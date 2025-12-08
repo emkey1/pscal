@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 
 enum TerminalGeometryCalculator {
     /// Horizontal padding inside the terminal when calculating columns.

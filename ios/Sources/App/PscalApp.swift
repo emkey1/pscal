@@ -23,14 +23,3 @@ struct PscalApp: App {
         }
     }
 }
-
-// Keep the AppDelegate as it might be used for other lifecycle events in the future
-// even if we moved away from the complex VC structure.
-class PscalAppDelegate: NSObject, UIApplicationDelegate {
-    func application(
-        _ application: UIApplication,
-        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
-    ) -> Bool {
-        return true
-    }
-}

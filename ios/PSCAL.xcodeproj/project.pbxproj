@@ -111,6 +111,14 @@
 				<string>145F4FCB2BE071F400603B3F</string>
 				<string>145F4FCB2BE071F400603B4E</string>
 				<string>14E9F2212BE2B9A300A1E3C0</string>
+				<string>5FFFD0023FFAA00000AAA001</string>
+				<string>5FFFD0043FFAA00000AAA001</string>
+				<string>5FFFD0063FFAA00000AAA001</string>
+				<string>5FFFD0083FFAA00000AAA001</string>
+				<string>5FFFD00A3FFAA00000AAA001</string>
+				<string>5FFFD00C3FFAA00000AAA001</string>
+				<string>5FFFD00E3FFAA00000AAA001</string>
+				<string>5FFFD0103FFAA00000AAA001</string>
 			</array>
 			<key>isa</key>
 			<string>PBXSourcesBuildPhase</string>
@@ -279,6 +287,150 @@
 		<dict>
 			<key>fileRef</key>
 			<string>5F73F4C32FCA700000EFC123</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD0013FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>PathTruncation.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD0023FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD0013FFAA00000AAA001</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD0033FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalFontSettings.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD0043FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD0033FFAA00000AAA001</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD0053FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalGeometry.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD0063FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD0053FFAA00000AAA001</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD0073FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalRenderer.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD0083FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD0073FFAA00000AAA001</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD0093FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalSelection.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD00A3FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD0093FFAA00000AAA001</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD00B3FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalSettingsView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD00C3FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD00B3FFAA00000AAA001</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD00D3FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalUtils.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD00E3FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD00D3FFAA00000AAA001</string>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+		</dict>
+		<key>5FFFD00F3FFAA00000AAA001</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>TerminalRootViewController.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>5FFFD0103FFAA00000AAA001</key>
+		<dict>
+			<key>fileRef</key>
+			<string>5FFFD00F3FFAA00000AAA001</string>
 			<key>isa</key>
 			<string>PBXBuildFile</string>
 		</dict>
@@ -848,8 +1000,16 @@
 				<string>145F4FC82BE071D600603B3F</string>
 				<string>145F4FCA2BE071F400603B3F</string>
 				<string>5F73F4C32FCA700000EFC123</string>
+				<string>5FFFD0033FFAA00000AAA001</string>
+				<string>5FFFD0053FFAA00000AAA001</string>
 				<string>14B7F7E02BE5F46B00E6D40B</string>
 				<string>14CF02B32BE1481D0037FB7E</string>
+				<string>5FFFD0013FFAA00000AAA001</string>
+				<string>5FFFD0073FFAA00000AAA001</string>
+				<string>5FFFD0093FFAA00000AAA001</string>
+				<string>5FFFD00B3FFAA00000AAA001</string>
+				<string>5FFFD00D3FFAA00000AAA001</string>
+				<string>5FFFD00F3FFAA00000AAA001</string>
 				<string>14F2C4F72BE1B12300DE9FD9</string>
 				<string>14A5C5F32BE13E6500CEF0B9</string>
 				<string>14E9F2202BE2B9A300A1E3C0</string>
