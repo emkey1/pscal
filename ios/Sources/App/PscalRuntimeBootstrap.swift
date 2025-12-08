@@ -660,8 +660,19 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
-    private static func defaultGeometryMetrics() -> TerminalGeometryMetrics {
+    static func defaultGeometryMetrics() -> TerminalGeometryMetrics {
         let font = TerminalFontSettings.shared.currentFont
+
+        // Use the same logic the UI uses, just without a status row yet.
+        if let metrics = TerminalGeometryCalculator.fallbackMetrics(
+            showingStatus: false,
+            font: font
+        ) {
+            return metrics
+        }
+
+        // Extremely defensive last-resort fallback – this should basically never run,
+        // but it keeps us safe if something goes weird very early in app launch.
         let size: CGSize
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first {
@@ -669,13 +680,18 @@ final class PscalRuntimeBootstrap: ObservableObject {
         } else {
             size = UIScreen.main.bounds.size
         }
-        let charWidth = max(1.0, ("W" as NSString).size(withAttributes: [.font: font]).width)
-        let lineHeight = max(1.0, font.lineHeight)
-        let columns = max(10, min(Int(floor(size.width / charWidth)), 2000))
-        let rows = max(4, min(Int(floor(size.height / lineHeight)), 2000))
+
+        // NOTE: characterMetrics now returns a CharacterMetrics struct.
+        let charMetrics = TerminalGeometryCalculator.characterMetrics(for: font)
+        let safeCharWidth = max(charMetrics.width, 1.0)
+        let safeLineHeight = max(charMetrics.lineHeight, 1.0)
+
+        let columns = max(10, min(Int(floor(size.width / safeCharWidth)), 2000))
+        let rows    = max(4,  min(Int(floor(size.height / safeLineHeight)), 2000))
+
         return TerminalGeometryMetrics(columns: columns, rows: rows)
     }
-
+    
     private static func renderJoined(snapshot: TerminalBuffer.TerminalSnapshot) -> (text: NSAttributedString, cursor: TerminalCursorInfo?) {
         let renderedLines = TerminalBuffer.render(snapshot: snapshot)
         let result = NSMutableAttributedString()

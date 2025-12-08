@@ -34,11 +34,11 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.onInput = onInput
         view.onPaste = onPaste
         context.coordinator.view = view
-        
-        // Remove the default "Assistant" shortcuts (copy/paste/undo) to save space
+
+        // Remove default copy/paste/undo bar
         view.inputAssistantItem.leadingBarButtonGroups = []
         view.inputAssistantItem.trailingBarButtonGroups = []
-        
+
         DispatchQueue.main.async {
             view.becomeFirstResponder()
         }
@@ -48,6 +48,7 @@ struct TerminalInputBridge: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalKeyInputView, context: Context) {
         uiView.onInput = onInput
         uiView.onPaste = onPaste
+
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
             DispatchQueue.main.async {
@@ -56,12 +57,14 @@ struct TerminalInputBridge: UIViewRepresentable {
         }
     }
 
+    @MainActor
     final class Coordinator {
         weak var view: TerminalKeyInputView?
         var focusAnchor: Int = 0
     }
 }
 
+@MainActor
 final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
@@ -134,7 +137,13 @@ final class TerminalKeyInputView: UITextView {
         let dot = makeButton(".", action: #selector(handleDot))
         let minus = makeButton("-", action: #selector(handleMinus))
 
-        [esc, ctrl, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+        // Updated Layout Logic: Include Tab only for phones
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            let tab = makeButton("Tab", action: #selector(handleTab))
+            [esc, ctrl, tab, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+        } else {
+            [esc, ctrl, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+        }
 
         bar.addSubview(stack)
         
@@ -361,19 +370,17 @@ final class TerminalKeyInputView: UITextView {
                 self.reloadInputViews()
             }
         }
-        let willHide = NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillHideNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            _ = self
-        }
-        keyboardObservers = [willShow, willHide]
+
+        keyboardObservers = [willShow]
     }
 
     // MARK: - Accessory button actions
     @objc private func handleEsc() {
         onInput?("\u{1B}")
+    }
+    
+    @objc private func handleTab() {
+        onInput?("\t")
     }
 
     @objc private func handleCtrlToggle(_ sender: UIButton) {

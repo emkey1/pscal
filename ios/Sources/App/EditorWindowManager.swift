@@ -170,10 +170,13 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
                willConnectTo session: UISceneSession,
                options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
+
         let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = UIHostingController(rootView: TerminalView())
+        let root = TerminalRootViewController()
+        window.rootViewController = root
         self.window = window
         window.makeKeyAndVisible()
+
         EditorWindowManager.shared.mainSceneDidConnect(session: windowScene.session)
     }
 
@@ -260,12 +263,6 @@ final class TerminalEditorViewController: UIViewController {
         if let observer = fontObserver {
             NotificationCenter.default.removeObserver(observer)
         }
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        //applyTerminalGeometry(to: view, keyboardHeight: 0)
-        //reportGeometryIfNeeded()
     }
 
     override func viewSafeAreaInsetsDidChange() {
