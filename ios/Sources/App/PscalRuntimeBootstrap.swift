@@ -686,8 +686,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let safeCharWidth = max(charMetrics.width, 1.0)
         let safeLineHeight = max(charMetrics.lineHeight, 1.0)
 
-        let columns = max(10, min(Int(floor(size.width / safeCharWidth)), 2000))
-        let rows    = max(4,  min(Int(floor(size.height / safeLineHeight)), 2000))
+        let columns = max(20, min(Int(floor(size.width / safeCharWidth)), 2000))
+        let rows    = max(23,  min(Int(floor(size.height / safeLineHeight)), 2000))
 
         return TerminalGeometryMetrics(columns: columns, rows: rows)
     }

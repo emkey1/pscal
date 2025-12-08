@@ -2,16 +2,10 @@ import SwiftUI
 import UIKit
 import Darwin
 
-@_silgen_name("pscalRuntimeDebugLog")
-private func c_pscalRuntimeDebugLog(_ message: UnsafePointer<CChar>) -> Void
-
 private func editorRuntimeLog(_ message: String) {
     #if DEBUG
-    let cString = message.utf8CString
-    cString.withUnsafeBufferPointer { ptr in
-        if let base = ptr.baseAddress {
-            c_pscalRuntimeDebugLog(base)
-        }
+    message.withCString { ptr in
+        pscalRuntimeDebugLog(ptr)
     }
     #else
     _ = message

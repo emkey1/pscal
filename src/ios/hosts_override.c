@@ -17,6 +17,7 @@
 #error "hosts_override.c should only be compiled for iOS builds"
 #endif
 
+#define PSCAL_HOSTS_CUSTOM_IMPL
 #include "common/pscal_hosts.h"
 
 // Simple override for getaddrinfo that consults $PSCALI_CONTAINER_ROOT/etc/hosts

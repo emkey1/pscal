@@ -111,6 +111,22 @@ struct TerminalSettingsView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 6) {
+                Divider()
+                Text("Subscribe to the PSCAL Discord:")
+                    .font(.callout.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.primary)
+                Text("https://discord.gg/YWQVExN363")
+                    .font(.callout.monospaced())
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.blue)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal)
+            .background(.ultraThinMaterial)
+        }
         .applyDetents()
     }
 }

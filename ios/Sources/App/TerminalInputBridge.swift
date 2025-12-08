@@ -8,6 +8,7 @@ extension Notification.Name {
     static let terminalModifierStateChanged = Notification.Name("terminalModifierStateChanged")
 }
 
+@MainActor
 struct TerminalInputBridge: UIViewRepresentable {
     @Binding var focusAnchor: Int
     var onInput: (String) -> Void
@@ -77,13 +78,21 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
+        self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        self.repeatKeyCommands = []
         super.init(frame: frame, textContainer: textContainer)
+        configureAccessoryBar()
+        repeatKeyCommands = buildRepeatCommands()
         installKeyboardObservers()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
+        self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        self.repeatKeyCommands = []
         super.init(coder: coder)
+        configureAccessoryBar()
+        repeatKeyCommands = buildRepeatCommands()
         installKeyboardObservers()
     }
 
@@ -92,22 +101,28 @@ final class TerminalKeyInputView: UITextView {
     }
 
     private var controlLatch: Bool = false
+    private weak var ctrlButton: UIButton?
 
     // MARK: - FIXED ACCESSORY BAR
-    private lazy var accessoryBar: UIInputView = {
-        // 1. Init with .zero. The system manages the frame.
-        let bar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
-        
-        // 2. Enable Auto Layout internal sizing
-        bar.allowsSelfSizing = true
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        
-        // 3. REMOVED: bar.autoresizingMask (This causes conflicts during rotation)
+    private let accessoryBar: UIInputView
+
+    override var inputAccessoryView: UIView? {
+        get {
+            hardwareKeyboardConnected ? nil : accessoryBar
+        }
+        set { /* ignore external setters */ }
+    }
+
+    private var repeatKeyCommands: [RepeatCommand]
+
+    private func configureAccessoryBar() {
+        accessoryBar.allowsSelfSizing = true
+        accessoryBar.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = UIStackView()
         stack.axis = .horizontal
-        stack.alignment = .center
-        stack.distribution = .fillProportionally
+        stack.alignment = .fill
+        stack.distribution = .fillEqually
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -118,10 +133,14 @@ final class TerminalKeyInputView: UITextView {
             config.baseBackgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.8)
             config.baseForegroundColor = .label
             config.title = title
-            // Reduced insets slightly to fit better on smaller screens (iPad mini)
-            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4)
+            let isPhone = UIDevice.current.userInterfaceIdiom == .phone
+            config.contentInsets = NSDirectionalEdgeInsets(
+                top:   isPhone ? 3 : 6,
+                leading: 4,
+                bottom: isPhone ? 3 : 6,
+                trailing: 4
+            )
             button.configuration = config
-            // Dynamic type support for accessibility
             button.titleLabel?.font = UIFontMetrics.default.scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
             button.addTarget(self, action: action, for: .touchUpInside)
             return button
@@ -129,6 +148,7 @@ final class TerminalKeyInputView: UITextView {
 
         let esc = makeButton("Esc", action: #selector(handleEsc))
         let ctrl = makeButton("Ctrl", action: #selector(handleCtrlToggle))
+        ctrlButton = ctrl
         let up = makeButton("↑", action: #selector(handleUp))
         let down = makeButton("↓", action: #selector(handleDown))
         let left = makeButton("←", action: #selector(handleLeft))
@@ -137,7 +157,6 @@ final class TerminalKeyInputView: UITextView {
         let dot = makeButton(".", action: #selector(handleDot))
         let minus = makeButton("-", action: #selector(handleMinus))
 
-        // Updated Layout Logic: Include Tab only for phones
         if UIDevice.current.userInterfaceIdiom == .phone {
             let tab = makeButton("Tab", action: #selector(handleTab))
             [esc, ctrl, tab, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
@@ -145,35 +164,23 @@ final class TerminalKeyInputView: UITextView {
             [esc, ctrl, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         }
 
-        bar.addSubview(stack)
-        
-        // 4. Use safeAreaLayoutGuide. This keeps buttons accessible on all device orientations.
+        accessoryBar.addSubview(stack)
+        let minHeight: CGFloat = UIDevice.current.userInterfaceIdiom == .phone ? 30 : 45
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.trailingAnchor, constant: -8),
-            stack.topAnchor.constraint(equalTo: bar.topAnchor, constant: 6),
-            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -6),
-            // Ensure the bar has a minimum height, but allow it to grow if font size is huge
-            bar.heightAnchor.constraint(greaterThanOrEqualToConstant: 50)
+            stack.leadingAnchor.constraint(equalTo: accessoryBar.safeAreaLayoutGuide.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: accessoryBar.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            stack.topAnchor.constraint(equalTo: accessoryBar.topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: accessoryBar.bottomAnchor, constant: -4),
+            accessoryBar.heightAnchor.constraint(greaterThanOrEqualToConstant: minHeight)
         ])
-        return bar
-    }()
-
-    override var inputAccessoryView: UIView? {
-        get {
-            // NOTE: If you want the Esc/Ctrl keys to be available even when a
-            // hardware keyboard is attached (common for Vim usage), remove this check.
-            hardwareKeyboardConnected ? nil : accessoryBar
-        }
-        set { /* ignore external setters */ }
     }
 
-    private lazy var repeatKeyCommands: [RepeatCommand] = {
+    private func buildRepeatCommands() -> [RepeatCommand] {
         var commands: [RepeatCommand] = []
         func makeCommand(input: String, output: String, modifiers: UIKeyModifierFlags = []) {
             let command = UIKeyCommand(input: input,
-                                     modifierFlags: modifiers,
-                                     action: #selector(handleRepeatCommand(_:)))
+                                       modifierFlags: modifiers,
+                                       action: #selector(handleRepeatCommand(_:)))
             if #available(iOS 15.0, *) {
                 command.wantsPriorityOverSystemBehavior = true
             }
@@ -190,7 +197,7 @@ final class TerminalKeyInputView: UITextView {
         makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
         makeCommand(input: "\r", output: "\n")
         return commands
-    }()
+    }
 
     override var canBecomeFirstResponder: Bool { true }
 
@@ -365,9 +372,11 @@ final class TerminalKeyInputView: UITextView {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            if self.hardwareKeyboardConnected {
-                self.hardwareKeyboardConnected = false
-                self.reloadInputViews()
+            Task { @MainActor in
+                if self.hardwareKeyboardConnected {
+                    self.hardwareKeyboardConnected = false
+                    self.reloadInputViews()
+                }
             }
         }
 
@@ -385,9 +394,11 @@ final class TerminalKeyInputView: UITextView {
 
     @objc private func handleCtrlToggle(_ sender: UIButton) {
         controlLatch.toggle()
-        sender.backgroundColor = controlLatch
+        var config = sender.configuration ?? UIButton.Configuration.filled()
+        config.baseBackgroundColor = controlLatch
         ? UIColor.systemBlue.withAlphaComponent(0.8)
         : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
+        sender.configuration = config
     }
 
     @objc private func handleUp() {

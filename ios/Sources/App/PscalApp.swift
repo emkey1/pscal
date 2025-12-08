@@ -16,7 +16,10 @@ struct PscalApp: App {
                 .onAppear {
                     // Set default window background color to match terminal default
                     // This helps avoid white flashes during rotation/startup
-                    if let window = UIApplication.shared.windows.first {
+                    if let windowScene = UIApplication.shared.connectedScenes
+                        .compactMap({ $0 as? UIWindowScene })
+                        .first(where: { $0.activationState == .foregroundActive }),
+                       let window = windowScene.windows.first {
                         window.backgroundColor = .black
                     }
                 }

@@ -386,9 +386,35 @@ final class TerminalBuffer {
     }
     
     func reset() {
+        var handler: (() -> Void)?
         syncQueue.sync {
-            resetState()
+            currentAttributes.reset()
+            scrollback.removeAll()
+            grid = Array(repeating: makeBlankRow(), count: rows)
+            cursorRow = 0
+            cursorCol = 0
+            savedCursor = nil
+            cursorHidden = false
+            originModeEnabled = false
+            suppressNextRemoteLF = false
+            parserState = .normal
+            csiParameters.removeAll()
+            currentParameter = ""
+            csiPrivateMode = false
+            scrollRegionTop = 0
+            scrollRegionBottom = rows - 1
+            bracketedPasteEnabled = false
+            insertMode = false
+            autoWrapMode = true
+            mouseMode = .none
+            mouseEncoding = .normal
+            wrapPending = false
+            lastPrintedChar = nil
+            resetTabStops()
+            handler = resetHandler
         }
+        notifyMouseChange()
+        handler?()
     }
     
     func echoUserInput(_ text: String) {

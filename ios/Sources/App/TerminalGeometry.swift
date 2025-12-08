@@ -52,6 +52,7 @@ enum TerminalGeometryCalculator {
         // UIKit already constrains the host view to sit above the keyboard via
         // keyboardLayoutGuide, so `size.height` is the actual usable height.
         var availableHeight = size.height
+        availableHeight -= (safeAreaInsets.top + safeAreaInsets.bottom)
         availableHeight -= topPadding
         if showingStatus {
             availableHeight -= statusOverlayHeight
@@ -62,6 +63,7 @@ enum TerminalGeometryCalculator {
         let lineHeight = metrics.lineHeight
 
         var availableWidth = size.width
+        availableWidth -= (safeAreaInsets.left + safeAreaInsets.right)
         availableWidth -= (horizontalPadding * 2)
         availableWidth = max(0, availableWidth)
 

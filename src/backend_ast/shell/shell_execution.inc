@@ -22,6 +22,88 @@ static int shellPagerGetVirtualTTYOverride(void) {
 }
 #endif
 
+static int shellTryRunScriptFallback(VM *vm, ShellCommand *cmd) {
+    if (!cmd || cmd->argc <= 0 || !cmd->argv || !cmd->argv[0]) {
+        return -1;
+    }
+    const char *path = cmd->argv[0];
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        return -1;
+    }
+    if (access(path, R_OK) != 0) {
+        return -1;
+    }
+
+    char *source = shellLoadFile(path);
+    if (!source) {
+        return -1;
+    }
+
+    char **saved_params = gParamValues;
+    int saved_count = gParamCount;
+    bool saved_owned = gShellPositionalOwned;
+
+    bool replaced_params = false;
+    char **new_params = NULL;
+    int new_count = (cmd->argc > 1) ? (cmd->argc - 1) : 0;
+    if (new_count > 0) {
+        new_params = (char **)calloc((size_t)new_count, sizeof(char *));
+        if (!new_params) {
+            free(source);
+            return -1;
+        }
+        for (int i = 0; i < new_count; ++i) {
+            new_params[i] = strdup(cmd->argv[i + 1] ? cmd->argv[i + 1] : "");
+            if (!new_params[i]) {
+                shellFreeParameterArray(new_params, i);
+                free(source);
+                return -1;
+            }
+        }
+        gParamValues = new_params;
+        gParamCount = new_count;
+        gShellPositionalOwned = true;
+        replaced_params = true;
+    }
+
+    ShellRunOptions opts = {0};
+    opts.no_cache = 1;
+    opts.quiet = true;
+    opts.exit_on_signal = shellRuntimeExitOnSignal();
+    opts.suppress_warnings = true;
+    const char *frontend_path = shellRuntimeGetArg0();
+    opts.frontend_path = frontend_path ? frontend_path : "exsh";
+
+    shellRuntimeSetArg0(path);
+    bool exit_requested = false;
+    int status = shellRunSource(source, path, &opts, &exit_requested);
+    free(source);
+    shellRuntimeSetArg0(frontend_path);
+
+    if (replaced_params) {
+        if (gShellPositionalOwned) {
+            shellFreeOwnedPositionalParameters();
+        } else {
+            gParamValues = NULL;
+            gParamCount = 0;
+        }
+        gParamValues = saved_params;
+        gParamCount = saved_count;
+        gShellPositionalOwned = saved_owned;
+    }
+
+    if (exit_requested) {
+        shellRuntimeRequestExit();
+        if (vm) {
+            vm->exit_requested = true;
+        }
+    }
+
+    shellUpdateStatus(status);
+    return status;
+}
+
 static void shellHashRecordExecution(const char *name);
 static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *out_cmd) {
     if (!out_cmd) {
@@ -601,6 +683,10 @@ static int shellSpawnProcess(VM *vm,
 #endif
             execvp(cmd->argv[0], cmd->argv);
             int err = errno;
+            int script_status = shellTryRunScriptFallback(vm ? vm : gShellCurrentVm, cmd);
+            if (script_status >= 0) {
+                _exit(script_status);
+            }
             fprintf(stderr, "exsh: %s: %s\n", cmd->argv[0], strerror(err));
             _exit((err == ENOENT) ? 127 : 126);
         }
