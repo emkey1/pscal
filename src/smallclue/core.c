@@ -50,6 +50,10 @@
 #include "common/path_virtualization.h"
 void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
 #endif
+#if defined(PSCAL_TARGET_IOS)
+__attribute__((weak_import)) void PSCALRuntimeUpdateWindowSize(int columns, int rows);
+__attribute__((weak)) void PSCALRuntimeUpdateWindowSize(int columns, int rows) { (void)columns; (void)rows; }
+#endif
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -5158,6 +5162,14 @@ static void smallclueApplyWindowSize(int rows, int cols) {
         }
         printf("\x1b[8;%d;%dt", rows, cols);
         fflush(stdout);
+
+#if defined(PSCAL_TARGET_IOS)
+        // On iOS we drive the runtime through the bridge so the master PTY
+        // and any downstream consumers see the updated geometry immediately.
+        if (PSCALRuntimeUpdateWindowSize) {
+            PSCALRuntimeUpdateWindowSize(cols, rows);
+        }
+#endif
     }
 }
 

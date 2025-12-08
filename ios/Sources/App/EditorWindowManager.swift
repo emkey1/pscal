@@ -210,22 +210,23 @@ class EditorSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 private enum EditorFontMetrics {
     static func characterSize(for font: UIFont) -> CGSize {
-        let width = max(1, ("W" as NSString).size(withAttributes: [.font: font]).width)
-        let height = max(1, font.lineHeight)
-        return CGSize(width: width, height: height)
+        let char = TerminalGeometryCalculator.characterMetrics(for: font)
+        return CGSize(width: char.width, height: char.lineHeight)
     }
 
     static func metrics(for bounds: CGRect,
                         safeInsets: UIEdgeInsets,
                         font: UIFont) -> (TerminalGeometryMetrics, CGSize) {
-        let safeBounds = bounds.inset(by: safeInsets)
+        let grid = TerminalGeometryCalculator.calculateGrid(
+            for: bounds.size,
+            font: font,
+            safeAreaInsets: safeInsets,
+            topPadding: 0,
+            horizontalPadding: TerminalGeometryCalculator.horizontalPadding,
+            showingStatus: false
+        )
+        let metrics = TerminalGeometryMetrics(columns: grid.columns, rows: grid.rows)
         let charSize = characterSize(for: font)
-        let usableWidth = max(0, safeBounds.width)
-        let usableHeight = max(0, safeBounds.height)
-        let rawColumns = Int(floor(usableWidth / charSize.width))
-        let rawRows = Int(floor(usableHeight / charSize.height))
-        let metrics = TerminalGeometryMetrics(columns: max(10, rawColumns),
-                                              rows: max(4, rawRows))
         return (metrics, charSize)
     }
 }
