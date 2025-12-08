@@ -664,12 +664,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let font = TerminalFontSettings.shared.currentFont
 
         // Use the same logic the UI uses, just without a status row yet.
-        if let metrics = TerminalGeometryCalculator.fallbackMetrics(
+        return TerminalGeometryCalculator.fallbackMetrics(
             showingStatus: false,
             font: font
-        ) {
-            return metrics
-        }
+        )
 
         // Extremely defensive last-resort fallback – this should basically never run,
         // but it keeps us safe if something goes weird very early in app launch.
