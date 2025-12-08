@@ -282,10 +282,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         super.pressesCancelled(presses, with: event)
     }
 
-    override func becomeFirstResponder() -> Bool {
-        super.becomeFirstResponder()
-    }
-
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil {
