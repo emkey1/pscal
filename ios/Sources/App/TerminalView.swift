@@ -20,7 +20,7 @@ struct TerminalView: View {
             GeometryReader { proxy in
                 TerminalContentView(
                     availableSize: proxy.size,
-                    safeAreaInsets: proxy.safeAreaInsets,
+                    safeAreaInsets: EdgeInsets(),
                     fontSettings: fontSettings,
                     focusAnchor: $focusAnchor
                 )
@@ -186,10 +186,10 @@ struct TerminalContentView: View {
         let font = fontSettings.currentFont
 
         // GeometryReader reports the size of the view.
-        // If the view is respecting safe area (default), this size is the safe area size.
-        // In that case, proxy.safeAreaInsets will be zero (relative to the view).
-        // If the view was ignoring safe area, proxy.size would be full screen and insets non-zero.
-        // In either case, passing both to calculateGrid handles it correctly (size - insets).
+        // If the view is respecting safe area (default), this size is already reduced by safe areas (including keyboard).
+        // However, proxy.safeAreaInsets might still report the insets of the container/window context, leading to double subtraction.
+        // Since we are not using .ignoresSafeArea(), we should treat availableSize as the definitive usable area
+        // and ignore reported safeAreaInsets to avoid subtracting them again.
 
         let effectiveHeight = max(1, availableSize.height)
         let sizeForMetrics = CGSize(width: availableSize.width, height: effectiveHeight)
