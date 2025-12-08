@@ -12,7 +12,8 @@ struct PscalApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TerminalView(showsOverlay: true)
+            TerminalRootView(showsOverlay: true)
+                .ignoresSafeArea(.keyboard) // We handle keyboard manually via TerminalRootViewController
                 .onAppear {
                     // Set default window background color to match terminal default
                     // This helps avoid white flashes during rotation/startup
