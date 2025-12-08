@@ -1,12 +1,19 @@
 import UIKit
 import SwiftUI
 
+/// Responsible for calculating the terminal grid dimensions (rows and columns)
+/// based on the available visual size, font metrics, and safe area insets.
 enum TerminalGeometryCalculator {
-    /// Horizontal padding inside the terminal when calculating columns.
+
+    // MARK: - Constants
+
+    /// Horizontal padding inside the terminal (left and right).
     static let horizontalPadding: CGFloat = 0
 
-    /// Extra vertical space reserved for the "process exited" status bar.
+    /// Vertical space reserved for the "process exited" status bar.
     static let statusOverlayHeight: CGFloat = 28.0
+
+    // MARK: - Types
 
     struct CharacterMetrics {
         let width: CGFloat
@@ -23,82 +30,106 @@ enum TerminalGeometryCalculator {
         let columns: Int
         let width: CGFloat
         let height: CGFloat
+        let usableWidth: CGFloat
+        let usableHeight: CGFloat
     }
 
-    /// Round up to the nearest device pixel.
+    // MARK: - Calculations
+
+    /// Round up to the nearest device pixel to align with the screen grid.
     static func pixelCeil(_ value: CGFloat) -> CGFloat {
         let scale = UIScreen.main.scale
         return ceil(value * scale) / scale
     }
 
-    /// Compute character width and line height for the given font.
-    /// We use "W" as the sample character as it is typically the widest in variable width fonts,
-    /// and matches the standard width in monospaced fonts.
-    /// We round up the width to the nearest pixel to ensure we never underestimate the space required,
-    /// which prevents unexpected line wrapping.
+    /// Computes character metrics for the given font.
+    /// Uses 'W' as the reference character for width.
     static func characterMetrics(for font: UIFont) -> CharacterMetrics {
+        // We use "W" as the sample character as it is typically the widest in variable width fonts,
+        // and matches the standard width in monospaced fonts.
         let sample = "W" as NSString
         let sampleWidth = sample.size(withAttributes: [.font: font]).width
+
+        // Round up to ensure we don't underestimate width (prevents wrapping).
+        // Ensure at least 1px width.
         let charWidth = max(1.0, pixelCeil(sampleWidth))
         let lineHeight = pixelCeil(font.lineHeight)
+
         return CharacterMetrics(width: charWidth, lineHeight: lineHeight)
     }
 
-    /// Core grid calculation based on a concrete view size.
+    /// Calculates the grid capacity given the bounds and constraints.
+    ///
+    /// - Parameters:
+    ///   - size: The total size of the view (from GeometryReader).
+    ///   - font: The font used for rendering.
+    ///   - safeAreaInsets: The safe area insets to respect (subtract from size).
+    ///   - topPadding: Additional top padding.
+    ///   - horizontalPadding: Additional horizontal padding (applied to both sides).
+    ///   - showingStatus: Whether the status overlay is visible.
     static func calculateGrid(
         for size: CGSize,
         font: UIFont,
         safeAreaInsets: UIEdgeInsets,
         topPadding: CGFloat,
-        horizontalPadding: CGFloat,
+        horizontalPadding: CGFloat = TerminalGeometryCalculator.horizontalPadding,
         showingStatus: Bool
     ) -> TerminalGridCapacity {
-        // UIKit already constrains the host view to sit above the keyboard via
-        // keyboardLayoutGuide, so `size.height` is the actual usable height.
+
+        // Vertical calculation
         var availableHeight = size.height
+
+        // 1. Subtract safe areas (top/bottom)
         availableHeight -= (safeAreaInsets.top + safeAreaInsets.bottom)
+
+        // 2. Subtract custom UI padding
         availableHeight -= topPadding
+
+        // 3. Subtract status overlay if present
         if showingStatus {
             availableHeight -= statusOverlayHeight
         }
 
-        // Subtract vertical safe areas for robustness.
-        // If the view is within the safe area, these insets are 0.
-        // If the view extends into unsafe areas (e.g. full screen), we subtract them
-        // to ensure we don't calculate rows that would be obscured.
-        availableHeight -= safeAreaInsets.top
-        availableHeight -= safeAreaInsets.bottom
+        // Clamp to 0
         availableHeight = max(0, availableHeight)
 
-        let metrics = characterMetrics(for: font)
-        let lineHeight = metrics.lineHeight
-
+        // Horizontal calculation
         var availableWidth = size.width
+
+        // 1. Subtract safe areas (left/right)
         availableWidth -= (safeAreaInsets.left + safeAreaInsets.right)
+
+        // 2. Subtract custom UI padding (left/right)
         availableWidth -= (horizontalPadding * 2)
 
-        // Subtract horizontal safe areas
-        availableWidth -= safeAreaInsets.left
-        availableWidth -= safeAreaInsets.right
+        // Clamp to 0
         availableWidth = max(0, availableWidth)
 
+        // Metrics
+        let metrics = characterMetrics(for: font)
+        let lineHeight = metrics.lineHeight
         let charWidth = metrics.width
 
-        let maxColumns = max(10, min(Int(availableWidth / charWidth), 2000))
-        let maxRows    = max(4,  min(Int(availableHeight / lineHeight), 2000))
+        // Grid dimensions
+        // We enforce a minimum of 1x1 to prevent crashes, but usually terminal logic handles small sizes.
+        // We cap at 2000 to prevent crazy allocations if size reports huge.
+        let columns = max(1, min(Int(availableWidth / charWidth), 2000))
+        let rows = max(1, min(Int(availableHeight / lineHeight), 2000))
 
         return TerminalGridCapacity(
-            rows: maxRows,
-            columns: maxColumns,
-            width: availableWidth,
-            height: availableHeight
+            rows: rows,
+            columns: columns,
+            width: availableWidth,   // This is technically "usable width"
+            height: availableHeight, // "usable height"
+            usableWidth: availableWidth,
+            usableHeight: availableHeight
         )
     }
 
-    /// Main entry used by `updateTerminalGeometry()`.
+    /// Helper to get metrics directly.
     static func metrics(
         for size: CGSize,
-        safeAreaInsets: EdgeInsets,
+        safeAreaInsets: EdgeInsets, // SwiftUI EdgeInsets
         topPadding: CGFloat,
         showingStatus: Bool,
         font: UIFont
@@ -115,23 +146,18 @@ enum TerminalGeometryCalculator {
             font: font,
             safeAreaInsets: uiInsets,
             topPadding: topPadding,
-            horizontalPadding: horizontalPadding,
             showingStatus: showingStatus
         )
 
-        guard grid.rows > 0, grid.columns > 0 else {
-            return nil
+        // If the grid is too small to be useful (0 rows or columns), return nil to fallback
+        if grid.rows < 1 || grid.columns < 1 {
+             return nil
         }
 
         return TerminalGeometryMetrics(columns: grid.columns, rows: grid.rows)
     }
 
-    /// Fallback when we don't have a usable size yet.
-    static func fallbackMetrics(
-        showingStatus: Bool,
-        font: UIFont
-    ) -> TerminalGeometryMetrics? {
-        // Simple conservative default.
+    static func fallbackMetrics(showingStatus: Bool, font: UIFont) -> TerminalGeometryMetrics {
         return TerminalGeometryMetrics(columns: 80, rows: showingStatus ? 23 : 24)
     }
 }
