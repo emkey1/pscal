@@ -31,13 +31,17 @@ enum TerminalGeometryCalculator {
         return ceil(value * scale) / scale
     }
 
-    /// Compute average character width and line height for the given font.
+    /// Compute character width and line height for the given font.
+    /// We use "W" as the sample character as it is typically the widest in variable width fonts,
+    /// and matches the standard width in monospaced fonts.
+    /// We round up the width to the nearest pixel to ensure we never underestimate the space required,
+    /// which prevents unexpected line wrapping.
     static func characterMetrics(for font: UIFont) -> CharacterMetrics {
-        let sample = "MMMMMMMMMM" as NSString
+        let sample = "W" as NSString
         let sampleWidth = sample.size(withAttributes: [.font: font]).width
-        let avgCharWidth = max(1.0, sampleWidth / 10.0)
+        let charWidth = max(1.0, pixelCeil(sampleWidth))
         let lineHeight = pixelCeil(font.lineHeight)
-        return CharacterMetrics(width: avgCharWidth, lineHeight: lineHeight)
+        return CharacterMetrics(width: charWidth, lineHeight: lineHeight)
     }
 
     /// Core grid calculation based on a concrete view size.
@@ -56,6 +60,13 @@ enum TerminalGeometryCalculator {
         if showingStatus {
             availableHeight -= statusOverlayHeight
         }
+
+        // Subtract vertical safe areas for robustness.
+        // If the view is within the safe area, these insets are 0.
+        // If the view extends into unsafe areas (e.g. full screen), we subtract them
+        // to ensure we don't calculate rows that would be obscured.
+        availableHeight -= safeAreaInsets.top
+        availableHeight -= safeAreaInsets.bottom
         availableHeight = max(0, availableHeight)
 
         let metrics = characterMetrics(for: font)
@@ -63,6 +74,10 @@ enum TerminalGeometryCalculator {
 
         var availableWidth = size.width
         availableWidth -= (horizontalPadding * 2)
+
+        // Subtract horizontal safe areas
+        availableWidth -= safeAreaInsets.left
+        availableWidth -= safeAreaInsets.right
         availableWidth = max(0, availableWidth)
 
         let charWidth = metrics.width
