@@ -70,12 +70,11 @@ enum TerminalFontMetrics {
     }
 
     static var characterWidth: CGFloat {
-        let font = displayFont
-        return max(1, ("W" as NSString).size(withAttributes: [.font: font]).width)
+        TerminalGeometryCalculator.characterMetrics(for: displayFont).width
     }
 
     static var lineHeight: CGFloat {
-        displayFont.lineHeight
+        TerminalGeometryCalculator.characterMetrics(for: displayFont).lineHeight
     }
 }
 
