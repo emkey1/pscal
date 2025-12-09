@@ -20,153 +20,62 @@ struct TerminalView: View {
             GeometryReader { proxy in
                 TerminalContentView(
                     availableSize: proxy.size,
-                    fontSettings: fontSettings,
-                    focusAnchor: $focusAnchor
+                    fontSettings: fontSettings
                 )
-                // We must frame the content view to the available size to ensure it fills the space
                 .frame(width: proxy.size.width, height: proxy.size.height)
-            }
-
-            if showsOverlay {
-                overlayButtons
-            }
-        }
-        .sheet(isPresented: $showingSettings) {
-            TerminalSettingsView()
-        }
-        .onChange(of: showingSettings) { isPresented in
-            if isPresented {
-                hideSoftKeyboard()
-            } else {
-                focusAnchor &+= 1
             }
         }
         .background(Color(fontSettings.backgroundColor))
-    }
-
-    // MARK: Overlay
-
-    @ViewBuilder
-    private var overlayButtons: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Button {
-                PscalRuntimeBootstrap.shared.resetTerminalState()
-                focusAnchor &+= 1
-            } label: {
-                Text("R")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .padding(11)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .accessibilityLabel("Reset Terminal")
-
-            Button {
-                showingSettings = true
-            } label: {
-                Image(systemName: "textformat.size")
-                    .font(.system(size: 16, weight: .semibold))
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .accessibilityLabel("Adjust Font Size")
-        }
-        .padding(.bottom, 16)
-        .padding(.trailing, 10)
-    }
-
-    private func hideSoftKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                        to: nil,
-                                        from: nil,
-                                        for: nil)
     }
 }
 
 // MARK: - Terminal Content View
 
 struct TerminalContentView: View {
-    static let topPadding: CGFloat = 32.0
-
     let availableSize: CGSize
 
     @ObservedObject private var fontSettings: TerminalFontSettings
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
-    @Binding private var focusAnchor: Int
-
-    @State private var lastLoggedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
 
     init(
         availableSize: CGSize,
-        fontSettings: TerminalFontSettings,
-        focusAnchor: Binding<Int>
+        fontSettings: TerminalFontSettings
     ) {
         self.availableSize = availableSize
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
-        _focusAnchor = focusAnchor
     }
 
     var body: some View {
-        let elvisToken = runtime.elvisRenderToken
-        let elvisActive = runtime.isElvisModeActive()
+        let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
         let elvisVisible = EditorWindowManager.shared.isVisible
-        let currentFont = fontSettings.currentFont
-        let hasExitStatus = runtime.exitStatus != nil
+        let shouldBlank = runtime.isElvisModeActive() && elvisVisible && externalWindowEnabled
 
-        return VStack(spacing: 0) {
-            TerminalRendererView(
-                text: runtime.screenText,
-                cursor: runtime.cursorInfo,
-                backgroundColor: fontSettings.backgroundColor,
-                foregroundColor: fontSettings.foregroundColor,
-                isElvisMode: elvisActive,
-                isElvisWindowVisible: elvisVisible,
-                elvisRenderToken: elvisToken,
-                font: currentFont,
-                fontPointSize: fontSettings.pointSize,
-                elvisSnapshot: nil,
-                onPaste: handlePaste,
-                mouseMode: runtime.mouseMode,
-                mouseEncoding: runtime.mouseEncoding
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(fontSettings.backgroundColor))
-
-            if let status = runtime.exitStatus {
-                Divider()
-                Text("Process exited with status \(status)")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity)
-                    .background(Color(.secondarySystemBackground))
-            }
-        }
-        // Align to top so that if we have extra vertical space (e.g. fractional line height)
-        // it appears at the bottom.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, Self.topPadding)
-        .background(Color(fontSettings.backgroundColor))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            focusAnchor &+= 1
-        }
-        .overlay(alignment: .bottomLeading) {
-            if !EditorWindowManager.shared.isVisible {
-                TerminalInputBridge(
-                    focusAnchor: $focusAnchor,
-                    onInput: handleInput,
-                    onPaste: handlePaste
+        Group {
+            if shouldBlank {
+                Color(fontSettings.backgroundColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                TerminalTextView(
+                    text: runtime.screenText,
+                    cursor: runtime.cursorInfo,
+                    fontSize: $fontSettings.pointSize,
+                    terminalColor: $fontSettings.foregroundColor,
+                    backgroundColor: $fontSettings.backgroundColor,
+                    onInput: { input in
+                        runtime.send(input)
+                    },
+                    onSettingsChanged: { newSize, newColor in
+                        fontSettings.updatePointSize(newSize)
+                        fontSettings.updateForegroundColor(newColor)
+                    }
                 )
-                .frame(width: 1, height: 1)
-                .allowsHitTesting(false)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(fontSettings.backgroundColor))
         .onAppear {
             updateTerminalGeometry()
             runtime.start()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                focusAnchor &+= 1
-            }
         }
         .onChange(of: availableSize) { _ in
             updateTerminalGeometry()
@@ -174,62 +83,21 @@ struct TerminalContentView: View {
         .onChange(of: fontSettings.pointSize) { _ in
             updateTerminalGeometry()
         }
-        .onChange(of: runtime.exitStatus) { _ in
-            updateTerminalGeometry()
-        }
-    }
-
-    // MARK: Input handlers
-
-    private func handleInput(_ text: String) {
-        runtime.send(text)
-    }
-
-    private func handlePaste(_ text: String) {
-        runtime.sendPasted(text)
     }
 
     // MARK: Geometry
 
     private func updateTerminalGeometry() {
         let font = fontSettings.currentFont
-        let showingStatus = runtime.exitStatus != nil
 
-        // Calculate usable height for the terminal text area.
-        // availableSize.height is the total space from GeometryReader (including padding area).
-        var usableHeight = availableSize.height
-
-        // Subtract top padding (applied to VStack)
-        usableHeight -= Self.topPadding
-
-        // If status is shown, we subtract the status overlay height.
-        // The Divider is part of this space, effectively.
-        if showingStatus {
-            usableHeight -= TerminalGeometryCalculator.statusOverlayHeight
-        }
-
-        let usableSize = CGSize(width: availableSize.width, height: usableHeight)
+        // Use full available size
+        let usableSize = availableSize
 
         let grid = TerminalGeometryCalculator.calculateCapacity(
             for: usableSize,
             font: font
         )
 
-        let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(
-            columns: grid.columns,
-            rows: grid.rows
-        )
-
-        #if DEBUGMEDO
-        if lastLoggedMetrics != metrics {
-            print("[TerminalView] Geometry update: \(availableSize.width)x\(availableSize.height) -> \(metrics.columns) cols x \(metrics.rows) rows")
-            lastLoggedMetrics = metrics
-        }
-        #endif
-
-        runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
+        runtime.updateTerminalSize(columns: grid.columns, rows: grid.rows)
     }
 }
-
-
-
