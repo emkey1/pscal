@@ -1614,8 +1614,13 @@ static int shellRunBuiltinInProcess(VM *vm,
 #if defined(PSCAL_TARGET_IOS)
     if (!builtin_ran) {
         /* Try tool-runner execution for shebang-wrapped scripts even in
-         * pipeline mode. This mirrors the exec path but stays in-process. */
+         * pipeline mode. This mirrors the exec path but stays in-process.
+         * Save and clear pipeline state so nested shebang execution does
+         * not stomp the outer pipeline bookkeeping. */
+        ShellPipelineContext saved_pipeline = gShellRuntime.pipeline;
+        memset(&gShellRuntime.pipeline, 0, sizeof(gShellRuntime.pipeline));
         int shebang_status = shellMaybeExecShebangTool(cmd->argv[0], cmd->argv);
+        gShellRuntime.pipeline = saved_pipeline;
         if (shebang_status >= 0) {
             shellUpdateStatus(shebang_status);
             builtin_ran = true;

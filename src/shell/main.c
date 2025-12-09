@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
@@ -43,6 +44,17 @@ static struct sigaction gInteractiveOldSigtstpAction;
 static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 
 static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length);
+static size_t interactiveCommonPrefixLength(char **items, size_t count);
+
+typedef struct {
+    size_t term_width;
+    size_t cursor_row;
+    size_t cursor_col;
+    size_t prompt_rows;
+    size_t total_rows;
+} InteractiveDisplayState;
+
+static InteractiveDisplayState gInteractiveDisplayState = {0, 0, 0, 0};
 
 static int interactiveTerminalWidth(void) {
     struct winsize ws;
@@ -771,6 +783,7 @@ static void redrawInteractiveLine(const char *prompt,
     size_t previous_prompt_lines =
         displayed_prompt_lines ? *displayed_prompt_lines : 0;
     size_t term_width = (size_t)interactiveTerminalWidth();
+    bool width_changed = (gInteractiveDisplayState.term_width != term_width);
 
     size_t total_rows = 1;
     size_t cursor_row = 0;
@@ -788,10 +801,19 @@ static void redrawInteractiveLine(const char *prompt,
                                      &end_row,
                                      &end_col);
 
-    fputs("\r", stdout);
-    for (size_t i = 0; i < previous_prompt_lines; ++i) {
+    size_t rows_to_prompt = 0;
+    if (gInteractiveDisplayState.total_rows > 0) {
+        rows_to_prompt = gInteractiveDisplayState.total_rows - 1;
+    } else {
+        rows_to_prompt = previous_prompt_lines;
+    }
+    if (width_changed && previous_prompt_lines > rows_to_prompt) {
+        rows_to_prompt = previous_prompt_lines;
+    }
+    for (size_t i = 0; i < rows_to_prompt; ++i) {
         fputs("\033[A", stdout);
     }
+    fputs("\r", stdout);
     fputs("\033[J", stdout);
     if (prompt) {
         fputs(prompt, stdout);
@@ -833,6 +855,11 @@ static void redrawInteractiveLine(const char *prompt,
         *displayed_prompt_lines =
             (total_rows > 0) ? (total_rows - 1) : 0;
     }
+    gInteractiveDisplayState.term_width = term_width;
+    gInteractiveDisplayState.cursor_row = cursor_row;
+    gInteractiveDisplayState.cursor_col = cursor_col;
+    gInteractiveDisplayState.prompt_rows = (total_rows > 0) ? (total_rows - 1) : 0;
+    gInteractiveDisplayState.total_rows = total_rows;
 }
 
 static bool interactiveEnsureCapacity(char **buffer, size_t *capacity, size_t needed) {
@@ -1403,7 +1430,7 @@ static bool interactiveWordLooksDynamic(const char *word) {
     return false;
 }
 
-static size_t interactiveCommonPrefixLength(char *const *items, size_t count) {
+static size_t interactiveCommonPrefixLength(char **items, size_t count) {
     if (!items || count == 0) {
         return 0;
     }
@@ -1425,6 +1452,148 @@ static size_t interactiveCommonPrefixLength(char *const *items, size_t count) {
         prefix_len = j;
     }
     return prefix_len;
+}
+
+static void interactiveFreeMatches(char **matches, size_t count) {
+    if (!matches) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(matches[i]);
+    }
+    free(matches);
+}
+
+typedef struct {
+    const char *prefix;
+    size_t prefix_len;
+    char ***matches;
+    size_t *count;
+    size_t *capacity;
+} InteractiveCompletionContext;
+
+static bool interactiveAddCompletionMatch(const char *name,
+                                          const char *prefix,
+                                          size_t prefix_len,
+                                          char ***matches,
+                                          size_t *count,
+                                          size_t *capacity) {
+    if (!name || !*name || !matches || !count || !capacity) {
+        return true;
+    }
+    if (prefix_len > 0 && strncasecmp(name, prefix, prefix_len) != 0) {
+        return true;
+    }
+    for (size_t i = 0; i < *count; ++i) {
+        const char *existing = (*matches)[i];
+        if (existing && strcasecmp(existing, name) == 0) {
+            return true;
+        }
+    }
+    if (*count >= *capacity) {
+        size_t new_cap = (*capacity > 0) ? (*capacity * 2) : 8;
+        char **resized = (char **)realloc(*matches, new_cap * sizeof(char *));
+        if (!resized) {
+            return false;
+        }
+        *matches = resized;
+        *capacity = new_cap;
+    }
+    char *copy = strdup(name);
+    if (!copy) {
+        return false;
+    }
+    (*matches)[(*count)++] = copy;
+    return true;
+}
+
+static void interactiveBuiltinCompletionVisitor(const char *name,
+                                                const char *canonical,
+                                                int id,
+                                                void *context) {
+    (void)canonical;
+    (void)id;
+    InteractiveCompletionContext *ctx = (InteractiveCompletionContext *)context;
+    if (!ctx) {
+        return;
+    }
+    (void)interactiveAddCompletionMatch(name,
+                                        ctx->prefix,
+                                        ctx->prefix_len,
+                                        ctx->matches,
+                                        ctx->count,
+                                        ctx->capacity);
+}
+
+static bool interactiveCollectPathExecutables(const char *prefix,
+                                              size_t prefix_len,
+                                              char ***matches,
+                                              size_t *count,
+                                              size_t *capacity) {
+    const char *path_env = getenv("PATH");
+    if (!path_env || !*path_env) {
+        return true;
+    }
+
+    char *copy = strdup(path_env);
+    if (!copy) {
+        return false;
+    }
+
+    bool ok = true;
+    char *saveptr = NULL;
+    char *dir = strtok_r(copy, ":", &saveptr);
+    while (ok && dir) {
+        const char *real_dir = (*dir == '\0') ? "." : dir;
+        DIR *d = opendir(real_dir);
+        if (d) {
+            struct dirent *ent = NULL;
+            while (ok && (ent = readdir(d)) != NULL) {
+                if (ent->d_name[0] == '\0') {
+                    continue;
+                }
+                if (ent->d_name[0] == '.' && prefix_len == 0) {
+                    continue;
+                }
+                char full[PATH_MAX];
+                size_t dir_len = strlen(real_dir);
+                size_t name_len = strlen(ent->d_name);
+                if (dir_len + 1 + name_len + 1 >= sizeof(full)) {
+                    continue;
+                }
+                memcpy(full, real_dir, dir_len);
+                if (dir_len > 0 && real_dir[dir_len - 1] != '/') {
+                    full[dir_len] = '/';
+                    dir_len += 1;
+                }
+                memcpy(full + dir_len, ent->d_name, name_len + 1);
+                struct stat st;
+                if (stat(full, &st) != 0) {
+                    continue;
+                }
+                if (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
+                    continue;
+                }
+                if (access(full, X_OK) != 0) {
+                    continue;
+                }
+                if (!interactiveAddCompletionMatch(ent->d_name,
+                                                   prefix,
+                                                   prefix_len,
+                                                   matches,
+                                                   count,
+                                                   capacity)) {
+                    ok = false;
+                    break;
+                }
+            }
+            closedir(d);
+        }
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+
+    free(copy);
+    return ok;
 }
 
 static void interactivePrintMatchesInColumns(char *const *items, size_t count) {
@@ -1558,6 +1727,96 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         glob_base_len--;
     }
 
+    size_t command_start = 0;
+    size_t command_len = 0;
+    bool completing_command = false;
+    bool command_is_cd = false;
+    if (interactiveExtractCommandToken(*buffer,
+                                       *length,
+                                       word_start,
+                                       &command_start,
+                                       &command_len)) {
+        completing_command = (word_start == command_start);
+        if (command_len == 2 && strncasecmp(*buffer + command_start, "cd", command_len) == 0) {
+            command_is_cd = true;
+        }
+    }
+
+    if (completing_command && strchr(word, '/') == NULL) {
+        char **matches = NULL;
+        size_t match_count = 0;
+        size_t match_capacity = 0;
+
+        InteractiveCompletionContext ctx = {
+            .prefix = word,
+            .prefix_len = word_len,
+            .matches = &matches,
+            .count = &match_count,
+            .capacity = &match_capacity
+        };
+        shellVisitBuiltins(interactiveBuiltinCompletionVisitor, &ctx);
+        bool path_ok = interactiveCollectPathExecutables(word, word_len, &matches, &match_count, &match_capacity);
+        if (match_count > 0) {
+            size_t replacement_len = 0;
+            bool append_space = false;
+            if (match_count == 1) {
+                replacement_len = strlen(matches[0]);
+                append_space = true;
+            } else {
+                replacement_len = interactiveCommonPrefixLength(matches, match_count);
+                if (replacement_len <= word_len) {
+                    putchar('\n');
+                    interactivePrintMatchesInColumns(matches, match_count);
+                    interactiveFreeMatches(matches, match_count);
+                    fflush(stdout);
+
+                    *cursor = *length;
+                    redrawInteractiveLine(prompt,
+                                          *buffer,
+                                          *length,
+                                          *cursor,
+                                          displayed_length,
+                                          displayed_prompt_lines);
+                    if (scratch) {
+                        interactiveUpdateScratch(scratch, *buffer, *length);
+                    }
+                    return true;
+                }
+            }
+
+            size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+            if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
+                interactiveFreeMatches(matches, match_count);
+                return false;
+            }
+
+            memcpy(*buffer + word_start, matches[0], replacement_len);
+            if (append_space) {
+                (*buffer)[word_start + replacement_len] = ' ';
+                replacement_len += 1;
+            }
+            *length = word_start + replacement_len;
+            (*buffer)[*length] = '\0';
+
+            *cursor = *length;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            if (scratch) {
+                interactiveUpdateScratch(scratch, *buffer, *length);
+            }
+            interactiveFreeMatches(matches, match_count);
+            return true;
+        }
+        interactiveFreeMatches(matches, match_count);
+        if (!path_ok) {
+            return false;
+        }
+    }
+
     size_t pattern_len = glob_base_len + (had_trailing_slash ? 3 : 2);
     char *pattern = (char *)malloc(pattern_len);
     if (!pattern) {
@@ -1602,23 +1861,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     }
 #endif
 
-    size_t command_start = 0;
-    size_t command_len = 0;
-    bool command_is_cd = false;
-    if (interactiveExtractCommandToken(*buffer,
-                                       *length,
-                                       word_start,
-                                       &command_start,
-                                       &command_len) &&
-        word_start > command_start) {
-        const char *command = *buffer + command_start;
-        if (command_len == 2) {
-            if (strncasecmp(command, "cd", command_len) == 0) {
-                command_is_cd = true;
-            }
-        }
-    }
-
+    /* command_is_cd is computed above when finding the command token. */
     if (command_is_cd) {
         size_t write_index = 0;
         for (size_t i = 0; i < results.gl_pathc; ++i) {
@@ -1891,16 +2134,43 @@ static char *readInteractiveLine(const char *prompt,
     size_t length = 0;
     size_t displayed_length = 0;
     size_t displayed_prompt_lines = shellPromptLineBreakCount(prompt);
-    size_t history_index = 0;
     size_t cursor = 0;
+    {
+        size_t total_rows = 1;
+        size_t cursor_row = 0;
+        size_t cursor_col = 0;
+        size_t end_row = 0;
+        size_t end_col = 0;
+        size_t term_width = (size_t)interactiveTerminalWidth();
+        interactiveComputeDisplayMetrics(prompt,
+                                         buffer,
+                                         length,
+                                         cursor,
+                                         term_width,
+                                         &total_rows,
+                                         &cursor_row,
+                                         &cursor_col,
+                                         &end_row,
+                                         &end_col);
+        gInteractiveDisplayState.term_width = term_width;
+        gInteractiveDisplayState.cursor_row = cursor_row;
+        gInteractiveDisplayState.cursor_col = cursor_col;
+        gInteractiveDisplayState.prompt_rows = (total_rows > 0) ? (total_rows - 1) : 0;
+        gInteractiveDisplayState.total_rows = total_rows;
+    }
+    size_t history_index = 0;
     char *scratch = NULL;
     interactiveUpdateScratch(&scratch, buffer, length);
     char *kill_buffer = NULL;
     size_t alt_dot_offset = 0;
     bool alt_dot_active = false;
 
-    fputs(prompt, stdout);
-    fflush(stdout);
+    redrawInteractiveLine(prompt,
+                          buffer,
+                          length,
+                          cursor,
+                          &displayed_length,
+                          &displayed_prompt_lines);
 
     bool done = false;
     bool eof_requested = false;
@@ -2290,8 +2560,12 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor > 0) {
                 cursor--;
-                fputs("\033[D", stdout);
-                fflush(stdout);
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
             } else {
                 fputc('\a', stdout);
                 fflush(stdout);
@@ -2304,8 +2578,12 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor < length) {
                 cursor++;
-                fputs("\033[C", stdout);
-                fflush(stdout);
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
             } else {
                 fputc('\a', stdout);
                 fflush(stdout);
@@ -2389,8 +2667,12 @@ static char *readInteractiveLine(const char *prompt,
                     alt_dot_offset = 0;
                     if (cursor < length) {
                         cursor++;
-                        fputs("\033[C", stdout);
-                        fflush(stdout);
+                        redrawInteractiveLine(prompt,
+                                              buffer,
+                                              length,
+                                              cursor,
+                                              &displayed_length,
+                                              &displayed_prompt_lines);
                     } else {
                         fputc('\a', stdout);
                         fflush(stdout);
@@ -2401,8 +2683,12 @@ static char *readInteractiveLine(const char *prompt,
                     alt_dot_offset = 0;
                     if (cursor > 0) {
                         cursor--;
-                        fputs("\033[D", stdout);
-                        fflush(stdout);
+                        redrawInteractiveLine(prompt,
+                                              buffer,
+                                              length,
+                                              cursor,
+                                              &displayed_length,
+                                              &displayed_prompt_lines);
                     } else {
                         fputc('\a', stdout);
                         fflush(stdout);

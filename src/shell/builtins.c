@@ -2,6 +2,9 @@
 #include "backend_ast/builtin.h"
 #include "ext_builtins/register.h"
 #include "common/builtin_shared.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "smallclue/smallclue.h"
+#endif
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -269,6 +272,34 @@ void shellVisitBuiltins(ShellBuiltinVisitor visitor, void *context) {
         const ShellBuiltinEntry *entry = &kShellBuiltins[i];
         visitor(entry->name, entry->canonical, entry->id, context);
     }
+#if defined(PSCAL_TARGET_IOS)
+    size_t applet_count = 0;
+    const SmallclueApplet *applets = smallclueGetApplets(&applet_count);
+    if (applets && applet_count > 0) {
+        for (size_t i = 0; i < applet_count; ++i) {
+            const char *name = applets[i].name;
+            if (!name || !*name) {
+                continue;
+            }
+            bool already_listed = false;
+            for (size_t j = 0; j < builtin_count; ++j) {
+                const ShellBuiltinEntry *entry = &kShellBuiltins[j];
+                if (entry->canonical && strcasecmp(entry->canonical, name) == 0) {
+                    already_listed = true;
+                    break;
+                }
+                if (entry->name && strcasecmp(entry->name, name) == 0) {
+                    already_listed = true;
+                    break;
+                }
+            }
+            if (already_listed) {
+                continue;
+            }
+            visitor(name, name, -1, context);
+        }
+    }
+#endif
 }
 
 void shellDumpBuiltins(FILE *out) {

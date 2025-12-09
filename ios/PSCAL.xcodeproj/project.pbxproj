@@ -564,7 +564,7 @@
 					"PSCALI_IGNORE_SESSION_LOCKS=1",
 				);
 				INFOPLIST_FILE = Sources/App/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PSCAL;
@@ -586,7 +586,7 @@
 					"PSCALI_IGNORE_SESSION_LOCKS=1",
 				);
 				INFOPLIST_FILE = Sources/App/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PSCAL;

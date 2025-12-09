@@ -10,6 +10,7 @@
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
+#include "smallclue/smallclue.h"
 static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
     if (!input) {
         return NULL;
@@ -6876,6 +6877,16 @@ static bool shellCommandCollectInfo(const char *name,
             goto error;
         }
     }
+#if defined(PSCAL_TARGET_IOS)
+    else {
+        const SmallclueApplet *applet = smallclueFindApplet(name);
+        if (applet) {
+            if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_BUILTIN, applet->name)) {
+                goto error;
+            }
+        }
+    }
+#endif
 
     const char *path_env = use_default_path ? kShellCommandDefaultPath : NULL;
     if (!shellCommandEnumerateExecutables(name,
