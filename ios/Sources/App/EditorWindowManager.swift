@@ -255,13 +255,13 @@ private enum EditorFontMetrics {
     static func metrics(for bounds: CGRect,
                         safeInsets: UIEdgeInsets,
                         font: UIFont) -> (TerminalGeometryMetrics, CGSize) {
-        let grid = TerminalGeometryCalculator.calculateGrid(
-            for: bounds.size,
-            font: font,
-            safeAreaInsets: safeInsets,
-            topPadding: 0,
-            horizontalPadding: TerminalGeometryCalculator.horizontalPadding,
-            showingStatus: false
+        let usableWidth = bounds.width - safeInsets.left - safeInsets.right
+        let usableHeight = bounds.height - safeInsets.top - safeInsets.bottom
+        let usableSize = CGSize(width: usableWidth, height: usableHeight)
+
+        let grid = TerminalGeometryCalculator.calculateCapacity(
+            for: usableSize,
+            font: font
         )
         let metrics = TerminalGeometryMetrics(columns: grid.columns, rows: grid.rows)
         let charSize = characterSize(for: font)
