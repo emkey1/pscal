@@ -6,6 +6,7 @@ struct TerminalTextView: UIViewRepresentable {
     var cursor: TerminalCursorInfo?
     @Binding var fontSize: CGFloat
     @Binding var terminalColor: UIColor
+    @Binding var backgroundColor: UIColor
 
     var onInput: (String) -> Void
     var onSettingsChanged: (CGFloat, UIColor) -> Void
@@ -18,21 +19,32 @@ struct TerminalTextView: UIViewRepresentable {
         let textView = NativeTerminalView()
         textView.delegate = context.coordinator
 
-        textView.onSettingsChanged = { newSize, newColor in
-            self.onSettingsChanged(newSize, newColor)
+        // Pass closures that call the coordinator's parent reference,
+        // which is updated in updateUIView. However, context.coordinator is stable.
+        // But context.coordinator.parent is updated.
+        // So we can use context.coordinator.parent inside these closures?
+        // Actually, closures in makeUIView capture 'self' of TerminalTextView struct (which is transient)
+        // or context.coordinator.
+
+        // The safest way is to update the closures in updateUIView OR use the coordinator to dispatch.
+        // Let's use the coordinator to dispatch these actions back to SwiftUI.
+
+        textView.onSettingsChanged = { [weak coordinator = context.coordinator] newSize, newColor in
+            coordinator?.parent.onSettingsChanged(newSize, newColor)
         }
 
-        textView.onInput = { input in
-            self.onInput(input)
+        textView.onInput = { [weak coordinator = context.coordinator] input in
+            coordinator?.parent.onInput(input)
         }
 
-        textView.updateAppearance(color: terminalColor, fontSize: fontSize)
+        textView.updateAppearance(color: terminalColor, backgroundColor: backgroundColor, fontSize: fontSize)
 
         return textView
     }
 
     func updateUIView(_ uiView: NativeTerminalView, context: Context) {
-        uiView.updateAppearance(color: terminalColor, fontSize: fontSize)
+        context.coordinator.parent = self
+        uiView.updateAppearance(color: terminalColor, backgroundColor: backgroundColor, fontSize: fontSize)
         uiView.updateContent(text: text, cursor: cursor)
     }
 
@@ -44,24 +56,16 @@ struct TerminalTextView: UIViewRepresentable {
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            // We intercept all input and send it to the backend
-            // The backend (PTY) will echo it back if appropriate
-
-            // Handle special case for newline if needed, but usually we just send everything
             if text == "\n" {
-                parent.onInput("\r")
+                parent.onInput("\n")
             } else if text == "" {
-                // Backspace
-                parent.onInput("\u{7F}")
+                if range.length > 0 {
+                    parent.onInput("\u{7F}")
+                }
             } else {
                 parent.onInput(text)
             }
-
-            return false // Prevent local change
-        }
-
-        func textViewDidChange(_ textView: UITextView) {
-            // Should not happen if we return false above
+            return false
         }
     }
 }

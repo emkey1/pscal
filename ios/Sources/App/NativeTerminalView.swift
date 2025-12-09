@@ -13,14 +13,13 @@ class NativeTerminalView: UITextView {
 
     private var containerView: TerminalAccessoryView!
     private var settingsContainer: UIView!
+    private weak var ctrlButton: UIButton? // Direct reference to Ctrl button
 
     // UI Controls
     private let sizeSlider = UISlider()
     private let colorSegmentedControl = UISegmentedControl(items: ["Green", "White", "Amber", "Cyan"])
 
     private var lastKeyboardFrame: CGRect = .zero
-
-    private var pendingUpdate: (text: NSAttributedString, cursor: TerminalCursorInfo?)?
 
     // Custom cursor layer
     private let terminalCursorLayer: CALayer = {
@@ -46,7 +45,7 @@ class NativeTerminalView: UITextView {
         setupKeyboardObservers()
 
         // Visual Styling
-        backgroundColor = .black
+        backgroundColor = .black // Default fallback
         autocapitalizationType = .none
         keyboardAppearance = .dark
 
@@ -73,7 +72,9 @@ class NativeTerminalView: UITextView {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    func updateAppearance(color: UIColor, fontSize: CGFloat) {
+    // Updated to accept background color
+    func updateAppearance(color: UIColor, backgroundColor: UIColor, fontSize: CGFloat) {
+        // Update font/foreground if changed
         if self.currentColor != color || self.currentFontSize != fontSize {
             self.currentColor = color
             self.currentFontSize = fontSize
@@ -81,7 +82,7 @@ class NativeTerminalView: UITextView {
             self.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
             self.terminalCursorLayer.backgroundColor = color.cgColor
 
-            // Update settings controls to match external state
+            // Update settings controls
             sizeSlider.value = Float(fontSize)
             switch color {
             case .white: colorSegmentedControl.selectedSegmentIndex = 1
@@ -89,6 +90,10 @@ class NativeTerminalView: UITextView {
             case .cyan: colorSegmentedControl.selectedSegmentIndex = 3
             default: colorSegmentedControl.selectedSegmentIndex = 0
             }
+        }
+        // Update background color
+        if self.backgroundColor != backgroundColor {
+            self.backgroundColor = backgroundColor
         }
     }
 
@@ -104,7 +109,9 @@ class NativeTerminalView: UITextView {
         self.attributedText = text
         self.font = UIFont.monospacedSystemFont(ofSize: currentFontSize, weight: .medium) // Ensure font persists
         self.textColor = currentColor
-        self.backgroundColor = TerminalFontSettings.shared.backgroundColor
+        // Background color is managed by updateAppearance, but ensure it sticks if attributed string overrides?
+        // Attributed string might have background attributes, so we trust it.
+        // But the view background color should remain what we set.
 
         updateCursor(info: cursor)
 
@@ -186,6 +193,10 @@ class NativeTerminalView: UITextView {
             btn.layer.cornerRadius = 6
             btn.addTarget(self, action: #selector(keyTapped(_:)), for: .touchUpInside)
             keysStack.addArrangedSubview(btn)
+
+            if key == "Ctrl" {
+                self.ctrlButton = btn
+            }
         }
 
         containerView.addSubview(keysStack)
@@ -260,20 +271,11 @@ class NativeTerminalView: UITextView {
         } else if title == "Esc" {
             onInput?("\u{1B}")
         } else if title == "Ctrl" {
-            // Toggle Ctrl mode or send next char as ctrl?
-            // Prototype just has it as a key. For now let's just log or implement if needed.
-            // TerminalInputBridge had a toggle. Let's assume toggle behavior or single shot?
-            // For now, I'll implementing a simple latch visual feedback if I could, but let's stick to basic input.
-            // Wait, standard Ctrl key usually means "Control".
-            // In the prototype code provided, it didn't have implementation for Ctrl action other than just a key.
-            // I'll implement it as sending a Ctrl modifier signal or just ignore for now if not specified.
-            // Actually, TerminalInputBridge had logic for Ctrl.
-            // Let's implement a simple latch.
              sender.isSelected.toggle()
              sender.backgroundColor = sender.isSelected ? UIColor.systemBlue : UIColor(white: 0.3, alpha: 1.0)
         } else {
             // Regular keys
-            if let ctrlBtn = (containerView.subviews.first?.subviews.first(where: { ($0 as? UIButton)?.title(for: .normal) == "Ctrl" }) as? UIButton), ctrlBtn.isSelected {
+            if let ctrl = ctrlButton, ctrl.isSelected {
                 // Handle Control char
                  if let first = title.first, let scalar = UnicodeScalar(String(first)) {
                      let value = scalar.value
@@ -281,8 +283,8 @@ class NativeTerminalView: UITextView {
                          let ctrlChar = UnicodeScalar(value & 0x1F)!
                          onInput?(String(ctrlChar))
                          // Reset Ctrl
-                         ctrlBtn.isSelected = false
-                         ctrlBtn.backgroundColor = UIColor(white: 0.3, alpha: 1.0)
+                         ctrl.isSelected = false
+                         ctrl.backgroundColor = UIColor(white: 0.3, alpha: 1.0)
                          return
                      }
                  }
@@ -325,8 +327,6 @@ class NativeTerminalView: UITextView {
     override func layoutSubviews() {
         super.layoutSubviews()
         updateBottomInset()
-        // Notify of resize?
-        // In the original, grid calculation happens in SwiftUI.
     }
 
     private func setupKeyboardObservers() {
@@ -362,4 +362,17 @@ class NativeTerminalView: UITextView {
     }
 
     override var canBecomeFirstResponder: Bool { true }
+
+    // Auto-focus logic
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+             // Delay to ensure hierarchy is ready
+            DispatchQueue.main.async {
+                if !self.isFirstResponder {
+                    self.becomeFirstResponder()
+                }
+            }
+        }
+    }
 }

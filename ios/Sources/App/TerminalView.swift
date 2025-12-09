@@ -37,16 +37,6 @@ struct TerminalContentView: View {
     @ObservedObject private var fontSettings: TerminalFontSettings
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
 
-    // To observe external window state changes, we might need a timer or observer
-    // But since EditorWindowManager sends notifications or updates runtime state,
-    // we rely on runtime updates or we can add a timer if needed.
-    // The old code checked EditorWindowManager.shared.isVisible in the body.
-    // We'll trust SwiftUI to re-evaluate if we depend on observed objects.
-    // However, EditorWindowManager is not an ObservableObject.
-    // We can use a timer to poll checking visibility if strictly needed,
-    // or rely on the fact that showing/hiding window usually triggers some other update.
-    // For now, let's just check it.
-
     init(
         availableSize: CGSize,
         fontSettings: TerminalFontSettings
@@ -70,6 +60,7 @@ struct TerminalContentView: View {
                     cursor: runtime.cursorInfo,
                     fontSize: $fontSettings.pointSize,
                     terminalColor: $fontSettings.foregroundColor,
+                    backgroundColor: $fontSettings.backgroundColor,
                     onInput: { input in
                         runtime.send(input)
                     },
