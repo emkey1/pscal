@@ -49,6 +49,12 @@ class NativeTerminalView: UITextView {
         autocapitalizationType = .none
         keyboardAppearance = .dark
 
+        // Ensure editable/selectable for keyboard to appear
+        isEditable = true
+        isSelectable = true
+        isUserInteractionEnabled = true
+        tintColor = .clear // Hide native cursor
+
         // Layout priority
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -68,9 +74,58 @@ class NativeTerminalView: UITextView {
 
         // Add cursor layer
         layer.addSublayer(terminalCursorLayer)
+
+        // Force layout of input views
+        reloadInputViews()
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
+
+    // MARK: - Hardware Keyboard Handling
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var handled = false
+        for press in presses {
+            guard let key = press.key else { continue }
+
+            // Check modifiers for Control+Key
+            if key.modifierFlags.contains(.control) {
+                if let char = key.charactersIgnoringModifiers.first {
+                    // Convert to control code
+                    let s = String(char).uppercased()
+                    if let scalar = s.unicodeScalars.first {
+                        let v = scalar.value
+                        // @ (64) .. _ (95)
+                        if v >= 64 && v <= 95 {
+                            let code = v - 64
+                            onInput?(String(UnicodeScalar(code)!))
+                            handled = true
+                            continue
+                        }
+                        // Handle '?' -> DEL (127) ? standard mappings
+                    }
+                }
+            }
+
+            if handled { continue }
+
+            switch key.keyCode {
+            case .keyboardUpArrow:    onInput?("\u{1B}[A"); handled = true
+            case .keyboardDownArrow:  onInput?("\u{1B}[B"); handled = true
+            case .keyboardLeftArrow:  onInput?("\u{1B}[D"); handled = true
+            case .keyboardRightArrow: onInput?("\u{1B}[C"); handled = true
+            case .keyboardEscape:     onInput?("\u{1B}"); handled = true
+            case .keyboardTab:        onInput?("\t"); handled = true
+            case .keyboardDeleteOrBackspace: onInput?("\u{7F}"); handled = true
+            // Note: Enter is usually handled by super -> shouldChangeTextIn, but we can intercept if needed.
+            // Leaving Enter to super ensures standard behavior unless we need raw \r
+            default: break
+            }
+        }
+
+        if !handled {
+            super.pressesBegan(presses, with: event)
+        }
+    }
 
     // Updated to accept background color
     func updateAppearance(color: UIColor, backgroundColor: UIColor, fontSize: CGFloat) {
