@@ -56,7 +56,7 @@
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
             uuid = "E9D61F7A-09D1-4B17-9B95-569B33E96731"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "Sources/App/PscalRuntimeBootstrap.swift"
@@ -72,7 +72,7 @@
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
             uuid = "03746BAF-EECF-4F51-BD2B-9F861BD98FB8"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "Sources/App/PscalRuntimeBootstrap.swift"
@@ -82,6 +82,52 @@
             endingLineNumber = "667"
             landmarkName = "defaultGeometryMetrics()"
             landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "DE96F503-0D7A-40CF-B9EA-00CBFB0DDA1F"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Sources/App/PscalRuntimeBootstrap.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "252"
+            endingLineNumber = "252"
+            landmarkName = "init()"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "DE96F503-0D7A-40CF-B9EA-00CBFB0DDA1F - 73487afd20d447f7"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #1 (Foundation.Data) -&gt; () in PSCAL.PscalRuntimeBootstrap.() -&gt; PSCAL.PscalRuntimeBootstrap.init() -&gt; PSCAL.PscalRuntimeBootstrap"
+                  moduleName = "PSCAL.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/mke/PBuild/ios/Sources/App/PscalRuntimeBootstrap.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "252"
+                  endingLineNumber = "252">
+               </Location>
+               <Location
+                  uuid = "DE96F503-0D7A-40CF-B9EA-00CBFB0DDA1F - c4e036b6c85e1c88"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #1 (Swift.UnsafeRawBufferPointer) -&gt; () in closure #1 (Foundation.Data) -&gt; () in PSCAL.PscalRuntimeBootstrap.() -&gt; PSCAL.PscalRuntimeBootstrap.init() -&gt; PSCAL.PscalRuntimeBootstrap"
+                  moduleName = "PSCAL.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/mke/PBuild/ios/Sources/App/PscalRuntimeBootstrap.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "253"
+                  endingLineNumber = "253">
+               </Location>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

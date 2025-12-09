@@ -166,7 +166,7 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         let window = UIWindow(windowScene: windowScene)
-        let root = TerminalRootViewController()
+        let root = TerminalRootViewController(showsOverlay: false)
         window.rootViewController = root
         self.window = window
         window.makeKeyAndVisible()
