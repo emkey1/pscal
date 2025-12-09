@@ -15,3 +15,5 @@ Tests/src_to_file.txt
 Tests/dst_to_file.txt
 Tests/headers_test.txt
 third-party/curl-8.17.0
+ios/PSCAL.xcodeproj/project.xcworkspace/xcuserdata/
+ios/PSCAL.xcodeproj/xcuserdata/mke.xcuserdatad/

@@ -34,6 +34,13 @@ struct TerminalView: View {
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()
         }
+        .onChange(of: showingSettings) { isPresented in
+            if isPresented {
+                hideSoftKeyboard()
+            } else {
+                focusAnchor &+= 1
+            }
+        }
         .background(Color(fontSettings.backgroundColor))
     }
 
@@ -65,6 +72,13 @@ struct TerminalView: View {
         }
         .padding(.bottom, 16)
         .padding(.trailing, 10)
+    }
+
+    private func hideSoftKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil,
+                                        from: nil,
+                                        for: nil)
     }
 }
 
@@ -217,11 +231,5 @@ struct TerminalContentView: View {
     }
 }
 
-// MARK: - Preview
 
-struct TerminalView_Previews: PreviewProvider {
-    static var previews: some View {
-        TerminalView()
-            .previewDevice("iPad Pro (11-inch) (4th generation)")
-    }
-}
+
