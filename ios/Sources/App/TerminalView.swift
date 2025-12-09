@@ -20,7 +20,6 @@ struct TerminalView: View {
             GeometryReader { proxy in
                 TerminalContentView(
                     availableSize: proxy.size,
-                    safeAreaInsets: EdgeInsets(),
                     fontSettings: fontSettings,
                     focusAnchor: $focusAnchor
                 )
@@ -72,10 +71,9 @@ struct TerminalView: View {
 // MARK: - Terminal Content View
 
 struct TerminalContentView: View {
-    private static let topPadding: CGFloat = 32.0
+    static let topPadding: CGFloat = 32.0
 
     let availableSize: CGSize
-    let safeAreaInsets: EdgeInsets
 
     @ObservedObject private var fontSettings: TerminalFontSettings
     @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
@@ -85,12 +83,10 @@ struct TerminalContentView: View {
 
     init(
         availableSize: CGSize,
-        safeAreaInsets: EdgeInsets,
         fontSettings: TerminalFontSettings,
         focusAnchor: Binding<Int>
     ) {
         self.availableSize = availableSize
-        self.safeAreaInsets = safeAreaInsets
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
         _focusAnchor = focusAnchor
     }
@@ -100,6 +96,7 @@ struct TerminalContentView: View {
         let elvisActive = runtime.isElvisModeActive()
         let elvisVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
+        let hasExitStatus = runtime.exitStatus != nil
 
         return VStack(spacing: 0) {
             TerminalRendererView(
@@ -120,9 +117,8 @@ struct TerminalContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(fontSettings.backgroundColor))
 
-            Divider()
-
             if let status = runtime.exitStatus {
+                Divider()
                 Text("Process exited with status \(status)")
                     .font(.footnote)
                     .foregroundColor(.secondary)
@@ -182,30 +178,33 @@ struct TerminalContentView: View {
     // MARK: Geometry
 
     private func updateTerminalGeometry() {
-        let showingStatus = runtime.exitStatus != nil
         let font = fontSettings.currentFont
+        let showingStatus = runtime.exitStatus != nil
 
-        // GeometryReader reports the size of the view.
-        // If the view is respecting safe area (default), this size is already reduced by safe areas (including keyboard).
-        // However, proxy.safeAreaInsets might still report the insets of the container/window context, leading to double subtraction.
-        // Since we are not using .ignoresSafeArea(), we should treat availableSize as the definitive usable area
-        // and ignore reported safeAreaInsets to avoid subtracting them again.
+        // Calculate usable height for the terminal text area.
+        // availableSize.height is the total space from GeometryReader (including padding area).
+        var usableHeight = availableSize.height
 
-        let effectiveHeight = max(1, availableSize.height)
-        let sizeForMetrics = CGSize(width: availableSize.width, height: effectiveHeight)
+        // Subtract top padding (applied to VStack)
+        usableHeight -= Self.topPadding
 
-        guard let metrics = TerminalGeometryCalculator.metrics(
-            for: sizeForMetrics,
-            safeAreaInsets: safeAreaInsets,
-            topPadding: Self.topPadding,
-            showingStatus: showingStatus,
-            font: font
-        ) else {
-            // If calculation failed (e.g. 0 size), use fallback.
-            let fallback = TerminalGeometryCalculator.fallbackMetrics(showingStatus: showingStatus, font: font)
-            runtime.updateTerminalSize(columns: fallback.columns, rows: fallback.rows)
-            return
+        // If status is shown, we subtract the status overlay height.
+        // The Divider is part of this space, effectively.
+        if showingStatus {
+            usableHeight -= TerminalGeometryCalculator.statusOverlayHeight
         }
+
+        let usableSize = CGSize(width: availableSize.width, height: usableHeight)
+
+        let grid = TerminalGeometryCalculator.calculateCapacity(
+            for: usableSize,
+            font: font
+        )
+
+        let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(
+            columns: grid.columns,
+            rows: grid.rows
+        )
 
         #if DEBUGMEDO
         if lastLoggedMetrics != metrics {
