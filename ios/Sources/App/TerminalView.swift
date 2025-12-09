@@ -56,7 +56,7 @@ struct TerminalContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 TerminalTextView(
-                    text: runtime.screenText,
+                    text: runtime.screenText.string,
                     cursor: runtime.cursorInfo,
                     fontSize: $fontSettings.pointSize,
                     terminalColor: $fontSettings.foregroundColor,
@@ -101,3 +101,4 @@ struct TerminalContentView: View {
         runtime.updateTerminalSize(columns: grid.columns, rows: grid.rows)
     }
 }
+

@@ -20,6 +20,7 @@
 		14E9F2052BE2B8D400A1E3C0 /* Examples in Resources */ = {isa = PBXBuildFile; fileRef = 14E9F2042BE2B8D400A1E3C0 /* Examples */; };
 		14E9F2212BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */; };
 		14F2C4F82BE1B12300DE9FD9 /* TerminalInputBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */; };
+		5D0626FB2EE8AB3100A33846 /* TerminalTextView 2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0626FA2EE8AB3000A33846 /* TerminalTextView 2.swift */; };
 		5DFF9B122EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */; };
 		5F1AA0112EC6F00100000001 /* lib in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0012EC6F00100000001 /* lib */; };
 		5F1AA0122EC6F00100000001 /* fonts in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0022EC6F00100000001 /* fonts */; };
@@ -54,6 +55,7 @@
 		14E9F2042BE2B8D400A1E3C0 /* Examples */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Examples; path = ../Examples; sourceTree = "<group>"; };
 		14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeAssetInstaller.swift; sourceTree = "<group>"; };
 		14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalInputBridge.swift; sourceTree = "<group>"; };
+		5D0626FA2EE8AB3000A33846 /* TerminalTextView 2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TerminalTextView 2.swift"; sourceTree = "<group>"; };
 		5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "PSCALIOS-LinkerWorkaround.xcconfig"; sourceTree = "<group>"; };
 		5F1AA0012EC6F00100000001 /* lib */ = {isa = PBXFileReference; lastKnownFileType = folder; name = lib; path = ../lib; sourceTree = "<group>"; };
 		5F1AA0022EC6F00100000001 /* fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = fonts; path = ../fonts; sourceTree = "<group>"; };
@@ -145,6 +147,7 @@
 				14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */,
 				5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */,
 				145F4FDA2BE072E500603B3F /* Info.plist */,
+				5D0626FA2EE8AB3000A33846 /* TerminalTextView 2.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -290,6 +293,7 @@
 			files = (
 				145F4FCD2BE0722600603B3F /* PSCALRuntime.mm in Sources */,
 				14A5C5F42BE13E6500CEF0B9 /* TerminalBuffer.swift in Sources */,
+				5D0626FB2EE8AB3100A33846 /* TerminalTextView 2.swift in Sources */,
 				14CF02B42BE1481D0037FB7E /* KeyboardAwareHostingController.swift in Sources */,
 				14F2C4F82BE1B12300DE9FD9 /* TerminalInputBridge.swift in Sources */,
 				145F4FC72BE071D600603B3F /* PscalApp.swift in Sources */,
