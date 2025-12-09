@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <termios.h>
 #include <time.h>
+#include <wchar.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -42,19 +43,10 @@ static struct sigaction gInteractiveOldSigintAction;
 static volatile sig_atomic_t gInteractiveHasOldSigint = 0;
 static struct sigaction gInteractiveOldSigtstpAction;
 static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
+static bool gInteractiveLineDrawn = false;
 
 static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length);
 static size_t interactiveCommonPrefixLength(char **items, size_t count);
-
-typedef struct {
-    size_t term_width;
-    size_t cursor_row;
-    size_t cursor_col;
-    size_t prompt_rows;
-    size_t total_rows;
-} InteractiveDisplayState;
-
-static InteractiveDisplayState gInteractiveDisplayState = {0, 0, 0, 0};
 
 static int interactiveTerminalWidth(void) {
     struct winsize ws;
@@ -150,6 +142,42 @@ static const unsigned char *interactiveSkipAnsiSequence(const unsigned char *p) 
     return p;
 }
 
+static int interactiveGlyphWidth(const char *s, size_t max_len, size_t *out_bytes) {
+    if (out_bytes) {
+        *out_bytes = 1;
+    }
+    if (!s || max_len == 0) {
+        return 0;
+    }
+    mbstate_t st;
+    memset(&st, 0, sizeof(st));
+    wchar_t wc;
+    size_t consumed = mbrtowc(&wc, s, max_len, &st);
+    if (consumed == (size_t)-1 || consumed == (size_t)-2 || consumed == 0) {
+        if (out_bytes) {
+            *out_bytes = 1;
+        }
+        return 1;
+    }
+    if (out_bytes) {
+        *out_bytes = consumed;
+    }
+    int width = wcwidth(wc);
+    if (width < 0) {
+        width = 0;
+    }
+    return width;
+}
+
+static void interactiveAdvanceColumns(size_t term_width,
+                                      size_t *row,
+                                      size_t *col,
+                                      size_t width) {
+    for (size_t i = 0; i < width; ++i) {
+        interactiveAdvancePosition(term_width, row, col, ' ');
+    }
+}
+
 static void interactiveComputeDisplayMetrics(const char *prompt,
                                              const char *buffer,
                                              size_t length,
@@ -165,23 +193,38 @@ static void interactiveComputeDisplayMetrics(const char *prompt,
     size_t total_rows = 1;
 
     if (prompt) {
-        const unsigned char *p = (const unsigned char *)prompt;
+        const char *p = prompt;
         while (*p) {
-            if (*p == '\033') {
-                const unsigned char *next = interactiveSkipAnsiSequence(p);
-                if (next == p) {
+            if ((unsigned char)*p == '\033') {
+                const unsigned char *next = interactiveSkipAnsiSequence((const unsigned char *)p);
+                if (next == (const unsigned char *)p) {
                     ++p;
                 } else {
-                    p = next;
+                    p = (const char *)next;
                 }
                 continue;
             }
-            interactiveAdvancePosition(term_width, &row, &col, *p);
+            if (*p == '\n' || *p == '\r' || *p == '\t') {
+                interactiveAdvancePosition(term_width, &row, &col, (unsigned char)*p);
+                if (*p == '\n' || *p == '\r') {
+                    size_t used_rows = row + 1;
+                    if (used_rows > total_rows) {
+                        total_rows = used_rows;
+                    }
+                }
+                ++p;
+                continue;
+            }
+            size_t bytes = 1;
+            int width = interactiveGlyphWidth(p, strlen(p), &bytes);
+            if (width > 0) {
+                interactiveAdvanceColumns(term_width, &row, &col, (size_t)width);
+            }
             size_t used_rows = row + 1;
             if (used_rows > total_rows) {
                 total_rows = used_rows;
             }
-            ++p;
+            p += bytes;
         }
     }
 
@@ -191,17 +234,34 @@ static void interactiveComputeDisplayMetrics(const char *prompt,
     }
 
     if (buffer && length > 0) {
-        for (size_t i = 0; i < length; ++i) {
-            if (i == cursor && out_cursor_row && out_cursor_col) {
+        size_t byte_index = 0;
+        while (byte_index < length) {
+            if (byte_index == cursor && out_cursor_row && out_cursor_col) {
                 *out_cursor_row = row;
                 *out_cursor_col = col;
             }
-            interactiveAdvancePosition(term_width, &row, &col,
-                                       (unsigned char)buffer[i]);
+            unsigned char c = (unsigned char)buffer[byte_index];
+            if (c == '\n' || c == '\r' || c == '\t') {
+                interactiveAdvancePosition(term_width, &row, &col, c);
+                if (c == '\n' || c == '\r') {
+                    size_t used_rows = row + 1;
+                    if (used_rows > total_rows) {
+                        total_rows = used_rows;
+                    }
+                }
+                byte_index++;
+                continue;
+            }
+            size_t bytes = 1;
+            int width = interactiveGlyphWidth(buffer + byte_index, length - byte_index, &bytes);
+            if (width > 0) {
+                interactiveAdvanceColumns(term_width, &row, &col, (size_t)width);
+            }
             size_t used_rows = row + 1;
             if (used_rows > total_rows) {
                 total_rows = used_rows;
             }
+            byte_index += bytes;
         }
     }
 
@@ -783,7 +843,6 @@ static void redrawInteractiveLine(const char *prompt,
     size_t previous_prompt_lines =
         displayed_prompt_lines ? *displayed_prompt_lines : 0;
     size_t term_width = (size_t)interactiveTerminalWidth();
-    bool width_changed = (gInteractiveDisplayState.term_width != term_width);
 
     size_t total_rows = 1;
     size_t cursor_row = 0;
@@ -801,15 +860,7 @@ static void redrawInteractiveLine(const char *prompt,
                                      &end_row,
                                      &end_col);
 
-    size_t rows_to_prompt = 0;
-    if (gInteractiveDisplayState.total_rows > 0) {
-        rows_to_prompt = gInteractiveDisplayState.total_rows - 1;
-    } else {
-        rows_to_prompt = previous_prompt_lines;
-    }
-    if (width_changed && previous_prompt_lines > rows_to_prompt) {
-        rows_to_prompt = previous_prompt_lines;
-    }
+    size_t rows_to_prompt = gInteractiveLineDrawn ? previous_prompt_lines : 0;
     for (size_t i = 0; i < rows_to_prompt; ++i) {
         fputs("\033[A", stdout);
     }
@@ -855,11 +906,7 @@ static void redrawInteractiveLine(const char *prompt,
         *displayed_prompt_lines =
             (total_rows > 0) ? (total_rows - 1) : 0;
     }
-    gInteractiveDisplayState.term_width = term_width;
-    gInteractiveDisplayState.cursor_row = cursor_row;
-    gInteractiveDisplayState.cursor_col = cursor_col;
-    gInteractiveDisplayState.prompt_rows = (total_rows > 0) ? (total_rows - 1) : 0;
-    gInteractiveDisplayState.total_rows = total_rows;
+    gInteractiveLineDrawn = true;
 }
 
 static bool interactiveEnsureCapacity(char **buffer, size_t *capacity, size_t needed) {
@@ -2134,30 +2181,8 @@ static char *readInteractiveLine(const char *prompt,
     size_t length = 0;
     size_t displayed_length = 0;
     size_t displayed_prompt_lines = shellPromptLineBreakCount(prompt);
+    gInteractiveLineDrawn = false;
     size_t cursor = 0;
-    {
-        size_t total_rows = 1;
-        size_t cursor_row = 0;
-        size_t cursor_col = 0;
-        size_t end_row = 0;
-        size_t end_col = 0;
-        size_t term_width = (size_t)interactiveTerminalWidth();
-        interactiveComputeDisplayMetrics(prompt,
-                                         buffer,
-                                         length,
-                                         cursor,
-                                         term_width,
-                                         &total_rows,
-                                         &cursor_row,
-                                         &cursor_col,
-                                         &end_row,
-                                         &end_col);
-        gInteractiveDisplayState.term_width = term_width;
-        gInteractiveDisplayState.cursor_row = cursor_row;
-        gInteractiveDisplayState.cursor_col = cursor_col;
-        gInteractiveDisplayState.prompt_rows = (total_rows > 0) ? (total_rows - 1) : 0;
-        gInteractiveDisplayState.total_rows = total_rows;
-    }
     size_t history_index = 0;
     char *scratch = NULL;
     interactiveUpdateScratch(&scratch, buffer, length);
