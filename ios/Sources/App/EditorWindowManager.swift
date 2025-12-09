@@ -150,12 +150,14 @@ class PscalAppDelegate: NSObject, UIApplicationDelegate {
         } else if hasEditorActivity {
             config.delegateClass = EditorSceneDelegate.self
         } else {
-            config.delegateClass = MainSceneDelegate.self
+            // Use SwiftUI's default delegate for the main scene
+            // config.delegateClass = MainSceneDelegate.self
         }
         return config
     }
 }
 
+// Kept for backward compatibility if needed, but unused by default now
 @objc(MainSceneDelegate)
 class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
@@ -163,20 +165,12 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene,
                willConnectTo session: UISceneSession,
                options connectionOptions: UIScene.ConnectionOptions) {
-        guard let windowScene = scene as? UIWindowScene else { return }
-
-        let window = UIWindow(windowScene: windowScene)
-        let root = TerminalRootViewController()
-        window.rootViewController = root
-        self.window = window
-        window.makeKeyAndVisible()
-
-        EditorWindowManager.shared.mainSceneDidConnect(session: windowScene.session)
+        // Handled by SwiftUI WindowGroup
+        EditorWindowManager.shared.mainSceneDidConnect(session: session)
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
         EditorWindowManager.shared.mainSceneDidDisconnect(session: scene.session)
-        window = nil
     }
 }
 

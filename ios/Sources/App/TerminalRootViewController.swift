@@ -1,6 +1,17 @@
 import SwiftUI
 import UIKit
 
+/// SwiftUI wrapper for TerminalRootViewController
+struct TerminalRootView: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> TerminalRootViewController {
+        return TerminalRootViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: TerminalRootViewController, context: Context) {
+        // No updates needed for now
+    }
+}
+
 /// UIKit shell that hosts the SwiftUI TerminalView and relies on keyboardLayoutGuide
 /// to keep the terminal aligned with the on-screen keyboard.
 final class TerminalRootViewController: UIViewController {
@@ -8,6 +19,7 @@ final class TerminalRootViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        view.backgroundColor = .black // Ensure background matches terminal
 
         addChild(hostingController)
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
