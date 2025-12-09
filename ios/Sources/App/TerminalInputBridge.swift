@@ -70,6 +70,7 @@ final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
     private var hardwareKeyboardConnected: Bool = false
+    private var softKeyboardVisible: Bool = false
     private var keyboardObservers: [NSObjectProtocol] = []
     
     private struct RepeatCommand {
@@ -108,7 +109,7 @@ final class TerminalKeyInputView: UITextView {
 
     override var inputAccessoryView: UIView? {
         get {
-            hardwareKeyboardConnected ? nil : accessoryBar
+            (softKeyboardVisible && !hardwareKeyboardConnected) ? accessoryBar : nil
         }
         set { /* ignore external setters */ }
     }
@@ -266,7 +267,9 @@ final class TerminalKeyInputView: UITextView {
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         if !hardwareKeyboardConnected {
             hardwareKeyboardConnected = true
-            reloadInputViews()
+            if softKeyboardVisible {
+                reloadInputViews()
+            }
         }
         if let event {
             NotificationCenter.default.post(name: .terminalModifierStateChanged,
@@ -373,14 +376,25 @@ final class TerminalKeyInputView: UITextView {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                if self.hardwareKeyboardConnected {
-                    self.hardwareKeyboardConnected = false
-                    self.reloadInputViews()
-                }
+                self.softKeyboardVisible = true
+                self.hardwareKeyboardConnected = false
+                self.reloadInputViews()
             }
         }
 
-        keyboardObservers = [willShow]
+        let willHide = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.softKeyboardVisible = false
+                self.reloadInputViews()
+            }
+        }
+
+        keyboardObservers = [willShow, willHide]
     }
 
     // MARK: - Accessory button actions

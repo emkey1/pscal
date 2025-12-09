@@ -1645,6 +1645,14 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                                                size_t stage_pos,
                                                bool pipeline_head,
                                                bool pipeline_tail) {
+    if (!ctx || !ctx->active || !ctx->pids || stage_pos >= ctx->stage_count) {
+        runtimeError(vm, "pipeline: invalid context");
+        shellUpdateStatus(1);
+        if (ctx) {
+            shellAbortPipeline();
+        }
+        return false;
+    }
     if (cmd->background) {
         runtimeError(vm, "pipelines cannot run in background on this platform");
         shellUpdateStatus(1);
@@ -1765,8 +1773,11 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 
     int status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, stdout_fd, stderr_fd, apply_exec_redirs);
     ctx->last_status = status;
-    ctx->pids[stage_pos] = 0;
-    ctx->launched = stage_pos + 1;
+    bool ctx_valid = ctx->active && ctx->pids && stage_pos < ctx->stage_count;
+    if (ctx_valid) {
+        ctx->pids[stage_pos] = 0;
+        ctx->launched = stage_pos + 1;
+    }
     ok = true;
 
 cleanup:
@@ -2074,6 +2085,14 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             }
             if (!stage_ok) {
                 shellAbortPipeline();
+            } else if (pipeline_tail) {
+                int status = ctx->last_status;
+                if (ctx->negated) {
+                    status = (status == 0) ? 1 : 0;
+                    shellUpdateStatus(status);
+                }
+                ctx->last_status = status;
+                shellResetPipeline();
             }
             shellFreeCommand(cmd);
             shellScalarCacheInvalidate();

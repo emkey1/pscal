@@ -137,6 +137,8 @@ final class EditorWindowManager {
 }
 
 class PscalAppDelegate: NSObject, UIApplicationDelegate {
+    static var lockedOrientationMask: UIInterfaceOrientationMask?
+
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
@@ -154,6 +156,39 @@ class PscalAppDelegate: NSObject, UIApplicationDelegate {
         }
         return config
     }
+
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        if let locked = Self.lockedOrientationMask {
+            return locked
+        }
+
+        let sceneOrientation: UIInterfaceOrientation? = {
+            if let scene = window?.windowScene {
+                return scene.interfaceOrientation
+            }
+            if let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }) {
+                return scene.interfaceOrientation
+            }
+            return nil
+        }()
+
+        let mask: UIInterfaceOrientationMask
+        if let orientation = sceneOrientation {
+            if orientation.isLandscape {
+                mask = .landscape
+            } else {
+                mask = .portrait
+            }
+        } else {
+            // Default to portrait if orientation can't be determined.
+            mask = .portrait
+        }
+
+        Self.lockedOrientationMask = mask
+        return mask
+    }
 }
 
 @objc(MainSceneDelegate)
@@ -170,6 +205,15 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = root
         self.window = window
         window.makeKeyAndVisible()
+
+        if let mask = PscalAppDelegate.lockedOrientationMask {
+            if #available(iOS 16.0, *) {
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+            } else {
+                // For iOS 15, set the mask on the scene's windows to discourage rotation.
+                windowScene.windows.forEach { $0.overrideUserInterfaceStyle = $0.overrideUserInterfaceStyle }
+            }
+        }
 
         EditorWindowManager.shared.mainSceneDidConnect(session: windowScene.session)
     }

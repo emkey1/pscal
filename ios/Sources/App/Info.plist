@@ -20,6 +20,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Bluetooth is used for optional external keyboard and accessory connectivity.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ssh._tcp</string>
@@ -27,8 +29,6 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Local network access is required for SSH/telnet/ping connections to LAN hosts.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Bluetooth is used for optional external keyboard and accessory connectivity.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used to feed /dev/ttyGPS with live NMEA sentences.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -62,6 +62,8 @@
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UIStatusBarStyle</key>
+	<string></string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

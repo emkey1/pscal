@@ -25,6 +25,18 @@
 extern char **environ;
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+static void shellRunnerFreeParamArray(char **values, int count) {
+    if (!values) {
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        free(values[i]);
+    }
+    free(values);
+}
+#endif
+
 static const char *const kShellCompilerId = "shell";
 
 #if defined(PSCAL_TARGET_IOS)
@@ -97,6 +109,93 @@ static bool shellReadShebangLine(const char *path, char **out_line) {
     line[line_len] = '\0';
     *out_line = line;
     return true;
+}
+
+static int shellRunExshShebang(const char *path, char *const *argv) {
+    if (!path || !*path) {
+        return -1;
+    }
+    char *source = shellLoadFile(path);
+    if (!source) {
+        return -1;
+    }
+
+    char **saved_params = gParamValues;
+    int saved_count = gParamCount;
+    bool saved_owned = gParamValuesOwned;
+
+    char **new_params = NULL;
+    int new_params_count = 0;
+    int new_count = 0;
+    if (argv) {
+        while (argv[1 + new_count]) {
+            new_count++;
+        }
+    }
+    bool replaced_params = false;
+    if (new_count > 0) {
+        new_params = (char **)calloc((size_t)new_count, sizeof(char *));
+        if (!new_params) {
+            free(source);
+            return -1;
+        }
+        new_params_count = new_count;
+        bool ok = true;
+        for (int i = 0; i < new_count; ++i) {
+            new_params[i] = strdup(argv[i + 1] ? argv[i + 1] : "");
+            if (!new_params[i]) {
+                shellRunnerFreeParamArray(new_params, i);
+                free(source);
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) {
+            return -1;
+        }
+        gParamValues = new_params;
+        gParamCount = new_count;
+        gParamValuesOwned = true;
+        replaced_params = true;
+    }
+
+    const char *previous_arg0 = shellRuntimeGetArg0();
+    char *saved_arg0 = previous_arg0 ? strdup(previous_arg0) : NULL;
+    shellRuntimeSetArg0(path);
+
+    ShellRunOptions opts = {0};
+    opts.no_cache = 1;
+    opts.quiet = true;
+    opts.exit_on_signal = shellRuntimeExitOnSignal();
+    opts.suppress_warnings = true;
+    opts.frontend_path = previous_arg0 ? previous_arg0 : "exsh";
+
+    bool exit_requested = false;
+    int status = shellRunSource(source, path, &opts, &exit_requested);
+
+    shellRuntimeSetArg0(saved_arg0);
+    free(saved_arg0);
+
+    if (replaced_params) {
+        bool freed_alloc = false;
+        if (gParamValuesOwned && gParamValues) {
+            shellRunnerFreeParamArray(gParamValues, gParamCount);
+            freed_alloc = (gParamValues == new_params);
+        }
+        if (new_params && !freed_alloc) {
+            shellRunnerFreeParamArray(new_params, new_params_count);
+        }
+    }
+    gParamValues = saved_params;
+    gParamCount = saved_count;
+    gParamValuesOwned = saved_owned;
+
+    free(source);
+
+    if (exit_requested) {
+        shellRuntimeRequestExit();
+    }
+    return status;
 }
 
 extern int pascal_main(int argc, char **argv);
@@ -194,6 +293,11 @@ int shellMaybeExecShebangTool(const char *path, char *const *argv) {
     if (!tool_name) {
         free(line);
         return -1;
+    }
+    if (strcasecmp(tool_name, "exsh") == 0) {
+        int status = shellRunExshShebang(path, argv);
+        free(line);
+        return status;
     }
 
     size_t shebang_argc = 0;
