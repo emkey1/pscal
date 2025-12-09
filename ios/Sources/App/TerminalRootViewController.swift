@@ -30,13 +30,14 @@ final class TerminalRootViewController: UIViewController {
 
         view.addSubview(hostingController.view)
 
-        // Pin the hosted SwiftUI view to the safe area and keyboard guide.
-        // We pin leading/trailing/top to safe area to avoid drawing under notch/home indicator.
+        // Pin the hosted SwiftUI view to the view edges and keyboard guide.
+        // We allow the SwiftUI view to handle safe area insets internally to support
+        // full-screen background colors and proper button placement.
         // We pin bottom to keyboardLayoutGuide.topAnchor to automatically resize when keyboard appears.
         NSLayoutConstraint.activate([
-            hostingController.view.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            hostingController.view.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            hostingController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
             hostingController.view.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor)
         ])
 

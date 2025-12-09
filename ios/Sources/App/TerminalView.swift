@@ -20,16 +20,28 @@ struct TerminalView: View {
             GeometryReader { proxy in
                 TerminalContentView(
                     availableSize: proxy.size,
-                    safeAreaInsets: EdgeInsets(),
+                    safeAreaInsets: proxy.safeAreaInsets,
                     fontSettings: fontSettings,
                     focusAnchor: $focusAnchor
                 )
                 // We must frame the content view to the available size to ensure it fills the space
                 .frame(width: proxy.size.width, height: proxy.size.height)
+                // Pass safe area insets to overlayButtons via preference or environment if needed,
+                // but simpler to use GeometryReader here.
             }
 
             if showsOverlay {
-                overlayButtons
+                GeometryReader { proxy in
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            overlayButtons
+                        }
+                    }
+                    .padding(.bottom, proxy.safeAreaInsets.bottom)
+                    .padding(.trailing, proxy.safeAreaInsets.trailing)
+                }
             }
         }
         .sheet(isPresented: $showingSettings) {
@@ -134,7 +146,9 @@ struct TerminalContentView: View {
         // Align to top so that if we have extra vertical space (e.g. fractional line height)
         // it appears at the bottom.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, Self.topPadding)
+        .padding(.top, safeAreaInsets.top + Self.topPadding)
+        .padding(.leading, safeAreaInsets.leading)
+        .padding(.trailing, safeAreaInsets.trailing)
         .background(Color(fontSettings.backgroundColor))
         .contentShape(Rectangle())
         .onTapGesture {
@@ -159,6 +173,9 @@ struct TerminalContentView: View {
             }
         }
         .onChange(of: availableSize) { _ in
+            updateTerminalGeometry()
+        }
+        .onChange(of: safeAreaInsets) { _ in
             updateTerminalGeometry()
         }
         .onChange(of: fontSettings.pointSize) { _ in
