@@ -32,8 +32,7 @@ extern void pscalRuntimeDebugLog(const char *message);
 #include "common/path_truncate.h"
 
 static bool pathVirtualizationActive(void) {
-    const char *prefix = getenv("PATH_TRUNCATE");
-    return prefix && prefix[0] == '/';
+    return pathTruncateEnabled();
 }
 
 static const char *pathVirtualizedExpand(const char *input, char *buffer, size_t buffer_len) {
