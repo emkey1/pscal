@@ -176,19 +176,14 @@ struct TerminalContentView: View {
             }
         }
         .onChange(of: availableSize) { _ in
-            if !hasMeasuredGeometry {
-                updateTerminalGeometry()
-            }
+            if !hasMeasuredGeometry { updateTerminalGeometry() }
         }
         .onChange(of: fontSettings.pointSize) { _ in
-            if !hasMeasuredGeometry {
-                updateTerminalGeometry()
-            }
+            hasMeasuredGeometry = false
+            updateTerminalGeometry()
         }
         .onChange(of: runtime.exitStatus) { _ in
-            if !hasMeasuredGeometry {
-                updateTerminalGeometry()
-            }
+            if !hasMeasuredGeometry { updateTerminalGeometry() }
         }
     }
 
@@ -243,4 +238,3 @@ struct TerminalContentView: View {
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }
-
