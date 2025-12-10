@@ -75,7 +75,7 @@ func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
     appendRuntimeDebugLog(String(cString: message))
 }
 
-private final class RuntimeLogger {
+public final class RuntimeLogger {
     static let runtime = RuntimeLogger(filename: "pscal_runtime.log")
 
     private let queue: DispatchQueue
@@ -116,7 +116,7 @@ private final class RuntimeLogger {
         }
     }
 
-    func resetSession() {
+    public func resetSession() {
         queue.sync {
             sessionLines.removeAll()
             sessionBytes = 0
@@ -139,7 +139,7 @@ private final class RuntimeLogger {
         return withCStringPointerRuntime(snapshot) { strdup($0) }
     }
 
-    func append(_ message: String) {
+    public func append(_ message: String) {
         let timestamp = RuntimeLogger.formatter.string(from: Date())
         let line = "[\(timestamp)] \(message)"
         let record = line + "\n"
