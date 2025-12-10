@@ -105,6 +105,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
 #endif
     {"pscalvm", "pscalvm", -1},
     {"rea", "rea", -1},
+    {"exsh", "exsh", -1},
+    {"sh", "exsh", -1},
     {"resize", "resize", -1},
     {"rm", "rm", -1},
     {"ping", "ping", -1},

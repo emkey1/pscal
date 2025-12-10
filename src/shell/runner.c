@@ -255,6 +255,7 @@ static const char *shellResolveToolName(const char *interpreter) {
     if (strcasecmp(base, "pscaljson2bc") == 0) return "pscaljson2bc";
     if (strcasecmp(base, "dascal") == 0) return "dascal";
     if (strcasecmp(base, "pscald") == 0) return "pscald";
+    if (strcasecmp(base, "sh") == 0) return "exsh";
     if (strcasecmp(base, "exsh") == 0) return "exsh";
     return NULL;
 }
