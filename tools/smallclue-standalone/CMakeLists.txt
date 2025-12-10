@@ -26,11 +26,12 @@ endif()
 
 # smallclue main source
 add_executable(smallclue_standalone
-    "${PSCALSRC}/src/smallclue/main.c"
+    "${PSCALSRC}/src/smallclue/src/main.c"
 )
 
 target_include_directories(smallclue_standalone PRIVATE
     "${PSCALSRC}/src"
+    "${PSCALSRC}/src/smallclue/src"
     "${PSCAL_BUILD_ROOT}/generated"
 )
 

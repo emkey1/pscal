@@ -354,6 +354,7 @@ include_directories(
     src/compiler
     src/vm
     src/third_party/yyjson
+    src/smallclue/src
     lib
 )
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
@@ -772,10 +773,10 @@ set(PSCAL_CORE_SOURCES
     src/common/frontend_kind.c
     src/common/runtime_paths.c
     src/common/pascal_state.c
-    src/smallclue/core.c
-    src/smallclue/integration.c
-    src/smallclue/nextvi_app.c
-    src/smallclue/openssh_app.c
+    src/smallclue/src/core.c
+    src/smallclue/src/integration.c
+    src/smallclue/src/nextvi_app.c
+    src/smallclue/src/openssh_app.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
@@ -1850,7 +1851,7 @@ if(SMALLCLUE_WITH_EXSH)
 endif()
 
 add_executable(smallclue
-    src/smallclue/main.c
+    src/smallclue/src/main.c
 )
 set(_SMALLCLUE_LINK_LIBS m Threads::Threads)
 if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)

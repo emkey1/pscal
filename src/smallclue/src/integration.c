@@ -1,4 +1,4 @@
-#include "smallclue/smallclue.h"
+#include "smallclue.h"
 
 #include "backend_ast/builtin.h"
 #include "core/utils.h"

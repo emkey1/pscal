@@ -1,4 +1,4 @@
-#include "smallclue/smallclue.h"
+#include "smallclue.h"
 
 int main(int argc, char **argv) {
     return smallclueMain(argc, argv);

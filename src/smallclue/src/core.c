@@ -3,11 +3,11 @@
  * src/smallclue/integration.c and src/shell/builtins.c so exsh can invoke it.
  * See Docs/notes_smallclu_ios.md for the full checklist before landing changes.
  */
-#include "smallclue/smallclue.h"
+#include "smallclue.h"
 
 #include "common/runtime_tty.h"
-#include "smallclue/nextvi_app.h"
-#include "smallclue/openssh_app.h"
+#include "nextvi_app.h"
+#include "openssh_app.h"
 #include "common/runtime_clipboard.h"
 #if defined(PSCAL_HAS_LIBCURL)
 #include <curl/curl.h>

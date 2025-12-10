@@ -1,4 +1,4 @@
-#include "smallclue/openssh_app.h"
+#include "openssh_app.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -147,47 +147,8 @@ static void smallclueLogTeeStop(SmallclueLogTee *tee) {
 }
 
 static bool smallclueLogTeeStart(SmallclueLogTee *tee) {
-    if (!tee) return false;
-    memset(tee, 0, sizeof(*tee));
-    tee->pipe_read = -1;
-    tee->pipe_write_dup = -1;
-    tee->stdout_dup = -1;
-    tee->stderr_dup = -1;
-    tee->log_fd = -1;
-
-    int fds[2];
-    if (pipe(fds) != 0) {
-        return false;
-    }
-
-    tee->pipe_read = fds[0];
-    tee->pipe_write_dup = fds[1];
-
-    tee->stdout_dup = dup(STDOUT_FILENO);
-    tee->stderr_dup = dup(STDERR_FILENO);
-    if (tee->stdout_dup < 0 || tee->stderr_dup < 0) {
-        smallclueLogTeeStop(tee);
-        return false;
-    }
-
-    if (dup2(tee->pipe_write_dup, STDOUT_FILENO) < 0 ||
-        dup2(tee->pipe_write_dup, STDERR_FILENO) < 0) {
-        smallclueLogTeeStop(tee);
-        return false;
-    }
-
-    char *log_path = smallclueRuntimeLogPath();
-    if (log_path) {
-        tee->log_fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        free(log_path);
-    }
-
-    if (pthread_create(&tee->thread, NULL, smallclueLogTeePump, tee) != 0) {
-        smallclueLogTeeStop(tee);
-        return false;
-    }
-    tee->active = true;
-    return true;
+    (void)tee;
+    return false;
 }
 
 static int smallclueInvokeOpensshEntry(const char *label, int (*entry)(int, char **),
@@ -201,7 +162,7 @@ static int smallclueInvokeOpensshEntry(const char *label, int (*entry)(int, char
     pscal_openssh_reset_progress_state();
     pscal_openssh_push_exit_context(&exitContext);
     SmallclueLogTee tee;
-    bool tee_active = smallclueLogTeeStart(&tee);
+    bool tee_active = false; /* Disable log tee in standalone build */
     int status;
     if (sigsetjmp(exitContext.env, 0) == 0) {
         status = entry(argc, argv);
