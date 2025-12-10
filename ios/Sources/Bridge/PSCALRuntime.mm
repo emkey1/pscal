@@ -13,6 +13,7 @@
 #include <SystemConfiguration/SystemConfiguration.h>
 #endif
 #include <errno.h>
+#include <TargetConditionals.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -31,6 +32,19 @@
 #include <pty.h>
 #endif
 #include "common/path_truncate.h"
+
+#if TARGET_OS_IPHONE
+extern "C" int PSCALRuntimeIsRunning(void);
+extern "C" void exit(int status) {
+    // Prevent frontends from terminating the host process on iOS; if the runtime
+    // is active, turn exit() into a thread termination instead.
+    if (PSCALRuntimeIsRunning()) {
+        NSLog(@"PSCALRuntime: intercepted exit(%d); converting to pthread_exit on iOS", status);
+        pthread_exit((void *)(intptr_t)status);
+    }
+    _Exit(status);
+}
+#endif
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
