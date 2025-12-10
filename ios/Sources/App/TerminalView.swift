@@ -228,12 +228,10 @@ struct TerminalContentView: View {
             rows: grid.rows
         )
 
-        #if DEBUG //mke
         if lastLoggedMetrics != metrics {
-            print("[TerminalView] Geometry update: \(availableSize.width)x\(availableSize.height) -> \(metrics.columns) cols x \(metrics.rows) rows")
+            RuntimeLogger.runtime.append("[TerminalView] Geometry update: \(availableSize.width)x\(availableSize.height) -> \(metrics.columns) cols x \(metrics.rows) rows")
             lastLoggedMetrics = metrics
         }
-        #endif
 
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }

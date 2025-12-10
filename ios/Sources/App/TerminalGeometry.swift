@@ -75,9 +75,8 @@ enum TerminalGeometryCalculator {
 
         // Grid dimensions
         // We enforce a minimum of 1x1 to prevent crashes.
-        // We cap at 2000 to prevent crazy allocations if size reports huge.
-        let columns = max(1, min(Int(availableWidth / charWidth), 2000))
-        let rows = max(1, min(Int(availableHeight / lineHeight), 2000))
+        let columns = max(1, Int(availableWidth / charWidth))
+        let rows = max(1, Int(availableHeight / lineHeight))
 
         return TerminalGridCapacity(
             rows: rows,
