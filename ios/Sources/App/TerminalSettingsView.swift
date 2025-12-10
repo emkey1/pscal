@@ -114,14 +114,26 @@ struct TerminalSettingsView: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
                 Divider()
-                Text("Subscribe to the PSCAL Discord:")
+                VStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text("Subscribe to the PSCAL")
+                        if let url = URL(string: "https://discord.gg/YWQVExN363") {
+                            Link("Discord", destination: url)
+                        }
+                    }
                     .font(.callout.weight(.semibold))
                     .multilineTextAlignment(.center)
-                    .foregroundColor(.primary)
-                Text("https://discord.gg/YWQVExN363")
-                    .font(.callout.monospaced())
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(.blue)
+
+                    if let github = URL(string: "https://github.com/emkey1/smallclue") {
+                        HStack(spacing: 4) {
+                            Text("Please submit bugs and suggestions on")
+                            Link("GitHub", destination: github)
+                        }
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                    }
+                }
+                .foregroundColor(.primary)
             }
             .padding(.vertical, 10)
             .padding(.horizontal)
