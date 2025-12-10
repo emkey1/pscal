@@ -17,3 +17,4 @@ Tests/headers_test.txt
 third-party/curl-8.17.0
 ios/PSCAL.xcodeproj/project.xcworkspace/xcuserdata/
 ios/PSCAL.xcodeproj/xcuserdata/mke.xcuserdatad/
+ios/DerivedData/
