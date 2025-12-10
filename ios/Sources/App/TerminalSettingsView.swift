@@ -118,7 +118,13 @@ struct TerminalSettingsView: View {
                     HStack(spacing: 6) {
                         Text("Subscribe to the PSCAL")
                         if let url = URL(string: "https://discord.gg/YWQVExN363") {
-                            Link("Discord", destination: url)
+                            Link(destination: url) {
+                                HStack(spacing: 4) {
+                                    Text("Discord").underline()
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                                .foregroundColor(.blue)
+                            }
                         }
                     }
                     .font(.callout.weight(.semibold))
@@ -127,7 +133,13 @@ struct TerminalSettingsView: View {
                     if let github = URL(string: "https://github.com/emkey1/smallclue") {
                         HStack(spacing: 4) {
                             Text("Please submit bugs and suggestions on")
-                            Link("GitHub", destination: github)
+                            Link(destination: github) {
+                                HStack(spacing: 4) {
+                                    Text("GitHub").underline()
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                                .foregroundColor(.blue)
+                            }
                         }
                         .font(.callout)
                         .multilineTextAlignment(.center)

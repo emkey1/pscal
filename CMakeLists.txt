@@ -355,6 +355,7 @@ include_directories(
     src/vm
     src/third_party/yyjson
     src/smallclue/src
+    src/smallclue
     lib
 )
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
