@@ -233,7 +233,7 @@ struct TerminalContentView: View {
             rows: grid.rows
         )
 
-        #if DEBUGMEDO
+        #if DEBUG //mke
         if lastLoggedMetrics != metrics {
             print("[TerminalView] Geometry update: \(availableSize.width)x\(availableSize.height) -> \(metrics.columns) cols x \(metrics.rows) rows")
             lastLoggedMetrics = metrics
