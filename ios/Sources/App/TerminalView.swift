@@ -126,7 +126,10 @@ struct TerminalContentView: View {
                 elvisSnapshot: nil,
                 onPaste: handlePaste,
                 mouseMode: runtime.mouseMode,
-                mouseEncoding: runtime.mouseEncoding
+                mouseEncoding: runtime.mouseEncoding,
+                onGeometryChange: { cols, rows in
+                    runtime.updateTerminalSize(columns: cols, rows: rows)
+                }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(fontSettings.backgroundColor))
@@ -230,6 +233,5 @@ struct TerminalContentView: View {
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }
-
 
 

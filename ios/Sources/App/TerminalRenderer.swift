@@ -17,6 +17,7 @@ struct TerminalRendererView: UIViewRepresentable {
     var onPaste: ((String) -> Void)? = nil
     let mouseMode: TerminalBuffer.MouseMode
     let mouseEncoding: TerminalBuffer.MouseEncoding
+    var onGeometryChange: ((Int, Int) -> Void)? = nil
 
     func makeUIView(context: Context) -> TerminalRendererContainerView {
         let container = TerminalRendererContainerView()
@@ -25,6 +26,7 @@ struct TerminalRendererView: UIViewRepresentable {
         container.applyFont(font: font)
         container.onPaste = onPaste
         container.updateMouseState(mode: mouseMode, encoding: mouseEncoding)
+        container.onGeometryChange = onGeometryChange
         return container
     }
 
@@ -36,6 +38,7 @@ struct TerminalRendererView: UIViewRepresentable {
         uiView.applyFont(font: font)
         uiView.onPaste = onPaste
         uiView.updateMouseState(mode: mouseMode, encoding: mouseEncoding)
+        uiView.onGeometryChange = onGeometryChange
 
         let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
         let shouldBlankMain = isElvisMode && isElvisWindowVisible && externalWindowEnabled
@@ -85,6 +88,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private let selectionOverlay = TerminalSelectionOverlay()
     private let selectionMenu = TerminalSelectionMenuView()
     private let commandIndicator = UILabel()
+    var onGeometryChange: ((Int, Int) -> Void)?
 
     // Mouse tracking
     private var mouseMode: TerminalBuffer.MouseMode = .none
@@ -111,6 +115,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     )?
 
     private var customKeyCommands: [UIKeyCommand] = []
+    private var lastReportedGeometry: TerminalGeometryCalculator.TerminalGeometryMetrics?
 
     private lazy var longPressRecognizer: UILongPressGestureRecognizer = {
         let recognizer = UILongPressGestureRecognizer(
@@ -314,6 +319,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
                    isElvisMode: pending.isElvisMode,
                    elvisSnapshot: pending.elvisSnapshot)
         }
+        reportGeometryIfNeeded()
     }
 
     func configure(backgroundColor: UIColor, foregroundColor: UIColor) {
@@ -415,6 +421,20 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
         let clamped = max(0, min(characterIndex, text.length))
         return clamped
+    }
+
+    private func reportGeometryIfNeeded() {
+        let size = terminalView.bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+        let grid = TerminalGeometryCalculator.calculateCapacity(for: size, font: resolvedFont)
+        let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(
+            columns: grid.columns,
+            rows: grid.rows
+        )
+        if metrics != lastReportedGeometry {
+            lastReportedGeometry = metrics
+            onGeometryChange?(metrics.columns, metrics.rows)
+        }
     }
 
     @objc
