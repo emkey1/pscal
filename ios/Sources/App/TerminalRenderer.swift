@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import QuartzCore
 import Combine
 
 struct TerminalRendererView: UIViewRepresentable {
@@ -540,12 +539,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             }
 
             terminalView.attributedText = displayText
-            terminalView.cursorTextOffset = cursor?.textOffset
             terminalView.cursorInfo = cursor
             terminalView.backgroundColor = backgroundColor
 
             if let cursorOffset = cursor?.textOffset {
-                scrollToCursor(textView: terminalView, cursorOffset: cursorOffset)
+                terminalView.applyCursor(offset: cursorOffset)
             } else {
                 scrollToBottom(textView: terminalView, text: displayText)
             }
@@ -576,8 +574,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             resolvedCursor = cursor
         }
 
-        terminalView.cursorTextOffset = resolvedCursor?.textOffset
         terminalView.cursorInfo = resolvedCursor
+        terminalView.applyCursor(offset: resolvedCursor?.textOffset)
 
         if let offset = resolvedCursor?.textOffset {
             if offset != lastElvisCursorOffset {
@@ -598,8 +596,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
                 lastElvisCursorOffset = offset
             }
         } else {
-            terminalView.cursorTextOffset = nil
             terminalView.cursorInfo = nil
+            terminalView.applyCursor(offset: nil)
             lastElvisCursorOffset = nil
             scrollToBottom(textView: terminalView, text: terminalView.attributedText)
         }
@@ -819,36 +817,21 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 }
 
 final class TerminalDisplayTextView: UITextView {
-    var cursorInfo: TerminalCursorInfo? {
-        didSet { updateCursorLayer() }
-    }
-
-    var cursorTextOffset: Int? {
-        didSet { updateCursorLayer() }
-    }
+    var cursorInfo: TerminalCursorInfo?
 
     var pasteHandler: ((String) -> Void)?
 
     var cursorColor: UIColor = .systemOrange {
         didSet {
-            cursorLayer.backgroundColor = cursorColor.cgColor
+            tintColor = cursorColor
+            if #available(iOS 15.0, *) {
+                insertionPointColor = cursorColor
+            }
         }
     }
 
-    private let cursorLayer: CALayer = {
-        let layer = CALayer()
-        layer.backgroundColor = UIColor.systemOrange.cgColor
-        layer.opacity = 0
-        return layer
-    }()
-
-    private var blinkAnimationAdded = false
-
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
-
-        layer.addSublayer(cursorLayer)
-        cursorLayer.backgroundColor = cursorColor.cgColor
 
         isEditable = false
         isSelectable = false
@@ -870,14 +853,9 @@ final class TerminalDisplayTextView: UITextView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        updateCursorLayer()
     }
 
     override var canBecomeFirstResponder: Bool { false }
-
-    override var contentOffset: CGPoint {
-        didSet { updateCursorLayer() }
-    }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) {
@@ -895,52 +873,14 @@ final class TerminalDisplayTextView: UITextView {
 
     override func copy(_ sender: Any?) { }
 
-    private func updateCursorLayer() {
-        guard let offset = cursorTextOffset else {
-            cursorLayer.opacity = 0
+    func applyCursor(offset: Int?) {
+        guard let offset else {
+            selectedRange = NSRange(location: 0, length: 0)
             return
         }
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            guard let currentOffset = self.cursorTextOffset,
-                  currentOffset == offset else { return }
-
-            guard self.attributedText.length > 0 else {
-                self.cursorLayer.opacity = 0
-                return
-            }
-
-            let clamped = max(0, min(offset, self.attributedText.length))
-            guard let pos = self.position(from: self.beginningOfDocument, offset: clamped) else {
-                return
-            }
-
-            let caret = self.caretRect(for: pos)
-            var rect = caret
-            rect.origin.x -= self.contentOffset.x
-            rect.origin.y -= self.contentOffset.y
-            rect.size.width = max(1, rect.size.width)
-            rect.size.height = max(rect.size.height, TerminalFontMetrics.lineHeight)
-
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            self.cursorLayer.frame = rect
-            CATransaction.commit()
-
-            if !self.blinkAnimationAdded {
-                let animation = CABasicAnimation(keyPath: "opacity")
-                animation.fromValue = 1
-                animation.toValue = 0
-                animation.duration = 0.8
-                animation.autoreverses = true
-                animation.repeatCount = .infinity
-                self.cursorLayer.add(animation, forKey: "blink")
-                self.blinkAnimationAdded = true
-            }
-
-            self.cursorLayer.opacity = 1
-        }
+        let clamped = max(0, min(offset, attributedText.length))
+        selectedRange = NSRange(location: clamped, length: 0)
+        scrollRangeToVisible(selectedRange)
     }
 
     private func pruneGestures() {
