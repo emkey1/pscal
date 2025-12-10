@@ -258,6 +258,7 @@ final class TerminalBuffer {
         let clampedColumns = max(10, min(newColumns, 2000))
         let clampedRows = max(4, min(newRows, 2000))
         syncQueue.sync {
+            let wasFullScrollRegion = (scrollRegionTop == 0 && scrollRegionBottom == rows - 1)
             var mutated = false
             if clampedColumns != columns {
                 adjustColumnCount(to: clampedColumns)
@@ -268,6 +269,10 @@ final class TerminalBuffer {
                 mutated = true
             }
             if mutated {
+                if wasFullScrollRegion {
+                    scrollRegionTop = 0
+                    scrollRegionBottom = clampedRows - 1
+                }
                 clampScrollRegionBounds()
             }
             didChange = mutated
