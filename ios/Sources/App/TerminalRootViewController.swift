@@ -5,6 +5,7 @@ import UIKit
 /// to keep the terminal aligned with the on-screen keyboard.
 final class TerminalRootViewController: UIViewController {
     private let hostingController = UIHostingController(rootView: TerminalView(showsOverlay: true))
+    private var keyboardObservers: [NSObjectProtocol] = []
 
     override var shouldAutorotate: Bool { return false }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
@@ -49,5 +50,46 @@ final class TerminalRootViewController: UIViewController {
         ])
 
         hostingController.didMove(toParent: self)
+        installKeyboardObservers()
+    }
+
+    deinit {
+        keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    private func installKeyboardObservers() {
+        let center = NotificationCenter.default
+        let willChange = center.addObserver(
+            forName: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleKeyboard(notification: notification)
+        }
+        let willHide = center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateKeyboardInset(overlap: 0)
+        }
+        keyboardObservers = [willChange, willHide]
+    }
+
+    private func handleKeyboard(notification: Notification) {
+        guard
+            let userInfo = notification.userInfo,
+            let frameValue = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue
+        else { return }
+        let kbFrame = frameValue.cgRectValue
+        let converted = view.convert(kbFrame, from: nil)
+        let overlap = max(0, view.bounds.maxY - converted.minY)
+        updateKeyboardInset(overlap: overlap)
+    }
+
+    private func updateKeyboardInset(overlap: CGFloat) {
+        let baseBottomInset = view.safeAreaInsets.bottom
+        let extra = max(0, overlap - baseBottomInset)
+        additionalSafeAreaInsets.bottom = extra
     }
 }

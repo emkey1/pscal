@@ -163,7 +163,7 @@ final class TerminalKeyInputView: UITextView {
             let tab = makeButton("Tab", action: #selector(handleTab))
             [esc, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         } else {
-            [esc, ctrl, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+            [esc, ctrl, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         }
 
         accessoryBar.addSubview(stack)
