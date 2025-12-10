@@ -94,6 +94,7 @@ struct TerminalContentView: View {
     @Binding private var focusAnchor: Int
 
     @State private var lastLoggedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
+    @State private var hasMeasuredGeometry: Bool = false
 
     init(
         availableSize: CGSize,
@@ -128,6 +129,7 @@ struct TerminalContentView: View {
                 mouseMode: runtime.mouseMode,
                 mouseEncoding: runtime.mouseEncoding,
                 onGeometryChange: { cols, rows in
+                    hasMeasuredGeometry = true
                     runtime.updateTerminalSize(columns: cols, rows: rows)
                 }
             )
@@ -165,20 +167,28 @@ struct TerminalContentView: View {
             }
         }
         .onAppear {
-            updateTerminalGeometry()
+            if !hasMeasuredGeometry {
+                updateTerminalGeometry()
+            }
             runtime.start()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 focusAnchor &+= 1
             }
         }
         .onChange(of: availableSize) { _ in
-            updateTerminalGeometry()
+            if !hasMeasuredGeometry {
+                updateTerminalGeometry()
+            }
         }
         .onChange(of: fontSettings.pointSize) { _ in
-            updateTerminalGeometry()
+            if !hasMeasuredGeometry {
+                updateTerminalGeometry()
+            }
         }
         .onChange(of: runtime.exitStatus) { _ in
-            updateTerminalGeometry()
+            if !hasMeasuredGeometry {
+                updateTerminalGeometry()
+            }
         }
     }
 
@@ -233,5 +243,4 @@ struct TerminalContentView: View {
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }
-
 
