@@ -129,6 +129,13 @@ static void *smallclueLogTeePump(void *arg) {
 
 static void smallclueLogTeeStop(SmallclueLogTee *tee) {
     if (!tee || !tee->active) return;
+    /* Restore original stdout/stderr before closing backups. */
+    if (tee->stdout_dup >= 0) {
+        dup2(tee->stdout_dup, STDOUT_FILENO);
+    }
+    if (tee->stderr_dup >= 0) {
+        dup2(tee->stderr_dup, STDERR_FILENO);
+    }
     close(tee->pipe_read);
     tee->pipe_read = -1;
     pthread_join(tee->thread, NULL);
@@ -204,9 +211,6 @@ static int smallclueInvokeOpensshEntry(const char *label, int (*entry)(int, char
     if (tee_active) {
         fflush(stdout);
         fflush(stderr);
-        // Restore original descriptors before stopping the pump so terminal output stays live.
-        if (tee.stdout_dup >= 0) dup2(tee.stdout_dup, STDOUT_FILENO);
-        if (tee.stderr_dup >= 0) dup2(tee.stderr_dup, STDERR_FILENO);
         smallclueLogTeeStop(&tee);
     }
     pscal_openssh_pop_exit_context(&exitContext);
