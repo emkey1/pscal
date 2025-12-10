@@ -1,0 +1,3 @@
+[submodule "src/smallclue"]
+	path = src/smallclue
+	url = https://github.com/emkey1/smallclue.git
