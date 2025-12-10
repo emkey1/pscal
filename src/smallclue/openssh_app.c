@@ -9,6 +9,9 @@
 #include <errno.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <pthread.h>
 #include "../../third-party/openssh-10.2p1/pscal_runtime_hooks.h"
 
 int pscal_openssh_ssh_main(int argc, char **argv);
@@ -17,6 +20,16 @@ int pscal_openssh_sftp_main(int argc, char **argv);
 int pscal_openssh_ssh_keygen_main(int argc, char **argv);
 
 volatile sig_atomic_t g_smallclue_openssh_exit_requested = 0;
+
+typedef struct {
+    int pipe_read;
+    int pipe_write_dup;
+    int stdout_dup;
+    int stderr_dup;
+    int log_fd;
+    pthread_t thread;
+    bool active;
+} SmallclueLogTee;
 
 static void smallclueFreeArgv(char **argv, int count) {
     if (!argv) {
@@ -63,6 +76,113 @@ static char *smallclueKnownHostsPath(void) {
     return strdup(file_path);
 }
 
+static char *smallclueRuntimeLogPath(void) {
+    const char *home = getenv("HOME");
+    if (!home || !*home) {
+        home = ".";
+    }
+    char var_dir[PATH_MAX];
+    int written = snprintf(var_dir, sizeof(var_dir), "%s/Documents/var", home);
+    if (written < 0 || written >= (int)sizeof(var_dir)) {
+        return NULL;
+    }
+    if (smallclueEnsureDirectory(var_dir, 0755) != 0) {
+        return NULL;
+    }
+    char log_dir[PATH_MAX];
+    written = snprintf(log_dir, sizeof(log_dir), "%s/log", var_dir);
+    if (written < 0 || written >= (int)sizeof(log_dir)) {
+        return NULL;
+    }
+    if (smallclueEnsureDirectory(log_dir, 0755) != 0) {
+        return NULL;
+    }
+    char file_path[PATH_MAX];
+    written = snprintf(file_path, sizeof(file_path), "%s/pscal_runtime.log", log_dir);
+    if (written < 0 || written >= (int)sizeof(file_path)) {
+        return NULL;
+    }
+    return strdup(file_path);
+}
+
+static void *smallclueLogTeePump(void *arg) {
+    SmallclueLogTee *tee = (SmallclueLogTee *)arg;
+    if (!tee) return NULL;
+    char buffer[4096];
+    while (1) {
+        ssize_t n = read(tee->pipe_read, buffer, sizeof(buffer));
+        if (n <= 0) {
+            break;
+        }
+        if (tee->stdout_dup >= 0) {
+            (void)write(tee->stdout_dup, buffer, (size_t)n);
+        }
+        if (tee->stderr_dup >= 0) {
+            (void)write(tee->stderr_dup, buffer, (size_t)n);
+        }
+        if (tee->log_fd >= 0) {
+            (void)write(tee->log_fd, buffer, (size_t)n);
+        }
+    }
+    return NULL;
+}
+
+static void smallclueLogTeeStop(SmallclueLogTee *tee) {
+    if (!tee || !tee->active) return;
+    close(tee->pipe_read);
+    tee->pipe_read = -1;
+    pthread_join(tee->thread, NULL);
+    if (tee->pipe_write_dup >= 0) close(tee->pipe_write_dup);
+    if (tee->stdout_dup >= 0) close(tee->stdout_dup);
+    if (tee->stderr_dup >= 0) close(tee->stderr_dup);
+    if (tee->log_fd >= 0) close(tee->log_fd);
+    tee->active = false;
+}
+
+static bool smallclueLogTeeStart(SmallclueLogTee *tee) {
+    if (!tee) return false;
+    memset(tee, 0, sizeof(*tee));
+    tee->pipe_read = -1;
+    tee->pipe_write_dup = -1;
+    tee->stdout_dup = -1;
+    tee->stderr_dup = -1;
+    tee->log_fd = -1;
+
+    int fds[2];
+    if (pipe(fds) != 0) {
+        return false;
+    }
+
+    tee->pipe_read = fds[0];
+    tee->pipe_write_dup = fds[1];
+
+    tee->stdout_dup = dup(STDOUT_FILENO);
+    tee->stderr_dup = dup(STDERR_FILENO);
+    if (tee->stdout_dup < 0 || tee->stderr_dup < 0) {
+        smallclueLogTeeStop(tee);
+        return false;
+    }
+
+    if (dup2(tee->pipe_write_dup, STDOUT_FILENO) < 0 ||
+        dup2(tee->pipe_write_dup, STDERR_FILENO) < 0) {
+        smallclueLogTeeStop(tee);
+        return false;
+    }
+
+    char *log_path = smallclueRuntimeLogPath();
+    if (log_path) {
+        tee->log_fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        free(log_path);
+    }
+
+    if (pthread_create(&tee->thread, NULL, smallclueLogTeePump, tee) != 0) {
+        smallclueLogTeeStop(tee);
+        return false;
+    }
+    tee->active = true;
+    return true;
+}
+
 static int smallclueInvokeOpensshEntry(const char *label, int (*entry)(int, char **),
                                        int argc, char **argv) {
     g_smallclue_openssh_exit_requested = 0;
@@ -73,11 +193,21 @@ static int smallclueInvokeOpensshEntry(const char *label, int (*entry)(int, char
     pscal_openssh_exit_context exitContext;
     pscal_openssh_reset_progress_state();
     pscal_openssh_push_exit_context(&exitContext);
+    SmallclueLogTee tee;
+    bool tee_active = smallclueLogTeeStart(&tee);
     int status;
     if (sigsetjmp(exitContext.env, 0) == 0) {
         status = entry(argc, argv);
     } else {
         status = exitContext.exit_code;
+    }
+    if (tee_active) {
+        fflush(stdout);
+        fflush(stderr);
+        // Restore original descriptors before stopping the pump so terminal output stays live.
+        if (tee.stdout_dup >= 0) dup2(tee.stdout_dup, STDOUT_FILENO);
+        if (tee.stderr_dup >= 0) dup2(tee.stderr_dup, STDERR_FILENO);
+        smallclueLogTeeStop(&tee);
     }
     pscal_openssh_pop_exit_context(&exitContext);
     return status;
