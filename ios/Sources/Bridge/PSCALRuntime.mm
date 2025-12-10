@@ -436,6 +436,37 @@ static bool PSCALRuntimeInstallVirtualTTY(int *out_master_fd, int *out_input_fd)
     return true;
 }
 
+static void PSCALRuntimeEnsurePathTruncationDefault(void) {
+    const char *existing = getenv("PATH_TRUNCATE");
+    if (existing && existing[0] != '\0') {
+        return;
+    }
+    const char *explicitDisable = getenv("PSCALI_PATH_TRUNCATE_DISABLED");
+    if (explicitDisable && explicitDisable[0] != '\0') {
+        return;
+    }
+
+    std::string containerRoot;
+    const char *containerEnv = getenv("PSCALI_CONTAINER_ROOT");
+    if (containerEnv && containerEnv[0] != '\0') {
+        containerRoot = containerEnv;
+    } else {
+        NSString *home = NSHomeDirectory();
+        if (!home || home.length == 0) {
+            return;
+        }
+        containerRoot = [home fileSystemRepresentation];
+    }
+
+    if (containerRoot.empty() || containerRoot[0] != '/') {
+        return;
+    }
+
+    setenv("PATH_TRUNCATE", containerRoot.c_str(), 1);
+    pathTruncateProvisionDev(containerRoot.c_str());
+    pathTruncateProvisionProc(containerRoot.c_str());
+}
+
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     NSLog(@"PSCALRuntime: launching exsh (argc=%d)", argc);
 #ifdef SIGPIPE
@@ -467,6 +498,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         errno = EBUSY;
         return -1;
     }
+    PSCALRuntimeEnsurePathTruncationDefault();
     const char *pt_prefix = getenv("PATH_TRUNCATE");
     if (pt_prefix && pt_prefix[0] == '/') {
         pathTruncateProvisionDev(pt_prefix);
@@ -744,10 +776,12 @@ void PSCALRuntimeSendSignal(int signo) {
 
 void PSCALRuntimeApplyPathTruncation(const char *path) {
     if (path && path[0] != '\0') {
+        unsetenv("PSCALI_PATH_TRUNCATE_DISABLED");
         setenv("PATH_TRUNCATE", path, 1);
         pathTruncateProvisionDev(path);
         pathTruncateProvisionProc(path);
     } else {
+        setenv("PSCALI_PATH_TRUNCATE_DISABLED", "1", 1);
         unsetenv("PATH_TRUNCATE");
     }
 }
