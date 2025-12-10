@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 import Combine
 
 struct TerminalRendererView: UIViewRepresentable {
@@ -818,17 +819,32 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
 final class TerminalDisplayTextView: UITextView {
     var cursorInfo: TerminalCursorInfo?
+    var cursorTextOffset: Int? {
+        didSet { updateCursorLayer() }
+    }
 
     var pasteHandler: ((String) -> Void)?
 
     var cursorColor: UIColor = .systemOrange {
         didSet {
             tintColor = cursorColor
+            cursorLayer.backgroundColor = cursorColor.cgColor
         }
     }
 
+    private let cursorLayer: CALayer = {
+        let layer = CALayer()
+        layer.backgroundColor = UIColor.systemOrange.cgColor
+        layer.opacity = 0
+        return layer
+    }()
+
+    private var blinkAnimationAdded = false
+
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
+
+        layer.addSublayer(cursorLayer)
 
         isEditable = false
         isSelectable = false
@@ -850,9 +866,14 @@ final class TerminalDisplayTextView: UITextView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        updateCursorLayer()
     }
 
     override var canBecomeFirstResponder: Bool { false }
+
+    override var contentOffset: CGPoint {
+        didSet { updateCursorLayer() }
+    }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) {
@@ -871,13 +892,10 @@ final class TerminalDisplayTextView: UITextView {
     override func copy(_ sender: Any?) { }
 
     func applyCursor(offset: Int?) {
-        guard let offset else {
-            selectedRange = NSRange(location: 0, length: 0)
-            return
-        }
-        let clamped = max(0, min(offset, attributedText.length))
+        cursorTextOffset = offset
+        let target = offset ?? 0
+        let clamped = max(0, min(target, attributedText.length))
         selectedRange = NSRange(location: clamped, length: 0)
-        scrollRangeToVisible(selectedRange)
     }
 
     private func pruneGestures() {
@@ -888,6 +906,43 @@ final class TerminalDisplayTextView: UITextView {
                 recognizer.isEnabled = false
             }
         }
+    }
+
+    private func updateCursorLayer() {
+        guard let offset = cursorTextOffset,
+              attributedText.length > 0 else {
+            cursorLayer.opacity = 0
+            return
+        }
+
+        let clamped = max(0, min(offset, attributedText.length))
+        guard let pos = position(from: beginningOfDocument, offset: clamped) else {
+            cursorLayer.opacity = 0
+            return
+        }
+
+        let caret = caretRect(for: pos)
+        var rect = caret
+        rect.size.width = max(1, rect.size.width)
+        rect.size.height = max(rect.size.height, TerminalFontMetrics.lineHeight)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cursorLayer.frame = rect
+        CATransaction.commit()
+
+        if !blinkAnimationAdded {
+            let animation = CABasicAnimation(keyPath: "opacity")
+            animation.fromValue = 1
+            animation.toValue = 0
+            animation.duration = 0.8
+            animation.autoreverses = true
+            animation.repeatCount = .infinity
+            cursorLayer.add(animation, forKey: "blink")
+            blinkAnimationAdded = true
+        }
+
+        cursorLayer.opacity = 1
     }
 }
 
