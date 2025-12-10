@@ -824,9 +824,6 @@ final class TerminalDisplayTextView: UITextView {
     var cursorColor: UIColor = .systemOrange {
         didSet {
             tintColor = cursorColor
-            if #available(iOS 15.0, *) {
-                insertionPointColor = cursorColor
-            }
         }
     }
 
