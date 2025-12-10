@@ -436,6 +436,28 @@ static bool PSCALRuntimeInstallVirtualTTY(int *out_master_fd, int *out_input_fd)
     return true;
 }
 
+static void PSCALRuntimeEnsurePathTruncationDirs(const char *prefix) {
+    if (!prefix || prefix[0] != '/') {
+        return;
+    }
+    NSString *root = [NSString stringWithUTF8String:prefix];
+    if (!root || root.length == 0) {
+        return;
+    }
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *paths = @[
+        [root stringByAppendingPathComponent:@"tmp"],
+        [[root stringByAppendingPathComponent:@"var"] stringByAppendingPathComponent:@"tmp"],
+        [[root stringByAppendingPathComponent:@"var"] stringByAppendingPathComponent:@"log"]
+    ];
+    for (NSString *path in paths) {
+        [fm createDirectoryAtPath:path
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:nil];
+    }
+}
+
 static void PSCALRuntimeEnsurePathTruncationDefault(void) {
     const char *existing = getenv("PATH_TRUNCATE");
     if (existing && existing[0] != '\0') {
@@ -446,25 +468,26 @@ static void PSCALRuntimeEnsurePathTruncationDefault(void) {
         return;
     }
 
-    std::string containerRoot;
-    const char *containerEnv = getenv("PSCALI_CONTAINER_ROOT");
-    if (containerEnv && containerEnv[0] != '\0') {
-        containerRoot = containerEnv;
-    } else {
-        NSString *home = NSHomeDirectory();
-        if (!home || home.length == 0) {
-            return;
+    std::string prefix;
+    NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+    if (docs && docs.length > 0) {
+        prefix = [docs fileSystemRepresentation];
+    }
+    if (prefix.empty() || prefix[0] != '/') {
+        const char *containerEnv = getenv("PSCALI_CONTAINER_ROOT");
+        if (containerEnv && containerEnv[0] != '\0') {
+            prefix = containerEnv;
         }
-        containerRoot = [home fileSystemRepresentation];
     }
 
-    if (containerRoot.empty() || containerRoot[0] != '/') {
+    if (prefix.empty() || prefix[0] != '/') {
         return;
     }
 
-    setenv("PATH_TRUNCATE", containerRoot.c_str(), 1);
-    pathTruncateProvisionDev(containerRoot.c_str());
-    pathTruncateProvisionProc(containerRoot.c_str());
+    setenv("PATH_TRUNCATE", prefix.c_str(), 1);
+    PSCALRuntimeEnsurePathTruncationDirs(prefix.c_str());
+    pathTruncateProvisionDev(prefix.c_str());
+    pathTruncateProvisionProc(prefix.c_str());
 }
 
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
@@ -778,6 +801,7 @@ void PSCALRuntimeApplyPathTruncation(const char *path) {
     if (path && path[0] != '\0') {
         unsetenv("PSCALI_PATH_TRUNCATE_DISABLED");
         setenv("PATH_TRUNCATE", path, 1);
+        PSCALRuntimeEnsurePathTruncationDirs(path);
         pathTruncateProvisionDev(path);
         pathTruncateProvisionProc(path);
     } else {

@@ -306,6 +306,10 @@ void pathTruncateApplyEnvironment(const char *prefix) {
         if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
             pathTruncateEnsureDir(tmpbuf);
         }
+        written = snprintf(tmpbuf, sizeof(tmpbuf), "%s/var/log", prefix);
+        if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
+            pathTruncateEnsureDir(tmpbuf);
+        }
         /* Seed emulated /dev with symlinks to system devices. */
         pathTruncateProvisionDev(prefix);
         /* Seed a minimal /proc tree with cpuinfo. */
