@@ -487,6 +487,26 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 #ifdef PSCAL_TARGET_IOS
 		pscal_debug_logf("timeout_connect: waitfd failed errno=%d", errno);
 		fprintf(stderr, "timeout_connect: waitfd failed errno=%d\n", errno);
+		if (errno == EBADF) {
+			/* Some iOS environments occasionally report EBADF here even
+			 * though the socket is otherwise usable; fall back to a
+			 * blocking connect as a last resort. */
+			unset_nonblock(sockfd);
+			int retry = connect(sockfd, serv_addr, addrlen);
+			if (retry == 0) {
+				pscal_debug_logf("timeout_connect: blocking retry succeeded after EBADF");
+				fprintf(stderr, "timeout_connect: blocking retry succeeded after EBADF\n");
+				if (watchdog) {
+					dispatch_block_cancel(watchdog);
+					Block_release(watchdog);
+				}
+				return 0;
+			}
+			if (errno == EINPROGRESS) {
+				pscal_debug_logf("timeout_connect: blocking retry returned EINPROGRESS");
+				fprintf(stderr, "timeout_connect: blocking retry returned EINPROGRESS\n");
+			}
+		}
 		if (watchdog) {
 			dispatch_block_cancel(watchdog);
 			Block_release(watchdog);
