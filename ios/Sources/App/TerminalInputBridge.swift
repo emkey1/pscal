@@ -116,6 +116,7 @@ final class TerminalKeyInputView: UITextView {
     }
 
     private var repeatKeyCommands: [RepeatCommand]
+    private lazy var controlKeyCommands: [UIKeyCommand] = buildControlCommands()
 
     private func configureAccessoryBar() {
         accessoryBar.allowsSelfSizing = true
@@ -218,6 +219,7 @@ final class TerminalKeyInputView: UITextView {
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
+        commands.append(contentsOf: controlKeyCommands)
         return commands
     }
 
@@ -370,6 +372,19 @@ final class TerminalKeyInputView: UITextView {
         return false
     }
 
+    private func buildControlCommands() -> [UIKeyCommand] {
+        let inputs = "abcdefghijklmnopqrstuvwxyz".map { String($0) }
+        return inputs.map { input in
+            let command = UIKeyCommand(input: input,
+                                       modifierFlags: [.control],
+                                       action: #selector(handleControlCommand(_:)))
+            if #available(iOS 15.0, *) {
+                command.wantsPriorityOverSystemBehavior = true
+            }
+            return command
+        }
+    }
+
     private func installKeyboardObservers() {
         let center = NotificationCenter.default
         let willShow = center.addObserver(
@@ -478,5 +493,19 @@ final class TerminalKeyInputView: UITextView {
     @objc private func handleDecreaseFont() {
         let current = TerminalFontSettings.shared.pointSize
         TerminalFontSettings.shared.updatePointSize(current - 1.0)
+    }
+
+    @objc private func handleControlCommand(_ command: UIKeyCommand) {
+        guard let input = command.input,
+              let scalar = input.lowercased().unicodeScalars.first else { return }
+        let value = scalar.value
+        if scalar == "c" {
+            pscalRuntimeRequestSigint()
+            return
+        }
+        if value >= 0x40, value <= 0x7F,
+           let ctrlScalar = UnicodeScalar(value & 0x1F) {
+            onInput?(String(ctrlScalar))
+        }
     }
 }
