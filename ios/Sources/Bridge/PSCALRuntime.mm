@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <setjmp.h>
 #include <string>
 #include <termios.h>
 #if __has_include(<util.h>)
@@ -35,9 +36,12 @@
 
 #if TARGET_OS_IPHONE
 extern "C" int PSCALRuntimeIsRunning(void);
+static thread_local jmp_buf *s_exit_jump_buffer = nullptr;
 extern "C" void exit(int status) {
-    // Prevent frontends from terminating the host process on iOS; if the runtime
-    // is active, turn exit() into a thread termination instead.
+    if (s_exit_jump_buffer) {
+        // Convert exit to a longjmp so the runtime thread can unwind cleanly.
+        longjmp(*s_exit_jump_buffer, status == 0 ? 1 : status);
+    }
     if (PSCALRuntimeIsRunning()) {
         NSLog(@"PSCALRuntime: intercepted exit(%d); converting to pthread_exit on iOS", status);
         pthread_exit((void *)(intptr_t)status);
@@ -609,7 +613,19 @@ typedef struct {
 
 static void *PSCALRuntimeThreadMain(void *arg) {
     PSCALRuntimeThreadContext *context = (PSCALRuntimeThreadContext *)arg;
-    context->result = PSCALRuntimeLaunchExsh(context->argc, context->argv);
+    jmp_buf exit_env;
+#if TARGET_OS_IPHONE
+    s_exit_jump_buffer = &exit_env;
+#endif
+    int jump_code = setjmp(exit_env);
+    if (jump_code == 0) {
+        context->result = PSCALRuntimeLaunchExsh(context->argc, context->argv);
+    } else {
+        context->result = jump_code;
+    }
+#if TARGET_OS_IPHONE
+    s_exit_jump_buffer = nullptr;
+#endif
     return NULL;
 }
 
