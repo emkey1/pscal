@@ -7,29 +7,31 @@ final class TerminalRootViewController: UIViewController {
     private let hostingController = UIHostingController(rootView: TerminalView(showsOverlay: true))
     private var keyboardObservers: [NSObjectProtocol] = []
 
-    override var shouldAutorotate: Bool { return false }
+    override var shouldAutorotate: Bool { return true }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        PscalAppDelegate.lockedOrientationMask ?? .portrait
+        PscalAppDelegate.activeOrientationMask
     }
 
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
-        if let mask = PscalAppDelegate.lockedOrientationMask {
-            if mask.contains(.landscape) {
-                return .landscapeLeft
-            }
+        let mask = PscalAppDelegate.activeOrientationMask
+        if mask.contains(.portrait) {
+            return .portrait
+        }
+        if mask.contains(.landscapeRight) {
+            return .landscapeRight
+        }
+        if mask.contains(.landscapeLeft) {
+            return .landscapeLeft
         }
         return .portrait
     }
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if let scene = view.window?.windowScene,
-           let mask = PscalAppDelegate.lockedOrientationMask {
+        if let scene = view.window?.windowScene {
+            let mask = PscalAppDelegate.activeOrientationMask
             if #available(iOS 16.0, *) {
                 scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
-            } else {
-                // For iOS 15, set the mask on the scene’s windows to discourage rotation.
-                scene.windows.forEach { $0.overrideUserInterfaceStyle = $0.overrideUserInterfaceStyle }
             }
         }
     }

@@ -39,7 +39,7 @@ struct TerminalView: View {
             if isPresented {
                 hideSoftKeyboard()
             } else {
-                focusAnchor &+= 1
+                requestInputFocus()
             }
         }
         .background(Color(fontSettings.backgroundColor))
@@ -52,7 +52,7 @@ struct TerminalView: View {
         HStack(alignment: .center, spacing: 10) {
             Button {
                 PscalRuntimeBootstrap.shared.resetTerminalState()
-                focusAnchor &+= 1
+                requestInputFocus()
             } label: {
                 Text("R")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
@@ -80,6 +80,11 @@ struct TerminalView: View {
                                         to: nil,
                                         from: nil,
                                         for: nil)
+    }
+
+    private func requestInputFocus() {
+        focusAnchor &+= 1
+        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
     }
 }
 
@@ -112,7 +117,6 @@ struct TerminalContentView: View {
         let elvisActive = runtime.isElvisModeActive()
         let elvisVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
-        let hasExitStatus = runtime.exitStatus != nil
 
         return VStack(spacing: 0) {
             TerminalRendererView(
@@ -154,7 +158,7 @@ struct TerminalContentView: View {
         .background(Color(fontSettings.backgroundColor))
         .contentShape(Rectangle())
         .onTapGesture {
-            focusAnchor &+= 1
+            requestInputFocus()
         }
         .overlay(alignment: .bottomLeading) {
             if !EditorWindowManager.shared.isVisible {
@@ -173,7 +177,7 @@ struct TerminalContentView: View {
             }
             runtime.start()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                focusAnchor &+= 1
+                requestInputFocus()
             }
         }
         .onChange(of: availableSize) { _ in
@@ -235,5 +239,10 @@ struct TerminalContentView: View {
         }
 
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
+    }
+
+    private func requestInputFocus() {
+        focusAnchor &+= 1
+        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
     }
 }

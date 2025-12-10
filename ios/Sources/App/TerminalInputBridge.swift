@@ -6,6 +6,7 @@ func pscalRuntimeRequestSigint()
 
 extension Notification.Name {
     static let terminalModifierStateChanged = Notification.Name("terminalModifierStateChanged")
+    static let terminalInputFocusRequested = Notification.Name("terminalInputFocusRequested")
 }
 
 @MainActor
@@ -370,7 +371,8 @@ final class TerminalKeyInputView: UITextView {
     }
 
     private func installKeyboardObservers() {
-        let willShow = NotificationCenter.default.addObserver(
+        let center = NotificationCenter.default
+        let willShow = center.addObserver(
             forName: UIResponder.keyboardWillShowNotification,
             object: nil,
             queue: .main
@@ -383,7 +385,7 @@ final class TerminalKeyInputView: UITextView {
             }
         }
 
-        let willHide = NotificationCenter.default.addObserver(
+        let willHide = center.addObserver(
             forName: UIResponder.keyboardWillHideNotification,
             object: nil,
             queue: .main
@@ -395,7 +397,22 @@ final class TerminalKeyInputView: UITextView {
             }
         }
 
-        keyboardObservers = [willShow, willHide]
+        let focusRequested = center.addObserver(
+            forName: .terminalInputFocusRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                if !self.isFirstResponder {
+                    self.becomeFirstResponder()
+                } else if !self.softKeyboardVisible {
+                    self.reloadInputViews()
+                }
+            }
+        }
+
+        keyboardObservers = [willShow, willHide, focusRequested]
     }
 
     // MARK: - Accessory button actions

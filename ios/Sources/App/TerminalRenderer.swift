@@ -126,6 +126,15 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         recognizer.delegate = self
         return recognizer
     }()
+    private lazy var tapRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(
+            target: self,
+            action: #selector(handleFocusTap(_:))
+        )
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = self
+        return recognizer
+    }()
 
     var onPaste: ((String) -> Void)? {
         didSet {
@@ -178,6 +187,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         selectionOverlay.backgroundColor = .clear
         selectionOverlay.textView = terminalView
         addSubview(selectionOverlay)
+        addGestureRecognizer(tapRecognizer)
         addGestureRecognizer(longPressRecognizer)
 
         selectionMenu.translatesAutoresizingMaskIntoConstraints = false
@@ -350,6 +360,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
 
     func currentFont() -> UIFont {
         terminalView.font ?? resolvedFont
+    }
+
+    @objc
+    private func handleFocusTap(_ recognizer: UITapGestureRecognizer) {
+        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
     }
 
     // MARK: Selection handling
@@ -860,6 +875,7 @@ final class TerminalDisplayTextView: UITextView {
     }()
 
     private var blinkAnimationAdded = false
+    private var pendingCursorUpdate = false
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -929,6 +945,20 @@ final class TerminalDisplayTextView: UITextView {
     }
 
     private func updateCursorLayer() {
+        let storageHasPendingEdits = textStorage.editedRange.location != NSNotFound ||
+            textStorage.editedMask.rawValue != 0
+        if storageHasPendingEdits {
+            if !pendingCursorUpdate {
+                pendingCursorUpdate = true
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.pendingCursorUpdate = false
+                    self.updateCursorLayer()
+                }
+            }
+            return
+        }
+
         guard let offset = cursorTextOffset,
               attributedText.length > 0 else {
             cursorLayer.opacity = 0
