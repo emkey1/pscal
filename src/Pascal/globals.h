@@ -14,6 +14,11 @@
 #endif
 
 // --- EXIT_FAILURE_HANDLER Macro ---
+// iOS builds should not call exit(3) from library code; force suppression there.
+#if defined(PSCAL_TARGET_IOS) && !defined(SUPPRESS_EXIT)
+#define SUPPRESS_EXIT
+#endif
+
 #ifdef SUPPRESS_EXIT
     #define EXIT_FAILURE_HANDLER() fprintf(stderr, "Suppressed exit call from %s:%d\n", __FILE__, __LINE__)
 #else
