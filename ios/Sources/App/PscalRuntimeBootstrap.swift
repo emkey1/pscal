@@ -151,21 +151,13 @@ public final class RuntimeLogger {
             if !fileManager.fileExists(atPath: directory.path) {
                 try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             }
-            if fileManager.fileExists(atPath: self.fileURL.path) {
-                do {
-                    let handle = try FileHandle(forWritingTo: self.fileURL)
-                    defer { try? handle.close() }
-                    do {
-                        try handle.seekToEnd()
-                    } catch {
-                        // ignore seek errors, fall through to write (which appends at current position)
-                    }
-                    handle.write(data)
-                } catch {
-                    try? data.write(to: self.fileURL, options: .atomic)
+            data.withUnsafeBytes { buffer in
+                guard let base = buffer.baseAddress else { return }
+                let fd = open(self.fileURL.path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+                if fd >= 0 {
+                    _ = write(fd, base, buffer.count)
+                    close(fd)
                 }
-            } else {
-                try? data.write(to: self.fileURL, options: .atomic)
             }
         }
     }
