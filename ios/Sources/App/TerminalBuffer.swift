@@ -255,8 +255,8 @@ final class TerminalBuffer {
     @discardableResult
     func resize(columns newColumns: Int, rows newRows: Int) -> Bool {
         var didChange = false
-        let clampedColumns = max(10, min(newColumns, 2000))
-        let clampedRows = max(4, min(newRows, 2000))
+        let clampedColumns = max(10, newColumns)
+        let clampedRows = max(4, newRows)
         syncQueue.sync {
             let wasFullScrollRegion = (scrollRegionTop == 0 && scrollRegionBottom == rows - 1)
             var mutated = false

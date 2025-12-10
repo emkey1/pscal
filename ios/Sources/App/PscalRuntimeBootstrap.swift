@@ -611,8 +611,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func updateGeometry(from source: GeometrySource, columns: Int, rows: Int) {
-        let clampedColumns = max(10, min(columns, 2000))
-        let clampedRows = max(4, min(rows, 2000))
+        let clampedColumns = max(10, columns)
+        let clampedRows = max(4, rows)
         let metrics = TerminalGeometryMetrics(columns: clampedColumns, rows: clampedRows)
         geometryBySource[source] = metrics
         refreshActiveGeometry()
