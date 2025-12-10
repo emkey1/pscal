@@ -157,10 +157,11 @@ final class TerminalKeyInputView: UITextView {
         let fslash = makeButton("/", action: #selector(handleFSlash))
         let dot = makeButton(".", action: #selector(handleDot))
         let minus = makeButton("-", action: #selector(handleMinus))
+        let pipe = makeButton("|", action: #selector(handlePipe))
 
         if UIDevice.current.userInterfaceIdiom == .phone {
             let tab = makeButton("Tab", action: #selector(handleTab))
-            [esc, ctrl, tab, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+            [esc, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         } else {
             [esc, ctrl, dot, fslash, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         }
@@ -441,6 +442,10 @@ final class TerminalKeyInputView: UITextView {
 
     @objc private func handleMinus() {
         onInput?("-")
+    }
+   
+    @objc private func handlePipe() {
+        onInput?("|")
     }
     
     @objc private func handlePasteCommand() {
