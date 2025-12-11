@@ -223,7 +223,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var mirrorDebugToTerminal: Bool = false
     private var waitingForRestart: Bool = false
     private var skipRcNextStart: Bool = false
-    private var promptKickPending: Bool = false
+    private var promptKickPending: Bool = true
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -273,6 +273,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
+            // Font change can leave the prompt visually stale; nudge terminal.
+            self?.send(" ")
+            self?.send("\u{08}")
             self?.scheduleRender()
         }
     }
@@ -355,13 +358,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let shouldKick = self.stateQueue.sync { self.promptKickPending }
             // Always send a carriage return to force prompt rendering; earlier
             // output may have cleared the pending flag already.
-            self.send("\r")
-            if shouldKick {
-                self.stateQueue.async { self.promptKickPending = false }
-            }
+            self.send(" ")
+            self.send("\u{08}")
         }
         if stateQueue.sync(execute: { skipRcNextStart }) {
             unsetenv("EXSH_SKIP_RC")
