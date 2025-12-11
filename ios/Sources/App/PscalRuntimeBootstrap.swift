@@ -69,12 +69,6 @@ func runtimeDebugLog(_ message: String) {
     appendRuntimeDebugLog(message)
 }
 
-@_cdecl("pscalRuntimeDebugLog")
-func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
-    guard let message else { return }
-    appendRuntimeDebugLog(String(cString: message))
-}
-
 public final class RuntimeLogger {
     static let runtime = RuntimeLogger(filename: "pscal_runtime.log")
 
