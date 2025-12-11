@@ -221,6 +221,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var elvisRefreshPending: Bool = false
     private var appearanceObserver: NSObjectProtocol?
     private var mirrorDebugToTerminal: Bool = false
+    private var waitingForRestart: Bool = false
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -367,6 +368,18 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func send(_ text: String) {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         guard let data = normalized.data(using: .utf8), !data.isEmpty else { return }
+        var consumedForRestart = false
+        stateQueue.sync {
+            if waitingForRestart {
+                waitingForRestart = false
+                consumedForRestart = true
+                started = false
+            }
+        }
+        if consumedForRestart {
+            DispatchQueue.main.async { self.start() }
+            return
+        }
         if data.count == 1 {
             switch data.first {
             case 0x03: // Ctrl-C
@@ -488,22 +501,21 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func handleExit(status: Int32) {
-        runtimeDebugLog("[Runtime] exsh exit detected (status=\(status)); scheduling restart")
+        runtimeDebugLog("[Runtime] exsh exit detected (status=\(status)); awaiting user to restart")
         let stackSymbols = Thread.callStackSymbols.joined(separator: "\n")
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
         stateQueue.async {
             self.started = false
+            self.waitingForRestart = true
         }
         DispatchQueue.main.async {
             self.exitStatus = status
-            EditorTerminalBridge.shared.deactivate()
-            EditorWindowManager.shared.hideWindow()
             self.setElvisModeActive(false)
-            let restartDelay: TimeInterval = 0.1
-            runtimeDebugLog("[Runtime] restarting exsh in \(restartDelay)s after status \(status)")
-            DispatchQueue.main.asyncAfter(deadline: .now() + restartDelay) {
-                runtimeDebugLog("[Runtime] relaunching exsh after prior exit status \(status)")
-                self.start()
+            let banner = "\r\nexsh exited (status=\(status)). Press any key to restart…\r\n"
+            if let data = banner.data(using: .utf8) {
+                self.terminalBuffer.append(data: data) {
+                    self.scheduleRender()
+                }
             }
         }
     }
