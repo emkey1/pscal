@@ -426,45 +426,12 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	int optval = 0;
 	socklen_t optlen = sizeof(optval);
 #ifdef PSCAL_TARGET_IOS
+	/* iOS poll/ppoll occasionally reports EBADF spuriously; prefer a simple
+	 * blocking connect with a watchdog that shuts down the socket on timeout. */
 	pscal_debug_logf("timeout_connect: start fd=%d timeout=%d", sockfd, timeoutp ? *timeoutp : -1);
 	fprintf(stderr, "timeout_connect: start fd=%d timeout=%d\n", sockfd, timeoutp ? *timeoutp : -1);
 	__block volatile sig_atomic_t cancelled = 0;
 	dispatch_block_t watchdog = NULL;
-#endif
-
-	/* No timeout: just do a blocking connect() */
-#ifndef PSCAL_TARGET_IOS
-	if (timeoutp == NULL || *timeoutp <= 0)
-		return connect(sockfd, serv_addr, addrlen);
-#endif
-
-	set_nonblock(sockfd);
-	for (;;) {
-		if (connect(sockfd, serv_addr, addrlen) == 0) {
-			/* Succeeded already? */
-			unset_nonblock(sockfd);
-#ifdef PSCAL_TARGET_IOS
-			pscal_debug_logf("timeout_connect: connect immediate success");
-			fprintf(stderr, "timeout_connect: connect immediate success\n");
-#endif
-			return 0;
-		} else if (errno == EINTR)
-			continue;
-		else if (errno != EINPROGRESS) {
-#ifdef PSCAL_TARGET_IOS
-			pscal_debug_logf("timeout_connect: connect failed errno=%d", errno);
-			fprintf(stderr, "timeout_connect: connect failed errno=%d\n", errno);
-#endif
-			return -1;
-		}
-		break;
-	}
-#ifdef PSCAL_TARGET_IOS
-	pscal_debug_logf("timeout_connect: connect EINPROGRESS");
-	fprintf(stderr, "timeout_connect: connect EINPROGRESS\n");
-#endif
-
-#ifdef PSCAL_TARGET_IOS
 	if (timeoutp != NULL && *timeoutp > 0) {
 		watchdog = dispatch_block_create(DISPATCH_BLOCK_ENFORCE_QOS_CLASS, ^{
 			cancelled = 1;
@@ -474,56 +441,54 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 		    (int64_t)(*timeoutp) * NSEC_PER_MSEC);
 		dispatch_after(delay, dispatch_get_main_queue(), watchdog);
 	}
-#endif
-
-	int ret;
-	if ((ret = waitfd(sockfd, timeoutp, POLLIN | POLLOUT,
-#ifdef PSCAL_TARGET_IOS
-	    (volatile sig_atomic_t *)&cancelled
-#else
-	    NULL
-#endif
-	    )) == -1) {
-#ifdef PSCAL_TARGET_IOS
-		pscal_debug_logf("timeout_connect: waitfd failed errno=%d", errno);
-		fprintf(stderr, "timeout_connect: waitfd failed errno=%d\n", errno);
-		if (errno == EBADF) {
-			/* Some iOS environments occasionally report EBADF here even
-			 * though the socket is otherwise usable; fall back to a
-			 * blocking connect as a last resort. */
-			unset_nonblock(sockfd);
-			int retry = connect(sockfd, serv_addr, addrlen);
-			if (retry == 0) {
-				pscal_debug_logf("timeout_connect: blocking retry succeeded after EBADF");
-				fprintf(stderr, "timeout_connect: blocking retry succeeded after EBADF\n");
-				if (watchdog) {
-					dispatch_block_cancel(watchdog);
-					Block_release(watchdog);
-				}
-				return 0;
-			}
-			if (errno == EINPROGRESS) {
-				pscal_debug_logf("timeout_connect: blocking retry returned EINPROGRESS");
-				fprintf(stderr, "timeout_connect: blocking retry returned EINPROGRESS\n");
-			}
+	int rc = -1;
+	for (;;) {
+		rc = connect(sockfd, serv_addr, addrlen);
+		if (rc == 0) {
+			pscal_debug_logf("timeout_connect: blocking connect success");
+			fprintf(stderr, "timeout_connect: blocking connect success\n");
+			break;
 		}
-		if (watchdog) {
-			dispatch_block_cancel(watchdog);
-			Block_release(watchdog);
+		if (errno == EINTR) {
+			continue;
 		}
-#endif
-		return -1;
+		if (errno == EINPROGRESS) {
+			/* Should not happen with blocking connect, but treat as retry. */
+			continue;
+		}
+		pscal_debug_logf("timeout_connect: blocking connect failed errno=%d", errno);
+		fprintf(stderr, "timeout_connect: blocking connect failed errno=%d\n", errno);
+		break;
 	}
-#ifdef PSCAL_TARGET_IOS
-	pscal_debug_logf("timeout_connect: waitfd success");
-	fprintf(stderr, "timeout_connect: waitfd success\n");
-#endif
-#ifdef PSCAL_TARGET_IOS
 	if (watchdog) {
 		dispatch_block_cancel(watchdog);
 		Block_release(watchdog);
 	}
+	return rc;
 #endif
+
+	/* No timeout: just do a blocking connect() */
+	if (timeoutp == NULL || *timeoutp <= 0)
+		return connect(sockfd, serv_addr, addrlen);
+
+	set_nonblock(sockfd);
+	for (;;) {
+		if (connect(sockfd, serv_addr, addrlen) == 0) {
+			/* Succeeded already? */
+			unset_nonblock(sockfd);
+			return 0;
+		} else if (errno == EINTR)
+			continue;
+		else if (errno != EINPROGRESS) {
+			return -1;
+		}
+		break;
+	}
+
+	int ret;
+	if ((ret = waitfd(sockfd, timeoutp, POLLIN | POLLOUT, NULL)) == -1) {
+		return -1;
+	}
 
 	/* Completed or failed */
 	if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &optval, &optlen) == -1) {
