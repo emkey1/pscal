@@ -222,6 +222,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var appearanceObserver: NSObjectProtocol?
     private var mirrorDebugToTerminal: Bool = false
     private var waitingForRestart: Bool = false
+    private var skipRcNextStart: Bool = false
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -317,6 +318,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
         setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
         let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
         setenv("PSCALI_WORKDIR", workdir, 1)
+        let shouldSkipRc = stateQueue.sync { skipRcNextStart }
+        if shouldSkipRc {
+            setenv("EXSH_SKIP_RC", "1", 1)
+        } else {
+            unsetenv("EXSH_SKIP_RC")
+        }
         GPSDeviceProvider.shared.start()
 
         EditorTerminalBridge.shared.deactivate()
@@ -344,6 +351,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 let stackSize: size_t = numericCast(self.runtimeStackSizeBytes)
                 _ = PSCALRuntimeLaunchExshWithStackSize(argc, buffer.baseAddress, stackSize)
             }
+        }
+        if stateQueue.sync(execute: { skipRcNextStart }) {
+            unsetenv("EXSH_SKIP_RC")
+            stateQueue.async { self.skipRcNextStart = false }
         }
     }
 
@@ -507,6 +518,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         stateQueue.async {
             self.started = false
             self.waitingForRestart = true
+            self.skipRcNextStart = true
         }
         DispatchQueue.main.async {
             self.exitStatus = status

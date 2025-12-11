@@ -428,6 +428,10 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
     if (out_status) {
         *out_status = EXIT_SUCCESS;
     }
+    const char *skip_rc = getenv("EXSH_SKIP_RC");
+    if (skip_rc && skip_rc[0] && strcmp(skip_rc, "0") != 0) {
+        return false;
+    }
     const char *home = getenv("HOME");
     if (!home || !*home) {
         return false;
