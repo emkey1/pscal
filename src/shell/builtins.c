@@ -112,6 +112,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"ping", "ping", -1},
     {"scp", "scp", -1},
     {"sftp", "sftp", -1},
+    {"script", "script", -1},
     {"sed", "sed", -1},
     {"sort", "sort", -1},
     {"stty", "stty", -1},
