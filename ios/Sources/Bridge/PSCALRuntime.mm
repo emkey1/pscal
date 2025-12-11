@@ -191,6 +191,10 @@ static bool PSCALRuntimeShouldSuppressLogLine(const std::string &line) {
     while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {
         trimmed.pop_back();
     }
+    // Suppress noisy GPS NMEA sentences that may surface if a reader is attached to /dev/ttyGPS.
+    if (!trimmed.empty() && trimmed.rfind("$GP", 0) == 0) {
+        return true;
+    }
     static const char *kSuppressedFragments[] = {
         "TextInputActionsAnalytics",
         "inputOperation = dismissAutoFillPanel",

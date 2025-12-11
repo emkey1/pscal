@@ -39,6 +39,7 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows);
 int PSCALRuntimeIsVirtualTTY(void);
 
 void pscalRuntimeDebugLog(const char *message);
+void PSCALRuntimeSetDebugLogMirroring(int enable);
 
 /// Returns a newly allocated C string containing the runtime log for the
 /// current session; caller must free() the result. Returns NULL on failure.

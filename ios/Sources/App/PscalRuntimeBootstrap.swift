@@ -181,6 +181,19 @@ func pscalRuntimeResetSessionLogBridge() {
     RuntimeLogger.runtime.resetSession()
 }
 
+@_cdecl("PSCALRuntimeSetDebugLogMirroring")
+func PSCALRuntimeSetDebugLogMirroring(_ enable: Int32) {
+    PscalRuntimeBootstrap.shared.setDebugLogMirroring(enable != 0)
+}
+
+@_cdecl("pscalRuntimeDebugLog")
+func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
+    guard let message = message else { return }
+    let msg = String(cString: message)
+    appendRuntimeDebugLog(msg)
+    PscalRuntimeBootstrap.shared.forwardDebugLogToTerminalIfEnabled(msg)
+}
+
 // MARK: - Runtime Bootstrap
 
 final class PscalRuntimeBootstrap: ObservableObject {
@@ -213,6 +226,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var elvisModeActive: Bool = false
     private var elvisRefreshPending: Bool = false
     private var appearanceObserver: NSObjectProtocol?
+    private var mirrorDebugToTerminal: Bool = false
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -450,6 +464,30 @@ final class PscalRuntimeBootstrap: ObservableObject {
         free(UnsafeMutableRawPointer(mutating: buffer))
         DispatchQueue.main.async {
             self.terminalBuffer.append(data: dataCopy) {
+                self.scheduleRender()
+            }
+        }
+    }
+
+    func setDebugLogMirroring(_ enabled: Bool) {
+        stateQueue.async { self.mirrorDebugToTerminal = enabled }
+    }
+
+    func forwardDebugLogToTerminalIfEnabled(_ message: String) {
+        guard !message.isEmpty else { return }
+        var shouldMirror = false
+        stateQueue.sync { shouldMirror = self.mirrorDebugToTerminal }
+        if !shouldMirror {
+            return
+        }
+        // Drop GPS NMEA chatter that can appear as noise.
+        if message.hasPrefix("$GP") {
+            return;
+        }
+        let line = message.hasSuffix("\n") ? message : (message + "\n")
+        guard let data = line.data(using: .utf8) else { return }
+        DispatchQueue.main.async {
+            self.terminalBuffer.append(data: data) {
                 self.scheduleRender()
             }
         }
