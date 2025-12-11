@@ -94,6 +94,7 @@ static bool s_vtty_initialized = false;
 static struct termios s_vtty_termios;
 static std::string s_vtty_canonical_buffer;
 static std::string s_vtty_raw_buffer;
+static int s_runtime_log_fd = -1;
 
 static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     CGFloat pointSize = 14.0;
@@ -203,6 +204,48 @@ static bool PSCALRuntimeShouldSuppressLogLine(const std::string &line) {
         }
     }
     return false;
+}
+
+static bool PSCALRuntimeEnsureLogFd(void) {
+    if (s_runtime_log_fd >= 0) {
+        return true;
+    }
+    @autoreleasepool {
+        NSString *root = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/var/log"];
+        if (root.length == 0) {
+            return false;
+        }
+        [[NSFileManager defaultManager] createDirectoryAtPath:root
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:nil];
+        NSString *path = [root stringByAppendingPathComponent:@"pscal_runtime.log"];
+        if (path.length == 0) {
+            return false;
+        }
+        int fd = open(path.UTF8String,
+                      O_WRONLY | O_CREAT | O_APPEND
+#ifdef O_CLOEXEC
+                      | O_CLOEXEC
+#endif
+                      ,
+                      0644);
+        if (fd >= 0) {
+            s_runtime_log_fd = fd;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void PSCALRuntimeLogOutput(const char *buffer, size_t length) {
+    if (!buffer || length == 0) {
+        return;
+    }
+    if (!PSCALRuntimeEnsureLogFd()) {
+        return;
+    }
+    (void)write(s_runtime_log_fd, buffer, length);
 }
 
 static void PSCALRuntimeInitVirtualTermiosLocked(void) {
@@ -372,6 +415,7 @@ static void *PSCALRuntimeOutputPump(void *_) {
         if (nread == 0) {
             break; // EOF
         }
+        PSCALRuntimeLogOutput(buffer, (size_t)nread);
         std::string chunk(buffer, (size_t)nread);
         if (PSCALRuntimeShouldSuppressLogLine(chunk)) {
             continue;
@@ -640,6 +684,10 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         close(stdin_fd);
     }
     pthread_join(s_output_thread, NULL);
+    if (s_runtime_log_fd >= 0) {
+        close(s_runtime_log_fd);
+        s_runtime_log_fd = -1;
+    }
     if (virtual_tty) {
         pscalRuntimeSetVirtualTTYEnabled(false);
     }
