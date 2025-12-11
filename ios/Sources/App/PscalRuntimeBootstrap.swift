@@ -358,7 +358,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.nudgePromptIfPending()
+            self.send(" ")
+            self.send("\u{08}") // backspace
         }
         if stateQueue.sync(execute: { skipRcNextStart }) {
             unsetenv("EXSH_SKIP_RC")
