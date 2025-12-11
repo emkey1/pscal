@@ -223,6 +223,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var mirrorDebugToTerminal: Bool = false
     private var waitingForRestart: Bool = false
     private var skipRcNextStart: Bool = false
+    private var promptKickPending: Bool = false
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -324,6 +325,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         } else {
             unsetenv("EXSH_SKIP_RC")
         }
+        stateQueue.async { self.promptKickPending = true }
         GPSDeviceProvider.shared.start()
 
         EditorTerminalBridge.shared.deactivate()
@@ -350,6 +352,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
             cArgs.withUnsafeMutableBufferPointer { buffer in
                 let stackSize: size_t = numericCast(self.runtimeStackSizeBytes)
                 _ = PSCALRuntimeLaunchExshWithStackSize(argc, buffer.baseAddress, stackSize)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            let shouldKick = self.stateQueue.sync { self.promptKickPending }
+            if shouldKick {
+                self.stateQueue.async { self.promptKickPending = false }
+                self.send("\n")
             }
         }
         if stateQueue.sync(execute: { skipRcNextStart }) {
@@ -480,6 +489,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         guard length > 0 else { return }
         let dataCopy = Data(bytes: buffer, count: length)
         free(UnsafeMutableRawPointer(mutating: buffer))
+        stateQueue.async { self.promptKickPending = false }
         DispatchQueue.main.async {
             self.terminalBuffer.append(data: dataCopy) {
                 self.scheduleRender()
