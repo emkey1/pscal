@@ -354,7 +354,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 _ = PSCALRuntimeLaunchExshWithStackSize(argc, buffer.baseAddress, stackSize)
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let shouldKick = self.stateQueue.sync { self.promptKickPending }
             if shouldKick {
                 self.stateQueue.async { self.promptKickPending = false }
