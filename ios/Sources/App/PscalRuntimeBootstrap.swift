@@ -431,13 +431,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
-    func nudgePromptIfPending() {
-        let shouldNudge = stateQueue.sync { waitingForRestart || promptKickPending }
-        guard shouldNudge else { return }
-        send(" ")
-        send("\u{08}") // backspace
-    }
-
     func updateTerminalSize(columns: Int, rows: Int) {
         runtimeDebugLog("[Geometry] main update request columns=\(columns) rows=\(rows)")
         
