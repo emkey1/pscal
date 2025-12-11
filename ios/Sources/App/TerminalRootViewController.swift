@@ -6,6 +6,7 @@ import UIKit
 final class TerminalRootViewController: UIViewController {
     private let hostingController = UIHostingController(rootView: TerminalView(showsOverlay: true))
     private var keyboardObservers: [NSObjectProtocol] = []
+    private var lastKeyboardOverlap: CGFloat = 0
 
     override var shouldAutorotate: Bool { return true }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
@@ -93,5 +94,13 @@ final class TerminalRootViewController: UIViewController {
         let baseBottomInset = view.safeAreaInsets.bottom
         let extra = max(0, overlap - baseBottomInset)
         additionalSafeAreaInsets.bottom = extra
+        let prev = lastKeyboardOverlap
+        lastKeyboardOverlap = extra
+        // When the keyboard shows or hides, nudge the shell to ensure the prompt is visible.
+        let transitioned = (prev == 0 && extra > 0) || (prev > 0 && extra == 0)
+        if transitioned {
+            PscalRuntimeBootstrap.shared.send(" ")
+            PscalRuntimeBootstrap.shared.send("\u{08}") // backspace
+        }
     }
 }
