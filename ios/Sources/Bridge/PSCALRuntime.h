@@ -40,6 +40,9 @@ int PSCALRuntimeIsVirtualTTY(void);
 
 void pscalRuntimeDebugLog(const char *message);
 void PSCALRuntimeSetDebugLogMirroring(int enable);
+void PSCALRuntimeBeginScriptCapture(const char *path, int append);
+void PSCALRuntimeEndScriptCapture(void);
+int PSCALRuntimeScriptCaptureActive(void);
 
 /// Returns a newly allocated C string containing the runtime log for the
 /// current session; caller must free() the result. Returns NULL on failure.

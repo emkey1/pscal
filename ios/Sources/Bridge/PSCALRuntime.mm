@@ -95,6 +95,8 @@ static struct termios s_vtty_termios;
 static std::string s_vtty_canonical_buffer;
 static std::string s_vtty_raw_buffer;
 static int s_runtime_log_fd = -1;
+static int s_script_capture_fd = -1;
+static std::string s_script_capture_path;
 
 static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     CGFloat pointSize = 14.0;
@@ -250,6 +252,64 @@ static void PSCALRuntimeLogOutput(const char *buffer, size_t length) {
         return;
     }
     (void)write(s_runtime_log_fd, buffer, length);
+}
+
+extern "C" void PSCALRuntimeBeginScriptCapture(const char *path, int append) {
+    pthread_mutex_lock(&s_runtime_mutex);
+    if (s_script_capture_fd >= 0) {
+        close(s_script_capture_fd);
+        s_script_capture_fd = -1;
+        s_script_capture_path.clear();
+    }
+    pthread_mutex_unlock(&s_runtime_mutex);
+
+    if (!path || path[0] == '\0') {
+        return;
+    }
+    std::string resolved(path);
+    @autoreleasepool {
+        NSString *nsPath = [NSString stringWithUTF8String:resolved.c_str()];
+        if (!nsPath) {
+            return;
+        }
+        NSString *dir = [nsPath stringByDeletingLastPathComponent];
+        if (dir.length == 0) {
+            dir = @".";
+        }
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:nil];
+    }
+    int flags = O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC);
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
+    int fd = open(resolved.c_str(), flags, 0644);
+    if (fd < 0) {
+        return;
+    }
+    pthread_mutex_lock(&s_runtime_mutex);
+    s_script_capture_fd = fd;
+    s_script_capture_path = resolved;
+    pthread_mutex_unlock(&s_runtime_mutex);
+}
+
+extern "C" void PSCALRuntimeEndScriptCapture(void) {
+    pthread_mutex_lock(&s_runtime_mutex);
+    if (s_script_capture_fd >= 0) {
+        close(s_script_capture_fd);
+        s_script_capture_fd = -1;
+    }
+    s_script_capture_path.clear();
+    pthread_mutex_unlock(&s_runtime_mutex);
+}
+
+extern "C" int PSCALRuntimeScriptCaptureActive(void) {
+    pthread_mutex_lock(&s_runtime_mutex);
+    int active = (s_script_capture_fd >= 0);
+    pthread_mutex_unlock(&s_runtime_mutex);
+    return active;
 }
 
 static void PSCALRuntimeInitVirtualTermiosLocked(void) {
@@ -420,6 +480,12 @@ static void *PSCALRuntimeOutputPump(void *_) {
             break; // EOF
         }
         PSCALRuntimeLogOutput(buffer, (size_t)nread);
+        pthread_mutex_lock(&s_runtime_mutex);
+        int capture_fd = s_script_capture_fd;
+        pthread_mutex_unlock(&s_runtime_mutex);
+        if (capture_fd >= 0) {
+            (void)write(capture_fd, buffer, (size_t)nread);
+        }
         std::string chunk(buffer, (size_t)nread);
         if (PSCALRuntimeShouldSuppressLogLine(chunk)) {
             continue;
@@ -688,6 +754,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         close(stdin_fd);
     }
     pthread_join(s_output_thread, NULL);
+    PSCALRuntimeEndScriptCapture();
     if (s_runtime_log_fd >= 0) {
         close(s_runtime_log_fd);
         s_runtime_log_fd = -1;
