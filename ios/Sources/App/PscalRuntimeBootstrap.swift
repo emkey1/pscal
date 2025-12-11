@@ -358,8 +358,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
             let shouldKick = self.stateQueue.sync { self.promptKickPending }
             if shouldKick {
                 self.stateQueue.async { self.promptKickPending = false }
-                // Poke the shell to force prompt rendering without changing state.
-                self.send(" \u{8}") // space then backspace
+                // Poke the shell to force prompt rendering without leaving residue.
+                self.send("\r")
             }
         }
         if stateQueue.sync(execute: { skipRcNextStart }) {
