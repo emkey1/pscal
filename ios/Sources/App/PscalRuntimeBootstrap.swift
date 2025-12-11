@@ -356,10 +356,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let shouldKick = self.stateQueue.sync { self.promptKickPending }
+            // Always send a carriage return to force prompt rendering; earlier
+            // output may have cleared the pending flag already.
+            self.send("\r")
             if shouldKick {
                 self.stateQueue.async { self.promptKickPending = false }
-                // Poke the shell to force prompt rendering without leaving residue.
-                self.send("\r")
             }
         }
         if stateQueue.sync(execute: { skipRcNextStart }) {
