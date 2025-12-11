@@ -397,8 +397,7 @@ final class TerminalKeyInputView: UITextView {
                 self.softKeyboardVisible = true
                 self.hardwareKeyboardConnected = false
                 self.reloadInputViews()
-                self.onInput?(" ")
-                self.onInput?("\u{08}")
+                PscalRuntimeBootstrap.shared.nudgePromptIfPending()
             }
         }
 
@@ -411,8 +410,7 @@ final class TerminalKeyInputView: UITextView {
             Task { @MainActor in
                 self.softKeyboardVisible = false
                 self.reloadInputViews()
-                self.onInput?(" ")
-                self.onInput?("\u{08}")
+                PscalRuntimeBootstrap.shared.nudgePromptIfPending()
             }
         }
 

@@ -429,6 +429,12 @@ ssh_userauth2(struct ssh *ssh, const char *local_user,
 	if (options.preferred_authentications == NULL)
 		options.preferred_authentications = authmethods_get();
 
+	/* If stdin is a TTY, ensure we never start in batch mode. */
+	if (options.batch_mode != 0 && isatty(STDIN_FILENO)) {
+		debug("PSCALI clearing BatchMode for TTY stdin");
+		options.batch_mode = 0;
+	}
+
 	debug("PSCALI auth prefs: preferred=%s batch=%d "
 	    "pwd_auth=%d kbdint=%d pubkey=%d hostbased=%d prompts=%d",
 	    options.preferred_authentications,

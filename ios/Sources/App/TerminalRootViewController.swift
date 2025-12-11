@@ -99,8 +99,7 @@ final class TerminalRootViewController: UIViewController {
         // When the keyboard shows or hides, nudge the shell to ensure the prompt is visible.
         let transitioned = (prev == 0 && extra > 0) || (prev > 0 && extra == 0)
         if transitioned {
-            PscalRuntimeBootstrap.shared.send(" ")
-            PscalRuntimeBootstrap.shared.send("\u{08}") // backspace
+            PscalRuntimeBootstrap.shared.nudgePromptIfPending()
         }
     }
 }

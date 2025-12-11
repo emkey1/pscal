@@ -358,10 +358,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Always send a carriage return to force prompt rendering; earlier
-            // output may have cleared the pending flag already.
-            self.send(" ")
-            self.send("\u{08}")
+            self.nudgePromptIfPending()
         }
         if stateQueue.sync(execute: { skipRcNextStart }) {
             unsetenv("EXSH_SKIP_RC")
@@ -432,6 +429,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 }
             }
         }
+    }
+
+    func nudgePromptIfPending() {
+        let shouldNudge = stateQueue.sync { waitingForRestart || promptKickPending }
+        guard shouldNudge else { return }
+        send(" ")
+        send("\u{08}") // backspace
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {
