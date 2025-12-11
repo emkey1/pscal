@@ -463,10 +463,6 @@ static void PSCALRuntimeEnsurePathTruncationDefault(void) {
     if (existing && existing[0] != '\0') {
         return;
     }
-    const char *explicitDisable = getenv("PSCALI_PATH_TRUNCATE_DISABLED");
-    if (explicitDisable && explicitDisable[0] != '\0') {
-        return;
-    }
 
     std::string prefix;
     NSString *docs = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];

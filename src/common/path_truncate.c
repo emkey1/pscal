@@ -155,10 +155,6 @@ static bool pathTruncateFetchPrefix(const char **out_prefix, size_t *out_length)
     if (!out_prefix || !out_length) {
         return false;
     }
-    const char *disable = getenv("PSCALI_PATH_TRUNCATE_DISABLED");
-    if (disable && disable[0] != '\0') {
-        return false;
-    }
     const char *env = getenv("PATH_TRUNCATE");
     if (!env || env[0] == '\0') {
         env = getenv("PSCALI_CONTAINER_ROOT");
@@ -317,6 +313,10 @@ void pathTruncateApplyEnvironment(const char *prefix) {
             pathTruncateEnsureDir(tmpbuf);
         }
         written = snprintf(tmpbuf, sizeof(tmpbuf), "%s/var/log", prefix);
+        if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
+            pathTruncateEnsureDir(tmpbuf);
+        }
+        written = snprintf(tmpbuf, sizeof(tmpbuf), "%s/var/local", prefix);
         if (written > 0 && (size_t)written < sizeof(tmpbuf)) {
             pathTruncateEnsureDir(tmpbuf);
         }
