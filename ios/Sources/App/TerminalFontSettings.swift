@@ -291,6 +291,20 @@ final class TerminalFontSettings: ObservableObject {
 
     // MARK: Font option discovery
 
+    private static func sanitizedFontName(_ rawName: String) -> String? {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix(".") {
+            return nil
+        }
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("sfcompact") || lower.hasPrefix("sfns") {
+            // Avoid private system UI fonts that trigger CoreText warnings.
+            return nil
+        }
+        return trimmed
+    }
+
     private static func buildFontOptions() -> [FontOption] {
         var options: [FontOption] = [
             FontOption(id: "system",
@@ -305,10 +319,8 @@ final class TerminalFontSettings: ObservableObject {
         var regularByFamily: [String: FontOption] = [:]
         var fallbackByFamily: [String: FontOption] = [:]
 
-        for name in postScriptNames {
-            if name.hasPrefix(".") {
-                continue
-            }
+        for rawName in postScriptNames {
+            guard let name = sanitizedFontName(rawName) else { continue }
 
             let font = CTFontCreateWithName(name as CFString, 0, nil)
             let traits = CTFontGetSymbolicTraits(font)
@@ -316,12 +328,13 @@ final class TerminalFontSettings: ObservableObject {
                 continue
             }
 
-            let familyName = (CTFontCopyName(font, kCTFontFamilyNameKey) as String?) ?? name
+            let familyNameRaw = (CTFontCopyName(font, kCTFontFamilyNameKey) as String?) ?? name
+            let familyName = familyNameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
             let styleName = (CTFontCopyName(font, kCTFontStyleNameKey) as String?)?.lowercased() ?? ""
             let familyKey = familyName.lowercased()
 
             let option = FontOption(id: name,
-                                    displayName: familyName,
+                                    displayName: familyName.isEmpty ? name : familyName,
                                     postScriptName: name)
 
             let isRegular = styleName.isEmpty ||

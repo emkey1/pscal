@@ -80,6 +80,24 @@ static PSCALRuntimeExitHandler s_exit_handler = NULL;
 static void *s_handler_context = NULL;
 static pthread_t s_runtime_thread_id;
 
+static BOOL PSCALRuntimeFontNameAllowed(NSString *candidate) {
+    if (!candidate) {
+        return NO;
+    }
+    NSString *trimmed = [candidate stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0) {
+        return NO;
+    }
+    if ([trimmed hasPrefix:@"."]) {
+        return NO;
+    }
+    NSString *lower = trimmed.lowercaseString;
+    if ([lower hasPrefix:@"sfcompact"]) {
+        return NO;
+    }
+    return YES;
+}
+
 static pthread_mutex_t s_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool s_runtime_active = false;
 static int s_master_fd = -1;
@@ -109,10 +127,17 @@ static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     }
     UIFont *resolved = nil;
     const char *fontEnv = getenv("PSCALI_FONT_NAME");
-    if (fontEnv && fontEnv[0] != '\0' && fontEnv[0] != '.') {
+    if (fontEnv && fontEnv[0] != '\0') {
         NSString *fontName = [NSString stringWithUTF8String:fontEnv];
-        if (fontName.length > 0) {
-            resolved = [UIFont fontWithName:fontName size:pointSize];
+        if (PSCALRuntimeFontNameAllowed(fontName)) {
+            NSString *trimmed = [fontName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            resolved = [UIFont fontWithName:trimmed size:pointSize];
+            if (resolved) {
+                UIFontDescriptorSymbolicTraits traits = resolved.fontDescriptor.symbolicTraits;
+                if ((traits & UIFontDescriptorTraitMonoSpace) == 0) {
+                    resolved = nil;
+                }
+            }
         }
     }
     if (!resolved) {

@@ -17,6 +17,8 @@ extern void pscalRuntimeDebugLog(const char *);
 #endif
 
 static PSCAL_THREAD_LOCAL pscal_openssh_exit_context *g_pscal_openssh_ctx = NULL;
+static PSCAL_THREAD_LOCAL sigjmp_buf *g_pscal_openssh_global_exit_env = NULL;
+static PSCAL_THREAD_LOCAL volatile sig_atomic_t *g_pscal_openssh_global_exit_code = NULL;
 #ifdef PSCAL_TARGET_IOS
 volatile sig_atomic_t interrupted = 0;
 int showprogress = 1;
@@ -41,6 +43,14 @@ pscal_openssh_pop_exit_context(pscal_openssh_exit_context *ctx)
 	if (g_pscal_openssh_ctx == ctx) {
 		g_pscal_openssh_ctx = ctx->prev;
 	}
+}
+
+void
+pscal_openssh_set_global_exit_handler(sigjmp_buf *env,
+    volatile sig_atomic_t *code_out)
+{
+	g_pscal_openssh_global_exit_env = env;
+	g_pscal_openssh_global_exit_code = code_out;
 }
 
 void
@@ -106,6 +116,12 @@ cleanup_exit(int code)
 		}
 		g_pscal_openssh_ctx->exit_code = code;
 		siglongjmp(g_pscal_openssh_ctx->env, 1);
+	}
+	if (g_pscal_openssh_global_exit_env != NULL) {
+		if (g_pscal_openssh_global_exit_code != NULL) {
+			*g_pscal_openssh_global_exit_code = code;
+		}
+		siglongjmp(*g_pscal_openssh_global_exit_env, 1);
 	}
 #ifdef PSCAL_TARGET_IOS
 	pscalRuntimeDebugLog("cleanup_exit without PSCAL context, terminating thread");

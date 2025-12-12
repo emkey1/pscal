@@ -12,9 +12,9 @@ CONST
   // Threading Configuration
   ThreadCount     = 4;
   
-  // Buffer Limits (Adjust if device runs out of memory, though 12MB is usually fine)
-  MaxBufferCols   = 2048;
-  MaxBufferRows   = 1536;
+  // Buffer Limits (must stay under the runtime safety cap)
+  MaxBufferCols   = 1200;
+  MaxBufferRows   = 1100;
 
   // Color Frequency for the vibrant look
   Freq            = 0.1;
@@ -56,6 +56,11 @@ VAR
   xTemp          : Real;
   iter           : Integer;
   PixelData      : TRGB;
+  FUNCTION ClampByte(v: Integer): Byte;
+  BEGIN
+    IF v < 0 THEN v := 0 ELSE IF v > 255 THEN v := 255;
+    ClampByte := Byte(v);
+  END;
 BEGIN
   IF (Row < 1) OR (Row > Height) THEN EXIT;
 
@@ -89,9 +94,9 @@ BEGIN
     BEGIN
       PixelData.IsInside := FALSE;
       // Sine wave math for 24-bit gradient
-      PixelData.R := Trunc((Sin(Freq * iter + 0.0) + 1.0) * 127.5);
-      PixelData.G := Trunc((Sin(Freq * iter + 2.0) + 1.0) * 127.5);
-      PixelData.B := Trunc((Sin(Freq * iter + 4.0) + 1.0) * 127.5);
+      PixelData.R := ClampByte(Trunc((Sin(Freq * iter + 0.0) + 1.0) * 127.5));
+      PixelData.G := ClampByte(Trunc((Sin(Freq * iter + 2.0) + 1.0) * 127.5));
+      PixelData.B := ClampByte(Trunc((Sin(Freq * iter + 4.0) + 1.0) * 127.5));
     END;
 
     ColorBuffer[Row, Col] := PixelData;
