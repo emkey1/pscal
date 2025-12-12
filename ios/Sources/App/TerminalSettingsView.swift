@@ -74,7 +74,7 @@ struct TerminalSettingsView: View {
                         )
                     )
 
-                    Text("Requires restarting the PSCAL runtime to take effect.")
+                    Text("Requires restarting PSCAL take effect.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
 

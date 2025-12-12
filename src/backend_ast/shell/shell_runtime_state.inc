@@ -919,7 +919,7 @@ typedef struct {
     pid_t pgid;
 #if defined(PSCAL_TARGET_IOS)
     bool in_process;
-    char *spool_buffer;
+    int spool_fd;
     size_t spool_size;
 #endif
 } ShellPipelineContext;

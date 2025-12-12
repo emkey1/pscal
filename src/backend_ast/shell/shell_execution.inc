@@ -804,9 +804,9 @@ static void shellResetPipeline(void) {
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (ctx->spool_buffer) {
-        free(ctx->spool_buffer);
-        ctx->spool_buffer = NULL;
+    if (ctx->spool_fd >= 0) {
+        close(ctx->spool_fd);
+        ctx->spool_fd = -1;
         ctx->spool_size = 0;
     }
     ctx->in_process = false;
@@ -851,9 +851,9 @@ static void shellAbortPipeline(void) {
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    if (ctx->spool_buffer) {
-        free(ctx->spool_buffer);
-        ctx->spool_buffer = NULL;
+    if (ctx->spool_fd >= 0) {
+        close(ctx->spool_fd);
+        ctx->spool_fd = -1;
         ctx->spool_size = 0;
     }
 #endif
@@ -904,7 +904,7 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     ctx->pgid = -1;
 #if defined(PSCAL_TARGET_IOS)
     ctx->in_process = true;
-    ctx->spool_buffer = NULL;
+    ctx->spool_fd = -1;
     ctx->spool_size = 0;
 #endif
     ctx->pids = calloc(stages, sizeof(pid_t));
@@ -1236,7 +1236,16 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     shellUpdateStatus(1);
                     goto redir_error;
                 }
-                int fd = open(redir->path, redir->flags, redir->mode);
+#if defined(PSCAL_TARGET_IOS)
+                char virtual_path[PATH_MAX];
+                const char *open_path = redir->path;
+                if (pathTruncateExpand(redir->path, virtual_path, sizeof(virtual_path))) {
+                    open_path = virtual_path;
+                }
+#else
+                const char *open_path = redir->path;
+#endif
+                int fd = open(open_path, redir->flags, redir->mode);
                 if (fd < 0) {
                     int err = errno;
                     runtimeError(vm, "exec: %s: %s", redir->path, strerror(err));
@@ -1474,13 +1483,17 @@ static bool __attribute__((unused)) shellPipelineReadPipeToBuffer(int fd, char *
 
 typedef struct {
     int fd;
-    char *buffer;
+    int spool_fd;
     size_t size;
     size_t capacity;
     int err;
+    char *buffer; /* only used when spool_fd < 0 */
 } ShellPipelineCapture;
 
 static bool shellPipelineCaptureGrow(ShellPipelineCapture *cap, size_t add) {
+    if (cap->spool_fd >= 0) {
+        return true;
+    }
     size_t need = cap->size + add;
     if (need <= cap->capacity) {
         return true;
@@ -1523,8 +1536,17 @@ static void *shellPipelineCaptureThread(void *arg) {
             cap->err = ENOMEM;
             break;
         }
-        memcpy(cap->buffer + cap->size, tmp, (size_t)res);
-        cap->size += (size_t)res;
+        if (cap->spool_fd >= 0) {
+            ssize_t written = write(cap->spool_fd, tmp, (size_t)res);
+            if (written < 0) {
+                cap->err = errno ? errno : EIO;
+                break;
+            }
+            cap->size += (size_t)written;
+        } else {
+            memcpy(cap->buffer + cap->size, tmp, (size_t)res);
+            cap->size += (size_t)res;
+        }
     }
     free(tmp);
     close(cap->fd);
@@ -1536,31 +1558,75 @@ typedef struct {
     const char *data;
     size_t len;
     int fd;
+    int src_fd;
     int err;
 } ShellPipelineFeed;
 
 static void *shellPipelineFeedThread(void *arg) {
     ShellPipelineFeed *feed = (ShellPipelineFeed *)arg;
     const size_t chunk = 4096;
-    size_t offset = 0;
-    while (offset < feed->len) {
-        size_t to_write = feed->len - offset;
-        if (to_write > chunk) {
-            to_write = chunk;
-        }
-        ssize_t res = write(feed->fd, feed->data + offset, to_write);
-        if (res < 0) {
-            if (errno == EINTR) {
-                continue;
+    if (feed->src_fd >= 0) {
+        char buf[4096];
+        for (;;) {
+            ssize_t r = read(feed->src_fd, buf, sizeof(buf));
+            if (r < 0) {
+                if (errno == EINTR) continue;
+                feed->err = errno ? errno : EIO;
+                break;
             }
-            feed->err = errno ? errno : EIO;
-            break;
+            if (r == 0) {
+                break;
+            }
+            size_t off = 0;
+            while (off < (size_t)r) {
+                ssize_t w = write(feed->fd, buf + off, (size_t)r - off);
+                if (w < 0) {
+                    if (errno == EINTR) continue;
+                    feed->err = errno ? errno : EIO;
+                    off = (size_t)r;
+                    break;
+                }
+                off += (size_t)w;
+            }
         }
-        offset += (size_t)res;
+        close(feed->src_fd);
+        feed->src_fd = -1;
+    } else {
+        size_t offset = 0;
+        while (offset < feed->len) {
+            size_t to_write = feed->len - offset;
+            if (to_write > chunk) {
+                to_write = chunk;
+            }
+            ssize_t res = write(feed->fd, feed->data + offset, to_write);
+            if (res < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                feed->err = errno ? errno : EIO;
+                break;
+            }
+            offset += (size_t)res;
+        }
     }
     close(feed->fd);
     feed->fd = -1;
     return NULL;
+}
+
+static int shellPipelineCreateSpoolFile(void) {
+    const char *tmp_root = getenv("TMPDIR");
+    if (!tmp_root || !*tmp_root) {
+        tmp_root = "/tmp";
+    }
+    char tmpl[PATH_MAX];
+    snprintf(tmpl, sizeof(tmpl), "%s/pscal-pipe-%ld-XXXXXX",
+             tmp_root, (long)getpid());
+    int fd = mkstemp(tmpl);
+    if (fd >= 0) {
+        unlink(tmpl);
+    }
+    return fd;
 }
 
 static int shellRunBuiltinInProcess(VM *vm,
@@ -1672,60 +1738,46 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     bool ok = false;
     pthread_t feed_thread;
     bool feed_thread_started = false;
-    ShellPipelineFeed feed = { .data = NULL, .len = 0, .fd = -1, .err = 0 };
+    ShellPipelineFeed feed = { .data = NULL, .len = 0, .fd = -1, .src_fd = -1, .err = 0 };
     pthread_t capture_thread;
     bool capture_thread_started = false;
-    ShellPipelineCapture capture = { .fd = -1, .buffer = NULL, .size = 0, .capacity = 0, .err = 0 };
+    ShellPipelineCapture capture = { .fd = -1, .spool_fd = -1, .size = 0, .capacity = 0, .err = 0, .buffer = NULL };
 #if defined(PSCAL_TARGET_IOS)
     bool pushed_virtual_tty = false;
 #endif
     bool need_spool = !pipeline_tail;
 
     if (!pipeline_head) {
-        if (!ctx->spool_buffer) {
+        if (ctx->spool_fd < 0) {
             runtimeError(vm, "pipeline: missing intermediate buffer");
             shellUpdateStatus(1);
             return false;
         }
+        lseek(ctx->spool_fd, 0, SEEK_SET);
         bool pager_tail = pipeline_tail &&
                           cmd->argc > 0 &&
                           (strcmp(cmd->argv[0], "less") == 0 || strcmp(cmd->argv[0], "more") == 0);
         if (pager_tail) {
-            const char *tmp_root = getenv("TMPDIR");
-            if (!tmp_root || !*tmp_root) {
-                tmp_root = "/tmp";
-            }
-            char tmpl[PATH_MAX];
-            snprintf(tmpl, sizeof(tmpl), "%s/pscal-pipe-pager-XXXXXX", tmp_root);
-            int fd = mkstemp(tmpl);
-            if (fd < 0) {
-                runtimeError(vm, "pipeline: failed to stage pager input: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            bool staged = shellPipelineWriteBufferToPipe(ctx->spool_buffer, ctx->spool_size, fd);
-            close(fd);
-            if (!staged) {
-                unlink(tmpl);
-                runtimeError(vm, "pipeline: failed to write pager buffer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            stdin_fd = open(tmpl, O_RDONLY);
-            unlink(tmpl);
+            stdin_fd = dup(ctx->spool_fd);
             if (stdin_fd < 0) {
                 runtimeError(vm, "pipeline: failed to reopen pager buffer: %s", strerror(errno));
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
+            lseek(stdin_fd, 0, SEEK_SET);
         } else {
             if (pipe(input_pipe) != 0) {
                 runtimeError(vm, "pipeline: failed to allocate input buffer: %s", strerror(errno));
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
-            feed.data = ctx->spool_buffer;
-            feed.len = ctx->spool_size;
+            feed.src_fd = dup(ctx->spool_fd);
+            if (feed.src_fd < 0) {
+                runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                return false;
+            }
+            lseek(feed.src_fd, 0, SEEK_SET);
             feed.fd = input_pipe[1];
             input_pipe[1] = -1;
             if (pthread_create(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
@@ -1747,6 +1799,12 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             goto cleanup;
         }
         stdout_fd = output_pipe[1];
+        capture.spool_fd = shellPipelineCreateSpoolFile();
+        if (capture.spool_fd < 0) {
+            runtimeError(vm, "pipeline: failed to allocate spool storage: %s", strerror(errno));
+            shellUpdateStatus(errno ? errno : 1);
+            goto cleanup;
+        }
     }
 
     if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos] && stdout_fd >= 0) {
@@ -1810,14 +1868,25 @@ cleanup:
             runtimeError(vm, "pipeline: failed to capture output: %s", strerror(capture.err));
             shellUpdateStatus(capture.err);
         } else if (ok && need_spool) {
-            free(ctx->spool_buffer);
-            ctx->spool_buffer = capture.buffer;
+            if (ctx->spool_fd >= 0) {
+                close(ctx->spool_fd);
+            }
+            ctx->spool_fd = capture.spool_fd;
             ctx->spool_size = capture.size;
-            capture.buffer = NULL;
-            capture.size = 0;
+            if (ctx->spool_fd >= 0) {
+                lseek(ctx->spool_fd, 0, SEEK_SET);
+            }
+            capture.spool_fd = -1;
         }
     }
-    free(capture.buffer);
+    if (capture.buffer) {
+        free(capture.buffer);
+        capture.buffer = NULL;
+    }
+    if (capture.spool_fd >= 0) {
+        close(capture.spool_fd);
+        capture.spool_fd = -1;
+    }
 
     if (feed_thread_started) {
         pthread_join(feed_thread, NULL);
@@ -1827,6 +1896,12 @@ cleanup:
             runtimeError(vm, "pipeline: failed to feed input: %s", strerror(feed.err));
             shellUpdateStatus(feed.err);
         }
+    }
+
+    if (!pipeline_head && ctx->spool_fd >= 0) {
+        close(ctx->spool_fd);
+        ctx->spool_fd = -1;
+        ctx->spool_size = 0;
     }
 
     if (need_spool && output_pipe[1] >= 0) {

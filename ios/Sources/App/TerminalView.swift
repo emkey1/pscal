@@ -53,10 +53,12 @@ struct TerminalView: View {
             Button {
                 PscalRuntimeBootstrap.shared.resetTerminalState()
                 requestInputFocus()
+                PscalRuntimeBootstrap.shared.send(" ")
+                PscalRuntimeBootstrap.shared.send("\u{08}") // backspace
             } label: {
-                Text("R")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .padding(11)
+                Text("RT")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .padding(9)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .accessibilityLabel("Reset Terminal")
@@ -70,6 +72,18 @@ struct TerminalView: View {
                     .background(.ultraThinMaterial, in: Circle())
             }
             .accessibilityLabel("Adjust Font Size")
+            
+            Button {
+                PscalRuntimeBootstrap.shared.forceExshRestart()
+                requestInputFocus()
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 16, weight: .semibold))
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .accessibilityLabel("Restart exsh shell")
+            
         }
         .padding(.bottom, 16)
         .padding(.trailing, 10)

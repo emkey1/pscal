@@ -73,6 +73,7 @@ extern "C" {
     void pscalRuntimeSetVirtualTTYEnabled(bool enabled);
     bool pscalRuntimeVirtualTTYEnabled(void);
     void pscalRuntimeRegisterVirtualTTYFd(int std_fd, int fd);
+    char *pscalRuntimeCopyMarketingVersion(void);
 }
 
 static PSCALRuntimeOutputHandler s_output_handler = NULL;
@@ -924,6 +925,22 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
 
 int PSCALRuntimeIsVirtualTTY(void) {
     return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
+}
+
+char *pscalRuntimeCopyMarketingVersion(void) {
+    @autoreleasepool {
+        NSString *shortVer = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+        NSString *buildVer = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
+        NSString *version = (shortVer.length > 0) ? shortVer : buildVer;
+        if (!version || version.length == 0) {
+            return NULL;
+        }
+        const char *utf8 = [version UTF8String];
+        if (!utf8) {
+            return NULL;
+        }
+        return strdup(utf8);
+    }
 }
 
 void PSCALRuntimeSendSignal(int signo) {

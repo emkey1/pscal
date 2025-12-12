@@ -59,10 +59,8 @@ var
   windowWidth : integer;
   effectiveWidth : integer;
 
-  { *** ADDED: Global Variables for Word List *** }
   wordListHead: PWordNode;
   wordListCount: Integer;
-  { *** END ADDED *** }
 
 function DefaultWordListPath: string;
 var

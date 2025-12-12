@@ -224,6 +224,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var waitingForRestart: Bool = false
     private var skipRcNextStart: Bool = false
     private var promptKickPending: Bool = true
+    private var forceRestartPending: Bool = false
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -472,6 +473,27 @@ final class PscalRuntimeBootstrap: ObservableObject {
         send("\u{1B}c") // RIS
     }
 
+    func forceExshRestart() {
+        runtimeDebugLog("[Runtime] manual exsh restart requested from UI")
+        stateQueue.async {
+            self.waitingForRestart = false
+            self.started = false
+            self.skipRcNextStart = true
+            self.forceRestartPending = true
+        }
+        PSCALRuntimeSendSignal(SIGTERM)
+        PSCALRuntimeSendSignal(SIGINT)
+        // Safety net: if the exit handler doesn't fire promptly, restart anyway.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self = self else { return }
+            let stillPending = self.stateQueue.sync { self.forceRestartPending }
+            if stillPending {
+                self.stateQueue.async { self.forceRestartPending = false }
+                self.start()
+            }
+        }
+    }
+
     func currentScreenText(maxLength: Int = 8000) -> String {
         let text = screenText.string
         let utf8 = text.utf8
@@ -529,16 +551,26 @@ final class PscalRuntimeBootstrap: ObservableObject {
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
         stateQueue.async {
             self.started = false
-            self.waitingForRestart = true
+            if self.forceRestartPending {
+                self.waitingForRestart = false
+            } else {
+                self.waitingForRestart = true
+            }
             self.skipRcNextStart = true
         }
         DispatchQueue.main.async {
+            let forced = self.stateQueue.sync { self.forceRestartPending }
             self.exitStatus = status
             self.setElvisModeActive(false)
-            let banner = "\r\nexsh exited (status=\(status)). Press any key to restart…\r\n"
-            if let data = banner.data(using: .utf8) {
-                self.terminalBuffer.append(data: data) {
-                    self.scheduleRender()
+            if forced {
+                self.stateQueue.async { self.forceRestartPending = false }
+                self.start()
+            } else {
+                let banner = "\r\nexsh exited (status=\(status)). Press any key to restart…\r\n"
+                if let data = banner.data(using: .utf8) {
+                    self.terminalBuffer.append(data: data) {
+                        self.scheduleRender()
+                    }
                 }
             }
         }
@@ -1544,6 +1576,11 @@ final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
     private var targetRoot: String?
     private var devicePath: String?
     private var writerFD: Int32 = -1
+    private var lastSentence: Data?
+    private var sendScheduled: Bool = false
+    private var lastWriteTime: TimeInterval = 0
+    private let sentenceThrottleSeconds: TimeInterval = 1.0
+    private let ioctlFionread: UInt = 0x4004667f // FIONREAD on Darwin
 
     private override init() {
         locationManager = CLLocationManager()
@@ -1614,7 +1651,7 @@ final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
                 runtimeDebugLog("GPS fifo mkfifo failed: \(String(cString: strerror(errno)))")
                 return false
             }
-            let fd = open(devicePath, O_RDWR | O_NONBLOCK)
+            let fd = open(devicePath, O_RDWR | O_NONBLOCK | O_CLOEXEC)
             if fd < 0 {
                 runtimeDebugLog("GPS fifo open failed: \(String(cString: strerror(errno)))")
                 try? fm.removeItem(atPath: devicePath)
@@ -1698,9 +1735,23 @@ final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func writeNMEA(for location: CLLocation) {
-        guard writerFD >= 0 else { return }
         let sentence = GPSDeviceProvider.createNMEASentence(location: location)
         guard let data = sentence.data(using: .utf8) else { return }
+        lastSentence = data
+        sendLatestIfReady()
+    }
+
+    private func writeSentence(_ data: Data) {
+        if writerFD < 0 {
+            return
+        }
+        // If the FIFO already has plenty of buffered data, drop this write to avoid bursts.
+        var pending: Int32 = 0
+        if ioctl(writerFD, ioctlFionread, &pending) == 0 {
+            if pending > 4096 {
+                return
+            }
+        }
         data.withUnsafeBytes { buffer in
             guard let base = buffer.baseAddress else { return }
             var offset = 0
@@ -1709,17 +1760,70 @@ final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
                 let written = write(writerFD, ptr, buffer.count - offset)
                 if written > 0 {
                     offset += written
-                } else if written < 0 && errno == EAGAIN {
-                    usleep(10000)
-                } else {
-                    let err = String(cString: strerror(errno))
-                    runtimeDebugLog("GPS write failed: \(err)")
-                    tearDownLocked(removeDevice: false)
-                    configureDeviceLocked()
+                    lastWriteTime = Date().timeIntervalSince1970
+                    continue
+                }
+                if written < 0 {
+                    let err = errno
+                    if err == EAGAIN || err == EWOULDBLOCK {
+                        usleep(10000)
+                        continue
+                    }
+                    if err == ENXIO || err == EPIPE {
+                        close(writerFD)
+                        writerFD = -1
+                        break
+                    }
+                    let errStr = String(cString: strerror(err))
+                    runtimeDebugLog("GPS write failed: \(errStr)")
+                    close(writerFD)
+                    writerFD = -1
                     break
                 }
             }
         }
+    }
+
+    private func ensureWriterOpenLocked() -> Bool {
+        if writerFD >= 0 {
+            return true
+        }
+        guard let devicePath else { return false }
+        let fd = open(devicePath, O_RDWR | O_NONBLOCK | O_CLOEXEC)
+        if fd < 0 {
+            if errno != ENXIO {
+                runtimeDebugLog("GPS fifo open failed: \(String(cString: strerror(errno)))")
+            }
+            return false
+        }
+        writerFD = fd
+        return true
+    }
+
+    private func scheduleSendIfNeeded(after delay: TimeInterval) {
+        if sendScheduled {
+            return;
+        }
+        sendScheduled = true
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            self.sendScheduled = false
+            self.sendLatestIfReady()
+        }
+    }
+
+    private func sendLatestIfReady() {
+        guard let cached = lastSentence else { return }
+        if !ensureWriterOpenLocked() {
+            return
+        }
+        let now = Date().timeIntervalSince1970
+        let sinceLast = now - lastWriteTime
+        if sinceLast < sentenceThrottleSeconds {
+            scheduleSendIfNeeded(after: sentenceThrottleSeconds - sinceLast)
+            return
+        }
+        writeSentence(cached)
     }
 
     private static func createNMEASentence(location: CLLocation) -> String {

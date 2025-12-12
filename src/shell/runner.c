@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <unistd.h>
 #if defined(PSCAL_TARGET_IOS)
 #include <spawn.h>
@@ -479,6 +480,14 @@ int shellRunSource(const char *source,
     if (!source || !options) {
         return EXIT_FAILURE;
     }
+
+#if defined(SIGPIPE)
+    static bool sigpipe_ignored = false;
+    if (!sigpipe_ignored) {
+        signal(SIGPIPE, SIG_IGN);
+        sigpipe_ignored = true;
+    }
+#endif
 
     bool previous_suppress = shellSemanticsWarningsSuppressed();
     shellSemanticsSetWarningSuppressed(options->suppress_warnings);

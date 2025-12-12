@@ -51,6 +51,10 @@ char *pscalRuntimeCopySessionLog(void);
 /// Clears the in-memory runtime log for the current session.
 void pscalRuntimeResetSessionLog(void);
 
+/// Returns a newly allocated C string containing the marketing (short) app
+/// version from the bundle. Caller must free(); returns NULL on failure.
+char *pscalRuntimeCopyMarketingVersion(void);
+
 /// Delivers a signal to the active runtime thread (no-op if inactive).
 /// Useful on iOS when virtual TTY mode prevents kernel-generated job-control
 /// signals from being delivered via the terminal.

@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
@@ -2732,144 +2735,183 @@ Value vmBuiltinShellCat(VM *vm, int arg_count, Value *args) {
 }
 
 typedef struct {
-    char *data;
     size_t length;
     size_t *offsets;
     size_t line_count;
-} ShellPagerBuffer;
+    FILE *file;
+} ShellPagerCache;
 
 static void shellPagerEmitChar(int ch, bool show_nonprinting);
 
-static void shellPagerBufferFree(ShellPagerBuffer *buffer) {
-    if (!buffer) {
+static void shellPagerCacheFree(ShellPagerCache *cache) {
+    if (!cache) {
         return;
     }
-    free(buffer->data);
-    free(buffer->offsets);
-    buffer->data = NULL;
-    buffer->offsets = NULL;
-    buffer->length = 0;
-    buffer->line_count = 0;
+    if (cache->file) {
+        fclose(cache->file);
+    }
+    free(cache->offsets);
+    cache->file = NULL;
+    cache->offsets = NULL;
+    cache->length = 0;
+    cache->line_count = 0;
 }
 
-static bool shellPagerBufferAppend(char **data,
-                                   size_t *length,
-                                   size_t *capacity,
-                                   const char *chunk,
-                                   size_t chunk_len) {
-    if (!data || !length || !capacity || !chunk) {
+static bool shellPagerEnsureOffsetCapacity(size_t **offsets,
+                                           size_t *capacity,
+                                           size_t required) {
+    if (!offsets || !capacity) {
         return false;
     }
-    if (*length + chunk_len + 1 > *capacity) {
-        size_t new_capacity = (*capacity == 0) ? 8192 : (*capacity * 2);
-        while (new_capacity < *length + chunk_len + 1) {
-            new_capacity *= 2;
-        }
-        char *resized = (char *)realloc(*data, new_capacity);
-        if (!resized) {
-            return false;
-        }
-        *data = resized;
-        *capacity = new_capacity;
+    if (required <= *capacity) {
+        return true;
     }
-    memcpy(*data + *length, chunk, chunk_len);
-    *length += chunk_len;
-    (*data)[*length] = '\0';
+    size_t new_capacity = (*capacity == 0) ? 1024 : *capacity;
+    while (new_capacity < required) {
+        new_capacity *= 2;
+    }
+    size_t *resized = (size_t *)realloc(*offsets, new_capacity * sizeof(size_t));
+    if (!resized) {
+        return false;
+    }
+    *offsets = resized;
+    *capacity = new_capacity;
     return true;
 }
 
-static bool shellPagerBufferLoad(FILE *stream, ShellPagerBuffer *buffer) {
-    if (!stream || !buffer) {
+static bool shellPagerCacheStream(FILE *stream, ShellPagerCache *cache) {
+    if (!stream || !cache) {
         return false;
     }
-    memset(buffer, 0, sizeof(*buffer));
+    memset(cache, 0, sizeof(*cache));
+    const char *tmp_root = getenv("TMPDIR");
+    if (!tmp_root || !*tmp_root) {
+        tmp_root = "/tmp";
+    }
+    char tmpl[PATH_MAX];
+    snprintf(tmpl, sizeof(tmpl), "%s/pscal-pager-XXXXXX", tmp_root);
+    int fd = mkstemp(tmpl);
+    if (fd < 0) {
+        return false;
+    }
+    FILE *fp = fdopen(fd, "w+b");
+    if (!fp) {
+        close(fd);
+        unlink(tmpl);
+        return false;
+    }
+    unlink(tmpl);
+
+    size_t *offsets = NULL;
+    size_t offset_cap = 0;
+    size_t offset_count = 0;
+    if (!shellPagerEnsureOffsetCapacity(&offsets, &offset_cap, 1)) {
+        fclose(fp);
+        return false;
+    }
+    offsets[offset_count++] = 0;
+
     char temp[8192];
-    size_t length = 0;
-    size_t capacity = 0;
-    char *data = NULL;
+    size_t total = 0;
     while (true) {
         size_t read_bytes = fread(temp, 1, sizeof(temp), stream);
         if (read_bytes > 0) {
-            if (!shellPagerBufferAppend(&data, &length, &capacity, temp, read_bytes)) {
-                free(data);
+            size_t written = fwrite(temp, 1, read_bytes, fp);
+            if (written != read_bytes) {
+                free(offsets);
+                fclose(fp);
                 return false;
             }
+            for (size_t i = 0; i < read_bytes; ++i) {
+                if (temp[i] == '\n') {
+                    if (!shellPagerEnsureOffsetCapacity(&offsets, &offset_cap, offset_count + 1)) {
+                        free(offsets);
+                        fclose(fp);
+                        return false;
+                    }
+                    offsets[offset_count++] = total + i + 1;
+                }
+            }
+            total += read_bytes;
         }
         if (read_bytes < sizeof(temp)) {
             if (ferror(stream)) {
-                free(data);
+                free(offsets);
+                fclose(fp);
                 return false;
             }
             break;
         }
     }
-    size_t reserve = (length / 32) + 2;
-    size_t *offsets = (size_t *)malloc(sizeof(size_t) * reserve);
-    if (!offsets) {
-        free(data);
+    if (offset_count == 0 || offsets[offset_count - 1] != total) {
+        if (!shellPagerEnsureOffsetCapacity(&offsets, &offset_cap, offset_count + 1)) {
+            free(offsets);
+            fclose(fp);
+            return false;
+        }
+        offsets[offset_count++] = total;
+    }
+    cache->file = fp;
+    cache->offsets = offsets;
+    cache->length = total;
+    cache->line_count = (offset_count > 0) ? (offset_count - 1) : 0;
+    if (fseeko(fp, 0, SEEK_SET) != 0) {
+        shellPagerCacheFree(cache);
         return false;
     }
-    size_t offset_count = 0;
-    offsets[offset_count++] = 0;
-    for (size_t i = 0; i < length; ++i) {
-        if (data[i] == '\n') {
-            if (offset_count == reserve) {
-                reserve *= 2;
-                size_t *resized = (size_t *)realloc(offsets, sizeof(size_t) * reserve);
-                if (!resized) {
-                    free(offsets);
-                    free(data);
-                    return false;
-                }
-                offsets = resized;
-            }
-            offsets[offset_count++] = i + 1;
-        }
-    }
-    if (offsets[offset_count - 1] != length) {
-        if (offset_count == reserve) {
-            reserve += 1;
-            size_t *resized = (size_t *)realloc(offsets, sizeof(size_t) * reserve);
-            if (!resized) {
-                free(offsets);
-                free(data);
-                return false;
-            }
-            offsets = resized;
-        }
-        offsets[offset_count++] = length;
-    }
-    buffer->data = data;
-    buffer->length = length;
-    buffer->offsets = offsets;
-    buffer->line_count = offset_count > 0 ? offset_count - 1 : 0;
     return true;
 }
 
-static void shellPagerEmitRange(const ShellPagerBuffer *buffer,
-                                size_t start_line,
-                                size_t end_line,
-                                bool show_nonprinting) {
-    if (!buffer || !buffer->data || !buffer->offsets) {
+static void shellPagerEmitRangeFromCache(const ShellPagerCache *cache,
+                                         size_t start_line,
+                                         size_t end_line,
+                                         bool show_nonprinting) {
+    if (!cache || !cache->file || !cache->offsets || cache->line_count == 0) {
         return;
     }
-    if (start_line >= buffer->line_count || start_line >= end_line) {
+    if (start_line >= cache->line_count || start_line >= end_line) {
         return;
     }
-    if (end_line > buffer->line_count) {
-        end_line = buffer->line_count;
+    if (end_line > cache->line_count) {
+        end_line = cache->line_count;
     }
+    char buffer[4096];
     for (size_t line = start_line; line < end_line; ++line) {
-        size_t begin = buffer->offsets[line];
-        size_t finish = buffer->offsets[line + 1];
-        if (finish > buffer->length) {
-            finish = buffer->length;
+        size_t begin = cache->offsets[line];
+        size_t finish = cache->offsets[line + 1];
+        if (finish > cache->length) {
+            finish = cache->length;
         }
-        for (size_t i = begin; i < finish; ++i) {
-            shellPagerEmitChar((unsigned char)buffer->data[i], show_nonprinting);
+        if (fseeko(cache->file, (off_t)begin, SEEK_SET) != 0) {
+            break;
         }
-        if (finish == begin || buffer->data[finish - 1] != '\n') {
+        size_t remaining = (finish > begin) ? (finish - begin) : 0;
+        while (remaining > 0) {
+            size_t chunk = remaining;
+            if (chunk > sizeof(buffer)) {
+                chunk = sizeof(buffer);
+            }
+            size_t read_bytes = fread(buffer, 1, chunk, cache->file);
+            if (read_bytes == 0) {
+                break;
+            }
+            for (size_t i = 0; i < read_bytes; ++i) {
+                shellPagerEmitChar((unsigned char)buffer[i], show_nonprinting);
+            }
+            remaining -= read_bytes;
+            if (read_bytes < chunk) {
+                break;
+            }
+        }
+        if (finish == begin) {
             fputc('\n', stdout);
+        } else {
+            if (fseeko(cache->file, (off_t)(finish - 1), SEEK_SET) == 0) {
+                int last = fgetc(cache->file);
+                if (last != '\n') {
+                    fputc('\n', stdout);
+                }
+            }
         }
     }
 }
@@ -2889,29 +2931,46 @@ static bool shellPagerLineContains(const char *line,
     return false;
 }
 
-static size_t shellPagerSearchForward(const ShellPagerBuffer *buffer,
-                                      size_t start_line,
-                                      const char *pattern,
-                                      size_t pattern_length) {
-    if (!buffer || !pattern || pattern_length == 0) {
+static size_t shellPagerSearchForwardCache(const ShellPagerCache *cache,
+                                           size_t start_line,
+                                           const char *pattern,
+                                           size_t pattern_length) {
+    if (!cache || !cache->file || !cache->offsets || !pattern || pattern_length == 0) {
         return SIZE_MAX;
     }
-    if (start_line >= buffer->line_count) {
-        start_line = buffer->line_count ? buffer->line_count - 1 : 0;
+    if (start_line >= cache->line_count) {
+        start_line = cache->line_count ? cache->line_count - 1 : 0;
     }
-    for (size_t line = start_line; line < buffer->line_count; ++line) {
-        size_t begin = buffer->offsets[line];
-        size_t finish = buffer->offsets[line + 1];
-        if (finish > buffer->length) {
-            finish = buffer->length;
+    char *line_buf = NULL;
+    size_t line_cap = 0;
+    for (size_t line = start_line; line < cache->line_count; ++line) {
+        size_t begin = cache->offsets[line];
+        size_t finish = cache->offsets[line + 1];
+        if (finish > cache->length) {
+            finish = cache->length;
         }
-        if (shellPagerLineContains(buffer->data + begin,
-                                   finish - begin,
-                                   pattern,
-                                   pattern_length)) {
+        size_t len = (finish > begin) ? (finish - begin) : 0;
+        if (line_cap < len + 1) {
+            size_t new_cap = (len + 1) * 2;
+            char *resized = (char *)realloc(line_buf, new_cap);
+            if (!resized) {
+                free(line_buf);
+                return SIZE_MAX;
+            }
+            line_buf = resized;
+            line_cap = new_cap;
+        }
+        if (fseeko(cache->file, (off_t)begin, SEEK_SET) != 0) {
+            break;
+        }
+        size_t read_bytes = fread(line_buf, 1, len, cache->file);
+        line_buf[read_bytes] = '\0';
+        if (shellPagerLineContains(line_buf, read_bytes, pattern, pattern_length)) {
+            free(line_buf);
             return line;
         }
     }
+    free(line_buf);
     return SIZE_MAX;
 }
 
@@ -2946,6 +3005,12 @@ static int shellPagerPageLines(void) {
     if (rows <= 0) {
         rows = 24;
     }
+    const char *env_lines = getenv("LINES");
+    if (!env_lines || !*env_lines) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", rows);
+        setenv("LINES", buf, 1);
+    }
 #if defined(PSCAL_TARGET_IOS)
     int reserved = 3;
 #else
@@ -2958,42 +3023,118 @@ static int shellPagerPageLines(void) {
 }
 
 static bool shellPagerShouldPaginate(void) {
-    if (!pscalRuntimeStdoutIsInteractive()) {
+    const char *force = shellSafeGetenv("PSCALI_PAGER_FORCE");
+    int force_value = shellParseEnvBool(force);
+    if (force_value == 0) {
         return false;
     }
+    if (force && *force && force_value < 0) {
+        return true;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    /* On iOS/iPadOS we never get a real controlling TTY, so treat pager usage
+     * as interactive by default. The virtual TTY bridge is still checked so
+     * other callers can opt in to a real descriptor when available. */
+    if (pscalRuntimeVirtualTTYEnabled() || shellPagerGetVirtualTTYOverride() >= 0) {
+        return true;
+    }
     return true;
+#endif
+    if (pscalRuntimeStdoutIsInteractive()) {
+        return true;
+    }
+    return pscalRuntimeStdinIsInteractive();
+}
+
+static int shellPagerDupForRead(int fd) {
+    int dup_fd = dup(fd);
+    if (dup_fd < 0) {
+        return -1;
+    }
+    int flags = fcntl(dup_fd, F_GETFL, 0);
+    if (flags >= 0 && (flags & O_ACCMODE) == O_WRONLY) {
+        close(dup_fd);
+        return -1;
+    }
+    return dup_fd;
+}
+
+static int shellPagerTestInputNext(void) {
+    static bool initialized = false;
+    static const char *cursor = NULL;
+    static size_t remaining = 0;
+    if (!initialized) {
+        const char *env = shellSafeGetenv("PSCALI_PAGER_TEST_INPUT");
+        if (env && *env) {
+            cursor = env;
+            remaining = strlen(env);
+        }
+        initialized = true;
+    }
+    if (!cursor || remaining == 0) {
+        return EOF;
+    }
+    int ch = (unsigned char)*cursor;
+    cursor++;
+    remaining--;
+    return ch;
 }
 
 static FILE *shellPagerAcquireTTY(bool *needs_close) {
     if (needs_close) {
         *needs_close = false;
     }
+    int fd = -1;
 #if defined(PSCAL_TARGET_IOS)
     int override_fd = shellPagerGetVirtualTTYOverride();
     if (override_fd >= 0) {
-        int dup_fd = dup(override_fd);
-        if (dup_fd >= 0) {
-            FILE *fp = fdopen(dup_fd, "r");
-            if (fp) {
-                if (needs_close) {
-                    *needs_close = true;
-                }
-                return fp;
-            }
-            close(dup_fd);
+        fd = shellPagerDupForRead(override_fd);
+    }
+#endif
+    if (fd < 0) {
+        fd = open("/dev/tty", O_RDONLY
+#ifdef O_CLOEXEC
+                  | O_CLOEXEC
+#endif
+        );
+    }
+    if (fd < 0 && pscalRuntimeStdoutIsInteractive()) {
+        const char *tty_path = ttyname(STDOUT_FILENO);
+        if (tty_path && *tty_path) {
+            fd = open(tty_path, O_RDONLY
+#ifdef O_CLOEXEC
+                      | O_CLOEXEC
+#endif
+            );
+        }
+        if (fd < 0) {
+            fd = shellPagerDupForRead(STDOUT_FILENO);
         }
     }
-    return stdin;
-#else
-    FILE *tty = fopen("/dev/tty", "r");
-    if (!tty) {
-        return stdin;
-    }
-    if (needs_close) {
-        *needs_close = true;
-    }
-    return tty;
+    if (fd < 0 && pscalRuntimeStdinIsInteractive()) {
+        const char *tty_path = ttyname(STDIN_FILENO);
+        if (tty_path && *tty_path) {
+            fd = open(tty_path, O_RDONLY
+#ifdef O_CLOEXEC
+                      | O_CLOEXEC
 #endif
+            );
+        }
+        if (fd < 0) {
+            fd = shellPagerDupForRead(STDIN_FILENO);
+        }
+    }
+    if (fd >= 0) {
+        FILE *fp = fdopen(fd, "r");
+        if (fp) {
+            if (needs_close) {
+                *needs_close = true;
+            }
+            return fp;
+        }
+        close(fd);
+    }
+    return stdin;
 }
 
 static void shellPagerEmitChar(int ch, bool show_nonprinting) {
@@ -3014,7 +3155,10 @@ static size_t shellPagerReadPattern(FILE *tty, char *buffer, size_t capacity) {
     fflush(stdout);
     size_t length = 0;
     while (true) {
-        int ch = input ? fgetc(input) : EOF;
+        int ch = shellPagerTestInputNext();
+        if (ch == EOF) {
+            ch = input ? fgetc(input) : EOF;
+        }
         if (ch == EOF || ch == '\n' || ch == '\r') {
             break;
         }
@@ -3053,7 +3197,10 @@ static int shellPagerPrompt(FILE *tty, char *search_buffer, size_t buffer_len, s
         fputs("--More--", stdout);
         fflush(stdout);
         shellRuntimeProcessPendingSignals();
-        int ch = input ? fgetc(input) : EOF;
+        int ch = shellPagerTestInputNext();
+        if (ch == EOF) {
+            ch = input ? fgetc(input) : EOF;
+        }
         if (ch == '\r') {
             int next = input ? fgetc(input) : EOF;
             if (next != '\n' && next != EOF && input) {
@@ -3106,8 +3253,8 @@ static int shellPagerDisplayStream(FILE *stream,
     if (page_lines <= 0) {
         page_lines = 23;
     }
-    ShellPagerBuffer buffer;
-    if (!shellPagerBufferLoad(stream, &buffer)) {
+    ShellPagerCache cache;
+    if (!shellPagerCacheStream(stream, &cache)) {
         fprintf(stderr, "%s: failed to cache input for paging\n", command_name);
         return errno ? errno : 1;
     }
@@ -3115,28 +3262,28 @@ static int shellPagerDisplayStream(FILE *stream,
     size_t top_line = 0;
     char search_pattern[256];
     size_t search_length = 0;
-    while (top_line < buffer.line_count) {
+    while (top_line < cache.line_count) {
         size_t end_line = top_line + (size_t)page_lines;
-        if (end_line > buffer.line_count) {
-            end_line = buffer.line_count;
+        if (end_line > cache.line_count) {
+            end_line = cache.line_count;
         }
-        shellPagerEmitRange(&buffer, top_line, end_line, show_nonprinting);
-        if (end_line >= buffer.line_count) {
+        shellPagerEmitRangeFromCache(&cache, top_line, end_line, show_nonprinting);
+        if (end_line >= cache.line_count) {
             break;
         }
         int action = shellPagerPrompt(tty, search_pattern, sizeof(search_pattern), &search_length);
         if (action == SHELL_PAGER_ACTION_ABORT) {
-            shellPagerBufferFree(&buffer);
+            shellPagerCacheFree(&cache);
             shellUpdateStatus(130);
             return EINTR;
         }
         if (action == SHELL_PAGER_ACTION_QUIT) {
-            top_line = buffer.line_count;
+            top_line = cache.line_count;
             break;
         }
         switch (action) {
             case SHELL_PAGER_ACTION_NEXT_LINE:
-                if (top_line + 1 < buffer.line_count) {
+                if (top_line + 1 < cache.line_count) {
                     top_line += 1;
                 }
                 break;
@@ -3149,10 +3296,10 @@ static int shellPagerDisplayStream(FILE *stream,
                 break;
             case SHELL_PAGER_ACTION_SEARCH:
                 if (search_length > 0) {
-                    size_t found = shellPagerSearchForward(&buffer,
-                                                           end_line,
-                                                           search_pattern,
-                                                           search_length);
+                    size_t found = shellPagerSearchForwardCache(&cache,
+                                                                end_line,
+                                                                search_pattern,
+                                                                search_length);
                     if (found == SIZE_MAX) {
                         fprintf(stdout, "\nPattern not found\n");
                     } else {
@@ -3171,7 +3318,7 @@ static int shellPagerDisplayStream(FILE *stream,
     if (interactive) {
         fputs("\r        \r", stdout);
     }
-    shellPagerBufferFree(&buffer);
+    shellPagerCacheFree(&cache);
     return result;
 }
 
@@ -6871,22 +7018,23 @@ static bool shellCommandCollectInfo(const char *name,
         }
     }
 
-    if (shellIsRuntimeBuiltin(name)) {
+    bool have_smallclue_applet = false;
+#if defined(PSCAL_TARGET_IOS)
+    const SmallclueApplet *applet = smallclueFindApplet(name);
+    if (applet) {
+        have_smallclue_applet = true;
+        if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_BUILTIN, applet->name)) {
+            goto error;
+        }
+    }
+#endif
+
+    if (!have_smallclue_applet && shellIsRuntimeBuiltin(name)) {
         const char *canonical = shellBuiltinCanonicalName(name);
         if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_BUILTIN, canonical)) {
             goto error;
         }
     }
-#if defined(PSCAL_TARGET_IOS)
-    else {
-        const SmallclueApplet *applet = smallclueFindApplet(name);
-        if (applet) {
-            if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_BUILTIN, applet->name)) {
-                goto error;
-            }
-        }
-    }
-#endif
 
     const char *path_env = use_default_path ? kShellCommandDefaultPath : NULL;
     if (!shellCommandEnumerateExecutables(name,

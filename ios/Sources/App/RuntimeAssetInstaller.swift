@@ -140,7 +140,7 @@ final class RuntimeAssetInstaller {
 
         guard let bundledRunner = Bundle.main.url(forResource: "pscal_tool_runner", withExtension: nil),
               fileManager.fileExists(atPath: bundledRunner.path) else {
-            NSLog("PSCAL iOS: missing pscal_tool_runner in bundle; tool builtins will be unavailable.")
+            //NSLog("PSCAL iOS: missing pscal_tool_runner in bundle; tool builtins will be unavailable.")
             cachedToolRunnerPath = nil
             return nil
         }
