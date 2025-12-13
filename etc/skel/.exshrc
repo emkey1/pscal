@@ -121,10 +121,22 @@ alias host='nslookup'
 # The helpers below make it easy to inspect `ThreadStats` output while working
 # interactively. Set PSCALSHELL_THREAD_METRICS=1 to print a snapshot at login.
 threadpool_report() {
-    builtin ThreadStats
+    builtin ThreadStatsJson | python3 - <<'PY'
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    sys.stderr.write(f"threadstats: failed to parse JSON: {e}\n")
+    sys.exit(1)
+print("id\tgen\tname\tactive\tready\tstatus")
+for t in data:
+    print(f"{t.get('id')}\t{t.get('pool_generation', 0)}\t{t.get('name','')}"
+          f"\t{bool(t.get('active'))}\t{bool(t.get('ready_for_reuse'))}\t{bool(t.get('status_success'))}")
+PY
 }
 
 alias threadpool='threadpool_report'
+alias ps-threads='builtin ps-threads'
 
 if [ "${PSCALSHELL_THREAD_METRICS:-0}" != "0" ]; then
     echo "[exsh] worker pool snapshot"

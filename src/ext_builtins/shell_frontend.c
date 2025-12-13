@@ -81,6 +81,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "bg", vmBuiltinShellBg);
     registerShellBuiltin(category, command_group, "wait", vmBuiltinShellWait);
     registerShellBuiltin(category, command_group, "WaitForThread", vmBuiltinShellWaitForThread);
+    registerShellBuiltin(category, thread_group, "ps-threads", vmBuiltinShellPsThreads);
     registerShellBuiltin(category, thread_group, "ThreadSpawnBuiltin", vmBuiltinThreadSpawnBuiltin);
     registerShellBuiltin(category, thread_group, "ThreadGetResult", vmBuiltinThreadGetResult);
     registerShellBuiltin(category, thread_group, "ThreadGetStatus", vmBuiltinThreadGetStatus);

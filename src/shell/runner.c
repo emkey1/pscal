@@ -547,6 +547,9 @@ int shellRunSource(const char *source,
     bool chunk_initialized = false;
     VM *vm = NULL;
     bool vm_initialized = false;
+    ShellRuntimeState *vm_shell_ctx = NULL;
+    VM *previous_vm_for_context = NULL;
+    bool vm_context_swapped = false;
     bool vm_stack_dumped = false;
     VM *previous_thread_owner = NULL;
     bool assigned_thread_owner = false;
@@ -631,6 +634,12 @@ int shellRunSource(const char *source,
     }
     initVM(vm);
     vm_initialized = true;
+    vm_shell_ctx = shellRuntimeCreateContext();
+    if (!vm_shell_ctx) {
+        fprintf(stderr, "shell: failed to allocate shell runtime context.\n");
+        goto cleanup;
+    }
+    vm->frontendContext = vm_shell_ctx;
     previous_thread_owner = gShellThreadOwnerVm;
     if (!gShellThreadOwnerVm) {
         gShellThreadOwnerVm = vm;
@@ -640,6 +649,8 @@ int shellRunSource(const char *source,
     if (options->vm_trace_head > 0) {
         vm->trace_head_instructions = options->vm_trace_head;
     }
+    previous_vm_for_context = shellSwapCurrentVm(vm);
+    vm_context_swapped = true;
 
     InterpretResult result = interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
     if (result == INTERPRET_RUNTIME_ERROR) {
@@ -707,11 +718,19 @@ cleanup:
     } else {
         (void)exit_flag;
     }
+    if (vm_context_swapped) {
+        shellRestoreCurrentVm(previous_vm_for_context);
+        vm_context_swapped = false;
+    }
     if (assigned_thread_owner) {
         gShellThreadOwnerVm = previous_thread_owner;
     }
     if (vm_initialized && vm) {
         freeVM(vm);
+    }
+    if (vm_shell_ctx) {
+        shellRuntimeDestroyContext(vm_shell_ctx);
+        vm_shell_ctx = NULL;
     }
     if (vm) {
         free(vm);

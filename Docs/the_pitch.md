@@ -35,141 +35,44 @@ The design goal of having compiled programs map cleanly onto PSCAL bytecode furt
 
 ---
 
-## Example Walkthrough
+## Quick Start (showing the pipeline)
 
-Here is an example **C-like program** to illustrate the steps from source code → AST → bytecode → execution.
+Here is a tiny **Pascal front end** program that maps cleanly to the VM. You can substitute your own file—these commands are what instructors/students can actually run to see the artifacts end to end.
 
-### Source Program
-
-```c
-mke@MacBookPro ~ % cat example
-int main() {
-  int a = 5;
-  printf("a = %d\n", a);
-  exit(0);
-}
-```
+- Save as `example.p`:
+  ```pascal
+  program example;
+  var a: integer;
+  begin
+    a := 5;
+    write('a = ', a, '\n');
+    halt(0);
+  end.
+  ```
+- Dump the AST: `build/bin/pascal --dump-ast-json example.p > ast.json`
+- Dump the bytecode: `build/bin/pascal --dump-bytecode example.p > bytecode.txt`
+- Run it: `build/bin/pascal example.p`
 
 ---
 
 ### AST Representation
 
-Here is the **JSON dump of the AST** for this example program:
+Here is an **actual AST JSON excerpt** from the Pascal front end for that program (truncated for brevity):
 
 ```json
---- Dumping AST to JSON (stdout) ---
 {
   "node_type": "PROGRAM",
-  "token": {
-    "type": "IDENTIFIER",
-    "value": "int"
-  },
   "children": [
     {
       "node_type": "FUNCTION_DECL",
-      "token": {
-        "type": "IDENTIFIER",
-        "value": "main"
-      },
-      "var_type_annotated": "INTEGER",
-      "right": 
-        {
-          "node_type": "COMPOUND",
-          "token": {
-            "type": "IDENTIFIER",
-            "value": "int"
-          },
-          "children": [
-            {
-              "node_type": "VAR_DECL",
-              "token": {
-                "type": "IDENTIFIER",
-                "value": "a"
-              },
-              "var_type_annotated": "INTEGER",
-              "left": 
-                {
-                  "node_type": "NUMBER",
-                  "token": {
-                    "type": "INTEGER_CONST",
-                    "value": "5"
-                  },
-                  "var_type_annotated": "INTEGER"
-                },
-              "right": 
-                {
-                  "node_type": "VARIABLE",
-                  "token": {
-                    "type": "IDENTIFIER",
-                    "value": "int"
-                  },
-                  "var_type_annotated": "INTEGER"
-                }
-            },
-            {
-              "node_type": "EXPR_STMT",
-              "token": {
-                "type": "IDENTIFIER",
-                "value": "exit"
-              },
-              "left": 
-                {
-                  "node_type": "PROCEDURE_CALL",
-                  "token": {
-                    "type": "IDENTIFIER",
-                    "value": "printf"
-                  },
-                  "children": [
-                    {
-                      "node_type": "STRING",
-                      "token": {
-                        "type": "STRING_CONST",
-                        "value": "a = %d\\n"
-                      },
-                      "var_type_annotated": "STRING"
-                    },
-                    {
-                      "node_type": "VARIABLE",
-                      "token": {
-                        "type": "IDENTIFIER",
-                        "value": "a"
-                      }
-                    }
-                  ]
-                }
-            },
-            {
-              "node_type": "EXPR_STMT",
-              "token": {
-                "type": "RBRACKET",
-                "value": "}"
-              },
-              "left": 
-                {
-                  "node_type": "PROCEDURE_CALL",
-                  "token": {
-                    "type": "IDENTIFIER",
-                    "value": "exit"
-                  },
-                  "children": [
-                    {
-                      "node_type": "NUMBER",
-                      "token": {
-                        "type": "INTEGER_CONST",
-                        "value": "0"
-                      },
-                      "var_type_annotated": "INTEGER"
-                    }
-                  ]
-                }
-            }
-          ]
-        }
+      "token": {"value": "main"},
+      "children": [
+        {"node_type": "VAR_DECL", "token": {"value": "a"}, "var_type_annotated": "INTEGER"},
+        {"node_type": "EXPR_STMT", "token": {"value": "write"}, "...": "..."},
+        {"node_type": "EXPR_STMT", "token": {"value": "halt"}, "...": "..."}
+      ]
     }
   ]
-}
-
---- AST JSON Dump Complete (stderr print)---
 }
 ```
 
@@ -229,8 +132,16 @@ This transparent workflow lets learners trace a program from source code through
 PSCAL’s code base is intentionally small and written in C, making it easy to extend. New language front ends or VM built-ins can be added with minimal scaffolding, providing a practical playground for exploring language and runtime design. Because the modules are loosely coupled, a single change—such as adding a new opcode or a parser rule—can be studied in isolation before being reintroduced into the whole system. This modularity encourages experimentation and helps learners see how individual compiler pieces cooperate to form a complete toolchain.
 
 The project’s simplicity also invites collaboration. A class might divide into teams, each implementing a feature, and then merge their contributions to extend the platform. Since every front end targets the same VM, work on one language benefits the others, reinforcing how shared abstractions make language design more efficient.
+
+### Why PSCAL (vs. existing teaching VMs?)
+- Transparent AST/bytecode dumps via `--dump-ast-json`/`--dump-bytecode` on every front end, so students can see the whole pipeline without extra tooling.
+- Small, hackable C codebase with shared VM across front ends (Pascal, C-like, Rea, exsh), making cross-language experiments cheap.
+- Bytecode and VM are stable enough for course material, but not a general-purpose JVM/.NET replacement; UI/SDL and iOS constraints still apply.
+
+### Notes and limits
+- The examples above use the Pascal front end; exsh, C-like, and Rea can emit the same artifacts with the same flags.
+- Some tooling is intentionally minimal (no full IDE); expect to drive dumps and bytecode inspection from the CLI.
 message.md
 8 KB
 
 ---
-

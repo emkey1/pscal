@@ -26,11 +26,11 @@ DELAY_STATUS=$EXSH_LAST_STATUS
 WaitForThread "$dns_thread"
 DNS_STATUS=$EXSH_LAST_STATUS
 
-dns_result=$(builtin ThreadGetResult "$dns_thread")
-dns_status_consumed=$(builtin ThreadGetStatus "$dns_thread" bool:true)
+dns_result=$(builtin ThreadGetResult "$dns_thread" bool:true)
+DNS_RESULT_STATUS=$EXSH_LAST_STATUS
 
 echo "threading_demo:delay_status:$DELAY_STATUS"
 echo "threading_demo:dns_status:$DNS_STATUS"
 echo "threading_demo:dns_result:${dns_result:-<empty>}"
-echo "threading_demo:dns_status_consumed:$dns_status_consumed"
+echo "threading_demo:dns_result_status:$DNS_RESULT_STATUS"
 echo "threading_demo:end"

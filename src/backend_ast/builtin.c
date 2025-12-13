@@ -7093,7 +7093,7 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     pthread_mutex_lock(&thread_vm->threadRegistryLock);
     int active_count = 0;
     for (int i = 1; i < VM_MAX_THREADS; ++i) {
-        if (thread_vm->threads[i].inPool && thread_vm->threads[i].poolWorker) {
+        if (thread_vm->threads[i].inPool) {
             active_count++;
         }
     }
@@ -7108,7 +7108,7 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     int index = 0;
     for (int i = 1; i < VM_MAX_THREADS && index < active_count; ++i) {
         Thread* thread = &thread_vm->threads[i];
-        if (!thread->inPool || !thread->poolWorker) {
+        if (!thread->inPool) {
             continue;
         }
         Value entry = makeThreadStateRecord(i, thread);
@@ -7138,7 +7138,7 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
     int emitted = 0;
     for (int i = 1; i < VM_MAX_THREADS && ok; ++i) {
         Thread *thread = &thread_vm->threads[i];
-        if (!thread->inPool || !thread->poolWorker) {
+        if (!thread->inPool) {
             continue;
         }
         if (emitted > 0) {

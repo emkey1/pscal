@@ -2369,6 +2369,7 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     if (!invoke_vm) {
         goto invoke_cleanup;
     }
+    invoke_vm->frontendContext = vm ? vm->frontendContext : NULL;
 
     if (!shellRuntimePushCallFrame(name, cmd->line, cmd->column)) {
         runtimeError(vm, "%s: out of memory", name);

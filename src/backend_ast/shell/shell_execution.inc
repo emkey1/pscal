@@ -1724,12 +1724,6 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         }
         return false;
     }
-    if (cmd->background) {
-        runtimeError(vm, "pipelines cannot run in background on this platform");
-        shellUpdateStatus(1);
-        return false;
-    }
-
     int stdin_fd = -1;
     int stdout_fd = -1;
     int stderr_fd = -1;
@@ -2069,16 +2063,6 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         assignments_applied = true;
     }
 
-#if defined(PSCAL_TARGET_IOS)
-    if (cmd->background && pscalRuntimeVirtualTTYEnabled()) {
-        runtimeError(vm, "job control (&/bg/fg) is not supported on this platform");
-        shellUpdateStatus(1);
-        shellFreeCommand(cmd);
-        shellScalarCacheInvalidate();
-        return makeVoid();
-    }
-#endif
-
     int stdin_fd = -1;
     int stdout_fd = -1;
     int stderr_fd = -1;
@@ -2219,13 +2203,20 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     if (cmd->argv && cmd->argv[0] && cmd->argv[0][0] != '\0') {
         shellHashRecordExecution(cmd->argv[0]);
     }
+    bool ignore_job_signals = background_execution &&
+                              (!gShellRuntime.job_control_enabled
+#if defined(PSCAL_TARGET_IOS)
+                               || pscalRuntimeVirtualTTYEnabled()
+#endif
+                               );
+
     int spawn_err = shellSpawnProcess(vm,
                                       cmd,
                                       stdin_fd,
                                       stdout_fd,
                                       stderr_fd,
                                       &child,
-                                      background_execution && !gShellRuntime.job_control_enabled);
+                                      ignore_job_signals);
     if (assignments_applied) {
         shellRestoreAssignments(assignment_backups, assignment_backup_count);
         assignments_applied = false;

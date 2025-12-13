@@ -202,6 +202,9 @@ typedef struct VM_s {
     Thread* owningThread;        // Non-NULL when running inside a worker slot
     int threadId;                // Slot index for owningThread (0 for main VM)
 
+    /* Frontend-specific context; e.g., exsh per-VM shell state. */
+    void* frontendContext;
+
     // Optional tracing: when >0, print execution of first N instructions
     int trace_head_instructions;
     int trace_executed;

@@ -8,6 +8,8 @@
 #include <stddef.h>
 
 struct VM_s;
+struct ShellRuntimeState;
+typedef struct ShellRuntimeState ShellRuntimeState;
 
 typedef Value (*VmBuiltinFn)(struct VM_s* vm, int arg_count, Value* args);
 
@@ -184,6 +186,7 @@ Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWaitForThread(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPsThreads(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEcho(struct VM_s* vm, int arg_count, Value* args);
@@ -253,6 +256,10 @@ void shellRuntimeEnterCondition(void);
 void shellRuntimeLeaveCondition(void);
 bool shellRuntimeEvaluatingCondition(void);
 void shellRuntimeAbandonConditionEvaluation(void);
+ShellRuntimeState *shellRuntimeCreateContext(void);
+ShellRuntimeState *shellRuntimeCurrentContext(void);
+ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx);
+void shellRuntimeDestroyContext(ShellRuntimeState *ctx);
 void shellRuntimeRequestExit(void);
 void shellRuntimePushScript(void);
 void shellRuntimePopScript(void);
@@ -265,6 +272,8 @@ bool shellRuntimeIsInteractive(void);
 void shellRuntimeSetExitOnSignal(bool enabled);
 bool shellRuntimeExitOnSignal(void);
 size_t shellRuntimeHistoryCount(void);
+struct VM_s *shellSwapCurrentVm(struct VM_s *vm);
+void shellRestoreCurrentVm(struct VM_s *vm);
 void shellRuntimeSetLastStatus(int status);
 void shellRuntimeSetLastStatusSticky(int status);
 bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);

@@ -3605,6 +3605,7 @@ typedef struct {
     volatile int finished;
     pthread_t worker_thread;
     pthread_t main_thread;
+    bool use_shell_context;
 } ShellToolThreadContext;
 
 static __thread sigjmp_buf gShellThreadJumpBuf;
@@ -3635,11 +3636,23 @@ static void *shellToolThreadMain(void *arg) {
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, &old_sa);
 
+    ShellRuntimeState *thread_ctx = NULL;
+    ShellRuntimeState *prev_ctx = NULL;
+    if (ctx->use_shell_context) {
+        thread_ctx = shellRuntimeCreateContext();
+        prev_ctx = shellRuntimeActivateContext(thread_ctx);
+    }
+
     if (sigsetjmp(gShellThreadJumpBuf, 1) == 0) {
         ctx->status = ctx->entry(ctx->argc, ctx->argv);
     } else {
         /* Interrupted */
         ctx->status = 130;
+    }
+
+    if (ctx->use_shell_context) {
+        shellRuntimeActivateContext(prev_ctx);
+        shellRuntimeDestroyContext(thread_ctx);
     }
 
     /* Restore signal handler */
@@ -3655,7 +3668,10 @@ static void *shellToolWaiterMain(void *arg) {
     return NULL;
 }
 
-static int shellRunToolInThread(ShellToolEntryFn entry, int argc, char **argv) {
+static int shellRunToolInThread(ShellToolEntryFn entry,
+                                int argc,
+                                char **argv,
+                                bool use_shell_context) {
     if (!entry) {
         return 127;
     }
@@ -3667,6 +3683,7 @@ static int shellRunToolInThread(ShellToolEntryFn entry, int argc, char **argv) {
     context.status = 127;
     context.finished = 0;
     context.main_thread = pthread_self();
+    context.use_shell_context = use_shell_context;
 
     /* Block SIGINT and SIGURG on Main */
     sigset_t new_mask, old_mask;
@@ -3682,7 +3699,15 @@ static int shellRunToolInThread(ShellToolEntryFn entry, int argc, char **argv) {
     pthread_attr_destroy(&attr);
     if (create_rc != 0) {
         pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
-        return entry(argc, argv);
+        if (!use_shell_context) {
+            return entry(argc, argv);
+        }
+        ShellRuntimeState *ctx = shellRuntimeCreateContext();
+        ShellRuntimeState *prev = shellRuntimeActivateContext(ctx);
+        int status = entry(argc, argv);
+        shellRuntimeActivateContext(prev);
+        shellRuntimeDestroyContext(ctx);
+        return status;
     }
 
     /* Spawn waiter */
@@ -3819,11 +3844,16 @@ static Value shellRunToolBuiltin(VM *vm,
         int status = shellSpawnToolProcess(tool_name, argc, argv);
         if (status == kShellToolRunnerUnavailable) {
             if (entry) {
+                bool needs_shell_ctx = (target_kind == FRONTEND_KIND_SHELL);
 #if defined(PSCAL_TARGET_IOS)
-                status = shellRunToolInThread(entry, argc, argv);
+                status = shellRunToolInThread(entry, argc, argv, needs_shell_ctx);
                 shellInvalidateFrontendState(target_kind);
 #else
-                status = entry(argc, argv);
+                if (needs_shell_ctx) {
+                    status = shellRunToolInThread(entry, argc, argv, true);
+                } else {
+                    status = entry(argc, argv);
+                }
                 pascalInvalidateGlobalState();
 #endif
             } else {
@@ -9879,13 +9909,6 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
-#if defined(PSCAL_TARGET_IOS)
-    if (pscalRuntimeVirtualTTYEnabled()) {
-        runtimeError(vm, "fg: job control is not supported on this platform");
-        shellUpdateStatus(1);
-        return makeVoid();
-    }
-#endif
     shellCollectJobs();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "fg", arg_count, args, &index)) {
@@ -9948,13 +9971,6 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
-#if defined(PSCAL_TARGET_IOS)
-    if (pscalRuntimeVirtualTTYEnabled()) {
-        runtimeError(vm, "bg: job control is not supported on this platform");
-        shellUpdateStatus(1);
-        return makeVoid();
-    }
-#endif
     shellCollectJobs();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "bg", arg_count, args, &index)) {
@@ -10102,6 +10118,19 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
     if (converted_valid) {
         freeValue(&converted);
     }
+    return makeVoid();
+}
+
+Value vmBuiltinShellPsThreads(VM *vm, int arg_count, Value *args) {
+    (void)arg_count;
+    (void)args;
+
+    VM *root = vm && vm->threadOwner ? vm->threadOwner : vm;
+    Value stats_json = vmBuiltinThreadStatsJson(root, 0, NULL);
+    const char *text = (stats_json.type == TYPE_STRING && stats_json.s_val) ? stats_json.s_val : "[]";
+    printf("%s\n", text);
+    freeValue(&stats_json);
+    shellUpdateStatus(0);
     return makeVoid();
 }
 

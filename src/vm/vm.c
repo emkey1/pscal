@@ -1889,13 +1889,38 @@ static void joinThread(VM* vm, int id) {
     if (!vm) {
         return;
     }
-    if (!vmThreadTakeResult(vm, id, NULL, true, NULL, true)) {
-        joinThreadInternal(vm, id);
-    }
+    joinThreadInternal(vm, id);
 }
 
 bool vmJoinThreadById(VM* vm, int id) {
-    return joinThreadInternal(vm, id);
+    joinThread(vm, id);
+
+    /* Ensure any pending status/result is consumed so the worker can be reused. */
+    if (vm && id > 0 && id < VM_MAX_THREADS) {
+        vmThreadTakeResult(vm, id, NULL, false, NULL, true);
+        Thread *thread = &vm->threads[id];
+        if (thread && thread->inPool && thread->syncInitialized) {
+            bool mark_ready = false;
+            pthread_mutex_lock(&thread->resultMutex);
+            if (!thread->statusReady) {
+                thread->statusFlag = true;
+                thread->statusReady = false;
+                thread->statusConsumed = true;
+                thread->resultConsumed = true;
+                mark_ready = true;
+            } else if (thread->statusConsumed && (!thread->resultReady || thread->resultConsumed)) {
+                mark_ready = true;
+            }
+            pthread_mutex_unlock(&thread->resultMutex);
+            if (mark_ready) {
+                pthread_mutex_lock(&thread->stateMutex);
+                thread->readyForReuse = true;
+                pthread_cond_broadcast(&thread->stateCond);
+                pthread_mutex_unlock(&thread->stateMutex);
+            }
+        }
+    }
+    return true;
 }
 
 bool vmThreadAssignName(VM* vm, int threadId, const char* name) {
@@ -3987,6 +4012,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 
     vm->owningThread = NULL;
     vm->threadId = 0;
+    vm->frontendContext = NULL;
 
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
@@ -4065,6 +4091,8 @@ void freeVM(VM* vm) {
         vm->jobQueue = NULL;
     }
     pthread_mutex_destroy(&vm->threadRegistryLock);
+
+    vm->frontendContext = NULL;
 
     if (vm->mutexOwner == vm) {
         for (int i = 0; i < vm->mutexCount; i++) {
