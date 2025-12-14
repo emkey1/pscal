@@ -1,5 +1,8 @@
 # Pscal
 
+iOS/iPadOS Port available in TestFlight Currently...
+https://testflight.apple.com/join/M6bvAXeX
+
 Pscal started out as a Pascal interpreter, written for the most part with the help of various AI's.  Most notably Google's Gemini 2.5 Pro and more recently OpenAI's GPT5 in conjunction with their codex.  It has quickly evolved into a VM with multiple front ends, documented below.
 
 There are currently four front end languages:
