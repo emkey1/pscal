@@ -896,27 +896,34 @@ static void *shellSignalWatchThread(void *arg) {
     return NULL;
 }
 
-static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
+static bool shellStartSignalWatch(const pid_t *pids, size_t count) {
+    if (!pids || count == 0) {
+        return false;
+    }
+    ShellSigWatchCtx *ctx = (ShellSigWatchCtx *)calloc(1, sizeof(ShellSigWatchCtx));
+    if (!ctx) {
+        return false;
+    }
+    ctx->pids = pids;
+    ctx->count = count;
     pthread_t sig_thread;
-    bool sig_thread_started = false;
+    if (pthread_create(&sig_thread, NULL, shellSignalWatchThread, ctx) == 0) {
+        pthread_detach(sig_thread);
+        return true;
+    }
+    free(ctx);
+    return false;
+}
+
+static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool watch_signals, bool *out_stopped) {
     pid_t watch_list[1] = { pid };
 
-    if (allow_stop
+    if (watch_signals && allow_stop
 #if defined(PSCAL_TARGET_IOS)
         && pscalRuntimeVirtualTTYEnabled()
 #endif
     ) {
-        ShellSigWatchCtx *ctx = (ShellSigWatchCtx *)calloc(1, sizeof(ShellSigWatchCtx));
-        if (ctx) {
-            ctx->pids = watch_list;
-            ctx->count = 1;
-            if (pthread_create(&sig_thread, NULL, shellSignalWatchThread, ctx) == 0) {
-                sig_thread_started = true;
-                pthread_detach(sig_thread);
-            } else {
-                free(ctx);
-            }
-        }
+        (void)shellStartSignalWatch(watch_list, 1);
     }
 
     if (out_stopped) {
@@ -1591,6 +1598,14 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             shellJobControlSetForeground(job_pgid);
         }
 
+#if defined(PSCAL_TARGET_IOS)
+        bool watcher_started = false;
+        if (job_control && pscalRuntimeVirtualTTYEnabled() &&
+            ctx->pids && ctx->launched > 0) {
+            watcher_started = shellStartSignalWatch(ctx->pids, ctx->launched);
+        }
+#endif
+
         for (size_t i = 0; i < ctx->launched; ++i) {
             pid_t pid = ctx->pids[i];
             if (pid <= 0) {
@@ -1614,7 +1629,13 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             }
             bool stopped = false;
             int status = 0;
-            int err = shellWaitPid(pid, &status, job_control, &stopped);
+            int err = shellWaitPid(pid, &status, job_control,
+#if defined(PSCAL_TARGET_IOS)
+                                   !watcher_started,
+#else
+                                   true,
+#endif
+                                   &stopped);
             if (err != 0) {
                 continue;
             }
@@ -3114,7 +3135,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             if (job_control) {
                 shellJobControlSetForeground(child);
             }
-            shellWaitPid(child, &status, job_control, &stopped);
+            shellWaitPid(child, &status, job_control, true, &stopped);
             if (job_control) {
                 shellJobControlRestoreForeground();
             }
