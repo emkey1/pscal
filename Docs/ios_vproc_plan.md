@@ -43,14 +43,12 @@ Goal: keep exsh interactive on iOS while background tasks run, by giving each pi
 ## Progress
 - [x] Milestone 1 (scaffolding, fd tables, unit coverage)
 - [x] Milestone 2 (syscall shims + translation tests)
-- [ ] Milestone 3 (pipeline integration & background redirs)
-- [ ] Milestone 4 (job control, signals, lps/kill on synthetic PIDs)
+- [x] Milestone 3 (pipeline integration & background redirs; iOS pipelines now use vproc pipes/redirs and keep the prompt live)
+- [x] Milestone 4 (job control, signals, lps/kill on synthetic PIDs; stable job IDs, `%N` kill, labeled `lps`, synthetic wait/fg/bg)
 - [ ] Milestone 5 (polish/docs)
 
 Active focus:
-- Ensure built-in frontends (clike/pascal/rea/pscalvm/pscaljson2bc/exsh) dispatch inline on iOS so background jobs don’t return 127 and the prompt stays responsive.
-- Finish tying shell job-control builtins (fg/bg/wait/kill) and `lps` listings to the synthetic vproc table; shell-facing `kill`/friends must target synthetic PIDs instead of host processes. Kill/wait/fg/bg now use vproc shims for synthetic PIDs, and `%N` jobspecs resolve against synthetic task snapshots.
-- Auto-register any untracked vproc tasks into the shell job table so `jobs`/`fg`/`bg` always see synthetic processes even if registration was skipped.
-- Ctrl+C/Z on iOS now raise SIGINT/SIGTSTP into the active vproc pipeline; remaining: foreground/background state transitions for Ctrl+Z without a real SIGTSTP stop.
-- Ensure vproc kill attempts thread cancellation so blocking syscalls (sleep, etc.) terminate promptly; lps now shows placeholder names for tasks without recorded commands.
-- SIGTSTP on iOS now forces a clean exit from the current builtin (sets status 128+SIGTSTP) instead of refusing Ctrl+Z outright, giving a minimal suspend/abort path in virtual TTY mode.
+- Tighten Ctrl+C/Z parity with iSH: ensure foreground vproc pipelines interrupt/stop immediately (no deferred stop until completion).
+- Harden fg/bg/wait state transitions in virtual TTY mode so the shell never recurses/crashes when contexts swap.
+- Add regression coverage for job-number stability (IDs should not renumber when intermediate jobs exit) and for `kill %N`/Ctrl+Z behaviour.
+- Trim remaining noisy logging and document iOS-only limitations (no fork/exec/pty).

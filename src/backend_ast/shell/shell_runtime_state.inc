@@ -1459,7 +1459,9 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .readonly_error_name = NULL
 };
 
-static __thread ShellRuntimeState *gShellRuntimeCtx = NULL;
+/* Default to the global runtime state to avoid pathological recursion when
+ * shellGetContext() is first called before an explicit activation. */
+static __thread ShellRuntimeState *gShellRuntimeCtx = &gShellRuntimeDefault;
 static __thread ShellRuntimeState *gShellContextStack[8] = {0};
 static __thread size_t gShellContextDepth = 0;
 static __thread bool gShellCurrentBuiltinBackground = false;
@@ -1488,12 +1490,9 @@ static ShellRuntimeState *shellGetContext(void) {
         return &gShellRuntimeDefault;
     }
     resolving = true;
-    if (gShellRuntimeCtx) {
-        resolving = false;
-        return gShellRuntimeCtx;
-    }
+    ShellRuntimeState *ctx = gShellRuntimeCtx ? gShellRuntimeCtx : &gShellRuntimeDefault;
     resolving = false;
-    return &gShellRuntimeDefault;
+    return ctx;
 }
 
 static void shellSetContext(ShellRuntimeState *ctx) {
