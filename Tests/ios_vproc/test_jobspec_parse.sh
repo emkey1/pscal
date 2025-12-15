@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN="${ROOT}/build/bin/exsh"
-TMP_ROOT="${ROOT}/tmp"
+TMP_ROOT="${HOME:-/tmp}/jobspec_tmp"
 
 mkdir -p "${TMP_ROOT}"
 
@@ -42,7 +42,7 @@ jobs
   local script="${TMP_ROOT}/jobspec_case1.exsh"
   printf "%s\n" "${body}" > "${script}"
   local output
-  output=$("${BIN}" --norc --noprofile "${script}")
+  output=$("${BIN}" --norc --noprofile "${script}") || fail "case_kill_percent_one: exsh status $?"
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--K1--")
@@ -74,7 +74,7 @@ kill %3 || true
   local script="${TMP_ROOT}/jobspec_case2.exsh"
   printf "%s\n" "${body}" > "${script}"
   local output
-  output=$("${BIN}" --norc --noprofile "${script}")
+  output=$("${BIN}" --norc --noprofile "${script}") || fail "case_kill_middle_preserves_ids: exsh status $?"
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--Kmid--")
