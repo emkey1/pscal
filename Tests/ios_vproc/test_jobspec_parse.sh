@@ -39,10 +39,8 @@ sleep 1
 echo --J3--
 jobs
 "
-  local script="${TMP_ROOT}/jobspec_case1.exsh"
-  printf "%s\n" "${body}" > "${script}"
   local output
-  output=$("${BIN}" --no-cache "${script}") || fail "case_kill_percent_one: exsh status $?"
+  output=$("${BIN}" -c "${body}") || fail "case_kill_percent_one: exsh status $?"
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--K1--")
@@ -71,10 +69,8 @@ echo --Kall--
 kill %1 || true
 kill %3 || true
 "
-  local script="${TMP_ROOT}/jobspec_case2.exsh"
-  printf "%s\n" "${body}" > "${script}"
   local output
-  output=$("${BIN}" --no-cache "${script}") || fail "case_kill_middle_preserves_ids: exsh status $?"
+  output=$("${BIN}" -c "${body}") || fail "case_kill_middle_preserves_ids: exsh status $?"
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--Kmid--")
