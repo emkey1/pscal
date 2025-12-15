@@ -493,9 +493,103 @@ void vprocMarkExit(VProc *vp, int status) {
         entry->exited = true;
         entry->stopped = false;
         entry->stop_signo = 0;
+        entry->zombie = true;
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+void vprocSetParent(int pid, int parent_pid) {
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        entry->parent_pid = parent_pid;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+int vprocSetPgid(int pid, int pgid) {
+    if (pid <= 0 || pgid <= 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    int rc = -1;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        entry->pgid = pgid;
+        rc = 0;
+    } else {
+        errno = ESRCH;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return rc;
+}
+
+int vprocSetSid(int pid, int sid) {
+    if (pid <= 0 || sid <= 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    int rc = -1;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        entry->sid = sid;
+        rc = 0;
+    } else {
+        errno = ESRCH;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return rc;
+}
+
+int vprocGetPgid(int pid) {
+    int pgid = -1;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        pgid = entry->pgid;
+    } else {
+        errno = ESRCH;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return pgid;
+}
+
+int vprocGetSid(int pid) {
+    int sid = -1;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        sid = entry->sid;
+    } else {
+        errno = ESRCH;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return sid;
+}
+
+static void vprocClearEntryLocked(VProcTaskEntry *entry) {
+    if (!entry) {
+        return;
+    }
+    if (entry->label) {
+        free(entry->label);
+        entry->label = NULL;
+    }
+    memset(entry->comm, 0, sizeof(entry->comm));
+    entry->pid = 0;
+    entry->tid = 0;
+    entry->parent_pid = 0;
+    entry->pgid = 0;
+    entry->sid = 0;
+    entry->status = 0;
+    entry->exited = false;
+    entry->stopped = false;
+    entry->stop_signo = 0;
+    entry->zombie = false;
+    entry->job_id = 0;
 }
 
 size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
@@ -559,10 +653,12 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
         *status_out = status;
     }
 
-    /* Only clear tracking on exit; stopped tasks remain in the table so they
-     * can be continued and waited on again. */
     if (entry->exited) {
         entry->zombie = true;
+        if (!allow_stop) {
+            /* Reap zombies on blocking waits; leave them for non-blocking/stop waits. */
+            vprocClearEntryLocked(entry);
+        }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return pid;
