@@ -20,6 +20,7 @@
 #undef waitpid
 #undef kill
 #undef getpid
+#undef pthread_create
 
 #define read  vprocReadShim
 #define write vprocWriteShim
@@ -35,6 +36,7 @@
 #define waitpid vprocWaitPidShim
 #define kill  vprocKillShim
 #define getpid vprocGetPidShim
+#define pthread_create vprocPthreadCreateShim
 
 #endif /* !PSCAL_IOS_SHIM_H */
 

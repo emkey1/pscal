@@ -59,6 +59,11 @@ int vprocClose(VProc *vp, int fd);
 int vprocPipe(VProc *vp, int pipefd[2]);
 /* Adopt an existing host fd into the vproc table, returning the vproc-local fd. */
 int vprocAdoptHostFd(VProc *vp, int host_fd);
+/* Inherit the current vproc into new threads created via pthread_create shim. */
+int vprocPthreadCreateShim(pthread_t *thread,
+                           const pthread_attr_t *attr,
+                           void *(*start_routine)(void *),
+                           void *arg);
 int vprocOpenAt(VProc *vp, const char *path, int flags, int mode);
 int vprocSetWinsize(VProc *vp, int cols, int rows);
 int vprocGetWinsize(VProc *vp, VProcWinsize *out);

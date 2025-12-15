@@ -59,6 +59,8 @@ struct VProc {
     int stdin_fd;
     int stdout_fd;
     int stderr_fd;
+    int stdout_host_fd;
+    int stderr_host_fd;
     VProcWinsize winsize;
     int pid;
 };
@@ -90,6 +92,12 @@ typedef struct {
     pthread_mutex_t mu;
     pthread_cond_t cv;
 } VProcTaskTable;
+
+typedef struct {
+    void *(*start_routine)(void *);
+    void *arg;
+    VProc *vp;
+} VProcThreadStartCtx;
 
 static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 
@@ -293,6 +301,8 @@ VProc *vprocCreate(const VProcOptions *opts) {
     vp->stdin_fd = 0;
     vp->stdout_fd = 1;
     vp->stderr_fd = 2;
+    vp->stdout_host_fd = stdout_src;
+    vp->stderr_host_fd = stderr_src;
     return vp;
 }
 
@@ -307,11 +317,22 @@ void vprocDestroy(VProc *vp) {
         entry->label = NULL;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+    /* Close only the vproc-owned fds; do not close the saved host stdio fds. */
     for (size_t i = 0; i < vp->capacity; ++i) {
-        if (vp->entries[i].host_fd >= 0) {
+        if (vp->entries[i].host_fd >= 0 &&
+            vp->entries[i].host_fd != vp->stdout_host_fd &&
+            vp->entries[i].host_fd != vp->stderr_host_fd) {
             close(vp->entries[i].host_fd);
-            vp->entries[i].host_fd = -1;
         }
+        vp->entries[i].host_fd = -1;
+    }
+    if (vp->stdout_host_fd >= 0) {
+        close(vp->stdout_host_fd);
+        vp->stdout_host_fd = -1;
+    }
+    if (vp->stderr_host_fd >= 0) {
+        close(vp->stderr_host_fd);
+        vp->stderr_host_fd = -1;
     }
     free(vp->entries);
     vp->entries = NULL;
@@ -328,6 +349,39 @@ void vprocDeactivate(void) {
 
 VProc *vprocCurrent(void) {
     return gVProcCurrent;
+}
+
+static void *vprocThreadTrampoline(void *arg) {
+    VProcThreadStartCtx *ctx = (VProcThreadStartCtx *)arg;
+    VProc *vp = ctx ? ctx->vp : NULL;
+    if (vp) {
+        vprocActivate(vp);
+        vprocRegisterThread(vp, pthread_self());
+    }
+    void *res = NULL;
+    if (ctx && ctx->start_routine) {
+        res = ctx->start_routine(ctx->arg);
+    }
+    free(ctx);
+    if (vp) {
+        vprocDeactivate();
+    }
+    return res;
+}
+
+int vprocPthreadCreateShim(pthread_t *thread,
+                           const pthread_attr_t *attr,
+                           void *(*start_routine)(void *),
+                           void *arg) {
+    VProcThreadStartCtx *ctx = (VProcThreadStartCtx *)calloc(1, sizeof(VProcThreadStartCtx));
+    if (!ctx) {
+        errno = ENOMEM;
+        return ENOMEM;
+    }
+    ctx->start_routine = start_routine;
+    ctx->arg = arg;
+    ctx->vp = vprocCurrent();
+    return pthread_create(thread, attr, vprocThreadTrampoline, ctx);
 }
 
 int vprocTranslateFd(VProc *vp, int fd) {
@@ -865,6 +919,9 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     int host = shimTranslate(fd, 1);
     if (host < 0) {
         return -1;
+    }
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr, "[vwrite] fd=%d -> host=%d count=%zu\n", fd, host, count);
     }
     return write(host, buf, count);
 }

@@ -1100,6 +1100,11 @@ typedef struct {
 
 static void *shellPipelineTeeThread(void *arg) {
     ShellPipelineTee *tee = (ShellPipelineTee *)arg;
+    bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (dbg) {
+        fprintf(stderr, "[tee] start read_fd=%d file_fd=%d mirror_fd=%d\n",
+                tee->read_fd, tee->file_fd, tee->mirror_fd);
+    }
     const size_t chunk = 4096;
     char *tmp = malloc(chunk);
     if (!tmp) {
@@ -1127,6 +1132,10 @@ static void *shellPipelineTeeThread(void *arg) {
             if (w < 0) {
                 if (errno == EINTR) continue;
                 tee->err = errno ? errno : EIO;
+                if (dbg) {
+                    fprintf(stderr, "[tee] write file_fd=%d error=%s\n",
+                            tee->file_fd, strerror(errno));
+                }
                 goto done;
             }
             written += w;
@@ -1138,6 +1147,10 @@ static void *shellPipelineTeeThread(void *arg) {
                 if (e < 0) {
                     if (errno == EINTR) continue;
                     /* Do not fail the tee on mirror errors; keep file writes authoritative. */
+                    if (dbg) {
+                        fprintf(stderr, "[tee] mirror write fd=%d error=%s\n",
+                                tee->mirror_fd, strerror(errno));
+                    }
                     break;
                 }
                 echoed += e;
@@ -1152,6 +1165,9 @@ done:
         close(tee->mirror_fd);
     }
     free(tmp);
+    if (dbg) {
+        fprintf(stderr, "[tee] exit err=%d\n", tee->err);
+    }
     return NULL;
 }
 
@@ -1356,7 +1372,6 @@ static void *shellInProcessBackgroundMain(void *arg) {
         int vfd = vprocAdoptHostFd(vp, host_fd);
         if (vfd >= 0) {
             vm_stdout = vfd;
-            close(host_fd);
         }
     }
     if (vm_stderr >= 0) {
@@ -1364,13 +1379,13 @@ static void *shellInProcessBackgroundMain(void *arg) {
         int vfd = vprocAdoptHostFd(vp, host_fd);
         if (vfd >= 0) {
             vm_stderr = vfd;
-            close(host_fd);
         }
     }
     vprocActivate(vp);
 #endif
     gShellBackgroundWorkerActive = true;
-    bg_status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, vm_stdout, vm_stderr, false);
+    /* Apply exec redirs so background jobs honor user-specified &>, >>, etc. */
+    bg_status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, vm_stdout, vm_stderr, true);
     gShellBackgroundWorkerActive = false;
 
 cleanup:
@@ -1908,6 +1923,7 @@ static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups, size_t coun
 static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                                        ShellExecRedirBackup **out_backups,
                                        size_t *out_count) {
+    bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (cmd && cmd->background);
     if (out_backups) {
         *out_backups = NULL;
     }
@@ -1918,6 +1934,9 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
         return true;
     }
 
+    if (dbg) {
+        fprintf(stderr, "[redir] begin count=%zu\n", cmd ? cmd->redir_count : 0);
+    }
     ShellExecRedirBackup *backups = NULL;
     size_t backup_count = 0;
     size_t backup_capacity = 0;
@@ -1942,6 +1961,11 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
         }
         switch (redir->kind) {
             case SHELL_RUNTIME_REDIR_OPEN: {
+                if (dbg) {
+                    fprintf(stderr, "[redir] open fd=%d path=%s flags=0x%x mode=0%o\n",
+                            target_fd, redir->path ? redir->path : "<null>",
+                            redir->flags, redir->mode);
+                }
                 if (!redir->path) {
                     runtimeError(vm, "exec: missing redirection target");
                     shellUpdateStatus(1);
@@ -1959,12 +1983,18 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                 int fd = open(open_path, redir->flags, redir->mode);
                 if (fd < 0) {
                     int err = errno;
+                    if (dbg) {
+                        fprintf(stderr, "[redir] open failed: %s\n", strerror(err));
+                    }
                     runtimeError(vm, "exec: %s: %s", redir->path, strerror(err));
                     shellUpdateStatus(err ? err : 1);
                     goto redir_error;
                 }
                 if (dup2(fd, target_fd) < 0) {
                     int err = errno;
+                    if (dbg) {
+                        fprintf(stderr, "[redir] dup2 %d->%d failed: %s\n", fd, target_fd, strerror(err));
+                    }
                     runtimeError(vm, "exec: %s: %s", redir->path, strerror(err));
                     shellUpdateStatus(err ? err : 1);
                     close(fd);
@@ -1978,6 +2008,10 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                 break;
             }
             case SHELL_RUNTIME_REDIR_DUP: {
+                if (dbg) {
+                    fprintf(stderr, "[redir] dup fd=%d target=%d close=%d\n",
+                            redir->dup_target_fd, target_fd, (int)redir->close_target);
+                }
                 if (target_fd == STDOUT_FILENO && redir->dup_target_fd == STDOUT_FILENO && stdout_redirected) {
                     target_fd = STDERR_FILENO;
                 }
@@ -1997,6 +2031,10 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     }
                     if (dup2(redir->dup_target_fd, target_fd) < 0) {
                         int err = errno;
+                        if (dbg) {
+                            fprintf(stderr, "[redir] dup2 %d->%d failed: %s\n",
+                                    redir->dup_target_fd, target_fd, strerror(err));
+                        }
                         runtimeError(vm, "exec: failed to duplicate fd %d: %s",
                                      redir->dup_target_fd, strerror(err));
                         shellUpdateStatus(err ? err : 1);
@@ -2525,6 +2563,11 @@ cleanup:
                 (int)apply_exec_redirs,
                 stdin_fd, stdout_fd, stderr_fd);
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (tool_dbg) {
+        fprintf(stderr, "[run-builtin] final fd map stdout_fd=%d stderr_fd=%d\n", stdout_fd, stderr_fd);
+    }
+#endif
     if (applied_redirs) {
         shellRestoreExecRedirections(backups, backup_count);
     } else if (backups) {
