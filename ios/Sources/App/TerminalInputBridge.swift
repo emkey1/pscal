@@ -216,6 +216,13 @@ final class TerminalKeyInputView: UITextView {
             decrease.wantsPriorityOverSystemBehavior = true
         }
         commands.append(contentsOf: [increase1, increase2, decrease])
+        let escape = UIKeyCommand(input: UIKeyCommand.inputEscape,
+                                  modifierFlags: [],
+                                  action: #selector(handleEscapeKey))
+        if #available(iOS 15.0, *) {
+            escape.wantsPriorityOverSystemBehavior = true
+        }
+        commands.append(escape)
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
@@ -381,6 +388,10 @@ final class TerminalKeyInputView: UITextView {
             break
         }
         return false
+    }
+
+    @objc private func handleEscapeKey() {
+        onInput?("\u{1B}")
     }
 
     private func buildControlCommands() -> [UIKeyCommand] {
