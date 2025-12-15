@@ -668,8 +668,56 @@ int vprocKillShim(pid_t pid, int sig) {
     if (pid == 0) {
         return kill(pid, sig);
     }
-    int target = (pid < 0) ? -pid : pid;
+    bool target_group = (pid < 0);
+    int target = target_group ? -pid : pid;
+    int rc = 0;
+
     pthread_mutex_lock(&gVProcTasks.mu);
+    if (target_group) {
+        /* Deliver to all tasks in the target pgid. */
+        bool delivered = false;
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (!entry || entry->pid <= 0) {
+                continue;
+            }
+            if (entry->pgid != target) {
+                continue;
+            }
+            delivered = true;
+            bool stop_signal = (sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU);
+            bool cont_signal = (sig == SIGCONT);
+            if (entry->tid && !stop_signal && !cont_signal) {
+                pthread_kill(entry->tid, sig);
+                pthread_cancel(entry->tid);
+            } else if (entry->tid && stop_signal) {
+                pthread_kill(entry->tid, sig);
+            }
+            if (stop_signal) {
+                entry->stopped = true;
+                entry->exited = false;
+                entry->stop_signo = sig;
+                entry->status = 128 + sig;
+            } else if (cont_signal) {
+                entry->stopped = false;
+                entry->stop_signo = 0;
+            } else {
+                entry->status = 128 + sig;
+                entry->exited = true;
+                entry->stopped = false;
+                entry->stop_signo = 0;
+                entry->zombie = true;
+            }
+        }
+        pthread_cond_broadcast(&gVProcTasks.cv);
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        if (!delivered) {
+            errno = ESRCH;
+            rc = -1;
+        }
+        return rc;
+    }
+
     VProcTaskEntry *entry = vprocTaskFindLocked(target);
     if (!entry || entry->pid <= 0) {
         pthread_mutex_unlock(&gVProcTasks.mu);
@@ -702,6 +750,7 @@ int vprocKillShim(pid_t pid, int sig) {
         entry->exited = true;
         entry->stopped = false;
         entry->stop_signo = 0;
+        entry->zombie = true;
     }
     pthread_cond_broadcast(&gVProcTasks.cv);
     pthread_mutex_unlock(&gVProcTasks.mu);
