@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN="${ROOT}/build/bin/exsh"
+TMP_ROOT="${ROOT}/tmp"
+
+mkdir -p "${TMP_ROOT}"
 
 if [[ ! -x "${BIN}" ]]; then
   echo "exsh binary not found at ${BIN}" >&2
@@ -18,7 +21,7 @@ jobs_block() {
 }
 
 case_kill_percent_one() {
-  local script="
+  local body="
 set -e
 set -m
 echo --J1--
@@ -36,8 +39,10 @@ sleep 1
 echo --J3--
 jobs
 "
+  local script="${TMP_ROOT}/jobspec_case1.exsh"
+  printf "%s\n" "${body}" > "${script}"
   local output
-  output=$("${BIN}" --norc --noprofile -c "${script}")
+  output=$("${BIN}" --norc --noprofile "${script}")
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--K1--")
@@ -49,7 +54,7 @@ jobs
 }
 
 case_kill_middle_preserves_ids() {
-  local script="
+  local body="
 set -e
 set -m
 sleep 60 &
@@ -66,8 +71,10 @@ echo --Kall--
 kill %1 || true
 kill %3 || true
 "
+  local script="${TMP_ROOT}/jobspec_case2.exsh"
+  printf "%s\n" "${body}" > "${script}"
   local output
-  output=$("${BIN}" --norc --noprofile -c "${script}")
+  output=$("${BIN}" --norc --noprofile "${script}")
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--Kmid--")
