@@ -393,6 +393,7 @@ static void assert_stop_and_continue_round_trip(void) {
     assert(vp);
     int pid = vprocPid(vp);
     assert(pid > 0);
+    vprocSetJobId(pid, 42);
 
     /* Stop the synthetic process and observe WIFSTOPPED. */
     assert(vprocKillShim(pid, SIGTSTP) == 0);
@@ -407,6 +408,8 @@ static void assert_stop_and_continue_round_trip(void) {
     assert(vprocWaitPidShim(pid, &status, 0) == pid);
     assert(WIFEXITED(status));
     assert(WEXITSTATUS(status) == 5);
+    /* Job id should be cleared once the task fully exits. */
+    assert(vprocGetJobId(pid) == 0);
 
     vprocDestroy(vp);
 }

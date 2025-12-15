@@ -555,6 +555,7 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
             free(entry->label);
             entry->label = NULL;
         }
+        entry->job_id = 0;
         entry->pid = 0;
         entry->tid = 0;
         entry->exited = true;
