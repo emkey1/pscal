@@ -50,5 +50,5 @@ Goal: keep exsh interactive on iOS while background tasks run, by giving each pi
 Active focus:
 - Tighten Ctrl+C/Z parity with iSH: ensure foreground vproc pipelines interrupt/stop immediately (no deferred stop until completion).
 - Harden fg/bg/wait state transitions in virtual TTY mode so the shell never recurses/crashes when contexts swap.
-- Add regression coverage for job-number stability (IDs should not renumber when intermediate jobs exit) and for `kill %N`/Ctrl+Z behaviour.
+- Add regression coverage for `kill %N`/Ctrl+Z behaviour (job-number stability tests for vproc IDs now exist).
 - Trim remaining noisy logging and document iOS-only limitations (no fork/exec/pty).
