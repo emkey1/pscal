@@ -558,18 +558,34 @@ int vprocKillShim(pid_t pid, int sig) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         return kill(pid, sig);
     }
-    /* Try to cancel the target thread to stop blocking syscalls (sleep, etc.). */
-    if (entry->tid) {
+    bool stop_signal = (sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU);
+    bool cont_signal = (sig == SIGCONT);
+
+    if (entry->tid && !stop_signal && !cont_signal) {
+        /* Try to cancel the target thread to stop blocking syscalls (sleep, etc.). */
         pthread_kill(entry->tid, sig);
         pthread_cancel(entry->tid);
+    } else if (entry->tid && stop_signal) {
+        pthread_kill(entry->tid, sig);
     }
-    /* Simulate signal delivery for synthetic tasks: mark exit immediately and
-     * wake any waiters. This avoids terminating the entire process when using
-     * pthread_kill with SIGTERM/SIGKILL semantics on a shared process. */
-    entry->status = 128 + sig;
-    entry->exited = true;
-    entry->stopped = false;
-    entry->stop_signo = 0;
+
+    if (stop_signal) {
+        entry->stopped = true;
+        entry->exited = false;
+        entry->stop_signo = sig;
+        entry->status = 128 + sig;
+    } else if (cont_signal) {
+        entry->stopped = false;
+        entry->stop_signo = 0;
+    } else {
+        /* Simulate signal delivery for synthetic tasks: mark exit immediately and
+         * wake any waiters. This avoids terminating the entire process when using
+         * pthread_kill with SIGTERM/SIGKILL semantics on a shared process. */
+        entry->status = 128 + sig;
+        entry->exited = true;
+        entry->stopped = false;
+        entry->stop_signo = 0;
+    }
     pthread_cond_broadcast(&gVProcTasks.cv);
     pthread_mutex_unlock(&gVProcTasks.mu);
     return 0;

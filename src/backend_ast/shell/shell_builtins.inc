@@ -10018,9 +10018,15 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
                      spec_text ? spec_text : "job");
         return false;
     }
-    job->last_status = 128 + signo;
-    job->running = false;
-    job->stopped = false;
+    if (signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU) {
+        job->last_status = 128 + signo;
+        job->running = false;
+        job->stopped = true;
+    } else {
+        job->last_status = 128 + signo;
+        job->running = false;
+        job->stopped = false;
+    }
     return true;
 }
 
