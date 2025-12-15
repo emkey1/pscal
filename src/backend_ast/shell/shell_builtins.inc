@@ -10312,26 +10312,15 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
     if (job_control) {
         shellJobControlSetForeground(job->pgid);
     }
-    if (job->pgid > 0) {
-        for (size_t i = 0; i < job->pid_count; ++i) {
-            if (job->pids[i] > 0) {
+    /* Continue every pid; we do not rely on pgid because vproc uses thread ids. */
+    for (size_t i = 0; i < job->pid_count; ++i) {
+        pid_t pid = job->pids[i];
+        if (pid > 0) {
 #if defined(PSCAL_TARGET_IOS)
-                vprocKillShim(job->pids[i], SIGCONT);
+            vprocKillShim(pid, SIGCONT);
 #else
-                kill(job->pids[i], SIGCONT);
+            kill(pid, SIGCONT);
 #endif
-            }
-        }
-    } else {
-        for (size_t i = 0; i < job->pid_count; ++i) {
-            pid_t pid = job->pids[i];
-            if (pid > 0) {
-#if defined(PSCAL_TARGET_IOS)
-                vprocKillShim(pid, SIGCONT);
-#else
-                kill(pid, SIGCONT);
-#endif
-            }
         }
     }
     job->stopped = false;
@@ -10379,26 +10368,14 @@ Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
-    if (job->pgid > 0) {
-        for (size_t i = 0; i < job->pid_count; ++i) {
-            if (job->pids[i] > 0) {
+    for (size_t i = 0; i < job->pid_count; ++i) {
+        pid_t pid = job->pids[i];
+        if (pid > 0) {
 #if defined(PSCAL_TARGET_IOS)
-                vprocKillShim(job->pids[i], SIGCONT);
+            vprocKillShim(pid, SIGCONT);
 #else
-                kill(job->pids[i], SIGCONT);
+            kill(pid, SIGCONT);
 #endif
-            }
-        }
-    } else {
-        for (size_t i = 0; i < job->pid_count; ++i) {
-            pid_t pid = job->pids[i];
-            if (pid > 0) {
-#if defined(PSCAL_TARGET_IOS)
-                vprocKillShim(pid, SIGCONT);
-#else
-                kill(pid, SIGCONT);
-#endif
-            }
         }
     }
     job->stopped = false;
