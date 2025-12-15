@@ -2987,6 +2987,13 @@ static bool shellParseJobSpecifier(VM *vm, const char *name, Value spec, size_t 
 
 static bool shellResolveJobIndex(VM *vm, const char *name, int arg_count, Value *args, size_t *out_index) {
     size_t visible_count = shellJobVisibleCount();
+#if defined(PSCAL_TARGET_IOS)
+    if (visible_count == 0) {
+        /* If jobs were not registered, try to mirror from vproc snapshots. */
+        shellCollectJobs();
+        visible_count = shellJobVisibleCount();
+    }
+#endif
     if (arg_count == 0) {
         if (visible_count == 0) {
             runtimeError(vm, "%s: no current job", name);
@@ -3007,7 +3014,16 @@ static bool shellResolveJobIndex(VM *vm, const char *name, int arg_count, Value 
         return false;
     }
 
+    if (shellParseJobSpecifier(vm, name, args[0], out_index)) {
+        return true;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    /* One more attempt after refreshing vproc snapshot. */
+    shellCollectJobs();
     return shellParseJobSpecifier(vm, name, args[0], out_index);
+#else
+    return false;
+#endif
 }
 
 static void shellParseMetadata(const char *meta, ShellCommand *cmd) {
