@@ -3891,6 +3891,31 @@ static Value shellRunToolBuiltin(VM *vm,
                                  int arg_count,
                                  Value *args) {
     fprintf(stderr, "[tool-dispatch] name=%s argc=%d\n", tool_name ? tool_name : "<null>", arg_count + 1);
+#if defined(PSCAL_TARGET_IOS)
+    /* Special-case exsh: on iOS we cannot exec a new process, so run exsh_main inline
+     * with the provided arguments to preserve -c/script execution. */
+    if (tool_name && strcmp(tool_name, "exsh") == 0 && entry == exsh_main) {
+        int argc = arg_count + 1;
+        char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+        if (!argv) {
+            shellUpdateStatus(127);
+            return makeVoid();
+        }
+        argv[0] = strdup("exsh");
+        for (int i = 0; i < arg_count; ++i) {
+            const Value *v = &args[i];
+            const char *s = (v->type == TYPE_STRING && v->s_val) ? v->s_val : "";
+            argv[i + 1] = strdup(s);
+        }
+        int status = exsh_main(argc, argv);
+        for (int i = 0; i <= argc; ++i) {
+            free(argv[i]);
+        }
+        free(argv);
+        shellUpdateStatus(status);
+        return makeVoid();
+    }
+#endif
     FrontendKind previous_kind = frontendPushKind(target_kind);
     if (!entry) {
         runtimeError(vm, "%s: tool entrypoint unavailable", tool_name);
