@@ -225,6 +225,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var skipRcNextStart: Bool = false
     private var promptKickPending: Bool = true
     private var forceRestartPending: Bool = false
+    private var shellContext: UnsafeMutableRawPointer?
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -281,6 +282,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
+    deinit {
+        if let ctx = shellContext {
+            PSCALRuntimeSetShellContext(nil, 0)
+            PSCALRuntimeDestroyShellContext(ctx)
+        }
+    }
+
     func sendPasted(_ text: String) {
         guard !text.isEmpty else { return }
         let wrapped: String
@@ -328,6 +336,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
             setenv("EXSH_SKIP_RC", "1", 1)
         } else {
             unsetenv("EXSH_SKIP_RC")
+        }
+        if shellContext == nil {
+            shellContext = PSCALRuntimeCreateShellContext()
+        }
+        if let ctx = shellContext {
+            PSCALRuntimeSetShellContext(ctx, 0)
         }
         stateQueue.async { self.promptKickPending = true }
         GPSDeviceProvider.shared.start()

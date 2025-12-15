@@ -50,6 +50,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
+#include <fcntl.h>
 #ifdef SDL
 #include "core/sdl_headers.h"
 #include PSCALI_SDL_TTF_HEADER
@@ -58,6 +59,36 @@
 // ast.h is already included via globals.h or directly, no need for duplicate
 
 static int s_vm_trace_head = 0;
+
+static void pascalApplyBgRedirectionFromEnv(void) {
+#if defined(PSCAL_TARGET_IOS)
+    /* Avoid process-wide fd redirection on iOS; background jobs would steal the shell TTY. */
+    return;
+#endif
+    const char *stdout_path = getenv("PSCALI_BG_STDOUT");
+    const char *stdout_append = getenv("PSCALI_BG_STDOUT_APPEND");
+    const char *stderr_path = getenv("PSCALI_BG_STDERR");
+    const char *stderr_append = getenv("PSCALI_BG_STDERR_APPEND");
+
+    if (stdout_path && *stdout_path) {
+        int flags = O_CREAT | O_WRONLY | ((stdout_append && strcmp(stdout_append, "1") == 0) ? O_APPEND : O_TRUNC);
+        int fd = open(stdout_path, flags, 0666);
+        if (fd >= 0) {
+            dup2(fd, STDOUT_FILENO);
+            close(fd);
+        }
+    }
+    if (stderr_path && *stderr_path) {
+        int flags = O_CREAT | O_WRONLY | ((stderr_append && strcmp(stderr_append, "1") == 0) ? O_APPEND : O_TRUNC);
+        int fd = open(stderr_path, flags, 0666);
+        if (fd >= 0) {
+            dup2(fd, STDERR_FILENO);
+            close(fd);
+        }
+    } else if (stdout_path && *stdout_path && stderr_append && strcmp(stderr_append, "1") == 0) {
+        dup2(STDOUT_FILENO, STDERR_FILENO);
+    }
+}
 static VM *s_sigint_vm = NULL;
 
 static void pascalHandleSigint(int signo) {
@@ -653,6 +684,7 @@ int PSCAL_PASCAL_ENTRY_SYMBOL(int argc, char *argv[]) {
 
 #ifndef PSCAL_NO_CLI_ENTRYPOINTS
 int main(int argc, char *argv[]) {
+    pascalApplyBgRedirectionFromEnv();
     return PSCAL_PASCAL_ENTRY_SYMBOL(argc, argv);
 }
 #endif

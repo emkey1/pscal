@@ -1,0 +1,54 @@
+#!/usr/bin/env exsh
+# Thread pool smoke test for exsh worker model.
+# Exercises ThreadPoolSubmit, WaitForThread, and the thread allowlist guard.
+# Usage: build/bin/exsh Examples/exsh/threadpool_smoke [delay1_ms] [delay2_ms]
+
+set -e
+set -o pipefail
+
+DELAY1=${1:-80}
+DELAY2=${2:-120}
+
+echo "threadpool_smoke:start"
+
+# Snapshot initial pool state.
+stats_before=$(builtin ThreadStatsJson)
+echo "threadpool_smoke:stats_before:${stats_before}"
+
+# Submit two delay jobs to the worker pool.
+t1=$(builtin ThreadPoolSubmit str:delay "int:${DELAY1}")
+t2=$(builtin ThreadPoolSubmit str:delay "int:${DELAY2}")
+
+echo "threadpool_smoke:t1:${t1}"
+echo "threadpool_smoke:t2:${t2}"
+
+WaitForThread "${t1}"
+s1=$EXSH_LAST_STATUS
+WaitForThread "${t2}"
+s2=$EXSH_LAST_STATUS
+
+echo "threadpool_smoke:t1_status:${s1}"
+echo "threadpool_smoke:t2_status:${s2}"
+
+# Attempt to consume status flags so slots become reusable; some builtins may not store status.
+set +e
+consume1=$(builtin ThreadGetStatus "${t1}" bool:true 2>/dev/null)
+c1_status=$?
+consume2=$(builtin ThreadGetStatus "${t2}" bool:true 2>/dev/null)
+c2_status=$?
+set -e
+echo "threadpool_smoke:t1_consumed_status:${c1_status}"
+echo "threadpool_smoke:t2_consumed_status:${c2_status}"
+
+# Snapshot post-run state; pool_generation/ready flags should advance.
+stats_after=$(builtin ThreadStatsJson)
+echo "threadpool_smoke:stats_after:${stats_after}"
+
+# Attempt to submit a non-allowlisted builtin; should be rejected.
+set +e
+builtin ThreadPoolSubmit str:window >/dev/null 2>&1
+disallowed_status=$?
+set -e
+echo "threadpool_smoke:disallowed_status:${disallowed_status}"
+
+echo "threadpool_smoke:end"

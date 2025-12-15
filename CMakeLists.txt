@@ -18,6 +18,11 @@ else()
 endif()
 if(PSCAL_PLATFORM_IOS)
     add_compile_definitions(PSCAL_TARGET_IOS __progname=pscal_progname __progname_full=pscal_progname_full)
+    add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/ios/vproc_shim.h)
+    # vproc implementation compiles without the global shim overrides to avoid macro pollution.
+    set_property(SOURCE src/ios/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1)
+    # path virtualization helpers must call the real syscalls to avoid recursion with vproc shim macros.
+    set_property(SOURCE src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1)
 endif()
 
 if(PSCAL_PLATFORM_IOS AND NOT TARGET pscal_common_frontend_shim)
@@ -1001,7 +1006,7 @@ set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     -Wno-string-compare)
 if(PSCAL_PLATFORM_IOS)
     set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
-        APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS;__progname=pscal_progname)
+        APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS;__progname=pscal_progname;VPROC_SHIM_DISABLED=1)
 else()
     set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
         APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H)
@@ -1051,6 +1056,7 @@ list(APPEND PSCAL_CORE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
 if(PSCAL_PLATFORM_IOS)
     list(APPEND PSCAL_CORE_SOURCES src/common/frontend_symbol_wrappers.c)
+    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc.c)
 endif()
 
 set(PASCAL_FRONTEND_SOURCES

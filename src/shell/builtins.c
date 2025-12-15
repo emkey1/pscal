@@ -79,7 +79,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"yes", "yes", -1},
     {"no", "no", -1},
     {"traceroute", "traceroute", -1},
-    {"ps", "ps", -1},
+    {"lps", "lps", 1057},
     {"ps-threads", "ps-threads", 55},
     {"kill", "kill", -1},
     {"file", "file", -1},

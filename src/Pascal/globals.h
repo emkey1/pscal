@@ -7,7 +7,7 @@
 #include <pthread.h> // For mutex guarding of global tables
 #include <stdatomic.h> // For atomic flags shared across threads
 
-#include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
+#include "core/types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
 #ifdef SDL
 #include "backend_ast/pscal_sdl_runtime.h"   // For SDL related externs or types if any directly in globals.h
                    // (It's better if specific SDL globals are in sdl.h and sdl.c)

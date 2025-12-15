@@ -219,6 +219,13 @@ final class TerminalKeyInputView: UITextView {
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
+        let interrupt = UIKeyCommand(input: "c",
+                                     modifierFlags: [.command],
+                                     action: #selector(handleCommandInterrupt))
+        if #available(iOS 15.0, *) {
+            interrupt.wantsPriorityOverSystemBehavior = true
+        }
+        commands.append(interrupt)
         commands.append(contentsOf: controlKeyCommands)
         return commands
     }
@@ -247,6 +254,10 @@ final class TerminalKeyInputView: UITextView {
     override func paste(_ sender: Any?) {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         onPaste?(text)
+    }
+
+    @objc private func handleCommandInterrupt() {
+        pscalRuntimeRequestSigint()
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {

@@ -10,6 +10,9 @@
 #include "Pascal/globals.h"
 #include "pscal_paths.h"
 #include "common/runtime_tty.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+#endif
 
 #include <ctype.h>
 #include <errno.h>
@@ -42,6 +45,8 @@ static void shellFlushStandardStreams(void) {
     fflush(stdout);
     fflush(stderr);
 }
+
+static void shellResetStandardStream(int fd);
 
 #if defined(__GLIBC__) || defined(__ANDROID__)
 #define SHELL_HAVE_SECURE_GETENV 1
@@ -132,6 +137,7 @@ typedef struct ShellJob {
     pid_t pgid;
     pid_t *pids;
     size_t pid_count;
+    size_t id;
     bool running;
     bool stopped;
     bool disowned;
@@ -202,6 +208,7 @@ typedef struct ShellRuntimeState {
     bool trap_executing;
     int script_depth;
     int condition_depth;
+    size_t job_next_id;
     ShellJob *jobs;
     size_t job_count;
     ShellArrayVariable *array_vars;
@@ -1438,6 +1445,7 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .trap_executing = false,
     .script_depth = 0,
     .condition_depth = 0,
+    .job_next_id = 1,
     .jobs = NULL,
     .job_count = 0,
     .array_vars = NULL,
@@ -1454,6 +1462,9 @@ static ShellRuntimeState gShellRuntimeDefault = {
 static __thread ShellRuntimeState *gShellRuntimeCtx = NULL;
 static __thread ShellRuntimeState *gShellContextStack[8] = {0};
 static __thread size_t gShellContextDepth = 0;
+static __thread bool gShellCurrentBuiltinBackground = false;
+static __thread bool gShellBackgroundWorkerActive = false;
+static int gShellSavedStdFds[3] = { -1, -1, -1 };
 
 #define gShellRuntime (*shellGetContext())
 
@@ -1465,11 +1476,23 @@ static volatile sig_atomic_t gShellExitOnSignalFlag = 0;
 static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
 static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
+void shellResetJobIds(void) {
+    if (SC()) {
+        SC()->job_next_id = 1;
+    }
+}
 
 static ShellRuntimeState *shellGetContext(void) {
+    static __thread bool resolving = false;
+    if (resolving) {
+        return &gShellRuntimeDefault;
+    }
+    resolving = true;
     if (gShellRuntimeCtx) {
+        resolving = false;
         return gShellRuntimeCtx;
     }
+    resolving = false;
     return &gShellRuntimeDefault;
 }
 
@@ -1499,7 +1522,14 @@ ShellRuntimeState *shellRuntimeCurrentContext(void) {
 ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx) {
     ShellRuntimeState *previous = shellGetContext();
     shellSetContext(ctx);
+    if (ctx && ctx->job_count == 0) {
+        shellResetJobIds();
+    }
     return previous;
+}
+
+bool shellRuntimeCurrentBuiltinBackground(void) {
+    return gShellCurrentBuiltinBackground;
 }
 static unsigned int gShellRandomSeed = 0;
 static bool gShellRandomSeedInitialized = false;
@@ -2227,6 +2257,32 @@ void shellRuntimeSetInteractive(bool interactive) {
 
 bool shellRuntimeIsInteractive(void) {
     return gShellInteractiveMode;
+}
+
+static void shellRuntimeRememberStandardFds(void) {
+    if (gShellSavedStdFds[0] < 0) gShellSavedStdFds[0] = dup(STDIN_FILENO);
+    if (gShellSavedStdFds[1] < 0) gShellSavedStdFds[1] = dup(STDOUT_FILENO);
+    if (gShellSavedStdFds[2] < 0) gShellSavedStdFds[2] = dup(STDERR_FILENO);
+    for (int i = 0; i < 3; ++i) {
+        if (gShellSavedStdFds[i] >= 0) {
+            fcntl(gShellSavedStdFds[i], F_SETFD, FD_CLOEXEC);
+        }
+    }
+}
+
+void shellRuntimeEnsureStandardFds(void) {
+    shellRuntimeRememberStandardFds();
+    int targets[3] = { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
+    for (int i = 0; i < 3; ++i) {
+        if (targets[i] < 0) {
+            continue;
+        }
+        int rc = fcntl(targets[i], F_GETFD);
+        if (rc < 0 && errno == EBADF && gShellSavedStdFds[i] >= 0) {
+            dup2(gShellSavedStdFds[i], targets[i]);
+            shellResetStandardStream(targets[i]);
+        }
+    }
 }
 
 static void shellRandomEnsureSeeded(void) {
@@ -3796,6 +3852,17 @@ static void shellEnsureJobControl(void) {
     }
 
     shellInitJobControlState();
+
+#if defined(PSCAL_TARGET_IOS)
+    /* iOS has no controlling TTY for background threads; keep job tracking enabled so
+     * synthetic vproc pids can be managed with fg/bg/kill/wait semantics even without
+     * tcsetpgrp support. */
+    gShellRuntime.job_control_enabled = true;
+    if (gShellRuntime.shell_pgid <= 0) {
+        gShellRuntime.shell_pgid = getpgrp();
+    }
+    return;
+#endif
 
     if (gShellRuntime.tty_fd < 0) {
         gShellRuntime.job_control_enabled = false;

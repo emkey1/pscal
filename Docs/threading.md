@@ -113,6 +113,8 @@ bench run:
   queue DNS probes in parallel, tag workers with `ThreadSetName`, and release
   cached status/result pairs via `ThreadGetResult(..., true)` while the shell
   keeps running foreground commands.【F:Examples/exsh/parallel-check†L1-L74】
+- Run `build/bin/exsh Examples/exsh/context_smoke` to exercise nested `exsh`
+  launches that each install an isolated shell runtime context.【F:Examples/exsh/context_smoke†L1-L5】
 - Execute `build/bin/pascal Examples/pascal/base/docs_examples/threading_config`
   after exporting `PSCAL_THREAD_POOL_SIZE=<n>` to verify Pascal observes the
   configured limit and reports worker usage through `ThreadStatsCount`.

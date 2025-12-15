@@ -122,6 +122,7 @@ void registerShellFrontendBuiltins(void) {
 #endif
     registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
+    registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);
 #endif
 }

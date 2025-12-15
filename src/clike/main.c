@@ -49,9 +49,42 @@
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
 #include "common/frontend_kind.h"
+#include <fcntl.h>
+#include <unistd.h>
 
 int clike_error_count = 0;
 int clike_warning_count = 0;
+
+static void clikeApplyBgRedirectionFromEnv(void) {
+#if defined(PSCAL_TARGET_IOS)
+    /* iOS shares process fds across threads; redirecting here would steal the shell's TTY.
+     * Applets that need logging (e.g., simple_web_server) should handle PSCALI_BG_* themselves. */
+    return;
+#endif
+    const char *stdout_path = getenv("PSCALI_BG_STDOUT");
+    const char *stdout_append = getenv("PSCALI_BG_STDOUT_APPEND");
+    const char *stderr_path = getenv("PSCALI_BG_STDERR");
+    const char *stderr_append = getenv("PSCALI_BG_STDERR_APPEND");
+
+    if (stdout_path && *stdout_path) {
+        int flags = O_CREAT | O_WRONLY | ((stdout_append && strcmp(stdout_append, "1") == 0) ? O_APPEND : O_TRUNC);
+        int fd = open(stdout_path, flags, 0666);
+        if (fd >= 0) {
+            dup2(fd, STDOUT_FILENO);
+            close(fd);
+        }
+    }
+    if (stderr_path && *stderr_path) {
+        int flags = O_CREAT | O_WRONLY | ((stderr_append && strcmp(stderr_append, "1") == 0) ? O_APPEND : O_TRUNC);
+        int fd = open(stderr_path, flags, 0666);
+        if (fd >= 0) {
+            dup2(fd, STDERR_FILENO);
+            close(fd);
+        }
+    } else if (stdout_path && *stdout_path && stderr_append && strcmp(stderr_append, "1") == 0) {
+        dup2(STDOUT_FILENO, STDERR_FILENO);
+    }
+}
 
 static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
@@ -129,6 +162,7 @@ static char* resolveImportPath(const char* orig_path) {
 }
 
 int clike_main(int argc, char **argv) {
+    clikeApplyBgRedirectionFromEnv();
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_CLIKE);
 #define CLIKE_RETURN(value)            \
     do {                               \

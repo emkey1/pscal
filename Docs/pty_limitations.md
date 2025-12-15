@@ -1,6 +1,6 @@
 # PSCAL PTY Emulation Notes
 
-This app runs the shell in-process on iOS, falling back to a virtual TTY built on pipes when `openpty` is unavailable. The virtual TTY emulates a small subset of PTY behavior and still has limitations.
+iOS/iPadOS builds cannot fork/exec and cannot open PTYs or even the controlling TTY. The shell therefore always runs in-process on those platforms and uses a virtual TTY built on pipes when `openpty` is unavailable. The virtual TTY emulates a small subset of PTY behavior and still has limitations.
 
 ## Current behavior
 - Default termios state (ICANON, ECHO, ISIG, CR->NL, ONLCR) applied to the virtual TTY.

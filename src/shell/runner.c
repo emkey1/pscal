@@ -470,6 +470,136 @@ char *shellLoadFile(const char *path) {
     return buffer;
 }
 
+static char *shellRewriteCombinedRedirectsInSource(const char *src) {
+    if (!src) {
+        return NULL;
+    }
+    size_t len = strlen(src);
+    size_t capacity = len + 32;
+    char *out = (char *)malloc(capacity);
+    if (!out) {
+        return NULL;
+    }
+    size_t out_len = 0;
+    bool in_single = false;
+    bool in_double = false;
+    bool escaped = false;
+
+    for (size_t i = 0; src[i] != '\0'; ++i) {
+        char c = src[i];
+        if (escaped) {
+            if (out_len + 2 >= capacity) {
+                capacity *= 2;
+                char *resized = (char *)realloc(out, capacity);
+                if (!resized) {
+                    free(out);
+                    return NULL;
+                }
+                out = resized;
+            }
+            out[out_len++] = c;
+            escaped = false;
+            continue;
+        }
+        if (c == '\\') {
+            if (out_len + 2 >= capacity) {
+                capacity *= 2;
+                char *resized = (char *)realloc(out, capacity);
+                if (!resized) {
+                    free(out);
+                    return NULL;
+                }
+                out = resized;
+            }
+            out[out_len++] = c;
+            escaped = true;
+            continue;
+        }
+        if (c == '\'' && !in_double) {
+            in_single = !in_single;
+        } else if (c == '"' && !in_single) {
+            in_double = !in_double;
+        }
+
+        if (!in_single && !in_double && c == '&' && src[i + 1] == '>') {
+            bool append = (src[i + 2] == '>');
+            size_t j = i + (append ? 3 : 2);
+            while (src[j] == ' ' || src[j] == '\t') {
+                j++;
+            }
+            bool word_single = false, word_double = false, word_escaped = false;
+            size_t start = j;
+            size_t end = j;
+            for (; src[end] != '\0'; ++end) {
+                char wc = src[end];
+                if (word_escaped) {
+                    word_escaped = false;
+                    continue;
+                }
+                if (wc == '\\') {
+                    word_escaped = true;
+                    continue;
+                }
+                if (wc == '\'' && !word_double) {
+                    word_single = !word_single;
+                    continue;
+                }
+                if (wc == '"' && !word_single) {
+                    word_double = !word_double;
+                    continue;
+                }
+                if (!word_single && !word_double && isspace((unsigned char)wc)) {
+                    break;
+                }
+            }
+            if (start >= end) {
+                goto copy_char;
+            }
+            size_t path_len = end - start;
+            const char *extra = " 2>&1";
+            size_t extra_len = strlen(extra);
+            size_t needed = out_len + (append ? 2 : 1) + 1 + path_len + extra_len + 1;
+            if (needed > capacity) {
+                capacity = needed + len + 16;
+                char *resized = (char *)realloc(out, capacity);
+                if (!resized) {
+                    free(out);
+                    return NULL;
+                }
+                out = resized;
+            }
+            out[out_len++] = '>';
+            if (append) {
+                out[out_len++] = '>';
+            }
+            out[out_len++] = ' ';
+            memcpy(out + out_len, src + start, path_len);
+            out_len += path_len;
+            memcpy(out + out_len, extra, extra_len);
+            out_len += extra_len;
+            fprintf(stderr, "[rewrite] &%s> -> %s path='%.*s'\n",
+                    append ? ">>" : ">", append ? ">>" : ">", (int)path_len, src + start);
+            i = end - 1;
+            continue;
+        }
+
+copy_char:
+        if (out_len + 2 >= capacity) {
+            capacity *= 2;
+            char *resized = (char *)realloc(out, capacity);
+            if (!resized) {
+                free(out);
+                return NULL;
+            }
+            out = resized;
+        }
+        out[out_len++] = c;
+    }
+
+    out[out_len] = '\0';
+    return out;
+}
+
 int shellRunSource(const char *source,
                    const char *path,
                    const ShellRunOptions *options,
@@ -557,9 +687,16 @@ int shellRunSource(const char *source,
     bool should_run_exit_trap = false;
     bool trap_exit_requested = false;
 
+    char *rewrite_src = shellRewriteCombinedRedirectsInSource(pre_src ? pre_src : source);
+    const char *parse_src = rewrite_src ? rewrite_src : (pre_src ? pre_src : source);
+
     ShellParser parser;
-    program = shellParseString(pre_src ? pre_src : source, &parser);
+    program = shellParseString(parse_src, &parser);
     shellParserFree(&parser);
+    if (rewrite_src) {
+        free(rewrite_src);
+        rewrite_src = NULL;
+    }
     if (parser.had_error || !program) {
         fprintf(stderr, "Parsing failed.\n");
         goto cleanup;

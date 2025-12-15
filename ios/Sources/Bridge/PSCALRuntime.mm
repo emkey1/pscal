@@ -33,6 +33,9 @@
 #include <pty.h>
 #endif
 #include "common/path_truncate.h"
+extern "C" {
+#include "backend_ast/builtin.h"
+}
 
 #if TARGET_OS_IPHONE
 extern "C" int PSCALRuntimeIsRunning(void);
@@ -74,12 +77,18 @@ extern "C" {
     bool pscalRuntimeVirtualTTYEnabled(void);
     void pscalRuntimeRegisterVirtualTTYFd(int std_fd, int fd);
     char *pscalRuntimeCopyMarketingVersion(void);
+    void shellRuntimeInitSignals(void);
+    ShellRuntimeState *shellRuntimeCreateContext(void);
+    ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx);
+    void shellRuntimeDestroyContext(ShellRuntimeState *ctx);
 }
 
 static PSCALRuntimeOutputHandler s_output_handler = NULL;
 static PSCALRuntimeExitHandler s_exit_handler = NULL;
 static void *s_handler_context = NULL;
 static pthread_t s_runtime_thread_id;
+static ShellRuntimeState *s_forced_shell_ctx = NULL;
+static bool s_forced_shell_ctx_owned = false;
 
 static BOOL PSCALRuntimeFontNameAllowed(NSString *candidate) {
     if (!candidate) {
@@ -416,7 +425,12 @@ static void PSCALRuntimeHandleSignalsForByte(uint8_t byte) {
     } else if (byte == t.c_cc[VQUIT]) {
         PSCALRuntimeSendSignal(SIGQUIT);
     } else if (byte == t.c_cc[VSUSP]) {
+#if defined(PSCAL_TARGET_IOS)
+        /* Never propagate SIGTSTP to the host process; ignore Ctrl-Z. */
+        return;
+#else
         PSCALRuntimeSendSignal(SIGTSTP);
+#endif
     }
 }
 
@@ -650,6 +664,8 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         setenv("ASAN_OPTIONS", merged.c_str(), 1);
     }
 #endif
+    ShellRuntimeState *launch_ctx = NULL;
+    bool launch_ctx_owned = false;
     pthread_mutex_lock(&s_runtime_mutex);
     if (s_runtime_active) {
         pthread_mutex_unlock(&s_runtime_mutex);
@@ -657,6 +673,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         errno = EBUSY;
         return -1;
     }
+    launch_ctx = s_forced_shell_ctx;
     PSCALRuntimeEnsurePathTruncationDefault();
     const char *pt_prefix = getenv("PATH_TRUNCATE");
     if (pt_prefix && pt_prefix[0] == '/') {
@@ -694,6 +711,15 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     const int initial_columns = s_pending_columns;
     const int initial_rows = s_pending_rows;
     pthread_mutex_unlock(&s_runtime_mutex);
+
+    if (!launch_ctx) {
+        launch_ctx = shellRuntimeCreateContext();
+        if (!launch_ctx) {
+            errno = ENOMEM;
+            return -1;
+        }
+        launch_ctx_owned = true;
+    }
 
     // Make input writes non-blocking; PSCALRuntimeSendInput will back off on EAGAIN.
     if (input_fd >= 0) {
@@ -757,8 +783,11 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
 #if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
     PSCALRuntimeEnsureSDLReady();
 #endif
+    ShellRuntimeState *prev_ctx = shellRuntimeActivateContext(launch_ctx);
+    shellRuntimeInitSignals();
     int result = exsh_main(argc, argv);
     NSLog(@"PSCALRuntime: exsh_main exited with status %d", result);
+    shellRuntimeActivateContext(prev_ctx);
 
     // Tear down PTY + output pump.
     pthread_mutex_lock(&s_runtime_mutex);
@@ -796,6 +825,10 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
 
     if (exit_handler) {
         exit_handler(result, context);
+    }
+
+    if (launch_ctx_owned && launch_ctx) {
+        shellRuntimeDestroyContext(launch_ctx);
     }
 
     return result;
@@ -965,6 +998,39 @@ void PSCALRuntimeApplyPathTruncation(const char *path) {
         setenv("PSCALI_PATH_TRUNCATE_DISABLED", "1", 1);
         unsetenv("PATH_TRUNCATE");
     }
+}
+
+void *PSCALRuntimeCreateShellContext(void) {
+    return (void *)shellRuntimeCreateContext();
+}
+
+void PSCALRuntimeDestroyShellContext(void *ctx) {
+    if (!ctx) {
+        return;
+    }
+    pthread_mutex_lock(&s_runtime_mutex);
+    if (s_runtime_active && ctx == s_forced_shell_ctx) {
+        pthread_mutex_unlock(&s_runtime_mutex);
+        return;
+    }
+    if (ctx == s_forced_shell_ctx) {
+        s_forced_shell_ctx = NULL;
+        s_forced_shell_ctx_owned = false;
+    }
+    pthread_mutex_unlock(&s_runtime_mutex);
+    shellRuntimeDestroyContext((ShellRuntimeState *)ctx);
+}
+
+void PSCALRuntimeSetShellContext(void *ctx, int takeOwnership) {
+    pthread_mutex_lock(&s_runtime_mutex);
+    ShellRuntimeState *incoming = (ShellRuntimeState *)ctx;
+    if (s_forced_shell_ctx && s_forced_shell_ctx_owned && s_forced_shell_ctx != incoming &&
+        !s_runtime_active) {
+        shellRuntimeDestroyContext(s_forced_shell_ctx);
+    }
+    s_forced_shell_ctx = incoming;
+    s_forced_shell_ctx_owned = (takeOwnership != 0);
+    pthread_mutex_unlock(&s_runtime_mutex);
 }
 
 extern "C" int pscalPlatformClipboardSet(const char *utf8, size_t len) {

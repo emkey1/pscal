@@ -1762,8 +1762,8 @@ static void shellHandlePendingSignal(int signo) {
 
 #if defined(PSCAL_TARGET_IOS)
     if (signo == SIGTSTP && pscalRuntimeVirtualTTYEnabled()) {
-        fprintf(stderr, "job control (Ctrl-Z/bg/fg) is not supported in this environment\n");
-        return;
+        shellUpdateStatus(128 + signo);
+        shellRuntimeRequestExit();
     }
 #endif
 
@@ -1777,6 +1777,24 @@ static void shellHandlePendingSignal(int signo) {
             shellRuntimeRequestExit();
         }
 
+#if defined(PSCAL_TARGET_IOS)
+        if (pscalRuntimeVirtualTTYEnabled()) {
+            ShellPipelineContext *pipe_ctx = &gShellRuntime.pipeline;
+            size_t launched = pipe_ctx ? pipe_ctx->launched : 0;
+            if (pipe_ctx && pipe_ctx->active && pipe_ctx->pids) {
+                if (launched == 0 && pipe_ctx->stage_count > 0) {
+                    launched = pipe_ctx->stage_count;
+                }
+                for (size_t i = 0; i < launched; ++i) {
+                    pid_t pid = pipe_ctx->pids[i];
+                    if (pid > 0) {
+                        vprocKillShim(pid, signo);
+                    }
+                }
+            }
+        }
+#endif
+
         if (gShellLoopStackSize > 0) {
             gShellRuntime.break_requested = true;
             gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
@@ -1786,6 +1804,12 @@ static void shellHandlePendingSignal(int signo) {
         bool propagate_default =
             (gShellExitOnSignalFlag && (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) &&
              !gShellRuntime.trap_enabled && !command_trap);
+#if defined(PSCAL_TARGET_IOS)
+        if (signo == SIGTSTP) {
+            /* Never let SIGTSTP stop the host app; handle it logically instead. */
+            propagate_default = false;
+        }
+#endif
 
         if (propagate_default) {
             struct sigaction action;
@@ -2263,6 +2287,58 @@ bool shellRuntimeExpandHistoryReference(const char *input,
     return true;
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static bool shellDispatchIOSFrontendBuiltin(VM *vm, ShellCommand *cmd) {
+    if (!cmd || !cmd->argv || !cmd->argv[0]) {
+        return false;
+    }
+    const char *name = cmd->argv[0];
+    VmBuiltinFn handler = NULL;
+    if (strcasecmp(name, "clike") == 0) {
+        handler = vmBuiltinShellClike;
+    } else if (strcasecmp(name, "pascal") == 0) {
+        handler = vmBuiltinShellPascal;
+    } else if (strcasecmp(name, "rea") == 0) {
+        handler = vmBuiltinShellRea;
+    } else if (strcasecmp(name, "pscalvm") == 0) {
+        handler = vmBuiltinShellPscalVm;
+    } else if (strcasecmp(name, "pscaljson2bc") == 0) {
+        handler = vmBuiltinShellPscalJson2bc;
+    } else if (strcasecmp(name, "exsh") == 0 || strcasecmp(name, "sh") == 0) {
+        handler = vmBuiltinShellExshTool;
+    }
+    if (!handler) {
+        return false;
+    }
+    int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
+    Value *args = NULL;
+    if (arg_count > 0) {
+        args = calloc((size_t)arg_count, sizeof(Value));
+        if (!args) {
+            shellUpdateStatus(1);
+            return true;
+        }
+        for (int i = 0; i < arg_count; ++i) {
+            args[i] = makeString(cmd->argv[i + 1]);
+        }
+    }
+    const char *previous_name = shellRuntimeCurrentCommandName();
+    shellRuntimeSetCurrentCommandName(name);
+    bool previous_background = gShellCurrentBuiltinBackground;
+    gShellCurrentBuiltinBackground = cmd->background;
+    handler(vm, arg_count, args);
+    gShellCurrentBuiltinBackground = previous_background;
+    shellRuntimeSetCurrentCommandName(previous_name);
+    if (args) {
+        for (int i = 0; i < arg_count; ++i) {
+            freeValue(&args[i]);
+        }
+        free(args);
+    }
+    return true;
+}
+#endif
+
 static bool shellIsRuntimeBuiltin(const char *name) {
     if (!name || !*name) {
         return false;
@@ -2270,6 +2346,18 @@ static bool shellIsRuntimeBuiltin(const char *name) {
     if (shellRuntimeBuiltinDisabled(name)) {
         return false;
     }
+#if defined(PSCAL_TARGET_IOS)
+    /* Frontends are statically linked on iOS; treat them as builtins even if
+     * their compiler ids were not resolved. */
+    if (strcasecmp(name, "clike") == 0 ||
+        strcasecmp(name, "pascal") == 0 ||
+        strcasecmp(name, "rea") == 0 ||
+        strcasecmp(name, "pscalvm") == 0 ||
+        strcasecmp(name, "pscaljson2bc") == 0 ||
+        strcasecmp(name, "exsh") == 0 || strcasecmp(name, "sh") == 0) {
+        return true;
+    }
+#endif
     return shellIsBuiltinName(name);
 }
 
@@ -2418,19 +2506,55 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || cmd->argc == 0) {
         return false;
     }
+    const char *name = cmd->argv[0];
     if (!cmd->ignore_functions && shellInvokeFunction(vm, cmd)) {
         return true;
     }
-    const char *name = cmd->argv[0];
-    if (!name || !shellIsRuntimeBuiltin(name)) {
+    if (!name || *name == '\0') {
         return false;
     }
     const char *canonical = shellBuiltinCanonicalName(name);
-    VmBuiltinFn handler = getVmBuiltinHandler(canonical);
+    if (shellRuntimeBuiltinDisabled(canonical ? canonical : name)) {
+        return false;
+    }
+    VmBuiltinFn handler = getVmBuiltinHandler(canonical ? canonical : name);
     if (!handler && canonical && canonical != name) {
         handler = getVmBuiltinHandler(name);
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (!handler && canonical) {
+        if (strcasecmp(canonical, "clike") == 0) {
+            handler = vmBuiltinShellClike;
+        } else if (strcasecmp(canonical, "pascal") == 0) {
+            handler = vmBuiltinShellPascal;
+        } else if (strcasecmp(canonical, "rea") == 0) {
+            handler = vmBuiltinShellRea;
+        } else if (strcasecmp(canonical, "pscalvm") == 0) {
+            handler = vmBuiltinShellPscalVm;
+        } else if (strcasecmp(canonical, "pscaljson2bc") == 0) {
+            handler = vmBuiltinShellPscalJson2bc;
+        } else if (strcasecmp(canonical, "exsh") == 0 || strcasecmp(canonical, "sh") == 0) {
+            handler = vmBuiltinShellExshTool;
+        }
+    }
+#endif
+    if (!handler && shellIsRuntimeBuiltin(name)) {
+        /* Fallback to canonical lookup via builtin table if registry failed. */
+        const char *fallback = shellBuiltinCanonicalName(name);
+        if (fallback && fallback != canonical) {
+            handler = getVmBuiltinHandler(fallback);
+            canonical = fallback;
+        }
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (!handler && shellDispatchIOSFrontendBuiltin(vm, cmd)) {
+        return true;
+    }
+#endif
     if (!handler) {
+        fprintf(stderr, "[builtin-missing] name=%s canonical=%s\n",
+                name ? name : "<null>",
+                canonical ? canonical : "<null>");
         const char *label = canonical ? canonical : name;
         if (vm) {
             runtimeError(vm, "shell builtin '%s': not available", label ? label : "<builtin>");
@@ -2461,6 +2585,8 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
 
     const char *previous_name = shellRuntimeCurrentCommandName();
     shellRuntimeSetCurrentCommandName(name);
+    bool previous_background = gShellCurrentBuiltinBackground;
+    gShellCurrentBuiltinBackground = cmd->background;
     bool profile_enabled = vmOpcodeProfileIsEnabled();
     const char *profile_name = canonical ? canonical : name;
     if (profile_enabled) {
@@ -2505,6 +2631,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
             if (!args) {
                 runtimeError(vm, "shell builtin '%s': out of memory", name);
                 shellUpdateStatus(1);
+                gShellCurrentBuiltinBackground = previous_background;
                 shellRuntimeSetCurrentCommandName(previous_name);
                 shellFlushStandardStreams();
                 shellRestoreExecRedirections(redir_backups, redir_backup_count);
@@ -2518,6 +2645,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         }
         handler(vm, arg_count, args);
     }
+    gShellCurrentBuiltinBackground = previous_background;
     shellRuntimeSetCurrentCommandName(previous_name);
     shellFlushStandardStreams();
     shellRestoreExecRedirections(redir_backups, redir_backup_count);
@@ -2568,7 +2696,9 @@ static void shellRemoveJobAt(size_t index) {
     ShellJob *job = &gShellJobs[index];
     shellFreeJob(job);
     if (index + 1 < gShellJobCount) {
-        gShellJobs[index] = gShellJobs[gShellJobCount - 1];
+        memmove(&gShellJobs[index],
+                &gShellJobs[index + 1],
+                (gShellJobCount - index - 1) * sizeof(ShellJob));
     }
     gShellJobCount--;
     if (gShellJobCount == 0 && gShellJobs) {
@@ -2577,8 +2707,10 @@ static void shellRemoveJobAt(size_t index) {
     }
 }
 
+static ShellJob *shellFindJobByPid(pid_t pid);
+
 static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, const ShellCommand *cmd) {
-    if (pgid <= 0 || !pids || pid_count == 0 || !cmd) {
+    if (pgid <= 0 || !pids || pid_count == 0) {
         return NULL;
     }
 
@@ -2588,8 +2720,9 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     }
     memcpy(pid_copy, pids, sizeof(pid_t) * pid_count);
 
+    char label_buf[128] = {0};
     char *summary = NULL;
-    if (cmd->argc > 0 && cmd->argv) {
+    if (cmd && cmd->argc > 0 && cmd->argv) {
         size_t len = 0;
         for (size_t i = 0; i < cmd->argc; ++i) {
             len += strlen(cmd->argv[i]) + 1;
@@ -2606,6 +2739,22 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
         }
     }
 
+    if (!summary) {
+        /* Try to reuse any stored label from the vproc table. */
+        if (!vprocGetCommandLabel(pgid, label_buf, sizeof(label_buf)) && pid_count > 0) {
+            (void)vprocGetCommandLabel(pids[0], label_buf, sizeof(label_buf));
+        }
+        if (label_buf[0]) {
+            summary = strdup(label_buf);
+        } else {
+            summary = strdup("task");
+        }
+    }
+    if (summary && label_buf[0] == '\0') {
+        strncpy(label_buf, summary, sizeof(label_buf) - 1);
+        label_buf[sizeof(label_buf) - 1] = '\0';
+    }
+
     ShellJob *new_jobs = realloc(gShellJobs, sizeof(ShellJob) * (gShellJobCount + 1));
     if (!new_jobs) {
         free(summary);
@@ -2618,6 +2767,24 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     job->pgid = pgid;
     job->pids = pid_copy;
     job->pid_count = pid_count;
+    int stored_id = vprocGetJobId(pgid);
+    if (stored_id <= 0 && pid_count > 0) {
+        stored_id = vprocGetJobId(pids[0]);
+    }
+    if (stored_id > 0) {
+        job->id = (size_t)stored_id;
+        if (SC()->job_next_id <= (size_t)stored_id) {
+            SC()->job_next_id = (size_t)stored_id + 1;
+        }
+    } else {
+        job->id = SC()->job_next_id++;
+    }
+    vprocSetJobId(pgid, (int)job->id);
+    for (size_t i = 0; i < pid_count; ++i) {
+        vprocSetJobId(pids[i], (int)job->id);
+        vprocSetCommandLabel(pids[i], summary);
+    }
+    vprocSetCommandLabel(pgid, summary);
     job->running = true;
     job->stopped = false;
     job->disowned = false;
@@ -2627,6 +2794,41 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
 }
 
 static int shellCollectJobs(void) {
+#if defined(PSCAL_TARGET_IOS)
+    /* Mirror synthetic vproc tasks into the job table if they were launched
+     * without registering a ShellJob (e.g., ad-hoc background threads). */
+    size_t snap_cap = vprocSnapshot(NULL, 0);
+    if (snap_cap > 0) {
+            VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
+            if (snaps) {
+                size_t snap_count = vprocSnapshot(snaps, snap_cap);
+                for (size_t i = 0; i < snap_count; ++i) {
+                    const VProcSnapshot *s = &snaps[i];
+                    if (!s || s->pid <= 0) {
+                        continue;
+                    }
+                    if (s->pid == vprocGetShellSelfPid() ||
+                        pthread_equal(s->tid, pthread_self())) {
+                        continue;
+                    }
+                    if (shellFindJobByPid((pid_t)s->pid)) {
+                        continue;
+                    }
+                    pid_t pid_copy[1] = { (pid_t)s->pid };
+                    ShellJob *job = shellRegisterJob((pid_t)s->pid, pid_copy, 1, NULL);
+                    if (job) {
+                        job->running = !s->exited && !s->stopped;
+                        job->stopped = s->stopped;
+                        job->last_status = s->status;
+                        if (!job->command && s->command[0]) {
+                            job->command = strdup(s->command);
+                        }
+                    }
+                }
+                free(snaps);
+            }
+        }
+#endif
     int reaped = 0;
     for (size_t i = 0; i < gShellJobCount;) {
         ShellJob *job = &gShellJobs[i];
@@ -2644,7 +2846,7 @@ static int shellCollectJobs(void) {
                 continue;
             }
             int status = 0;
-            pid_t res = waitpid(pid, &status, WNOHANG | WUNTRACED | WCONTINUED);
+            pid_t res = vprocWaitPidShim(pid, &status, WNOHANG | WUNTRACED | WCONTINUED);
             if (res == 0) {
                 job_active = true;
                 continue;
@@ -2726,14 +2928,12 @@ static bool shellJobFindVisibleIndex(size_t visible_number, size_t *out_index) {
     if (!out_index || visible_number == 0) {
         return false;
     }
-    size_t visible = 0;
     for (size_t i = 0; i < gShellJobCount; ++i) {
         ShellJob *job = &gShellJobs[i];
         if (job->disowned) {
             continue;
         }
-        ++visible;
-        if (visible == visible_number) {
+        if (job->id == visible_number) {
             *out_index = i;
             return true;
         }
@@ -3194,6 +3394,37 @@ static bool shellAddRedirection(ShellCommand *cmd, const char *spec) {
         redir.mode = 0666;
         redir.path = expanded_target;
         expanded_target = NULL;
+    } else if (strcmp(type_text, "&>") == 0 || strcmp(type_text, "&>>") == 0) {
+        /* Redirect both stdout and stderr. */
+        bool append = (strcmp(type_text, "&>>") == 0);
+        redir.kind = SHELL_RUNTIME_REDIR_OPEN;
+        redir.flags = O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC);
+        redir.mode = 0666;
+        redir.path = expanded_target;
+        expanded_target = NULL;
+
+        /* Prepare a dup redirection for stderr to stdout. */
+        ShellRedirection dup_redir;
+        memset(&dup_redir, 0, sizeof(dup_redir));
+        dup_redir.fd = STDERR_FILENO;
+        dup_redir.kind = SHELL_RUNTIME_REDIR_DUP;
+        dup_redir.dup_target_fd = STDOUT_FILENO;
+
+        ShellRedirection *new_redirs = realloc(cmd->redirs,
+                                               sizeof(ShellRedirection) * (cmd->redir_count + 2));
+        if (!new_redirs) {
+            free(redir.path);
+            free(expanded_target);
+            free(word_encoded);
+            free(copy);
+            return false;
+        }
+        cmd->redirs = new_redirs;
+        cmd->redirs[cmd->redir_count++] = redir;
+        cmd->redirs[cmd->redir_count++] = dup_redir;
+        free(word_encoded);
+        free(copy);
+        return true;
     } else if (strcmp(type_text, "<>") == 0) {
         redir.kind = SHELL_RUNTIME_REDIR_OPEN;
         redir.flags = O_RDWR | O_CREAT;

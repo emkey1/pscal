@@ -38,6 +38,7 @@
 #include "core/preproc.h"
 #include "core/build_info.h"
 #include "symbol/symbol.h"
+#include <fcntl.h>
 #include "Pascal/globals.h"
 #include "ast/ast.h"
 #include "compiler/bytecode.h"
@@ -281,6 +282,32 @@ static void collectUsesClauses(AST* node, List* out) {
 }
 
 int rea_main(int argc, char **argv) {
+    /* Skip process-wide fd redirection on iOS; background jobs share descriptors with the shell. */
+#if !defined(PSCAL_TARGET_IOS)
+    const char *stdout_path = getenv("PSCALI_BG_STDOUT");
+    const char *stdout_append = getenv("PSCALI_BG_STDOUT_APPEND");
+    const char *stderr_path = getenv("PSCALI_BG_STDERR");
+    const char *stderr_append = getenv("PSCALI_BG_STDERR_APPEND");
+    if (stdout_path && *stdout_path) {
+        int flags = O_CREAT | O_WRONLY | ((stdout_append && strcmp(stdout_append, "1") == 0) ? O_APPEND : O_TRUNC);
+        int fd = open(stdout_path, flags, 0666);
+        if (fd >= 0) {
+            dup2(fd, STDOUT_FILENO);
+            close(fd);
+        }
+    }
+    if (stderr_path && *stderr_path) {
+        int flags = O_CREAT | O_WRONLY | ((stderr_append && strcmp(stderr_append, "1") == 0) ? O_APPEND : O_TRUNC);
+        int fd = open(stderr_path, flags, 0666);
+        if (fd >= 0) {
+            dup2(fd, STDERR_FILENO);
+            close(fd);
+        }
+    } else if (stdout_path && *stdout_path && stderr_append && strcmp(stderr_append, "1") == 0) {
+        dup2(STDOUT_FILENO, STDERR_FILENO);
+    }
+#endif
+
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_REA);
 #define REA_RETURN(value)                           \
     do {                                            \

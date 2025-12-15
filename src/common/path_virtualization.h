@@ -30,10 +30,12 @@ int pscalPathVirtualized_symlink(const char *target, const char *linkpath);
 ssize_t pscalPathVirtualized_readlink(const char *path, char *buf, size_t size);
 char *pscalPathVirtualized_realpath(const char *path, char *resolved_path);
 
-#ifndef PATH_VIRTUALIZATION_NO_MACROS
+#if !defined(PATH_VIRTUALIZATION_NO_MACROS)
 #define chdir(path) pscalPathVirtualized_chdir(path)
 #define getcwd(buf, size) pscalPathVirtualized_getcwd(buf, size)
+#ifndef open
 #define open(...) pscalPathVirtualized_open(__VA_ARGS__)
+#endif
 #define fopen(path, mode) pscalPathVirtualized_fopen(path, mode)
 #define freopen(path, mode, stream) pscalPathVirtualized_freopen(path, mode, stream)
 #define stat(path, buf) pscalPathVirtualized_stat(path, buf)

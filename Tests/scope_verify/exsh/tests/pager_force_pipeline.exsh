@@ -1,0 +1,5 @@
+i=1
+while [ "$i" -le 40 ]; do
+  printf "line-%02d\n" "$i"
+  i=$((i + 1))
+done | more

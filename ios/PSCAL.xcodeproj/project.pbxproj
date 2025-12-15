@@ -70,6 +70,7 @@
 		5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
 		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
 		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
+		DEAD00012C0FF00D00DEAD00 /* src */ = {isa = PBXFileReference; lastKnownFileType = folder; name = src; path = ../src; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +96,7 @@
 				5F1AA0032EC6F00100000001 /* etc */,
 				5F1AA0042EC6F00100000001 /* Docs */,
 				5F1AA0052EC6F00100000001 /* TestsLibs */,
+				DEAD00012C0FF00D00DEAD00 /* src */,
 				145F4FBE2BE0719A00603B3F /* PSCAL.app */,
 				145F4FD12BE0727A00603B3F /* SwiftUI.framework */,
 				145F4FD32BE0727A00603B3F /* UIKit.framework */,

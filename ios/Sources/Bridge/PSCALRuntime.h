@@ -65,6 +65,16 @@ void PSCALRuntimeSendSignal(int signo);
 /// Passing NULL or an empty string clears the setting.
 void PSCALRuntimeApplyPathTruncation(const char *path);
 
+/// Creates/destroys an isolated shell runtime context for embedding scenarios
+/// (e.g. multiple iPadOS windows). The caller owns the returned pointer.
+void *PSCALRuntimeCreateShellContext(void);
+void PSCALRuntimeDestroyShellContext(void *ctx);
+
+/// Makes a shell context current for the next exsh launch. Pass takeOwnership=0
+/// when the caller will free the context; non-zero transfers ownership to the
+/// runtime (it will free any previously owned context).
+void PSCALRuntimeSetShellContext(void *ctx, int takeOwnership);
+
 #ifdef __cplusplus
 }
 #endif
