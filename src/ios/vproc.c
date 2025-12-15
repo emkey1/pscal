@@ -70,12 +70,17 @@ static int gShellSelfPid = 0;
 typedef struct {
     int pid;
     pthread_t tid;
+    int parent_pid;
+    int pgid;
+    int sid;
     int status;
     bool exited;
     bool stopped;
     int stop_signo;
+    bool zombie;
     int job_id;
     char *label;
+    char comm[16];
 } VProcTaskEntry;
 
 typedef struct {
@@ -253,10 +258,16 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (slot) {
         slot->pid = vp->pid;
         slot->tid = 0;
+        slot->parent_pid = 0;
+        slot->pgid = vp->pid;
+        slot->sid = vp->pid;
         slot->status = 0;
         slot->exited = false;
         slot->stopped = false;
         slot->stop_signo = 0;
+        slot->zombie = false;
+        slot->job_id = 0;
+        memset(slot->comm, 0, sizeof(slot->comm));
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 
@@ -551,16 +562,7 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
     /* Only clear tracking on exit; stopped tasks remain in the table so they
      * can be continued and waited on again. */
     if (entry->exited) {
-        if (entry->label) {
-            free(entry->label);
-            entry->label = NULL;
-        }
-        entry->job_id = 0;
-        entry->pid = 0;
-        entry->tid = 0;
-        entry->exited = true;
-        entry->stopped = false;
-        entry->stop_signo = 0;
+        entry->zombie = true;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return pid;
