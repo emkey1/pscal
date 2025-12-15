@@ -414,6 +414,40 @@ static void assert_stop_and_continue_round_trip(void) {
     vprocDestroy(vp);
 }
 
+static void assert_job_ids_stable_across_exits(void) {
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp1 = vprocCreate(&opts);
+    opts.pid_hint = vprocReservePid();
+    VProc *vp2 = vprocCreate(&opts);
+    opts.pid_hint = vprocReservePid();
+    VProc *vp3 = vprocCreate(&opts);
+    assert(vp1 && vp2 && vp3);
+
+    int pid1 = vprocPid(vp1);
+    int pid2 = vprocPid(vp2);
+    int pid3 = vprocPid(vp3);
+
+    vprocSetJobId(pid1, 1);
+    vprocSetJobId(pid2, 2);
+    vprocSetJobId(pid3, 3);
+
+    vprocMarkExit(vp2, 0);
+    int status = 0;
+    assert(vprocWaitPidShim(pid2, &status, 0) == pid2);
+    assert(vprocGetJobId(pid2) == 0);
+    assert(vprocGetJobId(pid1) == 1);
+    assert(vprocGetJobId(pid3) == 3);
+
+    vprocMarkExit(vp1, 0);
+    vprocMarkExit(vp3, 0);
+    (void)vprocWaitPidShim(pid1, &status, 0);
+    (void)vprocWaitPidShim(pid3, &status, 0);
+    vprocDestroy(vp1);
+    vprocDestroy(vp2);
+    vprocDestroy(vp3);
+}
+
 static void assert_path_truncate_maps_to_sandbox(void) {
     char templ[] = "/tmp/vproc-sandbox-XXXXXX";
     char *root = mkdtemp(templ);
@@ -485,6 +519,8 @@ int main(void) {
     assert_snapshot_lists_active_tasks();
     fprintf(stderr, "TEST stop_and_continue_round_trip\n");
     assert_stop_and_continue_round_trip();
+    fprintf(stderr, "TEST job_ids_stable_across_exits\n");
+    assert_job_ids_stable_across_exits();
     fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");
     assert_path_truncate_maps_to_sandbox();
     fprintf(stderr, "TEST write_reads_back\n");
