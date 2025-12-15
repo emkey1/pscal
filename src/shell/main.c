@@ -3367,6 +3367,7 @@ int exsh_main(int argc, char **argv) {
     vmSetSuppressStateDump(true);
 
 #if defined(PSCAL_TARGET_IOS)
+void pscalRuntimeDebugLog(const char *message);
     {
         char logbuf[1024];
         int written = snprintf(logbuf, sizeof(logbuf), "[exsh-ios] argc=%d", argc);
