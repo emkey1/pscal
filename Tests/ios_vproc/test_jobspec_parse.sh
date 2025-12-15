@@ -9,13 +9,15 @@ if [[ ! -x "${BIN}" ]]; then
   exit 77
 fi
 
-run_exsh() {
-  local script="$1"
+run_case() {
+  local label="$1"
+  local script="$2"
+  echo "CASE: ${label}"
   "${BIN}" --norc --noprofile <<'EOF'
 set -e
-PS4='+ '
 set -m
 EOF
 }
 
-echo "TODO: shell-level jobspec parse tests run against exsh binary on device."
+echo "NOTE: This script should be run on iOS with the in-app exsh binary available."
+echo "TODO: Implement background job creation and %N resolution checks once device harness is wired."
