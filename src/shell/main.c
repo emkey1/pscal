@@ -3380,6 +3380,8 @@ void pscalRuntimeDebugLog(const char *message);
             written += n;
         }
         pscalRuntimeDebugLog(logbuf);
+        /* Also emit to stderr so interactive runs surface argv immediately. */
+        fprintf(stderr, "%s\n", logbuf);
     }
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
