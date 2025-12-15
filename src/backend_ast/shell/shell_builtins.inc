@@ -3894,7 +3894,7 @@ static Value shellRunToolBuiltin(VM *vm,
 #if defined(PSCAL_TARGET_IOS)
     /* Special-case exsh: on iOS we cannot exec a new process, so run exsh_main inline
      * with the provided arguments to preserve -c/script execution. */
-    if (tool_name && strcmp(tool_name, "exsh") == 0 && entry == exsh_main) {
+    if (tool_name && strcmp(tool_name, "exsh") == 0 && entry) {
         int argc = arg_count + 1;
         char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
         if (!argv) {
@@ -3907,7 +3907,7 @@ static Value shellRunToolBuiltin(VM *vm,
             const char *s = (v->type == TYPE_STRING && v->s_val) ? v->s_val : "";
             argv[i + 1] = strdup(s);
         }
-        int status = exsh_main(argc, argv);
+        int status = entry(argc, argv);
         for (int i = 0; i <= argc; ++i) {
             free(argv[i]);
         }
