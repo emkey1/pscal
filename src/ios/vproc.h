@@ -64,6 +64,11 @@ int vprocGetWinsize(VProc *vp, VProcWinsize *out);
 /* Task lifecycle management for virtual processes (iOS clean-room). */
 int vprocRegisterThread(VProc *vp, pthread_t tid);
 void vprocMarkExit(VProc *vp, int status);
+void vprocSetParent(int pid, int parent_pid);
+int vprocSetPgid(int pid, int pgid);
+int vprocSetSid(int pid, int sid);
+int vprocGetPgid(int pid);
+int vprocGetSid(int pid);
 
 // Shimmed syscalls: respect the active vproc on the current thread when set,
 // otherwise fall back to real libc/syscall equivalents.
