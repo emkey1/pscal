@@ -37,7 +37,7 @@ echo --J3--
 jobs
 "
   local output
-  output=$(printf "%s\n" "${script}" | "${BIN}" --norc --noprofile)
+  output=$("${BIN}" --norc --noprofile -c "${script}")
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--K1--")
@@ -67,7 +67,7 @@ kill %1 || true
 kill %3 || true
 "
   local output
-  output=$(printf "%s\n" "${script}" | "${BIN}" --norc --noprofile)
+  output=$("${BIN}" --norc --noprofile -c "${script}")
   echo "${output}"
   local j1 j2
   j1=$(jobs_block "${output}" "--J1--" "--Kmid--")
