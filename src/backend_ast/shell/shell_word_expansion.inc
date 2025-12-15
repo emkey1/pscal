@@ -1761,9 +1761,10 @@ static void shellHandlePendingSignal(int signo) {
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    if (signo == SIGTSTP && pscalRuntimeVirtualTTYEnabled()) {
+    bool virtual_tty = pscalRuntimeVirtualTTYEnabled();
+    if (signo == SIGTSTP && virtual_tty) {
         shellUpdateStatus(128 + signo);
-        shellRuntimeRequestExit();
+        /* Do not request exit here; we’ll stop the running job instead. */
     }
 #endif
 
@@ -1778,7 +1779,7 @@ static void shellHandlePendingSignal(int signo) {
         }
 
 #if defined(PSCAL_TARGET_IOS)
-        if (pscalRuntimeVirtualTTYEnabled()) {
+        if (virtual_tty) {
             ShellPipelineContext *pipe_ctx = &gShellRuntime.pipeline;
             size_t launched = pipe_ctx ? pipe_ctx->launched : 0;
             if (pipe_ctx && pipe_ctx->active && pipe_ctx->pids) {
