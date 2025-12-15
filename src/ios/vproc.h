@@ -57,6 +57,8 @@ int vprocDup(VProc *vp, int fd);
 int vprocDup2(VProc *vp, int fd, int target);
 int vprocClose(VProc *vp, int fd);
 int vprocPipe(VProc *vp, int pipefd[2]);
+/* Adopt an existing host fd into the vproc table, returning the vproc-local fd. */
+int vprocAdoptHostFd(VProc *vp, int host_fd);
 int vprocOpenAt(VProc *vp, const char *path, int flags, int mode);
 int vprocSetWinsize(VProc *vp, int cols, int rows);
 int vprocGetWinsize(VProc *vp, VProcWinsize *out);

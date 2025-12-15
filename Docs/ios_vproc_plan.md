@@ -52,3 +52,6 @@ Active focus:
 - Harden fg/bg/wait state transitions in virtual TTY mode so the shell never recurses/crashes when contexts swap.
 - Add regression coverage for `kill %N`/Ctrl+Z behaviour (job-number stability tests for vproc IDs now exist).
 - Trim remaining noisy logging and document iOS-only limitations (no fork/exec/pty).
+- Open issues (to avoid repeats):
+  - `exsh testjobs`: `%N` kills are sent but targeted jobs remain running; likely signal delivery/handling in vproc background workers rather than job-spec parsing. Need to verify vprocKillShim delivery and worker threads honoring signals.
+  - Background worker vprocs still end up sharing/retaining host job IDs unexpectedly after kills; ensure reaping and state updates close running slots.

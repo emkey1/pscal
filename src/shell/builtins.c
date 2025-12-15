@@ -30,6 +30,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"read", "read", 10},
     {"test", "test", 11},
     {"[", "test", 11},
+    {"[[", "__shell_double_bracket", 1013},
     {"shift", "shift", 12},
     {"alias", "alias", 13},
     {"unalias", "unalias", 38},

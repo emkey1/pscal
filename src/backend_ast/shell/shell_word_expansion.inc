@@ -2710,14 +2710,27 @@ static void shellRemoveJobAt(size_t index) {
 
 static ShellJob *shellFindJobByPid(pid_t pid);
 
+static size_t shellAllocateJobId(void) {
+    size_t candidate = 1;
+    while (true) {
+        bool used = false;
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            if (gShellJobs[i].id == candidate) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) {
+            return candidate;
+        }
+        ++candidate;
+    }
+}
+
 static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, const ShellCommand *cmd) {
     if (pgid <= 0 || !pids || pid_count == 0) {
         return NULL;
     }
-    if (gShellJobCount == 0 && SC()->job_next_id != 1) {
-        shellResetJobIds();
-    }
-
     pid_t *pid_copy = malloc(sizeof(pid_t) * pid_count);
     if (!pid_copy) {
         return NULL;
@@ -2777,11 +2790,8 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     }
     if (stored_id > 0) {
         job->id = (size_t)stored_id;
-        if (SC()->job_next_id <= (size_t)stored_id) {
-            SC()->job_next_id = (size_t)stored_id + 1;
-        }
     } else {
-        job->id = SC()->job_next_id++;
+        job->id = shellAllocateJobId();
     }
     vprocSetJobId(pgid, (int)job->id);
     for (size_t i = 0; i < pid_count; ++i) {
@@ -2806,19 +2816,43 @@ static int shellCollectJobs(void) {
 #if defined(PSCAL_TARGET_IOS)
     /* Mirror synthetic vproc tasks into the job table if they were launched
      * without registering a ShellJob (e.g., ad-hoc background threads). */
+    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
     size_t snap_cap = vprocSnapshot(NULL, 0);
     if (snap_cap > 0) {
             VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
             if (snaps) {
                 size_t snap_count = vprocSnapshot(snaps, snap_cap);
-                for (size_t i = 0; i < snap_count; ++i) {
-                    const VProcSnapshot *s = &snaps[i];
-                    if (!s || s->pid <= 0) {
-                        continue;
-                    }
-                    if (s->pid == vprocGetShellSelfPid() ||
-                        pthread_equal(s->tid, pthread_self())) {
-                        continue;
+                if (dbg) {
+                    fprintf(stderr, "[jobs-ios] snapshot count=%zu\n", snap_count);
+                }
+    for (size_t i = 0; i < snap_count; ++i) {
+        const VProcSnapshot *s = &snaps[i];
+        if (!s || s->pid <= 0 || s->exited) {
+            continue;
+        }
+        /* Ignore snapshots that have no command label; these are typically
+         * helper threads (output pumps, etc.) that should not appear as
+         * jobs. */
+        if (s->command[0] == '\0') {
+            continue;
+        }
+        /* Skip snapshots whose label is the shell (self) to avoid mirroring the
+         * foreground shell as a background job after reaping. */
+        if (strcmp(s->command, "shell") == 0) {
+            continue;
+        }
+        if (s->pid == vprocGetShellSelfPid() ||
+            pthread_equal(s->tid, pthread_self())) {
+            continue;
+        }
+                    if (dbg) {
+                        fprintf(stderr, "[jobs-ios] snapshot pid=%d tid=%p exited=%d stopped=%d status=%d label='%s'\n",
+                                (int)s->pid,
+                                (void *)s->tid,
+                                (int)s->exited,
+                                (int)s->stopped,
+                                s->status,
+                                s->command);
                     }
                     if (shellFindJobByPid((pid_t)s->pid)) {
                         continue;
@@ -2918,6 +2952,25 @@ static int shellCollectJobs(void) {
         }
 
         ++i;
+    }
+    if (gShellJobCount == 0) {
+        shellResetJobIds();
+    }
+    if (dbg) {
+        fprintf(stderr, "[jobs-ios] table after collect count=%zu\n", gShellJobCount);
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            ShellJob *job = &gShellJobs[i];
+            fprintf(stderr, "[jobs-ios]   job id=%zu pgid=%d running=%d stopped=%d pid_count=%zu command='%s'\n",
+                    job->id,
+                    (int)job->pgid,
+                    (int)job->running,
+                    (int)job->stopped,
+                    job->pid_count,
+                    job->command ? job->command : "");
+            for (size_t j = 0; j < job->pid_count; ++j) {
+                fprintf(stderr, "[jobs-ios]     pid[%zu]=%d\n", j, (int)job->pids[j]);
+            }
+        }
     }
     return reaped;
 }

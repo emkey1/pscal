@@ -1160,6 +1160,9 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (!ctx) {
         return NULL;
     }
+    /* Allow pthread_cancel to interrupt sleeps/IO. */
+    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+    pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure tool frontends are registered in this process before we spin up
      * a fresh runtime/VM for the background worker. */
@@ -1229,6 +1232,13 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (stderr_raw && pathTruncateExpand(stderr_raw, resolved_stderr, sizeof(resolved_stderr))) {
         stderr_env = resolved_stderr;
     }
+    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (tool_dbg) {
+        fprintf(stderr, "[bg-stage] cmd=%s stdout_raw=%s stderr_raw=%s\n",
+                cmd && cmd->argc > 0 ? cmd->argv[0] : "<null>",
+                stdout_env ? stdout_env : "<none>",
+                stderr_env ? stderr_env : "<none>");
+    }
 #endif
     char *stdout_path = stdout_env ? strdup(stdout_env) : NULL;
     char *stderr_path = stderr_env ? strdup(stderr_env) : NULL;
@@ -1267,6 +1277,9 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (stdout_path && *stdout_path) {
         int flags = O_CREAT | O_WRONLY | (stdout_append ? O_APPEND : O_TRUNC);
         stdout_target = open(stdout_path, flags, 0666);
+        if (tool_dbg && stdout_target < 0) {
+            fprintf(stderr, "[bg-stage] open stdout '%s' failed: %s\n", stdout_path, strerror(errno));
+        }
         if (stdout_target >= 0 && pipe(stdout_pipe) == 0) {
             tee_ctx[tee_count].read_fd = stdout_pipe[0];
             tee_ctx[tee_count].file_fd = stdout_target;
@@ -1282,6 +1295,9 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (stderr_path && *stderr_path) {
         int flags = O_CREAT | O_WRONLY | (stderr_append ? O_APPEND : O_TRUNC);
         stderr_target = open(stderr_path, flags, 0666);
+        if (tool_dbg && stderr_target < 0) {
+            fprintf(stderr, "[bg-stage] open stderr '%s' failed: %s\n", stderr_path, strerror(errno));
+        }
         if (stderr_target >= 0 && pipe(stderr_pipe) == 0) {
             tee_ctx[tee_count].read_fd = stderr_pipe[0];
             tee_ctx[tee_count].file_fd = stderr_target;
@@ -1309,6 +1325,48 @@ static void *shellInProcessBackgroundMain(void *arg) {
         goto cleanup;
     }
     vprocRegisterThread(vp, pthread_self());
+    vprocSetParent(vprocPid(vp), vprocGetShellSelfPid());
+    vprocSetPgid(vprocPid(vp), vprocPid(vp));
+    vprocSetSid(vprocPid(vp), vprocPid(vp));
+    /* Label the vproc for lps/ps visibility. */
+    if (cmd && cmd->argc > 0 && cmd->argv) {
+        char label[96] = {0};
+        size_t used = 0;
+        for (size_t i = 0; i < cmd->argc && used + 1 < sizeof(label); ++i) {
+            const char *part = cmd->argv[i] ? cmd->argv[i] : "";
+            size_t len = strlen(part);
+            if (used + len + 1 >= sizeof(label)) {
+                len = sizeof(label) - used - 1;
+            }
+            memcpy(label + used, part, len);
+            used += len;
+            if (used + 1 < sizeof(label) && i + 1 < cmd->argc) {
+                label[used++] = ' ';
+            }
+        }
+        label[used] = '\0';
+        if (label[0]) {
+            vprocSetCommandLabel(vprocPid(vp), label);
+        }
+    }
+    /* Hand off host fds to the synthetic vproc so dup2 shims work on vproc-local
+     * descriptors during builtin execution. */
+    if (vm_stdout >= 0) {
+        int host_fd = vm_stdout;
+        int vfd = vprocAdoptHostFd(vp, host_fd);
+        if (vfd >= 0) {
+            vm_stdout = vfd;
+            close(host_fd);
+        }
+    }
+    if (vm_stderr >= 0) {
+        int host_fd = vm_stderr;
+        int vfd = vprocAdoptHostFd(vp, host_fd);
+        if (vfd >= 0) {
+            vm_stderr = vfd;
+            close(host_fd);
+        }
+    }
     vprocActivate(vp);
 #endif
     gShellBackgroundWorkerActive = true;
@@ -1344,8 +1402,13 @@ cleanup:
     }
 #endif
     if (stdin_fd >= 0) close(stdin_fd);
+#if defined(PSCAL_TARGET_IOS)
+    if (vm_stdout >= 0) vprocCloseShim(vm_stdout);
+    if (vm_stderr >= 0) vprocCloseShim(vm_stderr);
+#else
     if (vm_stdout >= 0) close(vm_stdout);
     if (vm_stderr >= 0) close(vm_stderr);
+#endif
     for (int i = 0; i < tee_count; ++i) {
         pthread_join(tee_threads[i], NULL);
     }
@@ -2283,6 +2346,7 @@ static int shellRunBuiltinInProcess(VM *vm,
                                     int stdout_fd,
                                     int stderr_fd,
                                     bool apply_exec_redirs) {
+    bool tool_dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (cmd && cmd->background);
     ShellExecRedirBackup *backups = NULL;
     size_t backup_count = 0;
     size_t backup_capacity = 0;
@@ -2291,27 +2355,38 @@ static int shellRunBuiltinInProcess(VM *vm,
 
     if (stdin_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDIN_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            if (tool_dbg) fprintf(stderr, "[run-builtin] backup stdin failed\n");
             goto cleanup;
         }
         if (dup2(stdin_fd, STDIN_FILENO) < 0) {
+            if (tool_dbg) fprintf(stderr, "[run-builtin] dup2 stdin failed: %s\n", strerror(errno));
             goto cleanup;
         }
         shellResetStandardStream(STDIN_FILENO);
     }
     if (stdout_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDOUT_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            if (tool_dbg) fprintf(stderr, "[run-builtin] backup stdout failed\n");
             goto cleanup;
         }
+        if (tool_dbg) {
+            int fd_flags = fcntl(stdout_fd, F_GETFD);
+            fprintf(stderr, "[run-builtin] stdout_fd=%d fcntl=%d (%s)\n",
+                    stdout_fd, fd_flags, (fd_flags < 0) ? strerror(errno) : "ok");
+        }
         if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
+            if (tool_dbg) fprintf(stderr, "[run-builtin] dup2 stdout failed: %s\n", strerror(errno));
             goto cleanup;
         }
         shellResetStandardStream(STDOUT_FILENO);
     }
     if (stderr_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDERR_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
+            if (tool_dbg) fprintf(stderr, "[run-builtin] backup stderr failed\n");
             goto cleanup;
         }
         if (dup2(stderr_fd, STDERR_FILENO) < 0) {
+            if (tool_dbg) fprintf(stderr, "[run-builtin] dup2 stderr failed: %s\n", strerror(errno));
             goto cleanup;
         }
         shellResetStandardStream(STDERR_FILENO);
@@ -2325,6 +2400,13 @@ static int shellRunBuiltinInProcess(VM *vm,
         applied_redirs = true;
     }
 
+    if (tool_dbg) {
+        fprintf(stderr, "[run-builtin] invoking cmd=%s argc=%zu redirs=%zu apply_exec_redirs=%d\n",
+                (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
+                cmd ? cmd->argc : 0,
+                cmd ? cmd->redir_count : 0,
+                (int)apply_exec_redirs);
+    }
     bool builtin_ran = shellInvokeBuiltin(vm, cmd);
 #if defined(PSCAL_TARGET_IOS)
     if (!builtin_ran) {
@@ -2429,11 +2511,20 @@ static int shellRunBuiltinInProcess(VM *vm,
     if (!builtin_ran) {
         runtimeError(vm, "%s: command unavailable in pipeline", cmd->argv[0]);
         shellUpdateStatus(127);
+        if (tool_dbg) {
+            fprintf(stderr, "[run-builtin] builtin not found for %s\n", cmd && cmd->argv ? cmd->argv[0] : "<nil>");
+        }
     }
     shellFlushStandardStreams();
     status = gShellRuntime.last_status;
 
 cleanup:
+    if (tool_dbg && status == 127) {
+        fprintf(stderr, "[run-builtin] exiting with status=127 cmd=%s apply_exec_redirs=%d stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
+                (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
+                (int)apply_exec_redirs,
+                stdin_fd, stdout_fd, stderr_fd);
+    }
     if (applied_redirs) {
         shellRestoreExecRedirections(backups, backup_count);
     } else if (backups) {

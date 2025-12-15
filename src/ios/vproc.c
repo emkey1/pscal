@@ -140,6 +140,10 @@ static int vprocInsert(VProc *vp, int host_fd) {
     return slot;
 }
 
+int vprocAdoptHostFd(VProc *vp, int host_fd) {
+    return vprocInsert(vp, host_fd);
+}
+
 static int vprocCloneFd(int source_fd) {
     int duped = fcntl(source_fd, F_DUPFD_CLOEXEC, 0);
     if (duped < 0 && errno == EINVAL) {
@@ -654,11 +658,9 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
     }
 
     if (entry->exited) {
+        /* Wait semantics should reap exited tasks even when WNOHANG is set. */
         entry->zombie = true;
-        if (!allow_stop) {
-            /* Reap zombies on blocking waits; leave them for non-blocking/stop waits. */
-            vprocClearEntryLocked(entry);
-        }
+        vprocClearEntryLocked(entry);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return pid;
@@ -707,6 +709,14 @@ int vprocKillShim(pid_t pid, int sig) {
                 entry->stopped = false;
                 entry->stop_signo = 0;
                 entry->zombie = true;
+                if (entry->label) {
+                    free(entry->label);
+                    entry->label = NULL;
+                }
+            }
+            if (!stop_signal && !cont_signal) {
+                /* Terminating signal: clear slot immediately to prevent re-mirroring. */
+                vprocClearEntryLocked(entry);
             }
         }
         pthread_cond_broadcast(&gVProcTasks.cv);
@@ -721,6 +731,9 @@ int vprocKillShim(pid_t pid, int sig) {
     VProcTaskEntry *entry = vprocTaskFindLocked(target);
     if (!entry || entry->pid <= 0) {
         pthread_mutex_unlock(&gVProcTasks.mu);
+        if (getenv("PSCALI_KILL_DEBUG")) {
+            fprintf(stderr, "[vproc-kill] pid=%d not found in synthetic table, falling back to host kill\n", target);
+        }
         return kill(pid, sig);
     }
     bool stop_signal = (sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU);
@@ -751,6 +764,11 @@ int vprocKillShim(pid_t pid, int sig) {
         entry->stopped = false;
         entry->stop_signo = 0;
         entry->zombie = true;
+        if (entry->label) {
+            free(entry->label);
+            entry->label = NULL;
+        }
+        vprocClearEntryLocked(entry);
     }
     pthread_cond_broadcast(&gVProcTasks.cv);
     pthread_mutex_unlock(&gVProcTasks.mu);

@@ -2409,6 +2409,16 @@ static bool shellEvaluateFileBinary(const char *left,
 
 Value vmBuiltinShellDoubleBracket(VM *vm, int arg_count, Value *args) {
     (void)vm;
+    /* Be tolerant of unmatched parsing so that [[ ... ]] still works even if
+     * the rewrite step failed and left a trailing "]]" argument. */
+    while (arg_count > 0) {
+        const Value *last = &args[arg_count - 1];
+        const char *text = (last->type == TYPE_STRING && last->s_val) ? last->s_val : "";
+        if (strcmp(text, "]]") != 0) {
+            break;
+        }
+        arg_count--;
+    }
     bool negate = false;
     int index = 0;
     while (index < arg_count) {
@@ -3625,6 +3635,10 @@ static void *shellToolThreadMain(void *arg) {
     if (!ctx || !ctx->entry) {
         return NULL;
     }
+    bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (dbg) {
+        fprintf(stderr, "[tool-thread] worker start argc=%d entry=%p\n", ctx->argc, (void *)ctx->entry);
+    }
     (void)ctx->stdout_fd;
     (void)ctx->stderr_fd;
 
@@ -3701,6 +3715,9 @@ static void *shellToolThreadMain(void *arg) {
     /* Restore signal handler */
     sigaction(SIGINT, &old_sa, NULL);
     sigaction(SIGTSTP, &old_sa_tstp, NULL);
+    if (dbg) {
+        fprintf(stderr, "[tool-thread] worker done status=%d\n", ctx->status);
+    }
     return NULL;
 }
 
@@ -3709,6 +3726,9 @@ static void *shellToolWaiterMain(void *arg) {
     pthread_join(ctx->worker_thread, NULL);
     ctx->finished = 1;
     pthread_kill(ctx->main_thread, SIGURG);
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr, "[tool-thread] waiter signaled main\n");
+    }
     return NULL;
 }
 
@@ -3781,6 +3801,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
     context.finished = 0;
     context.main_thread = pthread_self();
     context.use_shell_context = use_shell_context;
+    /* Foreground runs keep the caller's stdio; use -1 to skip dup2. */
+    context.stdout_fd = -1;
+    context.stderr_fd = -1;
 
     /* Block SIGINT and SIGURG on Main */
     sigset_t new_mask, old_mask;
@@ -9922,6 +9945,11 @@ static bool shellKillResolveJobSpecIOS(const char *text, size_t *out_index) {
     }
 
     if (shellKillTryJobSpec(text, out_index)) {
+#if defined(PSCAL_TARGET_IOS)
+        if (getenv("PSCALI_KILL_DEBUG")) {
+            fprintf(stderr, "[kill-ios] resolved job-spec '%s' -> job index=%zu\n", text, *out_index);
+        }
+#endif
         return true;
     }
 
@@ -9949,6 +9977,11 @@ static bool shellKillResolveJobSpecIOS(const char *text, size_t *out_index) {
     }
 
     if (shellJobFindVisibleIndex((size_t)vis, out_index)) {
+#if defined(PSCAL_TARGET_IOS)
+        if (getenv("PSCALI_KILL_DEBUG")) {
+            fprintf(stderr, "[kill-ios] resolved job-spec '%s' -> job index=%zu via snapshot\n", text, *out_index);
+        }
+#endif
         return true;
     }
 
@@ -10021,6 +10054,13 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
     }
     ShellJob *job = &gShellJobs[index];
     bool sent = false;
+    bool terminate = !(signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU || signo == SIGCONT);
+#if defined(PSCAL_TARGET_IOS)
+    if (getenv("PSCALI_KILL_DEBUG")) {
+        fprintf(stderr, "[kill-ios] job-spec '%s' -> job id=%zu pgid=%d pid_count=%zu terminate=%d\n",
+                spec_text ? spec_text : "<null>", job->id, (int)job->pgid, job->pid_count, (int)terminate);
+    }
+#endif
     for (size_t i = 0; i < job->pid_count; ++i) {
         pid_t pid = job->pids[i];
         if (pid <= 0) {
@@ -10037,6 +10077,14 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
                          strerror(errno));
             return false;
         }
+#if defined(PSCAL_TARGET_IOS)
+        /* If we just delivered a terminating signal, mark the slot as exited so
+         * that job bookkeeping collapses immediately even if the underlying
+         * thread is already gone. */
+        if (terminate) {
+            job->pids[i] = -1;
+        }
+#endif
     }
     if (!sent) {
         runtimeError(vm, "kill: %s: no associated processes",
@@ -10052,6 +10100,28 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         job->running = false;
         job->stopped = false;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (terminate) {
+        /* On iOS synthetic tasks do not reap unless we drop the job entry. Do it
+         * immediately after delivering a terminating signal so job listings shrink. */
+        if (getenv("PSCALI_KILL_DEBUG")) {
+            fprintf(stderr, "[kill-ios] removing job id=%zu after terminate\n", job->id);
+        }
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            pid_t pid = job->pids[i];
+            if (pid > 0) {
+                (void)vprocWaitPidShim(pid, NULL, 0);
+            }
+        }
+        shellRemoveJobAt(index);
+        if (getenv("PSCALI_KILL_DEBUG")) {
+            fprintf(stderr, "[kill-ios] job table size now=%zu\n", gShellJobCount);
+        }
+        /* Refresh vproc snapshot after removal to avoid mirroring killed tasks. */
+        shellCollectJobs();
+        return true;
+    }
+#endif
     return true;
 }
 
@@ -10183,10 +10253,6 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     bool overall_ok = true;
     for (int i = operand_start; i < arg_count; ++i) {
         Value target = args[i];
-        const char *raw = (target.type == TYPE_STRING && target.s_val) ? target.s_val : NULL;
-#if defined(PSCAL_TARGET_IOS)
-        fprintf(stderr, "[kill-ios] arg%d='%s'\n", i, raw ? raw : "<null>");
-#endif
         /* Resolve job specs (with or without leading %); prefer job matching before PID parsing. */
         if (target.type == TYPE_STRING && target.s_val) {
 #if defined(PSCAL_TARGET_IOS)
@@ -10319,6 +10385,8 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
         }
     }
 
+    /* Pull in any state changes caused by the signals (stops, exits) so jobs/
+     * lps reflect the new status immediately. */
     shellCollectJobs();
     shellUpdateStatus(overall_ok ? 0 : 1);
     return makeVoid();

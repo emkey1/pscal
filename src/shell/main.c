@@ -3398,6 +3398,42 @@ void pscalRuntimeDebugLog(const char *message);
     const char *command_arg0 = NULL;
     int command_param_start = -1;
 
+    /* Self-hosted jobspec test helper for environments (iOS) where the test
+     * script file is not present on disk. Invoked as `exsh testjobs`. */
+    static const char *kJobspecSelfTest =
+        "set -e\n"
+        "set -m\n"
+        "echo --DB1--\n"
+        "if [[ foo == foo ]]; then echo OK; else echo BAD; exit 1; fi\n"
+        "echo --J1--\n"
+        "sleep 60 &\n"
+        "sleep 60 &\n"
+        "jobs\n"
+        "echo --K1--\n"
+        "kill %1\n"
+        "sleep 1\n"
+        "echo --J2--\n"
+        "jobs\n"
+        "echo --K2--\n"
+        "kill %2 || true\n"
+        "sleep 1\n"
+        "echo --J3--\n"
+        "jobs\n"
+        "echo --M1--\n"
+        "sleep 60 &\n"
+        "sleep 60 &\n"
+        "sleep 60 &\n"
+        "echo --J4--\n"
+        "jobs\n"
+        "echo --Kmid--\n"
+        "kill %2\n"
+        "sleep 1\n"
+        "echo --J5--\n"
+        "jobs\n"
+        "echo --Kall--\n"
+        "kill %1 || true\n"
+        "kill %3 || true\n";
+
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("%s", SHELL_USAGE);
@@ -3449,6 +3485,12 @@ void pscalRuntimeDebugLog(const char *message);
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], SHELL_USAGE);
             EXSH_RETURN(EXIT_FAILURE);
         } else {
+            if (strcmp(argv[i], "testjobs") == 0) {
+                command_string = kJobspecSelfTest;
+                command_param_start = argc;
+                command_arg0 = argv[0];
+                break;
+            }
             path = argv[i];
             arg_start_index = i + 1;
             break;
