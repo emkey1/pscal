@@ -2787,6 +2787,11 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     for (size_t i = 0; i < pid_count; ++i) {
         vprocSetJobId(pids[i], (int)job->id);
         vprocSetCommandLabel(pids[i], summary);
+        if (pgid > 0) {
+            vprocSetPgid(pids[i], (int)pgid);
+            vprocSetSid(pids[i], (int)pgid);
+            vprocSetParent(pids[i], vprocGetShellSelfPid());
+        }
     }
     vprocSetCommandLabel(pgid, summary);
     job->running = true;
