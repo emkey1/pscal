@@ -2714,6 +2714,9 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     if (pgid <= 0 || !pids || pid_count == 0) {
         return NULL;
     }
+    if (gShellJobCount == 0 && SC()->job_next_id != 1) {
+        shellResetJobIds();
+    }
 
     pid_t *pid_copy = malloc(sizeof(pid_t) * pid_count);
     if (!pid_copy) {
