@@ -247,6 +247,18 @@ VProc *vprocCreate(const VProcOptions *opts) {
     } else {
         vp->pid = __sync_fetch_and_add(&gNextSyntheticPid, 1);
     }
+    /* Ensure a task slot exists for synthetic pid bookkeeping. */
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *slot = vprocTaskEnsureSlotLocked(vp->pid);
+    if (slot) {
+        slot->pid = vp->pid;
+        slot->tid = 0;
+        slot->status = 0;
+        slot->exited = false;
+        slot->stopped = false;
+        slot->stop_signo = 0;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
 
     int stdin_src = (local.stdin_fd == -2) ? open("/dev/null", O_RDONLY)
                                            : vprocCloneFd((local.stdin_fd >= 0) ? local.stdin_fd : STDIN_FILENO);
@@ -522,10 +534,11 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
                 *status_out = 0;
             }
             return 0;
+        }
+        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
     }
-    pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
-}
-int status = 0;
+
+    int status = 0;
     if (entry->exited) {
         status = W_EXITCODE(entry->status & 0xff, 0);
     } else if (entry->stopped && entry->stop_signo > 0) {
@@ -534,15 +547,20 @@ int status = 0;
     if (status_out) {
         *status_out = status;
     }
-    if (entry->label) {
-        free(entry->label);
-        entry->label = NULL;
+
+    /* Only clear tracking on exit; stopped tasks remain in the table so they
+     * can be continued and waited on again. */
+    if (entry->exited) {
+        if (entry->label) {
+            free(entry->label);
+            entry->label = NULL;
+        }
+        entry->pid = 0;
+        entry->tid = 0;
+        entry->exited = true;
+        entry->stopped = false;
+        entry->stop_signo = 0;
     }
-    entry->pid = 0;
-    entry->tid = 0;
-    entry->exited = true;
-    entry->stopped = false;
-    entry->stop_signo = 0;
     pthread_mutex_unlock(&gVProcTasks.mu);
     return pid;
 }

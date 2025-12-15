@@ -388,6 +388,29 @@ static void assert_snapshot_lists_active_tasks(void) {
     assert(post == 0 || post < count);
 }
 
+static void assert_stop_and_continue_round_trip(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    assert(pid > 0);
+
+    /* Stop the synthetic process and observe WIFSTOPPED. */
+    assert(vprocKillShim(pid, SIGTSTP) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED) == pid);
+    assert(WIFSTOPPED(status));
+
+    /* Continue and then exit cleanly; wait should now report exit. */
+    assert(vprocKillShim(pid, SIGCONT) == 0);
+    vprocMarkExit(vp, 5);
+    memset(&status, 0, sizeof(status));
+    assert(vprocWaitPidShim(pid, &status, 0) == pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 5);
+
+    vprocDestroy(vp);
+}
+
 static void assert_path_truncate_maps_to_sandbox(void) {
     char templ[] = "/tmp/vproc-sandbox-XXXXXX";
     char *root = mkdtemp(templ);
@@ -435,19 +458,35 @@ static void assert_passthrough_when_inactive(void) {
 }
 
 int main(void) {
+    fprintf(stderr, "TEST pipe_round_trip\n");
     assert_pipe_round_trip();
+    fprintf(stderr, "TEST dup2_isolated\n");
     assert_dup2_isolated();
+    fprintf(stderr, "TEST stdin_redirected\n");
     assert_stdin_redirected_via_dup2();
+    fprintf(stderr, "TEST host_stdio_untouched\n");
     assert_host_stdio_untouched_after_vproc_close();
+    fprintf(stderr, "TEST winsize_round_trip\n");
     assert_winsize_round_trip();
+    fprintf(stderr, "TEST open_and_read\n");
     assert_open_and_read_via_shim();
+    fprintf(stderr, "TEST isolation_between_vprocs\n");
     assert_isolation_between_vprocs();
+    fprintf(stderr, "TEST wait_on_synthetic_pid\n");
     assert_wait_on_synthetic_pid();
+    fprintf(stderr, "TEST kill_negative_pid_routes_to_thread\n");
     assert_kill_negative_pid_routes_to_thread();
+    fprintf(stderr, "TEST wait_nohang_transitions\n");
     assert_wait_nohang_transitions();
+    fprintf(stderr, "TEST snapshot_lists_active_tasks\n");
     assert_snapshot_lists_active_tasks();
+    fprintf(stderr, "TEST stop_and_continue_round_trip\n");
+    assert_stop_and_continue_round_trip();
+    fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");
     assert_path_truncate_maps_to_sandbox();
+    fprintf(stderr, "TEST write_reads_back\n");
     assert_write_reads_back();
+    fprintf(stderr, "TEST passthrough_when_inactive\n");
     assert_passthrough_when_inactive();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
