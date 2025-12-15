@@ -10214,7 +10214,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
                     continue;
                 }
             }
-
+            shellCollectJobs();
             size_t job_index = 0;
             if (shellKillResolveJobSpecIOS(target.s_val, &job_index) && job_index < gShellJobCount) {
                 if (!shellKillSignalJob(vm, target.s_val, job_index, signal_number)) {
