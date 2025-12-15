@@ -3367,6 +3367,19 @@ int exsh_main(int argc, char **argv) {
     vmSetSuppressStateDump(true);
 
 #if defined(PSCAL_TARGET_IOS)
+    {
+        char logbuf[1024];
+        int written = snprintf(logbuf, sizeof(logbuf), "[exsh-ios] argc=%d", argc);
+        for (int i = 0; i < argc && written < (int)sizeof(logbuf) - 8; ++i) {
+            int n = snprintf(logbuf + written, sizeof(logbuf) - (size_t)written,
+                             " argv[%d]='%s'", i, argv[i] ? argv[i] : "(null)");
+            if (n <= 0) {
+                break;
+            }
+            written += n;
+        }
+        pscalRuntimeDebugLog(logbuf);
+    }
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
     shellSetupSelfVproc();
