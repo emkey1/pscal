@@ -10,9 +10,7 @@
 #include "Pascal/globals.h"
 #include "pscal_paths.h"
 #include "common/runtime_tty.h"
-#if defined(PSCAL_TARGET_IOS)
 #include "ios/vproc.h"
-#endif
 
 #include <ctype.h>
 #include <errno.h>

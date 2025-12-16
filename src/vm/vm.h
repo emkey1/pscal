@@ -204,6 +204,8 @@ typedef struct VM_s {
 
     /* Frontend-specific context; e.g., exsh per-VM shell state. */
     void* frontendContext;
+    /* String indexing mode: true for shell-style (0-based), false for Pascal/REA (1-based). */
+    bool shellIndexing;
 
     // Optional tracing: when >0, print execution of first N instructions
     int trace_head_instructions;

@@ -2000,6 +2000,15 @@ bool loadBytecodeFromCache(const char* source_path,
             }
         }
     }
+    /* If we cannot resolve the frontend path, avoid using potentially stale
+     * cached bytecode that was produced by a different binary (common when
+     * in-process tool runners set argv[0] to just the tool name). */
+    if (frontend_path && frontend_path[0] && !frontend_for_cache) {
+        free(prefix);
+        free(sanitized_base);
+        free(dir);
+        return false;
+    }
 
     size_t candidate_count = 0;
     CacheCandidate* candidates = gatherCacheCandidates(dir, prefix, &candidate_count);

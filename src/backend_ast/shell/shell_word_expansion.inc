@@ -2515,10 +2515,12 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         return false;
     }
     const char *canonical = shellBuiltinCanonicalName(name);
-    if (shellRuntimeBuiltinDisabled(canonical ? canonical : name)) {
+    const char *lookup = canonical ? canonical : name;
+    if (shellRuntimeBuiltinDisabled(lookup)) {
         return false;
     }
-    VmBuiltinFn handler = getVmBuiltinHandler(canonical ? canonical : name);
+    bool is_runtime_builtin = shellIsRuntimeBuiltin(lookup);
+    VmBuiltinFn handler = getVmBuiltinHandler(lookup);
     if (!handler && canonical && canonical != name) {
         handler = getVmBuiltinHandler(name);
     }
@@ -2539,20 +2541,24 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         }
     }
 #endif
-    if (!handler && shellIsRuntimeBuiltin(name)) {
+    if (!handler && is_runtime_builtin) {
         /* Fallback to canonical lookup via builtin table if registry failed. */
         const char *fallback = shellBuiltinCanonicalName(name);
         if (fallback && fallback != canonical) {
             handler = getVmBuiltinHandler(fallback);
             canonical = fallback;
+            lookup = canonical ? canonical : name;
         }
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (!handler && shellDispatchIOSFrontendBuiltin(vm, cmd)) {
+    if (!handler && is_runtime_builtin && shellDispatchIOSFrontendBuiltin(vm, cmd)) {
         return true;
     }
 #endif
     if (!handler) {
+        if (!is_runtime_builtin) {
+            return false;
+        }
         fprintf(stderr, "[builtin-missing] name=%s canonical=%s\n",
                 name ? name : "<null>",
                 canonical ? canonical : "<null>");
@@ -2956,6 +2962,7 @@ static int shellCollectJobs(void) {
     if (gShellJobCount == 0) {
         shellResetJobIds();
     }
+#if defined(PSCAL_TARGET_IOS)
     if (dbg) {
         fprintf(stderr, "[jobs-ios] table after collect count=%zu\n", gShellJobCount);
         for (size_t i = 0; i < gShellJobCount; ++i) {
@@ -2972,6 +2979,7 @@ static int shellCollectJobs(void) {
             }
         }
     }
+#endif
     return reaped;
 }
 

@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <stdio.h> // Added for fprintf
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -21,12 +22,21 @@
 #undef PATH_VIRTUALIZATION_NO_MACROS
 #endif
 
+/* -- Compatibility Macros -- */
+#ifndef W_EXITCODE
+#define W_EXITCODE(ret, sig) ((ret) << 8 | (sig))
+#endif
+
+#ifndef W_STOPCODE
+#define W_STOPCODE(sig) ((sig) << 8 | 0x7f)
+#endif
+
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 static int vprocHostOpenVirtualized(const char *path, int flags, int mode) {
     if (flags & O_CREAT) {
-        return open(path, flags, mode);
+        return pscalPathVirtualized_open(path, flags, mode);
     }
-    return open(path, flags);
+    return pscalPathVirtualized_open(path, flags);
 }
 #elif defined(PSCAL_TARGET_IOS)
 #define vprocHostOpenVirtualized(path, flags, mode) pscalPathVirtualized_open((path), (flags), (mode))
@@ -34,6 +44,7 @@ static int vprocHostOpenVirtualized(const char *path, int flags, int mode) {
 #define vprocHostOpenVirtualized(path, flags, mode) open((path), (flags), (mode))
 #endif
 
+/* -- Undefine host macros that might conflict -- */
 #ifdef waitpid
 #undef waitpid
 #endif
@@ -48,11 +59,14 @@ static int vprocHostOpenVirtualized(const char *path, int flags, int mode) {
 #define VPROC_INITIAL_CAPACITY 16
 #endif
 
+/* -- Data Structures -- */
+
 typedef struct {
     int host_fd;
 } VProcFdEntry;
 
 struct VProc {
+    pthread_mutex_t mu;     // ADDED: Protects the FD table shared by threads
     VProcFdEntry *entries;
     size_t capacity;
     int next_fd;
@@ -76,6 +90,7 @@ typedef struct {
     int pgid;
     int sid;
     int status;
+    int exit_signal;
     bool exited;
     bool stopped;
     int stop_signo;
@@ -109,6 +124,44 @@ static VProcTaskTable gVProcTasks = {
     .cv = PTHREAD_COND_INITIALIZER,
 };
 
+/* -- Helper Functions -- */
+
+static void vprocSetCommLocked(VProcTaskEntry *entry, const char *label) {
+    if (!entry) return;
+    if (label && *label) {
+        strncpy(entry->comm, label, sizeof(entry->comm) - 1);
+        entry->comm[sizeof(entry->comm) - 1] = '\0';
+    } else {
+        memset(entry->comm, 0, sizeof(entry->comm));
+    }
+}
+
+static void vprocMaybeUpdateThreadNameLocked(VProcTaskEntry *entry) {
+    if (!entry || entry->pid <= 0 || entry->tid == 0) {
+        return;
+    }
+    if (!pthread_equal(entry->tid, pthread_self())) {
+        return;
+    }
+    const char *base = entry->comm[0] ? entry->comm : "vproc";
+    char name[16];
+    char suffix[8];
+    snprintf(suffix, sizeof(suffix), "-%d", entry->pid);
+    size_t suffix_len = strlen(suffix);
+    size_t base_cap = (suffix_len + 1 < sizeof(name)) ? (sizeof(name) - suffix_len - 1) : 0;
+    if (base_cap > 0) {
+        snprintf(name, sizeof(name), "%.*s%s", (int)base_cap, base, suffix);
+    } else {
+        snprintf(name, sizeof(name), "%s", suffix);
+    }
+#if defined(__APPLE__)
+    pthread_setname_np(name);
+#else
+    pthread_setname_np(pthread_self(), name);
+#endif
+}
+
+// NOTE: Caller must hold vp->mu
 static int vprocAllocSlot(VProc *vp) {
     if (!vp) {
         return -1;
@@ -135,7 +188,8 @@ static int vprocAllocSlot(VProc *vp) {
     return idx;
 }
 
-static int vprocInsert(VProc *vp, int host_fd) {
+// NOTE: Caller must hold vp->mu, or wrap this
+static int vprocInsertLocked(VProc *vp, int host_fd) {
     if (!vp || host_fd < 0) {
         errno = EBADF;
         return -1;
@@ -146,6 +200,14 @@ static int vprocInsert(VProc *vp, int host_fd) {
     }
     vp->entries[slot].host_fd = host_fd;
     return slot;
+}
+
+static int vprocInsert(VProc *vp, int host_fd) {
+    if (!vp) return -1;
+    pthread_mutex_lock(&vp->mu);
+    int rc = vprocInsertLocked(vp, host_fd);
+    pthread_mutex_unlock(&vp->mu);
+    return rc;
 }
 
 int vprocAdoptHostFd(VProc *vp, int host_fd) {
@@ -220,12 +282,6 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     entry = &gVProcTasks.items[gVProcTasks.count++];
     memset(entry, 0, sizeof(*entry));
     entry->pid = pid;
-    entry->status = 0;
-    entry->exited = false;
-    entry->stopped = false;
-    entry->stop_signo = 0;
-    entry->job_id = 0;
-    entry->label = NULL;
     return entry;
 }
 
@@ -246,9 +302,17 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (!vp) {
         return NULL;
     }
+    
+    // Initialize mutex before use
+    if (pthread_mutex_init(&vp->mu, NULL) != 0) {
+        free(vp);
+        return NULL;
+    }
+
     vp->capacity = VPROC_INITIAL_CAPACITY;
     vp->entries = calloc(vp->capacity, sizeof(VProcFdEntry));
     if (!vp->entries) {
+        pthread_mutex_destroy(&vp->mu);
         free(vp);
         return NULL;
     }
@@ -258,12 +322,14 @@ VProc *vprocCreate(const VProcOptions *opts) {
     vp->next_fd = 3;
     vp->winsize.cols = (local.winsize_cols > 0) ? local.winsize_cols : 80;
     vp->winsize.rows = (local.winsize_rows > 0) ? local.winsize_rows : 24;
+
     if (local.pid_hint > 0) {
         vprocMaybeAdvancePidCounter(local.pid_hint);
         vp->pid = local.pid_hint;
     } else {
         vp->pid = __sync_fetch_and_add(&gNextSyntheticPid, 1);
     }
+
     /* Ensure a task slot exists for synthetic pid bookkeeping. */
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *slot = vprocTaskEnsureSlotLocked(vp->pid);
@@ -274,6 +340,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
         slot->pgid = vp->pid;
         slot->sid = vp->pid;
         slot->status = 0;
+        slot->exit_signal = 0;
         slot->exited = false;
         slot->stopped = false;
         slot->stop_signo = 0;
@@ -317,6 +384,9 @@ void vprocDestroy(VProc *vp) {
         entry->label = NULL;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+
+    // Lock shouldn't strictly be needed here if refcount is 0, but good practice
+    pthread_mutex_lock(&vp->mu);
     /* Close only the vproc-owned fds; do not close the saved host stdio fds. */
     for (size_t i = 0; i < vp->capacity; ++i) {
         if (vp->entries[i].host_fd >= 0 &&
@@ -328,14 +398,15 @@ void vprocDestroy(VProc *vp) {
     }
     if (vp->stdout_host_fd >= 0) {
         close(vp->stdout_host_fd);
-        vp->stdout_host_fd = -1;
     }
     if (vp->stderr_host_fd >= 0) {
         close(vp->stderr_host_fd);
-        vp->stderr_host_fd = -1;
     }
     free(vp->entries);
     vp->entries = NULL;
+    pthread_mutex_unlock(&vp->mu);
+    
+    pthread_mutex_destroy(&vp->mu);
     free(vp);
 }
 
@@ -353,19 +424,31 @@ VProc *vprocCurrent(void) {
 
 static void *vprocThreadTrampoline(void *arg) {
     VProcThreadStartCtx *ctx = (VProcThreadStartCtx *)arg;
+    
+    // Detach so resources are freed by iOS when the thread exits.
+    // We rely on vprocTaskEntry for logical join/wait.
+    pthread_detach(pthread_self());
+
     VProc *vp = ctx ? ctx->vp : NULL;
     if (vp) {
         vprocActivate(vp);
         vprocRegisterThread(vp, pthread_self());
     }
+
     void *res = NULL;
     if (ctx && ctx->start_routine) {
         res = ctx->start_routine(ctx->arg);
     }
-    free(ctx);
+
     if (vp) {
+        // FIX: Report exit status to the task table before dying
+        // Assuming the thread return value is the exit code (intptr_t cast)
+        int exit_code = (int)(intptr_t)res;
+        vprocMarkExit(vp, W_EXITCODE(exit_code, 0));
         vprocDeactivate();
     }
+    
+    free(ctx);
     return res;
 }
 
@@ -389,11 +472,13 @@ int vprocTranslateFd(VProc *vp, int fd) {
         errno = EBADF;
         return -1;
     }
-    if ((size_t)fd >= vp->capacity) {
-        errno = EBADF;
-        return -1;
+    int host = -1;
+    pthread_mutex_lock(&vp->mu);
+    if ((size_t)fd < vp->capacity) {
+        host = vp->entries[fd].host_fd;
     }
-    int host = vp->entries[fd].host_fd;
+    pthread_mutex_unlock(&vp->mu);
+    
     if (host < 0) {
         errno = EBADF;
         return -1;
@@ -418,17 +503,22 @@ int vprocDup2(VProc *vp, int fd, int target) {
         errno = EBADF;
         return -1;
     }
+    // We cannot hold lock here during Clone, but we need it for Translate
     int host_fd = vprocTranslateFd(vp, fd);
     if (host_fd < 0) {
         return -1;
     }
+    
+    pthread_mutex_lock(&vp->mu);
     if ((size_t)target >= vp->capacity) {
         size_t new_cap = vp->capacity;
+        if (new_cap == 0) new_cap = VPROC_INITIAL_CAPACITY;
         while ((size_t)target >= new_cap) {
             new_cap *= 2;
         }
         VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
         if (!resized) {
+            pthread_mutex_unlock(&vp->mu);
             return -1;
         }
         for (size_t i = vp->capacity; i < new_cap; ++i) {
@@ -441,25 +531,36 @@ int vprocDup2(VProc *vp, int fd, int target) {
         close(vp->entries[target].host_fd);
         vp->entries[target].host_fd = -1;
     }
+    // Clone calls fcntl on host, safe to do while holding lock as it doesn't re-enter vproc
     int cloned = vprocCloneFd(host_fd);
     if (cloned < 0) {
+        pthread_mutex_unlock(&vp->mu);
         return -1;
     }
     vp->entries[target].host_fd = cloned;
+    pthread_mutex_unlock(&vp->mu);
     return target;
 }
 
 int vprocClose(VProc *vp, int fd) {
-    if (!vp || fd < 0 || (size_t)fd >= vp->capacity) {
+    if (!vp || fd < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    pthread_mutex_lock(&vp->mu);
+    if ((size_t)fd >= vp->capacity) {
+        pthread_mutex_unlock(&vp->mu);
         errno = EBADF;
         return -1;
     }
     int host = vp->entries[fd].host_fd;
     if (host < 0) {
+        pthread_mutex_unlock(&vp->mu);
         errno = EBADF;
         return -1;
     }
     vp->entries[fd].host_fd = -1;
+    pthread_mutex_unlock(&vp->mu);
     return close(host);
 }
 
@@ -472,11 +573,14 @@ int vprocPipe(VProc *vp, int pipefd[2]) {
     if (pipe(raw) != 0) {
         return -1;
     }
+    // vprocInsert locks internally, so this is safe
     int left = vprocInsert(vp, raw[0]);
     int right = vprocInsert(vp, raw[1]);
     if (left < 0 || right < 0) {
         if (left >= 0) vprocClose(vp, left);
+        else close(raw[0]);
         if (right >= 0) vprocClose(vp, right);
+        else close(raw[1]);
         return -1;
     }
     pipefd[0] = left;
@@ -489,7 +593,7 @@ int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) {
         errno = EINVAL;
         return -1;
     }
-    int host_fd = open(path, flags, mode);
+    int host_fd = vprocHostOpenVirtualized(path, flags, mode);
     if (host_fd < 0) {
         return -1;
     }
@@ -505,8 +609,12 @@ int vprocSetWinsize(VProc *vp, int cols, int rows) {
         errno = EINVAL;
         return -1;
     }
+    // Winsize changes are atomic enough to not strictly need mutex for this simple struct,
+    // but better safe if we expanded struct later.
+    pthread_mutex_lock(&vp->mu);
     if (cols > 0) vp->winsize.cols = cols;
     if (rows > 0) vp->winsize.rows = rows;
+    pthread_mutex_unlock(&vp->mu);
     return 0;
 }
 
@@ -515,7 +623,9 @@ int vprocGetWinsize(VProc *vp, VProcWinsize *out) {
         errno = EINVAL;
         return -1;
     }
+    pthread_mutex_lock(&vp->mu);
     *out = vp->winsize;
+    pthread_mutex_unlock(&vp->mu);
     return 0;
 }
 
@@ -536,6 +646,7 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         return -1;
     }
     entry->tid = tid;
+    vprocMaybeUpdateThreadNameLocked(entry);
     pthread_mutex_unlock(&gVProcTasks.mu);
     return vp->pid;
 }
@@ -548,6 +659,7 @@ void vprocMarkExit(VProc *vp, int status) {
     VProcTaskEntry *entry = vprocTaskFindLocked(vp->pid);
     if (entry) {
         entry->status = status;
+        entry->exit_signal = 0;
         entry->exited = true;
         entry->stopped = false;
         entry->stop_signo = 0;
@@ -643,6 +755,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->pgid = 0;
     entry->sid = 0;
     entry->status = 0;
+    entry->exit_signal = 0;
     entry->exited = false;
     entry->stopped = false;
     entry->stop_signo = 0;
@@ -661,12 +774,22 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
         if (out && count < capacity) {
             out[count].pid = entry->pid;
             out[count].tid = entry->tid;
+            out[count].parent_pid = entry->parent_pid;
+            out[count].pgid = entry->pgid;
+            out[count].sid = entry->sid;
             out[count].exited = entry->exited;
             out[count].stopped = entry->stopped;
+            out[count].zombie = entry->zombie;
+            out[count].exit_signal = entry->exit_signal;
             out[count].status = entry->status;
             out[count].stop_signo = entry->stop_signo;
+            strncpy(out[count].comm, entry->comm, sizeof(out[count].comm) - 1);
+            out[count].comm[sizeof(out[count].comm) - 1] = '\0';
             if (entry->label) {
                 strncpy(out[count].command, entry->label, sizeof(out[count].command) - 1);
+                out[count].command[sizeof(out[count].command) - 1] = '\0';
+            } else if (entry->comm[0]) {
+                strncpy(out[count].command, entry->comm, sizeof(out[count].command) - 1);
                 out[count].command[sizeof(out[count].command) - 1] = '\0';
             } else {
                 out[count].command[0] = '\0';
@@ -680,154 +803,192 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
 
 pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
     bool allow_stop = (options & WUNTRACED) != 0;
+    bool allow_cont = (options & WCONTINUED) != 0;
     bool nohang = (options & WNOHANG) != 0;
-    if (pid <= 0) {
-        return waitpid(pid, status_out, options);
-    }
+    bool nowait = (options & WNOWAIT) != 0;
+    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskFindLocked((int)pid);
-    if (!entry) {
-        pthread_mutex_unlock(&gVProcTasks.mu);
-        return waitpid(pid, status_out, options);
-    }
-    while (!entry->exited && !(allow_stop && entry->stopped)) {
-        if (nohang) {
-            pthread_mutex_unlock(&gVProcTasks.mu);
-            if (status_out) {
-                *status_out = 0;
+    while (true) {
+        VProcTaskEntry *ready = NULL;
+        bool has_candidate = false;
+        
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (!entry || entry->pid <= 0) continue;
+            
+            bool match = false;
+            if (pid > 0 && entry->pid == pid) {
+                match = true;
+            } else if (pid == -1) {
+                match = true;
+            } else if (pid == 0) {
+                int shell_pgid = vprocGetShellSelfPid();
+                match = (shell_pgid > 0) ? (entry->pgid == shell_pgid) : true;
+            } else if (pid < -1) {
+                match = (entry->pgid == -pid);
             }
+            
+            if (!match) continue;
+            has_candidate = true;
+            
+            // Check if this task has a state change to report
+            if (entry->exited ||
+               (allow_stop && entry->stopped && entry->stop_signo > 0) ||
+               (allow_cont && !entry->stopped && entry->exit_signal == 0 && entry->zombie)) {
+                ready = entry;
+                break;
+            }
+        }
+
+        if (ready) {
+            int status = 0;
+            // Cache values locally before potentially clearing the entry
+            int r_exited = ready->exited;
+            int r_stopped = ready->stopped;
+            int r_exit_sig = ready->exit_signal;
+            int r_stop_sig = ready->stop_signo;
+            int r_status = ready->status;
+            int waited_pid = ready->pid;
+
+            if (r_exited) {
+                if (r_exit_sig > 0) {
+                    status = (r_exit_sig & 0x7f);
+                } else {
+                    status = W_EXITCODE(r_status & 0xff, 0);
+                }
+            } else if (r_stopped && r_stop_sig > 0) {
+                status = W_STOPCODE(r_stop_sig & 0xff);
+            }
+            
+            if (status_out) {
+                *status_out = status;
+            }
+            
+            // FIX: Reap the process (clear the slot) here, and only here.
+            if (r_exited && !nowait) {
+                vprocClearEntryLocked(ready);
+            } else if (r_exited) {
+                ready->zombie = true; // WNOWAIT requested, leave as zombie
+            } else if (r_stopped) {
+                ready->stop_signo = 0; // Clear stop signal after reporting
+            }
+
+            if (dbg) {
+                fprintf(stderr, "[vproc-wait] pid=%d status=%d exited=%d stop=%d\n",
+                        waited_pid, status, r_exited, r_stopped);
+            }
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            return waited_pid;
+        }
+
+        if (nohang) {
+            if (status_out) *status_out = 0;
+            pthread_mutex_unlock(&gVProcTasks.mu);
             return 0;
         }
+
+        if (!has_candidate) {
+            // No synthetic match found
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            if (pid > 0) {
+                errno = ESRCH;
+                return -1;
+            }
+            return waitpid(pid, status_out, options);
+        }
+
         pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
     }
-
-    int status = 0;
-    if (entry->exited) {
-        status = W_EXITCODE(entry->status & 0xff, 0);
-    } else if (entry->stopped && entry->stop_signo > 0) {
-        status = W_STOPCODE(entry->stop_signo & 0xff);
-    }
-    if (status_out) {
-        *status_out = status;
-    }
-
-    if (entry->exited) {
-        /* Wait semantics should reap exited tasks even when WNOHANG is set. */
-        entry->zombie = true;
-        vprocClearEntryLocked(entry);
-    }
-    pthread_mutex_unlock(&gVProcTasks.mu);
-    return pid;
 }
 
 int vprocKillShim(pid_t pid, int sig) {
-    if (pid == 0) {
-        return kill(pid, sig);
-    }
-    bool target_group = (pid < 0);
+    bool target_group = (pid <= 0);
+    bool broadcast_all = (pid == -1);
     int target = target_group ? -pid : pid;
+    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    
+    if (pid == 0) {
+        target = vprocGetShellSelfPid();
+        if (target <= 0) return kill(pid, sig);
+    }
+    
     int rc = 0;
-
     pthread_mutex_lock(&gVProcTasks.mu);
-    if (target_group) {
-        /* Deliver to all tasks in the target pgid. */
-        bool delivered = false;
-        for (size_t i = 0; i < gVProcTasks.count; ++i) {
-            VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) {
-                continue;
-            }
-            if (entry->pgid != target) {
-                continue;
-            }
-            delivered = true;
-            bool stop_signal = (sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU);
-            bool cont_signal = (sig == SIGCONT);
-            if (entry->tid && !stop_signal && !cont_signal) {
-                pthread_kill(entry->tid, sig);
-                pthread_cancel(entry->tid);
-            } else if (entry->tid && stop_signal) {
-                pthread_kill(entry->tid, sig);
-            }
-            if (stop_signal) {
-                entry->stopped = true;
-                entry->exited = false;
-                entry->stop_signo = sig;
-                entry->status = 128 + sig;
-            } else if (cont_signal) {
-                entry->stopped = false;
-                entry->stop_signo = 0;
-            } else {
-                entry->status = 128 + sig;
-                entry->exited = true;
-                entry->stopped = false;
-                entry->stop_signo = 0;
-                entry->zombie = true;
-                if (entry->label) {
-                    free(entry->label);
-                    entry->label = NULL;
-                }
-            }
-            if (!stop_signal && !cont_signal) {
-                /* Terminating signal: clear slot immediately to prevent re-mirroring. */
-                vprocClearEntryLocked(entry);
-            }
+    bool delivered = false;
+    
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (!entry || entry->pid <= 0) continue;
+        
+        if (broadcast_all) {
+            // Don't kill self in broadcast
+            if (entry->pid == vprocGetPidShim()) continue;
+        } else if (target_group) {
+            if (entry->pgid != target) continue;
+        } else {
+            if (entry->pid != target) continue;
         }
-        pthread_cond_broadcast(&gVProcTasks.cv);
-        pthread_mutex_unlock(&gVProcTasks.mu);
-        if (!delivered) {
-            errno = ESRCH;
-            rc = -1;
+        
+        delivered = true;
+        
+        if (dbg) {
+            fprintf(stderr, "[vproc-kill] pid=%d sig=%d target=%d entry_pid=%d tid=%p\n",
+                    (int)pid, sig, target, entry->pid, (void *)entry->tid);
         }
-        return rc;
-    }
 
-    VProcTaskEntry *entry = vprocTaskFindLocked(target);
-    if (!entry || entry->pid <= 0) {
-        pthread_mutex_unlock(&gVProcTasks.mu);
-        if (getenv("PSCALI_KILL_DEBUG")) {
-            fprintf(stderr, "[vproc-kill] pid=%d not found in synthetic table, falling back to host kill\n", target);
-        }
-        return kill(pid, sig);
-    }
-    bool stop_signal = (sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU);
-    bool cont_signal = (sig == SIGCONT);
+        bool stop_signal = (sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU);
+        bool cont_signal = (sig == SIGCONT);
 
-    if (entry->tid && !stop_signal && !cont_signal) {
-        /* Try to cancel the target thread to stop blocking syscalls (sleep, etc.). */
-        pthread_kill(entry->tid, sig);
-        pthread_cancel(entry->tid);
-    } else if (entry->tid && stop_signal) {
-        pthread_kill(entry->tid, sig);
-    }
-
-    if (stop_signal) {
-        entry->stopped = true;
-        entry->exited = false;
-        entry->stop_signo = sig;
-        entry->status = 128 + sig;
-    } else if (cont_signal) {
-        entry->stopped = false;
-        entry->stop_signo = 0;
-    } else {
-        /* Simulate signal delivery for synthetic tasks: mark exit immediately and
-         * wake any waiters. This avoids terminating the entire process when using
-         * pthread_kill with SIGTERM/SIGKILL semantics on a shared process. */
-        entry->status = 128 + sig;
-        entry->exited = true;
-        entry->stopped = false;
-        entry->stop_signo = 0;
-        entry->zombie = true;
-        if (entry->label) {
-            free(entry->label);
-            entry->label = NULL;
+        if (entry->tid && !stop_signal && !cont_signal) {
+            // Terminate the thread
+            pthread_kill(entry->tid, sig);
+            pthread_cancel(entry->tid);
+        } else if (entry->tid && stop_signal) {
+            pthread_kill(entry->tid, sig);
         }
-        vprocClearEntryLocked(entry);
+
+        if (stop_signal) {
+            entry->stopped = true;
+            entry->exited = false;
+            entry->stop_signo = sig;
+            entry->exit_signal = 0;
+            entry->status = 128 + sig;
+            entry->zombie = false;
+        } else if (cont_signal) {
+            entry->stopped = false;
+            entry->stop_signo = 0;
+            entry->exit_signal = 0;
+            entry->zombie = false;
+        } else {
+            // TERMINATION
+            entry->status = entry->status & 0xff;
+            entry->exit_signal = sig;
+            entry->exited = true;
+            entry->stopped = false;
+            entry->stop_signo = 0;
+            
+            // FIX: Do NOT clear the entry here!
+            // Mark it as zombie so waitpid can find it and report status.
+            entry->zombie = true;
+        }
     }
+    
     pthread_cond_broadcast(&gVProcTasks.cv);
     pthread_mutex_unlock(&gVProcTasks.mu);
-    return 0;
+
+    if (delivered) return rc;
+
+    if (target_group || broadcast_all) {
+        errno = ESRCH;
+        return -1;
+    }
+    
+    return kill(pid, sig);
 }
+
+/* ... (Remaining functions for getters/setters/shell-self-pid are unchanged logically) ... */
+/* INCLUDED HERE FOR COMPLETENESS */
 
 pid_t vprocGetPidShim(void) {
     VProc *vp = vprocCurrent();
@@ -874,6 +1035,8 @@ void vprocSetCommandLabel(int pid, const char *label) {
         if (label && *label) {
             entry->label = strdup(label);
         }
+        vprocSetCommLocked(entry, label);
+        vprocMaybeUpdateThreadNameLocked(entry);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
@@ -935,6 +1098,7 @@ int vprocDupShim(int fd) {
     if (host_fd < 0) {
         return -1;
     }
+    // vprocInsert handles internal locking
     return vprocInsert(vp, vprocCloneFd(host_fd));
 }
 
@@ -993,6 +1157,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
     }
     int host_fd = vprocHostOpenVirtualized(path, flags, mode);
     if (host_fd < 0) {
+        if (getenv("PSCALI_TOOL_DEBUG")) {
+            fprintf(stderr, "[vproc-open] path=%s flags=%d errno=%d\n", path, flags, errno);
+        }
         return -1;
     }
     int slot = vprocInsert(vp, host_fd);

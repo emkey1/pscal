@@ -30,6 +30,24 @@ typedef struct {
     int rows;
 } VProcWinsize;
 
+typedef struct {
+    int pid;
+    pthread_t tid;
+    int parent_pid;
+    int pgid;
+    int sid;
+    bool exited;
+    bool stopped;
+    bool zombie;
+    int exit_signal;
+    int status;
+    int stop_signo;
+    char comm[16];
+    char command[64];
+} VProcSnapshot;
+
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+
 VProcOptions vprocDefaultOptions(void);
 VProc *vprocCreate(const VProcOptions *opts);
 void vprocDestroy(VProc *vp);
@@ -39,16 +57,6 @@ int vprocReservePid(void);
 void vprocActivate(VProc *vp);
 void vprocDeactivate(void);
 VProc *vprocCurrent(void);
-
-typedef struct {
-    int pid;
-    pthread_t tid;
-    bool exited;
-    bool stopped;
-    int status;
-    int stop_signo;
-    char command[64];
-} VProcSnapshot;
 
 size_t vprocSnapshot(VProcSnapshot *out, size_t capacity);
 
@@ -99,6 +107,69 @@ void vprocSetJobId(int pid, int job_id);
 int vprocGetJobId(int pid);
 void vprocSetCommandLabel(int pid, const char *label);
 bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len);
+
+#else /* desktop stubs */
+#include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <signal.h>
+/* Desktop stubs: map to host syscalls or no-ops so non-iOS builds compile. */
+static inline VProcOptions vprocDefaultOptions(void) {
+    VProcOptions o = {.stdin_fd = -1, .stdout_fd = -1, .stderr_fd = -1, .winsize_cols = 80, .winsize_rows = 24, .pid_hint = -1};
+    return o;
+}
+static inline VProc *vprocCreate(const VProcOptions *opts) { (void)opts; return NULL; }
+static inline void vprocDestroy(VProc *vp) { (void)vp; }
+static inline int vprocPid(VProc *vp) { (void)vp; return -1; }
+static inline int vprocReservePid(void) { return (int)getpid(); }
+static inline void vprocActivate(VProc *vp) { (void)vp; }
+static inline void vprocDeactivate(void) {}
+static inline VProc *vprocCurrent(void) { return NULL; }
+static inline size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) { (void)out; (void)capacity; return 0; }
+static inline int vprocTranslateFd(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
+static inline int vprocDup(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
+static inline int vprocDup2(VProc *vp, int fd, int target) { (void)vp; (void)fd; (void)target; return -1; }
+static inline int vprocClose(VProc *vp, int fd) { (void)vp; (void)fd; return close(fd); }
+static inline int vprocPipe(VProc *vp, int pipefd[2]) { (void)vp; return pipe(pipefd); }
+static inline int vprocAdoptHostFd(VProc *vp, int host_fd) { (void)vp; return host_fd; }
+static inline int vprocPthreadCreateShim(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *arg) { return pthread_create(t, a, fn, arg); }
+static inline int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) { (void)vp; return open(path, flags, mode); }
+static inline int vprocSetWinsize(VProc *vp, int cols, int rows) { (void)vp; (void)cols; (void)rows; return 0; }
+static inline int vprocGetWinsize(VProc *vp, VProcWinsize *out) { if (out) { out->cols = 80; out->rows = 24; } return 0; }
+static inline int vprocRegisterThread(VProc *vp, pthread_t tid) { (void)vp; (void)tid; return 0; }
+static inline void vprocMarkExit(VProc *vp, int status) { (void)vp; (void)status; }
+static inline void vprocSetParent(int pid, int parent_pid) { (void)pid; (void)parent_pid; }
+static inline int vprocSetPgid(int pid, int pgid) { (void)pid; (void)pgid; return 0; }
+static inline int vprocSetSid(int pid, int sid) { (void)pid; (void)sid; return 0; }
+static inline int vprocGetPgid(int pid) { (void)pid; return -1; }
+static inline int vprocGetSid(int pid) { (void)pid; return -1; }
+static inline ssize_t vprocReadShim(int fd, void *buf, size_t count) { return read(fd, buf, count); }
+static inline ssize_t vprocWriteShim(int fd, const void *buf, size_t count) { return write(fd, buf, count); }
+static inline int vprocDupShim(int fd) { return dup(fd); }
+static inline int vprocDup2Shim(int fd, int target) { return dup2(fd, target); }
+static inline int vprocCloseShim(int fd) { return close(fd); }
+static inline int vprocPipeShim(int pipefd[2]) { return pipe(pipefd); }
+static inline int vprocFstatShim(int fd, struct stat *st) { return fstat(fd, st); }
+static inline off_t vprocLseekShim(int fd, off_t offset, int whence) { return lseek(fd, offset, whence); }
+static inline int vprocOpenShim(const char *path, int flags, ...) {
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list ap; va_start(ap, flags); mode = va_arg(ap, int); va_end(ap);
+        return open(path, flags, mode);
+    }
+    return open(path, flags);
+}
+static inline pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) { return waitpid(pid, status_out, options); }
+static inline int vprocKillShim(pid_t pid, int sig) { return kill(pid, sig); }
+static inline pid_t vprocGetPidShim(void) { return getpid(); }
+static inline void vprocSetShellSelfPid(int pid) { (void)pid; }
+static inline int vprocGetShellSelfPid(void) { return (int)getpid(); }
+static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id; }
+static inline int vprocGetJobId(int pid) { (void)pid; return 0; }
+static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid; (void)label; }
+static inline bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len) { (void)pid; (void)buf; (void)buf_len; return false; }
+#endif /* PSCAL_TARGET_IOS || VPROC_ENABLE_STUBS_FOR_TESTS */
 
 #ifdef __cplusplus
 }

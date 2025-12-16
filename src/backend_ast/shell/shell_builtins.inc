@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "ios/vproc.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #if defined(PSCAL_TARGET_IOS)
@@ -3613,6 +3614,7 @@ typedef struct {
     int argc;
     char **argv;
     bool argv_owned;
+    FrontendKind frontend_kind;
     int stdout_fd;
     int stderr_fd;
     int status;
@@ -3633,6 +3635,10 @@ static void shellThreadSigintHandler(int signo) {
 static void *shellToolThreadMain(void *arg) {
     ShellToolThreadContext *ctx = (ShellToolThreadContext *)arg;
     if (!ctx || !ctx->entry) {
+        if (ctx) {
+            ctx->status = 127;
+            ctx->finished = 1;
+        }
         return NULL;
     }
     bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
@@ -3664,6 +3670,7 @@ static void *shellToolThreadMain(void *arg) {
     sa_tstp.sa_flags = 0;
     sigaction(SIGTSTP, &sa_tstp, &old_sa_tstp);
 
+    FrontendKind previous_kind = frontendPushKind(ctx->frontend_kind);
     ShellRuntimeState *thread_ctx = NULL;
     ShellRuntimeState *prev_ctx = NULL;
     if (ctx->use_shell_context) {
@@ -3701,6 +3708,7 @@ static void *shellToolThreadMain(void *arg) {
         shellRuntimeActivateContext(prev_ctx);
         shellRuntimeDestroyContext(thread_ctx);
     }
+    frontendPopKind(previous_kind);
 
     if (ctx->argv_owned && ctx->argv) {
         for (int i = 0; i < ctx->argc; ++i) {
@@ -3735,6 +3743,7 @@ static void *shellToolWaiterMain(void *arg) {
 static int shellRunToolInThread(ShellToolEntryFn entry,
                                 int argc,
                                 char **argv,
+                                FrontendKind frontend_kind,
                                 bool use_shell_context,
                                 bool background) {
     if (!entry) {
@@ -3775,6 +3784,7 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
         context->status = 0;
         context->finished = 0;
         context->main_thread = pthread_self();
+        context->frontend_kind = frontend_kind;
         context->use_shell_context = use_shell_context;
         context->stdout_fd = dup(STDOUT_FILENO);
         context->stderr_fd = dup(STDERR_FILENO);
@@ -3800,6 +3810,7 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
     context.status = 127;
     context.finished = 0;
     context.main_thread = pthread_self();
+    context.frontend_kind = frontend_kind;
     context.use_shell_context = use_shell_context;
     /* Foreground runs keep the caller's stdio; use -1 to skip dup2. */
     context.stdout_fd = -1;
@@ -3846,13 +3857,16 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
     sigaddset(&wait_mask, SIGURG);
 
     while (!context.finished) {
-        int sig = 0;
-        if (sigwait(&wait_mask, &sig) == 0) {
-            if (sig == SIGINT) {
-                pthread_kill(context.worker_thread, SIGINT);
-            }
-            /* SIGURG wakes us up to check context.finished */
+        sigset_t pending;
+        sigemptyset(&pending);
+        if (sigpending(&pending) == 0 && sigismember(&pending, SIGINT)) {
+            pthread_kill(context.worker_thread, SIGINT);
         }
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 200 * 1000 * 1000; /* 200ms */
+        nanosleep(&ts, NULL);
+        /* Poll for completion to avoid hanging if SIGURG never arrives. */
     }
 
     pthread_join(waiter_thread, NULL);
@@ -3991,39 +4005,54 @@ static Value shellRunToolBuiltin(VM *vm,
 #if !defined(PSCAL_TARGET_IOS)
         status = shellSpawnToolProcess(tool_name, argc, argv);
 #endif
-        if (status == kShellToolRunnerUnavailable) {
-            if (entry) {
-                bool needs_shell_ctx = (target_kind == FRONTEND_KIND_SHELL);
-                bool background = shellRuntimeCurrentBuiltinBackground();
+        if (status == kShellToolRunnerUnavailable && entry) {
+            bool needs_shell_ctx = (target_kind == FRONTEND_KIND_SHELL);
+            bool background = shellRuntimeCurrentBuiltinBackground();
 #if defined(PSCAL_TARGET_IOS)
-                (void)background;
-                if (background && gShellBackgroundWorkerActive) {
-                    fprintf(stderr, "[tool-inline] %s argc=%d (bg worker)\n", tool_name, argc);
-                    for (int i = 0; i < argc; ++i) {
-                        fprintf(stderr, "[tool-inline] argv[%d]=%s\n", i, argv[i] ? argv[i] : "(null)");
-                    }
-                    /* Already running inside a background worker: execute inline so redirections
-                     * remain active for this thread. */
-                    status = entry(argc, argv);
-                    fprintf(stderr, "[tool-inline] %s exit=%d\n", tool_name, status);
-                } else {
-                    fprintf(stderr, "[tool-thread] %s argc=%d bg=%d\n", tool_name, argc, (int)background);
-                    status = shellRunToolInThread(entry, argc, argv, needs_shell_ctx, background);
-                    fprintf(stderr, "[tool-thread] %s dispatched status=%d\n", tool_name, status);
+            (void)background;
+            if (background && gShellBackgroundWorkerActive) {
+                fprintf(stderr, "[tool-inline] %s argc=%d (bg worker)\n", tool_name, argc);
+                for (int i = 0; i < argc; ++i) {
+                    fprintf(stderr, "[tool-inline] argv[%d]=%s\n", i, argv[i] ? argv[i] : "(null)");
                 }
-                shellInvalidateFrontendState(target_kind);
-#else
-                if (needs_shell_ctx || background) {
-                    status = shellRunToolInThread(entry, argc, argv, needs_shell_ctx, background);
-                } else {
-                    status = entry(argc, argv);
-                }
-                pascalInvalidateGlobalState();
-#endif
+                /* Already running inside a background worker: execute inline so redirections
+                 * remain active for this thread. */
+                status = entry(argc, argv);
+                fprintf(stderr, "[tool-inline] %s exit=%d\n", tool_name, status);
+            } else if (background || target_kind == FRONTEND_KIND_SHELL) {
+                fprintf(stderr, "[tool-thread] %s argc=%d bg=%d\n", tool_name, argc, (int)background);
+                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background);
+                fprintf(stderr, "[tool-thread] %s dispatched status=%d\n", tool_name, status);
             } else {
-                fprintf(stderr, "%s: tool runner unavailable and no builtin entry.\n", tool_name);
-                status = 127;
+                /* Run non-shell frontends inline on iOS to avoid repeated
+                 * cross-thread state swaps that can leave symbol tables in an
+                 * inconsistent state. */
+                status = entry(argc, argv);
             }
+            shellInvalidateFrontendState(target_kind);
+            /* The frontend reset tears down its own symbol tables; reattach the saved
+             * shell tables so pascalPopGlobalState does not attempt to free
+             * already-destroyed structures. */
+            globalSymbols = pascal_state.globalSymbols;
+            constGlobalSymbols = pascal_state.constGlobalSymbols;
+            localSymbols = pascal_state.localSymbols;
+            procedure_table = pascal_state.procedure_table;
+            current_procedure_table = pascal_state.current_procedure_table;
+            type_table = pascal_state.type_table;
+            /* For inline/background runs, return the actual worker status so the shell
+             * prompt reflects tool success/failure. */
+            gShellRuntime.last_status = status;
+#else
+            if (needs_shell_ctx || background) {
+                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background);
+            } else {
+                status = entry(argc, argv);
+            }
+            pascalInvalidateGlobalState();
+#endif
+        } else if (status == kShellToolRunnerUnavailable) {
+            fprintf(stderr, "%s: tool runner unavailable and no builtin entry.\n", tool_name);
+            status = 127;
         }
         fflush(NULL);
         shellUpdateStatus(status);
@@ -4042,7 +4071,11 @@ static Value shellRunToolBuiltin(VM *vm,
     pascalPopGlobalState(&pascal_state);
 
     Value result = makeVoid();
-    fprintf(stderr, "[tool-dispatch] %s final status=%d\n", tool_name ? tool_name : "<null>", shellRuntimeLastStatus());
+    /* For synchronous iOS runs, the worker thread will set gShellRuntime.last_status.
+     * Use that value when available to avoid a default 127 on success. */
+    int final_status = shellRuntimeLastStatus();
+    shellUpdateStatus(final_status);
+    fprintf(stderr, "[tool-dispatch] %s final status=%d\n", tool_name ? tool_name : "<null>", final_status);
     frontendPopKind(previous_kind);
     return result;
 }
@@ -10055,36 +10088,39 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
     ShellJob *job = &gShellJobs[index];
     bool sent = false;
     bool terminate = !(signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU || signo == SIGCONT);
-#if defined(PSCAL_TARGET_IOS)
-    if (getenv("PSCALI_KILL_DEBUG")) {
-        fprintf(stderr, "[kill-ios] job-spec '%s' -> job id=%zu pgid=%d pid_count=%zu terminate=%d\n",
-                spec_text ? spec_text : "<null>", job->id, (int)job->pgid, job->pid_count, (int)terminate);
+    bool synthetic = (vprocSnapshot(NULL, 0) > 0);
+    if (terminate && job->pgid > 0) {
+        /* Deliver to the whole synthetic group; safer for pipelines and job-spec parity. */
+        if (vprocKillShim(-job->pgid, signo) == 0) {
+            sent = true;
+        }
     }
-#endif
+
     for (size_t i = 0; i < job->pid_count; ++i) {
         pid_t pid = job->pids[i];
         if (pid <= 0) {
             continue;
         }
-        sent = true;
-#if defined(PSCAL_TARGET_IOS)
-        if (vprocKillShim(pid, signo) != 0) {
-#else
-        if (kill(pid, signo) != 0) {
-#endif
-            runtimeError(vm, "kill: %s: %s",
-                         spec_text ? spec_text : "job",
-                         strerror(errno));
-            return false;
+        if (!terminate || !sent) {
+            /* If group kill failed or we are delivering non-terminating signals, send per-pid. */
+            if (vprocKillShim(pid, signo) != 0) {
+                runtimeError(vm, "kill: %s: %s",
+                             spec_text ? spec_text : "job",
+                             strerror(errno));
+                return false;
+            }
         }
-#if defined(PSCAL_TARGET_IOS)
-        /* If we just delivered a terminating signal, mark the slot as exited so
-         * that job bookkeeping collapses immediately even if the underlying
-         * thread is already gone. */
-        if (terminate) {
+        sent = true;
+        int status = 0;
+        pid_t res = vprocWaitPidShim(pid, &status, terminate ? 0 : (WNOHANG | WUNTRACED | WCONTINUED));
+        if (res > 0 && (WIFEXITED(status) || WIFSIGNALED(status))) {
+            job->pids[i] = -1;
+        } else if (res > 0 && WIFSTOPPED(status)) {
+            job->stopped = true;
+            job->running = false;
+        } else if (terminate) {
             job->pids[i] = -1;
         }
-#endif
     }
     if (!sent) {
         runtimeError(vm, "kill: %s: no associated processes",
@@ -10100,28 +10136,13 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         job->running = false;
         job->stopped = false;
     }
-#if defined(PSCAL_TARGET_IOS)
     if (terminate) {
-        /* On iOS synthetic tasks do not reap unless we drop the job entry. Do it
-         * immediately after delivering a terminating signal so job listings shrink. */
-        if (getenv("PSCALI_KILL_DEBUG")) {
-            fprintf(stderr, "[kill-ios] removing job id=%zu after terminate\n", job->id);
-        }
-        for (size_t i = 0; i < job->pid_count; ++i) {
-            pid_t pid = job->pids[i];
-            if (pid > 0) {
-                (void)vprocWaitPidShim(pid, NULL, 0);
-            }
-        }
+        /* Drop the job immediately for terminating signals to keep numbering stable. */
         shellRemoveJobAt(index);
-        if (getenv("PSCALI_KILL_DEBUG")) {
-            fprintf(stderr, "[kill-ios] job table size now=%zu\n", gShellJobCount);
-        }
-        /* Refresh vproc snapshot after removal to avoid mirroring killed tasks. */
         shellCollectJobs();
         return true;
     }
-#endif
+    (void)synthetic; /* avoid unused warning on non-iOS builds */
     return true;
 }
 

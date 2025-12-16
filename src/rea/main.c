@@ -319,6 +319,7 @@ int rea_main(int argc, char **argv) {
         frontendPopKind(previousKind);              \
         return __rea_rc;                            \
     } while (0)
+
     const char *initTerm = getenv("PSCAL_INIT_TERM");
     if (initTerm && *initTerm && *initTerm != '0') {
         vmInitTerminalState();
@@ -331,11 +332,26 @@ int rea_main(int argc, char **argv) {
     int dump_ext_builtins = 0;
     int vm_trace_head = 0;
     int no_cache = 0;
+#ifdef PSCAL_TARGET_IOS
+    /* Cached bytecode compiled by a different app binary can drift out of sync
+     * on iOS because tools run in-process. Default to fresh compiles unless the
+     * user explicitly opts back in via REA_CACHE=1. */
+    const char *rea_cache_env = getenv("REA_CACHE");
+    if (!rea_cache_env || rea_cache_env[0] == '\0' || rea_cache_env[0] == '0') {
+        no_cache = 1;
+    }
+#endif
     int verbose_flag = 0;
     int strict_mode = 0;
     int argi = 1;
     bool reaSymbolStateActive = false;
-    while (argc > argi && argv[argi][0] == '-') {
+    /* Clear any stale compiler/unit state that might linger when invoked
+     * repeatedly from the shell tool runner. */
+    compilerResetState();
+    if (!argv || argc <= 0) {
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
+    }
+    while (argc > argi && argv && argv[argi] && argv[argi][0] == '-') {
         if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0) {
             printf("%s", REA_USAGE);
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));

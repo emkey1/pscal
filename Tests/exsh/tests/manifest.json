@@ -700,6 +700,15 @@
             "expected_stderr_substring": "printf: usage"
         },
         {
+            "id": "shebang_exec_slash_command",
+            "name": "shebang script dispatches through exec path",
+            "category": "runtime",
+            "description": "Executable paths containing slashes should be executed via their shebang interpreter instead of failing builtin lookup.",
+            "script": "Tests/exsh/tests/shebang_exec.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "shebang-fixture"
+        },
+        {
             "id": "times_builtin",
             "name": "times reports CPU usage lines",
             "category": "builtins",

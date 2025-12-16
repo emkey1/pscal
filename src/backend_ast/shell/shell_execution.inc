@@ -1,8 +1,8 @@
 /* Auto-generated include: command execution and pipeline management. Included from shell.c. */
 
-#if defined(PSCAL_TARGET_IOS)
 #include "ios/vproc.h"
 #include "smallclue/smallclue.h"
+#if defined(PSCAL_TARGET_IOS)
 static int gShellPagerVirtualTTYFd = -1;
 
 static void shellPagerPushVirtualTTYOverride(int fd) {

@@ -2242,13 +2242,45 @@ static void lowerCopy(const char *s, char *buf) {
     buf[i] = '\0';
 }
 
+static HashTable *ensureProcedureTable(void) {
+    if (!procedure_table) {
+        procedure_table = createHashTable();
+        current_procedure_table = procedure_table;
+    } else if (!current_procedure_table) {
+        current_procedure_table = procedure_table;
+    }
+    return procedure_table;
+}
+
+static void ensureReaSymbolTables(void) {
+    if (!globalSymbols) {
+        globalSymbols = createHashTable();
+    }
+    if (!constGlobalSymbols) {
+        constGlobalSymbols = createHashTable();
+    }
+    ensureProcedureTable();
+}
+
+static HashTable *ensureClassMethods(ClassInfo *ci) {
+    if (!ci) return NULL;
+    if (!ci->methods) {
+        ci->methods = createHashTable();
+    }
+    return ci->methods;
+}
+
 static ClassInfo *lookupClass(const char *name) {
     if (!class_table || !name) return NULL;
     char lower[MAX_SYMBOL_LENGTH];
     lowerCopy(name, lower);
     Symbol *sym = hashTableLookup(class_table, lower);
     if (!sym || !sym->value) return NULL;
-    return (ClassInfo *)sym->value->ptr_val;
+    ClassInfo *ci = (ClassInfo *)sym->value->ptr_val;
+    if (ci) {
+        ensureClassMethods(ci);
+    }
+    return ci;
 }
 
 static AST *getFunctionParam(AST *func, int index) {
@@ -2483,6 +2515,8 @@ static void ensureSelfParam(AST *node, const char *cls) {
 
 static void collectMethods(AST *node) {
     if (!node) return;
+    HashTable *procTable = ensureProcedureTable();
+    (void)procTable;
     if ((node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL) && node->token && node->token->value) {
         const char *fullname = node->token->value;
         const char *us = strchr(fullname, '.');
@@ -2498,13 +2532,18 @@ static void collectMethods(AST *node) {
                     fprintf(stderr, "Method '%s' defined for unknown class '%s'\n", mname, cls);
                     pascal_semantic_error_count++;
                 } else {
+                    HashTable *methods = ensureClassMethods(ci);
+                    if (!methods) {
+                        free(cls);
+                        goto recurse;
+                    }
                     ensureSelfParam(node, cls);
                     char *lname = lowerDup(mname);
                     if (!lname) {
                         free(cls);
                         goto recurse; /* continue traversal */
                     }
-                    if (hashTableLookup(ci->methods, lname)) {
+                    if (hashTableLookup(methods, lname)) {
                         fprintf(stderr, "Duplicate method '%s' in class '%s'\n", mname, cls);
                         pascal_semantic_error_count++;
                         free(lname);
@@ -2516,7 +2555,7 @@ static void collectMethods(AST *node) {
                             v->ptr_val = (Value *)node;
                             sym->value = v;
                             sym->type_def = node; /* reference for signature */
-                            hashTableInsert(ci->methods, sym);
+                            hashTableInsert(methods, sym);
                             char lowerName[MAX_SYMBOL_LENGTH];
                             lowerCopy(fullname, lowerName);
                             Symbol *existing = lookupProcedure(lowerName);
@@ -2596,6 +2635,10 @@ static void collectMethods(AST *node) {
                     const char *cls = ptype->token->value;
                     ClassInfo *ci = lookupClass(cls);
                     if (ci) {
+                        HashTable *methods = ensureClassMethods(ci);
+                        if (!methods) {
+                            goto recurse;
+                        }
                         size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
                         char *mangled = (char *)malloc(ln);
                         if (mangled) {
@@ -2608,18 +2651,16 @@ static void collectMethods(AST *node) {
                         ensureSelfParam(node, cls);
                         // Assign method index for implicitly declared methods
                         int method_index = 0;
-                        if (ci->methods) {
-                            for (int mb = 0; mb < HASHTABLE_SIZE; mb++) {
-                                for (Symbol *ms = ci->methods->buckets[mb]; ms; ms = ms->next) {
-                                    method_index++;
-                                }
+                        for (int mb = 0; mb < HASHTABLE_SIZE; mb++) {
+                            for (Symbol *ms = methods->buckets[mb]; ms; ms = ms->next) {
+                                method_index++;
                             }
                         }
                         node->is_virtual = true;
                         node->i_val = method_index;
                         char *lname = lowerDup(fullname + strlen(cls) + 1);
                         if (lname) {
-                            if (hashTableLookup(ci->methods, lname)) {
+                            if (hashTableLookup(methods, lname)) {
                                 fprintf(stderr, "Duplicate method '%s' in class '%s'\n", fullname + strlen(cls) + 1, cls);
                                 pascal_semantic_error_count++;
                                 free(lname);
@@ -2631,7 +2672,7 @@ static void collectMethods(AST *node) {
                                     v->ptr_val = (Value *)node;
                                     sym->value = v;
                                     sym->type_def = node;
-                                    hashTableInsert(ci->methods, sym);
+                                    hashTableInsert(methods, sym);
                                     char lowerName[MAX_SYMBOL_LENGTH];
                                     lowerCopy(fullname, lowerName);
                                     Symbol *existing = lookupProcedure(lowerName);
@@ -2669,6 +2710,10 @@ static void collectMethods(AST *node) {
             if (cls) {
                 ClassInfo *ci = lookupClass(cls);
                 if (ci) {
+                    HashTable *methods = ensureClassMethods(ci);
+                    if (!methods) {
+                        goto recurse;
+                    }
                     size_t ln = strlen(cls) + 1 + strlen(fullname) + 1;
                     char *mangled = (char *)malloc(ln);
                     if (mangled) {
@@ -2681,7 +2726,7 @@ static void collectMethods(AST *node) {
                     ensureSelfParam(node, cls);
                     char *lname = lowerDup(fullname + strlen(cls) + 1);
                     if (lname) {
-                        if (hashTableLookup(ci->methods, lname)) {
+                        if (hashTableLookup(methods, lname)) {
                             fprintf(stderr, "Duplicate method '%s' in class '%s'\n", fullname + strlen(cls) + 1, cls);
                             pascal_semantic_error_count++;
                             free(lname);
@@ -2693,7 +2738,7 @@ static void collectMethods(AST *node) {
                                 v->ptr_val = (Value *)node;
                                 sym->value = v;
                                 sym->type_def = node;
-                                hashTableInsert(ci->methods, sym);
+                                hashTableInsert(methods, sym);
                                 char lowerName[MAX_SYMBOL_LENGTH];
                                 lowerCopy(fullname, lowerName);
                                 Symbol *procSym = lookupProcedure(lowerName);
@@ -2780,13 +2825,19 @@ static void checkOverrides(void) {
         while (s) {
             ClassInfo *ci = s->value ? (ClassInfo *)s->value->ptr_val : NULL;
             if (ci && ci->parent) {
+                HashTable *methods = ensureClassMethods(ci);
+                if (!methods) {
+                    s = s->next;
+                    continue;
+                }
                 for (int j = 0; j < HASHTABLE_SIZE; j++) {
-                    Symbol *m = ci->methods->buckets[j];
+                    Symbol *m = methods->buckets[j];
                     while (m) {
                         ClassInfo *p = ci->parent;
                         Symbol *pm = NULL;
                         while (p && !pm) {
-                            pm = hashTableLookup(p->methods, m->name);
+                            HashTable *parentMethods = ensureClassMethods(p);
+                            pm = parentMethods ? hashTableLookup(parentMethods, m->name) : NULL;
                             p = p->parent;
                         }
                         if (pm) {
@@ -2818,13 +2869,18 @@ static void addInheritedMethodAliases(void) {
         while (s) {
             ClassInfo *ci = s->value ? (ClassInfo *)s->value->ptr_val : NULL;
             if (ci && ci->parent) {
+                HashTable *childMethods = ensureClassMethods(ci);
+                if (!childMethods) {
+                    s = s->next;
+                    continue;
+                }
                 ClassInfo *p = ci->parent;
                 while (p) {
                     for (int j = 0; j < HASHTABLE_SIZE; j++) {
                         Symbol *m = p->methods ? p->methods->buckets[j] : NULL;
                         while (m) {
                             /* Skip if subclass defines/overrides this method */
-                            if (!hashTableLookup(ci->methods, m->name)) {
+                            if (!hashTableLookup(childMethods, m->name)) {
                                 char classLower[MAX_SYMBOL_LENGTH];
                                 lowerCopy(ci->name, classLower);
                                 char aliasName[MAX_SYMBOL_LENGTH * 2];
@@ -2902,7 +2958,8 @@ static Symbol *lookupMethod(ClassInfo *ci, const char *name) {
     lowerCopy(name, lower);
     ClassInfo *curr = ci;
     while (curr) {
-        Symbol *s = hashTableLookup(curr->methods, lower);
+        HashTable *methods = ensureClassMethods(curr);
+        Symbol *s = methods ? hashTableLookup(methods, lower) : NULL;
         if (s) return s;
         curr = curr->parent;
     }
@@ -3709,6 +3766,7 @@ static void analyzeProgramWithBindings(AST *root, ReaModuleBindingList *bindings
 
 void reaPerformSemanticAnalysis(AST *root) {
     if (!root) return;
+    ensureReaSymbolTables();
     ensureExceptionGlobals(root);
     AST *rewrittenRoot = desugarNode(root, TYPE_VOID);
     if (rewrittenRoot) {

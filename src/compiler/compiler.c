@@ -832,6 +832,21 @@ typedef struct {
     bool has_unresolved;
 } VTableInfo;
 
+/* Ensure the global procedure table exists; callers often run after the shell
+ * has swapped out Pascal state, leaving the table NULL. */
+static bool ensureProcedureTableInitialized(void) {
+    if (!procedure_table) {
+        procedure_table = createHashTable();
+    }
+    if (!procedure_table) {
+        return false;
+    }
+    if (!current_procedure_table) {
+        current_procedure_table = procedure_table;
+    }
+    return true;
+}
+
 static int findVTableIndex(VTableInfo* tables, int table_count, const char* name) {
     for (int i = 0; i < table_count; i++) {
         if (strcmp(tables[i].class_name, name) == 0) return i;
@@ -868,6 +883,9 @@ static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt
 }
 
 static void emitVTables(BytecodeChunk* chunk) {
+    if (!ensureProcedureTableInitialized()) {
+        return;
+    }
     ensureVTableTrackerForChunk(chunk);
     VTableInfo* tables = NULL;
     int table_count = 0;
@@ -2663,6 +2681,10 @@ static bool recordTypeHasVTable(AST* recordType) {
     }
 
     if (!recordType || recordType->type != AST_RECORD_TYPE) return false;
+
+    if (!ensureProcedureTableInitialized()) {
+        return false;
+    }
 
     for (int i = 0; i < recordType->child_count; i++) {
         AST* member = recordType->children[i];
@@ -4832,6 +4854,7 @@ cleanup:
 
 bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    if (!ensureProcedureTableInitialized()) return false;
     resetAddressConstantTracking();
     if (!compiler_debug) {
         const char* d = getenv("REA_DEBUG");
@@ -4891,6 +4914,7 @@ bool compileASTToBytecode(AST* rootNode, BytecodeChunk* outputChunk) {
 
 bool compileModuleAST(AST* rootNode, BytecodeChunk* outputChunk) {
     if (!rootNode || !outputChunk) return false;
+    if (!ensureProcedureTableInitialized()) return false;
     resetAddressConstantTracking();
     if (!compiler_debug) {
         const char* d = getenv("REA_DEBUG");
@@ -5668,6 +5692,26 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     }
     
     proc_symbol = lookupProcedure(name_for_lookup);
+
+    if (!proc_symbol) {
+        /* In REA we allow implementations without prior interface declarations.
+         * Materialize a symbol on the fly so the compiler can proceed. */
+        if (ensureProcedureTableInitialized()) {
+            proc_symbol = (Symbol *)calloc(1, sizeof(Symbol));
+            if (proc_symbol) {
+                proc_symbol->name = strdup(name_for_lookup);
+                proc_symbol->type = func_decl_node->var_type;
+                proc_symbol->type_def = copyAST(func_decl_node);
+                Value *v = (Value *)calloc(1, sizeof(Value));
+                if (v) {
+                    v->type = TYPE_POINTER;
+                    v->ptr_val = (Value *)func_decl_node;
+                    proc_symbol->value = v;
+                }
+                hashTableInsert(procedure_table, proc_symbol);
+            }
+        }
+    }
 
     if (!proc_symbol) {
         fprintf(stderr, "L%d: Compiler Error: Procedure implementation for '%s' (looked up as '%s') does not have a corresponding interface declaration.\n", line, func_name, name_for_lookup);

@@ -130,6 +130,10 @@ static void assert_open_and_read_via_shim(void) {
     char tmpl[] = "/tmp/vproc-openXXXXXX";
     int fd = mkstemp(tmpl);
     assert(fd >= 0);
+    close(fd);
+    unlink(tmpl);
+    fd = pscalPathVirtualized_open(tmpl, O_CREAT | O_RDWR, 0600);
+    assert(fd >= 0);
     const char *msg = "filedata";
     assert(write(fd, msg, 8) == 8);
     lseek(fd, 0, SEEK_SET);
@@ -147,6 +151,7 @@ static void assert_open_and_read_via_shim(void) {
     vprocDestroy(vp);
 
     close(fd);
+    pscalPathVirtualized_unlink(tmpl);
     unlink(tmpl);
 }
 
@@ -475,8 +480,30 @@ static void assert_path_truncate_maps_to_sandbox(void) {
     assert(strcmp(buf, msg) == 0);
     close(host_fd);
 
+    /* Ensure vprocOpenAt also respects path virtualization. */
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    int vfd = vprocOpenAt(vp, "/sandbox-openat.txt", O_CREAT | O_RDWR, 0600);
+    assert(vfd >= 0);
+    const char *msg2 = "sand";
+    assert(vprocWriteShim(vfd, msg2, 4) == 4);
+    assert(vprocCloseShim(vfd) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+
+    char host_at_path[PATH_MAX];
+    snprintf(host_at_path, sizeof(host_at_path), "%s/sandbox-openat.txt", root);
+    int host_at_fd = open(host_at_path, O_RDONLY);
+    assert(host_at_fd >= 0);
+    char buf2[8] = {0};
+    assert(read(host_at_fd, buf2, sizeof(buf2)) == 4);
+    assert(strncmp(buf2, msg2, 4) == 0);
+    close(host_at_fd);
+
     unsetenv("PATH_TRUNCATE");
     unlink(host_path);
+    unlink(host_at_path);
     rmdir(root);
 }
 
@@ -495,6 +522,8 @@ static void assert_passthrough_when_inactive(void) {
 }
 
 int main(void) {
+    /* Default truncation path for tests to keep path virtualization in /tmp. */
+    setenv("PATH_TRUNCATE", "/tmp", 1);
     fprintf(stderr, "TEST pipe_round_trip\n");
     assert_pipe_round_trip();
     fprintf(stderr, "TEST dup2_isolated\n");

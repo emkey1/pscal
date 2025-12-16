@@ -403,7 +403,10 @@ static bool vmResolveStringIndex(VM* vm,
                                  size_t* out_offset,
                                  bool allow_length_query,
                                  bool* out_length_query) {
-    if (!frontendIsShell()) {
+    bool is_shell_frontend = vm ? vm->shellIndexing : frontendIsShell();
+
+    if (!is_shell_frontend)
+    {
         if (allow_length_query && raw_index == 0) {
             if (out_length_query) {
                 *out_length_query = true;
@@ -4013,6 +4016,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->owningThread = NULL;
     vm->threadId = 0;
     vm->frontendContext = NULL;
+    vm->shellIndexing = frontendIsShell();
 
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
@@ -4564,10 +4568,21 @@ static bool builtinUsesGlobalStructures(const char* name) {
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
 
+    /* Defensive: ensure symbol tables exist so DEFINE_GLOBAL and similar ops
+     * never dereference an uninitialized pointer (can happen after frontend
+     * state swaps on iOS). */
+    if (!globals) {
+        globals = createHashTable();
+    }
+    if (!const_globals) {
+        const_globals = createHashTable();
+    }
+
     vm->chunk = chunk;
     vm->ip = vm->chunk->code + entry;
     vm->lastInstruction = vm->ip;
     vm->abort_requested = false;
+    vm->shellIndexing = frontendIsShell();
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
