@@ -121,6 +121,7 @@ int vprocGetShellSelfPid(void);
 int vprocSigpending(int pid, sigset_t *set);
 int vprocSigsuspend(int pid, const sigset_t *mask);
 int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset_t *oldset);
+int vprocSigwait(int pid, const sigset_t *set, int *sig);
 
 /* Optional synthetic metadata: store/retrieve a stable job id for a vproc pid. */
 void vprocSetJobId(int pid, int job_id);
@@ -206,6 +207,7 @@ static inline int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset
     (void)pid;
     return sigprocmask(how, set, oldset);
 }
+static inline int vprocSigwait(int pid, const sigset_t *set, int *sig) { (void)pid; return sigwait(set, sig); }
 static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id; }
 static inline int vprocGetJobId(int pid) { (void)pid; return 0; }
 static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid; (void)label; }

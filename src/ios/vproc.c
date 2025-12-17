@@ -1863,6 +1863,33 @@ int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset_t *oldset) {
     return 0;
 }
 
+int vprocSigwait(int pid, const sigset_t *set, int *sig) {
+    if (!set || !sig) {
+        errno = EINVAL;
+        return -1;
+    }
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    while (true) {
+        for (int s = 1; s < 32; ++s) {
+            if (!sigismember(set, s)) continue;
+            int bit = vprocSigMask(s);
+            if (entry->pending_signals & bit) {
+                entry->pending_signals &= ~bit;
+                *sig = s;
+                pthread_mutex_unlock(&gVProcTasks.mu);
+                return 0;
+            }
+        }
+        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+    }
+}
+
 static int shimTranslate(int fd, int allow_real) {
     VProc *vp = vprocForThread();
     if (!vp) {

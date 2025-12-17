@@ -1005,6 +1005,27 @@ static void assert_sigprocmask_round_trip(void) {
     vprocDestroy(vp);
 }
 
+static void assert_sigwait_receives_pending(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    sigset_t waitset;
+    sigemptyset(&waitset);
+    sigaddset(&waitset, SIGUSR1);
+    assert(vprocBlockSignals(pid, 1 << SIGUSR1) == 0);
+    assert(vprocKillShim(pid, SIGUSR1) == 0);
+    int got = 0;
+    assert(vprocSigwait(pid, &waitset, &got) == 0);
+    assert(got == SIGUSR1);
+    sigset_t pending;
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(!sigismember(&pending, SIGUSR1));
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
 static void assert_background_tty_signals(void) {
     int shell_pid = current_waiter_pid();
     int prev_shell = vprocGetShellSelfPid();
@@ -1241,6 +1262,8 @@ int main(void) {
     assert_sigprocmask_round_trip();
     fprintf(stderr, "TEST sighandler_resets_with_sa_resethand\n");
     assert_sighandler_resets_with_sa_resethand();
+    fprintf(stderr, "TEST sigwait_receives_pending\n");
+    assert_sigwait_receives_pending();
     fprintf(stderr, "TEST sigkill_not_blockable\n");
     assert_sigkill_not_blockable();
     fprintf(stderr, "TEST sigstop_not_ignorable_or_blockable\n");
