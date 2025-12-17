@@ -60,6 +60,7 @@ static void shellSetupSelfVproc(void) {
     if (gShellSelfVproc) {
         vprocRegisterThread(gShellSelfVproc, pthread_self());
         vprocSetShellSelfPid(vprocPid(gShellSelfVproc));
+        vprocSetCommandLabel(vprocPid(gShellSelfVproc), "shell");
     }
 }
 

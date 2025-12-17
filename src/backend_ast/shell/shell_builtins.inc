@@ -3876,7 +3876,7 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
 
 static const int kShellToolRunnerUnavailable = -32768;
 
-static int shellSpawnToolProcess(const char *tool_name, int argc, char **argv) {
+static int __attribute__((unused)) shellSpawnToolProcess(const char *tool_name, int argc, char **argv) {
     const char *runner = getenv("PSCALI_TOOL_RUNNER_PATH");
     if (!runner || !*runner) {
         (void)tool_name;
@@ -9266,6 +9266,16 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
     {
+        "top",
+        "Live view of synthetic vprocs on iOS.",
+        "top",
+        "Prints a one-shot table of synthetic vproc state including pid, pgid,"
+        " foreground marker, state, and utime/stime counters. Additional fields"
+        " will be added as process emulation grows.",
+        NULL,
+        0
+    },
+    {
         "disown",
         "Remove jobs from the shell's job table.",
         "disown [job ...]",
@@ -10711,6 +10721,40 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
 
     free(snapshots);
     free(seen);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellTop(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)arg_count;
+    (void)args;
+    shellCollectJobs();
+
+    size_t snapshot_cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snapshots = NULL;
+    if (snapshot_cap > 0) {
+        snapshots = (VProcSnapshot *)calloc(snapshot_cap, sizeof(VProcSnapshot));
+    }
+    size_t snapshot_count = snapshots ? vprocSnapshot(snapshots, snapshot_cap) : 0;
+
+    printf("%-6s %-6s %-3s %-10s %-6s %-6s %s\n",
+           "PID", "PGID", "FG", "STATE", "UTIME", "STIME", "CMD");
+    for (size_t i = 0; i < snapshot_count; ++i) {
+        VProcSnapshot *snap = &snapshots[i];
+        if (!snap || snap->pid <= 0) continue;
+        ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
+        const char *cmd = (job && job->command) ? job->command
+                        : (snap->command[0] ? snap->command
+                                            : (pthread_equal(snap->tid, pthread_self()) ? "shell" : "task"));
+        const char *state = shellPsStateForEntry(job, snap);
+        bool fg = (snap->fg_pgid > 0 && snap->pgid == snap->fg_pgid);
+        printf("%-6d %-6d %-3s %-10s %-6d %-6d %s\n",
+               snap->pid, snap->pgid, fg ? "fg" : "",
+               state, snap->rusage_utime, snap->rusage_stime, cmd);
+    }
+
+    free(snapshots);
     shellUpdateStatus(0);
     return makeVoid();
 }

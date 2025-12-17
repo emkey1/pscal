@@ -1,9 +1,34 @@
 /* Auto-generated include: command execution and pipeline management. Included from shell.c. */
 
 #include "ios/vproc.h"
+#include "backend_ast/builtin.h"
 #include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
 static int gShellPagerVirtualTTYFd = -1;
+
+static void shellVprocFormatLabel(const ShellCommand *cmd, char *out, size_t out_sz) {
+    if (!out || out_sz == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (!cmd || cmd->argc == 0 || !cmd->argv) {
+        return;
+    }
+    size_t used = 0;
+    for (size_t i = 0; i < cmd->argc && used + 1 < out_sz; ++i) {
+        const char *part = cmd->argv[i] ? cmd->argv[i] : "";
+        size_t len = strlen(part);
+        if (used + len + 1 >= out_sz) {
+            len = out_sz - used - 1;
+        }
+        memcpy(out + used, part, len);
+        used += len;
+        if (used + 1 < out_sz && i + 1 < cmd->argc) {
+            out[used++] = ' ';
+        }
+    }
+    out[used] = '\0';
+}
 
 static void shellPagerPushVirtualTTYOverride(int fd) {
     if (gShellPagerVirtualTTYFd >= 0) {
@@ -40,7 +65,7 @@ static VProc *shellCreateVProcForStage(int stdin_host,
 }
 #endif
 
-static int shellTryRunScriptFallback(VM *vm, ShellCommand *cmd) {
+static int shellTryRunScriptFallback(VM *vm, const ShellCommand *cmd) {
     if (!cmd || cmd->argc <= 0 || !cmd->argv || !cmd->argv[0]) {
         return -1;
     }
@@ -918,11 +943,7 @@ static bool shellStartSignalWatch(const pid_t *pids, size_t count) {
 static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool watch_signals, bool *out_stopped) {
     pid_t watch_list[1] = { pid };
 
-    if (watch_signals && allow_stop
-#if defined(PSCAL_TARGET_IOS)
-        && pscalRuntimeVirtualTTYEnabled()
-#endif
-    ) {
+    if (watch_signals && allow_stop) {
         (void)shellStartSignalWatch(watch_list, 1);
     }
 
@@ -1341,30 +1362,22 @@ static void *shellInProcessBackgroundMain(void *arg) {
         goto cleanup;
     }
     vprocRegisterThread(vp, pthread_self());
-    vprocSetParent(vprocPid(vp), vprocGetShellSelfPid());
-    vprocSetPgid(vprocPid(vp), vprocPid(vp));
-    vprocSetSid(vprocPid(vp), vprocPid(vp));
-    /* Label the vproc for lps/ps visibility. */
-    if (cmd && cmd->argc > 0 && cmd->argv) {
-        char label[96] = {0};
-        size_t used = 0;
-        for (size_t i = 0; i < cmd->argc && used + 1 < sizeof(label); ++i) {
-            const char *part = cmd->argv[i] ? cmd->argv[i] : "";
-            size_t len = strlen(part);
-            if (used + len + 1 >= sizeof(label)) {
-                len = sizeof(label) - used - 1;
-            }
-            memcpy(label + used, part, len);
-            used += len;
-            if (used + 1 < sizeof(label) && i + 1 < cmd->argc) {
-                label[used++] = ' ';
-            }
-        }
-        label[used] = '\0';
-        if (label[0]) {
-            vprocSetCommandLabel(vprocPid(vp), label);
-        }
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid > 0) {
+        vprocSetParent(vprocPid(vp), shell_pid);
     }
+    pid_t group = (ctx->synthetic_pid > 0) ? ctx->synthetic_pid : vprocPid(vp);
+    vprocSetPgid(vprocPid(vp), group);
+    vprocSetSid(vprocPid(vp), group);
+    ctx->synthetic_pid = group;
+    /* Label the vproc for lps/ps visibility. */
+        if (cmd && cmd->argc > 0 && cmd->argv) {
+            char label[96] = {0};
+            shellVprocFormatLabel(cmd, label, sizeof(label));
+            if (label[0]) {
+                vprocSetCommandLabel(vprocPid(vp), label);
+            }
+        }
     /* Hand off host fds to the synthetic vproc so dup2 shims work on vproc-local
      * descriptors during builtin execution. */
     if (vm_stdout >= 0) {
@@ -1413,6 +1426,7 @@ cleanup:
     vprocDeactivate();
     if (vp) {
         vprocMarkExit(vp, bg_status);
+        vprocDiscard(vprocPid(vp));
         vprocDestroy(vp);
     }
 #endif
@@ -2174,7 +2188,7 @@ redir_error:
 }
 
 #if defined(PSCAL_TARGET_IOS)
-static bool shellPipelineWriteBufferToPipe(const char *data, size_t len, int fd) {
+static bool __attribute__((unused)) shellPipelineWriteBufferToPipe(const char *data, size_t len, int fd) {
     size_t written = 0;
     while (written < len) {
         ssize_t res = write(fd, data + written, len - written);
@@ -2547,10 +2561,30 @@ static int shellRunBuiltinInProcess(VM *vm,
     }
 #endif
     if (!builtin_ran) {
-        runtimeError(vm, "%s: command unavailable in pipeline", cmd->argv[0]);
-        shellUpdateStatus(127);
-        if (tool_dbg) {
-            fprintf(stderr, "[run-builtin] builtin not found for %s\n", cmd && cmd->argv ? cmd->argv[0] : "<nil>");
+        VmBuiltinFn handler = getVmBuiltinHandler(cmd && cmd->argv ? cmd->argv[0] : NULL);
+        if (handler) {
+            int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
+            Value *args = NULL;
+            if (arg_count > 0) {
+                args = calloc((size_t)arg_count, sizeof(Value));
+                for (int i = 0; args && i < arg_count; ++i) {
+                    args[i] = makeString(cmd->argv[i + 1]);
+                }
+            }
+            handler(vm ? vm : gShellCurrentVm, arg_count, args);
+            if (args) {
+                for (int i = 0; i < arg_count; ++i) {
+                    freeValue(&args[i]);
+                }
+                free(args);
+            }
+            builtin_ran = true;
+        } else {
+            runtimeError(vm, "%s: command unavailable in pipeline", cmd->argv[0]);
+            shellUpdateStatus(127);
+            if (tool_dbg) {
+                fprintf(stderr, "[run-builtin] builtin not found for %s\n", cmd && cmd->argv ? cmd->argv[0] : "<nil>");
+            }
         }
     }
     shellFlushStandardStreams();
@@ -2775,6 +2809,39 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         goto cleanup;
     }
     vprocRegisterThread(vp, pthread_self());
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid > 0) {
+        vprocSetParent(vprocPid(vp), shell_pid);
+    }
+    pid_t group = (ctx->pgid > 0) ? ctx->pgid
+                : ((ctx->launched > 0 && ctx->pids) ? ctx->pids[0] : -1);
+    if (group <= 0) {
+        group = vprocPid(vp);
+    }
+    vprocSetPgid(vprocPid(vp), group);
+    vprocSetSid(vprocPid(vp), group);
+    ctx->pgid = group;
+    /* Label the vproc so ps/top output is readable. */
+    if (cmd && cmd->argc > 0 && cmd->argv) {
+        char label[96] = {0};
+        size_t used = 0;
+        for (size_t i = 0; i < cmd->argc && used + 1 < sizeof(label); ++i) {
+            const char *part = cmd->argv[i] ? cmd->argv[i] : "";
+            size_t len = strlen(part);
+            if (used + len + 1 >= sizeof(label)) {
+                len = sizeof(label) - used - 1;
+            }
+            memcpy(label + used, part, len);
+            used += len;
+            if (used + 1 < sizeof(label) && i + 1 < cmd->argc) {
+                label[used++] = ' ';
+            }
+        }
+        label[used] = '\0';
+        if (label[0]) {
+            vprocSetCommandLabel(vprocPid(vp), label);
+        }
+    }
     vprocActivate(vp);
 #endif
 
@@ -2799,6 +2866,7 @@ cleanup:
     vprocDeactivate();
     if (vp) {
         vprocMarkExit(vp, status);
+        vprocDiscard(vprocPid(vp));
         vprocDestroy(vp);
     }
 #endif
@@ -3073,24 +3141,52 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        if (ctx->stage_count == 1 && !ctx->background && !cmd->background &&
-            shellInvokeBuiltin(vm, cmd)) {
-            if (assignments_applied) {
-                shellRestoreAssignments(assignment_backups, assignment_backup_count);
-                assignments_applied = false;
-                assignment_backups = NULL;
-                assignment_backup_count = 0;
+        if (ctx->stage_count == 1 && !ctx->background && !cmd->background) {
+#if defined(PSCAL_TARGET_IOS)
+            char prev_label[64];
+            char label[96];
+            bool have_prev = false;
+            int label_pid = vprocGetShellSelfPid();
+            VProc *current_vp = vprocCurrent();
+            if (current_vp) {
+                label_pid = vprocPid(current_vp);
             }
-            int status = gShellRuntime.last_status;
-            if (ctx->negated) {
-                status = (status == 0) ? 1 : 0;
-                shellUpdateStatus(status);
+            if (label_pid > 0) {
+                have_prev = vprocGetCommandLabel(label_pid, prev_label, sizeof(prev_label));
+                shellVprocFormatLabel(cmd, label, sizeof(label));
+                if (label[0]) {
+                    vprocSetCommandLabel(label_pid, label);
+                }
             }
-            ctx->last_status = status;
-            shellResetPipeline();
-            shellFreeCommand(cmd);
-            shellScalarCacheInvalidate();
-            return makeVoid();
+#endif
+            bool ran_builtin = shellInvokeBuiltin(vm, cmd);
+#if defined(PSCAL_TARGET_IOS)
+            if (label_pid > 0) {
+                if (have_prev) {
+                    vprocSetCommandLabel(label_pid, prev_label);
+                } else {
+                    vprocSetCommandLabel(label_pid, "shell");
+                }
+            }
+#endif
+            if (ran_builtin) {
+                if (assignments_applied) {
+                    shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                    assignments_applied = false;
+                    assignment_backups = NULL;
+                    assignment_backup_count = 0;
+                }
+                int status = gShellRuntime.last_status;
+                if (ctx->negated) {
+                    status = (status == 0) ? 1 : 0;
+                    shellUpdateStatus(status);
+                }
+                ctx->last_status = status;
+                shellResetPipeline();
+                shellFreeCommand(cmd);
+                shellScalarCacheInvalidate();
+                return makeVoid();
+            }
         }
         size_t idx = stage_pos;
         if (idx >= ctx->stage_count) {
@@ -3167,16 +3263,45 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        if (shellInvokeBuiltin(vm, cmd)) {
-            if (assignments_applied) {
-                shellRestoreAssignments(assignment_backups, assignment_backup_count);
-                assignments_applied = false;
-                assignment_backups = NULL;
-                assignment_backup_count = 0;
+        {
+#if defined(PSCAL_TARGET_IOS)
+            char prev_label[64];
+            char label[96];
+            bool have_prev = false;
+            int label_pid = vprocGetShellSelfPid();
+            VProc *current_vp = vprocCurrent();
+            if (current_vp) {
+                label_pid = vprocPid(current_vp);
             }
-            shellFreeCommand(cmd);
-            shellScalarCacheInvalidate();
-            return makeVoid();
+            if (label_pid > 0) {
+                have_prev = vprocGetCommandLabel(label_pid, prev_label, sizeof(prev_label));
+                shellVprocFormatLabel(cmd, label, sizeof(label));
+                if (label[0]) {
+                    vprocSetCommandLabel(label_pid, label);
+                }
+            }
+#endif
+            bool ran_builtin = shellInvokeBuiltin(vm, cmd);
+#if defined(PSCAL_TARGET_IOS)
+            if (label_pid > 0) {
+                if (have_prev) {
+                    vprocSetCommandLabel(label_pid, prev_label);
+                } else {
+                    vprocSetCommandLabel(label_pid, "shell");
+                }
+            }
+#endif
+            if (ran_builtin) {
+                if (assignments_applied) {
+                    shellRestoreAssignments(assignment_backups, assignment_backup_count);
+                    assignments_applied = false;
+                    assignment_backups = NULL;
+                    assignment_backup_count = 0;
+                }
+                shellFreeCommand(cmd);
+                shellScalarCacheInvalidate();
+                return makeVoid();
+            }
         }
     }
 

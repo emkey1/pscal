@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <signal.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,10 +39,16 @@ typedef struct {
     int sid;
     bool exited;
     bool stopped;
+    bool continued;
     bool zombie;
     int exit_signal;
     int status;
     int stop_signo;
+    bool sigchld_pending;
+    int rusage_utime;
+    int rusage_stime;
+    int fg_pgid;
+    int job_id;
     char comm[16];
     char command[64];
 } VProcSnapshot;
@@ -84,6 +91,15 @@ int vprocSetPgid(int pid, int pgid);
 int vprocSetSid(int pid, int sid);
 int vprocGetPgid(int pid);
 int vprocGetSid(int pid);
+int vprocSetForegroundPgid(int sid, int fg_pgid);
+int vprocGetForegroundPgid(int sid);
+void vprocMarkGroupExit(int pid, int status);
+void vprocSetRusage(int pid, int utime, int stime);
+int vprocBlockSignals(int pid, int mask);
+int vprocUnblockSignals(int pid, int mask);
+int vprocIgnoreSignal(int pid, int mask);
+int vprocDefaultSignal(int pid, int mask);
+int vprocSigaction(int pid, int sig, const struct sigaction *act, struct sigaction *old);
 
 // Shimmed syscalls: respect the active vproc on the current thread when set,
 // otherwise fall back to real libc/syscall equivalents.
@@ -107,6 +123,10 @@ void vprocSetJobId(int pid, int job_id);
 int vprocGetJobId(int pid);
 void vprocSetCommandLabel(int pid, const char *label);
 bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len);
+void vprocDiscard(int pid);
+bool vprocSigchldPending(int pid);
+int vprocSetSigchldBlocked(int pid, bool block);
+void vprocClearSigchldPending(int pid);
 
 #else /* desktop stubs */
 #include <unistd.h>
@@ -144,6 +164,17 @@ static inline int vprocSetPgid(int pid, int pgid) { (void)pid; (void)pgid; retur
 static inline int vprocSetSid(int pid, int sid) { (void)pid; (void)sid; return 0; }
 static inline int vprocGetPgid(int pid) { (void)pid; return -1; }
 static inline int vprocGetSid(int pid) { (void)pid; return -1; }
+static inline int vprocSetForegroundPgid(int sid, int fg) { (void)sid; (void)fg; return 0; }
+static inline int vprocGetForegroundPgid(int sid) { (void)sid; return -1; }
+static inline void vprocMarkGroupExit(int pid, int status) { (void)pid; (void)status; }
+static inline void vprocSetRusage(int pid, int utime, int stime) { (void)pid; (void)utime; (void)stime; }
+static inline int vprocBlockSignals(int pid, int mask) { (void)pid; (void)mask; return 0; }
+static inline int vprocUnblockSignals(int pid, int mask) { (void)pid; (void)mask; return 0; }
+static inline int vprocIgnoreSignal(int pid, int mask) { (void)pid; (void)mask; return 0; }
+static inline int vprocDefaultSignal(int pid, int mask) { (void)pid; (void)mask; return 0; }
+static inline int vprocSigaction(int pid, int sig, const struct sigaction *act, struct sigaction *old) {
+    (void)pid; (void)sig; (void)act; (void)old; return sigaction(sig, act, old);
+}
 static inline ssize_t vprocReadShim(int fd, void *buf, size_t count) { return read(fd, buf, count); }
 static inline ssize_t vprocWriteShim(int fd, const void *buf, size_t count) { return write(fd, buf, count); }
 static inline int vprocDupShim(int fd) { return dup(fd); }
@@ -169,6 +200,10 @@ static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id;
 static inline int vprocGetJobId(int pid) { (void)pid; return 0; }
 static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid; (void)label; }
 static inline bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len) { (void)pid; (void)buf; (void)buf_len; return false; }
+static inline void vprocDiscard(int pid) { (void)pid; }
+static inline bool vprocSigchldPending(int pid) { (void)pid; return false; }
+static inline int vprocSetSigchldBlocked(int pid, bool block) { (void)pid; (void)block; return 0; }
+static inline void vprocClearSigchldPending(int pid) { (void)pid; }
 #endif /* PSCAL_TARGET_IOS || VPROC_ENABLE_STUBS_FOR_TESTS */
 
 #ifdef __cplusplus

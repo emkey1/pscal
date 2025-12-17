@@ -127,6 +127,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"tr", "tr", -1},
     {"uptime", "uptime", -1},
     {"watch", "watch", -1},
+    {"top", "top", -1},
 #ifdef SMALLCLUE_WITH_EXSH
     {"sh", "sh", -1},
 #endif
