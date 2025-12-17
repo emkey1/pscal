@@ -878,6 +878,133 @@ static void assert_sigstop_not_ignorable_or_blockable(void) {
     vprocDestroy(vp);
 }
 
+static void assert_sigchld_nocldstop(void) {
+    int parent = current_waiter_pid();
+    struct sigaction sa = {0};
+    sa.sa_handler = SIG_DFL;
+    sa.sa_flags = SA_NOCLDSTOP;
+    assert(vprocSigaction(parent, SIGCHLD, &sa, NULL) == 0);
+    vprocClearSigchldPending(parent);
+
+    VProc *child = vprocCreate(NULL);
+    assert(child);
+    int cpid = vprocPid(child);
+    vprocSetParent(cpid, parent);
+
+    assert(vprocKillShim(cpid, SIGTSTP) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(cpid, &status, WUNTRACED) == cpid);
+    assert(WIFSTOPPED(status));
+    /* Should not have SIGCHLD pending due to SA_NOCLDSTOP. */
+    assert(!vprocSigchldPending(parent));
+    assert(vprocKillShim(cpid, SIGCONT) == 0);
+    vprocMarkExit(child, 0);
+    (void)vprocWaitPidShim(cpid, &status, 0);
+    vprocDestroy(child);
+}
+
+static void assert_sigchld_nocldwait_reaps(void) {
+    int parent = current_waiter_pid();
+    struct sigaction sa = {0};
+    sa.sa_handler = SIG_DFL;
+    sa.sa_flags = SA_NOCLDWAIT;
+    assert(vprocSigaction(parent, SIGCHLD, &sa, NULL) == 0);
+
+    VProc *child = vprocCreate(NULL);
+    assert(child);
+    int cpid = vprocPid(child);
+    vprocSetParent(cpid, parent);
+    vprocMarkExit(child, 0);
+    int status = 0;
+    errno = 0;
+    assert(vprocWaitPidShim(cpid, &status, 0) == -1);
+    assert(errno == ECHILD);
+    sigset_t pending;
+    assert(vprocSigpending(parent, &pending) == 0);
+    assert(!sigismember(&pending, SIGCHLD));
+    vprocDestroy(child);
+    /* Reset to defaults to avoid side effects. */
+    struct sigaction sa_reset = {0};
+    sa_reset.sa_handler = SIG_DFL;
+    sa_reset.sa_flags = 0;
+    vprocSigaction(parent, SIGCHLD, &sa_reset, NULL);
+}
+
+static void assert_sigsuspend_drains_pending(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    assert(vprocBlockSignals(pid, 1 << SIGUSR1) == 0);
+    assert(vprocKillShim(pid, SIGUSR1) == 0);
+    sigset_t mask;
+    sigemptyset(&mask);
+    errno = 0;
+    assert(vprocSigsuspend(pid, &mask) == -1);
+    assert(errno == EINTR);
+    sigset_t pending;
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(!sigismember(&pending, SIGUSR1));
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
+static void handler_resetting(int signo) { (void)signo; }
+
+static void assert_sighandler_resets_with_sa_resethand(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    struct sigaction sa = {0};
+    sa.sa_handler = handler_resetting;
+    sa.sa_flags = SA_RESETHAND;
+    assert(vprocSigaction(pid, SIGUSR2, &sa, NULL) == 0);
+
+    /* First delivery should be treated as handled and reset disposition. */
+    assert(vprocKillShim(pid, SIGUSR2) == 0);
+    sigset_t pending;
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(!sigismember(&pending, SIGUSR2));
+
+    /* Second delivery should follow default and terminate the vproc. */
+    assert(vprocKillShim(pid, SIGUSR2) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, 0) == pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGUSR2);
+    vprocDestroy(vp);
+}
+
+static void assert_sigprocmask_round_trip(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
+    sigaddset(&mask, SIGTERM);
+    sigset_t old;
+    assert(vprocSigprocmask(pid, SIG_SETMASK, &mask, &old) == 0);
+    sigset_t now;
+    sigemptyset(&now);
+    assert(vprocSigpending(pid, &now) == 0);
+    /* Verify mask set by blocking and delivering a signal then unblocking. */
+    assert(vprocKillShim(pid, SIGTERM) == 0);
+    sigset_t pending;
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(sigismember(&pending, SIGTERM));
+    sigset_t unblock;
+    sigemptyset(&unblock);
+    sigaddset(&unblock, SIGTERM);
+    assert(vprocSigprocmask(pid, SIG_UNBLOCK, &unblock, NULL) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, 0) == pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGTERM);
+    vprocDestroy(vp);
+}
+
 static void assert_background_tty_signals(void) {
     int shell_pid = current_waiter_pid();
     int prev_shell = vprocGetShellSelfPid();
@@ -1104,6 +1231,16 @@ int main(void) {
     assert_sigchld_ignored_by_default();
     fprintf(stderr, "TEST sigwinch_ignored_by_default\n");
     assert_sigwinch_ignored_by_default();
+    fprintf(stderr, "TEST sigchld_nocldstop\n");
+    assert_sigchld_nocldstop();
+    fprintf(stderr, "TEST sigchld_nocldwait_reaps\n");
+    assert_sigchld_nocldwait_reaps();
+    fprintf(stderr, "TEST sigsuspend_drains_pending\n");
+    assert_sigsuspend_drains_pending();
+    fprintf(stderr, "TEST sigprocmask_round_trip\n");
+    assert_sigprocmask_round_trip();
+    fprintf(stderr, "TEST sighandler_resets_with_sa_resethand\n");
+    assert_sighandler_resets_with_sa_resethand();
     fprintf(stderr, "TEST sigkill_not_blockable\n");
     assert_sigkill_not_blockable();
     fprintf(stderr, "TEST sigstop_not_ignorable_or_blockable\n");

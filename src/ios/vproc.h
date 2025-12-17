@@ -117,6 +117,10 @@ int vprocKillShim(pid_t pid, int sig);
 pid_t vprocGetPidShim(void);
 void vprocSetShellSelfPid(int pid);
 int vprocGetShellSelfPid(void);
+/* Minimal signal queries/suspension helpers. */
+int vprocSigpending(int pid, sigset_t *set);
+int vprocSigsuspend(int pid, const sigset_t *mask);
+int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset_t *oldset);
 
 /* Optional synthetic metadata: store/retrieve a stable job id for a vproc pid. */
 void vprocSetJobId(int pid, int job_id);
@@ -196,6 +200,12 @@ static inline int vprocKillShim(pid_t pid, int sig) { return kill(pid, sig); }
 static inline pid_t vprocGetPidShim(void) { return getpid(); }
 static inline void vprocSetShellSelfPid(int pid) { (void)pid; }
 static inline int vprocGetShellSelfPid(void) { return (int)getpid(); }
+static inline int vprocSigpending(int pid, sigset_t *set) { (void)pid; return sigpending(set); }
+static inline int vprocSigsuspend(int pid, const sigset_t *mask) { (void)pid; return sigsuspend(mask); }
+static inline int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset_t *oldset) {
+    (void)pid;
+    return sigprocmask(how, set, oldset);
+}
 static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id; }
 static inline int vprocGetJobId(int pid) { (void)pid; return 0; }
 static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid; (void)label; }

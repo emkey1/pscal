@@ -120,6 +120,12 @@ typedef struct {
     struct sigaction actions[32];
 } VProcTaskEntry;
 
+typedef enum {
+    VPROC_SIGCHLD_EVENT_EXIT = 0,
+    VPROC_SIGCHLD_EVENT_STOP,
+    VPROC_SIGCHLD_EVENT_CONT
+} VProcSigchldEvent;
+
 typedef struct {
     VProcTaskEntry *items;
     size_t count;
@@ -183,7 +189,8 @@ static void vprocMaybeUpdateThreadNameLocked(VProcTaskEntry *entry) {
 #endif
 }
 
-static void vprocNotifyParentSigchldLocked(int parent_pid);
+static void vprocNotifyParentSigchldLocked(int parent_pid, VProcSigchldEvent evt);
+static struct sigaction vprocGetSigactionLocked(VProcTaskEntry *entry, int sig);
 static int vprocDefaultParentPid(void) {
     int cur = vprocGetPidShim();
     if (cur <= 0) {
@@ -318,6 +325,13 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
         return;
     }
     if (action == VPROC_SIG_HANDLER) {
+        struct sigaction sa = vprocGetSigactionLocked(entry, sig);
+        if (sa.sa_flags & SA_RESETHAND) {
+            entry->actions[sig].sa_handler = SIG_DFL;
+            entry->actions[sig].sa_flags = 0;
+            sigemptyset(&entry->actions[sig].sa_mask);
+            entry->ignored_signals &= ~vprocSigMask(sig);
+        }
         entry->continued = false;
         entry->stop_signo = 0;
         entry->exit_signal = 0;
@@ -332,14 +346,14 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
         entry->exit_signal = 0;
         entry->status = 128 + sig;
         entry->zombie = false;
-        vprocNotifyParentSigchldLocked(entry->parent_pid);
+        vprocNotifyParentSigchldLocked(entry->parent_pid, VPROC_SIGCHLD_EVENT_STOP);
     } else if (action == VPROC_SIG_CONT) {
         entry->stopped = false;
         entry->stop_signo = 0;
         entry->exit_signal = 0;
         entry->zombie = false;
         entry->continued = true;
-        vprocNotifyParentSigchldLocked(entry->parent_pid);
+        vprocNotifyParentSigchldLocked(entry->parent_pid, VPROC_SIGCHLD_EVENT_CONT);
     } else if (sig > 0) {
         entry->status = entry->status & 0xff;
         entry->exit_signal = sig;
@@ -348,7 +362,7 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
         entry->continued = false;
         entry->stop_signo = 0;
         entry->zombie = true;
-        vprocNotifyParentSigchldLocked(entry->parent_pid);
+        vprocNotifyParentSigchldLocked(entry->parent_pid, VPROC_SIGCHLD_EVENT_EXIT);
     }
 }
 
@@ -444,10 +458,16 @@ static void vprocReparentChildrenLocked(VProcTaskEntry *entry, int new_parent_pi
     entry->child_count = 0;
 }
 
-static void vprocNotifyParentSigchldLocked(int parent_pid) {
+static void vprocNotifyParentSigchldLocked(int parent_pid, VProcSigchldEvent evt) {
     if (parent_pid <= 0) return;
     VProcTaskEntry *parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
     if (parent_entry) {
+        if (evt == VPROC_SIGCHLD_EVENT_STOP) {
+            struct sigaction sa = vprocGetSigactionLocked(parent_entry, SIGCHLD);
+            if (sa.sa_flags & SA_NOCLDSTOP) {
+                return;
+            }
+        }
         parent_entry->sigchld_events++;
         vprocQueuePendingSignalLocked(parent_entry, SIGCHLD);
         if (!parent_entry->sigchld_blocked) {
@@ -998,7 +1018,21 @@ void vprocMarkExit(VProc *vp, int status) {
         entry->stop_signo = 0;
         entry->zombie = true;
         vprocReparentChildrenLocked(entry, vprocGetShellSelfPid());
-        vprocNotifyParentSigchldLocked(entry->parent_pid);
+
+        bool discard_zombie = false;
+        VProcTaskEntry *parent_entry = vprocTaskFindLocked(entry->parent_pid);
+        if (parent_entry) {
+            struct sigaction sa = vprocGetSigactionLocked(parent_entry, SIGCHLD);
+            if (sa.sa_handler == SIG_IGN || (sa.sa_flags & SA_NOCLDWAIT)) {
+                discard_zombie = true;
+            }
+        }
+        if (discard_zombie) {
+            entry->zombie = false;
+            vprocClearEntryLocked(entry);
+        } else {
+            vprocNotifyParentSigchldLocked(entry->parent_pid, VPROC_SIGCHLD_EVENT_EXIT);
+        }
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -1017,7 +1051,7 @@ void vprocMarkGroupExit(int pid, int status) {
             peer->group_exit_code = status;
             peer->exited = true;
             peer->zombie = true;
-            vprocNotifyParentSigchldLocked(peer->parent_pid);
+            vprocNotifyParentSigchldLocked(peer->parent_pid, VPROC_SIGCHLD_EVENT_EXIT);
         }
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
@@ -1704,7 +1738,7 @@ int vprocSigaction(int pid, int sig, const struct sigaction *act, struct sigacti
     int mask = vprocSigMask(sig);
     int rc = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
     if (entry) {
         if (old) {
             *old = vprocGetSigactionLocked(entry, sig);
@@ -1728,6 +1762,105 @@ int vprocSigaction(int pid, int sig, const struct sigaction *act, struct sigacti
 
 static VProc *vprocForThread(void) {
     return gVProcCurrent;
+}
+
+int vprocSigpending(int pid, sigset_t *set) {
+    if (!set) {
+        errno = EINVAL;
+        return -1;
+    }
+    sigemptyset(set);
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        int pending = entry->pending_signals;
+        for (int sig = 1; sig < 32; ++sig) {
+            if (pending & vprocSigMask(sig)) {
+                sigaddset(set, sig);
+            }
+        }
+    } else {
+        errno = ESRCH;
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return -1;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return 0;
+}
+
+int vprocSigsuspend(int pid, const sigset_t *mask) {
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    int original_blocked = entry->blocked_signals;
+    if (mask) {
+        entry->blocked_signals = 0;
+        for (int sig = 1; sig < 32; ++sig) {
+            if (sigismember(mask, sig)) {
+                entry->blocked_signals |= vprocSigMask(sig);
+            }
+        }
+    }
+    while (true) {
+        int orig_pending = entry->pending_signals;
+        vprocDeliverPendingSignalsLocked(entry);
+        if (orig_pending != 0) {
+            break;
+        }
+        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+    }
+    entry->blocked_signals = original_blocked;
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    errno = EINTR;
+    return -1;
+}
+
+int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset_t *oldset) {
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    if (oldset) {
+        sigemptyset(oldset);
+        for (int sig = 1; sig < 32; ++sig) {
+            if (entry->blocked_signals & vprocSigMask(sig)) {
+                sigaddset(oldset, sig);
+            }
+        }
+    }
+    if (!set) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return 0;
+    }
+    int mask_bits = 0;
+    for (int sig = 1; sig < 32; ++sig) {
+        if (sigismember(set, sig)) {
+            mask_bits |= vprocSigMask(sig);
+        }
+    }
+    int unmaskable = vprocSigMask(SIGKILL) | vprocSigMask(SIGSTOP);
+    mask_bits &= ~unmaskable;
+    if (how == SIG_BLOCK) {
+        entry->blocked_signals |= mask_bits;
+    } else if (how == SIG_UNBLOCK) {
+        entry->blocked_signals &= ~mask_bits;
+    } else if (how == SIG_SETMASK) {
+        entry->blocked_signals = mask_bits;
+    } else {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = EINVAL;
+        return -1;
+    }
+    vprocDeliverPendingSignalsLocked(entry);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return 0;
 }
 
 static int shimTranslate(int fd, int allow_real) {
