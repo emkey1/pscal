@@ -1026,6 +1026,34 @@ static void assert_sigwait_receives_pending(void) {
     vprocDestroy(vp);
 }
 
+static void assert_sigtimedwait_timeout_and_drains(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    struct timespec to = {.tv_sec = 0, .tv_nsec = 1000000};
+    int sig = 0;
+    errno = 0;
+    assert(vprocSigtimedwait(pid, &set, &to, &sig) == -1);
+    assert(errno == EAGAIN);
+
+    /* Queue two signals, ensure both are consumed separately. */
+    assert(vprocBlockSignals(pid, 1 << SIGUSR1) == 0);
+    assert(vprocKillShim(pid, SIGUSR1) == 0);
+    assert(vprocKillShim(pid, SIGUSR1) == 0);
+    assert(vprocSigtimedwait(pid, &set, NULL, &sig) == SIGUSR1);
+    assert(vprocSigtimedwait(pid, &set, NULL, &sig) == SIGUSR1);
+    sigset_t pending;
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(!sigismember(&pending, SIGUSR1));
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
 static void assert_background_tty_signals(void) {
     int shell_pid = current_waiter_pid();
     int prev_shell = vprocGetShellSelfPid();
@@ -1264,6 +1292,8 @@ int main(void) {
     assert_sighandler_resets_with_sa_resethand();
     fprintf(stderr, "TEST sigwait_receives_pending\n");
     assert_sigwait_receives_pending();
+    fprintf(stderr, "TEST sigtimedwait_timeout_and_drains\n");
+    assert_sigtimedwait_timeout_and_drains();
     fprintf(stderr, "TEST sigkill_not_blockable\n");
     assert_sigkill_not_blockable();
     fprintf(stderr, "TEST sigstop_not_ignorable_or_blockable\n");

@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <limits.h>
 
 #if defined(PSCAL_TARGET_IOS)
 #define PATH_VIRTUALIZATION_NO_MACROS 1
@@ -116,6 +117,7 @@ typedef struct {
     int blocked_signals;
     int pending_signals;
     int ignored_signals;
+    int pending_counts[32];
     int fg_override_pgid;
     struct sigaction actions[32];
 } VProcTaskEntry;
@@ -315,6 +317,11 @@ static void vprocQueuePendingSignalLocked(VProcTaskEntry *entry, int sig) {
     int mask = vprocSigMask(sig);
     if (mask != 0) {
         entry->pending_signals |= mask;
+        if (sig > 0 && sig < 32) {
+            if (entry->pending_counts[sig] < INT_MAX) {
+                entry->pending_counts[sig]++;
+            }
+        }
     }
 }
 
@@ -406,10 +413,12 @@ static void vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
         VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
         if (action == VPROC_SIG_IGNORE || vprocSignalIgnoredLocked(entry, sig)) {
             entry->pending_signals &= ~mask;
+            entry->pending_counts[sig] = 0;
             continue;
         }
         vprocApplySignalLocked(entry, sig);
         entry->pending_signals &= ~mask;
+        entry->pending_counts[sig] = 0;
     }
 }
 
@@ -1256,6 +1265,12 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->blocked_signals = 0;
     entry->pending_signals = 0;
     entry->ignored_signals = 0;
+    for (int i = 0; i < 32; ++i) {
+        entry->pending_counts[i] = 0;
+    }
+    for (int i = 0; i < 32; ++i) {
+        entry->pending_counts[i] = 0;
+    }
     entry->fg_override_pgid = 0;
     for (int i = 0; i < 32; ++i) {
         sigemptyset(&entry->actions[i].sa_mask);
@@ -1775,7 +1790,7 @@ int vprocSigpending(int pid, sigset_t *set) {
     if (entry) {
         int pending = entry->pending_signals;
         for (int sig = 1; sig < 32; ++sig) {
-            if (pending & vprocSigMask(sig)) {
+            if ((pending & vprocSigMask(sig)) || entry->pending_counts[sig] > 0) {
                 sigaddset(set, sig);
             }
         }
@@ -1879,14 +1894,79 @@ int vprocSigwait(int pid, const sigset_t *set, int *sig) {
         for (int s = 1; s < 32; ++s) {
             if (!sigismember(set, s)) continue;
             int bit = vprocSigMask(s);
-            if (entry->pending_signals & bit) {
-                entry->pending_signals &= ~bit;
+            if (entry->pending_counts[s] > 0 || (entry->pending_signals & bit)) {
+                if (entry->pending_counts[s] > 0) {
+                    entry->pending_counts[s]--;
+                }
+                if (entry->pending_counts[s] <= 0) {
+                    entry->pending_signals &= ~bit;
+                    entry->pending_counts[s] = 0;
+                }
                 *sig = s;
                 pthread_mutex_unlock(&gVProcTasks.mu);
                 return 0;
             }
         }
         pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+    }
+}
+
+int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeout, int *sig) {
+    if (!set || !sig) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct timespec deadline = {0, 0};
+    if (timeout) {
+        struct timespec now;
+        if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+            return -1;
+        }
+        deadline.tv_sec = now.tv_sec + timeout->tv_sec;
+        deadline.tv_nsec = now.tv_nsec + timeout->tv_nsec;
+        if (deadline.tv_nsec >= 1000000000L) {
+            deadline.tv_sec += 1;
+            deadline.tv_nsec -= 1000000000L;
+        }
+    }
+
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    while (true) {
+        for (int s = 1; s < 32; ++s) {
+            if (!sigismember(set, s)) continue;
+            int bit = vprocSigMask(s);
+            if (entry->pending_counts[s] > 0 || (entry->pending_signals & bit)) {
+                if (entry->pending_counts[s] > 0) {
+                    entry->pending_counts[s]--;
+                }
+                if (entry->pending_counts[s] <= 0) {
+                    entry->pending_signals &= ~bit;
+                    entry->pending_counts[s] = 0;
+                }
+                *sig = s;
+                pthread_mutex_unlock(&gVProcTasks.mu);
+                return s;
+            }
+        }
+        if (timeout) {
+            struct timespec now;
+            clock_gettime(CLOCK_REALTIME, &now);
+            if (now.tv_sec > deadline.tv_sec ||
+                (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+                pthread_mutex_unlock(&gVProcTasks.mu);
+                errno = EAGAIN;
+                return -1;
+            }
+            pthread_cond_timedwait(&gVProcTasks.cv, &gVProcTasks.mu, &deadline);
+        } else {
+            pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        }
     }
 }
 
