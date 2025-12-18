@@ -225,6 +225,22 @@ static void assert_wait_on_synthetic_pid(void) {
 
 static volatile sig_atomic_t g_signal_seen = 0;
 static volatile int g_snapshot_exit = 0;
+static volatile sig_atomic_t g_handler_hits = 0;
+static volatile sig_atomic_t g_handler_sig = 0;
+static volatile sig_atomic_t g_siginfo_hits = 0;
+static volatile sig_atomic_t g_siginfo_signo = 0;
+
+static void test_handler(int signo) {
+    g_handler_hits++;
+    g_handler_sig = signo;
+}
+
+static void test_siginfo_handler(int signo, siginfo_t *info, void *ctx) {
+    (void)ctx;
+    g_siginfo_hits++;
+    g_siginfo_signo = (info ? info->si_signo : 0);
+    g_handler_sig = signo;
+}
 
 static void sigusr1_handler(int signo) {
     if (signo == SIGUSR1) {
@@ -319,14 +335,25 @@ static void assert_wait_wnowait_preserves_zombie(void) {
 }
 
 static void assert_wait_by_pgid(void) {
+    int prev_shell = vprocGetShellSelfPid();
+
+    VProcOptions leader_opts = vprocDefaultOptions();
+    leader_opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&leader_opts);
+    assert(leader);
+    int sid = vprocPid(leader);
+    vprocSetShellSelfPid(sid);
+    assert(vprocSetSid(sid, sid) == 0);
+
     VProcOptions opts = vprocDefaultOptions();
     VProc *vp1 = vprocCreate(&opts);
     VProc *vp2 = vprocCreate(&opts);
     assert(vp1 && vp2);
     int pid1 = vprocPid(vp1);
     int pid2 = vprocPid(vp2);
-    int pgid = pid1 + 1000;
-    assert(vprocSetSid(pid2, vprocGetSid(pid1)) == 0);
+    int pgid = pid1;
+    assert(vprocGetSid(pid1) == sid);
+    assert(vprocGetSid(pid2) == sid);
     assert(vprocSetPgid(pid1, pgid) == 0);
     assert(vprocSetPgid(pid2, pgid) == 0);
 
@@ -344,6 +371,10 @@ static void assert_wait_by_pgid(void) {
 
     vprocDestroy(vp1);
     vprocDestroy(vp2);
+    vprocMarkExit(leader, 0);
+    vprocDiscard(sid);
+    vprocDestroy(leader);
+    vprocSetShellSelfPid(prev_shell);
 }
 
 static void assert_wait_reports_continued(void) {
@@ -586,6 +617,30 @@ static void assert_rusage_snapshot(void) {
     vprocDestroy(vp);
 }
 
+static void assert_rusage_populated_on_exit(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    usleep(100000); /* 100ms to guarantee deci-ticks */
+    vprocMarkExit(vp, 0);
+
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    size_t count = vprocSnapshot(snaps, cap);
+    bool found = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (snaps[i].pid == pid) {
+            found = true;
+            assert(snaps[i].rusage_utime >= 1);
+        }
+    }
+    assert(found);
+    free(snaps);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
 static void assert_blocked_stop_delivered_on_unblock(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -648,6 +703,75 @@ static void assert_background_stop_foreground_cont(void) {
     (void)vprocWaitPidShim(vprocPid(bg), &status, 0);
     vprocDestroy(fg);
     vprocDestroy(bg);
+}
+
+static void assert_child_inherits_sid_and_pgid(void) {
+    VProc *parent = vprocCreate(NULL);
+    assert(parent);
+    int parent_pid = vprocPid(parent);
+    int sid = parent_pid;
+    int pgid = sid;
+    int fg = sid + 7;
+    assert(vprocSetSid(parent_pid, sid) == 0);
+    assert(vprocSetPgid(parent_pid, pgid) == 0);
+    assert(vprocSetForegroundPgid(sid, fg) == 0);
+
+    vprocActivate(parent);
+    VProc *child = vprocCreate(NULL);
+    vprocDeactivate();
+    assert(child);
+    int child_pid = vprocPid(child);
+    assert(vprocGetSid(child_pid) == sid);
+    assert(vprocGetPgid(child_pid) == pgid);
+    assert(vprocGetForegroundPgid(sid) == fg);
+
+    vprocMarkExit(parent, 0);
+    vprocMarkExit(child, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(parent_pid, &status, 0);
+    (void)vprocWaitPidShim(child_pid, &status, 0);
+    vprocDestroy(parent);
+    vprocDestroy(child);
+}
+
+static void assert_child_inherits_signal_state(void) {
+    VProc *parent = vprocCreate(NULL);
+    assert(parent);
+    int parent_pid = vprocPid(parent);
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = test_handler;
+    sigemptyset(&sa.sa_mask);
+    assert(vprocSigaction(parent_pid, SIGUSR1, &sa, NULL) == 0);
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR2);
+    assert(vprocSigprocmask(parent_pid, SIG_BLOCK, &mask, NULL) == 0);
+
+    vprocActivate(parent);
+    VProc *child = vprocCreate(NULL);
+    vprocDeactivate();
+    assert(child);
+    int child_pid = vprocPid(child);
+
+    struct sigaction child_sa;
+    memset(&child_sa, 0, sizeof(child_sa));
+    assert(vprocSigaction(child_pid, SIGUSR1, NULL, &child_sa) == 0);
+    assert(child_sa.sa_handler == test_handler);
+
+    sigset_t child_mask;
+    sigemptyset(&child_mask);
+    assert(vprocSigprocmask(child_pid, SIG_BLOCK, NULL, &child_mask) == 0);
+    assert(sigismember(&child_mask, SIGUSR2));
+
+    vprocMarkExit(parent, 0);
+    vprocMarkExit(child, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(parent_pid, &status, 0);
+    (void)vprocWaitPidShim(child_pid, &status, 0);
+    vprocDestroy(parent);
+    vprocDestroy(child);
 }
 
 typedef struct {
@@ -1054,30 +1178,67 @@ static void assert_sigtimedwait_timeout_and_drains(void) {
     vprocDestroy(vp);
 }
 
+static void assert_signal_handler_invoked(void) {
+    g_handler_hits = 0;
+    g_handler_sig = 0;
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    struct sigaction sa = {0};
+    sa.sa_handler = test_handler;
+    sa.sa_flags = 0;
+    assert(vprocSigaction(pid, SIGUSR1, &sa, NULL) == 0);
+    assert(vprocKillShim(pid, SIGUSR1) == 0);
+    assert(g_handler_hits == 1);
+    assert(g_handler_sig == SIGUSR1);
+    sigset_t pending;
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(!sigismember(&pending, SIGUSR1));
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
+static void assert_siginfo_handler_invoked(void) {
+    g_siginfo_hits = 0;
+    g_siginfo_signo = 0;
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    struct sigaction sa = {0};
+    sa.sa_sigaction = test_siginfo_handler;
+    sa.sa_flags = SA_SIGINFO;
+    assert(vprocSigaction(pid, SIGUSR2, &sa, NULL) == 0);
+    assert(vprocKillShim(pid, SIGUSR2) == 0);
+    assert(g_siginfo_hits == 1);
+    assert(g_siginfo_signo == SIGUSR2);
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
 static void assert_background_tty_signals(void) {
-    int shell_pid = current_waiter_pid();
     int prev_shell = vprocGetShellSelfPid();
-    vprocSetShellSelfPid(shell_pid);
     VProcOptions leader_opts = vprocDefaultOptions();
     leader_opts.pid_hint = vprocReservePid();
     VProc *leader = vprocCreate(&leader_opts);
     assert(leader);
     int sid = vprocPid(leader);
+    vprocSetShellSelfPid(sid);
     assert(vprocSetSid(sid, sid) == 0);
     assert(vprocSetForegroundPgid(sid, sid) == 0);
-    vprocSetParent(sid, shell_pid);
 
     VProcOptions opts = vprocDefaultOptions();
     opts.pid_hint = vprocReservePid();
     VProc *vp = vprocCreate(&opts);
     assert(vp);
     int pid = vprocPid(vp);
-    assert(vprocSetSid(pid, sid) == 0);
     int fg = sid;
     int bg = sid + 5;
     assert(vprocSetForegroundPgid(sid, fg) == 0);
     assert(vprocSetPgid(pid, bg) == 0);
-    vprocSetParent(pid, shell_pid);
 
     VProc *prev = vprocCurrent();
     vprocActivate(vp);
@@ -1100,6 +1261,35 @@ static void assert_background_tty_signals(void) {
     vprocDestroy(vp);
     vprocMarkExit(leader, 0);
     (void)vprocWaitPidShim(sid, &status, 0);
+    vprocDestroy(leader);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_getpid_falls_back_to_shell_and_create_inherits_session(void) {
+    int prev_shell = vprocGetShellSelfPid();
+
+    VProcOptions leader_opts = vprocDefaultOptions();
+    leader_opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&leader_opts);
+    assert(leader);
+    int sid = vprocPid(leader);
+    vprocSetShellSelfPid(sid);
+    assert(vprocGetPidShim() == sid);
+    assert(vprocSetSid(sid, sid) == 0);
+
+    VProc *child = vprocCreate(NULL);
+    assert(child);
+    int child_pid = vprocPid(child);
+    assert(vprocGetSid(child_pid) == sid);
+    assert(vprocGetPgid(child_pid) == vprocGetPgid(sid));
+
+    vprocMarkExit(child, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(child_pid, &status, 0);
+    vprocDestroy(child);
+
+    vprocMarkExit(leader, 0);
+    vprocDiscard(sid);
     vprocDestroy(leader);
     vprocSetShellSelfPid(prev_shell);
 }
@@ -1219,6 +1409,149 @@ static void assert_passthrough_when_inactive(void) {
     unlink(tmpl);
 }
 
+static void assert_job_id_and_label_round_trip(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    vprocSetJobId(pid, 7);
+    vprocSetCommandLabel(pid, "jobcmd");
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    size_t count = vprocSnapshot(snaps, cap);
+    bool found = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (snaps[i].pid == pid) {
+            found = true;
+            assert(snaps[i].job_id == 7);
+            assert(strcmp(snaps[i].command, "jobcmd") == 0);
+        }
+    }
+    assert(found);
+    free(snaps);
+
+    vprocSetJobId(pid, 0);
+    vprocSetCommandLabel(pid, NULL);
+    cap = vprocSnapshot(NULL, 0);
+    snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    count = vprocSnapshot(snaps, cap);
+    found = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (snaps[i].pid == pid) {
+            found = true;
+            assert(snaps[i].job_id == 0);
+            assert(snaps[i].command[0] == '\0');
+        }
+    }
+    assert(found);
+    free(snaps);
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
+static void assert_vproc_activation_stack_restores_previous(void) {
+    /* Ensure vprocActivate/vprocDeactivate are nestable so the shell can keep a
+     * baseline vproc active while pipeline stages temporarily override it. */
+    VProc *vp1 = vprocCreate(NULL);
+    VProc *vp2 = vprocCreate(NULL);
+    assert(vp1 && vp2);
+
+    assert(vprocCurrent() == NULL);
+    vprocActivate(vp1);
+    assert(vprocCurrent() == vp1);
+    vprocActivate(vp2);
+    assert(vprocCurrent() == vp2);
+    vprocDeactivate();
+    assert(vprocCurrent() == vp1);
+    vprocDeactivate();
+    assert(vprocCurrent() == NULL);
+
+    vprocDestroy(vp2);
+    vprocDestroy(vp1);
+}
+
+static int snapshot_find_parent(const VProcSnapshot *snaps, size_t count, int pid) {
+    for (size_t i = 0; i < count; ++i) {
+        if (snaps[i].pid == pid) {
+            return snaps[i].parent_pid;
+        }
+    }
+    return -1;
+}
+
+static void assert_reparenting_uses_session_leader_sid(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int prev_kernel = vprocGetKernelPid();
+
+    VProc *kernel1 = vprocCreate(NULL);
+    VProc *shell1 = vprocCreate(NULL);
+    VProc *kernel2 = vprocCreate(NULL);
+    VProc *shell2 = vprocCreate(NULL);
+    assert(kernel1 && shell1 && kernel2 && shell2);
+
+    int k1 = vprocPid(kernel1);
+    int s1 = vprocPid(shell1);
+    int k2 = vprocPid(kernel2);
+    int s2 = vprocPid(shell2);
+
+    vprocSetParent(k1, 0);
+    assert(vprocSetSid(k1, k1) == 0);
+    vprocSetCommandLabel(k1, "kernel");
+    vprocSetParent(s1, k1);
+    assert(vprocSetSid(s1, k1) == 0);
+    assert(vprocSetPgid(s1, s1) == 0);
+    assert(vprocSetForegroundPgid(k1, s1) == 0);
+    vprocSetCommandLabel(s1, "shell");
+
+    vprocSetParent(k2, 0);
+    assert(vprocSetSid(k2, k2) == 0);
+    vprocSetCommandLabel(k2, "kernel");
+    vprocSetParent(s2, k2);
+    assert(vprocSetSid(s2, k2) == 0);
+    assert(vprocSetPgid(s2, s2) == 0);
+    assert(vprocSetForegroundPgid(k2, s2) == 0);
+    vprocSetCommandLabel(s2, "shell");
+
+    /* Pretend the current runtime thread belongs to session 2 so any global
+     * fallback would target the wrong kernel/shell. Reparenting should still
+     * prefer the exiting entry's SID (session leader). */
+    vprocSetKernelPid(k2);
+    vprocSetShellSelfPid(s2);
+
+    VProc *child = vprocCreate(NULL);
+    assert(child);
+    int cpid = vprocPid(child);
+    vprocSetParent(cpid, s1);
+    assert(vprocSetSid(cpid, k1) == 0);
+    vprocSetCommandLabel(cpid, "child");
+
+    vprocMarkExit(shell1, 0);
+
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    size_t count = vprocSnapshot(snaps, cap);
+    int parent_after = snapshot_find_parent(snaps, count, cpid);
+    free(snaps);
+    assert(parent_after == k1);
+
+    vprocMarkExit(child, 0);
+    vprocDiscard(cpid);
+    vprocDestroy(child);
+
+    vprocDiscard(s1);
+    vprocDestroy(shell1);
+    vprocDiscard(k1);
+    vprocDestroy(kernel1);
+    vprocDiscard(s2);
+    vprocDestroy(shell2);
+    vprocDiscard(k2);
+    vprocDestroy(kernel2);
+
+    vprocSetKernelPid(prev_kernel);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 int main(void) {
     /* Default truncation path for tests to keep path virtualization in /tmp. */
     setenv("PATH_TRUNCATE", "/tmp", 1);
@@ -1258,12 +1591,18 @@ int main(void) {
     assert_sigchld_pending_api();
     fprintf(stderr, "TEST sigchld_unblock_drains_pending_signal\n");
     assert_sigchld_unblock_drains_pending_signal();
+    fprintf(stderr, "TEST child_inherits_sid_and_pgid\n");
+    assert_child_inherits_sid_and_pgid();
+    fprintf(stderr, "TEST child_inherits_signal_state\n");
+    assert_child_inherits_signal_state();
     fprintf(stderr, "TEST group_exit_code_used\n");
     assert_group_exit_code_used();
     fprintf(stderr, "TEST group_stop_reaches_all_members\n");
     assert_group_stop_reaches_all_members();
     fprintf(stderr, "TEST rusage_snapshot\n");
     assert_rusage_snapshot();
+    fprintf(stderr, "TEST rusage_populated_on_exit\n");
+    assert_rusage_populated_on_exit();
     fprintf(stderr, "TEST blocked_stop_delivered_on_unblock\n");
     assert_blocked_stop_delivered_on_unblock();
     fprintf(stderr, "TEST background_stop_foreground_cont\n");
@@ -1294,14 +1633,24 @@ int main(void) {
     assert_sigwait_receives_pending();
     fprintf(stderr, "TEST sigtimedwait_timeout_and_drains\n");
     assert_sigtimedwait_timeout_and_drains();
+    fprintf(stderr, "TEST signal_handler_invoked\n");
+    assert_signal_handler_invoked();
+    fprintf(stderr, "TEST siginfo_handler_invoked\n");
+    assert_siginfo_handler_invoked();
     fprintf(stderr, "TEST sigkill_not_blockable\n");
     assert_sigkill_not_blockable();
     fprintf(stderr, "TEST sigstop_not_ignorable_or_blockable\n");
     assert_sigstop_not_ignorable_or_blockable();
     fprintf(stderr, "TEST background_tty_signals\n");
     assert_background_tty_signals();
+    fprintf(stderr, "TEST getpid_fallback_and_create_inherits\n");
+    assert_getpid_falls_back_to_shell_and_create_inherits_session();
     fprintf(stderr, "TEST job_id_present_in_snapshot\n");
     assert_job_id_present_in_snapshot();
+    fprintf(stderr, "TEST vproc_activation_stack\n");
+    assert_vproc_activation_stack_restores_previous();
+    fprintf(stderr, "TEST reparenting_uses_sid\n");
+    assert_reparenting_uses_session_leader_sid();
     fprintf(stderr, "TEST setpgid_zero_defaults_to_pid\n");
     assert_setpgid_zero_defaults_to_pid();
     fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");

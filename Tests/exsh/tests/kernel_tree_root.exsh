@@ -1,0 +1,59 @@
+set -e
+
+# Regression: a synthetic per-session kernel process should exist and be the
+# root of the vproc tree, with the shell as its child.
+#
+# The harness treats exit code 77 as a skip.
+
+if [ "${RUN_VPROC_TESTS:-0}" != "1" ]; then
+    exit 77
+fi
+
+tmp_base="./.exsh-kernel-root-$$"
+tmp_out="${tmp_base}.out"
+
+rm -f "$tmp_out"
+
+top --flat >"$tmp_out"
+
+kernel_pid=0
+kernel_ppid=-1
+shell_ppid=-1
+
+while IFS= read -r line; do
+    case "$line" in
+        ("PID "*) continue ;;
+    esac
+    set -- $line
+    pid="$1"
+    ppid="$2"
+    case "$line" in
+        (*" kernel")
+            kernel_pid="$pid"
+            kernel_ppid="$ppid"
+            ;;
+        (*" shell")
+            shell_ppid="$ppid"
+            ;;
+    esac
+done <"$tmp_out"
+
+if [ "$kernel_pid" -eq 0 ]; then
+    echo "FAIL: missing kernel row in top --flat output" >&2
+    cat "$tmp_out" >&2
+    exit 1
+fi
+
+if [ "$kernel_ppid" -ne 0 ]; then
+    echo "FAIL: kernel PPID expected 0, got ${kernel_ppid}" >&2
+    cat "$tmp_out" >&2
+    exit 1
+fi
+
+if [ "$shell_ppid" -ne "$kernel_pid" ]; then
+    echo "FAIL: shell PPID expected ${kernel_pid}, got ${shell_ppid}" >&2
+    cat "$tmp_out" >&2
+    exit 1
+fi
+
+rm -f "$tmp_out"

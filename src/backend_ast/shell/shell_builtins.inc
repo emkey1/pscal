@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include "ios/vproc.h"
+#include "ios/vproc_tree.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #if defined(PSCAL_TARGET_IOS)
@@ -3927,7 +3928,9 @@ static Value shellRunToolBuiltin(VM *vm,
                                  FrontendKind target_kind,
                                  int arg_count,
                                  Value *args) {
-    fprintf(stderr, "[tool-dispatch] name=%s argc=%d\n", tool_name ? tool_name : "<null>", arg_count + 1);
+    if (getenv("PSCALI_PIPE_DEBUG")) {
+        fprintf(stderr, "[tool-dispatch] name=%s argc=%d\n", tool_name ? tool_name : "<null>", arg_count + 1);
+    }
 #if defined(PSCAL_TARGET_IOS)
     /* Special-case exsh: on iOS we cannot exec a new process, so run exsh_main inline
      * with the provided arguments to preserve -c/script execution. */
@@ -4075,7 +4078,9 @@ static Value shellRunToolBuiltin(VM *vm,
      * Use that value when available to avoid a default 127 on success. */
     int final_status = shellRuntimeLastStatus();
     shellUpdateStatus(final_status);
-    fprintf(stderr, "[tool-dispatch] %s final status=%d\n", tool_name ? tool_name : "<null>", final_status);
+    if (getenv("PSCALI_PIPE_DEBUG")) {
+        fprintf(stderr, "[tool-dispatch] %s final status=%d\n", tool_name ? tool_name : "<null>", final_status);
+    }
     frontendPopKind(previous_kind);
     return result;
 }
@@ -5757,10 +5762,9 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     size_t line_length = 0;
     if (ok) {
         if (prompt) {
-            fputs(prompt, stdout);
-            fflush(stdout);
+            write(STDOUT_FILENO, prompt, strlen(prompt));
         }
-        read_result = shellReadLineFromStream(stdin, &line, &line_length);
+        read_result = shellReadLineFromFd(STDIN_FILENO, &line, &line_length);
         if (read_result == SHELL_READ_LINE_OK && line_length > 0 && line[line_length - 1] == '\n') {
             line[--line_length] = '\0';
         }
@@ -6140,7 +6144,7 @@ Value vmBuiltinShellMapfile(VM *vm, int arg_count, Value *args) {
     for (;;) {
         char *line = NULL;
         size_t line_length = 0;
-        ShellReadLineResult result = shellReadLineFromStream(stdin, &line, &line_length);
+        ShellReadLineResult result = shellReadLineFromFd(STDIN_FILENO, &line, &line_length);
         if (result == SHELL_READ_LINE_ERROR) {
             runtimeError(vm, "mapfile: failed to read input");
             ok = false;
@@ -8842,6 +8846,60 @@ Value vmBuiltinShellContinue(VM *vm, int arg_count, Value *args) {
 static ShellAlias *gShellAliases = NULL;
 static size_t gShellAliasCount = 0;
 
+static void shellWriteAllFd(int fd, const char *buf, size_t len) {
+    if (fd < 0 || !buf || len == 0) {
+        return;
+    }
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, buf + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (n == 0) {
+            break;
+        }
+        off += (size_t)n;
+    }
+}
+
+static void shellFdVprintf(int fd, const char *fmt, va_list ap) {
+    if (!fmt) {
+        return;
+    }
+    char stack_buf[768];
+    va_list ap2;
+    va_copy(ap2, ap);
+    int needed = vsnprintf(stack_buf, sizeof(stack_buf), fmt, ap2);
+    va_end(ap2);
+    if (needed < 0) {
+        return;
+    }
+    if ((size_t)needed < sizeof(stack_buf)) {
+        shellWriteAllFd(fd, stack_buf, (size_t)needed);
+        return;
+    }
+    size_t cap = (size_t)needed + 1;
+    char *heap = (char *)malloc(cap);
+    if (!heap) {
+        shellWriteAllFd(fd, stack_buf, strlen(stack_buf));
+        return;
+    }
+    vsnprintf(heap, cap, fmt, ap);
+    shellWriteAllFd(fd, heap, (size_t)needed);
+    free(heap);
+}
+
+static void shellFdPrintf(int fd, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    shellFdVprintf(fd, fmt, ap);
+    va_end(ap);
+}
+
 static void shellReportRecoverableError(VM *vm, bool with_location, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -8861,11 +8919,11 @@ static void shellReportRecoverableError(VM *vm, bool with_location, const char *
     }
 
     if (script && line > 0) {
-        fprintf(stderr, "%s: line %d: %s\n", script, line, message);
+        shellFdPrintf(STDERR_FILENO, "%s: line %d: %s\n", script, line, message);
     } else if (script) {
-        fprintf(stderr, "%s: %s\n", script, message);
+        shellFdPrintf(STDERR_FILENO, "%s: %s\n", script, message);
     } else {
-        fprintf(stderr, "%s\n", message);
+        shellFdPrintf(STDERR_FILENO, "%s\n", message);
     }
 
     if (vm) {
@@ -9823,14 +9881,54 @@ static const char *shellPsStateForEntry(const ShellJob *job, const VProcSnapshot
     return "running";
 }
 
-static void shellPsPrintLine(pid_t pid, pid_t pgid, const char *state, const char *command) {
+static void shellPsPrintLine(pid_t pid, pid_t pgid, const char *state, int utime_cs, int stime_cs, const char *command) {
     char pgid_buf[16];
     if (pgid > 0) {
         snprintf(pgid_buf, sizeof(pgid_buf), "%d", (int)pgid);
     } else {
         snprintf(pgid_buf, sizeof(pgid_buf), "-");
     }
-    printf("%-6d %-6s %-9s %s\n", (int)pid, pgid_buf, state ? state : "running",
+    double utime_s = 0.0, stime_s = 0.0;
+    vprocFormatCpuTimes(utime_cs, stime_cs, &utime_s, &stime_s);
+    printf("%-6d %-6s %-9s %-6.1f %-6.1f %s\n", (int)pid, pgid_buf,
+           state ? state : "running", utime_s, stime_s, command ? command : "");
+}
+
+static void shellPsPrintLineTree(const VProcSnapshot *snap,
+                                 pid_t pgid,
+                                 const char *state,
+                                 const char *command,
+                                 int depth) {
+    if (!snap) {
+        return;
+    }
+    char pgid_buf[16];
+    if (pgid > 0) {
+        snprintf(pgid_buf, sizeof(pgid_buf), "%d", (int)pgid);
+    } else {
+        snprintf(pgid_buf, sizeof(pgid_buf), "-");
+    }
+
+    double utime_s = 0.0, stime_s = 0.0;
+    vprocFormatCpuTimes(snap->rusage_utime, snap->rusage_stime, &utime_s, &stime_s);
+
+    char indent[96];
+    size_t used = 0;
+    for (int d = 0; d < depth && used + 2 < sizeof(indent); ++d) {
+        indent[used++] = ' ';
+        indent[used++] = ' ';
+    }
+    indent[used] = '\0';
+
+    printf("%-6d %-6d %-6s %-6d %-9s %-6.1f %-6.1f %s%s\n",
+           (int)snap->pid,
+           (int)snap->parent_pid,
+           pgid_buf,
+           (int)snap->sid,
+           state ? state : "running",
+           utime_s,
+           stime_s,
+           indent,
            command ? command : "");
 }
 #endif
@@ -9847,9 +9945,8 @@ Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
         }
         const char *state = job->stopped ? "Stopped" : "Running";
         const char *command = job->command ? job->command : "";
-        printf("[%zu] %s %s\n", job->id, state, command);
+        shellFdPrintf(STDOUT_FILENO, "[%zu] %s %s\n", job->id, state, command);
     }
-    fflush(stdout);
     shellUpdateStatus(0);
     return makeVoid();
 }
@@ -9958,9 +10055,10 @@ static bool shellKillTryJobSpec(const char *text, size_t *out_index) {
     while (isspace((unsigned char)*text)) {
         ++text;
     }
-    if (*text == '%') {
-        ++text;
+    if (*text != '%') {
+        return false;
     }
+    ++text;
     while (isspace((unsigned char)*text)) {
         ++text;
     }
@@ -9975,99 +10073,8 @@ static bool shellKillTryJobSpec(const char *text, size_t *out_index) {
     if (endptr && *endptr == '\0' && vis > 0) {
         return shellJobFindVisibleIndex((size_t)vis, out_index);
     }
-#if defined(PSCAL_TARGET_IOS)
-    fprintf(stderr, "[kill-ios] job spec parse failed: '%s'\n", text);
-#endif
     return false;
 }
-
-#if defined(PSCAL_TARGET_IOS)
-static bool shellKillResolveJobSpecIOS(const char *text, size_t *out_index) {
-    if (!text || !out_index) {
-        return false;
-    }
-
-    if (shellKillTryJobSpec(text, out_index)) {
-#if defined(PSCAL_TARGET_IOS)
-        if (getenv("PSCALI_KILL_DEBUG")) {
-            fprintf(stderr, "[kill-ios] resolved job-spec '%s' -> job index=%zu\n", text, *out_index);
-        }
-#endif
-        return true;
-    }
-
-    const char *cursor = text;
-    while (isspace((unsigned char)*cursor)) {
-        ++cursor;
-    }
-    if (*cursor == '%') {
-        ++cursor;
-    }
-    while (isspace((unsigned char)*cursor)) {
-        ++cursor;
-    }
-    if (!*cursor || !isdigit((unsigned char)*cursor)) {
-        return false;
-    }
-
-    char *endptr = NULL;
-    long vis = strtol(cursor, &endptr, 10);
-    while (endptr && *endptr && isspace((unsigned char)*endptr)) {
-        ++endptr;
-    }
-    if (!endptr || *endptr != '\0' || vis <= 0) {
-        return false;
-    }
-
-    if (shellJobFindVisibleIndex((size_t)vis, out_index)) {
-#if defined(PSCAL_TARGET_IOS)
-        if (getenv("PSCALI_KILL_DEBUG")) {
-            fprintf(stderr, "[kill-ios] resolved job-spec '%s' -> job index=%zu via snapshot\n", text, *out_index);
-        }
-#endif
-        return true;
-    }
-
-    size_t snap_cap = vprocSnapshot(NULL, 0);
-    if (snap_cap == 0) {
-        return false;
-    }
-
-    VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
-    if (!snaps) {
-        return false;
-    }
-
-    size_t snap_count = vprocSnapshot(snaps, snap_cap);
-    size_t visible = 0;
-    for (size_t i = 0; i < snap_count; ++i) {
-        const VProcSnapshot *s = &snaps[i];
-        if (!s || s->pid <= 0) {
-            continue;
-        }
-        if (s->pid == vprocGetShellSelfPid() || pthread_equal(s->tid, pthread_self())) {
-            continue;
-        }
-        ++visible;
-        if (visible == (size_t)vis) {
-            pid_t pid = (pid_t)s->pid;
-            if (!shellFindJobByPid(pid)) {
-                pid_t pid_copy[1] = { pid };
-                ShellJob *job = shellRegisterJob(pid, pid_copy, 1, NULL);
-                if (job) {
-                    job->running = !s->exited && !s->stopped;
-                    job->stopped = s->stopped;
-                    job->last_status = s->status;
-                }
-            }
-            break;
-        }
-    }
-
-    free(snaps);
-    return shellJobFindVisibleIndex((size_t)vis, out_index);
-}
-#endif
 
 static void shellKillPrintSignalTable(void) {
     int column = 0;
@@ -10097,8 +10104,26 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
     }
     ShellJob *job = &gShellJobs[index];
     bool sent = false;
-    bool terminate = !(signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU || signo == SIGCONT);
+    bool probe = (signo == 0);
+    bool terminate = !probe &&
+                     !(signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU || signo == SIGCONT);
     bool synthetic = (vprocSnapshot(NULL, 0) > 0);
+    if (probe) {
+        if (job->pgid > 0 && vprocKillShim(-job->pgid, 0) == 0) {
+            return true;
+        }
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            pid_t pid = job->pids[i];
+            if (pid <= 0) {
+                continue;
+            }
+            if (vprocKillShim(pid, 0) == 0) {
+                return true;
+            }
+        }
+        runtimeError(vm, "kill: %s: no associated processes", spec_text ? spec_text : "job");
+        return false;
+    }
     if (terminate && job->pgid > 0) {
         /* Deliver to the whole synthetic group; safer for pipelines and job-spec parity. */
         if (vprocKillShim(-job->pgid, signo) == 0) {
@@ -10158,6 +10183,18 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
 
 Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
+    bool kill_dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    if (kill_dbg) {
+        fprintf(stderr, "[kill] job_count=%zu args=%d\n", gShellJobCount, arg_count);
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            ShellJob *job = &gShellJobs[i];
+            fprintf(stderr, "[kill]   job idx=%zu id=%zu pgid=%d disowned=%d stopped=%d running=%d pid_count=%zu\n",
+                    i, job->id, (int)job->pgid, (int)job->disowned, (int)job->stopped, (int)job->running, job->pid_count);
+            for (size_t j = 0; j < job->pid_count; ++j) {
+                fprintf(stderr, "[kill]     pid[%zu]=%d\n", j, (int)job->pids[j]);
+            }
+        }
+    }
 
     bool parsing_options = true;
     bool expect_signal_value = false;
@@ -10284,95 +10321,23 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     bool overall_ok = true;
     for (int i = operand_start; i < arg_count; ++i) {
         Value target = args[i];
-        /* Resolve job specs (with or without leading %); prefer job matching before PID parsing. */
         if (target.type == TYPE_STRING && target.s_val) {
-#if defined(PSCAL_TARGET_IOS)
-            /* Fast path: explicit %N always refers to the Nth visible synthetic task. */
-            if (target.s_val[0] == '%' && target.s_val[1] != '\0') {
-                const char *p = target.s_val + 1;
-                while (isspace((unsigned char)*p)) ++p;
-                long vis = 0;
-                while (isdigit((unsigned char)*p)) {
-                    vis = vis * 10 + (*p - '0');
-                    ++p;
-                }
-                while (isspace((unsigned char)*p)) ++p;
-                if (vis > 0) {
-                    /* Try job table first. */
-                    size_t idx = 0;
-                    if (shellJobFindVisibleIndex((size_t)vis, &idx) && idx < gShellJobCount) {
-                        if (!shellKillSignalJob(vm, target.s_val, idx, signal_number)) {
-                            overall_ok = false;
-                        }
-                        continue;
-                    }
-                    /* Fallback: walk the synthetic task snapshot and signal the Nth visible task. */
-                    size_t snap_cap = vprocSnapshot(NULL, 0);
-                    VProcSnapshot *snaps = snap_cap ? (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot)) : NULL;
-                    size_t snap_count = snaps ? vprocSnapshot(snaps, snap_cap) : 0;
-                    size_t visible = 0;
-                    pid_t target_pid = -1;
-                    for (size_t j = 0; j < snap_count; ++j) {
-                        const VProcSnapshot *s = &snaps[j];
-                        if (!s || s->pid <= 0) continue;
-                        if (s->pid == vprocGetShellSelfPid() || pthread_equal(s->tid, pthread_self())) continue;
-                        ++visible;
-                        if (visible == (size_t)vis) {
-                            target_pid = (pid_t)s->pid;
-                            break;
-                        }
-                    }
-                    if (snaps) free(snaps);
-                    if (target_pid > 0) {
-                        if (vprocKillShim(target_pid, signal_number) != 0) {
-                            runtimeError(vm, "kill: %d: %s", (int)target_pid, strerror(errno));
-                            overall_ok = false;
-                        }
-                        shellCollectJobs();
-                        continue;
-                    }
-                    runtimeError(vm, "kill: %s: no associated processes", target.s_val);
-                    overall_ok = false;
-                    continue;
-                }
-            }
-            shellCollectJobs();
-            size_t job_index = 0;
-            if (shellKillResolveJobSpecIOS(target.s_val, &job_index) && job_index < gShellJobCount) {
-                if (!shellKillSignalJob(vm, target.s_val, job_index, signal_number)) {
-                    overall_ok = false;
-                }
-                continue;
-            }
-#else
             const char *text = target.s_val;
-            size_t index = 0;
-            if (shellKillTryJobSpec(text, &index) && index < gShellJobCount) {
-                ShellJob *job = &gShellJobs[index];
-                bool signalled = false;
-                for (size_t j = 0; j < job->pid_count; ++j) {
-                    pid_t pid = job->pids[j];
-                    if (pid > 0) {
-                        signalled = true;
-                        if (kill(pid, signal_number) != 0) {
-                            runtimeError(vm, "kill: %d: %s", (int)pid, strerror(errno));
-                            overall_ok = false;
-                        } else {
-                            job->last_status = 128 + signal_number;
-                            job->running = false;
-                        }
+            while (isspace((unsigned char)*text)) {
+                ++text;
+            }
+            if (*text == '%') {
+                size_t index = 0;
+                if (shellKillTryJobSpec(text, &index) && index < gShellJobCount) {
+                    if (!shellKillSignalJob(vm, target.s_val, index, signal_number)) {
+                        overall_ok = false;
                     }
-                }
-                if (!signalled) {
-                    runtimeError(vm, "kill: %s: no associated processes", text ? text : "%");
+                } else {
+                    runtimeError(vm, "kill: %s: no such job", target.s_val);
                     overall_ok = false;
                 }
                 continue;
             }
-#endif
-#if defined(PSCAL_TARGET_IOS)
-            fprintf(stderr, "[kill-ios] job-spec parse failed for '%s'\n", target.s_val);
-#endif
         }
         long pid_value = 0;
         if (!shellKillParseLong(target, &pid_value)) {
@@ -10511,8 +10476,50 @@ Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
 Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
     size_t visible_count = shellJobVisibleCount();
-    if (visible_count == 0 && arg_count == 0) {
-        shellUpdateStatus(0);
+    if (arg_count == 0) {
+        if (visible_count == 0) {
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+        int final_status = 0;
+        while (shellJobVisibleCount() > 0) {
+            /* Match Bash's tendency to treat the most recent job as "current". */
+            size_t index = 0;
+            bool found = false;
+            for (size_t i = gShellJobCount; i > 0; --i) {
+                ShellJob *job = &gShellJobs[i - 1];
+                if (!job->disowned) {
+                    index = i - 1;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                break;
+            }
+            ShellJob *job = &gShellJobs[index];
+            int job_status = job->last_status;
+            for (size_t i = 0; i < job->pid_count; ++i) {
+                pid_t pid = job->pids[i];
+                if (pid <= 0) {
+                    continue;
+                }
+                int status = 0;
+                pid_t res;
+                do {
+                    res = vprocWaitPidShim(pid, &status, 0);
+                } while (res < 0 && errno == EINTR);
+                if (res < 0) {
+                    continue;
+                }
+                job_status = shellStatusFromWait(status);
+                job->pids[i] = -1;
+            }
+            shellRemoveJobAt(index);
+            final_status = job_status;
+            shellCollectJobs();
+        }
+        shellUpdateStatus(final_status);
         return makeVoid();
     }
     size_t index = 0;
@@ -10657,8 +10664,29 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
 #else
 Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
     (void)vm;
-    (void)arg_count;
-    (void)args;
+    bool tree = false;
+    for (int i = 0; i < arg_count; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val) {
+            continue;
+        }
+        const char *opt = args[i].s_val;
+        if (strcmp(opt, "--tree") == 0) {
+            tree = true;
+        } else if (strcmp(opt, "--flat") == 0) {
+            tree = false;
+        } else if (strcmp(opt, "--help") == 0 || strcmp(opt, "-h") == 0) {
+            printf("lps [--tree|--flat]\n");
+            printf("  Show PSCAL synthetic process list.\n");
+            printf("  --flat (default) show flat list.\n");
+            printf("  --tree render parent/child tree.\n");
+            shellUpdateStatus(0);
+            return makeVoid();
+        } else {
+            printf("lps: unknown option '%s'\n", opt);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
     shellCollectJobs();
 
     size_t snapshot_cap = vprocSnapshot(NULL, 0);
@@ -10672,21 +10700,64 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
     pid_t *seen = (pid_t *)calloc(seen_cap ? seen_cap : 1, sizeof(pid_t));
     size_t seen_count = 0;
 
-    printf("%-6s %-6s %-9s %s\n", "PID", "PGID", "STATE", "CMD");
-    for (size_t i = 0; i < snapshot_count; ++i) {
-        const VProcSnapshot *snap = &snapshots[i];
-        if (!snap || snap->pid <= 0) {
-            continue;
+    if (tree) {
+        printf("%-6s %-6s %-6s %-6s %-9s %-6s %-6s %s\n",
+               "PID", "PPID", "PGID", "SID", "STATE", "UTIME", "STIME", "CMD");
+
+        size_t row_cap = snapshot_count ? snapshot_count : 1;
+        VProcTreeRow *rows = (VProcTreeRow *)calloc(row_cap, sizeof(VProcTreeRow));
+        size_t row_count = rows ? vprocBuildTreeRows(snapshots, snapshot_count, rows, row_cap) : 0;
+        if (rows && row_count > row_cap) {
+            VProcTreeRow *grown = (VProcTreeRow *)realloc(rows, row_count * sizeof(VProcTreeRow));
+            if (grown) {
+                rows = grown;
+                row_cap = row_count;
+            }
+            row_count = rows ? vprocBuildTreeRows(snapshots, snapshot_count, rows, row_cap) : 0;
         }
-        ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
-        pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
-        const char *cmd = (job && job->command) ? job->command
-                        : (snap->command[0] ? snap->command
-                                            : (pthread_equal(snap->tid, pthread_self()) ? "shell" : "task"));
-        const char *state = shellPsStateForEntry(job, snap);
-        shellPsPrintLine((pid_t)snap->pid, pgid, state, cmd);
-        if (seen && seen_count < seen_cap) {
-            seen[seen_count++] = (pid_t)snap->pid;
+
+        if (rows) {
+            for (size_t r = 0; r < row_count && r < row_cap; ++r) {
+                const VProcTreeRow *row = &rows[r];
+                if (!row || row->snapshot_index >= snapshot_count) {
+                    continue;
+                }
+                const VProcSnapshot *snap = &snapshots[row->snapshot_index];
+                if (!snap || snap->pid <= 0) {
+                    continue;
+                }
+                ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
+                pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
+                const char *cmd = (job && job->command) ? job->command
+                                : (snap->command[0] ? snap->command
+                                : (snap->comm[0] ? snap->comm
+                                : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+                const char *state = shellPsStateForEntry(job, snap);
+                shellPsPrintLineTree(snap, pgid, state, cmd, row->depth);
+                if (seen && seen_count < seen_cap) {
+                    seen[seen_count++] = (pid_t)snap->pid;
+                }
+            }
+            free(rows);
+        }
+    } else {
+        printf("%-6s %-6s %-9s %-6s %-6s %s\n", "PID", "PGID", "STATE", "UTIME", "STIME", "CMD");
+        for (size_t i = 0; i < snapshot_count; ++i) {
+            const VProcSnapshot *snap = &snapshots[i];
+            if (!snap || snap->pid <= 0) {
+                continue;
+            }
+            ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
+            pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
+            const char *cmd = (job && job->command) ? job->command
+                            : (snap->command[0] ? snap->command
+                            : (snap->comm[0] ? snap->comm
+                            : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+            const char *state = shellPsStateForEntry(job, snap);
+            shellPsPrintLine((pid_t)snap->pid, pgid, state, snap->rusage_utime, snap->rusage_stime, cmd);
+            if (seen && seen_count < seen_cap) {
+                seen[seen_count++] = (pid_t)snap->pid;
+            }
         }
     }
 
@@ -10715,7 +10786,7 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
                                               : (job->stopped ? "stopped"
                                                               : (job->running ? "running" : "exited"));
             const char *cmd = job->command ? job->command : "";
-            shellPsPrintLine(pid, pgid, state, cmd);
+            shellPsPrintLine(pid, pgid, state, 0, 0, cmd);
         }
     }
 
@@ -10725,39 +10796,6 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
-Value vmBuiltinShellTop(VM *vm, int arg_count, Value *args) {
-    (void)vm;
-    (void)arg_count;
-    (void)args;
-    shellCollectJobs();
-
-    size_t snapshot_cap = vprocSnapshot(NULL, 0);
-    VProcSnapshot *snapshots = NULL;
-    if (snapshot_cap > 0) {
-        snapshots = (VProcSnapshot *)calloc(snapshot_cap, sizeof(VProcSnapshot));
-    }
-    size_t snapshot_count = snapshots ? vprocSnapshot(snapshots, snapshot_cap) : 0;
-
-    printf("%-6s %-6s %-3s %-10s %-6s %-6s %s\n",
-           "PID", "PGID", "FG", "STATE", "UTIME", "STIME", "CMD");
-    for (size_t i = 0; i < snapshot_count; ++i) {
-        VProcSnapshot *snap = &snapshots[i];
-        if (!snap || snap->pid <= 0) continue;
-        ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
-        const char *cmd = (job && job->command) ? job->command
-                        : (snap->command[0] ? snap->command
-                                            : (pthread_equal(snap->tid, pthread_self()) ? "shell" : "task"));
-        const char *state = shellPsStateForEntry(job, snap);
-        bool fg = (snap->fg_pgid > 0 && snap->pgid == snap->fg_pgid);
-        printf("%-6d %-6d %-3s %-10s %-6d %-6d %s\n",
-               snap->pid, snap->pgid, fg ? "fg" : "",
-               state, snap->rusage_utime, snap->rusage_stime, cmd);
-    }
-
-    free(snapshots);
-    shellUpdateStatus(0);
-    return makeVoid();
-}
 #endif
 
 Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {

@@ -631,6 +631,19 @@ static char *shellExpandParameter(const char *input,
         return strdup(buffer);
     }
 
+    if (*input == '!') {
+        if (out_consumed) {
+            *out_consumed = 1;
+        }
+        pid_t pid = gShellRuntime.last_bg_pid;
+        if (pid <= 0) {
+            return strdup("");
+        }
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d", (int)pid);
+        return strdup(buffer);
+    }
+
     if (*input == '#') {
         if (out_consumed) {
             *out_consumed = 1;
@@ -2684,6 +2697,18 @@ static void shellFreeJob(ShellJob *job) {
     if (!job) {
         return;
     }
+    if (job->pids && job->pid_count > 0) {
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            if (job->pids[i] > 0) {
+                vprocSetJobId(job->pids[i], 0);
+                vprocSetCommandLabel(job->pids[i], NULL);
+            }
+        }
+    }
+    if (job->pgid > 0) {
+        vprocSetJobId(job->pgid, 0);
+        vprocSetCommandLabel(job->pgid, NULL);
+    }
     free(job->command);
     job->command = NULL;
     free(job->pids);
@@ -2770,7 +2795,7 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
         if (label_buf[0]) {
             summary = strdup(label_buf);
         } else {
-            summary = strdup("task");
+            summary = strdup("unknown");
         }
     }
     if (summary && label_buf[0] == '\0') {
@@ -2805,8 +2830,15 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
         vprocSetCommandLabel(pids[i], summary);
         if (pgid > 0) {
             vprocSetPgid(pids[i], (int)pgid);
-            vprocSetSid(pids[i], (int)pgid);
-            vprocSetParent(pids[i], vprocGetShellSelfPid());
+            int shell_pid = vprocGetShellSelfPid();
+            if (shell_pid > 0 && pids[i] != shell_pid) {
+                int sid = vprocGetSid((int)pids[i]);
+                /* Never rewrite the session leader's parent (kernel/sid). */
+                if (sid > 0 && sid == (int)pids[i]) {
+                    continue;
+                }
+                vprocSetParent(pids[i], shell_pid);
+            }
         }
     }
     vprocSetCommandLabel(pgid, summary);
@@ -2821,7 +2853,12 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
 static int shellCollectJobs(void) {
 #if defined(PSCAL_TARGET_IOS)
     /* Mirror synthetic vproc tasks into the job table if they were launched
-     * without registering a ShellJob (e.g., ad-hoc background threads). */
+     * without registering a ShellJob.
+     *
+     * Important: do NOT treat every synthetic vproc task as a "job". Jobs are
+     * shell-managed background pipelines. We only mirror entries that already
+     * carry a non-zero vproc job id, otherwise core session entities (kernel,
+     * shell, pumps, etc.) pollute the job table and break job-spec semantics. */
     bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
     size_t snap_cap = vprocSnapshot(NULL, 0);
     if (snap_cap > 0) {
@@ -2834,6 +2871,9 @@ static int shellCollectJobs(void) {
     for (size_t i = 0; i < snap_count; ++i) {
         const VProcSnapshot *s = &snaps[i];
         if (!s || s->pid <= 0 || s->exited) {
+            continue;
+        }
+        if (s->job_id <= 0) {
             continue;
         }
         /* Ignore snapshots that have no command label; these are typically
@@ -2883,6 +2923,16 @@ static int shellCollectJobs(void) {
         ShellJob *job = &gShellJobs[i];
         bool job_active = false;
 
+#if defined(PSCAL_TARGET_IOS)
+        int stored_id = vprocGetJobId(job->pgid);
+        if (stored_id <= 0 && job->pid_count > 0) {
+            stored_id = vprocGetJobId(job->pids[0]);
+        }
+        if (stored_id > 0) {
+            job->id = (size_t)stored_id;
+        }
+#endif
+
         if (!job->pids || job->pid_count == 0) {
             shellRemoveJobAt(i);
             reaped++;
@@ -2906,8 +2956,11 @@ static int shellCollectJobs(void) {
                     continue;
                 }
                 if (errno == ECHILD) {
-                    job->pids[j] = -1;
+                    /* Synthetic tasks may not be parented to the shell; treat as still active. */
+                    job_active = true;
+                    continue;
                 }
+                job->pids[j] = -1;
                 continue;
             }
             if (WIFSTOPPED(status)) {
@@ -2998,12 +3051,14 @@ static bool shellJobFindVisibleIndex(size_t visible_number, size_t *out_index) {
     if (!out_index || visible_number == 0) {
         return false;
     }
+    size_t ordinal = 0;
     for (size_t i = 0; i < gShellJobCount; ++i) {
         ShellJob *job = &gShellJobs[i];
         if (job->disowned) {
             continue;
         }
-        if (job->id == visible_number) {
+        ++ordinal;
+        if (job->id == visible_number || ordinal == visible_number) {
             *out_index = i;
             return true;
         }
@@ -3040,11 +3095,11 @@ static bool shellParseJobSpecifier(VM *vm, const char *name, Value spec, size_t 
             runtimeError(vm, "%s: invalid job index", name);
             return false;
         }
-        if (!shellJobFindVisibleIndex((size_t)index, out_index)) {
-            runtimeError(vm, "%s: invalid job index", name);
-            return false;
+        if (shellJobFindVisibleIndex((size_t)index, out_index)) {
+            return true;
         }
-        return true;
+        runtimeError(vm, "%s: invalid job index", name);
+        return false;
     }
 
     runtimeError(vm, "%s: job spec must be a string or integer", name);

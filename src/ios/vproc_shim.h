@@ -20,7 +20,22 @@
 #undef waitpid
 #undef kill
 #undef getpid
+#undef getppid
+#undef getpgrp
+#undef getpgid
+#undef setpgid
+#undef getsid
+#undef setsid
+#undef tcgetpgrp
+#undef tcsetpgrp
 #undef pthread_create
+#undef sigaction
+#undef sigprocmask
+#undef sigpending
+#undef sigsuspend
+#undef signal
+#undef raise
+#undef pthread_sigmask
 
 #define read  vprocReadShim
 #define write vprocWriteShim
@@ -36,7 +51,22 @@
 #define waitpid vprocWaitPidShim
 #define kill  vprocKillShim
 #define getpid vprocGetPidShim
+#define getppid vprocGetPpidShim
+#define getpgrp vprocGetpgrpShim
+#define getpgid vprocGetpgidShim
+#define setpgid vprocSetpgidShim
+#define getsid vprocGetsidShim
+#define setsid vprocSetsidShim
+#define tcgetpgrp vprocTcgetpgrpShim
+#define tcsetpgrp vprocTcsetpgrpShim
 #define pthread_create vprocPthreadCreateShim
+#define sigaction(sig, act, oldact) vprocSigactionShim((sig), (act), (oldact))
+#define sigprocmask(how, set, oldset) vprocSigprocmaskShim((how), (set), (oldset))
+#define sigpending(set) vprocSigpendingShim((set))
+#define sigsuspend(mask) vprocSigsuspendShim((mask))
+#define signal(sig, handler) vprocSignalShim((sig), (handler))
+#define raise(sig) vprocRaiseShim((sig))
+#define pthread_sigmask(how, set, oldset) vprocPthreadSigmaskShim((how), (set), (oldset))
 
 #endif /* !PSCAL_IOS_SHIM_H */
 

@@ -1,0 +1,32 @@
+set -e
+
+# Regression: the synthetic `lps` builtin should not temporarily relabel the
+# shell's own vproc entry.
+#
+# The harness treats exit code 77 as a skip.
+
+if [ "${RUN_VPROC_TESTS:-0}" != "1" ]; then
+    exit 77
+fi
+
+tmp_base="./.exsh-lps-label-$$"
+tmp_out="${tmp_base}.out"
+
+rm -f "$tmp_out"
+
+lps >"$tmp_out"
+
+found_shell=0
+while IFS= read -r line; do
+    case "$line" in
+        (*" shell") found_shell=1 ;;
+    esac
+done <"$tmp_out"
+
+if [ "$found_shell" -ne 1 ]; then
+    echo "FAIL: lps output missing shell CMD label" >&2
+    cat "$tmp_out" >&2
+    exit 1
+fi
+
+rm -f "$tmp_out"

@@ -2476,12 +2476,13 @@ void runtimeWarning(VM* vm, const char* format, ...) {
         resetTextAttributes(stderr);
     }
 
+    char message[1024];
     va_list args;
     va_start(args, format);
-    vfprintf(stderr, format, args);
+    vsnprintf(message, sizeof(message), format, args);
     va_end(args);
-    fputc('\n', stderr);
-    fflush(stderr);
+    write(STDERR_FILENO, message, strlen(message));
+    write(STDERR_FILENO, "\n", 1);
 
     if (s_vmVerboseErrors) {
         emitRuntimeLocation(vm, "[Warning Location]");
@@ -2503,12 +2504,13 @@ void runtimeError(VM* vm, const char* format, ...) {
         resetTextAttributes(stderr);
     }
 
+    char message[1024];
     va_list args;
     va_start(args, format);
-    vfprintf(stderr, format, args);
+    vsnprintf(message, sizeof(message), format, args);
     va_end(args);
-    fputc('\n', stderr);
-    fflush(stderr);
+    write(STDERR_FILENO, message, strlen(message));
+    write(STDERR_FILENO, "\n", 1);
 
     size_t instruction_offset = 0;
     int error_line = 0;

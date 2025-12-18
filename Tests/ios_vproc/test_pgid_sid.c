@@ -149,6 +149,25 @@ static void assert_foreground_pgid_round_trip(void) {
     vprocDestroy(leader);
 }
 
+static void assert_foreground_updates_multiple_times(void) {
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&opts);
+    assert(leader);
+    int sid = vprocPid(leader);
+    assert(vprocSetSid(sid, sid) == 0);
+    int fg1 = sid + 11;
+    int fg2 = sid + 22;
+    assert(vprocSetForegroundPgid(sid, fg1) == 0);
+    assert(vprocGetForegroundPgid(sid) == fg1);
+    assert(vprocSetForegroundPgid(sid, fg2) == 0);
+    assert(vprocGetForegroundPgid(sid) == fg2);
+    vprocMarkExit(leader, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(sid, &status, 0);
+    vprocDestroy(leader);
+}
+
 int main(void) {
     assert_pgid_sid_defaults();
     assert_pgid_sid_setters();
@@ -158,6 +177,7 @@ int main(void) {
     assert_setpgid_rejects_cross_session();
     assert_session_leader_cannot_change_pgid();
     assert_foreground_pgid_round_trip();
+    assert_foreground_updates_multiple_times();
     printf("pgid/sid tests passed\n");
     return 0;
 }

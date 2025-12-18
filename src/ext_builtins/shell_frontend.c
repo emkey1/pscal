@@ -100,14 +100,6 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "true", vmBuiltinShellTrue);
     registerShellBuiltin(category, command_group, "false", vmBuiltinShellFalse);
 #ifdef PSCAL_TARGET_IOS
-    registerShellBuiltin(category, command_group, "ls", vmBuiltinShellLs);
-    registerShellBuiltin(category, command_group, "cat", vmBuiltinShellCat);
-    registerShellBuiltin(category, command_group, "less", vmBuiltinShellLess);
-    registerShellBuiltin(category, command_group, "more", vmBuiltinShellMore);
-    registerShellBuiltin(category, command_group, "chmod", vmBuiltinShellChmod);
-    registerShellBuiltin(category, command_group, "clear", vmBuiltinShellClear);
-    registerShellBuiltin(category, command_group, "cls", vmBuiltinShellClear);
-    registerShellBuiltin(category, command_group, "cat", vmBuiltinShellCat);
     registerShellBuiltin(category, command_group, "pascal", vmBuiltinShellPascal);
 #ifdef BUILD_DASCAL
     registerShellBuiltin(category, command_group, "dascal", vmBuiltinShellDascal);
@@ -123,7 +115,6 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
     registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
-    registerShellBuiltin(category, command_group, "top", vmBuiltinShellTop);
     registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);
 #endif
 }

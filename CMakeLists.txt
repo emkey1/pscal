@@ -3,26 +3,41 @@ cmake_minimum_required(VERSION 3.18)
 project(pscal C)
 enable_testing()
 
-set(PSCAL_PLATFORM_IOS OFF)
+option(PSCAL_FORCE_IOS "Force iOS mode (PSCAL_TARGET_IOS + vproc shims) on non-iOS hosts." OFF)
+option(VPROC_ENABLE_STUBS_FOR_TESTS "Build vproc with test stubs (host-only helpers)." OFF)
+
+set(PSCAL_REAL_IOS OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    set(PSCAL_PLATFORM_IOS ON)
+    set(PSCAL_REAL_IOS ON)
 elseif(APPLE AND CMAKE_OSX_SYSROOT)
     string(TOLOWER "${CMAKE_OSX_SYSROOT}" _pscal_sysroot_lower)
     if(_pscal_sysroot_lower MATCHES "iphoneos" OR _pscal_sysroot_lower MATCHES "iphonesimulator")
-        set(PSCAL_PLATFORM_IOS ON)
+        set(PSCAL_REAL_IOS ON)
     endif()
-else()
+endif()
+
+set(PSCAL_PLATFORM_IOS ${PSCAL_REAL_IOS})
+if(PSCAL_FORCE_IOS)
+    set(PSCAL_PLATFORM_IOS ON)
+endif()
+
+if(NOT PSCAL_REAL_IOS)
     find_package(OpenSSL REQUIRED)
     set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
     set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
 endif()
 if(PSCAL_PLATFORM_IOS)
     add_compile_definitions(PSCAL_TARGET_IOS __progname=pscal_progname __progname_full=pscal_progname_full)
+    if(VPROC_ENABLE_STUBS_FOR_TESTS)
+        add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
+    endif()
     add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/ios/vproc_shim.h)
     # vproc implementation compiles without the global shim overrides to avoid macro pollution.
     set_property(SOURCE src/ios/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1)
     # path virtualization helpers must call the real syscalls to avoid recursion with vproc shim macros.
     set_property(SOURCE src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1)
+elseif(VPROC_ENABLE_STUBS_FOR_TESTS)
+    add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
 endif()
 
 if(PSCAL_PLATFORM_IOS AND NOT TARGET pscal_common_frontend_shim)
@@ -93,7 +108,7 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
 include_directories("${CMAKE_BINARY_DIR}/generated")
 
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_REAL_IOS)
     set(PSCAL_OPENSSL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third-party/openssl-3.6.0")
     if(NOT EXISTS "${PSCAL_OPENSSL_SOURCE_DIR}/Configure")
         message(FATAL_ERROR "third-party/openssl-3.6.0 not found; please add the OpenSSL sources")
@@ -243,7 +258,7 @@ endif()
 
 # Optionally emit static libraries (default when targeting iOS)
 set(_PSCAL_BUILD_STATIC_LIBS_DEFAULT OFF)
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_REAL_IOS)
     set(_PSCAL_BUILD_STATIC_LIBS_DEFAULT ON)
 endif()
 option(PSCAL_BUILD_STATIC_LIBS "Build PSCAL static libraries for embedding runners" ${_PSCAL_BUILD_STATIC_LIBS_DEFAULT})
@@ -612,7 +627,7 @@ endif()
 # Option A: build against a bundled libcurl (default on iOS where the SDK does not provide one).
 # Option B: rely on the system SDK via FindCURL (with optional Homebrew hints on macOS).
 set(_PSCAL_DEFAULT_BUNDLED_CURL OFF)
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_REAL_IOS)
     set(_PSCAL_DEFAULT_BUNDLED_CURL ON)
 endif()
 option(PSCAL_USE_BUNDLED_CURL "Build libcurl from third-party/curl-8.17.0" ${_PSCAL_DEFAULT_BUNDLED_CURL})
@@ -632,7 +647,7 @@ if(PSCAL_USE_BUNDLED_CURL)
     set(CURL_DISABLE_TFTP ON CACHE BOOL "Disable TFTP support in libcurl" FORCE)
     set(CURL_DISABLE_SMTP ON CACHE BOOL "Disable SMTP support in libcurl" FORCE)
     set(CURL_USE_LIBPSL OFF CACHE BOOL "Disable libpsl dependency for bundled libcurl" FORCE)
-    if(PSCAL_PLATFORM_IOS)
+    if(PSCAL_REAL_IOS)
         # Prefer OpenSSL with Apple SecTrust so we can rely on the system
         # certificate store instead of shipping our own CA bundle.
         set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
@@ -644,7 +659,7 @@ if(PSCAL_USE_BUNDLED_CURL)
     else()
         set(CURL_USE_OPENSSL ON CACHE BOOL "Use OpenSSL for bundled libcurl" FORCE)
     endif()
-    if(PSCAL_PLATFORM_IOS)
+    if(PSCAL_REAL_IOS)
         if(NOT DEFINED PSCAL_OPENSSL_INSTALL_DIR)
             message(FATAL_ERROR "Bundled libcurl on iOS requires PSCAL_OPENSSL_INSTALL_DIR (ensure PSCAL_PLATFORM_IOS OpenSSL logic runs first).")
         endif()
@@ -673,7 +688,7 @@ if(PSCAL_USE_BUNDLED_CURL)
     if(_PSCAL_LIBCURL_TARGET STREQUAL "")
         message(FATAL_ERROR "Bundled libcurl target not found after configuring third-party/curl-8.17.0.")
     endif()
-    if(PSCAL_PLATFORM_IOS AND TARGET pscal_openssl)
+    if(PSCAL_REAL_IOS AND TARGET pscal_openssl)
         add_dependencies(${_PSCAL_LIBCURL_TARGET} pscal_openssl)
     endif()
     if(NOT TARGET CURL::libcurl)
@@ -1046,7 +1061,18 @@ set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno
 if(PSCAL_PLATFORM_IOS)
     list(APPEND PSCAL_CORE_SOURCES
         src/ios/progname_stub.c
+    )
+endif()
+
+# The OpenSSH integration on real iOS requires interposing getaddrinfo so the
+# container-scoped hosts file is honored. Forced-iOS host parity builds should
+# not override the system resolver, so this stays real-iOS only.
+if(PSCAL_REAL_IOS)
+    list(APPEND PSCAL_CORE_SOURCES
         src/ios/hosts_override.c)
+    # When using the custom resolver/interposer, suppress the portable wrapper
+    # definitions in pscal_hosts.c to avoid duplicate symbols.
+    set_property(SOURCE src/common/pscal_hosts.c APPEND PROPERTY COMPILE_DEFINITIONS PSCAL_HOSTS_CUSTOM_IMPL)
 endif()
 
 # ---- Extended builtins ----
@@ -1054,10 +1080,11 @@ endif()
 add_subdirectory(src/ext_builtins)
 list(APPEND PSCAL_CORE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
-if(PSCAL_PLATFORM_IOS)
-    list(APPEND PSCAL_CORE_SOURCES src/common/frontend_symbol_wrappers.c)
-    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc.c)
-endif()
+	if(PSCAL_PLATFORM_IOS)
+	    list(APPEND PSCAL_CORE_SOURCES src/common/frontend_symbol_wrappers.c)
+	    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc.c)
+	    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc_tree.c)
+	endif()
 
 set(PASCAL_FRONTEND_SOURCES
     src/Pascal/main.c
@@ -1125,7 +1152,7 @@ target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
     z resolv)
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_REAL_IOS)
     target_compile_definitions(pscal_core_static PRIVATE __progname=pscal_progname __progname_full=pscal_progname_full)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
@@ -1358,7 +1385,10 @@ list(APPEND SHELL_SOURCES
 
 list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
 
-if(NOT PSCAL_PLATFORM_IOS)
+# On real iOS builds we do not ship CLI entrypoints, but for host-based iOS
+# parity testing (PSCAL_FORCE_IOS=ON) we still build exsh so vproc/job-control
+# behavior can be exercised on macOS.
+if(NOT PSCAL_PLATFORM_IOS OR PSCAL_FORCE_IOS)
     add_executable(exsh ${SHELL_SOURCES})
     target_link_libraries(exsh PRIVATE pscal_core_static)
     target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)
@@ -1849,6 +1879,29 @@ if(PSCAL_BUILD_STATIC_LIBS)
     pscal_add_static_library(pscal_json2bc_static
         SOURCES ${JSON2BC_SOURCES})
     target_link_libraries(pscal_json2bc_static PUBLIC pscal_core_static)
+endif()
+
+# Host-based iOS parity builds link tool entrypoints directly into exsh so
+# `pascal`, `clike`, `rea`, etc. can run without spawning external processes.
+if(TARGET exsh AND PSCAL_FORCE_IOS)
+    if(TARGET pscal_pascal_static)
+        target_link_libraries(exsh PRIVATE pscal_pascal_static)
+    endif()
+    if(TARGET pscal_vm_static)
+        target_link_libraries(exsh PRIVATE pscal_vm_static)
+    endif()
+    if(TARGET pscal_pscald_static)
+        target_link_libraries(exsh PRIVATE pscal_pscald_static)
+    endif()
+    if(TARGET pscal_json2bc_static)
+        target_link_libraries(exsh PRIVATE pscal_json2bc_static)
+    endif()
+    if(TARGET pscal_clike_static)
+        target_link_libraries(exsh PRIVATE pscal_clike_static)
+    endif()
+    if(TARGET pscal_rea_static)
+        target_link_libraries(exsh PRIVATE pscal_rea_static)
+    endif()
 endif()
 
 # Optional smallclue extras

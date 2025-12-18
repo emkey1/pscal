@@ -15,10 +15,23 @@
 #include <dlfcn.h>
 #endif
 
+#ifndef PSCAL_HOSTS_CUSTOM_IMPL
 typedef int (*system_getaddrinfo_fn)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 typedef void (*system_freeaddrinfo_fn)(struct addrinfo *);
 
+static void pscalHostsFreeAddrInfoChain(struct addrinfo *ai) {
+    while (ai) {
+        struct addrinfo *next = ai->ai_next;
+        free(ai->ai_canonname);
+        free(ai->ai_addr);
+        free(ai);
+        ai = next;
+    }
+}
+#endif /* !PSCAL_HOSTS_CUSTOM_IMPL */
+
 #if defined(PSCAL_TARGET_IOS)
+#ifndef PSCAL_HOSTS_CUSTOM_IMPL
 static system_getaddrinfo_fn resolve_system_getaddrinfo(void) {
     static system_getaddrinfo_fn fn = NULL;
     if (!fn) {
@@ -40,13 +53,16 @@ static system_freeaddrinfo_fn resolve_system_freeaddrinfo(void) {
     }
     return fn;
 }
+#endif /* !PSCAL_HOSTS_CUSTOM_IMPL */
 #else
+#ifndef PSCAL_HOSTS_CUSTOM_IMPL
 static system_getaddrinfo_fn resolve_system_getaddrinfo(void) {
     return &getaddrinfo;
 }
 static system_freeaddrinfo_fn resolve_system_freeaddrinfo(void) {
     return &freeaddrinfo;
 }
+#endif /* !PSCAL_HOSTS_CUSTOM_IMPL */
 #endif
 
 static bool buildHostsPath(const char *root, char *out, size_t out_size) {
@@ -102,6 +118,7 @@ static const char *pscalHostsPath(void) {
 #endif
 }
 
+#ifndef PSCAL_HOSTS_CUSTOM_IMPL
 static bool parseServicePort(const char *service, int *out_port) {
     if (!service || !*service) {
         *out_port = 0;
@@ -186,7 +203,7 @@ static struct addrinfo *cloneAddrinfoChain(const struct addrinfo *src) {
     while (it) {
         struct addrinfo *copy = (struct addrinfo *)calloc(1, sizeof(struct addrinfo));
         if (!copy) {
-            pscalHostsFreeAddrInfo(head);
+            pscalHostsFreeAddrInfoChain(head);
             return NULL;
         }
         memcpy(copy, it, sizeof(struct addrinfo));
@@ -194,7 +211,7 @@ static struct addrinfo *cloneAddrinfoChain(const struct addrinfo *src) {
             struct sockaddr *addr = (struct sockaddr *)malloc(it->ai_addrlen);
             if (!addr) {
                 free(copy);
-                pscalHostsFreeAddrInfo(head);
+                pscalHostsFreeAddrInfoChain(head);
                 return NULL;
             }
             memcpy(addr, it->ai_addr, it->ai_addrlen);
@@ -210,6 +227,7 @@ static struct addrinfo *cloneAddrinfoChain(const struct addrinfo *src) {
     }
     return head;
 }
+#endif /* !PSCAL_HOSTS_CUSTOM_IMPL */
 
 const char *pscalHostsGetContainerPath(void) {
 #if defined(PSCAL_TARGET_IOS)
@@ -241,6 +259,7 @@ void pscalHostsSetLogEnabled(int enabled) {
 #endif
 }
 
+#ifndef PSCAL_HOSTS_CUSTOM_IMPL
 static bool readHostsFile(const char *path, const char *node, int port,
                           const struct addrinfo *hints, struct addrinfo **head) {
     if (!path || !head) return false;
@@ -323,7 +342,9 @@ static bool hostsLookup(const char *node, const char *service,
     *out_res = head;
     return true;
 }
+#endif /* !PSCAL_HOSTS_CUSTOM_IMPL */
 
+#ifndef PSCAL_HOSTS_CUSTOM_IMPL
 int pscalHostsGetAddrInfo(const char *node, const char *service,
                           const struct addrinfo *hints, struct addrinfo **res) {
     if (!node) {
@@ -359,11 +380,6 @@ int pscalHostsGetAddrInfo(const char *node, const char *service,
 }
 
 void pscalHostsFreeAddrInfo(struct addrinfo *ai) {
-    while (ai) {
-        struct addrinfo *next = ai->ai_next;
-        free(ai->ai_canonname);
-        free(ai->ai_addr);
-        free(ai);
-        ai = next;
-    }
+    pscalHostsFreeAddrInfoChain(ai);
 }
+#endif /* PSCAL_HOSTS_CUSTOM_IMPL */

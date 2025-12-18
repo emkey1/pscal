@@ -168,6 +168,7 @@ typedef struct ShellRuntimeState {
     int last_status;
     ShellPipelineContext pipeline;
     pid_t shell_pgid;
+    pid_t last_bg_pid;
     int tty_fd;
     bool job_control_enabled;
     bool job_control_initialized;
@@ -1405,6 +1406,7 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .last_status = 0,
     .pipeline = {0},
     .shell_pgid = 0,
+    .last_bg_pid = 0,
     .tty_fd = -1,
     .job_control_enabled = false,
     .job_control_initialized = false,
@@ -2988,6 +2990,73 @@ typedef enum {
     SHELL_READ_LINE_ERROR
 } ShellReadLineResult;
 
+static ShellReadLineResult shellReadLineFromFd(int fd,
+                                               char **out_line,
+                                               size_t *out_length) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (out_length) {
+        *out_length = 0;
+    }
+    if (fd < 0) {
+        return SHELL_READ_LINE_ERROR;
+    }
+
+    size_t capacity = 128;
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        return SHELL_READ_LINE_ERROR;
+    }
+
+    size_t length = 0;
+    bool saw_any = false;
+    while (true) {
+        char ch = '\0';
+        ssize_t n = read(fd, &ch, 1);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            free(buffer);
+            return SHELL_READ_LINE_ERROR;
+        }
+        if (n == 0) {
+            if (!saw_any) {
+                free(buffer);
+                return SHELL_READ_LINE_EOF;
+            }
+            break;
+        }
+        saw_any = true;
+        if (length + 1 >= capacity) {
+            size_t new_capacity = capacity * 2;
+            char *resized = (char *)realloc(buffer, new_capacity);
+            if (!resized) {
+                free(buffer);
+                return SHELL_READ_LINE_ERROR;
+            }
+            buffer = resized;
+            capacity = new_capacity;
+        }
+        buffer[length++] = ch;
+        if (ch == '\n') {
+            break;
+        }
+    }
+
+    buffer[length] = '\0';
+    if (out_line) {
+        *out_line = buffer;
+    } else {
+        free(buffer);
+    }
+    if (out_length) {
+        *out_length = length;
+    }
+    return SHELL_READ_LINE_OK;
+}
+
 static ShellReadLineResult shellReadLineFromStream(FILE *stream,
                                                    char **out_line,
                                                    size_t *out_length) {
@@ -3829,6 +3898,18 @@ static void shellInitJobControlState(void) {
     (void)sigaction(SIGTTIN, &ignore_action, NULL);
     (void)sigaction(SIGTTOU, &ignore_action, NULL);
 
+#if defined(PSCAL_TARGET_IOS)
+    pid_t shell_pid = (pid_t)vprocGetShellSelfPid();
+    if (shell_pid <= 0) {
+        shell_pid = getpid();
+    }
+    pid_t current_pgid = (shell_pid > 0) ? (pid_t)vprocGetPgid((int)shell_pid) : -1;
+    if (current_pgid <= 0) {
+        current_pgid = shell_pid;
+    }
+    gShellRuntime.shell_pgid = current_pgid;
+    return;
+#else
     pid_t shell_pid = getpid();
     pid_t current_pgid = getpgrp();
     if (current_pgid != shell_pid) {
@@ -3840,6 +3921,7 @@ static void shellInitJobControlState(void) {
     }
 
     gShellRuntime.shell_pgid = current_pgid;
+#endif
 }
 
 static void shellEnsureJobControl(void) {
@@ -3856,7 +3938,15 @@ static void shellEnsureJobControl(void) {
      * tcsetpgrp support. */
     gShellRuntime.job_control_enabled = true;
     if (gShellRuntime.shell_pgid <= 0) {
-        gShellRuntime.shell_pgid = getpgrp();
+        int shell_pid = vprocGetShellSelfPid();
+        if (shell_pid > 0) {
+            gShellRuntime.shell_pgid = vprocGetPgid(shell_pid);
+        } else {
+            gShellRuntime.shell_pgid = getpgrp();
+        }
+        if (gShellRuntime.shell_pgid <= 0 && shell_pid > 0) {
+            gShellRuntime.shell_pgid = shell_pid;
+        }
     }
     return;
 #endif
@@ -3888,6 +3978,13 @@ static void shellEnsureJobControl(void) {
     }
 
     gShellRuntime.shell_pgid = pgid;
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    if (sid > 0) {
+        vprocSetForegroundPgid(sid, (int)pgid);
+    }
+#endif
 
     if (virtual_tty) {
         /* No controlling TTY, but still allow the shell’s job table to track
@@ -3923,6 +4020,13 @@ static void shellJobControlSetForeground(pid_t pgid) {
     if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0 || pgid <= 0) {
         return;
     }
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    if (sid > 0) {
+        vprocSetForegroundPgid(sid, (int)pgid);
+    }
+#endif
     if (
 #if defined(PSCAL_TARGET_IOS)
         pscalRuntimeVirtualTTYEnabled()
@@ -3945,6 +4049,13 @@ static void shellJobControlRestoreForeground(void) {
     if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0) {
         return;
     }
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    if (sid > 0 && gShellRuntime.shell_pgid > 0) {
+        vprocSetForegroundPgid(sid, (int)gShellRuntime.shell_pgid);
+    }
+#endif
     if (
 #if defined(PSCAL_TARGET_IOS)
         pscalRuntimeVirtualTTYEnabled()

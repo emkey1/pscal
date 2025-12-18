@@ -115,8 +115,19 @@ int vprocOpenShim(const char *path, int flags, ...);
 pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options);
 int vprocKillShim(pid_t pid, int sig);
 pid_t vprocGetPidShim(void);
+pid_t vprocGetPpidShim(void);
+pid_t vprocGetpgrpShim(void);
+pid_t vprocGetpgidShim(pid_t pid);
+int vprocSetpgidShim(pid_t pid, pid_t pgid);
+pid_t vprocSetsidShim(void);
+pid_t vprocGetsidShim(pid_t pid);
+pid_t vprocTcgetpgrpShim(int fd);
+int vprocTcsetpgrpShim(int fd, pid_t pgid);
 void vprocSetShellSelfPid(int pid);
 int vprocGetShellSelfPid(void);
+/* Optional: identify a per-session "kernel" vproc that acts as adoptive parent. */
+void vprocSetKernelPid(int pid);
+int vprocGetKernelPid(void);
 /* Minimal signal queries/suspension helpers. */
 int vprocSigpending(int pid, sigset_t *set);
 int vprocSigsuspend(int pid, const sigset_t *mask);
@@ -134,12 +145,49 @@ bool vprocSigchldPending(int pid);
 int vprocSetSigchldBlocked(int pid, bool block);
 void vprocClearSigchldPending(int pid);
 
+typedef struct {
+    VProc *prev;
+    VProc *vp;
+    int pid;
+} VProcCommandScope;
+
+/* Utility for iOS-hosted tools (smallclue applets, in-process exec, etc):
+ * optionally create and activate a child vproc to represent the invoked command,
+ * then tear it down while marking it exited. */
+bool vprocCommandScopeBegin(VProcCommandScope *scope,
+                            const char *label,
+                            bool force_new_vproc,
+                            bool inherit_parent_pgid);
+void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code);
+
+/* Signal API shims: allow vproc_shim.h to virtualize signal dispositions when
+ * a vproc is active on the current thread. */
+typedef void (*VProcSigHandler)(int);
+int vprocSigactionShim(int sig, const struct sigaction *act, struct sigaction *oldact);
+int vprocSigprocmaskShim(int how, const sigset_t *set, sigset_t *oldset);
+int vprocSigpendingShim(sigset_t *set);
+int vprocSigsuspendShim(const sigset_t *mask);
+int vprocPthreadSigmaskShim(int how, const sigset_t *set, sigset_t *oldset);
+int vprocRaiseShim(int sig);
+VProcSigHandler vprocSignalShim(int sig, VProcSigHandler handler);
+
+static inline void vprocFormatCpuTimes(int utime_cs, int stime_cs, double *utime_s, double *stime_s) {
+    if (utime_s) {
+        *utime_s = (double)utime_cs / 100.0;
+    }
+    if (stime_s) {
+        *stime_s = (double)stime_cs / 100.0;
+    }
+}
+
 #else /* desktop stubs */
 #include <unistd.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <termios.h>
+#include <errno.h>
 /* Desktop stubs: map to host syscalls or no-ops so non-iOS builds compile. */
 static inline VProcOptions vprocDefaultOptions(void) {
     VProcOptions o = {.stdin_fd = -1, .stdout_fd = -1, .stderr_fd = -1, .winsize_cols = 80, .winsize_rows = 24, .pid_hint = -1};
@@ -200,8 +248,18 @@ static inline int vprocOpenShim(const char *path, int flags, ...) {
 static inline pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) { return waitpid(pid, status_out, options); }
 static inline int vprocKillShim(pid_t pid, int sig) { return kill(pid, sig); }
 static inline pid_t vprocGetPidShim(void) { return getpid(); }
+static inline pid_t vprocGetPpidShim(void) { return getppid(); }
+static inline pid_t vprocGetpgrpShim(void) { return getpgrp(); }
+static inline pid_t vprocGetpgidShim(pid_t pid) { return getpgid(pid); }
+static inline int vprocSetpgidShim(pid_t pid, pid_t pgid) { return setpgid(pid, pgid); }
+static inline pid_t vprocSetsidShim(void) { return setsid(); }
+static inline pid_t vprocGetsidShim(pid_t pid) { return getsid(pid); }
+static inline pid_t vprocTcgetpgrpShim(int fd) { return tcgetpgrp(fd); }
+static inline int vprocTcsetpgrpShim(int fd, pid_t pgid) { return tcsetpgrp(fd, pgid); }
 static inline void vprocSetShellSelfPid(int pid) { (void)pid; }
 static inline int vprocGetShellSelfPid(void) { return (int)getpid(); }
+static inline void vprocSetKernelPid(int pid) { (void)pid; }
+static inline int vprocGetKernelPid(void) { return 0; }
 static inline int vprocSigpending(int pid, sigset_t *set) { (void)pid; return sigpending(set); }
 static inline int vprocSigsuspend(int pid, const sigset_t *mask) { (void)pid; return sigsuspend(mask); }
 static inline int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset_t *oldset) {
@@ -211,7 +269,15 @@ static inline int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset
 static inline int vprocSigwait(int pid, const sigset_t *set, int *sig) { (void)pid; return sigwait(set, sig); }
 static inline int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeout, int *sig) {
     (void)pid;
+#if defined(__APPLE__)
+    (void)set;
+    (void)timeout;
+    (void)sig;
+    errno = ENOSYS;
+    return -1;
+#else
     return sigtimedwait(set, sig, timeout);
+#endif
 }
 static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id; }
 static inline int vprocGetJobId(int pid) { (void)pid; return 0; }
@@ -219,8 +285,35 @@ static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid;
 static inline bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len) { (void)pid; (void)buf; (void)buf_len; return false; }
 static inline void vprocDiscard(int pid) { (void)pid; }
 static inline bool vprocSigchldPending(int pid) { (void)pid; return false; }
+typedef struct {
+    VProc *prev;
+    VProc *vp;
+    int pid;
+} VProcCommandScope;
+static inline bool vprocCommandScopeBegin(VProcCommandScope *scope,
+                                         const char *label,
+                                         bool force_new_vproc,
+                                         bool inherit_parent_pgid) {
+    (void)scope;
+    (void)label;
+    (void)force_new_vproc;
+    (void)inherit_parent_pgid;
+    return false;
+}
+static inline void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code) {
+    (void)scope;
+    (void)exit_code;
+}
 static inline int vprocSetSigchldBlocked(int pid, bool block) { (void)pid; (void)block; return 0; }
 static inline void vprocClearSigchldPending(int pid) { (void)pid; }
+static inline void vprocFormatCpuTimes(int utime_cs, int stime_cs, double *utime_s, double *stime_s) {
+    if (utime_s) {
+        *utime_s = (double)utime_cs / 100.0;
+    }
+    if (stime_s) {
+        *stime_s = (double)stime_cs / 100.0;
+    }
+}
 #endif /* PSCAL_TARGET_IOS || VPROC_ENABLE_STUBS_FOR_TESTS */
 
 #ifdef __cplusplus

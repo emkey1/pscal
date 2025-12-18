@@ -275,6 +275,21 @@ Control-flow helpers (`if`, loop syntax) are currently placeholders that execute
 both branches. Gate behaviour using the exported status variable until the VM
 gains proper jump support for the exsh front end.
 
+### iOS/vproc parity testing on macOS
+
+To exercise the iOS-style virtual-process path on macOS (without a simulator/device), build a host binary that defines `PSCAL_TARGET_IOS` and runs the vproc code:
+
+```sh
+Tests/run_exsh_ios_host_tests.sh          # configures build/ios-host, builds exsh, runs jobspec sanity
+# or manually:
+cmake -S . -B build/ios-host -DPSCAL_FORCE_IOS=ON -DVPROC_ENABLE_STUBS_FOR_TESTS=ON -DPSCAL_BUILD_STATIC_LIBS=ON -DSDL=OFF -DPSCAL_USE_BUNDLED_CURL=OFF
+cmake --build build/ios-host --target exsh
+python Tests/exsh/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobspec
+```
+
+The exsh harness accepts `--executable` to point at any built exsh, so you can run the full manifest against the iOS-flavored binary when debugging vproc/job-control behavior.
+Use `-DPSCAL_FORCE_IOS=ON` to enable iOS mode on macOS; this defines `PSCAL_TARGET_IOS` and injects the vproc shim include so behavior matches the iOS/iPadOS app build.
+
 More details and operational tips live in
 [Docs/exsh_overview.md](Docs/exsh_overview.md).
 

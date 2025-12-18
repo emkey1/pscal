@@ -1,0 +1,19 @@
+set -e
+
+echo "jobs-wait-all:start"
+set -m
+
+sleep 1 &
+sleep 1 &
+
+echo "jobs:before-start"
+jobs
+echo "jobs:before-end"
+
+wait
+
+echo "jobs:after-start"
+jobs
+echo "jobs:after-end"
+echo "jobs-wait-all:end"
+

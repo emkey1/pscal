@@ -46,21 +46,97 @@ static struct sigaction gInteractiveOldSigtstpAction;
 static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 static bool gInteractiveLineDrawn = false;
 #if defined(PSCAL_TARGET_IOS)
-static VProc *gShellSelfVproc = NULL;
+static _Thread_local VProc *gKernelVproc = NULL;
+static _Thread_local VProc *gShellSelfVproc = NULL;
+static _Thread_local bool gShellSelfVprocActivated = false;
 static void shellSetupSelfVproc(void) {
     if (gShellSelfVproc) {
         return;
     }
+
+    if (!gKernelVproc) {
+        VProcOptions kopts = vprocDefaultOptions();
+        kopts.stdin_fd = STDIN_FILENO;
+        kopts.stdout_fd = STDOUT_FILENO;
+        kopts.stderr_fd = STDERR_FILENO;
+        int kpid_hint = vprocReservePid();
+        kopts.pid_hint = kpid_hint;
+        gKernelVproc = vprocCreate(&kopts);
+        if (!gKernelVproc) {
+            kopts.stdin_fd = -2;
+            gKernelVproc = vprocCreate(&kopts);
+        }
+        if (gKernelVproc) {
+            int kpid = vprocPid(gKernelVproc);
+            vprocSetKernelPid(kpid);
+            vprocSetParent(kpid, 0);
+            (void)vprocSetSid(kpid, kpid);
+            vprocSetCommandLabel(kpid, "kernel");
+        } else if (kpid_hint > 0) {
+            vprocSetKernelPid(kpid_hint);
+            vprocSetParent(kpid_hint, 0);
+            (void)vprocSetSid(kpid_hint, kpid_hint);
+            vprocSetCommandLabel(kpid_hint, "kernel");
+            if (getenv("PSCALI_VPROC_DEBUG")) {
+                fprintf(stderr, "[vproc] kernel vproc init failed; using pid=%d without fd table\n", kpid_hint);
+            }
+        }
+    }
+
+    int kernel_pid = vprocGetKernelPid();
     VProcOptions opts = vprocDefaultOptions();
     opts.stdin_fd = STDIN_FILENO;
     opts.stdout_fd = STDOUT_FILENO;
     opts.stderr_fd = STDERR_FILENO;
-    opts.pid_hint = vprocReservePid();
+    int shell_pid_hint = vprocReservePid();
+    opts.pid_hint = shell_pid_hint;
     gShellSelfVproc = vprocCreate(&opts);
+    if (!gShellSelfVproc) {
+        /* Some iOS entrypoints may not have stdio wired up at the time the
+         * shell starts. Fall back to /dev/null for stdin so we still get a
+         * stable session leader entry for job control and process listings. */
+        opts.stdin_fd = -2;
+        gShellSelfVproc = vprocCreate(&opts);
+    }
     if (gShellSelfVproc) {
         vprocRegisterThread(gShellSelfVproc, pthread_self());
-        vprocSetShellSelfPid(vprocPid(gShellSelfVproc));
-        vprocSetCommandLabel(vprocPid(gShellSelfVproc), "shell");
+        int shell_pid = vprocPid(gShellSelfVproc);
+        vprocSetShellSelfPid(shell_pid);
+        if (kernel_pid > 0 && kernel_pid != shell_pid) {
+            vprocSetParent(shell_pid, kernel_pid);
+            (void)vprocSetSid(shell_pid, kernel_pid);
+            (void)vprocSetPgid(shell_pid, shell_pid);
+            (void)vprocSetForegroundPgid(kernel_pid, shell_pid);
+        } else {
+            (void)vprocSetSid(shell_pid, shell_pid);
+        }
+        vprocSetCommandLabel(shell_pid, "shell");
+        if (kernel_pid > 0) {
+            vprocSetParent(kernel_pid, 0);
+        }
+        if (getenv("PSCALI_SHELL_VPROC")) {
+            vprocActivate(gShellSelfVproc);
+            gShellSelfVprocActivated = true;
+        }
+    } else if (shell_pid_hint > 0) {
+        /* Ensure the shell has a stable synthetic pid even if the fd table
+         * could not be initialised. */
+        vprocSetShellSelfPid(shell_pid_hint);
+        if (kernel_pid > 0 && kernel_pid != shell_pid_hint) {
+            vprocSetParent(shell_pid_hint, kernel_pid);
+            (void)vprocSetSid(shell_pid_hint, kernel_pid);
+            (void)vprocSetPgid(shell_pid_hint, shell_pid_hint);
+            (void)vprocSetForegroundPgid(kernel_pid, shell_pid_hint);
+        } else {
+            (void)vprocSetSid(shell_pid_hint, shell_pid_hint);
+        }
+        vprocSetCommandLabel(shell_pid_hint, "shell");
+        if (kernel_pid > 0) {
+            vprocSetParent(kernel_pid, 0);
+        }
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            fprintf(stderr, "[vproc] shell self-vproc init failed; using pid=%d without fd table\n", shell_pid_hint);
+        }
     }
 }
 
@@ -68,9 +144,22 @@ static void shellTeardownSelfVproc(int status) {
     if (!gShellSelfVproc) {
         return;
     }
+    if (gShellSelfVprocActivated) {
+        vprocDeactivate();
+        gShellSelfVprocActivated = false;
+    }
     vprocMarkExit(gShellSelfVproc, status);
     vprocDestroy(gShellSelfVproc);
     gShellSelfVproc = NULL;
+
+    if (gKernelVproc) {
+        vprocMarkExit(gKernelVproc, status);
+        vprocDestroy(gKernelVproc);
+        gKernelVproc = NULL;
+    } else if (vprocGetKernelPid() > 0) {
+        vprocDiscard(vprocGetKernelPid());
+        vprocSetKernelPid(0);
+    }
 }
 #endif
 
@@ -3369,7 +3458,7 @@ int exsh_main(int argc, char **argv) {
 
 #if defined(PSCAL_TARGET_IOS)
 void pscalRuntimeDebugLog(const char *message);
-    {
+    if (getenv("PSCALI_PIPE_DEBUG")) {
         char logbuf[1024];
         int written = snprintf(logbuf, sizeof(logbuf), "[exsh-ios] argc=%d", argc);
         for (int i = 0; i < argc && written < (int)sizeof(logbuf) - 8; ++i) {
