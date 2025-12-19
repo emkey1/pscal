@@ -72,6 +72,15 @@ int vprocDup(VProc *vp, int fd);
 int vprocDup2(VProc *vp, int fd, int target);
 int vprocClose(VProc *vp, int fd);
 int vprocPipe(VProc *vp, int pipefd[2]);
+/* Duplicate a host fd onto a target host descriptor, bypassing shim indirection. */
+int vprocHostDup2(int host_fd, int target_fd);
+/* Close a host descriptor without routing through the shim table. */
+int vprocHostClose(int fd);
+/* Spawn a joinable host thread, bypassing vproc's pthread_create shim. */
+int vprocHostPthreadCreate(pthread_t *thread,
+                           const pthread_attr_t *attr,
+                           void *(*start_routine)(void *),
+                           void *arg);
 /* Adopt an existing host fd into the vproc table, returning the vproc-local fd. */
 int vprocAdoptHostFd(VProc *vp, int host_fd);
 /* Inherit the current vproc into new threads created via pthread_create shim. */
@@ -208,6 +217,14 @@ static inline int vprocDup(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
 static inline int vprocDup2(VProc *vp, int fd, int target) { (void)vp; (void)fd; (void)target; return -1; }
 static inline int vprocClose(VProc *vp, int fd) { (void)vp; (void)fd; return close(fd); }
 static inline int vprocPipe(VProc *vp, int pipefd[2]) { (void)vp; return pipe(pipefd); }
+static inline int vprocHostDup2(int host_fd, int target_fd) { return dup2(host_fd, target_fd); }
+static inline int vprocHostClose(int fd) { return close(fd); }
+static inline int vprocHostPthreadCreate(pthread_t *thread,
+                                         const pthread_attr_t *attr,
+                                         void *(*start_routine)(void *),
+                                         void *arg) {
+    return pthread_create(thread, attr, start_routine, arg);
+}
 static inline int vprocAdoptHostFd(VProc *vp, int host_fd) { (void)vp; return host_fd; }
 static inline int vprocPthreadCreateShim(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *arg) { return pthread_create(t, a, fn, arg); }
 static inline int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) { (void)vp; return open(path, flags, mode); }

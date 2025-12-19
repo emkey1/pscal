@@ -1095,6 +1095,54 @@ int vprocTranslateFd(VProc *vp, int fd) {
     return host;
 }
 
+int vprocHostDup2(int host_fd, int target_fd) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef dup2
+#undef dup2
+    int res = dup2(host_fd, target_fd);
+#define dup2 vprocDup2Shim
+#else
+    int res = dup2(host_fd, target_fd);
+#endif
+    return res;
+#else
+    return dup2(host_fd, target_fd);
+#endif
+}
+
+int vprocHostClose(int fd) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef close
+#undef close
+    int res = close(fd);
+#define close vprocCloseShim
+#else
+    int res = close(fd);
+#endif
+    return res;
+#else
+    return close(fd);
+#endif
+}
+
+int vprocHostPthreadCreate(pthread_t *thread,
+                           const pthread_attr_t *attr,
+                           void *(*start_routine)(void *),
+                           void *arg) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef pthread_create
+#undef pthread_create
+    int rc = pthread_create(thread, attr, start_routine, arg);
+#define pthread_create vprocPthreadCreateShim
+#else
+    int rc = pthread_create(thread, attr, start_routine, arg);
+#endif
+    return rc;
+#else
+    return pthread_create(thread, attr, start_routine, arg);
+#endif
+}
+
 int vprocDup(VProc *vp, int fd) {
     int host_fd = vprocTranslateFd(vp, fd);
     if (host_fd < 0) {
