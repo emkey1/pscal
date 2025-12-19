@@ -201,6 +201,8 @@ typedef struct {
     void *(*start_routine)(void *);
     void *arg;
     VProc *vp;
+    int shell_self_pid;
+    int kernel_pid;
 } VProcThreadStartCtx;
 
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
@@ -983,6 +985,11 @@ static void *vprocThreadTrampoline(void *arg) {
     // We rely on vprocTaskEntry for logical join/wait.
     pthread_detach(pthread_self());
 
+    if (ctx) {
+        vprocSetShellSelfPid(ctx->shell_self_pid);
+        vprocSetKernelPid(ctx->kernel_pid);
+    }
+
     VProc *vp = ctx ? ctx->vp : NULL;
     if (vp) {
         vprocActivate(vp);
@@ -1018,6 +1025,8 @@ int vprocPthreadCreateShim(pthread_t *thread,
     ctx->start_routine = start_routine;
     ctx->arg = arg;
     ctx->vp = vprocCurrent();
+    ctx->shell_self_pid = vprocGetShellSelfPid();
+    ctx->kernel_pid = vprocGetKernelPid();
     return pthread_create(thread, attr, vprocThreadTrampoline, ctx);
 }
 

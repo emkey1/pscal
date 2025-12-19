@@ -2851,6 +2851,8 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
 }
 
 static int shellCollectJobs(void) {
+    int shell_pid = 0;
+    int current_sid = 0;
 #if defined(PSCAL_TARGET_IOS)
     /* Mirror synthetic vproc tasks into the job table if they were launched
      * without registering a ShellJob.
@@ -2860,6 +2862,8 @@ static int shellCollectJobs(void) {
      * carry a non-zero vproc job id, otherwise core session entities (kernel,
      * shell, pumps, etc.) pollute the job table and break job-spec semantics. */
     bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    shell_pid = vprocGetShellSelfPid();
+    current_sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : 0;
     size_t snap_cap = vprocSnapshot(NULL, 0);
     if (snap_cap > 0) {
             VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
@@ -2871,6 +2875,12 @@ static int shellCollectJobs(void) {
     for (size_t i = 0; i < snap_count; ++i) {
         const VProcSnapshot *s = &snaps[i];
         if (!s || s->pid <= 0 || s->exited) {
+            continue;
+        }
+        /* When multiple shells/windows are active in the same process, vproc
+         * snapshots can include tasks from other sessions. Only mirror tasks
+         * that belong to the current shell session. */
+        if (current_sid > 0 && s->sid > 0 && s->sid != current_sid) {
             continue;
         }
         if (s->job_id <= 0) {
@@ -2885,6 +2895,9 @@ static int shellCollectJobs(void) {
         /* Skip snapshots whose label is the shell (self) to avoid mirroring the
          * foreground shell as a background job after reaping. */
         if (strcmp(s->command, "shell") == 0) {
+            continue;
+        }
+        if (shell_pid > 0 && s->pid == shell_pid) {
             continue;
         }
         if (s->pid == vprocGetShellSelfPid() ||
@@ -2924,6 +2937,14 @@ static int shellCollectJobs(void) {
         bool job_active = false;
 
 #if defined(PSCAL_TARGET_IOS)
+        if (current_sid > 0 && job && job->pgid > 0) {
+            int job_sid = vprocGetSid((int)job->pgid);
+            if (job_sid > 0 && job_sid != current_sid) {
+                shellRemoveJobAt(i);
+                reaped++;
+                continue;
+            }
+        }
         int stored_id = vprocGetJobId(job->pgid);
         if (stored_id <= 0 && job->pid_count > 0) {
             stored_id = vprocGetJobId(job->pids[0]);

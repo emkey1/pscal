@@ -1552,6 +1552,70 @@ static void assert_reparenting_uses_session_leader_sid(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    bool done;
+    int got_shell;
+    int got_kernel;
+    bool got_vproc;
+} ThreadInheritResult;
+
+static void *inherit_thread_entry(void *arg) {
+    ThreadInheritResult *res = (ThreadInheritResult *)arg;
+    int shell = vprocGetShellSelfPid();
+    int kernel = vprocGetKernelPid();
+    bool has_vproc = (vprocCurrent() != NULL);
+
+    pthread_mutex_lock(&res->mu);
+    res->got_shell = shell;
+    res->got_kernel = kernel;
+    res->got_vproc = has_vproc;
+    res->done = true;
+    pthread_cond_signal(&res->cv);
+    pthread_mutex_unlock(&res->mu);
+    return NULL;
+}
+
+static void assert_pthread_inherits_session_ids(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int prev_kernel = vprocGetKernelPid();
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    vprocSetShellSelfPid(42420);
+    vprocSetKernelPid(42421);
+
+    ThreadInheritResult res;
+    memset(&res, 0, sizeof(res));
+    pthread_mutex_init(&res.mu, NULL);
+    pthread_cond_init(&res.cv, NULL);
+
+    pthread_t t;
+    assert(vprocPthreadCreateShim(&t, NULL, inherit_thread_entry, &res) == 0);
+
+    pthread_mutex_lock(&res.mu);
+    while (!res.done) {
+        pthread_cond_wait(&res.cv, &res.mu);
+    }
+    pthread_mutex_unlock(&res.mu);
+
+    pthread_cond_destroy(&res.cv);
+    pthread_mutex_destroy(&res.mu);
+
+    assert(res.got_shell == 42420);
+    assert(res.got_kernel == 42421);
+    assert(res.got_vproc);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+
+    vprocSetShellSelfPid(prev_shell);
+    vprocSetKernelPid(prev_kernel);
+}
+
 int main(void) {
     /* Default truncation path for tests to keep path virtualization in /tmp. */
     setenv("PATH_TRUNCATE", "/tmp", 1);
@@ -1651,6 +1715,8 @@ int main(void) {
     assert_vproc_activation_stack_restores_previous();
     fprintf(stderr, "TEST reparenting_uses_sid\n");
     assert_reparenting_uses_session_leader_sid();
+    fprintf(stderr, "TEST pthread_inherits_session_ids\n");
+    assert_pthread_inherits_session_ids();
     fprintf(stderr, "TEST setpgid_zero_defaults_to_pid\n");
     assert_setpgid_zero_defaults_to_pid();
     fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");

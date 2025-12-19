@@ -10099,7 +10099,7 @@ static void shellKillPrintSignalTable(void) {
 
 static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int signo) {
     if (index >= gShellJobCount) {
-        runtimeError(vm, "kill: invalid job index");
+        fprintf(stderr, "kill: invalid job index\n");
         return false;
     }
     ShellJob *job = &gShellJobs[index];
@@ -10121,7 +10121,7 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
                 return true;
             }
         }
-        runtimeError(vm, "kill: %s: no associated processes", spec_text ? spec_text : "job");
+        fprintf(stderr, "kill: %s: no associated processes\n", spec_text ? spec_text : "job");
         return false;
     }
     if (terminate && job->pgid > 0) {
@@ -10139,9 +10139,9 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         if (!terminate || !sent) {
             /* If group kill failed or we are delivering non-terminating signals, send per-pid. */
             if (vprocKillShim(pid, signo) != 0) {
-                runtimeError(vm, "kill: %s: %s",
-                             spec_text ? spec_text : "job",
-                             strerror(errno));
+                fprintf(stderr, "kill: %s: %s\n",
+                        spec_text ? spec_text : "job",
+                        strerror(errno));
                 return false;
             }
         }
@@ -10158,8 +10158,8 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         }
     }
     if (!sent) {
-        runtimeError(vm, "kill: %s: no associated processes",
-                     spec_text ? spec_text : "job");
+        fprintf(stderr, "kill: %s: no associated processes\n",
+                spec_text ? spec_text : "job");
         return false;
     }
     if (signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU) {
@@ -10212,7 +10212,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
             bool numeric_only = (pending_option == 'n');
             int signo = 0;
             if (!shellKillParseSignal(value, numeric_only, &signo)) {
-                runtimeError(vm, "kill: invalid signal");
+                fprintf(stderr, "kill: invalid signal\n");
                 shellUpdateStatus(1);
                 return makeVoid();
             }
@@ -10271,7 +10271,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     }
 
     if (expect_signal_value) {
-        runtimeError(vm, "kill: option requires an argument");
+        fprintf(stderr, "kill: option requires an argument\n");
         shellUpdateStatus(1);
         return makeVoid();
     }
@@ -10287,7 +10287,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
                 if (shellKillParseLong(value, &numeric)) {
                     char name[32];
                     if (!shellRuntimeSignalName((int)numeric, false, name, sizeof(name))) {
-                        runtimeError(vm, "kill: %ld: unknown signal", numeric);
+                        fprintf(stderr, "kill: %ld: unknown signal\n", numeric);
                         ok = false;
                         continue;
                     }
@@ -10301,7 +10301,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
                 }
                 int signo = 0;
                 if (!shellRuntimeParseSignal(value.s_val, &signo)) {
-                    runtimeError(vm, "kill: invalid signal '%s'", value.s_val);
+                    fprintf(stderr, "kill: invalid signal '%s'\n", value.s_val);
                     ok = false;
                     continue;
                 }
@@ -10313,7 +10313,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     }
 
     if (operand_start >= arg_count) {
-        runtimeError(vm, "kill: missing operand");
+        fprintf(stderr, "kill: missing operand\n");
         shellUpdateStatus(1);
         return makeVoid();
     }
@@ -10333,7 +10333,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
                         overall_ok = false;
                     }
                 } else {
-                    runtimeError(vm, "kill: %s: no such job", target.s_val);
+                    fprintf(stderr, "kill: %s: no such job\n", target.s_val);
                     overall_ok = false;
                 }
                 continue;
@@ -10342,9 +10342,9 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
         long pid_value = 0;
         if (!shellKillParseLong(target, &pid_value)) {
             if (target.type == TYPE_STRING && target.s_val) {
-                runtimeError(vm, "kill: invalid pid '%s'", target.s_val);
+                fprintf(stderr, "kill: invalid pid '%s'\n", target.s_val);
             } else {
-                runtimeError(vm, "kill: invalid pid");
+                fprintf(stderr, "kill: invalid pid\n");
             }
             overall_ok = false;
             continue;
@@ -10376,7 +10376,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
         rc = kill((pid_t)pid_value, signal_number);
 #endif
         if (rc != 0) {
-            runtimeError(vm, "kill: (%ld) %s", pid_value, strerror(errno));
+            fprintf(stderr, "kill: (%ld) %s\n", pid_value, strerror(errno));
             overall_ok = false;
         }
     }

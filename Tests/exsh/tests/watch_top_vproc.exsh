@@ -29,7 +29,6 @@ top >"$tmp_out"
 
 set +e
 kill "$wp" >/dev/null 2>&1
-kill %1 >/dev/null 2>&1
 set -e
 
 sleep 0.10
