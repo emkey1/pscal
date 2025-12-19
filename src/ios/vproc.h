@@ -137,6 +137,25 @@ int vprocGetShellSelfPid(void);
 /* Optional: identify a per-session "kernel" vproc that acts as adoptive parent. */
 void vprocSetKernelPid(int pid);
 int vprocGetKernelPid(void);
+int vprocGetSessionKernelPid(void);
+void vprocSetSessionKernelPid(int pid);
+
+/* Per-session stdio ownership: duplicated host fds that define the
+ * controlling stdio for a given shell window/session. */
+typedef struct VProcSessionStdio {
+    int stdin_host_fd;
+    int stdout_host_fd;
+    int stderr_host_fd;
+    int kernel_pid;
+} VProcSessionStdio;
+
+/* Obtain the current session stdio (per window/session). */
+VProcSessionStdio *vprocSessionStdioCurrent(void);
+/* Initialize session stdio from the current host stdio and kernel pid. */
+void vprocSessionStdioInit(VProcSessionStdio *stdio_ctx, int kernel_pid);
+/* Activate a session stdio context for the calling thread (per window). */
+void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx);
+
 /* Terminate and discard all vprocs in the given session (sid). */
 void vprocTerminateSession(int sid);
 /* Minimal signal queries/suspension helpers. */

@@ -135,6 +135,7 @@ static __thread size_t gVProcStackDepth = 0;
 static int gNextSyntheticPid = 0;
 static _Thread_local int gShellSelfPid = 0;
 static _Thread_local int gKernelPid = 0;
+static VProcSessionStdio gSessionStdio = { .stdin_host_fd = -1, .stdout_host_fd = -1, .stderr_host_fd = -1, .kernel_pid = 0 };
 
 static int vprocNextPidSeed(void) {
     int host = (int)getpid();
@@ -2218,6 +2219,45 @@ void vprocSetKernelPid(int pid) {
 
 int vprocGetKernelPid(void) {
     return gKernelPid;
+}
+
+int vprocGetSessionKernelPid(void) {
+    return gSessionStdio.kernel_pid;
+}
+
+void vprocSetSessionKernelPid(int pid) {
+    gSessionStdio.kernel_pid = pid;
+}
+
+VProcSessionStdio *vprocSessionStdioCurrent(void) {
+    return &gSessionStdio;
+}
+
+void vprocSessionStdioInit(VProcSessionStdio *stdio_ctx, int kernel_pid) {
+    if (!stdio_ctx) {
+        return;
+    }
+    stdio_ctx->kernel_pid = kernel_pid;
+    /* Duplicate current host stdio so this session owns stable copies. */
+    int in = fcntl(STDIN_FILENO, F_DUPFD_CLOEXEC, 0);
+    int out = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 0);
+    int err = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 0);
+    if (in < 0 && errno == EINVAL) in = dup(STDIN_FILENO);
+    if (out < 0 && errno == EINVAL) out = dup(STDOUT_FILENO);
+    if (err < 0 && errno == EINVAL) err = dup(STDERR_FILENO);
+    if (in >= 0) fcntl(in, F_SETFD, FD_CLOEXEC);
+    if (out >= 0) fcntl(out, F_SETFD, FD_CLOEXEC);
+    if (err >= 0) fcntl(err, F_SETFD, FD_CLOEXEC);
+    stdio_ctx->stdin_host_fd = in;
+    stdio_ctx->stdout_host_fd = out;
+    stdio_ctx->stderr_host_fd = err;
+}
+
+void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx) {
+    if (!stdio_ctx) {
+        return;
+    }
+    gSessionStdio = *stdio_ctx;
 }
 
 void vprocSetJobId(int pid, int job_id) {

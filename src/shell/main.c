@@ -54,11 +54,21 @@ static void shellSetupSelfVproc(void) {
         return;
     }
 
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (!session_stdio) {
+        static VProcSessionStdio fallback_stdio = { .stdin_host_fd = -1, .stdout_host_fd = -1, .stderr_host_fd = -1, .kernel_pid = 0 };
+        vprocSessionStdioActivate(&fallback_stdio);
+        session_stdio = vprocSessionStdioCurrent();
+    }
+    if (session_stdio && session_stdio->stdin_host_fd < 0 && session_stdio->stdout_host_fd < 0 && session_stdio->stderr_host_fd < 0) {
+        vprocSessionStdioInit(session_stdio, 0);
+    }
+
     if (!gKernelVproc) {
         VProcOptions kopts = vprocDefaultOptions();
-        kopts.stdin_fd = STDIN_FILENO;
-        kopts.stdout_fd = STDOUT_FILENO;
-        kopts.stderr_fd = STDERR_FILENO;
+        kopts.stdin_fd = (session_stdio && session_stdio->stdin_host_fd >= 0) ? session_stdio->stdin_host_fd : STDIN_FILENO;
+        kopts.stdout_fd = (session_stdio && session_stdio->stdout_host_fd >= 0) ? session_stdio->stdout_host_fd : STDOUT_FILENO;
+        kopts.stderr_fd = (session_stdio && session_stdio->stderr_host_fd >= 0) ? session_stdio->stderr_host_fd : STDERR_FILENO;
         int kpid_hint = vprocReservePid();
         kopts.pid_hint = kpid_hint;
         gKernelVproc = vprocCreate(&kopts);
@@ -69,11 +79,13 @@ static void shellSetupSelfVproc(void) {
         if (gKernelVproc) {
             int kpid = vprocPid(gKernelVproc);
             vprocSetKernelPid(kpid);
+            vprocSetSessionKernelPid(kpid);
             vprocSetParent(kpid, 0);
             (void)vprocSetSid(kpid, kpid);
             vprocSetCommandLabel(kpid, "kernel");
         } else if (kpid_hint > 0) {
             vprocSetKernelPid(kpid_hint);
+            vprocSetSessionKernelPid(kpid_hint);
             vprocSetParent(kpid_hint, 0);
             (void)vprocSetSid(kpid_hint, kpid_hint);
             vprocSetCommandLabel(kpid_hint, "kernel");
@@ -84,10 +96,20 @@ static void shellSetupSelfVproc(void) {
     }
 
     int kernel_pid = vprocGetKernelPid();
+    VProcSessionStdio *session_stdio_ref = vprocSessionStdioCurrent();
+    if (session_stdio_ref) {
+        if (session_stdio_ref->kernel_pid <= 0 && kernel_pid > 0) {
+            session_stdio_ref->kernel_pid = kernel_pid;
+        }
+    }
+    int session_stdin = (session_stdio_ref && session_stdio_ref->stdin_host_fd >= 0) ? session_stdio_ref->stdin_host_fd : -2;
+    int session_stdout = (session_stdio_ref && session_stdio_ref->stdout_host_fd >= 0) ? session_stdio_ref->stdout_host_fd : -1;
+    int session_stderr = (session_stdio_ref && session_stdio_ref->stderr_host_fd >= 0) ? session_stdio_ref->stderr_host_fd : -1;
+
     VProcOptions opts = vprocDefaultOptions();
-    opts.stdin_fd = STDIN_FILENO;
-    opts.stdout_fd = STDOUT_FILENO;
-    opts.stderr_fd = STDERR_FILENO;
+    opts.stdin_fd = session_stdin;
+    opts.stdout_fd = session_stdout;
+    opts.stderr_fd = session_stderr;
     int shell_pid_hint = vprocReservePid();
     opts.pid_hint = shell_pid_hint;
     gShellSelfVproc = vprocCreate(&opts);
@@ -144,6 +166,8 @@ static void shellTeardownSelfVproc(int status) {
     if (!gShellSelfVproc) {
         return;
     }
+    extern VProcSessionStdio *vprocSessionStdioCurrent(void);
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
     int sid = vprocGetSid(vprocPid(gShellSelfVproc));
     if (sid <= 0) {
         sid = vprocGetSid(vprocGetShellSelfPid());
@@ -158,6 +182,14 @@ static void shellTeardownSelfVproc(int status) {
     vprocMarkExit(gShellSelfVproc, status);
     vprocDestroy(gShellSelfVproc);
     gShellSelfVproc = NULL;
+    if (session_stdio) {
+        if (session_stdio->stdin_host_fd >= 0) close(session_stdio->stdin_host_fd);
+        if (session_stdio->stdout_host_fd >= 0) close(session_stdio->stdout_host_fd);
+        if (session_stdio->stderr_host_fd >= 0) close(session_stdio->stderr_host_fd);
+        session_stdio->stdin_host_fd = -1;
+        session_stdio->stdout_host_fd = -1;
+        session_stdio->stderr_host_fd = -1;
+    }
 
     if (gKernelVproc) {
         vprocMarkExit(gKernelVproc, status);

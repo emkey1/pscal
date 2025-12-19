@@ -2851,9 +2851,9 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
 }
 
 static int shellCollectJobs(void) {
+#if defined(PSCAL_TARGET_IOS)
     int shell_pid = 0;
     int current_sid = 0;
-#if defined(PSCAL_TARGET_IOS)
     /* Mirror synthetic vproc tasks into the job table if they were launched
      * without registering a ShellJob.
      *
@@ -2883,7 +2883,9 @@ static int shellCollectJobs(void) {
         if (current_sid > 0 && s->sid > 0 && s->sid != current_sid) {
             continue;
         }
-        if (s->job_id <= 0) {
+        bool has_jobid = (s->job_id > 0);
+        bool is_shell_child = (shell_pid > 0 && s->parent_pid == shell_pid);
+        if (!has_jobid && !is_shell_child) {
             continue;
         }
         /* Ignore snapshots that have no command label; these are typically

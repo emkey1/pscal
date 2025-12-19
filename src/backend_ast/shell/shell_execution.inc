@@ -124,6 +124,18 @@ static VProc *shellCreateVProcForStage(int stdin_host,
                                        int cols,
                                        int rows,
                                        int pid_hint) {
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (session_stdio) {
+        if (stdin_host < 0 && session_stdio->stdin_host_fd >= 0) {
+            stdin_host = session_stdio->stdin_host_fd;
+        }
+        if (stdout_host < 0 && session_stdio->stdout_host_fd >= 0) {
+            stdout_host = session_stdio->stdout_host_fd;
+        }
+        if (stderr_host < 0 && session_stdio->stderr_host_fd >= 0) {
+            stderr_host = session_stdio->stderr_host_fd;
+        }
+    }
     VProcOptions opts = vprocDefaultOptions();
     opts.stdin_fd = (stdin_host >= 0) ? stdin_host : -2;   /* default to /dev/null */
     opts.stdout_fd = (stdout_host >= 0) ? stdout_host : -1;
@@ -1316,6 +1328,8 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (!ctx) {
         return NULL;
     }
+    bool prev_bg_flag = gShellCurrentBuiltinBackground;
+    gShellCurrentBuiltinBackground = true;
     /* Allow pthread_cancel to interrupt sleeps/IO. */
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
@@ -1354,18 +1368,32 @@ static void *shellInProcessBackgroundMain(void *arg) {
     VM *vm = ctx->vm ? ctx->vm : gShellCurrentVm;
 #endif
     ShellCommand *cmd = ctx->cmd;
+#if defined(PSCAL_TARGET_IOS)
+    fprintf(stderr, "[bg-stage] start cmd=%s bg=%d stage_count=%zu ctx=%p\n",
+            (cmd && cmd->argv && cmd->argc > 0) ? cmd->argv[0] : "<nil>",
+            (int)(cmd ? cmd->background : 0),
+            (size_t)(cmd ? cmd->argc : 0),
+            (void *)ctx);
+#endif
     size_t redir_count = cmd ? cmd->redir_count : 0;
     const char *stdout_raw = NULL;
     const char *stderr_raw = NULL;
     bool stdout_append = false;
     bool stderr_append = false;
     int stdin_fd = -1;
+    bool stdin_redirected = false;
 
     if (cmd && redir_count > 0 && cmd->redirs) {
         for (size_t i = 0; i < redir_count; ++i) {
             ShellRedirection *r = &cmd->redirs[i];
             if (r->kind == SHELL_RUNTIME_REDIR_OPEN) {
-                if (r->fd == STDOUT_FILENO && r->path) {
+                if (r->fd == STDIN_FILENO && r->path) {
+                    int fd = open(r->path, r->flags, r->mode);
+                    if (fd >= 0) {
+                        stdin_fd = fd;
+                        stdin_redirected = true;
+                    }
+                } else if (r->fd == STDOUT_FILENO && r->path) {
                     stdout_raw = r->path;
                     stdout_append = (r->flags & O_APPEND) != 0;
                 } else if (r->fd == STDERR_FILENO && r->path) {
@@ -1381,6 +1409,10 @@ static void *shellInProcessBackgroundMain(void *arg) {
         }
     }
 
+    if (!stdin_redirected && stdin_fd < 0) {
+        stdin_fd = open("/dev/null", O_RDONLY);
+    }
+
     char resolved_stdout[PATH_MAX];
     char resolved_stderr[PATH_MAX];
     const char *stdout_env = stdout_raw;
@@ -1393,6 +1425,7 @@ static void *shellInProcessBackgroundMain(void *arg) {
         stderr_env = resolved_stderr;
     }
     bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
     if (tool_dbg) {
         fprintf(stderr, "[bg-stage] cmd=%s stdout_raw=%s stderr_raw=%s\n",
                 cmd && cmd->argc > 0 ? cmd->argv[0] : "<null>",
@@ -1418,15 +1451,6 @@ static void *shellInProcessBackgroundMain(void *arg) {
         unsetenv("PSCALI_BG_STDERR");
         unsetenv("PSCALI_BG_STDERR_APPEND");
     }
-    int stdout_pipe[2] = { -1, -1 };
-    int stderr_pipe[2] = { -1, -1 };
-    int stdout_target = -1;
-    int stderr_target = -1;
-    pthread_t tee_threads[2];
-    ShellPipelineTee tee_ctx[2];
-    int tee_count = 0;
-    int stdout_mirror = -1;
-    int stderr_mirror = -1;
     int vm_stdout = -1;
     int vm_stderr = -1;
     int bg_status = 0;
@@ -1434,47 +1458,28 @@ static void *shellInProcessBackgroundMain(void *arg) {
     VProc *vp = NULL;
 #endif
 
-    stdout_mirror = dup(STDOUT_FILENO);
-    stderr_mirror = dup(STDERR_FILENO);
     if (stdout_path && *stdout_path) {
         int flags = O_CREAT | O_WRONLY | (stdout_append ? O_APPEND : O_TRUNC);
-        stdout_target = open(stdout_path, flags, 0666);
-        if (tool_dbg && stdout_target < 0) {
+        vm_stdout = open(stdout_path, flags, 0666);
+        fprintf(stderr, "[bg-stage] open stdout '%s' fd=%d err=%s\n",
+                stdout_path, vm_stdout, (vm_stdout < 0) ? strerror(errno) : "ok");
+        if (tool_dbg && vm_stdout < 0) {
             fprintf(stderr, "[bg-stage] open stdout '%s' failed: %s\n", stdout_path, strerror(errno));
-        }
-        if (stdout_target >= 0 && pipe(stdout_pipe) == 0) {
-            tee_ctx[tee_count].read_fd = stdout_pipe[0];
-            tee_ctx[tee_count].file_fd = stdout_target;
-            tee_ctx[tee_count].mirror_fd = (stdout_mirror >= 0) ? stdout_mirror : -1;
-            tee_ctx[tee_count].err = 0;
-            vprocHostPthreadCreate(&tee_threads[tee_count], NULL, shellPipelineTeeThread, &tee_ctx[tee_count]);
-            ++tee_count;
-        } else if (stdout_target >= 0) {
-            close(stdout_target);
-            stdout_target = -1;
+        } else if (pipe_dbg) {
+            fprintf(stderr, "[bg-stage] opened stdout '%s' host_fd=%d\n", stdout_path, vm_stdout);
         }
     }
     if (stderr_path && *stderr_path) {
         int flags = O_CREAT | O_WRONLY | (stderr_append ? O_APPEND : O_TRUNC);
-        stderr_target = open(stderr_path, flags, 0666);
-        if (tool_dbg && stderr_target < 0) {
+        vm_stderr = open(stderr_path, flags, 0666);
+        fprintf(stderr, "[bg-stage] open stderr '%s' fd=%d err=%s\n",
+                stderr_path, vm_stderr, (vm_stderr < 0) ? strerror(errno) : "ok");
+        if (tool_dbg && vm_stderr < 0) {
             fprintf(stderr, "[bg-stage] open stderr '%s' failed: %s\n", stderr_path, strerror(errno));
-        }
-        if (stderr_target >= 0 && pipe(stderr_pipe) == 0) {
-            tee_ctx[tee_count].read_fd = stderr_pipe[0];
-            tee_ctx[tee_count].file_fd = stderr_target;
-            tee_ctx[tee_count].mirror_fd = (stderr_mirror >= 0) ? stderr_mirror : -1;
-            tee_ctx[tee_count].err = 0;
-            vprocHostPthreadCreate(&tee_threads[tee_count], NULL, shellPipelineTeeThread, &tee_ctx[tee_count]);
-            ++tee_count;
-        } else if (stderr_target >= 0) {
-            close(stderr_target);
-            stderr_target = -1;
+        } else if (pipe_dbg) {
+            fprintf(stderr, "[bg-stage] opened stderr '%s' host_fd=%d\n", stderr_path, vm_stderr);
         }
     }
-
-    vm_stdout = (stdout_pipe[1] >= 0) ? stdout_pipe[1] : -1;
-    vm_stderr = (stderr_pipe[1] >= 0) ? stderr_pipe[1] : -1;
 #if defined(PSCAL_TARGET_IOS)
     vp = shellCreateVProcForStage(stdin_fd,
                                   vm_stdout,
@@ -1492,7 +1497,11 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (shell_pid > 0) {
         vprocSetParent(vprocPid(vp), shell_pid);
     }
+    int shell_sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
     pid_t group = (ctx->synthetic_pid > 0) ? ctx->synthetic_pid : vprocPid(vp);
+    if (shell_sid > 0) {
+        vprocSetSid(vprocPid(vp), shell_sid);
+    }
     vprocSetPgid(vprocPid(vp), group);
     ctx->synthetic_pid = group;
     /* Label the vproc for lps/ps visibility. */
@@ -1505,29 +1514,53 @@ static void *shellInProcessBackgroundMain(void *arg) {
         }
     /* Hand off host fds to the synthetic vproc so dup2 shims work on vproc-local
      * descriptors during builtin execution. */
-    if (vm_stdout >= 0) {
-        int host_fd = vm_stdout;
+    /* For redirected stdio, keep host fds so dup2 binds directly like iSH. */
+    if (stdin_fd >= 0 && !stdout_path && !stderr_path) {
+        int host_fd = stdin_fd;
         int vfd = vprocAdoptHostFd(vp, host_fd);
         if (vfd >= 0) {
-            vm_stdout = vfd;
-        }
-    }
-    if (vm_stderr >= 0) {
-        int host_fd = vm_stderr;
-        int vfd = vprocAdoptHostFd(vp, host_fd);
-        if (vfd >= 0) {
-            vm_stderr = vfd;
+            stdin_fd = vfd;
+            if (pipe_dbg) fprintf(stderr, "[bg-stage] adopted stdin host=%d vfd=%d\n", host_fd, vfd);
+        } else if (pipe_dbg) {
+            fprintf(stderr, "[bg-stage] adopt stdin host=%d failed: %s\n", host_fd, strerror(errno));
         }
     }
     vprocActivate(vp);
 #endif
     gShellBackgroundWorkerActive = true;
     /* Apply exec redirs so background jobs honor user-specified &>, >>, etc. */
+    if (pipe_dbg) {
+        VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+        fprintf(stderr, "[bg-stage] about to run builtin stdin_fd=%d stdout_fd=%d stderr_fd=%d session_out=%d session_err=%d\n",
+                stdin_fd, vm_stdout, vm_stderr,
+                session_stdio ? session_stdio->stdout_host_fd : -1,
+                session_stdio ? session_stdio->stderr_host_fd : -1);
+    }
+    if (pipe_dbg) {
+        int host_out = vprocTranslateFd(vp, STDOUT_FILENO);
+        int host_err = vprocTranslateFd(vp, STDERR_FILENO);
+        int host_in = vprocTranslateFd(vp, STDIN_FILENO);
+        fprintf(stderr, "[bg-stage] pre-run fdmap stdin host=%d stdout host=%d stderr host=%d bg_flag=%d\n",
+                host_in, host_out, host_err, (int)gShellCurrentBuiltinBackground);
+    }
     bg_status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, vm_stdout, vm_stderr, true);
+    if (pipe_dbg) {
+        fprintf(stderr, "[bg-stage] finished run status=%d\n", bg_status);
+    }
+    if (pipe_dbg) {
+        int host_out = vprocTranslateFd(vp, STDOUT_FILENO);
+        int host_err = vprocTranslateFd(vp, STDERR_FILENO);
+        int host_in = vprocTranslateFd(vp, STDIN_FILENO);
+        fprintf(stderr, "[bg-stage] post-run fdmap stdin host=%d stdout host=%d stderr host=%d status=%d\n",
+                host_in, host_out, host_err, bg_status);
+    }
     gShellBackgroundWorkerActive = false;
 
 cleanup:
 #if defined(PSCAL_TARGET_IOS)
+    if (stdin_fd >= 0) vprocCloseShim(stdin_fd);
+    if (vm_stdout >= 0) vprocCloseShim(vm_stdout);
+    if (vm_stderr >= 0) vprocCloseShim(vm_stderr);
     if (vp) {
         /* If the synthetic task was terminated via vprocKillShim, reflect that
          * status rather than a default 0 from the builtin dispatcher. */
@@ -1557,20 +1590,11 @@ cleanup:
         vprocDestroy(vp);
         ctx->vp = NULL;
     }
-#endif
-    if (stdin_fd >= 0) close(stdin_fd);
-#if defined(PSCAL_TARGET_IOS)
-    if (vm_stdout >= 0) vprocCloseShim(vm_stdout);
-    if (vm_stderr >= 0) vprocCloseShim(vm_stderr);
 #else
+    if (stdin_fd >= 0) close(stdin_fd);
     if (vm_stdout >= 0) close(vm_stdout);
     if (vm_stderr >= 0) close(vm_stderr);
 #endif
-    for (int i = 0; i < tee_count; ++i) {
-        pthread_join(tee_threads[i], NULL);
-    }
-    if (stdout_mirror >= 0) close(stdout_mirror);
-    if (stderr_mirror >= 0) close(stderr_mirror);
     unsetenv("PSCALI_BG_STDOUT");
     unsetenv("PSCALI_BG_STDOUT_APPEND");
     unsetenv("PSCALI_BG_STDERR");
@@ -1601,6 +1625,7 @@ cleanup:
 #if defined(PSCAL_TARGET_IOS)
     pthread_cleanup_pop(0);
 #endif
+    gShellCurrentBuiltinBackground = prev_bg_flag;
     free(ctx);
     return NULL;
 }
@@ -1763,6 +1788,17 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
 #if defined(PSCAL_TARGET_IOS)
     if (ctx->in_process) {
         if (ctx->background) {
+            /* Register the synthetic in-process job so fg/bg/jobs work. */
+            if (ctx->pids && ctx->launched > 0) {
+                pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
+                ShellJob *job = shellRegisterJob(bg_pgid, ctx->pids, ctx->launched, tail_cmd);
+                if (job) {
+                    job->running = true;
+                    job->stopped = false;
+                    job->last_status = 0;
+                }
+                gShellRuntime.last_bg_pid = bg_pgid;
+            }
             ShellShebangThreadCtx *bg_ctx = NULL;
             if (tail_cmd && tail_cmd->argc > 0 && tail_cmd->argv) {
                 bg_ctx = (ShellShebangThreadCtx *)calloc(1, sizeof(ShellShebangThreadCtx));
@@ -1954,32 +1990,49 @@ static bool shellEnsureExecRedirBackup(int target_fd,
     backup.saved_fd = -1;
     backup.saved_valid = false;
     backup.was_closed = false;
+#if defined(PSCAL_TARGET_IOS)
+    backup.use_vproc = false;
+    VProc *active_vp = vprocCurrent();
+#else
+    backup.use_vproc = false;
+    VProc *active_vp = NULL;
+#endif
     int min_fd = target_fd + 1;
     if (avoid_fd >= 0 && avoid_fd >= min_fd) {
         min_fd = avoid_fd + 1;
     }
     int dup_fd = -1;
+    int source_fd = target_fd;
+#if defined(PSCAL_TARGET_IOS)
+    if (active_vp) {
+        int host_src = vprocTranslateFd(active_vp, target_fd);
+        if (host_src >= 0) {
+            source_fd = host_src;
+            backup.use_vproc = true;
+        }
+    }
+#endif
 #ifdef F_DUPFD_CLOEXEC
-    dup_fd = fcntl(target_fd, F_DUPFD_CLOEXEC, min_fd);
+    dup_fd = fcntl(source_fd, F_DUPFD_CLOEXEC, min_fd);
     if (dup_fd < 0 && errno == EINVAL) {
         dup_fd = -1;
     }
 #endif
     if (dup_fd < 0) {
-        dup_fd = fcntl(target_fd, F_DUPFD, min_fd);
+        dup_fd = fcntl(source_fd, F_DUPFD, min_fd);
         if (dup_fd >= 0) {
             fcntl(dup_fd, F_SETFD, FD_CLOEXEC);
         }
     }
     if (dup_fd < 0) {
-        dup_fd = dup(target_fd);
+        dup_fd = dup(source_fd);
         if (dup_fd >= 0) {
             fcntl(dup_fd, F_SETFD, FD_CLOEXEC);
         }
     }
     if (dup_fd >= 0 && avoid_fd >= 0 && dup_fd == avoid_fd) {
 #ifdef F_DUPFD_CLOEXEC
-        int alt_fd = fcntl(target_fd, F_DUPFD_CLOEXEC, avoid_fd + 1);
+        int alt_fd = fcntl(source_fd, F_DUPFD_CLOEXEC, avoid_fd + 1);
         if (alt_fd >= 0) {
             close(dup_fd);
             dup_fd = alt_fd;
@@ -1991,7 +2044,7 @@ static bool shellEnsureExecRedirBackup(int target_fd,
 #endif
         if (dup_fd >= 0 && dup_fd == avoid_fd) {
             if (alt_fd < 0) {
-                alt_fd = fcntl(target_fd, F_DUPFD, avoid_fd + 1);
+                alt_fd = fcntl(source_fd, F_DUPFD, avoid_fd + 1);
                 if (alt_fd >= 0) {
                     fcntl(alt_fd, F_SETFD, FD_CLOEXEC);
                 }
@@ -2045,10 +2098,19 @@ static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t c
     if (!backups) {
         return;
     }
+#if defined(PSCAL_TARGET_IOS)
+    VProc *active_vp = vprocCurrent();
+#else
+    VProc *active_vp = NULL;
+#endif
     for (size_t i = 0; i < count; ++i) {
         ShellExecRedirBackup *backup = &backups[i];
         if (backup->saved_valid && backup->saved_fd >= 0) {
-            vprocHostDup2(backup->saved_fd, backup->target_fd);
+            if (backup->use_vproc && active_vp) {
+                vprocDup2(active_vp, backup->saved_fd, backup->target_fd);
+            } else {
+                vprocHostDup2(backup->saved_fd, backup->target_fd);
+            }
             shellResetStandardStream(backup->target_fd);
         } else if (backup->was_closed) {
             vprocHostClose(backup->target_fd);
@@ -2562,6 +2624,10 @@ static int shellRunBuiltinInProcess(VM *vm,
     bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
+    if (pipe_dbg) {
+        fprintf(stderr, "[run-builtin] active_vp=%p stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
+                (void *)active_vp, stdin_fd, stdout_fd, stderr_fd);
+    }
 #endif
     ShellExecRedirBackup *backups = NULL;
     size_t backup_count = 0;
@@ -2575,18 +2641,22 @@ static int shellRunBuiltinInProcess(VM *vm,
             goto cleanup;
         }
         int dup_src = stdin_fd;
+        bool used_vproc = false;
 #if defined(PSCAL_TARGET_IOS)
-        dup_src = shellHostFdForShimmedFd(stdin_fd);
+        int trans = active_vp ? vprocTranslateFd(active_vp, dup_src) : -1;
+        if (pipe_dbg) fprintf(stderr, "[run-builtin] stdin translate fd=%d -> %d\n", dup_src, trans);
+        if (active_vp && trans >= 0) {
+            if (vprocDup2(active_vp, dup_src, STDIN_FILENO) < 0) {
+                if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] vprocDup2 stdin failed: %s\n", strerror(errno));
+                goto cleanup;
+            }
+            used_vproc = true;
+        }
 #endif
-        if (vprocHostDup2(dup_src, STDIN_FILENO) < 0) {
+        if (!used_vproc && dup2(dup_src, STDIN_FILENO) < 0) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup2 stdin failed: %s\n", strerror(errno));
             goto cleanup;
         }
-#if defined(PSCAL_TARGET_IOS)
-        if (active_vp && vprocTranslateFd(active_vp, stdin_fd) >= 0) {
-            vprocDup2(active_vp, stdin_fd, STDIN_FILENO);
-        }
-#endif
         shellResetStandardStream(STDIN_FILENO);
     }
     if (stdout_fd >= 0) {
@@ -2600,18 +2670,22 @@ static int shellRunBuiltinInProcess(VM *vm,
                     stdout_fd, fd_flags, (fd_flags < 0) ? strerror(errno) : "ok");
         }
         int dup_src = stdout_fd;
+        bool used_vproc = false;
 #if defined(PSCAL_TARGET_IOS)
-        dup_src = shellHostFdForShimmedFd(stdout_fd);
+        int trans = active_vp ? vprocTranslateFd(active_vp, dup_src) : -1;
+        if (pipe_dbg) fprintf(stderr, "[run-builtin] stdout translate fd=%d -> %d\n", dup_src, trans);
+        if (active_vp && trans >= 0) {
+            if (vprocDup2(active_vp, dup_src, STDOUT_FILENO) < 0) {
+                if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] vprocDup2 stdout failed: %s\n", strerror(errno));
+                goto cleanup;
+            }
+            used_vproc = true;
+        }
 #endif
-        if (vprocHostDup2(dup_src, STDOUT_FILENO) < 0) {
+        if (!used_vproc && dup2(dup_src, STDOUT_FILENO) < 0) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup2 stdout failed: %s\n", strerror(errno));
             goto cleanup;
         }
-#if defined(PSCAL_TARGET_IOS)
-        if (active_vp && vprocTranslateFd(active_vp, stdout_fd) >= 0) {
-            vprocDup2(active_vp, stdout_fd, STDOUT_FILENO);
-        }
-#endif
         shellResetStandardStream(STDOUT_FILENO);
     }
     if (stderr_fd >= 0) {
@@ -2620,18 +2694,22 @@ static int shellRunBuiltinInProcess(VM *vm,
             goto cleanup;
         }
         int dup_src = stderr_fd;
+        bool used_vproc = false;
 #if defined(PSCAL_TARGET_IOS)
-        dup_src = shellHostFdForShimmedFd(stderr_fd);
+        int trans = active_vp ? vprocTranslateFd(active_vp, dup_src) : -1;
+        if (pipe_dbg) fprintf(stderr, "[run-builtin] stderr translate fd=%d -> %d\n", dup_src, trans);
+        if (active_vp && trans >= 0) {
+            if (vprocDup2(active_vp, dup_src, STDERR_FILENO) < 0) {
+                if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] vprocDup2 stderr failed: %s\n", strerror(errno));
+                goto cleanup;
+            }
+            used_vproc = true;
+        }
 #endif
-        if (vprocHostDup2(dup_src, STDERR_FILENO) < 0) {
+        if (!used_vproc && dup2(dup_src, STDERR_FILENO) < 0) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup2 stderr failed: %s\n", strerror(errno));
             goto cleanup;
         }
-#if defined(PSCAL_TARGET_IOS)
-        if (active_vp && vprocTranslateFd(active_vp, stderr_fd) >= 0) {
-            vprocDup2(active_vp, stderr_fd, STDERR_FILENO);
-        }
-#endif
         shellResetStandardStream(STDERR_FILENO);
     }
 
@@ -2904,9 +2982,19 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
-        if (pthread_create(&tid, &attr, shellInProcessBackgroundMain, bg_ctx) == 0) {
+        int create_rc = pthread_create(&tid, &attr, shellInProcessBackgroundMain, bg_ctx);
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipeline-bg] pthread_create rc=%d ctx=%p\n", create_rc, (void *)bg_ctx);
+        }
+        if (create_rc == 0) {
             pthread_detach(tid);
             pthread_attr_destroy(&attr);
+            if (getenv("PSCALI_PIPE_DEBUG")) {
+                pid_t pgid_dbg = ctx->pgid;
+                pid_t pid_dbg = (bg_ctx && bg_ctx->synthetic_pid > 0) ? bg_ctx->synthetic_pid : -1;
+                fprintf(stderr, "[pipeline-bg] bg thread launched pid=%d pgid=%d stage_pos=%zu launched=%zu\n",
+                        (int)pid_dbg, (int)pgid_dbg, stage_pos, ctx->launched);
+            }
             if (bg_ctx->synthetic_pid > 0) {
                 gShellRuntime.last_bg_pid = bg_ctx->synthetic_pid;
             }
@@ -3074,6 +3162,10 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     int shell_pid = vprocGetShellSelfPid();
     if (shell_pid > 0) {
         vprocSetParent(vprocPid(vp), shell_pid);
+    }
+    int shell_sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    if (shell_sid > 0) {
+        vprocSetSid(vprocPid(vp), shell_sid);
     }
     pid_t group = (ctx->pgid > 0) ? ctx->pgid
                 : ((ctx->launched > 0 && ctx->pids) ? ctx->pids[0] : -1);

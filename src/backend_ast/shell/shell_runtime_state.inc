@@ -1356,6 +1356,7 @@ typedef struct {
     int saved_fd;
     bool saved_valid;
     bool was_closed;
+    bool use_vproc;
 } ShellExecRedirBackup;
 
 static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count);

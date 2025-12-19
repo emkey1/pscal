@@ -4012,7 +4012,14 @@ static Value shellRunToolBuiltin(VM *vm,
             bool needs_shell_ctx = (target_kind == FRONTEND_KIND_SHELL);
             bool background = shellRuntimeCurrentBuiltinBackground();
 #if defined(PSCAL_TARGET_IOS)
-            (void)background;
+            /* When running inside the background worker thread, always execute
+             * inline so the worker's redirections (stdout/stderr to files) are
+             * honored. */
+            if (gShellBackgroundWorkerActive) {
+                background = true;
+            }
+            fprintf(stderr, "[tool-dispatch] name=%s bg=%d worker=%d argc=%d\n",
+                    tool_name ? tool_name : "<null>", (int)background, (int)gShellBackgroundWorkerActive, argc);
             if (background && gShellBackgroundWorkerActive) {
                 fprintf(stderr, "[tool-inline] %s argc=%d (bg worker)\n", tool_name, argc);
                 for (int i = 0; i < argc; ++i) {
