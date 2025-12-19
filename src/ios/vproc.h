@@ -128,6 +128,8 @@ int vprocGetShellSelfPid(void);
 /* Optional: identify a per-session "kernel" vproc that acts as adoptive parent. */
 void vprocSetKernelPid(int pid);
 int vprocGetKernelPid(void);
+/* Terminate and discard all vprocs in the given session (sid). */
+void vprocTerminateSession(int sid);
 /* Minimal signal queries/suspension helpers. */
 int vprocSigpending(int pid, sigset_t *set);
 int vprocSigsuspend(int pid, const sigset_t *mask);

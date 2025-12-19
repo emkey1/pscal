@@ -144,6 +144,13 @@ static void shellTeardownSelfVproc(int status) {
     if (!gShellSelfVproc) {
         return;
     }
+    int sid = vprocGetSid(vprocPid(gShellSelfVproc));
+    if (sid <= 0) {
+        sid = vprocGetSid(vprocGetShellSelfPid());
+    }
+    if (sid > 0) {
+        vprocTerminateSession(sid);
+    }
     if (gShellSelfVprocActivated) {
         vprocDeactivate();
         gShellSelfVprocActivated = false;

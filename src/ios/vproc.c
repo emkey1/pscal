@@ -208,6 +208,7 @@ typedef struct {
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
 static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 static void vprocClearEntryLocked(VProcTaskEntry *entry);
+static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
 
 static VProcTaskTable gVProcTasks = {
     .items = NULL,
@@ -976,6 +977,51 @@ void vprocDiscard(int pid) {
         vprocClearEntryLocked(entry);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+void vprocTerminateSession(int sid) {
+    if (sid <= 0) {
+        return;
+    }
+    pthread_t self = pthread_self();
+    pthread_t *cancel = NULL;
+    size_t cancel_count = 0;
+    size_t cancel_cap = 0;
+
+    pthread_mutex_lock(&gVProcTasks.mu);
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (!entry || entry->pid <= 0) continue;
+        if (entry->sid != sid) continue;
+
+        vprocMaybeStampRusageLocked(entry);
+        entry->exit_signal = SIGKILL;
+        entry->status = W_EXITCODE(128 + SIGKILL, 0);
+        entry->exited = true;
+        entry->zombie = false;
+        entry->stopped = false;
+        entry->continued = false;
+        entry->stop_signo = 0;
+        vprocNotifyParentSigchldLocked(entry->parent_pid, VPROC_SIGCHLD_EVENT_EXIT);
+
+        if (entry->tid && !pthread_equal(entry->tid, self)) {
+            vprocCancelListAdd(&cancel, &cancel_count, &cancel_cap, entry->tid);
+        }
+        for (size_t t = 0; t < entry->thread_count; ++t) {
+            pthread_t tid = entry->threads[t];
+            if (tid && !pthread_equal(tid, self)) {
+                vprocCancelListAdd(&cancel, &cancel_count, &cancel_cap, tid);
+            }
+        }
+        vprocClearEntryLocked(entry);
+    }
+    pthread_cond_broadcast(&gVProcTasks.cv);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+
+    for (size_t i = 0; i < cancel_count; ++i) {
+        pthread_cancel(cancel[i]);
+    }
+    free(cancel);
 }
 
 static void *vprocThreadTrampoline(void *arg) {

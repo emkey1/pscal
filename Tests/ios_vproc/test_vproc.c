@@ -1552,6 +1552,60 @@ static void assert_reparenting_uses_session_leader_sid(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+static bool snapshot_contains_sid(const VProcSnapshot *snaps, size_t count, int sid) {
+    if (sid <= 0) return false;
+    for (size_t i = 0; i < count; ++i) {
+        if (snaps[i].pid > 0 && snaps[i].sid == sid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void assert_terminate_session_discards_entries(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int prev_kernel = vprocGetKernelPid();
+
+    VProc *kernel = vprocCreate(NULL);
+    VProc *shell = vprocCreate(NULL);
+    VProc *child = vprocCreate(NULL);
+    assert(kernel && shell && child);
+
+    int kpid = vprocPid(kernel);
+    int spid = vprocPid(shell);
+    int cpid = vprocPid(child);
+
+    vprocSetParent(kpid, 0);
+    assert(vprocSetSid(kpid, kpid) == 0);
+    vprocSetParent(spid, kpid);
+    assert(vprocSetSid(spid, kpid) == 0);
+    assert(vprocSetPgid(spid, spid) == 0);
+    assert(vprocSetForegroundPgid(kpid, spid) == 0);
+    vprocSetParent(cpid, spid);
+    assert(vprocSetSid(cpid, kpid) == 0);
+    assert(vprocSetPgid(cpid, cpid) == 0);
+
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    size_t count = vprocSnapshot(snaps, cap);
+    assert(snapshot_contains_sid(snaps, count, kpid));
+    free(snaps);
+
+    vprocTerminateSession(kpid);
+
+    cap = vprocSnapshot(NULL, 0);
+    snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    count = vprocSnapshot(snaps, cap);
+    assert(!snapshot_contains_sid(snaps, count, kpid));
+    free(snaps);
+
+    vprocDestroy(child);
+    vprocDestroy(shell);
+    vprocDestroy(kernel);
+    vprocSetShellSelfPid(prev_shell);
+    vprocSetKernelPid(prev_kernel);
+}
+
 typedef struct {
     pthread_mutex_t mu;
     pthread_cond_t cv;
@@ -1715,6 +1769,8 @@ int main(void) {
     assert_vproc_activation_stack_restores_previous();
     fprintf(stderr, "TEST reparenting_uses_sid\n");
     assert_reparenting_uses_session_leader_sid();
+    fprintf(stderr, "TEST terminate_session_discards_entries\n");
+    assert_terminate_session_discards_entries();
     fprintf(stderr, "TEST pthread_inherits_session_ids\n");
     assert_pthread_inherits_session_ids();
     fprintf(stderr, "TEST setpgid_zero_defaults_to_pid\n");
