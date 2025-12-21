@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <limits.h>
 #include <stdlib.h>
+#include <time.h>
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_virtualization.h"
 
@@ -21,6 +22,20 @@ void pscalRuntimeDebugLog(const char *message) {
 #endif
 
 #include "ios/vproc.h"
+
+static void burn_cpu_for_ms(int ms) {
+    struct timespec start;
+    assert(clock_gettime(CLOCK_MONOTONIC, &start) == 0);
+    for (;;) {
+        struct timespec now;
+        assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+        int64_t elapsed_ms = (int64_t)(now.tv_sec - start.tv_sec) * 1000 +
+                             (int64_t)(now.tv_nsec - start.tv_nsec) / 1000000;
+        if (elapsed_ms >= ms) {
+            break;
+        }
+    }
+}
 
 static void assert_write_reads_back(void) {
     int host_pipe[2];
@@ -604,8 +619,8 @@ static void assert_rusage_snapshot(void) {
     bool found = false;
     for (size_t i = 0; i < count; ++i) {
         if (snaps[i].pid == pid) {
-            assert(snaps[i].rusage_utime == 5);
-            assert(snaps[i].rusage_stime == 7);
+            assert(snaps[i].rusage_utime >= 5);
+            assert(snaps[i].rusage_stime >= 7);
             found = true;
         }
     }
@@ -621,7 +636,7 @@ static void assert_rusage_populated_on_exit(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
     int pid = vprocPid(vp);
-    usleep(100000); /* 100ms to guarantee deci-ticks */
+    burn_cpu_for_ms(30);
     vprocMarkExit(vp, 0);
 
     size_t cap = vprocSnapshot(NULL, 0);

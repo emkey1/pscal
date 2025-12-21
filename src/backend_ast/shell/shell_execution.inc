@@ -1085,6 +1085,8 @@ typedef struct {
     VM *bg_vm;
     char *stdout_path;
     char *stderr_path;
+    int shell_pid;
+    int kernel_pid;
 #endif
 } ShellBackgroundStageCtx;
 
@@ -1335,6 +1337,14 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (!ctx) {
         return NULL;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->shell_pid > 0) {
+        vprocSetShellSelfPid(ctx->shell_pid);
+    }
+    if (ctx->kernel_pid > 0) {
+        vprocSetKernelPid(ctx->kernel_pid);
+    }
+#endif
     bool prev_bg_flag = gShellCurrentBuiltinBackground;
     gShellCurrentBuiltinBackground = true;
     /* Allow pthread_cancel to interrupt sleeps/IO. */
@@ -1375,16 +1385,20 @@ static void *shellInProcessBackgroundMain(void *arg) {
     VM *vm = ctx->vm ? ctx->vm : gShellCurrentVm;
 #endif
     ShellCommand *cmd = ctx->cmd;
+    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
 #if defined(PSCAL_TARGET_IOS)
-    fprintf(stderr, "[bg-stage] start cmd=%s bg=%d stage_count=%zu ctx=%p\n",
-            (cmd && cmd->argv && cmd->argc > 0) ? cmd->argv[0] : "<nil>",
-            (int)(cmd ? cmd->background : 0),
-            (size_t)(cmd ? cmd->argc : 0),
-            (void *)ctx);
+    if (tool_dbg) {
+        fprintf(stderr, "[bg-stage] start cmd=%s bg=%d stage_count=%zu ctx=%p\n",
+                (cmd && cmd->argv && cmd->argc > 0) ? cmd->argv[0] : "<nil>",
+                (int)(cmd ? cmd->background : 0),
+                (size_t)(cmd ? cmd->argc : 0),
+                (void *)ctx);
+    }
 #endif
     size_t redir_count = cmd ? cmd->redir_count : 0;
     bool redir_dbg = getenv("PSCALI_REDIR_DEBUG") != NULL;
-    if (redir_dbg || getenv("PSCALI_PIPE_DEBUG")) {
+    if (tool_dbg && (redir_dbg || pipe_dbg)) {
         fprintf(stderr, "[bg-stage] redir_count=%zu\n", redir_count);
         if (redir_dbg && cmd && cmd->redirs) {
             for (size_t ri = 0; ri < redir_count; ++ri) {
@@ -1439,7 +1453,7 @@ static void *shellInProcessBackgroundMain(void *arg) {
     char resolved_stderr[PATH_MAX];
     const char *stdout_env = stdout_raw;
     const char *stderr_env = stderr_raw;
-    if (redir_dbg || getenv("PSCALI_PIPE_DEBUG")) {
+    if (tool_dbg && (redir_dbg || pipe_dbg)) {
         fprintf(stderr, "[bg-stage] stdout_raw=%s stderr_raw=%s\n",
                 stdout_raw ? stdout_raw : "<null>",
                 stderr_raw ? stderr_raw : "<null>");
@@ -1451,8 +1465,6 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (stderr_raw && pathTruncateExpand(stderr_raw, resolved_stderr, sizeof(resolved_stderr))) {
         stderr_env = resolved_stderr;
     }
-    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
-    bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
     if (tool_dbg) {
         fprintf(stderr, "[bg-stage] cmd=%s stdout_raw=%s stderr_raw=%s\n",
                 cmd && cmd->argc > 0 ? cmd->argv[0] : "<null>",
@@ -1489,23 +1501,27 @@ static void *shellInProcessBackgroundMain(void *arg) {
     if (stdout_path && *stdout_path) {
         int flags = O_CREAT | O_WRONLY | (stdout_append ? O_APPEND : O_TRUNC);
         vm_stdout = open(stdout_path, flags, 0666);
-        fprintf(stderr, "[bg-stage] open stdout '%s' fd=%d err=%s\n",
-                stdout_path, vm_stdout, (vm_stdout < 0) ? strerror(errno) : "ok");
-        if (tool_dbg && vm_stdout < 0) {
-            fprintf(stderr, "[bg-stage] open stdout '%s' failed: %s\n", stdout_path, strerror(errno));
-        } else if (pipe_dbg) {
-            fprintf(stderr, "[bg-stage] opened stdout '%s' host_fd=%d\n", stdout_path, vm_stdout);
+        if (tool_dbg) {
+            fprintf(stderr, "[bg-stage] open stdout '%s' fd=%d err=%s\n",
+                    stdout_path, vm_stdout, (vm_stdout < 0) ? strerror(errno) : "ok");
+            if (vm_stdout < 0) {
+                fprintf(stderr, "[bg-stage] open stdout '%s' failed: %s\n", stdout_path, strerror(errno));
+            } else if (pipe_dbg) {
+                fprintf(stderr, "[bg-stage] opened stdout '%s' host_fd=%d\n", stdout_path, vm_stdout);
+            }
         }
     }
     if (stderr_path && *stderr_path) {
         int flags = O_CREAT | O_WRONLY | (stderr_append ? O_APPEND : O_TRUNC);
         vm_stderr = open(stderr_path, flags, 0666);
-        fprintf(stderr, "[bg-stage] open stderr '%s' fd=%d err=%s\n",
-                stderr_path, vm_stderr, (vm_stderr < 0) ? strerror(errno) : "ok");
-        if (tool_dbg && vm_stderr < 0) {
-            fprintf(stderr, "[bg-stage] open stderr '%s' failed: %s\n", stderr_path, strerror(errno));
-        } else if (pipe_dbg) {
-            fprintf(stderr, "[bg-stage] opened stderr '%s' host_fd=%d\n", stderr_path, vm_stderr);
+        if (tool_dbg) {
+            fprintf(stderr, "[bg-stage] open stderr '%s' fd=%d err=%s\n",
+                    stderr_path, vm_stderr, (vm_stderr < 0) ? strerror(errno) : "ok");
+            if (vm_stderr < 0) {
+                fprintf(stderr, "[bg-stage] open stderr '%s' failed: %s\n", stderr_path, strerror(errno));
+            } else if (pipe_dbg) {
+                fprintf(stderr, "[bg-stage] opened stderr '%s' host_fd=%d\n", stderr_path, vm_stderr);
+            }
         }
     }
     if (stdout_path && stderr_path && strcmp(stdout_path, stderr_path) == 0 && vm_stdout >= 0) {
@@ -1553,8 +1569,8 @@ static void *shellInProcessBackgroundMain(void *arg) {
         int vfd = vprocAdoptHostFd(vp, host_fd);
         if (vfd >= 0) {
             stdin_fd = vfd;
-            if (pipe_dbg) fprintf(stderr, "[bg-stage] adopted stdin host=%d vfd=%d\n", host_fd, vfd);
-        } else if (pipe_dbg) {
+            if (tool_dbg && pipe_dbg) fprintf(stderr, "[bg-stage] adopted stdin host=%d vfd=%d\n", host_fd, vfd);
+        } else if (tool_dbg && pipe_dbg) {
             fprintf(stderr, "[bg-stage] adopt stdin host=%d failed: %s\n", host_fd, strerror(errno));
         }
     }
@@ -1563,8 +1579,8 @@ static void *shellInProcessBackgroundMain(void *arg) {
         int vfd = vprocAdoptHostFd(vp, host_fd);
         if (vfd >= 0) {
             vm_stdout = vfd;
-            if (pipe_dbg) fprintf(stderr, "[bg-stage] adopted stdout host=%d vfd=%d\n", host_fd, vfd);
-        } else if (pipe_dbg) {
+            if (tool_dbg && pipe_dbg) fprintf(stderr, "[bg-stage] adopted stdout host=%d vfd=%d\n", host_fd, vfd);
+        } else if (tool_dbg && pipe_dbg) {
             fprintf(stderr, "[bg-stage] adopt stdout host=%d failed: %s\n", host_fd, strerror(errno));
         }
     }
@@ -1573,8 +1589,8 @@ static void *shellInProcessBackgroundMain(void *arg) {
         int vfd = vprocAdoptHostFd(vp, host_fd);
         if (vfd >= 0) {
             vm_stderr = vfd;
-            if (pipe_dbg) fprintf(stderr, "[bg-stage] adopted stderr host=%d vfd=%d\n", host_fd, vfd);
-        } else if (pipe_dbg) {
+            if (tool_dbg && pipe_dbg) fprintf(stderr, "[bg-stage] adopted stderr host=%d vfd=%d\n", host_fd, vfd);
+        } else if (tool_dbg && pipe_dbg) {
             fprintf(stderr, "[bg-stage] adopt stderr host=%d failed: %s\n", host_fd, strerror(errno));
         }
     }
@@ -1584,14 +1600,14 @@ static void *shellInProcessBackgroundMain(void *arg) {
     /* We already materialised stdout/stderr redirs above; skip apply_exec_redirs here.
      * Clear cmd redirs so downstream helpers do not reopen/dup back to the session. */
     cmd->redir_count = 0;
-    if (pipe_dbg) {
+    if (tool_dbg && pipe_dbg) {
         VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
         fprintf(stderr, "[bg-stage] about to run builtin stdin_fd=%d stdout_fd=%d stderr_fd=%d session_out=%d session_err=%d\n",
                 stdin_fd, vm_stdout, vm_stderr,
                 session_stdio ? session_stdio->stdout_host_fd : -1,
                 session_stdio ? session_stdio->stderr_host_fd : -1);
     }
-    if (pipe_dbg) {
+    if (tool_dbg && pipe_dbg) {
         int host_out = vprocTranslateFd(vp, STDOUT_FILENO);
         int host_err = vprocTranslateFd(vp, STDERR_FILENO);
         int host_in = vprocTranslateFd(vp, STDIN_FILENO);
@@ -1599,10 +1615,10 @@ static void *shellInProcessBackgroundMain(void *arg) {
                 host_in, host_out, host_err, (int)gShellCurrentBuiltinBackground);
     }
     bg_status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, vm_stdout, vm_stderr, false);
-    if (pipe_dbg) {
+    if (tool_dbg && pipe_dbg) {
         fprintf(stderr, "[bg-stage] finished run status=%d\n", bg_status);
     }
-    if (pipe_dbg) {
+    if (tool_dbg && pipe_dbg) {
         int host_out = vprocTranslateFd(vp, STDOUT_FILENO);
         int host_err = vprocTranslateFd(vp, STDERR_FILENO);
         int host_in = vprocTranslateFd(vp, STDIN_FILENO);
@@ -3124,6 +3140,10 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         bg_ctx->vm = vm;
         bg_ctx->cmd = cloned;
         bg_ctx->synthetic_pid = vprocReservePid();
+#if defined(PSCAL_TARGET_IOS)
+        bg_ctx->shell_pid = vprocGetShellSelfPid();
+        bg_ctx->kernel_pid = vprocGetKernelPid();
+#endif
 
         if (ctx->pids && stage_pos < ctx->stage_count) {
             ctx->pids[stage_pos] = bg_ctx->synthetic_pid;

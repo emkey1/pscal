@@ -19,6 +19,11 @@
 #include <termios.h>
 #include <limits.h>
 #include <sys/time.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/thread_info.h>
+#include <mach/thread_act.h>
+#endif
 
 #if defined(PSCAL_TARGET_IOS)
 #define PATH_VIRTUALIZATION_NO_MACROS 1
@@ -324,6 +329,84 @@ static int vprocRuntimeCenti(const VProcTaskEntry *entry, uint64_t now_ns) {
     return centi < 0 ? 0 : centi;
 }
 
+static int vprocCentiFromMicros(int64_t micros) {
+    if (micros <= 0) {
+        return 0;
+    }
+    int64_t centi = micros / 10000;
+    if (centi > INT_MAX) {
+        return INT_MAX;
+    }
+    return (int)centi;
+}
+
+static bool vprocThreadUsageMicros(pthread_t tid, int64_t *user_us, int64_t *system_us) {
+#if defined(__APPLE__)
+    thread_t thread_port = pthread_mach_thread_np(tid);
+    if (thread_port == MACH_PORT_NULL) {
+        return false;
+    }
+    thread_basic_info_data_t info;
+    mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+    kern_return_t kr = thread_info(thread_port, THREAD_BASIC_INFO, (thread_info_t)&info, &count);
+    mach_port_deallocate(mach_task_self(), thread_port);
+    if (kr != KERN_SUCCESS) {
+        return false;
+    }
+    if (user_us) {
+        *user_us = (int64_t)info.user_time.seconds * 1000000 + info.user_time.microseconds;
+    }
+    if (system_us) {
+        *system_us = (int64_t)info.system_time.seconds * 1000000 + info.system_time.microseconds;
+    }
+    return true;
+#else
+    (void)tid;
+    if (user_us) *user_us = 0;
+    if (system_us) *system_us = 0;
+    return false;
+#endif
+}
+
+static bool vprocComputeCpuTimesLocked(const VProcTaskEntry *entry, int *utime_cs, int *stime_cs) {
+    if (!entry) {
+        return false;
+    }
+    int64_t user_total = 0;
+    int64_t system_total = 0;
+    bool saw = false;
+    if (entry->thread_count == 0) {
+        int64_t user_us = 0;
+        int64_t system_us = 0;
+        if (vprocThreadUsageMicros(entry->tid, &user_us, &system_us)) {
+            user_total += user_us;
+            system_total += system_us;
+            saw = true;
+        }
+    } else {
+        for (size_t i = 0; i < entry->thread_count; ++i) {
+            pthread_t tid = entry->threads[i];
+            int64_t user_us = 0;
+            int64_t system_us = 0;
+            if (vprocThreadUsageMicros(tid, &user_us, &system_us)) {
+                user_total += user_us;
+                system_total += system_us;
+                saw = true;
+            }
+        }
+    }
+    if (!saw) {
+        return false;
+    }
+    if (utime_cs) {
+        *utime_cs = vprocCentiFromMicros(user_total);
+    }
+    if (stime_cs) {
+        *stime_cs = vprocCentiFromMicros(system_total);
+    }
+    return true;
+}
+
 static uint64_t vprocNowMonoNs(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
@@ -419,13 +502,24 @@ static void vprocMaybeStampRusageLocked(VProcTaskEntry *entry) {
     if (!entry) {
         return;
     }
-    uint64_t now = vprocNowMonoNs();
-    int centi = vprocRuntimeCenti(entry, now);
-    if (entry->rusage_utime == 0 && centi > 0) {
-        entry->rusage_utime = centi;
+    int utime = 0;
+    int stime = 0;
+    if (vprocComputeCpuTimesLocked(entry, &utime, &stime)) {
+        if (utime > entry->rusage_utime) {
+            entry->rusage_utime = utime;
+        }
+        if (stime > entry->rusage_stime) {
+            entry->rusage_stime = stime;
+        }
+        return;
     }
-    if (entry->rusage_stime == 0 && centi > 0) {
-        entry->rusage_stime = centi / 10; /* crude split: mostly user time */
+    if (entry->rusage_utime == 0 && entry->rusage_stime == 0) {
+        uint64_t now = vprocNowMonoNs();
+        int centi = vprocRuntimeCenti(entry, now);
+        if (centi > 0) {
+            entry->rusage_utime = centi;
+            entry->rusage_stime = centi / 10; /* crude split fallback */
+        }
     }
 }
 
@@ -1900,7 +1994,16 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
             int fg_for_session = (entry->sid > 0) ? vprocForegroundPgidLocked(entry->sid) : -1;
             int utime = entry->rusage_utime;
             int stime = entry->rusage_stime;
-            if (!entry->exited) {
+            int cpu_utime = 0;
+            int cpu_stime = 0;
+            if (vprocComputeCpuTimesLocked(entry, &cpu_utime, &cpu_stime)) {
+                if (cpu_utime > utime) {
+                    utime = cpu_utime;
+                }
+                if (cpu_stime > stime) {
+                    stime = cpu_stime;
+                }
+            } else if (!entry->exited && utime == 0 && stime == 0) {
                 int live = vprocRuntimeCenti(entry, now);
                 if (live > utime) {
                     utime = live;

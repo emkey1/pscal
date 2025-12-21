@@ -585,12 +585,6 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
     if (out_status) {
         *out_status = EXIT_SUCCESS;
     }
-#if defined(PSCAL_TARGET_IOS)
-    const char *allow_rc = getenv("EXSH_ALLOW_RC");
-    if (!allow_rc || !allow_rc[0] || strcmp(allow_rc, "0") == 0) {
-        return false;
-    }
-#endif
     const char *skip_rc = getenv("EXSH_SKIP_RC");
     if (skip_rc && skip_rc[0] && strcmp(skip_rc, "0") != 0) {
         return false;
