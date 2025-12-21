@@ -1,4 +1,13 @@
 /* Auto-generated include: word expansion and substitution logic. Included from shell.c. */
+#if defined(PSCAL_TARGET_IOS)
+#undef stdin
+#undef stdout
+#undef stderr
+#define stdin shellVprocStdin()
+#define stdout shellVprocStdout()
+#define stderr shellVprocStderr()
+#endif
+
 static char *shellExpandWord(const char *text,
                              uint8_t flags,
                              const char *meta,
@@ -2742,20 +2751,10 @@ static void shellRemoveJobAt(size_t index) {
 static ShellJob *shellFindJobByPid(pid_t pid);
 
 static size_t shellAllocateJobId(void) {
-    size_t candidate = 1;
-    while (true) {
-        bool used = false;
-        for (size_t i = 0; i < gShellJobCount; ++i) {
-            if (gShellJobs[i].id == candidate) {
-                used = true;
-                break;
-            }
-        }
-        if (!used) {
-            return candidate;
-        }
-        ++candidate;
+    if (!SC()) {
+        return 1;
     }
+    return SC()->job_next_id++;
 }
 
 static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, const ShellCommand *cmd) {
@@ -2812,21 +2811,23 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
 
     gShellJobs = new_jobs;
     ShellJob *job = &gShellJobs[gShellJobCount++];
+    /* Preserve any existing vproc job id; otherwise allocate a new one and stamp it. */
+    int job_id = vprocGetJobId(pgid);
+    if (job_id <= 0 && pid_count > 0) {
+        job_id = vprocGetJobId(pids[0]);
+    }
+    if (job_id <= 0) {
+        job_id = (int)shellAllocateJobId();
+        vprocSetJobId(pgid, job_id);
+        for (size_t i = 0; i < pid_count; ++i) {
+            vprocSetJobId(pids[i], job_id);
+        }
+    }
+    job->id = (size_t)job_id;
     job->pgid = pgid;
     job->pids = pid_copy;
     job->pid_count = pid_count;
-    int stored_id = vprocGetJobId(pgid);
-    if (stored_id <= 0 && pid_count > 0) {
-        stored_id = vprocGetJobId(pids[0]);
-    }
-    if (stored_id > 0) {
-        job->id = (size_t)stored_id;
-    } else {
-        job->id = shellAllocateJobId();
-    }
-    vprocSetJobId(pgid, (int)job->id);
     for (size_t i = 0; i < pid_count; ++i) {
-        vprocSetJobId(pids[i], (int)job->id);
         vprocSetCommandLabel(pids[i], summary);
         if (pgid > 0) {
             vprocSetPgid(pids[i], (int)pgid);
@@ -2926,6 +2927,11 @@ static int shellCollectJobs(void) {
                         job->last_status = s->status;
                         if (!job->command && s->command[0]) {
                             job->command = strdup(s->command);
+                        }
+                        /* If the snapshot carries a job id, keep it stable so %n works. */
+                        if (s->job_id > 0) {
+                            job->id = (size_t)s->job_id;
+                            vprocSetJobId(s->pid, s->job_id);
                         }
                     }
                 }
@@ -3074,6 +3080,7 @@ static bool shellJobFindVisibleIndex(size_t visible_number, size_t *out_index) {
     if (!out_index || visible_number == 0) {
         return false;
     }
+    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
     size_t ordinal = 0;
     for (size_t i = 0; i < gShellJobCount; ++i) {
         ShellJob *job = &gShellJobs[i];
@@ -3081,6 +3088,11 @@ static bool shellJobFindVisibleIndex(size_t visible_number, size_t *out_index) {
             continue;
         }
         ++ordinal;
+        if (dbg) {
+            fprintf(stderr, "[jobs-ios] vis=%zu ordinal=%zu id=%zu pgid=%d running=%d stopped=%d\n",
+                    visible_number, ordinal, job->id, (int)job->pgid,
+                    (int)job->running, (int)job->stopped);
+        }
         if (job->id == visible_number || ordinal == visible_number) {
             *out_index = i;
             return true;

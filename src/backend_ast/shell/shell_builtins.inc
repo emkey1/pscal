@@ -65,6 +65,19 @@ static void shellInvalidateFrontendState(FrontendKind kind) {
 }
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+#undef stdin
+#undef stdout
+#undef stderr
+#define stdin shellVprocStdin()
+#define stdout shellVprocStdout()
+#define stderr shellVprocStderr()
+#define printf(...) fprintf(stdout, __VA_ARGS__)
+#define puts(text) shellVprocPuts((text))
+#define putchar(ch) fputc((ch), stdout)
+#define perror(label) shellVprocPerror((label))
+#endif
+
 static const char *shellTypesetArithmeticErrorFormat(void) {
     static int cached_style = -1;
     if (cached_style < 0) {
@@ -700,10 +713,96 @@ Value vmBuiltinShellOr(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+typedef struct {
+    ShellExecRedirBackup *backups;
+    size_t backup_count;
+} ShellSubshellFrame;
+
+static ShellSubshellFrame *gShellSubshellStack = NULL;
+static size_t gShellSubshellStackSize = 0;
+static size_t gShellSubshellStackCapacity = 0;
+
+static bool shellSubshellStackPush(ShellExecRedirBackup *backups, size_t backup_count) {
+    if (gShellSubshellStackSize >= gShellSubshellStackCapacity) {
+        size_t new_cap = (gShellSubshellStackCapacity == 0) ? 4 : (gShellSubshellStackCapacity * 2);
+        ShellSubshellFrame *resized = (ShellSubshellFrame *)realloc(gShellSubshellStack, new_cap * sizeof(ShellSubshellFrame));
+        if (!resized) {
+            return false;
+        }
+        gShellSubshellStack = resized;
+        gShellSubshellStackCapacity = new_cap;
+    }
+    ShellSubshellFrame *slot = &gShellSubshellStack[gShellSubshellStackSize++];
+    slot->backups = backups;
+    slot->backup_count = backup_count;
+    return true;
+}
+
+static ShellSubshellFrame shellSubshellStackPop(void) {
+    ShellSubshellFrame frame = {0};
+    if (gShellSubshellStackSize == 0) {
+        return frame;
+    }
+    frame = gShellSubshellStack[--gShellSubshellStackSize];
+    return frame;
+}
+
 Value vmBuiltinShellSubshell(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
-    (void)arg_count;
-    (void)args;
+    const char *meta = (arg_count > 0 && args[0].type == TYPE_STRING) ? args[0].s_val : "";
+    bool leave = (meta && strstr(meta, "mode=leave") != NULL);
+    if (leave) {
+        ShellSubshellFrame frame = shellSubshellStackPop();
+        if (frame.backups) {
+            shellRestoreExecRedirections(frame.backups, frame.backup_count);
+            shellFreeExecRedirBackups(frame.backups, frame.backup_count);
+        }
+        shellRestoreCurrentVm(previous_vm);
+        return makeVoid();
+    }
+
+    ShellCommand cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    bool ok = true;
+    ShellExecRedirBackup *backups = NULL;
+    size_t backup_count = 0;
+    for (int i = 1; i < arg_count; ++i) {
+        Value entry = args[i];
+        if (entry.type != TYPE_STRING || !entry.s_val) {
+            ok = false;
+            break;
+        }
+        if (!shellAddRedirection(&cmd, entry.s_val)) {
+            ok = false;
+            break;
+        }
+    }
+    if (ok && cmd.redir_count > 0) {
+        if (!shellApplyExecRedirections(vm ? vm : gShellCurrentVm, &cmd, &backups, &backup_count)) {
+            ok = false;
+        }
+    }
+    if (cmd.redirs) {
+        shellFreeRedirections(&cmd);
+        cmd.redirs = NULL;
+        cmd.redir_count = 0;
+    }
+    if (ok && (backups || backup_count == 0)) {
+        if (!shellSubshellStackPush(backups, backup_count)) {
+            if (backups) {
+                shellRestoreExecRedirections(backups, backup_count);
+                shellFreeExecRedirBackups(backups, backup_count);
+            }
+            ok = false;
+        }
+    } else if (backups) {
+        shellRestoreExecRedirections(backups, backup_count);
+        shellFreeExecRedirBackups(backups, backup_count);
+    }
+    if (!ok) {
+        runtimeError(vm, "subshell: failed to apply redirections");
+        shellUpdateStatus(1);
+    }
     shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
@@ -4138,7 +4237,7 @@ static int shellLsCompare(const void *a, const void *b) {
     return strcasecmp(*lhs, *rhs);
 }
 
-static int shellBuiltinListDirectory(const char *path, bool show_all) {
+static int shellBuiltinListDirectory(const char *path, bool show_all, bool show_almost_all) {
     DIR *dir = opendir(path);
     if (!dir) {
         fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
@@ -4149,8 +4248,15 @@ static int shellBuiltinListDirectory(const char *path, bool show_all) {
     errno = 0;
     struct dirent *dent;
     while ((dent = readdir(dir)) != NULL) {
-        if (!show_all && dent->d_name[0] == '.') {
-            continue;
+        if (dent->d_name[0] == '.') {
+            if (!show_all) {
+                if (!show_almost_all) {
+                    continue;
+                }
+                if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0) {
+                    continue;
+                }
+            }
         }
         if (!shellStringVectorPush(&entries, dent->d_name)) {
             errno = ENOMEM;
@@ -4174,7 +4280,7 @@ static int shellBuiltinListDirectory(const char *path, bool show_all) {
     return 0;
 }
 
-static int shellBuiltinListPath(const char *path, bool show_all, bool print_header, bool needs_spacing) {
+static int shellBuiltinListPath(const char *path, bool show_all, bool show_almost_all, bool print_header, bool needs_spacing) {
     struct stat st;
     if (stat(path, &st) != 0) {
         fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
@@ -4192,11 +4298,12 @@ static int shellBuiltinListPath(const char *path, bool show_all, bool print_head
         }
         printf("%s:\n", path);
     }
-    return shellBuiltinListDirectory(path, show_all);
+    return shellBuiltinListDirectory(path, show_all, show_almost_all);
 }
 
 Value vmBuiltinShellLs(VM *vm, int arg_count, Value *args) {
     bool show_all = false;
+    bool show_almost_all = false;
     int index = 0;
     while (index < arg_count) {
         if (args[index].type != TYPE_STRING || !args[index].s_val) {
@@ -4213,6 +4320,11 @@ Value vmBuiltinShellLs(VM *vm, int arg_count, Value *args) {
         for (const char *opt = word + 1; *opt; ++opt) {
             if (*opt == 'a') {
                 show_all = true;
+                show_almost_all = false;
+            } else if (*opt == 'A') {
+                if (!show_all) {
+                    show_almost_all = true;
+                }
             } else {
                 runtimeError(vm, "ls: unsupported option -%c", *opt);
                 shellUpdateStatus(1);
@@ -4249,7 +4361,7 @@ Value vmBuiltinShellLs(VM *vm, int arg_count, Value *args) {
 
     int final_status = 0;
     for (int i = 0; i < path_count; ++i) {
-        int rc = shellBuiltinListPath(paths[i], show_all, path_count > 1, i > 0);
+        int rc = shellBuiltinListPath(paths[i], show_all, show_almost_all, path_count > 1, i > 0);
         if (rc != 0 && final_status == 0) {
             final_status = rc;
         }

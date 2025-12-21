@@ -136,10 +136,10 @@ static void shellSetupSelfVproc(void) {
         if (kernel_pid > 0) {
             vprocSetParent(kernel_pid, 0);
         }
-        if (getenv("PSCALI_SHELL_VPROC")) {
-            vprocActivate(gShellSelfVproc);
-            gShellSelfVprocActivated = true;
-        }
+        /* Always activate the shell's vproc so shims and stdio inheritance work
+         * consistently for pipelines and background workers. */
+        vprocActivate(gShellSelfVproc);
+        gShellSelfVprocActivated = true;
     } else if (shell_pid_hint > 0) {
         /* Ensure the shell has a stable synthetic pid even if the fd table
          * could not be initialised. */
@@ -585,8 +585,18 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
     if (out_status) {
         *out_status = EXIT_SUCCESS;
     }
+#if defined(PSCAL_TARGET_IOS)
+    const char *allow_rc = getenv("EXSH_ALLOW_RC");
+    if (!allow_rc || !allow_rc[0] || strcmp(allow_rc, "0") == 0) {
+        return false;
+    }
+#endif
     const char *skip_rc = getenv("EXSH_SKIP_RC");
     if (skip_rc && skip_rc[0] && strcmp(skip_rc, "0") != 0) {
+        return false;
+    }
+    const char *no_rc = getenv("EXSH_NO_RC");
+    if (no_rc && no_rc[0] && strcmp(no_rc, "0") != 0) {
         return false;
     }
     const char *home = getenv("HOME");
@@ -615,6 +625,26 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
             return false;
         }
     }
+    const char *disable_name = ".exshrc.disable";
+    size_t disable_len = strlen(disable_name);
+    size_t disable_path_len = home_len + (needs_separator ? 1 : 0) + disable_len + 1;
+    char *disable_path = (char *)malloc(disable_path_len);
+    if (disable_path) {
+        if (needs_separator) {
+            snprintf(disable_path, disable_path_len, "%s/%s", home, disable_name);
+        } else {
+            snprintf(disable_path, disable_path_len, "%s%s", home, disable_name);
+        }
+        if (access(disable_path, F_OK) == 0) {
+            fprintf(stderr,
+                    "exsh: startup file disabled by '%s'\n",
+                    disable_path);
+            free(disable_path);
+            free(rc_path);
+            return false;
+        }
+        free(disable_path);
+    }
     if (access(rc_path, F_OK) != 0) {
         free(rc_path);
         return false;
@@ -623,6 +653,29 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
     if (!source) {
         free(rc_path);
         return false;
+    }
+    if (source[0] == '#' && source[1] == '!') {
+        const char *line_end = strchr(source, '\n');
+        size_t line_len = line_end ? (size_t)(line_end - source) : strlen(source);
+        bool looks_like_exsh = false;
+        if (line_len > 2) {
+            const char *interp = source + 2;
+            const char *interp_end = source + line_len;
+            for (const char *p = interp; p + 3 < interp_end; ++p) {
+                if (p[0] == 'e' && p[1] == 'x' && p[2] == 's' && p[3] == 'h') {
+                    looks_like_exsh = true;
+                    break;
+                }
+            }
+        }
+        if (!looks_like_exsh) {
+            fprintf(stderr,
+                    "exsh: skipping startup file '%s' (non-exsh shebang)\n",
+                    rc_path);
+            free(source);
+            free(rc_path);
+            return false;
+        }
     }
 
     ShellRunOptions rc_options = {0};
@@ -3685,11 +3738,11 @@ void pscalRuntimeDebugLog(const char *message);
 
     if (pscalRuntimeStdinIsInteractive()) {
         shellRuntimeSetInteractive(true);
+        shellRuntimeInitJobControl();
         int rc_status = EXIT_SUCCESS;
         if (shellRunStartupConfig(&options, &rc_status)) {
             EXSH_RETURN(vmExitWithCleanup(rc_status));
         }
-        shellRuntimeInitJobControl();
         int status = runInteractiveSession(&options);
         EXSH_RETURN(vmExitWithCleanup(status));
     }

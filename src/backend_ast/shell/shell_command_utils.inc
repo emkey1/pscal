@@ -7,6 +7,19 @@ extern void pscalRuntimeDebugLog(const char *message);
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
+#undef stdin
+#undef stdout
+#undef stderr
+#define stdin shellVprocStdin()
+#define stdout shellVprocStdout()
+#define stderr shellVprocStderr()
+#define printf(...) fprintf(stdout, __VA_ARGS__)
+#define puts(text) shellVprocPuts((text))
+#define putchar(ch) fputc((ch), stdout)
+#define perror(label) shellVprocPerror((label))
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
 #define SHELL_GETCWD(buf, len) pscalPathVirtualized_getcwd((buf), (len))
 #define SHELL_CHDIR(path) pscalPathVirtualized_chdir((path))
 #else
@@ -261,12 +274,6 @@ static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
     ctx->fd = -1;
 }
 
-static void *shellCommandSubstitutionReader(void *arg) {
-    ShellCommandSubReadContext *ctx = (ShellCommandSubReadContext *)arg;
-    shellCommandSubstitutionDrain(ctx);
-    return NULL;
-}
-
 static char *shellRunCommandSubstitution(const char *command) {
     const char *source = command ? command : "";
     ShellScalarCacheEntry *cached_entry = NULL;
@@ -281,15 +288,13 @@ static char *shellRunCommandSubstitution(const char *command) {
     size_t result_length = 0;
     bool from_cache = false;
 
-    ShellCommandSubReadContext reader;
-    reader.fd = -1;
-    reader.buffer = NULL;
-    reader.length = 0;
-    reader.capacity = 0;
-    reader.error = 0;
-
-    pthread_t reader_thread;
-    bool reader_started = false;
+    ShellCommandSubReadContext reader = {
+        .fd = -1,
+        .buffer = NULL,
+        .length = 0,
+        .capacity = 0,
+        .error = 0,
+    };
 
     int pipes[2] = {-1, -1};
     int saved_stdout = -1;
@@ -357,10 +362,6 @@ static char *shellRunCommandSubstitution(const char *command) {
     pipes[1] = -1;
 
     reader.fd = pipes[0];
-    reader_started = (pthread_create(&reader_thread, NULL, shellCommandSubstitutionReader, &reader) == 0);
-    if (!reader_started) {
-        /* Fallback to synchronous draining if thread creation fails. */
-    }
 
     memset(&opts, 0, sizeof(opts));
     opts.no_cache = 1;
@@ -419,11 +420,8 @@ static char *shellRunCommandSubstitution(const char *command) {
         saved_stdout = -1;
     }
 
-    if (reader_started) {
-        pthread_join(reader_thread, NULL);
-    } else {
-        shellCommandSubstitutionDrain(&reader);
-    }
+    /* Drain synchronously to avoid background lifetime issues. */
+    shellCommandSubstitutionDrain(&reader);
 
     if (reader.fd >= 0) {
         close(reader.fd);
@@ -462,6 +460,9 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
 substitution_finish:
+    if (reader.error && !exit_requested) {
+        shellUpdateStatus(reader.error);
+    }
     if (capture_frame) {
         capture_frame->entry = stored_entry;
         capture_frame->from_cache = from_cache;
@@ -485,22 +486,6 @@ substitution_finish:
         shellCaptureStackPop();
     }
 
-    if (stdout_redirected && saved_stdout >= 0) {
-        dup2(saved_stdout, STDOUT_FILENO);
-    }
-    if (saved_stdout >= 0) {
-        close(saved_stdout);
-    }
-    if (pipes[0] >= 0) {
-        close(pipes[0]);
-    }
-    if (pipes[1] >= 0) {
-        close(pipes[1]);
-    }
-    if (reader.fd >= 0) {
-        close(reader.fd);
-    }
-
     if (!result) {
         result = strdup("");
     }
@@ -512,6 +497,12 @@ static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, s
         return false;
     }
     size_t needed = *length + extra + 1; // +1 for null terminator
+    if (*capacity == 0 && *buffer != NULL) {
+        /* If the caller passed a non-owned or stale pointer with no capacity
+         * metadata, reset to NULL so we allocate fresh storage rather than
+         * reallocating an invalid pointer. */
+        *buffer = NULL;
+    }
     if (needed <= *capacity) {
         return true;
     }

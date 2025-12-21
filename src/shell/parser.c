@@ -1100,7 +1100,7 @@ static ShellCommand *parseSimpleCommand(ShellParser *parser) {
         break;
     }
 
-    if (!seen_word && command->data.simple.words.count == 0 && command->data.simple.redirections.count == 0) {
+    if (!seen_word && command->data.simple.words.count == 0 && command->redirections.count == 0) {
         shellFreeCommand(command);
         parserErrorAt(parser, &parser->current, "Expected command");
         return NULL;

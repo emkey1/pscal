@@ -4,8 +4,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <signal.h>
 
 #ifdef __cplusplus
@@ -24,6 +27,7 @@ typedef struct {
     int winsize_cols;
     int winsize_rows;
     int pid_hint;   // optional fixed synthetic pid; -1 for auto
+    int job_id;     // optional job id to stamp on creation
 } VProcOptions;
 
 typedef struct {
@@ -70,12 +74,26 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity);
 int vprocTranslateFd(VProc *vp, int fd);
 int vprocDup(VProc *vp, int fd);
 int vprocDup2(VProc *vp, int fd, int target);
+/* Sync vproc table entry to a host fd already duplicated onto target_fd. */
+int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src);
 int vprocClose(VProc *vp, int fd);
 int vprocPipe(VProc *vp, int pipefd[2]);
 /* Duplicate a host fd onto a target host descriptor, bypassing shim indirection. */
 int vprocHostDup2(int host_fd, int target_fd);
+/* Duplicate a host descriptor without routing through the shim table. */
+int vprocHostDup(int fd);
+/* Open a host path without routing through the shim table. */
+int vprocHostOpen(const char *path, int flags, ...);
+/* Create a host pipe without routing through the shim table. */
+int vprocHostPipe(int pipefd[2]);
+/* Seek on a host descriptor without routing through the shim table. */
+off_t vprocHostLseek(int fd, off_t offset, int whence);
 /* Close a host descriptor without routing through the shim table. */
 int vprocHostClose(int fd);
+/* Read from a host descriptor without routing through the shim table. */
+ssize_t vprocHostRead(int fd, void *buf, size_t count);
+/* Write to a host descriptor without routing through the shim table. */
+ssize_t vprocHostWrite(int fd, const void *buf, size_t count);
 /* Spawn a joinable host thread, bypassing vproc's pthread_create shim. */
 int vprocHostPthreadCreate(pthread_t *thread,
                            const pthread_attr_t *attr,
@@ -93,6 +111,7 @@ int vprocSetWinsize(VProc *vp, int cols, int rows);
 int vprocGetWinsize(VProc *vp, VProcWinsize *out);
 
 /* Task lifecycle management for virtual processes (iOS clean-room). */
+int vprocRegisterTidHint(int pid, pthread_t tid);
 int vprocRegisterThread(VProc *vp, pthread_t tid);
 void vprocMarkExit(VProc *vp, int status);
 void vprocSetParent(int pid, int parent_pid);
@@ -102,6 +121,7 @@ int vprocGetPgid(int pid);
 int vprocGetSid(int pid);
 int vprocSetForegroundPgid(int sid, int fg_pgid);
 int vprocGetForegroundPgid(int sid);
+int vprocNextJobIdSeed(void);
 void vprocMarkGroupExit(int pid, int status);
 void vprocSetRusage(int pid, int utime, int stime);
 int vprocBlockSignals(int pid, int mask);
@@ -220,7 +240,7 @@ static inline void vprocFormatCpuTimes(int utime_cs, int stime_cs, double *utime
 #include <errno.h>
 /* Desktop stubs: map to host syscalls or no-ops so non-iOS builds compile. */
 static inline VProcOptions vprocDefaultOptions(void) {
-    VProcOptions o = {.stdin_fd = -1, .stdout_fd = -1, .stderr_fd = -1, .winsize_cols = 80, .winsize_rows = 24, .pid_hint = -1};
+    VProcOptions o = {.stdin_fd = -1, .stdout_fd = -1, .stderr_fd = -1, .winsize_cols = 80, .winsize_rows = 24, .pid_hint = -1, .job_id = 0};
     return o;
 }
 static inline VProc *vprocCreate(const VProcOptions *opts) { (void)opts; return NULL; }
@@ -234,10 +254,31 @@ static inline size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) { (void)
 static inline int vprocTranslateFd(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
 static inline int vprocDup(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
 static inline int vprocDup2(VProc *vp, int fd, int target) { (void)vp; (void)fd; (void)target; return -1; }
+static inline int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src) {
+    (void)vp;
+    (void)target_fd;
+    (void)host_src;
+    return 0;
+}
 static inline int vprocClose(VProc *vp, int fd) { (void)vp; (void)fd; return close(fd); }
 static inline int vprocPipe(VProc *vp, int pipefd[2]) { (void)vp; return pipe(pipefd); }
 static inline int vprocHostDup2(int host_fd, int target_fd) { return dup2(host_fd, target_fd); }
+static inline int vprocHostDup(int fd) { return dup(fd); }
+static inline int vprocHostOpen(const char *path, int flags, ...) {
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    return open(path, flags, mode);
+}
+static inline int vprocHostPipe(int pipefd[2]) { return pipe(pipefd); }
+static inline off_t vprocHostLseek(int fd, off_t offset, int whence) { return lseek(fd, offset, whence); }
 static inline int vprocHostClose(int fd) { return close(fd); }
+static inline ssize_t vprocHostRead(int fd, void *buf, size_t count) { return read(fd, buf, count); }
+static inline ssize_t vprocHostWrite(int fd, const void *buf, size_t count) { return write(fd, buf, count); }
 static inline int vprocHostPthreadCreate(pthread_t *thread,
                                          const pthread_attr_t *attr,
                                          void *(*start_routine)(void *),

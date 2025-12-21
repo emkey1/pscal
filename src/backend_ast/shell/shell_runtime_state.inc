@@ -39,7 +39,145 @@
 #include <pthread.h>
 #include <time.h>
 
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    FILE *fp;
+    int host_fd;
+    int std_fd;
+} ShellVprocStream;
+
+static __thread ShellVprocStream gShellVprocStdout = { NULL, -1, STDOUT_FILENO };
+static __thread ShellVprocStream gShellVprocStderr = { NULL, -1, STDERR_FILENO };
+static __thread ShellVprocStream gShellVprocStdin = { NULL, -1, STDIN_FILENO };
+
+static FILE *shellVprocStreamFallback(int std_fd) {
+    if (std_fd == STDIN_FILENO) {
+        return stdin;
+    }
+    if (std_fd == STDOUT_FILENO) {
+        return stdout;
+    }
+    return stderr;
+}
+
+static FILE *shellVprocStreamOpen(int std_fd,
+                                  ShellVprocStream *cache,
+                                  const char *mode,
+                                  int buf_mode) {
+    if (!cache || !mode) {
+        return shellVprocStreamFallback(std_fd);
+    }
+
+    int host_fd = std_fd;
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int translated = vprocTranslateFd(vp, std_fd);
+        if (translated >= 0) {
+            host_fd = translated;
+        }
+    }
+
+    if (cache->fp && cache->host_fd == host_fd) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    int dup_fd = -1;
+#ifdef F_DUPFD_CLOEXEC
+    dup_fd = fcntl(host_fd, F_DUPFD_CLOEXEC, 0);
+    if (dup_fd < 0 && errno == EINVAL) {
+        dup_fd = -1;
+    }
+#endif
+    if (dup_fd < 0) {
+        dup_fd = dup(host_fd);
+    }
+    if (dup_fd < 0) {
+        return shellVprocStreamFallback(std_fd);
+    }
+
+    FILE *fp = fdopen(dup_fd, mode);
+    if (!fp) {
+        close(dup_fd);
+        return shellVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = host_fd;
+    return fp;
+}
+
+static FILE *shellVprocStdout(void) {
+    int buf_mode = pscalRuntimeStdoutIsInteractive() ? _IOLBF : _IOFBF;
+    return shellVprocStreamOpen(STDOUT_FILENO, &gShellVprocStdout, "w", buf_mode);
+}
+
+static FILE *shellVprocStderr(void) {
+    return shellVprocStreamOpen(STDERR_FILENO, &gShellVprocStderr, "w", _IONBF);
+}
+
+static FILE *shellVprocStdin(void) {
+    return shellVprocStreamOpen(STDIN_FILENO, &gShellVprocStdin, "r", -1);
+}
+
+static int shellVprocPuts(const char *text) {
+    FILE *out = shellVprocStdout();
+    const char *value = text ? text : "(null)";
+    if (fputs(value, out) == EOF) {
+        return EOF;
+    }
+    return fputc('\n', out);
+}
+
+static void shellVprocPerror(const char *label) {
+    int saved_errno = errno;
+    FILE *errfp = shellVprocStderr();
+    if (label && *label) {
+        fprintf(errfp, "%s: %s\n", label, strerror(saved_errno));
+    } else {
+        fprintf(errfp, "%s\n", strerror(saved_errno));
+    }
+    errno = saved_errno;
+}
+
+static void shellFlushVprocStreams(void) {
+    if (gShellVprocStdout.fp) {
+        fflush(gShellVprocStdout.fp);
+    }
+    if (gShellVprocStderr.fp) {
+        fflush(gShellVprocStderr.fp);
+    }
+}
+
+static void shellCloseVprocStream(ShellVprocStream *stream) {
+    if (!stream || !stream->fp) {
+        return;
+    }
+    fclose(stream->fp);
+    stream->fp = NULL;
+    stream->host_fd = -1;
+}
+
+static void shellCloseVprocStreams(void) {
+    shellCloseVprocStream(&gShellVprocStdout);
+    shellCloseVprocStream(&gShellVprocStderr);
+    shellCloseVprocStream(&gShellVprocStdin);
+}
+#else
+static void shellFlushVprocStreams(void) {}
+static void __attribute__((unused)) shellCloseVprocStreams(void) {}
+#endif
+
 static void shellFlushStandardStreams(void) {
+    shellFlushVprocStreams();
     fflush(stdout);
     fflush(stderr);
 }

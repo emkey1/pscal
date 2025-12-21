@@ -65,38 +65,45 @@ fi
 # Quality-of-life aliases modelled after common Unix shells. Some
 # environments expose a slimmed-down `ls` (e.g. the iPad smallclue bundle),
 # so probe for the fancy flags before enabling them so `ls` keeps working.
-_exshrc_ls_supports() {
-    if builtin ls "$@" >/dev/null 2>&1; then
-        return 0
-    fi
-    command ls "$@" >/dev/null 2>&1
-}
-
-if _exshrc_ls_supports --color=auto; then
-    alias ls='builtin ls --color=auto'
-else
+if [ -n "${PSCALI_CONTAINER_ROOT:-}" ]; then
     alias ls='builtin ls'
-fi
-
-if _exshrc_ls_supports -alF; then
-    alias ll='ls -alF'
-else
     alias ll='ls -al'
-fi
-
-if _exshrc_ls_supports -A; then
-    alias la='ls -A'
-else
     alias la='ls -a'
-fi
-
-if _exshrc_ls_supports -CF; then
-    alias l='ls -CF'
-else
     alias l='ls -l'
-fi
+else
+    _exshrc_ls_supports() {
+        if builtin ls "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        command ls "$@" >/dev/null 2>&1
+    }
 
-unset -f _exshrc_ls_supports
+    if _exshrc_ls_supports --color=auto; then
+        alias ls='builtin ls --color=auto'
+    else
+        alias ls='builtin ls'
+    fi
+
+    if _exshrc_ls_supports -alF; then
+        alias ll='ls -alF'
+    else
+        alias ll='ls -al'
+    fi
+
+    if _exshrc_ls_supports -A; then
+        alias la='ls -A'
+    else
+        alias la='ls -a'
+    fi
+
+    if _exshrc_ls_supports -CF; then
+        alias l='ls -CF'
+    else
+        alias l='ls -l'
+    fi
+
+    unset -f _exshrc_ls_supports
+fi
 
 alias grep='grep --color=auto'
 alias ..='cd ..'

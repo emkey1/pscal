@@ -124,17 +124,17 @@ static VProc *shellCreateVProcForStage(int stdin_host,
                                        int cols,
                                        int rows,
                                        int pid_hint) {
-    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
-    if (session_stdio) {
-        if (stdin_host < 0 && session_stdio->stdin_host_fd >= 0) {
-            stdin_host = session_stdio->stdin_host_fd;
-        }
-        if (stdout_host < 0 && session_stdio->stdout_host_fd >= 0) {
-            stdout_host = session_stdio->stdout_host_fd;
-        }
-        if (stderr_host < 0 && session_stdio->stderr_host_fd >= 0) {
-            stderr_host = session_stdio->stderr_host_fd;
-        }
+    /* Always inherit stdio from the active vproc; never fall back to session
+     * stdio here. Background workers must not mutate the interactive session's
+     * fds. */
+    VProc *active = vprocCurrent();
+    if (active) {
+        int translated = vprocTranslateFd(active, STDIN_FILENO);
+        if (stdin_host < 0 && translated >= 0) stdin_host = translated;
+        translated = vprocTranslateFd(active, STDOUT_FILENO);
+        if (stdout_host < 0 && translated >= 0) stdout_host = translated;
+        translated = vprocTranslateFd(active, STDERR_FILENO);
+        if (stderr_host < 0 && translated >= 0) stderr_host = translated;
     }
     VProcOptions opts = vprocDefaultOptions();
     opts.stdin_fd = (stdin_host >= 0) ? stdin_host : -2;   /* default to /dev/null */
@@ -305,6 +305,7 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
     if (!out_cmd) {
         return false;
     }
+    bool redir_dbg = getenv("PSCALI_REDIR_DEBUG") != NULL;
     memset(out_cmd, 0, sizeof(*out_cmd));
     if (arg_count <= 0) {
         runtimeError(vm, "shell exec: missing metadata argument");
@@ -317,12 +318,18 @@ static bool shellBuildCommand(VM *vm, int arg_count, Value *args, ShellCommand *
     }
     shellParseMetadata(meta.s_val, out_cmd);
     bool saw_command_word = false;
+    if (redir_dbg) {
+        fprintf(stderr, "[redir-build] arg_count=%d meta=%s\n", arg_count, meta.s_val);
+    }
     for (int i = 1; i < arg_count; ++i) {
         Value v = args[i];
         if (v.type != TYPE_STRING || !v.s_val) {
             runtimeError(vm, "shell exec: arguments must be strings");
             shellFreeCommand(out_cmd);
             return false;
+        }
+        if (redir_dbg) {
+            fprintf(stderr, "[redir-build]   arg[%d]=%s\n", i, v.s_val);
         }
         if (strncmp(v.s_val, "redir:", 6) == 0) {
             if (!shellAddRedirection(out_cmd, v.s_val)) {
@@ -1376,12 +1383,27 @@ static void *shellInProcessBackgroundMain(void *arg) {
             (void *)ctx);
 #endif
     size_t redir_count = cmd ? cmd->redir_count : 0;
+    bool redir_dbg = getenv("PSCALI_REDIR_DEBUG") != NULL;
+    if (redir_dbg || getenv("PSCALI_PIPE_DEBUG")) {
+        fprintf(stderr, "[bg-stage] redir_count=%zu\n", redir_count);
+        if (redir_dbg && cmd && cmd->redirs) {
+            for (size_t ri = 0; ri < redir_count; ++ri) {
+                ShellRedirection *r = &cmd->redirs[ri];
+                fprintf(stderr, "[bg-stage]   redir[%zu] fd=%d kind=%d path=%s dup=%d flags=0x%x\n",
+                        ri, r->fd, (int)r->kind, r->path ? r->path : "<none>", r->dup_target_fd, r->flags);
+            }
+        }
+    }
     const char *stdout_raw = NULL;
     const char *stderr_raw = NULL;
     bool stdout_append = false;
     bool stderr_append = false;
     int stdin_fd = -1;
     bool stdin_redirected = false;
+    /* Background defaults: stdin -> /dev/null unless explicitly redirected. */
+    if (ctx->cmd && ctx->cmd->background) {
+        stdin_fd = -2;
+    }
 
     if (cmd && redir_count > 0 && cmd->redirs) {
         for (size_t i = 0; i < redir_count; ++i) {
@@ -1417,6 +1439,11 @@ static void *shellInProcessBackgroundMain(void *arg) {
     char resolved_stderr[PATH_MAX];
     const char *stdout_env = stdout_raw;
     const char *stderr_env = stderr_raw;
+    if (redir_dbg || getenv("PSCALI_PIPE_DEBUG")) {
+        fprintf(stderr, "[bg-stage] stdout_raw=%s stderr_raw=%s\n",
+                stdout_raw ? stdout_raw : "<null>",
+                stderr_raw ? stderr_raw : "<null>");
+    }
 #if defined(PSCAL_TARGET_IOS)
     if (stdout_raw && pathTruncateExpand(stdout_raw, resolved_stdout, sizeof(resolved_stdout))) {
         stdout_env = resolved_stdout;
@@ -1453,6 +1480,7 @@ static void *shellInProcessBackgroundMain(void *arg) {
     }
     int vm_stdout = -1;
     int vm_stderr = -1;
+    /* If stderr was requested to follow stdout, reuse the stdout handle (after open). */
     int bg_status = 0;
 #if defined(PSCAL_TARGET_IOS)
     VProc *vp = NULL;
@@ -1479,6 +1507,9 @@ static void *shellInProcessBackgroundMain(void *arg) {
         } else if (pipe_dbg) {
             fprintf(stderr, "[bg-stage] opened stderr '%s' host_fd=%d\n", stderr_path, vm_stderr);
         }
+    }
+    if (stdout_path && stderr_path && strcmp(stdout_path, stderr_path) == 0 && vm_stdout >= 0) {
+        vm_stderr = vm_stdout;
     }
 #if defined(PSCAL_TARGET_IOS)
     vp = shellCreateVProcForStage(stdin_fd,
@@ -1514,8 +1545,10 @@ static void *shellInProcessBackgroundMain(void *arg) {
         }
     /* Hand off host fds to the synthetic vproc so dup2 shims work on vproc-local
      * descriptors during builtin execution. */
-    /* For redirected stdio, keep host fds so dup2 binds directly like iSH. */
-    if (stdin_fd >= 0 && !stdout_path && !stderr_path) {
+    /* Adopt host fds into the child vproc so shimmed I/O stays per-process.
+     * If adoption fails, keep using the host fd directly (don’t close or rewrite
+     * the parent’s descriptors). */
+    if (stdin_fd >= 0) {
         int host_fd = stdin_fd;
         int vfd = vprocAdoptHostFd(vp, host_fd);
         if (vfd >= 0) {
@@ -1525,10 +1558,32 @@ static void *shellInProcessBackgroundMain(void *arg) {
             fprintf(stderr, "[bg-stage] adopt stdin host=%d failed: %s\n", host_fd, strerror(errno));
         }
     }
+    if (vm_stdout >= 0) {
+        int host_fd = vm_stdout;
+        int vfd = vprocAdoptHostFd(vp, host_fd);
+        if (vfd >= 0) {
+            vm_stdout = vfd;
+            if (pipe_dbg) fprintf(stderr, "[bg-stage] adopted stdout host=%d vfd=%d\n", host_fd, vfd);
+        } else if (pipe_dbg) {
+            fprintf(stderr, "[bg-stage] adopt stdout host=%d failed: %s\n", host_fd, strerror(errno));
+        }
+    }
+    if (vm_stderr >= 0) {
+        int host_fd = vm_stderr;
+        int vfd = vprocAdoptHostFd(vp, host_fd);
+        if (vfd >= 0) {
+            vm_stderr = vfd;
+            if (pipe_dbg) fprintf(stderr, "[bg-stage] adopted stderr host=%d vfd=%d\n", host_fd, vfd);
+        } else if (pipe_dbg) {
+            fprintf(stderr, "[bg-stage] adopt stderr host=%d failed: %s\n", host_fd, strerror(errno));
+        }
+    }
     vprocActivate(vp);
 #endif
     gShellBackgroundWorkerActive = true;
-    /* Apply exec redirs so background jobs honor user-specified &>, >>, etc. */
+    /* We already materialised stdout/stderr redirs above; skip apply_exec_redirs here.
+     * Clear cmd redirs so downstream helpers do not reopen/dup back to the session. */
+    cmd->redir_count = 0;
     if (pipe_dbg) {
         VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
         fprintf(stderr, "[bg-stage] about to run builtin stdin_fd=%d stdout_fd=%d stderr_fd=%d session_out=%d session_err=%d\n",
@@ -1543,7 +1598,7 @@ static void *shellInProcessBackgroundMain(void *arg) {
         fprintf(stderr, "[bg-stage] pre-run fdmap stdin host=%d stdout host=%d stderr host=%d bg_flag=%d\n",
                 host_in, host_out, host_err, (int)gShellCurrentBuiltinBackground);
     }
-    bg_status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, vm_stdout, vm_stderr, true);
+    bg_status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, vm_stdout, vm_stderr, false);
     if (pipe_dbg) {
         fprintf(stderr, "[bg-stage] finished run status=%d\n", bg_status);
     }
@@ -1606,7 +1661,8 @@ cleanup:
     ctx->stderr_path = NULL;
     free(cmd);
 #if defined(PSCAL_TARGET_IOS)
-    if (bg_vm) {
+    /* Restore VM/runtime context now that the background task is done. */
+    if (bg_vm || prev_vm) {
         shellRestoreCurrentVm(prev_vm);
     }
     if (prev_ctx) {
@@ -1640,7 +1696,7 @@ static void shellResetPipeline(void) {
     }
 #if defined(PSCAL_TARGET_IOS)
     if (ctx->spool_fd >= 0) {
-        close(ctx->spool_fd);
+        vprocHostClose(ctx->spool_fd);
         ctx->spool_fd = -1;
         ctx->spool_size = 0;
     }
@@ -1687,7 +1743,7 @@ static void shellAbortPipeline(void) {
 
 #if defined(PSCAL_TARGET_IOS)
     if (ctx->spool_fd >= 0) {
-        close(ctx->spool_fd);
+        vprocHostClose(ctx->spool_fd);
         ctx->spool_fd = -1;
         ctx->spool_size = 0;
     }
@@ -1972,6 +2028,28 @@ static bool shellCommandIsExecBuiltin(const ShellCommand *cmd) {
     return strcasecmp(canonical, "exec") == 0;
 }
 
+static bool shellExecRedirBackupPush(const ShellExecRedirBackup *backup,
+                                     ShellExecRedirBackup **backups,
+                                     size_t *count,
+                                     size_t *capacity) {
+    if (!backup || !backups || !count || !capacity) {
+        return false;
+    }
+    if (*capacity == 0 || *count >= *capacity) {
+        size_t new_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        ShellExecRedirBackup *resized =
+            (ShellExecRedirBackup *)realloc(*backups, new_capacity * sizeof(ShellExecRedirBackup));
+        if (!resized) {
+            return false;
+        }
+        *backups = resized;
+        *capacity = new_capacity;
+    }
+    (*backups)[*count] = *backup;
+    (*count)++;
+    return true;
+}
+
 static bool shellEnsureExecRedirBackup(int target_fd,
                                        int avoid_fd,
                                        ShellExecRedirBackup **backups,
@@ -1990,11 +2068,10 @@ static bool shellEnsureExecRedirBackup(int target_fd,
     backup.saved_fd = -1;
     backup.saved_valid = false;
     backup.was_closed = false;
-#if defined(PSCAL_TARGET_IOS)
     backup.use_vproc = false;
+#if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
 #else
-    backup.use_vproc = false;
     VProc *active_vp = NULL;
 #endif
     int min_fd = target_fd + 1;
@@ -2094,27 +2171,90 @@ static void shellResetStandardStream(int fd) {
     }
 }
 
+/* Duplicate src onto target, updating both the host fd and (when present) the
+ * current vproc's fd table. */
+static bool shellDupOntoTarget(VProc *vp, int src_fd, int target_fd, bool dbg, const char *label) {
+    if (target_fd < 0) {
+        errno = EBADF;
+        return false;
+    }
+    int host_src = src_fd;
+#if defined(PSCAL_TARGET_IOS)
+    bool skip_host_dup = gShellBackgroundWorkerActive;
+    if (vp) {
+        int translated = vprocTranslateFd(vp, src_fd);
+        if (translated >= 0) {
+            host_src = translated;
+        }
+    }
+#endif
+    int hrc = 0;
+#if defined(PSCAL_TARGET_IOS)
+    if (vp) {
+        int vrc = vprocDup2(vp, src_fd, target_fd);
+        if (dbg) {
+            fprintf(stderr, "[redir] vprocDup2 %d->%d rc=%d host_src=%d (%s)\n",
+                    src_fd, target_fd, vrc, host_src, label ? label : "");
+        }
+        /* Never touch the process-wide stdio when running in a background worker;
+         * the interactive shell shares host fds across threads. */
+        if (!skip_host_dup && host_src >= 0) {
+            hrc = vprocHostDup2(host_src, target_fd);
+            if (dbg) {
+                fprintf(stderr, "[redir] vprocHostDup2 %d->%d rc=%d (%s)\n",
+                        host_src, target_fd, hrc, label ? label : "");
+            }
+        }
+        if (!skip_host_dup && host_src < 0 && src_fd >= 0) {
+            hrc = dup2(src_fd, target_fd);
+        } else if (!skip_host_dup && host_src >= 0 && hrc < 0) {
+            hrc = dup2(host_src, target_fd);
+        }
+    } else
+#endif
+    {
+        hrc = dup2((host_src >= 0) ? host_src : src_fd, target_fd);
+    }
+    if (hrc < 0) {
+        if (dbg) {
+            fprintf(stderr, "[redir] dup %d->%d failed: %s (%s)\n",
+                    (host_src >= 0) ? host_src : src_fd,
+                    target_fd, strerror(errno), label ? label : "");
+        }
+        return false;
+    }
+    shellResetStandardStream(target_fd);
+    return true;
+}
+
 static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count) {
     if (!backups) {
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
+    bool skip_host_restore = gShellBackgroundWorkerActive;
 #else
     VProc *active_vp = NULL;
+    bool skip_host_restore = false;
 #endif
     for (size_t i = 0; i < count; ++i) {
         ShellExecRedirBackup *backup = &backups[i];
         if (backup->saved_valid && backup->saved_fd >= 0) {
-            if (backup->use_vproc && active_vp) {
-                vprocDup2(active_vp, backup->saved_fd, backup->target_fd);
-            } else {
+            if (!skip_host_restore) {
                 vprocHostDup2(backup->saved_fd, backup->target_fd);
             }
-            shellResetStandardStream(backup->target_fd);
+            if (backup->use_vproc && active_vp) {
+                (void)vprocRestoreHostFd(active_vp, backup->target_fd, backup->saved_fd);
+            }
+            if (!skip_host_restore) {
+                shellResetStandardStream(backup->target_fd);
+            }
         } else if (backup->was_closed) {
-            vprocHostClose(backup->target_fd);
-            shellResetStandardStream(backup->target_fd);
+            if (!skip_host_restore) {
+                vprocHostClose(backup->target_fd);
+                shellResetStandardStream(backup->target_fd);
+            }
         }
     }
 }
@@ -2136,6 +2276,11 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                                        ShellExecRedirBackup **out_backups,
                                        size_t *out_count) {
     bool dbg = (getenv("PSCALI_REDIR_DEBUG") != NULL) || (getenv("PSCALI_PIPE_DEBUG") != NULL);
+#if defined(PSCAL_TARGET_IOS)
+    VProc *vp_current = vprocCurrent();
+#else
+    VProc *vp_current = NULL;
+#endif
     if (out_backups) {
         *out_backups = NULL;
     }
@@ -2192,7 +2337,12 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
 #else
                 const char *open_path = redir->path;
 #endif
-                int fd = open(open_path, redir->flags, redir->mode);
+                int fd = -1;
+#if defined(PSCAL_TARGET_IOS)
+                fd = vprocHostOpen(open_path, redir->flags, redir->mode);
+#else
+                fd = open(open_path, redir->flags, redir->mode);
+#endif
                 if (fd < 0) {
                     int err = errno;
                     if (dbg) {
@@ -2202,18 +2352,39 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                     shellUpdateStatus(err ? err : 1);
                     goto redir_error;
                 }
-                if (dup2(fd, target_fd) < 0) {
+                int vfd = -1;
+#if defined(PSCAL_TARGET_IOS)
+                if (vp_current) {
+                    vfd = vprocAdoptHostFd(vp_current, fd);
+                    if (vfd < 0) {
+                        vprocHostClose(fd);
+                        runtimeError(vm, "exec: %s: %s", redir->path, strerror(errno));
+                        shellUpdateStatus(errno ? errno : 1);
+                        goto redir_error;
+                    }
+                }
+#endif
+                if (!shellDupOntoTarget(vp_current, (vfd >= 0) ? vfd : fd, target_fd, dbg, "open")) {
                     int err = errno;
                     if (dbg) {
-                        fprintf(stderr, "[redir] dup2 %d->%d failed: %s\n", fd, target_fd, strerror(err));
+                        fprintf(stderr, "[redir] dup %d->%d failed: %s\n", fd, target_fd, strerror(err));
                     }
                     runtimeError(vm, "exec: %s: %s", redir->path, strerror(err));
                     shellUpdateStatus(err ? err : 1);
-                    close(fd);
+#if defined(PSCAL_TARGET_IOS)
+                    if (vp_current && vfd >= 0) {
+                        vprocCloseShim(vfd);
+                    } else
+#endif
+                    vprocHostClose(fd);
                     goto redir_error;
                 }
-                shellResetStandardStream(target_fd);
-                close(fd);
+#if defined(PSCAL_TARGET_IOS)
+                if (vp_current && vfd >= 0) {
+                    vprocCloseShim(vfd);
+                } else
+#endif
+                vprocHostClose(fd);
                 if (target_fd == STDOUT_FILENO) {
                     stdout_redirected = true;
                 }
@@ -2241,7 +2412,7 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                         shellUpdateStatus(1);
                         goto redir_error;
                     }
-                    if (dup2(redir->dup_target_fd, target_fd) < 0) {
+                    if (!shellDupOntoTarget(vp_current, redir->dup_target_fd, target_fd, dbg, "dup")) {
                         int err = errno;
                         if (dbg) {
                             fprintf(stderr, "[redir] dup2 %d->%d failed: %s\n",
@@ -2252,7 +2423,6 @@ static bool shellApplyExecRedirections(VM *vm, const ShellCommand *cmd,
                         shellUpdateStatus(err ? err : 1);
                         goto redir_error;
                     }
-                    shellResetStandardStream(target_fd);
                 }
                 break;
             }
@@ -2389,7 +2559,7 @@ redir_error:
 static bool __attribute__((unused)) shellPipelineWriteBufferToPipe(const char *data, size_t len, int fd) {
     size_t written = 0;
     while (written < len) {
-        ssize_t res = write(fd, data + written, len - written);
+        ssize_t res = vprocHostWrite(fd, data + written, len - written);
         if (res < 0) {
             if (errno == EINTR) {
                 continue;
@@ -2417,7 +2587,7 @@ static bool __attribute__((unused)) shellPipelineReadPipeToBuffer(int fd, char *
             buffer = new_buf;
             capacity = new_capacity;
         }
-        ssize_t res = read(fd, buffer + size, capacity - size);
+        ssize_t res = vprocHostRead(fd, buffer + size, capacity - size);
         if (res < 0) {
             if (errno == EINTR) {
                 continue;
@@ -2479,11 +2649,11 @@ static void *shellPipelineCaptureThread(void *arg) {
     char *tmp = malloc(chunk);
     if (!tmp) {
         cap->err = ENOMEM;
-        close(cap->fd);
+        vprocHostClose(cap->fd);
         return NULL;
     }
     for (;;) {
-        ssize_t res = read(cap->fd, tmp, chunk);
+        ssize_t res = vprocHostRead(cap->fd, tmp, chunk);
         if (res < 0) {
             if (errno == EINTR) {
                 continue;
@@ -2502,7 +2672,7 @@ static void *shellPipelineCaptureThread(void *arg) {
             break;
         }
         if (cap->spool_fd >= 0) {
-            ssize_t written = write(cap->spool_fd, tmp, (size_t)res);
+            ssize_t written = vprocHostWrite(cap->spool_fd, tmp, (size_t)res);
             if (written < 0) {
                 cap->err = errno ? errno : EIO;
                 if (dbg) fprintf(stderr, "[pipe-capture] spool write err=%s\n", strerror(cap->err));
@@ -2516,7 +2686,7 @@ static void *shellPipelineCaptureThread(void *arg) {
         if (dbg) fprintf(stderr, "[pipe-capture] read=%zd total=%zu\n", res, cap->size);
     }
     free(tmp);
-    close(cap->fd);
+    vprocHostClose(cap->fd);
     cap->fd = -1;
     return NULL;
 }
@@ -2536,7 +2706,7 @@ static void *shellPipelineFeedThread(void *arg) {
     if (feed->src_fd >= 0) {
         char buf[4096];
         for (;;) {
-            ssize_t r = read(feed->src_fd, buf, sizeof(buf));
+            ssize_t r = vprocHostRead(feed->src_fd, buf, sizeof(buf));
             if (r < 0) {
                 if (errno == EINTR) continue;
                 feed->err = errno ? errno : EIO;
@@ -2548,14 +2718,14 @@ static void *shellPipelineFeedThread(void *arg) {
             }
             size_t off = 0;
             while (off < (size_t)r) {
-                ssize_t w = write(feed->fd, buf + off, (size_t)r - off);
+                ssize_t w = vprocHostWrite(feed->fd, buf + off, (size_t)r - off);
                 if (w < 0) {
                     if (errno == EINTR) continue;
                     if (errno == EPIPE) {
                         /* Consumer closed; treat as normal completion. */
                         feed->err = 0;
                         off = (size_t)r;
-                        close(feed->fd);
+                        vprocHostClose(feed->fd);
                         feed->fd = -1;
                         if (dbg) fprintf(stderr, "[pipe-feed] EPIPE after %zu bytes (src_fd=%d)\n", off, feed->src_fd);
                         return NULL;
@@ -2568,7 +2738,7 @@ static void *shellPipelineFeedThread(void *arg) {
                 off += (size_t)w;
             }
         }
-        close(feed->src_fd);
+        vprocHostClose(feed->src_fd);
         feed->src_fd = -1;
     } else {
         size_t offset = 0;
@@ -2577,7 +2747,7 @@ static void *shellPipelineFeedThread(void *arg) {
             if (to_write > chunk) {
                 to_write = chunk;
             }
-            ssize_t res = write(feed->fd, feed->data + offset, to_write);
+            ssize_t res = vprocHostWrite(feed->fd, feed->data + offset, to_write);
             if (res < 0) {
                 if (errno == EINTR) {
                     continue;
@@ -2594,7 +2764,7 @@ static void *shellPipelineFeedThread(void *arg) {
             offset += (size_t)res;
         }
     }
-    close(feed->fd);
+    vprocHostClose(feed->fd);
     feed->fd = -1;
     return NULL;
 }
@@ -2622,6 +2792,7 @@ static int shellRunBuiltinInProcess(VM *vm,
                                     bool apply_exec_redirs) {
     bool tool_dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (cmd && cmd->background);
     bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
+    bool redir_dbg = getenv("PSCALI_REDIR_DEBUG") != NULL;
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
     if (pipe_dbg) {
@@ -2629,6 +2800,25 @@ static int shellRunBuiltinInProcess(VM *vm,
                 (void *)active_vp, stdin_fd, stdout_fd, stderr_fd);
     }
 #endif
+    if (redir_dbg) {
+        fprintf(stderr, "[redir] cmd=%s argc=%zu redir_count=%zu apply_exec=%d\n",
+                (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
+                cmd ? cmd->argc : 0,
+                cmd ? cmd->redir_count : 0,
+                (int)apply_exec_redirs);
+        if (cmd && cmd->argv) {
+            for (size_t ai = 0; ai < (size_t)cmd->argc; ++ai) {
+                fprintf(stderr, "[redir]   argv[%zu]=%s\n", ai, cmd->argv[ai] ? cmd->argv[ai] : "<null>");
+            }
+        }
+        if (cmd && cmd->redirs) {
+            for (size_t ri = 0; ri < cmd->redir_count; ++ri) {
+                ShellRedirection *r = &cmd->redirs[ri];
+                fprintf(stderr, "[redir]   redir[%zu] fd=%d kind=%d path=%s dup_target=%d flags=0x%x\n",
+                        ri, r->fd, (int)r->kind, r->path ? r->path : "<none>", r->dup_target_fd, r->flags);
+            }
+        }
+    }
     ShellExecRedirBackup *backups = NULL;
     size_t backup_count = 0;
     size_t backup_capacity = 0;
@@ -2640,77 +2830,30 @@ static int shellRunBuiltinInProcess(VM *vm,
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stdin failed\n");
             goto cleanup;
         }
-        int dup_src = stdin_fd;
-        bool used_vproc = false;
-#if defined(PSCAL_TARGET_IOS)
-        int trans = active_vp ? vprocTranslateFd(active_vp, dup_src) : -1;
-        if (pipe_dbg) fprintf(stderr, "[run-builtin] stdin translate fd=%d -> %d\n", dup_src, trans);
-        if (active_vp && trans >= 0) {
-            if (vprocDup2(active_vp, dup_src, STDIN_FILENO) < 0) {
-                if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] vprocDup2 stdin failed: %s\n", strerror(errno));
-                goto cleanup;
-            }
-            used_vproc = true;
-        }
-#endif
-        if (!used_vproc && dup2(dup_src, STDIN_FILENO) < 0) {
-            if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup2 stdin failed: %s\n", strerror(errno));
+        if (!shellDupOntoTarget(active_vp, stdin_fd, STDIN_FILENO, pipe_dbg, "stdin")) {
+            if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup stdin failed\n");
             goto cleanup;
         }
-        shellResetStandardStream(STDIN_FILENO);
     }
     if (stdout_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDOUT_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stdout failed\n");
             goto cleanup;
         }
-        if (tool_dbg && pipe_dbg) {
-            int fd_flags = fcntl(stdout_fd, F_GETFD);
-            fprintf(stderr, "[run-builtin] stdout_fd=%d fcntl=%d (%s)\n",
-                    stdout_fd, fd_flags, (fd_flags < 0) ? strerror(errno) : "ok");
-        }
-        int dup_src = stdout_fd;
-        bool used_vproc = false;
-#if defined(PSCAL_TARGET_IOS)
-        int trans = active_vp ? vprocTranslateFd(active_vp, dup_src) : -1;
-        if (pipe_dbg) fprintf(stderr, "[run-builtin] stdout translate fd=%d -> %d\n", dup_src, trans);
-        if (active_vp && trans >= 0) {
-            if (vprocDup2(active_vp, dup_src, STDOUT_FILENO) < 0) {
-                if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] vprocDup2 stdout failed: %s\n", strerror(errno));
-                goto cleanup;
-            }
-            used_vproc = true;
-        }
-#endif
-        if (!used_vproc && dup2(dup_src, STDOUT_FILENO) < 0) {
-            if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup2 stdout failed: %s\n", strerror(errno));
+        if (!shellDupOntoTarget(active_vp, stdout_fd, STDOUT_FILENO, pipe_dbg, "stdout")) {
+            if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup stdout failed\n");
             goto cleanup;
         }
-        shellResetStandardStream(STDOUT_FILENO);
     }
     if (stderr_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDERR_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stderr failed\n");
             goto cleanup;
         }
-        int dup_src = stderr_fd;
-        bool used_vproc = false;
-#if defined(PSCAL_TARGET_IOS)
-        int trans = active_vp ? vprocTranslateFd(active_vp, dup_src) : -1;
-        if (pipe_dbg) fprintf(stderr, "[run-builtin] stderr translate fd=%d -> %d\n", dup_src, trans);
-        if (active_vp && trans >= 0) {
-            if (vprocDup2(active_vp, dup_src, STDERR_FILENO) < 0) {
-                if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] vprocDup2 stderr failed: %s\n", strerror(errno));
-                goto cleanup;
-            }
-            used_vproc = true;
-        }
-#endif
-        if (!used_vproc && dup2(dup_src, STDERR_FILENO) < 0) {
-            if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup2 stderr failed: %s\n", strerror(errno));
+        if (!shellDupOntoTarget(active_vp, stderr_fd, STDERR_FILENO, pipe_dbg, "stderr")) {
+            if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup stderr failed\n");
             goto cleanup;
         }
-        shellResetStandardStream(STDERR_FILENO);
     }
 
     if (apply_exec_redirs) {
@@ -2918,7 +3061,22 @@ cleanup:
     } else if (backups) {
         shellRestoreExecRedirections(backups, backup_count);
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (pipe_dbg && backups && backup_count > 0) {
+        for (size_t bi = 0; bi < backup_count; ++bi) {
+            fprintf(stderr, "[redir-restore] target=%d saved_fd=%d use_vproc=%d was_closed=%d\n",
+                    backups[bi].target_fd,
+                    backups[bi].saved_fd,
+                    (int)backups[bi].use_vproc,
+                    (int)backups[bi].was_closed);
+        }
+    }
+#endif
     shellFreeExecRedirBackups(backups, backup_count);
+#if defined(PSCAL_TARGET_IOS)
+    /* Close cached vproc streams so redirected pipeline fds get released. */
+    shellCloseVprocStreams();
+#endif
     return status;
 }
 
@@ -2982,7 +3140,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
-        int create_rc = pthread_create(&tid, &attr, shellInProcessBackgroundMain, bg_ctx);
+        int create_rc = vprocHostPthreadCreate(&tid, &attr, shellInProcessBackgroundMain, bg_ctx);
         if (getenv("PSCALI_PIPE_DEBUG")) {
             fprintf(stderr, "[pipeline-bg] pthread_create rc=%d ctx=%p\n", create_rc, (void *)bg_ctx);
         }
@@ -3024,6 +3182,8 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     int stderr_fd = -1;
     int input_pipe[2] = { -1, -1 };
     int output_pipe[2] = { -1, -1 };
+    int capture_writer_fd = -1;
+    int capture_writer_vfd = -1;
     bool ok = false;
     pthread_t feed_thread;
     bool feed_thread_started = false;
@@ -3042,6 +3202,8 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     bool vm_stderr_adopted = false;
 #endif
     bool need_spool = !pipeline_tail;
+    bool direct_spool = true;
+    int input_spool_fd = -1;
     int status = 0;
 
     if (!pipeline_head) {
@@ -3050,25 +3212,26 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             shellUpdateStatus(1);
             return false;
         }
-        lseek(ctx->spool_fd, 0, SEEK_SET);
+        input_spool_fd = ctx->spool_fd;
+        vprocHostLseek(input_spool_fd, 0, SEEK_SET);
         bool pager_tail = pipeline_tail &&
                           cmd->argc > 0 &&
                           (strcmp(cmd->argv[0], "less") == 0 || strcmp(cmd->argv[0], "more") == 0);
         bool empty_spool = (ctx->spool_size == 0);
         if (pager_tail) {
-            stdin_fd = dup(ctx->spool_fd);
+            stdin_fd = vprocHostDup(input_spool_fd);
             if (stdin_fd < 0) {
                 runtimeError(vm, "pipeline: failed to reopen pager buffer: %s", strerror(errno));
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
-            lseek(stdin_fd, 0, SEEK_SET);
+            vprocHostLseek(stdin_fd, 0, SEEK_SET);
             if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] pager tail using spool_fd=%d size=%zu\n", ctx->spool_fd, ctx->spool_size);
+                fprintf(stderr, "[pipe] pager tail using spool_fd=%d size=%zu\n", input_spool_fd, ctx->spool_size);
             }
         } else if (empty_spool) {
             /* Nothing captured; avoid spinning up a feeder thread. */
-            stdin_fd = open("/dev/null", O_RDONLY);
+            stdin_fd = vprocHostOpen("/dev/null", O_RDONLY);
             if (stdin_fd < 0) {
                 runtimeError(vm, "pipeline: failed to open /dev/null: %s", strerror(errno));
                 shellUpdateStatus(errno ? errno : 1);
@@ -3078,18 +3241,18 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 fprintf(stderr, "[pipe] empty spool -> /dev/null\n");
             }
         } else {
-            if (pipe(input_pipe) != 0) {
+            if (vprocHostPipe(input_pipe) != 0) {
                 runtimeError(vm, "pipeline: failed to allocate input buffer: %s", strerror(errno));
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
-            feed.src_fd = dup(ctx->spool_fd);
+            feed.src_fd = vprocHostDup(input_spool_fd);
             if (feed.src_fd < 0) {
                 runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
-            lseek(feed.src_fd, 0, SEEK_SET);
+            vprocHostLseek(feed.src_fd, 0, SEEK_SET);
             feed.fd = input_pipe[1];
             input_pipe[1] = -1;
             if (vprocHostPthreadCreate(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
@@ -3105,17 +3268,34 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     }
 
     if (need_spool) {
-        if (pipe(output_pipe) != 0) {
-            runtimeError(vm, "pipeline: unable to allocate buffer: %s", strerror(errno));
-            shellUpdateStatus(errno ? errno : 1);
-            goto cleanup;
-        }
-        stdout_fd = output_pipe[1];
-        capture.spool_fd = shellPipelineCreateSpoolFile();
-        if (capture.spool_fd < 0) {
-            runtimeError(vm, "pipeline: failed to allocate spool storage: %s", strerror(errno));
-            shellUpdateStatus(errno ? errno : 1);
-            goto cleanup;
+        if (direct_spool) {
+            capture.spool_fd = shellPipelineCreateSpoolFile();
+            if (capture.spool_fd < 0) {
+                runtimeError(vm, "pipeline: failed to allocate spool storage: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                goto cleanup;
+            }
+            stdout_fd = vprocHostDup(capture.spool_fd);
+            if (stdout_fd < 0) {
+                runtimeError(vm, "pipeline: failed to open spool writer: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                goto cleanup;
+            }
+            capture_writer_fd = stdout_fd;
+        } else {
+            if (vprocHostPipe(output_pipe) != 0) {
+                runtimeError(vm, "pipeline: unable to allocate buffer: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                goto cleanup;
+            }
+            stdout_fd = output_pipe[1];
+            capture_writer_fd = output_pipe[1];
+            capture.spool_fd = shellPipelineCreateSpoolFile();
+            if (capture.spool_fd < 0) {
+                runtimeError(vm, "pipeline: failed to allocate spool storage: %s", strerror(errno));
+                shellUpdateStatus(errno ? errno : 1);
+                goto cleanup;
+            }
         }
     }
 
@@ -3133,10 +3313,14 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     }
 #endif
 
-    bool apply_exec_redirs = !(ctx->stage_count > 1);
-    if (need_spool && output_pipe[0] >= 0) {
+    bool apply_exec_redirs = cmd && cmd->redir_count > 0;
+    if (need_spool && !direct_spool && output_pipe[0] >= 0) {
         capture.fd = output_pipe[0];
         output_pipe[0] = -1;
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipe] capture setup fd=%d writer=%d spool_fd=%d writer_vfd=%d\n",
+                    capture.fd, stdout_fd, capture.spool_fd, capture_writer_vfd);
+        }
         if (vprocHostPthreadCreate(&capture_thread, NULL, shellPipelineCaptureThread, &capture) == 0) {
             capture_thread_started = true;
         } else {
@@ -3198,6 +3382,10 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     int stdout_host_fd = stdout_fd;
     int stderr_host_fd = stderr_fd;
     if (vp) {
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipe] vproc adopt stdin=%d stdout=%d stderr=%d\n",
+                    stdin_fd, stdout_fd, stderr_fd);
+        }
         if (stdin_fd >= 0) {
             int vfd = vprocAdoptHostFd(vp, stdin_fd);
             if (vfd >= 0) {
@@ -3212,6 +3400,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 vm_stdout_fd = vfd;
                 vm_stdout_adopted = true;
                 stdout_fd = -1;
+                capture_writer_vfd = vfd;
                 if (output_pipe[1] == stdout_host_fd) {
                     output_pipe[1] = -1;
                 }
@@ -3229,6 +3418,10 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 vm_stderr_adopted = true;
                 stderr_fd = -1;
             }
+        }
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipe] vproc adopt stdin=%d stdout=%d stderr=%d\n",
+                    stdin_fd, stdout_fd, stderr_fd);
         }
     }
     vprocActivate(vp);
@@ -3249,6 +3442,17 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 #endif
 
     status = shellRunBuiltinInProcess(vm, cmd, run_stdin_fd, run_stdout_fd, run_stderr_fd, apply_exec_redirs);
+    if (need_spool && direct_spool && capture.spool_fd >= 0) {
+        ctx->spool_fd = capture.spool_fd;
+        off_t end = vprocHostLseek(ctx->spool_fd, 0, SEEK_END);
+        if (end >= 0) {
+            ctx->spool_size = (size_t)end;
+            vprocHostLseek(ctx->spool_fd, 0, SEEK_SET);
+        } else {
+            ctx->spool_size = 0;
+        }
+        capture.spool_fd = -1;
+    }
     if (getenv("PSCALI_PIPE_DEBUG")) {
         fprintf(stderr, "[pipe] stage cmd=%s status=%d spool_fd=%d size=%zu\n",
                 (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
@@ -3287,6 +3491,12 @@ cleanup:
             vprocCloseShim(run_stderr_fd);
             run_stderr_fd = -1;
         }
+        /* Ensure any vproc entries that still reference the pipeline writer are closed
+         * so the capture thread can see EOF. */
+        if (capture_writer_vfd >= 0) {
+            vprocCloseShim(capture_writer_vfd);
+            capture_writer_vfd = -1;
+        }
     }
 #endif
 #if defined(PSCAL_TARGET_IOS)
@@ -3297,15 +3507,19 @@ cleanup:
         vprocDestroy(vp);
     }
 #endif
-    if (stdin_fd >= 0) close(stdin_fd);
-    if (input_pipe[0] >= 0) close(input_pipe[0]);
-    if (input_pipe[1] >= 0) close(input_pipe[1]);
+    if (stdin_fd >= 0) vprocHostClose(stdin_fd);
+    if (input_pipe[0] >= 0) vprocHostClose(input_pipe[0]);
+    if (input_pipe[1] >= 0) vprocHostClose(input_pipe[1]);
     if (stdout_fd >= 0) {
-        close(stdout_fd);
+        vprocHostClose(stdout_fd);
         if (output_pipe[1] == stdout_fd) {
             output_pipe[1] = -1;
         }
         stdout_fd = -1;
+    }
+    if (capture_writer_fd >= 0) {
+        vprocHostClose(capture_writer_fd);
+        capture_writer_fd = -1;
     }
 #if defined(PSCAL_TARGET_IOS)
     if (pushed_virtual_tty) {
@@ -3314,6 +3528,10 @@ cleanup:
     }
 #endif
     if (capture_thread_started) {
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipe] capture join fd=%d spool_fd=%d size=%zu err=%d\n",
+                    capture.fd, capture.spool_fd, capture.size, capture.err);
+        }
         int join_rc = pthread_join(capture_thread, NULL);
         if (join_rc != 0 && getenv("PSCALI_PIPE_DEBUG")) {
             fprintf(stderr, "[pipe] capture join failed rc=%d (%s)\n", join_rc, strerror(join_rc));
@@ -3330,7 +3548,7 @@ cleanup:
                         capture.size, capture.spool_fd);
             }
             if (ctx->spool_fd >= 0) {
-                close(ctx->spool_fd);
+                vprocHostClose(ctx->spool_fd);
             }
             ctx->spool_fd = capture.spool_fd;
             ctx->spool_size = capture.size;
@@ -3338,7 +3556,7 @@ cleanup:
                 fprintf(stderr, "[pipe] captured size=%zu\n", ctx->spool_size);
             }
             if (ctx->spool_fd >= 0) {
-                lseek(ctx->spool_fd, 0, SEEK_SET);
+                vprocHostLseek(ctx->spool_fd, 0, SEEK_SET);
             }
             capture.spool_fd = -1;
         }
@@ -3348,7 +3566,11 @@ cleanup:
         capture.buffer = NULL;
     }
     if (capture.spool_fd >= 0) {
-        close(capture.spool_fd);
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipe] capture cleanup spool_fd=%d size=%zu err=%d\n",
+                    capture.spool_fd, capture.size, capture.err);
+        }
+        vprocHostClose(capture.spool_fd);
         capture.spool_fd = -1;
     }
 
@@ -3362,19 +3584,18 @@ cleanup:
         }
     }
 
-    if (!pipeline_head && ctx->spool_fd >= 0) {
-        close(ctx->spool_fd);
-        ctx->spool_fd = -1;
-        ctx->spool_size = 0;
+    if (!pipeline_head && input_spool_fd >= 0) {
+        vprocHostClose(input_spool_fd);
+        input_spool_fd = -1;
     }
 
     if (need_spool && output_pipe[1] >= 0) {
-        close(output_pipe[1]);
+        vprocHostClose(output_pipe[1]);
         output_pipe[1] = -1;
     }
 
     if (!feed_thread_started && feed.fd >= 0) {
-        close(feed.fd);
+        vprocHostClose(feed.fd);
         feed.fd = -1;
     }
 
@@ -3453,8 +3674,19 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     shellPatchCombinedRedirectTokens(cmd);
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
 #if defined(PSCAL_TARGET_IOS)
-    if (!ctx->active && cmd->background) {
-        if (shellEnsurePipeline(1, false)) {
+    if (cmd->background) {
+        bool need_new = (!ctx->active) || (!ctx->background) || (ctx->stage_count != 1) ||
+                        (!cmd->is_pipeline_head) || (!cmd->is_pipeline_tail);
+        if (need_new) {
+            shellResetPipeline();
+            if (!shellEnsurePipeline(1, false)) {
+                runtimeError(vm, "pipeline: unable to allocate background context");
+                shellUpdateStatus(1);
+                shellFreeCommand(cmd);
+                shellScalarCacheInvalidate();
+                return makeVoid();
+            }
+            ctx = &gShellRuntime.pipeline;
             ctx->active = true;
             ctx->in_process = true;
             ctx->stage_count = 1;
@@ -3464,15 +3696,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             cmd->is_pipeline_head = true;
             cmd->is_pipeline_tail = true;
             if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipeline-bg] auto in-process pipeline for background command '%s'\n",
+                fprintf(stderr, "[pipeline-bg] auto in-process pipeline reset for background '%s'\n",
                         (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<null>");
             }
-        } else {
-            runtimeError(vm, "pipeline: unable to allocate background context");
-            shellUpdateStatus(1);
-            shellFreeCommand(cmd);
-            shellScalarCacheInvalidate();
-            return makeVoid();
         }
     }
 #endif

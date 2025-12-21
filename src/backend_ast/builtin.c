@@ -38,6 +38,108 @@
 #include <signal.h>
 #include <fcntl.h>
 
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+typedef struct {
+    FILE *fp;
+    int host_fd;
+    int std_fd;
+} VmVprocStream;
+
+static __thread VmVprocStream gVmVprocStdout = { NULL, -1, STDOUT_FILENO };
+static __thread VmVprocStream gVmVprocStderr = { NULL, -1, STDERR_FILENO };
+static __thread VmVprocStream gVmVprocStdin = { NULL, -1, STDIN_FILENO };
+
+static FILE *vmVprocStreamFallback(int std_fd) {
+    if (std_fd == STDIN_FILENO) {
+        return stdin;
+    }
+    if (std_fd == STDOUT_FILENO) {
+        return stdout;
+    }
+    return stderr;
+}
+
+static FILE *vmVprocStreamOpen(int std_fd,
+                               VmVprocStream *cache,
+                               const char *mode,
+                               int buf_mode) {
+    if (!cache || !mode) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    int host_fd = std_fd;
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int translated = vprocTranslateFd(vp, std_fd);
+        if (translated >= 0) {
+            host_fd = translated;
+        }
+    }
+
+    if (host_fd < 0) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    if (cache->fp && cache->host_fd == host_fd) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    int dup_fd = -1;
+#ifdef F_DUPFD_CLOEXEC
+    dup_fd = fcntl(host_fd, F_DUPFD_CLOEXEC, 0);
+    if (dup_fd < 0 && errno == EINVAL) {
+        dup_fd = -1;
+    }
+#endif
+    if (dup_fd < 0) {
+        dup_fd = dup(host_fd);
+    }
+    if (dup_fd < 0) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    FILE *fp = fdopen(dup_fd, mode);
+    if (!fp) {
+        close(dup_fd);
+        return vmVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = host_fd;
+    return fp;
+}
+
+static FILE *vmVprocStdout(void) {
+    int buf_mode = pscalRuntimeStdoutIsInteractive() ? _IOLBF : _IOFBF;
+    return vmVprocStreamOpen(STDOUT_FILENO, &gVmVprocStdout, "w", buf_mode);
+}
+
+static FILE *vmVprocStderr(void) {
+    return vmVprocStreamOpen(STDERR_FILENO, &gVmVprocStderr, "w", _IONBF);
+}
+
+static FILE *vmVprocStdin(void) {
+    return vmVprocStreamOpen(STDIN_FILENO, &gVmVprocStdin, "r", -1);
+}
+
+#undef stdin
+#undef stdout
+#undef stderr
+#define stdin vmVprocStdin()
+#define stdout vmVprocStdout()
+#define stderr vmVprocStderr()
+#endif
+
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
 extern void shellRuntimeSetLastStatusSticky(int status) __attribute__((weak_import));
@@ -5662,13 +5764,81 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     return makeInt(result);
 }
 
-Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dosMkdir expects 1 string argument.");
-        return makeInt(errno);
+static int dosMkdirParents(const char *path) {
+    if (!path || !*path) {
+        errno = EINVAL;
+        return -1;
     }
-    int rc = mkdir(AS_STRING(args[0]), 0777);
-    return makeInt(rc == 0 ? 0 : errno);
+    char *tmp = strdup(path);
+    if (!tmp) {
+        errno = ENOMEM;
+        return -1;
+    }
+    size_t len = strlen(tmp);
+    if (len > 1 && tmp[len - 1] == '/') {
+        tmp[len - 1] = '\0';
+    }
+    char *p = tmp;
+    /* Skip leading slash so we don't try to mkdir("/") */
+    if (*p == '/') {
+        p++;
+    }
+    int rc = 0;
+    for (; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+            rc = -1;
+            break;
+        }
+        *p = '/';
+    }
+    if (rc == 0) {
+        if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+            rc = -1;
+        }
+    }
+    free(tmp);
+    return rc;
+}
+
+Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
+    bool parents = false;
+    int first_path_idx = 0;
+    if (arg_count <= 0) {
+        runtimeError(vm, "dosMkdir expects at least one path.");
+        return makeInt(EINVAL);
+    }
+    /* Accept optional flags like -p, ignoring others for now. */
+    if (args[0].type == TYPE_STRING && AS_STRING(args[0])[0] == '-') {
+        const char *opt = AS_STRING(args[0]);
+        if (strcmp(opt, "-p") == 0) {
+            parents = true;
+        } else {
+            runtimeError(vm, "dosMkdir: unsupported option '%s'", opt);
+            return makeInt(EINVAL);
+        }
+        first_path_idx = 1;
+    }
+    int last_err = 0;
+    bool any = false;
+    for (int i = first_path_idx; i < arg_count; i++) {
+        if (args[i].type != TYPE_STRING) {
+            runtimeError(vm, "dosMkdir: path %d is not a string", i - first_path_idx + 1);
+            return makeInt(EINVAL);
+        }
+        const char *path = AS_STRING(args[i]);
+        any = true;
+        int rc = parents ? dosMkdirParents(path) : mkdir(path, 0777);
+        if (rc != 0 && errno != EEXIST) {
+            last_err = errno ? errno : EIO;
+        }
+    }
+    if (!any) {
+        runtimeError(vm, "dosMkdir expects at least one path.");
+        return makeInt(EINVAL);
+    }
+    return makeInt(last_err);
 }
 
 Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {

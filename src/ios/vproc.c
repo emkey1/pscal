@@ -204,6 +204,7 @@ typedef struct {
     VProc *vp;
     int shell_self_pid;
     int kernel_pid;
+    bool detach;
 } VProcThreadStartCtx;
 
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
@@ -308,6 +309,11 @@ static inline uint32_t vprocSigMask(int sig) {
     return (1u << sig);
 }
 
+int vprocNextJobIdSeed(void) {
+    static int next_job_id = 1;
+    return __sync_fetch_and_add(&next_job_id, 1);
+}
+
 static int vprocRuntimeCenti(const VProcTaskEntry *entry, uint64_t now_ns) {
     if (!entry || entry->start_mono_ns == 0) {
         return 0;
@@ -368,7 +374,8 @@ static void vprocInitEntryDefaultsLocked(VProcTaskEntry *entry, int pid, const V
         if (inherit_parent->sid > 0) entry->sid = inherit_parent->sid;
         if (inherit_parent->pgid > 0) entry->pgid = inherit_parent->pgid;
         if (inherit_parent->fg_pgid > 0) entry->fg_pgid = inherit_parent->fg_pgid;
-        entry->blocked_signals = inherit_parent->blocked_signals & ~(vprocSigMask(SIGKILL) | vprocSigMask(SIGSTOP));
+        /* Do NOT inherit blocked signals so job-control signals (TERM/INT) work. */
+        entry->blocked_signals = 0;
         entry->ignored_signals = inherit_parent->ignored_signals & ~(vprocSigMask(SIGKILL) | vprocSigMask(SIGSTOP));
         entry->sigchld_blocked = inherit_parent->sigchld_blocked;
         memcpy(entry->actions, inherit_parent->actions, sizeof(entry->actions));
@@ -751,6 +758,27 @@ static int vprocCloneFd(int source_fd) {
     return duped;
 }
 
+static int vprocSelectHostFd(VProc *inherit_from, int option_fd, int stdno) {
+    /* Explicit host fd provided: clone it. */
+    if (option_fd >= 0) {
+        return vprocCloneFd(option_fd);
+    }
+    /* Force /dev/null. */
+    if (option_fd == -2) {
+        int flags = (stdno == STDIN_FILENO) ? O_RDONLY : O_WRONLY;
+        return open("/dev/null", flags);
+    }
+    /* Otherwise inherit from the active vproc's mapping, falling back to host stdno. */
+    int source = stdno;
+    if (inherit_from) {
+        int translated = vprocTranslateFd(inherit_from, stdno);
+        if (translated >= 0) {
+            source = translated;
+        }
+    }
+    return vprocCloneFd(source);
+}
+
 int vprocReservePid(void) {
     if (gNextSyntheticPid == 0) {
         gNextSyntheticPid = vprocNextPidSeed();
@@ -764,6 +792,10 @@ int vprocReservePid(void) {
         vprocClearEntryLocked(entry);
         vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
         entry->parent_pid = parent_pid;
+        /* Reserve creates a brand-new process group; do not inherit the shell's
+         * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
+        entry->pgid = pid;
+        entry->fg_pgid = pid;
         if (entry->parent_pid > 0 && entry->parent_pid != pid) {
             VProcTaskEntry *parent = vprocTaskEnsureSlotLocked(entry->parent_pid);
             if (parent) {
@@ -838,6 +870,7 @@ VProcOptions vprocDefaultOptions(void) {
     opts.winsize_cols = 80;
     opts.winsize_rows = 24;
     opts.pid_hint = -1;
+    opts.job_id = 0;
     return opts;
 }
 
@@ -846,6 +879,8 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (gNextSyntheticPid == 0) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
+    bool vproc_dbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    VProc *active = vprocCurrent();
     VProc *vp = calloc(1, sizeof(VProc));
     if (!vp) {
         return NULL;
@@ -887,18 +922,45 @@ VProc *vprocCreate(const VProcOptions *opts) {
         vprocClearEntryLocked(slot);
         vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
         vprocUpdateParentLocked(slot, parent_pid);
+        if (local.job_id > 0) {
+            slot->job_id = local.job_id;
+        }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 
-    int stdin_src = (local.stdin_fd == -2) ? open("/dev/null", O_RDONLY)
-                                           : vprocCloneFd((local.stdin_fd >= 0) ? local.stdin_fd : STDIN_FILENO);
-    int stdout_src = vprocCloneFd((local.stdout_fd >= 0) ? local.stdout_fd : STDOUT_FILENO);
-    int stderr_src = vprocCloneFd((local.stderr_fd >= 0) ? local.stderr_fd : STDERR_FILENO);
+    int stdin_src = vprocSelectHostFd(active, local.stdin_fd, STDIN_FILENO);
+    if (stdin_src < 0 && local.stdin_fd != -2) {
+        stdin_src = open("/dev/null", O_RDONLY);
+        if (vproc_dbg && stdin_src < 0) {
+            fprintf(stderr, "[vproc] stdin clone failed fd=%d err=%s\n",
+                    (local.stdin_fd >= 0) ? local.stdin_fd : STDIN_FILENO, strerror(errno));
+        }
+    }
+    int stdout_src = vprocSelectHostFd(active, local.stdout_fd, STDOUT_FILENO);
+    if (stdout_src < 0) {
+        stdout_src = open("/dev/null", O_WRONLY);
+        if (vproc_dbg && stdout_src < 0) {
+            fprintf(stderr, "[vproc] stdout clone failed fd=%d err=%s\n",
+                    (local.stdout_fd >= 0) ? local.stdout_fd : STDOUT_FILENO, strerror(errno));
+        }
+    }
+    int stderr_src = vprocSelectHostFd(active, local.stderr_fd, STDERR_FILENO);
+    if (stderr_src < 0) {
+        stderr_src = open("/dev/null", O_WRONLY);
+        if (vproc_dbg && stderr_src < 0) {
+            fprintf(stderr, "[vproc] stderr clone failed fd=%d err=%s\n",
+                    (local.stderr_fd >= 0) ? local.stderr_fd : STDERR_FILENO, strerror(errno));
+        }
+    }
 
     if (stdin_src < 0 || stdout_src < 0 || stderr_src < 0) {
         if (stdin_src >= 0) close(stdin_src);
         if (stdout_src >= 0) close(stdout_src);
         if (stderr_src >= 0) close(stderr_src);
+        if (vproc_dbg) {
+            fprintf(stderr, "[vproc] create failed stdin=%d stdout=%d stderr=%d\n",
+                    stdin_src, stdout_src, stderr_src);
+        }
         vprocDestroy(vp);
         return NULL;
     }
@@ -941,6 +1003,14 @@ void vprocDestroy(VProc *vp) {
     }
     free(vp->entries);
     vp->entries = NULL;
+    if (gVProcCurrent == vp) {
+        gVProcCurrent = NULL;
+    }
+    for (size_t i = 0; i < gVProcStackDepth; ++i) {
+        if (gVProcStack[i] == vp) {
+            gVProcStack[i] = NULL;
+        }
+    }
     pthread_mutex_unlock(&vp->mu);
     
     pthread_mutex_destroy(&vp->mu);
@@ -1027,10 +1097,10 @@ void vprocTerminateSession(int sid) {
 
 static void *vprocThreadTrampoline(void *arg) {
     VProcThreadStartCtx *ctx = (VProcThreadStartCtx *)arg;
-    
-    // Detach so resources are freed by iOS when the thread exits.
-    // We rely on vprocTaskEntry for logical join/wait.
-    pthread_detach(pthread_self());
+
+    if (ctx && ctx->detach) {
+        pthread_detach(pthread_self());
+    }
 
     if (ctx) {
         vprocSetShellSelfPid(ctx->shell_self_pid);
@@ -1074,6 +1144,14 @@ int vprocPthreadCreateShim(pthread_t *thread,
     ctx->vp = vprocCurrent();
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
+    ctx->detach = false;
+    if (attr) {
+        int detach_state = 0;
+        if (pthread_attr_getdetachstate(attr, &detach_state) == 0 &&
+            detach_state == PTHREAD_CREATE_DETACHED) {
+            ctx->detach = true;
+        }
+    }
     return pthread_create(thread, attr, vprocThreadTrampoline, ctx);
 }
 
@@ -1111,6 +1189,66 @@ int vprocHostDup2(int host_fd, int target_fd) {
 #endif
 }
 
+int vprocHostDup(int fd) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef dup
+#undef dup
+    int res = dup(fd);
+#define dup vprocDupShim
+#else
+    int res = dup(fd);
+#endif
+    return res;
+#else
+    return dup(fd);
+#endif
+}
+
+int vprocHostOpen(const char *path, int flags, ...) {
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+    return vprocHostOpenVirtualized(path, flags, mode);
+#else
+    return open(path, flags, mode);
+#endif
+}
+
+int vprocHostPipe(int pipefd[2]) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef pipe
+#undef pipe
+    int rc = pipe(pipefd);
+#define pipe vprocPipeShim
+#else
+    int rc = pipe(pipefd);
+#endif
+    return rc;
+#else
+    return pipe(pipefd);
+#endif
+}
+
+off_t vprocHostLseek(int fd, off_t offset, int whence) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef lseek
+#undef lseek
+    off_t res = lseek(fd, offset, whence);
+#define lseek vprocLseekShim
+#else
+    off_t res = lseek(fd, offset, whence);
+#endif
+    return res;
+#else
+    return lseek(fd, offset, whence);
+#endif
+}
+
 int vprocHostClose(int fd) {
 #if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
 #ifdef close
@@ -1123,6 +1261,36 @@ int vprocHostClose(int fd) {
     return res;
 #else
     return close(fd);
+#endif
+}
+
+ssize_t vprocHostRead(int fd, void *buf, size_t count) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef read
+#undef read
+    ssize_t res = read(fd, buf, count);
+#define read vprocReadShim
+#else
+    ssize_t res = read(fd, buf, count);
+#endif
+    return res;
+#else
+    return read(fd, buf, count);
+#endif
+}
+
+ssize_t vprocHostWrite(int fd, const void *buf, size_t count) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+#ifdef write
+#undef write
+    ssize_t res = write(fd, buf, count);
+#define write vprocWriteShim
+#else
+    ssize_t res = write(fd, buf, count);
+#endif
+    return res;
+#else
+    return write(fd, buf, count);
 #endif
 }
 
@@ -1202,6 +1370,45 @@ int vprocDup2(VProc *vp, int fd, int target) {
     vp->entries[target].host_fd = cloned;
     pthread_mutex_unlock(&vp->mu);
     return target;
+}
+
+/* Re-sync the vproc fd table to match a host fd already duplicated onto
+ * target_fd at the OS level. This is used when shellRestoreExecRedirections
+ * has performed a host dup2 and we need the vproc view to follow suit. */
+int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src) {
+    if (!vp || target_fd < 0 || host_src < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    pthread_mutex_lock(&vp->mu);
+    if ((size_t)target_fd >= vp->capacity) {
+        size_t new_cap = vp->capacity ? vp->capacity : VPROC_INITIAL_CAPACITY;
+        while ((size_t)target_fd >= new_cap) {
+            new_cap *= 2;
+        }
+        VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
+        if (!resized) {
+            pthread_mutex_unlock(&vp->mu);
+            return -1;
+        }
+        for (size_t i = vp->capacity; i < new_cap; ++i) {
+            resized[i].host_fd = -1;
+        }
+        vp->entries = resized;
+        vp->capacity = new_cap;
+    }
+    if (vp->entries[target_fd].host_fd >= 0 &&
+        !(target_fd == STDIN_FILENO && vp->entries[target_fd].host_fd == vp->stdin_host_fd)) {
+        close(vp->entries[target_fd].host_fd);
+    }
+    int cloned = vprocCloneFd(host_src);
+    if (cloned < 0) {
+        pthread_mutex_unlock(&vp->mu);
+        return -1;
+    }
+    vp->entries[target_fd].host_fd = cloned;
+    pthread_mutex_unlock(&vp->mu);
+    return target_fd;
 }
 
 int vprocClose(VProc *vp, int fd) {
@@ -1308,16 +1515,20 @@ int vprocPid(VProc *vp) {
     return vp ? vp->pid : -1;
 }
 
-int vprocRegisterThread(VProc *vp, pthread_t tid) {
-    if (!vp || vp->pid <= 0) {
+int vprocRegisterTidHint(int pid, pthread_t tid) {
+    if (pid <= 0) {
         errno = EINVAL;
         return -1;
     }
+    bool vdbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(vp->pid);
+    VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
     if (!entry) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         errno = ENOMEM;
+        if (vdbg) {
+            fprintf(stderr, "[vproc] register tid hint failed pid=%d tid=%p\n", pid, (void *)tid);
+        }
         return -1;
     }
     entry->tid = tid;
@@ -1343,6 +1554,57 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         entry->threads[entry->thread_count++] = tid;
     }
     vprocMaybeUpdateThreadNameLocked(entry);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    if (vdbg) {
+        fprintf(stderr, "[vproc] register tid hint pid=%d tid=%p thread_count=%zu\n",
+                pid, (void *)tid, entry->thread_count);
+    }
+    return pid;
+}
+
+int vprocRegisterThread(VProc *vp, pthread_t tid) {
+    if (!vp || vp->pid <= 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    bool vdbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(vp->pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ENOMEM;
+        if (vdbg) {
+            fprintf(stderr, "[vproc] register thread failed pid=%d tid=%p\n", vp->pid, (void *)tid);
+        }
+        return -1;
+    }
+    entry->tid = tid;
+    bool duplicate = false;
+    for (size_t i = 0; i < entry->thread_count; ++i) {
+        if (pthread_equal(entry->threads[i], tid)) {
+            duplicate = true;
+            break;
+        }
+    }
+    if (!duplicate) {
+        if (entry->thread_count >= entry->thread_capacity) {
+            size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
+            pthread_t *resized = realloc(entry->threads, new_cap * sizeof(pthread_t));
+            if (!resized) {
+                pthread_mutex_unlock(&gVProcTasks.mu);
+                errno = ENOMEM;
+                return -1;
+            }
+            entry->threads = resized;
+            entry->thread_capacity = new_cap;
+        }
+        entry->threads[entry->thread_count++] = tid;
+    }
+    vprocMaybeUpdateThreadNameLocked(entry);
+    if (vdbg) {
+        fprintf(stderr, "[vproc] register thread pid=%d tid=%p thread_count=%zu\n",
+                vp->pid, (void *)tid, entry->thread_count);
+    }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return vp->pid;
 }
