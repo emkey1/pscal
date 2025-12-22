@@ -545,6 +545,20 @@ static void vprocInitEntryDefaultsLocked(VProcTaskEntry *entry, int pid, const V
         entry->ignored_signals = inherit_parent->ignored_signals & ~(vprocSigMask(SIGKILL) | vprocSigMask(SIGSTOP));
         entry->sigchld_blocked = inherit_parent->sigchld_blocked;
         memcpy(entry->actions, inherit_parent->actions, sizeof(entry->actions));
+        if (shell_pid > 0 && inherit_parent->pid == shell_pid) {
+            int job_sigs[] = { SIGTSTP, SIGTTIN, SIGTTOU };
+            size_t sig_count = sizeof(job_sigs) / sizeof(job_sigs[0]);
+            for (size_t i = 0; i < sig_count; ++i) {
+                int sig = job_sigs[i];
+                if (!vprocSigIndexValid(sig)) {
+                    continue;
+                }
+                sigemptyset(&entry->actions[sig].sa_mask);
+                entry->actions[sig].sa_handler = SIG_DFL;
+                entry->actions[sig].sa_flags = 0;
+                entry->ignored_signals &= ~vprocSigMask(sig);
+            }
+        }
     }
     entry->start_mono_ns = vprocNowMonoNs();
 }
@@ -821,16 +835,6 @@ bool vprocWaitIfStopped(VProc *vp) {
         return false;
     }
     while (entry && entry->stopped && !entry->exited) {
-        if (entry->stop_signo == SIGTSTP) {
-            if (pscalRuntimeRequestSigint) {
-                pscalRuntimeRequestSigint();
-            }
-            entry->stopped = false;
-            entry->continued = true;
-            entry->stop_signo = 0;
-            pthread_cond_broadcast(&gVProcTasks.cv);
-            break;
-        }
         if (entry->stop_unsupported) {
             entry->stopped = false;
             entry->continued = true;
@@ -2325,16 +2329,29 @@ int vprocSetForegroundPgid(int sid, int fg_pgid) {
     int rc = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
+    VProcTaskEntry *leader = NULL;
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
         if (entry->sid == sid && entry->session_leader) {
-            entry->fg_pgid = fg_pgid;
-            rc = 0;
+            leader = entry;
             break;
         }
     }
-    if (rc != 0) errno = ESRCH;
+    if (!leader) {
+        leader = vprocTaskEnsureSlotLocked(sid);
+        if (leader) {
+            leader->sid = sid;
+            leader->pid = sid;
+            leader->session_leader = true;
+        }
+    }
+    if (leader) {
+        leader->fg_pgid = fg_pgid;
+        rc = 0;
+    } else {
+        errno = ESRCH;
+    }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return rc;
 }

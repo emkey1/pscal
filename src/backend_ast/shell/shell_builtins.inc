@@ -10052,19 +10052,91 @@ static void shellPsPrintLineTree(const VProcSnapshot *snap,
 }
 #endif
 
+static int shellJobIndexCompareById(const void *left, const void *right) {
+    size_t lhs = *(const size_t *)left;
+    size_t rhs = *(const size_t *)right;
+    size_t lhs_id = gShellJobs[lhs].id;
+    size_t rhs_id = gShellJobs[rhs].id;
+    if (lhs_id < rhs_id) {
+        return -1;
+    }
+    if (lhs_id > rhs_id) {
+        return 1;
+    }
+    return 0;
+}
+
 Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
     (void)vm;
     (void)arg_count;
     (void)args;
     shellCollectJobs();
-    for (size_t i = 0; i < gShellJobCount; ++i) {
-        ShellJob *job = &gShellJobs[i];
+    size_t current_index = SIZE_MAX;
+    size_t previous_index = SIZE_MAX;
+    for (size_t i = gShellJobCount; i > 0; --i) {
+        ShellJob *job = &gShellJobs[i - 1];
         if (job->disowned) {
             continue;
         }
-        const char *state = job->stopped ? "Stopped" : "Running";
-        const char *command = job->command ? job->command : "";
-        shellFdPrintf(STDOUT_FILENO, "[%zu] %s %s\n", job->id, state, command);
+        if (current_index == SIZE_MAX) {
+            current_index = i - 1;
+        } else {
+            previous_index = i - 1;
+            break;
+        }
+    }
+
+    size_t visible_count = 0;
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        if (!gShellJobs[i].disowned) {
+            visible_count++;
+        }
+    }
+
+    size_t *indices = NULL;
+    if (visible_count > 0) {
+        indices = malloc(sizeof(size_t) * visible_count);
+    }
+    if (indices) {
+        size_t idx_count = 0;
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            if (!gShellJobs[i].disowned) {
+                indices[idx_count++] = i;
+            }
+        }
+        if (idx_count > 1) {
+            qsort(indices, idx_count, sizeof(size_t), shellJobIndexCompareById);
+        }
+        for (size_t i = 0; i < idx_count; ++i) {
+            size_t job_index = indices[i];
+            ShellJob *job = &gShellJobs[job_index];
+            const char *state = job->stopped ? "Stopped" : "Running";
+            const char *command = job->command ? job->command : "";
+            char marker = ' ';
+            if (job_index == current_index) {
+                marker = '+';
+            } else if (job_index == previous_index) {
+                marker = '-';
+            }
+            shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
+        }
+        free(indices);
+    } else {
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            ShellJob *job = &gShellJobs[i];
+            if (job->disowned) {
+                continue;
+            }
+            const char *state = job->stopped ? "Stopped" : "Running";
+            const char *command = job->command ? job->command : "";
+            char marker = ' ';
+            if (i == current_index) {
+                marker = '+';
+            } else if (i == previous_index) {
+                marker = '-';
+            }
+            shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
+        }
     }
     shellUpdateStatus(0);
     return makeVoid();
@@ -10530,6 +10602,11 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
             kill(pid, SIGCONT);
 #endif
         }
+    }
+    if (job->command && job->command[0]) {
+        shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued  %s\n", job->id, job->command);
+    } else {
+        shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued\n", job->id);
     }
     job->stopped = false;
     job->running = true;

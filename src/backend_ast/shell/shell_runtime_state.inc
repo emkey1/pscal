@@ -1619,6 +1619,7 @@ static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
 static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
 void shellResetJobIds(void) {
+    gShellRuntimeDefault.job_next_id = 1;
     if (SC()) {
         SC()->job_next_id = 1;
     }
@@ -1661,9 +1662,6 @@ ShellRuntimeState *shellRuntimeCurrentContext(void) {
 ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx) {
     ShellRuntimeState *previous = shellGetContext();
     shellSetContext(ctx);
-    if (ctx && ctx->job_count == 0) {
-        shellResetJobIds();
-    }
     return previous;
 }
 

@@ -1000,6 +1000,68 @@ static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_s
 }
 
 #if defined(PSCAL_TARGET_IOS)
+static void shellFdPrintf(int fd, const char *fmt, ...);
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+static const char *shellFormatCommandSummary(const ShellCommand *cmd, char *buf, size_t buf_len) {
+    if (!buf || buf_len == 0) {
+        return NULL;
+    }
+    buf[0] = '\0';
+    if (!cmd || cmd->argc <= 0 || !cmd->argv) {
+        return NULL;
+    }
+    size_t used = 0;
+    for (size_t i = 0; i < cmd->argc && used + 1 < buf_len; ++i) {
+        const char *part = cmd->argv[i] ? cmd->argv[i] : "";
+        size_t len = strlen(part);
+        if (used + len + 1 >= buf_len) {
+            len = buf_len - used - 1;
+        }
+        memcpy(buf + used, part, len);
+        used += len;
+        if (used + 1 < buf_len && i + 1 < cmd->argc) {
+            buf[used++] = ' ';
+        }
+    }
+    buf[used] = '\0';
+    return (buf[0] != '\0') ? buf : NULL;
+}
+
+static void shellPrintJobSuspended(const ShellJob *job, const ShellCommand *cmd) {
+    const char *command = (job && job->command) ? job->command : NULL;
+    char summary[128];
+    if (!command) {
+        command = shellFormatCommandSummary(cmd, summary, sizeof(summary));
+    }
+    if (!command) {
+        command = "unknown";
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (shellRuntimeIsInteractive()) {
+        shellFdPrintf(STDERR_FILENO, "^Z\n");
+    }
+#endif
+    shellFdPrintf(STDERR_FILENO, "exsh: suspended  %s\n", command);
+}
+
+static void shellPrintJobStarted(const ShellJob *job, pid_t pid) {
+    if (pid <= 0) {
+        return;
+    }
+    size_t job_id = job ? job->id : 0;
+    if (job_id == 0) {
+        job_id = (size_t)vprocGetJobId((int)pid);
+    }
+    if (job_id == 0) {
+        return;
+    }
+    shellFdPrintf(STDOUT_FILENO, "[%zu] %d\n", job_id, (int)pid);
+}
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
 static bool shellShouldRunSmallclueInWorker(const ShellCommand *cmd) {
     if (!cmd || !cmd->argv || !cmd->argv[0]) {
         return false;
@@ -1029,6 +1091,7 @@ typedef struct {
     VM *vm;
     ShellCommand *cmd;
     int synthetic_pid;
+    int job_id;
 #if defined(PSCAL_TARGET_IOS)
     VProc *vp;
     ShellRuntimeState *bg_shell_ctx;
@@ -1536,6 +1599,12 @@ static void *shellInProcessBackgroundMain(void *arg) {
     }
     vprocSetPgid(vprocPid(vp), group);
     ctx->synthetic_pid = group;
+    if (ctx->job_id > 0) {
+        vprocSetJobId(vprocPid(vp), ctx->job_id);
+        if (group > 0 && group != vprocPid(vp)) {
+            vprocSetJobId(group, ctx->job_id);
+        }
+    }
     /* Label the vproc for lps/ps visibility. */
         if (cmd && cmd->argc > 0 && cmd->argv) {
             char label[96] = {0};
@@ -1958,6 +2027,9 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                     job->running = false;
                     job->last_status = final_status;
                 }
+#if defined(PSCAL_TARGET_IOS)
+                shellPrintJobSuspended(job, tail_cmd);
+#endif
                 ctx->last_status = final_status;
                 shellResetPipeline();
                 shellUpdateStatus(final_status);
@@ -1973,18 +2045,21 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             return final_status;
         }
 
-        if (ctx->background) {
-            /* Register the synthetic in-process job so fg/bg/jobs work. */
-            if (ctx->pids && ctx->launched > 0) {
-                pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
-                ShellJob *job = shellRegisterJob(bg_pgid, ctx->pids, ctx->launched, tail_cmd);
-                if (job) {
-                    job->running = true;
-                    job->stopped = false;
-                    job->last_status = 0;
+            if (ctx->background) {
+                /* Register the synthetic in-process job so fg/bg/jobs work. */
+                if (ctx->pids && ctx->launched > 0) {
+                    pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
+                    ShellJob *job = shellRegisterJob(bg_pgid, ctx->pids, ctx->launched, tail_cmd);
+                    if (job) {
+                        job->running = true;
+                        job->stopped = false;
+                        job->last_status = 0;
+                    }
+                    gShellRuntime.last_bg_pid = bg_pgid;
+#if defined(PSCAL_TARGET_IOS)
+                    shellPrintJobStarted(job, bg_pgid);
+#endif
                 }
-                gShellRuntime.last_bg_pid = bg_pgid;
-            }
             ShellShebangThreadCtx *bg_ctx = NULL;
             if (tail_cmd && tail_cmd->argc > 0 && tail_cmd->argv) {
                 bg_ctx = (ShellShebangThreadCtx *)calloc(1, sizeof(ShellShebangThreadCtx));
@@ -2105,6 +2180,9 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 job->running = false;
                 job->last_status = final_status;
             }
+#if defined(PSCAL_TARGET_IOS)
+            shellPrintJobSuspended(job, tail_cmd);
+#endif
             ctx->last_status = final_status;
             shellResetPipeline();
             shellUpdateStatus(final_status);
@@ -3285,6 +3363,10 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                     job->stopped = false;
                     job->last_status = 0;
                 }
+                bg_ctx->job_id = job ? (int)job->id : 0;
+#if defined(PSCAL_TARGET_IOS)
+                shellPrintJobStarted(job, bg_ctx->synthetic_pid);
+#endif
             }
             shellResetPipeline();
             return true;
@@ -3491,9 +3573,6 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     }
     vprocSetPgid(vprocPid(vp), group);
     ctx->pgid = group;
-    if (run_in_worker) {
-        vprocSetStopUnsupported(vprocPid(vp), true);
-    }
     /* Label the vproc so ps/top output is readable. */
     if (cmd && cmd->argc > 0 && cmd->argv) {
         char label[96] = {0};
@@ -4273,6 +4352,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                     job->running = false;
                     job->last_status = status;
                 }
+#if defined(PSCAL_TARGET_IOS)
+                shellPrintJobSuspended(job, cmd);
+#endif
                 shellUpdateStatus(status);
                 shellFreeCommand(cmd);
                 shellScalarCacheInvalidate();
@@ -4288,6 +4370,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 job->stopped = false;
                 job->last_status = 0;
             }
+        #if defined(PSCAL_TARGET_IOS)
+            shellPrintJobStarted(job, child);
+        #endif
             status = 0;
         }
         shellUpdateStatus(status);

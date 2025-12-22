@@ -2752,10 +2752,58 @@ static void shellRemoveJobAt(size_t index) {
 static ShellJob *shellFindJobByPid(pid_t pid);
 
 static size_t shellAllocateJobId(void) {
-    if (!SC()) {
-        return 1;
+    size_t candidate = 1;
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    int current_sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : 0;
+    size_t snap_cap = vprocSnapshot(NULL, 0);
+    if (snap_cap > 0) {
+        VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
+        if (snaps) {
+            size_t snap_count = vprocSnapshot(snaps, snap_cap);
+            bool used = true;
+            while (used) {
+                used = false;
+                for (size_t i = 0; i < snap_count; ++i) {
+                    const VProcSnapshot *s = &snaps[i];
+                    if (!s || s->pid <= 0 || s->job_id <= 0) {
+                        continue;
+                    }
+                    if (current_sid > 0 && s->sid > 0 && s->sid != current_sid) {
+                        continue;
+                    }
+                    if ((size_t)s->job_id == candidate) {
+                        used = true;
+                        candidate++;
+                        break;
+                    }
+                }
+            }
+            free(snaps);
+            gShellRuntimeDefault.job_next_id = candidate + 1;
+            if (SC()) {
+                SC()->job_next_id = gShellRuntimeDefault.job_next_id;
+            }
+            return candidate;
+        }
     }
-    return SC()->job_next_id++;
+#endif
+    bool used = true;
+    while (used) {
+        used = false;
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            if (gShellJobs[i].id == candidate) {
+                used = true;
+                candidate++;
+                break;
+            }
+        }
+    }
+    gShellRuntimeDefault.job_next_id = candidate + 1;
+    if (SC()) {
+        SC()->job_next_id = gShellRuntimeDefault.job_next_id;
+    }
+    return candidate;
 }
 
 static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_count, const ShellCommand *cmd) {
@@ -2823,6 +2871,14 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
         for (size_t i = 0; i < pid_count; ++i) {
             vprocSetJobId(pids[i], job_id);
         }
+    } else {
+        size_t next_id = (size_t)job_id + 1;
+        if (gShellRuntimeDefault.job_next_id < next_id) {
+            gShellRuntimeDefault.job_next_id = next_id;
+        }
+        if (SC() && SC()->job_next_id < next_id) {
+            SC()->job_next_id = next_id;
+        }
     }
     job->id = (size_t)job_id;
     job->pgid = pgid;
@@ -2886,8 +2942,7 @@ static int shellCollectJobs(void) {
             continue;
         }
         bool has_jobid = (s->job_id > 0);
-        bool is_shell_child = (shell_pid > 0 && s->parent_pid == shell_pid);
-        if (!has_jobid && !is_shell_child) {
+        if (!has_jobid) {
             continue;
         }
         /* Ignore snapshots that have no command label; these are typically
