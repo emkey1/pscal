@@ -30,6 +30,9 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+#endif
 
 static bool vmHandleGlobalInterrupt(VM* vm);
 
@@ -4851,6 +4854,11 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
+#if defined(PSCAL_TARGET_IOS)
+        if (vprocWaitIfStopped(vprocCurrent())) {
+            continue;
+        }
+#endif
         if (pending_exit_flag && *pending_exit_flag) {
             shellRuntimeMaybeRequestPendingExit(vm);
         }

@@ -1791,12 +1791,13 @@ static void shellHandlePendingSignal(int signo) {
 #endif
 
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
-        if (gShellCurrentVm) {
+        bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled;
+        if (gShellCurrentVm && !stop_request) {
             gShellCurrentVm->exit_requested = true;
             gShellCurrentVm->current_builtin_name = "signal";
         }
 
-        if (!gShellRuntime.job_control_enabled) {
+        if (!gShellRuntime.job_control_enabled && !stop_request) {
             shellRuntimeRequestExit();
         }
 
@@ -1818,7 +1819,7 @@ static void shellHandlePendingSignal(int signo) {
         }
 #endif
 
-        if (gShellLoopStackSize > 0) {
+        if (gShellLoopStackSize > 0 && !stop_request) {
             gShellRuntime.break_requested = true;
             gShellRuntime.break_requested_levels = (int)gShellLoopStackSize;
             shellLoopRequestBreakLevels((int)gShellLoopStackSize);

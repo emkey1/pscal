@@ -124,6 +124,7 @@ static void shellSetupSelfVproc(void) {
         vprocRegisterThread(gShellSelfVproc, pthread_self());
         int shell_pid = vprocPid(gShellSelfVproc);
         vprocSetShellSelfPid(shell_pid);
+        vprocSetShellSelfTid(pthread_self());
         if (kernel_pid > 0 && kernel_pid != shell_pid) {
             vprocSetParent(shell_pid, kernel_pid);
             (void)vprocSetSid(shell_pid, kernel_pid);
@@ -144,6 +145,7 @@ static void shellSetupSelfVproc(void) {
         /* Ensure the shell has a stable synthetic pid even if the fd table
          * could not be initialised. */
         vprocSetShellSelfPid(shell_pid_hint);
+        vprocSetShellSelfTid(pthread_self());
         if (kernel_pid > 0 && kernel_pid != shell_pid_hint) {
             vprocSetParent(shell_pid_hint, kernel_pid);
             (void)vprocSetSid(shell_pid_hint, kernel_pid);

@@ -24,11 +24,16 @@
 #include <mach/thread_info.h>
 #include <mach/thread_act.h>
 #endif
+#include "common/runtime_tty.h"
 
 #if defined(PSCAL_TARGET_IOS)
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_virtualization.h"
 #undef PATH_VIRTUALIZATION_NO_MACROS
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+__attribute__((weak)) void pscalRuntimeRequestSigint(void);
 #endif
 
 /* -- Compatibility Macros -- */
@@ -137,10 +142,17 @@ struct VProc {
 static __thread VProc *gVProcCurrent = NULL;
 static __thread VProc *gVProcStack[16] = {0};
 static __thread size_t gVProcStackDepth = 0;
+static VProc **gVProcRegistry = NULL;
+static size_t gVProcRegistryCount = 0;
+static size_t gVProcRegistryCapacity = 0;
+static pthread_mutex_t gVProcRegistryMu = PTHREAD_MUTEX_INITIALIZER;
 static int gNextSyntheticPid = 0;
 static _Thread_local int gShellSelfPid = 0;
 static _Thread_local int gKernelPid = 0;
+static pthread_t gShellSelfTid;
+static bool gShellSelfTidValid = false;
 static VProcSessionStdio gSessionStdio = { .stdin_host_fd = -1, .stdout_host_fd = -1, .stderr_host_fd = -1, .kernel_pid = 0 };
+static pthread_mutex_t gSessionInputInitMu = PTHREAD_MUTEX_INITIALIZER;
 
 static int vprocNextPidSeed(void) {
     int host = (int)getpid();
@@ -149,6 +161,72 @@ static int vprocNextPidSeed(void) {
     }
     return host;
 }
+
+static void vprocRegistryAdd(VProc *vp) {
+    if (!vp) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcRegistryMu);
+    for (size_t i = 0; i < gVProcRegistryCount; ++i) {
+        if (gVProcRegistry[i] == vp) {
+            pthread_mutex_unlock(&gVProcRegistryMu);
+            return;
+        }
+    }
+    if (gVProcRegistryCount >= gVProcRegistryCapacity) {
+        size_t new_cap = gVProcRegistryCapacity ? gVProcRegistryCapacity * 2 : 16;
+        VProc **resized = (VProc **)realloc(gVProcRegistry, new_cap * sizeof(VProc *));
+        if (!resized) {
+            pthread_mutex_unlock(&gVProcRegistryMu);
+            return;
+        }
+        gVProcRegistry = resized;
+        gVProcRegistryCapacity = new_cap;
+    }
+    gVProcRegistry[gVProcRegistryCount++] = vp;
+    pthread_mutex_unlock(&gVProcRegistryMu);
+}
+
+static void vprocRegistryRemove(VProc *vp) {
+    if (!vp) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcRegistryMu);
+    for (size_t i = 0; i < gVProcRegistryCount; ++i) {
+        if (gVProcRegistry[i] == vp) {
+            gVProcRegistry[i] = gVProcRegistry[gVProcRegistryCount - 1];
+            gVProcRegistryCount--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&gVProcRegistryMu);
+}
+
+static bool vprocRegistryContains(const VProc *vp) {
+    if (!vp) {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&gVProcRegistryMu);
+    for (size_t i = 0; i < gVProcRegistryCount; ++i) {
+        if (gVProcRegistry[i] == vp) {
+            found = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&gVProcRegistryMu);
+    return found;
+}
+
+static void vprocClearThreadState(void) {
+    gVProcCurrent = NULL;
+    gVProcStackDepth = 0;
+    for (size_t i = 0; i < sizeof(gVProcStack) / sizeof(gVProcStack[0]); ++i) {
+        gVProcStack[i] = NULL;
+    }
+}
+
+static VProc *vprocForThread(void);
 
 typedef struct {
     int pid;
@@ -168,6 +246,7 @@ typedef struct {
     bool continued;
     int stop_signo;
     bool zombie;
+    bool stop_unsupported;
     int job_id;
     char *label;
     char comm[16];
@@ -216,6 +295,7 @@ static VProcTaskEntry *vprocTaskFindLocked(int pid);
 static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 static void vprocClearEntryLocked(VProcTaskEntry *entry);
 static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
+static void vprocTaskTableRepairLocked(void);
 
 static VProcTaskTable gVProcTasks = {
     .items = NULL,
@@ -224,6 +304,8 @@ static VProcTaskTable gVProcTasks = {
     .mu = PTHREAD_MUTEX_INITIALIZER,
     .cv = PTHREAD_COND_INITIALIZER,
 };
+static VProcTaskEntry *gVProcTasksItemsStable = NULL;
+static size_t gVProcTasksCapacityStable = 0;
 
 /* -- Helper Functions -- */
 
@@ -441,6 +523,7 @@ static void vprocInitEntryDefaultsLocked(VProcTaskEntry *entry, int pid, const V
     }
     if (!entry) return;
     memset(entry, 0, sizeof(*entry));
+    entry->stop_unsupported = false;
     entry->pid = pid;
     entry->pgid = pid;
     entry->sid = pid;
@@ -637,6 +720,12 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
         return;
     }
     if (action == VPROC_SIG_STOP) {
+        if (entry->stop_unsupported) {
+            if (sig == SIGTSTP && pscalRuntimeRequestSigint) {
+                pscalRuntimeRequestSigint();
+            }
+            return;
+        }
         entry->stopped = true;
         entry->continued = false;
         entry->exited = false;
@@ -666,6 +755,7 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
 
 static int vprocForegroundPgidLocked(int sid) {
     if (sid <= 0) return -1;
+    vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
@@ -695,6 +785,93 @@ static bool vprocShouldStopForBackgroundTty(VProc *vp, int sig) {
     return stopped;
 }
 
+static int vprocForegroundPgidForEntryLocked(const VProcTaskEntry *entry) {
+    if (!entry || entry->pid <= 0) {
+        return -1;
+    }
+    if (entry->sid > 0) {
+        int fg = vprocForegroundPgidLocked(entry->sid);
+        if (fg > 0) {
+            return fg;
+        }
+    }
+    if (entry->pgid > 0) {
+        return entry->pgid;
+    }
+    return entry->pid;
+}
+
+bool vprocWaitIfStopped(VProc *vp) {
+    if (!vp) {
+        return false;
+    }
+    int pid = vprocPid(vp);
+    if (pid <= 0) {
+        return false;
+    }
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid > 0 && pid == shell_pid) {
+        return false;
+    }
+    bool waited = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry && entry->stop_unsupported) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return false;
+    }
+    while (entry && entry->stopped && !entry->exited) {
+        if (entry->stop_signo == SIGTSTP) {
+            if (pscalRuntimeRequestSigint) {
+                pscalRuntimeRequestSigint();
+            }
+            entry->stopped = false;
+            entry->continued = true;
+            entry->stop_signo = 0;
+            pthread_cond_broadcast(&gVProcTasks.cv);
+            break;
+        }
+        if (entry->stop_unsupported) {
+            entry->stopped = false;
+            entry->continued = true;
+            entry->stop_signo = 0;
+            pthread_cond_broadcast(&gVProcTasks.cv);
+            break;
+        }
+        waited = true;
+        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        if (entry->pid != pid) {
+            entry = vprocTaskFindLocked(pid);
+        }
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return waited;
+}
+
+static void vprocDispatchControlSignal(VProc *vp, int sig) {
+    if (!vp) {
+        return;
+    }
+    int pid = vprocPid(vp);
+    int shell_pid = vprocGetShellSelfPid();
+    if (pid <= 0 || (shell_pid > 0 && pid == shell_pid)) {
+        return;
+    }
+    int fg_pgid = -1;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    fg_pgid = vprocForegroundPgidForEntryLocked(entry);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    if (fg_pgid > 0) {
+        (void)vprocKillShim(-fg_pgid, sig);
+    } else {
+        (void)vprocKillShim(pid, sig);
+    }
+    if (sig == SIGTSTP) {
+        (void)vprocWaitIfStopped(vp);
+    }
+}
+
 static void vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
     uint32_t pending = entry->pending_signals;
     for (int sig = 1; sig < 32; ++sig) {
@@ -713,6 +890,168 @@ static void vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
     }
 }
 
+typedef struct {
+    VProcSessionStdio *session;
+    int shell_pid;
+    int kernel_pid;
+} VProcSessionInputCtx;
+
+static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, int shell_pid, int kernel_pid);
+static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size_t count);
+
+static bool vprocShellOwnsForegroundLocked(int shell_pid, int *out_fgid) {
+    if (out_fgid) {
+        *out_fgid = -1;
+    }
+    if (shell_pid <= 0) {
+        return true;
+    }
+    VProcTaskEntry *entry = vprocTaskFindLocked(shell_pid);
+    if (!entry) {
+        return true;
+    }
+    int shell_pgid = entry->pgid;
+    int sid = entry->sid;
+    int fg = (sid > 0) ? vprocForegroundPgidLocked(sid) : -1;
+    if (out_fgid) {
+        *out_fgid = fg;
+    }
+    if (fg <= 0 || shell_pgid <= 0) {
+        return true;
+    }
+    return fg == shell_pgid;
+}
+
+static void vprocDispatchControlSignalToForeground(int shell_pid, int sig) {
+    if (shell_pid <= 0) {
+        return;
+    }
+    int target_fgid = -1;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    bool shell_owns_fg = vprocShellOwnsForegroundLocked(shell_pid, &target_fgid);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    if (shell_owns_fg || target_fgid <= 0) {
+#if defined(PSCAL_TARGET_IOS)
+        if (sig == SIGINT && pscalRuntimeRequestSigint) {
+            pscalRuntimeRequestSigint();
+        }
+#endif
+        return;
+    }
+    (void)vprocKillShim(-target_fgid, sig);
+}
+
+static void *vprocSessionInputThread(void *arg) {
+    VProcSessionInputCtx *ctx = (VProcSessionInputCtx *)arg;
+    if (!ctx || !ctx->session) {
+        free(ctx);
+        return NULL;
+    }
+    if (ctx->shell_pid > 0) {
+        vprocSetShellSelfPid(ctx->shell_pid);
+    }
+    if (ctx->kernel_pid > 0) {
+        vprocSetKernelPid(ctx->kernel_pid);
+    }
+
+    VProcSessionStdio *session = ctx->session;
+    VProcSessionInput *input = session ? session->input : NULL;
+    int fd = session ? session->stdin_host_fd : -1;
+    unsigned char ch = 0;
+    while (fd >= 0) {
+        ssize_t r = vprocHostRead(fd, &ch, 1);
+        if (r <= 0) {
+            if (input) {
+                pthread_mutex_lock(&input->mu);
+                input->eof = true;
+                pthread_cond_broadcast(&input->cv);
+                pthread_mutex_unlock(&input->mu);
+            }
+            break;
+        }
+        if (ch == 3 || ch == 26) {
+            int sig = (ch == 3) ? SIGINT : SIGTSTP;
+            vprocDispatchControlSignalToForeground(ctx->shell_pid, sig);
+            continue;
+        }
+        if (!input) {
+            continue;
+        }
+        pthread_mutex_lock(&input->mu);
+        if (input->len + 1 > input->cap) {
+            size_t new_cap = input->cap ? input->cap * 2 : 256;
+            unsigned char *resized = (unsigned char *)realloc(input->buf, new_cap);
+            if (resized) {
+                input->buf = resized;
+                input->cap = new_cap;
+            }
+        }
+        if (input->len < input->cap) {
+            input->buf[input->len++] = ch;
+            pthread_cond_signal(&input->cv);
+        }
+        pthread_mutex_unlock(&input->mu);
+    }
+    free(ctx);
+    return NULL;
+}
+
+static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, int shell_pid, int kernel_pid) {
+    if (!session || session->stdin_host_fd < 0) {
+        return NULL;
+    }
+    pthread_mutex_lock(&gSessionInputInitMu);
+    if (!session->input) {
+        session->input = (VProcSessionInput *)calloc(1, sizeof(VProcSessionInput));
+        if (session->input) {
+            pthread_mutex_init(&session->input->mu, NULL);
+            pthread_cond_init(&session->input->cv, NULL);
+            session->input->inited = true;
+        }
+    }
+    VProcSessionInput *input = session->input;
+    if (input && !input->reader_active) {
+        VProcSessionInputCtx *ctx = (VProcSessionInputCtx *)calloc(1, sizeof(VProcSessionInputCtx));
+        if (ctx) {
+            ctx->session = session;
+            ctx->shell_pid = shell_pid;
+            ctx->kernel_pid = kernel_pid;
+            pthread_t tid;
+            if (vprocHostPthreadCreate(&tid, NULL, vprocSessionInputThread, ctx) == 0) {
+                pthread_detach(tid);
+                input->reader_active = true;
+            } else {
+                free(ctx);
+            }
+        }
+    }
+    pthread_mutex_unlock(&gSessionInputInitMu);
+    return input;
+}
+
+static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size_t count) {
+    if (!session || !session->input || !buf || count == 0) {
+        return 0;
+    }
+    VProcSessionInput *input = session->input;
+    pthread_mutex_lock(&input->mu);
+    while (input->len == 0 && !input->eof) {
+        pthread_cond_wait(&input->cv, &input->mu);
+    }
+    if (input->len == 0 && input->eof) {
+        pthread_mutex_unlock(&input->mu);
+        return 0;
+    }
+    size_t to_copy = (count < input->len) ? count : input->len;
+    memcpy(buf, input->buf, to_copy);
+    input->len -= to_copy;
+    if (input->len > 0) {
+        memmove(input->buf, input->buf + to_copy, input->len);
+    }
+    pthread_mutex_unlock(&input->mu);
+    return (ssize_t)to_copy;
+}
+
 static void vprocRemoveChildLocked(VProcTaskEntry *parent, int child_pid) {
     if (!parent || !parent->children || parent->child_count == 0) return;
     for (size_t i = 0; i < parent->child_count; ++i) {
@@ -724,55 +1063,73 @@ static void vprocRemoveChildLocked(VProcTaskEntry *parent, int child_pid) {
     }
 }
 
-static void vprocUpdateParentLocked(VProcTaskEntry *child_entry, int new_parent_pid) {
+static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
+    if (child_pid <= 0) return;
+    VProcTaskEntry *child_entry = vprocTaskFindLocked(child_pid);
     if (!child_entry) return;
     int old_parent = child_entry->parent_pid;
     if (old_parent == new_parent_pid) return;
     if (old_parent > 0) {
         VProcTaskEntry *old_parent_entry = vprocTaskFindLocked(old_parent);
         if (old_parent_entry) {
-            vprocRemoveChildLocked(old_parent_entry, child_entry->pid);
+            vprocRemoveChildLocked(old_parent_entry, child_pid);
         }
     }
     child_entry->parent_pid = new_parent_pid;
     if (new_parent_pid > 0) {
         VProcTaskEntry *new_parent_entry = vprocTaskEnsureSlotLocked(new_parent_pid);
+        child_entry = vprocTaskFindLocked(child_pid);
+        if (!child_entry) return;
+        child_entry->parent_pid = new_parent_pid;
         if (new_parent_entry) {
-            vprocAddChildLocked(new_parent_entry, child_entry->pid);
+            vprocAddChildLocked(new_parent_entry, child_pid);
         }
     }
 }
 
-static void vprocReparentChildrenLocked(VProcTaskEntry *entry, int new_parent_pid) {
+static void vprocReparentChildrenLocked(int parent_pid, int new_parent_pid) {
+    VProcTaskEntry *entry = vprocTaskFindLocked(parent_pid);
     if (!entry || entry->child_count == 0 || !entry->children) {
-        entry->child_count = 0;
+        if (entry) {
+            entry->child_count = 0;
+        }
         return;
     }
-    for (size_t i = 0; i < entry->child_count; ++i) {
-        int child_pid = entry->children[i];
-        VProcTaskEntry *child_entry = vprocTaskFindLocked(child_pid);
-        if (child_entry) {
-            vprocUpdateParentLocked(child_entry, new_parent_pid);
+    size_t count = entry->child_count;
+    int *children = (int *)calloc(count, sizeof(int));
+    if (!children) {
+        return;
+    }
+    memcpy(children, entry->children, count * sizeof(int));
+    for (size_t i = 0; i < count; ++i) {
+        int child_pid = children[i];
+        if (child_pid > 0) {
+            vprocUpdateParentLocked(child_pid, new_parent_pid);
         }
     }
-    entry->child_count = 0;
+    free(children);
+    entry = vprocTaskFindLocked(parent_pid);
+    if (entry) {
+        entry->child_count = 0;
+    }
 }
 
 static void vprocNotifyParentSigchldLocked(int parent_pid, VProcSigchldEvent evt) {
     if (parent_pid <= 0) return;
-    VProcTaskEntry *parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
-    if (parent_entry) {
-        if (evt == VPROC_SIGCHLD_EVENT_STOP) {
-            struct sigaction sa = vprocGetSigactionLocked(parent_entry, SIGCHLD);
-            if (sa.sa_flags & SA_NOCLDSTOP) {
-                return;
-            }
+    VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+    if (!parent_entry) {
+        return;
+    }
+    if (evt == VPROC_SIGCHLD_EVENT_STOP) {
+        struct sigaction sa = vprocGetSigactionLocked(parent_entry, SIGCHLD);
+        if (sa.sa_flags & SA_NOCLDSTOP) {
+            return;
         }
-        parent_entry->sigchld_events++;
-        vprocQueuePendingSignalLocked(parent_entry, SIGCHLD);
-        if (!parent_entry->sigchld_blocked) {
-            vprocDeliverPendingSignalsLocked(parent_entry);
-        }
+    }
+    parent_entry->sigchld_events++;
+    vprocQueuePendingSignalLocked(parent_entry, SIGCHLD);
+    if (!parent_entry->sigchld_blocked) {
+        vprocDeliverPendingSignalsLocked(parent_entry);
     }
 }
 
@@ -882,18 +1239,24 @@ int vprocReservePid(void) {
     VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
     if (entry) {
         int parent_pid = vprocDefaultParentPid();
+        if (parent_pid > 0 && parent_pid != pid) {
+            (void)vprocTaskEnsureSlotLocked(parent_pid);
+        }
         VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
         vprocClearEntryLocked(entry);
-        vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
-        entry->parent_pid = parent_pid;
-        /* Reserve creates a brand-new process group; do not inherit the shell's
-         * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
-        entry->pgid = pid;
-        entry->fg_pgid = pid;
-        if (entry->parent_pid > 0 && entry->parent_pid != pid) {
-            VProcTaskEntry *parent = vprocTaskEnsureSlotLocked(entry->parent_pid);
-            if (parent) {
-                vprocAddChildLocked(parent, pid);
+        entry = vprocTaskFindLocked(pid);
+        if (entry) {
+            vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
+            entry->parent_pid = parent_pid;
+            /* Reserve creates a brand-new process group; do not inherit the shell's
+             * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
+            entry->pgid = pid;
+            entry->fg_pgid = pid;
+            if (parent_pid > 0 && parent_pid != pid) {
+                VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
+                if (parent) {
+                    vprocAddChildLocked(parent, pid);
+                }
             }
         }
     }
@@ -916,7 +1279,25 @@ static void vprocMaybeAdvancePidCounter(int pid_hint) {
     }
 }
 
+static void vprocTaskTableRepairLocked(void) {
+    if (gVProcTasks.items != gVProcTasksItemsStable) {
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            fprintf(stderr, "[vproc] task table pointer mismatch; repairing\n");
+        }
+        gVProcTasks.items = gVProcTasksItemsStable;
+        gVProcTasks.capacity = gVProcTasksCapacityStable;
+    }
+    if (!gVProcTasks.items || gVProcTasks.capacity == 0) {
+        gVProcTasks.items = NULL;
+        gVProcTasks.count = 0;
+        gVProcTasks.capacity = 0;
+    } else if (gVProcTasks.count > gVProcTasks.capacity) {
+        gVProcTasks.count = gVProcTasks.capacity;
+    }
+}
+
 static VProcTaskEntry *vprocTaskFindLocked(int pid) {
+    vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         if (gVProcTasks.items[i].pid == pid) {
             return &gVProcTasks.items[i];
@@ -934,6 +1315,9 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
     int parent_pid = vprocDefaultParentPid();
+    if (parent_pid > 0 && parent_pid != pid) {
+        (void)vprocTaskEnsureSlotLocked(parent_pid);
+    }
     const VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
     if (gVProcTasks.count >= gVProcTasks.capacity) {
         size_t new_cap = gVProcTasks.capacity ? (gVProcTasks.capacity * 2) : 8;
@@ -943,12 +1327,14 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         }
         gVProcTasks.items = resized;
         gVProcTasks.capacity = new_cap;
+        gVProcTasksItemsStable = gVProcTasks.items;
+        gVProcTasksCapacityStable = gVProcTasks.capacity;
     }
     entry = &gVProcTasks.items[gVProcTasks.count++];
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
     entry->parent_pid = parent_pid;
     if (entry->parent_pid > 0 && entry->parent_pid != pid) {
-        VProcTaskEntry *parent = vprocTaskEnsureSlotLocked(entry->parent_pid);
+        VProcTaskEntry *parent = vprocTaskFindLocked(entry->parent_pid);
         if (parent) {
             vprocAddChildLocked(parent, pid);
         }
@@ -1012,12 +1398,18 @@ VProc *vprocCreate(const VProcOptions *opts) {
     VProcTaskEntry *slot = vprocTaskEnsureSlotLocked(vp->pid);
     if (slot) {
         int parent_pid = vprocDefaultParentPid();
+        if (parent_pid > 0 && parent_pid != vp->pid) {
+            (void)vprocTaskEnsureSlotLocked(parent_pid);
+        }
         VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
         vprocClearEntryLocked(slot);
-        vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
-        vprocUpdateParentLocked(slot, parent_pid);
-        if (local.job_id > 0) {
-            slot->job_id = local.job_id;
+        slot = vprocTaskFindLocked(vp->pid);
+        if (slot) {
+            vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
+            vprocUpdateParentLocked(vp->pid, parent_pid);
+            if (local.job_id > 0) {
+                slot->job_id = local.job_id;
+            }
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -1067,6 +1459,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
     vp->stdin_host_fd = stdin_src;
     vp->stdout_host_fd = stdout_src;
     vp->stderr_host_fd = stderr_src;
+    vprocRegistryAdd(vp);
     return vp;
 }
 
@@ -1074,6 +1467,7 @@ void vprocDestroy(VProc *vp) {
     if (!vp) {
         return;
     }
+    vprocRegistryRemove(vp);
     // Lock shouldn't strictly be needed here if refcount is 0, but good practice
     pthread_mutex_lock(&vp->mu);
     /* Close only the vproc-owned fds; do not close the saved host stdio fds. */
@@ -1112,6 +1506,9 @@ void vprocDestroy(VProc *vp) {
 }
 
 void vprocActivate(VProc *vp) {
+    if (gVProcCurrent && !vprocRegistryContains(gVProcCurrent)) {
+        vprocClearThreadState();
+    }
     if (gVProcStackDepth < (sizeof(gVProcStack) / sizeof(gVProcStack[0]))) {
         gVProcStack[gVProcStackDepth++] = gVProcCurrent;
     }
@@ -1129,7 +1526,7 @@ void vprocDeactivate(void) {
 }
 
 VProc *vprocCurrent(void) {
-    return gVProcCurrent;
+    return vprocForThread();
 }
 
 void vprocDiscard(int pid) {
@@ -1152,8 +1549,21 @@ void vprocTerminateSession(int sid) {
     pthread_t *cancel = NULL;
     size_t cancel_count = 0;
     size_t cancel_cap = 0;
+    size_t target_count = 0;
+    int *target_pids = NULL;
 
     pthread_mutex_lock(&gVProcTasks.mu);
+    vprocTaskTableRepairLocked();
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (!entry || entry->pid <= 0) continue;
+        if (entry->sid != sid) continue;
+        target_count++;
+    }
+    if (target_count > 0) {
+        target_pids = (int *)calloc(target_count, sizeof(int));
+    }
+    size_t target_index = 0;
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
@@ -1178,7 +1588,15 @@ void vprocTerminateSession(int sid) {
                 vprocCancelListAdd(&cancel, &cancel_count, &cancel_cap, tid);
             }
         }
-        vprocClearEntryLocked(entry);
+        if (target_pids && target_index < target_count) {
+            target_pids[target_index++] = entry->pid;
+        }
+    }
+    for (size_t i = 0; i < target_index; ++i) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(target_pids[i]);
+        if (entry) {
+            vprocClearEntryLocked(entry);
+        }
     }
     pthread_cond_broadcast(&gVProcTasks.cv);
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -1187,6 +1605,7 @@ void vprocTerminateSession(int sid) {
         pthread_cancel(cancel[i]);
     }
     free(cancel);
+    free(target_pids);
 }
 
 static void *vprocThreadTrampoline(void *arg) {
@@ -1251,6 +1670,10 @@ int vprocPthreadCreateShim(pthread_t *thread,
 
 int vprocTranslateFd(VProc *vp, int fd) {
     if (!vp || fd < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    if (!vprocRegistryContains(vp)) {
         errno = EBADF;
         return -1;
     }
@@ -1720,7 +2143,12 @@ void vprocMarkExit(VProc *vp, int status) {
         entry->stop_signo = 0;
         entry->zombie = true;
         int adopt_parent = vprocAdoptiveParentPidLocked(entry);
-        vprocReparentChildrenLocked(entry, adopt_parent);
+        vprocReparentChildrenLocked(vp->pid, adopt_parent);
+        entry = vprocTaskFindLocked(vp->pid);
+        if (!entry) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            return;
+        }
 
         bool discard_zombie = false;
         VProcTaskEntry *parent_entry = vprocTaskFindLocked(entry->parent_pid);
@@ -1771,7 +2199,7 @@ void vprocSetParent(int pid, int parent_pid) {
             fprintf(stderr, "[vproc-parent] pid=%d old=%d new=%d\n",
                     pid, entry->parent_pid, parent_pid);
         }
-        vprocUpdateParentLocked(entry, parent_pid);
+    vprocUpdateParentLocked(pid, parent_pid);
     } else if (dbg) {
         fprintf(stderr, "[vproc-parent] pid=%d not found; new=%d\n", pid, parent_pid);
     }
@@ -1842,6 +2270,24 @@ int vprocSetSid(int pid, int sid) {
     return rc;
 }
 
+void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
+    if (pid <= 0) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        entry->stop_unsupported = stop_unsupported;
+        if (stop_unsupported && entry->stopped) {
+            entry->stopped = false;
+            entry->continued = true;
+            entry->stop_signo = 0;
+        }
+        pthread_cond_broadcast(&gVProcTasks.cv);
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
 int vprocGetPgid(int pid) {
     if (pid == 0) {
         pid = vprocGetPidShim();
@@ -1878,6 +2324,7 @@ int vprocSetForegroundPgid(int sid, int fg_pgid) {
     }
     int rc = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
+    vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
@@ -1899,6 +2346,7 @@ int vprocGetForegroundPgid(int sid) {
     }
     int fg = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
+    vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
@@ -1916,14 +2364,21 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     if (!entry) {
         return;
     }
-    if (entry->parent_pid > 0 && entry->pid > 0) {
-        VProcTaskEntry *parent = vprocTaskFindLocked(entry->parent_pid);
+    int pid = entry->pid;
+    int parent_pid = entry->parent_pid;
+    if (parent_pid > 0 && pid > 0) {
+        VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
         if (parent) {
-            vprocRemoveChildLocked(parent, entry->pid);
+            vprocRemoveChildLocked(parent, pid);
         }
     }
     int adopt_parent = vprocAdoptiveParentPidLocked(entry);
-    vprocReparentChildrenLocked(entry, adopt_parent);
+    vprocReparentChildrenLocked(pid, adopt_parent);
+
+    entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        return;
+    }
 
     if (entry->label) {
         free(entry->label);
@@ -1942,6 +2397,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->continued = false;
     entry->stop_signo = 0;
     entry->zombie = false;
+    entry->stop_unsupported = false;
     entry->job_id = 0;
     if (entry->children) {
         free(entry->children);
@@ -1984,6 +2440,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
 size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
     size_t count = 0;
     pthread_mutex_lock(&gVProcTasks.mu);
+    vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) {
@@ -2413,6 +2870,15 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
         vprocSetCommandLabel(pid, label);
     }
 
+    if (vprocIsShellSelfThread()) {
+        pthread_mutex_lock(&gVProcTasks.mu);
+        VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+        if (entry) {
+            entry->stop_unsupported = true;
+        }
+        pthread_mutex_unlock(&gVProcTasks.mu);
+    }
+
     vprocActivate(vp);
     return true;
 }
@@ -2578,6 +3044,15 @@ int vprocGetShellSelfPid(void) {
     return gShellSelfPid;
 }
 
+void vprocSetShellSelfTid(pthread_t tid) {
+    gShellSelfTid = tid;
+    gShellSelfTidValid = true;
+}
+
+bool vprocIsShellSelfThread(void) {
+    return gShellSelfTidValid && pthread_equal(pthread_self(), gShellSelfTid);
+}
+
 void vprocSetKernelPid(int pid) {
     gKernelPid = pid;
 }
@@ -2603,6 +3078,7 @@ void vprocSessionStdioInit(VProcSessionStdio *stdio_ctx, int kernel_pid) {
         return;
     }
     stdio_ctx->kernel_pid = kernel_pid;
+    stdio_ctx->input = NULL;
     /* Duplicate current host stdio so this session owns stable copies. */
     int in = fcntl(STDIN_FILENO, F_DUPFD_CLOEXEC, 0);
     int out = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 0);
@@ -2857,7 +3333,15 @@ int vprocSigaction(int pid, int sig, const struct sigaction *act, struct sigacti
 }
 
 static VProc *vprocForThread(void) {
-    return gVProcCurrent;
+    VProc *vp = gVProcCurrent;
+    if (!vp) {
+        return NULL;
+    }
+    if (!vprocRegistryContains(vp)) {
+        vprocClearThreadState();
+        return NULL;
+    }
+    return vp;
 }
 
 int vprocSigpending(int pid, sigset_t *set) {
@@ -3067,11 +3551,54 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     }
     VProc *vp = vprocForThread();
     bool controlling_stdin = (vp && vp->stdin_host_fd >= 0 && fd == STDIN_FILENO && host == vp->stdin_host_fd);
+    if (controlling_stdin) {
+        (void)vprocWaitIfStopped(vp);
+    }
     if (controlling_stdin && vprocShouldStopForBackgroundTty(vprocCurrent(), SIGTTIN)) {
         errno = EINTR;
         return -1;
     }
-    return read(host, buf, count);
+    ssize_t res;
+    if (controlling_stdin && pscalRuntimeVirtualTTYEnabled()) {
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (session && vprocSessionInputEnsure(session, vprocGetShellSelfPid(), vprocGetKernelPid())) {
+            res = vprocSessionReadInput(session, buf, count);
+        } else {
+            res = read(host, buf, count);
+        }
+    } else {
+        res = read(host, buf, count);
+    }
+    if (res <= 0 || !controlling_stdin || !vp) {
+        return res;
+    }
+    if (!pscalRuntimeVirtualTTYEnabled()) {
+        return res;
+    }
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid > 0 && vprocPid(vp) == shell_pid) {
+        return res;
+    }
+    bool saw_sigint = false;
+    bool saw_sigtstp = false;
+    unsigned char *bytes = (unsigned char *)buf;
+    for (ssize_t i = 0; i < res; ++i) {
+        if (bytes[i] == 3) {
+            saw_sigint = true;
+        } else if (bytes[i] == 26) {
+            saw_sigtstp = true;
+        }
+    }
+    if (!saw_sigint && !saw_sigtstp) {
+        return res;
+    }
+    if (saw_sigint) {
+        vprocDispatchControlSignal(vp, SIGINT);
+    } else if (saw_sigtstp) {
+        vprocDispatchControlSignal(vp, SIGTSTP);
+    }
+    errno = EINTR;
+    return -1;
 }
 
 ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {

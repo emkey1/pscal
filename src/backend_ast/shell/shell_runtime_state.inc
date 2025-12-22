@@ -297,6 +297,7 @@ typedef struct {
     pid_t pgid;
 #if defined(PSCAL_TARGET_IOS)
     bool in_process;
+    bool in_process_worker;
     int spool_fd;
     size_t spool_size;
 #endif

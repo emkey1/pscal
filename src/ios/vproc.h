@@ -68,6 +68,7 @@ int vprocReservePid(void);
 void vprocActivate(VProc *vp);
 void vprocDeactivate(void);
 VProc *vprocCurrent(void);
+bool vprocWaitIfStopped(VProc *vp);
 
 size_t vprocSnapshot(VProcSnapshot *out, size_t capacity);
 
@@ -119,6 +120,7 @@ int vprocSetPgid(int pid, int pgid);
 int vprocSetSid(int pid, int sid);
 int vprocGetPgid(int pid);
 int vprocGetSid(int pid);
+void vprocSetStopUnsupported(int pid, bool stop_unsupported);
 int vprocSetForegroundPgid(int sid, int fg_pgid);
 int vprocGetForegroundPgid(int sid);
 int vprocNextJobIdSeed(void);
@@ -154,6 +156,8 @@ pid_t vprocTcgetpgrpShim(int fd);
 int vprocTcsetpgrpShim(int fd, pid_t pgid);
 void vprocSetShellSelfPid(int pid);
 int vprocGetShellSelfPid(void);
+void vprocSetShellSelfTid(pthread_t tid);
+bool vprocIsShellSelfThread(void);
 /* Optional: identify a per-session "kernel" vproc that acts as adoptive parent. */
 void vprocSetKernelPid(int pid);
 int vprocGetKernelPid(void);
@@ -162,11 +166,23 @@ void vprocSetSessionKernelPid(int pid);
 
 /* Per-session stdio ownership: duplicated host fds that define the
  * controlling stdio for a given shell window/session. */
+typedef struct VProcSessionInput {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    unsigned char *buf;
+    size_t len;
+    size_t cap;
+    bool inited;
+    bool eof;
+    bool reader_active;
+} VProcSessionInput;
+
 typedef struct VProcSessionStdio {
     int stdin_host_fd;
     int stdout_host_fd;
     int stderr_host_fd;
     int kernel_pid;
+    VProcSessionInput *input;
 } VProcSessionStdio;
 
 /* Obtain the current session stdio (per window/session). */
@@ -250,6 +266,7 @@ static inline int vprocReservePid(void) { return (int)getpid(); }
 static inline void vprocActivate(VProc *vp) { (void)vp; }
 static inline void vprocDeactivate(void) {}
 static inline VProc *vprocCurrent(void) { return NULL; }
+static inline bool vprocWaitIfStopped(VProc *vp) { (void)vp; return false; }
 static inline size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) { (void)out; (void)capacity; return 0; }
 static inline int vprocTranslateFd(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
 static inline int vprocDup(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
@@ -337,6 +354,8 @@ static inline pid_t vprocTcgetpgrpShim(int fd) { return tcgetpgrp(fd); }
 static inline int vprocTcsetpgrpShim(int fd, pid_t pgid) { return tcsetpgrp(fd, pgid); }
 static inline void vprocSetShellSelfPid(int pid) { (void)pid; }
 static inline int vprocGetShellSelfPid(void) { return (int)getpid(); }
+static inline void vprocSetShellSelfTid(pthread_t tid) { (void)tid; }
+static inline bool vprocIsShellSelfThread(void) { return false; }
 static inline void vprocSetKernelPid(int pid) { (void)pid; }
 static inline int vprocGetKernelPid(void) { return 0; }
 static inline int vprocSigpending(int pid, sigset_t *set) { (void)pid; return sigpending(set); }

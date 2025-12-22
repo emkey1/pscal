@@ -60,7 +60,7 @@ static int shellSpawnProcess(VM *vm,
                              int stderr_fd,
                              pid_t *child_pid,
                              bool ignore_job_signals);
-static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool watch_signals, bool *out_stopped);
+static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped);
 static void shellFreeCommand(ShellCommand *cmd);
 static void shellUpdateStatus(int status);
 static bool shellCommandIsExecBuiltin(const ShellCommand *cmd);
