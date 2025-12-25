@@ -115,6 +115,7 @@ struct TerminalContentView: View {
 
     @State private var lastLoggedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
     @State private var hasMeasuredGeometry: Bool = false
+    @State private var runtimeStarted: Bool = false
 
     init(
         availableSize: CGSize,
@@ -133,9 +134,9 @@ struct TerminalContentView: View {
         let currentFont = fontSettings.currentFont
 
         return VStack(spacing: 0) {
-            TerminalRendererView(
-                text: runtime.screenText,
-                cursor: runtime.cursorInfo,
+                TerminalRendererView(
+                    text: runtime.screenText,
+                    cursor: runtime.cursorInfo,
                 backgroundColor: fontSettings.backgroundColor,
                 foregroundColor: fontSettings.foregroundColor,
                 isElvisMode: elvisActive,
@@ -150,6 +151,7 @@ struct TerminalContentView: View {
                 onGeometryChange: { cols, rows in
                     hasMeasuredGeometry = true
                     runtime.updateTerminalSize(columns: cols, rows: rows)
+                    startRuntimeIfNeeded()
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -189,10 +191,7 @@ struct TerminalContentView: View {
             if !hasMeasuredGeometry {
                 updateTerminalGeometry()
             }
-            runtime.start()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                requestInputFocus()
-            }
+            startRuntimeIfNeeded()
         }
         .onChange(of: availableSize) { _ in
             if !hasMeasuredGeometry { updateTerminalGeometry() }
@@ -253,6 +252,15 @@ struct TerminalContentView: View {
         }
 
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
+    }
+
+    private func startRuntimeIfNeeded() {
+        guard hasMeasuredGeometry, !runtimeStarted else { return }
+        runtimeStarted = true
+        runtime.start()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            requestInputFocus()
+        }
     }
 
     private func requestInputFocus() {

@@ -635,7 +635,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         lastRenderTime = Date().timeIntervalSince1970
         
         // Actual expensive rendering logic
-        let snapshot = self.terminalBuffer.snapshot()
+        let allowScrollback = !self.isElvisModeActive()
+        let snapshot = self.terminalBuffer.snapshot(includeScrollback: allowScrollback)
         let renderResult = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
         let backgroundColor = snapshot.defaultBackground
         self.screenText = renderResult.text

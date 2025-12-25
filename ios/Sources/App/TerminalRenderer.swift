@@ -83,7 +83,7 @@ enum TerminalFontMetrics {
 
 // MARK: - TerminalRendererContainerView
 
-final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
+final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, UITextViewDelegate {
     private let terminalView = TerminalDisplayTextView()
     private let selectionOverlay = TerminalSelectionOverlay()
     private let selectionMenu = TerminalSelectionMenuView()
@@ -105,6 +105,9 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
     private var selectionStartIndex: Int?
     private var selectionEndIndex: Int?
     private var selectionAnchorPoint: CGPoint?
+
+    private var scrollbackEnabled = true
+    private var autoScrollEnabled = true
 
     private var pendingUpdate: (
         text: NSAttributedString,
@@ -150,6 +153,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         terminalView.isEditable = false
         terminalView.isSelectable = false
         terminalView.isScrollEnabled = true
+        terminalView.showsVerticalScrollIndicator = false
+        terminalView.showsHorizontalScrollIndicator = false
         terminalView.textContainerInset = .zero
         terminalView.textContainer.lineFragmentPadding = 0
         terminalView.contentInset = .zero
@@ -161,6 +166,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         terminalView.backgroundColor = TerminalFontSettings.shared.backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
         terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
+        terminalView.delegate = self
 
         addSubview(terminalView)
         configureKeyCommands()
@@ -553,6 +559,12 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
             return
         }
 
+        scrollbackEnabled = !isElvisMode
+        if !scrollbackEnabled {
+            autoScrollEnabled = true
+        }
+        terminalView.isScrollEnabled = scrollbackEnabled && (mouseMode == .none)
+
         if isElvisMode, let snapshot = elvisSnapshot {
             applyElvisSnapshot(snapshot, backgroundColor: backgroundColor)
             return
@@ -574,14 +586,25 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
                 return
             }
 
+            let previousOffset = terminalView.contentOffset
+            let shouldAutoScroll = autoScrollEnabled
+
             terminalView.attributedText = displayText
             terminalView.cursorInfo = cursor
             terminalView.backgroundColor = backgroundColor
 
             if let cursorOffset = cursor?.textOffset {
                 terminalView.applyCursor(offset: cursorOffset)
-            } else {
+                if shouldAutoScroll {
+                    scrollToCursor(textView: terminalView,
+                                   cursorOffset: cursorOffset)
+                }
+            } else if shouldAutoScroll {
                 scrollToBottom(textView: terminalView, text: displayText)
+            }
+
+            if !shouldAutoScroll {
+                restoreScrollOffset(previousOffset, textView: terminalView)
             }
         }
     }
@@ -590,6 +613,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         _ snapshot: ElvisSnapshot,
         backgroundColor: UIColor
     ) {
+        scrollbackEnabled = false
+        autoScrollEnabled = true
         lastElvisSnapshotText = snapshot.text
 
         terminalView.backgroundColor = backgroundColor
@@ -639,6 +664,16 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollbackEnabled else {
+            autoScrollEnabled = true
+            return
+        }
+        if scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
+            autoScrollEnabled = isAtBottom(textView: terminalView)
+        }
+    }
+
     private func scrollToBottom(textView: UITextView, text: NSAttributedString) {
         textView.layoutIfNeeded()
 
@@ -661,6 +696,30 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
                 animated: false
             )
         }
+    }
+
+    private func restoreScrollOffset(_ offset: CGPoint, textView: UITextView) {
+        textView.layoutIfNeeded()
+        let contentHeight = textView.contentSize.height
+        let boundsHeight = textView.bounds.height
+        let maxOffset = max(
+            -textView.contentInset.top,
+            contentHeight - boundsHeight + textView.contentInset.bottom
+        )
+        let clampedY = min(max(offset.y, -textView.contentInset.top), maxOffset)
+        textView.setContentOffset(CGPoint(x: offset.x, y: clampedY), animated: false)
+    }
+
+    private func isAtBottom(textView: UITextView) -> Bool {
+        textView.layoutIfNeeded()
+        let contentHeight = textView.contentSize.height
+        let boundsHeight = textView.bounds.height
+        let maxOffset = max(
+            -textView.contentInset.top,
+            contentHeight - boundsHeight + textView.contentInset.bottom
+        )
+        let threshold = max(4.0, TerminalFontMetrics.lineHeight)
+        return (maxOffset - textView.contentOffset.y) <= threshold
     }
 
     private func scrollToCursor(
@@ -731,7 +790,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate {
         self.mouseMode = mode
         self.mouseEncoding = encoding
 
-        terminalView.isScrollEnabled = (mode == .none)
+        terminalView.isScrollEnabled = scrollbackEnabled && (mode == .none)
     }
 
     private func elvisCommandLineCursor(
@@ -885,6 +944,8 @@ final class TerminalDisplayTextView: UITextView {
         isEditable = false
         isSelectable = false
         isScrollEnabled = true
+        showsVerticalScrollIndicator = false
+        showsHorizontalScrollIndicator = false
         textContainerInset = .zero
         backgroundColor = .clear
         isUserInteractionEnabled = true

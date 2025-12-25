@@ -348,45 +348,55 @@ final class TerminalBuffer {
         return result
     }
     
-    func snapshot() -> TerminalSnapshot {
+    func snapshot(includeScrollback: Bool = false) -> TerminalSnapshot {
         return syncQueue.sync {
             let retainedScrollback = Array(scrollback.suffix(maxScrollback))
             let combinedLines = retainedScrollback + grid
             let totalLines = combinedLines.count
-            let visibleStart = max(0, totalLines - rows)
-            let visibleEnd = min(totalLines, visibleStart + rows)
-            var trimmedLines = Array(combinedLines[visibleStart..<visibleEnd])
-            let deficit = rows - trimmedLines.count
-            var paddingCount = 0
-            if deficit > 0 {
-                paddingCount = deficit
-                let blankRow = TerminalBuffer.makeBlankRow(width: columns)
-                let paddingLines = Array(repeating: blankRow, count: paddingCount)
-                trimmedLines = paddingLines + trimmedLines
+            var lines = combinedLines
+            var visibleRows = totalLines
+            var cursorRowIndex: Int? = nil
+
+            if includeScrollback {
+                cursorRowIndex = retainedScrollback.count + cursorRow
+            } else {
+                let visibleStart = max(0, totalLines - rows)
+                let visibleEnd = min(totalLines, visibleStart + rows)
+                var trimmedLines = Array(combinedLines[visibleStart..<visibleEnd])
+                let deficit = rows - trimmedLines.count
+                var paddingCount = 0
+                if deficit > 0 {
+                    paddingCount = deficit
+                    let blankRow = TerminalBuffer.makeBlankRow(width: columns)
+                    let paddingLines = Array(repeating: blankRow, count: paddingCount)
+                    trimmedLines = paddingLines + trimmedLines
+                }
+                lines = trimmedLines
+                visibleRows = trimmedLines.count
+
+                let absoluteCursorRow = retainedScrollback.count + cursorRow
+                cursorRowIndex = absoluteCursorRow - visibleStart + paddingCount
             }
-            
+
             let cursorInfo: TerminalSnapshot.Cursor?
             if cursorHidden {
                 cursorInfo = nil
+            } else if let rowIndex = cursorRowIndex,
+                      rowIndex >= 0 && rowIndex < lines.count {
+                let clampedCol = clamp(cursorCol, lower: 0, upper: columns - 1)
+                cursorInfo = TerminalSnapshot.Cursor(row: rowIndex, col: clampedCol)
             } else {
-                let absoluteCursorRow = retainedScrollback.count + cursorRow
-                let adjustedRow = absoluteCursorRow - visibleStart + paddingCount
-                if adjustedRow >= 0 && adjustedRow < trimmedLines.count {
-                    let clampedCol = clamp(cursorCol, lower: 0, upper: columns - 1)
-                    cursorInfo = TerminalSnapshot.Cursor(row: adjustedRow, col: clampedCol)
-                } else {
-                    cursorInfo = nil
-                }
+                cursorInfo = nil
             }
             
             let referenceRow = grid.last ?? grid.first
             let referenceAttributes = referenceRow?.first?.attributes ?? TerminalAttributes()
             let backgroundColor = TerminalBuffer.resolvedColors(attributes: referenceAttributes).background
             
-            return TerminalSnapshot(lines: trimmedLines,
+            return TerminalSnapshot(lines: lines,
                                     cursor: cursorInfo,
                                     defaultBackground: backgroundColor,
-                                    visibleRows: trimmedLines.count)
+                                    visibleRows: visibleRows)
         }
     }
     
