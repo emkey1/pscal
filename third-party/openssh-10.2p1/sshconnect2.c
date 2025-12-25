@@ -116,6 +116,17 @@ first_alg(const char *algs)
 	return ret;
 }
 
+static int
+pscalPassphraseFlags(int flags)
+{
+#ifdef PSCAL_TARGET_IOS
+	/* Prefer stdin over askpass on iOS/iPadOS. */
+	return flags | RP_ALLOW_STDIN;
+#else
+	return flags;
+#endif
+}
+
 static char *
 order_hostkeyalgs(char *host, struct sockaddr *hostaddr, u_short port,
     const struct ssh_conn_info *cinfo)
@@ -1085,7 +1096,11 @@ userauth_passwd(struct ssh *ssh)
 		error("Permission denied, please try again.");
 
 	xasprintf(&prompt, "%s@%s's password: ", authctxt->server_user, host);
-	password = read_passphrase(prompt, 0);
+	debug2_f("PSCAL iOS passwd auth attempt=%d prompt=\"%s\"",
+	    authctxt->attempt_passwd, prompt ? prompt : "");
+	password = read_passphrase(prompt, pscalPassphraseFlags(0));
+	debug2_f("PSCAL iOS passwd auth got_len=%zu",
+	    password ? strlen(password) : 0);
 	if ((r = sshpkt_start(ssh, SSH2_MSG_USERAUTH_REQUEST)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, authctxt->server_user)) != 0 ||
 	    (r = sshpkt_put_cstring(ssh, authctxt->service)) != 0 ||
@@ -1140,7 +1155,7 @@ input_userauth_passwd_changereq(int type, u_int32_t seqnr, struct ssh *ssh)
 	snprintf(prompt, sizeof(prompt),
 	    "Enter %.30s@%.128s's old password: ",
 	    authctxt->server_user, host);
-	password = read_passphrase(prompt, 0);
+	password = read_passphrase(prompt, pscalPassphraseFlags(0));
 	if ((r = sshpkt_put_cstring(ssh, password)) != 0)
 		goto out;
 
@@ -1150,7 +1165,8 @@ input_userauth_passwd_changereq(int type, u_int32_t seqnr, struct ssh *ssh)
 		snprintf(prompt, sizeof(prompt),
 		    "Enter %.30s@%.128s's new password: ",
 		    authctxt->server_user, host);
-		password = read_passphrase(prompt, RP_ALLOW_EOF);
+		password = read_passphrase(prompt,
+		    pscalPassphraseFlags(RP_ALLOW_EOF));
 		if (password == NULL) {
 			/* bail out */
 			r = 0;
@@ -1159,7 +1175,7 @@ input_userauth_passwd_changereq(int type, u_int32_t seqnr, struct ssh *ssh)
 		snprintf(prompt, sizeof(prompt),
 		    "Retype %.30s@%.128s's new password: ",
 		    authctxt->server_user, host);
-		retype = read_passphrase(prompt, 0);
+		retype = read_passphrase(prompt, pscalPassphraseFlags(0));
 		if (strcmp(password, retype) != 0) {
 			freezero(password, strlen(password));
 			logit("Mismatch; try again, EOF to quit.");
@@ -1300,7 +1316,7 @@ identity_sign(struct identity *id, u_char **sigp, size_t *lenp,
 			notifier = NULL;
 			xasprintf(&prompt, "Enter PIN for %s key %s: ",
 			    sshkey_type(sign_key), id->filename);
-			pin = read_passphrase(prompt, 0);
+			pin = read_passphrase(prompt, pscalPassphraseFlags(0));
 			retried = 1;
 			goto retry_pin;
 		}
@@ -1576,7 +1592,8 @@ load_identity_file(Identity *id)
 		if (i == 0)
 			passphrase = "";
 		else {
-			passphrase = read_passphrase(prompt, 0);
+			passphrase = read_passphrase(prompt,
+			    pscalPassphraseFlags(0));
 			if (*passphrase == '\0') {
 				debug2("no passphrase given, try next key");
 				free(passphrase);
@@ -2022,7 +2039,8 @@ input_userauth_info_req(int type, u_int32_t seq, struct ssh *ssh)
 		    authctxt->server_user, options.host_key_alias ?
 		    options.host_key_alias : authctxt->host, prompt) == -1)
 			fatal_f("asmprintf failed");
-		response = read_passphrase(display_prompt, echo ? RP_ECHO : 0);
+		response = read_passphrase(display_prompt,
+		    pscalPassphraseFlags(echo ? RP_ECHO : 0));
 		if ((r = sshpkt_put_cstring(ssh, response)) != 0)
 			goto out;
 		freezero(response, strlen(response));

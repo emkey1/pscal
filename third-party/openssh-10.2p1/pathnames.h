@@ -132,7 +132,11 @@
  * Default location of askpass
  */
 #ifndef _PATH_SSH_ASKPASS_DEFAULT
+#ifdef PSCAL_TARGET_IOS
+#define _PATH_SSH_ASKPASS_DEFAULT	"ssh-askpass"
+#else
 #define _PATH_SSH_ASKPASS_DEFAULT	"/usr/X11R6/bin/ssh-askpass"
+#endif
 #endif
 
 /* Location of ssh-keysign for hostbased authentication */

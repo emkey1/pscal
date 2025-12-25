@@ -18,6 +18,15 @@
 
 #include "config.h"
 
+#if defined(__APPLE__)
+# include <TargetConditionals.h>
+# if TARGET_OS_IPHONE
+#  ifndef PSCAL_TARGET_IOS
+#   define PSCAL_TARGET_IOS 1
+#  endif
+# endif
+#endif
+
 #ifdef PSCAL_TARGET_IOS
 # undef HAVE_NLIST_H
 # undef HAVE_NLIST

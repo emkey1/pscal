@@ -1301,6 +1301,7 @@ tilde_expand(const char *filename, uid_t uid, char **retp)
 	char *ocopy = NULL, *copy, *s = NULL;
 	const char *path = NULL, *user = NULL;
 	struct passwd *pw;
+	const char *home_dir = NULL;
 	size_t len;
 	int ret = -1, r, slash;
 
@@ -1336,15 +1337,34 @@ tilde_expand(const char *filename, uid_t uid, char **retp)
 			error_f("No such user %s", user);
 			goto out;
 		}
-	} else if ((pw = getpwuid(uid)) == NULL) {
-		error_f("No such uid %ld", (long)uid);
-		goto out;
+	} else {
+#ifdef PSCAL_TARGET_IOS
+		const char *override_home = getenv("PSCALI_HOME");
+		if (override_home == NULL || override_home[0] == '\0')
+			override_home = getenv("HOME");
+		if (override_home == NULL || override_home[0] == '\0')
+			override_home = getenv("PSCALI_WORKDIR");
+		if (override_home != NULL && override_home[0] != '\0') {
+			home_dir = override_home;
+		}
+#endif
+		if (home_dir == NULL) {
+			if ((pw = getpwuid(uid)) == NULL) {
+				error_f("No such uid %ld", (long)uid);
+				goto out;
+			}
+			home_dir = pw->pw_dir;
+		}
 	}
 
 	/* Make sure directory has a trailing '/' */
-	slash = (len = strlen(pw->pw_dir)) == 0 || pw->pw_dir[len - 1] != '/';
+	if (home_dir == NULL) {
+		error_f("No home directory found");
+		goto out;
+	}
+	slash = (len = strlen(home_dir)) == 0 || home_dir[len - 1] != '/';
 
-	if ((r = xasprintf(&s, "%s%s%s", pw->pw_dir,
+	if ((r = xasprintf(&s, "%s%s%s", home_dir,
 	    slash ? "/" : "", path != NULL ? path : "")) <= 0) {
 		error_f("xasprintf failed");
 		goto out;

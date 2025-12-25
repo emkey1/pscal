@@ -11,6 +11,7 @@
 
 int pscal_ios_open(const char *path, int oflag, ...);
 int pscal_ios_openat(int fd, const char *path, int oflag, ...);
+ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte);
 ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte);
 int pscal_ios_close(int fd);
 int pscal_ios_ioctl(int fd, unsigned long request, ...);
@@ -40,6 +41,7 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define execle(...) pscal_ios_execle(__VA_ARGS__)
 # define execlp(...) pscal_ios_execlp(__VA_ARGS__)
 
+# define read(...) pscal_ios_read(__VA_ARGS__)
 # define open(...) pscal_ios_open(__VA_ARGS__)
 # define openat(...) pscal_ios_openat(__VA_ARGS__)
 # define write(...) pscal_ios_write(__VA_ARGS__)

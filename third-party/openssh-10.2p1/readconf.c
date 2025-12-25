@@ -38,6 +38,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#ifdef PSCAL_TARGET_IOS
+#include "common/path_truncate.h"
+#endif
 #include <unistd.h>
 #ifdef USE_SYSTEM_GLOB
 # include <glob.h>
@@ -2609,7 +2612,15 @@ read_config_file_depth(const char *filename, struct passwd *pw,
 	if (depth < 0 || depth > READCONF_MAX_DEPTH)
 		fatal("Too many recursive configuration includes");
 
-	if ((f = fopen(filename, "r")) == NULL)
+	const char *open_path = filename;
+#ifdef PSCAL_TARGET_IOS
+	char expanded_path[PATH_MAX];
+	if (filename != NULL && filename[0] == '/' &&
+	    pathTruncateExpand(filename, expanded_path, sizeof(expanded_path))) {
+		open_path = expanded_path;
+	}
+#endif
+	if ((f = fopen(open_path, "r")) == NULL)
 		return 0;
 
 	if (flags & SSHCONF_CHECKPERM) {

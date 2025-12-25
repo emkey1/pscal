@@ -38,12 +38,55 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef PSCAL_TARGET_IOS
+#include "ios/vproc.h"
+#include <pthread.h>
+#endif
+
 #include "xmalloc.h"
 #include "misc.h"
 #include "pathnames.h"
 #include "log.h"
 #include "ssh.h"
 #include "uidswap.h"
+
+#ifdef PSCAL_TARGET_IOS
+static void
+pscal_dump_session_state(const char *tag, int host_fd)
+{
+	VProcSessionStdio *session = vprocSessionStdioCurrent();
+	if (!session) {
+		debug3_f("PSCAL iOS %s session=null host_fd=%d", tag, host_fd);
+		return;
+	}
+	VProcSessionInput *input = session->input;
+	int stdin_fd = session->stdin_host_fd;
+	int stdout_fd = session->stdout_host_fd;
+	int stderr_fd = session->stderr_host_fd;
+	bool needs_refresh = vprocSessionStdioNeedsRefresh(session);
+	if (!input) {
+		debug3_f("PSCAL iOS %s session_in=%d out=%d err=%d host_fd=%d refresh=%d input=null",
+		    tag, stdin_fd, stdout_fd, stderr_fd, host_fd, (int)needs_refresh);
+		return;
+	}
+	pthread_mutex_lock(&input->mu);
+	debug3_f("PSCAL iOS %s session_in=%d out=%d err=%d host_fd=%d refresh=%d len=%zu cap=%zu eof=%d reader=%d reader_fd=%d stop=%d intr=%d",
+	    tag,
+	    stdin_fd,
+	    stdout_fd,
+	    stderr_fd,
+	    host_fd,
+	    (int)needs_refresh,
+	    input->len,
+	    input->cap,
+	    (int)input->eof,
+	    (int)input->reader_active,
+	    input->reader_fd,
+	    (int)input->stop_requested,
+	    (int)input->interrupt_pending);
+	pthread_mutex_unlock(&input->mu);
+}
+#endif
 
 static char *
 ssh_askpass(char *askpass, const char *msg, const char *env_hint)
@@ -54,6 +97,24 @@ ssh_askpass(char *askpass, const char *msg, const char *env_hint)
 	int p[2], status;
 	char buf[1024];
 	void (*osigchld)(int);
+
+#ifdef PSCAL_TARGET_IOS
+	(void)askpass;
+	(void)env_hint;
+
+	if (msg && *msg) {
+		size_t msglen = strlen(msg);
+		(void)write(STDERR_FILENO, msg, msglen);
+		if (msg[msglen - 1] != ' ')
+			(void)write(STDERR_FILENO, " ", 1);
+	}
+	if (readpassphrase("", buf, sizeof(buf), RPP_ECHO_OFF | RPP_STDIN) == NULL)
+		return NULL;
+	buf[strcspn(buf, "\r\n")] = '\0';
+	pass = xstrdup(buf);
+	explicit_bzero(buf, sizeof(buf));
+	return pass;
+#endif
 
 	if (fflush(stdout) != 0)
 		error_f("fflush: %s", strerror(errno));
@@ -124,6 +185,62 @@ read_passphrase(const char *prompt, int flags)
 	int rppflags, ttyfd, use_askpass = 0, allow_askpass = 0;
 	const char *askpass_hint = NULL;
 	const char *s;
+
+#ifdef PSCAL_TARGET_IOS
+	debug2_f("PSCAL iOS read_passphrase prompt=\"%s\" flags=0x%x",
+	    prompt ? prompt : "", flags);
+	VProc *vp = vprocCurrent();
+	int host_fd = -1;
+	int host_errno = 0;
+	VProcSessionStdio *session = vprocSessionStdioCurrent();
+	if (vp) {
+		host_fd = vprocTranslateFd(vp, STDIN_FILENO);
+		host_errno = errno;
+	}
+	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d",
+	    (void *)vp,
+	    host_fd,
+	    host_errno,
+	    session ? session->stdin_host_fd : -1);
+	if (getenv("PSCALI_TOOL_DEBUG")) {
+		pscal_dump_session_state("readpass-start", host_fd);
+	}
+	if (prompt && *prompt) {
+		size_t plen = strlen(prompt);
+		(void)write(STDERR_FILENO, prompt, plen);
+		if (prompt[plen - 1] != ' ')
+			(void)write(STDERR_FILENO, " ", 1);
+	}
+	size_t len = 0;
+	char ch = '\0';
+	while (len + 1 < sizeof(buf)) {
+		ssize_t rd = vprocSessionReadInputShim(&ch, 1);
+		if (rd <= 0) {
+			debug3_f("PSCAL iOS read_passphrase read rc=%zd errno=%d",
+			    rd, errno);
+			if (getenv("PSCALI_TOOL_DEBUG")) {
+				pscal_dump_session_state("readpass-fail", host_fd);
+			}
+			if (flags & RP_ALLOW_EOF)
+				return NULL;
+			buf[0] = '\0';
+			ret = xstrdup(buf);
+			explicit_bzero(buf, sizeof(buf));
+			return ret;
+		}
+		if (ch == '\n' || ch == '\r')
+			break;
+		buf[len++] = ch;
+	}
+	buf[len] = '\0';
+	debug2_f("PSCAL iOS read_passphrase len=%zu", len);
+	if (getenv("PSCALI_TOOL_DEBUG")) {
+		pscal_dump_session_state("readpass-done", host_fd);
+	}
+	ret = xstrdup(buf);
+	explicit_bzero(buf, sizeof(buf));
+	return ret;
+#endif
 
 	if (((s = getenv("DISPLAY")) != NULL && *s != '\0') ||
 	    ((s = getenv("WAYLAND_DISPLAY")) != NULL && *s != '\0'))

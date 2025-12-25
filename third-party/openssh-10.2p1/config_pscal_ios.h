@@ -7,6 +7,15 @@
  * our static, client-only integration.
  */
 
+#if defined(__APPLE__)
+# include <TargetConditionals.h>
+# if TARGET_OS_IPHONE
+#  ifndef PSCAL_TARGET_IOS
+#   define PSCAL_TARGET_IOS 1
+#  endif
+# endif
+#endif
+
 /* Avoid pulling the private libc symbol __progname on iOS. */
 #if defined(PSCAL_TARGET_IOS)
 #define __progname pscal_progname

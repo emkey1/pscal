@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -16,6 +17,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #ifndef PATH_MAX
@@ -23,6 +25,13 @@
 #endif
 
 #include "common/runtime_tty.h"
+#include "common/path_truncate.h"
+#include "ios/vproc.h"
+
+int pscal_openssh_ssh_main(int argc, char **argv);
+int pscal_openssh_scp_main(int argc, char **argv);
+int pscal_openssh_sftp_main(int argc, char **argv);
+int pscalVprocTestChildMain(int argc, char **argv);
 
 typedef struct {
     int fd;
@@ -33,6 +42,137 @@ typedef struct {
 
 static pthread_mutex_t g_pscal_ios_tty_lock = PTHREAD_MUTEX_INITIALIZER;
 static pscal_ios_virtual_tty g_pscal_ios_virtual_ttys[8];
+
+typedef struct {
+    bool active;
+    bool in_child;
+    sigjmp_buf parent_env;
+    VProc *child_vp;
+    int child_pid;
+} pscal_ios_fork_state;
+
+static __thread pscal_ios_fork_state g_pscal_ios_fork_state;
+
+typedef struct {
+    VProc *vp;
+    int (*entry)(int, char **);
+    int argc;
+    char **argv;
+} pscal_ios_exec_ctx;
+
+static const char *pscal_ios_basename(const char *path) {
+    if (!path) {
+        return NULL;
+    }
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
+static int pscal_ios_askpass_main(int argc, char **argv) {
+    (void)argc;
+    const char *prompt = (argc > 1) ? argv[1] : "Password: ";
+    if (prompt && *prompt) {
+        fputs(prompt, stderr);
+        if (prompt[strlen(prompt) - 1] != ' ') {
+            fputc(' ', stderr);
+        }
+        fflush(stderr);
+    }
+    char buf[512];
+    if (!fgets(buf, sizeof(buf), stdin)) {
+        return 1;
+    }
+    fputs(buf, stdout);
+    fflush(stdout);
+    return 0;
+}
+
+static char **pscal_ios_dup_argv(char *const argv[], int *out_argc) {
+    int argc = 0;
+    if (argv) {
+        while (argv[argc]) {
+            argc++;
+        }
+    }
+    char **copy = (char **)calloc((size_t)argc + 1, sizeof(char *));
+    if (!copy) {
+        return NULL;
+    }
+    for (int i = 0; i < argc; ++i) {
+        const char *src = argv[i] ? argv[i] : "";
+        copy[i] = strdup(src);
+        if (!copy[i]) {
+            for (int j = 0; j < i; ++j) {
+                free(copy[j]);
+            }
+            free(copy);
+            return NULL;
+        }
+    }
+    copy[argc] = NULL;
+    if (out_argc) {
+        *out_argc = argc;
+    }
+    return copy;
+}
+
+static void pscal_ios_free_argv(char **argv, int argc) {
+    if (!argv) {
+        return;
+    }
+    for (int i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+static void *pscal_ios_exec_thread(void *arg) {
+    pscal_ios_exec_ctx *ctx = (pscal_ios_exec_ctx *)arg;
+    int status = 127;
+    if (ctx && ctx->vp && ctx->entry) {
+        vprocActivate(ctx->vp);
+        vprocRegisterThread(ctx->vp, pthread_self());
+        status = ctx->entry(ctx->argc, ctx->argv);
+        vprocMarkExit(ctx->vp, W_EXITCODE(status & 0xff, 0));
+        vprocDeactivate();
+        vprocDestroy(ctx->vp);
+    }
+    if (ctx) {
+        pscal_ios_free_argv(ctx->argv, ctx->argc);
+        free(ctx);
+    }
+    return (void *)(intptr_t)status;
+}
+
+static int pscal_ios_spawn_child(VProc *vp, int (*entry)(int, char **),
+                                 char *const argv[]) {
+    int argc = 0;
+    char **argv_copy = pscal_ios_dup_argv(argv, &argc);
+    if (!argv_copy) {
+        errno = ENOMEM;
+        return -1;
+    }
+    pscal_ios_exec_ctx *ctx = (pscal_ios_exec_ctx *)calloc(1, sizeof(pscal_ios_exec_ctx));
+    if (!ctx) {
+        pscal_ios_free_argv(argv_copy, argc);
+        errno = ENOMEM;
+        return -1;
+    }
+    ctx->vp = vp;
+    ctx->entry = entry;
+    ctx->argc = argc;
+    ctx->argv = argv_copy;
+    pthread_t tid;
+    int err = pthread_create(&tid, NULL, pscal_ios_exec_thread, ctx);
+    if (err != 0) {
+        pscal_ios_free_argv(argv_copy, argc);
+        free(ctx);
+        errno = err;
+        return -1;
+    }
+    pthread_detach(tid);
+    return 0;
+}
 
 static bool pscal_ios_path_is_devtty(const char *path) {
     if (path == NULL) {
@@ -307,12 +447,21 @@ int pscal_ios_open(const char *path, int oflag, ...) {
         return pscal_ios_register_virtual_tty();
     }
 
+    if (!path) {
+        errno = EFAULT;
+        return -1;
+    }
+
     char remapped_path[PATH_MAX];
+    char expanded_path[PATH_MAX];
     const char *target_path = path;
-    if (path != NULL &&
-        pscal_ios_translate_etc_path(path, remapped_path,
+    if (pscal_ios_translate_etc_path(path, remapped_path,
             sizeof(remapped_path))) {
         target_path = remapped_path;
+    } else if (!pathTruncateExpand(path, expanded_path, sizeof(expanded_path))) {
+        return -1;
+    } else {
+        target_path = expanded_path;
     }
 
     if (has_mode) {
@@ -332,14 +481,12 @@ int pscal_ios_openat(int fd, const char *path, int oflag, ...) {
         has_mode = true;
     }
 
-    if (path != NULL && path[0] == '/') {
-        if (has_mode) {
-            return pscal_ios_open(path, oflag, mode);
-        }
-        return pscal_ios_open(path, oflag);
+    if (!path) {
+        errno = EFAULT;
+        return -1;
     }
 
-    if (path != NULL && pscal_ios_path_is_devtty(path)) {
+    if (pscal_ios_path_is_devtty(path)) {
         if (!pscalRuntimeStdinIsInteractive()) {
             errno = ENOTTY;
             return -1;
@@ -351,17 +498,43 @@ int pscal_ios_openat(int fd, const char *path, int oflag, ...) {
     }
 
     char remapped_path[PATH_MAX];
+    char expanded_path[PATH_MAX];
     const char *target_path = path;
-    if (path != NULL &&
-        pscal_ios_translate_etc_path(path, remapped_path,
+    if (pscal_ios_translate_etc_path(path, remapped_path,
             sizeof(remapped_path))) {
         target_path = remapped_path;
+    } else if (!pathTruncateExpand(path, expanded_path, sizeof(expanded_path))) {
+        return -1;
+    } else {
+        target_path = expanded_path;
     }
 
     if (has_mode) {
         return openat(fd, target_path, oflag, mode);
     }
     return openat(fd, target_path, oflag);
+}
+
+ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte) {
+    if (fd == STDIN_FILENO) {
+        ssize_t res = vprocReadShim(fd, buf, nbyte);
+        if (res < 0 && getenv("PSCALI_TOOL_DEBUG")) {
+            int saved_errno = errno;
+            VProc *vp = vprocCurrent();
+            int host = -1;
+            int host_errno = 0;
+            if (vp) {
+                host = vprocTranslateFd(vp, fd);
+                host_errno = errno;
+            }
+            fprintf(stderr,
+                    "[pscal-ios-read] fd=%d res=%zd errno=%d vp=%p host=%d host_errno=%d\n",
+                    fd, res, saved_errno, (void *)vp, host, host_errno);
+            errno = saved_errno;
+        }
+        return res;
+    }
+    return read(fd, buf, nbyte);
 }
 
 ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte) {
@@ -474,7 +647,10 @@ static const char *pscal_ios_effective_path(const char *path,
     if (pscal_ios_translate_etc_path(path, buffer, buflen)) {
         return buffer;
     }
-    return path;
+    if (!pathTruncateExpand(path, buffer, buflen)) {
+        return NULL;
+    }
+    return buffer;
 }
 
 int pscal_ios_stat(const char *path, struct stat *buf) {
@@ -547,43 +723,194 @@ DIR *pscal_ios_opendir(const char *path) {
 }
 
 pid_t pscal_ios_fork(void) {
-    errno = ENOSYS;
-    return -1;
+    pscal_ios_fork_state *state = &g_pscal_ios_fork_state;
+    if (state->active) {
+        errno = EAGAIN;
+        return -1;
+    }
+    volatile int jump_rc = sigsetjmp(state->parent_env, 1);
+    if (jump_rc != 0) {
+        state = &g_pscal_ios_fork_state;
+        state->active = false;
+        state->in_child = false;
+        state->child_vp = NULL;
+        int pid = state->child_pid;
+        state->child_pid = 0;
+        return (pid_t)pid;
+    }
+
+    VProcCommandScope scope;
+    if (!vprocCommandScopeBegin(&scope, "fork", true, true)) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    state->active = true;
+    state->in_child = true;
+    state->child_vp = scope.vp;
+    state->child_pid = scope.pid;
+    return 0;
 }
 
 int pscal_ios_execv(const char *path, char *const argv[]) {
-    (void)path;
-    (void)argv;
-    errno = ENOSYS;
+    const char *base = pscal_ios_basename(path);
+    int (*entry)(int, char **) = NULL;
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr, "[fork-exec] path=%s base=%s\n",
+                path ? path : "<null>",
+                base ? base : "<null>");
+    }
+    if (base) {
+        if (strcmp(base, "ssh") == 0) {
+            entry = pscal_openssh_ssh_main;
+        } else if (strcmp(base, "scp") == 0) {
+            entry = pscal_openssh_scp_main;
+        } else if (strcmp(base, "sftp") == 0) {
+            entry = pscal_openssh_sftp_main;
+        } else if (strcmp(base, "pscal-vproc-test-child") == 0) {
+            entry = pscalVprocTestChildMain;
+        } else if (strstr(base, "ssh-askpass") != NULL) {
+            entry = pscal_ios_askpass_main;
+        }
+    }
+    pscal_ios_fork_state *state = &g_pscal_ios_fork_state;
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr,
+                "[fork-exec] entry=%p active=%d in_child=%d child_vp=%p child_pid=%d\n",
+                (void *)entry,
+                state->active ? 1 : 0,
+                state->in_child ? 1 : 0,
+                (void *)state->child_vp,
+                state->child_pid);
+    }
+    if (!state->active || !state->in_child || !state->child_vp) {
+        errno = ENOSYS;
+        if (getenv("PSCALI_TOOL_DEBUG")) {
+            fprintf(stderr, "[fork-exec] invalid fork state\n");
+        }
+        return -1;
+    }
+    if (!entry) {
+        state->active = false;
+        state->in_child = false;
+        state->child_vp = NULL;
+        state->child_pid = 0;
+        errno = ENOENT;
+        if (getenv("PSCALI_TOOL_DEBUG")) {
+            fprintf(stderr, "[fork-exec] no entry for %s\n", base ? base : "<null>");
+        }
+        return -1;
+    }
+    if (pscal_ios_spawn_child(state->child_vp, entry, argv) != 0) {
+        if (errno == 0) {
+            errno = EIO;
+        }
+        if (getenv("PSCALI_TOOL_DEBUG")) {
+            fprintf(stderr, "[fork-exec] spawn failed errno=%d\n", errno);
+        }
+        state->active = false;
+        state->in_child = false;
+        state->child_vp = NULL;
+        state->child_pid = 0;
+        return -1;
+    }
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr, "[fork-exec] spawn ok, jumping to parent\n");
+    }
+    vprocUnregisterThread(state->child_vp, pthread_self());
+    vprocDeactivate();
+    siglongjmp(state->parent_env, 1);
     return -1;
 }
 
 int pscal_ios_execvp(const char *file, char *const argv[]) {
-    (void)file;
-    (void)argv;
-    errno = ENOSYS;
-    return -1;
+    return pscal_ios_execv(file, argv);
 }
 
 int pscal_ios_execl(const char *path, const char *arg, ...) {
-    (void)path;
-    (void)arg;
-    errno = ENOSYS;
-    return -1;
+    va_list ap;
+    int argc = 0;
+    const char *scan = arg;
+    va_start(ap, arg);
+    while (scan) {
+        argc++;
+        scan = va_arg(ap, const char *);
+    }
+    va_end(ap);
+
+    char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+    if (!argv) {
+        errno = ENOMEM;
+        return -1;
+    }
+    argv[0] = (char *)arg;
+    va_start(ap, arg);
+    for (int i = 1; i < argc; ++i) {
+        argv[i] = va_arg(ap, char *);
+    }
+    va_end(ap);
+    argv[argc] = NULL;
+    int rc = pscal_ios_execv(path, argv);
+    free(argv);
+    return rc;
 }
 
 int pscal_ios_execle(const char *path, const char *arg, ...) {
-    (void)path;
-    (void)arg;
-    errno = ENOSYS;
-    return -1;
+    va_list ap;
+    int argc = 0;
+    const char *scan = arg;
+    va_start(ap, arg);
+    while (scan) {
+        argc++;
+        scan = va_arg(ap, const char *);
+    }
+    char **envp = va_arg(ap, char **);
+    va_end(ap);
+    (void)envp;
+
+    char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+    if (!argv) {
+        errno = ENOMEM;
+        return -1;
+    }
+    argv[0] = (char *)arg;
+    va_start(ap, arg);
+    for (int i = 1; i < argc; ++i) {
+        argv[i] = va_arg(ap, char *);
+    }
+    va_end(ap);
+    argv[argc] = NULL;
+    int rc = pscal_ios_execv(path, argv);
+    free(argv);
+    return rc;
 }
 
 int pscal_ios_execlp(const char *file, const char *arg, ...) {
-    (void)file;
-    (void)arg;
-    errno = ENOSYS;
-    return -1;
+    va_list ap;
+    int argc = 0;
+    const char *scan = arg;
+    va_start(ap, arg);
+    while (scan) {
+        argc++;
+        scan = va_arg(ap, const char *);
+    }
+    va_end(ap);
+
+    char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+    if (!argv) {
+        errno = ENOMEM;
+        return -1;
+    }
+    argv[0] = (char *)arg;
+    va_start(ap, arg);
+    for (int i = 1; i < argc; ++i) {
+        argv[i] = va_arg(ap, char *);
+    }
+    va_end(ap);
+    argv[argc] = NULL;
+    int rc = pscal_ios_execvp(file, argv);
+    free(argv);
+    return rc;
 }
 
 #endif /* PSCAL_TARGET_IOS */

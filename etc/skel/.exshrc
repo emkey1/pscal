@@ -205,4 +205,4 @@ if [ -r "$HOME/.exshrc.local" ]; then
     . "$HOME/.exshrc.local"
 fi
 
-alias ssh='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+# alias ssh='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'

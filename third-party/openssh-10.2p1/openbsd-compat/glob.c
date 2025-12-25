@@ -392,7 +392,17 @@ globtilde(const Char *pattern, Char *patbuf, size_t patbuf_len, glob_t *pglob)
 #if 0
 		if (issetugid() != 0 || (h = getenv("HOME")) == NULL) {
 #endif
-		if ((getuid() != geteuid()) || (h = getenv("HOME")) == NULL) {
+		h = NULL;
+#ifdef PSCAL_TARGET_IOS
+		h = getenv("PSCALI_HOME");
+		if (h == NULL || *h == '\0')
+			h = getenv("HOME");
+		if (h == NULL || *h == '\0')
+			h = getenv("PSCALI_WORKDIR");
+#endif
+		if (h == NULL || *h == '\0')
+			h = getenv("HOME");
+		if ((getuid() != geteuid()) || h == NULL) {
 			if ((pwd = getpwuid(getuid())) == NULL)
 				return pattern;
 			else
