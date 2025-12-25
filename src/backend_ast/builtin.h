@@ -367,6 +367,7 @@ void vmInitTerminalState(void);
 // and clears any pending flag/pipe.
 bool pscalRuntimeConsumeSigint(void);
 void pscalRuntimeRequestSigint(void);
+void pscalRuntimeRequestSigtstp(void);
 bool pscalRuntimeSigintPending(void);
 bool pscalRuntimeInterruptFlag(void);
 void pscalRuntimeClearInterruptFlag(void);

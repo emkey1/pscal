@@ -63,6 +63,9 @@ static void shellSetupSelfVproc(void) {
     if (session_stdio && session_stdio->stdin_host_fd < 0 && session_stdio->stdout_host_fd < 0 && session_stdio->stderr_host_fd < 0) {
         vprocSessionStdioInit(session_stdio, 0);
     }
+    if (session_stdio && vprocSessionStdioNeedsRefresh(session_stdio)) {
+        vprocSessionStdioRefresh(session_stdio, 0);
+    }
 
     if (!gKernelVproc) {
         VProcOptions kopts = vprocDefaultOptions();
@@ -3411,6 +3414,8 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     }
 
     while (true) {
+        pscalRuntimeConsumeSigint();
+        pscalRuntimeClearInterruptFlag();
         shellRuntimeEnsureStandardFds();
         char *prompt_storage = shellResolveInteractivePrompt();
         const char *prompt = prompt_storage ? prompt_storage : "exsh$ ";

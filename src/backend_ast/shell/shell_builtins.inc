@@ -40,6 +40,7 @@ static const char *shellResolvePathForIOS(const char *input, char *buffer, size_
 #include "common/pascal_state.h"
 #include "clike/state.h"
 #include "rea/state.h"
+extern bool pscalRuntimeConsumeSigint(void);
 extern char **environ;
 extern void pscalShowGwinMessage(const char *message);
 extern void pscalElvisDump(void);
@@ -3959,6 +3960,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
     while (!context.finished) {
         sigset_t pending;
         sigemptyset(&pending);
+        if (pscalRuntimeConsumeSigint()) {
+            pthread_kill(context.worker_thread, SIGINT);
+        }
         if (sigpending(&pending) == 0 && sigismember(&pending, SIGINT)) {
             pthread_kill(context.worker_thread, SIGINT);
         }

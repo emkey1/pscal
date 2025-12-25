@@ -3,6 +3,8 @@ import UIKit
 
 @_silgen_name("pscalRuntimeRequestSigint")
 func pscalRuntimeRequestSigint()
+@_silgen_name("pscalRuntimeRequestSigtstp")
+func pscalRuntimeRequestSigtstp()
 
 extension Notification.Name {
     static let terminalModifierStateChanged = Notification.Name("terminalModifierStateChanged")
@@ -245,6 +247,10 @@ final class TerminalKeyInputView: UITextView {
                 pscalRuntimeRequestSigint()
                 return
             }
+            if scalar == "z" {
+                pscalRuntimeRequestSigtstp()
+                return
+            }
             if value >= 0x40, value <= 0x7F,
                let ctrlScalar = UnicodeScalar(value & 0x1F) {
                 onInput?(String(ctrlScalar))
@@ -370,6 +376,10 @@ final class TerminalKeyInputView: UITextView {
             let value = scalar.value
             if scalar == "c" {
                 pscalRuntimeRequestSigint()
+                return true
+            }
+            if scalar == "z" {
+                pscalRuntimeRequestSigtstp()
                 return true
             }
             if value >= 0x40, value <= 0x7F,
@@ -527,6 +537,10 @@ final class TerminalKeyInputView: UITextView {
         let value = scalar.value
         if scalar == "c" {
             pscalRuntimeRequestSigint()
+            return
+        }
+        if scalar == "z" {
+            pscalRuntimeRequestSigtstp()
             return
         }
         if value >= 0x40, value <= 0x7F,

@@ -4859,6 +4859,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             continue;
         }
 #endif
+        if (vmConsumeInterruptRequest(vm)) {
+            /* VM abort flag is set; let the normal exit/abort handling run. */
+        }
         if (pending_exit_flag && *pending_exit_flag) {
             shellRuntimeMaybeRequestPendingExit(vm);
         }

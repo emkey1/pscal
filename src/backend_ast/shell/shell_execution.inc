@@ -127,15 +127,26 @@ static VProc *shellCreateVProcForStage(int stdin_host,
     /* Always inherit stdio from the active vproc; never fall back to session
      * stdio here. Background workers must not mutate the interactive session's
      * fds. */
+    bool stdin_force_null = (stdin_host == -2);
     VProc *active = vprocCurrent();
     if (active) {
         int translated = vprocTranslateFd(active, STDIN_FILENO);
-        if (stdin_host < 0 && translated >= 0) stdin_host = translated;
+        if (!stdin_force_null && stdin_host < 0 && translated >= 0) stdin_host = translated;
         translated = vprocTranslateFd(active, STDOUT_FILENO);
         if (stdout_host < 0 && translated >= 0) stdout_host = translated;
         translated = vprocTranslateFd(active, STDERR_FILENO);
         if (stderr_host < 0 && translated >= 0) stderr_host = translated;
     }
+    if (!stdin_force_null && stdin_host < 0) {
+        stdin_host = STDIN_FILENO;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr,
+                "[vproc-stage] stdin_host=%d stdout_host=%d stderr_host=%d force_null=%d\n",
+                stdin_host, stdout_host, stderr_host, (int)stdin_force_null);
+    }
+#endif
     VProcOptions opts = vprocDefaultOptions();
     opts.stdin_fd = (stdin_host >= 0) ? stdin_host : -2;   /* default to /dev/null */
     opts.stdout_fd = (stdout_host >= 0) ? stdout_host : -1;

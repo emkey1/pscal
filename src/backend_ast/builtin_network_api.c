@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -224,6 +225,50 @@ static void setSocketError(int err) {
     snprintf(g_socket_last_error_msg, sizeof(g_socket_last_error_msg), "%s", strerror(err));
 #endif
 }
+
+static bool socketConsumeInterrupt(VM *vm) {
+    if (!pscalRuntimeConsumeSigint()) {
+        return false;
+    }
+    if (vm) {
+        vm->abort_requested = true;
+        vm->exit_requested = true;
+    }
+#ifdef _WIN32
+    setSocketError(WSAEINTR);
+#else
+    setSocketError(EINTR);
+#endif
+    return true;
+}
+
+#ifndef _WIN32
+static int socketWaitReadable(VM *vm, int fd) {
+    for (;;) {
+        if (socketConsumeInterrupt(vm)) {
+            return -1;
+        }
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 200000;
+        int res = select(fd + 1, &rfds, NULL, NULL, &tv);
+        if (res > 0) {
+            return 0;
+        }
+        if (res == 0) {
+            continue;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        setSocketError(errno);
+        return -1;
+    }
+}
+#endif
 
 static void setSocketAddrInfoError(int err) {
 #ifdef _WIN32
@@ -2231,11 +2276,31 @@ Value vmBuiltinSocketAccept(VM* vm, int arg_count, Value* args) {
     int parent_family = AF_INET;
     int parent_type = SOCK_STREAM;
     lookupSocketInfo(s, &parent_family, &parent_type);
-    int r = (int)accept(s, NULL, NULL);
-    if (r < 0) {
-#ifdef _WIN32
-        setSocketError(WSAGetLastError());
+    int r = -1;
+    for (;;) {
+#ifndef _WIN32
+        if (socketWaitReadable(vm, s) != 0) {
+            return makeInt(-1);
+        }
 #else
+        if (socketConsumeInterrupt(vm)) {
+            return makeInt(-1);
+        }
+#endif
+        r = (int)accept(s, NULL, NULL);
+        if (r >= 0) {
+            break;
+        }
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err == WSAEINTR || err == WSAEWOULDBLOCK) {
+            continue;
+        }
+        setSocketError(err);
+#else
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+            continue;
+        }
         setSocketError(errno);
 #endif
         return makeInt(-1);
@@ -2296,13 +2361,34 @@ Value vmBuiltinSocketReceive(VM* vm, int arg_count, Value* args) {
         releaseMStream(ms);
         return makeMStream(NULL);
     }
-    int n = (int)recv(s, ms->buffer, maxlen, 0);
-    if (n < 0) {
+    int n = -1;
+    for (;;) {
+#ifndef _WIN32
+        if (socketWaitReadable(vm, s) != 0) {
+            releaseMStream(ms);
+            return makeMStream(NULL);
+        }
+#else
+        if (socketConsumeInterrupt(vm)) {
+            releaseMStream(ms);
+            return makeMStream(NULL);
+        }
+#endif
+        n = (int)recv(s, ms->buffer, maxlen, 0);
+        if (n >= 0) {
+            break;
+        }
 #ifdef _WIN32
         int e = WSAGetLastError();
-        if (e != WSAEWOULDBLOCK) setSocketError(e); else g_socket_last_error = 0;
+        if (e == WSAEINTR || e == WSAEWOULDBLOCK) {
+            continue;
+        }
+        setSocketError(e);
 #else
-        if (errno != EWOULDBLOCK && errno != EAGAIN) setSocketError(errno); else g_socket_last_error = 0;
+        if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN) {
+            continue;
+        }
+        setSocketError(errno);
 #endif
         releaseMStream(ms);
         return makeMStream(NULL);

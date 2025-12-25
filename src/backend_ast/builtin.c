@@ -2845,28 +2845,108 @@ static void vmEnsureSigintPipe(void) {
 }
 
 static void init_pipe_once(void) {
+#if defined(PSCAL_TARGET_IOS)
+    int host_pipe[2] = {-1, -1};
+    if (vprocHostPipe(host_pipe) != 0) {
+        g_vm_sigint_pipe[0] = -1;
+        g_vm_sigint_pipe[1] = -1;
+        return;
+    }
+    g_vm_sigint_pipe[0] = host_pipe[0];
+    g_vm_sigint_pipe[1] = host_pipe[1];
+#else
     if (pipe(g_vm_sigint_pipe) != 0) {
         g_vm_sigint_pipe[0] = -1;
         g_vm_sigint_pipe[1] = -1;
         return;
     }
+#endif
     for (int i = 0; i < 2; ++i) {
-        fcntl(g_vm_sigint_pipe[i], F_SETFD, FD_CLOEXEC);
-        int flags = fcntl(g_vm_sigint_pipe[i], F_GETFL, 0);
+        int target_fd = g_vm_sigint_pipe[i];
+        fcntl(target_fd, F_SETFD, FD_CLOEXEC);
+        int flags = fcntl(target_fd, F_GETFL, 0);
         if (flags >= 0) {
-            fcntl(g_vm_sigint_pipe[i], F_SETFL, flags | O_NONBLOCK);
+            fcntl(target_fd, F_SETFL, flags | O_NONBLOCK);
         }
     }
 }
 
 // Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
 void pscalRuntimeRequestSigint(void) {
+#if defined(PSCAL_TARGET_IOS)
+    bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
+    bool from_vproc = (vprocCurrent() != NULL);
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+    if (fg_pgid <= 0 && shell_pid > 0) {
+        fg_pgid = vprocGetPgid(shell_pid);
+    }
+    int shell_pgid = (shell_pid > 0) ? vprocGetPgid(shell_pid) : -1;
+    if (!from_vproc && shell_pid > 0 && fg_pgid > 0 && shell_pgid > 0 && fg_pgid != shell_pgid) {
+        int rc = vprocKillShim(-fg_pgid, SIGINT);
+        if (dbg) {
+            fprintf(stderr,
+                    "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d kill_rc=%d errno=%d\n",
+                    shell_pid, shell_pgid, sid, fg_pgid, rc, errno);
+        }
+    } else if (dbg && shell_pid > 0) {
+        fprintf(stderr,
+                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d\n",
+                shell_pid, shell_pgid, sid, fg_pgid);
+    }
+#endif
     g_vm_sigint_seen = 1;
     atomic_store(&g_vm_interrupt_broadcast, true);
     if (g_vm_sigint_pipe[1] >= 0) {
         char c = 'i';
+#if defined(PSCAL_TARGET_IOS)
+        (void)vprocHostWrite(g_vm_sigint_pipe[1], &c, 1);
+#else
         (void)write(g_vm_sigint_pipe[1], &c, 1);
+#endif
     }
+}
+
+void pscalRuntimeRequestSigtstp(void) {
+#if defined(PSCAL_TARGET_IOS)
+    bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid <= 0) {
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] no shell pid\n");
+        }
+        return;
+    }
+    int sid = vprocGetSid(shell_pid);
+    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+    if (fg_pgid <= 0) {
+        fg_pgid = vprocGetPgid(shell_pid);
+    }
+    if (fg_pgid <= 0) {
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] no fg pgid shell=%d sid=%d\n", shell_pid, sid);
+        }
+        return;
+    }
+    int shell_pgid = vprocGetPgid(shell_pid);
+    if (shell_pgid > 0 && fg_pgid == shell_pgid) {
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] fg pgid matches shell pgid=%d sid=%d\n", shell_pgid, sid);
+        }
+        return;
+    }
+    if (dbg) {
+        fprintf(stderr, "[sigtstp] shell=%d shell_pgid=%d sid=%d fg=%d\n",
+                shell_pid, shell_pgid, sid, fg_pgid);
+    }
+    int rc = vprocKillShim(-fg_pgid, SIGTSTP);
+    if (dbg) {
+        fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, errno);
+    }
+#else
+    raise(SIGTSTP);
+#endif
 }
 
 bool pscalRuntimeSigintPending(void) {
@@ -2889,8 +2969,13 @@ bool pscalRuntimeConsumeSigint(void) {
     g_vm_sigint_seen = 0;
     if (g_vm_sigint_pipe[0] >= 0) {
         char drain[8];
+#if defined(PSCAL_TARGET_IOS)
+        while (vprocHostRead(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+        }
+#else
         while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
         }
+#endif
     }
     return seen;
 }
@@ -2987,7 +3072,49 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 
     size_t len = 0;
     vmEnsureSigintPipe();
-    if (stream == stdin && pscalRuntimeStdinIsInteractive()) {
+    bool use_interruptible = (stream == stdin && pscalRuntimeStdinIsInteractive());
+#if defined(PSCAL_TARGET_IOS)
+    if (stream == stdin) {
+        use_interruptible = true;
+    }
+#endif
+    if (use_interruptible) {
+#if defined(PSCAL_TARGET_IOS)
+        int read_fd = fd;
+        bool read_is_host = true;
+        bool skip_leading_newline = (stream == stdin &&
+                                     pscalRuntimeVirtualTTYEnabled() &&
+                                     !pscalRuntimeStdinHasRealTTY());
+        bool skipped_leading_newline = false;
+        VProc *vp = vprocCurrent();
+        int host_fd = -1;
+        if (vp) {
+            host_fd = vprocTranslateFd(vp, fd);
+            if (host_fd >= 0) {
+                read_fd = host_fd;
+            }
+        }
+        bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+        if (tool_dbg && stream == stdin) {
+            fprintf(stderr,
+                    "[readln] start stdin fd=%d read_fd=%d host=%d host_fd=%d skip_nl=%d vtty=%d\n",
+                    fd, read_fd, (int)read_is_host, host_fd, (int)skip_leading_newline,
+                    (int)pscalRuntimeVirtualTTYEnabled());
+        }
+#else
+        int read_fd = fd;
+        bool read_is_host = false;
+        bool skip_leading_newline = false;
+        bool skipped_leading_newline = false;
+#endif
+        int sigint_fd = g_vm_sigint_pipe[0];
+        bool sigint_host = false;
+#if defined(PSCAL_TARGET_IOS)
+        if (sigint_fd >= 0) {
+            sigint_host = true;
+        }
+#endif
+        bool saw_newline = false;
         while (len < buffer_sz - 1) {
             if (g_vm_sigint_seen) {
                 g_vm_sigint_seen = 0;
@@ -3004,16 +3131,16 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             }
             fd_set rfds;
             FD_ZERO(&rfds);
-            FD_SET(fd, &rfds);
-            if (g_vm_sigint_pipe[0] >= 0) {
-                FD_SET(g_vm_sigint_pipe[0], &rfds);
+            FD_SET(read_fd, &rfds);
+            if (sigint_fd >= 0) {
+                FD_SET(sigint_fd, &rfds);
             }
             struct timeval tv;
             tv.tv_sec = 0;
             tv.tv_usec = 100 * 1000; // 100ms
-            int maxfd = fd;
-            if (g_vm_sigint_pipe[0] >= 0 && g_vm_sigint_pipe[0] > maxfd) {
-                maxfd = g_vm_sigint_pipe[0];
+            int maxfd = read_fd;
+            if (sigint_fd >= 0 && sigint_fd > maxfd) {
+                maxfd = sigint_fd;
             }
             int ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
             if (ready < 0) {
@@ -3021,20 +3148,43 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                     continue;
                 }
                 if (errno == EBADF) {
+#if defined(PSCAL_TARGET_IOS)
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] select EBADF read_fd=%d sigint_fd=%d\n",
+                                read_fd, sigint_fd);
+                    }
+#endif
                     return false;
                 }
                 if (errno == EINTR) {
                     continue;
                 }
+#if defined(PSCAL_TARGET_IOS)
+                if (tool_dbg && stream == stdin) {
+                    fprintf(stderr, "[readln] select error=%d (%s) read_fd=%d sigint_fd=%d\n",
+                            errno, strerror(errno), read_fd, sigint_fd);
+                }
+#endif
                 break;
             }
             if (ready == 0) {
                 continue;
             }
-            if (g_vm_sigint_pipe[0] >= 0 && FD_ISSET(g_vm_sigint_pipe[0], &rfds)) {
+            if (sigint_fd >= 0 && FD_ISSET(sigint_fd, &rfds)) {
                 char drain[8];
-                while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+#if defined(PSCAL_TARGET_IOS)
+                if (sigint_host) {
+                    while (vprocHostRead(sigint_fd, drain, sizeof(drain)) > 0) {
+                    }
+                } else {
+                    while (read(sigint_fd, drain, sizeof(drain)) > 0) {
+                    }
                 }
+#else
+                (void)sigint_host;
+                while (read(sigint_fd, drain, sizeof(drain)) > 0) {
+                }
+#endif
                 if (vm) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
@@ -3043,14 +3193,31 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 return false;
             }
             char ch;
-            ssize_t n = read(fd, &ch, 1);
+#if defined(PSCAL_TARGET_IOS)
+            ssize_t n = read_is_host ? vprocHostRead(read_fd, &ch, 1)
+                                     : read(read_fd, &ch, 1);
+#else
+            ssize_t n = read(read_fd, &ch, 1);
+#endif
             if (n == 0) {
+#if defined(PSCAL_TARGET_IOS)
+                if (tool_dbg && stream == stdin) {
+                    fprintf(stderr, "[readln] read EOF read_fd=%d host=%d len=%zu\n",
+                            read_fd, (int)read_is_host, len);
+                }
+#endif
                 break;
             }
             if (n < 0) {
-                if (errno == EINTR) {
+                if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
                     continue;
                 }
+#if defined(PSCAL_TARGET_IOS)
+                if (tool_dbg && stream == stdin) {
+                    fprintf(stderr, "[readln] read error=%d (%s) read_fd=%d host=%d\n",
+                            errno, strerror(errno), read_fd, (int)read_is_host);
+                }
+#endif
                 break;
             }
             if (ch == 0x03) { // Ctrl-C
@@ -3065,14 +3232,31 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 continue;
             }
             if (ch == '\n') {
+                if (skip_leading_newline && len == 0 && !skipped_leading_newline) {
+                    skipped_leading_newline = true;
+#if defined(PSCAL_TARGET_IOS)
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] skipped leading newline\n");
+                    }
+#endif
+                    continue;
+                }
+                saw_newline = true;
                 break;
             }
             buffer[len++] = ch;
         }
         buffer[len] = '\0';
-        if (len > 0 || feof(stream)) {
+#if defined(PSCAL_TARGET_IOS)
+        if (tool_dbg && stream == stdin) {
+            fprintf(stderr, "[readln] done len=%zu saw_nl=%d eof=%d\n",
+                    len, (int)saw_newline, (int)feof(stream));
+        }
+#endif
+        if (saw_newline || len > 0 || feof(stream)) {
             return true;
         }
+        return false;
     }
 
     if (fgets(buffer, buffer_sz, stream) == NULL) {
@@ -6379,7 +6563,25 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     long long ms = AS_INTEGER(args[0]);
-    if (ms > 0) usleep((useconds_t)ms * 1000);
+    if (ms > 0) {
+        const long long slice_ms = 200;
+        long long remaining = ms;
+        while (remaining > 0) {
+            if (pscalRuntimeConsumeSigint()) {
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                break;
+            }
+            if (vm && (vm->abort_requested || vm->exit_requested)) {
+                break;
+            }
+            long long step = remaining > slice_ms ? slice_ms : remaining;
+            usleep((useconds_t)step * 1000);
+            remaining -= step;
+        }
+    }
     return makeVoid();
 }
 
