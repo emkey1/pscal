@@ -214,7 +214,10 @@ read_passphrase(const char *prompt, int flags)
 	size_t len = 0;
 	char ch = '\0';
 	while (len + 1 < sizeof(buf)) {
-		ssize_t rd = vprocSessionReadInputShim(&ch, 1);
+		ssize_t rd = vprocReadShim(STDIN_FILENO, &ch, 1);
+		if (rd < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+			continue;
+		}
 		if (rd <= 0) {
 			debug3_f("PSCAL iOS read_passphrase read rc=%zd errno=%d",
 			    rd, errno);
