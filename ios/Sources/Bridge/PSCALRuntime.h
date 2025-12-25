@@ -65,6 +65,12 @@ void PSCALRuntimeSendSignal(int signo);
 /// Passing NULL or an empty string clears the setting.
 void PSCALRuntimeApplyPathTruncation(const char *path);
 
+/// Enable or disable the virtual /dev/location device.
+void PSCALRuntimeSetLocationDeviceEnabled(int enabled);
+
+/// Writes a payload into the virtual /dev/location device.
+int PSCALRuntimeWriteLocationDevice(const char *utf8, size_t length);
+
 /// Creates/destroys an isolated shell runtime context for embedding scenarios
 /// (e.g. multiple iPadOS windows). The caller owns the returned pointer.
 void *PSCALRuntimeCreateShellContext(void);

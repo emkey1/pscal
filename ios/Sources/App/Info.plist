@@ -30,7 +30,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Local network access is required for SSH/telnet/ping connections to LAN hosts.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Location is used to feed /dev/ttyGPS with live NMEA sentences.</string>
+	<string>Location is used to feed /dev/location with live updates.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -103,6 +103,20 @@ struct TerminalSettingsView: View {
                     .font(.footnote)
                     .foregroundColor(.secondary)
                 }
+
+                Section(header: Text("Devices")) {
+                    Toggle(
+                        "Enable /dev/location",
+                        isOn: Binding(
+                            get: { settings.locationDeviceEnabled },
+                            set: { settings.updateLocationDeviceEnabled($0) }
+                        )
+                    )
+
+                    Text("Expose a live location feed to shell sessions.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
             }
             .navigationTitle("Terminal Settings")
             .toolbar {

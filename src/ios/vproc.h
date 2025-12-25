@@ -95,6 +95,12 @@ int vprocHostClose(int fd);
 ssize_t vprocHostRead(int fd, void *buf, size_t count);
 /* Write to a host descriptor without routing through the shim table. */
 ssize_t vprocHostWrite(int fd, const void *buf, size_t count);
+/* Enable/disable the virtual location device (/dev/location). */
+void vprocLocationDeviceSetEnabled(bool enabled);
+/* Write a payload to the virtual location device. */
+ssize_t vprocLocationDeviceWrite(const void *data, size_t len);
+/* Read from the shared session input queue (stdin) on iOS. */
+ssize_t vprocSessionReadInputShim(void *buf, size_t count);
 /* Spawn a joinable host thread, bypassing vproc's pthread_create shim. */
 int vprocHostPthreadCreate(pthread_t *thread,
                            const pthread_attr_t *attr,
@@ -114,6 +120,8 @@ int vprocGetWinsize(VProc *vp, VProcWinsize *out);
 /* Task lifecycle management for virtual processes (iOS clean-room). */
 int vprocRegisterTidHint(int pid, pthread_t tid);
 int vprocRegisterThread(VProc *vp, pthread_t tid);
+void vprocUnregisterThread(VProc *vp, pthread_t tid);
+int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthread_t *thread_out);
 void vprocMarkExit(VProc *vp, int status);
 void vprocSetParent(int pid, int parent_pid);
 int vprocSetPgid(int pid, int pgid);
@@ -172,9 +180,13 @@ typedef struct VProcSessionInput {
     unsigned char *buf;
     size_t len;
     size_t cap;
+    int reader_fd;
+    uint64_t reader_generation;
     bool inited;
     bool eof;
     bool reader_active;
+    bool interrupt_pending;
+    bool stop_requested;
 } VProcSessionInput;
 
 typedef struct VProcSessionStdio {
@@ -189,8 +201,15 @@ typedef struct VProcSessionStdio {
 VProcSessionStdio *vprocSessionStdioCurrent(void);
 /* Initialize session stdio from the current host stdio and kernel pid. */
 void vprocSessionStdioInit(VProcSessionStdio *stdio_ctx, int kernel_pid);
+bool vprocSessionStdioNeedsRefresh(VProcSessionStdio *stdio_ctx);
+void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid);
+void vprocSessionDebugDumpShim(const char *tag);
 /* Activate a session stdio context for the calling thread (per window). */
 void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx);
+/* Ensure session input is initialized for the current session. */
+VProcSessionInput *vprocSessionInputEnsureShim(void);
+/* Inject input into the current session input queue. */
+bool vprocSessionInjectInputShim(const void *data, size_t len);
 
 /* Terminate and discard all vprocs in the given session (sid). */
 void vprocTerminateSession(int sid);
@@ -296,6 +315,13 @@ static inline off_t vprocHostLseek(int fd, off_t offset, int whence) { return ls
 static inline int vprocHostClose(int fd) { return close(fd); }
 static inline ssize_t vprocHostRead(int fd, void *buf, size_t count) { return read(fd, buf, count); }
 static inline ssize_t vprocHostWrite(int fd, const void *buf, size_t count) { return write(fd, buf, count); }
+static inline void vprocLocationDeviceSetEnabled(bool enabled) { (void)enabled; }
+static inline ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
+    (void)data;
+    (void)len;
+    errno = ENODEV;
+    return -1;
+}
 static inline int vprocHostPthreadCreate(pthread_t *thread,
                                          const pthread_attr_t *attr,
                                          void *(*start_routine)(void *),

@@ -344,7 +344,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             PSCALRuntimeSetShellContext(ctx, 0)
         }
         stateQueue.async { self.promptKickPending = true }
-        GPSDeviceProvider.shared.start()
+        LocationDeviceProvider.shared.start()
 
         EditorTerminalBridge.shared.deactivate()
 
@@ -546,7 +546,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if !shouldMirror {
             return
         }
-        // Drop GPS NMEA chatter that can appear as noise.
+        // Drop GPS NMEA chatter that can appear as noise from /dev/location.
         if message.hasPrefix("$GP") {
             return;
         }
@@ -1580,21 +1580,17 @@ func pscalElvisDump() {
     }
 }
 
-final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
-    static let shared = GPSDeviceProvider()
+final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
+    static let shared = LocationDeviceProvider()
 
-    private let queue = DispatchQueue(label: "com.pscal.gps.device")
+    private let queue = DispatchQueue(label: "com.pscal.location.device")
     private let locationManager: CLLocationManager
     private var started = false
+    private var deviceEnabled = false
     private var locationActive = false
-    private var targetRoot: String?
-    private var devicePath: String?
-    private var writerFD: Int32 = -1
-    private var lastSentence: Data?
-    private var sendScheduled: Bool = false
-    private var lastWriteTime: TimeInterval = 0
-    private let sentenceThrottleSeconds: TimeInterval = 1.0
-    private let ioctlFionread: UInt = 0x4004667f // FIONREAD on Darwin
+    private var latestLocation: CLLocation?
+    private var sendTimer: DispatchSourceTimer?
+    private let sendInterval: TimeInterval = 1.0
 
     private override init() {
         locationManager = CLLocationManager()
@@ -1606,117 +1602,84 @@ final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
 
     func start() {
         queue.async {
+            guard !self.started else { return }
             self.started = true
-            if self.targetRoot == nil {
-                self.targetRoot = self.currentRoot()
-            }
-            self.configureDeviceLocked()
+            self.syncDeviceStateLocked()
         }
     }
 
-    func updateTargetRoot(_ root: String?) {
+    func setDeviceEnabled(_ enabled: Bool) {
         queue.async {
-            self.targetRoot = root
-            if self.started {
-                self.configureDeviceLocked()
-            }
+            self.deviceEnabled = enabled
+            self.syncDeviceStateLocked()
         }
     }
 
-    private func currentRoot() -> String? {
-        guard let raw = ProcessInfo.processInfo.environment["PATH_TRUNCATE"], !raw.isEmpty else {
-            return nil
-        }
-        return PathTruncationManager.shared.normalize(raw)
-    }
-
-    private func configureDeviceLocked() {
-        guard started else { return }
-        guard let root = targetRoot ?? currentRoot(), !root.isEmpty else {
-            tearDownLocked(removeDevice: true)
-            stopLocationUpdatesLocked()
-            return
-        }
-        let fm = FileManager.default
-        let device = (root as NSString).appendingPathComponent("dev/ttyGPS")
-        let needsDevice = devicePath != device || !fm.fileExists(atPath: device)
-        if needsDevice {
-            tearDownLocked(removeDevice: true)
-            if !setupFifo(root: root, devicePath: device) {
-                return
-            }
-            deliverLatestLocationIfAvailable()
-        }
-        if !locationActive {
+    private func syncDeviceStateLocked() {
+        PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
+        if started && deviceEnabled {
             startLocationUpdatesLocked()
+            startSendTimerLocked()
+            sendLatestLocationLocked()
+        } else {
+            stopSendTimerLocked()
+            stopLocationUpdatesLocked()
         }
-    }
-
-    private func setupFifo(root: String, devicePath: String) -> Bool {
-        let devDir = (root as NSString).appendingPathComponent("dev")
-        let fm = FileManager.default
-        do {
-            try fm.createDirectory(atPath: devDir, withIntermediateDirectories: true)
-            if fm.fileExists(atPath: devicePath) {
-                try? fm.removeItem(atPath: devicePath)
-            }
-            let mode: mode_t = 0o666
-            if mkfifo(devicePath, mode) != 0 && errno != EEXIST {
-                runtimeDebugLog("GPS fifo mkfifo failed: \(String(cString: strerror(errno)))")
-                return false
-            }
-            let fd = open(devicePath, O_RDWR | O_NONBLOCK | O_CLOEXEC)
-            if fd < 0 {
-                runtimeDebugLog("GPS fifo open failed: \(String(cString: strerror(errno)))")
-                try? fm.removeItem(atPath: devicePath)
-                return false
-            }
-            writerFD = fd
-        } catch {
-            runtimeDebugLog("GPS fifo setup error: \(error.localizedDescription)")
-            return false
-        }
-        self.devicePath = devicePath
-        runtimeDebugLog("GPS device ready at \(devicePath)")
-        return true
-    }
-
-    private func tearDownLocked(removeDevice: Bool) {
-        if writerFD >= 0 {
-            close(writerFD)
-            writerFD = -1
-        }
-        if removeDevice, let devicePath {
-            try? FileManager.default.removeItem(atPath: devicePath)
-        }
-        devicePath = nil
     }
 
     private func startLocationUpdatesLocked() {
+        guard !locationActive else { return }
         locationActive = true
         DispatchQueue.main.async {
             self.requestAuthorizationIfNeeded()
             self.locationManager.startUpdatingLocation()
             if let initial = self.locationManager.location {
-                self.queue.async { self.writeNMEA(for: initial) }
+                self.queue.async { self.latestLocation = initial }
             }
         }
     }
 
     private func stopLocationUpdatesLocked() {
-        if !locationActive {
-            return
-        }
+        guard locationActive else { return }
         locationActive = false
         DispatchQueue.main.async {
             self.locationManager.stopUpdatingLocation()
         }
     }
 
-    private func deliverLatestLocationIfAvailable() {
-        DispatchQueue.main.async {
-            if let latest = self.locationManager.location {
-                self.queue.async { self.writeNMEA(for: latest) }
+    private func startSendTimerLocked() {
+        guard sendTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + sendInterval, repeating: sendInterval)
+        timer.setEventHandler { [weak self] in
+            self?.sendLatestLocationLocked()
+        }
+        timer.resume()
+        sendTimer = timer
+    }
+
+    private func stopSendTimerLocked() {
+        sendTimer?.cancel()
+        sendTimer = nil
+    }
+
+    private func sendLatestLocationLocked() {
+        guard deviceEnabled, let location = latestLocation else { return }
+        let payload = LocationDeviceProvider.createLocationPayload(location: location)
+        sendPayload(payload)
+    }
+
+    private func sendPayload(_ payload: String) {
+        guard let data = payload.data(using: .utf8), !data.isEmpty else { return }
+        data.withUnsafeBytes { buffer in
+            guard let base = buffer.baseAddress else { return }
+            let res = PSCALRuntimeWriteLocationDevice(base.assumingMemoryBound(to: CChar.self),
+                                                      buffer.count)
+            if res < 0 {
+                let err = errno
+                if err != EAGAIN && err != EWOULDBLOCK && err != EPIPE {
+                    runtimeDebugLog("Location device write failed: \(String(cString: strerror(err)))")
+                }
             }
         }
     }
@@ -1732,7 +1695,6 @@ final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
         if status == .denied || status == .restricted {
             queue.async {
                 self.stopLocationUpdatesLocked()
-                self.tearDownLocked(removeDevice: false)
             }
         }
     }
@@ -1740,154 +1702,17 @@ final class GPSDeviceProvider: NSObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
         queue.async {
-            self.writeNMEA(for: latest)
+            self.latestLocation = latest
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        runtimeDebugLog("GPS device error: \(error.localizedDescription)")
+        runtimeDebugLog("Location device error: \(error.localizedDescription)")
     }
 
-    private func writeNMEA(for location: CLLocation) {
-        let sentence = GPSDeviceProvider.createNMEASentence(location: location)
-        guard let data = sentence.data(using: .utf8) else { return }
-        lastSentence = data
-        sendLatestIfReady()
-    }
-
-    private func writeSentence(_ data: Data) {
-        if writerFD < 0 {
-            return
-        }
-        // If the FIFO already has plenty of buffered data, drop this write to avoid bursts.
-        var pending: Int32 = 0
-        if ioctl(writerFD, ioctlFionread, &pending) == 0 {
-            if pending > 4096 {
-                return
-            }
-        }
-        data.withUnsafeBytes { buffer in
-            guard let base = buffer.baseAddress else { return }
-            var offset = 0
-            while offset < buffer.count {
-                let ptr = base.advanced(by: offset)
-                let written = write(writerFD, ptr, buffer.count - offset)
-                if written > 0 {
-                    offset += written
-                    lastWriteTime = Date().timeIntervalSince1970
-                    continue
-                }
-                if written < 0 {
-                    let err = errno
-                    if err == EAGAIN || err == EWOULDBLOCK {
-                        usleep(10000)
-                        continue
-                    }
-                    if err == ENXIO || err == EPIPE {
-                        close(writerFD)
-                        writerFD = -1
-                        break
-                    }
-                    let errStr = String(cString: strerror(err))
-                    runtimeDebugLog("GPS write failed: \(errStr)")
-                    close(writerFD)
-                    writerFD = -1
-                    break
-                }
-            }
-        }
-    }
-
-    private func ensureWriterOpenLocked() -> Bool {
-        if writerFD >= 0 {
-            return true
-        }
-        guard let devicePath else { return false }
-        let fd = open(devicePath, O_RDWR | O_NONBLOCK | O_CLOEXEC)
-        if fd < 0 {
-            if errno != ENXIO {
-                runtimeDebugLog("GPS fifo open failed: \(String(cString: strerror(errno)))")
-            }
-            return false
-        }
-        writerFD = fd
-        return true
-    }
-
-    private func scheduleSendIfNeeded(after delay: TimeInterval) {
-        if sendScheduled {
-            return;
-        }
-        sendScheduled = true
-        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self else { return }
-            self.sendScheduled = false
-            self.sendLatestIfReady()
-        }
-    }
-
-    private func sendLatestIfReady() {
-        guard let cached = lastSentence else { return }
-        if !ensureWriterOpenLocked() {
-            return
-        }
-        let now = Date().timeIntervalSince1970
-        let sinceLast = now - lastWriteTime
-        if sinceLast < sentenceThrottleSeconds {
-            scheduleSendIfNeeded(after: sentenceThrottleSeconds - sinceLast)
-            return
-        }
-        writeSentence(cached)
-    }
-
-    private static func createNMEASentence(location: CLLocation) -> String {
-        let lat = formatCoordinate(location.coordinate.latitude, width: 2)
-        let latDir = location.coordinate.latitude >= 0 ? "N" : "S"
-        let lon = formatCoordinate(location.coordinate.longitude, width: 3)
-        let lonDir = location.coordinate.longitude >= 0 ? "E" : "W"
-        let time = formatTimestamp(location.timestamp)
-        let fixQuality = location.horizontalAccuracy >= 0 ? 1 : 0
-        let satellites = 8
-        let hdop = max(location.horizontalAccuracy / 5.0, 0.8)
-        let altitude = location.altitude
-        let body = String(format: "GPGGA,%@,%@,%@,%@,%@,%d,%02d,%.1f,%.1f,M,0.0,M,,",
-                          time,
-                          lat, latDir,
-                          lon, lonDir,
-                          fixQuality,
-                          satellites,
-                          hdop,
-                          altitude)
-        let checksum = checksumHex(body: body)
-        return "$\(body)*\(checksum)\r\n"
-    }
-
-    private static func formatCoordinate(_ decimalDegrees: Double, width: Int) -> String {
-        let absValue = abs(decimalDegrees)
-        let degrees = Int(absValue)
-        let minutes = (absValue - Double(degrees)) * 60.0
-        return String(format: "%0*d%06.3f", width, degrees, minutes)
-    }
-
-    private static let utcCalendar: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
-        return calendar
-    }()
-
-    private static func formatTimestamp(_ date: Date) -> String {
-        let comps = utcCalendar.dateComponents([.hour, .minute, .second], from: date)
-        let hour = comps.hour ?? 0
-        let minute = comps.minute ?? 0
-        let second = comps.second ?? 0
-        return String(format: "%02d%02d%02d", hour, minute, second)
-    }
-
-    private static func checksumHex(body: String) -> String {
-        var checksum: UInt8 = 0
-        for byte in body.utf8 {
-            checksum ^= byte
-        }
-        return String(format: "%02X", checksum)
+    private static func createLocationPayload(location: CLLocation) -> String {
+        let lat = location.coordinate.latitude
+        let lon = location.coordinate.longitude
+        return String(format: "%+.6f,%+.6f\n", lat, lon)
     }
 }

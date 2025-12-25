@@ -21,6 +21,7 @@ final class TerminalFontSettings: ObservableObject {
     private let backgroundKey = "com.pscal.terminal.backgroundColor"
     private let foregroundKey = "com.pscal.terminal.foregroundColor"
     private let elvisWindowKey = "com.pscal.terminal.nextviWindow"
+    private let locationDeviceKey = "com.pscal.terminal.locationDeviceEnabled"
 
     static let elvisWindowBuildEnabled: Bool = {
 #if ELVIS_FLOATING_WINDOW
@@ -42,6 +43,7 @@ final class TerminalFontSettings: ObservableObject {
 
     @Published var pathTruncationEnabled: Bool = false
     @Published private(set) var pathTruncationPath: String = ""
+    @Published var locationDeviceEnabled: Bool = false
 
     @Published private(set) var selectedFontID: String
     @Published private(set) var elvisWindowEnabled: Bool
@@ -113,6 +115,13 @@ final class TerminalFontSettings: ObservableObject {
         } else {
             pathTruncationEnabled = !pathTruncationPath.isEmpty
         }
+
+        if UserDefaults.standard.object(forKey: locationDeviceKey) != nil {
+            locationDeviceEnabled = UserDefaults.standard.bool(forKey: locationDeviceKey)
+        } else {
+            locationDeviceEnabled = false
+        }
+        LocationDeviceProvider.shared.setDeviceEnabled(locationDeviceEnabled)
 
         applyPathTruncationPreferences()
     }
@@ -238,6 +247,13 @@ final class TerminalFontSettings: ObservableObject {
         if pathTruncationEnabled {
             applyPathTruncationPreferences()
         }
+    }
+
+    func updateLocationDeviceEnabled(_ enabled: Bool) {
+        guard enabled != locationDeviceEnabled else { return }
+        locationDeviceEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: locationDeviceKey)
+        LocationDeviceProvider.shared.setDeviceEnabled(enabled)
     }
 
     func useDocumentsPathForTruncation() {

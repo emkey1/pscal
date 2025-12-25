@@ -33,6 +33,7 @@
 #include <pty.h>
 #endif
 #include "common/path_truncate.h"
+#include "ios/vproc.h"
 extern "C" {
 #include "backend_ast/builtin.h"
 }
@@ -228,7 +229,7 @@ static bool PSCALRuntimeShouldSuppressLogLine(const std::string &line) {
     while (!trimmed.empty() && (trimmed.back() == '\n' || trimmed.back() == '\r')) {
         trimmed.pop_back();
     }
-    // Suppress noisy GPS NMEA sentences that may surface if a reader is attached to /dev/ttyGPS.
+    // Suppress noisy GPS NMEA sentences that may surface if a reader is attached to /dev/location.
     if (!trimmed.empty() && trimmed.rfind("$GP", 0) == 0) {
         return true;
     }
@@ -998,6 +999,18 @@ void PSCALRuntimeApplyPathTruncation(const char *path) {
         setenv("PSCALI_PATH_TRUNCATE_DISABLED", "1", 1);
         unsetenv("PATH_TRUNCATE");
     }
+}
+
+void PSCALRuntimeSetLocationDeviceEnabled(int enabled) {
+    vprocLocationDeviceSetEnabled(enabled != 0);
+}
+
+int PSCALRuntimeWriteLocationDevice(const char *utf8, size_t length) {
+    if (!utf8 || length == 0) {
+        return 0;
+    }
+    ssize_t res = vprocLocationDeviceWrite(utf8, length);
+    return res < 0 ? -1 : (int)res;
 }
 
 void *PSCALRuntimeCreateShellContext(void) {
