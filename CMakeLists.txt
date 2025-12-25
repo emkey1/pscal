@@ -798,6 +798,7 @@ set(PSCAL_CORE_SOURCES
     src/smallclue/src/integration.c
     src/smallclue/src/nextvi_app.c
     src/smallclue/src/openssh_app.c
+    src/smallclue/src/vproc_test_app.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
