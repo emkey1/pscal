@@ -36,23 +36,17 @@ private struct ShellTerminalContentView: View {
         let currentFont = fontSettings.currentFont
 
         return VStack(spacing: 0) {
-            TerminalRendererView(
-                text: session.screenText,
-                cursor: session.cursorInfo,
-                backgroundColor: fontSettings.backgroundColor,
-                foregroundColor: fontSettings.foregroundColor,
-                isElvisMode: false,
-                isElvisWindowVisible: false,
-                elvisRenderToken: 0,
+            HtermTerminalView(
                 font: currentFont,
-                fontPointSize: fontSettings.pointSize,
-                elvisSnapshot: nil,
-                onPaste: handlePaste,
-                mouseMode: session.mouseMode,
-                mouseEncoding: session.mouseEncoding,
-                onGeometryChange: { cols, rows in
+                foregroundColor: fontSettings.foregroundColor,
+                backgroundColor: fontSettings.backgroundColor,
+                onInput: handleInput,
+                onResize: { cols, rows in
                     hasMeasuredGeometry = true
                     session.updateTerminalSize(columns: cols, rows: rows)
+                },
+                onReady: { controller in
+                    session.attachHtermController(controller)
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)

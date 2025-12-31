@@ -133,27 +133,54 @@ struct TerminalContentView: View {
         let elvisVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
 
+        let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
+        let showElvisSnapshot = elvisActive && (!externalWindowEnabled || !elvisVisible)
+        let showBlank = elvisActive && elvisVisible && externalWindowEnabled
+
         return VStack(spacing: 0) {
-                TerminalRendererView(
-                    text: runtime.screenText,
-                    cursor: runtime.cursorInfo,
-                backgroundColor: fontSettings.backgroundColor,
-                foregroundColor: fontSettings.foregroundColor,
-                isElvisMode: elvisActive,
-                isElvisWindowVisible: elvisVisible,
-                elvisRenderToken: elvisToken,
-                font: currentFont,
-                fontPointSize: fontSettings.pointSize,
-                elvisSnapshot: nil,
-                onPaste: handlePaste,
-                mouseMode: runtime.mouseMode,
-                mouseEncoding: runtime.mouseEncoding,
-                onGeometryChange: { cols, rows in
-                    hasMeasuredGeometry = true
-                    runtime.updateTerminalSize(columns: cols, rows: rows)
-                    startRuntimeIfNeeded()
+            ZStack {
+                HtermTerminalView(
+                    font: currentFont,
+                    foregroundColor: fontSettings.foregroundColor,
+                    backgroundColor: fontSettings.backgroundColor,
+                    onInput: handleInput,
+                    onResize: { cols, rows in
+                        runtime.updateTerminalSize(columns: cols, rows: rows)
+                        hasMeasuredGeometry = true
+                        startRuntimeIfNeeded()
+                    },
+                    onReady: { controller in
+                        runtime.attachHtermController(controller)
+                    }
+                )
+
+                if showElvisSnapshot {
+                    TerminalRendererView(
+                        text: runtime.screenText,
+                        cursor: runtime.cursorInfo,
+                        backgroundColor: fontSettings.backgroundColor,
+                        foregroundColor: fontSettings.foregroundColor,
+                        isElvisMode: elvisActive,
+                        isElvisWindowVisible: elvisVisible,
+                        elvisRenderToken: elvisToken,
+                        font: currentFont,
+                        fontPointSize: fontSettings.pointSize,
+                        elvisSnapshot: nil,
+                        onPaste: handlePaste,
+                        mouseMode: runtime.mouseMode,
+                        mouseEncoding: runtime.mouseEncoding,
+                        onGeometryChange: { cols, rows in
+                            hasMeasuredGeometry = true
+                            runtime.updateTerminalSize(columns: cols, rows: rows)
+                            startRuntimeIfNeeded()
+                        }
+                    )
                 }
-            )
+
+                if showBlank {
+                    Color(fontSettings.backgroundColor)
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(fontSettings.backgroundColor))
 

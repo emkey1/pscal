@@ -237,6 +237,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var outputDrainTimer: DispatchSourceTimer?
     private let outputDrainInterval: TimeInterval = 0.001
     private let outputDrainMaxBytes: Int = 1024 * 1024
+    private var htermController: HtermTerminalController?
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -548,11 +549,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let dataCopy = Data(bytes: buffer, count: length)
         free(UnsafeMutableRawPointer(mutating: buffer))
         stateQueue.async { self.promptKickPending = false }
-        DispatchQueue.main.async {
-            self.terminalBuffer.append(data: dataCopy) {
-                PSCALRuntimeOutputDidProcess(Int(outputLength))
-                self.scheduleRender()
-            }
+        outputDrainQueue.async { [weak self] in
+            guard let self else { return }
+            self.htermController?.enqueueOutput(dataCopy)
+            self.terminalBuffer.append(data: dataCopy)
+            PSCALRuntimeOutputDidProcess(Int(outputLength))
         }
     }
 
@@ -573,10 +574,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         let line = message.hasSuffix("\n") ? message : (message + "\n")
         guard let data = line.data(using: .utf8) else { return }
-        DispatchQueue.main.async {
-            self.terminalBuffer.append(data: data) {
-                self.scheduleRender()
-            }
+        outputDrainQueue.async { [weak self] in
+            guard let self else { return }
+            self.htermController?.enqueueOutput(data)
+            self.terminalBuffer.append(data: data)
         }
     }
 
@@ -619,6 +620,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
+    func attachHtermController(_ controller: HtermTerminalController?) {
+        outputDrainQueue.async {
+            self.htermController = controller
+        }
+    }
+
     private func startOutputDrain() {
         outputDrainQueue.async { [weak self] in
             guard let self else { return }
@@ -646,21 +653,22 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func drainOutputOnce() {
+        guard let controller = htermController else { return }
         var outPtr: UnsafeMutablePointer<UInt8>?
         let count = PSCALRuntimeDrainOutput(&outPtr, outputDrainMaxBytes)
         guard count > 0, let base = outPtr else { return }
         let data = Data(bytesNoCopy: base, count: Int(count), deallocator: .free)
-        DispatchQueue.main.async {
-            self.terminalBuffer.append(data: data) {
-                self.scheduleRender()
-            }
-        }
+        controller.enqueueOutput(data)
+        terminalBuffer.append(data: data)
     }
 
     // --- RENDER SCHEDULING (THROTTLED) ---
     private func scheduleRender(preserveBackground: Bool = false) {
         if isElvisModeActive() {
             refreshElvisDisplay()
+            return
+        }
+        if htermController != nil {
             return
         }
         

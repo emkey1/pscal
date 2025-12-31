@@ -33,6 +33,10 @@
 		5F1AA0142EC6F00100000001 /* Docs in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0042EC6F00100000001 /* Docs */; };
 		5F1AA0152EC6F00100000001 /* TestsLibs in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0052EC6F00100000001 /* TestsLibs */; };
 		5F73F4B32FCA5B9A00EFC123 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */; };
+		5F9A00212F00000100ABC001 /* hterm_all.js in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00142F00000100ABC001 /* hterm_all.js */; };
+		5F9A00222F00000100ABC001 /* term.js in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00122F00000100ABC001 /* term.js */; };
+		5F9A00232F00000100ABC001 /* term.css in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00132F00000100ABC001 /* term.css */; };
+		5F9A00242F00000100ABC001 /* term.html in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00112F00000100ABC001 /* term.html */; };
 		5FFFD0023FFAA00000AAA001 /* PathTruncation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */; };
 		5FFFD0043FFAA00000AAA001 /* TerminalFontSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */; };
 		5FFFD0063FFAA00000AAA001 /* TerminalGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */; };
@@ -41,6 +45,7 @@
 		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
+		5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9A00312F00000100ABC001 /* HtermTerminalView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -74,6 +79,11 @@
 		5F1AA0052EC6F00100000001 /* TestsLibs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TestsLibs; path = ../Tests/libs; sourceTree = "<group>"; };
 		5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerminalGeometryHelper.swift; sourceTree = "<group>"; };
+		5F9A00312F00000100ABC001 /* HtermTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HtermTerminalView.swift; sourceTree = "<group>"; };
+		5F9A00112F00000100ABC001 /* term.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = term.html; sourceTree = "<group>"; };
+		5F9A00122F00000100ABC001 /* term.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = term.js; sourceTree = "<group>"; };
+		5F9A00132F00000100ABC001 /* term.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = term.css; sourceTree = "<group>"; };
+		5F9A00142F00000100ABC001 /* hterm_all.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = hterm_all.js; sourceTree = "<group>"; };
 		5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathTruncation.swift; sourceTree = "<group>"; };
 		5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontSettings.swift; sourceTree = "<group>"; };
 		5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalGeometry.swift; sourceTree = "<group>"; };
@@ -147,6 +157,8 @@
 				5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */,
 				5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */,
 				5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */,
+				5F9A00312F00000100ABC001 /* HtermTerminalView.swift */,
+				5F9A00152F00000100ABC001 /* TerminalWeb */,
 				14B7F7E02BE5F46B00E6D40B /* EditorWindowManager.swift */,
 				1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */,
 				1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */,
@@ -167,6 +179,17 @@
 				145F4FDA2BE072E500603B3F /* Info.plist */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		5F9A00152F00000100ABC001 /* TerminalWeb */ = {
+			isa = PBXGroup;
+			children = (
+				5F9A00142F00000100ABC001 /* hterm_all.js */,
+				5F9A00132F00000100ABC001 /* term.css */,
+				5F9A00112F00000100ABC001 /* term.html */,
+				5F9A00122F00000100ABC001 /* term.js */,
+			);
+			path = TerminalWeb;
 			sourceTree = "<group>";
 		};
 		5D8F07B52ECB57F000431C40 /* Frameworks */ = {
@@ -239,6 +262,10 @@
 			files = (
 				14E9F2052BE2B8D400A1E3C0 /* Examples in Resources */,
 				5F73F4B32FCA5B9A00EFC123 /* Assets.xcassets in Resources */,
+				5F9A00212F00000100ABC001 /* hterm_all.js in Resources */,
+				5F9A00242F00000100ABC001 /* term.html in Resources */,
+				5F9A00232F00000100ABC001 /* term.css in Resources */,
+				5F9A00222F00000100ABC001 /* term.js in Resources */,
 				5F1AA0112EC6F00100000001 /* lib in Resources */,
 				5F1AA0122EC6F00100000001 /* fonts in Resources */,
 				5F1AA0132EC6F00100000001 /* etc in Resources */,
@@ -332,6 +359,7 @@
 				5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */,
 				5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */,
 				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
+				5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

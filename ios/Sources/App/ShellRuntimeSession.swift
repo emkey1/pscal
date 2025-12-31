@@ -46,6 +46,7 @@ final class ShellRuntimeSession: ObservableObject {
     private var pendingRows: Int
     private var handlerContext: UnsafeMutableRawPointer?
     private var directOutput = false
+    private var htermController: HtermTerminalController?
     private lazy var sessionOutputHandler: PSCALRuntimeSessionOutputHandler = { sessionId, data, length, context in
         guard let context, let data else { return }
         let session = Unmanaged<ShellRuntimeSession>.fromOpaque(context).takeUnretainedValue()
@@ -60,6 +61,12 @@ final class ShellRuntimeSession: ObservableObject {
         self.pendingRows = metrics.rows
         self.screenText = NSAttributedString(string: "Launching shell...")
         _ = terminalBuffer
+    }
+
+    func attachHtermController(_ controller: HtermTerminalController?) {
+        outputQueue.async {
+            self.htermController = controller
+        }
     }
 
     @discardableResult
@@ -198,9 +205,8 @@ final class ShellRuntimeSession: ObservableObject {
             let readCount = read(masterFd, &buffer, buffer.count)
             if readCount > 0 {
                 let data = Data(buffer[0..<readCount])
-                terminalBuffer.append(data: data) { [weak self] in
-                    self?.scheduleRender()
-                }
+                htermController?.enqueueOutput(data)
+                terminalBuffer.append(data: data)
                 continue
             }
             if readCount == 0 {
@@ -218,6 +224,9 @@ final class ShellRuntimeSession: ObservableObject {
     // MARK: - Rendering
 
     private func scheduleRender() {
+        if htermController != nil {
+            return
+        }
         if renderQueued {
             return
         }
@@ -238,6 +247,10 @@ final class ShellRuntimeSession: ObservableObject {
     }
 
     private func performRender() {
+        if htermController != nil {
+            renderQueued = false
+            return
+        }
         renderQueued = false
         lastRenderTime = Date().timeIntervalSince1970
         let snapshot = terminalBuffer.snapshot(includeScrollback: true)
@@ -273,9 +286,8 @@ final class ShellRuntimeSession: ObservableObject {
         let data = Data(bytes: buffer, count: length)
         outputQueue.async { [weak self] in
             guard let self else { return }
-            self.terminalBuffer.append(data: data) { [weak self] in
-                self?.scheduleRender()
-            }
+            self.htermController?.enqueueOutput(data)
+            self.terminalBuffer.append(data: data)
         }
     }
 
