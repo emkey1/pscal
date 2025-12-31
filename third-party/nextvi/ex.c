@@ -571,11 +571,72 @@ static void *ex_pipeout(char *cmd, sbuf *buf)
 	return ret ? xuerr : NULL;
 }
 
+static long ex_write_all(int fd, const char *buf, long len)
+{
+	long off = 0;
+	while (off < len) {
+		long nw = write(fd, buf + off, len - off);
+		if (nw < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		off += nw;
+	}
+	return off;
+}
+
+static int ex_write_buffer(int fd, int beg, int end, int o1, int o2)
+{
+	if (o1 >= 0) {
+		sbuf ibuf;
+		lbuf_region(xb, &ibuf, beg, o1, end-1, o2);
+		long wrote = ex_write_all(fd, ibuf.s, ibuf.s_n);
+		free(ibuf.s);
+		return wrote < 0 ? -1 : 0;
+	}
+	return lbuf_wr(xb, fd, beg, end);
+}
+
+static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
+{
+	char tmp[PATH_MAX];
+	struct stat st;
+	mode_t mode = conf_mode;
+	int fd;
+	int rc;
+
+	if (!path || !path[0])
+		return -1;
+	if (snprintf(tmp, sizeof(tmp), "%s.tmpXXXXXX", path) >= (int)sizeof(tmp))
+		return -1;
+	fd = mkstemp(tmp);
+	if (fd < 0)
+		return -1;
+	if (stat(path, &st) == 0)
+		mode = st.st_mode & 0777;
+	fchmod(fd, mode);
+	rc = ex_write_buffer(fd, beg, end, o1, o2);
+	if (rc < 0 || fsync(fd) < 0) {
+		close(fd);
+		unlink(tmp);
+		return -2;
+	}
+	if (close(fd) < 0) {
+		unlink(tmp);
+		return -2;
+	}
+	if (rename(tmp, path) < 0) {
+		unlink(tmp);
+		return -1;
+	}
+	return 0;
+}
+
 static void *ec_write(char *loc, char *cmd, char *arg)
 {
 	char msg[512], *path;
-	sbuf ibuf;
-	int fd, beg, end, o1 = -1, o2 = -1;
+	int beg, end, o1 = -1, o2 = -1;
 	path = arg[0] ? arg : xb_path;
 	if (cmd[0] == 'x' && !xb->modified)
 		return ec_quit("", cmd, "");
@@ -586,6 +647,7 @@ static void *ec_write(char *loc, char *cmd, char *arg)
 		end = lbuf_len(xb);
 	}
 	if (arg[0] == '!') {
+		sbuf ibuf;
 		lbuf_region(xb, &ibuf, beg, MAX(0, o1), end-1, o2);
 		ex_pipeout(arg + 1, &ibuf);
 		free(ibuf.s);
@@ -596,18 +658,9 @@ static void *ec_write(char *loc, char *cmd, char *arg)
 			if (arg[0] && mtime(path) >= 0)
 				return "write failed: file exists";
 		}
-		fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, conf_mode);
-		if (fd < 0)
-			return "write failed: cannot create file";
-		if (o1 >= 0) {
-			lbuf_region(xb, &ibuf, beg, o1, end-1, o2);
-			o1 = write(fd, ibuf.s, ibuf.s_n);
-			free(ibuf.s);
-		} else
-			o1 = lbuf_wr(xb, fd, beg, end);
-		close(fd);
-		if (o1 < 0)
-			return "write failed";
+		int rc = ex_write_atomic(path, beg, end, o1, o2);
+		if (rc < 0)
+			return rc == -1 ? "write failed: cannot create file" : "write failed";
 		snprintf(msg, sizeof(msg), "\"%s\" %dL [w]",
 				path, end - beg);
 		ex_print(msg, bar_ft)

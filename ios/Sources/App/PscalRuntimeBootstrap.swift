@@ -213,6 +213,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var started = false
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
     private let launchQueue = DispatchQueue(label: "com.pscal.runtime.launch", qos: .userInitiated)
+    private let outputDrainQueue = DispatchQueue(label: "com.pscal.runtime.output", qos: .utility)
     private let runtimeStackSizeBytes = 32 * 1024 * 1024
     private var handlerContext: UnsafeMutableRawPointer?
     private let terminalBuffer: TerminalBuffer
@@ -233,6 +234,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var promptKickPending: Bool = true
     private var forceRestartPending: Bool = false
     private var shellContext: UnsafeMutableRawPointer?
+    private var outputDrainTimer: DispatchSourceTimer?
+    private let outputDrainInterval: TimeInterval = 0.001
+    private let outputDrainMaxBytes: Int = 1024 * 1024
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -370,7 +374,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
 
             self.handlerContext = Unmanaged.passUnretained(self).toOpaque()
+            PSCALRuntimeSetOutputBufferingEnabled(1)
             PSCALRuntimeConfigureHandlers(self.outputHandler, self.exitHandler, self.handlerContext)
+            self.startOutputDrain()
 
             let args = ["exsh"]
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
@@ -578,6 +584,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         runtimeDebugLog("[Runtime] exsh exit detected (status=\(status)); awaiting user to restart")
         let stackSymbols = Thread.callStackSymbols.joined(separator: "\n")
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
+        stopOutputDrain()
         stateQueue.async {
             self.started = false
             if self.forceRestartPending {
@@ -609,6 +616,44 @@ final class PscalRuntimeBootstrap: ObservableObject {
         runtimeDebugLog("[Geometry] remote resize request columns=\(columns) rows=\(rows); reasserting active \(activeGeometry.columns)x\(activeGeometry.rows)")
         DispatchQueue.main.async {
             self.refreshActiveGeometry(forceRuntimeUpdate: true)
+        }
+    }
+
+    private func startOutputDrain() {
+        outputDrainQueue.async { [weak self] in
+            guard let self else { return }
+            if self.outputDrainTimer != nil {
+                return
+            }
+            let timer = DispatchSource.makeTimerSource(queue: self.outputDrainQueue)
+            timer.schedule(deadline: .now(), repeating: self.outputDrainInterval, leeway: .milliseconds(2))
+            timer.setEventHandler { [weak self] in
+                self?.drainOutputOnce()
+            }
+            self.outputDrainTimer = timer
+            timer.resume()
+        }
+    }
+
+    private func stopOutputDrain() {
+        outputDrainQueue.async { [weak self] in
+            guard let self else { return }
+            if let timer = self.outputDrainTimer {
+                timer.cancel()
+                self.outputDrainTimer = nil
+            }
+        }
+    }
+
+    private func drainOutputOnce() {
+        var outPtr: UnsafeMutablePointer<UInt8>?
+        let count = PSCALRuntimeDrainOutput(&outPtr, outputDrainMaxBytes)
+        guard count > 0, let base = outPtr else { return }
+        let data = Data(bytesNoCopy: base, count: Int(count), deallocator: .free)
+        DispatchQueue.main.async {
+            self.terminalBuffer.append(data: data) {
+                self.scheduleRender()
+            }
         }
     }
 

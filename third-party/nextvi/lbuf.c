@@ -240,8 +240,11 @@ int lbuf_wr(struct lbuf *lb, int fd, int beg, int end)
 		long nl = lbuf_s(ln)->len + 1;
 		while (nw < nl) {
 			long nc = write(fd, ln + nw, nl - nw);
-			if (nc < 0)
+			if (nc < 0) {
+				if (errno == EINTR)
+					continue;
 				return nc;
+			}
 			nw += nc;
 		}
 	}

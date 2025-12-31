@@ -93,6 +93,23 @@ static void *s_handler_context = NULL;
 static std::atomic<size_t> s_output_backlog(0);
 static const size_t kOutputBacklogLimit = 512 * 1024;
 static const useconds_t kOutputBackpressureSleepUsec = 1000;
+static const size_t kOutputRingCapacity = 512 * 1024;
+static std::atomic<int> s_output_buffering_enabled{0};
+static pthread_once_t s_output_ring_once = PTHREAD_ONCE_INIT;
+
+typedef struct {
+    uint8_t *data;
+    size_t capacity;
+    size_t head;
+    size_t tail;
+    size_t size;
+    bool active;
+    pthread_mutex_t lock;
+    pthread_cond_t can_read;
+    pthread_cond_t can_write;
+} PSCALRuntimeOutputRing;
+
+static PSCALRuntimeOutputRing s_output_ring = {};
 static pthread_t s_runtime_thread_id;
 static ShellRuntimeState *s_forced_shell_ctx = NULL;
 static bool s_forced_shell_ctx_owned = false;
@@ -137,6 +154,7 @@ static std::string s_vtty_raw_buffer;
 static int s_runtime_log_fd = -1;
 static int s_script_capture_fd = -1;
 static std::string s_script_capture_path;
+static std::atomic<int> s_output_log_enabled{-1};
 
 static bool PSCALRuntimeDirectPtyEnabled(void) {
     const char *env = getenv("PSCALI_PTY_OUTPUT_DIRECT");
@@ -437,7 +455,164 @@ static bool PSCALRuntimeShouldSuppressLogLine(const std::string &line) {
     return false;
 }
 
+static void PSCALRuntimeOutputRingInitOnce(void) {
+    pthread_mutex_init(&s_output_ring.lock, NULL);
+    pthread_cond_init(&s_output_ring.can_read, NULL);
+    pthread_cond_init(&s_output_ring.can_write, NULL);
+}
+
+static void PSCALRuntimeOutputRingActivate(void) {
+    pthread_once(&s_output_ring_once, PSCALRuntimeOutputRingInitOnce);
+    pthread_mutex_lock(&s_output_ring.lock);
+    if (!s_output_ring.data) {
+        s_output_ring.capacity = kOutputRingCapacity;
+        s_output_ring.data = (uint8_t *)malloc(s_output_ring.capacity);
+        s_output_ring.head = 0;
+        s_output_ring.tail = 0;
+        s_output_ring.size = 0;
+    } else {
+        s_output_ring.head = 0;
+        s_output_ring.tail = 0;
+        s_output_ring.size = 0;
+    }
+    s_output_ring.active = (s_output_ring.data != NULL);
+    pthread_cond_broadcast(&s_output_ring.can_write);
+    pthread_cond_broadcast(&s_output_ring.can_read);
+    pthread_mutex_unlock(&s_output_ring.lock);
+}
+
+static void PSCALRuntimeOutputRingDeactivate(void) {
+    pthread_once(&s_output_ring_once, PSCALRuntimeOutputRingInitOnce);
+    pthread_mutex_lock(&s_output_ring.lock);
+    s_output_ring.active = false;
+    s_output_ring.head = 0;
+    s_output_ring.tail = 0;
+    s_output_ring.size = 0;
+    pthread_cond_broadcast(&s_output_ring.can_write);
+    pthread_cond_broadcast(&s_output_ring.can_read);
+    pthread_mutex_unlock(&s_output_ring.lock);
+}
+
+static bool PSCALRuntimeOutputBufferingEnabled(void) {
+    return s_output_buffering_enabled.load(std::memory_order_acquire) != 0;
+}
+
+void PSCALRuntimeSetOutputBufferingEnabled(int enabled) {
+    if (enabled) {
+        PSCALRuntimeOutputRingActivate();
+        s_output_buffering_enabled.store(1, std::memory_order_release);
+    } else {
+        s_output_buffering_enabled.store(0, std::memory_order_release);
+        PSCALRuntimeOutputRingDeactivate();
+    }
+}
+
+static bool PSCALRuntimeQueueOutput(const char *buffer, size_t length) {
+    if (!buffer || length == 0) {
+        return true;
+    }
+    if (!PSCALRuntimeOutputBufferingEnabled()) {
+        return false;
+    }
+    pthread_once(&s_output_ring_once, PSCALRuntimeOutputRingInitOnce);
+    pthread_mutex_lock(&s_output_ring.lock);
+    if (!s_output_ring.data || s_output_ring.capacity == 0) {
+        pthread_mutex_unlock(&s_output_ring.lock);
+        return false;
+    }
+    if (!s_output_ring.active) {
+        pthread_mutex_unlock(&s_output_ring.lock);
+        return true;
+    }
+    size_t offset = 0;
+    while (offset < length && s_output_ring.active) {
+        while (s_output_ring.size == s_output_ring.capacity && s_output_ring.active) {
+            pthread_cond_wait(&s_output_ring.can_write, &s_output_ring.lock);
+        }
+        if (!s_output_ring.active) {
+            break;
+        }
+        size_t space = s_output_ring.capacity - s_output_ring.size;
+        size_t remaining = length - offset;
+        size_t chunk = remaining < space ? remaining : space;
+        size_t tail = s_output_ring.tail;
+        size_t first = s_output_ring.capacity - tail;
+        if (first > chunk) {
+            first = chunk;
+        }
+        memcpy(s_output_ring.data + tail, buffer + offset, first);
+        tail = (tail + first) % s_output_ring.capacity;
+        s_output_ring.size += first;
+        offset += first;
+        size_t second = chunk - first;
+        if (second > 0) {
+            memcpy(s_output_ring.data + tail, buffer + offset, second);
+            tail = (tail + second) % s_output_ring.capacity;
+            s_output_ring.size += second;
+            offset += second;
+        }
+        s_output_ring.tail = tail;
+        pthread_cond_signal(&s_output_ring.can_read);
+    }
+    pthread_mutex_unlock(&s_output_ring.lock);
+    return offset == length;
+}
+
+size_t PSCALRuntimeDrainOutput(uint8_t **out_buffer, size_t max_bytes) {
+    if (!out_buffer || max_bytes == 0) {
+        return 0;
+    }
+    *out_buffer = NULL;
+    if (!PSCALRuntimeOutputBufferingEnabled()) {
+        return 0;
+    }
+    pthread_once(&s_output_ring_once, PSCALRuntimeOutputRingInitOnce);
+    pthread_mutex_lock(&s_output_ring.lock);
+    if (!s_output_ring.active || s_output_ring.size == 0 || !s_output_ring.data) {
+        pthread_mutex_unlock(&s_output_ring.lock);
+        return 0;
+    }
+    size_t to_read = s_output_ring.size < max_bytes ? s_output_ring.size : max_bytes;
+    uint8_t *buffer = (uint8_t *)malloc(to_read);
+    if (!buffer) {
+        pthread_mutex_unlock(&s_output_ring.lock);
+        return 0;
+    }
+    size_t head = s_output_ring.head;
+    size_t first = s_output_ring.capacity - head;
+    if (first > to_read) {
+        first = to_read;
+    }
+    memcpy(buffer, s_output_ring.data + head, first);
+    s_output_ring.head = (head + first) % s_output_ring.capacity;
+    s_output_ring.size -= first;
+    size_t remaining = to_read - first;
+    if (remaining > 0) {
+        memcpy(buffer + first, s_output_ring.data + s_output_ring.head, remaining);
+        s_output_ring.head = (s_output_ring.head + remaining) % s_output_ring.capacity;
+        s_output_ring.size -= remaining;
+    }
+    pthread_cond_signal(&s_output_ring.can_write);
+    pthread_mutex_unlock(&s_output_ring.lock);
+    *out_buffer = buffer;
+    return to_read;
+}
+
+static bool PSCALRuntimeOutputLoggingEnabled(void) {
+    int cached = s_output_log_enabled.load(std::memory_order_acquire);
+    if (cached >= 0) {
+        return cached != 0;
+    }
+    const char *env = getenv("PSCALI_PTY_OUTPUT_LOG");
+    int enabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+    s_output_log_enabled.store(enabled, std::memory_order_release);
+    return enabled != 0;
+}
+
 static bool PSCALRuntimeEnsureLogFd(void) {
+    if (!PSCALRuntimeOutputLoggingEnabled()) {
+        return false;
+    }
     if (s_runtime_log_fd >= 0) {
         return true;
     }
@@ -497,6 +672,9 @@ static void PSCALRuntimeDirectOutputHandler(uint64_t session_id,
     }
     std::string chunk((const char *)buffer, length);
     if (PSCALRuntimeShouldSuppressLogLine(chunk)) {
+        return;
+    }
+    if (PSCALRuntimeQueueOutput((const char *)buffer, length)) {
         return;
     }
     PSCALRuntimeDispatchOutput((const char *)buffer, length);
@@ -722,6 +900,36 @@ static void *PSCALRuntimeOutputPump(void *_) {
     vprocRegisterInterposeBypassThread(pthread_self());
     const int fd = s_master_fd;
     char buffer[4096];
+    if (PSCALRuntimeOutputBufferingEnabled()) {
+        while (true) {
+            ssize_t nread = vprocHostRead(fd, buffer, sizeof(buffer));
+            if (nread < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if (nread == 0) {
+                break; // EOF
+            }
+            PSCALRuntimeLogOutput(buffer, (size_t)nread);
+            pthread_mutex_lock(&s_runtime_mutex);
+            int capture_fd = s_script_capture_fd;
+            pthread_mutex_unlock(&s_runtime_mutex);
+            if (capture_fd >= 0) {
+                (void)vprocHostWrite(capture_fd, buffer, (size_t)nread);
+            }
+            std::string chunk(buffer, (size_t)nread);
+            if (PSCALRuntimeShouldSuppressLogLine(chunk)) {
+                continue;
+            }
+            if (!PSCALRuntimeQueueOutput(buffer, (size_t)nread)) {
+                PSCALRuntimeDispatchOutput(buffer, (size_t)nread);
+            }
+        }
+        vprocUnregisterInterposeBypassThread(pthread_self());
+        return NULL;
+    }
     while (true) {
         size_t backlog = s_output_backlog.load(std::memory_order_relaxed);
         if (backlog >= kOutputBacklogLimit) {
@@ -893,6 +1101,9 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     s_runtime_stdio = NULL;
     pthread_mutex_unlock(&s_runtime_mutex);
     s_output_backlog.store(0, std::memory_order_relaxed);
+    if (PSCALRuntimeOutputBufferingEnabled()) {
+        PSCALRuntimeOutputRingActivate();
+    }
 
     if (direct_pty) {
         if (master_fd >= 0) {
@@ -993,6 +1204,9 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         pthread_join(s_output_thread, NULL);
     } else {
         PSCALRuntimeUnregisterSessionOutputHandler(session_id);
+    }
+    if (PSCALRuntimeOutputBufferingEnabled()) {
+        PSCALRuntimeOutputRingDeactivate();
     }
     PSCALRuntimeEndScriptCapture();
     if (s_runtime_log_fd >= 0) {

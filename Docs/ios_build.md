@@ -155,3 +155,6 @@ This file will grow as each of the steps above lands; contributions welcome.
   `PASCAL_LIB_DIR`, `CLIKE_LIB_DIR`, and the new `PSCALI_INSTALL_ROOT`
   environment variable at that staged tree so the native compilers can find
   their resources without touching the read-only system paths.
+
+## 10. Runtime Debug Toggles
+- `PSCALI_PTY_OUTPUT_LOG=1` writes raw PTY output to `~/Documents/var/log/pscal_runtime.log` (disabled by default to avoid throttling terminal output).

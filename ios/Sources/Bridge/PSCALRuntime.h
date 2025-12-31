@@ -19,6 +19,8 @@ void PSCALRuntimeConfigureHandlers(PSCALRuntimeOutputHandler output_handler,
                                    PSCALRuntimeExitHandler exit_handler,
                                    void *context);
 void PSCALRuntimeOutputDidProcess(size_t length);
+void PSCALRuntimeSetOutputBufferingEnabled(int enabled);
+size_t PSCALRuntimeDrainOutput(uint8_t **out_buffer, size_t max_bytes);
 
 /// Completes interposer initialization once the app runtime is ready.
 void PSCALRuntimeInterposeBootstrap(void);

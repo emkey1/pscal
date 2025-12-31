@@ -78,6 +78,7 @@ bool vprocWaitIfStopped(VProc *vp);
 size_t vprocSnapshot(VProcSnapshot *out, size_t capacity);
 
 int vprocTranslateFd(VProc *vp, int fd);
+struct pscal_fd *vprocGetPscalFd(VProc *vp, int fd);
 int vprocDup(VProc *vp, int fd);
 int vprocDup2(VProc *vp, int fd, int target);
 /* Sync vproc table entry to a host fd already duplicated onto target_fd. */
@@ -94,6 +95,8 @@ int vprocHostOpen(const char *path, int flags, ...);
 int vprocHostPipe(int pipefd[2]);
 /* Seek on a host descriptor without routing through the shim table. */
 off_t vprocHostLseek(int fd, off_t offset, int whence);
+/* Sync a host descriptor without routing through the shim table. */
+int vprocHostFsync(int fd);
 /* Close a host descriptor without routing through the shim table. */
 int vprocHostClose(int fd);
 /* Read from a host descriptor without routing through the shim table. */
@@ -156,6 +159,7 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count);
 int vprocDupShim(int fd);
 int vprocDup2Shim(int fd, int target);
 int vprocCloseShim(int fd);
+int vprocFsyncShim(int fd);
 int vprocPipeShim(int pipefd[2]);
 int vprocFstatShim(int fd, struct stat *st);
 int vprocStatShim(const char *path, struct stat *st);
@@ -263,6 +267,7 @@ int vprocAdoptPscalStdio(VProc *vp,
                          struct pscal_fd *stdin_fd,
                          struct pscal_fd *stdout_fd,
                          struct pscal_fd *stderr_fd);
+int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd);
 int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows);
 bool vprocSessionStdioNeedsRefresh(VProcSessionStdio *stdio_ctx);
 void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid);
@@ -392,6 +397,7 @@ static inline VProc *vprocCurrent(void) { return NULL; }
 static inline bool vprocWaitIfStopped(VProc *vp) { (void)vp; return false; }
 static inline size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) { (void)out; (void)capacity; return 0; }
 static inline int vprocTranslateFd(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
+static inline struct pscal_fd *vprocGetPscalFd(VProc *vp, int fd) { (void)vp; (void)fd; return NULL; }
 static inline int vprocDup(VProc *vp, int fd) { (void)vp; (void)fd; return -1; }
 static inline int vprocDup2(VProc *vp, int fd, int target) { (void)vp; (void)fd; (void)target; return -1; }
 static inline int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src) {
@@ -416,6 +422,7 @@ static inline int vprocHostOpen(const char *path, int flags, ...) {
 }
 static inline int vprocHostPipe(int pipefd[2]) { return pipe(pipefd); }
 static inline off_t vprocHostLseek(int fd, off_t offset, int whence) { return lseek(fd, offset, whence); }
+static inline int vprocHostFsync(int fd) { return fsync(fd); }
 static inline int vprocHostClose(int fd) { return close(fd); }
 static inline ssize_t vprocHostRead(int fd, void *buf, size_t count) { return read(fd, buf, count); }
 static inline ssize_t vprocHostWrite(int fd, const void *buf, size_t count) { return write(fd, buf, count); }
@@ -467,6 +474,7 @@ static inline ssize_t vprocWriteShim(int fd, const void *buf, size_t count) { re
 static inline int vprocDupShim(int fd) { return dup(fd); }
 static inline int vprocDup2Shim(int fd, int target) { return dup2(fd, target); }
 static inline int vprocCloseShim(int fd) { return close(fd); }
+static inline int vprocFsyncShim(int fd) { return fsync(fd); }
 static inline int vprocPipeShim(int pipefd[2]) { return pipe(pipefd); }
 static inline int vprocFstatShim(int fd, struct stat *st) { return fstat(fd, st); }
 static inline int vprocStatShim(const char *path, struct stat *st) { return stat(path, st); }
@@ -552,6 +560,12 @@ static inline int vprocAdoptPscalStdio(VProc *vp,
     (void)stdin_fd;
     (void)stdout_fd;
     (void)stderr_fd;
+    return 0;
+}
+static inline int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
+    (void)vp;
+    (void)target_fd;
+    (void)pscal_fd;
     return 0;
 }
 static inline int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {

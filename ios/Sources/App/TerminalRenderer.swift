@@ -354,6 +354,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         terminalView.font = font
         terminalView.typingAttributes[.font] = font
         resolvedFont = font
+        setNeedsLayout()
     }
 
     func applyElvisFont(_ font: UIFont) {
@@ -362,6 +363,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         terminalView.typingAttributes[.font] = font
         resolvedFont = font
         selectionOverlay.clearSelection()
+        setNeedsLayout()
     }
 
     func currentFont() -> UIFont {

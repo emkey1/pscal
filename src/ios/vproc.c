@@ -368,6 +368,27 @@ static VPROC_UNUSED off_t vprocHostLseekRaw(int fd, off_t offset, int whence) {
     return (off_t)-1;
 }
 
+static int vprocHostFsyncRaw(int fd) {
+    static int (*fn)(int) = NULL;
+    if (!fn) {
+        fn = (int (*)(int))vprocResolveSymbol("__fsync");
+    }
+    if (!fn) {
+        fn = (int (*)(int))vprocResolveSymbol("fsync");
+    }
+    if (!fn) {
+        fn = (int (*)(int))vprocResolveSymbol("fsync$NOCANCEL");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(fd);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
 static int vprocHostFstatRaw(int fd, struct stat *st) {
     static int (*fn)(int, struct stat *) = NULL;
     if (!fn) {
@@ -3009,7 +3030,7 @@ static int vprocInsertPscalFd(VProc *vp, struct pscal_fd *fd) {
     return slot;
 }
 
-static struct pscal_fd *vprocGetPscalFd(VProc *vp, int fd) {
+struct pscal_fd *vprocGetPscalFd(VProc *vp, int fd) {
     if (!vp || fd < 0) {
         return NULL;
     }
@@ -3599,6 +3620,34 @@ int vprocAdoptPscalStdio(VProc *vp,
     return 0;
 }
 
+int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
+    if (!vp || !pscal_fd || target_fd < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    (void)vprocClose(vp, target_fd);
+
+    pthread_mutex_lock(&vp->mu);
+    if ((size_t)target_fd >= vp->capacity) {
+        pthread_mutex_unlock(&vp->mu);
+        errno = EBADF;
+        return -1;
+    }
+    vp->entries[target_fd].host_fd = -1;
+    vp->entries[target_fd].pscal_fd = pscal_fd_retain(pscal_fd);
+    vp->entries[target_fd].kind = VPROC_FD_PSCAL;
+    if (target_fd == STDIN_FILENO) {
+        vp->stdin_host_fd = -1;
+        vp->stdin_from_session = false;
+    } else if (target_fd == STDOUT_FILENO) {
+        vp->stdout_host_fd = -1;
+    } else if (target_fd == STDERR_FILENO) {
+        vp->stderr_host_fd = -1;
+    }
+    pthread_mutex_unlock(&vp->mu);
+    return 0;
+}
+
 void vprocDestroy(VProc *vp) {
     if (!vp) {
         return;
@@ -3895,6 +3944,14 @@ off_t vprocHostLseek(int fd, off_t offset, int whence) {
     return vprocHostLseekRaw(fd, offset, whence);
 #else
     return lseek(fd, offset, whence);
+#endif
+}
+
+int vprocHostFsync(int fd) {
+#if defined(PSCAL_TARGET_IOS)
+    return vprocHostFsyncRaw(fd);
+#else
+    return fsync(fd);
 #endif
 }
 
@@ -6833,6 +6890,23 @@ int vprocCloseShim(int fd) {
         return vprocHostClose(fd);
     }
     return vprocClose(vp, fd);
+}
+
+int vprocFsyncShim(int fd) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostFsyncRaw(fd);
+    }
+    struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+    if (pscal_fd) {
+        pscal_fd_close(pscal_fd);
+        return 0;
+    }
+    int host = shimTranslate(fd, 1);
+    if (host < 0) {
+        return -1;
+    }
+    return vprocHostFsyncRaw(host);
 }
 
 int vprocPipeShim(int pipefd[2]) {

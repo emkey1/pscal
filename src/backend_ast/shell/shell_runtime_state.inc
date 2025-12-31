@@ -4046,6 +4046,13 @@ static void shellInitJobControlState(void) {
         current_pgid = shell_pid;
     }
     gShellRuntime.shell_pgid = current_pgid;
+    gShellRuntime.job_control_enabled = true;
+    if (shell_pid > 0 && current_pgid > 0) {
+        int sid = vprocGetSid((int)shell_pid);
+        if (sid > 0) {
+            vprocSetForegroundPgid(sid, (int)current_pgid);
+        }
+    }
     return;
 #else
     pid_t shell_pid = getpid();

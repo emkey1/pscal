@@ -524,6 +524,7 @@ static int pscalRebindSymbols(const struct pscalRebinding rebindings[], size_t r
 static int pscalRawStat(const char *path, struct stat *st);
 static int pscalRawOpen(const char *path, int flags, int mode, int has_mode);
 static int pscalRawFstat(int fd, struct stat *st);
+static int pscalRawFsync(int fd);
 static ssize_t pscalRawRead(int fd, void *buf, size_t count);
 static ssize_t pscalRawWrite(int fd, const void *buf, size_t count);
 static ssize_t pscalRawWriteKernel(int fd, const void *buf, size_t count);
@@ -954,6 +955,28 @@ static int pscalRawFstat(int fd, struct stat *st) {
     if (fn) { pscalInterposeEnterRaw(); int r = fn(fd, st); pscalInterposeExitRaw(); return r; }
 #if PSCAL_ENABLE_SYSCALL_FALLBACK
     return (int)syscall(SYS_fstat, fd, st);
+#else
+    errno = ENOSYS; return -1;
+#endif
+}
+
+static int pscalRawFsync(int fd) {
+    static int (*fn)(int) = NULL;
+    if (fn) { pscalInterposeEnterRaw(); int r = fn(fd); pscalInterposeExitRaw(); return r; }
+
+    if (pscalIsResolving()) {
+#if PSCAL_ENABLE_SYSCALL_FALLBACK
+        return (int)syscall(SYS_fsync, fd);
+#else
+        errno = ENOSYS; return -1;
+#endif
+    }
+    if (!fn) fn = (int (*)(int))pscalInterposeResolveSystem("__fsync");
+    if (!fn) fn = (int (*)(int))pscalInterposeResolveSystem("fsync");
+    if (!fn) fn = (int (*)(int))pscalInterposeResolveSystem("fsync$NOCANCEL");
+    if (fn) { pscalInterposeEnterRaw(); int r = fn(fd); pscalInterposeExitRaw(); return r; }
+#if PSCAL_ENABLE_SYSCALL_FALLBACK
+    return (int)syscall(SYS_fsync, fd);
 #else
     errno = ENOSYS; return -1;
 #endif
@@ -1824,6 +1847,15 @@ static int pscal_interpose_fstat(int fd, struct stat *st) {
 }
 PSCAL_DYLD_INTERPOSE(pscal_interpose_fstat, fstat);
 
+static int pscal_interpose_fsync(int fd) {
+    if (!pscalInterposeEnter()) return pscalRawFsync(fd);
+    int res = vprocFsyncShim(fd);
+    pscalInterposeLeave();
+    return res;
+}
+PSCAL_DYLD_INTERPOSE(pscal_interpose_fsync, fsync);
+PSCAL_DYLD_INTERPOSE(pscal_interpose_fsync, __fsync);
+
 static int pscal_interpose_stat(const char *path, struct stat *st) {
     if (!pscalInterposeEnter()) return pscalRawStat(path, st);
     int res = vprocStatShim(path, st);
@@ -2197,6 +2229,8 @@ static void pscalInterposeInstallHooks(void) {
         { "dup2", (void *)pscal_interpose_dup2, NULL },
         { "pipe", (void *)pscal_interpose_pipe, NULL },
         { "fstat", (void *)pscal_interpose_fstat, NULL },
+        { "__fsync", (void *)pscal_interpose_fsync, NULL },
+        { "fsync", (void *)pscal_interpose_fsync, NULL },
         { "stat", (void *)pscal_interpose_stat, NULL },
         { "lstat", (void *)pscal_interpose_lstat, NULL },
         { "chdir", (void *)pscal_interpose_chdir, NULL },

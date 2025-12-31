@@ -62,10 +62,64 @@ var
   wordListHead: PWordNode;
   wordListCount: Integer;
 
+function JoinPath(const baseDir, leaf: string): string;
+begin
+  if baseDir = '' then
+    JoinPath := ''
+  else if (baseDir[Length(baseDir)] = '/') then
+    JoinPath := baseDir + leaf
+  else
+    JoinPath := baseDir + '/' + leaf;
+end;
+
 function DefaultWordListPath: string;
 var
   root: string;
+  candidate: string;
 begin
+  candidate := GetEnv('PSCALI_WORDS_PATH');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    DefaultWordListPath := candidate;
+    exit;
+  end;
+
+  candidate := JoinPath(GetEnv('PSCALI_ETC_ROOT'), 'words');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    DefaultWordListPath := candidate;
+    exit;
+  end;
+
+  candidate := JoinPath(GetEnv('PSCALI_WORKSPACE_ROOT'), 'etc/words');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    DefaultWordListPath := candidate;
+    exit;
+  end;
+
+  candidate := JoinPath(GetEnv('PSCAL_EXAMPLES_ROOT'), '../etc/words');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    DefaultWordListPath := candidate;
+    exit;
+  end;
+
+  if Pos('PSCAL_INSTALL_ROOT', CONFIGURED_WORDS_PATH) = 0 then
+  begin
+    if FileExists(CONFIGURED_WORDS_PATH) then
+    begin
+      DefaultWordListPath := CONFIGURED_WORDS_PATH;
+      exit;
+    end;
+  end;
+
+  if FileExists('/etc/words') then
+  begin
+    DefaultWordListPath := '/etc/words';
+    exit;
+  end;
+
   root := GetEnv('PSCAL_INSTALL_ROOT_RESOLVED');
   if root = '' then
     root := GetEnv('PSCALI_INSTALL_ROOT');

@@ -437,8 +437,10 @@ final class TerminalKeyInputView: UITextView {
                 self.softKeyboardVisible = true
                 self.hardwareKeyboardConnected = false
                 self.reloadInputViews()
-                self.onInput?(" ")
-                self.onInput?("\u{08}")
+                if self.isFirstResponder {
+                    self.onInput?(" ")
+                    self.onInput?("\u{08}")
+                }
             }
         }
 
@@ -451,8 +453,10 @@ final class TerminalKeyInputView: UITextView {
             Task { @MainActor in
                 self.softKeyboardVisible = false
                 self.reloadInputViews()
-                self.onInput?(" ")
-                self.onInput?("\u{08}")
+                if self.isFirstResponder {
+                    self.onInput?(" ")
+                    self.onInput?("\u{08}")
+                }
             }
         }
 

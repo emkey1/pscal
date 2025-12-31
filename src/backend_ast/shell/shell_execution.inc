@@ -4,6 +4,7 @@
 #include "backend_ast/builtin.h"
 #include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
+#include "ios/tty/pscal_fd.h"
 static int gShellPagerVirtualTTYFd = -1;
 
 static void shellVprocFormatLabel(const ShellCommand *cmd, char *out, size_t out_sz) {
@@ -129,33 +130,94 @@ static VProc *shellCreateVProcForStage(int stdin_host,
      * stdio here. Background workers must not mutate the interactive session's
      * fds. */
     bool stdin_force_null = (stdin_host == -2);
+    bool stdin_use_pscal = false;
+    bool stdout_use_pscal = false;
+    bool stderr_use_pscal = false;
+    struct pscal_fd *pscal_stdin = NULL;
+    struct pscal_fd *pscal_stdout = NULL;
+    struct pscal_fd *pscal_stderr = NULL;
     VProc *active = vprocCurrent();
     if (active) {
-        int translated = vprocTranslateFd(active, STDIN_FILENO);
-        if (!stdin_force_null && stdin_host < 0 && translated >= 0) stdin_host = translated;
-        translated = vprocTranslateFd(active, STDOUT_FILENO);
-        if (stdout_host < 0 && translated >= 0) stdout_host = translated;
-        translated = vprocTranslateFd(active, STDERR_FILENO);
-        if (stderr_host < 0 && translated >= 0) stderr_host = translated;
+        if (!stdin_force_null && stdin_host < 0) {
+            int translated = vprocTranslateFd(active, STDIN_FILENO);
+            if (translated >= 0) {
+                stdin_host = translated;
+            } else {
+                pscal_stdin = vprocGetPscalFd(active, STDIN_FILENO);
+                stdin_use_pscal = (pscal_stdin != NULL);
+            }
+        }
+        if (stdout_host < 0) {
+            int translated = vprocTranslateFd(active, STDOUT_FILENO);
+            if (translated >= 0) {
+                stdout_host = translated;
+            } else {
+                pscal_stdout = vprocGetPscalFd(active, STDOUT_FILENO);
+                stdout_use_pscal = (pscal_stdout != NULL);
+            }
+        }
+        if (stderr_host < 0) {
+            int translated = vprocTranslateFd(active, STDERR_FILENO);
+            if (translated >= 0) {
+                stderr_host = translated;
+            } else {
+                pscal_stderr = vprocGetPscalFd(active, STDERR_FILENO);
+                stderr_use_pscal = (pscal_stderr != NULL);
+            }
+        }
     }
-    if (!stdin_force_null && stdin_host < 0) {
+    if (!stdin_force_null && stdin_host < 0 && !stdin_use_pscal) {
         stdin_host = STDIN_FILENO;
     }
-#if defined(PSCAL_TARGET_IOS)
-    if (getenv("PSCALI_TOOL_DEBUG")) {
-        fprintf(stderr,
-                "[vproc-stage] stdin_host=%d stdout_host=%d stderr_host=%d force_null=%d\n",
-                stdin_host, stdout_host, stderr_host, (int)stdin_force_null);
+    if (stdin_use_pscal && stdin_host < 0) {
+        stdin_host = -2;
     }
-#endif
+    if (stdout_use_pscal && stdout_host < 0) {
+        stdout_host = -2;
+    }
+    if (stderr_use_pscal && stderr_host < 0) {
+        stderr_host = -2;
+    }
+    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (tool_dbg) {
+        fprintf(stderr,
+                "[vproc-stage] stdin_host=%d stdout_host=%d stderr_host=%d force_null=%d pscal=%d/%d/%d\n",
+                stdin_host, stdout_host, stderr_host, (int)stdin_force_null,
+                (int)stdin_use_pscal, (int)stdout_use_pscal, (int)stderr_use_pscal);
+    }
     VProcOptions opts = vprocDefaultOptions();
     opts.stdin_fd = (stdin_host >= 0) ? stdin_host : -2;   /* default to /dev/null */
-    opts.stdout_fd = (stdout_host >= 0) ? stdout_host : -1;
-    opts.stderr_fd = (stderr_host >= 0) ? stderr_host : -1;
+    opts.stdout_fd = (stdout_host >= 0) ? stdout_host : stdout_host;
+    opts.stderr_fd = (stderr_host >= 0) ? stderr_host : stderr_host;
     opts.winsize_cols = cols;
     opts.winsize_rows = rows;
     opts.pid_hint = pid_hint;
-    return vprocCreate(&opts);
+    VProc *vp = vprocCreate(&opts);
+    if (!vp) {
+        if (pscal_stdin) pscal_fd_close(pscal_stdin);
+        if (pscal_stdout) pscal_fd_close(pscal_stdout);
+        if (pscal_stderr) pscal_fd_close(pscal_stderr);
+        return NULL;
+    }
+    if (stdin_use_pscal && pscal_stdin) {
+        if (vprocAdoptPscalFd(vp, STDIN_FILENO, pscal_stdin) != 0 && tool_dbg) {
+            fprintf(stderr, "[vproc-stage] adopt pscal stdin failed: %s\n", strerror(errno));
+        }
+    }
+    if (stdout_use_pscal && pscal_stdout) {
+        if (vprocAdoptPscalFd(vp, STDOUT_FILENO, pscal_stdout) != 0 && tool_dbg) {
+            fprintf(stderr, "[vproc-stage] adopt pscal stdout failed: %s\n", strerror(errno));
+        }
+    }
+    if (stderr_use_pscal && pscal_stderr) {
+        if (vprocAdoptPscalFd(vp, STDERR_FILENO, pscal_stderr) != 0 && tool_dbg) {
+            fprintf(stderr, "[vproc-stage] adopt pscal stderr failed: %s\n", strerror(errno));
+        }
+    }
+    if (pscal_stdin) pscal_fd_close(pscal_stdin);
+    if (pscal_stdout) pscal_fd_close(pscal_stdout);
+    if (pscal_stderr) pscal_fd_close(pscal_stderr);
+    return vp;
 }
 #endif
 
@@ -3685,7 +3747,15 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 #if defined(PSCAL_TARGET_IOS)
     if (shellRuntimeIsInteractive() && !cmd->background && !ctx->background) {
         shellEnsureJobControl();
-        if (gShellRuntime.job_control_enabled && ctx->pgid > 0 && run_stdin_fd >= 0) {
+        bool has_stdin = (run_stdin_fd >= 0);
+        if (!has_stdin && vp) {
+            struct pscal_fd *pscal_stdin = vprocGetPscalFd(vp, STDIN_FILENO);
+            if (pscal_stdin) {
+                has_stdin = true;
+                pscal_fd_close(pscal_stdin);
+            }
+        }
+        if (gShellRuntime.job_control_enabled && ctx->pgid > 0 && has_stdin) {
             shellJobControlSetForeground(ctx->pgid);
         }
     }

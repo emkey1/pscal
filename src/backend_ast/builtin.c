@@ -3081,17 +3081,20 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
     if (use_interruptible) {
 #if defined(PSCAL_TARGET_IOS)
         int read_fd = fd;
-        bool read_is_host = true;
+        VProc *vp = vprocCurrent();
+        bool read_is_host = (vp == NULL);
         bool skip_leading_newline = (stream == stdin &&
                                      pscalRuntimeVirtualTTYEnabled() &&
                                      !pscalRuntimeStdinHasRealTTY());
         bool skipped_leading_newline = false;
-        VProc *vp = vprocCurrent();
         int host_fd = -1;
         if (vp) {
             host_fd = vprocTranslateFd(vp, fd);
             if (host_fd >= 0) {
                 read_fd = host_fd;
+                read_is_host = true;
+            } else {
+                read_is_host = false;
             }
         }
         bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
@@ -3103,7 +3106,6 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         }
 #else
         int read_fd = fd;
-        bool read_is_host = false;
         bool skip_leading_newline = false;
         bool skipped_leading_newline = false;
 #endif
@@ -3129,20 +3131,58 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 buffer[0] = '\0';
                 return false;
             }
+#if defined(PSCAL_TARGET_IOS)
+            if (sigint_fd >= 0 && !read_is_host) {
+                char drain[8];
+                ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
+                if (drained > 0) {
+                    if (vm) {
+                        vm->abort_requested = true;
+                        vm->exit_requested = true;
+                    }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
+                                errno, strerror(errno));
+                    }
+                }
+            }
+#endif
             fd_set rfds;
             FD_ZERO(&rfds);
+            struct timeval tv;
+            tv.tv_sec = 0;
+            tv.tv_usec = 100 * 1000; // 100ms
+            int ready = -1;
+#if defined(PSCAL_TARGET_IOS)
+            if (read_is_host) {
+                FD_SET(read_fd, &rfds);
+                if (sigint_fd >= 0) {
+                    FD_SET(sigint_fd, &rfds);
+                }
+                int maxfd = read_fd;
+                if (sigint_fd >= 0 && sigint_fd > maxfd) {
+                    maxfd = sigint_fd;
+                }
+                ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+            } else {
+                FD_SET(read_fd, &rfds);
+                ready = vprocSelectShim(read_fd + 1, &rfds, NULL, NULL, &tv);
+            }
+#else
             FD_SET(read_fd, &rfds);
             if (sigint_fd >= 0) {
                 FD_SET(sigint_fd, &rfds);
             }
-            struct timeval tv;
-            tv.tv_sec = 0;
-            tv.tv_usec = 100 * 1000; // 100ms
             int maxfd = read_fd;
             if (sigint_fd >= 0 && sigint_fd > maxfd) {
                 maxfd = sigint_fd;
             }
-            int ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+            ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+#endif
             if (ready < 0) {
                 if (errno == EINTR) {
                     continue;
@@ -3170,7 +3210,11 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             if (ready == 0) {
                 continue;
             }
+#if defined(PSCAL_TARGET_IOS)
+            if (read_is_host && sigint_fd >= 0 && FD_ISSET(sigint_fd, &rfds)) {
+#else
             if (sigint_fd >= 0 && FD_ISSET(sigint_fd, &rfds)) {
+#endif
                 char drain[8];
 #if defined(PSCAL_TARGET_IOS)
                 if (sigint_host) {
@@ -3195,7 +3239,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             char ch;
 #if defined(PSCAL_TARGET_IOS)
             ssize_t n = read_is_host ? vprocHostRead(read_fd, &ch, 1)
-                                     : read(read_fd, &ch, 1);
+                                     : vprocReadShim(read_fd, &ch, 1);
 #else
             ssize_t n = read(read_fd, &ch, 1);
 #endif
@@ -3419,7 +3463,11 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
     vmEnableRawMode();
 
     int bytes_available = 0;
+#if defined(PSCAL_TARGET_IOS)
+    vprocIoctlShim(STDIN_FILENO, FIONREAD, &bytes_available);
+#else
     ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
+#endif
     return makeBoolean(bytes_available > 0);
 }
 
@@ -3438,10 +3486,18 @@ Value vmBuiltinPollkeyany(VM* vm, int arg_count, Value* args) {
 
     vmEnableRawMode();
     int bytes_available = 0;
+#if defined(PSCAL_TARGET_IOS)
+    vprocIoctlShim(STDIN_FILENO, FIONREAD, &bytes_available);
+#else
     ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
+#endif
     if (bytes_available > 0) {
         unsigned char ch_byte = 0;
+#if defined(PSCAL_TARGET_IOS)
+        if (vprocReadShim(STDIN_FILENO, &ch_byte, 1) == 1) {
+#else
         if (read(STDIN_FILENO, &ch_byte, 1) == 1) {
+#endif
             return makeInt((int)ch_byte);
         }
     }
@@ -3468,7 +3524,11 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         vmEnableRawMode();
 
         unsigned char ch_byte;
+#if defined(PSCAL_TARGET_IOS)
+        if (vprocReadShim(STDIN_FILENO, &ch_byte, 1) != 1) {
+#else
         if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+#endif
             ch_byte = '\0';
         }
         c = ch_byte;

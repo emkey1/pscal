@@ -18,6 +18,7 @@
 #undef dup
 #undef dup2
 #undef close
+#undef fsync
 #undef pipe
 #undef fstat
 #undef stat
@@ -52,6 +53,7 @@
 #define dup   vprocDupShim
 #define dup2  vprocDup2Shim
 #define close vprocCloseShim
+#define fsync vprocFsyncShim
 #define pipe  vprocPipeShim
 #define fstat vprocFstatShim
 #define stat(path, buf) vprocStatShim((path), (buf))
