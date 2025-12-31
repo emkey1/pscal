@@ -572,6 +572,43 @@ static const char *pathTruncateSkipLeadingSlashes(const char *input) {
     return cursor;
 }
 
+static bool pathTruncatePrefixMatch(const char *path, const char *prefix, size_t prefix_len) {
+    if (!path || !prefix || prefix_len == 0) {
+        return false;
+    }
+    return strncmp(path, prefix, prefix_len) == 0 &&
+           (path[prefix_len] == '\0' || path[prefix_len] == '/');
+}
+
+static bool pathTruncateMatchesEnvRoot(const char *path, const char *env_name) {
+    const char *root = getenv(env_name);
+    if (!root || root[0] != '/') {
+        return false;
+    }
+    size_t len = strlen(root);
+    while (len > 1 && root[len - 1] == '/') {
+        len--;
+    }
+    if (len == 0) {
+        return false;
+    }
+    if (pathTruncatePrefixMatch(path, root, len)) {
+        return true;
+    }
+    const char *private_prefix = "/private";
+    size_t private_len = strlen(private_prefix);
+    if (len > private_len && strncmp(root, private_prefix, private_len) == 0) {
+        if (pathTruncatePrefixMatch(path, root + private_len, len - private_len)) {
+            return true;
+        }
+    } else if (strncmp(path, private_prefix, private_len) == 0) {
+        if (pathTruncatePrefixMatch(path + private_len, root, len)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool pathTruncateIsSystemPath(const char *path) {
     if (!path || path[0] != '/') {
         return false;
@@ -584,6 +621,23 @@ static bool pathTruncateIsSystemPath(const char *path) {
             continue;
         }
         if (path[len] == '\0' || path[len] == '/') {
+            return true;
+        }
+    }
+    const char *env_roots[] = {
+        "PSCALI_INSTALL_ROOT",
+        "PSCAL_INSTALL_ROOT",
+        "PSCAL_INSTALL_ROOT_RESOLVED",
+        "PASCAL_LIB_DIR",
+        "CLIKE_LIB_DIR",
+        "REA_LIB_DIR",
+        "PSCALI_ETC_ROOT",
+        "PSCALI_DOCS_ROOT",
+        "PSCAL_EXAMPLES_ROOT",
+        "PSCALI_SYSFILES_ROOT"
+    };
+    for (size_t i = 0; i < sizeof(env_roots) / sizeof(env_roots[0]); ++i) {
+        if (pathTruncateMatchesEnvRoot(path, env_roots[i])) {
             return true;
         }
     }
