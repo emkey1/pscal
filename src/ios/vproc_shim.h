@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(VPROC_SHIM_DISABLED) && !defined(VPROC_SHIM_HARD_DISABLED)
+#undef VPROC_SHIM_DISABLED
+#endif
+
 #if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
 #include <sys/stat.h>
 #define VPROC_SHIM_PRESENT 1
@@ -16,7 +20,13 @@
 #undef close
 #undef pipe
 #undef fstat
+#undef stat
+#undef lstat
+#undef ioctl
 #undef lseek
+#undef isatty
+#undef poll
+#undef select
 #undef waitpid
 #undef kill
 #undef getpid
@@ -44,7 +54,13 @@
 #define close vprocCloseShim
 #define pipe  vprocPipeShim
 #define fstat vprocFstatShim
+#define stat(path, buf) vprocStatShim((path), (buf))
+#define lstat(path, buf) vprocLstatShim((path), (buf))
+#define ioctl vprocIoctlShim
 #define lseek vprocLseekShim
+#define isatty vprocIsattyShim
+#define poll vprocPollShim
+#define select vprocSelectShim
 #ifndef open
 #define open  vprocOpenShim
 #endif

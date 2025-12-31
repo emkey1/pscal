@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <termios.h>
+#include <pthread.h>
+#include "ios/vproc.h"
 
 int pscal_ios_open(const char *path, int oflag, ...);
 int pscal_ios_openat(int fd, const char *path, int oflag, ...);
@@ -25,6 +27,13 @@ int pscal_ios_access(const char *path, int mode);
 int pscal_ios_faccessat(int fd, const char *path, int mode, int flag);
 FILE *pscal_ios_fopen(const char *path, const char *mode);
 DIR *pscal_ios_opendir(const char *path);
+int pscal_ios_mkdir(const char *path, mode_t mode);
+int pscal_ios_rmdir(const char *path);
+int pscal_ios_unlink(const char *path);
+int pscal_ios_remove(const char *path);
+int pscal_ios_rename(const char *oldpath, const char *newpath);
+int pscal_ios_link(const char *target, const char *linkpath);
+int pscal_ios_symlink(const char *target, const char *linkpath);
 
 pid_t pscal_ios_fork(void);
 int pscal_ios_execv(const char *path, char *const argv[]);
@@ -58,6 +67,15 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
     pscal_ios_faccessat((fd), (path), (mode), (flag))
 # define fopen(path, mode) pscal_ios_fopen((path), (mode))
 # define opendir(path) pscal_ios_opendir((path))
+# define mkdir(path, mode) pscal_ios_mkdir((path), (mode))
+# define rmdir(path) pscal_ios_rmdir((path))
+# define unlink(path) pscal_ios_unlink((path))
+# define remove(path) pscal_ios_remove((path))
+# define rename(oldpath, newpath) pscal_ios_rename((oldpath), (newpath))
+# define link(target, linkpath) pscal_ios_link((target), (linkpath))
+# define symlink(target, linkpath) pscal_ios_symlink((target), (linkpath))
+# define pthread_create(thread, attr, start_routine, arg) \
+    vprocPthreadCreateShim((thread), (attr), (start_routine), (arg))
 #endif
 
 #endif /* PSCAL_TARGET_IOS */

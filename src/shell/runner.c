@@ -730,7 +730,7 @@ int shellRunSource(const char *source,
         ShellOptConfig opt_config = { false };
         shellRunOptimizations(program, &opt_config);
         shellCompile(program, &chunk);
-        if (path && path[0]) {
+        if (!options->no_cache && path && path[0]) {
             saveBytecodeToCache(path, kShellCompilerId, &chunk);
         }
         if (!options->quiet) {

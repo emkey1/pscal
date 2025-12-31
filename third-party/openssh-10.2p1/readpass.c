@@ -40,6 +40,7 @@
 
 #ifdef PSCAL_TARGET_IOS
 #include "ios/vproc.h"
+#include "common/runtime_tty.h"
 #include <pthread.h>
 #endif
 
@@ -197,6 +198,25 @@ read_passphrase(const char *prompt, int flags)
 		host_fd = vprocTranslateFd(vp, STDIN_FILENO);
 		host_errno = errno;
 	}
+	bool use_session_queue = false;
+	if (session && session->stdin_host_fd >= 0) {
+		if (pscalRuntimeStdinIsInteractive()) {
+			use_session_queue = true;
+		} else if (host_fd >= 0) {
+			if (session->stdin_host_fd == host_fd) {
+				use_session_queue = true;
+			} else {
+				struct stat session_st;
+				struct stat host_st;
+				if (fstat(session->stdin_host_fd, &session_st) == 0 &&
+				    fstat(host_fd, &host_st) == 0 &&
+				    session_st.st_dev == host_st.st_dev &&
+				    session_st.st_ino == host_st.st_ino) {
+					use_session_queue = true;
+				}
+			}
+		}
+	}
 	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d",
 	    (void *)vp,
 	    host_fd,
@@ -204,6 +224,11 @@ read_passphrase(const char *prompt, int flags)
 	    session ? session->stdin_host_fd : -1);
 	if (getenv("PSCALI_TOOL_DEBUG")) {
 		pscal_dump_session_state("readpass-start", host_fd);
+		fprintf(stderr,
+		    "[readpass-ios] host=%d session_in=%d use_session=%d\n",
+		    host_fd,
+		    session ? session->stdin_host_fd : -1,
+		    (int)use_session_queue);
 	}
 	if (prompt && *prompt) {
 		size_t plen = strlen(prompt);
@@ -214,7 +239,9 @@ read_passphrase(const char *prompt, int flags)
 	size_t len = 0;
 	char ch = '\0';
 	while (len + 1 < sizeof(buf)) {
-		ssize_t rd = vprocReadShim(STDIN_FILENO, &ch, 1);
+		ssize_t rd = use_session_queue ?
+		    vprocSessionReadInputShim(&ch, 1) :
+		    vprocReadShim(STDIN_FILENO, &ch, 1);
 		if (rd < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
 			continue;
 		}

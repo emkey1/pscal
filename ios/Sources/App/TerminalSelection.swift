@@ -14,10 +14,8 @@ final class TerminalSelectionOverlay: UIView {
     }
 
     func selectionBoundingRect(in view: UIView) -> CGRect? {
-        guard let textView else { return nil }
-        return selectionBoundingRect(for: selectionRange).flatMap {
-            convert($0, from: textView)
-        }
+        guard let rect = selectionBoundingRect(for: selectionRange) else { return nil }
+        return view.convert(rect, from: self)
     }
 
     func updateSelection(start: Int, end: Int) {
@@ -48,65 +46,59 @@ final class TerminalSelectionOverlay: UIView {
     }
 
     override func draw(_ rect: CGRect) {
-        guard let textView = textView,
-              let layoutManager = textView.layoutManager as NSLayoutManager?,
-              let textContainer = textView.textContainer as NSTextContainer?,
-              let selection = selectionRange,
+        guard let selection = selectionRange,
               selection.length > 0 else {
             return
         }
 
         let selectionColor = UIColor.systemBlue.withAlphaComponent(0.25)
-        let inset = textView.textContainerInset
         let context = UIGraphicsGetCurrentContext()
         context?.setFillColor(selectionColor.cgColor)
 
-        var actualCharRange = NSRange()
-        let glyphRange = layoutManager.glyphRange(
-            forCharacterRange: selection,
-            actualCharacterRange: &actualCharRange
-        )
+        let rects = selectionRects(for: selection)
+        guard !rects.isEmpty else { return }
 
-        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) {
-            _, usedRect, _, glyphRangeForLine, _ in
-            let intersection = NSIntersectionRange(glyphRangeForLine, glyphRange)
-            if intersection.length == 0 {
-                return
-            }
-            let highlightRect = layoutManager.boundingRect(
-                forGlyphRange: intersection,
-                in: textContainer
-            )
-            var drawRect = highlightRect
-            drawRect.origin.x += inset.left - textView.contentOffset.x
-            drawRect.origin.y += inset.top - textView.contentOffset.y
-            drawRect = drawRect.integral.insetBy(dx: -1, dy: -1)
+        for rect in rects {
+            let drawRect = rect.integral.insetBy(dx: -1, dy: -1)
             context?.fill(drawRect)
         }
     }
 
     private func selectionBoundingRect(for range: NSRange?) -> CGRect? {
-        guard let range = range,
-              let textView = textView,
-              let layoutManager = textView.layoutManager as NSLayoutManager?,
-              let textContainer = textView.textContainer as NSTextContainer?,
-              range.length > 0 else {
-            return nil
+        let rects = selectionRects(for: range)
+        guard var unionRect = rects.first else { return nil }
+        for rect in rects.dropFirst() {
+            unionRect = unionRect.union(rect)
+        }
+        return unionRect
+    }
+
+    private func selectionRects(for range: NSRange?) -> [CGRect] {
+        guard let textView = textView,
+              let range = range,
+              range.length > 0,
+              let textRange = textViewRange(for: range, in: textView) else {
+            return []
         }
 
-        let inset = textView.textContainerInset
-        let glyphRange = layoutManager.glyphRange(
-            forCharacterRange: range,
-            actualCharacterRange: nil
-        )
+        return textView.selectionRects(for: textRange).compactMap { selectionRect in
+            let rect = selectionRect.rect
+            guard !rect.isEmpty, !rect.isNull else { return nil }
+            return convert(rect, from: textView)
+        }
+    }
 
-        var rect = layoutManager.boundingRect(
-            forGlyphRange: glyphRange,
-            in: textContainer
-        )
-        rect.origin.x += inset.left - textView.contentOffset.x
-        rect.origin.y += inset.top - textView.contentOffset.y
-        return rect
+    private func textViewRange(for range: NSRange, in textView: UITextView) -> UITextRange? {
+        let length = textView.attributedText.length
+        let clampedLocation = max(0, min(range.location, length))
+        let clampedLength = max(0, min(range.length, length - clampedLocation))
+
+        guard let start = textView.position(from: textView.beginningOfDocument,
+                                            offset: clampedLocation),
+              let end = textView.position(from: start, offset: clampedLength) else {
+            return nil
+        }
+        return textView.textRange(from: start, to: end)
     }
 
     private func union(rectA: CGRect?, rectB: CGRect?) -> CGRect? {

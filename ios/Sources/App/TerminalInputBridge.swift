@@ -16,6 +16,8 @@ struct TerminalInputBridge: UIViewRepresentable {
     @Binding var focusAnchor: Int
     var onInput: (String) -> Void
     var onPaste: ((String) -> Void)?
+    var onInterrupt: (() -> Void)? = nil
+    var onSuspend: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -37,6 +39,8 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.keyboardAppearance = .dark
         view.onInput = onInput
         view.onPaste = onPaste
+        view.onInterrupt = onInterrupt
+        view.onSuspend = onSuspend
         context.coordinator.view = view
 
         // Remove default copy/paste/undo bar
@@ -52,6 +56,8 @@ struct TerminalInputBridge: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalKeyInputView, context: Context) {
         uiView.onInput = onInput
         uiView.onPaste = onPaste
+        uiView.onInterrupt = onInterrupt
+        uiView.onSuspend = onSuspend
 
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
@@ -72,6 +78,8 @@ struct TerminalInputBridge: UIViewRepresentable {
 final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
+    var onInterrupt: (() -> Void)?
+    var onSuspend: (() -> Void)?
     private var hardwareKeyboardConnected: Bool = false
     private var softKeyboardVisible: Bool = false
     private var keyboardObservers: [NSObjectProtocol] = []
@@ -244,11 +252,11 @@ final class TerminalKeyInputView: UITextView {
             controlLatch = false
             let value = scalar.value
             if scalar == "c" {
-                pscalRuntimeRequestSigint()
+                triggerInterrupt()
                 return
             }
             if scalar == "z" {
-                pscalRuntimeRequestSigtstp()
+                triggerSuspend()
                 return
             }
             if value >= 0x40, value <= 0x7F,
@@ -270,7 +278,7 @@ final class TerminalKeyInputView: UITextView {
     }
 
     @objc private func handleCommandInterrupt() {
-        pscalRuntimeRequestSigint()
+        triggerInterrupt()
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
@@ -375,11 +383,11 @@ final class TerminalKeyInputView: UITextView {
            let scalar = key.charactersIgnoringModifiers.lowercased().unicodeScalars.first {
             let value = scalar.value
             if scalar == "c" {
-                pscalRuntimeRequestSigint()
+                triggerInterrupt()
                 return true
             }
             if scalar == "z" {
-                pscalRuntimeRequestSigtstp()
+                triggerSuspend()
                 return true
             }
             if value >= 0x40, value <= 0x7F,
@@ -536,16 +544,32 @@ final class TerminalKeyInputView: UITextView {
               let scalar = input.lowercased().unicodeScalars.first else { return }
         let value = scalar.value
         if scalar == "c" {
-            pscalRuntimeRequestSigint()
+            triggerInterrupt()
             return
         }
         if scalar == "z" {
-            pscalRuntimeRequestSigtstp()
+            triggerSuspend()
             return
         }
         if value >= 0x40, value <= 0x7F,
            let ctrlScalar = UnicodeScalar(value & 0x1F) {
             onInput?(String(ctrlScalar))
+        }
+    }
+
+    private func triggerInterrupt() {
+        if let onInterrupt {
+            onInterrupt()
+        } else {
+            pscalRuntimeRequestSigint()
+        }
+    }
+
+    private func triggerSuspend() {
+        if let onSuspend {
+            onSuspend()
+        } else {
+            pscalRuntimeRequestSigtstp()
         }
     }
 }

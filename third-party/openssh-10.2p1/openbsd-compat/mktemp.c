@@ -34,6 +34,10 @@
 #include <ctype.h>
 #include <unistd.h>
 
+#ifdef PSCAL_TARGET_IOS
+#include "common/path_truncate.h"
+#endif
+
 #ifdef mkstemp
 #undef mkstemp
 #endif
@@ -51,6 +55,29 @@ _ssh_mkstemp(char *template)
 	mode_t mask;
 	int ret;
 
+#ifdef PSCAL_TARGET_IOS
+	if (template != NULL) {
+		char expanded[PATH_MAX];
+		if (pathTruncateExpand(template, expanded, sizeof(expanded))) {
+			size_t orig_len = strlen(template);
+			size_t expanded_len = strlen(expanded);
+			size_t x_len = 0;
+			while (x_len < orig_len && template[orig_len - 1 - x_len] == 'X') {
+				x_len++;
+			}
+			mask = umask(0177);
+			ret = mkstemp(expanded);
+			(void)umask(mask);
+			if (ret >= 0 && x_len > 0 &&
+			    orig_len >= x_len && expanded_len >= x_len) {
+				memcpy(template + (orig_len - x_len),
+				    expanded + (expanded_len - x_len),
+				    x_len);
+			}
+			return ret;
+		}
+	}
+#endif
 	mask = umask(0177);
 	ret = mkstemp(template);
 	(void)umask(mask);

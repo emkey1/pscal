@@ -117,4 +117,5 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);
 #endif
+    registerShellBuiltin(category, command_group, "stdioinfo", vmBuiltinShellStdioInfo);
 }

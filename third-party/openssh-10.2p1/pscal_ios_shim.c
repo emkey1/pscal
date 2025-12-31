@@ -43,6 +43,8 @@ typedef struct {
 static pthread_mutex_t g_pscal_ios_tty_lock = PTHREAD_MUTEX_INITIALIZER;
 static pscal_ios_virtual_tty g_pscal_ios_virtual_ttys[8];
 
+static int pscal_ios_translate_fd(int fd);
+
 typedef struct {
     bool active;
     bool in_child;
@@ -262,11 +264,12 @@ static bool pscal_ios_translate_etc_path(const char *path, char *out,
 static bool pscal_ios_virtual_tty_snapshot(int fd,
     pscal_ios_virtual_tty *out) {
     bool found = false;
+    int key = pscal_ios_translate_fd(fd);
     pthread_mutex_lock(&g_pscal_ios_tty_lock);
     for (size_t i = 0; i < sizeof(g_pscal_ios_virtual_ttys) /
          sizeof(g_pscal_ios_virtual_ttys[0]); ++i) {
         const pscal_ios_virtual_tty *entry = &g_pscal_ios_virtual_ttys[i];
-        if (entry->active && entry->fd == fd) {
+        if (entry->active && entry->fd == key) {
             if (out) {
                 *out = *entry;
             }
@@ -280,11 +283,12 @@ static bool pscal_ios_virtual_tty_snapshot(int fd,
 
 static bool pscal_ios_virtual_tty_release(int fd, int *writer_out) {
     bool released = false;
+    int key = pscal_ios_translate_fd(fd);
     pthread_mutex_lock(&g_pscal_ios_tty_lock);
     for (size_t i = 0; i < sizeof(g_pscal_ios_virtual_ttys) /
          sizeof(g_pscal_ios_virtual_ttys[0]); ++i) {
         pscal_ios_virtual_tty *entry = &g_pscal_ios_virtual_ttys[i];
-        if (entry->active && entry->fd == fd) {
+        if (entry->active && entry->fd == key) {
             if (writer_out) {
                 *writer_out = entry->writer;
             }
@@ -305,11 +309,12 @@ static bool pscal_ios_virtual_tty_update_termios(int fd,
     if (!termios_p) {
         return true;
     }
+    int key = pscal_ios_translate_fd(fd);
     pthread_mutex_lock(&g_pscal_ios_tty_lock);
     for (size_t i = 0; i < sizeof(g_pscal_ios_virtual_ttys) /
          sizeof(g_pscal_ios_virtual_ttys[0]); ++i) {
         pscal_ios_virtual_tty *entry = &g_pscal_ios_virtual_ttys[i];
-        if (entry->active && entry->fd == fd) {
+        if (entry->active && entry->fd == key) {
             entry->term = *termios_p;
             updated = true;
             break;
@@ -321,6 +326,56 @@ static bool pscal_ios_virtual_tty_update_termios(int fd,
 
 static bool pscal_ios_virtual_tty_exists(int fd) {
     return pscal_ios_virtual_tty_snapshot(fd, NULL);
+}
+
+static int pscal_ios_translate_fd(int fd) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return fd;
+    }
+    int saved_errno = errno;
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd < 0) {
+        errno = saved_errno;
+        return fd;
+    }
+    return host_fd;
+}
+
+static bool pscal_ios_session_stdio_matches(int fd) {
+    if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO) {
+        return false;
+    }
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return false;
+    }
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd < 0) {
+        return false;
+    }
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (!session) {
+        return false;
+    }
+    int session_fd = -1;
+    if (fd == STDIN_FILENO) {
+        session_fd = session->stdin_host_fd;
+    } else if (fd == STDOUT_FILENO) {
+        session_fd = session->stdout_host_fd;
+    } else {
+        session_fd = session->stderr_host_fd;
+    }
+    if (session_fd < 0) {
+        return false;
+    }
+    struct stat host_st;
+    struct stat session_st;
+    if (fstat(host_fd, &host_st) != 0 || fstat(session_fd, &session_st) != 0) {
+        return false;
+    }
+    return host_st.st_dev == session_st.st_dev &&
+           host_st.st_ino == session_st.st_ino;
 }
 
 static void pscal_ios_init_termios(struct termios *out) {
@@ -338,13 +393,13 @@ static void pscal_ios_init_termios(struct termios *out) {
 }
 
 static int pscal_ios_register_virtual_tty(void) {
-    int read_fd = dup(STDIN_FILENO);
+    int read_fd = dup(pscal_ios_translate_fd(STDIN_FILENO));
     if (read_fd == -1) {
         return -1;
     }
-    int write_fd = dup(STDOUT_FILENO);
+    int write_fd = dup(pscal_ios_translate_fd(STDOUT_FILENO));
     if (write_fd == -1) {
-        write_fd = dup(STDERR_FILENO);
+        write_fd = dup(pscal_ios_translate_fd(STDERR_FILENO));
         if (write_fd == -1) {
             close(read_fd);
             return -1;
@@ -381,12 +436,15 @@ static void pscal_ios_ensure_std_virtual_tty(int fd) {
     }
 
     bool interactive = false;
+    if (pscal_ios_session_stdio_matches(fd)) {
+        interactive = true;
+    }
     if (fd == STDIN_FILENO) {
-        interactive = pscalRuntimeStdinIsInteractive();
+        interactive = interactive || pscalRuntimeStdinIsInteractive();
     } else if (fd == STDOUT_FILENO) {
-        interactive = pscalRuntimeStdoutIsInteractive();
+        interactive = interactive || pscalRuntimeStdoutIsInteractive();
     } else if (fd == STDERR_FILENO) {
-        interactive = pscalRuntimeStderrIsInteractive();
+        interactive = interactive || pscalRuntimeStderrIsInteractive();
     }
 
     if (!interactive) {
@@ -400,12 +458,13 @@ static void pscal_ios_ensure_std_virtual_tty(int fd) {
     struct termios defaults;
     pscal_ios_init_termios(&defaults);
 
+    int host_fd = pscal_ios_translate_fd(fd);
     pthread_mutex_lock(&g_pscal_ios_tty_lock);
     // Double check active status under lock
     for (size_t i = 0; i < sizeof(g_pscal_ios_virtual_ttys) /
          sizeof(g_pscal_ios_virtual_ttys[0]); ++i) {
         if (g_pscal_ios_virtual_ttys[i].active &&
-            g_pscal_ios_virtual_ttys[i].fd == fd) {
+            g_pscal_ios_virtual_ttys[i].fd == host_fd) {
             pthread_mutex_unlock(&g_pscal_ios_tty_lock);
             return;
         }
@@ -415,11 +474,11 @@ static void pscal_ios_ensure_std_virtual_tty(int fd) {
          sizeof(g_pscal_ios_virtual_ttys[0]); ++i) {
         pscal_ios_virtual_tty *entry = &g_pscal_ios_virtual_ttys[i];
         if (!entry->active) {
-            entry->fd = fd;
+            entry->fd = host_fd;
             // For std streams, we map the writer to the fd itself
             // (or -1 for stdin to indicate no writing).
             // This ensures pscal_ios_write writes to the correct fd.
-            entry->writer = (fd == STDIN_FILENO) ? -1 : fd;
+            entry->writer = (fd == STDIN_FILENO) ? -1 : host_fd;
             entry->active = true;
             entry->term = defaults;
             break;
@@ -534,16 +593,47 @@ ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte) {
         }
         return res;
     }
-    return read(fd, buf, nbyte);
+    int host_fd = pscal_ios_translate_fd(fd);
+    if (pscalRuntimeStdinIsInteractive()) {
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (session && session->stdin_host_fd >= 0) {
+            if (session->stdin_host_fd == host_fd) {
+                int flags = fcntl(host_fd, F_GETFL, 0);
+                bool nonblocking = (flags >= 0) && ((flags & O_NONBLOCK) != 0);
+                return vprocSessionReadInputShimMode(buf, nbyte, nonblocking);
+            }
+            struct stat session_st;
+            struct stat fd_st;
+            if (fstat(session->stdin_host_fd, &session_st) == 0 &&
+                fstat(host_fd, &fd_st) == 0 &&
+                session_st.st_dev == fd_st.st_dev &&
+                session_st.st_ino == fd_st.st_ino) {
+                int flags = fcntl(host_fd, F_GETFL, 0);
+                bool nonblocking = (flags >= 0) && ((flags & O_NONBLOCK) != 0);
+                return vprocSessionReadInputShimMode(buf, nbyte, nonblocking);
+            }
+        }
+        struct stat stdin_st;
+        struct stat fd_st;
+        if (fstat(STDIN_FILENO, &stdin_st) == 0 &&
+            fstat(host_fd, &fd_st) == 0 &&
+            stdin_st.st_dev == fd_st.st_dev &&
+            stdin_st.st_ino == fd_st.st_ino) {
+            int flags = fcntl(host_fd, F_GETFL, 0);
+            bool nonblocking = (flags >= 0) && ((flags & O_NONBLOCK) != 0);
+            return vprocSessionReadInputShimMode(buf, nbyte, nonblocking);
+        }
+    }
+    return read(host_fd, buf, nbyte);
 }
 
 ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte) {
     pscal_ios_virtual_tty entry;
     if (pscal_ios_virtual_tty_snapshot(fd, &entry)) {
-        int target = entry.writer >= 0 ? entry.writer : STDOUT_FILENO;
+        int target = entry.writer >= 0 ? entry.writer : pscal_ios_translate_fd(fd);
         return write(target, buf, nbyte);
     }
-    return write(fd, buf, nbyte);
+    return write(pscal_ios_translate_fd(fd), buf, nbyte);
 }
 
 int pscal_ios_close(int fd) {
@@ -557,7 +647,7 @@ int pscal_ios_close(int fd) {
         writer != fd) {
         close(writer);
     }
-    return close(fd);
+    return close(pscal_ios_translate_fd(fd));
 }
 
 int pscal_ios_tcgetattr(int fd, struct termios *termios_p) {
@@ -587,7 +677,7 @@ int pscal_ios_isatty(int fd) {
     if (pscal_ios_virtual_tty_exists(fd)) {
         return 1;
     }
-    return isatty(fd);
+    return isatty(pscal_ios_translate_fd(fd));
 }
 
 int pscal_ios_ioctl(int fd, unsigned long request, ...) {
@@ -633,10 +723,11 @@ int pscal_ios_ioctl(int fd, unsigned long request, ...) {
         return 0;
     }
 
+    int host_fd = pscal_ios_translate_fd(fd);
     if (arg != NULL) {
-        return ioctl(fd, request, arg);
+        return ioctl(host_fd, request, arg);
     }
-    return ioctl(fd, request);
+    return ioctl(host_fd, request);
 }
 
 static const char *pscal_ios_effective_path(const char *path,
@@ -720,6 +811,92 @@ DIR *pscal_ios_opendir(const char *path) {
         return NULL;
     }
     return opendir(target);
+}
+
+int pscal_ios_mkdir(const char *path, mode_t mode) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return mkdir(target, mode);
+}
+
+int pscal_ios_rmdir(const char *path) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return rmdir(target);
+}
+
+int pscal_ios_unlink(const char *path) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return unlink(target);
+}
+
+int pscal_ios_remove(const char *path) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return remove(target);
+}
+
+int pscal_ios_rename(const char *oldpath, const char *newpath) {
+    char remapped_old[PATH_MAX];
+    char remapped_new[PATH_MAX];
+    const char *old_target = pscal_ios_effective_path(oldpath, remapped_old,
+        sizeof(remapped_old));
+    const char *new_target = pscal_ios_effective_path(newpath, remapped_new,
+        sizeof(remapped_new));
+    if (old_target == NULL || new_target == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return rename(old_target, new_target);
+}
+
+int pscal_ios_link(const char *target, const char *linkpath) {
+    char remapped_target[PATH_MAX];
+    char remapped_link[PATH_MAX];
+    const char *link_target = pscal_ios_effective_path(linkpath, remapped_link,
+        sizeof(remapped_link));
+    const char *target_path = pscal_ios_effective_path(target, remapped_target,
+        sizeof(remapped_target));
+    if (link_target == NULL || target_path == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return link(target_path, link_target);
+}
+
+int pscal_ios_symlink(const char *target, const char *linkpath) {
+    char remapped_target[PATH_MAX];
+    char remapped_link[PATH_MAX];
+    const char *link_target = pscal_ios_effective_path(linkpath, remapped_link,
+        sizeof(remapped_link));
+    const char *target_path = pscal_ios_effective_path(target, remapped_target,
+        sizeof(remapped_target));
+    if (link_target == NULL || target_path == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    return symlink(target_path, link_target);
 }
 
 pid_t pscal_ios_fork(void) {

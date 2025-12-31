@@ -171,8 +171,7 @@ size_t vprocBuildTreeRows(const VProcSnapshot *snapshots,
         bool ok = false;
         size_t pidx = findNodeByPid(pid_index, node_count, nodes[i].parent_pid, &ok);
         if (ok && pidx < node_count &&
-            pidx != i &&
-            nodes[pidx].sid == nodes[i].sid) {
+            pidx != i) {
             has_parent[i] = true;
             parent_node[i] = pidx;
             child_counts[pidx]++;
@@ -279,4 +278,3 @@ size_t vprocBuildTreeRows(const VProcSnapshot *snapshots,
     /* If the caller's output buffer was too small, return the required count. */
     return out_count;
 }
-

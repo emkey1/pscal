@@ -74,12 +74,19 @@ public final class RuntimeLogger {
 
     private let queue: DispatchQueue
     private let fileURL: URL
-    private static let formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = .current
-        return formatter
-    }()
+    private static func timestampString() -> String {
+        var ts = timespec()
+        if clock_gettime(CLOCK_REALTIME, &ts) != 0 {
+            return "0.000"
+        }
+        let seconds = Int64(ts.tv_sec)
+        let millis = Int(ts.tv_nsec / 1_000_000)
+        var millisString = String(millis)
+        if millisString.count < 3 {
+            millisString = String(repeating: "0", count: 3 - millisString.count) + millisString
+        }
+        return "\(seconds).\(millisString)"
+    }
 
     private static func logsDirectoryURL() -> URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -134,7 +141,7 @@ public final class RuntimeLogger {
     }
 
     public func append(_ message: String) {
-        let timestamp = RuntimeLogger.formatter.string(from: Date())
+        let timestamp = RuntimeLogger.timestampString()
         let line = "[\(timestamp)] \(message)"
         let record = line + "\n"
         guard let data = record.data(using: .utf8) else { return }
@@ -318,48 +325,53 @@ final class PscalRuntimeBootstrap: ObservableObject {
             return true
         }
         guard shouldStart else { return }
-
-        configureSanitizerEnv()
-
-        RuntimeLogger.runtime.resetSession()
-        purgeTransientState()
-        RuntimeAssetInstaller.shared.prepareWorkspace()
-        if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
-            setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
-        }
-        let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
-        setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
-        let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
-        setenv("PSCALI_WORKDIR", workdir, 1)
-        let shouldSkipRc = stateQueue.sync { skipRcNextStart }
-        if shouldSkipRc {
-            setenv("EXSH_SKIP_RC", "1", 1)
-        } else {
-            unsetenv("EXSH_SKIP_RC")
-        }
-        if shellContext == nil {
-            shellContext = PSCALRuntimeCreateShellContext()
-        }
-        if let ctx = shellContext {
-            PSCALRuntimeSetShellContext(ctx, 0)
-        }
         stateQueue.async { self.promptKickPending = true }
-        LocationDeviceProvider.shared.start()
-
-        EditorTerminalBridge.shared.deactivate()
-
-        terminalBuffer.reset()
         DispatchQueue.main.async {
+            self.terminalBuffer.reset()
             self.screenText = NSAttributedString(string: "Launching exsh...")
             self.exitStatus = nil
             self.terminalBackgroundColor = UIColor.systemBackground
             self.cursorInfo = nil
         }
 
-        handlerContext = Unmanaged.passUnretained(self).toOpaque()
-        PSCALRuntimeConfigureHandlers(outputHandler, exitHandler, handlerContext)
+        launchQueue.async { [weak self] in
+            guard let self else { return }
+            self.configureSanitizerEnv()
 
-        launchQueue.async {
+            RuntimeLogger.runtime.resetSession()
+            self.purgeTransientState()
+            RuntimeAssetInstaller.shared.prepareWorkspace()
+            if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
+                setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
+            }
+            let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
+            setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
+            let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
+            setenv("PSCALI_WORKDIR", workdir, 1)
+            if getenv("PSCALI_PTY_OUTPUT_DIRECT") == nil {
+                setenv("PSCALI_PTY_OUTPUT_DIRECT", "1", 1)
+            }
+            let shouldSkipRc = self.stateQueue.sync { self.skipRcNextStart }
+            if shouldSkipRc {
+                setenv("EXSH_SKIP_RC", "1", 1)
+            } else {
+                unsetenv("EXSH_SKIP_RC")
+            }
+            if self.shellContext == nil {
+                self.shellContext = PSCALRuntimeCreateShellContext()
+            }
+            if let ctx = self.shellContext {
+                PSCALRuntimeSetShellContext(ctx, 0)
+            }
+
+            DispatchQueue.main.async {
+                LocationDeviceProvider.shared.start()
+                EditorTerminalBridge.shared.deactivate()
+            }
+
+            self.handlerContext = Unmanaged.passUnretained(self).toOpaque()
+            PSCALRuntimeConfigureHandlers(self.outputHandler, self.exitHandler, self.handlerContext)
+
             let args = ["exsh"]
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
             let argc = Int32(cArgs.count)
@@ -371,16 +383,17 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 let stackSize: size_t = numericCast(self.runtimeStackSizeBytes)
                 _ = PSCALRuntimeLaunchExshWithStackSize(argc, buffer.baseAddress, stackSize)
             }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Always send a carriage return to force prompt rendering; earlier
-            // output may have cleared the pending flag already.
-            self.send(" ")
-            self.send("\u{08}")
-        }
-        if stateQueue.sync(execute: { skipRcNextStart }) {
-            unsetenv("EXSH_SKIP_RC")
-            stateQueue.async { self.skipRcNextStart = false }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // Always send a carriage return to force prompt rendering; earlier
+                // output may have cleared the pending flag already.
+                self.send(" ")
+                self.send("\u{08}")
+            }
+            if self.stateQueue.sync(execute: { self.skipRcNextStart }) {
+                unsetenv("EXSH_SKIP_RC")
+                self.stateQueue.async { self.skipRcNextStart = false }
+            }
         }
     }
 
@@ -525,11 +538,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
     @objc
     public func consumeOutput(buffer: UnsafePointer<Int8>, length: Int) {
         guard length > 0 else { return }
+        let outputLength = length
         let dataCopy = Data(bytes: buffer, count: length)
         free(UnsafeMutableRawPointer(mutating: buffer))
         stateQueue.async { self.promptKickPending = false }
         DispatchQueue.main.async {
             self.terminalBuffer.append(data: dataCopy) {
+                PSCALRuntimeOutputDidProcess(Int(outputLength))
                 self.scheduleRender()
             }
         }
@@ -771,10 +786,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let font = TerminalFontSettings.shared.currentFont
 
         // Use the same logic the UI uses, just without a status row yet.
-        return TerminalGeometryCalculator.fallbackMetrics(
+        let fallback = TerminalGeometryCalculator.fallbackMetrics(
             showingStatus: false,
             font: font
         )
+        if fallback.columns > 0 && fallback.rows > 0 {
+            return fallback
+        }
 
         // Extremely defensive last-resort fallback – this should basically never run,
         // but it keeps us safe if something goes weird very early in app launch.
@@ -797,7 +815,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         return TerminalGeometryMetrics(columns: columns, rows: rows)
     }
     
-    private static func renderJoined(snapshot: TerminalBuffer.TerminalSnapshot) -> (text: NSAttributedString, cursor: TerminalCursorInfo?) {
+    static func renderJoined(snapshot: TerminalBuffer.TerminalSnapshot) -> (text: NSAttributedString, cursor: TerminalCursorInfo?) {
         let renderedLines = TerminalBuffer.render(snapshot: snapshot)
         let result = NSMutableAttributedString()
         let cursorRow = snapshot.cursor?.row

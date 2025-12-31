@@ -31,8 +31,21 @@ extern void pscalRuntimeDebugLog(const char *message);
 #include <sys/stat.h>
 #include "common/path_truncate.h"
 
+#if defined(PSCAL_TARGET_IOS)
+__attribute__((weak)) int pscalHostOpenRaw(const char *path, int flags, mode_t mode);
+__attribute__((weak)) void *vprocCurrent(void);
+#endif
+
 static bool pathVirtualizationActive(void) {
-    return pathTruncateEnabled();
+    if (!pathTruncateEnabled()) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (vprocCurrent) {
+        return vprocCurrent() != NULL;
+    }
+#endif
+    return true;
 }
 
 static const char *pathVirtualizedExpand(const char *input, char *buffer, size_t buffer_len) {
@@ -239,17 +252,26 @@ static void pathVirtualizedEnsureParent(const char *path) {
     mkdir(buf, 0777);
 }
 
+static int pathVirtualizedOpenHost(const char *path, int oflag, mode_t mode, bool has_mode) {
+#if defined(PSCAL_TARGET_IOS)
+    if (pscalHostOpenRaw) {
+        return pscalHostOpenRaw(path, oflag, mode);
+    }
+#endif
+    return has_mode ? open(path, oflag, mode) : open(path, oflag);
+}
+
 int pscalPathVirtualized_open(const char *path, int oflag, ...) {
     if (!pathVirtualizationActive()) {
         if (oflag & O_CREAT) {
             va_list ap;
             va_start(ap, oflag);
             mode_t mode = (mode_t)va_arg(ap, int);
-            int fd = open(path, oflag, mode);
+            int fd = pathVirtualizedOpenHost(path, oflag, mode, true);
             va_end(ap);
             return fd;
         }
-        return open(path, oflag);
+        return pathVirtualizedOpenHost(path, oflag, 0, false);
     }
     char expanded[PATH_MAX];
     const char *target = pathVirtualizedPrepare(path, expanded);
@@ -260,10 +282,10 @@ int pscalPathVirtualized_open(const char *path, int oflag, ...) {
         va_start(ap, oflag);
         mode_t mode = (mode_t)va_arg(ap, int);
         pathVirtualizedEnsureParent(target);
-        fd = open(target, oflag, mode);
+        fd = pathVirtualizedOpenHost(target, oflag, mode, true);
         va_end(ap);
     } else {
-        fd = open(target, oflag);
+        fd = pathVirtualizedOpenHost(target, oflag, 0, false);
     }
     return fd;
 }

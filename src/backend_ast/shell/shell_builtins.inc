@@ -3604,6 +3604,77 @@ Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+Value vmBuiltinShellStdioInfo(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count > 0) {
+        if (arg_count == 1 && args[0].type == TYPE_STRING && args[0].s_val &&
+            (strcmp(args[0].s_val, "--help") == 0 || strcmp(args[0].s_val, "-h") == 0)) {
+            printf("stdioinfo\n");
+            printf("  Show shell stdio and session routing details.\n");
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+        runtimeError(vm, "stdioinfo: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    printf("stdioinfo:\n");
+    printf("  fds: stdin=%d stdout=%d stderr=%d\n", STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO);
+    printf("  isatty: stdin=%d stdout=%d stderr=%d\n",
+           isatty(STDIN_FILENO) != 0,
+           isatty(STDOUT_FILENO) != 0,
+           isatty(STDERR_FILENO) != 0);
+    printf("  interactive: stdin=%d stdout=%d stderr=%d\n",
+           pscalRuntimeFdIsInteractive(STDIN_FILENO) ? 1 : 0,
+           pscalRuntimeFdIsInteractive(STDOUT_FILENO) ? 1 : 0,
+           pscalRuntimeFdIsInteractive(STDERR_FILENO) ? 1 : 0);
+    printf("  real_tty: stdin=%d stdout=%d stderr=%d\n",
+           pscalRuntimeFdHasRealTTY(STDIN_FILENO) ? 1 : 0,
+           pscalRuntimeFdHasRealTTY(STDOUT_FILENO) ? 1 : 0,
+           pscalRuntimeFdHasRealTTY(STDERR_FILENO) ? 1 : 0);
+    printf("  virtual_tty: %d\n", pscalRuntimeVirtualTTYEnabled() ? 1 : 0);
+
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    bool session_default = !session || vprocSessionStdioIsDefault(session);
+    printf("  session: ptr=%p default=%d session_id=%llu kernel_pid=%d\n",
+           (void *)session,
+           session_default ? 1 : 0,
+           session ? (unsigned long long)session->session_id : 0ull,
+           session ? session->kernel_pid : 0);
+    if (session) {
+        printf("  host_fds: stdin=%d stdout=%d stderr=%d\n",
+               session->stdin_host_fd,
+               session->stdout_host_fd,
+               session->stderr_host_fd);
+        printf("  pscal_fds: stdin=%p stdout=%p stderr=%p\n",
+               (void *)session->stdin_pscal_fd,
+               (void *)session->stdout_pscal_fd,
+               (void *)session->stderr_pscal_fd);
+        printf("  pty: active=%d master=%p slave=%p in_fd=%d out_fd=%d\n",
+               session->pty_active ? 1 : 0,
+               (void *)session->pty_master,
+               (void *)session->pty_slave,
+               session->pty_in_fd,
+               session->pty_out_fd);
+    }
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        printf("  vproc: ptr=%p pid=%d\n", (void *)vp, vprocPid(vp));
+        printf("  shim_map: stdin=%d stdout=%d stderr=%d\n",
+               vprocTranslateFd(vp, STDIN_FILENO),
+               vprocTranslateFd(vp, STDOUT_FILENO),
+               vprocTranslateFd(vp, STDERR_FILENO));
+    } else {
+        printf("  vproc: <none>\n");
+    }
+#endif
+
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
 #ifdef PSCAL_TARGET_IOS
 static void shellApplyWindowSize(int rows, int cols) {
     if (rows <= 0 || cols <= 0) {
@@ -9409,6 +9480,15 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         0
     },
 #endif
+    {
+        "stdioinfo",
+        "Show stdio routing and session state.",
+        "stdioinfo",
+        "Prints the current stdin/stdout/stderr descriptor mapping, TTY state,"
+        " and on iOS the active vproc session/PTY wiring.",
+        NULL,
+        0
+    },
     {
         "caller",
         "Report information about active call frames.",

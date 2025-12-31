@@ -21,7 +21,17 @@ if(PSCAL_FORCE_IOS)
     set(PSCAL_PLATFORM_IOS ON)
 endif()
 
-if(NOT PSCAL_REAL_IOS)
+set(PSCAL_MACCATALYST OFF)
+if(APPLE AND CMAKE_OSX_SYSROOT)
+    string(TOLOWER "${CMAKE_OSX_SYSROOT}" _pscal_sysroot_lower)
+    if(_pscal_sysroot_lower MATCHES "macosx")
+        if(CMAKE_C_FLAGS MATCHES "macabi" OR CMAKE_CXX_FLAGS MATCHES "macabi")
+            set(PSCAL_MACCATALYST ON)
+        endif()
+    endif()
+endif()
+
+if(NOT PSCAL_PLATFORM_IOS)
     find_package(OpenSSL REQUIRED)
     set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
     set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
@@ -33,9 +43,14 @@ if(PSCAL_PLATFORM_IOS)
     endif()
     add_compile_options(-include ${CMAKE_SOURCE_DIR}/src/ios/vproc_shim.h)
     # vproc implementation compiles without the global shim overrides to avoid macro pollution.
-    set_property(SOURCE src/ios/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1)
+    set_property(SOURCE src/ios/vproc.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
     # path virtualization helpers must call the real syscalls to avoid recursion with vproc shim macros.
-    set_property(SOURCE src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1)
+    set_property(SOURCE src/common/path_virtualization.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    # path truncation helpers should bypass vproc shims to avoid recursive syscalls.
+    set_property(SOURCE src/common/path_truncate.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    # low-level tty/pty helpers must bypass vproc shim macros to avoid recursive interpose calls.
+    set_property(SOURCE src/ios/tty/pscal_fd.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
+    set_property(SOURCE src/ios/tty/pscal_pty.c APPEND PROPERTY COMPILE_DEFINITIONS VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
 elseif(VPROC_ENABLE_STUBS_FOR_TESTS)
     add_compile_definitions(VPROC_ENABLE_STUBS_FOR_TESTS)
 endif()
@@ -108,7 +123,7 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
 include_directories("${CMAKE_BINARY_DIR}/generated")
 
-if(PSCAL_REAL_IOS)
+if(PSCAL_PLATFORM_IOS)
     set(PSCAL_OPENSSL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third-party/openssl-3.6.0")
     if(NOT EXISTS "${PSCAL_OPENSSL_SOURCE_DIR}/Configure")
         message(FATAL_ERROR "third-party/openssl-3.6.0 not found; please add the OpenSSL sources")
@@ -116,36 +131,50 @@ if(PSCAL_REAL_IOS)
     find_program(PSCAL_PERL_EXECUTABLE perl REQUIRED)
     find_program(PSCAL_MAKE_EXECUTABLE make REQUIRED)
 
-    if(CMAKE_OSX_SYSROOT MATCHES "Simulator")
-        set(_pscal_openssl_target "iossimulator-xcrun")
-    else()
-        set(_pscal_openssl_target "ios64-cross")
-    endif()
-
-    get_filename_component(_pscal_sdk_dir "${CMAKE_OSX_SYSROOT}" DIRECTORY)
-    get_filename_component(_pscal_cross_top "${_pscal_sdk_dir}" DIRECTORY)
-    get_filename_component(_pscal_cross_sdk "${CMAKE_OSX_SYSROOT}" NAME)
-
-    if(CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(_pscal_openssl_min_version "${CMAKE_OSX_DEPLOYMENT_TARGET}")
-    else()
-        set(_pscal_openssl_min_version "15.0")
-    endif()
-    if(PSCALI_IOS_PLATFORM STREQUAL "SIMULATOR")
-        set(_pscal_openssl_version_flag "-mios-simulator-version-min=${_pscal_openssl_min_version}")
-    else()
-        set(_pscal_openssl_version_flag "-miphoneos-version-min=${_pscal_openssl_min_version}")
-    endif()
     if(CMAKE_OSX_ARCHITECTURES)
         string(REPLACE ";" " " _pscal_openssl_arch "${CMAKE_OSX_ARCHITECTURES}")
     else()
         set(_pscal_openssl_arch "arm64")
     endif()
+    if(PSCAL_MACCATALYST)
+        set(_pscal_openssl_platform "Mac Catalyst")
+        if(_pscal_openssl_arch MATCHES "x86_64")
+            set(_pscal_openssl_target "darwin64-x86_64-cc")
+        else()
+            set(_pscal_openssl_target "darwin64-arm64-cc")
+        endif()
+        set(_pscal_openssl_version_flag "")
+        set(_pscal_openssl_bitcode_flag "")
+    else()
+        set(_pscal_openssl_platform "iOS")
+        if(CMAKE_OSX_SYSROOT MATCHES "Simulator")
+            set(_pscal_openssl_target "iossimulator-xcrun")
+        else()
+            set(_pscal_openssl_target "ios64-cross")
+        endif()
+        get_filename_component(_pscal_sdk_dir "${CMAKE_OSX_SYSROOT}" DIRECTORY)
+        get_filename_component(_pscal_cross_top "${_pscal_sdk_dir}" DIRECTORY)
+        get_filename_component(_pscal_cross_sdk "${CMAKE_OSX_SYSROOT}" NAME)
+        if(CMAKE_OSX_DEPLOYMENT_TARGET)
+            set(_pscal_openssl_min_version "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        else()
+            set(_pscal_openssl_min_version "15.0")
+        endif()
+        if(PSCALI_IOS_PLATFORM STREQUAL "SIMULATOR")
+            set(_pscal_openssl_version_flag "-mios-simulator-version-min=${_pscal_openssl_min_version}")
+        else()
+            set(_pscal_openssl_version_flag "-miphoneos-version-min=${_pscal_openssl_min_version}")
+        endif()
+        set(_pscal_openssl_bitcode_flag "-fembed-bitcode")
+    endif()
 
     set(PSCAL_OPENSSL_BUILD_DIR "${CMAKE_BINARY_DIR}/third-party/openssl/build")
     set(PSCAL_OPENSSL_INSTALL_DIR "${CMAKE_BINARY_DIR}/third-party/openssl/install")
     set(_pscal_openssl_stamp_file "${PSCAL_OPENSSL_INSTALL_DIR}/.pscal_openssl_target")
-    set(_pscal_openssl_stamp_value "${_pscal_openssl_target};${_pscal_openssl_version_flag};${_pscal_openssl_arch}")
+    set(_pscal_openssl_stamp_value "${_pscal_openssl_platform};${_pscal_openssl_target};${_pscal_openssl_version_flag};${_pscal_openssl_arch}")
+    if(PSCAL_MACCATALYST)
+        string(APPEND _pscal_openssl_stamp_value ";${CMAKE_C_FLAGS}")
+    endif()
     if(EXISTS "${_pscal_openssl_stamp_file}")
         file(READ "${_pscal_openssl_stamp_file}" _pscal_openssl_stamp_content)
         string(STRIP "${_pscal_openssl_stamp_content}" _pscal_openssl_stamp_content)
@@ -165,14 +194,41 @@ if(PSCAL_REAL_IOS)
         --prefix=${PSCAL_OPENSSL_INSTALL_DIR} --openssldir=${PSCAL_OPENSSL_INSTALL_DIR}/ssl
     )
 
+    set(_pscal_openssl_sysroot "${CMAKE_OSX_SYSROOT}")
+    if(NOT IS_ABSOLUTE "${_pscal_openssl_sysroot}")
+        execute_process(
+            COMMAND xcrun --sdk ${CMAKE_OSX_SYSROOT} --show-sdk-path
+            OUTPUT_VARIABLE _pscal_openssl_sysroot_resolved
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _pscal_openssl_sysroot_status
+        )
+        if(_pscal_openssl_sysroot_status EQUAL 0 AND _pscal_openssl_sysroot_resolved)
+            set(_pscal_openssl_sysroot "${_pscal_openssl_sysroot_resolved}")
+        endif()
+    endif()
+
+    set(_pscal_openssl_extra_cflags "")
+    if(NOT _pscal_openssl_version_flag STREQUAL "")
+        list(APPEND _pscal_openssl_extra_cflags "${_pscal_openssl_version_flag}")
+    endif()
+    if(NOT _pscal_openssl_bitcode_flag STREQUAL "")
+        list(APPEND _pscal_openssl_extra_cflags "${_pscal_openssl_bitcode_flag}")
+    endif()
+    string(REPLACE ";" " " _pscal_openssl_extra_cflags "${_pscal_openssl_extra_cflags}")
+
     set(_pscal_openssl_env
         "CC=${CMAKE_C_COMPILER}"
-        "CROSS_TOP=${_pscal_cross_top}"
-        "CROSS_SDK=${_pscal_cross_sdk}"
-        "CFLAGS=${CMAKE_C_FLAGS} -arch ${_pscal_openssl_arch} -isysroot ${CMAKE_OSX_SYSROOT} ${_pscal_openssl_version_flag} -fembed-bitcode"
-        "CXXFLAGS=${CMAKE_CXX_FLAGS} -arch ${_pscal_openssl_arch} -isysroot ${CMAKE_OSX_SYSROOT} ${_pscal_openssl_version_flag} -fembed-bitcode"
+        "CFLAGS=${CMAKE_C_FLAGS} -arch ${_pscal_openssl_arch} -isysroot ${_pscal_openssl_sysroot} ${_pscal_openssl_extra_cflags}"
+        "CXXFLAGS=${CMAKE_CXX_FLAGS} -arch ${_pscal_openssl_arch} -isysroot ${_pscal_openssl_sysroot} ${_pscal_openssl_extra_cflags}"
         "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}"
     )
+    if(DEFINED _pscal_cross_top AND NOT _pscal_cross_top STREQUAL "")
+        list(APPEND _pscal_openssl_env "CROSS_TOP=${_pscal_cross_top}")
+    endif()
+    if(DEFINED _pscal_cross_sdk AND NOT _pscal_cross_sdk STREQUAL "")
+        list(APPEND _pscal_openssl_env "CROSS_SDK=${_pscal_cross_sdk}")
+    endif()
 
     add_custom_command(
         OUTPUT "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a" "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libcrypto.a"
@@ -181,7 +237,7 @@ if(PSCAL_REAL_IOS)
         COMMAND ${CMAKE_COMMAND} -E env ${_pscal_openssl_env} ${PSCAL_MAKE_EXECUTABLE} install_dev
         WORKING_DIRECTORY "${PSCAL_OPENSSL_BUILD_DIR}"
         DEPENDS "${PSCAL_OPENSSL_SOURCE_DIR}/Configure"
-        COMMENT "Building OpenSSL for iOS"
+        COMMENT "Building OpenSSL for ${_pscal_openssl_platform}"
         VERBATIM
     )
 
@@ -256,9 +312,9 @@ if(BUILD_PSCALD)
     add_compile_definitions(BUILD_PSCALD)
 endif()
 
-# Optionally emit static libraries (default when targeting iOS)
+# Optionally emit static libraries (default when targeting iOS/Mac Catalyst).
 set(_PSCAL_BUILD_STATIC_LIBS_DEFAULT OFF)
-if(PSCAL_REAL_IOS)
+if(PSCAL_PLATFORM_IOS)
     set(_PSCAL_BUILD_STATIC_LIBS_DEFAULT ON)
 endif()
 option(PSCAL_BUILD_STATIC_LIBS "Build PSCAL static libraries for embedding runners" ${_PSCAL_BUILD_STATIC_LIBS_DEFAULT})
@@ -1022,7 +1078,7 @@ set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     -Wno-string-compare)
 if(PSCAL_PLATFORM_IOS)
     set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
-        APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS;__progname=pscal_progname;VPROC_SHIM_DISABLED=1)
+        APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS;__progname=pscal_progname;VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
 else()
     set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
         APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H)
@@ -1085,6 +1141,13 @@ list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
 	    list(APPEND PSCAL_CORE_SOURCES src/common/frontend_symbol_wrappers.c)
 	    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc.c)
 	    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc_tree.c)
+	    list(APPEND PSCAL_CORE_SOURCES
+	        src/ios/tty/ish_compat.c
+	        src/ios/tty/pscal_fd.c
+	        src/ios/tty/pscal_tty.c
+	        src/ios/tty/pscal_pty.c
+	        src/ios/tty/pscal_tty_host.c
+	    )
 	endif()
 
 set(PASCAL_FRONTEND_SOURCES
@@ -1153,11 +1216,13 @@ target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
     z resolv)
-if(PSCAL_REAL_IOS)
-    target_compile_definitions(pscal_core_static PRIVATE __progname=pscal_progname __progname_full=pscal_progname_full)
+if(PSCAL_PLATFORM_IOS)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
         "${PSCAL_OPENSSL_INSTALL_DIR}/include")
+endif()
+if(PSCAL_REAL_IOS)
+    target_compile_definitions(pscal_core_static PRIVATE __progname=pscal_progname __progname_full=pscal_progname_full)
     set(_pscal_core_embed_archives
         "$<TARGET_FILE:pscal_core_static>"
         "${PSCAL_OPENSSL_INSTALL_DIR}/lib/libssl.a"
@@ -1388,8 +1453,8 @@ list(APPEND SHELL_SOURCES ${EXSH_EXT_BUILTIN_SOURCES})
 
 # On real iOS builds we do not ship CLI entrypoints, but for host-based iOS
 # parity testing (PSCAL_FORCE_IOS=ON) we still build exsh so vproc/job-control
-# behavior can be exercised on macOS.
-if(NOT PSCAL_PLATFORM_IOS OR PSCAL_FORCE_IOS)
+# behavior can be exercised on macOS. Skip the executable for Mac Catalyst.
+if(NOT PSCAL_PLATFORM_IOS OR (PSCAL_FORCE_IOS AND NOT PSCAL_MACCATALYST))
     add_executable(exsh ${SHELL_SOURCES})
     target_link_libraries(exsh PRIVATE pscal_core_static)
     target_compile_definitions(exsh PRIVATE FRONTEND_SHELL)

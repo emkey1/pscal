@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdbool.h>
+#include <termios.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #ifdef __cplusplus
@@ -28,6 +30,12 @@ bool pscalRuntimeStderrHasRealTTY(void);
 
 int pscalRuntimeDetectWindowRows(void);
 int pscalRuntimeDetectWindowCols(void);
+
+bool pscalRuntimeVirtualTTYGetTermios(struct termios *out);
+void pscalRuntimeVirtualTTYSetTermios(const struct termios *termios);
+bool pscalRuntimeVirtualTTYGetWinsize(struct winsize *out);
+void pscalRuntimeVirtualTTYSetWinsize(const struct winsize *winsize);
+void pscalRuntimeVirtualTTYReset(void);
 
 #ifdef __cplusplus
 }

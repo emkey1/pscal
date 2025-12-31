@@ -19,6 +19,7 @@ static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
 static char g_pathTruncateAlias[PATH_MAX];
 static size_t g_pathTruncateAliasLen = 0;
+static _Thread_local int g_pathTruncateResolving = 0;
 
 static void write_text_file(const char *path, const char *contents) {
     if (!path || !contents) {
@@ -155,6 +156,10 @@ static bool pathTruncateFetchPrefix(const char **out_prefix, size_t *out_length)
     if (!out_prefix || !out_length) {
         return false;
     }
+    const char *disabled = getenv("PSCALI_PATH_TRUNCATE_DISABLED");
+    if (disabled && disabled[0] != '\0') {
+        return false;
+    }
     const char *env = getenv("PATH_TRUNCATE");
     if (!env || env[0] == '\0') {
         env = getenv("PSCALI_CONTAINER_ROOT");
@@ -173,8 +178,12 @@ static bool pathTruncateFetchPrefix(const char **out_prefix, size_t *out_length)
     }
     const char *source = env;
     char canonical[PATH_MAX];
-    if (realpath(env, canonical)) {
-        source = canonical;
+    if (!g_pathTruncateResolving) {
+        g_pathTruncateResolving = 1;
+        if (realpath(env, canonical)) {
+            source = canonical;
+        }
+        g_pathTruncateResolving = 0;
     }
     size_t length = strlen(source);
     while (length > 1 && source[length - 1] == '/') {
@@ -346,7 +355,8 @@ void pathTruncateProvisionDev(const char *prefix) {
     } links[] = {
         { "null", "/dev/null" },
         { "zero", "/dev/zero" },
-        { "random", "/dev/random" }
+        { "random", "/dev/random" },
+        { "ptmx", "/dev/null" }
     };
     for (size_t i = 0; i < sizeof(links) / sizeof(links[0]); ++i) {
         char link_path[PATH_MAX];
@@ -358,6 +368,12 @@ void pathTruncateProvisionDev(const char *prefix) {
             continue; // already exists
         }
         symlink(links[i].target, link_path);
+    }
+
+    char ptsdir[PATH_MAX];
+    if (snprintf(ptsdir, sizeof(ptsdir), "%s/pts", devdir) > 0 &&
+        (size_t)strlen(ptsdir) < sizeof(ptsdir)) {
+        pathTruncateEnsureDir(ptsdir);
     }
 }
 
@@ -556,6 +572,24 @@ static const char *pathTruncateSkipLeadingSlashes(const char *input) {
     return cursor;
 }
 
+static bool pathTruncateIsSystemPath(const char *path) {
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    const char *prefixes[] = { "/System", "/usr", "/Library", "/Applications" };
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        const char *prefix = prefixes[i];
+        size_t len = strlen(prefix);
+        if (strncmp(path, prefix, len) != 0) {
+            continue;
+        }
+        if (path[len] == '\0' || path[len] == '/') {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     if (!out || out_size == 0) {
         errno = EINVAL;
@@ -567,6 +601,9 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     const char *prefix = NULL;
     size_t prefix_len = 0;
     if (!pathTruncateFetchPrefix(&prefix, &prefix_len) || input_path[0] != '/') {
+        return pathTruncateCopyString(input_path, out, out_size);
+    }
+    if (pathTruncateIsSystemPath(input_path)) {
         return pathTruncateCopyString(input_path, out, out_size);
     }
     /* Device nodes: leave untouched so they resolve to the real device. */

@@ -124,6 +124,7 @@ static VProc *shellCreateVProcForStage(int stdin_host,
                                        int cols,
                                        int rows,
                                        int pid_hint) {
+    (void)vprocEnsureKernelPid();
     /* Always inherit stdio from the active vproc; never fall back to session
      * stdio here. Background workers must not mutate the interactive session's
      * fds. */
@@ -1119,6 +1120,7 @@ typedef struct {
     VM *vm;
     ShellCommand *cmd;
     VProc *vp;
+    VProcSessionStdio *session_stdio;
     int stdin_fd;
     int stdout_fd;
     int stderr_fd;
@@ -1773,6 +1775,9 @@ static void *shellInProcessWorkerMain(void *arg) {
         free(ctx);
         return NULL;
     }
+    if (ctx->session_stdio) {
+        vprocSessionStdioActivate(ctx->session_stdio);
+    }
     if (ctx->shell_pid > 0) {
         vprocSetShellSelfPid(ctx->shell_pid);
     }
@@ -1824,6 +1829,9 @@ static void *shellInProcessWorkerMain(void *arg) {
     gShellBackgroundWorkerActive = prev_worker_flag;
     gShellCurrentBuiltinBackground = prev_bg_flag;
 
+    if (ctx->session_stdio) {
+        vprocSessionStdioActivate(NULL);
+    }
     shellFreeCommand(ctx->cmd);
     free(ctx->cmd);
     free(ctx);
@@ -3218,10 +3226,14 @@ static int shellRunBuiltinInProcess(VM *vm,
                         char label[96] = {0};
                         shellVprocFormatLabel(cmd, label, sizeof(label));
                         VProcCommandScope vproc_scope;
+                        bool inherit_pgid = !(cmd && cmd->background);
+                        if (gShellRuntime.pipeline.active && gShellRuntime.pipeline.background) {
+                            inherit_pgid = false;
+                        }
                         bool scoped = vprocCommandScopeBegin(&vproc_scope,
                                                              label[0] ? label : (cmd->argv && cmd->argv[0] ? cmd->argv[0] : "task"),
                                                              false,
-                                                             false);
+                                                             inherit_pgid);
 #endif
                         sc_status = smallclueDispatchApplet(applet, argc, argv_copy);
 #if defined(PSCAL_TARGET_IOS)
@@ -3670,6 +3682,15 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     }
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+    if (shellRuntimeIsInteractive() && !cmd->background && !ctx->background) {
+        shellEnsureJobControl();
+        if (gShellRuntime.job_control_enabled && ctx->pgid > 0 && run_stdin_fd >= 0) {
+            shellJobControlSetForeground(ctx->pgid);
+        }
+    }
+#endif
+
     if (run_in_worker) {
         ShellCommand *worker_cmd = shellCloneCommandForBackground(cmd);
         ShellInProcessWorkerCtx *worker = NULL;
@@ -3686,6 +3707,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             worker->vm = vm;
             worker->cmd = worker_cmd;
             worker->vp = vp;
+            worker->session_stdio = vprocSessionStdioCurrent();
             worker->stdin_fd = run_stdin_fd;
             worker->stdout_fd = run_stdout_fd;
             worker->stderr_fd = run_stderr_fd;

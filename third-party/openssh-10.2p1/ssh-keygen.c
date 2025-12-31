@@ -282,8 +282,29 @@ ask_filename(struct passwd *pw, const char *prompt)
 	    "%s/%s", pw->pw_dir, name);
 	printf("%s (%s): ", prompt, identity_file);
 	fflush(stdout);
+#ifdef PSCAL_TARGET_IOS
+	{
+		size_t len = 0;
+		while (len + 1 < sizeof(buf)) {
+			char ch = '\0';
+			ssize_t rd = read(STDIN_FILENO, &ch, 1);
+			if (rd < 0) {
+				if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+					continue;
+				exit(1);
+			}
+			if (rd == 0)
+				exit(1);
+			if (ch == '\n' || ch == '\r')
+				break;
+			buf[len++] = ch;
+		}
+		buf[len] = '\0';
+	}
+#else
 	if (fgets(buf, sizeof(buf), stdin) == NULL)
 		exit(1);
+#endif
 	buf[strcspn(buf, "\n")] = '\0';
 	if (strcmp(buf, "") != 0)
 		strlcpy(identity_file, buf, sizeof(identity_file));

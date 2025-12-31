@@ -7,6 +7,10 @@
 #include <stdarg.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/select.h>
+#include <dirent.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
@@ -19,6 +23,7 @@ extern "C" {
 // fd table per task and translates basic I/O syscalls through the table.
 
 typedef struct VProc VProc;
+struct pscal_fd;
 
 typedef struct {
     int stdin_fd;   // host fd to dup for stdin; -1 to dup host STDIN_FILENO; -2 for /dev/null
@@ -95,12 +100,16 @@ int vprocHostClose(int fd);
 ssize_t vprocHostRead(int fd, void *buf, size_t count);
 /* Write to a host descriptor without routing through the shim table. */
 ssize_t vprocHostWrite(int fd, const void *buf, size_t count);
+/* Virtual isatty shim for session-backed TTYs. */
+int vprocIsattyShim(int fd);
 /* Enable/disable the virtual location device (/dev/location). */
 void vprocLocationDeviceSetEnabled(bool enabled);
 /* Write a payload to the virtual location device. */
 ssize_t vprocLocationDeviceWrite(const void *data, size_t len);
 /* Read from the shared session input queue (stdin) on iOS. */
 ssize_t vprocSessionReadInputShim(void *buf, size_t count);
+/* Read from the shared session input queue with nonblocking support. */
+ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking);
 /* Spawn a joinable host thread, bypassing vproc's pthread_create shim. */
 int vprocHostPthreadCreate(pthread_t *thread,
                            const pthread_attr_t *attr,
@@ -149,8 +158,25 @@ int vprocDup2Shim(int fd, int target);
 int vprocCloseShim(int fd);
 int vprocPipeShim(int pipefd[2]);
 int vprocFstatShim(int fd, struct stat *st);
+int vprocStatShim(const char *path, struct stat *st);
+int vprocLstatShim(const char *path, struct stat *st);
+int vprocChdirShim(const char *path);
+char *vprocGetcwdShim(char *buffer, size_t size);
+int vprocAccessShim(const char *path, int mode);
+int vprocMkdirShim(const char *path, mode_t mode);
+int vprocRmdirShim(const char *path);
+int vprocUnlinkShim(const char *path);
+int vprocRemoveShim(const char *path);
+int vprocRenameShim(const char *oldpath, const char *newpath);
+DIR *vprocOpendirShim(const char *name);
+int vprocSymlinkShim(const char *target, const char *linkpath);
+ssize_t vprocReadlinkShim(const char *path, char *buf, size_t size);
+char *vprocRealpathShim(const char *path, char *resolved_path);
+int vprocIoctlShim(int fd, unsigned long request, ...);
 off_t vprocLseekShim(int fd, off_t offset, int whence);
 int vprocOpenShim(const char *path, int flags, ...);
+int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout);
+int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
 pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options);
 int vprocKillShim(pid_t pid, int sig);
 pid_t vprocGetPidShim(void);
@@ -169,8 +195,11 @@ bool vprocIsShellSelfThread(void);
 /* Optional: identify a per-session "kernel" vproc that acts as adoptive parent. */
 void vprocSetKernelPid(int pid);
 int vprocGetKernelPid(void);
+void vprocClearKernelPidGlobal(void);
 int vprocGetSessionKernelPid(void);
 void vprocSetSessionKernelPid(int pid);
+/* Ensure a shared kernel vproc exists and return its pid. */
+int vprocEnsureKernelPid(void);
 
 /* Per-session stdio ownership: duplicated host fds that define the
  * controlling stdio for a given shell window/session. */
@@ -195,21 +224,74 @@ typedef struct VProcSessionStdio {
     int stderr_host_fd;
     int kernel_pid;
     VProcSessionInput *input;
+    struct pscal_fd *stdin_pscal_fd;
+    struct pscal_fd *stdout_pscal_fd;
+    struct pscal_fd *stderr_pscal_fd;
+    struct pscal_fd *pty_master;
+    struct pscal_fd *pty_slave;
+    int pty_in_fd;
+    int pty_out_fd;
+    pthread_t pty_in_thread;
+    pthread_t pty_out_thread;
+    bool pty_active;
+    uint64_t session_id;
 } VProcSessionStdio;
+
+typedef void (*VProcSessionOutputHandler)(uint64_t session_id,
+                                          const unsigned char *data,
+                                          size_t len,
+                                          void *context);
 
 /* Obtain the current session stdio (per window/session). */
 VProcSessionStdio *vprocSessionStdioCurrent(void);
 /* Initialize session stdio from the current host stdio and kernel pid. */
 void vprocSessionStdioInit(VProcSessionStdio *stdio_ctx, int kernel_pid);
+/* Initialize session stdio from explicit host fds (duplicates are taken). */
+void vprocSessionStdioInitWithFds(VProcSessionStdio *stdio_ctx,
+                                  int stdin_fd,
+                                  int stdout_fd,
+                                  int stderr_fd,
+                                  int kernel_pid);
+int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
+                                 struct pscal_fd *pty_slave,
+                                 struct pscal_fd *pty_master,
+                                 int bridge_in_fd,
+                                 int bridge_out_fd,
+                                 uint64_t session_id,
+                                 int kernel_pid);
+int vprocAdoptPscalStdio(VProc *vp,
+                         struct pscal_fd *stdin_fd,
+                         struct pscal_fd *stdout_fd,
+                         struct pscal_fd *stderr_fd);
+int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows);
 bool vprocSessionStdioNeedsRefresh(VProcSessionStdio *stdio_ctx);
 void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid);
 void vprocSessionDebugDumpShim(const char *tag);
+bool vprocSessionStdioIsDefault(VProcSessionStdio *stdio_ctx);
 /* Activate a session stdio context for the calling thread (per window). */
 void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx);
+/* Create/destroy a heap-backed session stdio for custom sessions. */
+VProcSessionStdio *vprocSessionStdioCreate(void);
+void vprocSessionStdioDestroy(VProcSessionStdio *stdio_ctx);
+/* Replace the default (main) session stdio snapshot. */
+void vprocSessionStdioSetDefault(VProcSessionStdio *stdio_ctx);
+/* Register/unregister per-session PTY output callbacks. */
+void vprocSessionSetOutputHandler(uint64_t session_id,
+                                  VProcSessionOutputHandler handler,
+                                  void *context);
+void vprocSessionClearOutputHandler(uint64_t session_id);
+/* Write input data directly to a session PTY master. */
+ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len);
 /* Ensure session input is initialized for the current session. */
 VProcSessionInput *vprocSessionInputEnsureShim(void);
 /* Inject input into the current session input queue. */
 bool vprocSessionInjectInputShim(const void *data, size_t len);
+
+/* Create per-session pipes for virtual TTY I/O (session in/out + UI in/out). */
+int vprocCreateSessionPipes(int *session_stdin,
+                            int *session_stdout,
+                            int *ui_read,
+                            int *ui_write);
 
 /* Terminate and discard all vprocs in the given session (sid). */
 void vprocTerminateSession(int sid);
@@ -255,6 +337,24 @@ int vprocSigsuspendShim(const sigset_t *mask);
 int vprocPthreadSigmaskShim(int how, const sigset_t *set, sigset_t *oldset);
 int vprocRaiseShim(int sig);
 VProcSigHandler vprocSignalShim(int sig, VProcSigHandler handler);
+/* Indicates when it is safe for interposed libc calls to enter vproc shims. */
+int vprocInterposeReady(void);
+/* True when the thread has been registered as part of a vproc task. */
+int vprocThreadIsRegistered(pthread_t tid);
+/* Nonblocking variant for interposer gates (returns 0 if registry is busy). */
+int vprocThreadIsRegisteredNonblocking(pthread_t tid);
+/* True when the calling thread has an active vproc context (TLS). */
+int vprocThreadHasActiveVproc(void);
+/* True when the thread should bypass interposed libc calls entirely. */
+int vprocThreadIsInterposeBypassed(pthread_t tid);
+void vprocRegisterInterposeBypassThread(pthread_t tid);
+void vprocUnregisterInterposeBypassThread(pthread_t tid);
+/* Kernel-managed path truncation (present sandbox as "/"). */
+void vprocApplyPathTruncation(const char *prefix);
+/* Temporarily disable interposed libc calls while performing host syscalls. */
+void vprocInterposeBypassEnter(void);
+void vprocInterposeBypassExit(void);
+int vprocInterposeBypassActive(void);
 
 static inline void vprocFormatCpuTimes(int utime_cs, int stime_cs, double *utime_s, double *stime_s) {
     if (utime_s) {
@@ -272,7 +372,11 @@ static inline void vprocFormatCpuTimes(int utime_cs, int stime_cs, double *utime
 #include <stdarg.h>
 #include <signal.h>
 #include <termios.h>
+#include <sys/ioctl.h>
 #include <errno.h>
+typedef struct VProcSessionStdio {
+    int dummy;
+} VProcSessionStdio;
 /* Desktop stubs: map to host syscalls or no-ops so non-iOS builds compile. */
 static inline VProcOptions vprocDefaultOptions(void) {
     VProcOptions o = {.stdin_fd = -1, .stdout_fd = -1, .stderr_fd = -1, .winsize_cols = 80, .winsize_rows = 24, .pid_hint = -1, .job_id = 0};
@@ -322,6 +426,13 @@ static inline ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
     errno = ENODEV;
     return -1;
 }
+static inline int vprocIoctlShim(int fd, unsigned long request, ...) {
+    va_list ap;
+    va_start(ap, request);
+    uintptr_t arg = va_arg(ap, uintptr_t);
+    va_end(ap);
+    return ioctl(fd, request, arg);
+}
 static inline int vprocHostPthreadCreate(pthread_t *thread,
                                          const pthread_attr_t *attr,
                                          void *(*start_routine)(void *),
@@ -358,7 +469,22 @@ static inline int vprocDup2Shim(int fd, int target) { return dup2(fd, target); }
 static inline int vprocCloseShim(int fd) { return close(fd); }
 static inline int vprocPipeShim(int pipefd[2]) { return pipe(pipefd); }
 static inline int vprocFstatShim(int fd, struct stat *st) { return fstat(fd, st); }
+static inline int vprocStatShim(const char *path, struct stat *st) { return stat(path, st); }
+static inline int vprocLstatShim(const char *path, struct stat *st) { return lstat(path, st); }
+static inline int vprocChdirShim(const char *path) { return chdir(path); }
+static inline char *vprocGetcwdShim(char *buffer, size_t size) { return getcwd(buffer, size); }
+static inline int vprocAccessShim(const char *path, int mode) { return access(path, mode); }
+static inline int vprocMkdirShim(const char *path, mode_t mode) { return mkdir(path, mode); }
+static inline int vprocRmdirShim(const char *path) { return rmdir(path); }
+static inline int vprocUnlinkShim(const char *path) { return unlink(path); }
+static inline int vprocRemoveShim(const char *path) { return remove(path); }
+static inline int vprocRenameShim(const char *oldpath, const char *newpath) { return rename(oldpath, newpath); }
+static inline DIR *vprocOpendirShim(const char *name) { return opendir(name); }
+static inline int vprocSymlinkShim(const char *target, const char *linkpath) { return symlink(target, linkpath); }
+static inline ssize_t vprocReadlinkShim(const char *path, char *buf, size_t size) { return readlink(path, buf, size); }
+static inline char *vprocRealpathShim(const char *path, char *resolved_path) { return realpath(path, resolved_path); }
 static inline off_t vprocLseekShim(int fd, off_t offset, int whence) { return lseek(fd, offset, whence); }
+static inline int vprocIsattyShim(int fd) { return isatty(fd); }
 static inline int vprocOpenShim(const char *path, int flags, ...) {
     int mode = 0;
     if (flags & O_CREAT) {
@@ -378,12 +504,63 @@ static inline pid_t vprocSetsidShim(void) { return setsid(); }
 static inline pid_t vprocGetsidShim(pid_t pid) { return getsid(pid); }
 static inline pid_t vprocTcgetpgrpShim(int fd) { return tcgetpgrp(fd); }
 static inline int vprocTcsetpgrpShim(int fd, pid_t pgid) { return tcsetpgrp(fd, pgid); }
+static inline int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) { return poll(fds, nfds, timeout); }
+static inline int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
+    return select(nfds, readfds, writefds, exceptfds, timeout);
+}
 static inline void vprocSetShellSelfPid(int pid) { (void)pid; }
 static inline int vprocGetShellSelfPid(void) { return (int)getpid(); }
 static inline void vprocSetShellSelfTid(pthread_t tid) { (void)tid; }
 static inline bool vprocIsShellSelfThread(void) { return false; }
+static inline int vprocInterposeReady(void) { return 0; }
+static inline int vprocThreadIsRegistered(pthread_t tid) { (void)tid; return 0; }
+static inline int vprocThreadIsRegisteredNonblocking(pthread_t tid) { (void)tid; return 0; }
+static inline int vprocThreadHasActiveVproc(void) { return 0; }
+static inline int vprocThreadIsInterposeBypassed(pthread_t tid) { (void)tid; return 0; }
+static inline void vprocRegisterInterposeBypassThread(pthread_t tid) { (void)tid; }
+static inline void vprocUnregisterInterposeBypassThread(pthread_t tid) { (void)tid; }
+static inline void vprocApplyPathTruncation(const char *prefix) { (void)prefix; }
+static inline void vprocInterposeBypassEnter(void) {}
+static inline void vprocInterposeBypassExit(void) {}
+static inline int vprocInterposeBypassActive(void) { return 0; }
 static inline void vprocSetKernelPid(int pid) { (void)pid; }
 static inline int vprocGetKernelPid(void) { return 0; }
+static inline void vprocClearKernelPidGlobal(void) {}
+static inline bool vprocSessionStdioIsDefault(VProcSessionStdio *stdio_ctx) { (void)stdio_ctx; return true; }
+static inline int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
+                                               struct pscal_fd *pty_slave,
+                                               struct pscal_fd *pty_master,
+                                               int bridge_in_fd,
+                                               int bridge_out_fd,
+                                               uint64_t session_id,
+                                               int kernel_pid) {
+    (void)stdio_ctx;
+    (void)pty_slave;
+    (void)pty_master;
+    (void)bridge_in_fd;
+    (void)bridge_out_fd;
+    (void)session_id;
+    (void)kernel_pid;
+    errno = ENOTSUP;
+    return -1;
+}
+static inline int vprocAdoptPscalStdio(VProc *vp,
+                                       struct pscal_fd *stdin_fd,
+                                       struct pscal_fd *stdout_fd,
+                                       struct pscal_fd *stderr_fd) {
+    (void)vp;
+    (void)stdin_fd;
+    (void)stdout_fd;
+    (void)stderr_fd;
+    return 0;
+}
+static inline int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
+    (void)session_id;
+    (void)cols;
+    (void)rows;
+    errno = ENOTSUP;
+    return -1;
+}
 static inline int vprocSigpending(int pid, sigset_t *set) { (void)pid; return sigpending(set); }
 static inline int vprocSigsuspend(int pid, const sigset_t *mask) { (void)pid; return sigsuspend(mask); }
 static inline int vprocSigprocmask(int pid, int how, const sigset_t *set, sigset_t *oldset) {

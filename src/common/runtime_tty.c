@@ -5,6 +5,9 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+#endif
 
 typedef struct {
     bool valid;
@@ -12,8 +15,15 @@ typedef struct {
     ino_t ino;
 } VirtualTTYDescriptor;
 
-static bool sVirtualTTYEnabled = false;
-static VirtualTTYDescriptor sVirtualTTY[3];
+typedef struct {
+    bool initialized;
+    struct termios termios;
+    struct winsize winsize;
+} VirtualTTYState;
+
+static _Thread_local bool sVirtualTTYEnabled = false;
+static _Thread_local VirtualTTYDescriptor sVirtualTTY[3];
+static _Thread_local VirtualTTYState sVirtualTTYState;
 
 static int stdFdToIndex(int fd) {
     if (fd == STDIN_FILENO) return 0;
@@ -44,6 +54,7 @@ void pscalRuntimeRegisterVirtualTTYFd(int std_fd, int fd) {
     slot->valid = true;
     slot->dev = st.st_dev;
     slot->ino = st.st_ino;
+    sVirtualTTYEnabled = true;
 }
 
 void pscalRuntimeSetVirtualTTYEnabled(bool enabled) {
@@ -54,6 +65,7 @@ void pscalRuntimeSetVirtualTTYEnabled(bool enabled) {
             sVirtualTTY[i].dev = 0;
             sVirtualTTY[i].ino = 0;
         }
+        pscalRuntimeVirtualTTYReset();
     }
 }
 
@@ -81,10 +93,33 @@ static bool pscalRuntimeFdUsesVirtualTTY(int fd) {
     return false;
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static bool pscalRuntimeSessionFdIsInteractive(int fd) {
+    if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO) {
+        return false;
+    }
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (!session || vprocSessionStdioIsDefault(session)) {
+        return false;
+    }
+    return true;
+}
+#endif
+
 bool pscalRuntimeFdIsInteractive(int fd) {
     if (fd < 0) {
         return false;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if ((fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)) {
+        if (pscalRuntimeVirtualTTYEnabled()) {
+            return true;
+        }
+        if (pscalRuntimeSessionFdIsInteractive(fd)) {
+            return true;
+        }
+    }
+#endif
     if (isatty(fd)) {
         return true;
     }
@@ -110,6 +145,22 @@ bool pscalRuntimeFdHasRealTTY(int fd) {
     if (fd < 0) {
         return false;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (session && !vprocSessionStdioIsDefault(session)) {
+            if (session->pty_active) {
+                /* PTY-backed stdio supports termios even without a host TTY. */
+                return true;
+            }
+            if (session->stdin_pscal_fd ||
+                session->stdout_pscal_fd ||
+                session->stderr_pscal_fd) {
+                return false;
+            }
+        }
+    }
+#endif
     return isatty(fd) != 0;
 }
 
@@ -159,4 +210,73 @@ int pscalRuntimeDetectWindowRows(void) {
 
 int pscalRuntimeDetectWindowCols(void) {
     return pscalRuntimeDetectDimension(false);
+}
+
+static void pscalRuntimeVirtualTTYInitDefaults(void) {
+    if (sVirtualTTYState.initialized) {
+        return;
+    }
+    memset(&sVirtualTTYState, 0, sizeof(sVirtualTTYState));
+    struct termios term;
+    memset(&term, 0, sizeof(term));
+    term.c_iflag = ICRNL | IXON;
+#ifdef IUTF8
+    term.c_iflag |= IUTF8;
+#endif
+    term.c_oflag = OPOST | ONLCR;
+    term.c_cflag = CS8 | CREAD;
+    term.c_lflag = ISIG | ECHO;
+    term.c_cc[VINTR] = 0x03;
+    term.c_cc[VQUIT] = 0x1c;
+    term.c_cc[VSUSP] = 0x1a;
+    term.c_cc[VEOF] = 0x04;
+    term.c_cc[VEOL] = '\n';
+    term.c_cc[VEOL2] = '\r';
+    sVirtualTTYState.termios = term;
+    struct winsize ws;
+    memset(&ws, 0, sizeof(ws));
+    ws.ws_col = (unsigned short)pscalRuntimeDetectWindowCols();
+    ws.ws_row = (unsigned short)pscalRuntimeDetectWindowRows();
+    sVirtualTTYState.winsize = ws;
+    sVirtualTTYState.initialized = true;
+}
+
+bool pscalRuntimeVirtualTTYGetTermios(struct termios *out) {
+    if (!out) {
+        return false;
+    }
+    pscalRuntimeVirtualTTYInitDefaults();
+    *out = sVirtualTTYState.termios;
+    return true;
+}
+
+void pscalRuntimeVirtualTTYSetTermios(const struct termios *termios) {
+    if (!termios) {
+        return;
+    }
+    pscalRuntimeVirtualTTYInitDefaults();
+    sVirtualTTYState.termios = *termios;
+}
+
+bool pscalRuntimeVirtualTTYGetWinsize(struct winsize *out) {
+    if (!out) {
+        return false;
+    }
+    pscalRuntimeVirtualTTYInitDefaults();
+    *out = sVirtualTTYState.winsize;
+    return true;
+}
+
+void pscalRuntimeVirtualTTYSetWinsize(const struct winsize *winsize) {
+    if (!winsize) {
+        return;
+    }
+    pscalRuntimeVirtualTTYInitDefaults();
+    sVirtualTTYState.winsize = *winsize;
+}
+
+void pscalRuntimeVirtualTTYReset(void) {
+    sVirtualTTYState.initialized = false;
+    memset(&sVirtualTTYState.termios, 0, sizeof(sVirtualTTYState.termios));
+    memset(&sVirtualTTYState.winsize, 0, sizeof(sVirtualTTYState.winsize));
 }

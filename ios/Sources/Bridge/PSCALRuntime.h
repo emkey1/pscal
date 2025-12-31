@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -8,11 +9,22 @@ extern "C" {
 
 typedef void (*PSCALRuntimeOutputHandler)(const char *utf8, size_t length, void *context);
 typedef void (*PSCALRuntimeExitHandler)(int status, void *context);
+typedef void (*PSCALRuntimeSessionOutputHandler)(uint64_t session_id,
+                                                 const char *utf8,
+                                                 size_t length,
+                                                 void *context);
 
 /// Configures the callbacks used to stream stdout/stderr data and completion status.
 void PSCALRuntimeConfigureHandlers(PSCALRuntimeOutputHandler output_handler,
                                    PSCALRuntimeExitHandler exit_handler,
                                    void *context);
+void PSCALRuntimeOutputDidProcess(size_t length);
+
+/// Completes interposer initialization once the app runtime is ready.
+void PSCALRuntimeInterposeBootstrap(void);
+
+/// Enables or disables interposed logic after bootstrap.
+void PSCALRuntimeInterposeSetFeatureEnabled(int enabled);
 
 /// Launches the PSCAL shell (exsh) with the provided argv vector.
 /// Returns -1 if a runtime is already active or the PTY could not be created.
@@ -24,6 +36,8 @@ int PSCALRuntimeLaunchExshWithStackSize(int argc, char* argv[], size_t stackSize
 
 /// Writes UTF-8 input into the running exsh instance (no-op if not active).
 void PSCALRuntimeSendInput(const char *utf8, size_t length);
+/// Writes UTF-8 input into the specified session (direct PTY mode).
+void PSCALRuntimeSendInputForSession(uint64_t session_id, const char *utf8, size_t length);
 
 /// Returns non-zero while the runtime is active.
 int PSCALRuntimeIsRunning(void);
@@ -39,6 +53,7 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows);
 int PSCALRuntimeIsVirtualTTY(void);
 
 void pscalRuntimeDebugLog(const char *message);
+void PSCALRuntimeLogLine(const char *message);
 void PSCALRuntimeSetDebugLogMirroring(int enable);
 void PSCALRuntimeBeginScriptCapture(const char *path, int append);
 void PSCALRuntimeEndScriptCapture(void);
@@ -80,6 +95,35 @@ void PSCALRuntimeDestroyShellContext(void *ctx);
 /// when the caller will free the context; non-zero transfers ownership to the
 /// runtime (it will free any previously owned context).
 void PSCALRuntimeSetShellContext(void *ctx, int takeOwnership);
+
+/// Launches an OpenSSH ssh session backed by a kernel-managed virtual TTY.
+/// Returns 0 on success and provides UI read/write fds.
+int PSCALRuntimeCreateSshSession(int argc,
+                                 char **argv,
+                                 uint64_t session_id,
+                                 int *out_read_fd,
+                                 int *out_write_fd);
+
+/// Launches an exsh shell session backed by a kernel-managed virtual TTY.
+/// Returns 0 on success and provides UI read/write fds.
+int PSCALRuntimeCreateShellSession(int argc,
+                                   char **argv,
+                                   uint64_t session_id,
+                                   int *out_read_fd,
+                                   int *out_write_fd);
+
+/// Registers a per-session output handler (direct PTY mode).
+void PSCALRuntimeRegisterSessionOutputHandler(uint64_t session_id,
+                                              PSCALRuntimeSessionOutputHandler handler,
+                                              void *context);
+/// Unregisters a per-session output handler.
+void PSCALRuntimeUnregisterSessionOutputHandler(uint64_t session_id);
+
+/// Updates the virtual terminal size for a session-backed PTY.
+int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows);
+
+/// Requests the UI to open an additional shell tab (iOS only).
+int pscalRuntimeOpenShellTab(void);
 
 #ifdef __cplusplus
 }

@@ -38,8 +38,12 @@ char *pscalPathVirtualized_realpath(const char *path, char *resolved_path);
 #endif
 #define fopen(path, mode) pscalPathVirtualized_fopen(path, mode)
 #define freopen(path, mode, stream) pscalPathVirtualized_freopen(path, mode, stream)
+#ifndef stat
 #define stat(path, buf) pscalPathVirtualized_stat(path, buf)
+#endif
+#ifndef lstat
 #define lstat(path, buf) pscalPathVirtualized_lstat(path, buf)
+#endif
 #define access(path, mode) pscalPathVirtualized_access(path, mode)
 #define mkdir(path, mode) pscalPathVirtualized_mkdir(path, mode)
 #define rmdir(path) pscalPathVirtualized_rmdir(path)

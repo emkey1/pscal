@@ -4,7 +4,7 @@ import UIKit
 /// UIKit shell that hosts the SwiftUI TerminalView and relies on keyboardLayoutGuide
 /// to keep the terminal aligned with the on-screen keyboard.
 final class TerminalRootViewController: UIViewController {
-    private let hostingController = UIHostingController(rootView: TerminalView(showsOverlay: true))
+    private let hostingController = UIHostingController(rootView: TerminalTabsRootView())
     private var keyboardObservers: [NSObjectProtocol] = []
     private var lastKeyboardOverlap: CGFloat = 0
 

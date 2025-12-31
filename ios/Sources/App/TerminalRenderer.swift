@@ -729,14 +729,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
     ) {
         textView.layoutIfNeeded()
 
-        let storageLength = textView.attributedText.length
-        if storageLength > 0 {
-            textView.layoutManager.ensureLayout(
-                forCharacterRange: NSRange(location: 0, length: storageLength)
-            )
-            textView.layoutManager.ensureLayout(for: textView.textContainer)
-        }
-
         let length = textView.attributedText.length
         let safeOffset = max(0, min(cursorOffset, length))
         let range = NSRange(location: safeOffset, length: 0)
@@ -918,6 +910,20 @@ final class TerminalDisplayTextView: UITextView {
     }
 
     var pasteHandler: ((String) -> Void)?
+
+#if DEBUG
+    private var didLogLayoutManagerAccess = false
+
+    override var layoutManager: NSLayoutManager {
+        let manager = super.layoutManager
+        if !didLogLayoutManagerAccess {
+            didLogLayoutManagerAccess = true
+            let stack = Thread.callStackSymbols.joined(separator: "\n")
+            NSLog("[TerminalDisplayTextView] layoutManager accessed; TextKit1 compatibility enabled.\n%@", stack)
+        }
+        return manager
+    }
+#endif
 
     var cursorColor: UIColor = .systemOrange {
         didSet {

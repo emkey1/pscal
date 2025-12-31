@@ -188,6 +188,7 @@ Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWaitForThread(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellPsThreads(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellStdioInfo(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEcho(struct VM_s* vm, int arg_count, Value* args);

@@ -8,8 +8,10 @@
 #include <string.h>
 #include <strings.h>
 #include <signal.h>
+#include <pthread.h>
 #include <termios.h>
 #include <time.h>
+#include <stdint.h>
 #include <wchar.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -36,6 +38,24 @@
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_truncate.h"
 #include "ios/vproc.h"
+#include "ios/tty/pscal_pty.h"
+#if defined(__has_include)
+#  if __has_include("PSCALRuntime.h")
+#    include "PSCALRuntime.h"
+#    define PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP 1
+#  else
+#    define PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP 0
+#  endif
+#else
+#  define PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP 0
+#endif
+#if !PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP
+#  if defined(__APPLE__)
+extern void PSCALRuntimeInterposeBootstrap(void) __attribute__((weak_import));
+#  else
+extern void PSCALRuntimeInterposeBootstrap(void) __attribute__((weak));
+#  endif
+#endif
 #endif
 
 static struct termios gInteractiveOriginalTermios;
@@ -46,7 +66,6 @@ static struct sigaction gInteractiveOldSigtstpAction;
 static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 static bool gInteractiveLineDrawn = false;
 #if defined(PSCAL_TARGET_IOS)
-static _Thread_local VProc *gKernelVproc = NULL;
 static _Thread_local VProc *gShellSelfVproc = NULL;
 static _Thread_local bool gShellSelfVprocActivated = false;
 static void shellSetupSelfVproc(void) {
@@ -55,59 +74,34 @@ static void shellSetupSelfVproc(void) {
     }
 
     VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
-    if (!session_stdio) {
-        static VProcSessionStdio fallback_stdio = { .stdin_host_fd = -1, .stdout_host_fd = -1, .stderr_host_fd = -1, .kernel_pid = 0 };
-        vprocSessionStdioActivate(&fallback_stdio);
-        session_stdio = vprocSessionStdioCurrent();
-    }
-    if (session_stdio && session_stdio->stdin_host_fd < 0 && session_stdio->stdout_host_fd < 0 && session_stdio->stderr_host_fd < 0) {
+    bool is_default_stdio = vprocSessionStdioIsDefault(session_stdio);
+    if (session_stdio && is_default_stdio &&
+        session_stdio->stdin_host_fd < 0 &&
+        session_stdio->stdout_host_fd < 0 &&
+        session_stdio->stderr_host_fd < 0) {
         vprocSessionStdioInit(session_stdio, 0);
     }
-    if (session_stdio && vprocSessionStdioNeedsRefresh(session_stdio)) {
+    if (session_stdio && is_default_stdio && vprocSessionStdioNeedsRefresh(session_stdio)) {
         vprocSessionStdioRefresh(session_stdio, 0);
     }
 
-    if (!gKernelVproc) {
-        VProcOptions kopts = vprocDefaultOptions();
-        kopts.stdin_fd = (session_stdio && session_stdio->stdin_host_fd >= 0) ? session_stdio->stdin_host_fd : STDIN_FILENO;
-        kopts.stdout_fd = (session_stdio && session_stdio->stdout_host_fd >= 0) ? session_stdio->stdout_host_fd : STDOUT_FILENO;
-        kopts.stderr_fd = (session_stdio && session_stdio->stderr_host_fd >= 0) ? session_stdio->stderr_host_fd : STDERR_FILENO;
-        int kpid_hint = vprocReservePid();
-        kopts.pid_hint = kpid_hint;
-        gKernelVproc = vprocCreate(&kopts);
-        if (!gKernelVproc) {
-            kopts.stdin_fd = -2;
-            gKernelVproc = vprocCreate(&kopts);
-        }
-        if (gKernelVproc) {
-            int kpid = vprocPid(gKernelVproc);
-            vprocSetKernelPid(kpid);
-            vprocSetSessionKernelPid(kpid);
-            vprocSetParent(kpid, 0);
-            (void)vprocSetSid(kpid, kpid);
-            vprocSetCommandLabel(kpid, "kernel");
-        } else if (kpid_hint > 0) {
-            vprocSetKernelPid(kpid_hint);
-            vprocSetSessionKernelPid(kpid_hint);
-            vprocSetParent(kpid_hint, 0);
-            (void)vprocSetSid(kpid_hint, kpid_hint);
-            vprocSetCommandLabel(kpid_hint, "kernel");
-            if (getenv("PSCALI_VPROC_DEBUG")) {
-                fprintf(stderr, "[vproc] kernel vproc init failed; using pid=%d without fd table\n", kpid_hint);
-            }
-        }
+    int kernel_pid = vprocEnsureKernelPid();
+    if (kernel_pid > 0 && session_stdio && session_stdio->kernel_pid <= 0) {
+        session_stdio->kernel_pid = kernel_pid;
+    }
+    if (session_stdio && is_default_stdio) {
+        vprocSessionStdioSetDefault(session_stdio);
     }
 
-    int kernel_pid = vprocGetKernelPid();
-    VProcSessionStdio *session_stdio_ref = vprocSessionStdioCurrent();
-    if (session_stdio_ref) {
-        if (session_stdio_ref->kernel_pid <= 0 && kernel_pid > 0) {
-            session_stdio_ref->kernel_pid = kernel_pid;
-        }
+    int session_stdin = (session_stdio && session_stdio->stdin_host_fd >= 0) ? session_stdio->stdin_host_fd : -2;
+    int session_stdout = (session_stdio && session_stdio->stdout_host_fd >= 0) ? session_stdio->stdout_host_fd : -1;
+    int session_stderr = (session_stdio && session_stdio->stderr_host_fd >= 0) ? session_stdio->stderr_host_fd : -1;
+    bool use_pscal_stdio = session_stdio && session_stdio->stdin_pscal_fd;
+    if (use_pscal_stdio) {
+        session_stdin = -2;
+        session_stdout = -2;
+        session_stderr = -2;
     }
-    int session_stdin = (session_stdio_ref && session_stdio_ref->stdin_host_fd >= 0) ? session_stdio_ref->stdin_host_fd : -2;
-    int session_stdout = (session_stdio_ref && session_stdio_ref->stdout_host_fd >= 0) ? session_stdio_ref->stdout_host_fd : -1;
-    int session_stderr = (session_stdio_ref && session_stdio_ref->stderr_host_fd >= 0) ? session_stdio_ref->stderr_host_fd : -1;
 
     VProcOptions opts = vprocDefaultOptions();
     opts.stdin_fd = session_stdin;
@@ -130,19 +124,21 @@ static void shellSetupSelfVproc(void) {
         vprocSetShellSelfTid(pthread_self());
         if (kernel_pid > 0 && kernel_pid != shell_pid) {
             vprocSetParent(shell_pid, kernel_pid);
-            (void)vprocSetSid(shell_pid, kernel_pid);
-            (void)vprocSetPgid(shell_pid, shell_pid);
-            (void)vprocSetForegroundPgid(kernel_pid, shell_pid);
-        } else {
-            (void)vprocSetSid(shell_pid, shell_pid);
         }
+        (void)vprocSetSid(shell_pid, shell_pid);
+        (void)vprocSetPgid(shell_pid, shell_pid);
+        (void)vprocSetForegroundPgid(shell_pid, shell_pid);
         vprocSetCommandLabel(shell_pid, "shell");
-        if (kernel_pid > 0) {
-            vprocSetParent(kernel_pid, 0);
-        }
+        vprocRegisterTidHint(shell_pid, pthread_self());
         /* Always activate the shell's vproc so shims and stdio inheritance work
          * consistently for pipelines and background workers. */
         vprocActivate(gShellSelfVproc);
+        if (use_pscal_stdio) {
+            (void)vprocAdoptPscalStdio(gShellSelfVproc,
+                                       session_stdio->stdin_pscal_fd,
+                                       session_stdio->stdout_pscal_fd,
+                                       session_stdio->stderr_pscal_fd);
+        }
         gShellSelfVprocActivated = true;
     } else if (shell_pid_hint > 0) {
         /* Ensure the shell has a stable synthetic pid even if the fd table
@@ -151,16 +147,12 @@ static void shellSetupSelfVproc(void) {
         vprocSetShellSelfTid(pthread_self());
         if (kernel_pid > 0 && kernel_pid != shell_pid_hint) {
             vprocSetParent(shell_pid_hint, kernel_pid);
-            (void)vprocSetSid(shell_pid_hint, kernel_pid);
-            (void)vprocSetPgid(shell_pid_hint, shell_pid_hint);
-            (void)vprocSetForegroundPgid(kernel_pid, shell_pid_hint);
-        } else {
-            (void)vprocSetSid(shell_pid_hint, shell_pid_hint);
         }
+        (void)vprocSetSid(shell_pid_hint, shell_pid_hint);
+        (void)vprocSetPgid(shell_pid_hint, shell_pid_hint);
+        (void)vprocSetForegroundPgid(shell_pid_hint, shell_pid_hint);
         vprocSetCommandLabel(shell_pid_hint, "shell");
-        if (kernel_pid > 0) {
-            vprocSetParent(kernel_pid, 0);
-        }
+        vprocRegisterTidHint(shell_pid_hint, pthread_self());
         if (getenv("PSCALI_VPROC_DEBUG")) {
             fprintf(stderr, "[vproc] shell self-vproc init failed; using pid=%d without fd table\n", shell_pid_hint);
         }
@@ -196,13 +188,16 @@ static void shellTeardownSelfVproc(int status) {
         session_stdio->stderr_host_fd = -1;
     }
 
-    if (gKernelVproc) {
-        vprocMarkExit(gKernelVproc, status);
-        vprocDestroy(gKernelVproc);
-        gKernelVproc = NULL;
-    } else if (vprocGetKernelPid() > 0) {
-        vprocDiscard(vprocGetKernelPid());
-        vprocSetKernelPid(0);
+    vprocSetKernelPid(0);
+}
+
+static void shellEnsureSelfVprocActive(void) {
+    if (!gShellSelfVproc) {
+        return;
+    }
+    if (vprocCurrent() == NULL) {
+        vprocActivate(gShellSelfVproc);
+        gShellSelfVprocActivated = true;
     }
 }
 #endif
@@ -443,9 +438,69 @@ static void interactiveComputeDisplayMetrics(const char *prompt,
     }
 }
 
+static int shellTcgetattr(int fd, struct termios *termios) {
+#if defined(PSCAL_TARGET_IOS)
+    if (!termios) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(TIOCGETA)
+    if (vprocIoctlShim(fd, TIOCGETA, termios) == 0) {
+        return 0;
+    }
+#elif defined(TCGETS)
+    if (vprocIoctlShim(fd, TCGETS, termios) == 0) {
+        return 0;
+    }
+#endif
+#endif
+    return tcgetattr(fd, termios);
+}
+
+static int shellTcsetattr(int fd, int action, const struct termios *termios) {
+#if defined(PSCAL_TARGET_IOS)
+    if (!termios) {
+        errno = EINVAL;
+        return -1;
+    }
+    unsigned long cmd = 0;
+#if defined(TIOCSETA) && defined(TIOCSETAW) && defined(TIOCSETAF)
+    switch (action) {
+        case TCSANOW:
+            cmd = TIOCSETA;
+            break;
+        case TCSADRAIN:
+            cmd = TIOCSETAW;
+            break;
+        case TCSAFLUSH:
+            cmd = TIOCSETAF;
+            break;
+    }
+#elif defined(TCSETS) && defined(TCSETSW) && defined(TCSETSF)
+    switch (action) {
+        case TCSANOW:
+            cmd = TCSETS;
+            break;
+        case TCSADRAIN:
+            cmd = TCSETSW;
+            break;
+        case TCSAFLUSH:
+            cmd = TCSETSF;
+            break;
+    }
+#endif
+    if (cmd != 0) {
+        if (vprocIoctlShim(fd, cmd, (void *)termios) == 0) {
+            return 0;
+        }
+    }
+#endif
+    return tcsetattr(fd, action, termios);
+}
+
 static void interactiveRestoreTerminal(void) {
     if (gInteractiveTermiosValid) {
-        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &gInteractiveOriginalTermios);
+        (void)shellTcsetattr(STDIN_FILENO, TCSAFLUSH, &gInteractiveOriginalTermios);
         gInteractiveTermiosValid = 0;
     }
 }
@@ -488,8 +543,19 @@ static const char *SHELL_USAGE =
     "     --verbose                 Print compilation/cache status messages.\n"
     "     -d                          Enable verbose VM error diagnostics.\n";
 
-static char *readStream(FILE *stream) {
-    if (!stream) {
+static ssize_t shellReadFd(int fd, void *buf, size_t count) {
+    if (count == 0) {
+        return 0;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    return vprocReadShim(fd, buf, count);
+#else
+    return read(fd, buf, count);
+#endif
+}
+
+static char *readStreamFd(int fd) {
+    if (fd < 0) {
         return NULL;
     }
     size_t capacity = 4096;
@@ -510,17 +576,95 @@ static char *readStream(FILE *stream) {
             capacity = new_capacity;
         }
         size_t chunk_size = capacity - length - 1;
-        size_t read_count = fread(buffer + length, 1, chunk_size, stream);
-        length += read_count;
-        if (read_count < chunk_size) {
-            if (ferror(stream)) {
+        ssize_t read_count = shellReadFd(fd, buffer + length, chunk_size);
+        if (read_count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+            free(buffer);
+            return NULL;
+        }
+        if (read_count == 0) {
+            break;
+        }
+        length += (size_t)read_count;
+    }
+    buffer[length] = '\0';
+    return buffer;
+}
+
+static char *readLineFd(int fd, ssize_t *out_len, int *out_error) {
+    if (out_len) {
+        *out_len = 0;
+    }
+    if (out_error) {
+        *out_error = 0;
+    }
+    if (fd < 0) {
+        if (out_error) {
+            *out_error = EBADF;
+        }
+        return NULL;
+    }
+    size_t capacity = 128;
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        if (out_error) {
+            *out_error = ENOMEM;
+        }
+        return NULL;
+    }
+    size_t length = 0;
+    while (true) {
+        unsigned char ch = 0;
+        ssize_t read_count = shellReadFd(fd, &ch, 1);
+        if (read_count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+            if (out_error) {
+                *out_error = errno;
+            }
+            free(buffer);
+            return NULL;
+        }
+        if (read_count == 0) {
+            if (length == 0) {
                 free(buffer);
                 return NULL;
             }
             break;
         }
+        if (length + 2 > capacity) {
+            size_t new_capacity = capacity * 2;
+            char *new_buffer = (char *)realloc(buffer, new_capacity);
+            if (!new_buffer) {
+                if (out_error) {
+                    *out_error = ENOMEM;
+                }
+                free(buffer);
+                return NULL;
+            }
+            buffer = new_buffer;
+            capacity = new_capacity;
+        }
+        buffer[length++] = (char)ch;
+        if (ch == '\n') {
+            break;
+        }
     }
     buffer[length] = '\0';
+    if (out_len) {
+        *out_len = (ssize_t)length;
+    }
     return buffer;
 }
 
@@ -1047,6 +1191,41 @@ static size_t shellPromptLineBreakCount(const char *prompt) {
     return (total_rows > 0) ? (total_rows - 1) : 0;
 }
 
+static void shellWriteStdout(const char *buf, size_t len) {
+    if (!buf || len == 0) {
+        return;
+    }
+    size_t off = 0;
+    while (off < len) {
+#if defined(PSCAL_TARGET_IOS)
+        ssize_t w = vprocWriteShim(STDOUT_FILENO, buf + off, len - off);
+#else
+        ssize_t w = write(STDOUT_FILENO, buf + off, len - off);
+#endif
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (w == 0) {
+            break;
+        }
+        off += (size_t)w;
+    }
+}
+
+static void shellWriteStdoutStr(const char *str) {
+    if (!str) {
+        return;
+    }
+    shellWriteStdout(str, strlen(str));
+}
+
+static void shellWriteStdoutChar(char ch) {
+    shellWriteStdout(&ch, 1);
+}
+
 static void redrawInteractiveLine(const char *prompt,
                                   const char *buffer,
                                   size_t length,
@@ -1075,42 +1254,40 @@ static void redrawInteractiveLine(const char *prompt,
 
     size_t rows_to_prompt = gInteractiveLineDrawn ? previous_prompt_lines : 0;
     for (size_t i = 0; i < rows_to_prompt; ++i) {
-        fputs("\033[A", stdout);
+        shellWriteStdoutStr("\033[A");
     }
-    fputs("\r", stdout);
-    fputs("\033[J", stdout);
+    shellWriteStdoutStr("\r");
+    shellWriteStdoutStr("\033[J");
     if (prompt) {
-        fputs(prompt, stdout);
+        shellWriteStdoutStr(prompt);
     }
     if (buffer && length > 0) {
-        fwrite(buffer, 1, length, stdout);
+        shellWriteStdout(buffer, length);
     }
-    fflush(stdout);
 
     if (end_row > cursor_row) {
         size_t diff = end_row - cursor_row;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[A", stdout);
+            shellWriteStdoutStr("\033[A");
         }
     } else if (cursor_row > end_row) {
         size_t diff = cursor_row - end_row;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[B", stdout);
+            shellWriteStdoutStr("\033[B");
         }
     }
 
     if (end_col > cursor_col) {
         size_t diff = end_col - cursor_col;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[D", stdout);
+            shellWriteStdoutStr("\033[D");
         }
     } else if (cursor_col > end_col) {
         size_t diff = cursor_col - end_col;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[C", stdout);
+            shellWriteStdoutStr("\033[C");
         }
     }
-    fflush(stdout);
 
     if (displayed_length) {
         *displayed_length = length;
@@ -1366,14 +1543,14 @@ static bool interactiveFindHistoryMatch(const char *query,
 }
 
 static void interactiveRenderSearchPrompt(const char *query, const char *match) {
-    fputs("\r", stdout);
-    fputs("\033[K", stdout);
+    shellWriteStdoutStr("\r");
+    shellWriteStdoutStr("\033[K");
+    shellWriteStdoutStr("(reverse-i-search) '");
+    shellWriteStdoutStr(query ? query : "");
+    shellWriteStdoutStr("': ");
     if (match) {
-        fprintf(stdout, "(reverse-i-search) '%s': %s", query ? query : "", match);
-    } else {
-        fprintf(stdout, "(reverse-i-search) '%s': ", query ? query : "");
+        shellWriteStdoutStr(match);
     }
-    fflush(stdout);
 }
 
 static bool interactiveReverseSearch(const char *prompt,
@@ -1417,7 +1594,7 @@ static bool interactiveReverseSearch(const char *prompt,
 
     while (true) {
         unsigned char input = 0;
-        ssize_t count = read(STDIN_FILENO, &input, 1);
+        ssize_t count = shellReadFd(STDIN_FILENO, &input, 1);
         if (count <= 0) {
             break;
         }
@@ -1429,8 +1606,8 @@ static bool interactiveReverseSearch(const char *prompt,
             memcpy(*buffer, saved_line, saved_length + 1);
             *length = saved_length;
             *cursor = saved_cursor;
-            fputs("\r", stdout);
-            fputs("\033[K", stdout);
+            shellWriteStdoutStr("\r");
+            shellWriteStdoutStr("\033[K");
             redrawInteractiveLine(prompt,
                                   *buffer,
                                   *length,
@@ -1473,8 +1650,7 @@ static bool interactiveReverseSearch(const char *prompt,
                 match = NULL;
                 has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
                 if (!has_match) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
             }
             interactiveRenderSearchPrompt(query, has_match ? match : NULL);
@@ -1490,12 +1666,10 @@ static bool interactiveReverseSearch(const char *prompt,
                 match = NULL;
                 has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
                 if (!has_match) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             interactiveRenderSearchPrompt(query, has_match ? match : NULL);
             continue;
@@ -1518,19 +1692,17 @@ static bool interactiveReverseSearch(const char *prompt,
             match = NULL;
             has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
             if (!has_match) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             interactiveRenderSearchPrompt(query, has_match ? match : NULL);
             continue;
         }
 
-        fputc('\a', stdout);
-        fflush(stdout);
+        shellWriteStdoutChar('\a');
     }
 
-    fputs("\r", stdout);
-    fputs("\033[K", stdout);
+    shellWriteStdoutStr("\r");
+    shellWriteStdoutStr("\033[K");
     redrawInteractiveLine(prompt,
                           *buffer,
                           *length,
@@ -1883,8 +2055,8 @@ static void interactivePrintMatchesInColumns(char *const *items, size_t count) {
             if (!items[i]) {
                 continue;
             }
-            fputs(items[i], stdout);
-            fputc('\n', stdout);
+            shellWriteStdoutStr(items[i]);
+            shellWriteStdoutChar('\n');
         }
         return;
     }
@@ -1921,18 +2093,18 @@ static void interactivePrintMatchesInColumns(char *const *items, size_t count) {
             }
             const char *entry = entries[entry_index];
             size_t len = strlen(entry);
-            fputs(entry, stdout);
+            shellWriteStdoutStr(entry);
             if (col + 1 < columns) {
                 size_t next_index = (col + 1) * rows + row;
                 if (next_index < valid_count) {
                     size_t padding = (col_width > len) ? (col_width - len) : 1;
                     for (size_t pad = 0; pad < padding; ++pad) {
-                        fputc(' ', stdout);
+                        shellWriteStdoutChar(' ');
                     }
                 }
             }
         }
-        fputc('\n', stdout);
+        shellWriteStdoutChar('\n');
     }
 
     free(entries);
@@ -2025,10 +2197,9 @@ static bool interactiveHandleTabCompletion(const char *prompt,
             } else {
                 replacement_len = interactiveCommonPrefixLength(matches, match_count);
                 if (replacement_len <= word_len) {
-                    putchar('\n');
+                    shellWriteStdoutChar('\n');
                     interactivePrintMatchesInColumns(matches, match_count);
                     interactiveFreeMatches(matches, match_count);
-                    fflush(stdout);
 
                     *cursor = *length;
                     redrawInteractiveLine(prompt,
@@ -2157,10 +2328,9 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     } else {
         replacement_len = interactiveCommonPrefixLength(results.gl_pathv, results.gl_pathc);
         if (replacement_len <= word_len) {
-            putchar('\n');
+            shellWriteStdoutChar('\n');
             interactivePrintMatchesInColumns(results.gl_pathv, results.gl_pathc);
             globfree(&results);
-            fflush(stdout);
 
             *cursor = *length;
             redrawInteractiveLine(prompt,
@@ -2456,7 +2626,7 @@ static char *readInteractiveLine(const char *prompt,
     struct sigaction sigint_action;
     struct sigaction sigtstp_action;
     if (has_real_tty) {
-        if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
+        if (shellTcgetattr(STDIN_FILENO, &original_termios) != 0) {
             if (out_editor_failed) {
                 *out_editor_failed = true;
             }
@@ -2468,7 +2638,7 @@ static char *readInteractiveLine(const char *prompt,
         raw_termios.c_cc[VMIN] = 1;
         raw_termios.c_cc[VTIME] = 0;
         gInteractiveOriginalTermios = original_termios;
-        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+        if (shellTcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
             if (out_editor_failed) {
                 *out_editor_failed = true;
             }
@@ -2550,9 +2720,13 @@ static char *readInteractiveLine(const char *prompt,
 
     while (!done) {
         unsigned char ch = 0;
-        ssize_t read_count = read(STDIN_FILENO, &ch, 1);
+        ssize_t read_count = shellReadFd(STDIN_FILENO, &ch, 1);
         if (read_count < 0) {
             if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
                 continue;
             }
             eof_requested = true;
@@ -2565,8 +2739,7 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == '\r' || ch == '\n') {
-            fputc('\n', stdout);
-            fflush(stdout);
+            shellWriteStdoutChar('\n');
             done = true;
             alt_dot_active = false;
             break;
@@ -2592,8 +2765,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2601,8 +2773,7 @@ static char *readInteractiveLine(const char *prompt,
         if (ch == 3) { /* Ctrl-C */
             alt_dot_active = false;
             alt_dot_offset = 0;
-            fputs("^C\n", stdout);
-            fflush(stdout);
+            shellWriteStdoutStr("^C\n");
 #if defined(PSCAL_TARGET_IOS)
             raise(SIGINT);
             shellRuntimeProcessPendingSignals();
@@ -2614,8 +2785,7 @@ static char *readInteractiveLine(const char *prompt,
             displayed_prompt_lines = shellPromptLineBreakCount(prompt);
             history_index = 0;
             interactiveUpdateScratch(&scratch, buffer, length);
-            fputs(prompt, stdout);
-            fflush(stdout);
+            shellWriteStdoutStr(prompt);
             continue;
         }
 
@@ -2624,8 +2794,7 @@ static char *readInteractiveLine(const char *prompt,
             /* In virtual TTY mode, deliver SIGTSTP to the running builtin/VM and reset the prompt. */
             alt_dot_active = false;
             alt_dot_offset = 0;
-            fputs("^Z\n", stdout);
-            fflush(stdout);
+            shellWriteStdoutStr("^Z\n");
             raise(SIGTSTP);
 #if defined(PSCAL_TARGET_IOS)
             shellRuntimeProcessPendingSignals();
@@ -2646,8 +2815,7 @@ static char *readInteractiveLine(const char *prompt,
             continue;
 #endif
             if (!has_real_tty || pscalRuntimeVirtualTTYEnabled()) {
-                fputs("job control (Ctrl-Z) not supported on this terminal\n", stdout);
-                fflush(stdout);
+                shellWriteStdoutStr("job control (Ctrl-Z) not supported on this terminal\n");
                 continue;
             }
             alt_dot_active = false;
@@ -2657,7 +2825,7 @@ static char *readInteractiveLine(const char *prompt,
             interactiveRestoreSigtstpHandler();
             interactiveRestoreTerminal();
             raise(SIGTSTP);
-            if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+            if (shellTcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
                 if (out_editor_failed) {
                     *out_editor_failed = true;
                 }
@@ -2698,7 +2866,7 @@ static char *readInteractiveLine(const char *prompt,
         if (ch == 12) { /* Ctrl-L */
             alt_dot_active = false;
             alt_dot_offset = 0;
-            fputs("\033[H\033[J", stdout);
+            shellWriteStdoutStr("\033[H\033[J");
             redrawInteractiveLine(prompt,
                                   buffer,
                                   length,
@@ -2734,8 +2902,7 @@ static char *readInteractiveLine(const char *prompt,
                                               &displayed_prompt_lines,
                                               &history_index,
                                               &scratch)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2752,8 +2919,7 @@ static char *readInteractiveLine(const char *prompt,
                                                 &displayed_prompt_lines,
                                                 &history_index,
                                                 &scratch)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2772,11 +2938,9 @@ static char *readInteractiveLine(const char *prompt,
                                           &history_index,
                                           &scratch,
                                           &submit_line)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             } else if (submit_line) {
-                fputc('\n', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\n');
                 done = true;
                 break;
             }
@@ -2788,8 +2952,7 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor > 0) {
                 if (!interactiveSetKillBuffer(&kill_buffer, buffer, cursor)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 memmove(buffer, buffer + cursor, length - cursor + 1);
@@ -2804,8 +2967,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2815,8 +2977,7 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor < length) {
                 if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, length - cursor)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 buffer[cursor] = '\0';
@@ -2831,8 +2992,7 @@ static char *readInteractiveLine(const char *prompt,
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
                 interactiveSetKillBuffer(&kill_buffer, NULL, 0);
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2844,8 +3004,7 @@ static char *readInteractiveLine(const char *prompt,
             if (prev < cursor) {
                 size_t removed_len = cursor - prev;
                 if (!interactiveSetKillBuffer(&kill_buffer, buffer + prev, removed_len)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 memmove(buffer + prev, buffer + cursor, length - cursor + 1);
@@ -2860,8 +3019,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2876,8 +3034,7 @@ static char *readInteractiveLine(const char *prompt,
                                            &cursor,
                                            kill_buffer,
                                            kill_len)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 redrawInteractiveLine(prompt,
@@ -2889,8 +3046,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             alt_dot_active = false;
             continue;
@@ -2917,8 +3073,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2935,8 +3090,7 @@ static char *readInteractiveLine(const char *prompt,
                                       &displayed_length,
                                       &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2953,8 +3107,7 @@ static char *readInteractiveLine(const char *prompt,
                                       &displayed_length,
                                       &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2971,8 +3124,7 @@ static char *readInteractiveLine(const char *prompt,
                                       &displayed_length,
                                       &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2989,8 +3141,7 @@ static char *readInteractiveLine(const char *prompt,
                                       &displayed_length,
                                       &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -3011,8 +3162,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
                 /* Ensure the prompt stays intact even when backspace is hit at
                  * the start of input. */
                 redrawInteractiveLine(prompt,
@@ -3027,11 +3177,11 @@ static char *readInteractiveLine(const char *prompt,
 
         if (ch == 27) { /* Escape sequence */
             unsigned char seq[3];
-            if (read(STDIN_FILENO, &seq[0], 1) <= 0) {
+            if (shellReadFd(STDIN_FILENO, &seq[0], 1) <= 0) {
                 continue;
             }
             if (seq[0] == '[') {
-                if (read(STDIN_FILENO, &seq[1], 1) <= 0) {
+                if (shellReadFd(STDIN_FILENO, &seq[1], 1) <= 0) {
                     continue;
                 }
                 if (seq[1] == 'A') { /* Up arrow */
@@ -3046,8 +3196,7 @@ static char *readInteractiveLine(const char *prompt,
                                                       &displayed_prompt_lines,
                                                       &history_index,
                                                       &scratch)) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] == 'B') { /* Down arrow */
@@ -3062,8 +3211,7 @@ static char *readInteractiveLine(const char *prompt,
                                                         &displayed_prompt_lines,
                                                         &history_index,
                                                         &scratch)) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] == 'C') { /* Right arrow */
@@ -3078,8 +3226,7 @@ static char *readInteractiveLine(const char *prompt,
                                               &displayed_length,
                                               &displayed_prompt_lines);
                     } else {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] == 'D') { /* Left arrow */
@@ -3094,12 +3241,11 @@ static char *readInteractiveLine(const char *prompt,
                                               &displayed_length,
                                               &displayed_prompt_lines);
                     } else {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] >= '0' && seq[1] <= '9') {
-                    if (read(STDIN_FILENO, &seq[2], 1) <= 0) {
+                    if (shellReadFd(STDIN_FILENO, &seq[2], 1) <= 0) {
                         continue;
                     }
                     if (seq[1] == '3' && seq[2] == '~') { /* Delete */
@@ -3118,8 +3264,7 @@ static char *readInteractiveLine(const char *prompt,
                             history_index = 0;
                             interactiveUpdateScratch(&scratch, buffer, length);
                         } else {
-                            fputc('\a', stdout);
-                            fflush(stdout);
+                            shellWriteStdoutChar('\a');
                         }
                         continue;
                     }
@@ -3137,8 +3282,7 @@ static char *readInteractiveLine(const char *prompt,
                                           &displayed_length,
                                           &displayed_prompt_lines);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == 'b' || seq[0] == 'B') { /* Alt+B */
@@ -3154,8 +3298,7 @@ static char *readInteractiveLine(const char *prompt,
                                           &displayed_length,
                                           &displayed_prompt_lines);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == 'd' || seq[0] == 'D') { /* Alt+D */
@@ -3165,8 +3308,7 @@ static char *readInteractiveLine(const char *prompt,
                 if (next > cursor) {
                     size_t removed_len = next - cursor;
                     if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, removed_len)) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                         continue;
                     }
                     memmove(buffer + cursor, buffer + next, length - next + 1);
@@ -3180,8 +3322,7 @@ static char *readInteractiveLine(const char *prompt,
                     history_index = 0;
                     interactiveUpdateScratch(&scratch, buffer, length);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == 't' || seq[0] == 'T') { /* Alt+T */
@@ -3194,8 +3335,7 @@ static char *readInteractiveLine(const char *prompt,
                             current_start++;
                         }
                         if (current_start >= length) {
-                            fputc('\a', stdout);
-                            fflush(stdout);
+                            shellWriteStdoutChar('\a');
                             continue;
                         }
                     } else {
@@ -3212,8 +3352,7 @@ static char *readInteractiveLine(const char *prompt,
                         prev_end--;
                     }
                     if (prev_end == 0) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                         continue;
                     }
                     size_t prev_start = prev_end;
@@ -3225,8 +3364,7 @@ static char *readInteractiveLine(const char *prompt,
                     size_t word2_len = current_end - current_start;
                     char *temp = (char *)malloc(length + 1);
                     if (!temp) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                         continue;
                     }
                     memcpy(temp, buffer, prev_start);
@@ -3250,8 +3388,7 @@ static char *readInteractiveLine(const char *prompt,
                     history_index = 0;
                     interactiveUpdateScratch(&scratch, buffer, length);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == '.') { /* Alt+. */
@@ -3262,15 +3399,13 @@ static char *readInteractiveLine(const char *prompt,
                 }
                 char *argument = NULL;
                 if (!interactiveExtractLastArgument(alt_dot_offset, &argument)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     continue;
                 }
                 if (!argument) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     continue;
@@ -3282,8 +3417,7 @@ static char *readInteractiveLine(const char *prompt,
                                            &cursor,
                                            argument,
                                            arg_len)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     free(argument);
                     alt_dot_active = false;
                     alt_dot_offset = 0;
@@ -3317,8 +3451,7 @@ static char *readInteractiveLine(const char *prompt,
                                                 &displayed_length,
                                                 &displayed_prompt_lines,
                                                 &scratch)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             } else {
                 history_index = 0;
             }
@@ -3328,8 +3461,7 @@ static char *readInteractiveLine(const char *prompt,
         if (!isprint(ch)) {
             alt_dot_active = false;
             alt_dot_offset = 0;
-            fputc('\a', stdout);
-            fflush(stdout);
+            shellWriteStdoutChar('\a');
             continue;
         }
 
@@ -3343,8 +3475,7 @@ static char *readInteractiveLine(const char *prompt,
             }
             char *new_buffer = (char *)realloc(buffer, new_capacity);
             if (!new_buffer) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
                 continue;
             }
             buffer = new_buffer;
@@ -3414,6 +3545,9 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     }
 
     while (true) {
+#if defined(PSCAL_TARGET_IOS)
+        shellEnsureSelfVprocActive();
+#endif
         pscalRuntimeConsumeSigint();
         pscalRuntimeClearInterruptFlag();
         shellRuntimeEnsureStandardFds();
@@ -3425,33 +3559,37 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         if (tty) {
             line = readInteractiveLine(prompt, &interactive_eof, &editor_failed);
             if (!line && editor_failed) {
+#if defined(PSCAL_TARGET_IOS)
+                if (pscalRuntimeStdinIsInteractive() && !pscalRuntimeStdinHasRealTTY()) {
+                    usleep(1000);
+                    free(prompt_storage);
+                    continue;
+                }
+#endif
                 tty = false;
             }
             if (!line && interactive_eof) {
-                fputc('\n', stdout);
+                shellWriteStdoutChar('\n');
                 free(prompt_storage);
                 break;
             }
         }
-        size_t line_capacity = 0;
         ssize_t read = 0;
         if (!line) {
             if (pscalRuntimeStdinIsInteractive()) {
-                fputs(prompt, stdout);
-                fflush(stdout);
+                shellWriteStdoutStr(prompt);
             }
-            read = getline(&line, &line_capacity, stdin);
-            if (read < 0) {
-                int saved_errno = errno;
+            int read_err = 0;
+            line = readLineFd(STDIN_FILENO, &read, &read_err);
+            if (!line) {
+                int saved_errno = read_err;
                 shellRuntimeEnsureStandardFds();
                 if (saved_errno == EBADF || saved_errno == EIO) {
                     free(prompt_storage);
-                    free(line);
                     continue;
                 }
-                free(line);
                 if (pscalRuntimeStdinIsInteractive()) {
-                    fputc('\n', stdout);
+                    shellWriteStdoutChar('\n');
                 }
                 free(prompt_storage);
                 break;
@@ -3486,8 +3624,8 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             continue;
         }
         if (used_history && pscalRuntimeStdinIsInteractive()) {
-            printf("%s\n", expanded_line);
-            fflush(stdout);
+            shellWriteStdoutStr(expanded_line);
+            shellWriteStdoutChar('\n');
         }
         if (history_error) {
             free(history_error);
@@ -3749,7 +3887,7 @@ void pscalRuntimeDebugLog(const char *message);
     }
 
     shellRuntimeSetInteractive(false);
-    char *stdin_src = readStream(stdin);
+    char *stdin_src = readStreamFd(STDIN_FILENO);
     if (!stdin_src) {
         EXSH_RETURN(EXIT_FAILURE);
     }
@@ -3773,5 +3911,285 @@ int main(int argc, char **argv) {
 #include "SDL_main.h"
 int SDL_main(int argc, char **argv) {
     return exsh_main(argc, argv);
+}
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    int argc;
+    char **argv;
+    int bridge_in_fd;
+    int bridge_out_fd;
+    struct pscal_fd *pty_master;
+    struct pscal_fd *pty_slave;
+    uint64_t session_id;
+} ShellSessionContext;
+
+extern void pscalRuntimeShellSessionExited(uint64_t session_id, int status) __attribute__((weak));
+extern void pscalRuntimeKernelSessionExited(uint64_t session_id, int status) __attribute__((weak));
+extern void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) __attribute__((weak));
+extern ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t session_id) __attribute__((weak));
+
+static void shellSessionNotifyExit(uint64_t session_id, int status) {
+    if (pscalRuntimeShellSessionExited) {
+        pscalRuntimeShellSessionExited(session_id, status);
+    }
+    if (pscalRuntimeKernelSessionExited) {
+        pscalRuntimeKernelSessionExited(session_id, status);
+    }
+}
+
+static char **shellCopyArgv(int argc, char **argv) {
+    if (argc <= 0 || !argv) {
+        return NULL;
+    }
+    char **copy = (char **)calloc((size_t)argc, sizeof(char *));
+    if (!copy) {
+        return NULL;
+    }
+    for (int i = 0; i < argc; ++i) {
+        const char *src = argv[i] ? argv[i] : "";
+        copy[i] = strdup(src);
+        if (!copy[i]) {
+            for (int j = 0; j < i; ++j) {
+                free(copy[j]);
+            }
+            free(copy);
+            return NULL;
+        }
+    }
+    return copy;
+}
+
+static void shellFreeArgv(char **argv, int argc) {
+    if (!argv) {
+        return;
+    }
+    for (int i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+static void shellCloseSessionFds(ShellSessionContext *ctx) {
+    if (!ctx) {
+        return;
+    }
+    int bridge_in = ctx->bridge_in_fd;
+    int bridge_out = ctx->bridge_out_fd;
+    ctx->bridge_in_fd = -1;
+    ctx->bridge_out_fd = -1;
+    if (bridge_in >= 0) {
+        close(bridge_in);
+    }
+    if (bridge_out >= 0 && bridge_out != bridge_in) {
+        close(bridge_out);
+    }
+    if (ctx->pty_master) {
+        pscal_fd_close(ctx->pty_master);
+        ctx->pty_master = NULL;
+    }
+    if (ctx->pty_slave) {
+        pscal_fd_close(ctx->pty_slave);
+        ctx->pty_slave = NULL;
+    }
+}
+
+static bool shellDirectPtyOutputEnabled(void) {
+    const char *env = getenv("PSCALI_PTY_OUTPUT_DIRECT");
+    if (!env || env[0] == '\0') {
+        return true;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static void *shellRunSessionThread(void *arg) {
+    ShellSessionContext *ctx = (ShellSessionContext *)arg;
+    if (!ctx) {
+        return NULL;
+    }
+    int status = 255;
+    int kernel_pid = vprocEnsureKernelPid();
+    VProcSessionStdio *session_stdio = vprocSessionStdioCreate();
+    if (!session_stdio) {
+        shellCloseSessionFds(ctx);
+        shellSessionNotifyExit(ctx->session_id, status);
+        shellFreeArgv(ctx->argv, ctx->argc);
+        free(ctx);
+        return NULL;
+    }
+    if (vprocSessionStdioInitWithPty(session_stdio,
+                                     ctx->pty_slave,
+                                     ctx->pty_master,
+                                     ctx->bridge_in_fd,
+                                     ctx->bridge_out_fd,
+                                     ctx->session_id,
+                                     kernel_pid) != 0) {
+        vprocSessionStdioDestroy(session_stdio);
+        shellCloseSessionFds(ctx);
+        shellSessionNotifyExit(ctx->session_id, status);
+        shellFreeArgv(ctx->argv, ctx->argc);
+        free(ctx);
+        return NULL;
+    }
+    vprocSessionStdioActivate(session_stdio);
+    if (pscalRuntimeRegisterShellThread) {
+        pscalRuntimeRegisterShellThread(ctx->session_id, pthread_self());
+    }
+    ctx->pty_slave = NULL;
+    ctx->pty_master = NULL;
+    ctx->bridge_in_fd = -1;
+    ctx->bridge_out_fd = -1;
+
+    ShellRuntimeState *session_ctx = NULL;
+    bool session_ctx_owned = false;
+    if (pscalRuntimeShellContextForSession) {
+        session_ctx = pscalRuntimeShellContextForSession(ctx->session_id);
+    }
+    if (!session_ctx) {
+        session_ctx = shellRuntimeCreateContext();
+        session_ctx_owned = (session_ctx != NULL);
+    }
+    if (session_ctx) {
+        ShellRuntimeState *prev_ctx = shellRuntimeActivateContext(session_ctx);
+        shellRuntimeInitSignals();
+        status = exsh_main(ctx->argc, ctx->argv);
+        shellRuntimeActivateContext(prev_ctx);
+        if (session_ctx_owned) {
+            shellRuntimeDestroyContext(session_ctx);
+        }
+    }
+
+    if (session_stdio) {
+        vprocSessionStdioActivate(NULL);
+        vprocSessionStdioDestroy(session_stdio);
+    }
+
+    shellSessionNotifyExit(ctx->session_id, status);
+    shellFreeArgv(ctx->argv, ctx->argc);
+    free(ctx);
+    return NULL;
+}
+
+int PSCALRuntimeCreateShellSession(int argc,
+                                   char **argv,
+                                   uint64_t session_id,
+                                   int *out_read_fd,
+                                   int *out_write_fd) {
+    if (argc <= 0 || !argv) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!out_read_fd || !out_write_fd) {
+        errno = EINVAL;
+        return -1;
+    }
+    *out_read_fd = -1;
+    *out_write_fd = -1;
+
+#if PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP
+    PSCALRuntimeInterposeBootstrap();
+#else
+    if (PSCALRuntimeInterposeBootstrap) {
+        PSCALRuntimeInterposeBootstrap();
+    }
+#endif
+    (void)vprocEnsureKernelPid();
+
+    int session_stdin = -1;
+    int session_stdout = -1;
+    int ui_read = -1;
+    int ui_write = -1;
+    const bool direct_output = shellDirectPtyOutputEnabled();
+    if (!direct_output) {
+        if (vprocCreateSessionPipes(&session_stdin, &session_stdout, &ui_read, &ui_write) != 0) {
+            return -1;
+        }
+    }
+    struct pscal_fd *pty_master = NULL;
+    struct pscal_fd *pty_slave = NULL;
+    int pty_num = -1;
+    int pty_err = pscalPtyOpenMaster(O_RDWR, &pty_master, &pty_num);
+    if (pty_err < 0) {
+        if (session_stdin >= 0) close(session_stdin);
+        if (session_stdout >= 0) close(session_stdout);
+        if (ui_read >= 0) close(ui_read);
+        if (ui_write >= 0) close(ui_write);
+        errno = pscalCompatErrno(pty_err);
+        return -1;
+    }
+    pty_err = pscalPtyUnlock(pty_master);
+    if (pty_err < 0) {
+        if (session_stdin >= 0) close(session_stdin);
+        if (session_stdout >= 0) close(session_stdout);
+        if (ui_read >= 0) close(ui_read);
+        if (ui_write >= 0) close(ui_write);
+        if (pty_master) pscal_fd_close(pty_master);
+        errno = pscalCompatErrno(pty_err);
+        return -1;
+    }
+    pty_err = pscalPtyOpenSlave(pty_num, O_RDWR, &pty_slave);
+    if (pty_err < 0) {
+        if (session_stdin >= 0) close(session_stdin);
+        if (session_stdout >= 0) close(session_stdout);
+        if (ui_read >= 0) close(ui_read);
+        if (ui_write >= 0) close(ui_write);
+        if (pty_master) pscal_fd_close(pty_master);
+        errno = pscalCompatErrno(pty_err);
+        return -1;
+    }
+
+    ShellSessionContext *ctx = (ShellSessionContext *)calloc(1, sizeof(ShellSessionContext));
+    if (!ctx) {
+        errno = ENOMEM;
+        if (session_stdin >= 0) close(session_stdin);
+        if (session_stdout >= 0) close(session_stdout);
+        if (ui_read >= 0) close(ui_read);
+        if (ui_write >= 0) close(ui_write);
+        if (pty_master) pscal_fd_close(pty_master);
+        if (pty_slave) pscal_fd_close(pty_slave);
+        return -1;
+    }
+    ctx->argc = argc;
+    ctx->bridge_in_fd = session_stdin;
+    ctx->bridge_out_fd = session_stdout;
+    ctx->pty_master = pty_master;
+    ctx->pty_slave = pty_slave;
+    ctx->session_id = session_id;
+    ctx->argv = shellCopyArgv(argc, argv);
+    if (!ctx->argv) {
+        shellCloseSessionFds(ctx);
+        free(ctx);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    pthread_t thread;
+    int err = vprocHostPthreadCreate(&thread, NULL, shellRunSessionThread, ctx);
+    if (err != 0) {
+        shellFreeArgv(ctx->argv, ctx->argc);
+        shellCloseSessionFds(ctx);
+        free(ctx);
+        errno = err;
+        return -1;
+    }
+    pthread_detach(thread);
+    *out_read_fd = ui_read;
+    *out_write_fd = ui_write;
+    return 0;
+}
+#else
+int PSCALRuntimeCreateShellSession(int argc,
+                                   char **argv,
+                                   uint64_t session_id,
+                                   int *out_read_fd,
+                                   int *out_write_fd) {
+    (void)argc;
+    (void)argv;
+    (void)session_id;
+    (void)out_read_fd;
+    (void)out_write_fd;
+    errno = ENOTSUP;
+    return -1;
 }
 #endif
