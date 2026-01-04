@@ -103,30 +103,6 @@ static void shellRestoreSignalState(const ShellSignalBackup *backup) {
     }
 }
 
-static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
-                                         int argc,
-                                         char **argv,
-                                         bool dbg) {
-    ShellSignalBackup sig_backup;
-    shellSaveSignalState(&sig_backup);
-    int status = entry(argc, argv);
-    shellRestoreSignalState(&sig_backup);
-    shellRuntimeEnsureStandardFds();
-    shellEnsureJobControl();
-    shellJobControlRestoreForeground();
-    if (dbg) {
-        int shell_pid = vprocGetShellSelfPid();
-        int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
-        int fg = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-        fprintf(stderr,
-                "[tool-inline] restore complete shell=%d sid=%d fg=%d\n",
-                shell_pid,
-                sid,
-                fg);
-    }
-    return status;
-}
-
 static void shellInvalidateFrontendState(FrontendKind kind) {
     switch (kind) {
         case FRONTEND_KIND_PASCAL:
@@ -3860,6 +3836,30 @@ Value vmBuiltinShellElvisDump(VM *vm, int arg_count, Value *args) {
 #ifdef PSCAL_TARGET_IOS
 
 typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
+
+static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
+                                         int argc,
+                                         char **argv,
+                                         bool dbg) {
+    ShellSignalBackup sig_backup;
+    shellSaveSignalState(&sig_backup);
+    int status = entry(argc, argv);
+    shellRestoreSignalState(&sig_backup);
+    shellRuntimeEnsureStandardFds();
+    shellEnsureJobControl();
+    shellJobControlRestoreForeground();
+    if (dbg) {
+        int shell_pid = vprocGetShellSelfPid();
+        int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+        int fg = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+        fprintf(stderr,
+                "[tool-inline] restore complete shell=%d sid=%d fg=%d\n",
+                shell_pid,
+                sid,
+                fg);
+    }
+    return status;
+}
 
 #define SHELL_TOOL_THREAD_STACK_SZ (8 * 1024 * 1024)
 
