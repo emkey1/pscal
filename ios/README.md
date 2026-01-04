@@ -84,3 +84,14 @@ they stay in sync with the main toolchain.
 
 If you rebuild the static libs, simply rerun the CMake commands—Xcode will pick
 up the updated `.a` files without additional project changes.
+
+## Runtime Output Smoke Check (in-app)
+From the terminal tab, run:
+```sh
+pascal -v
+clike -v
+rea -v
+rea --badflag
+```
+Expected: each `-v` prints a version line, and the bad flag produces an error
+on stderr that still appears in the same terminal.

@@ -12,6 +12,10 @@
 #include "list.h"
 #include <stdbool.h>
 #include "common/frontend_symbol_aliases.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+#include "ios/vproc_stdio_shim.h"
+#endif
 
 // Default record size used for untyped files when RESET/REWRITE omit an
 // explicit size. Turbo Pascal historically defaults to 128 bytes; mirror that

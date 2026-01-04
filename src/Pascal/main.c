@@ -423,6 +423,14 @@ static FILE* s_stderr_tmp = NULL;
 static int s_saved_stderr_fd = -1;
 static int s_capture_active = 0;
 
+static ssize_t pascalWriteStderr(const void *buf, size_t len) {
+#if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
+    return vprocWriteShim(STDERR_FILENO, buf, len);
+#else
+    return write(STDERR_FILENO, buf, len);
+#endif
+}
+
 static void flushCapturedStderrAtExit(void) {
     if (!s_capture_active) return;
     fflush(stderr);
@@ -441,7 +449,7 @@ static void flushCapturedStderrAtExit(void) {
         while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) {
             size_t total = 0;
             while (total < n) {
-                ssize_t w = write(STDERR_FILENO, buf + total, n - total);
+                ssize_t w = pascalWriteStderr(buf + total, n - total);
                 if (w <= 0) {
                     total = n; // force exit outer loop on error
                     break;
@@ -656,7 +664,7 @@ int PSCAL_PASCAL_ENTRY_SYMBOL(int argc, char *argv[]) {
                 while ((n = fread(buf, 1, sizeof(buf), s_stderr_tmp)) > 0) {
                     size_t total = 0;
                     while (total < n) {
-                        ssize_t w = write(STDERR_FILENO, buf + total, n - total);
+                        ssize_t w = pascalWriteStderr(buf + total, n - total);
                         if (w <= 0) {
                             total = n;
                             break;
