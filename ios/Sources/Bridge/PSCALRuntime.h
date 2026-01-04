@@ -14,6 +14,23 @@ typedef void (*PSCALRuntimeSessionOutputHandler)(uint64_t session_id,
                                                  size_t length,
                                                  void *context);
 
+typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+
+/// Creates a runtime context that can host an independent shell session.
+PSCALRuntimeContext *PSCALRuntimeCreateRuntimeContext(void);
+/// Destroys a runtime context after shutdown; no-op if the context is active.
+void PSCALRuntimeDestroyRuntimeContext(PSCALRuntimeContext *ctx);
+/// Sets the runtime context for the current thread (NULL restores the shared context).
+void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
+/// Returns the runtime context for the current thread (shared context if unset).
+PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
+/// Returns a unique session id for PTY-backed sessions.
+uint64_t PSCALRuntimeNextSessionId(void);
+/// Associates the current runtime context with the session id.
+void PSCALRuntimeRegisterSessionContext(uint64_t session_id);
+/// Removes any runtime context association for the session id.
+void PSCALRuntimeUnregisterSessionContext(uint64_t session_id);
+
 /// Configures the callbacks used to stream stdout/stderr data and completion status.
 void PSCALRuntimeConfigureHandlers(PSCALRuntimeOutputHandler output_handler,
                                    PSCALRuntimeExitHandler exit_handler,

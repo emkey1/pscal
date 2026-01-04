@@ -15,6 +15,7 @@ struct TerminalRendererView: UIViewRepresentable {
     let fontPointSize: CGFloat
     let elvisSnapshot: ElvisSnapshot?
     var onPaste: ((String) -> Void)? = nil
+    var onInput: ((String) -> Void)? = nil
     let mouseMode: TerminalBuffer.MouseMode
     let mouseEncoding: TerminalBuffer.MouseEncoding
     var onGeometryChange: ((Int, Int) -> Void)? = nil
@@ -25,6 +26,7 @@ struct TerminalRendererView: UIViewRepresentable {
                             foregroundColor: foregroundColor)
         container.applyFont(font: font)
         container.onPaste = onPaste
+        container.onInput = onInput
         container.updateMouseState(mode: mouseMode, encoding: mouseEncoding)
         container.onGeometryChange = onGeometryChange
         return container
@@ -37,6 +39,7 @@ struct TerminalRendererView: UIViewRepresentable {
                          foregroundColor: foregroundColor)
         uiView.applyFont(font: font)
         uiView.onPaste = onPaste
+        uiView.onInput = onInput
         uiView.updateMouseState(mode: mouseMode, encoding: mouseEncoding)
         uiView.onGeometryChange = onGeometryChange
 
@@ -52,17 +55,13 @@ struct TerminalRendererView: UIViewRepresentable {
         }
 
         let shouldUseSnapshot = isElvisMode && (!externalWindowEnabled || !isElvisWindowVisible)
-        let snapshot: ElvisSnapshot?
-        if shouldUseSnapshot {
-            snapshot = elvisSnapshot ?? EditorTerminalBridge.shared.snapshot()
-        } else {
-            snapshot = nil
-        }
+        let snapshot = shouldUseSnapshot ? elvisSnapshot : nil
+        let renderElvis = shouldUseSnapshot && snapshot != nil
 
         uiView.update(text: text,
                       cursor: cursor,
                       backgroundColor: backgroundColor,
-                      isElvisMode: shouldUseSnapshot,
+                      isElvisMode: renderElvis,
                       elvisSnapshot: snapshot)
     }
 }
@@ -89,6 +88,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
     private let selectionMenu = TerminalSelectionMenuView()
     private let commandIndicator = UILabel()
     var onGeometryChange: ((Int, Int) -> Void)?
+    var onInput: ((String) -> Void)?
 
     // Mouse tracking
     private var mouseMode: TerminalBuffer.MouseMode = .none
@@ -895,10 +895,11 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
 
     private func sendSGRMouse(button: Int, x: Int, y: Int, pressed: Bool) {
         guard mouseEncoding == .sgr else { return }
+        guard let onInput else { return }
 
         let suffix = pressed ? "M" : "m"
         let sequence = "\u{1B}[<\(button);\(x);\(y)\(suffix)"
-        PscalRuntimeBootstrap.shared.send(sequence)
+        onInput(sequence)
     }
 
     private static let commandLinePrefixes: Set<Character> = [":", "/", "?"]
@@ -1068,13 +1069,33 @@ final class TerminalDisplayTextView: UITextView {
 // MARK: - Floating Editor Renderer
 
 struct EditorFloatingRendererView: View {
+    @ObservedObject private var manager = TerminalTabManager.shared
+
+    var body: some View {
+        EditorFloatingRendererContent(runtime: activeRuntime())
+    }
+
+    private func activeRuntime() -> PscalRuntimeBootstrap {
+        for tab in manager.tabs {
+            if case .shell(let runtime) = tab.kind, runtime.editorBridge.isActive {
+                return runtime
+            }
+        }
+        if case .shell(let runtime) = manager.selectedTab.kind {
+            return runtime
+        }
+        return PscalRuntimeBootstrap.shared
+    }
+}
+
+private struct EditorFloatingRendererContent: View {
+    @ObservedObject var runtime: PscalRuntimeBootstrap
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
-    @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
 
     var body: some View {
         let token = runtime.elvisRenderToken
         _ = token
-        let snapshot = EditorTerminalBridge.shared.snapshot()
+        let snapshot = runtime.editorBridge.snapshot()
 
         return TerminalRendererView(
             text: snapshot.attributedText,
@@ -1087,6 +1108,7 @@ struct EditorFloatingRendererView: View {
             font: fontSettings.currentFont,
             fontPointSize: fontSettings.pointSize,
             elvisSnapshot: snapshot,
+            onInput: runtime.send,
             mouseMode: runtime.mouseMode,
             mouseEncoding: runtime.mouseEncoding
         )

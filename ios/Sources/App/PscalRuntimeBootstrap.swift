@@ -58,6 +58,18 @@ private func terminalLog(_ message: String) {
     }
 }
 
+private let tabInitDebugEnabled: Bool = {
+    guard let value = ProcessInfo.processInfo.environment["PSCALI_TAB_INIT_DEBUG"] else {
+        return false
+    }
+    return value != "0"
+}()
+
+func tabInitLog(_ message: String) {
+    guard tabInitDebugEnabled else { return }
+    runtimeDebugLog("[TabInit] \(message)")
+}
+
 private let elvisDebugLoggingEnabled: Bool = {
     guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_ELVIS"] else {
         return false
@@ -184,6 +196,7 @@ func pscalRuntimeResetSessionLogBridge() {
 
 @_cdecl("PSCALRuntimeSetDebugLogMirroring")
 func PSCALRuntimeSetDebugLogMirroring(_ enable: Int32) {
+    // Debug logging is global/shared
     PscalRuntimeBootstrap.shared.setDebugLogMirroring(enable != 0)
 }
 
@@ -192,13 +205,59 @@ func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
     guard let message = message else { return }
     let msg = String(cString: message)
     appendRuntimeDebugLog(msg)
+    // Debug logging is global/shared
     PscalRuntimeBootstrap.shared.forwardDebugLogToTerminalIfEnabled(msg)
 }
 
 // MARK: - Runtime Bootstrap
 
 final class PscalRuntimeBootstrap: ObservableObject {
-    static let shared = PscalRuntimeBootstrap()
+    static let shared = PscalRuntimeBootstrap() // Main/Global instance
+    
+    // MARK: - Runtime ID Generation
+    private static let runtimeIdLock = NSLock()
+    private static var nextRuntimeIdValue: Int = 1
+    private static func nextRuntimeId() -> Int {
+        runtimeIdLock.lock()
+        defer { runtimeIdLock.unlock() }
+        let value = nextRuntimeIdValue
+        nextRuntimeIdValue += 1
+        return value
+    }
+    
+    // MARK: - Instance Registry
+    private struct WeakBootstrap {
+        weak var value: PscalRuntimeBootstrap?
+    }
+    private static var instanceRegistry = [UnsafeRawPointer: WeakBootstrap]()
+    private static let registryLock = NSLock()
+    
+    static var current: PscalRuntimeBootstrap? {
+        // Attempt to find the specific instance associated with the active C thread context
+        if let ctx = PSCALRuntimeGetCurrentRuntimeContext() {
+            let key = UnsafeRawPointer(ctx)
+            registryLock.lock()
+            defer { registryLock.unlock() }
+            if let weakRef = instanceRegistry[key] {
+                return weakRef.value
+            }
+        }
+        // Fallback to shared for legacy/global calls (e.g. logging)
+        return shared
+    }
+    
+    // MARK: - Properties
+    
+    private static let htermDebugEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if let value = env["PSCALI_HERM_DEBUG"] {
+            return value != "0"
+        }
+        if let value = env["PSCALI_PTY_OUTPUT_LOG"] {
+            return value != "0"
+        }
+        return false
+    }()
 
     @Published private(set) var screenText: NSAttributedString = NSAttributedString(string: "Launching exsh...")
     @Published private(set) var exitStatus: Int32?
@@ -206,9 +265,16 @@ final class PscalRuntimeBootstrap: ObservableObject {
     @Published private(set) var terminalBackgroundColor: UIColor = UIColor.systemBackground
     @Published private(set) var elvisRenderToken: UInt64 = 0
     
+    // Instance-owned Bridge for "Elvis" (Editor) mode
+    let editorBridge = EditorTerminalBridge()
+    
     // Mouse State Publishing
     @Published private(set) var mouseMode: TerminalBuffer.MouseMode = .none
     @Published private(set) var mouseEncoding: TerminalBuffer.MouseEncoding = .normal
+    @Published private(set) var htermReady: Bool = false
+    
+    // Unique ID for this runtime session
+    let runtimeId: Int
 
     private var started = false
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
@@ -234,21 +300,46 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var promptKickPending: Bool = true
     private var forceRestartPending: Bool = false
     private var shellContext: UnsafeMutableRawPointer?
+    private var runtimeContext: OpaquePointer?
     private var outputDrainTimer: DispatchSourceTimer?
     private let outputDrainInterval: TimeInterval = 0.001
     private let outputDrainMaxBytes: Int = 1024 * 1024
+    private let outputHandlerGroup = DispatchGroup()
     private var htermController: HtermTerminalController?
+    private var outputHtermController: HtermTerminalController?
+    private var htermReadyFlag: Bool = false
+    private var pendingHtermOutput: [Data] = []
+    private var pendingHtermBytes: Int = 0
+    private let pendingHtermMaxBytes: Int = 512 * 1024
+    private var htermHistoryOutput: [Data] = []
+    private var htermHistoryBytes: Int = 0
+    private var htermHistoryHead: Int = 0
+    private let htermHistoryMaxBytes: Int = 2 * 1024 * 1024
+    private var htermHistoryNeedsReplay: Bool = true
     
     // THROTTLING VARS
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
     // 0.016 = ~60 FPS. This prevents the UI thread from locking up during massive paste operations.
     private let minRenderInterval: TimeInterval = 0.016 
+
+    fileprivate func withRuntimeContext<T>(_ body: () -> T) -> T {
+        guard let runtimeContext else {
+            return body()
+        }
+        let previous = PSCALRuntimeGetCurrentRuntimeContext()
+        PSCALRuntimeSetCurrentRuntimeContext(runtimeContext)
+        defer { PSCALRuntimeSetCurrentRuntimeContext(previous) }
+        return body()
+    }
     
     private lazy var outputHandler: PSCALRuntimeOutputHandler = { data, length, context in
         guard let context, let base = data else { return }
-        let bootstrap = Unmanaged<PscalRuntimeBootstrap>.fromOpaque(context).takeUnretainedValue()
+        let unmanaged = Unmanaged<PscalRuntimeBootstrap>.fromOpaque(context)
+        let bootstrap = unmanaged.takeUnretainedValue()
+        bootstrap.outputHandlerGroup.enter()
         bootstrap.consumeOutput(buffer: base, length: Int(length))
+        bootstrap.outputHandlerGroup.leave()
     }
 
     private lazy var exitHandler: PSCALRuntimeExitHandler = { status, context in
@@ -257,11 +348,96 @@ final class PscalRuntimeBootstrap: ObservableObject {
         bootstrap.handleExit(status: status)
     }
 
-    private init() {
+    private func enqueueHtermOutput(_ data: Data) {
+        recordHtermHistory(data)
+        if let controller = outputHtermController, htermReadyFlag, !htermHistoryNeedsReplay {
+            controller.enqueueOutput(data)
+            return
+        }
+        if pendingHtermBytes >= pendingHtermMaxBytes {
+            return
+        }
+        pendingHtermOutput.append(data)
+        pendingHtermBytes += data.count
+    }
+
+    private func flushPendingHtermOutputIfReady() {
+        guard htermReadyFlag, let controller = outputHtermController else { return }
+        if htermHistoryNeedsReplay {
+            replayHtermHistory(controller: controller)
+            return
+        }
+        guard !pendingHtermOutput.isEmpty else { return }
+        pendingHtermOutput.forEach { controller.enqueueOutput($0) }
+        pendingHtermOutput.removeAll()
+        pendingHtermBytes = 0
+    }
+
+    private func recordHtermHistory(_ data: Data) {
+        guard htermHistoryMaxBytes > 0 else { return }
+        if data.count >= htermHistoryMaxBytes {
+            let tail = data.suffix(htermHistoryMaxBytes)
+            htermHistoryOutput = [Data(tail)]
+            htermHistoryBytes = tail.count
+            htermHistoryHead = 0
+            return
+        }
+        htermHistoryOutput.append(data)
+        htermHistoryBytes += data.count
+        guard htermHistoryBytes > htermHistoryMaxBytes else { return }
+        while htermHistoryBytes > htermHistoryMaxBytes && htermHistoryHead < htermHistoryOutput.count {
+            let removed = htermHistoryOutput[htermHistoryHead]
+            htermHistoryBytes -= removed.count
+            htermHistoryHead += 1
+        }
+        if htermHistoryHead > 64 && htermHistoryHead > htermHistoryOutput.count / 2 {
+            htermHistoryOutput.removeFirst(htermHistoryHead)
+            htermHistoryHead = 0
+        }
+    }
+
+    private func replayHtermHistory(controller: HtermTerminalController) {
+        guard htermHistoryNeedsReplay else { return }
+        if htermHistoryHead >= htermHistoryOutput.count {
+            htermHistoryOutput.removeAll()
+            htermHistoryHead = 0
+            htermHistoryBytes = 0
+        }
+        let replayCount = max(0, htermHistoryOutput.count - htermHistoryHead)
+        if htermHistoryBytes > 0 {
+            tabInitLog("runtime=\(runtimeId) replay history chunks=\(replayCount) bytes=\(htermHistoryBytes)")
+        } else {
+            tabInitLog("runtime=\(runtimeId) replay history empty")
+        }
+        if htermHistoryBytes > 0 {
+            for idx in htermHistoryHead..<htermHistoryOutput.count {
+                controller.enqueueOutput(htermHistoryOutput[idx])
+            }
+        }
+        pendingHtermOutput.removeAll()
+        pendingHtermBytes = 0
+        htermHistoryNeedsReplay = false
+    }
+
+    private func resetHtermHistory() {
+        htermHistoryOutput.removeAll()
+        htermHistoryBytes = 0
+        htermHistoryHead = 0
+        pendingHtermOutput.removeAll()
+        pendingHtermBytes = 0
+    }
+
+    init() {
+        // 1. Initialize properties first
+        self.runtimeId = Self.nextRuntimeId()
         let initialMetrics = PscalRuntimeBootstrap.defaultGeometryMetrics()
-        runtimeDebugLog("[Geometry] bootstrap size columns=\(initialMetrics.columns) rows=\(initialMetrics.rows)")
+        let createdRuntimeContext = PSCALRuntimeCreateRuntimeContext()
+        
+        self.runtimeContext = createdRuntimeContext
         self.geometryBySource = [.main: initialMetrics, .elvis: initialMetrics]
         self.activeGeometry = initialMetrics
+        
+        // Note: Using local 'createdRuntimeContext' inside the closure avoids accessing 'self' before initialization
         self.terminalBuffer = TerminalBuffer(columns: initialMetrics.columns,
                                              rows: initialMetrics.rows,
                                              scrollback: 400,
@@ -269,21 +445,39 @@ final class PscalRuntimeBootstrap: ObservableObject {
             data.withUnsafeBytes { buffer in
                 guard let base = buffer.baseAddress else { return }
                 let pointer = base.assumingMemoryBound(to: CChar.self)
-                PSCALRuntimeSendInput(pointer, buffer.count)
+                if let ctx = createdRuntimeContext {
+                    let previous = PSCALRuntimeGetCurrentRuntimeContext()
+                    PSCALRuntimeSetCurrentRuntimeContext(ctx)
+                    PSCALRuntimeSendInput(pointer, buffer.count)
+                    PSCALRuntimeSetCurrentRuntimeContext(previous)
+                } else {
+                    PSCALRuntimeSendInput(pointer, buffer.count)
+                }
             }
         })
         
+        // 2. 'self' is now fully initialized. Safe to use 'self' below.
+        
+        if let ctx = createdRuntimeContext {
+            PscalRuntimeBootstrap.registryLock.lock()
+            PscalRuntimeBootstrap.instanceRegistry[UnsafeRawPointer(ctx)] = WeakBootstrap(value: self)
+            PscalRuntimeBootstrap.registryLock.unlock()
+        }
+        
+        runtimeDebugLog("[Geometry] bootstrap size columns=\(initialMetrics.columns) rows=\(initialMetrics.rows)")
+
         self.terminalBuffer.setResizeHandler { [weak self] columns, rows in
             self?.handleTerminalResizeRequest(columns: columns, rows: rows)
         }
         
-        // Listen for mouse mode changes from the buffer
         self.terminalBuffer.onMouseModeChange = { [weak self] mode, encoding in
             self?.mouseMode = mode
             self?.mouseEncoding = encoding
         }
         
-        PSCALRuntimeUpdateWindowSize(Int32(initialMetrics.columns), Int32(initialMetrics.rows))
+        withRuntimeContext {
+            PSCALRuntimeUpdateWindowSize(Int32(initialMetrics.columns), Int32(initialMetrics.rows))
+        }
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
@@ -295,10 +489,40 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     deinit {
-        if let ctx = shellContext {
-            PSCALRuntimeSetShellContext(nil, 0)
-            PSCALRuntimeDestroyShellContext(ctx)
+        // Unregister
+        if let ctx = runtimeContext {
+            PscalRuntimeBootstrap.registryLock.lock()
+            PscalRuntimeBootstrap.instanceRegistry.removeValue(forKey: UnsafeRawPointer(ctx))
+            PscalRuntimeBootstrap.registryLock.unlock()
+            
+            PSCALRuntimeDestroyRuntimeContext(ctx)
         }
+        
+        if let ctx = shellContext {
+            // Cannot use withRuntimeContext here as it might be destroyed
+             PSCALRuntimeDestroyShellContext(ctx)
+        }
+    }
+
+    func ensureHtermController() -> HtermTerminalController {
+        dispatchPrecondition(condition: .onQueue(.main))
+        if let controller = htermController {
+            tabInitLog("runtime=\(runtimeId) reuse hterm controller=\(controller.instanceId)")
+            return controller
+        }
+        let controller = HtermTerminalController()
+        tabInitLog("runtime=\(runtimeId) create hterm controller=\(controller.instanceId)")
+        htermController = controller
+        outputDrainQueue.sync { [weak self] in
+            self?.outputHtermController = controller
+            self?.htermHistoryNeedsReplay = true
+        }
+        return controller
+    }
+
+    func htermControllerIfCreated() -> HtermTerminalController? {
+        dispatchPrecondition(condition: .onQueue(.main))
+        return htermController
     }
 
     func sendPasted(_ text: String) {
@@ -324,13 +548,21 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func start() {
+        tabInitLog("runtime=\(runtimeId) start request thread=\(Thread.isMainThread ? "main" : "bg")")
         let shouldStart = stateQueue.sync { () -> Bool in
             guard !started else { return false }
             started = true
             return true
         }
-        guard shouldStart else { return }
+        guard shouldStart else {
+            tabInitLog("runtime=\(runtimeId) start skipped (already started)")
+            return
+        }
+        tabInitLog("runtime=\(runtimeId) start begin")
         stateQueue.async { self.promptKickPending = true }
+        outputDrainQueue.async { [weak self] in
+            self?.resetHtermHistory()
+        }
         DispatchQueue.main.async {
             self.terminalBuffer.reset()
             self.screenText = NSAttributedString(string: "Launching exsh...")
@@ -366,17 +598,21 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 self.shellContext = PSCALRuntimeCreateShellContext()
             }
             if let ctx = self.shellContext {
-                PSCALRuntimeSetShellContext(ctx, 0)
+                self.withRuntimeContext {
+                    PSCALRuntimeSetShellContext(ctx, 0)
+                }
             }
 
             DispatchQueue.main.async {
                 LocationDeviceProvider.shared.start()
-                EditorTerminalBridge.shared.deactivate()
+                self.editorBridge.deactivate()
             }
 
-            self.handlerContext = Unmanaged.passUnretained(self).toOpaque()
-            PSCALRuntimeSetOutputBufferingEnabled(1)
-            PSCALRuntimeConfigureHandlers(self.outputHandler, self.exitHandler, self.handlerContext)
+            self.handlerContext = Unmanaged.passRetained(self).toOpaque()
+            self.withRuntimeContext {
+                PSCALRuntimeSetOutputBufferingEnabled(1)
+                PSCALRuntimeConfigureHandlers(self.outputHandler, self.exitHandler, self.handlerContext)
+            }
             self.startOutputDrain()
 
             let args = ["exsh"]
@@ -387,13 +623,22 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 cArgs.forEach { if let ptr = $0 { free(ptr) } }
             }
             cArgs.withUnsafeMutableBufferPointer { buffer in
+                guard let base = buffer.baseAddress else { return }
                 let stackSize: size_t = numericCast(self.runtimeStackSizeBytes)
-                _ = PSCALRuntimeLaunchExshWithStackSize(argc, buffer.baseAddress, stackSize)
+                self.withRuntimeContext {
+                    _ = PSCALRuntimeLaunchExshWithStackSize(argc, base, stackSize)
+                    
+                    // FIX: Ensure PTY knows the window size immediately after launch.
+                    let cols = Int32(self.activeGeometry.columns)
+                    let rows = Int32(self.activeGeometry.rows)
+                    if cols > 0 && rows > 0 {
+                        PSCALRuntimeUpdateWindowSize(cols, rows)
+                    }
+                }
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                // Always send a carriage return to force prompt rendering; earlier
-                // output may have cleared the pending flag already.
+                // Always send a carriage return to force prompt rendering
                 self.send(" ")
                 self.send("\u{08}")
             }
@@ -440,30 +685,37 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if data.count == 1 {
             switch data.first {
             case 0x03: // Ctrl-C
-                PSCALRuntimeSendSignal(SIGINT)
+                withRuntimeContext {
+                    PSCALRuntimeSendSignal(SIGINT)
+                }
             case 0x1a: // Ctrl-Z
-                PSCALRuntimeSendSignal(SIGTSTP)
+                withRuntimeContext {
+                    PSCALRuntimeSendSignal(SIGTSTP)
+                }
             default:
                 break
             }
         }
-        if EditorTerminalBridge.shared.interceptInputIfNeeded(data: data) {
+        if editorBridge.interceptInputIfNeeded(data: data) {
             return
         }
         echoLocallyIfNeeded(text)
         let bytes = [UInt8](data)
-        inputQueue.async {
-            let chunkSize = 512
-            var offset = 0
-            while offset < bytes.count {
-                let len = min(chunkSize, bytes.count - offset)
-                bytes.withUnsafeBytes { raw in
-                    guard let base = raw.baseAddress?.advanced(by: offset) else { return }
-                    PSCALRuntimeSendInput(base.assumingMemoryBound(to: CChar.self), len)
-                }
-                offset += len
-                if offset < bytes.count {
-                    usleep(2000)
+        inputQueue.async { [weak self] in
+            guard let self else { return }
+            self.withRuntimeContext {
+                let chunkSize = 512
+                var offset = 0
+                while offset < bytes.count {
+                    let len = min(chunkSize, bytes.count - offset)
+                    bytes.withUnsafeBytes { raw in
+                        guard let base = raw.baseAddress?.advanced(by: offset) else { return }
+                        PSCALRuntimeSendInput(base.assumingMemoryBound(to: CChar.self), len)
+                    }
+                    offset += len
+                    if offset < bytes.count {
+                        usleep(2000)
+                    }
                 }
             }
         }
@@ -480,7 +732,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
             runtimeDebugLog("[Geometry] Propagating main resize to Elvis state")
             updateGeometry(from: .elvis, columns: columns, rows: rows)
             activeGeometry = TerminalGeometryMetrics(columns: columns, rows: rows)
-            PSCALRuntimeUpdateWindowSize(Int32(columns), Int32(rows))
+            withRuntimeContext {
+                PSCALRuntimeUpdateWindowSize(Int32(columns), Int32(rows))
+            }
         }
     }
 
@@ -490,12 +744,17 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func resetTerminalState() {
+        outputDrainQueue.async { [weak self] in
+            self?.resetHtermHistory()
+        }
         let cols = activeGeometry.columns
         let rows = activeGeometry.rows
         if cols > 0 && rows > 0 {
-            PSCALRuntimeUpdateWindowSize(Int32(cols), Int32(rows))
-            if EditorTerminalBridge.shared.isActive {
-                EditorTerminalBridge.shared.reset(columns: cols, rows: rows)
+            withRuntimeContext {
+                PSCALRuntimeUpdateWindowSize(Int32(cols), Int32(rows))
+            }
+            if editorBridge.isActive {
+                editorBridge.reset(columns: cols, rows: rows)
             }
         }
         terminalBuffer.reset()
@@ -515,8 +774,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
             self.skipRcNextStart = true
             self.forceRestartPending = true
         }
-        PSCALRuntimeSendSignal(SIGTERM)
-        PSCALRuntimeSendSignal(SIGINT)
+        withRuntimeContext {
+            PSCALRuntimeSendSignal(SIGTERM)
+            PSCALRuntimeSendSignal(SIGINT)
+        }
         // Safety net: if the exit handler doesn't fire promptly, restart anyway.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self = self else { return }
@@ -546,14 +807,17 @@ final class PscalRuntimeBootstrap: ObservableObject {
     public func consumeOutput(buffer: UnsafePointer<Int8>, length: Int) {
         guard length > 0 else { return }
         let outputLength = length
-        let dataCopy = Data(bytes: buffer, count: length)
-        free(UnsafeMutableRawPointer(mutating: buffer))
+        let dataCopy = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: buffer),
+                            count: length,
+                            deallocator: .free)
         stateQueue.async { self.promptKickPending = false }
         outputDrainQueue.async { [weak self] in
             guard let self else { return }
-            self.htermController?.enqueueOutput(dataCopy)
-            self.terminalBuffer.append(data: dataCopy)
-            PSCALRuntimeOutputDidProcess(Int(outputLength))
+            self.enqueueHtermOutput(dataCopy)
+            self.appendOutput(dataCopy)
+            self.withRuntimeContext {
+                PSCALRuntimeOutputDidProcess(Int(outputLength))
+            }
         }
     }
 
@@ -576,8 +840,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         guard let data = line.data(using: .utf8) else { return }
         outputDrainQueue.async { [weak self] in
             guard let self else { return }
-            self.htermController?.enqueueOutput(data)
-            self.terminalBuffer.append(data: data)
+            self.enqueueHtermOutput(data)
+            self.appendOutput(data)
         }
     }
 
@@ -585,6 +849,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         runtimeDebugLog("[Runtime] exsh exit detected (status=\(status)); awaiting user to restart")
         let stackSymbols = Thread.callStackSymbols.joined(separator: "\n")
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
+        releaseHandlerContext()
         stopOutputDrain()
         stateQueue.async {
             self.started = false
@@ -613,6 +878,17 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
+    private func releaseHandlerContext() {
+        guard let context = handlerContext else { return }
+        withRuntimeContext {
+            PSCALRuntimeConfigureHandlers(nil, nil, nil)
+        }
+        outputHandlerGroup.notify(queue: outputDrainQueue) { [context] in
+            Unmanaged<PscalRuntimeBootstrap>.fromOpaque(context).release()
+        }
+        handlerContext = nil
+    }
+
     private func handleTerminalResizeRequest(columns: Int, rows: Int) {
         runtimeDebugLog("[Geometry] remote resize request columns=\(columns) rows=\(rows); reasserting active \(activeGeometry.columns)x\(activeGeometry.rows)")
         DispatchQueue.main.async {
@@ -622,7 +898,96 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     func attachHtermController(_ controller: HtermTerminalController?) {
         outputDrainQueue.async {
-            self.htermController = controller
+            guard let controller else {
+                tabInitLog("runtime=\(self.runtimeId) attach nil controller")
+                if Self.htermDebugEnabled {
+                    NSLog("Hterm: attach main runtime (nil controller)")
+                }
+                return
+            }
+            if self.outputHtermController == nil {
+                self.outputHtermController = controller
+                self.htermHistoryNeedsReplay = true
+                tabInitLog("runtime=\(self.runtimeId) attach set output controller=\(controller.instanceId)")
+            }
+            guard controller === self.outputHtermController else {
+                let expectedId = self.outputHtermController?.instanceId ?? -1
+                tabInitLog("runtime=\(self.runtimeId) attach ignored controller=\(controller.instanceId) expected=\(expectedId)")
+                if Self.htermDebugEnabled {
+                    NSLog("Hterm[%d]: attach main runtime ignored (unexpected controller)", controller.instanceId)
+                }
+                return
+            }
+            tabInitLog("runtime=\(self.runtimeId) attach controller=\(controller.instanceId) loaded=\(controller.isLoaded)")
+            if Self.htermDebugEnabled {
+                NSLog("Hterm[%d]: attach main runtime (loaded=%@)", controller.instanceId, controller.isLoaded.description)
+            }
+            self.htermReadyFlag = controller.isLoaded
+            self.flushPendingHtermOutputIfReady()
+        }
+        DispatchQueue.main.async {
+            self.htermReady = controller?.isLoaded ?? false
+        }
+    }
+
+    func detachHtermController(_ controller: HtermTerminalController) {
+        outputDrainQueue.async {
+            guard controller === self.outputHtermController else {
+                tabInitLog("runtime=\(self.runtimeId) detach ignored controller=\(controller.instanceId)")
+                return
+            }
+            tabInitLog("runtime=\(self.runtimeId) detach controller=\(controller.instanceId)")
+            if Self.htermDebugEnabled {
+                NSLog("Hterm[%d]: detach main runtime", controller.instanceId)
+            }
+            if self.htermReadyFlag {
+                self.htermReadyFlag = false
+                self.scheduleRender()
+            }
+        }
+        DispatchQueue.main.async {
+            self.htermReady = false
+        }
+    }
+
+    func markHtermLoaded() {
+        outputDrainQueue.async {
+            if self.htermReadyFlag {
+                return
+            }
+            self.htermReadyFlag = true
+            tabInitLog("runtime=\(self.runtimeId) mark hterm loaded")
+            self.flushPendingHtermOutputIfReady()
+        }
+        DispatchQueue.main.async {
+            self.htermReady = true
+        }
+    }
+
+    func markHtermUnloaded() {
+        outputDrainQueue.async {
+            if !self.htermReadyFlag {
+                self.htermHistoryNeedsReplay = true
+                tabInitLog("runtime=\(self.runtimeId) mark hterm unloaded (already not ready)")
+                return
+            }
+            self.htermReadyFlag = false
+            self.htermHistoryNeedsReplay = true
+            tabInitLog("runtime=\(self.runtimeId) mark hterm unloaded")
+            self.scheduleRender()
+        }
+        DispatchQueue.main.async {
+            self.htermReady = false
+        }
+    }
+
+    private func appendOutput(_ data: Data) {
+        if htermReadyFlag {
+            terminalBuffer.append(data: data)
+            return
+        }
+        terminalBuffer.append(data: data) { [weak self] in
+            self?.scheduleRender()
         }
     }
 
@@ -653,13 +1018,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func drainOutputOnce() {
-        guard let controller = htermController else { return }
         var outPtr: UnsafeMutablePointer<UInt8>?
-        let count = PSCALRuntimeDrainOutput(&outPtr, outputDrainMaxBytes)
+        let count = withRuntimeContext {
+            PSCALRuntimeDrainOutput(&outPtr, outputDrainMaxBytes)
+        }
         guard count > 0, let base = outPtr else { return }
         let data = Data(bytesNoCopy: base, count: Int(count), deallocator: .free)
-        controller.enqueueOutput(data)
-        terminalBuffer.append(data: data)
+        enqueueHtermOutput(data)
+        appendOutput(data)
     }
 
     // --- RENDER SCHEDULING (THROTTLED) ---
@@ -668,7 +1034,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             refreshElvisDisplay()
             return
         }
-        if htermController != nil {
+        if htermReadyFlag {
             return
         }
         
@@ -730,7 +1096,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 
                 runtimeDebugLog("[Geometry] Forcing C-Runtime to sync with Main UI: \(validMetrics.columns)x\(validMetrics.rows)")
                 
-                PSCALRuntimeUpdateWindowSize(Int32(validMetrics.columns), Int32(validMetrics.rows))
+                withRuntimeContext {
+                    PSCALRuntimeUpdateWindowSize(Int32(validMetrics.columns), Int32(validMetrics.rows))
+                }
                 
                 activeGeometry = validMetrics
                 activeGeometrySource = .main 
@@ -743,7 +1111,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
 
     func refreshElvisDisplay() {
-        guard EditorTerminalBridge.shared.isActive else { return }
+        guard editorBridge.isActive else { return }
         let shouldSchedule: Bool = stateQueue.sync {
             if elvisRefreshPending {
                 return false
@@ -767,7 +1135,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if isElvisModeActive() {
             return false
         }
-        return PSCALRuntimeIsVirtualTTY() != 0
+        return withRuntimeContext { PSCALRuntimeIsVirtualTTY() != 0 }
     }
 
     private func echoLocallyIfNeeded(_ text: String) {
@@ -831,7 +1199,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         if forceRuntimeUpdate || resizeTerminalBuffer {
             runtimeDebugLog("[Geometry] applying runtime window size columns=\(runtimeColumns) rows=\(runtimeRows) resizeBuffer=\(resizeTerminalBuffer) force=\(forceRuntimeUpdate)")
-            PSCALRuntimeUpdateWindowSize(Int32(runtimeColumns), Int32(runtimeRows))
+            withRuntimeContext {
+                PSCALRuntimeUpdateWindowSize(Int32(runtimeColumns), Int32(runtimeRows))
+            }
         }
     }
 
@@ -994,7 +1364,8 @@ private struct TerminalPalette {
 }
 
 final class EditorTerminalBridge {
-    static let shared = EditorTerminalBridge()
+    // REMOVED static shared instance to support multiple tabs
+    // This class is now owned by specific PscalRuntimeBootstrap instances.
 
     private struct ScreenState {
         var rows: Int = 0
@@ -1474,13 +1845,17 @@ final class EditorTerminalBridge {
     }
 }
 
+// MARK: - C Bridge Callbacks (Routed to Correct Instance)
+
 @_cdecl("pscalTerminalBegin")
 func pscalTerminalBegin(_ columns: Int32, _ rows: Int32) {
     if elvisDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalBegin cols=\(columns) rows=\(rows)")
     }
-    EditorTerminalBridge.shared.activate(columns: Int(columns), rows: Int(rows))
-    PscalRuntimeBootstrap.shared.setElvisModeActive(true)
+    // ROUTING: Use .current instance derived from C Context
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.activate(columns: Int(columns), rows: Int(rows))
+    bootstrap.setElvisModeActive(true)
 #if ELVIS_FLOATING_WINDOW
     EditorWindowManager.shared.showWindow()
 #endif
@@ -1491,8 +1866,9 @@ func pscalTerminalEnd() {
     if elvisDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalEnd")
     }
-    EditorTerminalBridge.shared.deactivate()
-    PscalRuntimeBootstrap.shared.setElvisModeActive(false)
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.deactivate()
+    bootstrap.setElvisModeActive(false)
 #if ELVIS_FLOATING_WINDOW
     EditorWindowManager.shared.hideWindow()
 #endif
@@ -1503,8 +1879,9 @@ func pscalTerminalResize(_ columns: Int32, _ rows: Int32) {
     if elvisDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalResize cols=\(columns) rows=\(rows)")
     }
-    EditorTerminalBridge.shared.resize(columns: Int(columns), rows: Int(rows))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.resize(columns: Int(columns), rows: Int(rows))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalRender")
@@ -1514,14 +1891,15 @@ func pscalTerminalRender(_ utf8: UnsafePointer<CChar>?, _ len: Int32, _ row: Int
         let bytes = (0..<previewLen).compactMap { idx in utf8?[idx] }.map { String(format: "%02X", $0) }.joined(separator: " ")
         terminalLog("RENDER row=\(row) col=\(col) len=\(len) fg=\(fg) bg=\(bg) attr=\(attr) bytes=\(bytes)")
     }
-    EditorTerminalBridge.shared.draw(row: Int(row),
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.draw(row: Int(row),
                                      column: Int(col),
                                      text: utf8,
                                      length: Int(len),
                                      fg: Int32(truncatingIfNeeded: fg),
                                      bg: Int32(truncatingIfNeeded: bg),
                                      attr: attr)
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalClear")
@@ -1530,8 +1908,9 @@ func pscalTerminalClear() {
         runtimeDebugLog("pscalTerminalClear")
     }
     if terminalLogURL() != nil { terminalLog("CLEAR") }
-    EditorTerminalBridge.shared.clear()
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.clear()
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalMoveCursor")
@@ -1539,105 +1918,122 @@ func pscalTerminalMoveCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil {
         terminalLog("CURSOR row=\(row) col=\(column)")
     }
-    EditorTerminalBridge.shared.moveCursor(row: Int(row), column: Int(column))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.moveCursor(row: Int(row), column: Int(column))
+    bootstrap.refreshElvisDisplay()
 }
 @_cdecl("pscalTerminalClearEol")
 func pscalTerminalClearEol(_ row: Int32, _ column: Int32) {
-    EditorTerminalBridge.shared.clearToEndOfLine(row: Int(row), column: Int(column))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.clearToEndOfLine(row: Int(row), column: Int(column))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalClearBol")
 func pscalTerminalClearBol(_ row: Int32, _ column: Int32) {
-    EditorTerminalBridge.shared.clearLineToCursor(row: Int(row), col: Int(column))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.clearLineToCursor(row: Int(row), col: Int(column))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalClearLine")
 func pscalTerminalClearLine(_ row: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_LINE row=\(row)") }
-    EditorTerminalBridge.shared.clearLine(row: Int(row))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.clearLine(row: Int(row))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalClearScreenFromCursor")
 func pscalTerminalClearScreenFromCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_SCR_FROM row=\(row) col=\(column)") }
-    EditorTerminalBridge.shared.clearToEndOfScreen(row: Int(row), col: Int(column))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.clearToEndOfScreen(row: Int(row), col: Int(column))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalClearScreenToCursor")
 func pscalTerminalClearScreenToCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_SCR_TO row=\(row) col=\(column)") }
-    EditorTerminalBridge.shared.clearToStartOfScreen(row: Int(row), col: Int(column))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.clearToStartOfScreen(row: Int(row), col: Int(column))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalInsertLines")
 func pscalTerminalInsertLines(_ row: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("IL row=\(row) count=\(count)") }
-    EditorTerminalBridge.shared.insertLines(at: Int(row), count: Int(max(1, count)))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.insertLines(at: Int(row), count: Int(max(1, count)))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalDeleteLines")
 func pscalTerminalDeleteLines(_ row: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("DL row=\(row) count=\(count)") }
-    EditorTerminalBridge.shared.deleteLines(at: Int(row), count: Int(max(1, count)))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.deleteLines(at: Int(row), count: Int(max(1, count)))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalInsertChars")
 func pscalTerminalInsertChars(_ row: Int32, _ col: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("ICH row=\(row) col=\(col) count=\(count)") }
-    EditorTerminalBridge.shared.insertChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.insertChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalDeleteChars")
 func pscalTerminalDeleteChars(_ row: Int32, _ col: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("DCH row=\(row) col=\(col) count=\(count)") }
-    EditorTerminalBridge.shared.deleteChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.deleteChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalEnterAltScreen")
 func pscalTerminalEnterAltScreen() {
     if terminalLogURL() != nil { terminalLog("ALT_ENTER") }
-    EditorTerminalBridge.shared.enterAltScreen()
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.enterAltScreen()
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalExitAltScreen")
 func pscalTerminalExitAltScreen() {
     if terminalLogURL() != nil { terminalLog("ALT_EXIT") }
-    EditorTerminalBridge.shared.exitAltScreen()
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.exitAltScreen()
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalSetCursorVisible")
 func pscalTerminalSetCursorVisible(_ visible: Int32) {
-    EditorTerminalBridge.shared.setCursorVisible(visible != 0)
-    PscalRuntimeBootstrap.shared.refreshElvisDisplay()
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    bootstrap.editorBridge.setCursorVisible(visible != 0)
+    bootstrap.refreshElvisDisplay()
 }
 
 @_cdecl("pscalTerminalRead")
 func pscalTerminalRead(_ buffer: UnsafeMutablePointer<UInt8>?, _ maxlen: Int32, _ timeout: Int32) -> Int32 {
     guard let buffer else { return 0 }
-    let bytesRead = EditorTerminalBridge.shared.read(into: buffer, maxLength: Int(maxlen), timeoutMs: Int(timeout))
+    // Read from the current bootstrap's bridge
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return 0 }
+    let bytesRead = bootstrap.editorBridge.read(into: buffer, maxLength: Int(maxlen), timeoutMs: Int(timeout))
     return Int32(bytesRead)
 }
 
 @_cdecl("pscalElvisDump")
 func pscalElvisDump() {
-    let snapshot = EditorTerminalBridge.shared.snapshot()
+    // Debug dump logic for current instance
+    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    let snapshot = bootstrap.editorBridge.snapshot()
     if let ptr = withCStringPointerRuntime(snapshot.text, { $0 }) {
         fputs(ptr, stdout)
         fputc(0x0A, stdout)
     }
-    let debugState = EditorTerminalBridge.shared.debugState()
+    let debugState = bootstrap.editorBridge.debugState()
     if let cursor = snapshot.cursor {
         let cursorLine = "[elvisdump] cursor row=\(cursor.row) col=\(cursor.column)\n"
         if let ptr = withCStringPointerRuntime(cursorLine, { $0 }) {
@@ -1688,7 +2084,9 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func syncDeviceStateLocked() {
-        PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
+        PscalRuntimeBootstrap.shared.withRuntimeContext {
+            PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
+        }
         if started && deviceEnabled {
             startLocationUpdatesLocked()
             startSendTimerLocked()
@@ -1745,8 +2143,10 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         guard let data = payload.data(using: .utf8), !data.isEmpty else { return }
         data.withUnsafeBytes { buffer in
             guard let base = buffer.baseAddress else { return }
-            let res = PSCALRuntimeWriteLocationDevice(base.assumingMemoryBound(to: CChar.self),
-                                                      buffer.count)
+            let res = PscalRuntimeBootstrap.shared.withRuntimeContext {
+                PSCALRuntimeWriteLocationDevice(base.assumingMemoryBound(to: CChar.self),
+                                                buffer.count)
+            }
             if res < 0 {
                 let err = errno
                 if err != EAGAIN && err != EWOULDBLOCK && err != EPIPE {

@@ -10,6 +10,10 @@ extern void pscalRuntimeDebugLog(const char *message);
 #undef stdin
 #undef stdout
 #undef stderr
+#undef printf
+#undef puts
+#undef putchar
+#undef perror
 #define stdin shellVprocStdin()
 #define stdout shellVprocStdout()
 #define stderr shellVprocStderr()

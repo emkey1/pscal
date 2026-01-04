@@ -88,4 +88,6 @@
 
 #endif /* !PSCAL_IOS_SHIM_H */
 
+#include "ios/vproc_stdio_shim.h"
+
 #endif /* PSCAL_TARGET_IOS */

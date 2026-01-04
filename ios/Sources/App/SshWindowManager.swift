@@ -2,13 +2,20 @@ import SwiftUI
 import Foundation
 import Darwin
 
+@MainActor
 final class TerminalTabManager: ObservableObject {
     static let shared = TerminalTabManager()
+    private static let multiTabDebugEnabled: Bool = {
+        guard let value = ProcessInfo.processInfo.environment["PSCALI_MULTI_TAB_DEBUG"] else {
+            return false
+        }
+        return value != "0"
+    }()
 
     struct Tab: Identifiable {
         enum Kind {
-            case shellMain
-            case shell(ShellRuntimeSession)
+            case shell(PscalRuntimeBootstrap)
+            case shellSession(ShellRuntimeSession)
             case ssh(SshRuntimeSession)
         }
 
@@ -17,15 +24,24 @@ final class TerminalTabManager: ObservableObject {
         let kind: Kind
     }
 
-    private let shellId: UInt64 = 1
-    private var nextShellId: UInt64 = 2
+    private let shellId: UInt64 = PSCALRuntimeNextSessionId()
     @Published private(set) var tabs: [Tab]
-    @Published var selectedId: UInt64
+    @Published var selectedId: UInt64 {
+        didSet {
+            if oldValue != selectedId {
+                logMultiTab("selected tab id=\(selectedId)")
+                tabInitLog("selected tab id=\(selectedId) tabs=\(tabs.count)")
+            }
+        }
+    }
 
     private init() {
-        let shellTab = Tab(id: shellId, title: "Shell", kind: .shellMain)
+        let runtime = PscalRuntimeBootstrap.shared
+        let shellTab = Tab(id: shellId, title: "Shell", kind: .shell(runtime))
         tabs = [shellTab]
         selectedId = shellId
+        logMultiTab("init shell tab id=\(shellId) runtime=\(runtime.runtimeId)")
+        tabInitLog("manager init shellTab=\(shellId) runtime=\(runtime.runtimeId) thread=\(Thread.isMainThread ? "main" : "bg")")
     }
 
     var hasActiveSshSession: Bool {
@@ -38,105 +54,96 @@ final class TerminalTabManager: ObservableObject {
     }
 
     func openShellTab() -> Int32 {
-        var result: Int32 = 0
-        let argv = ["exsh"]
-        let action = {
-            let shellCount = self.tabs.filter { tab in
+        tabInitLog("openShellTab request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
+        let shellCount = tabs.filter { tab in
+            switch tab.kind {
+            case .shell, .shellSession:
+                return true
+            case .ssh:
+                return false
+            }
+        }.count
+        let newId = PSCALRuntimeNextSessionId()
+        let title = "Shell \(shellCount + 1)"
+        let runtime = PscalRuntimeBootstrap()
+        let tab = Tab(id: newId, title: title, kind: .shell(runtime))
+        tabs.append(tab)
+        selectedId = newId
+        logMultiTab("open shell tab id=\(newId) runtime=\(runtime.runtimeId)")
+        tabInitLog("openShellTab created id=\(newId) runtime=\(runtime.runtimeId) title=\(title)")
+        tabInitLog("openShellTab selectedId=\(selectedId) tabs=\(tabs.count)")
+        return 0
+    }
+
+    func openSshSession(argv: [String]) -> Int32 {
+        tabInitLog("openSshSession request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
+        if hasActiveSshSession {
+            errno = EBUSY
+            tabInitLog("openSshSession rejected (existing ssh)")
+            return -1
+        }
+        let sessionId = PSCALRuntimeNextSessionId()
+        let session = SshRuntimeSession(sessionId: sessionId, argv: argv)
+        guard session.start() else {
+            let err = session.lastStartErrno
+            tabInitLog("openSshSession start failed errno=\(err)")
+            return -(err == 0 ? EIO : err)
+        }
+        let title = sshTitle(argv: argv)
+        let tab = Tab(id: sessionId, title: title, kind: .ssh(session))
+        tabs.append(tab)
+        selectedId = sessionId
+        logMultiTab("open ssh tab id=\(sessionId) title=\(title)")
+        tabInitLog("openSshSession created id=\(sessionId) title=\(title)")
+        tabInitLog("openSshSession selectedId=\(selectedId) tabs=\(tabs.count)")
+        return 0
+    }
+
+    func handleSessionExit(sessionId: UInt64, status: Int32) {
+        tabInitLog("sessionExit id=\(sessionId) status=\(status) thread=\(Thread.isMainThread ? "main" : "bg")")
+        guard let index = tabs.firstIndex(where: { $0.id == sessionId }) else { return }
+        switch tabs[index].kind {
+        case .shell:
+            return
+        case .shellSession(let session):
+            session.markExited(status: status)
+        case .ssh(let session):
+            session.markExited(status: status)
+        }
+        tabs.remove(at: index)
+        logMultiTab("session exit id=\(sessionId) status=\(status)")
+        tabInitLog("sessionExit removed id=\(sessionId) tabs=\(tabs.count) selectedId=\(selectedId)")
+        if selectedId == sessionId {
+            if let shellTab = tabs.first(where: { tab in
                 switch tab.kind {
-                case .shellMain, .shell:
+                case .shell, .shellSession:
                     return true
                 case .ssh:
                     return false
                 }
-            }.count
-            var newId = self.nextShellId
-            while self.tabs.contains(where: { $0.id == newId }) {
-                newId &+= 1
+            }) {
+                selectedId = shellTab.id
+            } else if let first = tabs.first {
+                selectedId = first.id
             }
-            self.nextShellId = newId &+ 1
-            let title = "Shell \(shellCount + 1)"
-            let session = ShellRuntimeSession(sessionId: newId, argv: argv)
-            guard session.start() else {
-                let err = session.lastStartErrno
-                result = -(err == 0 ? EIO : err)
-                return
-            }
-            let tab = Tab(id: newId, title: title, kind: .shell(session))
-            self.tabs.append(tab)
-            self.selectedId = newId
-        }
-        if Thread.isMainThread {
-            action()
-        } else {
-            DispatchQueue.main.sync(execute: action)
-        }
-        return result
-    }
-
-    func openSshSession(argv: [String]) -> Int32 {
-        var result: Int32 = 0
-        let action = {
-            if self.hasActiveSshSession {
-                errno = EBUSY
-                result = -1
-                return
-            }
-            let sessionId = UInt64(Date().timeIntervalSince1970 * 1000.0)
-            let session = SshRuntimeSession(sessionId: sessionId, argv: argv)
-            guard session.start() else {
-                let err = session.lastStartErrno
-                result = -(err == 0 ? EIO : err)
-                return
-            }
-            let title = self.sshTitle(argv: argv)
-            let tab = Tab(id: sessionId, title: title, kind: .ssh(session))
-            self.tabs.append(tab)
-            self.selectedId = sessionId
-        }
-        if Thread.isMainThread {
-            action()
-        } else {
-            DispatchQueue.main.sync(execute: action)
-        }
-        return result
-    }
-
-    func handleSessionExit(sessionId: UInt64, status: Int32) {
-        let action = {
-            guard let index = self.tabs.firstIndex(where: { $0.id == sessionId }) else { return }
-            switch self.tabs[index].kind {
-            case .shellMain:
-                return
-            case .shell(let session):
-                session.markExited(status: status)
-            case .ssh(let session):
-                session.markExited(status: status)
-            }
-            self.tabs.remove(at: index)
-            if self.selectedId == sessionId {
-                if let shellTab = self.tabs.first(where: { tab in
-                    switch tab.kind {
-                    case .shellMain, .shell:
-                        return true
-                    case .ssh:
-                        return false
-                    }
-                }) {
-                    self.selectedId = shellTab.id
-                } else if let first = self.tabs.first {
-                    self.selectedId = first.id
-                }
-            }
-        }
-        if Thread.isMainThread {
-            action()
-        } else {
-            DispatchQueue.main.async(execute: action)
         }
     }
 
     var selectedTab: Tab {
         tabs.first(where: { $0.id == selectedId }) ?? tabs[0]
+    }
+
+    func sendInputToSelected(_ text: String) {
+        guard !text.isEmpty else { return }
+        tabInitLog("sendInputToSelected len=\(text.utf8.count) selectedId=\(selectedId)")
+        switch selectedTab.kind {
+        case .shell(let runtime):
+            runtime.send(text)
+        case .shellSession(let session):
+            session.send(text)
+        case .ssh(let session):
+            session.send(text)
+        }
     }
 
     private func sshTitle(argv: [String]) -> String {
@@ -158,6 +165,11 @@ final class TerminalTabManager: ObservableObject {
         }
         return "SSH"
     }
+
+    private func logMultiTab(_ message: String) {
+        guard Self.multiTabDebugEnabled else { return }
+        runtimeDebugLog("[MultiTab] \(message)")
+    }
 }
 
 struct TerminalTabsRootView: View {
@@ -166,7 +178,16 @@ struct TerminalTabsRootView: View {
     var body: some View {
         VStack(spacing: 0) {
             TerminalTabBar(tabs: manager.tabs, selectedId: $manager.selectedId)
-            selectedContent
+            ZStack {
+                ForEach(manager.tabs) { tab in
+                    let isSelected = tab.id == manager.selectedId
+                    tabContent(for: tab, isSelected: isSelected)
+                        .opacity(isSelected ? 1 : 0)
+                        .allowsHitTesting(isSelected)
+                        .accessibilityHidden(!isSelected)
+                        .zIndex(isSelected ? 1 : 0)
+                }
+            }
         }
         .onChange(of: manager.selectedId) { _ in
             NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
@@ -174,14 +195,14 @@ struct TerminalTabsRootView: View {
     }
 
     @ViewBuilder
-    private var selectedContent: some View {
-        switch manager.selectedTab.kind {
-        case .shellMain:
-            TerminalView(showsOverlay: true)
-        case .shell(let session):
-            ShellTerminalView(session: session)
+    private func tabContent(for tab: TerminalTabManager.Tab, isSelected: Bool) -> some View {
+        switch tab.kind {
+        case .shell(let runtime):
+            TerminalView(showsOverlay: true, isActive: isSelected, runtime: runtime)
+        case .shellSession(let session):
+            ShellTerminalView(session: session, isActive: isSelected)
         case .ssh(let session):
-            SshTerminalView(session: session)
+            SshTerminalView(session: session, isActive: isSelected)
         }
     }
 }
@@ -223,6 +244,7 @@ private struct TerminalTabBar: View {
     }
 }
 
+@MainActor
 private struct TerminalTabButton: View {
     let title: String
     let isSelected: Bool
@@ -244,6 +266,27 @@ private struct TerminalTabButton: View {
     }
 }
 
+private func runOnMainBlocking<T>(_ label: String, work: @MainActor @escaping () -> T) -> T? {
+    let start = DispatchTime.now()
+    tabInitLog("\(label) enqueue thread=\(Thread.isMainThread ? "main" : "bg")")
+    if Thread.isMainThread {
+        return MainActor.assumeIsolated {
+            work()
+        }
+    }
+    var result: T?
+    let semaphore = DispatchSemaphore(value: 0)
+    Task { @MainActor in
+        result = work()
+        semaphore.signal()
+    }
+    semaphore.wait()
+    let end = DispatchTime.now()
+    let elapsedMs = Double(end.uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000.0
+    tabInitLog("\(label) completed wait_ms=\(String(format: "%.1f", elapsedMs))")
+    return result
+}
+
 @_cdecl("pscalRuntimeOpenSshSession")
 func pscalRuntimeOpenSshSession(_ argc: Int32,
                                 _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> Int32 {
@@ -257,20 +300,30 @@ func pscalRuntimeOpenSshSession(_ argc: Int32,
             args.append("")
         }
     }
-    return TerminalTabManager.shared.openSshSession(argv: args)
+    if let result = runOnMainBlocking("openSshSession", work: { TerminalTabManager.shared.openSshSession(argv: args) }) {
+        return result
+    }
+    return -EAGAIN
 }
 
 @_cdecl("pscalRuntimeOpenShellTab")
 func pscalRuntimeOpenShellTab() -> Int32 {
-    return TerminalTabManager.shared.openShellTab()
+    if let result = runOnMainBlocking("openShellTab", work: { TerminalTabManager.shared.openShellTab() }) {
+        return result
+    }
+    return -EAGAIN
 }
 
 @_cdecl("pscalRuntimeSshSessionExited")
 func pscalRuntimeSshSessionExited(_ sessionId: UInt64, _ status: Int32) {
-    TerminalTabManager.shared.handleSessionExit(sessionId: sessionId, status: status)
+    Task { @MainActor in
+        TerminalTabManager.shared.handleSessionExit(sessionId: sessionId, status: status)
+    }
 }
 
 @_cdecl("pscalRuntimeShellSessionExited")
 func pscalRuntimeShellSessionExited(_ sessionId: UInt64, _ status: Int32) {
-    TerminalTabManager.shared.handleSessionExit(sessionId: sessionId, status: status)
+    Task { @MainActor in
+        TerminalTabManager.shared.handleSessionExit(sessionId: sessionId, status: status)
+    }
 }

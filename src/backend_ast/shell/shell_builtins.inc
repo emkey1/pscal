@@ -3781,12 +3781,19 @@ typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
 
 #define SHELL_TOOL_THREAD_STACK_SZ (8 * 1024 * 1024)
 
+typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+extern PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) __attribute__((weak));
+extern void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) __attribute__((weak));
+
 typedef struct {
     ShellToolEntryFn entry;
     int argc;
     char **argv;
     bool argv_owned;
     FrontendKind frontend_kind;
+    VProcSessionStdio *session_stdio;
+    VProc *session_vproc;
+    PSCALRuntimeContext *runtime_ctx;
     int stdout_fd;
     int stderr_fd;
     int status;
@@ -3814,8 +3821,31 @@ static void *shellToolThreadMain(void *arg) {
         return NULL;
     }
     bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            fprintf(stderr,
+                    "[tool-thread] runtime ctx=%p\n",
+                    (void *)ctx->runtime_ctx);
+        }
+    }
+    VProcSessionStdio *prev_stdio = vprocSessionStdioCurrent();
+    if (ctx->session_stdio) {
+        vprocSessionStdioActivate(ctx->session_stdio);
+    }
+    bool vproc_active = false;
+    if (ctx->session_vproc) {
+        vprocRegisterThread(ctx->session_vproc, pthread_self());
+        vprocActivate(ctx->session_vproc);
+        vproc_active = true;
+    }
     if (dbg) {
-        fprintf(stderr, "[tool-thread] worker start argc=%d entry=%p\n", ctx->argc, (void *)ctx->entry);
+        fprintf(stderr, "[tool-thread] worker start argc=%d entry=%p vproc=%p\n",
+                ctx->argc, (void *)ctx->entry, (void *)ctx->session_vproc);
     }
     (void)ctx->stdout_fd;
     (void)ctx->stderr_fd;
@@ -3895,6 +3925,15 @@ static void *shellToolThreadMain(void *arg) {
     /* Restore signal handler */
     sigaction(SIGINT, &old_sa, NULL);
     sigaction(SIGTSTP, &old_sa_tstp, NULL);
+    if (ctx->session_stdio) {
+        vprocSessionStdioActivate(prev_stdio);
+    }
+    if (vproc_active) {
+        vprocDeactivate();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+    }
     if (dbg) {
         fprintf(stderr, "[tool-thread] worker done status=%d\n", ctx->status);
     }
@@ -3958,8 +3997,21 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
         context->main_thread = pthread_self();
         context->frontend_kind = frontend_kind;
         context->use_shell_context = use_shell_context;
+        context->session_stdio = vprocSessionStdioCurrent();
+        context->session_vproc = vprocCurrent();
+        context->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+            ? PSCALRuntimeGetCurrentRuntimeContext()
+            : NULL;
         context->stdout_fd = dup(STDOUT_FILENO);
         context->stderr_fd = dup(STDERR_FILENO);
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            fprintf(stderr,
+                    "[tool-thread] spawn bg stdio=%p vproc=%p stdout_fd=%d stderr_fd=%d\n",
+                    (void *)context->session_stdio,
+                    (void *)context->session_vproc,
+                    context->stdout_fd,
+                    context->stderr_fd);
+        }
 
         pthread_attr_t attr;
         pthread_attr_init(&attr);
@@ -3984,9 +4036,20 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
     context.main_thread = pthread_self();
     context.frontend_kind = frontend_kind;
     context.use_shell_context = use_shell_context;
+    context.session_stdio = vprocSessionStdioCurrent();
+    context.session_vproc = vprocCurrent();
+    context.runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+        ? PSCALRuntimeGetCurrentRuntimeContext()
+        : NULL;
     /* Foreground runs keep the caller's stdio; use -1 to skip dup2. */
     context.stdout_fd = -1;
     context.stderr_fd = -1;
+    if (getenv("PSCALI_VPROC_DEBUG")) {
+        fprintf(stderr,
+                "[tool-thread] spawn fg stdio=%p vproc=%p\n",
+                (void *)context.session_stdio,
+                (void *)context.session_vproc);
+    }
 
     /* Block SIGINT and SIGURG on Main */
     sigset_t new_mask, old_mask;
@@ -4057,6 +4120,12 @@ static int __attribute__((unused)) shellSpawnToolProcess(const char *tool_name, 
         (void)tool_name;
         return kShellToolRunnerUnavailable;
     }
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (session && !vprocSessionStdioIsDefault(session)) {
+        return kShellToolRunnerUnavailable;
+    }
+#endif
 
     size_t child_count = (size_t)argc + 1; // runner path + tool argv vector
     char **child_argv = (char **)calloc(child_count + 1, sizeof(char *));
@@ -10424,11 +10493,13 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         int status = 0;
         pid_t res = vprocWaitPidShim(pid, &status, terminate ? 0 : (WNOHANG | WUNTRACED | WCONTINUED));
         if (res > 0 && (WIFEXITED(status) || WIFSIGNALED(status))) {
-            job->pids[i] = -1;
+            if (!terminate) {
+                job->pids[i] = -1;
+            }
         } else if (res > 0 && WIFSTOPPED(status)) {
             job->stopped = true;
             job->running = false;
-        } else if (terminate) {
+        } else if (!terminate) {
             job->pids[i] = -1;
         }
     }

@@ -51,6 +51,13 @@ const native = new Proxy({}, {
     },
 });
 
+const debugEnabled = window.PSCALI_HERM_DEBUG === true;
+const debugLog = (message) => {
+    if (debugEnabled) {
+        native.log(message);
+    }
+};
+
 // Functions for native -> JS
 window.exports = {};
 
@@ -63,9 +70,56 @@ function syncProp(name, value) {
         native.propUpdate(name, value);
 }
 let decoder = new TextDecoder();
+let didLogFirstWrite = false;
+let writeLogCount = 0;
 exports.write = (data) => {
-    term.io.writeUTF16(decoder.decode(lib.codec.stringToCodeUnitArray(data)));
+    const payload = data == null ? '' : String(data);
+    const bytes = lib.codec.stringToCodeUnitArray(payload);
+    term.io.writeUTF16(decoder.decode(bytes));
     syncProp('applicationCursor', term.keyboard.applicationCursor);
+    if (debugEnabled && (!didLogFirstWrite || writeLogCount < 3)) {
+        didLogFirstWrite = true;
+        writeLogCount += 1;
+        const rowCount = term.getRowCount();
+        let rowText = '';
+        const cursor = term.screen_ && term.screen_.cursorPosition ? term.screen_.cursorPosition : null;
+        const cursorInfo = cursor ? ('cursor=' + cursor.row + ',' + cursor.column) : 'cursor=?';
+        const cursorRow = cursor ? cursor.row : 0;
+        if (rowCount > 0) {
+            try {
+                rowText = term.getRowText(cursorRow) || '';
+            } catch (err) {
+                rowText = '<rowText error>';
+            }
+        }
+        const safeText = rowText.replace(/\s+/g, ' ').slice(0, 120);
+        const maxDump = Math.min(bytes.length, 64);
+        const hex = [];
+        const ascii = [];
+        for (let i = 0; i < maxDump; i++) {
+            const value = bytes[i];
+            hex.push(value.toString(16).padStart(2, '0'));
+            ascii.push(value >= 0x20 && value <= 0x7E ? String.fromCharCode(value) : '.');
+        }
+        const active = (term.io && term.io.terminal_ && term.io.terminal_.io === term.io);
+        debugLog('writeBytes len=' + bytes.length + ' rows=' + rowCount + ' ' + cursorInfo +
+                 ' activeIo=' + active +
+                 ' text="' + safeText + '"' +
+                 ' hex=' + hex.join('') +
+                 ' ascii="' + ascii.join('') + '"');
+        if (writeLogCount == 1) {
+            const screen = term.scrollPort_ && term.scrollPort_.screen_ ? term.scrollPort_.screen_ : null;
+            if (screen && window.getComputedStyle) {
+                const style = window.getComputedStyle(screen);
+                debugLog('screen style visibility=' + style.visibility +
+                         ' opacity=' + style.opacity +
+                         ' color=' + style.color +
+                         ' fontSize=' + style.fontSize +
+                         ' height=' + style.height +
+                         ' width=' + style.width);
+            }
+        }
+    }
 };
 term.io.sendString = term.io.onVTKeyStroke = (data) => {
     native.sendInput(data);
@@ -147,6 +201,9 @@ exports.updateStyle = ({foregroundColor, backgroundColor, fontFamily, fontSize, 
     term.getPrefs().set('color-palette-overrides', colorPaletteOverrides);
     term.getPrefs().set('cursor-blink', blinkCursor);
     term.getPrefs().set('cursor-shape', cursorShape);
+    if (debugEnabled) {
+        debugLog('updateStyle fg=' + foregroundColor + ' bg=' + backgroundColor);
+    }
 };
 
 exports.getCharacterSize = () => {
@@ -160,5 +217,11 @@ hterm.openUrl = (url) => native.openLink(url);
 
 native.load();
 native.syncFocus();
+if (debugEnabled) {
+    debugLog('terminalReady');
+    if (term.scrollPort_ && term.scrollPort_.screen_) {
+        term.scrollPort_.screen_.style.outline = '1px solid #FF0000';
+    }
+}
 
 }

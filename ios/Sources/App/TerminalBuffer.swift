@@ -165,6 +165,7 @@ final class TerminalBuffer {
     private var suppressNextRemoteLF: Bool = false
     private var utf8ContinuationBytes: Int = 0
     private var utf8Codepoint: UInt32 = 0
+    private var utf8ReplayByte: UInt8? = nil
     
     private(set) var bracketedPasteEnabled: Bool = false
     private(set) var insertMode: Bool = false
@@ -504,6 +505,12 @@ final class TerminalBuffer {
                     if byte >= 0x20 {
                         if let scalar = decodeUTF8Byte(byte) {
                             insertCharacter(Character(scalar))
+                            if let replay = utf8ReplayByte {
+                                utf8ReplayByte = nil
+                                if let replayScalar = decodeUTF8Byte(replay) {
+                                    insertCharacter(Character(replayScalar))
+                                }
+                            }
                         }
                     }
                 }
@@ -523,6 +530,7 @@ final class TerminalBuffer {
         private func resetUTF8Decoder() {
             utf8ContinuationBytes = 0
             utf8Codepoint = 0
+            utf8ReplayByte = nil
         }
 
         private func decodeUTF8Byte(_ byte: UInt8) -> UnicodeScalar? {
@@ -549,6 +557,7 @@ final class TerminalBuffer {
             } else {
                 if (byte & 0xC0) != 0x80 {
                     resetUTF8Decoder()
+                    utf8ReplayByte = byte
                     return UnicodeScalar(0xFFFD)
                 }
                 utf8Codepoint = (utf8Codepoint << 6) | UInt32(byte & 0x3F)

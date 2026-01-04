@@ -4,6 +4,22 @@ import Darwin
 
 final class SshRuntimeSession: ObservableObject {
     let sessionId: UInt64
+    private static let htermDebugEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if let value = env["PSCALI_HERM_DEBUG"] {
+            return value != "0"
+        }
+        if let value = env["PSCALI_PTY_OUTPUT_LOG"] {
+            return value != "0"
+        }
+        return false
+    }()
+    private static func logHterm(_ message: String) {
+        guard htermDebugEnabled else { return }
+        if let data = (message + "\n").data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
+    }
 
     @Published private(set) var screenText: NSAttributedString
     @Published private(set) var cursorInfo: TerminalCursorInfo?
@@ -44,28 +60,70 @@ final class SshRuntimeSession: ObservableObject {
     private var usesPty = false
     private var pendingColumns: Int
     private var pendingRows: Int
+    private var runtimeContext: OpaquePointer?
     private var handlerContext: UnsafeMutableRawPointer?
+    private let outputHandlerGroup = DispatchGroup()
     private var directOutput = false
-    private var htermController: HtermTerminalController?
+    let htermController: HtermTerminalController
+    private var htermAttached = false
+    private func withRuntimeContext<T>(_ body: () -> T) -> T {
+        guard let runtimeContext else {
+            return body()
+        }
+        let previous = PSCALRuntimeGetCurrentRuntimeContext()
+        PSCALRuntimeSetCurrentRuntimeContext(runtimeContext)
+        defer { PSCALRuntimeSetCurrentRuntimeContext(previous) }
+        return body()
+    }
     private lazy var sessionOutputHandler: PSCALRuntimeSessionOutputHandler = { sessionId, data, length, context in
         guard let context, let data else { return }
-        let session = Unmanaged<SshRuntimeSession>.fromOpaque(context).takeUnretainedValue()
+        let unmanaged = Unmanaged<SshRuntimeSession>.fromOpaque(context)
+        let session = unmanaged.takeUnretainedValue()
+        session.outputHandlerGroup.enter()
         session.consumeOutput(buffer: data, length: Int(length))
+        session.outputHandlerGroup.leave()
     }
 
     init(sessionId: UInt64, argv: [String]) {
         self.sessionId = sessionId
         self.argv = argv
+        self.runtimeContext = PSCALRuntimeCreateRuntimeContext()
         let metrics = PscalRuntimeBootstrap.defaultGeometryMetrics()
         self.pendingColumns = metrics.columns
         self.pendingRows = metrics.rows
         self.screenText = NSAttributedString(string: "Launching ssh...")
+        self.htermController = HtermTerminalController.makeOnMainThread()
         _ = terminalBuffer
+    }
+
+    deinit {
+        if let runtimeContext = runtimeContext {
+            PSCALRuntimeDestroyRuntimeContext(runtimeContext)
+        }
     }
 
     func attachHtermController(_ controller: HtermTerminalController?) {
         outputQueue.async {
-            self.htermController = controller
+            guard let controller else {
+                Self.logHterm("Hterm: attach ssh session=\(self.sessionId) (nil controller)")
+                return
+            }
+            guard controller === self.htermController else {
+                Self.logHterm("Hterm[\(controller.instanceId)]: attach ssh session=\(self.sessionId) ignored (unexpected controller)")
+                return
+            }
+            Self.logHterm("Hterm[\(controller.instanceId)]: attach ssh session=\(self.sessionId)")
+            self.htermAttached = true
+        }
+    }
+
+    func detachHtermController(_ controller: HtermTerminalController) {
+        outputQueue.async {
+            guard controller === self.htermController else {
+                return
+            }
+            Self.logHterm("Hterm[\(controller.instanceId)]: detach ssh session=\(self.sessionId)")
+            self.htermAttached = false
         }
     }
 
@@ -78,10 +136,15 @@ final class SshRuntimeSession: ObservableObject {
         }
         guard shouldStart else { return false }
 
+        withRuntimeContext {
+            PSCALRuntimeRegisterSessionContext(sessionId)
+        }
         directOutput = usesDirectPtyOutput()
         if directOutput {
-            handlerContext = Unmanaged.passUnretained(self).toOpaque()
-            PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
+            handlerContext = Unmanaged.passRetained(self).toOpaque()
+            withRuntimeContext {
+                PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
+            }
         }
 
         var readFd: Int32 = -1
@@ -140,7 +203,9 @@ final class SshRuntimeSession: ObservableObject {
             scheduleRender()
         }
         if usesPty {
-            _ = PSCALRuntimeSetSessionWinsize(sessionId, Int32(clampedColumns), Int32(clampedRows))
+            withRuntimeContext {
+                _ = PSCALRuntimeSetSessionWinsize(sessionId, Int32(clampedColumns), Int32(clampedRows))
+            }
         } else if masterFd >= 0 {
             applyWindowSize(fd: masterFd, columns: clampedColumns, rows: clampedRows)
         }
@@ -163,6 +228,13 @@ final class SshRuntimeSession: ObservableObject {
             closeIfValid(fd)
         }
         childFds.removeAll()
+        withRuntimeContext {
+            PSCALRuntimeUnregisterSessionContext(sessionId)
+        }
+        if let runtimeContext = runtimeContext {
+            PSCALRuntimeDestroyRuntimeContext(runtimeContext)
+            self.runtimeContext = nil
+        }
         if let status {
             DispatchQueue.main.async {
                 self.exitStatus = status
@@ -192,8 +264,12 @@ final class SshRuntimeSession: ObservableObject {
     private func stopOutputPump() {
         outputSource?.cancel()
         outputSource = nil
-        if directOutput && handlerContext != nil {
-            PSCALRuntimeUnregisterSessionOutputHandler(sessionId)
+        if directOutput, let context = handlerContext {
+            withRuntimeContext {
+                PSCALRuntimeUnregisterSessionOutputHandler(sessionId)
+            }
+            outputHandlerGroup.wait()
+            Unmanaged<SshRuntimeSession>.fromOpaque(context).release()
             handlerContext = nil
         }
     }
@@ -201,11 +277,17 @@ final class SshRuntimeSession: ObservableObject {
     private func drainOutput() {
         guard masterFd >= 0 else { return }
         var buffer = [UInt8](repeating: 0, count: 8192)
-        while true {
+        var totalRead = 0
+        var iterations = 0
+        let maxIterations = 8
+        let maxBytes = 64 * 1024
+        while iterations < maxIterations && totalRead < maxBytes {
             let readCount = read(masterFd, &buffer, buffer.count)
             if readCount > 0 {
+                totalRead += readCount
+                iterations += 1
                 let data = Data(buffer[0..<readCount])
-                htermController?.enqueueOutput(data)
+                htermController.enqueueOutput(data)
                 terminalBuffer.append(data: data)
                 continue
             }
@@ -219,12 +301,17 @@ final class SshRuntimeSession: ObservableObject {
             markExited(status: nil)
             break
         }
+        if totalRead >= maxBytes || iterations >= maxIterations {
+            outputQueue.async { [weak self] in
+                self?.drainOutput()
+            }
+        }
     }
 
     // MARK: - Rendering
 
     private func scheduleRender() {
-        if htermController != nil {
+        if htermAttached {
             return
         }
         if renderQueued {
@@ -247,7 +334,7 @@ final class SshRuntimeSession: ObservableObject {
     }
 
     private func performRender() {
-        if htermController != nil {
+        if htermAttached {
             renderQueued = false
             return
         }
@@ -266,10 +353,12 @@ final class SshRuntimeSession: ObservableObject {
         inputQueue.async { [weak self] in
             guard let self else { return }
             if self.directOutput {
-                data.withUnsafeBytes { buffer in
-                    guard let base = buffer.baseAddress else { return }
-                    let ptr = base.assumingMemoryBound(to: CChar.self)
-                    PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
+                self.withRuntimeContext {
+                    data.withUnsafeBytes { buffer in
+                        guard let base = buffer.baseAddress else { return }
+                        let ptr = base.assumingMemoryBound(to: CChar.self)
+                        PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
+                    }
                 }
                 return
             }
@@ -286,7 +375,7 @@ final class SshRuntimeSession: ObservableObject {
         let data = Data(bytes: buffer, count: length)
         outputQueue.async { [weak self] in
             guard let self else { return }
-            self.htermController?.enqueueOutput(data)
+            self.htermController.enqueueOutput(data)
             self.terminalBuffer.append(data: data)
         }
     }
@@ -294,6 +383,7 @@ final class SshRuntimeSession: ObservableObject {
     private func launchSshSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {
         guard !argv.isEmpty else { return false }
         var cStrings: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) }
+        cStrings.append(nil)
         defer {
             for ptr in cStrings {
                 if let ptr {
@@ -304,11 +394,13 @@ final class SshRuntimeSession: ObservableObject {
         let argc = Int32(argv.count)
         let result = cStrings.withUnsafeMutableBufferPointer { buffer -> Int32 in
             guard let base = buffer.baseAddress else { return -1 }
-            return PSCALRuntimeCreateSshSession(argc,
-                                                base,
-                                                sessionId,
-                                                &readFd,
-                                                &writeFd)
+            return withRuntimeContext {
+                PSCALRuntimeCreateSshSession(argc,
+                                             base,
+                                             sessionId,
+                                             &readFd,
+                                             &writeFd)
+            }
         }
         return result == 0
     }

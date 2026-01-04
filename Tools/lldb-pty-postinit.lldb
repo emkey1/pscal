@@ -1,0 +1,6 @@
+# Post-init PTY snapshot: installs a breakpoint via Python so commands attach reliably.
+# Source this file in lldb when you want the dump:
+#   (lldb) command source /Users/mke/PBuild/tools/lldb-pty-postinit.lldb
+#
+# Note: If line numbers drift, update the line in tools/lldb_pty_postinit.py.
+command script import /Users/mke/PBuild/tools/lldb_pty_postinit.py

@@ -31,7 +31,9 @@ final class EditorWindowManager {
         preferenceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.preferencesDidChangeNotification,
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
-            self?.applyPreferenceChange()
+            Task { @MainActor in
+                self?.applyPreferenceChange()
+            }
         }
     }
 
@@ -124,15 +126,30 @@ final class EditorWindowManager {
                                                            errorHandler: nil)
     }
 
+    @MainActor
     private func applyPreferenceChange() {
         if EditorWindowManager.externalWindowEnabled {
-            if EditorTerminalBridge.shared.isActive {
+            if activeEditorBridge()?.isActive == true {
                 showWindow()
                 refreshWindow()
             }
         } else {
             hideWindow()
         }
+    }
+
+    @MainActor
+    private func activeEditorBridge() -> EditorTerminalBridge? {
+        let manager = TerminalTabManager.shared
+        for tab in manager.tabs {
+            if case .shell(let runtime) = tab.kind, runtime.editorBridge.isActive {
+                return runtime.editorBridge
+            }
+        }
+        if case .shell(let runtime) = manager.selectedTab.kind {
+            return runtime.editorBridge
+        }
+        return nil
     }
 }
 

@@ -80,6 +80,15 @@ final class TerminalKeyInputView: UITextView {
     var onPaste: ((String) -> Void)?
     var onInterrupt: (() -> Void)?
     var onSuspend: (() -> Void)?
+    var onFocusChange: ((Bool) -> Void)?
+    var inputEnabled: Bool = true {
+        didSet {
+            if !inputEnabled && isFirstResponder {
+                _ = resignFirstResponder()
+            }
+        }
+    }
+    var applicationCursorEnabled: Bool = false
     private var hardwareKeyboardConnected: Bool = false
     private var softKeyboardVisible: Bool = false
     private var keyboardObservers: [NSObjectProtocol] = []
@@ -209,11 +218,30 @@ final class TerminalKeyInputView: UITextView {
         makeCommand(input: UIKeyCommand.inputDownArrow, output: "\u{1B}[B")
         makeCommand(input: UIKeyCommand.inputLeftArrow, output: "\u{1B}[D")
         makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
-        makeCommand(input: "\r", output: "\n")
+        makeCommand(input: "\r", output: "\r")
         return commands
     }
 
-    override var canBecomeFirstResponder: Bool { true }
+    override var canBecomeFirstResponder: Bool {
+        inputEnabled && super.canBecomeFirstResponder
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        guard inputEnabled else { return false }
+        let became = super.becomeFirstResponder()
+        if became {
+            onFocusChange?(true)
+        }
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            onFocusChange?(false)
+        }
+        return resigned
+    }
 
     override var keyCommands: [UIKeyCommand]? {
         var commands = repeatKeyCommands.map { $0.command }
@@ -265,7 +293,8 @@ final class TerminalKeyInputView: UITextView {
                 return
             }
         }
-        onInput?(text)
+        let normalized = text.replacingOccurrences(of: "\n", with: "\r")
+        onInput?(normalized)
     }
 
     override func deleteBackward() {
@@ -354,7 +383,33 @@ final class TerminalKeyInputView: UITextView {
         super.pressesCancelled(presses, with: event)
     }
 
+    private func arrowSequence(_ direction: String) -> String {
+        let prefix = applicationCursorEnabled ? "\u{1B}O" : "\u{1B}["
+        return prefix + direction
+    }
+
     @objc private func handleRepeatCommand(_ command: UIKeyCommand) {
+        if let input = command.input {
+            switch input {
+            case UIKeyCommand.inputUpArrow:
+                onInput?(arrowSequence("A"))
+                return
+            case UIKeyCommand.inputDownArrow:
+                onInput?(arrowSequence("B"))
+                return
+            case UIKeyCommand.inputLeftArrow:
+                onInput?(arrowSequence("D"))
+                return
+            case UIKeyCommand.inputRightArrow:
+                onInput?(arrowSequence("C"))
+                return
+            case "\r":
+                onInput?("\r")
+                return
+            default:
+                break
+            }
+        }
         if let match = repeatKeyCommands.first(where: { $0.command === command }) {
             onInput?(match.output)
             return
@@ -362,15 +417,15 @@ final class TerminalKeyInputView: UITextView {
         guard let input = command.input else { return }
         switch input {
         case UIKeyCommand.inputUpArrow:
-            onInput?("\u{1B}[A")
+            onInput?(arrowSequence("A"))
         case UIKeyCommand.inputDownArrow:
-            onInput?("\u{1B}[B")
+            onInput?(arrowSequence("B"))
         case UIKeyCommand.inputLeftArrow:
-            onInput?("\u{1B}[D")
+            onInput?(arrowSequence("D"))
         case UIKeyCommand.inputRightArrow:
-            onInput?("\u{1B}[C")
+            onInput?(arrowSequence("C"))
         case "\r":
-            onInput?("\n")
+            onInput?("\r")
         default:
             onInput?(input)
         }
@@ -434,10 +489,13 @@ final class TerminalKeyInputView: UITextView {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
+                guard self.inputEnabled else { return }
+                guard self.window != nil else { return }
+                guard !self.softKeyboardVisible else { return }
                 self.softKeyboardVisible = true
                 self.hardwareKeyboardConnected = false
-                self.reloadInputViews()
                 if self.isFirstResponder {
+                    self.reloadInputViews()
                     self.onInput?(" ")
                     self.onInput?("\u{08}")
                 }
@@ -451,9 +509,12 @@ final class TerminalKeyInputView: UITextView {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
+                guard self.inputEnabled else { return }
+                guard self.window != nil else { return }
+                guard self.softKeyboardVisible else { return }
                 self.softKeyboardVisible = false
-                self.reloadInputViews()
                 if self.isFirstResponder {
+                    self.reloadInputViews()
                     self.onInput?(" ")
                     self.onInput?("\u{08}")
                 }
@@ -467,6 +528,8 @@ final class TerminalKeyInputView: UITextView {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
+                guard self.inputEnabled else { return }
+                guard self.window != nil else { return }
                 if !self.isFirstResponder {
                     self.becomeFirstResponder()
                 } else if !self.softKeyboardVisible {
@@ -497,19 +560,19 @@ final class TerminalKeyInputView: UITextView {
     }
 
     @objc private func handleUp() {
-        onInput?("\u{1B}[A")
+        onInput?(arrowSequence("A"))
     }
 
     @objc private func handleDown() {
-        onInput?("\u{1B}[B")
+        onInput?(arrowSequence("B"))
     }
 
     @objc private func handleLeft() {
-        onInput?("\u{1B}[D")
+        onInput?(arrowSequence("D"))
     }
 
     @objc private func handleRight() {
-        onInput?("\u{1B}[C")
+        onInput?(arrowSequence("C"))
     }
 
     @objc private func handleFSlash() {

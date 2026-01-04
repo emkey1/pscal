@@ -2865,6 +2865,35 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     if (job_id <= 0 && pid_count > 0) {
         job_id = vprocGetJobId(pids[0]);
     }
+    if (job_id > 0) {
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            ShellJob *existing = &gShellJobs[i];
+            if (existing->id != (size_t)job_id) {
+                continue;
+            }
+            bool same_job = (existing->pgid == pgid);
+            if (!same_job && existing->pids && existing->pid_count > 0) {
+                for (size_t j = 0; j < existing->pid_count; ++j) {
+                    if (existing->pids[j] <= 0) {
+                        continue;
+                    }
+                    for (size_t k = 0; k < pid_count; ++k) {
+                        if (existing->pids[j] == pids[k]) {
+                            same_job = true;
+                            break;
+                        }
+                    }
+                    if (same_job) {
+                        break;
+                    }
+                }
+            }
+            if (!same_job) {
+                job_id = 0;
+            }
+            break;
+        }
+    }
     if (job_id <= 0) {
         job_id = (int)shellAllocateJobId();
         vprocSetJobId(pgid, job_id);

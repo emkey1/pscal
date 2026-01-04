@@ -7,13 +7,17 @@ import os
 
 struct TerminalView: View {
     let showsOverlay: Bool
+    let isActive: Bool
+    @ObservedObject var runtime: PscalRuntimeBootstrap
 
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @State private var showingSettings = false
     @State private var focusAnchor: Int = 0
 
-    init(showsOverlay: Bool = true) {
+    init(showsOverlay: Bool = true, isActive: Bool = true, runtime: PscalRuntimeBootstrap) {
         self.showsOverlay = showsOverlay
+        self.isActive = isActive
+        _runtime = ObservedObject(wrappedValue: runtime)
     }
 
     var body: some View {
@@ -22,8 +26,12 @@ struct TerminalView: View {
                 TerminalContentView(
                     availableSize: proxy.size,
                     fontSettings: fontSettings,
-                    focusAnchor: $focusAnchor
+                    focusAnchor: $focusAnchor,
+                    isActive: isActive,
+                    runtime: runtime
                 )
+                // Ensure each tab's terminal view gets its own UIKit backing view.
+                .id(runtime.runtimeId)
                 // We must frame the content view to the available size to ensure it fills the space
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
@@ -34,6 +42,11 @@ struct TerminalView: View {
         }
         .sheet(isPresented: $showingSettings) {
             TerminalSettingsView()
+        }
+        .onChange(of: isActive) { active in
+            if active {
+                requestInputFocus()
+            }
         }
         .onChange(of: showingSettings) { isPresented in
             if isPresented {
@@ -51,10 +64,10 @@ struct TerminalView: View {
     private var overlayButtons: some View {
         HStack(alignment: .center, spacing: 10) {
             Button {
-                PscalRuntimeBootstrap.shared.resetTerminalState()
+                runtime.resetTerminalState()
                 requestInputFocus()
-                PscalRuntimeBootstrap.shared.send(" ")
-                PscalRuntimeBootstrap.shared.send("\u{08}") // backspace
+                runtime.send(" ")
+                runtime.send("\u{08}") // backspace
             } label: {
                 Text("RT")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -74,7 +87,7 @@ struct TerminalView: View {
             .accessibilityLabel("Adjust Font Size")
             
             Button {
-                PscalRuntimeBootstrap.shared.forceExshRestart()
+                runtime.forceExshRestart()
                 requestInputFocus()
             } label: {
                 Image(systemName: "arrow.triangle.2.circlepath")
@@ -98,7 +111,6 @@ struct TerminalView: View {
 
     private func requestInputFocus() {
         focusAnchor &+= 1
-        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
     }
 }
 
@@ -110,21 +122,27 @@ struct TerminalContentView: View {
     let availableSize: CGSize
 
     @ObservedObject private var fontSettings: TerminalFontSettings
-    @ObservedObject private var runtime = PscalRuntimeBootstrap.shared
+    @ObservedObject var runtime: PscalRuntimeBootstrap
     @Binding private var focusAnchor: Int
+    private let isActive: Bool
 
     @State private var lastLoggedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
     @State private var hasMeasuredGeometry: Bool = false
     @State private var runtimeStarted: Bool = false
+    @State private var localHtermLoaded: Bool = false
 
     init(
         availableSize: CGSize,
         fontSettings: TerminalFontSettings,
-        focusAnchor: Binding<Int>
+        focusAnchor: Binding<Int>,
+        isActive: Bool,
+        runtime: PscalRuntimeBootstrap
     ) {
         self.availableSize = availableSize
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
         _focusAnchor = focusAnchor
+        self.isActive = isActive
+        _runtime = ObservedObject(wrappedValue: runtime)
     }
 
     var body: some View {
@@ -132,27 +150,67 @@ struct TerminalContentView: View {
         let elvisActive = runtime.isElvisModeActive()
         let elvisVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
+        let controller = runtime.htermControllerIfCreated() ?? (isActive ? runtime.ensureHtermController() : nil)
+        let htermReady = (controller != nil) && (runtime.htermReady || localHtermLoaded)
 
         let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
         let showElvisSnapshot = elvisActive && (!externalWindowEnabled || !elvisVisible)
         let showBlank = elvisActive && elvisVisible && externalWindowEnabled
-
         return VStack(spacing: 0) {
             ZStack {
-                HtermTerminalView(
-                    font: currentFont,
-                    foregroundColor: fontSettings.foregroundColor,
-                    backgroundColor: fontSettings.backgroundColor,
-                    onInput: handleInput,
-                    onResize: { cols, rows in
-                        runtime.updateTerminalSize(columns: cols, rows: rows)
-                        hasMeasuredGeometry = true
-                        startRuntimeIfNeeded()
-                    },
-                    onReady: { controller in
-                        runtime.attachHtermController(controller)
-                    }
-                )
+                if let controller {
+                    HtermTerminalView(
+                        controller: controller,
+                        font: currentFont,
+                        foregroundColor: fontSettings.foregroundColor,
+                        backgroundColor: fontSettings.backgroundColor,
+                        focusToken: focusAnchor,
+                        isActive: isActive,
+                        onInput: handleInput,
+                        onPaste: handlePaste,
+                        onInterrupt: { runtime.send("\u{03}") },
+                        onSuspend: { runtime.send("\u{1A}") },
+                        onResize: { cols, rows in
+                            runtime.updateTerminalSize(columns: cols, rows: rows)
+                            hasMeasuredGeometry = true
+                            startRuntimeIfNeeded()
+                        },
+                        onReady: { controller in
+                            tabInitLog("TerminalView ready runtime=\(runtime.runtimeId) controller=\(controller.instanceId) loaded=\(controller.isLoaded)")
+                            controller.onLoaded = {
+                                tabInitLog("TerminalView onLoaded runtime=\(runtime.runtimeId) controller=\(controller.instanceId)")
+                                tabInitLog("TerminalView loaded runtime=\(runtime.runtimeId) controller=\(controller.instanceId)")
+                                runtime.markHtermLoaded()
+                                DispatchQueue.main.async {
+                                    localHtermLoaded = true
+                                }
+                            }
+                            if controller.isLoaded {
+                                runtime.markHtermLoaded()
+                                DispatchQueue.main.async {
+                                    localHtermLoaded = true
+                                }
+                            }
+                            runtime.attachHtermController(controller)
+                        },
+                        onDetach: { controller in
+                            tabInitLog("TerminalView detach runtime=\(runtime.runtimeId) controller=\(controller.instanceId)")
+                            runtime.detachHtermController(controller)
+                        },
+                        onLoadStateChange: { loaded in
+                            if !loaded {
+                                tabInitLog("TerminalView loadState runtime=\(runtime.runtimeId) loaded=false")
+                                runtime.markHtermUnloaded()
+                            } else {
+                                tabInitLog("TerminalView loadState runtime=\(runtime.runtimeId) loaded=true")
+                            }
+                            DispatchQueue.main.async {
+                                localHtermLoaded = loaded
+                            }
+                        }
+                    )
+                    .zIndex(htermReady ? 1 : 0)
+                }
 
                 if showElvisSnapshot {
                     TerminalRendererView(
@@ -165,8 +223,9 @@ struct TerminalContentView: View {
                         elvisRenderToken: elvisToken,
                         font: currentFont,
                         fontPointSize: fontSettings.pointSize,
-                        elvisSnapshot: nil,
+                        elvisSnapshot: runtime.editorBridge.snapshot(),
                         onPaste: handlePaste,
+                        onInput: runtime.send,
                         mouseMode: runtime.mouseMode,
                         mouseEncoding: runtime.mouseEncoding,
                         onGeometryChange: { cols, rows in
@@ -203,18 +262,13 @@ struct TerminalContentView: View {
         .onTapGesture {
             requestInputFocus()
         }
-        .overlay(alignment: .bottomLeading) {
-            if !EditorWindowManager.shared.isVisible {
-                TerminalInputBridge(
-                    focusAnchor: $focusAnchor,
-                    onInput: handleInput,
-                    onPaste: handlePaste
-                )
-                .frame(width: 1, height: 1)
-                .allowsHitTesting(false)
+        .onChange(of: isActive) { active in
+            if active {
+                requestInputFocus()
             }
         }
         .onAppear {
+            tabInitLog("TerminalView appear runtime=\(runtime.runtimeId) active=\(isActive)")
             if !hasMeasuredGeometry {
                 updateTerminalGeometry()
             }
@@ -272,18 +326,24 @@ struct TerminalContentView: View {
             columns: grid.columns,
             rows: grid.rows
         )
+        hasMeasuredGeometry = true
 
         if lastLoggedMetrics != metrics {
             RuntimeLogger.runtime.append("[TerminalView] Geometry update: \(availableSize.width)x\(availableSize.height) -> \(metrics.columns) cols x \(metrics.rows) rows")
             lastLoggedMetrics = metrics
         }
+        tabInitLog("TerminalView geometry runtime=\(runtime.runtimeId) cols=\(metrics.columns) rows=\(metrics.rows) status=\(showingStatus)")
 
         runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 
     private func startRuntimeIfNeeded() {
-        guard hasMeasuredGeometry, !runtimeStarted else { return }
+        guard hasMeasuredGeometry, !runtimeStarted else {
+            tabInitLog("TerminalView start skip runtime=\(runtime.runtimeId) measured=\(hasMeasuredGeometry) started=\(runtimeStarted)")
+            return
+        }
         runtimeStarted = true
+        tabInitLog("TerminalView start runtime=\(runtime.runtimeId)")
         runtime.start()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             requestInputFocus()
@@ -292,6 +352,5 @@ struct TerminalContentView: View {
 
     private func requestInputFocus() {
         focusAnchor &+= 1
-        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
     }
 }

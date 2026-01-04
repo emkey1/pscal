@@ -1,8 +1,25 @@
 import SwiftUI
 import WebKit
 import UIKit
+import Foundation
 
-final class HtermTerminalController: NSObject, WKScriptMessageHandler {
+private final class HtermWebView: WKWebView {
+    override func becomeFirstResponder() -> Bool {
+        if #available(iOS 13.4, *) {
+            return super.becomeFirstResponder()
+        }
+        return false
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(copy(_:)) || action == #selector(paste(_:)) {
+            return false
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+}
+
+final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     private enum HandlerName: String, CaseIterable {
         case load
         case log
@@ -23,33 +40,135 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
     private let outputLock = NSLock()
     private var pendingOutput = Data()
     private var outputInProgress = false
+    private var reloadPending = false
+    private var didLogFirstOutput = false
+    private var didLogFirstFlush = false
     private let maxFlushBytes = 32 * 1024
+    private var hostSizeReady = false
+    private var hostSize = CGSize.zero
 
-    private var loaded = false
+    private(set) var isLoaded = false
     private var pendingStyle: TerminalStylePayload?
+    private var pendingFocus: Bool?
+    private var lastStyle: TerminalStylePayload?
+    private var lastFocus: Bool?
+    private var applicationCursor = false
+    private var scrollToBottomPending = false
 
     let webView: WKWebView
     private let userContentController: WKUserContentController
     var onInput: ((String) -> Void)?
     var onResize: ((Int, Int) -> Void)?
+    var onFocusRequested: (() -> Void)?
+    var onSyncFocus: (() -> Void)?
+    var onLoaded: (() -> Void)?
+    var onLoadStateChange: ((Bool) -> Void)?
+    var onScrollHeight: ((CGFloat) -> Void)?
+    var onScrollTop: ((CGFloat) -> Void)?
+    var onApplicationCursorChange: ((Bool) -> Void)?
+    fileprivate weak var displayContainer: HtermTerminalContainerView?
+
+    static let debugEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if let value = env["PSCALI_HERM_DEBUG"] {
+            return value != "0"
+        }
+        if let value = env["PSCALI_PTY_OUTPUT_LOG"] {
+            return value != "0"
+        }
+        return false
+    }()
+    private static var nextInstanceId: Int = 0
+    let instanceId: Int
+    private var didLogZeroHostSize = false
+    private var lastFlushBlockReason: String?
+
+    static func makeOnMainThread() -> HtermTerminalController {
+        if Thread.isMainThread {
+            return HtermTerminalController()
+        }
+        var controller: HtermTerminalController?
+        DispatchQueue.main.sync {
+            controller = HtermTerminalController()
+        }
+        return controller!
+    }
 
     override init() {
+        Self.nextInstanceId += 1
+        self.instanceId = Self.nextInstanceId
         let controller = WKUserContentController()
         let config = WKWebViewConfiguration()
         config.userContentController = controller
-        self.webView = WKWebView(frame: .zero, configuration: config)
+        let debugValue = Self.debugEnabled ? "true" : "false"
+        let debugScript = WKUserScript(
+            source: "window.PSCALI_HERM_DEBUG = \(debugValue);",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        controller.addUserScript(debugScript)
+        let instanceScript = WKUserScript(
+            source: "window.PSCALI_HERM_INSTANCE_ID = \(instanceId);",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        controller.addUserScript(instanceScript)
+        let initialFrame = CGRect(x: 0, y: 0, width: 10000, height: 10000)
+        self.webView = HtermWebView(frame: initialFrame, configuration: config)
         self.userContentController = controller
         super.init()
+        logTabInit("controller init thread=\(Thread.isMainThread ? "main" : "bg")")
         HandlerName.allCases.forEach { controller.add(WeakScriptMessageHandler(handler: self), name: $0.rawValue) }
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
+        webView.scrollView.delaysContentTouches = false
+        webView.scrollView.canCancelContentTouches = false
+        webView.scrollView.panGestureRecognizer.isEnabled = false
+        webView.navigationDelegate = self
         loadTerminalPage()
     }
 
     deinit {
         HandlerName.allCases.forEach { userContentController.removeScriptMessageHandler(forName: $0.rawValue) }
+    }
+
+    @MainActor
+    func bindDisplayContainer(_ container: HtermTerminalContainerView) {
+        displayContainer = container
+    }
+
+    @MainActor
+    func unbindDisplayContainer(_ container: HtermTerminalContainerView) {
+        if displayContainer === container {
+            displayContainer = nil
+        }
+    }
+
+    private func logTabInit(_ message: String) {
+        tabInitLog("Hterm[\(instanceId)] \(message)")
+    }
+
+    private func pendingOutputSize() -> Int {
+        outputLock.lock()
+        let count = pendingOutput.count
+        outputLock.unlock()
+        return count
+    }
+
+    private func logFlushBlocked(_ reason: String) {
+        if lastFlushBlockReason == reason {
+            return
+        }
+        lastFlushBlockReason = reason
+        logTabInit("flush blocked reason=\(reason) pending=\(pendingOutputSize()) loaded=\(isLoaded) hostReady=\(hostSizeReady)")
+    }
+
+    private func clearFlushBlocked() {
+        guard lastFlushBlockReason != nil else { return }
+        lastFlushBlockReason = nil
+        logTabInit("flush unblocked pending=\(pendingOutputSize())")
     }
 
     func attach(to view: UIView) {
@@ -71,6 +190,10 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
         if shouldFlush {
             outputInProgress = true
         }
+        if Self.debugEnabled && !didLogFirstOutput {
+            didLogFirstOutput = true
+            NSLog("Hterm[%d]: first output enqueued (%lu bytes)", instanceId, data.count)
+        }
         outputLock.unlock()
         if shouldFlush {
             DispatchQueue.main.async { [weak self] in
@@ -81,8 +204,8 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
 
     func updateStyle(font: UIFont, foreground: UIColor, background: UIColor) {
         let payload: [String: Any] = [
-            "foregroundColor": cssColor(from: foreground),
-            "backgroundColor": cssColor(from: background),
+            "foregroundColor": cssColor(from: foreground, fallback: "#FFFFFF"),
+            "backgroundColor": cssColor(from: background, fallback: "#000000"),
             "fontFamily": font.familyName,
             "fontSize": font.pointSize,
             "blinkCursor": false,
@@ -93,29 +216,87 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
             return
         }
         let style = TerminalStylePayload(json: json)
-        if loaded {
+        lastStyle = style
+        if isLoaded {
             applyStyle(style)
         } else {
             pendingStyle = style
         }
     }
 
+    func setFocused(_ focused: Bool) {
+        lastFocus = focused
+        if isLoaded {
+            applyFocus(focused)
+        } else {
+            pendingFocus = focused
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case HandlerName.load.rawValue:
-            loaded = true
+            let wasLoaded = isLoaded
+            isLoaded = true
+            logTabInit("load message wasLoaded=\(wasLoaded) hostReady=\(hostSizeReady) pending=\(pendingOutputSize())")
+            if Self.debugEnabled {
+                NSLog("Hterm[%d]: load message received", instanceId)
+            }
+            onLoaded?()
+            if !wasLoaded {
+                onLoadStateChange?(true)
+            }
             if let style = pendingStyle {
                 applyStyle(style)
                 pendingStyle = nil
+            } else if let style = lastStyle {
+                applyStyle(style)
+            }
+            if let focus = pendingFocus {
+                applyFocus(focus)
+                pendingFocus = nil
+            } else if let focus = lastFocus {
+                applyFocus(focus)
             }
             flushOutput()
             requestResize()
+        case HandlerName.log.rawValue:
+            if let message = message.body as? String {
+                NSLog("Hterm[%d] log: %@", instanceId, message)
+            }
         case HandlerName.sendInput.rawValue:
             if let input = message.body as? String {
                 onInput?(input)
             }
         case HandlerName.resize.rawValue:
             requestResize()
+        case HandlerName.propUpdate.rawValue:
+            if let payload = message.body as? [Any], payload.count == 2,
+               let name = payload[0] as? String {
+                if name == "applicationCursor" {
+                    let value = (payload[1] as? Bool) ?? (payload[1] as? NSNumber)?.boolValue ?? false
+                    if applicationCursor != value {
+                        applicationCursor = value
+                        onApplicationCursorChange?(value)
+                    }
+                }
+            }
+        case HandlerName.focus.rawValue:
+            onFocusRequested?()
+        case HandlerName.syncFocus.rawValue:
+            onSyncFocus?()
+        case HandlerName.newScrollHeight.rawValue:
+            if let value = message.body as? NSNumber {
+                onScrollHeight?(CGFloat(value.doubleValue))
+            } else if let value = message.body as? Double {
+                onScrollHeight?(CGFloat(value))
+            }
+        case HandlerName.newScrollTop.rawValue:
+            if let value = message.body as? NSNumber {
+                onScrollTop?(CGFloat(value.doubleValue))
+            } else if let value = message.body as? Double {
+                onScrollTop?(CGFloat(value))
+            }
         case HandlerName.openLink.rawValue:
             if let urlString = message.body as? String, let url = URL(string: urlString) {
                 UIApplication.shared.open(url)
@@ -126,7 +307,14 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
     }
 
     private func loadTerminalPage() {
-        guard let url = terminalPageURL() else { return }
+        guard let url = terminalPageURL() else {
+            NSLog("Hterm error: terminal page URL not found in bundle")
+            return
+        }
+        logTabInit("load page url=\(url.lastPathComponent)")
+        if Self.debugEnabled {
+            NSLog("Hterm[%d]: loading terminal page %@", instanceId, url.absoluteString)
+        }
         webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
 
@@ -138,20 +326,73 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
     }
 
     private func requestResize() {
-        webView.evaluateJavaScript("exports.getSize()") { [weak self] result, _ in
+        webView.evaluateJavaScript("exports.getSize()") { [weak self] result, error in
+            if let error = error {
+                NSLog("Hterm resize error: %@", error.localizedDescription)
+            }
             guard let self = self else { return }
             guard let array = result as? [NSNumber], array.count == 2 else { return }
             self.onResize?(array[0].intValue, array[1].intValue)
         }
     }
 
+    func updateHostSize(_ size: CGSize, reason: String) {
+        guard size.width > 0, size.height > 0 else {
+            if !didLogZeroHostSize {
+                let sizeString = NSCoder.string(for: size)
+                logTabInit("host size ignored size=\(sizeString) reason=\(reason)")
+                didLogZeroHostSize = true
+            }
+            return
+        }
+        if didLogZeroHostSize {
+            didLogZeroHostSize = false
+        }
+        let wasReady = hostSizeReady
+        let changed = size != hostSize
+        hostSize = size
+        hostSizeReady = true
+        if !wasReady || changed {
+            let sizeString = NSCoder.string(for: size)
+            logTabInit("host size ready=\(hostSizeReady) size=\(sizeString) reason=\(reason) loaded=\(isLoaded)")
+        }
+        if Self.debugEnabled && (!wasReady || changed) {
+            let sizeString = NSCoder.string(for: size)
+            NSLog("Hterm[%d]: host size %@ (%@)", instanceId, sizeString, reason)
+        }
+        if isLoaded && (!wasReady || changed) {
+            requestResize()
+        }
+        var shouldFlush = false
+        outputLock.lock()
+        if isLoaded && hostSizeReady && !pendingOutput.isEmpty && !outputInProgress {
+            outputInProgress = true
+            shouldFlush = true
+        }
+        outputLock.unlock()
+        if shouldFlush {
+            DispatchQueue.main.async { [weak self] in
+                self?.flushOutput()
+            }
+        }
+    }
+
     private func flushOutput() {
-        guard loaded else {
+        guard isLoaded else {
+            logFlushBlocked("not-loaded")
             outputLock.lock()
             outputInProgress = false
             outputLock.unlock()
             return
         }
+        if !hostSizeReady {
+            logFlushBlocked("no-host-size")
+            outputLock.lock()
+            outputInProgress = false
+            outputLock.unlock()
+            return
+        }
+        clearFlushBlocked()
         let chunk: Data
         outputLock.lock()
         if pendingOutput.isEmpty {
@@ -162,6 +403,10 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
         let amount = min(pendingOutput.count, maxFlushBytes)
         chunk = pendingOutput.prefix(amount)
         pendingOutput.removeFirst(amount)
+        if Self.debugEnabled && !didLogFirstFlush {
+            didLogFirstFlush = true
+            NSLog("Hterm[%d]: flushing first output chunk (%lu bytes)", instanceId, chunk.count)
+        }
         outputLock.unlock()
 
         guard let js = jsWriteString(for: chunk) else {
@@ -193,30 +438,150 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler {
 
     private func applyStyle(_ style: TerminalStylePayload) {
         let script = "exports.updateStyle(\(style.json))"
-        webView.evaluateJavaScript(script) { [weak self] _, _ in
+        webView.evaluateJavaScript(script) { [weak self] _, error in
+            if let error = error {
+                NSLog("Hterm style error: %@", error.localizedDescription)
+            }
             self?.requestResize()
         }
     }
 
-    private func jsWriteString(for data: Data) -> String? {
-        guard var string = String(data: data, encoding: .isoLatin1) else { return nil }
-        string = string.replacingOccurrences(of: "\\\\", with: "\\\\\\\\")
-        string = string.replacingOccurrences(of: "\r", with: "\\r")
-        string = string.replacingOccurrences(of: "\n", with: "\\n")
-        string = string.replacingOccurrences(of: "\"", with: "\\\"")
-        return "exports.write(\"\(string)\")"
+    private func applyFocus(_ focused: Bool) {
+        let script = "exports.setFocused(\(focused ? "true" : "false"))"
+        webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
-    private func cssColor(from color: UIColor) -> String {
+    func setScrollTop(_ value: CGFloat) {
+        let script = String(format: "exports.newScrollTop(%f)", value)
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    func notifyUserInput() {
+        guard isLoaded else { return }
+        webView.evaluateJavaScript("exports.setUserGesture()", completionHandler: nil)
+        scheduleScrollToBottom()
+    }
+
+    private func jsWriteString(for data: Data) -> String? {
+        guard let raw = String(data: data, encoding: .isoLatin1) else {
+            return nil
+        }
+        var escaped = raw.replacingOccurrences(of: "\\", with: "\\\\")
+        escaped = escaped.replacingOccurrences(of: "\r", with: "\\r")
+        escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
+        escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
+        return "exports.write(\"\(escaped)\")"
+    }
+
+    private func scheduleScrollToBottom() {
+        guard !scrollToBottomPending else { return }
+        scrollToBottomPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrollToBottomPending = false
+            guard self.isLoaded else { return }
+            self.webView.evaluateJavaScript("exports.scrollToBottom()", completionHandler: nil)
+        }
+    }
+
+    private func cssColor(from color: UIColor, fallback: String) -> String {
+        let resolved = color.resolvedColor(with: webView.traitCollection)
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0
         var alpha: CGFloat = 0
-        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        let r = Int(red * 255.0)
-        let g = Int(green * 255.0)
-        let b = Int(blue * 255.0)
-        return String(format: "#%02X%02X%02X", r, g, b)
+        if resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            let r = Int(red * 255.0)
+            let g = Int(green * 255.0)
+            let b = Int(blue * 255.0)
+            return String(format: "#%02X%02X%02X", r, g, b)
+        }
+        var white: CGFloat = 0
+        if resolved.getWhite(&white, alpha: &alpha) {
+            let value = Int(white * 255.0)
+            return String(format: "#%02X%02X%02X", value, value, value)
+        }
+        if let components = resolved.cgColor.components {
+            if components.count >= 3 {
+                let r = Int(components[0] * 255.0)
+                let g = Int(components[1] * 255.0)
+                let b = Int(components[2] * 255.0)
+                return String(format: "#%02X%02X%02X", r, g, b)
+            }
+            if components.count == 2 {
+                let value = Int(components[0] * 255.0)
+                return String(format: "#%02X%02X%02X", value, value, value)
+            }
+        }
+        return fallback
+    }
+
+    private func handleWebContentReset(reason: String, error: Error? = nil) {
+        if let error {
+            logTabInit("web content reset reason=\(reason) error=\(error.localizedDescription)")
+        } else {
+            logTabInit("web content reset reason=\(reason)")
+        }
+        if let error = error {
+            NSLog("Hterm web content reset (%@): %@", reason, error.localizedDescription)
+        } else {
+            NSLog("Hterm web content reset (%@)", reason)
+        }
+        let wasLoaded = isLoaded
+        isLoaded = false
+        outputLock.lock()
+        outputInProgress = false
+        outputLock.unlock()
+        if let style = lastStyle {
+            pendingStyle = style
+        }
+        if let focus = lastFocus {
+            pendingFocus = focus
+        }
+        if wasLoaded {
+            onLoadStateChange?(false)
+        }
+        scheduleReload()
+    }
+
+    private func scheduleReload() {
+        guard !reloadPending else { return }
+        reloadPending = true
+        logTabInit("reload scheduled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            self.reloadPending = false
+            self.loadTerminalPage()
+        }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        handleWebContentReset(reason: "webcontent-terminated")
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if shouldIgnoreNavigationError(error) {
+            return
+        }
+        handleWebContentReset(reason: "navigation-failed", error: error)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if shouldIgnoreNavigationError(error) {
+            return
+        }
+        handleWebContentReset(reason: "provisional-navigation-failed", error: error)
+    }
+
+    private func shouldIgnoreNavigationError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+        if nsError.domain == WKErrorDomain && nsError.code == WKError.webContentProcessTerminated.rawValue {
+            return true
+        }
+        return false
     }
 }
 
@@ -232,39 +597,582 @@ private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+private final class ScrollbarViewDelegateProxy: NSObject, UIScrollViewDelegate {
+    weak var innerDelegate: UIScrollViewDelegate?
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        if super.responds(to: aSelector) {
+            return true
+        }
+        return innerDelegate?.responds(to: aSelector) ?? false
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        if innerDelegate?.responds(to: aSelector) == true {
+            return innerDelegate
+        }
+        return super.forwardingTarget(for: aSelector)
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard let scrollbarView = scrollView as? ScrollbarView,
+              let contentView = scrollbarView.contentView else {
+            innerDelegate?.scrollViewDidScroll?(scrollView)
+            return
+        }
+
+        var frame = contentView.frame
+        frame.origin.x = scrollView.contentOffset.x + scrollbarView.contentViewOrigin.x
+        frame.origin.y = scrollView.contentOffset.y + scrollbarView.contentViewOrigin.y
+        contentView.frame = frame
+
+        innerDelegate?.scrollViewDidScroll?(scrollView)
+    }
+}
+
+private final class ScrollbarView: UIScrollView {
+    fileprivate let outerDelegate = ScrollbarViewDelegateProxy()
+    fileprivate var contentViewOrigin: CGPoint = .zero
+
+    var contentView: UIView? {
+        didSet {
+            contentViewOrigin = contentView?.frame.origin ?? .zero
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        super.delegate = outerDelegate
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var delegate: UIScrollViewDelegate? {
+        get { outerDelegate.innerDelegate }
+        set { outerDelegate.innerDelegate = newValue }
+    }
+}
+
+@MainActor
+final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
+    private let controller: HtermTerminalController
+    private let scrollView: ScrollbarView
+    private let keyInputView: TerminalKeyInputView
+    private var pendingFocus = false
+    private var isAttached = false
+    private var isActiveForInput = true
+    private var lastVisibilityForInput: Bool?
+    private var attachHandler: (() -> Void)?
+    private var detachHandler: (() -> Void)?
+    private var windowObservers: [NSObjectProtocol] = []
+    private var isSyncingScroll = false
+    private var isTerminalInstalled = false
+    private var isTerminalLoaded = false
+
+    private func debugLog(_ message: String) {
+        guard HtermTerminalController.debugEnabled else { return }
+        if let data = (message + "\n").data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
+    }
+
+    private func logTabInit(_ message: String) {
+        tabInitLog("HtermView[\(controller.instanceId)] \(message)")
+    }
+
+    private func isDisplayVisible() -> Bool {
+        guard isEffectivelyVisible() else { return false }
+        return window?.isKeyWindow ?? false
+    }
+
+    private func updateDisplayAttachment() {
+        let loaded = controller.isLoaded
+        if isTerminalLoaded != loaded {
+            isTerminalLoaded = loaded
+            updateInputEnabled()
+        }
+        let shouldInstall = isTerminalLoaded && isDisplayVisible()
+        if shouldInstall {
+            controller.bindDisplayContainer(self)
+            installTerminalViewIfNeeded()
+            if pendingFocus {
+                requestFocus()
+            }
+        } else {
+            controller.unbindDisplayContainer(self)
+            uninstallTerminalViewIfNeeded()
+        }
+    }
+
+    init(controller: HtermTerminalController) {
+        self.controller = controller
+        self.scrollView = ScrollbarView()
+        self.keyInputView = TerminalKeyInputView()
+        super.init(frame: .zero)
+        isOpaque = false
+        configureScrollView()
+        configureKeyInputView()
+        updateInputEnabled()
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        tap.cancelsTouchesInView = false
+        addGestureRecognizer(tap)
+        installWindowObservers()
+        logTabInit("container init")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        if isAttached {
+            detachHandler?()
+        }
+    }
+
+    func updateInputHandlers(
+        onPaste: ((String) -> Void)?,
+        onInterrupt: (() -> Void)?,
+        onSuspend: (() -> Void)?
+    ) {
+        keyInputView.onInput = { [weak controller] text in
+            controller?.onInput?(text)
+        }
+        keyInputView.onPaste = { [weak controller] text in
+            onPaste?(text)
+            controller?.notifyUserInput()
+        }
+        keyInputView.onInterrupt = onInterrupt
+        keyInputView.onSuspend = onSuspend
+    }
+
+    func requestFocus() {
+        guard canReceiveInputFocus() else {
+            pendingFocus = true
+            return
+        }
+        if !keyInputView.isFirstResponder {
+            keyInputView.becomeFirstResponder()
+        }
+    }
+
+    func syncFocusFromTerminal() {
+        updateFocusForKeyWindow()
+    }
+
+    func updateScrollHeight(_ height: CGFloat) {
+        scrollView.contentSize = CGSize(width: 0, height: height)
+        if HtermTerminalController.debugEnabled {
+            debugLog("Hterm[\(controller.instanceId)]: scroll height=\(String(format: "%.2f", height)) " +
+                     "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
+                     "bounds=\(NSCoder.string(for: scrollView.bounds))")
+        }
+    }
+
+    func updateScrollTop(_ top: CGFloat) {
+        if abs(scrollView.contentOffset.y - top) < 0.5 {
+            return
+        }
+        isSyncingScroll = true
+        scrollView.setContentOffset(CGPoint(x: 0, y: top), animated: false)
+        isSyncingScroll = false
+        if HtermTerminalController.debugEnabled {
+            debugLog("Hterm[\(controller.instanceId)]: scroll top=\(String(format: "%.2f", top)) " +
+                     "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
+                     "contentSize=\(NSCoder.string(for: scrollView.contentSize))")
+        }
+    }
+
+    func updateApplicationCursor(_ enabled: Bool) {
+        keyInputView.applicationCursorEnabled = enabled
+    }
+
+    func updateAttachHandlers(onAttach: (() -> Void)?, onDetach: (() -> Void)?) {
+        attachHandler = onAttach
+        detachHandler = onDetach
+        handleAttachStateChange()
+    }
+
+    func updateTerminalLoaded(_ loaded: Bool) {
+        if isTerminalLoaded != loaded {
+            let keyWindow = window?.isKeyWindow ?? false
+            logTabInit("terminal loaded=\(loaded) active=\(isActiveForInput) attached=\(isAttached) window=\(window != nil) key=\(keyWindow)")
+        }
+        isTerminalLoaded = loaded
+        updateInputEnabled()
+        if loaded {
+            updateDisplayAttachment()
+            controller.updateHostSize(scrollView.bounds.size, reason: "load")
+            if pendingFocus {
+                requestFocus()
+            }
+        } else {
+            updateDisplayAttachment()
+        }
+        updateVisibilityForInput()
+    }
+
+    func setActive(_ active: Bool) {
+        if isActiveForInput == active {
+            updateInputEnabled()
+            return
+        }
+        isActiveForInput = active
+        let keyWindow = window?.isKeyWindow ?? false
+        logTabInit("active=\(active) loaded=\(isTerminalLoaded) attached=\(isAttached) window=\(window != nil) key=\(keyWindow)")
+        updateInputEnabled()
+        if !active {
+            pendingFocus = false
+            controller.setFocused(false)
+            if keyInputView.isFirstResponder {
+                keyInputView.resignFirstResponder()
+            }
+            updateDisplayAttachment()
+        } else if controller.isLoaded {
+            updateDisplayAttachment()
+            controller.updateHostSize(scrollView.bounds.size, reason: "active")
+        }
+        handleAttachStateChange()
+        updateVisibilityForInput()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        handleAttachStateChange()
+        updateFocusForKeyWindow()
+        updateVisibilityForInput()
+        updateDisplayAttachment()
+        if window != nil, pendingFocus {
+            pendingFocus = false
+            requestFocus()
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if controller.webView.superview === scrollView {
+            controller.webView.frame = scrollView.bounds
+            if HtermTerminalController.debugEnabled {
+                debugLog("Hterm[\(controller.instanceId)]: layout bounds=\(NSCoder.string(for: scrollView.bounds)) " +
+                         "webView=\(NSCoder.string(for: controller.webView.frame)) " +
+                         "contentOffset=\(NSCoder.string(for: scrollView.contentOffset))")
+            }
+        }
+        controller.updateHostSize(scrollView.bounds.size, reason: "layout")
+        updateVisibilityForInput()
+    }
+
+    private func installWindowObservers() {
+        let center = NotificationCenter.default
+        let becameKey = center.addObserver(
+            forName: UIWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                self?.handleWindowNotification(notification)
+            }
+        }
+        let resignedKey = center.addObserver(
+            forName: UIWindow.didResignKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                self?.handleWindowNotification(notification)
+            }
+        }
+        windowObservers = [becameKey, resignedKey]
+    }
+
+    private func handleWindowNotification(_ notification: Notification) {
+        guard let window = notification.object as? UIWindow else { return }
+        guard window === self.window else { return }
+        updateFocusForKeyWindow()
+        updateVisibilityForInput()
+        updateDisplayAttachment()
+    }
+
+    private func configureScrollView() {
+        scrollView.delegate = self
+        scrollView.bounces = false
+        scrollView.alwaysBounceVertical = false
+        scrollView.showsVerticalScrollIndicator = true
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.delaysContentTouches = false
+        scrollView.canCancelContentTouches = false
+        scrollView.isOpaque = false
+        scrollView.backgroundColor = .clear
+        scrollView.clipsToBounds = true
+        if #available(iOS 11.0, *) {
+            scrollView.contentInsetAdjustmentBehavior = .never
+        }
+        scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        scrollView.frame = bounds
+        addSubview(scrollView)
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if !isSyncingScroll {
+            controller.setScrollTop(scrollView.contentOffset.y)
+        }
+    }
+
+    private func installTerminalViewIfNeeded() {
+        guard !isTerminalInstalled else { return }
+        if controller.webView.superview != nil {
+            controller.webView.removeFromSuperview()
+        }
+        controller.webView.frame = scrollView.bounds
+        controller.webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.webView.isOpaque = false
+        controller.webView.backgroundColor = .clear
+        controller.webView.scrollView.isScrollEnabled = false
+        controller.webView.scrollView.bounces = false
+        controller.webView.scrollView.delaysContentTouches = false
+        controller.webView.scrollView.canCancelContentTouches = false
+        controller.webView.scrollView.panGestureRecognizer.isEnabled = false
+        scrollView.contentView = controller.webView
+        scrollView.addSubview(controller.webView)
+        isTerminalInstalled = true
+        logTabInit("install web view loaded=\(controller.isLoaded)")
+        debugLog("Hterm[\(controller.instanceId)]: install web view (loaded=\(controller.isLoaded))")
+        controller.updateHostSize(scrollView.bounds.size, reason: "install")
+    }
+
+    private func uninstallTerminalViewIfNeeded() {
+        guard isTerminalInstalled else { return }
+        if controller.webView.superview === scrollView {
+            controller.webView.removeFromSuperview()
+        }
+        scrollView.contentView = nil
+        isTerminalInstalled = false
+        logTabInit("uninstall web view loaded=\(controller.isLoaded)")
+        debugLog("Hterm[\(controller.instanceId)]: uninstall web view (loaded=\(controller.isLoaded))")
+    }
+
+    private func handleAttachStateChange() {
+        let shouldAttach = (window != nil)
+        if shouldAttach {
+            if isAttached {
+                return
+            }
+            isAttached = true
+            logTabInit("view attached window=\(String(describing: window)) hidden=\(isHidden) alpha=\(alpha)")
+            debugLog("Hterm[\(controller.instanceId)]: view attached " +
+                     "window=\(String(describing: window)) hidden=\(isHidden) alpha=\(alpha)")
+            attachHandler?()
+            return
+        }
+        if !isAttached {
+            debugLog("Hterm[\(controller.instanceId)]: view detached ignored " +
+                     "window=\(String(describing: window)) superview=\(String(describing: superview)) " +
+                     "hidden=\(isHidden) alpha=\(alpha)")
+            return
+        }
+        isAttached = false
+        logTabInit("view detached window=\(String(describing: window)) superview=\(String(describing: superview)) hidden=\(isHidden) alpha=\(alpha)")
+        debugLog("Hterm[\(controller.instanceId)]: view detached " +
+                 "window=\(String(describing: window)) superview=\(String(describing: superview)) " +
+                 "hidden=\(isHidden) alpha=\(alpha)")
+        detachHandler?()
+    }
+
+    private func updateFocusForKeyWindow() {
+        guard let window else { return }
+        let focused = window.isKeyWindow && isEffectivelyVisible()
+        controller.setFocused(focused)
+        if focused {
+            updateVisibilityForInput()
+        } else if keyInputView.isFirstResponder {
+            keyInputView.resignFirstResponder()
+        }
+    }
+
+    private func canReceiveInputFocus() -> Bool {
+        guard isActiveForInput else { return false }
+        guard isTerminalLoaded else { return false }
+        guard let window, window.isKeyWindow else { return false }
+        return isEffectivelyVisible()
+    }
+
+    private func isEffectivelyVisible() -> Bool {
+        if !isActiveForInput || window == nil || isHidden || alpha <= 0.01 {
+            return false
+        }
+        var view: UIView? = self
+        while let current = view {
+            if current.isHidden || current.alpha <= 0.01 {
+                return false
+            }
+            view = current.superview
+        }
+        return true
+    }
+
+    private func updateVisibilityForInput() {
+        let visible = isDisplayVisible()
+        if visible == lastVisibilityForInput {
+            return
+        }
+        lastVisibilityForInput = visible
+        if !visible {
+            if keyInputView.isFirstResponder {
+                keyInputView.resignFirstResponder()
+            }
+            updateDisplayAttachment()
+            return
+        }
+        updateDisplayAttachment()
+        if pendingFocus {
+            pendingFocus = false
+            requestFocus()
+        }
+    }
+
+    private func updateInputEnabled() {
+        let enabled = isActiveForInput && isTerminalLoaded
+        if keyInputView.inputEnabled != enabled {
+            keyInputView.inputEnabled = enabled
+        }
+    }
+
+    @objc private func handleTap() {
+        requestFocus()
+    }
+
+    private func configureKeyInputView() {
+        keyInputView.backgroundColor = .clear
+        keyInputView.textColor = .clear
+        keyInputView.tintColor = .clear
+        keyInputView.isScrollEnabled = false
+        keyInputView.text = ""
+        keyInputView.inputEnabled = false
+        keyInputView.autocorrectionType = .no
+        keyInputView.autocapitalizationType = .none
+        keyInputView.spellCheckingType = .no
+        keyInputView.smartQuotesType = .no
+        keyInputView.smartInsertDeleteType = .no
+        keyInputView.smartDashesType = .no
+        keyInputView.keyboardAppearance = .dark
+        keyInputView.onFocusChange = { [weak self] focused in
+            self?.controller.setFocused(focused)
+        }
+        keyInputView.inputAssistantItem.leadingBarButtonGroups = []
+        keyInputView.inputAssistantItem.trailingBarButtonGroups = []
+
+        keyInputView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(keyInputView)
+        NSLayoutConstraint.activate([
+            keyInputView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            keyInputView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            keyInputView.widthAnchor.constraint(equalToConstant: 1),
+            keyInputView.heightAnchor.constraint(equalToConstant: 1)
+        ])
+    }
+}
+
 struct HtermTerminalView: UIViewRepresentable {
+    let controller: HtermTerminalController
     let font: UIFont
     let foregroundColor: UIColor
     let backgroundColor: UIColor
+    var focusToken: Int = 0
+    var isActive: Bool = true
     var onInput: ((String) -> Void)?
+    var onPaste: ((String) -> Void)?
+    var onInterrupt: (() -> Void)?
+    var onSuspend: (() -> Void)?
     var onResize: ((Int, Int) -> Void)?
     var onReady: ((HtermTerminalController) -> Void)?
+    var onDetach: ((HtermTerminalController) -> Void)? = nil
+    var onLoadStateChange: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(controller: controller)
     }
 
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
+    func makeUIView(context: Context) -> HtermTerminalContainerView {
+        tabInitLog("HtermView makeUIView id=\(controller.instanceId) loaded=\(controller.isLoaded)")
+        let container = HtermTerminalContainerView(controller: context.coordinator.controller)
         container.backgroundColor = backgroundColor
-        let controller = context.coordinator.controller
-        controller.onInput = onInput
-        controller.onResize = onResize
-        controller.attach(to: container)
-        controller.updateStyle(font: font, foreground: foregroundColor, background: backgroundColor)
-        onReady?(controller)
+        configure(container, context: context)
         return container
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        let controller = context.coordinator.controller
-        controller.onInput = onInput
-        controller.onResize = onResize
-        controller.updateStyle(font: font, foreground: foregroundColor, background: backgroundColor)
+    func updateUIView(_ uiView: HtermTerminalContainerView, context: Context) {
         uiView.backgroundColor = backgroundColor
+        configure(uiView, context: context)
+    }
+
+    private func configure(
+        _ uiView: HtermTerminalContainerView,
+        context: Context
+    ) {
+        let controller = context.coordinator.controller
+        if context.coordinator.lastActive != isActive {
+            tabInitLog("HtermView update id=\(controller.instanceId) active=\(isActive) loaded=\(controller.isLoaded)")
+            context.coordinator.lastActive = isActive
+        }
+        controller.onInput = { [weak controller] input in
+            onInput?(input)
+            controller?.notifyUserInput()
+        }
+        controller.onResize = onResize
+        controller.onFocusRequested = { [weak controller] in
+            controller?.displayContainer?.requestFocus()
+        }
+        controller.onSyncFocus = { [weak controller] in
+            controller?.displayContainer?.syncFocusFromTerminal()
+        }
+        controller.onScrollHeight = { [weak controller] height in
+            controller?.displayContainer?.updateScrollHeight(height)
+        }
+        controller.onScrollTop = { [weak controller] top in
+            controller?.displayContainer?.updateScrollTop(top)
+        }
+        controller.onApplicationCursorChange = { [weak controller] enabled in
+            controller?.displayContainer?.updateApplicationCursor(enabled)
+        }
+        controller.onLoadStateChange = { [weak controller] loaded in
+            controller?.displayContainer?.updateTerminalLoaded(loaded)
+            onLoadStateChange?(loaded)
+        }
+
+        uiView.updateInputHandlers(
+            onPaste: onPaste,
+            onInterrupt: onInterrupt,
+            onSuspend: onSuspend
+        )
+
+        uiView.setActive(isActive)
+        controller.updateStyle(font: font, foreground: foregroundColor, background: backgroundColor)
+
+        if context.coordinator.focusToken != focusToken {
+            context.coordinator.focusToken = focusToken
+            tabInitLog("HtermView focus request id=\(controller.instanceId) token=\(focusToken)")
+            uiView.requestFocus()
+        }
+
+        uiView.updateAttachHandlers(
+            onAttach: { onReady?(controller) },
+            onDetach: { onDetach?(controller) }
+        )
+        uiView.updateTerminalLoaded(controller.isLoaded)
     }
 
     final class Coordinator {
-        let controller = HtermTerminalController()
+        let controller: HtermTerminalController
+        var focusToken: Int = 0
+        var lastActive: Bool?
+
+        init(controller: HtermTerminalController) {
+            self.controller = controller
+        }
     }
 }

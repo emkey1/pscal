@@ -227,6 +227,7 @@ typedef struct VProcSessionStdio {
     int stdout_host_fd;
     int stderr_host_fd;
     int kernel_pid;
+    int shell_pid;
     VProcSessionInput *input;
     struct pscal_fd *stdin_pscal_fd;
     struct pscal_fd *stdout_pscal_fd;

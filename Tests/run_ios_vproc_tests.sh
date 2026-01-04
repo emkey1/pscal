@@ -10,40 +10,45 @@ OUT_JOBCTRL="${BUILD_DIR}/ios_vproc_jobcontrol_shim_test"
 
 mkdir -p "${BUILD_DIR}"
 
+VPROC_SOURCES=(
+  "${ROOT}/src/ios/vproc.c"
+  "${ROOT}/src/common/path_virtualization.c"
+  "${ROOT}/src/common/path_truncate.c"
+  "${ROOT}/src/common/runtime_tty.c"
+  "${ROOT}/src/ios/runtime_session_stub.c"
+  "${ROOT}/src/ios/tty/ish_compat.c"
+  "${ROOT}/src/ios/tty/pscal_fd.c"
+  "${ROOT}/src/ios/tty/pscal_tty.c"
+  "${ROOT}/src/ios/tty/pscal_pty.c"
+  "${ROOT}/src/ios/tty/pscal_tty_host.c"
+)
+
 cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    -pthread \
    -Isrc -I"${ROOT}" \
    "${ROOT}/Tests/ios_vproc/test_vproc.c" \
-   "${ROOT}/src/ios/vproc.c" \
-   "${ROOT}/src/common/path_virtualization.c" \
-   "${ROOT}/src/common/path_truncate.c" \
+   "${VPROC_SOURCES[@]}" \
    -o "${OUT}"
 
 cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    -pthread \
    -Isrc -I"${ROOT}" \
    "${ROOT}/Tests/ios_vproc/test_pgid_sid.c" \
-   "${ROOT}/src/ios/vproc.c" \
-   "${ROOT}/src/common/path_virtualization.c" \
-   "${ROOT}/src/common/path_truncate.c" \
+   "${VPROC_SOURCES[@]}" \
    -o "${OUT_PGID}"
 
 cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    -pthread \
    -Isrc -I"${ROOT}" \
    "${ROOT}/Tests/ios_vproc/test_signal_shims.c" \
-   "${ROOT}/src/ios/vproc.c" \
-   "${ROOT}/src/common/path_virtualization.c" \
-   "${ROOT}/src/common/path_truncate.c" \
+   "${VPROC_SOURCES[@]}" \
    -o "${OUT_SHIMS}"
 
 cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    -pthread \
    -Isrc -I"${ROOT}" \
    "${ROOT}/Tests/ios_vproc/test_jobcontrol_shims.c" \
-   "${ROOT}/src/ios/vproc.c" \
-   "${ROOT}/src/common/path_virtualization.c" \
-   "${ROOT}/src/common/path_truncate.c" \
+   "${VPROC_SOURCES[@]}" \
    -o "${OUT_JOBCTRL}"
 
 echo "Running ios_vproc tests..."

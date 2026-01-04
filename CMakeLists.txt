@@ -30,8 +30,20 @@ if(APPLE AND CMAKE_OSX_SYSROOT)
         endif()
     endif()
 endif()
+if(PSCAL_MACCATALYST)
+    # Mac Catalyst runs under iOS-style sandboxing; enable iOS shims and defs.
+    set(PSCAL_PLATFORM_IOS ON)
+endif()
 
-if(NOT PSCAL_PLATFORM_IOS)
+set(PSCAL_USE_HOST_OPENSSL OFF)
+if(PSCAL_FORCE_IOS AND NOT PSCAL_REAL_IOS AND NOT PSCAL_MACCATALYST)
+    set(PSCAL_USE_HOST_OPENSSL ON)
+endif()
+if(PSCAL_MACCATALYST)
+    set(PSCAL_USE_HOST_OPENSSL ON)
+endif()
+
+if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
     find_package(OpenSSL REQUIRED)
     set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
     set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
@@ -123,7 +135,7 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
 configure_file(src/core/pscal_paths.h.in "${CMAKE_BINARY_DIR}/generated/pscal_paths.h" @ONLY)
 include_directories("${CMAKE_BINARY_DIR}/generated")
 
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_PLATFORM_IOS AND NOT PSCAL_USE_HOST_OPENSSL)
     set(PSCAL_OPENSSL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third-party/openssl-3.6.0")
     if(NOT EXISTS "${PSCAL_OPENSSL_SOURCE_DIR}/Configure")
         message(FATAL_ERROR "third-party/openssl-3.6.0 not found; please add the OpenSSL sources")
@@ -1118,6 +1130,7 @@ set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno
 if(PSCAL_PLATFORM_IOS)
     list(APPEND PSCAL_CORE_SOURCES
         src/ios/progname_stub.c
+        src/ios/runtime_session_stub.c
     )
 endif()
 
@@ -1216,7 +1229,7 @@ target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
     z resolv)
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_PLATFORM_IOS AND NOT PSCAL_USE_HOST_OPENSSL)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
         "${PSCAL_OPENSSL_INSTALL_DIR}/include")

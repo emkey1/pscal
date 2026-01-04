@@ -44,6 +44,19 @@
 #define PSCAL_USE_DYLD_INTERPOSE 0
 #endif
 
+#ifndef PSCAL_RUNTIME_INTERPOSE_ENABLED
+#if defined(PSCALI_IOS_APP)
+#define PSCAL_RUNTIME_INTERPOSE_ENABLED 0
+#else
+#define PSCAL_RUNTIME_INTERPOSE_ENABLED 1
+#endif
+#endif
+
+#if !PSCAL_RUNTIME_INTERPOSE_ENABLED
+#undef PSCAL_USE_DYLD_INTERPOSE
+#define PSCAL_USE_DYLD_INTERPOSE 0
+#endif
+
 #define PSCAL_DYLD_INTERPOSE(_replacement, _replacee)                \
     __attribute__((used)) static struct {                            \
         const void *replacement;                                     \
@@ -81,6 +94,11 @@
 #endif
 
 // --- Global State ---
+static volatile sig_atomic_t gInterposeBootstrapped = 0;
+static volatile sig_atomic_t gInterposeMasterEnabled = 0;
+static volatile sig_atomic_t gInterposeFeatureEnabled = 0;
+
+#if PSCAL_RUNTIME_INTERPOSE_ENABLED
 // Use a global bypass only before bootstrap (TLS may be unavailable), then
 // fall back to per-thread depth so one blocking raw call doesn't disable
 // interposition across all threads.
@@ -89,11 +107,11 @@ static _Thread_local int gInterposeBypassDepth = 0;
 static _Thread_local int gInterposeGuardDepth = 0;
 static atomic_uintptr_t gInterposeResolveOwner = 0;
 static atomic_int gInterposeResolveDepth = 0;
-static volatile sig_atomic_t gInterposeBootstrapped = 0;
 static pthread_t gInterposeMainThread;
 static volatile sig_atomic_t gInterposeMainThreadSet = 0;
-static volatile sig_atomic_t gInterposeMasterEnabled = 0;
-static volatile sig_atomic_t gInterposeFeatureEnabled = 0;
+#endif
+
+#if PSCAL_RUNTIME_INTERPOSE_ENABLED
 
 // --- Forward Declarations ---
 static const char *pscalInterposeAppBundlePrefix(void);
@@ -559,6 +577,12 @@ static void pscalWarmUpInterposers(void) {
 }
 
 void PSCALRuntimeInterposeBootstrap(void) {
+#if !PSCAL_RUNTIME_INTERPOSE_ENABLED
+    gInterposeMasterEnabled = 0;
+    gInterposeFeatureEnabled = 0;
+    gInterposeBootstrapped = 1;
+    return;
+#endif
     if (gInterposeBootstrapped) return;
     
     // Warm up critical symbols immediately.
@@ -587,6 +611,12 @@ void PSCALRuntimeInterposeBootstrap(void) {
 }
 
 void PSCALRuntimeInterposeSetFeatureEnabled(int enabled) {
+#if !PSCAL_RUNTIME_INTERPOSE_ENABLED
+    (void)enabled;
+    gInterposeFeatureEnabled = 0;
+    gInterposeMasterEnabled = 0;
+    return;
+#endif
     gInterposeFeatureEnabled = enabled ? 1 : 0;
 }
 
@@ -1244,8 +1274,14 @@ static int pscalRawIoctl(int fd, unsigned long request, ...) {
 #endif
     }
 
-    // 3. Resolve the symbol
-    if (!fn) fn = (int (*)(int, unsigned long, ...))pscalInterposeResolveSystem("ioctl");
+    // 3. Resolve the symbol via an explicit system handle to avoid interposer recursion.
+    if (!fn) fn = (int (*)(int, unsigned long, ...))pscalInterposeResolveKernel("ioctl");
+    if (!fn) {
+        void *handle = pscalInterposeKernelHandle();
+        if (handle) {
+            fn = (int (*)(int, unsigned long, ...))pscalInterposeResolveGeneric("ioctl", handle);
+        }
+    }
 
     // 4. Call it
     if (fn) {
@@ -2188,7 +2224,7 @@ static int pscal_interpose_pthread_sigmask(int how, const sigset_t *set, sigset_
 PSCAL_DYLD_INTERPOSE(pscal_interpose_pthread_sigmask, pthread_sigmask);
 
 static void pscalInterposeInstallHooks(void) {
-#if defined(__APPLE__) && !PSCAL_USE_DYLD_INTERPOSE
+#if defined(__APPLE__) && !PSCAL_USE_DYLD_INTERPOSE && PSCAL_RUNTIME_INTERPOSE_ENABLED
     static int installed = 0;
     if (installed) return;
     installed = 1;
@@ -2274,3 +2310,19 @@ static void pscalInterposeInstallHooks(void) {
     (void)pscalRebindSymbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
 #endif
 }
+
+#else
+
+void PSCALRuntimeInterposeBootstrap(void) {
+    gInterposeMasterEnabled = 0;
+    gInterposeFeatureEnabled = 0;
+    gInterposeBootstrapped = 1;
+}
+
+void PSCALRuntimeInterposeSetFeatureEnabled(int enabled) {
+    (void)enabled;
+    gInterposeFeatureEnabled = 0;
+    gInterposeMasterEnabled = 0;
+}
+
+#endif

@@ -1,0 +1,21 @@
+frame variable session_id pty_master pty_slave
+frame variable stdio_ctx
+expr -l c -- (void *)stdio_ctx
+expr -l c -- stdio_ctx ? ((VProcSessionStdio *)stdio_ctx)->session_id : 0
+expr -l c -- stdio_ctx ? (void *)((VProcSessionStdio *)stdio_ctx)->pty_master : (void *)0
+expr -l c -- stdio_ctx ? (void *)((VProcSessionStdio *)stdio_ctx)->pty_slave : (void *)0
+expr -l c -- stdio_ctx ? ((VProcSessionStdio *)stdio_ctx)->pty_active : false
+expr -l c -- stdio_ctx ? ((VProcSessionStdio *)stdio_ctx)->pty_out_fd : -1
+expr -l c -- (size_t)gVProcSessionPtys.count
+expr -l c -- gVProcSessionPtys.count > 0 ? gVProcSessionPtys.items[0].session_id : 0
+expr -l c -- gVProcSessionPtys.count > 0 ? (void *)gVProcSessionPtys.items[0].pty_master : (void *)0
+expr -l c -- gVProcSessionPtys.count > 0 ? (void *)gVProcSessionPtys.items[0].pty_slave : (void *)0
+expr -l c -- gVProcSessionPtys.count > 0 ? (void *)gVProcSessionPtys.items[0].output_handler : (void *)0
+expr -l c -- gVProcSessionPtys.count > 1 ? gVProcSessionPtys.items[1].session_id : 0
+expr -l c -- gVProcSessionPtys.count > 1 ? (void *)gVProcSessionPtys.items[1].pty_master : (void *)0
+expr -l c -- gVProcSessionPtys.count > 1 ? (void *)gVProcSessionPtys.items[1].pty_slave : (void *)0
+expr -l c -- gVProcSessionPtys.count > 1 ? (void *)gVProcSessionPtys.items[1].output_handler : (void *)0
+expr -l c -- gVProcSessionPtys.count > 2 ? gVProcSessionPtys.items[2].session_id : 0
+expr -l c -- gVProcSessionPtys.count > 2 ? (void *)gVProcSessionPtys.items[2].pty_master : (void *)0
+expr -l c -- gVProcSessionPtys.count > 2 ? (void *)gVProcSessionPtys.items[2].pty_slave : (void *)0
+expr -l c -- gVProcSessionPtys.count > 2 ? (void *)gVProcSessionPtys.items[2].output_handler : (void *)0

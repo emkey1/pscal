@@ -46,6 +46,12 @@ typedef struct {
     int std_fd;
 } ShellVprocStream;
 
+typedef struct {
+    int std_fd;
+    bool can_read;
+    bool can_write;
+} ShellVprocShimCookie;
+
 static __thread ShellVprocStream gShellVprocStdout = { NULL, -1, STDOUT_FILENO };
 static __thread ShellVprocStream gShellVprocStderr = { NULL, -1, STDERR_FILENO };
 static __thread ShellVprocStream gShellVprocStdin = { NULL, -1, STDIN_FILENO };
@@ -60,6 +66,87 @@ static FILE *shellVprocStreamFallback(int std_fd) {
     return stderr;
 }
 
+static int shellVprocShimRead(void *cookie, char *buf, int len) {
+    ShellVprocShimCookie *ctx = (ShellVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_read || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocReadShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int shellVprocShimWrite(void *cookie, const char *buf, int len) {
+    ShellVprocShimCookie *ctx = (ShellVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_write || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocWriteShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int shellVprocShimClose(void *cookie) {
+    free(cookie);
+    return 0;
+}
+
+static FILE *shellVprocStreamOpenShim(int std_fd,
+                                      ShellVprocStream *cache,
+                                      const char *mode,
+                                      int buf_mode) {
+    if (!cache || !mode) {
+        return shellVprocStreamFallback(std_fd);
+    }
+
+    if (cache->fp && cache->host_fd < 0) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    ShellVprocShimCookie *cookie = (ShellVprocShimCookie *)calloc(1, sizeof(ShellVprocShimCookie));
+    if (!cookie) {
+        return shellVprocStreamFallback(std_fd);
+    }
+    cookie->std_fd = std_fd;
+    cookie->can_read = strchr(mode, 'r') != NULL;
+    cookie->can_write = (strchr(mode, 'w') != NULL) || (strchr(mode, 'a') != NULL);
+
+    FILE *fp = funopen(cookie,
+                       cookie->can_read ? shellVprocShimRead : NULL,
+                       cookie->can_write ? shellVprocShimWrite : NULL,
+                       NULL,
+                       shellVprocShimClose);
+    if (!fp) {
+        free(cookie);
+        return shellVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = -1;
+    return fp;
+}
+
 static FILE *shellVprocStreamOpen(int std_fd,
                                   ShellVprocStream *cache,
                                   const char *mode,
@@ -69,12 +156,23 @@ static FILE *shellVprocStreamOpen(int std_fd,
     }
 
     int host_fd = std_fd;
+    bool use_host_stream = true;
     VProc *vp = vprocCurrent();
     if (vp) {
         int translated = vprocTranslateFd(vp, std_fd);
         if (translated >= 0) {
             host_fd = translated;
+        } else {
+            use_host_stream = false;
         }
+    }
+
+    if (!vp) {
+        use_host_stream = true;
+    }
+
+    if (!use_host_stream) {
+        return shellVprocStreamOpenShim(std_fd, cache, mode, buf_mode);
     }
 
     if (cache->fp && cache->host_fd == host_fd) {
@@ -1606,7 +1704,8 @@ static __thread ShellRuntimeState *gShellContextStack[8] = {0};
 static __thread size_t gShellContextDepth = 0;
 static __thread bool gShellCurrentBuiltinBackground = false;
 static __thread bool gShellBackgroundWorkerActive = false;
-static int gShellSavedStdFds[3] = { -1, -1, -1 };
+/* Per-thread to avoid cross-session stdio restoration on iOS. */
+static __thread int gShellSavedStdFds[3] = { -1, -1, -1 };
 
 #define gShellRuntime (*shellGetContext())
 

@@ -3,6 +3,7 @@ import UIKit
 
 struct SshTerminalView: View {
     @ObservedObject var session: SshRuntimeSession
+    let isActive: Bool
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @State private var focusAnchor: Int = 0
 
@@ -12,11 +13,18 @@ struct SshTerminalView: View {
                 availableSize: proxy.size,
                 fontSettings: fontSettings,
                 session: session,
-                focusAnchor: $focusAnchor
+                focusAnchor: $focusAnchor,
+                isActive: isActive
             )
+            .id(session.sessionId)
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .background(Color(fontSettings.backgroundColor))
+        .onChange(of: isActive) { active in
+            if active {
+                focusAnchor &+= 1
+            }
+        }
     }
 }
 
@@ -29,6 +37,7 @@ private struct SshTerminalContentView: View {
     @ObservedObject var fontSettings: TerminalFontSettings
     @ObservedObject var session: SshRuntimeSession
     @Binding var focusAnchor: Int
+    let isActive: Bool
 
     @State private var hasMeasuredGeometry: Bool = false
 
@@ -37,16 +46,28 @@ private struct SshTerminalContentView: View {
 
         return VStack(spacing: 0) {
             HtermTerminalView(
+                controller: session.htermController,
                 font: currentFont,
                 foregroundColor: fontSettings.foregroundColor,
                 backgroundColor: fontSettings.backgroundColor,
+                focusToken: focusAnchor,
+                isActive: isActive,
                 onInput: handleInput,
+                onPaste: handlePaste,
+                onInterrupt: { session.send("\u{03}") },
+                onSuspend: { session.send("\u{1A}") },
                 onResize: { cols, rows in
+                    tabInitLog("SshTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
                     hasMeasuredGeometry = true
                     session.updateTerminalSize(columns: cols, rows: rows)
                 },
                 onReady: { controller in
+                    tabInitLog("SshTerminalView ready session=\(session.sessionId) controller=\(controller.instanceId)")
                     session.attachHtermController(controller)
+                },
+                onDetach: { controller in
+                    tabInitLog("SshTerminalView detach session=\(session.sessionId) controller=\(controller.instanceId)")
+                    session.detachHtermController(controller)
                 }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -69,22 +90,13 @@ private struct SshTerminalContentView: View {
         .onTapGesture {
             requestInputFocus()
         }
-        .overlay(alignment: .bottomLeading) {
-            TerminalInputBridge(
-                focusAnchor: $focusAnchor,
-                onInput: handleInput,
-                onPaste: handlePaste,
-                onInterrupt: { session.send("\u{03}") },
-                onSuspend: { session.send("\u{1A}") }
-            )
-            .frame(width: 1, height: 1)
-            .allowsHitTesting(false)
-        }
         .onAppear {
+            tabInitLog("SshTerminalView appear session=\(session.sessionId) active=\(isActive)")
             if !hasMeasuredGeometry {
                 updateTerminalGeometry()
             }
-            session.start()
+            let started = session.start()
+            tabInitLog("SshTerminalView start session=\(session.sessionId) started=\(started)")
             DispatchQueue.main.async {
                 requestInputFocus()
             }
@@ -121,6 +133,5 @@ private struct SshTerminalContentView: View {
 
     private func requestInputFocus() {
         focusAnchor &+= 1
-        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
     }
 }

@@ -36,13 +36,28 @@ __attribute__((weak)) int pscalHostOpenRaw(const char *path, int flags, mode_t m
 __attribute__((weak)) void *vprocCurrent(void);
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+static bool pathVirtualizationExplicit(void) {
+    const char *env = getenv("PATH_TRUNCATE");
+    if (env && env[0] != '\0') {
+        return true;
+    }
+    env = getenv("PSCALI_CONTAINER_ROOT");
+    return env && env[0] == '/';
+}
+#endif
+
 static bool pathVirtualizationActive(void) {
     if (!pathTruncateEnabled()) {
         return false;
     }
 #if defined(PSCAL_TARGET_IOS)
     if (vprocCurrent) {
-        return vprocCurrent() != NULL;
+        if (vprocCurrent() != NULL) {
+            return true;
+        }
+        /* Only honor explicit truncation outside vproc to avoid HOME fallback surprises. */
+        return pathVirtualizationExplicit();
     }
 #endif
     return true;
