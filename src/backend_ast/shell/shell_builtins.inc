@@ -45,6 +45,88 @@ extern char **environ;
 extern void pscalShowGwinMessage(const char *message);
 extern void pscalElvisDump(void);
 
+typedef struct {
+    struct sigaction sigint;
+    struct sigaction sigquit;
+    struct sigaction sigterm;
+    struct sigaction sigtstp;
+    struct sigaction sigabrt;
+    struct sigaction sigsegv;
+    sigset_t sigmask;
+    bool have_sigint;
+    bool have_sigquit;
+    bool have_sigterm;
+    bool have_sigtstp;
+    bool have_sigabrt;
+    bool have_sigsegv;
+    bool have_sigmask;
+} ShellSignalBackup;
+
+static void shellSaveSignalState(ShellSignalBackup *backup) {
+    if (!backup) {
+        return;
+    }
+    memset(backup, 0, sizeof(*backup));
+    backup->have_sigint = (sigaction(SIGINT, NULL, &backup->sigint) == 0);
+    backup->have_sigquit = (sigaction(SIGQUIT, NULL, &backup->sigquit) == 0);
+    backup->have_sigterm = (sigaction(SIGTERM, NULL, &backup->sigterm) == 0);
+    backup->have_sigtstp = (sigaction(SIGTSTP, NULL, &backup->sigtstp) == 0);
+    backup->have_sigabrt = (sigaction(SIGABRT, NULL, &backup->sigabrt) == 0);
+    backup->have_sigsegv = (sigaction(SIGSEGV, NULL, &backup->sigsegv) == 0);
+    backup->have_sigmask = (pthread_sigmask(SIG_SETMASK, NULL, &backup->sigmask) == 0);
+}
+
+static void shellRestoreSignalState(const ShellSignalBackup *backup) {
+    if (!backup) {
+        return;
+    }
+    if (backup->have_sigint) {
+        sigaction(SIGINT, &backup->sigint, NULL);
+    }
+    if (backup->have_sigquit) {
+        sigaction(SIGQUIT, &backup->sigquit, NULL);
+    }
+    if (backup->have_sigterm) {
+        sigaction(SIGTERM, &backup->sigterm, NULL);
+    }
+    if (backup->have_sigtstp) {
+        sigaction(SIGTSTP, &backup->sigtstp, NULL);
+    }
+    if (backup->have_sigabrt) {
+        sigaction(SIGABRT, &backup->sigabrt, NULL);
+    }
+    if (backup->have_sigsegv) {
+        sigaction(SIGSEGV, &backup->sigsegv, NULL);
+    }
+    if (backup->have_sigmask) {
+        pthread_sigmask(SIG_SETMASK, &backup->sigmask, NULL);
+    }
+}
+
+static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
+                                         int argc,
+                                         char **argv,
+                                         bool dbg) {
+    ShellSignalBackup sig_backup;
+    shellSaveSignalState(&sig_backup);
+    int status = entry(argc, argv);
+    shellRestoreSignalState(&sig_backup);
+    shellRuntimeEnsureStandardFds();
+    shellEnsureJobControl();
+    shellJobControlRestoreForeground();
+    if (dbg) {
+        int shell_pid = vprocGetShellSelfPid();
+        int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+        int fg = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+        fprintf(stderr,
+                "[tool-inline] restore complete shell=%d sid=%d fg=%d\n",
+                shell_pid,
+                sid,
+                fg);
+    }
+    return status;
+}
+
 static void shellInvalidateFrontendState(FrontendKind kind) {
     switch (kind) {
         case FRONTEND_KIND_PASCAL:
@@ -4175,6 +4257,7 @@ static Value shellRunToolBuiltin(VM *vm,
         fprintf(stderr, "[tool-dispatch] name=%s argc=%d\n", tool_name ? tool_name : "<null>", arg_count + 1);
     }
 #if defined(PSCAL_TARGET_IOS)
+    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     /* Special-case exsh: on iOS we cannot exec a new process, so run exsh_main inline
      * with the provided arguments to preserve -c/script execution. */
     if (tool_name && strcmp(tool_name, "exsh") == 0 && entry) {
@@ -4270,7 +4353,7 @@ static Value shellRunToolBuiltin(VM *vm,
                 }
                 /* Already running inside a background worker: execute inline so redirections
                  * remain active for this thread. */
-                status = entry(argc, argv);
+                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg);
                 fprintf(stderr, "[tool-inline] %s exit=%d\n", tool_name, status);
             } else if (background || target_kind == FRONTEND_KIND_SHELL) {
                 fprintf(stderr, "[tool-thread] %s argc=%d bg=%d\n", tool_name, argc, (int)background);
@@ -4280,7 +4363,7 @@ static Value shellRunToolBuiltin(VM *vm,
                 /* Run non-shell frontends inline on iOS to avoid repeated
                  * cross-thread state swaps that can leave symbol tables in an
                  * inconsistent state. */
-                status = entry(argc, argv);
+                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg);
             }
             shellInvalidateFrontendState(target_kind);
             /* The frontend reset tears down its own symbol tables; reattach the saved

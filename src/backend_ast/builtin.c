@@ -46,6 +46,12 @@ typedef struct {
     int std_fd;
 } VmVprocStream;
 
+typedef struct {
+    int std_fd;
+    bool can_read;
+    bool can_write;
+} VmVprocShimCookie;
+
 static __thread VmVprocStream gVmVprocStdout = { NULL, -1, STDOUT_FILENO };
 static __thread VmVprocStream gVmVprocStderr = { NULL, -1, STDERR_FILENO };
 static __thread VmVprocStream gVmVprocStdin = { NULL, -1, STDIN_FILENO };
@@ -60,6 +66,87 @@ static FILE *vmVprocStreamFallback(int std_fd) {
     return stderr;
 }
 
+static int vmVprocShimRead(void *cookie, char *buf, int len) {
+    VmVprocShimCookie *ctx = (VmVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_read || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocReadShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int vmVprocShimWrite(void *cookie, const char *buf, int len) {
+    VmVprocShimCookie *ctx = (VmVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_write || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocWriteShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int vmVprocShimClose(void *cookie) {
+    free(cookie);
+    return 0;
+}
+
+static FILE *vmVprocStreamOpenShim(int std_fd,
+                                   VmVprocStream *cache,
+                                   const char *mode,
+                                   int buf_mode) {
+    if (!cache || !mode) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    if (cache->fp && cache->host_fd < 0) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    VmVprocShimCookie *cookie = (VmVprocShimCookie *)calloc(1, sizeof(VmVprocShimCookie));
+    if (!cookie) {
+        return vmVprocStreamFallback(std_fd);
+    }
+    cookie->std_fd = std_fd;
+    cookie->can_read = strchr(mode, 'r') != NULL;
+    cookie->can_write = (strchr(mode, 'w') != NULL) || (strchr(mode, 'a') != NULL);
+
+    FILE *fp = funopen(cookie,
+                       cookie->can_read ? vmVprocShimRead : NULL,
+                       cookie->can_write ? vmVprocShimWrite : NULL,
+                       NULL,
+                       vmVprocShimClose);
+    if (!fp) {
+        free(cookie);
+        return vmVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = -1;
+    return fp;
+}
+
 static FILE *vmVprocStreamOpen(int std_fd,
                                VmVprocStream *cache,
                                const char *mode,
@@ -69,12 +156,24 @@ static FILE *vmVprocStreamOpen(int std_fd,
     }
 
     int host_fd = std_fd;
+    bool use_host_stream = true;
     VProc *vp = vprocCurrent();
     if (vp) {
         int translated = vprocTranslateFd(vp, std_fd);
         if (translated >= 0) {
             host_fd = translated;
+        } else {
+            use_host_stream = false;
         }
+    } else {
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (session && !vprocSessionStdioIsDefault(session)) {
+            use_host_stream = false;
+        }
+    }
+
+    if (!use_host_stream) {
+        return vmVprocStreamOpenShim(std_fd, cache, mode, buf_mode);
     }
 
     if (host_fd < 0) {
