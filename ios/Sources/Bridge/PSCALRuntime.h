@@ -15,6 +15,7 @@ typedef void (*PSCALRuntimeSessionOutputHandler)(uint64_t session_id,
                                                  void *context);
 
 typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+typedef struct VProcSessionStdio VProcSessionStdio;
 
 /// Creates a runtime context that can host an independent shell session.
 PSCALRuntimeContext *PSCALRuntimeCreateRuntimeContext(void);
@@ -24,6 +25,10 @@ void PSCALRuntimeDestroyRuntimeContext(PSCALRuntimeContext *ctx);
 void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
 /// Returns the runtime context for the current thread (shared context if unset).
 PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
+/// Returns the VProc session stdio stored in the current runtime context.
+VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void);
+/// Sets the VProc session stdio for the current runtime context.
+void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx);
 /// Returns a unique session id for PTY-backed sessions.
 uint64_t PSCALRuntimeNextSessionId(void);
 /// Associates the current runtime context with the session id.
@@ -68,9 +73,6 @@ void PSCALRuntimeConfigureAsanReportPath(const char *path);
 /// the size will be applied once exsh starts.
 void PSCALRuntimeUpdateWindowSize(int columns, int rows);
 
-/// Returns non-zero when the runtime is using the virtual TTY fallback (pipes).
-int PSCALRuntimeIsVirtualTTY(void);
-
 void pscalRuntimeDebugLog(const char *message);
 void PSCALRuntimeLogLine(const char *message);
 void PSCALRuntimeSetDebugLogMirroring(int enable);
@@ -90,8 +92,7 @@ void pscalRuntimeResetSessionLog(void);
 char *pscalRuntimeCopyMarketingVersion(void);
 
 /// Delivers a signal to the active runtime thread (no-op if inactive).
-/// Useful on iOS when virtual TTY mode prevents kernel-generated job-control
-/// signals from being delivered via the terminal.
+/// Useful on iOS when job-control signals need to be injected manually.
 void PSCALRuntimeSendSignal(int signo);
 
 /// Configures the PATH_TRUNCATE environment variable used by the shell to

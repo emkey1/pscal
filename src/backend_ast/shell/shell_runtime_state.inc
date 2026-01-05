@@ -4115,18 +4115,10 @@ static void shellInitJobControlState(void) {
         return;
     }
 
-#if defined(PSCAL_TARGET_IOS)
-    bool virtual_tty = pscalRuntimeVirtualTTYEnabled();
-    if (!virtual_tty && !pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
-        gShellRuntime.tty_fd = -1;
-        return;
-    }
-#else
     if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.tty_fd = -1;
         return;
     }
-#endif
 
     struct sigaction ignore_action;
     memset(&ignore_action, 0, sizeof(ignore_action));
@@ -4176,10 +4168,11 @@ static void shellEnsureJobControl(void) {
 
     shellInitJobControlState();
 
+    if (gShellRuntime.tty_fd < 0) {
+        gShellRuntime.job_control_enabled = false;
+        return;
+    }
 #if defined(PSCAL_TARGET_IOS)
-    /* iOS has no controlling TTY for background threads; keep job tracking enabled so
-     * synthetic vproc pids can be managed with fg/bg/kill/wait semantics even without
-     * tcsetpgrp support. */
     gShellRuntime.job_control_enabled = true;
     if (gShellRuntime.shell_pgid <= 0) {
         int shell_pid = vprocGetShellSelfPid();
@@ -4195,26 +4188,6 @@ static void shellEnsureJobControl(void) {
     return;
 #endif
 
-    if (gShellRuntime.tty_fd < 0) {
-        gShellRuntime.job_control_enabled = false;
-        return;
-    }
-
-    bool virtual_tty =
-#if defined(PSCAL_TARGET_IOS)
-        pscalRuntimeVirtualTTYEnabled();
-#else
-        false;
-#endif
-
-    if (!virtual_tty) {
-        if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
-            gShellRuntime.job_control_enabled = false;
-            gShellRuntime.tty_fd = -1;
-            return;
-        }
-    }
-
     pid_t pgid = getpgrp();
     if (pgid <= 0) {
         gShellRuntime.job_control_enabled = false;
@@ -4229,13 +4202,6 @@ static void shellEnsureJobControl(void) {
         vprocSetForegroundPgid(sid, (int)pgid);
     }
 #endif
-
-    if (virtual_tty) {
-        /* No controlling TTY, but still allow the shell’s job table to track
-         * background work. Foreground handing of tcsetpgrp stays skipped. */
-        gShellRuntime.job_control_enabled = true;
-        return;
-    }
 
     while (true) {
         pid_t foreground = tcgetpgrp(gShellRuntime.tty_fd);
@@ -4271,16 +4237,6 @@ static void shellJobControlSetForeground(pid_t pgid) {
         vprocSetForegroundPgid(sid, (int)pgid);
     }
 #endif
-    if (
-#if defined(PSCAL_TARGET_IOS)
-        pscalRuntimeVirtualTTYEnabled()
-#else
-        false
-#endif
-    ) {
-        /* Virtual TTY: skip tcsetpgrp but leave job tracking active. */
-        return;
-    }
     while (tcsetpgrp(gShellRuntime.tty_fd, pgid) != 0) {
         if (errno == EINTR) {
             continue;
@@ -4300,15 +4256,6 @@ static void shellJobControlRestoreForeground(void) {
         vprocSetForegroundPgid(sid, (int)gShellRuntime.shell_pgid);
     }
 #endif
-    if (
-#if defined(PSCAL_TARGET_IOS)
-        pscalRuntimeVirtualTTYEnabled()
-#else
-        false
-#endif
-    ) {
-        return;
-    }
     pid_t target = gShellRuntime.shell_pgid > 0 ? gShellRuntime.shell_pgid : getpgrp();
     if (target <= 0) {
         return;

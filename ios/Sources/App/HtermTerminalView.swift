@@ -4,18 +4,53 @@ import UIKit
 import Foundation
 
 private final class HtermWebView: WKWebView {
+    var onPaste: ((String) -> Void)?
+    var onCopy: (() -> Void)?
+
+    override var canBecomeFirstResponder: Bool {
+        true
+    }
+
     override func becomeFirstResponder() -> Bool {
-        if #available(iOS 13.4, *) {
-            return super.becomeFirstResponder()
-        }
-        return false
+        super.becomeFirstResponder()
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(copy(_:)) || action == #selector(paste(_:)) {
-            return false
+        if action == #selector(copy(_:)) || action == #selector(cut(_:)) {
+            return true
+        }
+        if action == #selector(paste(_:)) {
+            return UIPasteboard.general.hasStrings
+        }
+        if action == #selector(selectAll(_:)) {
+            return true
         }
         return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func copy(_ sender: Any?) {
+        if let onCopy {
+            onCopy()
+            return
+        }
+        super.copy(sender)
+    }
+
+    override func cut(_ sender: Any?) {
+        if let onCopy {
+            onCopy()
+            return
+        }
+        super.cut(sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        if let onPaste {
+            onPaste(text)
+            return
+        }
+        super.paste(sender)
     }
 }
 
@@ -31,6 +66,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         case newScrollHeight
         case newScrollTop
         case openLink
+        case selectionChanged
     }
 
     private struct TerminalStylePayload {
@@ -301,6 +337,32 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             if let urlString = message.body as? String, let url = URL(string: urlString) {
                 UIApplication.shared.open(url)
             }
+        case HandlerName.selectionChanged.rawValue:
+            if message.body is NSNull {
+                displayContainer?.updateSelectionMenu(rect: nil)
+                break
+            }
+            if let payload = message.body as? [String: Any] {
+                func number(_ value: Any?) -> CGFloat? {
+                    if let number = value as? NSNumber {
+                        return CGFloat(number.doubleValue)
+                    }
+                    if let value = value as? Double {
+                        return CGFloat(value)
+                    }
+                    return nil
+                }
+                if let x = number(payload["x"]),
+                   let y = number(payload["y"]),
+                   let width = number(payload["width"]),
+                   let height = number(payload["height"]) {
+                    displayContainer?.updateSelectionMenu(rect: CGRect(x: x, y: y, width: width, height: height))
+                } else {
+                    displayContainer?.updateSelectionMenu(rect: nil)
+                }
+            } else {
+                displayContainer?.updateSelectionMenu(rect: nil)
+            }
         default:
             break
         }
@@ -460,6 +522,11 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         guard isLoaded else { return }
         webView.evaluateJavaScript("exports.setUserGesture()", completionHandler: nil)
         scheduleScrollToBottom()
+    }
+
+    func copySelectionToClipboard() {
+        guard isLoaded else { return }
+        webView.evaluateJavaScript("exports.copy()", completionHandler: nil)
     }
 
     private func jsWriteString(for data: Data) -> String? {
@@ -671,6 +738,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     private var isSyncingScroll = false
     private var isTerminalInstalled = false
     private var isTerminalLoaded = false
+    private var selectionMenuVisible = false
+    private var lastSelectionRect: CGRect?
 
     private func debugLog(_ message: String) {
         guard HtermTerminalController.debugEnabled else { return }
@@ -747,8 +816,20 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             onPaste?(text)
             controller?.notifyUserInput()
         }
+        keyInputView.onCopy = { [weak controller] in
+            controller?.copySelectionToClipboard()
+        }
         keyInputView.onInterrupt = onInterrupt
         keyInputView.onSuspend = onSuspend
+        if let webView = controller.webView as? HtermWebView {
+            webView.onPaste = { [weak controller] text in
+                onPaste?(text)
+                controller?.notifyUserInput()
+            }
+            webView.onCopy = { [weak controller] in
+                controller?.copySelectionToClipboard()
+            }
+        }
     }
 
     func requestFocus() {
@@ -785,6 +866,40 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             debugLog("Hterm[\(controller.instanceId)]: scroll top=\(String(format: "%.2f", top)) " +
                      "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
                      "contentSize=\(NSCoder.string(for: scrollView.contentSize))")
+        }
+    }
+
+    func updateSelectionMenu(rect: CGRect?) {
+        guard let webView = controller.webView as? HtermWebView else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let rect = rect, !rect.isNull {
+                let menuVisible = UIMenuController.shared.isMenuVisible
+                if let last = lastSelectionRect,
+                   rect.equalTo(last),
+                   selectionMenuVisible,
+                   menuVisible {
+                    return
+                }
+                if keyInputView.isFirstResponder {
+                    keyInputView.resignFirstResponder()
+                }
+                _ = webView.becomeFirstResponder()
+                let target = rect.insetBy(dx: -4, dy: -4)
+                let clamped = target.intersection(webView.bounds)
+                let effectiveTarget = clamped.isNull ? target : clamped
+                UIMenuController.shared.setTargetRect(effectiveTarget, in: webView)
+                UIMenuController.shared.setMenuVisible(true, animated: true)
+                selectionMenuVisible = true
+                lastSelectionRect = rect
+            } else if selectionMenuVisible {
+                UIMenuController.shared.setMenuVisible(false, animated: true)
+                selectionMenuVisible = false
+                lastSelectionRect = nil
+                if isActiveForInput {
+                    keyInputView.becomeFirstResponder()
+                }
+            }
         }
     }
 

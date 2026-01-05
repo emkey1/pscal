@@ -5,7 +5,6 @@
 #include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/tty/pscal_fd.h"
-static int gShellPagerVirtualTTYFd = -1;
 
 static void shellVprocFormatLabel(const ShellCommand *cmd, char *out, size_t out_sz) {
     if (!out || out_sz == 0) {
@@ -82,24 +81,6 @@ static void shellVprocLabelScopeEnd(ShellVprocLabelScope *scope) {
     scope->pid = -1;
     scope->have_prev = false;
     scope->prev_label[0] = '\0';
-}
-
-static void shellPagerPushVirtualTTYOverride(int fd) {
-    if (gShellPagerVirtualTTYFd >= 0) {
-        close(gShellPagerVirtualTTYFd);
-    }
-    gShellPagerVirtualTTYFd = fd;
-}
-
-static void shellPagerPopVirtualTTYOverride(void) {
-    if (gShellPagerVirtualTTYFd >= 0) {
-        close(gShellPagerVirtualTTYFd);
-        gShellPagerVirtualTTYFd = -1;
-    }
-}
-
-static int shellPagerGetVirtualTTYOverride(void) {
-    return gShellPagerVirtualTTYFd;
 }
 
 static int shellHostFdForShimmedFd(int fd) {
@@ -3481,7 +3462,6 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     bool capture_thread_started = false;
     ShellPipelineCapture capture = { .fd = -1, .spool_fd = -1, .size = 0, .capacity = 0, .err = 0, .buffer = NULL };
 #if defined(PSCAL_TARGET_IOS)
-    bool pushed_virtual_tty = false;
     VProc *vp = NULL;
     int vm_stdin_fd = -1;
     int vm_stdout_fd = -1;
@@ -3593,16 +3573,6 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos] && stdout_fd >= 0) {
         stderr_fd = stdout_fd;
     }
-
-#if defined(PSCAL_TARGET_IOS)
-    if (stdin_fd >= 0 && !pushed_virtual_tty) {
-        int dup_fd = dup(STDIN_FILENO);
-        if (dup_fd >= 0) {
-            shellPagerPushVirtualTTYOverride(dup_fd);
-            pushed_virtual_tty = true;
-        }
-    }
-#endif
 
     bool apply_exec_redirs = cmd && cmd->redir_count > 0;
 #if defined(PSCAL_TARGET_IOS)
@@ -3897,12 +3867,6 @@ cleanup:
             capture_writer_fd = -1;
         }
     }
-#if defined(PSCAL_TARGET_IOS)
-    if (pushed_virtual_tty) {
-        shellPagerPopVirtualTTYOverride();
-        pushed_virtual_tty = false;
-    }
-#endif
     if (capture_thread_started) {
         if (getenv("PSCALI_PIPE_DEBUG")) {
             fprintf(stderr, "[pipe] capture join fd=%d spool_fd=%d size=%zu err=%d\n",
@@ -4051,6 +4015,13 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
 #if defined(PSCAL_TARGET_IOS)
     bool prefer_worker = shellShouldRunSmallclueInWorker(cmd);
+    bool force_pipeline_builtin = false;
+    if (cmd->argc > 0 && !shellCommandIsExecBuiltin(cmd)) {
+        const char *cmd_name = (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : NULL;
+        if (shellIsRuntimeBuiltin(cmd_name) || smallclueFindApplet(cmd_name) != NULL) {
+            force_pipeline_builtin = true;
+        }
+    }
 #endif
 #if defined(PSCAL_TARGET_IOS)
     if (cmd->background) {
@@ -4078,6 +4049,18 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 fprintf(stderr, "[pipeline-bg] auto in-process pipeline reset for background '%s'\n",
                         (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<null>");
             }
+        }
+    }
+#endif
+#if defined(PSCAL_TARGET_IOS)
+    if (force_pipeline_builtin && !ctx->active && !cmd->background) {
+        if (!shellEnsurePipeline(1, false)) {
+            force_pipeline_builtin = false;
+        } else {
+            ctx = &gShellRuntime.pipeline;
+            cmd->pipeline_index = 0;
+            cmd->is_pipeline_head = true;
+            cmd->is_pipeline_tail = true;
         }
     }
 #endif
@@ -4198,7 +4181,11 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        if (ctx->stage_count == 1 && !ctx->background && !cmd->background) {
+        if (ctx->stage_count == 1 && !ctx->background && !cmd->background
+#if defined(PSCAL_TARGET_IOS)
+            && !force_pipeline_builtin
+#endif
+            ) {
 #if defined(PSCAL_TARGET_IOS)
             if (!prefer_worker) {
                 ShellVprocLabelScope label_scope;
@@ -4365,9 +4352,6 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     }
     bool ignore_job_signals = background_execution &&
                               (!gShellRuntime.job_control_enabled
-#if defined(PSCAL_TARGET_IOS)
-                               || pscalRuntimeVirtualTTYEnabled()
-#endif
                                );
 
     int spawn_err = shellSpawnProcess(vm,

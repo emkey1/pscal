@@ -63,18 +63,18 @@ struct TerminalView: View {
     @ViewBuilder
     private var overlayButtons: some View {
         HStack(alignment: .center, spacing: 10) {
-            Button {
-                runtime.resetTerminalState()
-                requestInputFocus()
-                runtime.send(" ")
-                runtime.send("\u{08}") // backspace
-            } label: {
-                Text("RT")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .padding(9)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .accessibilityLabel("Reset Terminal")
+//            Button {
+//                runtime.resetTerminalState()
+//                requestInputFocus()
+//                runtime.send(" ")
+//                runtime.send("\u{7F}") // delete
+//            } label: {
+//                Text("RT")
+//                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+//                    .padding(9)
+//                    .background(.ultraThinMaterial, in: Circle())
+//            }
+//            .accessibilityLabel("Reset Terminal")
 
             Button {
                 showingSettings = true
@@ -86,16 +86,16 @@ struct TerminalView: View {
             }
             .accessibilityLabel("Adjust Font Size")
             
-            Button {
-                runtime.forceExshRestart()
-                requestInputFocus()
-            } label: {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 16, weight: .semibold))
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .accessibilityLabel("Restart exsh shell")
+//            Button {
+//                runtime.forceExshRestart()
+//                requestInputFocus()
+//            } label: {
+//                Image(systemName: "arrow.triangle.2.circlepath")
+//                    .font(.system(size: 16, weight: .semibold))
+//                    .padding(8)
+//                    .background(.ultraThinMaterial, in: Circle())
+//            }
+//            .accessibilityLabel("Restart exsh shell")
             
         }
         .padding(.bottom, 16)

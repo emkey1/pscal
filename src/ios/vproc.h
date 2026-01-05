@@ -24,6 +24,7 @@ extern "C" {
 
 typedef struct VProc VProc;
 struct pscal_fd;
+struct termios;
 
 typedef struct {
     int stdin_fd;   // host fd to dup for stdin; -1 to dup host STDIN_FILENO; -2 for /dev/null
@@ -234,9 +235,6 @@ typedef struct VProcSessionStdio {
     struct pscal_fd *stderr_pscal_fd;
     struct pscal_fd *pty_master;
     struct pscal_fd *pty_slave;
-    int pty_in_fd;
-    int pty_out_fd;
-    pthread_t pty_in_thread;
     pthread_t pty_out_thread;
     bool pty_active;
     uint64_t session_id;
@@ -260,8 +258,6 @@ void vprocSessionStdioInitWithFds(VProcSessionStdio *stdio_ctx,
 int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
                                  struct pscal_fd *pty_slave,
                                  struct pscal_fd *pty_master,
-                                 int bridge_in_fd,
-                                 int bridge_out_fd,
                                  uint64_t session_id,
                                  int kernel_pid);
 int vprocAdoptPscalStdio(VProc *vp,
@@ -276,6 +272,9 @@ void vprocSessionDebugDumpShim(const char *tag);
 bool vprocSessionStdioIsDefault(VProcSessionStdio *stdio_ctx);
 /* Activate a session stdio context for the calling thread (per window). */
 void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx);
+/* Termios helpers that always target the active session PTY (if present). */
+bool vprocSessionStdioFetchTermios(int fd, struct termios *termios);
+bool vprocSessionStdioApplyTermios(int fd, int action, const struct termios *termios);
 /* Create/destroy a heap-backed session stdio for custom sessions. */
 VProcSessionStdio *vprocSessionStdioCreate(void);
 void vprocSessionStdioDestroy(VProcSessionStdio *stdio_ctx);
@@ -292,12 +291,6 @@ ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t l
 VProcSessionInput *vprocSessionInputEnsureShim(void);
 /* Inject input into the current session input queue. */
 bool vprocSessionInjectInputShim(const void *data, size_t len);
-
-/* Create per-session pipes for virtual TTY I/O (session in/out + UI in/out). */
-int vprocCreateSessionPipes(int *session_stdin,
-                            int *session_stdout,
-                            int *ui_read,
-                            int *ui_write);
 
 /* Terminate and discard all vprocs in the given session (sid). */
 void vprocTerminateSession(int sid);
@@ -536,18 +529,25 @@ static inline void vprocSetKernelPid(int pid) { (void)pid; }
 static inline int vprocGetKernelPid(void) { return 0; }
 static inline void vprocClearKernelPidGlobal(void) {}
 static inline bool vprocSessionStdioIsDefault(VProcSessionStdio *stdio_ctx) { (void)stdio_ctx; return true; }
+static inline bool vprocSessionStdioFetchTermios(int fd, struct termios *termios) {
+    (void)fd;
+    (void)termios;
+    return false;
+}
+static inline bool vprocSessionStdioApplyTermios(int fd, int action, const struct termios *termios) {
+    (void)fd;
+    (void)action;
+    (void)termios;
+    return false;
+}
 static inline int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
                                                struct pscal_fd *pty_slave,
                                                struct pscal_fd *pty_master,
-                                               int bridge_in_fd,
-                                               int bridge_out_fd,
                                                uint64_t session_id,
                                                int kernel_pid) {
     (void)stdio_ctx;
     (void)pty_slave;
     (void)pty_master;
-    (void)bridge_in_fd;
-    (void)bridge_out_fd;
     (void)session_id;
     (void)kernel_pid;
     errno = ENOTSUP;

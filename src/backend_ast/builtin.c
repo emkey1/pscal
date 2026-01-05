@@ -2726,57 +2726,158 @@ static void vmCreateThreadKey(void) {
     pthread_key_create(&vm_thread_cleanup_key, vmThreadCleanup);
 }
 
-#if defined(PSCAL_TARGET_IOS)
-static struct termios vm_virtual_termios;
-static int vm_virtual_termios_inited = 0;
-#endif
-
 static int vmTcgetattr(int fd, struct termios *term) {
     int res;
+#if defined(PSCAL_TARGET_IOS)
+    if (term) {
+#if defined(TIOCGETA)
+        do {
+            res = vprocIoctlShim(fd, TIOCGETA, term);
+        } while (res < 0 && errno == EINTR);
+        if (res == 0) {
+            return 0;
+        }
+#endif
+#if defined(TCGETS)
+        do {
+            res = vprocIoctlShim(fd, TCGETS, term);
+        } while (res < 0 && errno == EINTR);
+        if (res == 0) {
+            return 0;
+        }
+#endif
+        if (vprocSessionStdioFetchTermios(fd, term)) {
+            return 0;
+        }
+    }
+#endif
     do {
         res = tcgetattr(fd, term);
     } while (res < 0 && errno == EINTR);
-#if defined(PSCAL_TARGET_IOS)
-    if (res < 0 && errno == ENOTTY && pscalRuntimeVirtualTTYEnabled()) {
-        if (!vm_virtual_termios_inited) {
-            memset(&vm_virtual_termios, 0, sizeof(vm_virtual_termios));
-            vm_virtual_termios.c_lflag = ICANON | ECHO;
-            vm_virtual_termios.c_cc[VMIN] = 1;
-            vm_virtual_termios.c_cc[VTIME] = 0;
-            vm_virtual_termios_inited = 1;
-        }
-        if (term) {
-            *term = vm_virtual_termios;
-        }
-        return 0;
-    }
-#endif
     return res;
 }
 
 static int vmTcsetattr(int fd, int optional_actions, const struct termios *term) {
     int res;
-    do {
-        res = tcsetattr(fd, optional_actions, term);
-    } while (res < 0 && errno == EINTR);
 #if defined(PSCAL_TARGET_IOS)
-    if (res < 0 && errno == ENOTTY && pscalRuntimeVirtualTTYEnabled()) {
-        if (term) {
-            vm_virtual_termios = *term;
-            vm_virtual_termios_inited = 1;
+    int cmd = 0;
+#if defined(TCSETS)
+    switch (optional_actions) {
+        case TCSANOW:
+            cmd = TCSETS;
+            break;
+        case TCSADRAIN:
+            cmd = TCSETSW;
+            break;
+        case TCSAFLUSH:
+            cmd = TCSETSF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#elif defined(TIOCSETA)
+    switch (optional_actions) {
+        case TCSANOW:
+            cmd = TIOCSETA;
+            break;
+        case TCSADRAIN:
+            cmd = TIOCSETAW;
+            break;
+        case TCSAFLUSH:
+            cmd = TIOCSETAF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#endif
+    if (cmd != 0) {
+        do {
+            res = vprocIoctlShim(fd, (unsigned long)cmd, (void *)term);
+        } while (res < 0 && errno == EINTR);
+        if (res == 0) {
+            return 0;
         }
+    }
+    if (vprocSessionStdioApplyTermios(fd, optional_actions, term)) {
         return 0;
     }
 #endif
+    do {
+        res = tcsetattr(fd, optional_actions, term);
+    } while (res < 0 && errno == EINTR);
     return res;
+}
+
+static bool vmTermiosIsRaw(const struct termios *term) {
+    if (!term) {
+        return false;
+    }
+    return (term->c_lflag & (ICANON | ECHO)) == 0;
+}
+
+static bool vmTermiosDebugEnabled(void) {
+    return (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
+}
+
+static void vmLogTermios(const char *tag, const struct termios *term) {
+    if (!vmTermiosDebugEnabled() || !tag || !term) {
+        return;
+    }
+    fprintf(stderr,
+            "[termios] %s lflag=0x%lx iflag=0x%lx oflag=0x%lx cflag=0x%lx vmin=%u vtime=%u verase=0x%02x raw=%d icanon=%d echo=%d icrnl=%d\n",
+            tag,
+            (unsigned long)term->c_lflag,
+            (unsigned long)term->c_iflag,
+            (unsigned long)term->c_oflag,
+            (unsigned long)term->c_cflag,
+            (unsigned int)term->c_cc[VMIN],
+            (unsigned int)term->c_cc[VTIME],
+            (unsigned int)term->c_cc[VERASE],
+            vmTermiosIsRaw(term) ? 1 : 0,
+            (term->c_lflag & ICANON) ? 1 : 0,
+            (term->c_lflag & ECHO) ? 1 : 0,
+            (term->c_iflag & ICRNL) ? 1 : 0);
 }
 
 static void vmRestoreTerminal(void) {
     pthread_mutex_lock(&vm_term_mutex);
-    if (vm_termios_saved && vm_raw_mode) {
-        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios) == 0) {
-            vm_raw_mode = 0;
+    if (!vm_termios_saved) {
+        if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
+            vm_termios_saved = 1;
         }
+    }
+
+    if (vm_termios_saved) {
+        if (vmTermiosDebugEnabled()) {
+            vmLogTermios("restore target", &vm_orig_termios);
+        }
+        bool should_restore = vm_raw_mode;
+        struct termios current;
+        if (vmTcgetattr(STDIN_FILENO, &current) == 0) {
+            vmLogTermios("restore current", &current);
+            if ((current.c_lflag & (ICANON | ECHO)) != (vm_orig_termios.c_lflag & (ICANON | ECHO))) {
+                should_restore = true;
+            }
+        } else if (vmTermiosDebugEnabled()) {
+            fprintf(stderr, "[termios] restore get failed errno=%d\n", errno);
+        }
+        if (should_restore) {
+            if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] restore apply raw_mode=%d\n", vm_raw_mode);
+            }
+            if (vmTcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios) == 0) {
+                vm_raw_mode = 0;
+                vmLogTermios("restore applied", &vm_orig_termios);
+            } else if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] restore set failed errno=%d\n", errno);
+            }
+        } else if (vmTermiosDebugEnabled()) {
+            fprintf(stderr, "[termios] restore skipped raw_mode=%d\n", vm_raw_mode);
+        }
+    } else if (vmTermiosDebugEnabled()) {
+        fprintf(stderr, "[termios] restore skipped (termios not saved)\n");
     }
     pthread_mutex_unlock(&vm_term_mutex);
 }
@@ -3124,17 +3225,27 @@ static void vmEnableRawMode(void) {
     vmSetupTermHandlers();
     pthread_mutex_lock(&vm_term_mutex);
     if (vm_raw_mode) {
-        pthread_mutex_unlock(&vm_term_mutex);
-        return;
+        struct termios current;
+        if (vmTcgetattr(STDIN_FILENO, &current) == 0 && vmTermiosIsRaw(&current)) {
+            if (vmTermiosDebugEnabled()) {
+                vmLogTermios("raw already", &current);
+            }
+            pthread_mutex_unlock(&vm_term_mutex);
+            return;
+        }
     }
 
     if (!vm_termios_saved) {
         if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) != 0) {
+            if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] raw get failed errno=%d\n", errno);
+            }
             pthread_mutex_unlock(&vm_term_mutex);
             return;
         }
         vm_termios_saved = 1;
     }
+    vmLogTermios("raw base", &vm_orig_termios);
 
     struct termios raw = vm_orig_termios;
     raw.c_lflag &= ~(ICANON | ECHO);
@@ -3143,6 +3254,9 @@ static void vmEnableRawMode(void) {
 
     if (vmTcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
+        vmLogTermios("raw applied", &raw);
+    } else if (vmTermiosDebugEnabled()) {
+        fprintf(stderr, "[termios] raw set failed errno=%d\n", errno);
     }
     pthread_mutex_unlock(&vm_term_mutex);
 }
@@ -3152,6 +3266,42 @@ static void vmEnableRawMode(void) {
 // discards leftover input, ensures echoing, and makes the cursor visible.
 static void vmPrepareCanonicalInput(void) {
     vmRestoreTerminal();
+    pthread_mutex_lock(&vm_term_mutex);
+    struct termios term;
+    if (vmTcgetattr(STDIN_FILENO, &term) == 0) {
+        vmLogTermios("canon before", &term);
+        bool changed = false;
+        if ((term.c_lflag & (ICANON | ECHO)) != (ICANON | ECHO)) {
+            term.c_lflag |= (ICANON | ECHO);
+            changed = true;
+        }
+        if ((term.c_iflag & ICRNL) == 0) {
+            term.c_iflag |= ICRNL;
+            changed = true;
+        }
+        if (term.c_cc[VERASE] != 0x7f) {
+            term.c_cc[VERASE] = 0x7f;
+            changed = true;
+        }
+        if (term.c_cc[VMIN] != 1 || term.c_cc[VTIME] != 0) {
+            term.c_cc[VMIN] = 1;
+            term.c_cc[VTIME] = 0;
+            changed = true;
+        }
+        if (changed) {
+            if (vmTcsetattr(STDIN_FILENO, TCSANOW, &term) == 0) {
+                vm_raw_mode = 0;
+                vmLogTermios("canon after", &term);
+            } else if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] canon set failed errno=%d\n", errno);
+            }
+        } else if (vmTermiosDebugEnabled()) {
+            fprintf(stderr, "[termios] canon unchanged raw_mode=%d\n", vm_raw_mode);
+        }
+    } else if (vmTermiosDebugEnabled()) {
+        fprintf(stderr, "[termios] canon get failed errno=%d\n", errno);
+    }
+    pthread_mutex_unlock(&vm_term_mutex);
     tcflush(STDIN_FILENO, TCIFLUSH);
     const char show_cursor[] = "\x1B[?25h";
     if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
@@ -3182,10 +3332,6 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         int read_fd = fd;
         VProc *vp = vprocCurrent();
         bool read_is_host = (vp == NULL);
-        bool skip_leading_newline = (stream == stdin &&
-                                     pscalRuntimeVirtualTTYEnabled() &&
-                                     !pscalRuntimeStdinHasRealTTY());
-        bool skipped_leading_newline = false;
         int host_fd = -1;
         if (vp) {
             host_fd = vprocTranslateFd(vp, fd);
@@ -3199,14 +3345,11 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
         if (tool_dbg && stream == stdin) {
             fprintf(stderr,
-                    "[readln] start stdin fd=%d read_fd=%d host=%d host_fd=%d skip_nl=%d vtty=%d\n",
-                    fd, read_fd, (int)read_is_host, host_fd, (int)skip_leading_newline,
-                    (int)pscalRuntimeVirtualTTYEnabled());
+                    "[readln] start stdin fd=%d read_fd=%d host=%d host_fd=%d\n",
+                    fd, read_fd, (int)read_is_host, host_fd);
         }
 #else
         int read_fd = fd;
-        bool skip_leading_newline = false;
-        bool skipped_leading_newline = false;
 #endif
         int sigint_fd = g_vm_sigint_pipe[0];
         bool sigint_host = false;
@@ -3375,15 +3518,6 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 continue;
             }
             if (ch == '\n') {
-                if (skip_leading_newline && len == 0 && !skipped_leading_newline) {
-                    skipped_leading_newline = true;
-#if defined(PSCAL_TARGET_IOS)
-                    if (tool_dbg && stream == stdin) {
-                        fprintf(stderr, "[readln] skipped leading newline\n");
-                    }
-#endif
-                    continue;
-                }
                 saw_newline = true;
                 break;
             }
@@ -3419,7 +3553,6 @@ static int getCursorPosition(int *row, int *col) {
     char ch;
     int ret_status = -1; // Default to critical failure
     int read_errno = 0; // Store errno from read() operation
-    bool virtualTTY = pscalRuntimeVirtualTTYEnabled() && !pscalRuntimeStdinHasRealTTY();
     bool termiosApplied = false;
 
     // Default row/col in case of non-critical failure
@@ -3432,29 +3565,27 @@ static int getCursorPosition(int *row, int *col) {
         return 0; // Treat as non-critical failure, return default 1,1
     }
 
-    if (!virtualTTY) {
-        // --- Save Current Terminal Settings ---
-        if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
-            perror("getCursorPosition: tcgetattr failed");
-            return -1; // Critical failure
-        }
-
-        // --- Prepare and Set Raw Mode ---
-        newt = oldt;
-        newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
-        newt.c_cc[VMIN] = 0;              // Non-blocking read
-        newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
-
-        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
-            int setup_errno = errno;
-            perror("getCursorPosition: tcsetattr (set raw) failed");
-            // Attempt to restore original settings even if setting new ones failed
-            vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
-            errno = setup_errno; // Restore errno for accurate reporting
-            return -1; // Critical failure
-        }
-        termiosApplied = true;
+    // --- Save Current Terminal Settings ---
+    if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
+        perror("getCursorPosition: tcgetattr failed");
+        return -1; // Critical failure
     }
+
+    // --- Prepare and Set Raw Mode ---
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
+    newt.c_cc[VMIN] = 0;              // Non-blocking read
+    newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
+
+    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
+        int setup_errno = errno;
+        perror("getCursorPosition: tcsetattr (set raw) failed");
+        // Attempt to restore original settings even if setting new ones failed
+        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
+        errno = setup_errno; // Restore errno for accurate reporting
+        return -1; // Critical failure
+    }
+    termiosApplied = true;
 
     // --- Write DSR Query ---
     const char *dsr_query = "\x1B[6n"; // ANSI Device Status Report for cursor position
@@ -3470,44 +3601,22 @@ static int getCursorPosition(int *row, int *col) {
     memset(buf, 0, sizeof(buf));
     i = 0;
     while (i < (int)sizeof(buf) - 1) {
-        if (virtualTTY) {
-            struct pollfd pfd;
-            pfd.fd = STDIN_FILENO;
-            pfd.events = POLLIN;
-            int poll_rc = poll(&pfd, 1, 200);
-            if (poll_rc <= 0) {
-                if (poll_rc == 0) {
-                    fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
-                } else {
-                    perror("getCursorPosition: poll failed");
-                }
-                break;
-            }
-            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
-            if (bytes_read <= 0) {
-                if (bytes_read < 0) {
-                    perror("getCursorPosition: read failed");
-                }
-                break;
-            }
-        } else {
-            errno = 0; // Clear errno before read
-            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
-            read_errno = errno; // Store errno immediately after read
+        errno = 0; // Clear errno before read
+        ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+        read_errno = errno; // Store errno immediately after read
 
-            if (bytes_read < 0) { // Read error
-                 // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
-                 if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
-                     fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
-                 } else {
-                     perror("getCursorPosition: read failed");
-                 }
-                 break; // Exit loop on any read error or timeout
-            }
-            if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
-                 fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
-                 break;
-            }
+        if (bytes_read < 0) { // Read error
+             // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
+             if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
+                 fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
+             } else {
+                 perror("getCursorPosition: read failed");
+             }
+             break; // Exit loop on any read error or timeout
+        }
+        if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
+             fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
+             break;
         }
 
         // Store character and check for terminator 'R'

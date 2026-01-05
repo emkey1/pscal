@@ -48,22 +48,16 @@ final class SshRuntimeSession: ObservableObject {
     private let stateQueue = DispatchQueue(label: "com.pscal.ssh.session.state")
     private let inputQueue = DispatchQueue(label: "com.pscal.ssh.session.input", qos: .userInitiated)
     private let outputQueue = DispatchQueue(label: "com.pscal.ssh.session.output", qos: .utility)
-    private var outputSource: DispatchSourceRead?
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
     private let minRenderInterval: TimeInterval = 0.03
     private var started = false
     private var didExit = false
-    private var masterFd: Int32 = -1
-    private var inputFd: Int32 = -1
-    private var childFds: [Int32] = []
-    private var usesPty = false
     private var pendingColumns: Int
     private var pendingRows: Int
     private var runtimeContext: OpaquePointer?
     private var handlerContext: UnsafeMutableRawPointer?
     private let outputHandlerGroup = DispatchGroup()
-    private var directOutput = false
     let htermController: HtermTerminalController
     private var htermAttached = false
     private func withRuntimeContext<T>(_ body: () -> T) -> T {
@@ -139,12 +133,9 @@ final class SshRuntimeSession: ObservableObject {
         withRuntimeContext {
             PSCALRuntimeRegisterSessionContext(sessionId)
         }
-        directOutput = usesDirectPtyOutput()
-        if directOutput {
-            handlerContext = Unmanaged.passRetained(self).toOpaque()
-            withRuntimeContext {
-                PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
-            }
+        handlerContext = Unmanaged.passRetained(self).toOpaque()
+        withRuntimeContext {
+            PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
         }
 
         var readFd: Int32 = -1
@@ -153,28 +144,15 @@ final class SshRuntimeSession: ObservableObject {
         if !launched {
             let err = errno
             lastStartErrno = err == 0 ? EIO : err
-            stopOutputPump()
-            directOutput = false
+            stopOutputHandler()
             closeIfValid(readFd)
             closeIfValid(writeFd)
             markExited(status: 255)
             return false
         }
         lastStartErrno = 0
-        usesPty = true
-        childFds.removeAll()
-        if directOutput {
-            closeIfValid(readFd)
-            closeIfValid(writeFd)
-            masterFd = -1
-            inputFd = -1
-        } else {
-            masterFd = readFd
-            inputFd = writeFd
-            makeNonBlocking(fd: masterFd)
-            makeNonBlocking(fd: inputFd)
-            startOutputPump()
-        }
+        closeIfValid(readFd)
+        closeIfValid(writeFd)
         return true
     }
 
@@ -202,12 +180,8 @@ final class SshRuntimeSession: ObservableObject {
         if terminalBuffer.resize(columns: clampedColumns, rows: clampedRows) {
             scheduleRender()
         }
-        if usesPty {
-            withRuntimeContext {
-                _ = PSCALRuntimeSetSessionWinsize(sessionId, Int32(clampedColumns), Int32(clampedRows))
-            }
-        } else if masterFd >= 0 {
-            applyWindowSize(fd: masterFd, columns: clampedColumns, rows: clampedRows)
+        withRuntimeContext {
+            _ = PSCALRuntimeSetSessionWinsize(sessionId, Int32(clampedColumns), Int32(clampedRows))
         }
     }
 
@@ -218,16 +192,7 @@ final class SshRuntimeSession: ObservableObject {
             return true
         }
         guard shouldUpdate else { return }
-        stopOutputPump()
-        directOutput = false
-        if inputFd >= 0 && inputFd != masterFd {
-            closeIfValid(inputFd)
-            inputFd = -1
-        }
-        for fd in childFds {
-            closeIfValid(fd)
-        }
-        childFds.removeAll()
+        stopOutputHandler()
         withRuntimeContext {
             PSCALRuntimeUnregisterSessionContext(sessionId)
         }
@@ -242,70 +207,16 @@ final class SshRuntimeSession: ObservableObject {
         }
     }
 
-    // MARK: - Output Pump
+    // MARK: - Output Handler
 
-    private func startOutputPump() {
-        guard masterFd >= 0 else { return }
-        let source = DispatchSource.makeReadSource(fileDescriptor: masterFd, queue: outputQueue)
-        source.setEventHandler { [weak self] in
-            self?.drainOutput()
+    private func stopOutputHandler() {
+        guard let context = handlerContext else { return }
+        withRuntimeContext {
+            PSCALRuntimeUnregisterSessionOutputHandler(sessionId)
         }
-        source.setCancelHandler { [weak self] in
-            guard let self else { return }
-            if self.masterFd >= 0 {
-                close(self.masterFd)
-                self.masterFd = -1
-            }
-        }
-        outputSource = source
-        source.resume()
-    }
-
-    private func stopOutputPump() {
-        outputSource?.cancel()
-        outputSource = nil
-        if directOutput, let context = handlerContext {
-            withRuntimeContext {
-                PSCALRuntimeUnregisterSessionOutputHandler(sessionId)
-            }
-            outputHandlerGroup.wait()
-            Unmanaged<SshRuntimeSession>.fromOpaque(context).release()
-            handlerContext = nil
-        }
-    }
-
-    private func drainOutput() {
-        guard masterFd >= 0 else { return }
-        var buffer = [UInt8](repeating: 0, count: 8192)
-        var totalRead = 0
-        var iterations = 0
-        let maxIterations = 8
-        let maxBytes = 64 * 1024
-        while iterations < maxIterations && totalRead < maxBytes {
-            let readCount = read(masterFd, &buffer, buffer.count)
-            if readCount > 0 {
-                totalRead += readCount
-                iterations += 1
-                let data = Data(buffer[0..<readCount])
-                htermController.enqueueOutput(data)
-                terminalBuffer.append(data: data)
-                continue
-            }
-            if readCount == 0 {
-                markExited(status: nil)
-                break
-            }
-            if errno == EAGAIN || errno == EWOULDBLOCK {
-                break
-            }
-            markExited(status: nil)
-            break
-        }
-        if totalRead >= maxBytes || iterations >= maxIterations {
-            outputQueue.async { [weak self] in
-                self?.drainOutput()
-            }
-        }
+        outputHandlerGroup.wait()
+        Unmanaged<SshRuntimeSession>.fromOpaque(context).release()
+        handlerContext = nil
     }
 
     // MARK: - Rendering
@@ -352,20 +263,12 @@ final class SshRuntimeSession: ObservableObject {
         guard !data.isEmpty else { return }
         inputQueue.async { [weak self] in
             guard let self else { return }
-            if self.directOutput {
-                self.withRuntimeContext {
-                    data.withUnsafeBytes { buffer in
-                        guard let base = buffer.baseAddress else { return }
-                        let ptr = base.assumingMemoryBound(to: CChar.self)
-                        PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
-                    }
+            self.withRuntimeContext {
+                data.withUnsafeBytes { buffer in
+                    guard let base = buffer.baseAddress else { return }
+                    let ptr = base.assumingMemoryBound(to: CChar.self)
+                    PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
                 }
-                return
-            }
-            guard self.inputFd >= 0 else { return }
-            data.withUnsafeBytes { buffer in
-                guard let base = buffer.baseAddress else { return }
-                _ = write(self.inputFd, base, buffer.count)
             }
         }
     }
@@ -405,60 +308,9 @@ final class SshRuntimeSession: ObservableObject {
         return result == 0
     }
 
-    private func applyWindowSize(fd: Int32, columns: Int, rows: Int) {
-        if fd < 0 || columns <= 0 || rows <= 0 {
-            return
-        }
-        var ws = winsize()
-        memset(&ws, 0, MemoryLayout<winsize>.size)
-        ws.ws_col = UInt16(columns)
-        ws.ws_row = UInt16(rows)
-        _ = ioctl(fd, TIOCSWINSZ, &ws)
-    }
-
-    private func makeNonBlocking(fd: Int32) {
-        let flags = fcntl(fd, F_GETFL, 0)
-        if flags >= 0 {
-            _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
-        }
-    }
-
-    private func configurePtySlave(_ fd: Int32) {
-        guard fd >= 0 else { return }
-        var term = termios()
-        if tcgetattr(fd, &term) != 0 {
-            return
-        }
-        term.c_lflag |= tcflag_t(ICANON | ECHO | ECHOE | ECHOK | ECHONL)
-        term.c_lflag &= ~tcflag_t(ECHOCTL | ECHOKE)
-        term.c_iflag |= tcflag_t(ICRNL | IXON)
-        #if os(iOS)
-        term.c_iflag |= tcflag_t(IUTF8)
-        #endif
-        term.c_oflag |= tcflag_t(OPOST | ONLCR)
-        term.c_cflag |= tcflag_t(CS8 | CREAD)
-        setControlChar(&term, index: VMIN, value: 1)
-        setControlChar(&term, index: VTIME, value: 0)
-        tcsetattr(fd, TCSANOW, &term)
-    }
-
-    private func setControlChar(_ term: inout termios, index: Int32, value: cc_t) {
-        withUnsafeMutablePointer(to: &term.c_cc) { ptr in
-            ptr.withMemoryRebound(to: cc_t.self, capacity: Int(NCCS)) { ccPtr in
-                ccPtr[Int(index)] = value
-            }
-        }
-    }
-
     private func closeIfValid(_ fd: Int32) {
         if fd >= 0 {
             close(fd)
         }
-    }
-
-    private func usesDirectPtyOutput() -> Bool {
-        guard let raw = getenv("PSCALI_PTY_OUTPUT_DIRECT") else { return true }
-        let value = String(cString: raw)
-        return value.isEmpty || value != "0"
     }
 }

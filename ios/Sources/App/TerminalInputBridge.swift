@@ -16,6 +16,7 @@ struct TerminalInputBridge: UIViewRepresentable {
     @Binding var focusAnchor: Int
     var onInput: (String) -> Void
     var onPaste: ((String) -> Void)?
+    var onCopy: (() -> Void)?
     var onInterrupt: (() -> Void)? = nil
     var onSuspend: (() -> Void)? = nil
 
@@ -39,6 +40,7 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.keyboardAppearance = .dark
         view.onInput = onInput
         view.onPaste = onPaste
+        view.onCopy = onCopy
         view.onInterrupt = onInterrupt
         view.onSuspend = onSuspend
         context.coordinator.view = view
@@ -56,6 +58,7 @@ struct TerminalInputBridge: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalKeyInputView, context: Context) {
         uiView.onInput = onInput
         uiView.onPaste = onPaste
+        uiView.onCopy = onCopy
         uiView.onInterrupt = onInterrupt
         uiView.onSuspend = onSuspend
 
@@ -78,6 +81,7 @@ struct TerminalInputBridge: UIViewRepresentable {
 final class TerminalKeyInputView: UITextView {
     var onInput: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
+    var onCopy: (() -> Void)?
     var onInterrupt: (() -> Void)?
     var onSuspend: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
@@ -264,13 +268,19 @@ final class TerminalKeyInputView: UITextView {
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
-        let interrupt = UIKeyCommand(input: "c",
-                                     modifierFlags: [.command],
-                                     action: #selector(handleCommandInterrupt))
-        if #available(iOS 15.0, *) {
-            interrupt.wantsPriorityOverSystemBehavior = true
+        if onCopy != nil {
+            let copy = UIKeyCommand(input: "c",
+                                    modifierFlags: [.command],
+                                    action: #selector(handleCopyCommand(_:)))
+            let cut = UIKeyCommand(input: "x",
+                                   modifierFlags: [.command],
+                                   action: #selector(handleCopyCommand(_:)))
+            if #available(iOS 15.0, *) {
+                copy.wantsPriorityOverSystemBehavior = true
+                cut.wantsPriorityOverSystemBehavior = true
+            }
+            commands.append(contentsOf: [copy, cut])
         }
-        commands.append(interrupt)
         commands.append(contentsOf: controlKeyCommands)
         return commands
     }
@@ -306,16 +316,28 @@ final class TerminalKeyInputView: UITextView {
         onPaste?(text)
     }
 
-    @objc private func handleCommandInterrupt() {
-        triggerInterrupt()
+    override func copy(_ sender: Any?) {
+        if let onCopy {
+            onCopy()
+            return
+        }
+        super.copy(sender)
+    }
+
+    override func cut(_ sender: Any?) {
+        if let onCopy {
+            onCopy()
+            return
+        }
+        super.cut(sender)
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) {
             return UIPasteboard.general.hasStrings
         }
-        if action == #selector(copy(_:)) {
-            return false
+        if action == #selector(copy(_:)) || action == #selector(cut(_:)) {
+            return onCopy != nil
         }
         return super.canPerformAction(action, withSender: sender)
     }
@@ -497,7 +519,7 @@ final class TerminalKeyInputView: UITextView {
                 if self.isFirstResponder {
                     self.reloadInputViews()
                     self.onInput?(" ")
-                    self.onInput?("\u{08}")
+                    self.onInput?("\u{7F}")
                 }
             }
         }
@@ -516,7 +538,7 @@ final class TerminalKeyInputView: UITextView {
                 if self.isFirstResponder {
                     self.reloadInputViews()
                     self.onInput?(" ")
-                    self.onInput?("\u{08}")
+                    self.onInput?("\u{7F}")
                 }
             }
         }
@@ -594,6 +616,10 @@ final class TerminalKeyInputView: UITextView {
     @objc private func handlePasteCommand() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
         onPaste?(text)
+    }
+
+    @objc private func handleCopyCommand(_ command: UIKeyCommand) {
+        onCopy?()
     }
 
     @objc private func handleIncreaseFont() {

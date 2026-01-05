@@ -10,7 +10,7 @@
 
 static THREAD_LOCAL ShellContext *g_shell_tls = NULL;
 
-ShellContext *shellContextCreate(int stdin_fd, int stdout_fd, int stderr_fd, bool virtual_tty_enabled) {
+ShellContext *shellContextCreate(int stdin_fd, int stdout_fd, int stderr_fd) {
     ShellContext *ctx = (ShellContext *)calloc(1, sizeof(ShellContext));
     if (!ctx) {
         return NULL;
@@ -18,7 +18,6 @@ ShellContext *shellContextCreate(int stdin_fd, int stdout_fd, int stderr_fd, boo
     ctx->stdin_fd = stdin_fd;
     ctx->stdout_fd = stdout_fd;
     ctx->stderr_fd = stderr_fd;
-    ctx->virtual_tty_enabled = virtual_tty_enabled;
     return ctx;
 }
 

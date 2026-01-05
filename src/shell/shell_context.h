@@ -11,11 +11,10 @@ typedef struct ShellContext {
     int stdin_fd;
     int stdout_fd;
     int stderr_fd;
-    bool virtual_tty_enabled;
 } ShellContext;
 
 /// Creates a new shell context with the provided fds. Caller owns the result.
-ShellContext *shellContextCreate(int stdin_fd, int stdout_fd, int stderr_fd, bool virtual_tty_enabled);
+ShellContext *shellContextCreate(int stdin_fd, int stdout_fd, int stderr_fd);
 
 /// Destroys a shell context created by shellContextCreate.
 void shellContextDestroy(ShellContext *ctx);

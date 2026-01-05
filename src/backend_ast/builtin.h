@@ -244,6 +244,7 @@ void shellRuntimeRecordHistory(const char *line);
 void shellRuntimeSetArg0(const char *name);
 const char *shellRuntimeGetArg0(void);
 void shellRuntimeInitJobControl(void);
+void shellRuntimeRestoreForeground(void);
 void shellRuntimeInitSignals(void);
 void shellRuntimeProcessPendingSignals(void);
 bool shellRuntimeParseSignal(const char *text, int *out_signo);

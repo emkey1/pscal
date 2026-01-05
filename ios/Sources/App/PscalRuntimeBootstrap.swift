@@ -25,6 +25,13 @@ private let runtimeLogMirrorsToConsole: Bool = {
     return value != "0"
 }()
 
+private let runtimeDebugMirrorEnabled: Bool = {
+    guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_MIRROR_TERMINAL"] else {
+        return false
+    }
+    return value != "0"
+}()
+
 private func terminalLogURL() -> URL? {
     guard let raw = getenv("PSCALI_TERMINAL_LOG") else { return nil }
     let path = String(cString: raw)
@@ -483,7 +490,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                                                                     queue: .main) { [weak self] _ in
             // Font change can leave the prompt visually stale; nudge terminal.
             self?.send(" ")
-            self?.send("\u{08}")
+            self?.send("\u{7F}")
             self?.scheduleRender()
         }
     }
@@ -640,7 +647,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 // Always send a carriage return to force prompt rendering
                 self.send(" ")
-                self.send("\u{08}")
+                self.send("\u{7F}")
             }
             if self.stateQueue.sync(execute: { self.skipRcNextStart }) {
                 unsetenv("EXSH_SKIP_RC")
@@ -822,10 +829,15 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func setDebugLogMirroring(_ enabled: Bool) {
+        guard runtimeDebugMirrorEnabled else {
+            stateQueue.async { self.mirrorDebugToTerminal = false }
+            return
+        }
         stateQueue.async { self.mirrorDebugToTerminal = enabled }
     }
 
     func forwardDebugLogToTerminalIfEnabled(_ message: String) {
+        guard runtimeDebugMirrorEnabled else { return }
         guard !message.isEmpty else { return }
         var shouldMirror = false
         stateQueue.sync { shouldMirror = self.mirrorDebugToTerminal }
@@ -1135,7 +1147,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if isElvisModeActive() {
             return false
         }
-        return withRuntimeContext { PSCALRuntimeIsVirtualTTY() != 0 }
+        return false
     }
 
     private func echoLocallyIfNeeded(_ text: String) {

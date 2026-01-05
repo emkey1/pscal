@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include <stdio.h> // Added for fprintf
+#include <stdio.h> // for vsnprintf
 #include <string.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -146,38 +146,38 @@ static void *vprocResolveSymbol(const char *name) {
     return sym;
 }
 
-static VPROC_UNUSED ssize_t vprocHostReadRaw(int fd, void *buf, size_t count) {
-    static ssize_t (*fn)(int, void *, size_t) = NULL;
+static pthread_once_t vprocHostReadOnce = PTHREAD_ONCE_INIT;
+static void *vprocHostReadDirect = NULL;
+static ssize_t (*vprocHostReadFn)(int, void *, size_t) = NULL;
+
+static void vprocHostReadInit(void) {
 #if defined(__APPLE__)
-    static void *direct = NULL;
-    static int direct_checked = 0;
-    if (!direct_checked) {
-        direct_checked = 1;
-        if (&__read_nocancel) {
-            direct = vprocFilterSelfSymbol((void *)&__read_nocancel);
-        }
+    if (&__read_nocancel) {
+        vprocHostReadDirect = vprocFilterSelfSymbol((void *)&__read_nocancel);
     }
-    if (direct) {
-        /* Avoid racy reloads if another thread updates the cached symbol. */
-        ssize_t (*direct_fn)(int, void *, size_t) = (ssize_t (*)(int, void *, size_t))direct;
+#endif
+    vprocHostReadFn = (ssize_t (*)(int, void *, size_t))vprocResolveSymbol("__read_nocancel");
+    if (!vprocHostReadFn) {
+        vprocHostReadFn = (ssize_t (*)(int, void *, size_t))vprocResolveSymbol("read");
+    }
+    if (!vprocHostReadFn) {
+        vprocHostReadFn = (ssize_t (*)(int, void *, size_t))vprocResolveSymbol("read$NOCANCEL");
+    }
+}
+
+static VPROC_UNUSED ssize_t vprocHostReadRaw(int fd, void *buf, size_t count) {
+    pthread_once(&vprocHostReadOnce, vprocHostReadInit);
+#if defined(__APPLE__)
+    if (vprocHostReadDirect) {
+        ssize_t (*direct_fn)(int, void *, size_t) = (ssize_t (*)(int, void *, size_t))vprocHostReadDirect;
         vprocInterposeBypassEnter();
         ssize_t res = direct_fn(fd, buf, count);
         vprocInterposeBypassExit();
         return res;
     }
 #endif
-    if (!fn) {
-        fn = (ssize_t (*)(int, void *, size_t))vprocResolveSymbol("__read_nocancel");
-    }
-    if (!fn) {
-        fn = (ssize_t (*)(int, void *, size_t))vprocResolveSymbol("read");
-    }
-    if (!fn) {
-        fn = (ssize_t (*)(int, void *, size_t))vprocResolveSymbol("read$NOCANCEL");
-    }
-    if (fn) {
-        /* Keep a stable snapshot of the resolved symbol before bypassing. */
-        ssize_t (*read_fn)(int, void *, size_t) = fn;
+    if (vprocHostReadFn) {
+        ssize_t (*read_fn)(int, void *, size_t) = vprocHostReadFn;
         vprocInterposeBypassEnter();
         ssize_t res = read_fn(fd, buf, count);
         vprocInterposeBypassExit();
@@ -189,51 +189,35 @@ static VPROC_UNUSED ssize_t vprocHostReadRaw(int fd, void *buf, size_t count) {
     return res;
 }
 
-static ssize_t vprocHostWriteRaw(int fd, const void *buf, size_t count) {
-    static ssize_t (*fn)(int, const void *, size_t) = NULL;
-    static ssize_t (*fallback)(int, const void *, size_t) = NULL;
+static pthread_once_t vprocHostWriteOnce = PTHREAD_ONCE_INIT;
+static void *vprocHostWriteDirect = NULL;
+static ssize_t (*vprocHostWriteFallback)(int, const void *, size_t) = NULL;
+static ssize_t (*vprocHostWriteFn)(int, const void *, size_t) = NULL;
+
+static void vprocHostWriteInit(void) {
 #if defined(__APPLE__)
-    static void *direct = NULL;
-    static int direct_checked = 0;
-    if (!direct_checked) {
-        direct_checked = 1;
-        if (&__write_nocancel) {
-            direct = vprocFilterSelfSymbol((void *)&__write_nocancel);
-            if (vprocSymbolIsLogRedirect(direct)) {
-                fallback = (ssize_t (*)(int, const void *, size_t))direct;
-                direct = NULL;
-            }
+    if (&__write_nocancel) {
+        void *direct = vprocFilterSelfSymbol((void *)&__write_nocancel);
+        if (vprocSymbolIsLogRedirect(direct)) {
+            vprocHostWriteFallback = (ssize_t (*)(int, const void *, size_t))direct;
+        } else {
+            vprocHostWriteDirect = direct;
         }
     }
-    if (direct) {
-        /* Avoid racy reloads if another thread updates the cached symbol. */
-        ssize_t (*direct_fn)(int, const void *, size_t) = (ssize_t (*)(int, const void *, size_t))direct;
-        vprocInterposeBypassEnter();
-        ssize_t res = direct_fn(fd, buf, count);
-        vprocInterposeBypassExit();
-        return res;
-    }
 #endif
-    if (fn && vprocSymbolIsLogRedirect((void *)fn)) {
-        if (!fallback) {
-            fallback = fn;
+    ssize_t (*fn)(int, const void *, size_t) = NULL;
+    fn = (ssize_t (*)(int, const void *, size_t))vprocResolveSymbol("__write_nocancel");
+    if (vprocSymbolIsLogRedirect((void *)fn)) {
+        if (!vprocHostWriteFallback) {
+            vprocHostWriteFallback = fn;
         }
         fn = NULL;
     }
     if (!fn) {
-        fn = (ssize_t (*)(int, const void *, size_t))vprocResolveSymbol("__write_nocancel");
-        if (vprocSymbolIsLogRedirect((void *)fn)) {
-            if (!fallback) {
-                fallback = fn;
-            }
-            fn = NULL;
-        }
-    }
-    if (!fn) {
         fn = (ssize_t (*)(int, const void *, size_t))vprocResolveSymbol("write");
         if (vprocSymbolIsLogRedirect((void *)fn)) {
-            if (!fallback) {
-                fallback = fn;
+            if (!vprocHostWriteFallback) {
+                vprocHostWriteFallback = fn;
             }
             fn = NULL;
         }
@@ -241,18 +225,31 @@ static ssize_t vprocHostWriteRaw(int fd, const void *buf, size_t count) {
     if (!fn) {
         fn = (ssize_t (*)(int, const void *, size_t))vprocResolveSymbol("write$NOCANCEL");
         if (vprocSymbolIsLogRedirect((void *)fn)) {
-            if (!fallback) {
-                fallback = fn;
+            if (!vprocHostWriteFallback) {
+                vprocHostWriteFallback = fn;
             }
             fn = NULL;
         }
     }
-    if (!fn && fallback && !vprocSymbolIsLogRedirect((void *)fallback)) {
-        fn = fallback;
+    if (!fn && vprocHostWriteFallback && !vprocSymbolIsLogRedirect((void *)vprocHostWriteFallback)) {
+        fn = vprocHostWriteFallback;
     }
-    if (fn) {
-        /* Keep a stable snapshot of the resolved symbol before bypassing. */
-        ssize_t (*write_fn)(int, const void *, size_t) = fn;
+    vprocHostWriteFn = fn;
+}
+
+static ssize_t vprocHostWriteRaw(int fd, const void *buf, size_t count) {
+    pthread_once(&vprocHostWriteOnce, vprocHostWriteInit);
+#if defined(__APPLE__)
+    if (vprocHostWriteDirect) {
+        ssize_t (*direct_fn)(int, const void *, size_t) = (ssize_t (*)(int, const void *, size_t))vprocHostWriteDirect;
+        vprocInterposeBypassEnter();
+        ssize_t res = direct_fn(fd, buf, count);
+        vprocInterposeBypassExit();
+        return res;
+    }
+#endif
+    if (vprocHostWriteFn) {
+        ssize_t (*write_fn)(int, const void *, size_t) = vprocHostWriteFn;
         vprocInterposeBypassEnter();
         ssize_t res = write_fn(fd, buf, count);
         vprocInterposeBypassExit();
@@ -1209,9 +1206,6 @@ static VProcSessionStdio gSessionStdioDefault = {
     .stderr_pscal_fd = NULL,
     .pty_master = NULL,
     .pty_slave = NULL,
-    .pty_in_fd = -1,
-    .pty_out_fd = -1,
-    .pty_in_thread = 0,
     .pty_out_thread = 0,
     .pty_active = false,
     .session_id = 0,
@@ -2158,20 +2152,77 @@ static bool vprocSessionFdMatchesStd(int fd, int std_fd) {
     return fd_st.st_dev == std_st.st_dev && fd_st.st_ino == std_st.st_ino;
 }
 
-static bool vprocPtyOutputDirectEnabled(void) {
-    const char *env = getenv("PSCALI_PTY_OUTPUT_DIRECT");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
-
 static bool vprocIoDebugEnabled(void) {
     const char *env = getenv("PSCALI_IO_DEBUG");
     if (!env || env[0] == '\0') {
         return false;
     }
     return strcmp(env, "0") != 0;
+}
+
+static void vprocDebugLogf(const char *format, ...) {
+    if (!format) {
+        return;
+    }
+    char buf[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buf, sizeof(buf), format, args);
+    va_end(args);
+    size_t len = strlen(buf);
+    if (len == 0) {
+        return;
+    }
+    if (buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+#if defined(__APPLE__)
+    static void (*log_line)(const char *message) = NULL;
+    static int log_line_checked = 0;
+    if (!log_line_checked) {
+        log_line_checked = 1;
+        log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
+    }
+    if (log_line) {
+        log_line(buf);
+        return;
+    }
+#endif
+#if defined(PSCAL_TARGET_IOS)
+    if (pscalRuntimeDebugLog) {
+        pscalRuntimeDebugLog(buf);
+        return;
+    }
+#endif
+#if !defined(PSCAL_TARGET_IOS)
+    fprintf(stderr, "%s\n", buf);
+#endif
+}
+
+static void vprocIoTrace(const char *format, ...) {
+    if (!vprocIoDebugEnabled() || !format) {
+        return;
+    }
+    char buf[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buf, sizeof(buf), format, args);
+    va_end(args);
+#if defined(__APPLE__)
+    static void (*log_line)(const char *message) = NULL;
+    static int log_line_checked = 0;
+    if (!log_line_checked) {
+        log_line_checked = 1;
+        log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
+    }
+    if (log_line) {
+        log_line(buf);
+        return;
+    }
+#endif
+    if (pscalRuntimeDebugLog) {
+        pscalRuntimeDebugLog(buf);
+    }
 }
 
 static void vprocSessionResolveOutputFd(VProcSessionStdio *session, int fd, bool *is_stdout, bool *is_stderr) {
@@ -2288,13 +2339,10 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
     if (session_id == 0) {
         return;
     }
-    if (vprocIoDebugEnabled()) {
-        fprintf(stderr,
-                "[vproc-io] set output handler session=%llu handler=%p ctx=%p\n",
-                (unsigned long long)session_id,
-                (void *)handler,
-                context);
-    }
+    vprocIoTrace("[vproc-io] set output handler session=%llu handler=%p ctx=%p",
+                 (unsigned long long)session_id,
+                 (void *)handler,
+                 context);
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
     if (entry) {
@@ -2308,11 +2356,8 @@ void vprocSessionClearOutputHandler(uint64_t session_id) {
     if (session_id == 0) {
         return;
     }
-    if (vprocIoDebugEnabled()) {
-        fprintf(stderr,
-                "[vproc-io] clear output handler session=%llu\n",
-                (unsigned long long)session_id);
-    }
+    vprocIoTrace("[vproc-io] clear output handler session=%llu",
+                 (unsigned long long)session_id);
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
         VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
@@ -2365,12 +2410,9 @@ ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t l
         errno = EINVAL;
         return -1;
     }
-    if (vprocIoDebugEnabled()) {
-        fprintf(stderr,
-                "[vproc-io] input write session=%llu len=%zu\n",
-                (unsigned long long)session_id,
-                len);
-    }
+    vprocIoTrace("[vproc-io] input write session=%llu len=%zu",
+                 (unsigned long long)session_id,
+                 len);
     struct pscal_fd *master = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
@@ -2465,7 +2507,7 @@ static void *vprocSessionInputThread(void *arg) {
     int fd = session ? session->stdin_host_fd : -1;
     unsigned char ch = 0;
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        fprintf(stderr,
+        vprocDebugLogf(
                 "[session-input] reader start fd=%d shell=%d kernel=%d\n",
                 fd,
                 ctx->shell_pid,
@@ -2478,7 +2520,7 @@ static void *vprocSessionInputThread(void *arg) {
             pthread_mutex_unlock(&input->mu);
             if (stop_requested) {
                 if (getenv("PSCALI_TOOL_DEBUG")) {
-                    fprintf(stderr, "[session-input] reader stop fd=%d\n", fd);
+                    vprocDebugLogf( "[session-input] reader stop fd=%d\n", fd);
                 }
                 break;
             }
@@ -2491,7 +2533,7 @@ static void *vprocSessionInputThread(void *arg) {
             }
             if (getenv("PSCALI_TOOL_DEBUG")) {
                 int saved_errno = errno;
-                fprintf(stderr,
+                vprocDebugLogf(
                         "[session-input] reader eof fd=%d r=%zd errno=%d\n",
                         fd,
                         r,
@@ -2552,55 +2594,6 @@ static void *vprocSessionInputThread(void *arg) {
     return NULL;
 }
 
-static void *vprocSessionPtyInputThread(void *arg) {
-    VProcSessionStdio *session = (VProcSessionStdio *)arg;
-    if (!session) {
-        return NULL;
-    }
-    int fd = session->pty_in_fd;
-    struct pscal_fd *master = session->pty_master;
-    if (fd < 0 || !master || !master->ops || !master->ops->write) {
-        vprocPtyTrace("[PTY] input thread missing fd/master (fd=%d master=%p)", fd, (void *)master);
-        return NULL;
-    }
-    pthread_t tid = pthread_self();
-    vprocRegisterInterposeBypassThread(tid);
-    pthread_setname_np("vproc-pty-in");
-    vprocPtyTrace("[PTY] input thread start fd=%d", fd);
-    char buf[1024];
-    while (session->pty_active) {
-        /* Use host I/O to avoid shim/interposer recursion in bridge threads. */
-        ssize_t r = vprocHostRead(fd, buf, sizeof(buf));
-        if (r == 0) {
-            vprocPtyTrace("[PTY] input thread EOF");
-            break;
-        }
-        if (r < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            vprocPtyTrace("[PTY] input thread read error errno=%d", errno);
-            break;
-        }
-        size_t off = 0;
-        while (off < (size_t)r && session->pty_active) {
-            ssize_t w = master->ops->write(master, buf + off, (size_t)r - off);
-            if (w < 0) {
-                if (w == _EINTR || w == _EAGAIN) {
-                    continue;
-                }
-                vprocPtyTrace("[PTY] input thread write error code=%zd", w);
-                session->pty_active = false;
-                break;
-            }
-            off += (size_t)w;
-        }
-    }
-    vprocPtyTrace("[PTY] input thread exit active=%d", session->pty_active ? 1 : 0);
-    vprocUnregisterInterposeBypassThread(tid);
-    return NULL;
-}
-
 static void *vprocSessionPtyOutputThread(void *arg) {
     VProcSessionStdio *session = (VProcSessionStdio *)arg;
     if (!session) {
@@ -2614,7 +2607,7 @@ static void *vprocSessionPtyOutputThread(void *arg) {
     pthread_t tid = pthread_self();
     vprocRegisterInterposeBypassThread(tid);
     pthread_setname_np("vproc-pty-out");
-    vprocPtyTrace("[PTY] output thread start fd=%d", session->pty_out_fd);
+    vprocPtyTrace("[PTY] output thread start");
     char buf[1024];
     while (session->pty_active) {
         ssize_t r = master->ops->read(master, buf, sizeof(buf));
@@ -2636,41 +2629,17 @@ static void *vprocSessionPtyOutputThread(void *arg) {
         VProcSessionOutputHandler handler = NULL;
         void *context = NULL;
         if (vprocSessionGetOutputHandler(session->session_id, &handler, &context) && handler) {
-            if (vprocIoDebugEnabled()) {
-                fprintf(stderr,
-                        "[vproc-io] output session=%llu len=%zd handler=%p\n",
-                        (unsigned long long)session->session_id,
-                        r,
-                        (void *)handler);
-            }
+            vprocIoTrace("[vproc-io] output session=%llu len=%zd handler=%p",
+                         (unsigned long long)session->session_id,
+                         r,
+                         (void *)handler);
             handler(session->session_id, (const unsigned char *)buf, (size_t)r, context);
             continue;
         }
-        int fd = session->pty_out_fd;
-        if (fd < 0) {
-            if (vprocIoDebugEnabled()) {
-                fprintf(stderr,
-                        "[vproc-io] output drop session=%llu len=%zd (no handler/fd)\n",
-                        (unsigned long long)session->session_id,
-                        r);
-            }
-            vprocPtyTrace("[PTY] output thread drop len=%zd (no handler, no fd)", r);
-            continue;
-        }
-        size_t off = 0;
-        while (off < (size_t)r && session->pty_active) {
-            /* Use host I/O to avoid shim/interposer recursion in bridge threads. */
-            ssize_t w = vprocHostWrite(fd, buf + off, (size_t)r - off);
-            if (w < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                vprocPtyTrace("[PTY] output thread write error errno=%d", errno);
-                session->pty_active = false;
-                break;
-            }
-            off += (size_t)w;
-        }
+        vprocIoTrace("[vproc-io] output drop session=%llu len=%zd (no handler)",
+                     (unsigned long long)session->session_id,
+                     r);
+        vprocPtyTrace("[PTY] output thread drop len=%zd (no handler)", r);
     }
     vprocPtyTrace("[PTY] output thread exit active=%d", session->pty_active ? 1 : 0);
     vprocUnregisterInterposeBypassThread(tid);
@@ -2722,13 +2691,13 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
                 input->stop_requested = false;
                 pthread_mutex_unlock(&input->mu);
                 if (getenv("PSCALI_TOOL_DEBUG")) {
-                    fprintf(stderr,
+                    vprocDebugLogf(
                             "[session-input] reader spawned fd=%d\n",
                             session->stdin_host_fd);
                 }
             } else {
                 if (getenv("PSCALI_TOOL_DEBUG")) {
-                    fprintf(stderr,
+                    vprocDebugLogf(
                             "[session-input] reader spawn failed rc=%d\n",
                             create_rc);
                 }
@@ -2747,7 +2716,7 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
     VProcSessionInput *input = session->input;
     if (getenv("PSCALI_TOOL_DEBUG")) {
         pthread_mutex_lock(&input->mu);
-        fprintf(stderr,
+        vprocDebugLogf(
                 "[session-read] start len=%zu eof=%d reader=%d fd=%d stdin=%d\n",
                 input->len,
                 (int)input->eof,
@@ -2773,7 +2742,7 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
     }
     if (input->len == 0 && input->eof) {
         if (getenv("PSCALI_TOOL_DEBUG")) {
-            fprintf(stderr, "[session-read] eof\n");
+            vprocDebugLogf( "[session-read] eof\n");
         }
         pthread_mutex_unlock(&input->mu);
         return 0;
@@ -2803,7 +2772,7 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         return -1;
     }
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        fprintf(stderr,
+        vprocDebugLogf(
                 "[session-read] direct stdin=%d nonblock=%d\n",
                 session->stdin_host_fd,
                 (int)nonblocking);
@@ -2820,7 +2789,7 @@ VProcSessionInput *vprocSessionInputEnsureShim(void) {
     int shell_pid = vprocGetShellSelfPid();
     int kernel_pid = vprocGetKernelPid();
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        fprintf(stderr,
+        vprocDebugLogf(
                 "[session-input] ensure shell=%d kernel=%d stdin_host=%d input=%p\n",
                 shell_pid,
                 kernel_pid,
@@ -2863,7 +2832,7 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     input->len += len;
     pthread_cond_broadcast(&input->cv);
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        fprintf(stderr,
+        vprocDebugLogf(
                 "[session-input] injected len=%zu total=%zu cap=%zu\n",
                 len,
                 input->len,
@@ -2871,39 +2840,6 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     }
     pthread_mutex_unlock(&input->mu);
     return true;
-}
-
-int vprocCreateSessionPipes(int *session_stdin,
-                            int *session_stdout,
-                            int *ui_read,
-                            int *ui_write) {
-    if (!session_stdin || !session_stdout || !ui_read || !ui_write) {
-        errno = EINVAL;
-        return -1;
-    }
-    int stdin_pipe[2] = {-1, -1};
-    int stdout_pipe[2] = {-1, -1};
-    if (vprocHostPipe(stdin_pipe) != 0) {
-        return -1;
-    }
-    if (vprocHostPipe(stdout_pipe) != 0) {
-        int saved = errno;
-        vprocHostClose(stdin_pipe[0]);
-        vprocHostClose(stdin_pipe[1]);
-        errno = saved;
-        return -1;
-    }
-    if (stdin_pipe[0] >= 0) {
-        fcntl(stdin_pipe[0], F_SETFD, FD_CLOEXEC);
-    }
-    if (stdout_pipe[1] >= 0) {
-        fcntl(stdout_pipe[1], F_SETFD, FD_CLOEXEC);
-    }
-    *session_stdin = stdin_pipe[0];
-    *session_stdout = stdout_pipe[1];
-    *ui_write = stdin_pipe[1];
-    *ui_read = stdout_pipe[0];
-    return 0;
 }
 
 static void vprocRemoveChildLocked(VProcTaskEntry *parent, int child_pid) {
@@ -3439,7 +3375,7 @@ static void vprocMaybeAdvancePidCounter(int pid_hint) {
 static void vprocTaskTableRepairLocked(void) {
     if (gVProcTasks.items != gVProcTasksItemsStable) {
         if (getenv("PSCALI_VPROC_DEBUG")) {
-            fprintf(stderr, "[vproc] task table pointer mismatch; repairing\n");
+            vprocDebugLogf( "[vproc] task table pointer mismatch; repairing\n");
         }
         gVProcTasks.items = gVProcTasksItemsStable;
         gVProcTasks.capacity = gVProcTasksCapacityStable;
@@ -3530,10 +3466,10 @@ VProc *vprocCreate(const VProcOptions *opts) {
         local.stderr_fd == -1) {
         inherit_pscal_stdio = true;
         if (vproc_dbg) {
-            fprintf(stderr, "[vproc] inherit pscal stdio from session\n");
+            vprocDebugLogf( "[vproc] inherit pscal stdio from session\n");
         }
     } else if (vproc_dbg && session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
-        fprintf(stderr,
+        vprocDebugLogf(
                 "[vproc] skip pscal stdio inherit stdin=%d stdout=%d stderr=%d opts=(%d,%d,%d)\n",
                 session_stdio->stdin_pscal_fd ? 1 : 0,
                 session_stdio->stdout_pscal_fd ? 1 : 0,
@@ -3599,7 +3535,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (stdin_src < 0 && local.stdin_fd != -2) {
         stdin_src = vprocHostOpenRawInternal("/dev/null", O_RDONLY, 0, false);
         if (vproc_dbg && stdin_src < 0) {
-            fprintf(stderr, "[vproc] stdin clone failed fd=%d err=%s\n",
+            vprocDebugLogf( "[vproc] stdin clone failed fd=%d err=%s\n",
                     (local.stdin_fd >= 0) ? local.stdin_fd : STDIN_FILENO, strerror(errno));
         }
     }
@@ -3623,7 +3559,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (stdout_src < 0) {
         stdout_src = vprocHostOpenRawInternal("/dev/null", O_WRONLY, 0, false);
         if (vproc_dbg && stdout_src < 0) {
-            fprintf(stderr, "[vproc] stdout clone failed fd=%d err=%s\n",
+            vprocDebugLogf( "[vproc] stdout clone failed fd=%d err=%s\n",
                     (local.stdout_fd >= 0) ? local.stdout_fd : STDOUT_FILENO, strerror(errno));
         }
     }
@@ -3631,7 +3567,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (stderr_src < 0) {
         stderr_src = vprocHostOpenRawInternal("/dev/null", O_WRONLY, 0, false);
         if (vproc_dbg && stderr_src < 0) {
-            fprintf(stderr, "[vproc] stderr clone failed fd=%d err=%s\n",
+            vprocDebugLogf( "[vproc] stderr clone failed fd=%d err=%s\n",
                     (local.stderr_fd >= 0) ? local.stderr_fd : STDERR_FILENO, strerror(errno));
         }
     }
@@ -3641,7 +3577,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
         if (stdout_src >= 0) vprocHostClose(stdout_src);
         if (stderr_src >= 0) vprocHostClose(stderr_src);
         if (vproc_dbg) {
-            fprintf(stderr, "[vproc] create failed stdin=%d stdout=%d stderr=%d\n",
+            vprocDebugLogf( "[vproc] create failed stdin=%d stdout=%d stderr=%d\n",
                     stdin_src, stdout_src, stderr_src);
         }
         vprocDestroy(vp);
@@ -3670,7 +3606,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
                                  session_stdio->stdout_pscal_fd,
                                  session_stdio->stderr_pscal_fd) != 0) {
             if (vproc_dbg) {
-                fprintf(stderr, "[vproc] adopt pscal stdio failed: %s\n", strerror(errno));
+                vprocDebugLogf( "[vproc] adopt pscal stdio failed: %s\n", strerror(errno));
             }
         }
     }
@@ -4355,14 +4291,14 @@ int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) {
     int host_fd = vprocHostOpenVirtualized(path, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
-        if (dbg) fprintf(stderr, "[vproc-open] virtualized ENOENT for %s, fallback raw\n", path);
+        if (dbg) vprocDebugLogf( "[vproc-open] virtualized ENOENT for %s, fallback raw\n", path);
         /* Fallback to raw open so pipelines can read plain files even when
          * virtualization rejects the path. This mirrors shell expectations
          * for cat/head pipelines on iOS. */
         host_fd = vprocHostOpenRawInternal(path, flags, (mode_t)mode, (flags & O_CREAT) != 0);
     }
     if (dbg && host_fd >= 0) {
-        fprintf(stderr, "[vproc-open] opened %s -> fd=%d flags=0x%x\n", path, host_fd, flags);
+        vprocDebugLogf( "[vproc-open] opened %s -> fd=%d flags=0x%x\n", path, host_fd, flags);
     }
 #endif
     if (host_fd < 0) {
@@ -4418,7 +4354,7 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         errno = ENOMEM;
         if (vdbg) {
-            fprintf(stderr, "[vproc] register tid hint failed pid=%d tid=%p\n", pid, (void *)tid);
+            vprocDebugLogf( "[vproc] register tid hint failed pid=%d tid=%p\n", pid, (void *)tid);
         }
         return -1;
     }
@@ -4450,7 +4386,7 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         vprocApplyThreadName(thread_name);
     }
     if (vdbg) {
-        fprintf(stderr, "[vproc] register tid hint pid=%d tid=%p thread_count=%zu\n",
+        vprocDebugLogf( "[vproc] register tid hint pid=%d tid=%p thread_count=%zu\n",
                 pid, (void *)tid, entry->thread_count);
     }
     return pid;
@@ -4470,7 +4406,7 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         errno = ENOMEM;
         if (vdbg) {
-            fprintf(stderr, "[vproc] register thread failed pid=%d tid=%p\n", vp->pid, (void *)tid);
+            vprocDebugLogf( "[vproc] register thread failed pid=%d tid=%p\n", vp->pid, (void *)tid);
         }
         return -1;
     }
@@ -4498,7 +4434,7 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
     }
     rename_thread = vprocPrepareThreadNameLocked(entry, thread_name, sizeof(thread_name));
     if (vdbg) {
-        fprintf(stderr, "[vproc] register thread pid=%d tid=%p thread_count=%zu\n",
+        vprocDebugLogf( "[vproc] register thread pid=%d tid=%p thread_count=%zu\n",
                 vp->pid, (void *)tid, entry->thread_count);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -4647,12 +4583,12 @@ void vprocSetParent(int pid, int parent_pid) {
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
         if (dbg) {
-            fprintf(stderr, "[vproc-parent] pid=%d old=%d new=%d\n",
+            vprocDebugLogf( "[vproc-parent] pid=%d old=%d new=%d\n",
                     pid, entry->parent_pid, parent_pid);
         }
     vprocUpdateParentLocked(pid, parent_pid);
     } else if (dbg) {
-        fprintf(stderr, "[vproc-parent] pid=%d not found; new=%d\n", pid, parent_pid);
+        vprocDebugLogf( "[vproc-parent] pid=%d not found; new=%d\n", pid, parent_pid);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
@@ -5132,7 +5068,7 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
             }
 
             if (dbg) {
-                fprintf(stderr, "[vproc-wait] pid=%d status=%d exited=%d stop=%d\n",
+                vprocDebugLogf( "[vproc-wait] pid=%d status=%d exited=%d stop=%d\n",
                         waited_pid, status, ready->exited, ready->stopped);
             }
             pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5226,7 +5162,7 @@ int vprocKillShim(pid_t pid, int sig) {
 
     if (sig < 0 || sig >= 32) {
         if (dbg) {
-            fprintf(stderr, "[vproc-kill] invalid signal=%d\n", sig);
+            vprocDebugLogf( "[vproc-kill] invalid signal=%d\n", sig);
         }
         errno = EINVAL;
         return -1;
@@ -5251,7 +5187,7 @@ int vprocKillShim(pid_t pid, int sig) {
     size_t cancel_capacity = 0;
     pthread_mutex_lock(&gVProcTasks.mu);
     if (dbg) {
-        fprintf(stderr, "[vproc-kill] target=%d group=%d broadcast=%d count=%zu\n",
+        vprocDebugLogf( "[vproc-kill] target=%d group=%d broadcast=%d count=%zu\n",
                 target, (int)target_group, (int)broadcast_all, gVProcTasks.count);
     }
     bool delivered = false;
@@ -5262,7 +5198,7 @@ int vprocKillShim(pid_t pid, int sig) {
         if (entry->zombie || entry->exited) continue;
         if (entry->exited && entry->zombie) continue;
         if (dbg) {
-            fprintf(stderr, "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
+            vprocDebugLogf( "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
                     entry->pid, entry->pgid, entry->sid, entry->exited, entry->zombie);
         }
         
@@ -5278,7 +5214,7 @@ int vprocKillShim(pid_t pid, int sig) {
         delivered = true;
 
         if (dbg) {
-            fprintf(stderr, "[vproc-kill] pid=%d sig=%d target=%d entry_pid=%d tid=%p\n",
+            vprocDebugLogf( "[vproc-kill] pid=%d sig=%d target=%d entry_pid=%d tid=%p\n",
                     (int)pid, sig, target, entry->pid, (void *)entry->tid);
         }
 
@@ -5308,7 +5244,7 @@ int vprocKillShim(pid_t pid, int sig) {
     if (delivered) return rc;
 
     if (dbg) {
-        fprintf(stderr, "[vproc-kill] no targets pid=%d target=%d group=%d broadcast=%d\n",
+        vprocDebugLogf( "[vproc-kill] no targets pid=%d target=%d group=%d broadcast=%d\n",
                 (int)pid, target, (int)target_group, (int)broadcast_all);
     }
     errno = ESRCH;
@@ -6019,9 +5955,6 @@ void vprocSessionStdioInit(VProcSessionStdio *stdio_ctx, int kernel_pid) {
     stdio_ctx->stderr_pscal_fd = NULL;
     stdio_ctx->pty_master = NULL;
     stdio_ctx->pty_slave = NULL;
-    stdio_ctx->pty_in_fd = -1;
-    stdio_ctx->pty_out_fd = -1;
-    stdio_ctx->pty_in_thread = 0;
     stdio_ctx->pty_out_thread = 0;
     stdio_ctx->pty_active = false;
     stdio_ctx->session_id = 0;
@@ -6029,44 +5962,21 @@ void vprocSessionStdioInit(VProcSessionStdio *stdio_ctx, int kernel_pid) {
 
 void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx) {
     gSessionStdioTls = stdio_ctx ? stdio_ctx : &gSessionStdioDefault;
-    if (vprocIoDebugEnabled()) {
-        fprintf(stderr,
-                "[vproc-io] activate stdio=%p session=%llu pty_active=%d host=(%d,%d,%d) pscal=(%p,%p,%p)\n",
-                (void *)gSessionStdioTls,
-                (unsigned long long)(gSessionStdioTls ? gSessionStdioTls->session_id : 0),
-                (gSessionStdioTls && gSessionStdioTls->pty_active) ? 1 : 0,
-                gSessionStdioTls ? gSessionStdioTls->stdin_host_fd : -1,
-                gSessionStdioTls ? gSessionStdioTls->stdout_host_fd : -1,
-                gSessionStdioTls ? gSessionStdioTls->stderr_host_fd : -1,
-                gSessionStdioTls ? (void *)gSessionStdioTls->stdin_pscal_fd : NULL,
-                gSessionStdioTls ? (void *)gSessionStdioTls->stdout_pscal_fd : NULL,
-                gSessionStdioTls ? (void *)gSessionStdioTls->stderr_pscal_fd : NULL);
-    }
+    vprocIoTrace("[vproc-io] activate stdio=%p session=%llu pty_active=%d host=(%d,%d,%d) pscal=(%p,%p,%p)",
+                 (void *)gSessionStdioTls,
+                 (unsigned long long)(gSessionStdioTls ? gSessionStdioTls->session_id : 0),
+                 (gSessionStdioTls && gSessionStdioTls->pty_active) ? 1 : 0,
+                 gSessionStdioTls ? gSessionStdioTls->stdin_host_fd : -1,
+                 gSessionStdioTls ? gSessionStdioTls->stdout_host_fd : -1,
+                 gSessionStdioTls ? gSessionStdioTls->stderr_host_fd : -1,
+                 gSessionStdioTls ? (void *)gSessionStdioTls->stdin_pscal_fd : NULL,
+                 gSessionStdioTls ? (void *)gSessionStdioTls->stdout_pscal_fd : NULL,
+                 gSessionStdioTls ? (void *)gSessionStdioTls->stderr_pscal_fd : NULL);
     if (!gSessionStdioTls || vprocSessionStdioIsDefault(gSessionStdioTls)) {
         gShellSelfPid = 0;
     } else if (gSessionStdioTls->shell_pid > 0) {
         gShellSelfPid = gSessionStdioTls->shell_pid;
     }
-#if defined(PSCAL_TARGET_IOS)
-    if (gSessionStdioTls && !vprocSessionStdioIsDefault(gSessionStdioTls)) {
-        if (gSessionStdioTls->pty_active || gSessionStdioTls->stdin_pscal_fd) {
-            pscalRuntimeSetVirtualTTYEnabled(false);
-            return;
-        }
-        bool real_tty = false;
-        if (gSessionStdioTls->stdin_host_fd >= 0) {
-            real_tty = vprocHostIsatty(gSessionStdioTls->stdin_host_fd) != 0;
-        }
-        if (!real_tty) {
-            pscalRuntimeSetVirtualTTYEnabled(true);
-            pscalRuntimeRegisterVirtualTTYFd(STDIN_FILENO, gSessionStdioTls->stdin_host_fd);
-            pscalRuntimeRegisterVirtualTTYFd(STDOUT_FILENO, gSessionStdioTls->stdout_host_fd);
-            pscalRuntimeRegisterVirtualTTYFd(STDERR_FILENO, gSessionStdioTls->stderr_host_fd);
-        } else {
-            pscalRuntimeSetVirtualTTYEnabled(false);
-        }
-    }
-#endif
 }
 
 void vprocSessionStdioInitWithFds(VProcSessionStdio *stdio_ctx,
@@ -6098,9 +6008,6 @@ void vprocSessionStdioInitWithFds(VProcSessionStdio *stdio_ctx,
     stdio_ctx->stderr_pscal_fd = NULL;
     stdio_ctx->pty_master = NULL;
     stdio_ctx->pty_slave = NULL;
-    stdio_ctx->pty_in_fd = -1;
-    stdio_ctx->pty_out_fd = -1;
-    stdio_ctx->pty_in_thread = 0;
     stdio_ctx->pty_out_thread = 0;
     stdio_ctx->pty_active = false;
     stdio_ctx->session_id = 0;
@@ -6109,8 +6016,6 @@ void vprocSessionStdioInitWithFds(VProcSessionStdio *stdio_ctx,
 int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
                                  struct pscal_fd *pty_slave,
                                  struct pscal_fd *pty_master,
-                                 int bridge_in_fd,
-                                 int bridge_out_fd,
                                  uint64_t session_id,
                                  int kernel_pid) {
     if (!stdio_ctx || !pty_slave || !pty_master) {
@@ -6130,82 +6035,34 @@ int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
     stdio_ctx->stdin_pscal_fd = pty_slave;
     stdio_ctx->stdout_pscal_fd = pscal_fd_retain(pty_slave);
     stdio_ctx->stderr_pscal_fd = pscal_fd_retain(pty_slave);
-    if (vprocPtyOutputDirectEnabled()) {
-        bridge_in_fd = -1;
-        bridge_out_fd = -1;
-    }
-    stdio_ctx->pty_in_fd = bridge_in_fd;
-    stdio_ctx->pty_out_fd = bridge_out_fd;
     stdio_ctx->pty_active = true;
-    if (vprocIoDebugEnabled()) {
-        fprintf(stderr,
-                "[vproc-io] stdio init session=%llu in=%d out=%d direct=%d master=%p slave=%p\n",
-                (unsigned long long)session_id,
-                bridge_in_fd,
-                bridge_out_fd,
-                vprocPtyOutputDirectEnabled() ? 1 : 0,
-                (void *)pty_master,
-                (void *)pty_slave);
-    }
-    vprocPtyTrace("[PTY] init session=%llu in=%d out=%d master=%p slave=%p",
+    vprocIoTrace("[vproc-io] stdio init session=%llu master=%p slave=%p",
+                 (unsigned long long)session_id,
+                 (void *)pty_master,
+                 (void *)pty_slave);
+    vprocPtyTrace("[PTY] init session=%llu master=%p slave=%p",
                   (unsigned long long)session_id,
-                  bridge_in_fd,
-                  bridge_out_fd,
                   (void *)pty_master,
                   (void *)pty_slave);
 
     int rc = 0;
-    if (stdio_ctx->pty_in_fd >= 0) {
-        rc = vprocHostPthreadCreate(&stdio_ctx->pty_in_thread, NULL, vprocSessionPtyInputThread, stdio_ctx);
-        if (rc != 0) {
-            vprocPtyTrace("[PTY] input thread create failed rc=%d", rc);
-            stdio_ctx->pty_active = false;
-            if (stdio_ctx->stdout_pscal_fd) {
-                pscal_fd_close(stdio_ctx->stdout_pscal_fd);
-                stdio_ctx->stdout_pscal_fd = NULL;
-            }
-            if (stdio_ctx->stderr_pscal_fd) {
-                pscal_fd_close(stdio_ctx->stderr_pscal_fd);
-                stdio_ctx->stderr_pscal_fd = NULL;
-            }
-            stdio_ctx->stdin_pscal_fd = NULL;
-            stdio_ctx->pty_master = NULL;
-            stdio_ctx->pty_slave = NULL;
-            errno = rc;
-            return -1;
+    rc = vprocHostPthreadCreate(&stdio_ctx->pty_out_thread, NULL, vprocSessionPtyOutputThread, stdio_ctx);
+    if (rc != 0) {
+        vprocPtyTrace("[PTY] output thread create failed rc=%d", rc);
+        stdio_ctx->pty_active = false;
+        if (stdio_ctx->stdout_pscal_fd) {
+            pscal_fd_close(stdio_ctx->stdout_pscal_fd);
+            stdio_ctx->stdout_pscal_fd = NULL;
         }
-    }
-    if (stdio_ctx->pty_out_fd >= 0 || vprocPtyOutputDirectEnabled()) {
-        rc = vprocHostPthreadCreate(&stdio_ctx->pty_out_thread, NULL, vprocSessionPtyOutputThread, stdio_ctx);
-        if (rc != 0) {
-            vprocPtyTrace("[PTY] output thread create failed rc=%d", rc);
-            stdio_ctx->pty_active = false;
-            if (stdio_ctx->pty_in_fd >= 0) {
-                vprocHostClose(stdio_ctx->pty_in_fd);
-                stdio_ctx->pty_in_fd = -1;
-            }
-            if (stdio_ctx->pty_out_fd >= 0) {
-                vprocHostClose(stdio_ctx->pty_out_fd);
-                stdio_ctx->pty_out_fd = -1;
-            }
-            if (stdio_ctx->pty_in_thread) {
-                pthread_join(stdio_ctx->pty_in_thread, NULL);
-                stdio_ctx->pty_in_thread = 0;
-            }
-            if (stdio_ctx->stdout_pscal_fd) {
-                pscal_fd_close(stdio_ctx->stdout_pscal_fd);
-                stdio_ctx->stdout_pscal_fd = NULL;
-            }
-            if (stdio_ctx->stderr_pscal_fd) {
-                pscal_fd_close(stdio_ctx->stderr_pscal_fd);
-                stdio_ctx->stderr_pscal_fd = NULL;
-            }
-            stdio_ctx->stdin_pscal_fd = NULL;
-            stdio_ctx->pty_master = NULL;
-            stdio_ctx->pty_slave = NULL;
-            errno = rc;
-            return -1;
+        if (stdio_ctx->stderr_pscal_fd) {
+            pscal_fd_close(stdio_ctx->stderr_pscal_fd);
+            stdio_ctx->stderr_pscal_fd = NULL;
         }
+        stdio_ctx->stdin_pscal_fd = NULL;
+        stdio_ctx->pty_master = NULL;
+        stdio_ctx->pty_slave = NULL;
+        errno = rc;
+        return -1;
     }
 
     vprocSessionPtyRegister(session_id, pty_slave, pty_master);
@@ -6228,9 +6085,6 @@ VProcSessionStdio *vprocSessionStdioCreate(void) {
     session->stderr_pscal_fd = NULL;
     session->pty_master = NULL;
     session->pty_slave = NULL;
-    session->pty_in_fd = -1;
-    session->pty_out_fd = -1;
-    session->pty_in_thread = 0;
     session->pty_out_thread = 0;
     session->pty_active = false;
     session->session_id = 0;
@@ -6253,18 +6107,6 @@ void vprocSessionStdioDestroy(VProcSessionStdio *stdio_ctx) {
         unlock(&stdio_ctx->pty_master->tty->lock);
     }
     stdio_ctx->pty_active = false;
-    if (stdio_ctx->pty_in_fd >= 0) {
-        vprocHostClose(stdio_ctx->pty_in_fd);
-        stdio_ctx->pty_in_fd = -1;
-    }
-    if (stdio_ctx->pty_out_fd >= 0) {
-        vprocHostClose(stdio_ctx->pty_out_fd);
-        stdio_ctx->pty_out_fd = -1;
-    }
-    if (stdio_ctx->pty_in_thread) {
-        pthread_join(stdio_ctx->pty_in_thread, NULL);
-        stdio_ctx->pty_in_thread = 0;
-    }
     if (stdio_ctx->pty_out_thread) {
         pthread_join(stdio_ctx->pty_out_thread, NULL);
         stdio_ctx->pty_out_thread = 0;
@@ -6361,7 +6203,7 @@ void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid) {
         return;
     }
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        fprintf(stderr,
+        vprocDebugLogf(
                 "[session-stdio] refresh stdin=%d stdout=%d stderr=%d\n",
                 stdio_ctx->stdin_host_fd,
                 stdio_ctx->stdout_host_fd,
@@ -6911,9 +6753,6 @@ int vprocIsattyShim(int fd) {
     }
 #if defined(PSCAL_TARGET_IOS)
     if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
-        if (pscalRuntimeVirtualTTYEnabled()) {
-            return 1;
-        }
         VProcSessionStdio *session = vprocSessionStdioCurrent();
         if (session && !vprocSessionStdioIsDefault(session)) {
             return 1;
@@ -6984,13 +6823,12 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     }
     bool controlling_stdin = (vp && vp->stdin_host_fd >= 0 && fd == STDIN_FILENO && host == vp->stdin_host_fd);
     if (getenv("PSCALI_TOOL_DEBUG") && fd == STDIN_FILENO) {
-        fprintf(stderr,
-                "[vproc-read] stdin host=%d stdin_host=%d controlling=%d from_session=%d vtty=%d\n",
+        vprocDebugLogf(
+                "[vproc-read] stdin host=%d stdin_host=%d controlling=%d from_session=%d\n",
                 host,
                 vp ? vp->stdin_host_fd : -1,
                 (int)controlling_stdin,
-                (int)(vp ? vp->stdin_from_session : 0),
-                (int)pscalRuntimeVirtualTTYEnabled());
+                (int)(vp ? vp->stdin_from_session : 0));
     }
     if (controlling_stdin) {
         (void)vprocWaitIfStopped(vp);
@@ -7001,38 +6839,9 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     }
     ssize_t res;
     /* On iOS, default to direct host reads to avoid a second reader competing
-     * with foreground programs unless virtual TTY control dispatch is needed. */
+     * with foreground programs. */
     res = vprocHostRead(host, buf, count);
-    if (res <= 0 || !controlling_stdin || !vp) {
-        return res;
-    }
-    if (!pscalRuntimeVirtualTTYEnabled()) {
-        return res;
-    }
-    int shell_pid = vprocGetShellSelfPid();
-    if (shell_pid > 0 && vprocPid(vp) == shell_pid) {
-        return res;
-    }
-    bool saw_sigint = false;
-    bool saw_sigtstp = false;
-    unsigned char *bytes = (unsigned char *)buf;
-    for (ssize_t i = 0; i < res; ++i) {
-        if (bytes[i] == 3) {
-            saw_sigint = true;
-        } else if (bytes[i] == 26) {
-            saw_sigtstp = true;
-        }
-    }
-    if (!saw_sigint && !saw_sigtstp) {
-        return res;
-    }
-    if (saw_sigint) {
-        vprocDispatchControlSignal(vp, SIGINT);
-    } else if (saw_sigtstp) {
-        vprocDispatchControlSignal(vp, SIGTSTP);
-    }
-    errno = EINTR;
-    return -1;
+    return res;
 }
 
 ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
@@ -7075,7 +6884,7 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
         return -1;
     }
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        fprintf(stderr, "[vwrite] fd=%d -> host=%d count=%zu\n", fd, host, count);
+        vprocDebugLogf( "[vwrite] fd=%d -> host=%d count=%zu\n", fd, host, count);
     }
     return vprocHostWrite(host, buf, count);
 }
@@ -7825,6 +7634,81 @@ static int vprocIoctlTranslate(unsigned long cmd) {
     }
 }
 
+static struct pscal_fd *vprocSessionPscalFdForStd(int fd) {
+    if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO) {
+        return NULL;
+    }
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (!session || vprocSessionStdioIsDefault(session)) {
+        return NULL;
+    }
+    struct pscal_fd *candidate = NULL;
+    if (fd == STDIN_FILENO) {
+        candidate = session->stdin_pscal_fd ? session->stdin_pscal_fd : session->pty_slave;
+    } else if (fd == STDOUT_FILENO) {
+        candidate = session->stdout_pscal_fd ? session->stdout_pscal_fd : session->pty_slave;
+    } else if (fd == STDERR_FILENO) {
+        candidate = session->stderr_pscal_fd ? session->stderr_pscal_fd : session->pty_slave;
+    }
+    if (!candidate) {
+        return NULL;
+    }
+    return pscal_fd_retain(candidate);
+}
+
+bool vprocSessionStdioFetchTermios(int fd, struct termios *termios) {
+    if (!termios) {
+        return false;
+    }
+    struct pscal_fd *pscal_fd = vprocSessionPscalFdForStd(fd);
+    if (!pscal_fd) {
+        return false;
+    }
+    int res = _ENOTTY;
+    if (pscal_fd->ops && pscal_fd->ops->ioctl) {
+        struct termios_ termios_val;
+        res = pscal_fd->ops->ioctl(pscal_fd, TCGETS_, &termios_val);
+        if (res == 0) {
+            vprocTermiosToHost(&termios_val, termios);
+        }
+    }
+    pscal_fd_close(pscal_fd);
+    return res == 0;
+}
+
+bool vprocSessionStdioApplyTermios(int fd, int action, const struct termios *termios) {
+    if (!termios) {
+        return false;
+    }
+    int cmd = 0;
+    switch (action) {
+        case TCSANOW:
+            cmd = TCSETS_;
+            break;
+        case TCSADRAIN:
+            cmd = TCSETSW_;
+            break;
+        case TCSAFLUSH:
+            cmd = TCSETSF_;
+            break;
+        default:
+            cmd = TCSETS_;
+            break;
+    }
+    struct pscal_fd *pscal_fd = vprocSessionPscalFdForStd(fd);
+    if (!pscal_fd) {
+        return false;
+    }
+    int res = _ENOTTY;
+    if (pscal_fd->ops && pscal_fd->ops->ioctl) {
+        struct termios_ termios_val;
+        vprocTermiosFromHost(termios, &termios_val);
+        res = pscal_fd->ops->ioctl(pscal_fd, cmd, &termios_val);
+    }
+    pscal_fd_close(pscal_fd);
+    return res == 0;
+}
+
 int vprocIoctlShim(int fd, unsigned long request, ...) {
     uintptr_t arg_val = 0;
     va_list ap;
@@ -7833,156 +7717,74 @@ int vprocIoctlShim(int fd, unsigned long request, ...) {
     va_end(ap);
 
     VProc *vp = vprocForThread();
+    struct pscal_fd *pscal_fd = NULL;
     if (vp) {
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
-        if (pscal_fd) {
-            int cmd = vprocIoctlTranslate(request);
-            int res = _ENOTTY;
-            if (pscal_fd->ops && pscal_fd->ops->ioctl) {
-                switch (cmd) {
-                    case TCGETS_: {
-                        if (!arg_val) {
-                            res = _EINVAL;
-                            break;
-                        }
-                        struct termios_ termios;
-                        res = pscal_fd->ops->ioctl(pscal_fd, cmd, &termios);
-                        if (res == 0) {
-                            vprocTermiosToHost(&termios, (struct termios *)arg_val);
-                        }
-                        break;
-                    }
-                    case TCSETS_:
-                    case TCSETSW_:
-                    case TCSETSF_: {
-                        if (!arg_val) {
-                            res = _EINVAL;
-                            break;
-                        }
-                        struct termios_ termios;
-                        vprocTermiosFromHost((const struct termios *)arg_val, &termios);
-                        res = pscal_fd->ops->ioctl(pscal_fd, cmd, &termios);
-                        break;
-                    }
-                    case TIOCGWINSZ_: {
-                        if (!arg_val) {
-                            res = _EINVAL;
-                            break;
-                        }
-                        struct winsize_ ws;
-                        res = pscal_fd->ops->ioctl(pscal_fd, cmd, &ws);
-                        if (res == 0) {
-                            vprocWinsizeToHost(&ws, (struct winsize *)arg_val);
-                        }
-                        break;
-                    }
-                    case TIOCSWINSZ_: {
-                        if (!arg_val) {
-                            res = _EINVAL;
-                            break;
-                        }
-                        struct winsize_ ws;
-                        vprocWinsizeFromHost((const struct winsize *)arg_val, &ws);
-                        res = pscal_fd->ops->ioctl(pscal_fd, cmd, &ws);
-                        break;
-                    }
-                    default:
-                        res = pscal_fd->ops->ioctl(pscal_fd, cmd, (void *)arg_val);
-                        break;
-                }
-            }
-            pscal_fd_close(pscal_fd);
-            if (res < 0) {
-                return vprocSetCompatErrno(res);
-            }
-            return res;
-        }
-        if (pscalRuntimeVirtualTTYEnabled() &&
-            (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)) {
-            int cmd = vprocIoctlTranslate(request);
+        pscal_fd = vprocGetPscalFd(vp, fd);
+    }
+    if (!pscal_fd) {
+        pscal_fd = vprocSessionPscalFdForStd(fd);
+    }
+    if (pscal_fd) {
+        int cmd = vprocIoctlTranslate(request);
+        int res = _ENOTTY;
+        if (pscal_fd->ops && pscal_fd->ops->ioctl) {
             switch (cmd) {
                 case TCGETS_: {
                     if (!arg_val) {
-                        errno = EINVAL;
-                        return -1;
+                        res = _EINVAL;
+                        break;
                     }
-                    struct termios term;
-                    if (!pscalRuntimeVirtualTTYGetTermios(&term)) {
-                        errno = ENOTTY;
-                        return -1;
+                    struct termios_ termios;
+                    res = pscal_fd->ops->ioctl(pscal_fd, cmd, &termios);
+                    if (res == 0) {
+                        vprocTermiosToHost(&termios, (struct termios *)arg_val);
                     }
-                    *(struct termios *)arg_val = term;
-                    return 0;
+                    break;
                 }
                 case TCSETS_:
                 case TCSETSW_:
                 case TCSETSF_: {
                     if (!arg_val) {
-                        errno = EINVAL;
-                        return -1;
+                        res = _EINVAL;
+                        break;
                     }
-                    pscalRuntimeVirtualTTYSetTermios((const struct termios *)arg_val);
-                    return 0;
+                    struct termios_ termios;
+                    vprocTermiosFromHost((const struct termios *)arg_val, &termios);
+                    res = pscal_fd->ops->ioctl(pscal_fd, cmd, &termios);
+                    break;
                 }
                 case TIOCGWINSZ_: {
                     if (!arg_val) {
-                        errno = EINVAL;
-                        return -1;
+                        res = _EINVAL;
+                        break;
                     }
-                    struct winsize ws;
-                    if (!pscalRuntimeVirtualTTYGetWinsize(&ws)) {
-                        errno = ENOTTY;
-                        return -1;
+                    struct winsize_ ws;
+                    res = pscal_fd->ops->ioctl(pscal_fd, cmd, &ws);
+                    if (res == 0) {
+                        vprocWinsizeToHost(&ws, (struct winsize *)arg_val);
                     }
-                    *(struct winsize *)arg_val = ws;
-                    return 0;
+                    break;
                 }
                 case TIOCSWINSZ_: {
                     if (!arg_val) {
-                        errno = EINVAL;
-                        return -1;
+                        res = _EINVAL;
+                        break;
                     }
-                    pscalRuntimeVirtualTTYSetWinsize((const struct winsize *)arg_val);
-                    return 0;
+                    struct winsize_ ws;
+                    vprocWinsizeFromHost((const struct winsize *)arg_val, &ws);
+                    res = pscal_fd->ops->ioctl(pscal_fd, cmd, &ws);
+                    break;
                 }
-                case TIOCGPGRP_: {
-                    if (!arg_val) {
-                        errno = EINVAL;
-                        return -1;
-                    }
-                    int pid = (int)vprocGetPidShim();
-                    int sid = (pid > 0) ? vprocGetSid(pid) : -1;
-                    int fg = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-                    if (fg <= 0) {
-                        errno = ENOTTY;
-                        return -1;
-                    }
-                    *(dword_t *)arg_val = (dword_t)fg;
-                    return 0;
-                }
-                case TIOCSPGRP_: {
-                    if (!arg_val) {
-                        errno = EINVAL;
-                        return -1;
-                    }
-                    int pid = (int)vprocGetPidShim();
-                    int sid = (pid > 0) ? vprocGetSid(pid) : -1;
-                    if (sid <= 0) {
-                        errno = ENOTTY;
-                        return -1;
-                    }
-                    int fg = (int)*(dword_t *)arg_val;
-                    if (vprocSetForegroundPgid(sid, fg) != 0) {
-                        return -1;
-                    }
-                    return 0;
-                }
-                case TCFLSH_:
-                    return 0;
                 default:
+                    res = pscal_fd->ops->ioctl(pscal_fd, cmd, (void *)arg_val);
                     break;
             }
         }
+        pscal_fd_close(pscal_fd);
+        if (res < 0) {
+            return vprocSetCompatErrno(res);
+        }
+        return res;
     }
 
     int host = shimTranslate(fd, 1);
@@ -8371,16 +8173,16 @@ int vprocOpenShim(const char *path, int flags, ...) {
     int host_fd = vprocHostOpenVirtualized(path, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
-        if (dbg) fprintf(stderr, "[vproc-open] (shim) virtualized ENOENT for %s, fallback raw\n", path);
+        if (dbg) vprocDebugLogf( "[vproc-open] (shim) virtualized ENOENT for %s, fallback raw\n", path);
         host_fd = vprocHostOpenRawInternal(path, flags, (mode_t)mode, (flags & O_CREAT) != 0);
     }
     if (dbg && host_fd >= 0) {
-        fprintf(stderr, "[vproc-open] (shim) opened %s -> host_fd=%d flags=0x%x\n", path, host_fd, flags);
+        vprocDebugLogf( "[vproc-open] (shim) opened %s -> host_fd=%d flags=0x%x\n", path, host_fd, flags);
     }
 #endif
     if (host_fd < 0) {
         if (getenv("PSCALI_TOOL_DEBUG")) {
-            fprintf(stderr, "[vproc-open] path=%s flags=%d errno=%d\n", path, flags, errno);
+            vprocDebugLogf( "[vproc-open] path=%s flags=%d errno=%d\n", path, flags, errno);
         }
         return -1;
     }

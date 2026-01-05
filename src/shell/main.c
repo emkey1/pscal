@@ -12,11 +12,15 @@
 #include <termios.h>
 #include <time.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <wchar.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#if defined(PSCAL_TARGET_IOS)
+#include <dlfcn.h>
+#endif
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
@@ -52,8 +56,14 @@
 #if !PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP
 #  if defined(__APPLE__)
 extern void PSCALRuntimeInterposeBootstrap(void) __attribute__((weak_import));
+#    if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak_import));
+#    endif
 #  else
 extern void PSCALRuntimeInterposeBootstrap(void) __attribute__((weak));
+#    if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
+#    endif
 #  endif
 #endif
 #endif
@@ -68,6 +78,53 @@ static _Thread_local bool gInteractiveLineDrawn = false;
 #if defined(PSCAL_TARGET_IOS)
 static _Thread_local VProc *gShellSelfVproc = NULL;
 static _Thread_local bool gShellSelfVprocActivated = false;
+static void shellDebugLog(const char *message) {
+    if (!message || message[0] == '\0') {
+        return;
+    }
+#if defined(__APPLE__)
+    static void (*log_line)(const char *message) = NULL;
+    static int log_line_checked = 0;
+    if (!log_line_checked) {
+        log_line_checked = 1;
+        log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
+    }
+    if (log_line) {
+        log_line(message);
+        return;
+    }
+#endif
+    if (&pscalRuntimeDebugLog != NULL) {
+        pscalRuntimeDebugLog(message);
+    }
+}
+
+static void shellDebugLogf(const char *format, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, format);
+    int written = vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    if (written <= 0) {
+        return;
+    }
+#if defined(__APPLE__)
+    static void (*log_line)(const char *message) = NULL;
+    static int log_line_checked = 0;
+    if (!log_line_checked) {
+        log_line_checked = 1;
+        log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
+    }
+    if (log_line) {
+        log_line(buffer);
+        return;
+    }
+#endif
+    if (&pscalRuntimeDebugLog != NULL) {
+        pscalRuntimeDebugLog(buffer);
+    }
+}
+
 static void shellAdoptControllingTty(VProcSessionStdio *session_stdio) {
     if (!session_stdio) {
         return;
@@ -80,7 +137,7 @@ static void shellAdoptControllingTty(VProcSessionStdio *session_stdio) {
     }
     int rc = tty_fd->ops->ioctl(tty_fd, TIOCSCTTY_, NULL);
     if (rc < 0 && getenv("PSCALI_VPROC_DEBUG")) {
-        fprintf(stderr, "[vproc] TIOCSCTTY failed rc=%d\n", rc);
+        shellDebugLogf("[vproc] TIOCSCTTY failed rc=%d\n", rc);
     }
 }
 static void shellSetupSelfVproc(void) {
@@ -113,14 +170,13 @@ static void shellSetupSelfVproc(void) {
     int session_stderr = (session_stdio && session_stdio->stderr_host_fd >= 0) ? session_stdio->stderr_host_fd : -1;
     bool use_pscal_stdio = session_stdio && session_stdio->stdin_pscal_fd;
     if (getenv("PSCALI_VPROC_DEBUG")) {
-        fprintf(stderr,
-                "[vproc] setup self stdio=%p default=%d pscal=%d host=(%d,%d,%d)\n",
-                (void *)session_stdio,
-                session_stdio ? (int)vprocSessionStdioIsDefault(session_stdio) : -1,
-                use_pscal_stdio ? 1 : 0,
-                session_stdin,
-                session_stdout,
-                session_stderr);
+        shellDebugLogf("[vproc] setup self stdio=%p default=%d pscal=%d host=(%d,%d,%d)\n",
+                       (void *)session_stdio,
+                       session_stdio ? (int)vprocSessionStdioIsDefault(session_stdio) : -1,
+                       use_pscal_stdio ? 1 : 0,
+                       session_stdin,
+                       session_stdout,
+                       session_stderr);
     }
     if (use_pscal_stdio) {
         session_stdin = -2;
@@ -194,7 +250,7 @@ static void shellSetupSelfVproc(void) {
         vprocSetCommandLabel(shell_pid_hint, "shell");
         vprocRegisterTidHint(shell_pid_hint, pthread_self());
         if (getenv("PSCALI_VPROC_DEBUG")) {
-            fprintf(stderr, "[vproc] shell self-vproc init failed; using pid=%d without fd table\n", shell_pid_hint);
+            shellDebugLogf("[vproc] shell self-vproc init failed; using pid=%d without fd table\n", shell_pid_hint);
         }
     }
 }
@@ -2651,8 +2707,7 @@ static char *readInteractiveLine(const char *prompt,
                                  bool *out_eof,
                                  bool *out_editor_failed) {
     bool installed_sigint_handler = false;
-    const bool has_real_tty = pscalRuntimeStdinHasRealTTY() &&
-                              !pscalRuntimeVirtualTTYEnabled();
+    const bool has_real_tty = pscalRuntimeStdinHasRealTTY();
     if (out_eof) {
         *out_eof = false;
     }
@@ -2833,7 +2888,7 @@ static char *readInteractiveLine(const char *prompt,
 
         if (ch == 26) { /* Ctrl-Z */
 #if defined(PSCAL_TARGET_IOS)
-            /* In virtual TTY mode, deliver SIGTSTP to the running builtin/VM and reset the prompt. */
+            /* On iOS, deliver SIGTSTP to the running builtin/VM and reset the prompt. */
             alt_dot_active = false;
             alt_dot_offset = 0;
             shellWriteStdoutStr("^Z\n");
@@ -2856,7 +2911,7 @@ static char *readInteractiveLine(const char *prompt,
                                   &displayed_prompt_lines);
             continue;
 #endif
-            if (!has_real_tty || pscalRuntimeVirtualTTYEnabled()) {
+            if (!has_real_tty) {
                 shellWriteStdoutStr("job control (Ctrl-Z) not supported on this terminal\n");
                 continue;
             }
@@ -3593,6 +3648,7 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         pscalRuntimeConsumeSigint();
         pscalRuntimeClearInterruptFlag();
         shellRuntimeEnsureStandardFds();
+        shellRuntimeRestoreForeground();
         char *prompt_storage = shellResolveInteractivePrompt();
         const char *prompt = prompt_storage ? prompt_storage : "exsh$ ";
         char *line = NULL;
@@ -3730,7 +3786,6 @@ int exsh_main(int argc, char **argv) {
     vmSetSuppressStateDump(true);
 
 #if defined(PSCAL_TARGET_IOS)
-void pscalRuntimeDebugLog(const char *message);
     if (getenv("PSCALI_PIPE_DEBUG")) {
         char logbuf[1024];
         int written = snprintf(logbuf, sizeof(logbuf), "[exsh-ios] argc=%d", argc);
@@ -3742,9 +3797,7 @@ void pscalRuntimeDebugLog(const char *message);
             }
             written += n;
         }
-        pscalRuntimeDebugLog(logbuf);
-        /* Also emit to stderr so interactive runs surface argv immediately. */
-        fprintf(stderr, "%s\n", logbuf);
+        shellDebugLog(logbuf);
     }
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -3960,8 +4013,6 @@ int SDL_main(int argc, char **argv) {
 typedef struct {
     int argc;
     char **argv;
-    int bridge_in_fd;
-    int bridge_out_fd;
     struct pscal_fd *pty_master;
     struct pscal_fd *pty_slave;
     uint64_t session_id;
@@ -3979,6 +4030,7 @@ extern void PSCALRuntimeRegisterSessionContext(uint64_t session_id) __attribute_
 extern void PSCALRuntimeUnregisterSessionContext(uint64_t session_id) __attribute__((weak));
 extern PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) __attribute__((weak));
 extern void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) __attribute__((weak));
+extern void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx) __attribute__((weak));
 
 static void shellSessionNotifyExit(uint64_t session_id, int status) {
     if (pscalRuntimeShellSessionExited) {
@@ -4025,16 +4077,6 @@ static void shellCloseSessionFds(ShellSessionContext *ctx) {
     if (!ctx) {
         return;
     }
-    int bridge_in = ctx->bridge_in_fd;
-    int bridge_out = ctx->bridge_out_fd;
-    ctx->bridge_in_fd = -1;
-    ctx->bridge_out_fd = -1;
-    if (bridge_in >= 0) {
-        close(bridge_in);
-    }
-    if (bridge_out >= 0 && bridge_out != bridge_in) {
-        close(bridge_out);
-    }
     if (ctx->pty_master) {
         pscal_fd_close(ctx->pty_master);
         ctx->pty_master = NULL;
@@ -4043,14 +4085,6 @@ static void shellCloseSessionFds(ShellSessionContext *ctx) {
         pscal_fd_close(ctx->pty_slave);
         ctx->pty_slave = NULL;
     }
-}
-
-static bool shellDirectPtyOutputEnabled(void) {
-    const char *env = getenv("PSCALI_PTY_OUTPUT_DIRECT");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
 }
 
 static bool shellIoDebugEnabled(void) {
@@ -4073,10 +4107,9 @@ static void *shellRunSessionThread(void *arg) {
     if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
         PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
         if (getenv("PSCALI_VPROC_DEBUG")) {
-            fprintf(stderr,
-                    "[session] id=%llu runtime_ctx=%p\n",
-                    (unsigned long long)ctx->session_id,
-                    (void *)ctx->runtime_ctx);
+            shellDebugLogf("[session] id=%llu runtime_ctx=%p\n",
+                           (unsigned long long)ctx->session_id,
+                           (void *)ctx->runtime_ctx);
         }
     }
     int status = 255;
@@ -4095,8 +4128,6 @@ static void *shellRunSessionThread(void *arg) {
     if (vprocSessionStdioInitWithPty(session_stdio,
                                      ctx->pty_slave,
                                      ctx->pty_master,
-                                     ctx->bridge_in_fd,
-                                     ctx->bridge_out_fd,
                                      ctx->session_id,
                                      kernel_pid) != 0) {
         vprocSessionStdioDestroy(session_stdio);
@@ -4107,32 +4138,27 @@ static void *shellRunSessionThread(void *arg) {
         return NULL;
     }
     vprocSessionStdioActivate(session_stdio);
+    if (PSCALRuntimeSetCurrentRuntimeStdio) {
+        PSCALRuntimeSetCurrentRuntimeStdio(session_stdio);
+    }
     if (shellIoDebugEnabled()) {
-        fprintf(stderr,
-                "[session-io] activate id=%llu stdio=%p pty_active=%d in_fd=%d out_fd=%d\n",
-                (unsigned long long)ctx->session_id,
-                (void *)session_stdio,
-                session_stdio->pty_active ? 1 : 0,
-                session_stdio->pty_in_fd,
-                session_stdio->pty_out_fd);
+        shellDebugLogf("[session-io] activate id=%llu stdio=%p pty_active=%d\n",
+                       (unsigned long long)ctx->session_id,
+                       (void *)session_stdio,
+                       session_stdio->pty_active ? 1 : 0);
     }
     if (getenv("PSCALI_VPROC_DEBUG")) {
-        fprintf(stderr,
-                "[session] id=%llu stdio=%p pty_slave=%p pty_master=%p in_fd=%d out_fd=%d\n",
-                (unsigned long long)ctx->session_id,
-                (void *)session_stdio,
-                (void *)session_stdio->pty_slave,
-                (void *)session_stdio->pty_master,
-                session_stdio->pty_in_fd,
-                session_stdio->pty_out_fd);
+        shellDebugLogf("[session] id=%llu stdio=%p pty_slave=%p pty_master=%p\n",
+                       (unsigned long long)ctx->session_id,
+                       (void *)session_stdio,
+                       (void *)session_stdio->pty_slave,
+                       (void *)session_stdio->pty_master);
     }
     if (pscalRuntimeRegisterShellThread) {
         pscalRuntimeRegisterShellThread(ctx->session_id, pthread_self());
     }
     ctx->pty_slave = NULL;
     ctx->pty_master = NULL;
-    ctx->bridge_in_fd = -1;
-    ctx->bridge_out_fd = -1;
 
     ShellRuntimeState *session_ctx = NULL;
     bool session_ctx_owned = false;
@@ -4153,6 +4179,9 @@ static void *shellRunSessionThread(void *arg) {
         }
     }
 
+    if (PSCALRuntimeSetCurrentRuntimeStdio) {
+        PSCALRuntimeSetCurrentRuntimeStdio(NULL);
+    }
     if (session_stdio) {
         vprocSessionStdioActivate(NULL);
         vprocSessionStdioDestroy(session_stdio);
@@ -4192,52 +4221,28 @@ int PSCALRuntimeCreateShellSession(int argc,
 #endif
     (void)vprocEnsureKernelPid();
 
-    int session_stdin = -1;
-    int session_stdout = -1;
-    int ui_read = -1;
-    int ui_write = -1;
-    const bool direct_output = shellDirectPtyOutputEnabled();
     if (shellIoDebugEnabled()) {
-        fprintf(stderr,
-                "[session-io] create id=%llu direct=%d argc=%d argv0=%s\n",
-                (unsigned long long)session_id,
-                direct_output ? 1 : 0,
-                argc,
-                (argc > 0 && argv && argv[0]) ? argv[0] : "(null)");
-    }
-    if (!direct_output) {
-        if (vprocCreateSessionPipes(&session_stdin, &session_stdout, &ui_read, &ui_write) != 0) {
-            return -1;
-        }
+        shellDebugLogf("[session-io] create id=%llu argc=%d argv0=%s\n",
+                       (unsigned long long)session_id,
+                       argc,
+                       (argc > 0 && argv && argv[0]) ? argv[0] : "(null)");
     }
     struct pscal_fd *pty_master = NULL;
     struct pscal_fd *pty_slave = NULL;
     int pty_num = -1;
     int pty_err = pscalPtyOpenMaster(O_RDWR, &pty_master, &pty_num);
     if (pty_err < 0) {
-        if (session_stdin >= 0) close(session_stdin);
-        if (session_stdout >= 0) close(session_stdout);
-        if (ui_read >= 0) close(ui_read);
-        if (ui_write >= 0) close(ui_write);
         errno = pscalCompatErrno(pty_err);
         return -1;
     }
     pty_err = pscalPtyUnlock(pty_master);
     if (pty_err < 0) {
-        if (session_stdin >= 0) close(session_stdin);
-        if (session_stdout >= 0) close(session_stdout);
-        if (ui_read >= 0) close(ui_read);
-        if (ui_write >= 0) close(ui_write);
         if (pty_master) pscal_fd_close(pty_master);
         errno = pscalCompatErrno(pty_err);
         return -1;
     }
     pty_err = pscalPtyOpenSlave(pty_num, O_RDWR, &pty_slave);
     if (pty_err < 0) {
-        if (session_stdin >= 0) close(session_stdin);
-        if (session_stdout >= 0) close(session_stdout);
-        if (ui_read >= 0) close(ui_read);
-        if (ui_write >= 0) close(ui_write);
         if (pty_master) pscal_fd_close(pty_master);
         errno = pscalCompatErrno(pty_err);
         return -1;
@@ -4246,17 +4251,11 @@ int PSCALRuntimeCreateShellSession(int argc,
     ShellSessionContext *ctx = (ShellSessionContext *)calloc(1, sizeof(ShellSessionContext));
     if (!ctx) {
         errno = ENOMEM;
-        if (session_stdin >= 0) close(session_stdin);
-        if (session_stdout >= 0) close(session_stdout);
-        if (ui_read >= 0) close(ui_read);
-        if (ui_write >= 0) close(ui_write);
         if (pty_master) pscal_fd_close(pty_master);
         if (pty_slave) pscal_fd_close(pty_slave);
         return -1;
     }
     ctx->argc = argc;
-    ctx->bridge_in_fd = session_stdin;
-    ctx->bridge_out_fd = session_stdout;
     ctx->pty_master = pty_master;
     ctx->pty_slave = pty_slave;
     ctx->session_id = session_id;
@@ -4264,16 +4263,11 @@ int PSCALRuntimeCreateShellSession(int argc,
         ? PSCALRuntimeGetCurrentRuntimeContext()
         : NULL;
     if (shellIoDebugEnabled()) {
-        fprintf(stderr,
-                "[session-io] setup id=%llu ctx=%p pty=(%p,%p) pipes=(%d,%d) ui=(%d,%d)\n",
-                (unsigned long long)session_id,
-                (void *)ctx->runtime_ctx,
-                (void *)pty_master,
-                (void *)pty_slave,
-                session_stdin,
-                session_stdout,
-                ui_read,
-                ui_write);
+        shellDebugLogf("[session-io] setup id=%llu ctx=%p pty=(%p,%p)\n",
+                       (unsigned long long)session_id,
+                       (void *)ctx->runtime_ctx,
+                       (void *)pty_master,
+                       (void *)pty_slave);
     }
     ctx->argv = shellCopyArgv(argc, argv);
     if (!ctx->argv) {
@@ -4308,15 +4302,11 @@ int PSCALRuntimeCreateShellSession(int argc,
         return -1;
     }
     pthread_detach(thread);
-    *out_read_fd = ui_read;
-    *out_write_fd = ui_write;
+    *out_read_fd = -1;
+    *out_write_fd = -1;
     if (shellIoDebugEnabled()) {
-        fprintf(stderr,
-                "[session-io] launched id=%llu ui_read=%d ui_write=%d direct=%d\n",
-                (unsigned long long)session_id,
-                ui_read,
-                ui_write,
-                direct_output ? 1 : 0);
+        shellDebugLogf("[session-io] launched id=%llu\n",
+                       (unsigned long long)session_id);
     }
     return 0;
 }

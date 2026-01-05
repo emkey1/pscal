@@ -62,6 +62,72 @@ typedef struct {
     bool have_sigmask;
 } ShellSignalBackup;
 
+typedef struct {
+    int saved_fds[3];
+    bool saved_valid[3];
+} ShellStdFdBackup;
+
+static bool shellToolTcgetattr(int fd, struct termios *termios) {
+    if (!termios) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (vprocIoctlShim(fd, TIOCGETA, termios) == 0) {
+        return true;
+    }
+#ifdef TCGETS
+    if (vprocIoctlShim(fd, TCGETS, termios) == 0) {
+        return true;
+    }
+#endif
+#endif
+    return tcgetattr(fd, termios) == 0;
+}
+
+static bool shellToolTcsetattr(int fd, int action, const struct termios *termios) {
+    if (!termios) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    int cmd = 0;
+#if defined(TCSETS)
+    switch (action) {
+        case TCSANOW:
+            cmd = TCSETS;
+            break;
+        case TCSADRAIN:
+            cmd = TCSETSW;
+            break;
+        case TCSAFLUSH:
+            cmd = TCSETSF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#elif defined(TIOCSETA)
+    switch (action) {
+        case TCSANOW:
+            cmd = TIOCSETA;
+            break;
+        case TCSADRAIN:
+            cmd = TIOCSETAW;
+            break;
+        case TCSAFLUSH:
+            cmd = TIOCSETAF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#endif
+    if (cmd != 0 && vprocIoctlShim(fd, cmd, (void *)termios) == 0) {
+        return true;
+    }
+#endif
+    return tcsetattr(fd, action, termios) == 0;
+}
+
 static void shellSaveSignalState(ShellSignalBackup *backup) {
     if (!backup) {
         return;
@@ -100,6 +166,48 @@ static void shellRestoreSignalState(const ShellSignalBackup *backup) {
     }
     if (backup->have_sigmask) {
         pthread_sigmask(SIG_SETMASK, &backup->sigmask, NULL);
+    }
+}
+
+static void shellSaveStandardFds(ShellStdFdBackup *backup) {
+    if (!backup) {
+        return;
+    }
+    memset(backup, 0, sizeof(*backup));
+    int targets[3] = { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
+    for (int i = 0; i < 3; ++i) {
+        int fd = dup(targets[i]);
+        if (fd >= 0) {
+            fcntl(fd, F_SETFD, FD_CLOEXEC);
+            backup->saved_fds[i] = fd;
+            backup->saved_valid[i] = true;
+        } else {
+            backup->saved_fds[i] = -1;
+            backup->saved_valid[i] = false;
+        }
+    }
+}
+
+static void shellRestoreStandardFds(ShellStdFdBackup *backup, bool dbg) {
+    if (!backup) {
+        return;
+    }
+    int targets[3] = { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
+    for (int i = 0; i < 3; ++i) {
+        if (!backup->saved_valid[i] || backup->saved_fds[i] < 0) {
+            continue;
+        }
+        if (dup2(backup->saved_fds[i], targets[i]) == 0) {
+            shellResetStandardStream(targets[i]);
+        } else if (dbg) {
+            fprintf(stderr,
+                    "[tool-inline] restore fd=%d failed err=%s\n",
+                    targets[i],
+                    strerror(errno));
+        }
+        close(backup->saved_fds[i]);
+        backup->saved_fds[i] = -1;
+        backup->saved_valid[i] = false;
     }
 }
 
@@ -3203,12 +3311,7 @@ static bool shellPagerShouldPaginate(void) {
         return true;
     }
 #if defined(PSCAL_TARGET_IOS)
-    /* On iOS/iPadOS we never get a real controlling TTY, so treat pager usage
-     * as interactive by default. The virtual TTY bridge is still checked so
-     * other callers can opt in to a real descriptor when available. */
-    if (pscalRuntimeVirtualTTYEnabled() || shellPagerGetVirtualTTYOverride() >= 0) {
-        return true;
-    }
+    /* On iOS/iPadOS treat pager usage as interactive by default. */
     return true;
 #endif
     if (pscalRuntimeStdoutIsInteractive()) {
@@ -3256,12 +3359,6 @@ static FILE *shellPagerAcquireTTY(bool *needs_close) {
         *needs_close = false;
     }
     int fd = -1;
-#if defined(PSCAL_TARGET_IOS)
-    int override_fd = shellPagerGetVirtualTTYOverride();
-    if (override_fd >= 0) {
-        fd = shellPagerDupForRead(override_fd);
-    }
-#endif
     if (fd < 0) {
         fd = open("/dev/tty", O_RDONLY
 #ifdef O_CLOEXEC
@@ -3691,8 +3788,6 @@ Value vmBuiltinShellStdioInfo(VM *vm, int arg_count, Value *args) {
            pscalRuntimeFdHasRealTTY(STDIN_FILENO) ? 1 : 0,
            pscalRuntimeFdHasRealTTY(STDOUT_FILENO) ? 1 : 0,
            pscalRuntimeFdHasRealTTY(STDERR_FILENO) ? 1 : 0);
-    printf("  virtual_tty: %d\n", pscalRuntimeVirtualTTYEnabled() ? 1 : 0);
-
 #if defined(PSCAL_TARGET_IOS)
     VProcSessionStdio *session = vprocSessionStdioCurrent();
     bool session_default = !session || vprocSessionStdioIsDefault(session);
@@ -3710,12 +3805,10 @@ Value vmBuiltinShellStdioInfo(VM *vm, int arg_count, Value *args) {
                (void *)session->stdin_pscal_fd,
                (void *)session->stdout_pscal_fd,
                (void *)session->stderr_pscal_fd);
-        printf("  pty: active=%d master=%p slave=%p in_fd=%d out_fd=%d\n",
+        printf("  pty: active=%d master=%p slave=%p\n",
                session->pty_active ? 1 : 0,
                (void *)session->pty_master,
-               (void *)session->pty_slave,
-               session->pty_in_fd,
-               session->pty_out_fd);
+               (void *)session->pty_slave);
     }
     VProc *vp = vprocCurrent();
     if (vp) {
@@ -3837,13 +3930,85 @@ Value vmBuiltinShellElvisDump(VM *vm, int arg_count, Value *args) {
 
 typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
 
+extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
+
 static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
                                          int argc,
                                          char **argv,
                                          bool dbg) {
     ShellSignalBackup sig_backup;
+    ShellStdFdBackup fd_backup;
+    VProcSessionStdio *prev_session = vprocSessionStdioCurrent();
+    VProcSessionStdio *active_session = prev_session;
+    VProc *prev_vproc = vprocCurrent();
+    struct termios stdin_termios;
+    bool stdin_termios_valid = false;
     shellSaveSignalState(&sig_backup);
+    shellSaveStandardFds(&fd_backup);
+    if (dbg) {
+        int stdin_host = STDIN_FILENO;
+        VProc *vp = vprocCurrent();
+        if (vp) {
+            int translated = vprocTranslateFd(vp, STDIN_FILENO);
+            if (translated >= 0) {
+                stdin_host = translated;
+            }
+        }
+        fprintf(stderr,
+                "[tool-inline] stdio save stdin=%d host=%d tty=%d vproc=%p session=%p\n",
+                STDIN_FILENO,
+                stdin_host,
+                pscalRuntimeStdinHasRealTTY() ? 1 : 0,
+                (void *)prev_vproc,
+                (void *)prev_session);
+    }
+    if (PSCALRuntimeGetCurrentRuntimeStdio) {
+        VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+        if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio) &&
+            (!active_session || vprocSessionStdioIsDefault(active_session))) {
+            active_session = runtime_stdio;
+        }
+    }
+    if (active_session && active_session != prev_session) {
+        vprocSessionStdioActivate(active_session);
+    }
+    if (shellToolTcgetattr(STDIN_FILENO, &stdin_termios)) {
+        stdin_termios_valid = true;
+    }
     int status = entry(argc, argv);
+    shellFlushStandardStreams();
+    if (prev_session) {
+        vprocSessionStdioActivate(prev_session);
+    } else {
+        vprocSessionStdioActivate(NULL);
+    }
+    if (prev_vproc) {
+        vprocActivate(prev_vproc);
+    } else {
+        vprocDeactivate();
+    }
+    shellRestoreStandardFds(&fd_backup, dbg);
+    if (stdin_termios_valid) {
+        shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
+    }
+    shellCloseVprocStreams();
+    if (dbg) {
+        int stdin_host = STDIN_FILENO;
+        VProc *vp = vprocCurrent();
+        if (vp) {
+            int translated = vprocTranslateFd(vp, STDIN_FILENO);
+            if (translated >= 0) {
+                stdin_host = translated;
+            }
+        }
+        fprintf(stderr,
+                "[tool-inline] stdio restore stdin=%d host=%d tty=%d vproc=%p session=%p\n",
+                STDIN_FILENO,
+                stdin_host,
+                pscalRuntimeStdinHasRealTTY() ? 1 : 0,
+                (void *)vprocCurrent(),
+                (void *)vprocSessionStdioCurrent());
+    }
     shellRestoreSignalState(&sig_backup);
     shellRuntimeEnsureStandardFds();
     shellEnsureJobControl();

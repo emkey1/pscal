@@ -100,7 +100,7 @@ final class TerminalRootViewController: UIViewController {
         let transitioned = (prev == 0 && extra > 0) || (prev > 0 && extra == 0)
         if transitioned {
             TerminalTabManager.shared.sendInputToSelected(" ")
-            TerminalTabManager.shared.sendInputToSelected("\u{08}") // backspace
+            TerminalTabManager.shared.sendInputToSelected("\u{7F}") // delete
         }
     }
 }

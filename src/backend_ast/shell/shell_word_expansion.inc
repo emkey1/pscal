@@ -1782,14 +1782,6 @@ static void shellHandlePendingSignal(int signo) {
         shellUpdateStatus(128 + signo);
     }
 
-#if defined(PSCAL_TARGET_IOS)
-    bool virtual_tty = pscalRuntimeVirtualTTYEnabled();
-    if (signo == SIGTSTP && virtual_tty) {
-        shellUpdateStatus(128 + signo);
-        /* Do not request exit here; we’ll stop the running job instead. */
-    }
-#endif
-
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
         bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled;
         if (gShellCurrentVm && !stop_request) {
@@ -1800,24 +1792,6 @@ static void shellHandlePendingSignal(int signo) {
         if (!gShellRuntime.job_control_enabled && !stop_request) {
             shellRuntimeRequestExit();
         }
-
-#if defined(PSCAL_TARGET_IOS)
-        if (virtual_tty) {
-            ShellPipelineContext *pipe_ctx = &gShellRuntime.pipeline;
-            size_t launched = pipe_ctx ? pipe_ctx->launched : 0;
-            if (pipe_ctx && pipe_ctx->active && pipe_ctx->pids) {
-                if (launched == 0 && pipe_ctx->stage_count > 0) {
-                    launched = pipe_ctx->stage_count;
-                }
-                for (size_t i = 0; i < launched; ++i) {
-                    pid_t pid = pipe_ctx->pids[i];
-                    if (pid > 0) {
-                        vprocKillShim(pid, signo);
-                    }
-                }
-            }
-        }
-#endif
 
         if (gShellLoopStackSize > 0 && !stop_request) {
             gShellRuntime.break_requested = true;
@@ -2009,6 +1983,11 @@ int shellRuntimeCurrentCommandColumn(void) {
 
 void shellRuntimeInitJobControl(void) {
     shellEnsureJobControl();
+}
+
+void shellRuntimeRestoreForeground(void) {
+    shellEnsureJobControl();
+    shellJobControlRestoreForeground();
 }
 
 typedef enum {

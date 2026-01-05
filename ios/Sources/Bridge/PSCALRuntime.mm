@@ -15,10 +15,10 @@
 #include <errno.h>
 #include <TargetConditionals.h>
 #include <CoreFoundation/CoreFoundation.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -79,9 +79,6 @@ static void PSCALRuntimeEnsureSDLReady(void);
 extern "C" {
     // Forward declare exsh entrypoint exposed by the existing CLI target.
     int exsh_main(int argc, char* argv[]);
-    void pscalRuntimeSetVirtualTTYEnabled(bool enabled);
-    bool pscalRuntimeVirtualTTYEnabled(void);
-    void pscalRuntimeRegisterVirtualTTYFd(int std_fd, int fd);
     char *pscalRuntimeCopyMarketingVersion(void);
     void shellRuntimeInitSignals(void);
     ShellRuntimeState *shellRuntimeCreateContext(void);
@@ -95,6 +92,7 @@ static const size_t kOutputRingCapacity = 512 * 1024;
 
 static bool PSCALRuntimeOutputLoggingEnabled(void);
 static bool PSCALRuntimeIODebugEnabled(void);
+static void PSCALRuntimeDebugLogf(const char *format, ...);
 
 typedef struct {
     uint8_t *data;
@@ -128,7 +126,6 @@ struct PSCALRuntimeContext {
     bool runtime_active;
     int master_fd;
     int input_fd;
-    bool using_virtual_tty;
     bool using_pscal_pty;
     uint64_t runtime_session_id;
     VProcSessionStdio *runtime_stdio;
@@ -136,9 +133,6 @@ struct PSCALRuntimeContext {
     pthread_t runtime_thread;
     int pending_columns;
     int pending_rows;
-    pthread_mutex_t vtty_mutex;
-    std::string vtty_canonical_buffer;
-    std::string vtty_raw_buffer;
     int runtime_log_fd;
     int script_capture_fd;
     std::string script_capture_path;
@@ -178,7 +172,6 @@ static void PSCALRuntimeContextInit(PSCALRuntimeContext *ctx) {
     ctx->runtime_active = false;
     ctx->master_fd = -1;
     ctx->input_fd = -1;
-    ctx->using_virtual_tty = false;
     ctx->using_pscal_pty = false;
     ctx->runtime_session_id = 0;
     ctx->runtime_stdio = NULL;
@@ -186,9 +179,6 @@ static void PSCALRuntimeContextInit(PSCALRuntimeContext *ctx) {
     ctx->runtime_thread = 0;
     ctx->pending_columns = 0;
     ctx->pending_rows = 0;
-    pthread_mutex_init(&ctx->vtty_mutex, NULL);
-    ctx->vtty_canonical_buffer.clear();
-    ctx->vtty_raw_buffer.clear();
     ctx->runtime_log_fd = -1;
     ctx->script_capture_fd = -1;
     ctx->script_capture_path.clear();
@@ -252,7 +242,6 @@ static PSCALRuntimeContext *PSCALRuntimeSetCurrentContext(PSCALRuntimeContext *c
 #define s_runtime_active (PSCALRuntimeCurrentContext()->runtime_active)
 #define s_master_fd (PSCALRuntimeCurrentContext()->master_fd)
 #define s_input_fd (PSCALRuntimeCurrentContext()->input_fd)
-#define s_using_virtual_tty (PSCALRuntimeCurrentContext()->using_virtual_tty)
 #define s_using_pscal_pty (PSCALRuntimeCurrentContext()->using_pscal_pty)
 #define s_runtime_session_id (PSCALRuntimeCurrentContext()->runtime_session_id)
 #define s_runtime_stdio (PSCALRuntimeCurrentContext()->runtime_stdio)
@@ -260,9 +249,6 @@ static PSCALRuntimeContext *PSCALRuntimeSetCurrentContext(PSCALRuntimeContext *c
 #define s_runtime_thread (PSCALRuntimeCurrentContext()->runtime_thread)
 #define s_pending_columns (PSCALRuntimeCurrentContext()->pending_columns)
 #define s_pending_rows (PSCALRuntimeCurrentContext()->pending_rows)
-#define s_vtty_mutex (PSCALRuntimeCurrentContext()->vtty_mutex)
-#define s_vtty_canonical_buffer (PSCALRuntimeCurrentContext()->vtty_canonical_buffer)
-#define s_vtty_raw_buffer (PSCALRuntimeCurrentContext()->vtty_raw_buffer)
 #define s_runtime_log_fd (PSCALRuntimeCurrentContext()->runtime_log_fd)
 #define s_script_capture_fd (PSCALRuntimeCurrentContext()->script_capture_fd)
 #define s_script_capture_path (PSCALRuntimeCurrentContext()->script_capture_path)
@@ -325,10 +311,10 @@ void PSCALRuntimeRegisterSessionContext(uint64_t session_id) {
         pthread_mutex_unlock(&ctx->runtime_mutex);
     }
     if (PSCALRuntimeIODebugEnabled()) {
-        fprintf(stderr,
-                "[runtime-io] register context session=%llu ctx=%p\n",
-                (unsigned long long)session_id,
-                (void *)ctx);
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] register context session=%llu ctx=%p\n",
+            (unsigned long long)session_id,
+            (void *)ctx);
     }
     PSCALRuntimeRegisterSessionContextInternal(session_id, ctx);
 }
@@ -354,6 +340,18 @@ PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) {
     return PSCALRuntimeCurrentContext();
 }
 
+VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
+    PSCALRuntimeContext *ctx = PSCALRuntimeCurrentContext();
+    return ctx ? ctx->runtime_stdio : NULL;
+}
+
+void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx) {
+    PSCALRuntimeContext *ctx = PSCALRuntimeCurrentContext();
+    if (ctx) {
+        ctx->runtime_stdio = stdio_ctx;
+    }
+}
+
 static BOOL PSCALRuntimeFontNameAllowed(NSString *candidate) {
     if (!candidate) {
         return NO;
@@ -372,14 +370,6 @@ static BOOL PSCALRuntimeFontNameAllowed(NSString *candidate) {
     return YES;
 }
 
-
-static bool PSCALRuntimeDirectPtyEnabled(void) {
-    const char *env = getenv("PSCALI_PTY_OUTPUT_DIRECT");
-    if (!env || env[0] == '\0') {
-        return true;
-    }
-    return strcmp(env, "0") != 0;
-}
 
 static UIFont *PSCALRuntimeResolveDefaultUIFont(void) {
     CGFloat pointSize = 14.0;
@@ -426,115 +416,6 @@ static void PSCALRuntimeEnsurePendingWindowSizeLocked(void) {
     s_pending_rows = MAX(4, computedRows);
 }
 
-static void PSCALRuntimeCloseFd(int *fd) {
-    if (fd && *fd >= 0) {
-        close(*fd);
-        *fd = -1;
-    }
-}
-
-static __attribute__((unused)) bool PSCALRuntimeInstallPscalPty(int *out_master_fd,
-                                                                int *out_input_fd,
-                                                                VProcSessionStdio **out_stdio,
-                                                                uint64_t *out_session_id) {
-    if (!out_master_fd || !out_input_fd || !out_stdio || !out_session_id) {
-        errno = EINVAL;
-        return false;
-    }
-    int session_stdin = -1;
-    int session_stdout = -1;
-    int ui_read = -1;
-    int ui_write = -1;
-    if (vprocCreateSessionPipes(&session_stdin, &session_stdout, &ui_read, &ui_write) != 0) {
-        return false;
-    }
-    struct pscal_fd *pty_master = NULL;
-    struct pscal_fd *pty_slave = NULL;
-    int pty_num = -1;
-    int pty_err = pscalPtyOpenMaster(O_RDWR, &pty_master, &pty_num);
-    if (pty_err < 0) {
-        PSCALRuntimeCloseFd(&session_stdin);
-        PSCALRuntimeCloseFd(&session_stdout);
-        PSCALRuntimeCloseFd(&ui_read);
-        PSCALRuntimeCloseFd(&ui_write);
-        errno = pscalCompatErrno(pty_err);
-        return false;
-    }
-    pty_err = pscalPtyUnlock(pty_master);
-    if (pty_err < 0) {
-        PSCALRuntimeCloseFd(&session_stdin);
-        PSCALRuntimeCloseFd(&session_stdout);
-        PSCALRuntimeCloseFd(&ui_read);
-        PSCALRuntimeCloseFd(&ui_write);
-        if (pty_master) {
-            pscal_fd_close(pty_master);
-        }
-        errno = pscalCompatErrno(pty_err);
-        return false;
-    }
-    pty_err = pscalPtyOpenSlave(pty_num, O_RDWR, &pty_slave);
-    if (pty_err < 0) {
-        PSCALRuntimeCloseFd(&session_stdin);
-        PSCALRuntimeCloseFd(&session_stdout);
-        PSCALRuntimeCloseFd(&ui_read);
-        PSCALRuntimeCloseFd(&ui_write);
-        if (pty_master) {
-            pscal_fd_close(pty_master);
-        }
-        errno = pscalCompatErrno(pty_err);
-        return false;
-    }
-
-    VProcSessionStdio *stdio_ctx = vprocSessionStdioCreate();
-    if (!stdio_ctx) {
-        PSCALRuntimeCloseFd(&session_stdin);
-        PSCALRuntimeCloseFd(&session_stdout);
-        PSCALRuntimeCloseFd(&ui_read);
-        PSCALRuntimeCloseFd(&ui_write);
-        if (pty_master) {
-            pscal_fd_close(pty_master);
-        }
-        if (pty_slave) {
-            pscal_fd_close(pty_slave);
-        }
-        errno = ENOMEM;
-        return false;
-    }
-
-    int kernel_pid = vprocEnsureKernelPid();
-    const uint64_t session_id = PSCALRuntimeNextSessionId();
-    if (vprocSessionStdioInitWithPty(stdio_ctx,
-                                     pty_slave,
-                                     pty_master,
-                                     session_stdin,
-                                     session_stdout,
-                                     session_id,
-                                     kernel_pid) != 0) {
-        int saved = errno;
-        vprocSessionStdioDestroy(stdio_ctx);
-        PSCALRuntimeCloseFd(&ui_read);
-        PSCALRuntimeCloseFd(&ui_write);
-        errno = saved;
-        return false;
-    }
-
-    if (dup2(session_stdout, STDOUT_FILENO) < 0 || dup2(session_stdout, STDERR_FILENO) < 0) {
-        int saved = errno;
-        vprocSessionStdioDestroy(stdio_ctx);
-        PSCALRuntimeCloseFd(&ui_read);
-        PSCALRuntimeCloseFd(&ui_write);
-        errno = saved;
-        return false;
-    }
-
-    vprocSessionStdioActivate(stdio_ctx);
-    *out_master_fd = ui_read;
-    *out_input_fd = ui_write;
-    *out_stdio = stdio_ctx;
-    *out_session_id = session_id;
-    return true;
-}
-
 static __attribute__((unused)) void PSCALRuntimeConfigurePtySlave(int fd) {
     if (fd < 0) {
         return;
@@ -578,11 +459,11 @@ void PSCALRuntimeRegisterSessionOutputHandler(uint64_t session_id,
         return;
     }
     if (PSCALRuntimeIODebugEnabled()) {
-        fprintf(stderr,
-                "[runtime-io] register output handler session=%llu handler=%p ctx=%p\n",
-                (unsigned long long)session_id,
-                (void *)handler,
-                context);
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] register output handler session=%llu handler=%p ctx=%p\n",
+            (unsigned long long)session_id,
+            (void *)handler,
+            context);
     }
     if (PSCALRuntimeOutputLoggingEnabled()) {
         NSLog(@"PSCALRuntime: register session output handler session=%llu handler=%p",
@@ -903,6 +784,30 @@ static void PSCALRuntimeLogOutput(const char *buffer, size_t length) {
     (void)vprocHostWrite(s_runtime_log_fd, buffer, length);
 }
 
+static void PSCALRuntimeDebugLogf(const char *format, ...) {
+    if (!format) {
+        return;
+    }
+    char buf[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buf, sizeof(buf), format, args);
+    va_end(args);
+    size_t len = strlen(buf);
+    if (len == 0) {
+        return;
+    }
+    if (buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+    if (PSCALRuntimeOutputLoggingEnabled()) {
+        PSCALRuntimeLogOutput(buf, strlen(buf));
+        PSCALRuntimeLogOutput("\n", 1);
+    } else {
+        NSLog(@"%s", buf);
+    }
+}
+
 static void PSCALRuntimeDirectOutputHandler(uint64_t session_id,
                                             const char *buffer,
                                             size_t length,
@@ -1043,20 +948,20 @@ static void PSCALRuntimeWriteMasterWithBackoff(uint64_t session_id, const char *
         return;
     }
     if (PSCALRuntimeIODebugEnabled()) {
-        fprintf(stderr,
-                "[runtime-io] write master session=%llu len=%zu\n",
-                (unsigned long long)session_id,
-                length);
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] write master session=%llu len=%zu\n",
+            (unsigned long long)session_id,
+            length);
     }
     int backoffMicros = 1000;
     while (true) {
         ssize_t wrote = vprocSessionWriteToMaster(session_id, data, length);
         if (wrote < 0) {
             if (PSCALRuntimeIODebugEnabled()) {
-                fprintf(stderr,
-                        "[runtime-io] write master failed session=%llu errno=%d\n",
-                        (unsigned long long)session_id,
-                        errno);
+                PSCALRuntimeDebugLogf(
+                    "[runtime-io] write master failed session=%llu errno=%d\n",
+                    (unsigned long long)session_id,
+                    errno);
             }
             if (errno == EINTR) {
                 continue;
@@ -1073,120 +978,9 @@ static void PSCALRuntimeWriteMasterWithBackoff(uint64_t session_id, const char *
     }
 }
 
-static void PSCALRuntimeEchoToTerminal(const char *data, size_t length) {
-    pthread_mutex_lock(&s_runtime_mutex);
-    int fd = s_master_fd;
-    pthread_mutex_unlock(&s_runtime_mutex);
-    if (fd >= 0) {
-        PSCALRuntimeWriteWithBackoff(fd, data, length);
-    }
-}
-
-static bool PSCALRuntimeHandleSignalsForByte(uint8_t byte, const struct termios *t) {
-    if (!t || (t->c_lflag & ISIG) == 0) {
-        return false;
-    }
-    if (byte == t->c_cc[VINTR]) {
-        PSCALRuntimeSendSignal(SIGINT);
-        return true;
-    }
-    if (byte == t->c_cc[VQUIT]) {
-        PSCALRuntimeSendSignal(SIGQUIT);
-        return true;
-    }
-    if (byte == t->c_cc[VSUSP]) {
-#if defined(PSCAL_TARGET_IOS)
-        /* Never propagate SIGTSTP to the host process; ignore Ctrl-Z. */
-        return true;
-#else
-        PSCALRuntimeSendSignal(SIGTSTP);
-        return true;
-#endif
-    }
-    return false;
-}
-
-static void PSCALRuntimeProcessVirtualTTYInput(const char *utf8, size_t length, int input_fd) {
-    pthread_mutex_lock(&s_vtty_mutex);
-    struct termios t;
-    pscalRuntimeVirtualTTYGetTermios(&t);
-    pthread_mutex_unlock(&s_vtty_mutex);
-
-    const bool canonical = (t.c_lflag & ICANON) != 0;
-    const bool echo = (t.c_lflag & ECHO) != 0;
-    const bool echonl = (t.c_lflag & ECHONL) != 0;
-
-    auto flushCanonical = [&](bool appendNewline) {
-        pthread_mutex_lock(&s_vtty_mutex);
-        std::string buf = s_vtty_canonical_buffer;
-        s_vtty_canonical_buffer.clear();
-        pthread_mutex_unlock(&s_vtty_mutex);
-        if (buf.empty() && !appendNewline) {
-            return;
-        }
-        if (appendNewline) {
-            buf.push_back('\n');
-        }
-        PSCALRuntimeWriteWithBackoff(input_fd, buf.data(), buf.size());
-        if (echo) {
-            PSCALRuntimeEchoToTerminal(buf.data(), buf.size());
-        }
-    };
-
-    for (size_t i = 0; i < length; ++i) {
-        uint8_t byte = (uint8_t)utf8[i];
-        if (PSCALRuntimeHandleSignalsForByte(byte, &t)) {
-            continue;
-        }
-        if (canonical) {
-            if (byte == t.c_cc[VEOF]) {
-                flushCanonical(false);
-                continue;
-            }
-            if (byte == '\n' || byte == t.c_cc[VEOL] || byte == t.c_cc[VEOL2]) {
-                flushCanonical(true);
-                if (echonl && !echo) {
-                    char nl = '\n';
-                    PSCALRuntimeEchoToTerminal(&nl, 1);
-                }
-                continue;
-            }
-            if (byte == t.c_cc[VERASE]) {
-                bool erased = false;
-                pthread_mutex_lock(&s_vtty_mutex);
-                if (!s_vtty_canonical_buffer.empty()) {
-                    s_vtty_canonical_buffer.pop_back();
-                    erased = true;
-                }
-                pthread_mutex_unlock(&s_vtty_mutex);
-                if (erased && echo && (t.c_lflag & ECHOE)) {
-                    const char eraseSeq[] = "\b \b";
-                    PSCALRuntimeEchoToTerminal(eraseSeq, sizeof(eraseSeq) - 1);
-                }
-                continue;
-            }
-            pthread_mutex_lock(&s_vtty_mutex);
-            s_vtty_canonical_buffer.push_back((char)byte);
-            pthread_mutex_unlock(&s_vtty_mutex);
-            if (echo) {
-                PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
-            }
-        } else {
-            // Raw mode: deliver immediately; avoid double-echo by keeping ECHO off by default.
-            PSCALRuntimeWriteWithBackoff(input_fd, (const char *)&byte, 1);
-            if (echo || (echonl && (byte == '\n' || byte == '\r'))) {
-                PSCALRuntimeEchoToTerminal((const char *)&byte, 1);
-            }
-        }
-    }
-
-    // No deferred raw buffering (we deliver immediately in raw mode).
-}
-
 typedef enum {
-    PSCALRuntimeInputKindVirtualTTY = 0,
-    PSCALRuntimeInputKindFd = 1,
-    PSCALRuntimeInputKindSession = 2
+    PSCALRuntimeInputKindFd = 0,
+    PSCALRuntimeInputKindSession = 1
 } PSCALRuntimeInputKind;
 
 typedef struct PSCALRuntimeInputChunk {
@@ -1239,9 +1033,6 @@ static void *PSCALRuntimeInputWriterThread(void *arg) {
         pthread_mutex_unlock(&s_input_queue_mu);
 
         switch (chunk->kind) {
-        case PSCALRuntimeInputKindVirtualTTY:
-            PSCALRuntimeProcessVirtualTTYInput(chunk->data, chunk->length, chunk->fd);
-            break;
         case PSCALRuntimeInputKindSession:
             PSCALRuntimeWriteMasterWithBackoff(chunk->session_id, chunk->data, chunk->length);
             break;
@@ -1276,7 +1067,7 @@ static bool PSCALRuntimeEnqueueInput(PSCALRuntimeInputKind kind,
     if (kind == PSCALRuntimeInputKindSession && session_id == 0) {
         return false;
     }
-    if ((kind == PSCALRuntimeInputKindFd || kind == PSCALRuntimeInputKindVirtualTTY) && fd < 0) {
+    if (kind == PSCALRuntimeInputKindFd && fd < 0) {
         return false;
     }
     pthread_once(&s_input_queue_once, PSCALRuntimeInputQueueInitOnce);
@@ -1369,7 +1160,6 @@ void PSCALRuntimeDestroyRuntimeContext(PSCALRuntimeContext *ctx) {
         pthread_cond_destroy(&s_output_ring.can_read);
         pthread_cond_destroy(&s_output_ring.can_write);
     }
-    pthread_mutex_destroy(&s_vtty_mutex);
     pthread_mutex_destroy(&s_runtime_mutex);
     pthread_mutex_destroy(&s_session_exit_mu);
     pthread_cond_destroy(&s_session_exit_cv);
@@ -1489,50 +1279,6 @@ static void PSCALRuntimeApplyWindowSize(int fd, int columns, int rows) {
     ioctl(fd, TIOCSWINSZ, &ws);
 }
 
-static __attribute__((unused)) bool PSCALRuntimeInstallVirtualTTY(int *out_master_fd, int *out_input_fd) {
-    if (!out_master_fd || !out_input_fd) {
-        return false;
-    }
-
-    int stdin_pipe[2] = {-1, -1};
-    int stdout_pipe[2] = {-1, -1};
-    if (pipe(stdin_pipe) != 0) {
-        return false;
-    }
-    if (pipe(stdout_pipe) != 0) {
-        close(stdin_pipe[0]);
-        close(stdin_pipe[1]);
-        return false;
-    }
-
-    if (dup2(stdin_pipe[0], STDIN_FILENO) < 0 ||
-        dup2(stdout_pipe[1], STDOUT_FILENO) < 0 ||
-        dup2(stdout_pipe[1], STDERR_FILENO) < 0) {
-        int saved = errno;
-        close(stdin_pipe[0]);
-        close(stdin_pipe[1]);
-        close(stdout_pipe[0]);
-        close(stdout_pipe[1]);
-        errno = saved;
-        return false;
-    }
-
-    pscalRuntimeRegisterVirtualTTYFd(STDIN_FILENO, STDIN_FILENO);
-    pscalRuntimeRegisterVirtualTTYFd(STDOUT_FILENO, STDOUT_FILENO);
-    pscalRuntimeRegisterVirtualTTYFd(STDERR_FILENO, STDERR_FILENO);
-    close(stdin_pipe[0]);
-    close(stdout_pipe[1]);
-
-    *out_master_fd = stdout_pipe[0];
-    *out_input_fd = stdin_pipe[1];
-
-    pthread_mutex_lock(&s_vtty_mutex);
-    s_vtty_canonical_buffer.clear();
-    pthread_mutex_unlock(&s_vtty_mutex);
-    pscalRuntimeVirtualTTYReset();
-    return true;
-}
-
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     NSLog(@"PSCALRuntime: launching exsh (argc=%d)", argc);
     PSCALRuntimeInterposeBootstrap();
@@ -1583,16 +1329,8 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     s_runtime_thread = pthread_self();
     s_runtime_thread_id = 0;
     pthread_mutex_unlock(&s_runtime_mutex);
-    const bool direct_pty = PSCALRuntimeDirectPtyEnabled();
-    if (PSCALRuntimeOutputLoggingEnabled()) {
-        NSLog(@"PSCALRuntime: direct PTY output %s (session=%llu)",
-              direct_pty ? "enabled" : "disabled",
-              (unsigned long long)session_id);
-    }
     PSCALRuntimeRegisterSessionContext(session_id);
-    if (direct_pty) {
-        PSCALRuntimeRegisterSessionOutputHandler(session_id, PSCALRuntimeDirectOutputHandler, NULL);
-    }
+    PSCALRuntimeRegisterSessionOutputHandler(session_id, PSCALRuntimeDirectOutputHandler, NULL);
     int master_fd = -1;
     int input_fd = -1;
     if (PSCALRuntimeCreateShellSession(argc, argv, session_id, &master_fd, &input_fd) != 0) {
@@ -1602,17 +1340,14 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         memset(&s_runtime_thread, 0, sizeof(s_runtime_thread));
         memset(&s_runtime_thread_id, 0, sizeof(s_runtime_thread_id));
         pthread_mutex_unlock(&s_runtime_mutex);
-        if (direct_pty) {
-            PSCALRuntimeUnregisterSessionOutputHandler(session_id);
-        }
+        PSCALRuntimeUnregisterSessionOutputHandler(session_id);
         PSCALRuntimeUnregisterSessionContext(session_id);
         return -1;
     }
 
     pthread_mutex_lock(&s_runtime_mutex);
-    s_master_fd = direct_pty ? -1 : master_fd;
-    s_input_fd = direct_pty ? -1 : input_fd;
-    s_using_virtual_tty = false;
+    s_master_fd = -1;
+    s_input_fd = -1;
     s_using_pscal_pty = true;
     s_runtime_stdio = NULL;
     pthread_mutex_unlock(&s_runtime_mutex);
@@ -1621,26 +1356,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
         PSCALRuntimeOutputRingActivate();
     }
 
-    if (direct_pty) {
-        if (master_fd >= 0) {
-            close(master_fd);
-        }
-        if (input_fd >= 0) {
-            close(input_fd);
-        }
-    }
-
-    // Make input writes non-blocking; PSCALRuntimeSendInput will back off on EAGAIN.
-    if (!direct_pty && input_fd >= 0) {
-        int flags = fcntl(input_fd, F_GETFL, 0);
-        if (flags >= 0) {
-            (void)fcntl(input_fd, F_SETFL, flags | O_NONBLOCK);
-        }
-    }
-
     PSCALRuntimeSetSessionWinsize(session_id, initial_columns, initial_rows);
-    pscalRuntimeSetVirtualTTYEnabled(false);
-
     // Ensure session-heavy tools (e.g., embedded Elvis) write into a
     // writable sandbox directory instead of the app bundle.
     @autoreleasepool {
@@ -1669,18 +1385,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
-    if (!direct_pty) {
-        pthread_attr_t pumpAttr;
-        pthread_attr_init(&pumpAttr);
-        const size_t pumpStack = 2ull * 1024ull * 1024ull; // 2 MiB for the pump thread
-        pthread_attr_setstacksize(&pumpAttr, pumpStack);
-        PSCALRuntimeContext *ctx = PSCALRuntimeCurrentContext();
-        pthread_create(&s_output_thread, &pumpAttr, PSCALRuntimeOutputPump, ctx);
-        pthread_attr_destroy(&pumpAttr);
-        NSLog(@"PSCALRuntime: output pump thread started");
-    } else {
-        memset(&s_output_thread, 0, sizeof(s_output_thread));
-    }
+    memset(&s_output_thread, 0, sizeof(s_output_thread));
 
 #if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
     PSCALRuntimeEnsureSDLReady();
@@ -1699,10 +1404,8 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     pthread_mutex_lock(&s_runtime_mutex);
     int pump_fd = s_master_fd;
     int stdin_fd = s_input_fd;
-    bool virtual_tty = s_using_virtual_tty;
     s_master_fd = -1;
     s_input_fd = -1;
-    s_using_virtual_tty = false;
     s_using_pscal_pty = false;
     s_runtime_session_id = 0;
     s_runtime_stdio = NULL;
@@ -1717,11 +1420,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     if (stdin_fd >= 0 && stdin_fd != pump_fd) {
         close(stdin_fd);
     }
-    if (!direct_pty) {
-        pthread_join(s_output_thread, NULL);
-    } else {
-        PSCALRuntimeUnregisterSessionOutputHandler(session_id);
-    }
+    PSCALRuntimeUnregisterSessionOutputHandler(session_id);
     if (PSCALRuntimeOutputBufferingEnabled()) {
         PSCALRuntimeOutputRingDeactivate();
     }
@@ -1729,9 +1428,6 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     if (s_runtime_log_fd >= 0) {
         close(s_runtime_log_fd);
         s_runtime_log_fd = -1;
-    }
-    if (virtual_tty) {
-        pscalRuntimeSetVirtualTTYEnabled(false);
     }
     PSCALRuntimeUnregisterSessionContext(session_id);
 
@@ -1817,14 +1513,9 @@ void PSCALRuntimeSendInput(const char *utf8, size_t length) {
     }
     pthread_mutex_lock(&s_runtime_mutex);
     const int fd = s_input_fd;
-    const bool virtual_tty = s_using_virtual_tty;
     const uint64_t session_id = s_runtime_session_id;
     pthread_mutex_unlock(&s_runtime_mutex);
-    if (virtual_tty) {
-        PSCALRuntimeEnqueueInput(PSCALRuntimeInputKindVirtualTTY, session_id, fd, utf8, length);
-        return;
-    }
-    if (PSCALRuntimeDirectPtyEnabled() && session_id != 0) {
+    if (session_id != 0) {
         PSCALRuntimeEnqueueInput(PSCALRuntimeInputKindSession, session_id, -1, utf8, length);
         return;
     }
@@ -1839,10 +1530,10 @@ void PSCALRuntimeSendInputForSession(uint64_t session_id, const char *utf8, size
         return;
     }
     if (PSCALRuntimeIODebugEnabled()) {
-        fprintf(stderr,
-                "[runtime-io] enqueue input session=%llu len=%zu\n",
-                (unsigned long long)session_id,
-                length);
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] enqueue input session=%llu len=%zu\n",
+            (unsigned long long)session_id,
+            length);
     }
     PSCALRuntimeEnqueueInput(PSCALRuntimeInputKindSession, session_id, -1, utf8, length);
 }
@@ -1881,24 +1572,19 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
     int fd = s_master_fd;
     bool active = s_runtime_active;
     pthread_t runtime_thread = s_runtime_thread_id;
-    bool virtual_tty = s_using_virtual_tty;
     bool using_pscal_pty = s_using_pscal_pty;
     uint64_t session_id = s_runtime_session_id;
     pthread_mutex_unlock(&s_runtime_mutex);
 
     if (using_pscal_pty && session_id != 0) {
         PSCALRuntimeSetSessionWinsize(session_id, columns, rows);
-    } else if (!virtual_tty) {
+    } else {
         PSCALRuntimeApplyWindowSize(fd, columns, rows);
     }
 
     if (active && runtime_thread) {
         pthread_kill(runtime_thread, SIGWINCH);
     }
-}
-
-int PSCALRuntimeIsVirtualTTY(void) {
-    return pscalRuntimeVirtualTTYEnabled() ? 1 : 0;
 }
 
 char *pscalRuntimeCopyMarketingVersion(void) {

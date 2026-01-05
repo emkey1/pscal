@@ -135,6 +135,25 @@ term.blur();
 term.focus();
 exports.copy = () => term.copySelectionToClipboard();
 
+let lastSelectionRect = null;
+function getSelectionRect() {
+    const sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) return null;
+    return {x: rect.left, y: rect.top, width: rect.width, height: rect.height};
+}
+document.addEventListener('selectionchange', () => {
+    const rect = getSelectionRect();
+    if (rect) {
+        native.selectionChanged(rect);
+        lastSelectionRect = rect;
+    } else if (lastSelectionRect) {
+        native.selectionChanged(null);
+        lastSelectionRect = null;
+    }
+});
+
 // focus
 // This listener blocks blur events that come in because the webview has lost first responder
 term.scrollPort_.screen_.addEventListener('blur', (e) => {
