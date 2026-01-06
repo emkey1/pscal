@@ -99,6 +99,21 @@
             value = "0"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "PSCALI_PAGER_DEBUG"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "PSCALI_REDIR_DEBUG"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "PSCALI_PIPE_DEBUG"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction

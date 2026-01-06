@@ -48,8 +48,6 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"mapfile", "mapfile", 49},
     {"readarray", "mapfile", 49},
     {"cat", "cat", -1},
-    {"less", "less", -1},
-    {"more", "less", -1},
     {"clear", "clear", -1},
     {"cls", "clear", -1},
     {"jobs", "jobs", 17},

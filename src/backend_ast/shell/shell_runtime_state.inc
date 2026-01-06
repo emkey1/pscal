@@ -499,6 +499,7 @@ typedef enum {
     SHELL_COMMAND_RESULT_ALIAS,
     SHELL_COMMAND_RESULT_FUNCTION,
     SHELL_COMMAND_RESULT_BUILTIN,
+    SHELL_COMMAND_RESULT_APPLET,
     SHELL_COMMAND_RESULT_FILE
 } ShellCommandResultKind;
 
@@ -1704,6 +1705,7 @@ static __thread ShellRuntimeState *gShellContextStack[8] = {0};
 static __thread size_t gShellContextDepth = 0;
 static __thread bool gShellCurrentBuiltinBackground = false;
 static __thread bool gShellBackgroundWorkerActive = false;
+static __thread bool gShellSkipHostStdio = false;
 /* Per-thread to avoid cross-session stdio restoration on iOS. */
 static __thread int gShellSavedStdFds[3] = { -1, -1, -1 };
 

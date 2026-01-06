@@ -34,6 +34,7 @@ extern void pscalRuntimeDebugLog(const char *message);
 #if defined(PSCAL_TARGET_IOS)
 __attribute__((weak)) int pscalHostOpenRaw(const char *path, int flags, mode_t mode);
 __attribute__((weak)) void *vprocCurrent(void);
+int vprocOpenShim(const char *path, int flags, ...);
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
@@ -62,6 +63,43 @@ static bool pathVirtualizationActive(void) {
 #endif
     return true;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static bool pathVirtualizedIsVprocDevicePath(const char *path) {
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    const char *candidate = path;
+    if (strncmp(path, "/private", 8) == 0) {
+        candidate = path + 8;
+    }
+    if (strncmp(candidate, "/dev/", 5) != 0) {
+        return false;
+    }
+    if (strcmp(candidate, "/dev/tty") == 0 ||
+        strcmp(candidate, "/dev/console") == 0 ||
+        strcmp(candidate, "/dev/ptmx") == 0) {
+        return true;
+    }
+    if (strncmp(candidate, "/dev/pts/", 9) == 0) {
+        return true;
+    }
+    if (strncmp(candidate, "/dev/tty", 8) == 0) {
+        const char *digits = candidate + 8;
+        if (*digits == '\0') {
+            return true;
+        }
+        while (*digits) {
+            if (*digits < '0' || *digits > '9') {
+                return false;
+            }
+            digits++;
+        }
+        return true;
+    }
+    return false;
+}
+#endif
 
 static const char *pathVirtualizedExpand(const char *input, char *buffer, size_t buffer_len) {
     if (!input) {
@@ -277,32 +315,33 @@ static int pathVirtualizedOpenHost(const char *path, int oflag, mode_t mode, boo
 }
 
 int pscalPathVirtualized_open(const char *path, int oflag, ...) {
+    mode_t mode = 0;
+    bool has_mode = false;
+    if (oflag & O_CREAT) {
+        va_list ap;
+        va_start(ap, oflag);
+        mode = (mode_t)va_arg(ap, int);
+        va_end(ap);
+        has_mode = true;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return has_mode ? vprocOpenShim(path, oflag, mode) : vprocOpenShim(path, oflag);
+    }
+#endif
     if (!pathVirtualizationActive()) {
-        if (oflag & O_CREAT) {
-            va_list ap;
-            va_start(ap, oflag);
-            mode_t mode = (mode_t)va_arg(ap, int);
-            int fd = pathVirtualizedOpenHost(path, oflag, mode, true);
-            va_end(ap);
-            return fd;
-        }
-        return pathVirtualizedOpenHost(path, oflag, 0, false);
+        return has_mode
+            ? pathVirtualizedOpenHost(path, oflag, mode, true)
+            : pathVirtualizedOpenHost(path, oflag, 0, false);
     }
     char expanded[PATH_MAX];
     const char *target = pathVirtualizedPrepare(path, expanded);
     LOG_EXPANSION("open", path, target);
-    int fd;
-    if (oflag & O_CREAT) {
-        va_list ap;
-        va_start(ap, oflag);
-        mode_t mode = (mode_t)va_arg(ap, int);
+    if (has_mode) {
         pathVirtualizedEnsureParent(target);
-        fd = pathVirtualizedOpenHost(target, oflag, mode, true);
-        va_end(ap);
-    } else {
-        fd = pathVirtualizedOpenHost(target, oflag, 0, false);
+        return pathVirtualizedOpenHost(target, oflag, mode, true);
     }
-    return fd;
+    return pathVirtualizedOpenHost(target, oflag, 0, false);
 }
 
 FILE *pscalPathVirtualized_fopen(const char *path, const char *mode) {

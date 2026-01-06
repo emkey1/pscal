@@ -14,6 +14,13 @@ final class SshRuntimeSession: ObservableObject {
         }
         return false
     }()
+    private static let ioDebugEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if let value = env["PSCALI_IO_DEBUG"] {
+            return value != "0"
+        }
+        return false
+    }()
     private static func logHterm(_ message: String) {
         guard htermDebugEnabled else { return }
         if let data = (message + "\n").data(using: .utf8) {
@@ -137,6 +144,13 @@ final class SshRuntimeSession: ObservableObject {
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
         }
+        if Self.ioDebugEnabled {
+            let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
+            let message = "SshSession: start id=\(sessionId) ctx=\(ctxDesc)\n"
+            if let data = message.data(using: .utf8) {
+                FileHandle.standardError.write(data)
+            }
+        }
 
         var readFd: Int32 = -1
         var writeFd: Int32 = -1
@@ -149,6 +163,12 @@ final class SshRuntimeSession: ObservableObject {
             closeIfValid(writeFd)
             markExited(status: 255)
             return false
+        }
+        if Self.ioDebugEnabled {
+            let message = "SshSession: launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)\n"
+            if let data = message.data(using: .utf8) {
+                FileHandle.standardError.write(data)
+            }
         }
         lastStartErrno = 0
         closeIfValid(readFd)

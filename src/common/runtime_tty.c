@@ -7,31 +7,15 @@
 #include "ios/vproc.h"
 #endif
 
-#if defined(PSCAL_TARGET_IOS)
-static bool pscalRuntimeSessionFdIsInteractive(int fd) {
-    if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO) {
-        return false;
-    }
-    VProcSessionStdio *session = vprocSessionStdioCurrent();
-    if (!session || vprocSessionStdioIsDefault(session)) {
-        return false;
-    }
-    return true;
-}
-#endif
-
 bool pscalRuntimeFdIsInteractive(int fd) {
     if (fd < 0) {
         return false;
     }
 #if defined(PSCAL_TARGET_IOS)
-    if ((fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO)) {
-        if (pscalRuntimeSessionFdIsInteractive(fd)) {
-            return true;
-        }
-    }
-#endif
+    if (vprocIsattyShim(fd)) {
+#else
     if (isatty(fd)) {
+#endif
         return true;
     }
     return false;

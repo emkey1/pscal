@@ -2152,6 +2152,24 @@ static bool vprocSessionFdMatchesStd(int fd, int std_fd) {
     return fd_st.st_dev == std_st.st_dev && fd_st.st_ino == std_st.st_ino;
 }
 
+static bool vprocSessionFdMatchesHost(int fd, int host_fd) {
+    if (fd < 0 || host_fd < 0) {
+        return false;
+    }
+    if (fd == host_fd) {
+        return true;
+    }
+    struct stat fd_st;
+    struct stat host_st;
+    if (vprocHostFstatRaw(fd, &fd_st) != 0) {
+        return false;
+    }
+    if (vprocHostFstatRaw(host_fd, &host_st) != 0) {
+        return false;
+    }
+    return fd_st.st_dev == host_st.st_dev && fd_st.st_ino == host_st.st_ino;
+}
+
 static bool vprocIoDebugEnabled(void) {
     const char *env = getenv("PSCALI_IO_DEBUG");
     if (!env || env[0] == '\0') {
@@ -6737,6 +6755,8 @@ static int vprocHostIsatty(int fd) {
 #endif
 }
 
+static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
+
 int vprocIsattyShim(int fd) {
     VProc *vp = vprocForThread();
     if (vp) {
@@ -6746,19 +6766,25 @@ int vprocIsattyShim(int fd) {
             pscal_fd_close(pscal_fd);
             return res;
         }
+        int host_fd = vprocTranslateFd(vp, fd);
+        if (host_fd >= 0) {
+            return vprocHostIsatty(host_fd);
+        }
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        struct pscal_fd *pscal_fd = vprocSessionPscalFdForStd(fd);
+        if (pscal_fd) {
+            int res = (pscal_fd->tty != NULL) ? 1 : 0;
+            pscal_fd_close(pscal_fd);
+            return res;
+        }
+    }
+#endif
     int host = shimTranslate(fd, 1);
     if (host < 0) {
         return 0;
     }
-#if defined(PSCAL_TARGET_IOS)
-    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
-        VProcSessionStdio *session = vprocSessionStdioCurrent();
-        if (session && !vprocSessionStdioIsDefault(session)) {
-            return 1;
-        }
-    }
-#endif
     return vprocHostIsatty(host);
 }
 
@@ -6846,12 +6872,6 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
 
 ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     VProc *vp = vprocForThread();
-#if defined(PSCAL_TARGET_IOS)
-    VProcSessionStdio *session = vprocSessionStdioCurrent();
-    bool is_stdout = false;
-    bool is_stderr = false;
-    vprocSessionResolveOutputFd(session, fd, &is_stdout, &is_stderr);
-#endif
     if (vp) {
         struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
         if (pscal_fd) {
@@ -6863,7 +6883,20 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
             return res;
         }
     }
+    int host = -1;
 #if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    bool is_stdout = false;
+    bool is_stderr = false;
+    vprocSessionResolveOutputFd(session, fd, &is_stdout, &is_stderr);
+    host = shimTranslate(fd, 1);
+    if ((is_stdout || is_stderr) && session && !vprocSessionStdioIsDefault(session) && host >= 0) {
+        int session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
+        if (!vprocSessionFdMatchesHost(host, session_host_fd)) {
+            is_stdout = false;
+            is_stderr = false;
+        }
+    }
     if ((is_stdout || is_stderr) && session && !vprocSessionStdioIsDefault(session)) {
         struct pscal_fd *target =
             is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
@@ -6878,8 +6911,12 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
             return vprocSetCompatErrno((int)res);
         }
     }
+#else
+    host = shimTranslate(fd, 1);
 #endif
-    int host = shimTranslate(fd, 1);
+    if (host < 0) {
+        host = shimTranslate(fd, 1);
+    }
     if (host < 0) {
         return -1;
     }

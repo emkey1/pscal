@@ -2107,10 +2107,10 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             return final_status;
         }
 
-            if (ctx->background) {
-                /* Register the synthetic in-process job so fg/bg/jobs work. */
-                if (ctx->pids && ctx->launched > 0) {
-                    pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
+        if (ctx->background) {
+            /* Register the synthetic in-process job so fg/bg/jobs work. */
+            if (ctx->pids && ctx->launched > 0) {
+                pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
                     ShellJob *job = shellRegisterJob(bg_pgid, ctx->pids, ctx->launched, tail_cmd);
                     if (job) {
                         job->running = true;
@@ -2163,6 +2163,10 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 pthread_attr_destroy(&attr);
                 shellShebangThreadCtxFree(bg_ctx);
             }
+        }
+        if (!ctx->background) {
+            shellEnsureJobControl();
+            shellJobControlRestoreForeground();
         }
         if (ctx->negated) {
             final_status = (final_status == 0) ? 1 : 0;
@@ -2329,24 +2333,49 @@ static bool shellEnsureExecRedirBackup(int target_fd,
     backup.use_vproc = false;
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
+    bool want_vproc_restore = gShellSkipHostStdio;
+    if (gShellRuntime.pipeline.in_process && !gShellBackgroundWorkerActive && !want_vproc_restore) {
+        /* In-process pipelines run with a synthetic vproc whose stdio does not
+         * match the shell's host fds. Backup/restore must target the real host
+         * descriptors so interactive input is restored after the stage ends. */
+        active_vp = NULL;
+    }
 #else
     VProc *active_vp = NULL;
+    (void)active_vp;
 #endif
     int min_fd = target_fd + 1;
     if (avoid_fd >= 0 && avoid_fd >= min_fd) {
         min_fd = avoid_fd + 1;
     }
     int dup_fd = -1;
-    int source_fd = target_fd;
 #if defined(PSCAL_TARGET_IOS)
-    if (active_vp) {
+    int source_fd = target_fd;
+    if (want_vproc_restore) {
+        VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+        if (session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
+            if (target_fd == STDIN_FILENO) {
+                source_fd = session_stdio->stdin_host_fd;
+            } else if (target_fd == STDOUT_FILENO) {
+                source_fd = session_stdio->stdout_host_fd;
+            } else if (target_fd == STDERR_FILENO) {
+                source_fd = session_stdio->stderr_host_fd;
+            }
+        }
+        backup.use_vproc = true;
+    } else if (active_vp) {
         int host_src = vprocTranslateFd(active_vp, target_fd);
         if (host_src >= 0) {
             source_fd = host_src;
             backup.use_vproc = true;
         }
     }
+#else
+    int source_fd = target_fd;
 #endif
+    if (source_fd < 0) {
+        return false;
+    }
 #ifdef F_DUPFD_CLOEXEC
     dup_fd = fcntl(source_fd, F_DUPFD_CLOEXEC, min_fd);
     if (dup_fd < 0 && errno == EINVAL) {
@@ -2438,7 +2467,7 @@ static bool shellDupOntoTarget(VProc *vp, int src_fd, int target_fd, bool dbg, c
     }
     int host_src = src_fd;
 #if defined(PSCAL_TARGET_IOS)
-    bool skip_host_dup = gShellBackgroundWorkerActive;
+    bool skip_host_dup = gShellBackgroundWorkerActive || gShellSkipHostStdio;
     if (vp) {
         int translated = vprocTranslateFd(vp, src_fd);
         if (translated >= 0) {
@@ -2491,7 +2520,7 @@ static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t c
     }
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
-    bool skip_host_restore = gShellBackgroundWorkerActive;
+    bool skip_host_restore = gShellBackgroundWorkerActive || gShellSkipHostStdio;
 #else
     VProc *active_vp = NULL;
     bool skip_host_restore = false;
@@ -3053,6 +3082,16 @@ static int shellRunBuiltinInProcess(VM *vm,
     bool redir_dbg = getenv("PSCALI_REDIR_DEBUG") != NULL;
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
+    bool prev_skip_host = gShellSkipHostStdio;
+    bool want_skip_host = false;
+    if (!gShellBackgroundWorkerActive &&
+        gShellRuntime.pipeline.in_process &&
+        cmd && cmd->argv && cmd->argv[0] &&
+        (strcasecmp(cmd->argv[0], "less") == 0 ||
+         strcasecmp(cmd->argv[0], "more") == 0)) {
+        want_skip_host = true;
+    }
+    gShellSkipHostStdio = gShellSkipHostStdio || want_skip_host;
     if (pipe_dbg) {
         fprintf(stderr, "[run-builtin] active_vp=%p stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
                 (void *)active_vp, stdin_fd, stdout_fd, stderr_fd);
@@ -3338,6 +3377,7 @@ cleanup:
 #if defined(PSCAL_TARGET_IOS)
     /* Close cached vproc streams so redirected pipeline fds get released. */
     shellCloseVprocStreams();
+    gShellSkipHostStdio = prev_skip_host;
 #endif
     return status;
 }
