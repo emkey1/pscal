@@ -35,10 +35,63 @@ static int pscalHostUnlinkRaw(const char *path) {
     return res;
 }
 
+static int pscalHostChmodRaw(const char *path, mode_t mode) {
+    vprocInterposeBypassEnter();
+    int res = chmod(path, mode);
+    vprocInterposeBypassExit();
+    return res;
+}
+
+static int pscalHostChownRaw(const char *path, uid_t uid, gid_t gid) {
+    vprocInterposeBypassEnter();
+    int res = chown(path, uid, gid);
+    vprocInterposeBypassExit();
+    return res;
+}
+
+static void pscalPtyEnsureDevptsRoot(void) {
+    if (!pathTruncateEnabled()) {
+        return;
+    }
+    char pts_dir[PATH_MAX];
+    if (!pathTruncateExpand("/dev/pts", pts_dir, sizeof(pts_dir))) {
+        return;
+    }
+    if (pscalHostMkdirRaw(pts_dir, 0755) != 0 && errno != EEXIST) {
+        return;
+    }
+    char ptmx_path[PATH_MAX];
+    if (!pathTruncateExpand("/dev/pts/ptmx", ptmx_path, sizeof(ptmx_path))) {
+        return;
+    }
+    int fd = pscalHostOpenRaw(ptmx_path, O_CREAT | O_EXCL | O_RDONLY, 0666);
+    if (fd >= 0) {
+        vprocHostClose(fd);
+    }
+    if (fd >= 0 || errno == EEXIST) {
+        (void)pscalHostChmodRaw(ptmx_path, 0666);
+    }
+}
+
+static void pscalPtySyncDevptsEntry(int pty_num, mode_t_ perms, uid_t_ uid, gid_t_ gid) {
+    if (!pathTruncateEnabled()) {
+        return;
+    }
+    char rel_path[64];
+    snprintf(rel_path, sizeof(rel_path), "/dev/pts/%d", pty_num);
+    char node_path[PATH_MAX];
+    if (!pathTruncateExpand(rel_path, node_path, sizeof(node_path))) {
+        return;
+    }
+    (void)pscalHostChmodRaw(node_path, (mode_t)(perms & 0777));
+    (void)pscalHostChownRaw(node_path, (uid_t)uid, (gid_t)gid);
+}
+
 static void pscalPtyEnsureDevptsEntry(int pty_num) {
     if (!pathTruncateEnabled()) {
         return;
     }
+    pscalPtyEnsureDevptsRoot();
     char pts_dir[PATH_MAX];
     if (!pathTruncateExpand("/dev/pts", pts_dir, sizeof(pts_dir))) {
         return;
@@ -57,7 +110,7 @@ static void pscalPtyEnsureDevptsEntry(int pty_num) {
         vprocHostClose(fd);
     }
     if (fd >= 0 || errno == EEXIST) {
-        (void)chmod(node_path, 0620);
+        (void)pscalHostChmodRaw(node_path, 0620);
     }
 }
 
@@ -96,6 +149,7 @@ static int pty_master_init(struct tty *tty) {
     slave->pty.locked = true;
     pty_slave_init_inode(slave);
     pscalPtyEnsureDevptsEntry(tty->num);
+    pscalPtySyncDevptsEntry(tty->num, slave->pty.perms, slave->pty.uid, slave->pty.gid);
     return 0;
 }
 
@@ -341,6 +395,40 @@ int pscalPtyGetSlaveInfo(int pty_num, mode_t_ *perms, uid_t_ *uid, gid_t_ *gid) 
     }
     unlock(&tty->lock);
     unlock(&ttys_lock);
+    return 0;
+}
+
+int pscalPtySetSlaveInfo(int pty_num, const mode_t_ *perms, const uid_t_ *uid, const gid_t_ *gid) {
+    if (pty_num < 0 || pty_num >= MAX_PTYS) {
+        return _ENOENT;
+    }
+    mode_t_ updated_perms = 0;
+    uid_t_ updated_uid = 0;
+    gid_t_ updated_gid = 0;
+    lock(&ttys_lock);
+    struct tty *tty = pty_slave.ttys[pty_num];
+    if (!tty || tty == (void *)1) {
+        unlock(&ttys_lock);
+        return _ENOENT;
+    }
+    lock(&tty->lock);
+    if (perms) {
+        tty->pty.perms = *perms;
+    }
+    if (uid) {
+        tty->pty.uid = *uid;
+    }
+    if (gid) {
+        tty->pty.gid = *gid;
+    }
+    updated_perms = tty->pty.perms;
+    updated_uid = tty->pty.uid;
+    updated_gid = tty->pty.gid;
+    unlock(&tty->lock);
+    unlock(&ttys_lock);
+
+    pscalPtyEnsureDevptsEntry(pty_num);
+    pscalPtySyncDevptsEntry(pty_num, updated_perms, updated_uid, updated_gid);
     return 0;
 }
 

@@ -23,6 +23,10 @@
 #undef fstat
 #undef stat
 #undef lstat
+#undef chmod
+#undef chown
+#undef fchmod
+#undef fchown
 #undef ioctl
 #undef lseek
 #undef isatty
@@ -58,6 +62,10 @@
 #define fstat vprocFstatShim
 #define stat(path, buf) vprocStatShim((path), (buf))
 #define lstat(path, buf) vprocLstatShim((path), (buf))
+#define chmod(path, mode) vprocChmodShim((path), (mode))
+#define chown(path, uid, gid) vprocChownShim((path), (uid), (gid))
+#define fchmod(fd, mode) vprocFchmodShim((fd), (mode))
+#define fchown(fd, uid, gid) vprocFchownShim((fd), (uid), (gid))
 #define ioctl vprocIoctlShim
 #define lseek vprocLseekShim
 #define isatty vprocIsattyShim

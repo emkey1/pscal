@@ -502,6 +502,66 @@ static int vprocHostAccessRaw(const char *path, int mode) {
     return -1;
 }
 
+static int vprocHostChmodRaw(const char *path, mode_t mode) {
+    static int (*fn)(const char *, mode_t) = NULL;
+    if (!fn) {
+        fn = (int (*)(const char *, mode_t))vprocResolveSymbol("chmod");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(path, mode);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostFchmodRaw(int fd, mode_t mode) {
+    static int (*fn)(int, mode_t) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, mode_t))vprocResolveSymbol("fchmod");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(fd, mode);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostChownRaw(const char *path, uid_t uid, gid_t gid) {
+    static int (*fn)(const char *, uid_t, gid_t) = NULL;
+    if (!fn) {
+        fn = (int (*)(const char *, uid_t, gid_t))vprocResolveSymbol("chown");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(path, uid, gid);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostFchownRaw(int fd, uid_t uid, gid_t gid) {
+    static int (*fn)(int, uid_t, gid_t) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, uid_t, gid_t))vprocResolveSymbol("fchown");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(fd, uid, gid);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
 static int vprocHostMkdirRaw(const char *path, mode_t mode) {
     static int (*fn)(const char *, mode_t) = NULL;
     if (!fn) {
@@ -3095,7 +3155,10 @@ static bool vprocPathIsDevConsole(const char *path) {
 }
 
 static bool vprocPathIsPtyMaster(const char *path) {
-    return vprocPathMatches(path, "/dev/ptmx") || vprocPathMatches(path, "/private/dev/ptmx");
+    return vprocPathMatches(path, "/dev/ptmx") ||
+           vprocPathMatches(path, "/private/dev/ptmx") ||
+           vprocPathMatches(path, "/dev/pts/ptmx") ||
+           vprocPathMatches(path, "/private/dev/pts/ptmx");
 }
 
 static bool vprocPathIsDevPtsRoot(const char *path) {
@@ -3157,6 +3220,48 @@ static bool vprocPathParsePtySlave(const char *path, int *out_num) {
         return true;
     }
     return false;
+}
+
+static int vprocPtyApplyAttrsByNum(int pty_num,
+                                   const mode_t *mode,
+                                   const uid_t *uid,
+                                   const gid_t *gid) {
+    mode_t_ perms_local;
+    uid_t_ uid_local;
+    gid_t_ gid_local;
+    const mode_t_ *perms_ptr = NULL;
+    const uid_t_ *uid_ptr = NULL;
+    const gid_t_ *gid_ptr = NULL;
+    if (mode) {
+        perms_local = (mode_t_)(*mode & 0777);
+        perms_ptr = &perms_local;
+    }
+    if (uid) {
+        uid_local = (uid_t_)(*uid);
+        uid_ptr = &uid_local;
+    }
+    if (gid) {
+        gid_local = (gid_t_)(*gid);
+        gid_ptr = &gid_local;
+    }
+    return pscalPtySetSlaveInfo(pty_num, perms_ptr, uid_ptr, gid_ptr);
+}
+
+static int vprocPtyApplyAttrsForFd(struct pscal_fd *fd,
+                                   const mode_t *mode,
+                                   const uid_t *uid,
+                                   const gid_t *gid) {
+    if (!fd || !fd->tty) {
+        return _EBADF;
+    }
+    struct tty *tty = fd->tty;
+    if (tty->driver == &pty_master) {
+        tty = tty->pty.other;
+    }
+    if (!tty || tty->driver != &pty_slave) {
+        return _ENOTTY;
+    }
+    return vprocPtyApplyAttrsByNum(tty->num, mode, uid, gid);
 }
 
 static bool vprocPathParseConsoleTty(const char *path, int *out_num) {
@@ -7173,6 +7278,84 @@ int vprocAccessShim(const char *path, int mode) {
     char expanded[PATH_MAX];
     const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
     return vprocHostAccessRaw(target ? target : path, mode);
+}
+
+int vprocChmodShim(const char *path, mode_t mode) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostChmodRaw(path, mode);
+    }
+    int pty_num = -1;
+    if (vprocPathParsePtySlave(path, &pty_num)) {
+        int err = vprocPtyApplyAttrsByNum(pty_num, &mode, NULL, NULL);
+        if (err < 0) {
+            return vprocSetCompatErrno(err);
+        }
+        return 0;
+    }
+    char expanded[PATH_MAX];
+    const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
+    return vprocHostChmodRaw(target ? target : path, mode);
+}
+
+int vprocChownShim(const char *path, uid_t uid, gid_t gid) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostChownRaw(path, uid, gid);
+    }
+    int pty_num = -1;
+    if (vprocPathParsePtySlave(path, &pty_num)) {
+        int err = vprocPtyApplyAttrsByNum(pty_num, NULL, &uid, &gid);
+        if (err < 0) {
+            return vprocSetCompatErrno(err);
+        }
+        return 0;
+    }
+    char expanded[PATH_MAX];
+    const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
+    return vprocHostChownRaw(target ? target : path, uid, gid);
+}
+
+int vprocFchmodShim(int fd, mode_t mode) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostFchmodRaw(fd, mode);
+    }
+    struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+    if (pscal_fd) {
+        int err = vprocPtyApplyAttrsForFd(pscal_fd, &mode, NULL, NULL);
+        pscal_fd_close(pscal_fd);
+        if (err < 0) {
+            return vprocSetCompatErrno(err);
+        }
+        return 0;
+    }
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd < 0) {
+        return -1;
+    }
+    return vprocHostFchmodRaw(host_fd, mode);
+}
+
+int vprocFchownShim(int fd, uid_t uid, gid_t gid) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostFchownRaw(fd, uid, gid);
+    }
+    struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+    if (pscal_fd) {
+        int err = vprocPtyApplyAttrsForFd(pscal_fd, NULL, &uid, &gid);
+        pscal_fd_close(pscal_fd);
+        if (err < 0) {
+            return vprocSetCompatErrno(err);
+        }
+        return 0;
+    }
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd < 0) {
+        return -1;
+    }
+    return vprocHostFchownRaw(host_fd, uid, gid);
 }
 
 int vprocMkdirShim(const char *path, mode_t mode) {
