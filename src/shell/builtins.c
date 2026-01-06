@@ -121,6 +121,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"sort", "sort", -1},
     {"stty", "stty", -1},
     {"tset", "tset", -1},
+    {"tty", "tty", -1},
     {"tail", "tail", -1},
     {"telnet", "telnet", -1},
     {"touch", "touch", -1},
