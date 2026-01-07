@@ -300,9 +300,16 @@ func pscalRuntimeOpenSshSession(_ argc: Int32,
             args.append("")
         }
     }
+    if let first = args.first {
+        sshDebugLog("[ssh-session] open request argc=\(argc) argv0=\(first)")
+    } else {
+        sshDebugLog("[ssh-session] open request argc=\(argc)")
+    }
     if let result = runOnMainBlocking("openSshSession", work: { TerminalTabManager.shared.openSshSession(argv: args) }) {
+        sshDebugLog("[ssh-session] open result=\(result)")
         return result
     }
+    sshDebugLog("[ssh-session] open result=EAGAIN")
     return -EAGAIN
 }
 

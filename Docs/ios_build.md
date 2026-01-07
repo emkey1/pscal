@@ -144,8 +144,8 @@ This file will grow as each of the steps above lands; contributions welcome.
   (plus `PSCALI_WORKSPACE_ROOT`) so native code can locate the staged tree.
   This mirrors the macOS/Linux developer experience—`cd Examples/pascal/...`
   works the same way inside the iOS shell without requiring manual uploads.
-- Elvis can render inline or in a floating editor window. Use Terminal Settings →
-  “elvis/vi” to choose your preferred mode. The `PSCALI_ELVIS_WINDOW_MODE`
+- Editor can render inline or in a floating editor window. Use Terminal Settings →
+  “editor/vi” to choose your preferred mode. The `PSCALI_EDITOR_WINDOW_MODE`
   environment variable (`window`/`inline`) still seeds the default on first run.
 - In addition to `Examples`, the iOS bundle now ships with the same runtime
   payload that normally installs to `/usr/local/pscal` (e.g. `lib/`, `fonts/`,

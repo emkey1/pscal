@@ -52,6 +52,15 @@
 # define OPEN_MAX	256
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+/* PSCAL iOS uses virtual FDs; closefrom() would drop runtime/session FDs. */
+void
+closefrom(int lowfd)
+{
+	(void)lowfd;
+}
+#else
+
 #if 0
 __unused static const char rcsid[] = "$Sudo: closefrom.c,v 1.11 2006/08/17 15:26:54 millert Exp $";
 #endif /* lint */
@@ -155,4 +164,5 @@ closefrom(int lowfd)
 	closefrom_fallback(lowfd);
 }
 #endif /* !HAVE_FCNTL_CLOSEM */
+#endif /* PSCAL_TARGET_IOS */
 #endif /* HAVE_CLOSEFROM */

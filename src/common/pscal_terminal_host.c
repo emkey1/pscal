@@ -207,12 +207,14 @@ static void pscalTerminalClampCursor(int *row, int *col) {
 }
 
 static void pscalTerminalInitDebugFlag(void) {
+    const char *env = getenv("PSCALI_DEBUG_EDITOR");
+  //  if (env && *env && strcmp(env, "0") != 0) {
+        g_debug_log_enabled = true;
+        g_debug_log_checked = true;
+        return;
+  //  }
     if (g_debug_log_checked)
         return;
-    const char *env = getenv("PSCALI_DEBUG_ELVIS");
-    if (env && *env && strcmp(env, "0") != 0) {
-        g_debug_log_enabled = true;
-    }
     g_debug_log_checked = true;
 }
 

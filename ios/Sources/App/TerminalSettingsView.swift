@@ -102,6 +102,10 @@ struct TerminalSettingsView: View {
                     )
                     .font(.footnote)
                     .foregroundColor(.secondary)
+
+                    Text("Files app: PSCAL shows up under On My iPad; it exposes Documents/ (including home/).")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
 
                 Section(header: Text("Devices")) {

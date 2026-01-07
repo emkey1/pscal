@@ -46,6 +46,41 @@ static char xirerr[] = "invalid range";
 static char xsrerr[] = "range not found";
 static char *xrerr;
 
+extern void pscalRuntimeDebugLog(const char *message);
+
+static int ex_write_debug_enabled(void)
+{
+	static int checked = 0;
+	static int enabled = 0;
+	const char *env = NULL;
+	if (!enabled) {
+		env = getenv("PSCALI_DEBUG_EDITOR");
+		if (env && *env && strcmp(env, "0") != 0) {
+			enabled = 1;
+			checked = 1;
+			return 1;
+		}
+		if (checked)
+			return 0;
+		checked = 1;
+	}
+	return enabled;
+}
+
+static void ex_write_debugf(const char *fmt, ...)
+{
+	if (!ex_write_debug_enabled())
+		return;
+	if (&pscalRuntimeDebugLog == NULL)
+		return;
+	char buf[512];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	pscalRuntimeDebugLog(buf);
+}
+
 static int rstrcmp(const char *s1, const char *s2, int l1, int l2)
 {
 	if (l1 != l2 || !l1)
@@ -601,35 +636,176 @@ static int ex_write_buffer(int fd, int beg, int end, int o1, int o2)
 static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 {
 	char tmp[PATH_MAX];
+#if defined(PSCAL_TARGET_IOS)
+	char tmp_real[PATH_MAX];
+	char path_real[PATH_MAX];
+#endif
 	struct stat st;
 	mode_t mode = conf_mode;
 	int fd;
 	int rc;
+	const char *target = path;
+	int expanded = 0;
 
 	if (!path || !path[0])
 		return -1;
-	if (snprintf(tmp, sizeof(tmp), "%s.tmpXXXXXX", path) >= (int)sizeof(tmp))
+#if defined(PSCAL_TARGET_IOS)
+	if (pathTruncateExpand(path, path_real, sizeof(path_real))) {
+		target = path_real;
+		expanded = 1;
+	}
+#endif
+	ex_write_debugf("[nextvi-write] start path=%s target=%s expanded=%d",
+		path, target, expanded);
+	if (snprintf(tmp, sizeof(tmp), "%s.tmpXXXXXX", target) >= (int)sizeof(tmp))
 		return -1;
+#if defined(PSCAL_TARGET_IOS)
+	char *mkstemp_path = tmp;
+	int tmp_expanded = 0;
+	if (pathTruncateExpand(tmp, tmp_real, sizeof(tmp_real))) {
+		mkstemp_path = tmp_real;
+		tmp_expanded = 1;
+	}
+	ex_write_debugf("[nextvi-write] mkstemp template=%s expanded=%d",
+		mkstemp_path, tmp_expanded);
+	fd = mkstemp(mkstemp_path);
+#else
 	fd = mkstemp(tmp);
-	if (fd < 0)
+#endif
+	if (fd < 0) {
+		ex_write_debugf("[nextvi-write] mkstemp failed path=%s err=%d %s",
+#if defined(PSCAL_TARGET_IOS)
+			mkstemp_path,
+#else
+			tmp,
+#endif
+			errno, strerror(errno));
 		return -1;
-	if (stat(path, &st) == 0)
+	}
+	if (stat(target, &st) == 0)
 		mode = st.st_mode & 0777;
+	else if (errno != ENOENT)
+		ex_write_debugf("[nextvi-write] stat failed path=%s err=%d %s",
+			target, errno, strerror(errno));
 	fchmod(fd, mode);
 	rc = ex_write_buffer(fd, beg, end, o1, o2);
+	if (rc < 0)
+		ex_write_debugf("[nextvi-write] write buffer failed err=%d %s",
+			errno, strerror(errno));
 	if (rc < 0 || fsync(fd) < 0) {
+		if (rc >= 0)
+			ex_write_debugf("[nextvi-write] fsync failed err=%d %s",
+				errno, strerror(errno));
 		close(fd);
-		unlink(tmp);
+		unlink(
+#if defined(PSCAL_TARGET_IOS)
+			mkstemp_path
+#else
+			tmp
+#endif
+		);
+#if defined(PSCAL_TARGET_IOS)
+		{
+			ex_write_debugf("[nextvi-write] fallback direct write target=%s",
+				target);
+			int dfd = open(target, O_WRONLY | O_CREAT | O_TRUNC, mode);
+			if (dfd < 0) {
+				ex_write_debugf("[nextvi-write] fallback open failed err=%d %s",
+					errno, strerror(errno));
+				return -2;
+			}
+			rc = ex_write_buffer(dfd, beg, end, o1, o2);
+			if (rc < 0)
+				ex_write_debugf("[nextvi-write] fallback write failed err=%d %s",
+					errno, strerror(errno));
+			if (rc < 0 || fsync(dfd) < 0) {
+				if (rc >= 0)
+					ex_write_debugf("[nextvi-write] fallback fsync failed err=%d %s",
+						errno, strerror(errno));
+				close(dfd);
+				return -2;
+			}
+			if (close(dfd) < 0) {
+				ex_write_debugf("[nextvi-write] fallback close failed err=%d %s",
+					errno, strerror(errno));
+				return -2;
+			}
+			ex_write_debugf("[nextvi-write] fallback write ok target=%s",
+				target);
+			return 0;
+		}
+#else
 		return -2;
+#endif
 	}
 	if (close(fd) < 0) {
-		unlink(tmp);
+		ex_write_debugf("[nextvi-write] close failed err=%d %s",
+			errno, strerror(errno));
+		unlink(
+#if defined(PSCAL_TARGET_IOS)
+			mkstemp_path
+#else
+			tmp
+#endif
+		);
 		return -2;
 	}
-	if (rename(tmp, path) < 0) {
-		unlink(tmp);
+	if (rename(
+#if defined(PSCAL_TARGET_IOS)
+			mkstemp_path
+#else
+			tmp
+#endif
+			, target) < 0) {
+		ex_write_debugf("[nextvi-write] rename failed from=%s to=%s err=%d %s",
+#if defined(PSCAL_TARGET_IOS)
+			mkstemp_path,
+#else
+			tmp,
+#endif
+			target, errno, strerror(errno));
+		unlink(
+#if defined(PSCAL_TARGET_IOS)
+			mkstemp_path
+#else
+			tmp
+#endif
+		);
+#if defined(PSCAL_TARGET_IOS)
+		{
+			ex_write_debugf("[nextvi-write] fallback rename write target=%s",
+				target);
+			int dfd = open(target, O_WRONLY | O_CREAT | O_TRUNC, mode);
+			if (dfd < 0) {
+				ex_write_debugf("[nextvi-write] fallback rename open failed err=%d %s",
+					errno, strerror(errno));
+				return -1;
+			}
+			rc = ex_write_buffer(dfd, beg, end, o1, o2);
+			if (rc < 0)
+				ex_write_debugf("[nextvi-write] fallback rename write failed err=%d %s",
+					errno, strerror(errno));
+			if (rc < 0 || fsync(dfd) < 0) {
+				if (rc >= 0)
+					ex_write_debugf("[nextvi-write] fallback rename fsync failed err=%d %s",
+						errno, strerror(errno));
+				close(dfd);
+				return -2;
+			}
+			if (close(dfd) < 0) {
+				ex_write_debugf("[nextvi-write] fallback rename close failed err=%d %s",
+					errno, strerror(errno));
+				return -2;
+			}
+			ex_write_debugf("[nextvi-write] fallback rename write ok target=%s",
+				target);
+			return 0;
+		}
+#else
 		return -1;
+#endif
 	}
+	ex_write_debugf("[nextvi-write] success target=%s", target);
 	return 0;
 }
 

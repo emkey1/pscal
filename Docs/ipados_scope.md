@@ -9,32 +9,32 @@ This document lists the major subsystems that influence the iPadOS build so we c
   - Thread safety around `s_runtime_mutex` and window-resize state.
   - Error handling when PTY allocation fails; verify fallback to virtual TTY on simulator.
   - Signal routing (`SIGWINCH`, `SIGPIPE`) and cleanup when the shell exits/crashes.
-  - Swift bridge: ensure `ElvisTerminalBridge` state stays consistent if exsh restarts automatically.
+  - Swift bridge: ensure `EditorTerminalBridge` state stays consistent if exsh restarts automatically.
 
 ## 2. Terminal UI Layer
 - **Files**: `ios/Sources/App/TerminalView.swift`, `ios/Sources/App/TerminalRendererView.swift`, `ios/Sources/App/TerminalDisplayTextView.swift`, `ios/Sources/App/TerminalSettingsView.swift`
 - **Responsibilities**: Rendering the main VT100 surface, managing fonts/colors, handling input gestures.
 - **Review items**:
-  - Scrolling logic for both inline and Elvis snapshots (recent fixes need validation).
+  - Scrolling logic for both inline and Editor snapshots (recent fixes need validation).
   - Colour/theme propagation, especially between light/dark mode and the floating window.
   - Keyboard focus + resilience to hardware keyboard disconnects.
-  - Settings persistence (font selection, colours, Elvis toggle) and thread-safe notifications.
+  - Settings persistence (font selection, colours, Editor toggle) and thread-safe notifications.
 
-## 3. Floating Windows (Elvis/Gwin)
-- **Files**: `ios/Sources/App/ElvisWindowManager.swift`, `ios/Sources/App/GwinWindowManager.swift`, `ios/Sources/App/TerminalElvisViewController.swift`
+## 3. Floating Windows (Editor/Gwin)
+- **Files**: `ios/Sources/App/EditorWindowManager.swift`, `ios/Sources/App/GwinWindowManager.swift`, `ios/Sources/App/TerminalEditorViewController.swift`
 - **Responsibilities**: Managing secondary scenes, syncing geometry, input bridging.
 - **Review items**:
   - Scene lifecycle (`requestSceneSessionActivation/Destruction`) and focus handoff when windows close.
-  - Synchronization between `ElvisTerminalBridge` snapshots and SwiftUI renderer.
+  - Synchronization between `EditorTerminalBridge` snapshots and SwiftUI renderer.
   - Input pipeline (key repeat, modifiers) and cursor visibility.
   - Interaction with new task registry (future) / synthetic PIDs once implemented.
 
 ## 4. Smallclue Integration & GUI Hooks
-- **Files**: `src/smallclue/core.c`, `src/smallclue/integration.c`, `src/smallclue/elvis_app.c`, `src/common/pscal_terminal_host.c`
+- **Files**: `src/smallclue/core.c`, `src/smallclue/integration.c`, `src/smallclue/src/nextvi_app.c`, `src/common/pscal_terminal_host.c`
 - **Responsibilities**: iOS-specific wrappers for applets, environment overrides, GUI shims.
 - **Review items**:
   - Arg parsing fixes (e.g., `ls --color`) and regression risk for other applets.
-  - Environment overrides for Elvis (TERM, TERMCAP) and cleanup across restarts.
+  - Environment overrides for editor (TERM, TERMCAP) and cleanup across restarts.
   - `pscal_terminal_host`’s weak stubs vs iOS implementations; ensure there are no leak/buffer issues during frequent GUI opens.
 
 ## 5. Shell Runtime & Tool Runner
@@ -57,7 +57,7 @@ This document lists the major subsystems that influence the iPadOS build so we c
 - **Files**: `Docs/ios_build.md`, `ios/README.md`, potential xcconfigs.
 - **Responsibilities**: Build/test instructions, toggles for simulator vs device.
 - **Review items**:
-  - Update docs with any new environment knobs (e.g., Elvis floating toggle, synthetic tasks once added).
+  - Update docs with any new environment knobs (e.g., Editor floating toggle, synthetic tasks once added).
   - Ensure CI covers `cmake --preset ios-simulator` at least for static libs.
 
 ---

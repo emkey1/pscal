@@ -16,6 +16,9 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_truncate.h"
+#endif
 #include "vi.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
@@ -1304,6 +1307,8 @@ static void vi_argcmd(int arg, char cmd)
 	term_push(str, cs - str + 1);
 }
 
+static void vi_handle_sigwinch(void);
+
 void vi(int init)
 {
 	char *ln, *cs;
@@ -1317,6 +1322,7 @@ void vi(int init)
 		term_pos(xrow - xtop, led_pos(lbuf_get(xb, xrow), vi_col));
 	}
 	while (!xquit) {
+		vi_handle_sigwinch();
 		int nrow = xrow;
 		int noff = xoff;
 		int ooff = noff;
@@ -1909,10 +1915,24 @@ void vi(int init)
 	xgrec--;
 }
 
+static volatile sig_atomic_t vi_sigwinch_pending;
+static volatile sig_atomic_t vi_sigwinch_handling;
+
+static void vi_handle_sigwinch(void)
+{
+	if (!vi_sigwinch_pending || vi_sigwinch_handling)
+		return;
+	vi_sigwinch_handling = 1;
+	vi_sigwinch_pending = 0;
+	if (term_sbuf && !(xvis & 4))
+		term_exec("", 1, '&')
+	vi_sigwinch_handling = 0;
+}
+
 static void sighandler(int signo)
 {
-	if (term_sbuf && !(xvis & 4) && signo == SIGWINCH)
-		term_exec("", 1, '&')
+	if (signo == SIGWINCH)
+		vi_sigwinch_pending = 1;
 }
 
 static int setup_signals(void)

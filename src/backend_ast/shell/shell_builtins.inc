@@ -43,7 +43,7 @@ static const char *shellResolvePathForIOS(const char *input, char *buffer, size_
 extern bool pscalRuntimeConsumeSigint(void);
 extern char **environ;
 extern void pscalShowGwinMessage(const char *message);
-extern void pscalElvisDump(void);
+extern void pscalEditorDump(void);
 
 typedef struct {
     struct sigaction sigint;
@@ -3228,15 +3228,15 @@ Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
-Value vmBuiltinShellElvisDump(VM *vm, int arg_count, Value *args) {
+Value vmBuiltinShellEditorDump(VM *vm, int arg_count, Value *args) {
     (void)vm;
     (void)args;
     if (arg_count != 0) {
-        runtimeError(vm, "elvisdump: unexpected arguments");
+        runtimeError(vm, "editordump: unexpected arguments");
         shellUpdateStatus(1);
         return makeVoid();
     }
-    pscalElvisDump();
+    pscalEditorDump();
     shellUpdateStatus(0);
     return makeVoid();
 }

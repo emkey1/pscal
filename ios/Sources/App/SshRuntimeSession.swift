@@ -137,6 +137,7 @@ final class SshRuntimeSession: ObservableObject {
         }
         guard shouldStart else { return false }
 
+        sshDebugLog("[ssh-session] start id=\(sessionId)")
         withRuntimeContext {
             PSCALRuntimeRegisterSessionContext(sessionId)
         }
@@ -158,12 +159,14 @@ final class SshRuntimeSession: ObservableObject {
         if !launched {
             let err = errno
             lastStartErrno = err == 0 ? EIO : err
+            sshDebugLog("[ssh-session] start failed id=\(sessionId) errno=\(lastStartErrno)")
             stopOutputHandler()
             closeIfValid(readFd)
             closeIfValid(writeFd)
             markExited(status: 255)
             return false
         }
+        sshDebugLog("[ssh-session] launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)")
         if Self.ioDebugEnabled {
             let message = "SshSession: launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)\n"
             if let data = message.data(using: .utf8) {

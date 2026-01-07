@@ -86,6 +86,7 @@ struct termios_ {
 #define FIONREAD_ 0x541b
 #define TIOCGPTN_ 0x80045430
 #define TIOCSPTLCK_ 0x40045431
+#define TIOCGPTPEER_ 0x5441
 #define TIOCGPKT_ 0x80045438
 
 #define TCIFLUSH_ 0
@@ -170,5 +171,6 @@ int pscalTtyOpenControlling(int flags, struct pscal_fd **out_fd);
 ssize_t tty_input(struct tty *tty, const char *input, size_t len, bool blocking);
 void tty_set_winsize(struct tty *tty, struct winsize_ winsize);
 void tty_hangup(struct tty *tty);
+void pscalTtyDropSession(pid_t_ sid);
 
 extern const struct pscal_fd_ops pscal_tty_fd_ops;

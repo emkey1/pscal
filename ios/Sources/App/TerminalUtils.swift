@@ -13,3 +13,19 @@ func terminalViewLog(_ message: String) {
         pscalRuntimeDebugLog(ptr)
     }
 }
+
+private let sshDebugEnabled: Bool = {
+    let env = ProcessInfo.processInfo.environment
+    if let value = env["PSCALI_SSH_DEBUG"], !value.isEmpty, value != "0" {
+        return true
+    }
+    if let value = env["PSCALI_TOOL_DEBUG"], !value.isEmpty, value != "0" {
+        return true
+    }
+    return false
+}()
+
+func sshDebugLog(_ message: String) {
+    guard sshDebugEnabled else { return }
+    terminalViewLog(message)
+}

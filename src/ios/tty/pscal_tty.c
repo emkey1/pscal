@@ -15,6 +15,25 @@ struct tty_driver *tty_drivers[256] = {0};
 /* lock this before locking a tty */
 lock_t ttys_lock = LOCK_INITIALIZER;
 
+static int pscalConsoleInit(struct tty *UNUSED(tty)) {
+    return 0;
+}
+
+static int pscalConsoleWrite(struct tty *UNUSED(tty), const void *UNUSED(buf), size_t len, bool UNUSED(blocking)) {
+    return (int)len;
+}
+
+static void pscalConsoleCleanup(struct tty *UNUSED(tty)) {
+}
+
+static const struct tty_driver_ops pscal_console_ops = {
+    .init = pscalConsoleInit,
+    .write = pscalConsoleWrite,
+    .cleanup = pscalConsoleCleanup,
+};
+
+DEFINE_TTY_DRIVER(pscal_console_driver, &pscal_console_ops, TTY_CONSOLE_MAJOR, 64);
+
 typedef struct {
     pid_t_ sid;
     struct tty *tty;
@@ -54,16 +73,34 @@ static struct tty *ttySessionRetain(pid_t_ sid) {
     return tty;
 }
 
-static void ttySessionSet(pid_t_ sid, struct tty *tty) {
-    if (sid <= 0 || !tty) {
+static void ttySessionHoldRefLocked(struct tty *tty) {
+    if (!tty) {
         return;
     }
+    tty->refcount++;
+}
+
+static void ttySessionReleaseRef(struct tty *tty) {
+    if (!tty) {
+        return;
+    }
+    lock(&ttys_lock);
+    tty_release(tty);
+    unlock(&ttys_lock);
+}
+
+static struct tty *ttySessionSet(pid_t_ sid, struct tty *tty) {
+    if (sid <= 0 || !tty) {
+        return NULL;
+    }
+    struct tty *old = NULL;
     pthread_mutex_lock(&gTtySessionMu);
     for (size_t i = 0; i < gTtySessionCount; ++i) {
         if (gTtySessions[i].sid == sid) {
+            old = gTtySessions[i].tty;
             gTtySessions[i].tty = tty;
             pthread_mutex_unlock(&gTtySessionMu);
-            return;
+            return old;
         }
     }
     if (gTtySessionCount >= gTtySessionCap) {
@@ -71,13 +108,14 @@ static void ttySessionSet(pid_t_ sid, struct tty *tty) {
         TtySessionEntry *resized = (TtySessionEntry *)realloc(gTtySessions, new_cap * sizeof(TtySessionEntry));
         if (!resized) {
             pthread_mutex_unlock(&gTtySessionMu);
-            return;
+            return NULL;
         }
         gTtySessions = resized;
         gTtySessionCap = new_cap;
     }
     gTtySessions[gTtySessionCount++] = (TtySessionEntry){ .sid = sid, .tty = tty };
     pthread_mutex_unlock(&gTtySessionMu);
+    return NULL;
 }
 
 static struct tty *ttySessionTake(pid_t_ sid) {
@@ -131,14 +169,47 @@ void pscalTtySetControlling(struct tty *tty) {
     if (!tty || tty->session == 0) {
         return;
     }
-    ttySessionSet(tty->session, tty);
+    if (pscalTtyIsControlling(tty)) {
+        return;
+    }
+    ttySessionHoldRefLocked(tty);
+    struct tty *old = ttySessionSet(tty->session, tty);
+    if (old && old != tty) {
+        ttySessionReleaseRef(old);
+    }
 }
 
 void pscalTtyClearControlling(struct tty *tty) {
     if (!tty || tty->session == 0) {
         return;
     }
-    (void)ttySessionRemoveIfMatch(tty->session, tty);
+    struct tty *old = ttySessionRemoveIfMatch(tty->session, tty);
+    if (old) {
+        lock(&old->lock);
+        if (old->session == tty->session) {
+            old->session = 0;
+            old->fg_group = 0;
+        }
+        unlock(&old->lock);
+        ttySessionReleaseRef(old);
+    }
+}
+
+void pscalTtyDropSession(pid_t_ sid) {
+    if (sid <= 0) {
+        return;
+    }
+    struct tty *tty = ttySessionTake(sid);
+    if (!tty) {
+        return;
+    }
+    lock(&tty->lock);
+    if (tty->session == sid) {
+        tty->session = 0;
+        tty->fg_group = 0;
+    }
+    unlock(&tty->lock);
+    ttySessionReleaseRef(tty);
 }
 struct tty *tty_alloc(struct tty_driver *driver, int type, int num) {
     struct tty *tty = malloc(sizeof(struct tty));
@@ -224,7 +295,11 @@ static void tty_poll_wakeup(struct tty *tty, int events) {
 void tty_release(struct tty *tty) {
     lock(&tty->lock);
     if (--tty->refcount == 0) {
-        pscalTtyClearControlling(tty);
+        if (tty->session != 0) {
+            (void)ttySessionRemoveIfMatch(tty->session, tty);
+        }
+        tty->session = 0;
+        tty->fg_group = 0;
         struct tty_driver *driver = tty->driver;
         if (driver && driver->ops && driver->ops->cleanup) {
             driver->ops->cleanup(tty);
@@ -526,9 +601,12 @@ static bool pty_is_half_closed_master(struct tty *tty) {
     if (!slave) {
         return false;
     }
-    /* Best-effort check: avoid locking the slave to prevent master/slave deadlocks
-     * triggered by echo paths. It's OK to miss a close and retry on the next read. */
-    return slave->ever_opened && (slave->refcount == 1 || slave->hung_up);
+    bool locked = lock_try(&slave->lock);
+    bool half_closed = slave->ever_opened && (slave->refcount == 1 || slave->hung_up);
+    if (locked) {
+        unlock(&slave->lock);
+    }
+    return half_closed;
 }
 
 static bool tty_is_current(struct tty *tty) {
@@ -748,6 +826,7 @@ static ssize_t tty_ioctl_size(int cmd) {
         case TIOCSPGRP_:
         case TIOCSPTLCK_:
         case TIOCGPTN_:
+        case TIOCGPTPEER_:
         case TIOCPKT_:
         case TIOCGPKT_:
         case FIONREAD_:
@@ -797,6 +876,7 @@ static int tiocsctty(struct tty *tty, int force) {
                 old->fg_group = 0;
             }
             unlock(&old->lock);
+            ttySessionReleaseRef(old);
         }
     }
 
@@ -933,11 +1013,6 @@ void tty_set_winsize(struct tty *tty, struct winsize_ winsize) {
 
 void tty_hangup(struct tty *tty) {
     tty->hung_up = true;
-    if (tty->session != 0) {
-        pscalTtyClearControlling(tty);
-        tty->session = 0;
-        tty->fg_group = 0;
-    }
     tty_input_wakeup(tty);
 }
 

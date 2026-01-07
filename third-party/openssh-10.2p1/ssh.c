@@ -117,6 +117,42 @@
 
 extern char *__progname;
 
+#ifdef PSCAL_TARGET_IOS
+static int
+pscalSshEnvEnabled(const char *name)
+{
+	const char *value = getenv(name);
+	if (value == NULL || value[0] == '\0')
+		return 0;
+	return strcmp(value, "0") != 0;
+}
+
+static int
+pscalSshDebugEnabled(void)
+{
+	return pscalSshEnvEnabled("PSCALI_SSH_DEBUG") ||
+	    pscalSshEnvEnabled("PSCALI_TOOL_DEBUG");
+}
+
+static void
+pscalSshDebugLog(const char *fmt, ...)
+{
+	if (!pscalSshDebugEnabled())
+		return;
+
+	char buf[512];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+
+	if (pscalRuntimeDebugLog)
+		pscalRuntimeDebugLog(buf);
+	fprintf(stderr, "%s\n", buf);
+	fflush(stderr);
+}
+#endif
+
 /* Saves a copy of argv for setproctitle emulation */
 #ifndef HAVE_SETPROCTITLE
 static char **saved_av;
@@ -737,6 +773,8 @@ main(int ac, char **av)
 		return exit_code;
 	}
 	pscal_openssh_push_exit_context(&ctx);
+	pscalSshDebugLog("[ssh-main] entry ac=%d argv0=%s",
+	    ac, (av && av[0]) ? av[0] : "(null)");
 #endif
 
 	extern int optreset;
@@ -763,12 +801,24 @@ main(int ac, char **av)
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
+#ifdef PSCAL_TARGET_IOS
+	pscalSshDebugLog("[ssh-main] stdfd sanitized");
+#endif
 
 	/*
 	 * Discard other fds that are hanging around. These can cause problem
 	 * with backgrounded ssh processes started by ControlPersist.
 	 */
+#ifdef PSCAL_TARGET_IOS
+	if (pscalSshEnvEnabled("PSCALI_SSH_SKIP_CLOSEFROM")) {
+		pscalSshDebugLog("[ssh-main] closefrom skipped via PSCALI_SSH_SKIP_CLOSEFROM");
+	} else {
+		closefrom(STDERR_FILENO + 1);
+		pscalSshDebugLog("[ssh-main] closefrom complete");
+	}
+#else
 	closefrom(STDERR_FILENO + 1);
+#endif
 
 	__progname = ssh_get_progname(av[0]);
 
@@ -784,6 +834,9 @@ main(int ac, char **av)
 #endif
 
 	seed_rng();
+#ifdef PSCAL_TARGET_IOS
+	pscalSshDebugLog("[ssh-main] seed_rng complete");
+#endif
 
 	/* Get user data. */
 	pw = getpwuid(getuid());
@@ -791,6 +844,9 @@ main(int ac, char **av)
 		logit("No user exists for uid %lu", (u_long)getuid());
 		exit(255);
 	}
+#ifdef PSCAL_TARGET_IOS
+	pscalSshDebugLog("[ssh-main] getpwuid success uid=%lu", (u_long)getuid());
+#endif
 	/* Take a copy of the returned structure. */
 	pw = pwcopy(pw);
 
@@ -803,6 +859,9 @@ main(int ac, char **av)
 	umask(022 | umask(077));
 
 	msetlocale();
+#ifdef PSCAL_TARGET_IOS
+	pscalSshDebugLog("[ssh-main] locale initialized");
+#endif
 
 #ifdef PSCAL_TARGET_IOS
 	pscal_clientloop_register_cleanup();
@@ -813,12 +872,18 @@ main(int ac, char **av)
 	 * set.
 	 */
 	initialize_options(&options);
+#ifdef PSCAL_TARGET_IOS
+	pscalSshDebugLog("[ssh-main] options initialized");
+#endif
 
 	/*
 	 * Prepare main ssh transport/connection structures
 	 */
 	if ((ssh = ssh_alloc_session_state()) == NULL)
 		fatal("Couldn't allocate session state");
+#ifdef PSCAL_TARGET_IOS
+	pscalSshDebugLog("[ssh-main] session state allocated");
+#endif
 	channel_init_channels(ssh);
 
 	/* Parse command-line arguments. */

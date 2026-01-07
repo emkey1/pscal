@@ -246,7 +246,8 @@ final class RuntimeAssetInstaller {
         var sources: [URL] = []
         if fileManager.fileExists(atPath: bundledLicenses.path) {
             sources.append(contentsOf: (try? fileManager.contentsOfDirectory(at: bundledLicenses, includingPropertiesForKeys: nil)) ?? [])
-        } else {
+        }
+        if sources.isEmpty {
             // Fallback: look for flat license files in the bundle root.
             let fallbackNames = ["pscal_LICENSE.txt", "openssl_LICENSE.txt", "curl_LICENSE.txt", "sdl_LICENSE.txt", "nextvi_LICENSE.txt", "openssh_LICENSE.txt", "yyjson_LICENSE.txt", "hterm_LICENSE.txt"]
             for name in fallbackNames {

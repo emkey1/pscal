@@ -16,10 +16,16 @@
 
 extern struct tty_driver pty_master;
 extern struct tty_driver pty_slave;
+extern struct tty_driver pscal_console_driver;
 
 #define MAX_PTYS (1 << 12)
 
 extern int pscalHostOpenRaw(const char *path, int flags, mode_t mode);
+
+static bool gPtyReserved[MAX_PTYS];
+static mode_t_ gPtyReservedPerms[MAX_PTYS];
+static uid_t_ gPtyReservedUid[MAX_PTYS];
+static gid_t_ gPtyReservedGid[MAX_PTYS];
 
 static int pscalHostMkdirRaw(const char *path, mode_t mode) {
     vprocInterposeBypassEnter();
@@ -127,6 +133,30 @@ static void pscalPtyRemoveDevptsEntry(int pty_num) {
     pscalHostUnlinkRaw(node_path);
 }
 
+static void pscalPtyReserveDefaults(int pty_num) {
+    gPtyReserved[pty_num] = true;
+    gPtyReservedPerms[pty_num] = 0620;
+    gPtyReservedUid[pty_num] = (uid_t_)geteuid();
+    gPtyReservedGid[pty_num] = (gid_t_)getegid();
+}
+
+static bool pscalPtyConsumeReservedInfo(int pty_num, mode_t_ *perms, uid_t_ *uid, gid_t_ *gid) {
+    if (!gPtyReserved[pty_num]) {
+        return false;
+    }
+    if (perms) {
+        *perms = gPtyReservedPerms[pty_num];
+    }
+    if (uid) {
+        *uid = gPtyReservedUid[pty_num];
+    }
+    if (gid) {
+        *gid = gPtyReservedGid[pty_num];
+    }
+    gPtyReserved[pty_num] = false;
+    return true;
+}
+
 static void pty_slave_init_inode(struct tty *tty) {
     tty->pty.uid = (uid_t_)geteuid();
     tty->pty.gid = (gid_t_)getegid();
@@ -148,6 +178,14 @@ static int pty_master_init(struct tty *tty) {
     slave->pty.other = tty;
     slave->pty.locked = true;
     pty_slave_init_inode(slave);
+    mode_t_ reserved_perms = slave->pty.perms;
+    uid_t_ reserved_uid = slave->pty.uid;
+    gid_t_ reserved_gid = slave->pty.gid;
+    if (pscalPtyConsumeReservedInfo(tty->num, &reserved_perms, &reserved_uid, &reserved_gid)) {
+        slave->pty.perms = reserved_perms;
+        slave->pty.uid = reserved_uid;
+        slave->pty.gid = reserved_gid;
+    }
     pscalPtyEnsureDevptsEntry(tty->num);
     pscalPtySyncDevptsEntry(tty->num, slave->pty.perms, slave->pty.uid, slave->pty.gid);
     return 0;
@@ -257,12 +295,16 @@ DEFINE_TTY_DRIVER(pty_slave, &pty_slave_ops, TTY_PSEUDO_SLAVE_MAJOR, MAX_PTYS);
 static pthread_once_t g_pty_init_once = PTHREAD_ONCE_INIT;
 
 static void pscalPtyInit(void) {
+    tty_drivers[TTY_CONSOLE_MAJOR] = &pscal_console_driver;
     tty_drivers[TTY_PSEUDO_MASTER_MAJOR] = &pty_master;
     tty_drivers[TTY_PSEUDO_SLAVE_MAJOR] = &pty_slave;
 }
 
 static int pty_reserve_next(void) {
     int pty_num;
+    mode_t_ perms = 0620;
+    uid_t_ uid = (uid_t_)geteuid();
+    gid_t_ gid = (gid_t_)getegid();
     lock(&ttys_lock);
     for (pty_num = 0; pty_num < MAX_PTYS; pty_num++) {
         if (pty_slave.ttys[pty_num] == NULL) {
@@ -271,9 +313,34 @@ static int pty_reserve_next(void) {
     }
     if (pty_num < MAX_PTYS) {
         pty_slave.ttys[pty_num] = (void *)1;
+        pscalPtyReserveDefaults(pty_num);
+        perms = gPtyReservedPerms[pty_num];
+        uid = gPtyReservedUid[pty_num];
+        gid = gPtyReservedGid[pty_num];
     }
     unlock(&ttys_lock);
+    if (pty_num < MAX_PTYS) {
+        pscalPtyEnsureDevptsEntry(pty_num);
+        pscalPtySyncDevptsEntry(pty_num, perms, uid, gid);
+    }
     return pty_num;
+}
+
+static void pscalPtyCancelReservation(int pty_num) {
+    if (pty_num < 0 || pty_num >= MAX_PTYS) {
+        return;
+    }
+    bool cancel = false;
+    lock(&ttys_lock);
+    if (pty_slave.ttys[pty_num] == (void *)1) {
+        pty_slave.ttys[pty_num] = NULL;
+        gPtyReserved[pty_num] = false;
+        cancel = true;
+    }
+    unlock(&ttys_lock);
+    if (cancel) {
+        pscalPtyRemoveDevptsEntry(pty_num);
+    }
 }
 
 static struct pscal_fd *pscalPtyOpenTty(struct tty *tty, int flags) {
@@ -301,6 +368,7 @@ int pscalPtyOpenMaster(int flags, struct pscal_fd **out_master, int *out_pty_num
     }
     struct tty *master = tty_get(&pty_master, TTY_PSEUDO_MASTER_MAJOR, pty_num);
     if (IS_ERR(master)) {
+        pscalPtyCancelReservation(pty_num);
         return (int)PTR_ERR(master);
     }
 
@@ -359,6 +427,39 @@ int pscalPtyOpenSlave(int pty_num, int flags, struct pscal_fd **out_slave) {
     return 0;
 }
 
+struct tty *pscalPtyOpenFake(struct tty_driver *driver) {
+    if (!driver) {
+        return ERR_PTR(_EINVAL);
+    }
+    pthread_once(&g_pty_init_once, pscalPtyInit);
+
+    int pty_num = pty_reserve_next();
+    if (pty_num >= MAX_PTYS) {
+        return ERR_PTR(_ENOSPC);
+    }
+    /* Match iSH semantics: reuse the pseudo-slave slot for a custom driver. */
+    driver->ttys = pty_slave.ttys;
+    driver->limit = pty_slave.limit;
+    driver->major = TTY_PSEUDO_SLAVE_MAJOR;
+    struct tty *tty = tty_get(driver, TTY_PSEUDO_SLAVE_MAJOR, pty_num);
+    if (IS_ERR(tty)) {
+        pscalPtyCancelReservation(pty_num);
+        return tty;
+    }
+    pty_slave_init_inode(tty);
+    mode_t_ reserved_perms = tty->pty.perms;
+    uid_t_ reserved_uid = tty->pty.uid;
+    gid_t_ reserved_gid = tty->pty.gid;
+    if (pscalPtyConsumeReservedInfo(pty_num, &reserved_perms, &reserved_uid, &reserved_gid)) {
+        tty->pty.perms = reserved_perms;
+        tty->pty.uid = reserved_uid;
+        tty->pty.gid = reserved_gid;
+    }
+    pscalPtyEnsureDevptsEntry(pty_num);
+    pscalPtySyncDevptsEntry(pty_num, tty->pty.perms, tty->pty.uid, tty->pty.gid);
+    return tty;
+}
+
 bool pscalPtyIsMaster(struct pscal_fd *fd) {
     if (!fd || !fd->tty) {
         return false;
@@ -373,15 +474,43 @@ bool pscalPtyIsSlave(struct pscal_fd *fd) {
     return fd->tty->driver == &pty_slave;
 }
 
+bool pscalPtyExists(int pty_num) {
+    if (pty_num < 0 || pty_num >= MAX_PTYS) {
+        return false;
+    }
+    bool exists = false;
+    lock(&ttys_lock);
+    exists = (pty_slave.ttys[pty_num] != NULL);
+    unlock(&ttys_lock);
+    return exists;
+}
+
+int pscalPtyGetLimit(void) {
+    return MAX_PTYS;
+}
+
 int pscalPtyGetSlaveInfo(int pty_num, mode_t_ *perms, uid_t_ *uid, gid_t_ *gid) {
     if (pty_num < 0 || pty_num >= MAX_PTYS) {
         return -1;
     }
     lock(&ttys_lock);
     struct tty *tty = pty_slave.ttys[pty_num];
-    if (!tty || tty == (void *)1) {
+    if (!tty) {
         unlock(&ttys_lock);
         return -1;
+    }
+    if (tty == (void *)1) {
+        if (perms) {
+            *perms = gPtyReservedPerms[pty_num];
+        }
+        if (uid) {
+            *uid = gPtyReservedUid[pty_num];
+        }
+        if (gid) {
+            *gid = gPtyReservedGid[pty_num];
+        }
+        unlock(&ttys_lock);
+        return 0;
     }
     lock(&tty->lock);
     if (perms) {
@@ -407,9 +536,27 @@ int pscalPtySetSlaveInfo(int pty_num, const mode_t_ *perms, const uid_t_ *uid, c
     gid_t_ updated_gid = 0;
     lock(&ttys_lock);
     struct tty *tty = pty_slave.ttys[pty_num];
-    if (!tty || tty == (void *)1) {
+    if (!tty) {
         unlock(&ttys_lock);
         return _ENOENT;
+    }
+    if (tty == (void *)1) {
+        if (perms) {
+            gPtyReservedPerms[pty_num] = *perms;
+        }
+        if (uid) {
+            gPtyReservedUid[pty_num] = *uid;
+        }
+        if (gid) {
+            gPtyReservedGid[pty_num] = *gid;
+        }
+        updated_perms = gPtyReservedPerms[pty_num];
+        updated_uid = gPtyReservedUid[pty_num];
+        updated_gid = gPtyReservedGid[pty_num];
+        unlock(&ttys_lock);
+        pscalPtyEnsureDevptsEntry(pty_num);
+        pscalPtySyncDevptsEntry(pty_num, updated_perms, updated_uid, updated_gid);
+        return 0;
     }
     lock(&tty->lock);
     if (perms) {

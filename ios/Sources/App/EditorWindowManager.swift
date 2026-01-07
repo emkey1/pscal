@@ -17,8 +17,8 @@ final class EditorWindowManager {
     static let activityType = "com.pscal.editor.scene"
 
     static var externalWindowEnabled: Bool {
-        return TerminalFontSettings.elvisWindowBuildEnabled &&
-        TerminalFontSettings.shared.elvisWindowEnabled
+        return TerminalFontSettings.editorWindowBuildEnabled &&
+        TerminalFontSettings.shared.editorWindowEnabled
     }
 
     private var preferenceObserver: NSObjectProtocol?
@@ -92,7 +92,7 @@ final class EditorWindowManager {
             self.controller = controller
             self.pendingSceneActivity = nil
             // Keep the main session as-is; do not juggle activation to avoid
-            // backgrounding other windows when the Elvis scene appears/disappears.
+            // backgrounding other windows when the Editor scene appears/disappears.
         }
     }
 
@@ -372,7 +372,7 @@ final class TerminalEditorViewController: UIViewController {
                                font.pointSize,
                                charSize.width,
                                charSize.height))
-        PscalRuntimeBootstrap.shared.updateElvisWindowSize(columns: metrics.columns, rows: metrics.rows)
+        PscalRuntimeBootstrap.shared.updateEditorWindowSize(columns: metrics.columns, rows: metrics.rows)
     }
 
     private static func buildPreferredEditorFont(for traits: UITraitCollection) -> UIFont {
@@ -381,7 +381,7 @@ final class TerminalEditorViewController: UIViewController {
     }
 
     private static func resolvedFontPointSize(for traits: UITraitCollection) -> CGFloat {
-        if let env = getenv("PSCALI_ELVIS_FONT_SIZE") {
+        if let env = getenv("PSCALI_EDITOR_FONT_SIZE") {
             let value = String(cString: env).trimmingCharacters(in: .whitespacesAndNewlines)
             if value.caseInsensitiveCompare("inherit") == .orderedSame ||
                 value.caseInsensitiveCompare("system") == .orderedSame {

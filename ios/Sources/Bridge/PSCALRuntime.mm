@@ -1357,10 +1357,10 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     }
 
     PSCALRuntimeSetSessionWinsize(session_id, initial_columns, initial_rows);
-    // Ensure session-heavy tools (e.g., embedded Elvis) write into a
+    // Ensure session-heavy tools (e.g., embedded Editor) write into a
     // writable sandbox directory instead of the app bundle.
     @autoreleasepool {
-        // Prefer a stable Documents/home working directory so tools like Elvis
+        // Prefer a stable Documents/home working directory so tools like Editor
         // can create temp/session files in a writable location.
         NSString *homeRoot = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/home"];
         NSError *dirError = nil;

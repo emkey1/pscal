@@ -3,13 +3,23 @@
 
 #ifdef PSCAL_TARGET_IOS
 #include <dirent.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <pthread.h>
+#include "ios/tty/pscal_fd.h"
 #include "ios/vproc.h"
+
+#ifndef vprocSetCompatErrno
+static inline int pscal_ios_vproc_set_compat_errno(int err) {
+    errno = pscalCompatErrno(err);
+    return -1;
+}
+#define vprocSetCompatErrno pscal_ios_vproc_set_compat_errno
+#endif
 
 int pscal_ios_open(const char *path, int oflag, ...);
 int pscal_ios_openat(int fd, const char *path, int oflag, ...);

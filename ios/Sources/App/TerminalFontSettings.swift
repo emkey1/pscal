@@ -20,11 +20,11 @@ final class TerminalFontSettings: ObservableObject {
     private let fontNameKey = "com.pscal.terminal.fontName"
     private let backgroundKey = "com.pscal.terminal.backgroundColor"
     private let foregroundKey = "com.pscal.terminal.foregroundColor"
-    private let elvisWindowKey = "com.pscal.terminal.nextviWindow"
+    private let editorWindowKey = "com.pscal.terminal.nextviWindow"
     private let locationDeviceKey = "com.pscal.terminal.locationDeviceEnabled"
 
-    static let elvisWindowBuildEnabled: Bool = {
-#if ELVIS_FLOATING_WINDOW
+    static let editorWindowBuildEnabled: Bool = {
+#if EDITOR_FLOATING_WINDOW
         return true
 #else
         return false
@@ -46,7 +46,7 @@ final class TerminalFontSettings: ObservableObject {
     @Published var locationDeviceEnabled: Bool = false
 
     @Published private(set) var selectedFontID: String
-    @Published private(set) var elvisWindowEnabled: Bool
+    @Published private(set) var editorWindowEnabled: Bool
 
     let fontOptions: [FontOption]
 
@@ -88,11 +88,11 @@ final class TerminalFontSettings: ObservableObject {
             options: fontOptions
         )
 
-        // Elvis window / external editor
-        let storedElvisPref = UserDefaults.standard.object(forKey: elvisWindowKey) as? Bool
-        let envWindowMode = ProcessInfo.processInfo.environment["PSCALI_ELVIS_WINDOW_MODE"]
-        elvisWindowEnabled = TerminalFontSettings.elvisWindowBuildEnabled
-        ? TerminalFontSettings.resolveInitialElvisWindowSetting(stored: storedElvisPref,
+        // Editor window / external editor
+        let storedEditorPref = UserDefaults.standard.object(forKey: editorWindowKey) as? Bool
+        let envWindowMode = ProcessInfo.processInfo.environment["PSCALI_EDITOR_WINDOW_MODE"]
+        editorWindowEnabled = TerminalFontSettings.editorWindowBuildEnabled
+        ? TerminalFontSettings.resolveInitialEditorWindowSetting(stored: storedEditorPref,
                                                                 envValue: envWindowMode)
         : false
 
@@ -413,11 +413,11 @@ final class TerminalFontSettings: ObservableObject {
         })
     }
 
-    private static func resolveInitialElvisWindowSetting(
+    private static func resolveInitialEditorWindowSetting(
         stored: Bool?,
         envValue: String?
     ) -> Bool {
-        if !TerminalFontSettings.elvisWindowBuildEnabled {
+        if !TerminalFontSettings.editorWindowBuildEnabled {
             return false
         }
 
@@ -441,11 +441,11 @@ final class TerminalFontSettings: ObservableObject {
         return false
     }
 
-    func updateElvisWindowEnabled(_ enabled: Bool) {
-        guard TerminalFontSettings.elvisWindowBuildEnabled else { return }
-        guard enabled != elvisWindowEnabled else { return }
-        elvisWindowEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: elvisWindowKey)
+    func updateEditorWindowEnabled(_ enabled: Bool) {
+        guard TerminalFontSettings.editorWindowBuildEnabled else { return }
+        guard enabled != editorWindowEnabled else { return }
+        editorWindowEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: editorWindowKey)
         NotificationCenter.default.post(name: TerminalFontSettings.preferencesDidChangeNotification,
                                         object: nil)
     }

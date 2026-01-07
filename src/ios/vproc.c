@@ -1910,6 +1910,22 @@ static VProcSignalAction vprocEffectiveSignalActionLocked(VProcTaskEntry *entry,
     return vprocDefaultSignalAction(sig);
 }
 
+static bool vprocEntryIsCurrentThreadLocked(const VProcTaskEntry *entry) {
+    if (!entry) {
+        return false;
+    }
+    pthread_t self = pthread_self();
+    if (entry->tid && pthread_equal(entry->tid, self)) {
+        return true;
+    }
+    for (size_t i = 0; i < entry->thread_count; ++i) {
+        if (pthread_equal(entry->threads[i], self)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void vprocInvokeHandlerLocked(VProcTaskEntry *entry, int sig) {
     if (!entry || !vprocSigIndexValid(sig)) {
         return;
@@ -2725,7 +2741,7 @@ static void *vprocSessionPtyOutputThread(void *arg) {
 }
 
 static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, int shell_pid, int kernel_pid) {
-    if (!session || session->stdin_host_fd < 0) {
+    if (!session) {
         return NULL;
     }
     pthread_mutex_lock(&gSessionInputInitMu);
@@ -2748,7 +2764,7 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
         }
         pthread_mutex_unlock(&input->mu);
     }
-    if (input && !input->reader_active) {
+    if (input && !input->reader_active && session->stdin_host_fd >= 0) {
         VProcSessionInputCtx *ctx = (VProcSessionInputCtx *)calloc(1, sizeof(VProcSessionInputCtx));
         if (ctx) {
             ctx->session = session;
@@ -2845,18 +2861,31 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         return -1;
     }
     VProcSessionStdio *session = vprocSessionStdioCurrent();
-    if (!session || session->stdin_host_fd < 0) {
+    if (!session) {
+        errno = EBADF;
+        return -1;
+    }
+    if (session->stdin_host_fd >= 0) {
+        if (getenv("PSCALI_TOOL_DEBUG")) {
+            vprocDebugLogf(
+                    "[session-read] direct stdin=%d nonblock=%d\n",
+                    session->stdin_host_fd,
+                    (int)nonblocking);
+        }
+        (void)nonblocking;
+        return vprocHostRead(session->stdin_host_fd, buf, count);
+    }
+    VProcSessionInput *input = vprocSessionInputEnsure(session,
+                                                       vprocGetShellSelfPid(),
+                                                       vprocGetKernelPid());
+    if (!input) {
         errno = EBADF;
         return -1;
     }
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        vprocDebugLogf(
-                "[session-read] direct stdin=%d nonblock=%d\n",
-                session->stdin_host_fd,
-                (int)nonblocking);
+        vprocDebugLogf("[session-read] buffered nonblock=%d\n", (int)nonblocking);
     }
-    (void)nonblocking;
-    return vprocHostRead(session->stdin_host_fd, buf, count);
+    return vprocSessionReadInput(session, buf, count, nonblocking);
 }
 
 VProcSessionInput *vprocSessionInputEnsureShim(void) {
@@ -2882,7 +2911,7 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
         return false;
     }
     VProcSessionStdio *session = vprocSessionStdioCurrent();
-    if (!session || session->stdin_host_fd < 0) {
+    if (!session) {
         return false;
     }
     int shell_pid = vprocGetShellSelfPid();
@@ -4889,6 +4918,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     }
     int pid = entry->pid;
     int parent_pid = entry->parent_pid;
+    int sid = entry->sid;
     if (parent_pid > 0 && pid > 0) {
         VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
         if (parent) {
@@ -4901,6 +4931,26 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry = vprocTaskFindLocked(pid);
     if (!entry) {
         return;
+    }
+
+    if (sid > 0) {
+        bool drop_session = true;
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *peer = &gVProcTasks.items[i];
+            if (!peer || peer->pid <= 0) {
+                continue;
+            }
+            if (peer->pid == pid) {
+                continue;
+            }
+            if (peer->sid == sid) {
+                drop_session = false;
+                break;
+            }
+        }
+        if (drop_session) {
+            pscalTtyDropSession((pid_t_)sid);
+        }
     }
 
     if (entry->label) {
@@ -5342,6 +5392,12 @@ int vprocKillShim(pid_t pid, int sig) {
         }
 
         if (vprocSignalBlockedLocked(entry, sig)) {
+            vprocQueuePendingSignalLocked(entry, sig);
+            continue;
+        }
+
+        VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
+        if (action == VPROC_SIG_HANDLER && !vprocEntryIsCurrentThreadLocked(entry)) {
             vprocQueuePendingSignalLocked(entry, sig);
             continue;
         }
@@ -6610,6 +6666,19 @@ static VProc *vprocForThread(void) {
     return vp;
 }
 
+static void vprocDeliverPendingSignalsForCurrent(void) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
+    if (entry) {
+        vprocDeliverPendingSignalsLocked(entry);
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
 int vprocSigpending(int pid, sigset_t *set) {
     if (!set) {
         errno = EINVAL;
@@ -6936,6 +7005,7 @@ int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows) {
 }
 
 ssize_t vprocReadShim(int fd, void *buf, size_t count) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (vp) {
         struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
@@ -6976,6 +7046,7 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
 }
 
 ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (vp) {
         struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
@@ -7052,12 +7123,36 @@ int vprocDup2Shim(int fd, int target) {
     return vprocDup2(vp, fd, target);
 }
 
+static bool vprocHasFd(VProc *vp, int fd) {
+    if (!vp || fd < 0) {
+        return false;
+    }
+    if (!vprocRegistryContains(vp)) {
+        return false;
+    }
+    bool has = false;
+    pthread_mutex_lock(&vp->mu);
+    if ((size_t)fd < vp->capacity && vp->entries[fd].kind != VPROC_FD_NONE) {
+        has = true;
+    }
+    pthread_mutex_unlock(&vp->mu);
+    return has;
+}
+
 int vprocCloseShim(int fd) {
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostClose(fd);
     }
-    return vprocClose(vp, fd);
+    if (vprocHasFd(vp, fd)) {
+        return vprocClose(vp, fd);
+    }
+    struct stat st;
+    if (vprocHostFstatRaw(fd, &st) == 0) {
+        return vprocHostClose(fd);
+    }
+    errno = EBADF;
+    return -1;
 }
 
 int vprocFsyncShim(int fd) {
@@ -7829,6 +7924,10 @@ static int vprocIoctlTranslate(unsigned long cmd) {
         case TIOCGPTN:
             return TIOCGPTN_;
 #endif
+#ifdef TIOCGPTPEER
+        case TIOCGPTPEER:
+            return TIOCGPTPEER_;
+#endif
 #ifdef TIOCSPTLCK
         case TIOCSPTLCK:
             return TIOCSPTLCK_;
@@ -7930,6 +8029,7 @@ bool vprocSessionStdioApplyTermios(int fd, int action, const struct termios *ter
 }
 
 int vprocIoctlShim(int fd, unsigned long request, ...) {
+    vprocDeliverPendingSignalsForCurrent();
     uintptr_t arg_val = 0;
     va_list ap;
     va_start(ap, request);
@@ -7946,6 +8046,33 @@ int vprocIoctlShim(int fd, unsigned long request, ...) {
     }
     if (pscal_fd) {
         int cmd = vprocIoctlTranslate(request);
+        if (cmd == TIOCGPTPEER_) {
+            int res = _ENOTTY;
+            if (vp && pscal_fd->tty && pscalPtyIsMaster(pscal_fd)) {
+                int flags = (int)arg_val;
+                if (flags == 0) {
+                    flags = O_RDWR;
+                }
+                struct pscal_fd *peer = NULL;
+                int err = pscalPtyOpenSlave(pscal_fd->tty->num, flags, &peer);
+                if (err < 0) {
+                    res = err;
+                } else {
+                    int slot = vprocInsertPscalFd(vp, peer);
+                    if (slot < 0) {
+                        pscal_fd_close(peer);
+                        res = _EMFILE;
+                    } else {
+                        res = slot;
+                    }
+                }
+            }
+            pscal_fd_close(pscal_fd);
+            if (res < 0) {
+                return vprocSetCompatErrno(res);
+            }
+            return res;
+        }
         int res = _ENOTTY;
         if (pscal_fd->ops && pscal_fd->ops->ioctl) {
             switch (cmd) {
@@ -8035,6 +8162,7 @@ static short vprocPollMapReady(int pscal_events, short requested) {
 }
 
 int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostPollRaw(fds, nfds, timeout);
@@ -8169,6 +8297,7 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
 }
 
 int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostSelectRaw(nfds, readfds, writefds, exceptfds, timeout);

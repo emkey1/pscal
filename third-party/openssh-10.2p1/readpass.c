@@ -194,6 +194,8 @@ read_passphrase(const char *prompt, int flags)
 	int host_fd = -1;
 	int host_errno = 0;
 	VProcSessionStdio *session = vprocSessionStdioCurrent();
+	struct termios saved_termios;
+	bool restore_termios = false;
 	if (vp) {
 		host_fd = vprocTranslateFd(vp, STDIN_FILENO);
 		host_errno = errno;
@@ -230,6 +232,15 @@ read_passphrase(const char *prompt, int flags)
 		    session ? session->stdin_host_fd : -1,
 		    (int)use_session_queue);
 	}
+	if ((flags & RP_ECHO) == 0) {
+		if (vprocSessionStdioFetchTermios(STDIN_FILENO, &saved_termios)) {
+			struct termios raw = saved_termios;
+			raw.c_lflag &= ~(ECHO | ECHONL);
+			if (vprocSessionStdioApplyTermios(STDIN_FILENO, TCSAFLUSH, &raw)) {
+				restore_termios = true;
+			}
+		}
+	}
 	if (prompt && *prompt) {
 		size_t plen = strlen(prompt);
 		(void)write(STDERR_FILENO, prompt, plen);
@@ -251,12 +262,15 @@ read_passphrase(const char *prompt, int flags)
 			if (getenv("PSCALI_TOOL_DEBUG")) {
 				pscal_dump_session_state("readpass-fail", host_fd);
 			}
-			if (flags & RP_ALLOW_EOF)
-				return NULL;
+			if (flags & RP_ALLOW_EOF) {
+				explicit_bzero(buf, sizeof(buf));
+				ret = NULL;
+				goto readpass_done;
+			}
 			buf[0] = '\0';
 			ret = xstrdup(buf);
 			explicit_bzero(buf, sizeof(buf));
-			return ret;
+			goto readpass_done;
 		}
 		if (ch == '\n' || ch == '\r')
 			break;
@@ -269,6 +283,10 @@ read_passphrase(const char *prompt, int flags)
 	}
 	ret = xstrdup(buf);
 	explicit_bzero(buf, sizeof(buf));
+readpass_done:
+	if (restore_termios) {
+		(void)vprocSessionStdioApplyTermios(STDIN_FILENO, TCSANOW, &saved_termios);
+	}
 	return ret;
 #endif
 

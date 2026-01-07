@@ -720,11 +720,15 @@ int term_read(void)
 {
 #if defined(PSCAL_TARGET_IOS)
 	if (ibuf_pos >= ibuf_cnt) {
+		if (texec) {
+			xquit = !xquit ? 1 : xquit;
+			if (texec == '&')
+				return 0;
+		}
 		int n = pscalTerminalRead(ibuf, 1, 1000);
 		if (n <= 0) {
-			if (texec) {
+			if (texec)
 				xquit = texec == '&' ? -1 : 1;
-			}
 			return 0;
 		}
 		ibuf_cnt = (unsigned int)n;

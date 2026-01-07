@@ -331,13 +331,16 @@ void nextvi_reset_state(void);
 { \
 	preserve(int, ibuf_cnt,) \
 	preserve(int, ibuf_pos, ibuf_pos = ibuf_cnt;) \
+	int term_exec_saved_xquit = xquit; \
 	term_push(s, n); \
 	preserve(int, texec, texec = type;) \
 	tn = 0; \
 	vi(0); \
 	tn = 0; \
 	restore(texec) \
-	if (xquit > 0) \
+	if (term_exec_saved_xquit != 0) \
+		xquit = term_exec_saved_xquit; \
+	else if (xquit > 0) \
 		xquit = 0; \
 	restore(ibuf_pos) \
 	restore(ibuf_cnt) \

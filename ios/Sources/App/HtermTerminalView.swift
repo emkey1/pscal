@@ -1008,6 +1008,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     private func handleWindowNotification(_ notification: Notification) {
         guard let window = notification.object as? UIWindow else { return }
         guard window === self.window else { return }
+        if !window.isKeyWindow && isAppActive() {
+            return
+        }
         updateFocusForKeyWindow()
         updateVisibilityForInput()
         updateDisplayAttachment()
@@ -1099,8 +1102,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     private func updateFocusForKeyWindow() {
-        guard let window else { return }
-        let focused = window.isKeyWindow && isEffectivelyVisible()
+        guard window != nil else { return }
+        let focused = (window?.isKeyWindow ?? false) && isEffectivelyVisible()
         controller.setFocused(focused)
         if focused {
             updateVisibilityForInput()
@@ -1128,6 +1131,10 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             view = current.superview
         }
         return true
+    }
+
+    private func isAppActive() -> Bool {
+        UIApplication.shared.applicationState == .active
     }
 
     private func updateVisibilityForInput() {

@@ -8,12 +8,12 @@ struct TerminalRendererView: UIViewRepresentable {
     let cursor: TerminalCursorInfo?
     let backgroundColor: UIColor
     let foregroundColor: UIColor
-    let isElvisMode: Bool
-    let isElvisWindowVisible: Bool
-    let elvisRenderToken: UInt64
+    let isEditorMode: Bool
+    let isEditorWindowVisible: Bool
+    let editorRenderToken: UInt64
     let font: UIFont
     let fontPointSize: CGFloat
-    let elvisSnapshot: ElvisSnapshot?
+    let editorSnapshot: EditorSnapshot?
     var onPaste: ((String) -> Void)? = nil
     var onInput: ((String) -> Void)? = nil
     let mouseMode: TerminalBuffer.MouseMode
@@ -33,7 +33,7 @@ struct TerminalRendererView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalRendererContainerView, context: Context) {
-        _ = elvisRenderToken
+        _ = editorRenderToken
 
         uiView.configure(backgroundColor: backgroundColor,
                          foregroundColor: foregroundColor)
@@ -44,25 +44,25 @@ struct TerminalRendererView: UIViewRepresentable {
         uiView.onGeometryChange = onGeometryChange
 
         let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
-        let shouldBlankMain = isElvisMode && isElvisWindowVisible && externalWindowEnabled
+        let shouldBlankMain = isEditorMode && isEditorWindowVisible && externalWindowEnabled
         if shouldBlankMain {
             uiView.update(text: NSAttributedString(string: ""),
                           cursor: nil,
                           backgroundColor: backgroundColor,
-                          isElvisMode: false,
-                          elvisSnapshot: nil)
+                          isEditorMode: false,
+                          editorSnapshot: nil)
             return
         }
 
-        let shouldUseSnapshot = isElvisMode && (!externalWindowEnabled || !isElvisWindowVisible)
-        let snapshot = shouldUseSnapshot ? elvisSnapshot : nil
-        let renderElvis = shouldUseSnapshot && snapshot != nil
+        let shouldUseSnapshot = isEditorMode && (!externalWindowEnabled || !isEditorWindowVisible)
+        let snapshot = shouldUseSnapshot ? editorSnapshot : nil
+        let renderEditor = shouldUseSnapshot && snapshot != nil
 
         uiView.update(text: text,
                       cursor: cursor,
                       backgroundColor: backgroundColor,
-                      isElvisMode: renderElvis,
-                      elvisSnapshot: snapshot)
+                      isEditorMode: renderEditor,
+                      editorSnapshot: snapshot)
     }
 }
 
@@ -94,8 +94,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
     private var mouseMode: TerminalBuffer.MouseMode = .none
     private var mouseEncoding: TerminalBuffer.MouseEncoding = .normal
     private var lastMouseLocation: (row: Int, col: Int)?
-    private var lastElvisSnapshotText: String?
-    private var lastElvisCursorOffset: Int?
+    private var lastEditorSnapshotText: String?
+    private var lastEditorCursorOffset: Int?
 
     private(set) var resolvedFont: UIFont = TerminalFontSettings.shared.currentFont
 
@@ -113,8 +113,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         text: NSAttributedString,
         cursor: TerminalCursorInfo?,
         backgroundColor: UIColor,
-        isElvisMode: Bool,
-        elvisSnapshot: ElvisSnapshot?
+        isEditorMode: Bool,
+        editorSnapshot: EditorSnapshot?
     )?
 
     private var customKeyCommands: [UIKeyCommand] = []
@@ -332,8 +332,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
             update(text: pending.text,
                    cursor: pending.cursor,
                    backgroundColor: pending.backgroundColor,
-                   isElvisMode: pending.isElvisMode,
-                   elvisSnapshot: pending.elvisSnapshot)
+                   isEditorMode: pending.isEditorMode,
+                   editorSnapshot: pending.editorSnapshot)
         }
         reportGeometryIfNeeded()
     }
@@ -357,7 +357,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         setNeedsLayout()
     }
 
-    func applyElvisFont(_ font: UIFont) {
+    func applyEditorFont(_ font: UIFont) {
         terminalView.adjustsFontForContentSizeCategory = false
         terminalView.font = font
         terminalView.typingAttributes[.font] = font
@@ -548,31 +548,31 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
     func update(text: NSAttributedString,
                 cursor: TerminalCursorInfo?,
                 backgroundColor: UIColor,
-                isElvisMode: Bool,
-                elvisSnapshot: ElvisSnapshot?) {
+                isEditorMode: Bool,
+                editorSnapshot: EditorSnapshot?) {
         if !Thread.isMainThread {
             DispatchQueue.main.async {
                 self.update(text: text,
                             cursor: cursor,
                             backgroundColor: backgroundColor,
-                            isElvisMode: isElvisMode,
-                            elvisSnapshot: elvisSnapshot)
+                            isEditorMode: isEditorMode,
+                            editorSnapshot: editorSnapshot)
             }
             return
         }
 
-        scrollbackEnabled = !isElvisMode
+        scrollbackEnabled = !isEditorMode
         if !scrollbackEnabled {
             autoScrollEnabled = true
         }
         terminalView.isScrollEnabled = scrollbackEnabled && (mouseMode == .none)
 
-        if isElvisMode, let snapshot = elvisSnapshot {
-            applyElvisSnapshot(snapshot, backgroundColor: backgroundColor)
+        if isEditorMode, let snapshot = editorSnapshot {
+            applyEditorSnapshot(snapshot, backgroundColor: backgroundColor)
             return
         } else {
-            lastElvisSnapshotText = nil
-            lastElvisCursorOffset = nil
+            lastEditorSnapshotText = nil
+            lastEditorCursorOffset = nil
             selectionOverlay.clearSelection()
 
             let displayText = remapFontsIfNeeded(in: text)
@@ -582,8 +582,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
                     text,
                     cursor,
                     backgroundColor,
-                    isElvisMode,
-                    elvisSnapshot
+                    isEditorMode,
+                    editorSnapshot
                 )
                 return
             }
@@ -611,26 +611,26 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         }
     }
 
-    private func applyElvisSnapshot(
-        _ snapshot: ElvisSnapshot,
+    private func applyEditorSnapshot(
+        _ snapshot: EditorSnapshot,
         backgroundColor: UIColor
     ) {
         scrollbackEnabled = false
         autoScrollEnabled = true
-        lastElvisSnapshotText = snapshot.text
+        lastEditorSnapshotText = snapshot.text
 
         terminalView.backgroundColor = backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
         terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
         terminalView.attributedText = snapshot.attributedText
 
-        lastElvisCursorOffset = nil
+        lastEditorCursorOffset = nil
         selectionOverlay.clearSelection()
 
         var resolvedCursor: TerminalCursorInfo?
         var preferredInset: CGFloat = 0
 
-        if let commandCursor = elvisCommandLineCursor(from: snapshot) {
+        if let commandCursor = editorCommandLineCursor(from: snapshot) {
             resolvedCursor = commandCursor
             preferredInset = Self.commandLinePadding
         } else if let cursor = snapshot.cursor {
@@ -641,7 +641,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         terminalView.applyCursor(offset: resolvedCursor?.textOffset)
 
         if let offset = resolvedCursor?.textOffset {
-            if offset != lastElvisCursorOffset {
+            if offset != lastEditorCursorOffset {
                 if window == nil || bounds.width < 1 || bounds.height < 1 {
                     pendingUpdate = (
                         snapshot.attributedText,
@@ -656,12 +656,12 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
                 scrollToCursor(textView: terminalView,
                                cursorOffset: offset,
                                preferBottomInset: preferredInset)
-                lastElvisCursorOffset = offset
+                lastEditorCursorOffset = offset
             }
         } else {
             terminalView.cursorInfo = nil
             terminalView.applyCursor(offset: nil)
-            lastElvisCursorOffset = nil
+            lastEditorCursorOffset = nil
             scrollToBottom(textView: terminalView, text: terminalView.attributedText)
         }
     }
@@ -787,8 +787,8 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         terminalView.isScrollEnabled = scrollbackEnabled && (mode == .none)
     }
 
-    private func elvisCommandLineCursor(
-        from snapshot: ElvisSnapshot
+    private func editorCommandLineCursor(
+        from snapshot: EditorSnapshot
     ) -> TerminalCursorInfo? {
         let lines = snapshot.text.components(separatedBy: "\n")
         guard !lines.isEmpty else {
@@ -1093,7 +1093,7 @@ private struct EditorFloatingRendererContent: View {
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
 
     var body: some View {
-        let token = runtime.elvisRenderToken
+        let token = runtime.editorRenderToken
         _ = token
         let snapshot = runtime.editorBridge.snapshot()
 
@@ -1102,12 +1102,12 @@ private struct EditorFloatingRendererContent: View {
             cursor: snapshot.cursor,
             backgroundColor: fontSettings.backgroundColor,
             foregroundColor: fontSettings.foregroundColor,
-            isElvisMode: true,
-            isElvisWindowVisible: false,
-            elvisRenderToken: token,
+            isEditorMode: true,
+            isEditorWindowVisible: false,
+            editorRenderToken: token,
             font: fontSettings.currentFont,
             fontPointSize: fontSettings.pointSize,
-            elvisSnapshot: snapshot,
+            editorSnapshot: snapshot,
             onInput: runtime.send,
             mouseMode: runtime.mouseMode,
             mouseEncoding: runtime.mouseEncoding

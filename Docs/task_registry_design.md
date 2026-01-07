@@ -60,8 +60,8 @@ All operations protected by a mutex. PID counter wraps at INT_MAX; on collision 
 ### 3.4 Command Updates
 - **ps**: default view enumerates task registry. Add `--threads` to show the legacy VM thread list for debugging.
 - **jobs**: show `[n] pid state command`. `%n` maps to nth entry in the registry.
-- **fg/bg**: `fg PID` or `fg %n` sets that task as foreground. For GUI tasks we focus the window via `nextviWindowManager`. `bg PID` just clears the “needs attention” flag.
-- **kill**: resolves PID via registry and calls the stored `TaskSignalHandler`. GUI handlers map SIGINT/SIGTERM to `elvis_exit`/`gwin_exit`; other tasks get `pthread_kill`.
+- **fg/bg**: `fg PID` or `fg %n` sets that task as foreground. For GUI tasks we focus the window via `editorWindowManager`. `bg PID` just clears the “needs attention” flag.
+- **kill**: resolves PID via registry and calls the stored `TaskSignalHandler`. GUI handlers map SIGINT/SIGTERM to `editor_exit`/`gwin_exit`; other tasks get `pthread_kill`.
 - `$!` exports last-created task PID. `$?` still reflects exit status per POSIX.
 
 ### 3.5 Signal/State Handling
@@ -81,7 +81,7 @@ All operations protected by a mutex. PID counter wraps at INT_MAX; on collision 
 ### Milestone 2 – GUI frontends async (3 days)
 - Convert `smallclueRunnextvi`/`smallclueRunGwin` to use the tool runner path so the shell isn’t blocked.
 - Provide `TaskSignalHandler` implementations for nextvi/Gwin.
-- Ensure cleanup occurs even when `elvis_exit` longjmps.
+- Ensure cleanup occurs even when `editor_exit` longjmps.
 
 ### Milestone 3 – Command integration (3 days)
 - Rewrite `ps`, `jobs`, `kill`, `fg`, `bg` to use the registry.

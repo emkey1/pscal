@@ -149,6 +149,20 @@ static void pathTruncateStorePrefix(const char *source, size_t length) {
             g_pathTruncateAlias[alias_len] = '\0';
             g_pathTruncateAliasLen = alias_len;
         }
+        return;
+    }
+    const char prefix_var[] = "/var";
+    size_t var_len = sizeof(prefix_var) - 1;
+    if (length >= var_len &&
+        strncmp(g_pathTruncatePrimary, prefix_var, var_len) == 0 &&
+        (length == var_len || g_pathTruncatePrimary[var_len] == '/')) {
+        size_t alias_len = private_len + length;
+        if (alias_len < sizeof(g_pathTruncateAlias)) {
+            memcpy(g_pathTruncateAlias, prefix_private, private_len);
+            memcpy(g_pathTruncateAlias + private_len, g_pathTruncatePrimary, length);
+            g_pathTruncateAlias[alias_len] = '\0';
+            g_pathTruncateAliasLen = alias_len;
+        }
     }
 }
 

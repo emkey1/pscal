@@ -146,16 +146,16 @@ struct TerminalContentView: View {
     }
 
     var body: some View {
-        let elvisToken = runtime.elvisRenderToken
-        let elvisActive = runtime.isElvisModeActive()
-        let elvisVisible = EditorWindowManager.shared.isVisible
+        let editorToken = runtime.editorRenderToken
+        let editorActive = runtime.isEditorModeActive()
+        let editorVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
         let controller = runtime.htermControllerIfCreated() ?? (isActive ? runtime.ensureHtermController() : nil)
         let htermReady = (controller != nil) && (runtime.htermReady || localHtermLoaded)
 
         let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
-        let showElvisSnapshot = elvisActive && (!externalWindowEnabled || !elvisVisible)
-        let showBlank = elvisActive && elvisVisible && externalWindowEnabled
+        let showEditorSnapshot = editorActive && (!externalWindowEnabled || !editorVisible)
+        let showBlank = editorActive && editorVisible && externalWindowEnabled
         return VStack(spacing: 0) {
             ZStack {
                 if let controller {
@@ -212,18 +212,18 @@ struct TerminalContentView: View {
                     .zIndex(htermReady ? 1 : 0)
                 }
 
-                if showElvisSnapshot {
+                if showEditorSnapshot {
                     TerminalRendererView(
                         text: runtime.screenText,
                         cursor: runtime.cursorInfo,
                         backgroundColor: fontSettings.backgroundColor,
                         foregroundColor: fontSettings.foregroundColor,
-                        isElvisMode: elvisActive,
-                        isElvisWindowVisible: elvisVisible,
-                        elvisRenderToken: elvisToken,
+                        isEditorMode: editorActive,
+                        isEditorWindowVisible: editorVisible,
+                        editorRenderToken: editorToken,
                         font: currentFont,
                         fontPointSize: fontSettings.pointSize,
-                        elvisSnapshot: runtime.editorBridge.snapshot(),
+                        editorSnapshot: runtime.editorBridge.snapshot(),
                         onPaste: handlePaste,
                         onInput: runtime.send,
                         mouseMode: runtime.mouseMode,

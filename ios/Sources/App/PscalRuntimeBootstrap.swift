@@ -25,6 +25,12 @@ private let runtimeLogMirrorsToConsole: Bool = {
     return value != "0"
 }()
 
+private func editorDebugMirrorsToConsole() -> Bool {
+    guard let raw = getenv("PSCALI_DEBUG_EDITOR") else { return false }
+    let value = String(cString: raw)
+    return !value.isEmpty && value != "0"
+}
+
 private let runtimeDebugMirrorEnabled: Bool = {
     guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_MIRROR_TERMINAL"] else {
         return false
@@ -77,8 +83,8 @@ func tabInitLog(_ message: String) {
     runtimeDebugLog("[TabInit] \(message)")
 }
 
-private let elvisDebugLoggingEnabled: Bool = {
-    guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_ELVIS"] else {
+private let editorDebugLoggingEnabled: Bool = {
+    guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_EDITOR"] else {
         return false
     }
     return value != "0"
@@ -212,6 +218,9 @@ func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
     guard let message = message else { return }
     let msg = String(cString: message)
     appendRuntimeDebugLog(msg)
+    if editorDebugMirrorsToConsole() && !runtimeLogMirrorsToConsole {
+        NSLog("%@", msg)
+    }
     // Debug logging is global/shared
     PscalRuntimeBootstrap.shared.forwardDebugLogToTerminalIfEnabled(msg)
 }
@@ -270,9 +279,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
     @Published private(set) var exitStatus: Int32?
     @Published private(set) var cursorInfo: TerminalCursorInfo?
     @Published private(set) var terminalBackgroundColor: UIColor = UIColor.systemBackground
-    @Published private(set) var elvisRenderToken: UInt64 = 0
+    @Published private(set) var editorRenderToken: UInt64 = 0
     
-    // Instance-owned Bridge for "Elvis" (Editor) mode
+    // Instance-owned Bridge for editor mode
     let editorBridge = EditorTerminalBridge()
     
     // Mouse State Publishing
@@ -292,14 +301,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private let terminalBuffer: TerminalBuffer
     private enum GeometrySource: Hashable {
         case main
-        case elvis
+        case editor
     }
     private let inputQueue = DispatchQueue(label: "com.pscal.runtime.input", qos: .userInitiated)
     private var geometryBySource: [GeometrySource: TerminalGeometryMetrics]
     private var activeGeometry: TerminalGeometryMetrics
     private var activeGeometrySource: GeometrySource = .main
-    private var elvisModeActive: Bool = false
-    private var elvisRefreshPending: Bool = false
+    private var editorModeActive: Bool = false
+    private var editorRefreshPending: Bool = false
     private var appearanceObserver: NSObjectProtocol?
     private var mirrorDebugToTerminal: Bool = false
     private var waitingForRestart: Bool = false
@@ -441,7 +450,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let createdRuntimeContext = PSCALRuntimeCreateRuntimeContext()
         
         self.runtimeContext = createdRuntimeContext
-        self.geometryBySource = [.main: initialMetrics, .elvis: initialMetrics]
+        self.geometryBySource = [.main: initialMetrics, .editor: initialMetrics]
         self.activeGeometry = initialMetrics
         
         // Note: Using local 'createdRuntimeContext' inside the closure avoids accessing 'self' before initialization
@@ -733,11 +742,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
         
         updateGeometry(from: .main, columns: columns, rows: rows)
         
-        // CRITICAL FIX: If full-screen mode (Elvis) is active, force the new geometry
+        // CRITICAL FIX: If full-screen mode (Editor) is active, force the new geometry
         // down to the C-layer immediately, otherwise rotation is ignored.
-        if isElvisModeActive() {
-            runtimeDebugLog("[Geometry] Propagating main resize to Elvis state")
-            updateGeometry(from: .elvis, columns: columns, rows: rows)
+        if isEditorModeActive() {
+            runtimeDebugLog("[Geometry] Propagating main resize to Editor state")
+            updateGeometry(from: .editor, columns: columns, rows: rows)
             activeGeometry = TerminalGeometryMetrics(columns: columns, rows: rows)
             withRuntimeContext {
                 PSCALRuntimeUpdateWindowSize(Int32(columns), Int32(rows))
@@ -745,9 +754,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
-    func updateElvisWindowSize(columns: Int, rows: Int) {
-        runtimeDebugLog("[Geometry] elvis update request columns=\(columns) rows=\(rows)")
-        updateGeometry(from: .elvis, columns: columns, rows: rows)
+    func updateEditorWindowSize(columns: Int, rows: Int) {
+        runtimeDebugLog("[Geometry] editor update request columns=\(columns) rows=\(rows)")
+        updateGeometry(from: .editor, columns: columns, rows: rows)
     }
 
     func resetTerminalState() {
@@ -875,7 +884,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         DispatchQueue.main.async {
             let forced = self.stateQueue.sync { self.forceRestartPending }
             self.exitStatus = status
-            self.setElvisModeActive(false)
+            self.setEditorModeActive(false)
             if forced {
                 self.stateQueue.async { self.forceRestartPending = false }
                 self.start()
@@ -1042,8 +1051,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     // --- RENDER SCHEDULING (THROTTLED) ---
     private func scheduleRender(preserveBackground: Bool = false) {
-        if isElvisModeActive() {
-            refreshElvisDisplay()
+        if isEditorModeActive() {
+            refreshEditorDisplay()
             return
         }
         if htermReadyFlag {
@@ -1081,7 +1090,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         lastRenderTime = Date().timeIntervalSince1970
         
         // Actual expensive rendering logic
-        let allowScrollback = !self.isElvisModeActive()
+        let allowScrollback = !self.isEditorModeActive()
         let snapshot = self.terminalBuffer.snapshot(includeScrollback: allowScrollback)
         let renderResult = PscalRuntimeBootstrap.renderJoined(snapshot: snapshot)
         let backgroundColor = snapshot.defaultBackground
@@ -1093,13 +1102,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
     // -------------------------------------
 
-    func isElvisModeActive() -> Bool {
-        return stateQueue.sync { elvisModeActive }
+    func isEditorModeActive() -> Bool {
+        return stateQueue.sync { editorModeActive }
     }
 
-    func setElvisModeActive(_ active: Bool) {
+    func setEditorModeActive(_ active: Bool) {
             stateQueue.sync {
-                elvisModeActive = active
+                editorModeActive = active
             }
 
             if active {
@@ -1115,36 +1124,36 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 activeGeometry = validMetrics
                 activeGeometrySource = .main 
                 
-                refreshElvisDisplay()
+                refreshEditorDisplay()
             } else {
                 refreshActiveGeometry(forceRuntimeUpdate: true)
                 scheduleRender()
             }
         }
 
-    func refreshElvisDisplay() {
+    func refreshEditorDisplay() {
         guard editorBridge.isActive else { return }
         let shouldSchedule: Bool = stateQueue.sync {
-            if elvisRefreshPending {
+            if editorRefreshPending {
                 return false
             }
-            elvisRefreshPending = true
+            editorRefreshPending = true
             return true
         }
         guard shouldSchedule else { return }
         DispatchQueue.main.async {
             self.terminalBackgroundColor = TerminalFontSettings.shared.backgroundColor
-            self.elvisRenderToken &+= 1
+            self.editorRenderToken &+= 1
             EditorWindowManager.shared.refreshWindow()
             self.stateQueue.sync {
-                self.elvisRefreshPending = false
+                self.editorRefreshPending = false
             }
         }
     }
 
 
     private func shouldEchoLocally() -> Bool {
-        if isElvisModeActive() {
+        if isEditorModeActive() {
             return false
         }
         return false
@@ -1177,7 +1186,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let desiredSource = determineDesiredGeometrySource()
         let desiredMetrics = geometryBySource[desiredSource] ?? geometryBySource[.main] ?? activeGeometry
         let geometryChanged = desiredMetrics != activeGeometry || desiredSource != activeGeometrySource
-        let sourceLabel: String = (desiredSource == .main) ? "main" : "elvis"
+        let sourceLabel: String = (desiredSource == .main) ? "main" : "editor"
         if geometryChanged {
             runtimeDebugLog("[Geometry] switching to \(sourceLabel) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
             activeGeometry = desiredMetrics
@@ -1193,8 +1202,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func determineDesiredGeometrySource() -> GeometrySource {
-        if isElvisModeActive() && EditorWindowManager.shared.isVisible {
-            return .elvis
+        if isEditorModeActive() && EditorWindowManager.shared.isVisible {
+            return .editor
         }
         return .main
     }
@@ -1292,7 +1301,7 @@ struct TerminalCursorInfo: Equatable {
     let textOffset: Int
 }
 
-struct ElvisSnapshot {
+struct EditorSnapshot {
     let text: String
     let attributedText: NSAttributedString
     let cursor: TerminalCursorInfo?
@@ -1733,7 +1742,7 @@ final class EditorTerminalBridge {
         }
     }
 
-    func snapshot() -> ElvisSnapshot {
+    func snapshot() -> EditorSnapshot {
         let currentState = stateQueue.sync { state }
         let lines: [String]
         if currentState.rows == 0 || currentState.columns == 0 || currentState.grid.isEmpty {
@@ -1807,7 +1816,7 @@ final class EditorTerminalBridge {
         } else {
             cursor = nil
         }
-        return ElvisSnapshot(text: joined,
+        return EditorSnapshot(text: joined,
                               attributedText: attributed,
                               cursor: cursor)
     }
@@ -1861,39 +1870,39 @@ final class EditorTerminalBridge {
 
 @_cdecl("pscalTerminalBegin")
 func pscalTerminalBegin(_ columns: Int32, _ rows: Int32) {
-    if elvisDebugLoggingEnabled {
+    if editorDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalBegin cols=\(columns) rows=\(rows)")
     }
     // ROUTING: Use .current instance derived from C Context
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.activate(columns: Int(columns), rows: Int(rows))
-    bootstrap.setElvisModeActive(true)
-#if ELVIS_FLOATING_WINDOW
+    bootstrap.setEditorModeActive(true)
+#if EDITOR_FLOATING_WINDOW
     EditorWindowManager.shared.showWindow()
 #endif
 }
 
 @_cdecl("pscalTerminalEnd")
 func pscalTerminalEnd() {
-    if elvisDebugLoggingEnabled {
+    if editorDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalEnd")
     }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.deactivate()
-    bootstrap.setElvisModeActive(false)
-#if ELVIS_FLOATING_WINDOW
+    bootstrap.setEditorModeActive(false)
+#if EDITOR_FLOATING_WINDOW
     EditorWindowManager.shared.hideWindow()
 #endif
 }
 
 @_cdecl("pscalTerminalResize")
 func pscalTerminalResize(_ columns: Int32, _ rows: Int32) {
-    if elvisDebugLoggingEnabled {
+    if editorDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalResize cols=\(columns) rows=\(rows)")
     }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.resize(columns: Int(columns), rows: Int(rows))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalRender")
@@ -1911,18 +1920,18 @@ func pscalTerminalRender(_ utf8: UnsafePointer<CChar>?, _ len: Int32, _ row: Int
                                      fg: Int32(truncatingIfNeeded: fg),
                                      bg: Int32(truncatingIfNeeded: bg),
                                      attr: attr)
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalClear")
 func pscalTerminalClear() {
-    if elvisDebugLoggingEnabled {
+    if editorDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalClear")
     }
     if terminalLogURL() != nil { terminalLog("CLEAR") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.clear()
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalMoveCursor")
@@ -1932,20 +1941,20 @@ func pscalTerminalMoveCursor(_ row: Int32, _ column: Int32) {
     }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.moveCursor(row: Int(row), column: Int(column))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 @_cdecl("pscalTerminalClearEol")
 func pscalTerminalClearEol(_ row: Int32, _ column: Int32) {
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.clearToEndOfLine(row: Int(row), column: Int(column))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalClearBol")
 func pscalTerminalClearBol(_ row: Int32, _ column: Int32) {
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.clearLineToCursor(row: Int(row), col: Int(column))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalClearLine")
@@ -1953,7 +1962,7 @@ func pscalTerminalClearLine(_ row: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_LINE row=\(row)") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.clearLine(row: Int(row))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalClearScreenFromCursor")
@@ -1961,7 +1970,7 @@ func pscalTerminalClearScreenFromCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_SCR_FROM row=\(row) col=\(column)") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.clearToEndOfScreen(row: Int(row), col: Int(column))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalClearScreenToCursor")
@@ -1969,7 +1978,7 @@ func pscalTerminalClearScreenToCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_SCR_TO row=\(row) col=\(column)") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.clearToStartOfScreen(row: Int(row), col: Int(column))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalInsertLines")
@@ -1977,7 +1986,7 @@ func pscalTerminalInsertLines(_ row: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("IL row=\(row) count=\(count)") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.insertLines(at: Int(row), count: Int(max(1, count)))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalDeleteLines")
@@ -1985,7 +1994,7 @@ func pscalTerminalDeleteLines(_ row: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("DL row=\(row) count=\(count)") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.deleteLines(at: Int(row), count: Int(max(1, count)))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalInsertChars")
@@ -1993,7 +2002,7 @@ func pscalTerminalInsertChars(_ row: Int32, _ col: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("ICH row=\(row) col=\(col) count=\(count)") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.insertChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalDeleteChars")
@@ -2001,7 +2010,7 @@ func pscalTerminalDeleteChars(_ row: Int32, _ col: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("DCH row=\(row) col=\(col) count=\(count)") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.deleteChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalEnterAltScreen")
@@ -2009,7 +2018,7 @@ func pscalTerminalEnterAltScreen() {
     if terminalLogURL() != nil { terminalLog("ALT_ENTER") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.enterAltScreen()
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalExitAltScreen")
@@ -2017,14 +2026,14 @@ func pscalTerminalExitAltScreen() {
     if terminalLogURL() != nil { terminalLog("ALT_EXIT") }
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.exitAltScreen()
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalSetCursorVisible")
 func pscalTerminalSetCursorVisible(_ visible: Int32) {
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     bootstrap.editorBridge.setCursorVisible(visible != 0)
-    bootstrap.refreshElvisDisplay()
+    bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalRead")
@@ -2036,8 +2045,8 @@ func pscalTerminalRead(_ buffer: UnsafeMutablePointer<UInt8>?, _ maxlen: Int32, 
     return Int32(bytesRead)
 }
 
-@_cdecl("pscalElvisDump")
-func pscalElvisDump() {
+@_cdecl("pscalEditorDump")
+func pscalEditorDump() {
     // Debug dump logic for current instance
     guard let bootstrap = PscalRuntimeBootstrap.current else { return }
     let snapshot = bootstrap.editorBridge.snapshot()
@@ -2047,14 +2056,14 @@ func pscalElvisDump() {
     }
     let debugState = bootstrap.editorBridge.debugState()
     if let cursor = snapshot.cursor {
-        let cursorLine = "[elvisdump] cursor row=\(cursor.row) col=\(cursor.column)\n"
+        let cursorLine = "[editordump] cursor row=\(cursor.row) col=\(cursor.column)\n"
         if let ptr = withCStringPointerRuntime(cursorLine, { $0 }) {
             fputs(ptr, stderr)
         }
     } else {
-        fputs("[elvisdump] cursor unavailable\n", stderr)
+        fputs("[editordump] cursor unavailable\n", stderr)
     }
-    let stateLine = "[elvisdump] active=\(debugState.active) rows=\(debugState.rows) cols=\(debugState.columns)\n"
+    let stateLine = "[editordump] active=\(debugState.active) rows=\(debugState.rows) cols=\(debugState.columns)\n"
     if let ptr = withCStringPointerRuntime(stateLine, { $0 }) {
         fputs(ptr, stderr)
     }
