@@ -5,6 +5,8 @@ __attribute__((weak)) void registerShellFrontendBuiltins(void) {
 }
 
 #if defined(PSCAL_TARGET_IOS)
+typedef struct VProcSessionStdio VProcSessionStdio;
+
 __attribute__((weak)) void pscalRuntimeDebugLog(const char *message) {
     (void)message;
 }
@@ -14,5 +16,9 @@ __attribute__((weak)) void pscalShowGwinMessage(const char *message) {
 }
 
 __attribute__((weak)) void pscalEditorDump(void) {
+}
+
+__attribute__((weak)) VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
+    return NULL;
 }
 #endif
