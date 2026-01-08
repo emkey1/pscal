@@ -4,6 +4,15 @@
 #include <setjmp.h>
 #include <signal.h>
 
+#ifndef PSCAL_THREAD_LOCAL
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && \
+    !defined(__STDC_NO_THREADS__)
+#define PSCAL_THREAD_LOCAL _Thread_local
+#else
+#define PSCAL_THREAD_LOCAL __thread
+#endif
+#endif
+
 typedef void (*pscal_openssh_cleanup_fn)(int);
 
 typedef struct pscal_openssh_exit_context {

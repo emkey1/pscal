@@ -8,12 +8,15 @@
 #include <pthread.h>
 #ifdef PSCAL_TARGET_IOS
 extern void pscalRuntimeDebugLog(const char *);
+void pscal_clientloop_reset_hostkeys(void);
 #endif
 
+#ifndef PSCAL_THREAD_LOCAL
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
 #define PSCAL_THREAD_LOCAL _Thread_local
 #else
 #define PSCAL_THREAD_LOCAL __thread
+#endif
 #endif
 
 static PSCAL_THREAD_LOCAL pscal_openssh_exit_context *g_pscal_openssh_ctx = NULL;
@@ -56,6 +59,11 @@ pscal_openssh_set_global_exit_handler(sigjmp_buf *env,
 void
 pscal_openssh_reset_progress_state(void)
 {
+#ifdef PSCAL_TARGET_IOS
+	pscal_clientloop_reset_hostkeys();
+#endif
+	interrupted = 0;
+	showprogress = 1;
 }
 
 const char *

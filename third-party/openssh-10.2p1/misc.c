@@ -44,6 +44,7 @@
 #include <nlist.h>
 #endif
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -430,11 +431,15 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	 * blocking connect with a watchdog that shuts down the socket on timeout. */
 	pscal_debug_logf("timeout_connect: start fd=%d timeout=%d", sockfd, timeoutp ? *timeoutp : -1);
 	fprintf(stderr, "timeout_connect: start fd=%d timeout=%d\n", sockfd, timeoutp ? *timeoutp : -1);
-	__block volatile sig_atomic_t cancelled = 0;
+	__block atomic_int watchdog_state = ATOMIC_VAR_INIT(0);
 	dispatch_block_t watchdog = NULL;
 	if (timeoutp != NULL && *timeoutp > 0) {
+		atomic_store(&watchdog_state, 1);
 		watchdog = dispatch_block_create(DISPATCH_BLOCK_ENFORCE_QOS_CLASS, ^{
-			cancelled = 1;
+			int expected = 1;
+			if (!atomic_compare_exchange_strong(&watchdog_state, &expected, 2)) {
+				return;
+			}
 			shutdown(sockfd, SHUT_RDWR);
 		});
 		dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW,
@@ -461,8 +466,13 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 		break;
 	}
 	if (watchdog) {
+		int prior_state = atomic_exchange(&watchdog_state, 0);
 		dispatch_block_cancel(watchdog);
 		Block_release(watchdog);
+		if (prior_state == 2) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
 	}
 	return rc;
 #endif

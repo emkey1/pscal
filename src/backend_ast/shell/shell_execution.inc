@@ -1159,11 +1159,16 @@ typedef struct {
 } ShellBackgroundStageCtx;
 
 #if defined(PSCAL_TARGET_IOS)
+typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+extern PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) __attribute__((weak));
+extern void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) __attribute__((weak));
+
 typedef struct {
     VM *vm;
     ShellCommand *cmd;
     VProc *vp;
     VProcSessionStdio *session_stdio;
+    PSCALRuntimeContext *runtime_ctx;
     int stdin_fd;
     int stdout_fd;
     int stderr_fd;
@@ -1818,6 +1823,13 @@ static void *shellInProcessWorkerMain(void *arg) {
         free(ctx);
         return NULL;
     }
+    PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
+    }
     if (ctx->session_stdio) {
         vprocSessionStdioActivate(ctx->session_stdio);
     }
@@ -1874,6 +1886,9 @@ static void *shellInProcessWorkerMain(void *arg) {
 
     if (ctx->session_stdio) {
         vprocSessionStdioActivate(NULL);
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
     }
     shellFreeCommand(ctx->cmd);
     free(ctx->cmd);
@@ -3788,6 +3803,9 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             worker->cmd = worker_cmd;
             worker->vp = vp;
             worker->session_stdio = vprocSessionStdioCurrent();
+            worker->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+                ? PSCALRuntimeGetCurrentRuntimeContext()
+                : NULL;
             worker->stdin_fd = run_stdin_fd;
             worker->stdout_fd = run_stdout_fd;
             worker->stderr_fd = run_stderr_fd;

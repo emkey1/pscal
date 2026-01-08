@@ -155,62 +155,65 @@ pscalSshDebugLog(const char *fmt, ...)
 
 /* Saves a copy of argv for setproctitle emulation */
 #ifndef HAVE_SETPROCTITLE
-static char **saved_av;
+static PSCAL_SSH_THREAD_LOCAL char **saved_av;
 #endif
 
 /* Flag indicating whether debug mode is on.  May be set on the command line. */
-int debug_flag = 0;
+PSCAL_SSH_THREAD_LOCAL int debug_flag = 0;
 
 /* Flag indicating whether a tty should be requested */
-int tty_flag = 0;
+PSCAL_SSH_THREAD_LOCAL int tty_flag = 0;
 
 /*
  * Flag indicating that the current process should be backgrounded and
  * a new mux-client launched in the foreground for ControlPersist.
  */
-static int need_controlpersist_detach = 0;
+static PSCAL_SSH_THREAD_LOCAL int need_controlpersist_detach = 0;
 
 /* Copies of flags for ControlPersist foreground mux-client */
-static int ostdin_null_flag, osession_type, otty_flag, orequest_tty;
-static int ofork_after_authentication;
+static PSCAL_SSH_THREAD_LOCAL int ostdin_null_flag;
+static PSCAL_SSH_THREAD_LOCAL int osession_type;
+static PSCAL_SSH_THREAD_LOCAL int otty_flag;
+static PSCAL_SSH_THREAD_LOCAL int orequest_tty;
+static PSCAL_SSH_THREAD_LOCAL int ofork_after_authentication;
 
 /*
  * General data structure for command line options and options configurable
  * in configuration files.  See readconf.h.
  */
-Options options;
+PSCAL_SSH_THREAD_LOCAL Options options;
 
 /* optional user configfile */
-char *config = NULL;
+PSCAL_SSH_THREAD_LOCAL char *config = NULL;
 
 /*
  * Name of the host we are connecting to.  This is the name given on the
  * command line, or the Hostname specified for the user-supplied name in a
  * configuration file.
  */
-char *host;
+PSCAL_SSH_THREAD_LOCAL char *host;
 
 /*
  * A config can specify a path to forward, overriding SSH_AUTH_SOCK. If this is
  * not NULL, forward the socket at this path instead.
  */
-char *forward_agent_sock_path = NULL;
+PSCAL_SSH_THREAD_LOCAL char *forward_agent_sock_path = NULL;
 
 /* socket address the host resolves to */
-struct sockaddr_storage hostaddr;
+PSCAL_SSH_THREAD_LOCAL struct sockaddr_storage hostaddr;
 
 /* Private host keys. */
-Sensitive sensitive_data;
+PSCAL_SSH_THREAD_LOCAL Sensitive sensitive_data;
 
 /* command to be executed */
-struct sshbuf *command;
+PSCAL_SSH_THREAD_LOCAL struct sshbuf *command;
 
 /* # of replies received for global requests */
-static int forward_confirms_pending = -1;
+static PSCAL_SSH_THREAD_LOCAL int forward_confirms_pending = -1;
 
 /* mux.c */
-extern int muxserver_sock;
-extern u_int muxclient_command;
+extern PSCAL_SSH_THREAD_LOCAL int muxserver_sock;
+extern PSCAL_SSH_THREAD_LOCAL u_int muxclient_command;
 
 /* Prints a help message to the user.  This function never returns. */
 

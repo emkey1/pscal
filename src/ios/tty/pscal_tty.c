@@ -212,7 +212,7 @@ void pscalTtyDropSession(pid_t_ sid) {
     ttySessionReleaseRef(tty);
 }
 struct tty *tty_alloc(struct tty_driver *driver, int type, int num) {
-    struct tty *tty = malloc(sizeof(struct tty));
+    struct tty *tty = calloc(1, sizeof(struct tty));
     if (tty == NULL) {
         return NULL;
     }

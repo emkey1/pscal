@@ -151,6 +151,20 @@ final class EditorWindowManager {
         }
         return nil
     }
+
+    @MainActor
+    fileprivate func activeEditorRuntime() -> PscalRuntimeBootstrap {
+        let manager = TerminalTabManager.shared
+        for tab in manager.tabs {
+            if case .shell(let runtime) = tab.kind, runtime.editorBridge.isActive {
+                return runtime
+            }
+        }
+        if case .shell(let runtime) = manager.selectedTab.kind {
+            return runtime
+        }
+        return PscalRuntimeBootstrap.shared
+    }
 }
 
 class PscalAppDelegate: NSObject, UIApplicationDelegate {
@@ -259,6 +273,7 @@ private enum EditorFontMetrics {
     }
 }
 
+@MainActor
 final class TerminalEditorViewController: UIViewController {
     private let hostingController = UIHostingController(rootView: EditorFloatingRendererView())
     private let inputViewBridge = TerminalKeyInputView()
@@ -329,7 +344,7 @@ final class TerminalEditorViewController: UIViewController {
         inputViewBridge.smartDashesType = .no
         inputViewBridge.keyboardAppearance = .dark
         inputViewBridge.onInput = { text in
-            PscalRuntimeBootstrap.shared.send(text)
+            EditorWindowManager.shared.activeEditorRuntime().send(text)
         }
         inputViewBridge.inputAssistantItem.leadingBarButtonGroups = []
         inputViewBridge.inputAssistantItem.trailingBarButtonGroups = []
@@ -372,7 +387,7 @@ final class TerminalEditorViewController: UIViewController {
                                font.pointSize,
                                charSize.width,
                                charSize.height))
-        PscalRuntimeBootstrap.shared.updateEditorWindowSize(columns: metrics.columns, rows: metrics.rows)
+        EditorWindowManager.shared.activeEditorRuntime().updateEditorWindowSize(columns: metrics.columns, rows: metrics.rows)
     }
 
     private static func buildPreferredEditorFont(for traits: UITraitCollection) -> UIFont {

@@ -64,13 +64,13 @@
 
 struct sshkey *previous_host_key = NULL;
 
-static int matching_host_key_dns = 0;
+static PSCAL_SSH_THREAD_LOCAL int matching_host_key_dns = 0;
 
-static pid_t proxy_command_pid = 0;
+static PSCAL_SSH_THREAD_LOCAL pid_t proxy_command_pid = 0;
 
 /* import */
-extern int debug_flag;
-extern Options options;
+extern PSCAL_SSH_THREAD_LOCAL int debug_flag;
+extern PSCAL_SSH_THREAD_LOCAL Options options;
 extern char *__progname;
 
 static int show_other_keys(struct hostkeys *, struct sshkey *);

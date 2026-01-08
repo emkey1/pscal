@@ -41,6 +41,16 @@
 # define _exit cleanup_exit
 #endif
 
+#ifdef PSCAL_TARGET_IOS
+# ifndef PSCAL_SSH_THREAD_LOCAL
+#  define PSCAL_SSH_THREAD_LOCAL PSCAL_THREAD_LOCAL
+# endif
+#else
+# ifndef PSCAL_SSH_THREAD_LOCAL
+#  define PSCAL_SSH_THREAD_LOCAL
+# endif
+#endif
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* activate extra prototypes for glibc */
 #endif

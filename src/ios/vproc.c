@@ -40,6 +40,8 @@
 #include "ios/tty/pscal_pty.h"
 #include "ios/tty/pscal_tty_host.h"
 
+typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+
 #if defined(PSCAL_TARGET_IOS)
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_virtualization.h"
@@ -49,6 +51,8 @@
 #if defined(PSCAL_TARGET_IOS)
 __attribute__((weak)) void pscalRuntimeRequestSigint(void);
 __attribute__((weak)) void pscalRuntimeDebugLog(const char *message);
+__attribute__((weak)) PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
+__attribute__((weak)) void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
 #endif
 
 #if defined(__APPLE__)
@@ -1476,6 +1480,7 @@ typedef struct {
     int shell_self_pid;
     int kernel_pid;
     bool detach;
+    PSCALRuntimeContext *runtime_ctx;
 } VProcThreadStartCtx;
 
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
@@ -4032,6 +4037,21 @@ void vprocTerminateSession(int sid) {
 static void *vprocThreadTrampoline(void *arg) {
     VProcThreadStartCtx *ctx = (VProcThreadStartCtx *)arg;
 
+    PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    bool runtime_ctx_swapped = false;
+#if defined(PSCAL_TARGET_IOS)
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && ctx && ctx->runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
+        runtime_ctx_swapped = true;
+    }
+#else
+    (void)prev_runtime_ctx;
+    (void)runtime_ctx_swapped;
+#endif
+
     if (ctx && ctx->detach) {
         pthread_detach(pthread_self());
     }
@@ -4066,7 +4086,13 @@ static void *vprocThreadTrampoline(void *arg) {
     if (ctx && ctx->session_stdio) {
         vprocSessionStdioActivate(NULL);
     }
-    
+
+#if defined(PSCAL_TARGET_IOS)
+    if (runtime_ctx_swapped && PSCALRuntimeSetCurrentRuntimeContext) {
+        PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+    }
+#endif
+
     free(ctx);
     return res;
 }
@@ -4087,6 +4113,11 @@ int vprocPthreadCreateShim(pthread_t *thread,
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
     ctx->detach = false;
+#if defined(PSCAL_TARGET_IOS)
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        ctx->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+#endif
     if (attr) {
         int detach_state = 0;
         if (pthread_attr_getdetachstate(attr, &detach_state) == 0 &&
@@ -4678,6 +4709,11 @@ int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthre
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
     ctx->detach = false;
+#if defined(PSCAL_TARGET_IOS)
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        ctx->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+#endif
     pthread_t thread;
     int rc = vprocHostPthreadCreateRaw(&thread, NULL, vprocThreadTrampoline, ctx);
     if (rc != 0) {
@@ -6439,8 +6475,6 @@ void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid) {
         input->len = 0;
         input->eof = false;
         input->interrupt_pending = false;
-        input->reader_active = false;
-        input->reader_fd = -1;
         pthread_cond_broadcast(&input->cv);
         pthread_mutex_unlock(&input->mu);
     }
@@ -6456,6 +6490,14 @@ void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid) {
     stdio_ctx->stdin_host_fd = -1;
     stdio_ctx->stdout_host_fd = -1;
     stdio_ctx->stderr_host_fd = -1;
+    if (input) {
+        pthread_mutex_lock(&input->mu);
+        while (input->reader_active) {
+            pthread_cond_wait(&input->cv, &input->mu);
+        }
+        input->reader_fd = -1;
+        pthread_mutex_unlock(&input->mu);
+    }
     vprocSessionStdioInit(stdio_ctx, kernel_pid);
 }
 

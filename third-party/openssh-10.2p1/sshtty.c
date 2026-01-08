@@ -44,8 +44,8 @@
 
 #include "sshpty.h"
 
-static struct termios _saved_tio;
-static int _in_raw_mode = 0;
+static PSCAL_SSH_THREAD_LOCAL struct termios _saved_tio;
+static PSCAL_SSH_THREAD_LOCAL int _in_raw_mode = 0;
 
 struct termios *
 get_saved_tio(void)

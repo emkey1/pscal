@@ -11,8 +11,16 @@
 #ifdef PSCAL_TARGET_IOS
 #define PSCAL_WEAK __attribute__((weak))
 
+typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+
 PSCAL_WEAK void pscalRuntimeDebugLog(const char *message) {
     (void)message;
+}
+PSCAL_WEAK PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) {
+    return NULL;
+}
+PSCAL_WEAK void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) {
+    (void)ctx;
 }
 PSCAL_WEAK void pscalTerminalBegin(int columns, int rows) {
     (void)columns;

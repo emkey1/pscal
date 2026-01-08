@@ -80,15 +80,15 @@
 #endif
 
 /* import */
-extern Options options;
+extern PSCAL_SSH_THREAD_LOCAL Options options;
 
 /*
  * SSH2 key exchange
  */
 
-static char *xxx_host;
-static struct sockaddr *xxx_hostaddr;
-static const struct ssh_conn_info *xxx_conn_info;
+static PSCAL_SSH_THREAD_LOCAL char *xxx_host;
+static PSCAL_SSH_THREAD_LOCAL struct sockaddr *xxx_hostaddr;
+static PSCAL_SSH_THREAD_LOCAL const struct ssh_conn_info *xxx_conn_info;
 
 static int
 verify_host_key_callback(struct sshkey *hostkey, struct ssh *ssh)
@@ -399,29 +399,29 @@ Authmethod authmethods[] = {
 	{"gssapi-with-mic",
 		userauth_gssapi,
 		userauth_gssapi_cleanup,
-		&options.gss_authentication,
+		NULL,
 		NULL},
 #endif
 	{"hostbased",
 		userauth_hostbased,
 		NULL,
-		&options.hostbased_authentication,
+		NULL,
 		NULL},
 	{"publickey",
 		userauth_pubkey,
 		NULL,
-		&options.pubkey_authentication,
+		NULL,
 		NULL},
 	{"keyboard-interactive",
 		userauth_kbdint,
 		NULL,
-		&options.kbd_interactive_authentication,
-		&options.batch_mode},
+		NULL,
+		NULL},
 	{"password",
 		userauth_passwd,
 		NULL,
-		&options.password_authentication,
-		&options.batch_mode},
+		NULL,
+		NULL},
 	{"none",
 		userauth_none,
 		NULL,
@@ -430,6 +430,38 @@ Authmethod authmethods[] = {
 	{NULL, NULL, NULL, NULL, NULL}
 };
 
+static PSCAL_SSH_THREAD_LOCAL int authmethods_initialized = 0;
+
+static void
+pscal_authmethods_init(void)
+{
+	Authmethod *method;
+
+	if (authmethods_initialized)
+		return;
+
+	for (method = authmethods; method->name != NULL; method++) {
+		method->batch_flag = NULL;
+		if (strcmp(method->name, "gssapi-with-mic") == 0) {
+			method->enabled = &options.gss_authentication;
+		} else if (strcmp(method->name, "hostbased") == 0) {
+			method->enabled = &options.hostbased_authentication;
+		} else if (strcmp(method->name, "publickey") == 0) {
+			method->enabled = &options.pubkey_authentication;
+		} else if (strcmp(method->name, "keyboard-interactive") == 0) {
+			method->enabled = &options.kbd_interactive_authentication;
+			method->batch_flag = &options.batch_mode;
+		} else if (strcmp(method->name, "password") == 0) {
+			method->enabled = &options.password_authentication;
+			method->batch_flag = &options.batch_mode;
+		} else {
+			method->enabled = NULL;
+		}
+	}
+
+	authmethods_initialized = 1;
+}
+
 void
 ssh_userauth2(struct ssh *ssh, const char *local_user,
     const char *server_user, char *host, Sensitive *sensitive)
@@ -437,6 +469,7 @@ ssh_userauth2(struct ssh *ssh, const char *local_user,
 	Authctxt authctxt;
 	int r;
 
+	pscal_authmethods_init();
 	if (options.preferred_authentications == NULL)
 		options.preferred_authentications = authmethods_get();
 
@@ -2348,9 +2381,9 @@ authmethod_lookup(const char *name)
 }
 
 /* XXX internal state */
-static Authmethod *current = NULL;
-static char *supported = NULL;
-static char *preferred = NULL;
+static PSCAL_SSH_THREAD_LOCAL Authmethod *current = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *supported = NULL;
+static PSCAL_SSH_THREAD_LOCAL char *preferred = NULL;
 
 /*
  * Given the authentication method list sent by the server, return the

@@ -60,11 +60,11 @@
 #include "ssherr.h"
 
 /* from ssh.c */
-extern int tty_flag;
-extern Options options;
-extern char *host;
-extern struct sshbuf *command;
-extern volatile sig_atomic_t quit_pending;
+extern PSCAL_SSH_THREAD_LOCAL int tty_flag;
+extern PSCAL_SSH_THREAD_LOCAL Options options;
+extern PSCAL_SSH_THREAD_LOCAL char *host;
+extern PSCAL_SSH_THREAD_LOCAL struct sshbuf *command;
+extern PSCAL_SSH_THREAD_LOCAL volatile sig_atomic_t quit_pending;
 
 /* Context for session open confirmation callback */
 struct mux_session_confirm_ctx {
@@ -92,21 +92,21 @@ struct mux_channel_confirm_ctx {
 };
 
 /* fd to control socket */
-int muxserver_sock = -1;
+PSCAL_SSH_THREAD_LOCAL int muxserver_sock = -1;
 
 /* client request id */
-u_int muxclient_request_id = 0;
+PSCAL_SSH_THREAD_LOCAL u_int muxclient_request_id = 0;
 
 /* Multiplexing control command */
-u_int muxclient_command = 0;
+PSCAL_SSH_THREAD_LOCAL u_int muxclient_command = 0;
 
 /* Set when signalled. */
-static volatile sig_atomic_t muxclient_terminate = 0;
+static PSCAL_SSH_THREAD_LOCAL volatile sig_atomic_t muxclient_terminate = 0;
 
 /* PID of multiplex server */
-static u_int muxserver_pid = 0;
+static PSCAL_SSH_THREAD_LOCAL u_int muxserver_pid = 0;
 
-static Channel *mux_listener_channel = NULL;
+static PSCAL_SSH_THREAD_LOCAL Channel *mux_listener_channel = NULL;
 
 struct mux_master_state {
 	int hello_rcvd;
