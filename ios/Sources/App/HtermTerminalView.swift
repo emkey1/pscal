@@ -688,10 +688,7 @@ private final class ScrollbarViewDelegateProxy: NSObject, UIScrollViewDelegate {
             return
         }
 
-        var frame = contentView.frame
-        frame.origin.x = scrollView.contentOffset.x + scrollbarView.contentViewOrigin.x
-        frame.origin.y = scrollView.contentOffset.y + scrollbarView.contentViewOrigin.y
-        contentView.frame = frame
+        scrollbarView.syncContentViewPosition()
 
         innerDelegate?.scrollViewDidScroll?(scrollView)
     }
@@ -705,6 +702,14 @@ private final class ScrollbarView: UIScrollView {
         didSet {
             contentViewOrigin = contentView?.frame.origin ?? .zero
         }
+    }
+
+    fileprivate func syncContentViewPosition() {
+        guard let contentView else { return }
+        var frame = contentView.frame
+        frame.origin.x = contentOffset.x + contentViewOrigin.x
+        frame.origin.y = contentOffset.y + contentViewOrigin.y
+        contentView.frame = frame
     }
 
     override init(frame: CGRect) {
@@ -847,7 +852,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     func updateScrollHeight(_ height: CGFloat) {
-        scrollView.contentSize = CGSize(width: 0, height: height)
+        let width = scrollView.bounds.width > 0 ? scrollView.bounds.width : max(scrollView.contentSize.width, 1)
+        scrollView.contentSize = CGSize(width: width, height: height)
+        clampScrollOffset(reason: "height")
         if HtermTerminalController.debugEnabled {
             debugLog("Hterm[\(controller.instanceId)]: scroll height=\(String(format: "%.2f", height)) " +
                      "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
@@ -856,15 +863,41 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     func updateScrollTop(_ top: CGFloat) {
-        if abs(scrollView.contentOffset.y - top) < 0.5 {
+        let maxTop = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+        let clampedTop = min(max(top, 0), maxTop)
+        if abs(scrollView.contentOffset.y - clampedTop) < 0.5 {
             return
         }
         isSyncingScroll = true
-        scrollView.setContentOffset(CGPoint(x: 0, y: top), animated: false)
+        scrollView.setContentOffset(CGPoint(x: 0, y: clampedTop), animated: false)
         isSyncingScroll = false
         if HtermTerminalController.debugEnabled {
-            debugLog("Hterm[\(controller.instanceId)]: scroll top=\(String(format: "%.2f", top)) " +
+            debugLog("Hterm[\(controller.instanceId)]: scroll top=\(String(format: "%.2f", clampedTop)) " +
                      "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
+                     "contentSize=\(NSCoder.string(for: scrollView.contentSize))")
+        }
+    }
+
+    private func clampScrollOffset(reason: String) {
+        let maxX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
+        let maxY = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+        let current = scrollView.contentOffset
+        let clamped = CGPoint(
+            x: min(max(current.x, 0), maxX),
+            y: min(max(current.y, 0), maxY)
+        )
+        if abs(current.x - clamped.x) < 0.5 && abs(current.y - clamped.y) < 0.5 {
+            scrollView.syncContentViewPosition()
+            return
+        }
+        isSyncingScroll = true
+        scrollView.setContentOffset(clamped, animated: false)
+        isSyncingScroll = false
+        scrollView.syncContentViewPosition()
+        if HtermTerminalController.debugEnabled {
+            debugLog("Hterm[\(controller.instanceId)]: scroll clamp reason=\(reason) " +
+                     "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
+                     "bounds=\(NSCoder.string(for: scrollView.bounds)) " +
                      "contentSize=\(NSCoder.string(for: scrollView.contentSize))")
         }
     }
@@ -910,7 +943,6 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     func updateAttachHandlers(onAttach: (() -> Void)?, onDetach: (() -> Void)?) {
         attachHandler = onAttach
         detachHandler = onDetach
-        handleAttachStateChange()
     }
 
     func updateTerminalLoaded(_ loaded: Bool) {
@@ -922,7 +954,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         updateInputEnabled()
         if loaded {
             updateDisplayAttachment()
-            controller.updateHostSize(scrollView.bounds.size, reason: "load")
+            if isEffectivelyVisible() {
+                controller.updateHostSize(scrollView.bounds.size, reason: "load")
+            }
             if pendingFocus {
                 requestFocus()
             }
@@ -950,7 +984,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             updateDisplayAttachment()
         } else if controller.isLoaded {
             updateDisplayAttachment()
-            controller.updateHostSize(scrollView.bounds.size, reason: "active")
+            if isEffectivelyVisible() {
+                controller.updateHostSize(scrollView.bounds.size, reason: "active")
+            }
         }
         handleAttachStateChange()
         updateVisibilityForInput()
@@ -971,14 +1007,20 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     override func layoutSubviews() {
         super.layoutSubviews()
         if controller.webView.superview === scrollView {
-            controller.webView.frame = scrollView.bounds
+            var frame = controller.webView.frame
+            frame.size = scrollView.bounds.size
+            controller.webView.frame = frame
+            scrollView.syncContentViewPosition()
             if HtermTerminalController.debugEnabled {
                 debugLog("Hterm[\(controller.instanceId)]: layout bounds=\(NSCoder.string(for: scrollView.bounds)) " +
                          "webView=\(NSCoder.string(for: controller.webView.frame)) " +
                          "contentOffset=\(NSCoder.string(for: scrollView.contentOffset))")
             }
         }
-        controller.updateHostSize(scrollView.bounds.size, reason: "layout")
+        if isEffectivelyVisible() {
+            controller.updateHostSize(scrollView.bounds.size, reason: "layout")
+        }
+        clampScrollOffset(reason: "layout")
         updateVisibilityForInput()
     }
 
@@ -1057,10 +1099,13 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         controller.webView.scrollView.panGestureRecognizer.isEnabled = false
         scrollView.contentView = controller.webView
         scrollView.addSubview(controller.webView)
+        scrollView.syncContentViewPosition()
         isTerminalInstalled = true
         logTabInit("install web view loaded=\(controller.isLoaded)")
         debugLog("Hterm[\(controller.instanceId)]: install web view (loaded=\(controller.isLoaded))")
-        controller.updateHostSize(scrollView.bounds.size, reason: "install")
+        if isEffectivelyVisible() {
+            controller.updateHostSize(scrollView.bounds.size, reason: "install")
+        }
     }
 
     private func uninstallTerminalViewIfNeeded() {
@@ -1120,15 +1165,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     private func isEffectivelyVisible() -> Bool {
-        if !isActiveForInput || window == nil || isHidden || alpha <= 0.01 {
+        if !isActiveForInput || window == nil {
             return false
-        }
-        var view: UIView? = self
-        while let current = view {
-            if current.isHidden || current.alpha <= 0.01 {
-                return false
-            }
-            view = current.superview
         }
         return true
     }

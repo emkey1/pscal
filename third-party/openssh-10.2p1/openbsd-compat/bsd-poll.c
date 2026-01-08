@@ -30,7 +30,11 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include "bsd-poll.h"
+#ifdef PSCAL_TARGET_IOS
+#include "ios/vproc.h"
+#endif
 
 #if !defined(HAVE_PPOLL) || defined(BROKEN_POLL)
 /*
@@ -47,6 +51,27 @@ ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *tmoutp,
     const sigset_t *sigmask)
 {
 	nfds_t i;
+#ifdef PSCAL_TARGET_IOS
+	int timeout_ms = -1;
+
+	if (tmoutp != NULL) {
+		if (tmoutp->tv_sec < 0 || tmoutp->tv_nsec < 0 ||
+		    tmoutp->tv_nsec >= 1000000000) {
+			errno = EINVAL;
+			return -1;
+		}
+		long long total_ms = (long long)tmoutp->tv_sec * 1000LL +
+		    tmoutp->tv_nsec / 1000000;
+		if (total_ms < 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		timeout_ms = total_ms > INT_MAX ? INT_MAX : (int)total_ms;
+	}
+
+	(void)sigmask;
+	return vprocPollShim(fds, nfds, timeout_ms);
+#else
 	int ret, fd, maxfd = 0;
 	fd_set readfds, writefds, exceptfds;
 
@@ -92,6 +117,7 @@ ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *tmoutp,
 	}
 
 	return ret;
+#endif
 }
 #endif /* !HAVE_PPOLL || BROKEN_POLL */
 

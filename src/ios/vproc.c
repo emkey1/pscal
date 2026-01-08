@@ -2599,15 +2599,20 @@ static void *vprocSessionInputThread(void *arg) {
     VProcSessionStdio *session = ctx->session;
     VProcSessionInput *input = session ? session->input : NULL;
     int fd = session ? session->stdin_host_fd : -1;
+    struct pscal_fd *pscal_fd = session ? session->stdin_pscal_fd : NULL;
+    if (pscal_fd && (!pscal_fd->ops || !pscal_fd->ops->read)) {
+        pscal_fd = NULL;
+    }
     unsigned char ch = 0;
     if (getenv("PSCALI_TOOL_DEBUG")) {
         vprocDebugLogf(
-                "[session-input] reader start fd=%d shell=%d kernel=%d\n",
+                "[session-input] reader start host_fd=%d pscal_fd=%p shell=%d kernel=%d\n",
                 fd,
+                (void *)pscal_fd,
                 ctx->shell_pid,
                 ctx->kernel_pid);
     }
-    while (fd >= 0) {
+    while (fd >= 0 || pscal_fd) {
         if (input) {
             pthread_mutex_lock(&input->mu);
             bool stop_requested = input->stop_requested;
@@ -2619,30 +2624,64 @@ static void *vprocSessionInputThread(void *arg) {
                 break;
             }
         }
-        ssize_t r = vprocHostRead(fd, &ch, 1);
-        if (r <= 0) {
-            if (r < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
-                usleep(1000);
-                continue;
-            }
-            if (getenv("PSCALI_TOOL_DEBUG")) {
-                int saved_errno = errno;
-                vprocDebugLogf(
-                        "[session-input] reader eof fd=%d r=%zd errno=%d\n",
-                        fd,
-                        r,
-                        saved_errno);
-            }
-            if (input) {
-                pthread_mutex_lock(&input->mu);
-                bool is_current = (input->reader_generation == ctx->generation);
-                if (is_current) {
-                    input->eof = true;
-                    pthread_cond_broadcast(&input->cv);
+        ssize_t r = 0;
+        if (fd >= 0) {
+            r = vprocHostRead(fd, &ch, 1);
+            if (r <= 0) {
+                if (r < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    usleep(1000);
+                    continue;
                 }
-                pthread_mutex_unlock(&input->mu);
+                if (getenv("PSCALI_TOOL_DEBUG")) {
+                    int saved_errno = errno;
+                    vprocDebugLogf(
+                            "[session-input] reader eof host_fd=%d r=%zd errno=%d\n",
+                            fd,
+                            r,
+                            saved_errno);
+                }
+                if (input) {
+                    pthread_mutex_lock(&input->mu);
+                    bool is_current = (input->reader_generation == ctx->generation);
+                    if (is_current) {
+                        input->eof = true;
+                        pthread_cond_broadcast(&input->cv);
+                    }
+                    pthread_mutex_unlock(&input->mu);
+                }
+                break;
             }
-            break;
+        } else {
+            r = pscal_fd->ops->read(pscal_fd, &ch, 1);
+            if (r <= 0) {
+                if (r == _EINTR || r == _EAGAIN) {
+                    if (r == _EAGAIN) {
+                        usleep(1000);
+                    }
+                    continue;
+                }
+                if (r < 0) {
+                    vprocSetCompatErrno((int)r);
+                }
+                if (getenv("PSCALI_TOOL_DEBUG")) {
+                    int saved_errno = errno;
+                    vprocDebugLogf(
+                            "[session-input] reader eof pscal_fd=%p r=%zd errno=%d\n",
+                            (void *)pscal_fd,
+                            r,
+                            saved_errno);
+                }
+                if (input) {
+                    pthread_mutex_lock(&input->mu);
+                    bool is_current = (input->reader_generation == ctx->generation);
+                    if (is_current) {
+                        input->eof = true;
+                        pthread_cond_broadcast(&input->cv);
+                    }
+                    pthread_mutex_unlock(&input->mu);
+                }
+                break;
+            }
         }
         if (ch == 3 || ch == 26) {
             int sig = (ch == 3) ? SIGINT : SIGTSTP;
@@ -2764,7 +2803,11 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
         }
         pthread_mutex_unlock(&input->mu);
     }
-    if (input && !input->reader_active && session->stdin_host_fd >= 0) {
+    bool has_pscal_fd = session->stdin_pscal_fd &&
+            session->stdin_pscal_fd->ops &&
+            session->stdin_pscal_fd->ops->read;
+    if (input && !input->reader_active &&
+            (session->stdin_host_fd >= 0 || has_pscal_fd)) {
         VProcSessionInputCtx *ctx = (VProcSessionInputCtx *)calloc(1, sizeof(VProcSessionInputCtx));
         if (ctx) {
             ctx->session = session;
@@ -2786,8 +2829,9 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
                 pthread_mutex_unlock(&input->mu);
                 if (getenv("PSCALI_TOOL_DEBUG")) {
                     vprocDebugLogf(
-                            "[session-input] reader spawned fd=%d\n",
-                            session->stdin_host_fd);
+                            "[session-input] reader spawned host_fd=%d pscal_fd=%p\n",
+                            session->stdin_host_fd,
+                            (void *)session->stdin_pscal_fd);
                 }
             } else {
                 if (getenv("PSCALI_TOOL_DEBUG")) {
@@ -8206,6 +8250,12 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         }
 
         int host_fd = vprocTranslateFd(vp, fds[i].fd);
+        if (host_fd < 0) {
+            struct stat st;
+            if (vprocHostFstatRaw(fds[i].fd, &st) == 0) {
+                host_fd = fds[i].fd;
+            }
+        }
         if (host_fd < 0) {
             fds[i].revents = POLLNVAL;
             ready_count++;

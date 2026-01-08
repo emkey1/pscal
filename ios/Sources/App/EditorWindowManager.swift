@@ -302,6 +302,10 @@ final class TerminalEditorViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         reportGeometryIfNeeded()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.view.window?.isKeyWindow == true else { return }
+            self.inputViewBridge.becomeFirstResponder()
+        }
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -335,10 +339,6 @@ final class TerminalEditorViewController: UIViewController {
         inputViewBridge.heightAnchor.constraint(equalToConstant: 1).isActive = true
         inputViewBridge.bottomAnchor.constraint(equalTo: view.bottomAnchor).isActive = true
         inputViewBridge.leadingAnchor.constraint(equalTo: view.leadingAnchor).isActive = true
-
-        DispatchQueue.main.async {
-            self.inputViewBridge.becomeFirstResponder()
-        }
     }
 
     func resignInputFocus() {

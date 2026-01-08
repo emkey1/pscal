@@ -512,7 +512,7 @@ final class TerminalKeyInputView: UITextView {
             guard let self else { return }
             Task { @MainActor in
                 guard self.inputEnabled else { return }
-                guard self.window != nil else { return }
+                guard let window = self.window, window.isKeyWindow else { return }
                 guard !self.softKeyboardVisible else { return }
                 self.softKeyboardVisible = true
                 self.hardwareKeyboardConnected = false
@@ -532,7 +532,7 @@ final class TerminalKeyInputView: UITextView {
             guard let self else { return }
             Task { @MainActor in
                 guard self.inputEnabled else { return }
-                guard self.window != nil else { return }
+                guard let window = self.window, window.isKeyWindow else { return }
                 guard self.softKeyboardVisible else { return }
                 self.softKeyboardVisible = false
                 if self.isFirstResponder {
@@ -551,7 +551,7 @@ final class TerminalKeyInputView: UITextView {
             guard let self else { return }
             Task { @MainActor in
                 guard self.inputEnabled else { return }
-                guard self.window != nil else { return }
+                guard let window = self.window, window.isKeyWindow else { return }
                 if !self.isFirstResponder {
                     self.becomeFirstResponder()
                 } else if !self.softKeyboardVisible {

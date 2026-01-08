@@ -130,6 +130,7 @@ struct TerminalContentView: View {
     @State private var hasMeasuredGeometry: Bool = false
     @State private var runtimeStarted: Bool = false
     @State private var localHtermLoaded: Bool = false
+    @State private var htermController: HtermTerminalController?
 
     init(
         availableSize: CGSize,
@@ -150,7 +151,7 @@ struct TerminalContentView: View {
         let editorActive = runtime.isEditorModeActive()
         let editorVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
-        let controller = runtime.htermControllerIfCreated() ?? (isActive ? runtime.ensureHtermController() : nil)
+        let controller = htermController ?? runtime.htermControllerIfCreated()
         let htermReady = (controller != nil) && (runtime.htermReady || localHtermLoaded)
 
         let externalWindowEnabled = EditorWindowManager.externalWindowEnabled
@@ -264,25 +265,27 @@ struct TerminalContentView: View {
         }
         .onChange(of: isActive) { active in
             if active {
+                ensureHtermControllerIfNeeded()
+                updateTerminalGeometry()
+                startRuntimeIfNeeded()
                 requestInputFocus()
             }
         }
         .onAppear {
             tabInitLog("TerminalView appear runtime=\(runtime.runtimeId) active=\(isActive)")
-            if !hasMeasuredGeometry {
-                updateTerminalGeometry()
-            }
+            ensureHtermControllerIfNeeded()
+            updateTerminalGeometry()
             startRuntimeIfNeeded()
         }
         .onChange(of: availableSize) { _ in
-            if !hasMeasuredGeometry { updateTerminalGeometry() }
+            updateTerminalGeometry()
         }
         .onChange(of: fontSettings.pointSize) { _ in
             hasMeasuredGeometry = false
             updateTerminalGeometry()
         }
         .onChange(of: runtime.exitStatus) { _ in
-            if !hasMeasuredGeometry { updateTerminalGeometry() }
+            updateTerminalGeometry()
         }
     }
 
@@ -299,6 +302,7 @@ struct TerminalContentView: View {
     // MARK: Geometry
 
     private func updateTerminalGeometry() {
+        guard isActive else { return }
         let font = fontSettings.currentFont
         let showingStatus = runtime.exitStatus != nil
 
@@ -347,6 +351,13 @@ struct TerminalContentView: View {
         runtime.start()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             requestInputFocus()
+        }
+    }
+
+    private func ensureHtermControllerIfNeeded() {
+        guard isActive else { return }
+        if htermController == nil {
+            htermController = runtime.ensureHtermController()
         }
     }
 

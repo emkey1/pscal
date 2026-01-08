@@ -424,32 +424,51 @@ static bool pscal_ios_session_stdio_matches(int fd) {
     if (!vp) {
         return false;
     }
-    int host_fd = vprocTranslateFd(vp, fd);
-    if (host_fd < 0) {
-        return false;
-    }
     VProcSessionStdio *session = vprocSessionStdioCurrent();
     if (!session) {
         return false;
     }
-    int session_fd = -1;
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd >= 0) {
+        int session_fd = -1;
+        if (fd == STDIN_FILENO) {
+            session_fd = session->stdin_host_fd;
+        } else if (fd == STDOUT_FILENO) {
+            session_fd = session->stdout_host_fd;
+        } else {
+            session_fd = session->stderr_host_fd;
+        }
+        if (session_fd < 0) {
+            return false;
+        }
+        struct stat host_st;
+        struct stat session_st;
+        if (fstat(host_fd, &host_st) != 0 || fstat(session_fd, &session_st) != 0) {
+            return false;
+        }
+        return host_st.st_dev == session_st.st_dev &&
+               host_st.st_ino == session_st.st_ino;
+    }
+
+    struct pscal_fd *session_pscal_fd = NULL;
     if (fd == STDIN_FILENO) {
-        session_fd = session->stdin_host_fd;
+        session_pscal_fd = session->stdin_pscal_fd ? session->stdin_pscal_fd : session->pty_slave;
     } else if (fd == STDOUT_FILENO) {
-        session_fd = session->stdout_host_fd;
+        session_pscal_fd = session->stdout_pscal_fd ? session->stdout_pscal_fd : session->pty_slave;
     } else {
-        session_fd = session->stderr_host_fd;
+        session_pscal_fd = session->stderr_pscal_fd ? session->stderr_pscal_fd : session->pty_slave;
     }
-    if (session_fd < 0) {
+    if (!session_pscal_fd) {
         return false;
     }
-    struct stat host_st;
-    struct stat session_st;
-    if (fstat(host_fd, &host_st) != 0 || fstat(session_fd, &session_st) != 0) {
+
+    struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+    if (!pscal_fd) {
         return false;
     }
-    return host_st.st_dev == session_st.st_dev &&
-           host_st.st_ino == session_st.st_ino;
+    bool matches = (pscal_fd == session_pscal_fd);
+    pscal_fd_close(pscal_fd);
+    return matches;
 }
 
 static void pscal_ios_init_termios(struct termios *out) {

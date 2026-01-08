@@ -179,14 +179,9 @@ struct TerminalTabsRootView: View {
         VStack(spacing: 0) {
             TerminalTabBar(tabs: manager.tabs, selectedId: $manager.selectedId)
             ZStack {
-                ForEach(manager.tabs) { tab in
-                    let isSelected = tab.id == manager.selectedId
-                    tabContent(for: tab, isSelected: isSelected)
-                        .opacity(isSelected ? 1 : 0)
-                        .allowsHitTesting(isSelected)
-                        .accessibilityHidden(!isSelected)
-                        .zIndex(isSelected ? 1 : 0)
-                }
+                let tab = manager.selectedTab
+                tabContent(for: tab, isSelected: true)
+                    .id(tab.id)
             }
         }
         .onChange(of: manager.selectedId) { _ in

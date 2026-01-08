@@ -92,9 +92,7 @@ private struct ShellTerminalContentView: View {
         }
         .onAppear {
             tabInitLog("ShellTerminalView appear session=\(session.sessionId) active=\(isActive)")
-            if !hasMeasuredGeometry {
-                updateTerminalGeometry()
-            }
+            updateTerminalGeometry()
             let started = session.start()
             tabInitLog("ShellTerminalView start session=\(session.sessionId) started=\(started)")
             DispatchQueue.main.async {
@@ -102,11 +100,16 @@ private struct ShellTerminalContentView: View {
             }
         }
         .onChange(of: availableSize) { _ in
-            if !hasMeasuredGeometry { updateTerminalGeometry() }
+            updateTerminalGeometry()
         }
         .onChange(of: fontSettings.pointSize) { _ in
             hasMeasuredGeometry = false
             updateTerminalGeometry()
+        }
+        .onChange(of: isActive) { active in
+            if active {
+                updateTerminalGeometry()
+            }
         }
     }
 
@@ -119,6 +122,9 @@ private struct ShellTerminalContentView: View {
     }
 
     private func updateTerminalGeometry() {
+        guard isActive else {
+            return
+        }
         let font = fontSettings.currentFont
         let usableHeight = availableSize.height - Layout.topPadding
         let usableSize = CGSize(width: availableSize.width, height: usableHeight)
