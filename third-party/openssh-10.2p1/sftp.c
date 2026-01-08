@@ -2521,7 +2521,11 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	posix_spawnattr_destroy(&attr);
 	sshpid = child;
 #else
+#ifdef PSCAL_TARGET_IOS
+	if ((sshpid = pscal_ios_fork()) == -1)
+#else
 	if ((sshpid = fork()) == -1)
+#endif
 		fatal("fork: %s", strerror(errno));
 	else if (sshpid == 0) {
 		if ((dup2(c_in, STDIN_FILENO) == -1) ||
@@ -2543,7 +2547,11 @@ connect_to_server(char *path, char **args, int *in, int *out)
 		 */
 		ssh_signal(SIGINT, SIG_IGN);
 		ssh_signal(SIGTERM, SIG_DFL);
+#ifdef PSCAL_TARGET_IOS
+		pscal_ios_execvp(path, args);
+#else
 		execvp(path, args);
+#endif
 		fprintf(stderr, "exec: %s: %s\n", path, strerror(errno));
 		_exit(1);
 	}

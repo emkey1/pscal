@@ -328,11 +328,19 @@ do_local_cmd(arglist *a)
 			fmprintf(stderr, " %s", a->list[i]);
 		fprintf(stderr, "\n");
 	}
+#ifdef PSCAL_TARGET_IOS
+	if ((pid = pscal_ios_fork()) == -1)
+#else
 	if ((pid = fork()) == -1)
+#endif
 		fatal("do_local_cmd: fork: %s", strerror(errno));
 
 	if (pid == 0) {
+#ifdef PSCAL_TARGET_IOS
+		pscal_ios_execvp(a->list[0], a->list);
+#else
 		execvp(a->list[0], a->list);
+#endif
 		perror(a->list[0]);
 		exit(1);
 	}
@@ -463,7 +471,11 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawnattr_destroy(&attr);
 	*pid = child;
 #else
+#ifdef PSCAL_TARGET_IOS
+	child = pscal_ios_fork();
+#else
 	child = fork();
+#endif
 	if (child == -1)
 		fatal("fork: %s", strerror(errno));
 	if (child == 0) {
@@ -488,7 +500,11 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 		close(sv[1]);
 		close(sv[0]);
 #endif
+#ifdef PSCAL_TARGET_IOS
+		pscal_ios_execvp(program, args.list);
+#else
 		execvp(program, args.list);
+#endif
 		perror(program);
 		_exit(1);
 	}
@@ -534,7 +550,11 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 		port = sshport;
 
 	/* Fork a child to execute the command on the remote host using ssh. */
+#ifdef PSCAL_TARGET_IOS
+	pid = pscal_ios_fork();
+#else
 	pid = fork();
+#endif
 	if (pid == 0) {
 		if (dup2(fdin, 0) == -1)
 			perror("dup2");
@@ -555,7 +575,11 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 		addargs(&args, "%s", host);
 		addargs(&args, "%s", cmd);
 
+#ifdef PSCAL_TARGET_IOS
+		pscal_ios_execvp(ssh_program, args.list);
+#else
 		execvp(ssh_program, args.list);
+#endif
 		perror(ssh_program);
 		exit(1);
 	} else if (pid == -1) {
