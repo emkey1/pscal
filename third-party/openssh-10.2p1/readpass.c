@@ -42,6 +42,7 @@
 #include "ios/vproc.h"
 #include "common/runtime_tty.h"
 #include <pthread.h>
+extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
 #endif
 
 #include "xmalloc.h"
@@ -194,6 +195,7 @@ read_passphrase(const char *prompt, int flags)
 	int host_fd = -1;
 	int host_errno = 0;
 	VProcSessionStdio *session = vprocSessionStdioCurrent();
+	VProcSessionStdio *prompt_session = session;
 	struct termios saved_termios;
 	bool restore_termios = false;
 	if (vp) {
@@ -219,17 +221,38 @@ read_passphrase(const char *prompt, int flags)
 			}
 		}
 	}
-	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d",
+	if (!use_session_queue && PSCALRuntimeGetCurrentRuntimeStdio) {
+		VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+		if (runtime_stdio && runtime_stdio != session &&
+		    !vprocSessionStdioIsDefault(runtime_stdio)) {
+			bool runtime_has_input = runtime_stdio->pty_active ||
+			    runtime_stdio->stdin_pscal_fd ||
+			    runtime_stdio->stdin_host_fd < 0;
+			if (runtime_has_input) {
+				prompt_session = runtime_stdio;
+				use_session_queue = true;
+			}
+		}
+	}
+	bool switched_session = false;
+	if (prompt_session && prompt_session != session) {
+		vprocSessionStdioActivate(prompt_session);
+		switched_session = true;
+	}
+	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d prompt_in=%d use_session=%d",
 	    (void *)vp,
 	    host_fd,
 	    host_errno,
-	    session ? session->stdin_host_fd : -1);
+	    session ? session->stdin_host_fd : -1,
+	    prompt_session ? prompt_session->stdin_host_fd : -1,
+	    (int)use_session_queue);
 	if (getenv("PSCALI_TOOL_DEBUG")) {
 		pscal_dump_session_state("readpass-start", host_fd);
 		fprintf(stderr,
-		    "[readpass-ios] host=%d session_in=%d use_session=%d\n",
+		    "[readpass-ios] host=%d session_in=%d prompt_in=%d use_session=%d\n",
 		    host_fd,
 		    session ? session->stdin_host_fd : -1,
+		    prompt_session ? prompt_session->stdin_host_fd : -1,
 		    (int)use_session_queue);
 	}
 	if ((flags & RP_ECHO) == 0) {
@@ -286,6 +309,13 @@ read_passphrase(const char *prompt, int flags)
 readpass_done:
 	if (restore_termios) {
 		(void)vprocSessionStdioApplyTermios(STDIN_FILENO, TCSANOW, &saved_termios);
+	}
+	if (switched_session) {
+		if (session) {
+			vprocSessionStdioActivate(session);
+		} else {
+			vprocSessionStdioActivate(NULL);
+		}
 	}
 	return ret;
 #endif
