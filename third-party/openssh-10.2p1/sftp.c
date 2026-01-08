@@ -80,13 +80,11 @@ static volatile pid_t sshpid = -1;
 int quiet = 0;
 
 /* This is set to 0 if the progressmeter is not desired. */
-#if defined(PSCAL_TARGET_IOS)
 extern int showprogress;
 extern char **environ;
+#if defined(PSCAL_TARGET_IOS)
 #undef environ
 #define environ (*_NSGetEnviron())
-#else
-extern int showprogress;
 #endif
 
 /* When this option is set, we always recursively download/upload directories */
@@ -2453,7 +2451,7 @@ static void
 connect_to_server(char *path, char **args, int *in, int *out)
 {
 	int c_in, c_out;
-#ifdef PSCAL_TARGET_IOS
+#if !defined(PSCAL_TARGET_IOS)
 	posix_spawn_file_actions_t actions;
 	pid_t child = -1;
 #endif
@@ -2475,7 +2473,7 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	c_in = c_out = inout[1];
 #endif /* USE_PIPES */
 
-#ifdef PSCAL_TARGET_IOS
+#if !defined(PSCAL_TARGET_IOS)
 	if (posix_spawn_file_actions_init(&actions) != 0)
 		fatal("posix_spawn_file_actions_init failed");
 #ifdef USE_PIPES

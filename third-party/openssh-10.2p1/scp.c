@@ -369,8 +369,10 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 #else
 	int sv[2];
 #endif
-	posix_spawn_file_actions_t actions;
 	pid_t child = -1;
+#if !defined(PSCAL_TARGET_IOS)
+	posix_spawn_file_actions_t actions;
+#endif
 	if (verbose_mode)
 		fmprintf(stderr,
 		    "Executing: program %s host %s, user %s, command %s\n",
@@ -393,6 +395,7 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	ssh_signal(SIGTTIN, suspchild);
 	ssh_signal(SIGTTOU, suspchild);
 
+#if !defined(PSCAL_TARGET_IOS)
 	if (posix_spawn_file_actions_init(&actions) != 0)
 		fatal("posix_spawn_file_actions_init failed");
 #ifdef USE_PIPES
@@ -410,6 +413,7 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawn_file_actions_addclose(&actions, sv[1]);
 	posix_spawn_file_actions_addclose(&actions, sv[0]);
 #endif
+#endif
 
 	replacearg(&args, 0, "%s", program);
 	if (port != -1) {
@@ -426,6 +430,7 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	addargs(&args, "%s", host);
 	addargs(&args, "%s", cmd);
 
+#if !defined(PSCAL_TARGET_IOS)
 	posix_spawnattr_t attr;
 	sigset_t emptyset, sigdef;
 	posix_spawnattr_init(&attr);
@@ -455,6 +460,38 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawn_file_actions_destroy(&actions);
 	posix_spawnattr_destroy(&attr);
 	*pid = child;
+#else
+	child = fork();
+	if (child == -1)
+		fatal("fork: %s", strerror(errno));
+	if (child == 0) {
+#ifdef USE_PIPES
+		if (dup2(pin[0], STDIN_FILENO) == -1 ||
+		    dup2(pout[1], STDOUT_FILENO) == -1 ||
+		    dup2(pout[1], STDERR_FILENO) == -1) {
+			perror("dup2");
+			_exit(1);
+		}
+		close(pin[1]);
+		close(pout[0]);
+		close(pin[0]);
+		close(pout[1]);
+#else
+		if (dup2(sv[0], STDIN_FILENO) == -1 ||
+		    dup2(sv[0], STDOUT_FILENO) == -1 ||
+		    dup2(sv[0], STDERR_FILENO) == -1) {
+			perror("dup2");
+			_exit(1);
+		}
+		close(sv[1]);
+		close(sv[0]);
+#endif
+		execvp(program, args.list);
+		perror(program);
+		_exit(1);
+	}
+	*pid = child;
+#endif
 
 	/* Parent.  Close the other side, and return the local side. */
 #ifdef USE_PIPES
