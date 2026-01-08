@@ -2620,6 +2620,9 @@ main(int argc, char **argv)
 	size_t copy_buffer_len = 0;
 	size_t num_requests = 0;
 	long long llv, limit_kbps = 0;
+#ifdef PSCAL_TARGET_IOS
+	bool use_tool_runner = false;
+#endif
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
@@ -2629,12 +2632,26 @@ main(int argc, char **argv)
 	optreset = 1;
 	optind = 1;
 
+#ifdef PSCAL_TARGET_IOS
+	{
+		char *runner = pscal_tool_runner_path();
+		if (runner != NULL && access(runner, X_OK) == 0) {
+			ssh_program = runner;
+			use_tool_runner = true;
+		} else {
+			free(runner);
+		}
+	}
+#endif
+
 	__progname = ssh_get_progname(argv[0]);
 	memset(&args, '\0', sizeof(args));
 	args.list = NULL;
 	addargs(&args, "%s", ssh_program);
 #ifdef PSCAL_TARGET_IOS
-	addargs(&args, "ssh");
+	if (use_tool_runner) {
+		addargs(&args, "ssh");
+	}
 #endif
 	addargs(&args, "-oForwardX11 no");
 	addargs(&args, "-oPermitLocalCommand no");

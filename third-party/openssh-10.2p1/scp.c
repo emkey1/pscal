@@ -441,6 +441,7 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
 	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
 
+#if !defined(PSCAL_TARGET_IOS)
 	if (access(program, X_OK) != 0) {
 		fprintf(stderr, "scp: transport '%s' not executable: %s\n",
 		    program, strerror(errno));
@@ -448,6 +449,7 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 		posix_spawnattr_destroy(&attr);
 		return -1;
 	}
+#endif
 
 	if (posix_spawn(&child, program, &actions, &attr, args.list, environ) != 0) {
 		int spawn_err = errno;
@@ -663,6 +665,9 @@ main(int argc, char **argv)
 	enum scp_mode_e mode = MODE_SFTP;
 	char *sftp_direct = NULL;
 	long long llv;
+#ifdef PSCAL_TARGET_IOS
+	bool use_tool_runner = false;
+#endif
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
@@ -678,12 +683,9 @@ main(int argc, char **argv)
 		char *runner = pscal_tool_runner_path();
 		if (runner != NULL && access(runner, X_OK) == 0) {
 			ssh_program = runner;
-			fprintf(stderr, "scp: using ssh transport via tool runner: %s\n",
-			    ssh_program);
+			use_tool_runner = true;
 		} else {
 			free(runner);
-			fprintf(stderr, "scp: no executable tool runner found\n");
-			return 1;
 		}
 	}
 	pscal_openssh_register_cleanup(pscal_scp_cleanup_handler);
@@ -705,7 +707,9 @@ main(int argc, char **argv)
 	args.list = remote_remote_args.list = NULL;
 	addargs(&args, "%s", ssh_program);
 #ifdef PSCAL_TARGET_IOS
-	addargs(&args, "ssh");
+	if (use_tool_runner) {
+		addargs(&args, "ssh");
+	}
 #endif
 	addargs(&args, "-x");
 	addargs(&args, "-oPermitLocalCommand=no");
