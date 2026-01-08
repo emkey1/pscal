@@ -74,10 +74,17 @@ typedef struct {
     int argc;
     char **argv;
     VProcSessionStdio *session_stdio;
+    VProcSessionStdio *prompt_stdio;
     bool owns_session_stdio;
     int shell_self_pid;
     int kernel_pid;
 } pscal_ios_exec_ctx;
+
+static __thread VProcSessionStdio *g_pscal_ios_prompt_stdio;
+
+VProcSessionStdio *pscalRuntimePromptStdio(void) {
+    return g_pscal_ios_prompt_stdio;
+}
 
 static bool pscal_ios_debug_enabled(void) {
     const char *tool_debug = getenv("PSCALI_TOOL_DEBUG");
@@ -180,6 +187,7 @@ static void *pscal_ios_exec_thread(void *arg) {
         if (ctx->session_stdio) {
             vprocSessionStdioActivate(ctx->session_stdio);
         }
+        g_pscal_ios_prompt_stdio = ctx->prompt_stdio;
     }
     if (ctx && ctx->vp && ctx->entry) {
         vprocActivate(ctx->vp);
@@ -192,6 +200,7 @@ static void *pscal_ios_exec_thread(void *arg) {
     if (ctx && ctx->session_stdio) {
         vprocSessionStdioActivate(NULL);
     }
+    g_pscal_ios_prompt_stdio = NULL;
     if (ctx && ctx->owns_session_stdio) {
         vprocSessionStdioDestroy(ctx->session_stdio);
     }
@@ -221,6 +230,7 @@ static int pscal_ios_spawn_child(VProc *vp, int (*entry)(int, char **),
     ctx->argc = argc;
     ctx->argv = argv_copy;
     ctx->session_stdio = vprocSessionStdioCurrent();
+    ctx->prompt_stdio = ctx->session_stdio;
     ctx->owns_session_stdio = false;
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();

@@ -43,6 +43,7 @@
 #include "common/runtime_tty.h"
 #include <pthread.h>
 extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
+extern VProcSessionStdio *pscalRuntimePromptStdio(void) __attribute__((weak));
 #endif
 
 #include "xmalloc.h"
@@ -207,6 +208,18 @@ read_passphrase(const char *prompt, int flags)
 	if (session) {
 		if (stdin_interactive || session->pty_active || session->stdin_pscal_fd) {
 			use_session_queue = true;
+		}
+	}
+	if (!use_session_queue && pscalRuntimePromptStdio) {
+		VProcSessionStdio *prompt_stdio = pscalRuntimePromptStdio();
+		if (prompt_stdio && prompt_stdio != session) {
+			bool prompt_has_input = prompt_stdio->pty_active ||
+			    prompt_stdio->stdin_pscal_fd ||
+			    prompt_stdio->stdin_host_fd < 0;
+			if (prompt_has_input) {
+				prompt_session = prompt_stdio;
+				use_session_queue = true;
+			}
 		}
 	}
 	if (!use_session_queue && PSCALRuntimeGetCurrentRuntimeStdio) {
