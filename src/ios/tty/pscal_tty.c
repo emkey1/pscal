@@ -550,6 +550,9 @@ no_special:
             }
             assert(tty->bufsize < sizeof(tty->buf));
             tty->buf[tty->bufsize++] = input[i];
+            if (tty->bufsize == 1) {
+                tty_input_wakeup(tty);
+            }
         }
         if (tty->bufsize > 0) {
             tty_input_wakeup(tty);
@@ -640,11 +643,13 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
         return 0;
     }
 
-    pid_t_ current_pgid = (pid_t_)pscalTtyCurrentPgid();
-    err = tty_signal_if_background(tty, current_pgid, SIGTTIN_);
-    if (err < 0) {
-        unlock(&tty->lock);
-        return err;
+    if (tty->driver != &pty_master) {
+        pid_t_ current_pgid = (pid_t_)pscalTtyCurrentPgid();
+        err = tty_signal_if_background(tty, current_pgid, SIGTTIN_);
+        if (err < 0) {
+            unlock(&tty->lock);
+            return err;
+        }
     }
 
     int bufsize_extra = 0;
