@@ -74,6 +74,7 @@ typedef struct {
     int argc;
     char **argv;
     VProcSessionStdio *session_stdio;
+    bool owns_session_stdio;
     int shell_self_pid;
     int kernel_pid;
 } pscal_ios_exec_ctx;
@@ -191,6 +192,9 @@ static void *pscal_ios_exec_thread(void *arg) {
     if (ctx && ctx->session_stdio) {
         vprocSessionStdioActivate(NULL);
     }
+    if (ctx && ctx->owns_session_stdio) {
+        vprocSessionStdioDestroy(ctx->session_stdio);
+    }
     if (ctx) {
         pscal_ios_free_argv(ctx->argv, ctx->argc);
         free(ctx);
@@ -217,8 +221,28 @@ static int pscal_ios_spawn_child(VProc *vp, int (*entry)(int, char **),
     ctx->argc = argc;
     ctx->argv = argv_copy;
     ctx->session_stdio = vprocSessionStdioCurrent();
+    ctx->owns_session_stdio = false;
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
+#if defined(PSCAL_TARGET_IOS)
+    if (vp) {
+        int stdin_host = vprocTranslateFd(vp, STDIN_FILENO);
+        int stdout_host = vprocTranslateFd(vp, STDOUT_FILENO);
+        int stderr_host = vprocTranslateFd(vp, STDERR_FILENO);
+        if (stdin_host >= 0 || stdout_host >= 0 || stderr_host >= 0) {
+            VProcSessionStdio *stdio_ctx = vprocSessionStdioCreate();
+            if (stdio_ctx) {
+                vprocSessionStdioInitWithFds(stdio_ctx,
+                                             stdin_host,
+                                             stdout_host,
+                                             stderr_host,
+                                             ctx->kernel_pid);
+                ctx->session_stdio = stdio_ctx;
+                ctx->owns_session_stdio = true;
+            }
+        }
+    }
+#endif
     pthread_t tid;
     int err = pthread_create(&tid, NULL, pscal_ios_exec_thread, ctx);
     if (err != 0) {
