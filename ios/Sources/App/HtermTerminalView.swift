@@ -530,14 +530,8 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     }
 
     private func jsWriteString(for data: Data) -> String? {
-        guard let raw = String(data: data, encoding: .isoLatin1) else {
-            return nil
-        }
-        var escaped = raw.replacingOccurrences(of: "\\", with: "\\\\")
-        escaped = escaped.replacingOccurrences(of: "\r", with: "\\r")
-        escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
-        escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
-        return "exports.write(\"\(escaped)\")"
+        let encoded = data.base64EncodedString()
+        return "exports.writeB64(\"\(encoded)\")"
     }
 
     private func scheduleScrollToBottom() {

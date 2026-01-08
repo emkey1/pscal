@@ -69,13 +69,14 @@ function syncProp(name, value) {
     if (oldProps[name] !== value)
         native.propUpdate(name, value);
 }
-let decoder = new TextDecoder();
 let didLogFirstWrite = false;
 let writeLogCount = 0;
-exports.write = (data) => {
-    const payload = data == null ? '' : String(data);
-    const bytes = lib.codec.stringToCodeUnitArray(payload);
-    term.io.writeUTF16(decoder.decode(bytes));
+const writeUtf8Bytes = (bytes) => {
+    const shouldStick = term.scrollPort_.isScrolledEnd;
+    term.io.writeUTF8(bytes);
+    if (shouldStick) {
+        term.scrollPort_.scrollRowToBottom(term.getRowCount());
+    }
     syncProp('applicationCursor', term.keyboard.applicationCursor);
     if (debugEnabled && (!didLogFirstWrite || writeLogCount < 3)) {
         didLogFirstWrite = true;
@@ -120,6 +121,19 @@ exports.write = (data) => {
             }
         }
     }
+};
+exports.write = (data) => {
+    const payload = data == null ? '' : String(data);
+    const bytes = lib.codec.stringToCodeUnitArray(payload);
+    writeUtf8Bytes(bytes);
+};
+exports.writeB64 = (b64) => {
+    if (!b64) {
+        return;
+    }
+    const binary = atob(b64);
+    const bytes = lib.codec.stringToCodeUnitArray(binary);
+    writeUtf8Bytes(bytes);
 };
 term.io.sendString = term.io.onVTKeyStroke = (data) => {
     native.sendInput(data);

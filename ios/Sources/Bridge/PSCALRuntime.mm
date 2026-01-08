@@ -648,38 +648,33 @@ static bool PSCALRuntimeQueueOutput(const char *buffer, size_t length) {
         pthread_mutex_unlock(&s_output_ring.lock);
         return true;
     }
-    size_t offset = 0;
-    while (offset < length && s_output_ring.active) {
-        while (s_output_ring.size == s_output_ring.capacity && s_output_ring.active) {
-            pthread_cond_wait(&s_output_ring.can_write, &s_output_ring.lock);
-        }
-        if (!s_output_ring.active) {
-            break;
-        }
-        size_t space = s_output_ring.capacity - s_output_ring.size;
-        size_t remaining = length - offset;
-        size_t chunk = remaining < space ? remaining : space;
-        size_t tail = s_output_ring.tail;
-        size_t first = s_output_ring.capacity - tail;
-        if (first > chunk) {
-            first = chunk;
-        }
-        memcpy(s_output_ring.data + tail, buffer + offset, first);
-        tail = (tail + first) % s_output_ring.capacity;
-        s_output_ring.size += first;
-        offset += first;
-        size_t second = chunk - first;
-        if (second > 0) {
-            memcpy(s_output_ring.data + tail, buffer + offset, second);
-            tail = (tail + second) % s_output_ring.capacity;
-            s_output_ring.size += second;
-            offset += second;
-        }
-        s_output_ring.tail = tail;
-        pthread_cond_signal(&s_output_ring.can_read);
+    size_t space = s_output_ring.capacity > s_output_ring.size
+        ? (s_output_ring.capacity - s_output_ring.size)
+        : 0;
+    if (length > space) {
+        pthread_mutex_unlock(&s_output_ring.lock);
+        return false;
     }
+    size_t offset = 0;
+    size_t tail = s_output_ring.tail;
+    size_t first = s_output_ring.capacity - tail;
+    if (first > length) {
+        first = length;
+    }
+    memcpy(s_output_ring.data + tail, buffer + offset, first);
+    tail = (tail + first) % s_output_ring.capacity;
+    s_output_ring.size += first;
+    offset += first;
+    size_t second = length - first;
+    if (second > 0) {
+        memcpy(s_output_ring.data + tail, buffer + offset, second);
+        tail = (tail + second) % s_output_ring.capacity;
+        s_output_ring.size += second;
+    }
+    s_output_ring.tail = tail;
+    pthread_cond_signal(&s_output_ring.can_read);
     pthread_mutex_unlock(&s_output_ring.lock);
-    return offset == length;
+    return true;
 }
 
 size_t PSCALRuntimeDrainOutput(uint8_t **out_buffer, size_t max_bytes) {

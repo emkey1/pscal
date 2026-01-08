@@ -756,6 +756,61 @@ int pscal_ios_close(int fd) {
     return close(pscal_ios_translate_fd(fd));
 }
 
+int pscal_ios_dup(int fd) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return dup(fd);
+    }
+    int duped = vprocDup(vp, fd);
+    if (duped >= 0) {
+        return duped;
+    }
+    int saved_errno = errno;
+    if (saved_errno != EBADF) {
+        return -1;
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        errno = saved_errno;
+        return -1;
+    }
+    int host_dup = vprocHostDup(fd);
+    if (host_dup < 0) {
+        return -1;
+    }
+    int slot = vprocAdoptHostFd(vp, host_dup);
+    if (slot < 0) {
+        vprocHostClose(host_dup);
+        return -1;
+    }
+    return slot;
+}
+
+int pscal_ios_dup2(int fd, int target) {
+    if (target < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return dup2(fd, target);
+    }
+    int rc = vprocDup2(vp, fd, target);
+    if (rc >= 0) {
+        return rc;
+    }
+    int saved_errno = errno;
+    if (saved_errno != EBADF) {
+        return -1;
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        errno = saved_errno;
+        return -1;
+    }
+    return vprocRestoreHostFd(vp, target, fd);
+}
+
 int pscal_ios_tcgetattr(int fd, struct termios *termios_p) {
     VProc *vp = vprocCurrent();
     if (vp) {

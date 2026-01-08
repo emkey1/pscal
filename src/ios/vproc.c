@@ -7151,12 +7151,29 @@ int vprocDupShim(int fd) {
     if (!vp) {
         return vprocHostDup(fd);
     }
-    int host_fd = shimTranslate(fd, 0);
-    if (host_fd < 0) {
+    int duped = vprocDup(vp, fd);
+    if (duped >= 0) {
+        return duped;
+    }
+    int saved_errno = errno;
+    if (saved_errno != EBADF) {
         return -1;
     }
-    // vprocInsert handles internal locking
-    return vprocInsert(vp, vprocCloneFd(host_fd));
+    int host_fd = shimTranslate(fd, 1);
+    if (host_fd < 0) {
+        errno = saved_errno;
+        return -1;
+    }
+    int cloned = vprocCloneFd(host_fd);
+    if (cloned < 0) {
+        return -1;
+    }
+    int slot = vprocInsert(vp, cloned);
+    if (slot < 0) {
+        vprocHostClose(cloned);
+        return -1;
+    }
+    return slot;
 }
 
 int vprocDup2Shim(int fd, int target) {
@@ -7164,7 +7181,20 @@ int vprocDup2Shim(int fd, int target) {
     if (!vp) {
         return vprocHostDup2(fd, target);
     }
-    return vprocDup2(vp, fd, target);
+    int rc = vprocDup2(vp, fd, target);
+    if (rc >= 0) {
+        return rc;
+    }
+    int saved_errno = errno;
+    if (saved_errno != EBADF) {
+        return -1;
+    }
+    struct stat st;
+    if (vprocHostFstatRaw(fd, &st) != 0) {
+        errno = saved_errno;
+        return -1;
+    }
+    return vprocRestoreHostFd(vp, target, fd);
 }
 
 static bool vprocHasFd(VProc *vp, int fd) {

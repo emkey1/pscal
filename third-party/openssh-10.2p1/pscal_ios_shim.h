@@ -26,6 +26,8 @@ int pscal_ios_openat(int fd, const char *path, int oflag, ...);
 ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte);
 ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte);
 int pscal_ios_close(int fd);
+int pscal_ios_dup(int fd);
+int pscal_ios_dup2(int fd, int target);
 int pscal_ios_ioctl(int fd, unsigned long request, ...);
 int pscal_ios_tcgetattr(int fd, struct termios *termios_p);
 int pscal_ios_tcsetattr(int fd, int optional_actions,
@@ -65,6 +67,8 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define openat(...) pscal_ios_openat(__VA_ARGS__)
 # define write(...) pscal_ios_write(__VA_ARGS__)
 # define close(...) pscal_ios_close(__VA_ARGS__)
+# define dup(...) pscal_ios_dup(__VA_ARGS__)
+# define dup2(...) pscal_ios_dup2(__VA_ARGS__)
 # define ioctl(...) pscal_ios_ioctl(__VA_ARGS__)
 # define tcgetattr(fd, termios_p) pscal_ios_tcgetattr((fd), (termios_p))
 # define tcsetattr(fd, opt, termios_p) \
