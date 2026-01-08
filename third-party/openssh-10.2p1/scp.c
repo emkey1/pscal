@@ -328,19 +328,11 @@ do_local_cmd(arglist *a)
 			fmprintf(stderr, " %s", a->list[i]);
 		fprintf(stderr, "\n");
 	}
-#ifdef PSCAL_TARGET_IOS
-	if ((pid = pscal_ios_fork()) == -1)
-#else
 	if ((pid = fork()) == -1)
-#endif
 		fatal("do_local_cmd: fork: %s", strerror(errno));
 
 	if (pid == 0) {
-#ifdef PSCAL_TARGET_IOS
-		pscal_ios_execvp(a->list[0], a->list);
-#else
 		execvp(a->list[0], a->list);
-#endif
 		perror(a->list[0]);
 		exit(1);
 	}
@@ -377,10 +369,8 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 #else
 	int sv[2];
 #endif
-	pid_t child = -1;
-#if !defined(PSCAL_TARGET_IOS)
 	posix_spawn_file_actions_t actions;
-#endif
+	pid_t child = -1;
 	if (verbose_mode)
 		fmprintf(stderr,
 		    "Executing: program %s host %s, user %s, command %s\n",
@@ -403,7 +393,6 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	ssh_signal(SIGTTIN, suspchild);
 	ssh_signal(SIGTTOU, suspchild);
 
-#if !defined(PSCAL_TARGET_IOS)
 	if (posix_spawn_file_actions_init(&actions) != 0)
 		fatal("posix_spawn_file_actions_init failed");
 #ifdef USE_PIPES
@@ -421,7 +410,6 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawn_file_actions_addclose(&actions, sv[1]);
 	posix_spawn_file_actions_addclose(&actions, sv[0]);
 #endif
-#endif
 
 	replacearg(&args, 0, "%s", program);
 	if (port != -1) {
@@ -438,7 +426,6 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	addargs(&args, "%s", host);
 	addargs(&args, "%s", cmd);
 
-#if !defined(PSCAL_TARGET_IOS)
 	posix_spawnattr_t attr;
 	sigset_t emptyset, sigdef;
 	posix_spawnattr_init(&attr);
@@ -449,7 +436,6 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
 	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
 
-#if !defined(PSCAL_TARGET_IOS)
 	if (access(program, X_OK) != 0) {
 		fprintf(stderr, "scp: transport '%s' not executable: %s\n",
 		    program, strerror(errno));
@@ -457,7 +443,6 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 		posix_spawnattr_destroy(&attr);
 		return -1;
 	}
-#endif
 
 	if (posix_spawn(&child, program, &actions, &attr, args.list, environ) != 0) {
 		int spawn_err = errno;
@@ -470,46 +455,6 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawn_file_actions_destroy(&actions);
 	posix_spawnattr_destroy(&attr);
 	*pid = child;
-#else
-#ifdef PSCAL_TARGET_IOS
-	child = pscal_ios_fork();
-#else
-	child = fork();
-#endif
-	if (child == -1)
-		fatal("fork: %s", strerror(errno));
-	if (child == 0) {
-#ifdef USE_PIPES
-		if (dup2(pin[0], STDIN_FILENO) == -1 ||
-		    dup2(pout[1], STDOUT_FILENO) == -1 ||
-		    dup2(pout[1], STDERR_FILENO) == -1) {
-			perror("dup2");
-			_exit(1);
-		}
-		close(pin[1]);
-		close(pout[0]);
-		close(pin[0]);
-		close(pout[1]);
-#else
-		if (dup2(sv[0], STDIN_FILENO) == -1 ||
-		    dup2(sv[0], STDOUT_FILENO) == -1 ||
-		    dup2(sv[0], STDERR_FILENO) == -1) {
-			perror("dup2");
-			_exit(1);
-		}
-		close(sv[1]);
-		close(sv[0]);
-#endif
-#ifdef PSCAL_TARGET_IOS
-		pscal_ios_execvp(program, args.list);
-#else
-		execvp(program, args.list);
-#endif
-		perror(program);
-		_exit(1);
-	}
-	*pid = child;
-#endif
 
 	/* Parent.  Close the other side, and return the local side. */
 #ifdef USE_PIPES
@@ -550,11 +495,7 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 		port = sshport;
 
 	/* Fork a child to execute the command on the remote host using ssh. */
-#ifdef PSCAL_TARGET_IOS
-	pid = pscal_ios_fork();
-#else
 	pid = fork();
-#endif
 	if (pid == 0) {
 		if (dup2(fdin, 0) == -1)
 			perror("dup2");
@@ -575,11 +516,7 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 		addargs(&args, "%s", host);
 		addargs(&args, "%s", cmd);
 
-#ifdef PSCAL_TARGET_IOS
-		pscal_ios_execvp(ssh_program, args.list);
-#else
 		execvp(ssh_program, args.list);
-#endif
 		perror(ssh_program);
 		exit(1);
 	} else if (pid == -1) {
@@ -689,9 +626,6 @@ main(int argc, char **argv)
 	enum scp_mode_e mode = MODE_SFTP;
 	char *sftp_direct = NULL;
 	long long llv;
-#ifdef PSCAL_TARGET_IOS
-	bool use_tool_runner = false;
-#endif
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
@@ -707,9 +641,12 @@ main(int argc, char **argv)
 		char *runner = pscal_tool_runner_path();
 		if (runner != NULL && access(runner, X_OK) == 0) {
 			ssh_program = runner;
-			use_tool_runner = true;
+			fprintf(stderr, "scp: using ssh transport via tool runner: %s\n",
+			    ssh_program);
 		} else {
 			free(runner);
+			fprintf(stderr, "scp: no executable tool runner found\n");
+			return 1;
 		}
 	}
 	pscal_openssh_register_cleanup(pscal_scp_cleanup_handler);
@@ -731,9 +668,7 @@ main(int argc, char **argv)
 	args.list = remote_remote_args.list = NULL;
 	addargs(&args, "%s", ssh_program);
 #ifdef PSCAL_TARGET_IOS
-	if (use_tool_runner) {
-		addargs(&args, "ssh");
-	}
+	addargs(&args, "ssh");
 #endif
 	addargs(&args, "-x");
 	addargs(&args, "-oPermitLocalCommand=no");

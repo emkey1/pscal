@@ -42,8 +42,6 @@
 #include "ios/vproc.h"
 #include "common/runtime_tty.h"
 #include <pthread.h>
-extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
-extern VProcSessionStdio *pscalRuntimePromptStdio(void) __attribute__((weak));
 #endif
 
 #include "xmalloc.h"
@@ -196,8 +194,6 @@ read_passphrase(const char *prompt, int flags)
 	int host_fd = -1;
 	int host_errno = 0;
 	VProcSessionStdio *session = vprocSessionStdioCurrent();
-	VProcSessionStdio *prompt_session = session;
-	bool stdin_interactive = pscalRuntimeStdinIsInteractive();
 	struct termios saved_termios;
 	bool restore_termios = false;
 	if (vp) {
@@ -205,58 +201,36 @@ read_passphrase(const char *prompt, int flags)
 		host_errno = errno;
 	}
 	bool use_session_queue = false;
-	if (session) {
-		if (stdin_interactive || session->pty_active || session->stdin_pscal_fd) {
+	if (session && session->stdin_host_fd >= 0) {
+		if (pscalRuntimeStdinIsInteractive()) {
 			use_session_queue = true;
-		}
-	}
-	if (!use_session_queue && pscalRuntimePromptStdio) {
-		VProcSessionStdio *prompt_stdio = pscalRuntimePromptStdio();
-		if (prompt_stdio && prompt_stdio != session) {
-			bool prompt_has_input = prompt_stdio->pty_active ||
-			    prompt_stdio->stdin_pscal_fd ||
-			    prompt_stdio->stdin_host_fd < 0;
-			if (prompt_has_input) {
-				prompt_session = prompt_stdio;
+		} else if (host_fd >= 0) {
+			if (session->stdin_host_fd == host_fd) {
 				use_session_queue = true;
+			} else {
+				struct stat session_st;
+				struct stat host_st;
+				if (fstat(session->stdin_host_fd, &session_st) == 0 &&
+				    fstat(host_fd, &host_st) == 0 &&
+				    session_st.st_dev == host_st.st_dev &&
+				    session_st.st_ino == host_st.st_ino) {
+					use_session_queue = true;
+				}
 			}
 		}
 	}
-	if (!use_session_queue && PSCALRuntimeGetCurrentRuntimeStdio) {
-		VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
-		if (runtime_stdio && runtime_stdio != session &&
-		    !vprocSessionStdioIsDefault(runtime_stdio)) {
-			bool runtime_has_input = runtime_stdio->pty_active ||
-			    runtime_stdio->stdin_pscal_fd ||
-			    runtime_stdio->stdin_host_fd < 0;
-			if (runtime_has_input) {
-				prompt_session = runtime_stdio;
-				use_session_queue = true;
-			}
-		}
-	}
-	bool switched_session = false;
-	if (prompt_session && prompt_session != session) {
-		vprocSessionStdioActivate(prompt_session);
-		switched_session = true;
-	}
-	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d prompt_in=%d use_session=%d interactive=%d",
+	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d",
 	    (void *)vp,
 	    host_fd,
 	    host_errno,
-	    session ? session->stdin_host_fd : -1,
-	    prompt_session ? prompt_session->stdin_host_fd : -1,
-	    (int)use_session_queue,
-	    (int)stdin_interactive);
+	    session ? session->stdin_host_fd : -1);
 	if (getenv("PSCALI_TOOL_DEBUG")) {
 		pscal_dump_session_state("readpass-start", host_fd);
 		fprintf(stderr,
-		    "[readpass-ios] host=%d session_in=%d prompt_in=%d use_session=%d interactive=%d\n",
+		    "[readpass-ios] host=%d session_in=%d use_session=%d\n",
 		    host_fd,
 		    session ? session->stdin_host_fd : -1,
-		    prompt_session ? prompt_session->stdin_host_fd : -1,
-		    (int)use_session_queue,
-		    (int)stdin_interactive);
+		    (int)use_session_queue);
 	}
 	if ((flags & RP_ECHO) == 0) {
 		if (vprocSessionStdioFetchTermios(STDIN_FILENO, &saved_termios)) {
@@ -312,13 +286,6 @@ read_passphrase(const char *prompt, int flags)
 readpass_done:
 	if (restore_termios) {
 		(void)vprocSessionStdioApplyTermios(STDIN_FILENO, TCSANOW, &saved_termios);
-	}
-	if (switched_session) {
-		if (session) {
-			vprocSessionStdioActivate(session);
-		} else {
-			vprocSessionStdioActivate(NULL);
-		}
 	}
 	return ret;
 #endif

@@ -80,11 +80,13 @@ static volatile pid_t sshpid = -1;
 int quiet = 0;
 
 /* This is set to 0 if the progressmeter is not desired. */
+#if defined(PSCAL_TARGET_IOS)
 extern int showprogress;
 extern char **environ;
-#if defined(PSCAL_TARGET_IOS)
 #undef environ
 #define environ (*_NSGetEnviron())
+#else
+extern int showprogress;
 #endif
 
 /* When this option is set, we always recursively download/upload directories */
@@ -2451,7 +2453,7 @@ static void
 connect_to_server(char *path, char **args, int *in, int *out)
 {
 	int c_in, c_out;
-#if !defined(PSCAL_TARGET_IOS)
+#ifdef PSCAL_TARGET_IOS
 	posix_spawn_file_actions_t actions;
 	pid_t child = -1;
 #endif
@@ -2473,7 +2475,7 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	c_in = c_out = inout[1];
 #endif /* USE_PIPES */
 
-#if !defined(PSCAL_TARGET_IOS)
+#ifdef PSCAL_TARGET_IOS
 	if (posix_spawn_file_actions_init(&actions) != 0)
 		fatal("posix_spawn_file_actions_init failed");
 #ifdef USE_PIPES
@@ -2521,11 +2523,7 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	posix_spawnattr_destroy(&attr);
 	sshpid = child;
 #else
-#ifdef PSCAL_TARGET_IOS
-	if ((sshpid = pscal_ios_fork()) == -1)
-#else
 	if ((sshpid = fork()) == -1)
-#endif
 		fatal("fork: %s", strerror(errno));
 	else if (sshpid == 0) {
 		if ((dup2(c_in, STDIN_FILENO) == -1) ||
@@ -2547,11 +2545,7 @@ connect_to_server(char *path, char **args, int *in, int *out)
 		 */
 		ssh_signal(SIGINT, SIG_IGN);
 		ssh_signal(SIGTERM, SIG_DFL);
-#ifdef PSCAL_TARGET_IOS
-		pscal_ios_execvp(path, args);
-#else
 		execvp(path, args);
-#endif
 		fprintf(stderr, "exec: %s: %s\n", path, strerror(errno));
 		_exit(1);
 	}
@@ -2628,9 +2622,6 @@ main(int argc, char **argv)
 	size_t copy_buffer_len = 0;
 	size_t num_requests = 0;
 	long long llv, limit_kbps = 0;
-#ifdef PSCAL_TARGET_IOS
-	bool use_tool_runner = false;
-#endif
 
 	/* Ensure that fds 0, 1 and 2 are open or directed to /dev/null */
 	sanitise_stdfd();
@@ -2640,26 +2631,12 @@ main(int argc, char **argv)
 	optreset = 1;
 	optind = 1;
 
-#ifdef PSCAL_TARGET_IOS
-	{
-		char *runner = pscal_tool_runner_path();
-		if (runner != NULL && access(runner, X_OK) == 0) {
-			ssh_program = runner;
-			use_tool_runner = true;
-		} else {
-			free(runner);
-		}
-	}
-#endif
-
 	__progname = ssh_get_progname(argv[0]);
 	memset(&args, '\0', sizeof(args));
 	args.list = NULL;
 	addargs(&args, "%s", ssh_program);
 #ifdef PSCAL_TARGET_IOS
-	if (use_tool_runner) {
-		addargs(&args, "ssh");
-	}
+	addargs(&args, "ssh");
 #endif
 	addargs(&args, "-oForwardX11 no");
 	addargs(&args, "-oPermitLocalCommand no");
