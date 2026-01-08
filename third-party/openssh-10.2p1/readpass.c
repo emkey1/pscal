@@ -196,6 +196,7 @@ read_passphrase(const char *prompt, int flags)
 	int host_errno = 0;
 	VProcSessionStdio *session = vprocSessionStdioCurrent();
 	VProcSessionStdio *prompt_session = session;
+	bool stdin_interactive = pscalRuntimeStdinIsInteractive();
 	struct termios saved_termios;
 	bool restore_termios = false;
 	if (vp) {
@@ -203,22 +204,9 @@ read_passphrase(const char *prompt, int flags)
 		host_errno = errno;
 	}
 	bool use_session_queue = false;
-	if (session && session->stdin_host_fd >= 0) {
-		if (pscalRuntimeStdinIsInteractive()) {
+	if (session) {
+		if (stdin_interactive || session->pty_active || session->stdin_pscal_fd) {
 			use_session_queue = true;
-		} else if (host_fd >= 0) {
-			if (session->stdin_host_fd == host_fd) {
-				use_session_queue = true;
-			} else {
-				struct stat session_st;
-				struct stat host_st;
-				if (fstat(session->stdin_host_fd, &session_st) == 0 &&
-				    fstat(host_fd, &host_st) == 0 &&
-				    session_st.st_dev == host_st.st_dev &&
-				    session_st.st_ino == host_st.st_ino) {
-					use_session_queue = true;
-				}
-			}
 		}
 	}
 	if (!use_session_queue && PSCALRuntimeGetCurrentRuntimeStdio) {
@@ -239,21 +227,23 @@ read_passphrase(const char *prompt, int flags)
 		vprocSessionStdioActivate(prompt_session);
 		switched_session = true;
 	}
-	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d prompt_in=%d use_session=%d",
+	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d prompt_in=%d use_session=%d interactive=%d",
 	    (void *)vp,
 	    host_fd,
 	    host_errno,
 	    session ? session->stdin_host_fd : -1,
 	    prompt_session ? prompt_session->stdin_host_fd : -1,
-	    (int)use_session_queue);
+	    (int)use_session_queue,
+	    (int)stdin_interactive);
 	if (getenv("PSCALI_TOOL_DEBUG")) {
 		pscal_dump_session_state("readpass-start", host_fd);
 		fprintf(stderr,
-		    "[readpass-ios] host=%d session_in=%d prompt_in=%d use_session=%d\n",
+		    "[readpass-ios] host=%d session_in=%d prompt_in=%d use_session=%d interactive=%d\n",
 		    host_fd,
 		    session ? session->stdin_host_fd : -1,
 		    prompt_session ? prompt_session->stdin_host_fd : -1,
-		    (int)use_session_queue);
+		    (int)use_session_queue,
+		    (int)stdin_interactive);
 	}
 	if ((flags & RP_ECHO) == 0) {
 		if (vprocSessionStdioFetchTermios(STDIN_FILENO, &saved_termios)) {
