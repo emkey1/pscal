@@ -15,4 +15,8 @@ __attribute__((weak)) void pscalShowGwinMessage(const char *message) {
 
 __attribute__((weak)) void pscalEditorDump(void) {
 }
+
+__attribute__((weak)) void pscalElvisDump(void) {
+    pscalEditorDump();
+}
 #endif

@@ -138,6 +138,8 @@ typedef struct ValueStruct {
             ClosureEnvPayload *payload;
         } interface;
     };
+    uint8_t *array_raw;
+    bool array_is_packed;
     AST *base_type_node; // AST node defining the type this pointer points to
                          // Needed for new(), dispose(), dereferencing type checks.
 

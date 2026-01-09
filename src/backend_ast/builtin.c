@@ -1311,6 +1311,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"gllinewidth", NULL},
     {"gldepthmask", NULL},
     {"gldepthfunc", NULL},
+    {"fflush", vmBuiltinFflush},
     {"to be filled", NULL}
 };
 
@@ -2204,6 +2205,28 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
+// fflush([file])
+Value vmBuiltinFflush(VM* vm, int arg_count, Value* args) {
+    if (arg_count == 0) {
+        fflush(NULL);
+        return makeInt(0);
+    }
+    if (arg_count != 1) {
+        runtimeError(vm, "fflush expects (file).");
+        return makeInt(0);
+    }
+    const Value* farg = &args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) {
+        farg = (const Value*)farg->ptr_val;
+    }
+    if (farg->type != TYPE_FILE || !farg->f_val) {
+        runtimeError(vm, "fflush requires a valid file argument.");
+        return makeInt(0);
+    }
+    fflush(farg->f_val);
+    return makeInt(0);
+}
+
 // fopen(path, mode) -> FILE
 Value vmBuiltinFopen(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
@@ -2304,6 +2327,7 @@ static bool resizeDynamicArrayValue(VM* vm,
 
     VarType element_type = array_value->element_type;
     AST* element_type_def = array_value->element_type_def;
+    bool use_packed = isPackedByteElementType(element_type);
 
     int* new_lower = (int*)malloc(sizeof(int) * dimension_count);
     int* new_upper = (int*)malloc(sizeof(int) * dimension_count);
@@ -2354,7 +2378,7 @@ static bool resizeDynamicArrayValue(VM* vm,
     }
 
     size_t old_total = 0;
-    if (array_value->array_val && array_value->dimensions > 0 &&
+    if (array_value->dimensions > 0 &&
         array_value->lower_bounds && array_value->upper_bounds) {
         old_total = 1;
         for (int i = 0; i < array_value->dimensions; ++i) {
@@ -2368,22 +2392,33 @@ static bool resizeDynamicArrayValue(VM* vm,
     }
 
     Value* new_elements = NULL;
+    unsigned char* new_raw = NULL;
     int* copy_lower = NULL;
     int* copy_upper = NULL;
     int* copy_indices = NULL;
     if (new_total > 0) {
-        new_elements = (Value*)malloc(sizeof(Value) * new_total);
-        if (!new_elements) {
-            runtimeError(vm, "SetLength: memory allocation failed for array contents.");
-            goto setlength_cleanup_failure;
+        if (use_packed) {
+            new_raw = (unsigned char*)calloc(new_total, sizeof(unsigned char));
+            if (!new_raw) {
+                runtimeError(vm, "SetLength: memory allocation failed for packed array contents.");
+                goto setlength_cleanup_failure;
+            }
+        } else {
+            new_elements = (Value*)malloc(sizeof(Value) * new_total);
+            if (!new_elements) {
+                runtimeError(vm, "SetLength: memory allocation failed for array contents.");
+                goto setlength_cleanup_failure;
+            }
+
+            for (size_t i = 0; i < new_total; ++i) {
+                new_elements[i] = makeValueForType(element_type, element_type_def, NULL);
+            }
         }
 
-        for (size_t i = 0; i < new_total; ++i) {
-            new_elements[i] = makeValueForType(element_type, element_type_def, NULL);
-        }
-
-        if (old_total > 0 && array_value->array_val && array_value->lower_bounds &&
-            array_value->upper_bounds && array_value->dimensions == dimension_count) {
+        if (old_total > 0 && array_value->lower_bounds &&
+            array_value->upper_bounds && array_value->dimensions == dimension_count &&
+            ((use_packed && (array_value->array_raw || array_value->array_val)) ||
+             (!use_packed && array_value->array_val))) {
             copy_lower = (int*)malloc(sizeof(int) * dimension_count);
             copy_upper = (int*)malloc(sizeof(int) * dimension_count);
             if (!copy_lower || !copy_upper) {
@@ -2427,8 +2462,18 @@ static bool resizeDynamicArrayValue(VM* vm,
                 while (true) {
                     int old_offset = computeFlatOffset(&old_array_stub, copy_indices);
                     int new_offset = computeFlatOffset(&new_array_stub, copy_indices);
-                    freeValue(&new_elements[new_offset]);
-                    new_elements[new_offset] = makeCopyOfValue(&array_value->array_val[old_offset]);
+                    if (use_packed) {
+                        unsigned char byte = 0;
+                        if (array_value->array_is_packed && array_value->array_raw) {
+                            byte = array_value->array_raw[old_offset];
+                        } else if (array_value->array_val) {
+                            byte = valueToByte(&array_value->array_val[old_offset]);
+                        }
+                        new_raw[new_offset] = byte;
+                    } else {
+                        freeValue(&new_elements[new_offset]);
+                        new_elements[new_offset] = makeCopyOfValue(&array_value->array_val[old_offset]);
+                    }
 
                     int dim = dimension_count - 1;
                     while (dim >= 0) {
@@ -2460,7 +2505,10 @@ static bool resizeDynamicArrayValue(VM* vm,
         copy_upper = NULL;
     }
 
-    if (array_value->array_val) {
+    if (array_value->array_is_packed) {
+        free(array_value->array_raw);
+        array_value->array_raw = NULL;
+    } else if (array_value->array_val) {
         for (size_t i = 0; i < old_total; ++i) {
             freeValue(&array_value->array_val[i]);
         }
@@ -2472,6 +2520,8 @@ static bool resizeDynamicArrayValue(VM* vm,
     array_value->lower_bounds = new_lower;
     array_value->upper_bounds = new_upper;
     array_value->array_val = new_elements;
+    array_value->array_raw = new_raw;
+    array_value->array_is_packed = use_packed;
     array_value->dimensions = dimension_count;
     array_value->lower_bound = (dimension_count >= 1) ? new_lower[0] : 0;
     array_value->upper_bound = (dimension_count >= 1) ? new_upper[0] : -1;
@@ -2480,6 +2530,7 @@ static bool resizeDynamicArrayValue(VM* vm,
 
     if (new_total == 0) {
         array_value->array_val = NULL;
+        array_value->array_raw = NULL;
     }
 
     return true;
@@ -2499,6 +2550,9 @@ setlength_cleanup_failure:
             freeValue(&new_elements[i]);
         }
         free(new_elements);
+    }
+    if (new_raw) {
+        free(new_raw);
     }
     free(new_lower);
     free(new_upper);
@@ -5261,12 +5315,15 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
         goto cleanup;
     }
 
-    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
     } else {
         bufferValue = (Value*)args[1].ptr_val;
-        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (bufferValue && bufferValue->type == TYPE_POINTER &&
+            (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;
         }
@@ -5342,21 +5399,36 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
                 parameterError = true;
                 goto cleanup;
             }
-            tempBuffer = (unsigned char*)malloc(bytesToRead);
-            if (!tempBuffer) {
-                runtimeError(vm, "BlockRead: memory allocation failed.");
-                last_io_error = 1;
-                parameterError = true;
-                goto cleanup;
-            }
-            errno = 0;
-            performedIO = true;
-            bytesProcessed = fread(tempBuffer, 1, bytesToRead, stream);
-            if (bytesProcessed < bytesToRead && ferror(stream)) {
-                last_io_error = errno ? errno : 1;
-            }
-            for (size_t i = 0; i < bytesProcessed && bufferValue->array_val; ++i) {
-                assignByteToValue(&bufferValue->array_val[i], tempBuffer[i]);
+            if (bufferValue->array_is_packed && bufferValue->element_type == TYPE_BYTE) {
+                if (!bufferValue->array_raw && bytesToRead > 0) {
+                    runtimeError(vm, "BlockRead: packed byte buffer is NULL.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fread(bufferValue->array_raw, 1, bytesToRead, stream);
+                if (bytesProcessed < bytesToRead && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
+            } else {
+                tempBuffer = (unsigned char*)malloc(bytesToRead);
+                if (!tempBuffer) {
+                    runtimeError(vm, "BlockRead: memory allocation failed.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fread(tempBuffer, 1, bytesToRead, stream);
+                if (bytesProcessed < bytesToRead && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
+                for (size_t i = 0; i < bytesProcessed && bufferValue->array_val; ++i) {
+                    assignByteToValue(&bufferValue->array_val[i], tempBuffer[i]);
+                }
             }
         } else {
             performedIO = true;
@@ -5461,12 +5533,15 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
         goto cleanup;
     }
 
-    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
     } else {
         bufferValue = (Value*)args[1].ptr_val;
-        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (bufferValue && bufferValue->type == TYPE_POINTER &&
+            (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;
         }
@@ -5542,21 +5617,36 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
                 parameterError = true;
                 goto cleanup;
             }
-            tempBuffer = (unsigned char*)malloc(bytesToWrite);
-            if (!tempBuffer) {
-                runtimeError(vm, "BlockWrite: memory allocation failed.");
-                last_io_error = 1;
-                parameterError = true;
-                goto cleanup;
-            }
-            for (size_t i = 0; i < bytesToWrite && bufferValue->array_val; ++i) {
-                tempBuffer[i] = valueToByte(&bufferValue->array_val[i]);
-            }
-            errno = 0;
-            performedIO = true;
-            bytesProcessed = fwrite(tempBuffer, 1, bytesToWrite, stream);
-            if (bytesProcessed < bytesToWrite && ferror(stream)) {
-                last_io_error = errno ? errno : 1;
+            if (bufferValue->array_is_packed && bufferValue->element_type == TYPE_BYTE) {
+                if (!bufferValue->array_raw && bytesToWrite > 0) {
+                    runtimeError(vm, "BlockWrite: packed byte buffer is NULL.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fwrite(bufferValue->array_raw, 1, bytesToWrite, stream);
+                if (bytesProcessed < bytesToWrite && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
+            } else {
+                tempBuffer = (unsigned char*)malloc(bytesToWrite);
+                if (!tempBuffer) {
+                    runtimeError(vm, "BlockWrite: memory allocation failed.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                for (size_t i = 0; i < bytesToWrite && bufferValue->array_val; ++i) {
+                    tempBuffer[i] = valueToByte(&bufferValue->array_val[i]);
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fwrite(tempBuffer, 1, bytesToWrite, stream);
+                if (bytesProcessed < bytesToWrite && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
             }
         } else {
             performedIO = true;
@@ -7189,8 +7279,18 @@ static bool jsonAppendArrayRecursive(JsonBuffer *buffer, const Value *array,
         indices[dimension] = idx;
         if (dimension + 1 >= array->dimensions) {
             int offset = computeFlatOffset((Value *)array, indices);
-            if (!jsonAppendValue(buffer, &array->array_val[offset])) {
-                return false;
+            if (arrayUsesPackedBytes(array)) {
+                if (!array->array_raw) {
+                    return false;
+                }
+                Value temp = makeByte(array->array_raw[offset]);
+                if (!jsonAppendValue(buffer, &temp)) {
+                    return false;
+                }
+            } else {
+                if (!jsonAppendValue(buffer, &array->array_val[offset])) {
+                    return false;
+                }
             }
         } else {
             if (!jsonAppendArrayRecursive(buffer, array, dimension + 1, indices)) {
@@ -7202,7 +7302,8 @@ static bool jsonAppendArrayRecursive(JsonBuffer *buffer, const Value *array,
 }
 
 static bool jsonAppendArray(JsonBuffer *buffer, const Value *array) {
-    if (!array || array->dimensions <= 0 || !array->array_val ||
+    if (!array || array->dimensions <= 0 ||
+        (!array->array_val && !arrayUsesPackedBytes(array)) ||
         !array->lower_bounds || !array->upper_bounds) {
         return jsonBufferAppendFormat(buffer, "[]");
     }
@@ -8380,6 +8481,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("Fopen", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Fclose", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Fprintf", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Fflush", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Read", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("ReadLn", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("DeLine", AST_PROCEDURE_DECL, NULL);

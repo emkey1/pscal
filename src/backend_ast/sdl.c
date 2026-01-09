@@ -958,8 +958,17 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinUpdatetexture) {
         return makeVoid();
     }
 
-    for (int i = 0; i < expectedPscalArraySize; ++i) {
-        c_pixel_buffer[i] = (unsigned char)AS_INTEGER(pixelDataVal.array_val[i]);
+    if (arrayUsesPackedBytes(&pixelDataVal)) {
+        if (!pixelDataVal.array_raw) {
+            free(c_pixel_buffer);
+            runtimeError(vm, "UpdateTexture PixelData buffer is NULL.");
+            return makeVoid();
+        }
+        memcpy(c_pixel_buffer, pixelDataVal.array_raw, (size_t)expectedPscalArraySize);
+    } else {
+        for (int i = 0; i < expectedPscalArraySize; ++i) {
+            c_pixel_buffer[i] = (unsigned char)AS_INTEGER(pixelDataVal.array_val[i]);
+        }
     }
 
 #if defined(PSCALI_SDL3)

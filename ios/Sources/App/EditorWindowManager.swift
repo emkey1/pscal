@@ -346,6 +346,12 @@ final class TerminalEditorViewController: UIViewController {
         inputViewBridge.onInput = { text in
             EditorWindowManager.shared.activeEditorRuntime().send(text)
         }
+        inputViewBridge.onNewTab = {
+            _ = TerminalTabManager.shared.openShellTab()
+        }
+        inputViewBridge.onCloseTab = {
+            TerminalTabManager.shared.closeSelectedTab()
+        }
         inputViewBridge.inputAssistantItem.leadingBarButtonGroups = []
         inputViewBridge.inputAssistantItem.trailingBarButtonGroups = []
         inputViewBridge.translatesAutoresizingMaskIntoConstraints = false

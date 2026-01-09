@@ -108,6 +108,14 @@ static inline bool isRealType(VarType t) {
     }
 }
 
+static inline bool isPackedByteElementType(VarType t) {
+    return t == TYPE_BYTE;
+}
+
+static inline bool arrayUsesPackedBytes(const Value* v) {
+    return v && v->type == TYPE_ARRAY && v->array_is_packed;
+}
+
 static inline bool isOrdinalType(VarType t) {
     // Pascal ordinals: integer subranges, enumerations, char, boolean.
     // Treat INTEGER/BYTE/WORD/BOOLEAN/CHAR/ENUM as ordinal.

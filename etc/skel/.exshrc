@@ -4,8 +4,10 @@
 # sensible defaults while remaining easy to extend.  Copy it to your home
 # directory and adjust any sections that need to be customised.
 
-# Shortcut to get to home dir
+# Shortcut to get to home dir, make terminal size correct.  Yes, this is a 
+# kludge
 cd
+stty reset
 
 # ---------------------------------------------------------------------------
 # PATH management helpers

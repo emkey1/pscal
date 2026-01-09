@@ -195,6 +195,10 @@ final class SshRuntimeSession: ObservableObject {
         send(wrapped)
     }
 
+    func requestClose() {
+        send("\u{04}")
+    }
+
     func updateTerminalSize(columns: Int, rows: Int) {
         let clampedColumns = max(10, columns)
         let clampedRows = max(4, rows)

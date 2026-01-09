@@ -28,6 +28,19 @@
 #define MAX_SYMBOL_LENGTH 255
 #define MAX_ID_LENGTH 256
 
+// Per-session thread-local storage for iOS multi-tab isolation.
+#ifndef PSCAL_THREAD_LOCAL
+#if defined(PSCAL_TARGET_IOS)
+#if defined(__cplusplus)
+#define PSCAL_THREAD_LOCAL thread_local
+#else
+#define PSCAL_THREAD_LOCAL _Thread_local
+#endif
+#else
+#define PSCAL_THREAD_LOCAL
+#endif
+#endif
+
 // --- Forward Declarations and Typedefs needed by this file ---
 // These types are defined in symbol.h
 struct Symbol_s;
@@ -43,14 +56,14 @@ extern "C" {
 #endif
 
 // --- Global Variable EXTERN Declarations ---
-extern HashTable *globalSymbols;
-extern HashTable *constGlobalSymbols;
-extern HashTable *localSymbols;
-extern Symbol *current_function_symbol;
+extern PSCAL_THREAD_LOCAL HashTable *globalSymbols;
+extern PSCAL_THREAD_LOCAL HashTable *constGlobalSymbols;
+extern PSCAL_THREAD_LOCAL HashTable *localSymbols;
+extern PSCAL_THREAD_LOCAL Symbol *current_function_symbol;
 
-extern HashTable *procedure_table; // Procedure table is now a HashTable
-extern HashTable *current_procedure_table; // Pointer to current procedure scope
-extern TypeEntry *type_table;      // TypeEntry definition comes from types.h
+extern PSCAL_THREAD_LOCAL HashTable *procedure_table; // Procedure table is now a HashTable
+extern PSCAL_THREAD_LOCAL HashTable *current_procedure_table; // Pointer to current procedure scope
+extern PSCAL_THREAD_LOCAL TypeEntry *type_table;      // TypeEntry definition comes from types.h
 
 // --- CRT State Variables ---
 extern int gCurrentTextColor;
@@ -79,9 +92,9 @@ extern int last_io_error;
 extern int typeWarn;
 
 #ifdef DEBUG
-extern int dumpExec;
+extern PSCAL_THREAD_LOCAL int dumpExec;
 // Assuming List is defined in types.h or list.h (which types.h might include)
-extern List *inserted_global_names;
+extern PSCAL_THREAD_LOCAL List *inserted_global_names;
 #endif
 
 extern atomic_int break_requested;

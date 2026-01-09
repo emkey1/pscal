@@ -823,15 +823,10 @@ Value makeRecord(FieldValue *rec) {
 }
 
 Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType element_type, AST *type_def) {
-    Value v;
-    memset(&v, 0, sizeof(Value)); // Initialize all fields
-    v.type = TYPE_ARRAY;
+    Value v = makeEmptyArray(element_type, type_def);
     v.dimensions = dimensions;
-    v.lower_bounds = NULL; // Allocate below
-    v.upper_bounds = NULL; // Allocate below
-    v.array_val = NULL;    // Allocate below
-    v.element_type = element_type;
-    v.element_type_def = type_def; // Store link to element type definition
+    bool use_packed = isPackedByteElementType(element_type);
+    v.array_is_packed = use_packed;
 
     if (dimensions <= 0) {
          fprintf(stderr, "Warning: makeArrayND called with zero or negative dimensions.\n");
@@ -843,72 +838,98 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     v.upper_bounds = malloc(sizeof(int) * dimensions);
     if (!v.lower_bounds || !v.upper_bounds) {
         fprintf(stderr, "Memory allocation error for bounds in makeArrayND.\n");
-        free(v.lower_bounds); // Free potentially allocated lower bounds
+        free(v.lower_bounds);
+        free(v.upper_bounds);
         EXIT_FAILURE_HANDLER();
+        goto fail;
     }
 
     // Calculate total size and copy bounds
     size_t total_size = 1;
     const size_t MAX_ARRAY_ELEMENTS = 2 * 1000 * 1000; // hard cap to avoid runaway allocations
     const size_t MAX_ARRAY_BYTES = 256 * 1024 * 1024;  // 256 MB ceiling
+    size_t element_bytes = use_packed ? sizeof(uint8_t) : sizeof(Value);
+    size_t max_by_bytes = element_bytes > 0 ? (MAX_ARRAY_BYTES / element_bytes) : 0;
+    size_t absolute_cap = max_by_bytes;
+    if (!use_packed && MAX_ARRAY_ELEMENTS < absolute_cap) {
+        absolute_cap = MAX_ARRAY_ELEMENTS;
+    }
+    if (absolute_cap == 0) {
+        absolute_cap = MAX_ARRAY_ELEMENTS;
+    }
+
     for (int i = 0; i < dimensions; i++) {
         v.lower_bounds[i] = lower_bounds[i];
         v.upper_bounds[i] = upper_bounds[i];
         int size_i = (upper_bounds[i] - lower_bounds[i] + 1);
         if (size_i <= 0) {
             fprintf(stderr, "Error: Invalid array dimension size (%d..%d) in makeArrayND.\n", lower_bounds[i], upper_bounds[i]);
-            free(v.lower_bounds); free(v.upper_bounds);
             EXIT_FAILURE_HANDLER();
+            goto fail;
         }
         size_t dim_size = (size_t)size_i;
         // Check for potential integer overflow when calculating total_size
         if (__builtin_mul_overflow(total_size, dim_size, &total_size)) {
             fprintf(stderr, "Error: Array size exceeds limits in makeArrayND.\n");
-            free(v.lower_bounds); free(v.upper_bounds);
             EXIT_FAILURE_HANDLER();
-        }
-        size_t max_by_bytes = MAX_ARRAY_BYTES / sizeof(Value);
-        size_t absolute_cap = MAX_ARRAY_ELEMENTS < max_by_bytes ? MAX_ARRAY_ELEMENTS : max_by_bytes;
-        if (absolute_cap == 0) {
-            absolute_cap = MAX_ARRAY_ELEMENTS;
+            goto fail;
         }
         if (total_size > absolute_cap) {
             fprintf(stderr, "Error: Array size %zu exceeds safety cap (%zu elements / %zu bytes) in makeArrayND.\n",
                     total_size, absolute_cap, MAX_ARRAY_BYTES);
-            free(v.lower_bounds); free(v.upper_bounds);
             EXIT_FAILURE_HANDLER();
+            goto fail;
         }
     }
 
-    // Allocate array for Value elements
-    v.array_val = malloc(sizeof(Value) * total_size);
-    if (!v.array_val) {
-        fprintf(stderr, "Memory allocation error for array data in makeArrayND.\n");
-        free(v.lower_bounds); free(v.upper_bounds);
-        EXIT_FAILURE_HANDLER();
-    }
-
-    // Initialize each element with its default value
-    bool isSimple = (element_type == TYPE_INT32 || element_type == TYPE_DOUBLE ||
-                     element_type == TYPE_BOOLEAN || element_type == TYPE_CHAR ||
-                     element_type == TYPE_BYTE || element_type == TYPE_INT8 ||
-                     element_type == TYPE_UINT8 || element_type == TYPE_INT16 ||
-                     element_type == TYPE_UINT16 || element_type == TYPE_UINT32 ||
-                     element_type == TYPE_INT64 || element_type == TYPE_UINT64 ||
-                     element_type == TYPE_FLOAT || element_type == TYPE_LONG_DOUBLE);
-    if (isSimple && total_size > 0) {
-        memset(v.array_val, 0, sizeof(Value) * total_size);
-        for (size_t i = 0; i < total_size; i++) {
-            v.array_val[i].type = element_type;
+    if (use_packed) {
+        v.array_raw = calloc(total_size, sizeof(uint8_t));
+        if (!v.array_raw) {
+            fprintf(stderr, "Memory allocation error for packed array data in makeArrayND.\n");
+            EXIT_FAILURE_HANDLER();
+            goto fail;
         }
     } else {
-        for (size_t i = 0; i < total_size; i++) {
-            // Pass the element type definition node for complex types like records
-            v.array_val[i] = makeValueForType(element_type, type_def, NULL);
+        // Allocate array for Value elements
+        v.array_val = malloc(sizeof(Value) * total_size);
+        if (!v.array_val) {
+            fprintf(stderr, "Memory allocation error for array data in makeArrayND.\n");
+            EXIT_FAILURE_HANDLER();
+            goto fail;
+        }
+
+        // Initialize each element with its default value
+        bool isSimple = (element_type == TYPE_INT32 || element_type == TYPE_DOUBLE ||
+                         element_type == TYPE_BOOLEAN || element_type == TYPE_CHAR ||
+                         element_type == TYPE_BYTE || element_type == TYPE_INT8 ||
+                         element_type == TYPE_UINT8 || element_type == TYPE_INT16 ||
+                         element_type == TYPE_UINT16 || element_type == TYPE_UINT32 ||
+                         element_type == TYPE_INT64 || element_type == TYPE_UINT64 ||
+                         element_type == TYPE_FLOAT || element_type == TYPE_LONG_DOUBLE);
+        if (isSimple && total_size > 0) {
+            memset(v.array_val, 0, sizeof(Value) * total_size);
+            for (size_t i = 0; i < total_size; i++) {
+                v.array_val[i].type = element_type;
+            }
+        } else {
+            for (size_t i = 0; i < total_size; i++) {
+                // Pass the element type definition node for complex types like records
+                v.array_val[i] = makeValueForType(element_type, type_def, NULL);
+            }
         }
     }
 
     return v;
+fail:
+    if (v.array_val) {
+        free(v.array_val);
+    }
+    if (v.array_raw) {
+        free(v.array_raw);
+    }
+    free(v.lower_bounds);
+    free(v.upper_bounds);
+    return makeEmptyArray(element_type, type_def);
 }
 
 Value makeEmptyArray(VarType element_type, AST *type_def) {
@@ -921,6 +942,8 @@ Value makeEmptyArray(VarType element_type, AST *type_def) {
     v.lower_bounds = NULL;
     v.upper_bounds = NULL;
     v.array_val = NULL;
+    v.array_raw = NULL;
+    v.array_is_packed = isPackedByteElementType(element_type);
     v.lower_bound = 0;
     v.upper_bound = -1;
     return v;
@@ -1607,7 +1630,12 @@ void freeValue(Value *v) {
              fprintf(stderr, "[DEBUG]   Processing array for Value* at %p (array_val=%p)\n", (void*)v, (void*)v->array_val);
              fflush(stderr);
 #endif
-             if (v->array_val) {
+             if (v->array_is_packed) {
+                 if (v->array_raw) {
+                     free(v->array_raw);
+                 }
+                 v->array_raw = NULL;
+             } else if (v->array_val) {
                  int total = 1;
                  if(v->dimensions > 0 && v->lower_bounds && v->upper_bounds) {
                    for (int i = 0; i < v->dimensions; i++)
@@ -1640,6 +1668,8 @@ void freeValue(Value *v) {
              free(v->lower_bounds);
              free(v->upper_bounds);
              v->array_val = NULL;
+             v->array_raw = NULL;
+             v->array_is_packed = false;
              v->lower_bounds = NULL;
              v->upper_bounds = NULL;
              v->dimensions = 0; // Reset dimensions
@@ -2649,6 +2679,7 @@ Value makeCopyOfValue(const Value *src) {
         case TYPE_ARRAY: {
             int total = 1;
             v.dimensions = src->dimensions;
+            v.array_is_packed = src->array_is_packed;
 
             if (v.dimensions > 0 && src->lower_bounds && src->upper_bounds) {
                 v.lower_bounds = malloc(sizeof(int) * src->dimensions);
@@ -2669,17 +2700,26 @@ Value makeCopyOfValue(const Value *src) {
             }
 
             v.array_val = NULL;
-            if (total > 0 && src->array_val) {
-                 v.array_val = malloc(sizeof(Value) * total);
-                 if (!v.array_val) { /* Handle error */ }
-                 for (int i = 0; i < total; i++) {
-                     v.array_val[i] = makeCopyOfValue(&src->array_val[i]);
-                 }
+            v.array_raw = NULL;
+            if (total > 0) {
+                if (v.array_is_packed) {
+                    v.array_raw = (uint8_t*)calloc((size_t)total, sizeof(uint8_t));
+                    if (!v.array_raw) { /* Handle error */ }
+                    if (src->array_raw) {
+                        memcpy(v.array_raw, src->array_raw, (size_t)total);
+                    }
+                } else if (src->array_val) {
+                    v.array_val = malloc(sizeof(Value) * total);
+                    if (!v.array_val) { /* Handle error */ }
+                    for (int i = 0; i < total; i++) {
+                        v.array_val[i] = makeCopyOfValue(&src->array_val[i]);
+                    }
+                }
             } else if (total < 0) {
-                 fprintf(stderr, "Error: Array size overflow during copy.\n");
-                 v.dimensions = 0;
-                 free(v.lower_bounds); v.lower_bounds = NULL;
-                 free(v.upper_bounds); v.upper_bounds = NULL;
+                fprintf(stderr, "Error: Array size overflow during copy.\n");
+                v.dimensions = 0;
+                free(v.lower_bounds); v.lower_bounds = NULL;
+                free(v.upper_bounds); v.upper_bounds = NULL;
             }
 
             v.element_type_def = src->element_type_def;
@@ -2756,6 +2796,9 @@ Value makeCopyOfValue(const Value *src) {
 
 int calculateArrayTotalSize(const Value* array_val) {
     if (!array_val || array_val->type != TYPE_ARRAY || array_val->dimensions == 0) {
+        return 0;
+    }
+    if (!array_val->lower_bounds || !array_val->upper_bounds) {
         return 0;
     }
     int total_size = 1;

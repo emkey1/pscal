@@ -19,6 +19,8 @@ struct TerminalInputBridge: UIViewRepresentable {
     var onCopy: (() -> Void)?
     var onInterrupt: (() -> Void)? = nil
     var onSuspend: (() -> Void)? = nil
+    var onNewTab: (() -> Void)? = nil
+    var onCloseTab: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -43,6 +45,8 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.onCopy = onCopy
         view.onInterrupt = onInterrupt
         view.onSuspend = onSuspend
+        view.onNewTab = onNewTab
+        view.onCloseTab = onCloseTab
         context.coordinator.view = view
 
         // Remove default copy/paste/undo bar
@@ -61,6 +65,8 @@ struct TerminalInputBridge: UIViewRepresentable {
         uiView.onCopy = onCopy
         uiView.onInterrupt = onInterrupt
         uiView.onSuspend = onSuspend
+        uiView.onNewTab = onNewTab
+        uiView.onCloseTab = onCloseTab
 
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
@@ -84,6 +90,8 @@ final class TerminalKeyInputView: UITextView {
     var onCopy: (() -> Void)?
     var onInterrupt: (() -> Void)?
     var onSuspend: (() -> Void)?
+    var onNewTab: (() -> Void)?
+    var onCloseTab: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
     var inputEnabled: Bool = true {
         didSet {
@@ -280,6 +288,24 @@ final class TerminalKeyInputView: UITextView {
                 cut.wantsPriorityOverSystemBehavior = true
             }
             commands.append(contentsOf: [copy, cut])
+        }
+        if onNewTab != nil {
+            let newTab = UIKeyCommand(input: "t",
+                                      modifierFlags: [.command],
+                                      action: #selector(handleNewTabCommand))
+            if #available(iOS 15.0, *) {
+                newTab.wantsPriorityOverSystemBehavior = true
+            }
+            commands.append(newTab)
+        }
+        if onCloseTab != nil {
+            let closeTab = UIKeyCommand(input: "w",
+                                        modifierFlags: [.command],
+                                        action: #selector(handleCloseTabCommand))
+            if #available(iOS 15.0, *) {
+                closeTab.wantsPriorityOverSystemBehavior = true
+            }
+            commands.append(closeTab)
         }
         commands.append(contentsOf: controlKeyCommands)
         return commands
@@ -620,6 +646,14 @@ final class TerminalKeyInputView: UITextView {
 
     @objc private func handleCopyCommand(_ command: UIKeyCommand) {
         onCopy?()
+    }
+
+    @objc private func handleNewTabCommand() {
+        onNewTab?()
+    }
+
+    @objc private func handleCloseTabCommand() {
+        onCloseTab?()
     }
 
     @objc private func handleIncreaseFont() {

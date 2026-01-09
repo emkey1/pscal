@@ -63,8 +63,8 @@ static void runtimeDebugLog(const char *message) {
 }
 #endif
 
-static int gShellSymbolTableDepth = 0;
-static VM *gShellThreadOwnerVm = NULL;
+static PSCAL_THREAD_LOCAL int gShellSymbolTableDepth = 0;
+static PSCAL_THREAD_LOCAL VM *gShellThreadOwnerVm = NULL;
 
 #if defined(PSCAL_TARGET_IOS)
 static bool shellReadShebangLine(const char *path, char **out_line) {

@@ -75,6 +75,68 @@ final class TerminalTabManager: ObservableObject {
         return 0
     }
 
+    func closeSelectedTab() {
+        let tab = selectedTab
+        if tab.id == shellId {
+            tabInitLog("closeSelectedTab ignored root id=\(tab.id)")
+            return
+        }
+        switch tab.kind {
+        case .shell(let runtime):
+            if let status = runtime.exitStatus {
+                closeShellTab(runtime: runtime, status: status)
+            } else {
+                tabInitLog("closeSelectedTab request shell id=\(tab.id)")
+                runtime.requestClose()
+            }
+        case .shellSession(let session):
+            if let status = session.exitStatus {
+                handleSessionExit(sessionId: session.sessionId, status: status)
+            } else {
+                tabInitLog("closeSelectedTab request shellSession id=\(tab.id)")
+                session.requestClose()
+            }
+        case .ssh(let session):
+            if let status = session.exitStatus {
+                handleSessionExit(sessionId: session.sessionId, status: status)
+            } else {
+                tabInitLog("closeSelectedTab request ssh id=\(tab.id)")
+                session.requestClose()
+            }
+        }
+    }
+
+    func closeShellTab(runtime: PscalRuntimeBootstrap, status: Int32) {
+        guard let index = tabs.firstIndex(where: { tab in
+            if case .shell(let tabRuntime) = tab.kind {
+                return tabRuntime === runtime
+            }
+            return false
+        }) else { return }
+        if tabs[index].id == shellId {
+            tabInitLog("closeShellTab ignored root id=\(tabs[index].id)")
+            return
+        }
+        let removedId = tabs[index].id
+        tabs.remove(at: index)
+        logMultiTab("shell tab exit id=\(removedId) status=\(status)")
+        tabInitLog("closeShellTab removed id=\(removedId) tabs=\(tabs.count)")
+        if selectedId == removedId {
+            if let shellTab = tabs.first(where: { tab in
+                switch tab.kind {
+                case .shell, .shellSession:
+                    return true
+                case .ssh:
+                    return false
+                }
+            }) {
+                selectedId = shellTab.id
+            } else if let first = tabs.first {
+                selectedId = first.id
+            }
+        }
+    }
+
     func openSshSession(argv: [String]) -> Int32 {
         tabInitLog("openSshSession request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
         if hasActiveSshSession {

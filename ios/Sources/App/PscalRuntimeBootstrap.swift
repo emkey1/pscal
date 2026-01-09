@@ -316,6 +316,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var skipRcNextStart: Bool = false
     private var promptKickPending: Bool = true
     private var forceRestartPending: Bool = false
+    private var closeOnExit: Bool = false
     private var shellContext: UnsafeMutableRawPointer?
     private var runtimeContext: OpaquePointer?
     private var outputDrainTimer: DispatchSourceTimer?
@@ -817,6 +818,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
+    func requestClose() {
+        stateQueue.async {
+            self.closeOnExit = true
+        }
+        send("\u{04}")
+    }
+
     func currentScreenText(maxLength: Int = 8000) -> String {
         let text = screenText.string
         let utf8 = text.utf8
@@ -884,6 +892,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
         releaseHandlerContext()
         stopOutputDrain()
+        let shouldClose = stateQueue.sync { closeOnExit }
+        if shouldClose {
+            stateQueue.async { self.closeOnExit = false }
+            DispatchQueue.main.async {
+                TerminalTabManager.shared.closeShellTab(runtime: self, status: status)
+            }
+            return
+        }
         stateQueue.async {
             self.started = false
             if self.forceRestartPending {
@@ -2104,6 +2120,11 @@ func pscalEditorDump() {
     if let ptr = withCStringPointerRuntime(stateLine, { $0 }) {
         fputs(ptr, stderr)
     }
+}
+
+@_cdecl("pscalElvisDump")
+func pscalElvisDump() {
+    pscalEditorDump()
 }
 
 final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {

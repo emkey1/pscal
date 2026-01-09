@@ -63,6 +63,7 @@ Value vmBuiltinUpcase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPos(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPrintf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFprintf(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFflush(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFopen(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFclose(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFilesize(struct VM_s* vm, int arg_count, Value* args);

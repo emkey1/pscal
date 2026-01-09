@@ -806,7 +806,8 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     func updateInputHandlers(
         onPaste: ((String) -> Void)?,
         onInterrupt: (() -> Void)?,
-        onSuspend: (() -> Void)?
+        onSuspend: (() -> Void)?,
+        onCloseTab: (() -> Void)?
     ) {
         keyInputView.onInput = { [weak controller] text in
             controller?.onInput?(text)
@@ -820,6 +821,10 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         }
         keyInputView.onInterrupt = onInterrupt
         keyInputView.onSuspend = onSuspend
+        keyInputView.onCloseTab = onCloseTab
+        keyInputView.onNewTab = {
+            _ = TerminalTabManager.shared.openShellTab()
+        }
         if let webView = controller.webView as? HtermWebView {
             webView.onPaste = { [weak controller] text in
                 onPaste?(text)
@@ -1301,7 +1306,10 @@ struct HtermTerminalView: UIViewRepresentable {
         uiView.updateInputHandlers(
             onPaste: onPaste,
             onInterrupt: onInterrupt,
-            onSuspend: onSuspend
+            onSuspend: onSuspend,
+            onCloseTab: {
+                TerminalTabManager.shared.closeSelectedTab()
+            }
         )
 
         uiView.setActive(isActive)

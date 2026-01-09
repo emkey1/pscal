@@ -15,25 +15,25 @@ int last_io_error = 0; // Stores the error code of the last I/O operation.
 int typeWarn = 1; // Flag to control type warning messages (e.g., 1 for enabled, 0 for disabled).
 
 #ifdef DEBUG
-List *inserted_global_names = NULL; // Tracks globals inserted during debugging sessions.
+PSCAL_THREAD_LOCAL List *inserted_global_names = NULL; // Tracks globals inserted during debugging sessions.
 #endif
 
 // Symbol table globals - NOW POINTERS TO HASHTABLES.
 // These will be initialized by calling createHashTable() in initSymbolSystem().
-HashTable *globalSymbols = NULL; // Global symbol table (initialized to NULL, will point to a HashTable).
-HashTable *localSymbols = NULL;  // Current local symbol table (initialized to NULL, will point to a HashTable).
-HashTable *constGlobalSymbols = NULL; // Table of global constants (read-only at runtime)
+PSCAL_THREAD_LOCAL HashTable *globalSymbols = NULL; // Global symbol table (initialized to NULL, will point to a HashTable).
+PSCAL_THREAD_LOCAL HashTable *localSymbols = NULL;  // Current local symbol table (initialized to NULL, will point to a HashTable).
+PSCAL_THREAD_LOCAL HashTable *constGlobalSymbols = NULL; // Table of global constants (read-only at runtime)
 
 // Pointer to the Symbol representing the currently executing function (for 'result' variable).
 
 // Procedure table for storing information about declared procedures and functions.
 // This remains a linked list of Procedure structs.
-HashTable *procedure_table = NULL; // Initialized to NULL.
-HashTable *current_procedure_table = NULL; // Pointer to current procedure scope.
+PSCAL_THREAD_LOCAL HashTable *procedure_table = NULL; // Initialized to NULL.
+PSCAL_THREAD_LOCAL HashTable *current_procedure_table = NULL; // Pointer to current procedure scope.
 
 // User-defined type table for storing information about declared types (records, enums, etc.).
 // This remains a linked list of TypeEntry structs.
-TypeEntry *type_table = NULL; // Initialized to NULL.
+PSCAL_THREAD_LOCAL TypeEntry *type_table = NULL; // Initialized to NULL.
 
 
 // --- CRT State Variable Definitions & Defaults ---
@@ -67,10 +67,10 @@ int pascal_parser_error_count = 0;
 
 #ifdef DEBUG
 // In DEBUG mode, this flag controls whether execution debugging output is enabled.
-int dumpExec = 1;  // Set to 1 by default in debug mode.
+PSCAL_THREAD_LOCAL int dumpExec = 1;  // Set to 1 by default in debug mode.
 #endif
 
-Symbol *current_function_symbol = NULL;
+PSCAL_THREAD_LOCAL Symbol *current_function_symbol = NULL;
 
 // Note: Other global SDL/Audio variables declared in globals.h are typically
 // defined and initialized in their respective .c files (sdl.c, audio.c).
@@ -93,4 +93,3 @@ static void initGlobalsMutex(void) {
     pthread_mutexattr_destroy(&attr);
 }
 #endif
-
