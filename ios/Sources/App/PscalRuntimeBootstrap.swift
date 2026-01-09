@@ -294,6 +294,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     private var started = false
     private let stateQueue = DispatchQueue(label: "com.pscal.runtime.state")
+    private let stateQueueKey = DispatchSpecificKey<UInt8>()
     private let launchQueue = DispatchQueue(label: "com.pscal.runtime.launch", qos: .userInitiated)
     private let outputDrainQueue = DispatchQueue(label: "com.pscal.runtime.output", qos: .utility)
     private let runtimeStackSizeBytes = 32 * 1024 * 1024
@@ -347,6 +348,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
         PSCALRuntimeSetCurrentRuntimeContext(runtimeContext)
         defer { PSCALRuntimeSetCurrentRuntimeContext(previous) }
         return body()
+    }
+
+    private func withState<T>(_ body: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: stateQueueKey) != nil {
+            return body()
+        }
+        return stateQueue.sync(execute: body)
     }
     
     private lazy var outputHandler: PSCALRuntimeOutputHandler = { data, length, context in
@@ -452,6 +460,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         self.runtimeContext = createdRuntimeContext
         self.geometryBySource = [.main: initialMetrics, .editor: initialMetrics]
         self.activeGeometry = initialMetrics
+        self.stateQueue.setSpecific(key: stateQueueKey, value: 1)
         
         // Note: Using local 'createdRuntimeContext' inside the closure avoids accessing 'self' before initialization
         self.terminalBuffer = TerminalBuffer(columns: initialMetrics.columns,
@@ -645,8 +654,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                     _ = PSCALRuntimeLaunchExshWithStackSize(argc, base, stackSize)
                     
                     // FIX: Ensure PTY knows the window size immediately after launch.
-                    let cols = Int32(self.activeGeometry.columns)
-                    let rows = Int32(self.activeGeometry.rows)
+                    let metrics = self.withState { self.activeGeometry }
+                    let cols = Int32(metrics.columns)
+                    let rows = Int32(metrics.rows)
                     if cols > 0 && rows > 0 {
                         PSCALRuntimeUpdateWindowSize(cols, rows)
                     }
@@ -747,7 +757,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if isEditorModeActive() {
             runtimeDebugLog("[Geometry] Propagating main resize to Editor state")
             updateGeometry(from: .editor, columns: columns, rows: rows)
-            activeGeometry = TerminalGeometryMetrics(columns: columns, rows: rows)
+            let metrics = TerminalGeometryMetrics(columns: columns, rows: rows)
+            withState { activeGeometry = metrics }
             withRuntimeContext {
                 PSCALRuntimeUpdateWindowSize(Int32(columns), Int32(rows))
             }
@@ -763,8 +774,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         outputDrainQueue.async { [weak self] in
             self?.resetHtermHistory()
         }
-        let cols = activeGeometry.columns
-        let rows = activeGeometry.rows
+        let metrics = withState { activeGeometry }
+        let cols = metrics.columns
+        let rows = metrics.rows
         if cols > 0 && rows > 0 {
             withRuntimeContext {
                 PSCALRuntimeUpdateWindowSize(Int32(cols), Int32(rows))
@@ -911,7 +923,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     private func handleTerminalResizeRequest(columns: Int, rows: Int) {
-        runtimeDebugLog("[Geometry] remote resize request columns=\(columns) rows=\(rows); reasserting active \(activeGeometry.columns)x\(activeGeometry.rows)")
+        let metrics = withState { activeGeometry }
+        runtimeDebugLog("[Geometry] remote resize request columns=\(columns) rows=\(rows); reasserting active \(metrics.columns)x\(metrics.rows)")
         DispatchQueue.main.async {
             self.refreshActiveGeometry(forceRuntimeUpdate: true)
         }
@@ -1103,33 +1116,34 @@ final class PscalRuntimeBootstrap: ObservableObject {
     // -------------------------------------
 
     func isEditorModeActive() -> Bool {
-        return stateQueue.sync { editorModeActive }
+        return withState { editorModeActive }
     }
 
     func setEditorModeActive(_ active: Bool) {
-            stateQueue.sync {
-                editorModeActive = active
-            }
-
+        var metricsToApply: TerminalGeometryMetrics?
+        withState {
+            editorModeActive = active
             if active {
-                // Force the C-Runtime to match the Main UI size.
                 let validMetrics = geometryBySource[.main] ?? activeGeometry
-                
+                activeGeometry = validMetrics
+                activeGeometrySource = .main
+                metricsToApply = validMetrics
+            }
+        }
+
+        if active {
+            if let validMetrics = metricsToApply {
                 runtimeDebugLog("[Geometry] Forcing C-Runtime to sync with Main UI: \(validMetrics.columns)x\(validMetrics.rows)")
-                
                 withRuntimeContext {
                     PSCALRuntimeUpdateWindowSize(Int32(validMetrics.columns), Int32(validMetrics.rows))
                 }
-                
-                activeGeometry = validMetrics
-                activeGeometrySource = .main 
-                
-                refreshEditorDisplay()
-            } else {
-                refreshActiveGeometry(forceRuntimeUpdate: true)
-                scheduleRender()
             }
+            refreshEditorDisplay()
+        } else {
+            refreshActiveGeometry(forceRuntimeUpdate: true)
+            scheduleRender()
         }
+    }
 
     func refreshEditorDisplay() {
         guard editorBridge.isActive else { return }
@@ -1178,27 +1192,49 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let clampedColumns = max(10, columns)
         let clampedRows = max(4, rows)
         let metrics = TerminalGeometryMetrics(columns: clampedColumns, rows: clampedRows)
-        geometryBySource[source] = metrics
+        withState {
+            geometryBySource[source] = metrics
+        }
         refreshActiveGeometry()
     }
 
     private func refreshActiveGeometry(forceRuntimeUpdate: Bool = false) {
-        let desiredSource = determineDesiredGeometrySource()
-        let desiredMetrics = geometryBySource[desiredSource] ?? geometryBySource[.main] ?? activeGeometry
-        let geometryChanged = desiredMetrics != activeGeometry || desiredSource != activeGeometrySource
-        let sourceLabel: String = (desiredSource == .main) ? "main" : "editor"
-        if geometryChanged {
-            runtimeDebugLog("[Geometry] switching to \(sourceLabel) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
-            activeGeometry = desiredMetrics
-            activeGeometrySource = desiredSource
-            let shouldResize = (desiredSource == .main)
-            applyActiveGeometry(resizeTerminalBuffer: shouldResize, forceRuntimeUpdate: true)
-        } else if forceRuntimeUpdate {
-            runtimeDebugLog("[Geometry] refreshing existing geometry source=\(sourceLabel) columns=\(desiredMetrics.columns) rows=\(desiredMetrics.rows)")
-            applyActiveGeometry(resizeTerminalBuffer: false, forceRuntimeUpdate: true)
-        } else {
-            activeGeometrySource = desiredSource
+        var metricsToApply: TerminalGeometryMetrics?
+        var source: GeometrySource = .main
+        var geometryChanged = false
+        var shouldResize = false
+        var shouldApply = false
+        withState {
+            let desiredSource = determineDesiredGeometrySource()
+            let desiredMetrics = geometryBySource[desiredSource] ?? geometryBySource[.main] ?? activeGeometry
+            let changed = desiredMetrics != activeGeometry || desiredSource != activeGeometrySource
+            if changed {
+                activeGeometry = desiredMetrics
+                activeGeometrySource = desiredSource
+                metricsToApply = desiredMetrics
+                source = desiredSource
+                geometryChanged = true
+                shouldResize = (desiredSource == .main)
+                shouldApply = true
+            } else if forceRuntimeUpdate {
+                activeGeometrySource = desiredSource
+                metricsToApply = desiredMetrics
+                source = desiredSource
+                shouldApply = true
+            } else {
+                activeGeometrySource = desiredSource
+            }
         }
+        guard shouldApply, let metrics = metricsToApply else {
+            return
+        }
+        let sourceLabel: String = (source == .main) ? "main" : "editor"
+        if geometryChanged {
+            runtimeDebugLog("[Geometry] switching to \(sourceLabel) columns=\(metrics.columns) rows=\(metrics.rows)")
+        } else if forceRuntimeUpdate {
+            runtimeDebugLog("[Geometry] refreshing existing geometry source=\(sourceLabel) columns=\(metrics.columns) rows=\(metrics.rows)")
+        }
+        applyActiveGeometry(metrics: metrics, resizeTerminalBuffer: shouldResize, forceRuntimeUpdate: true)
     }
 
     private func determineDesiredGeometrySource() -> GeometrySource {
@@ -1208,8 +1244,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         return .main
     }
 
-    private func applyActiveGeometry(resizeTerminalBuffer: Bool, forceRuntimeUpdate: Bool) {
-        let metrics = activeGeometry
+    private func applyActiveGeometry(metrics: TerminalGeometryMetrics,
+                                     resizeTerminalBuffer: Bool,
+                                     forceRuntimeUpdate: Bool) {
         let runtimeColumns = metrics.columns
         let runtimeRows = metrics.rows
         if resizeTerminalBuffer {

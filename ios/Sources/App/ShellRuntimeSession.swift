@@ -171,6 +171,7 @@ final class ShellRuntimeSession: ObservableObject {
             }
         }
         lastStartErrno = 0
+        applyPendingWinsize()
         closeIfValid(readFd)
         closeIfValid(writeFd)
         return true
@@ -201,7 +202,7 @@ final class ShellRuntimeSession: ObservableObject {
             scheduleRender()
         }
         withRuntimeContext {
-            _ = PSCALRuntimeSetSessionWinsize(sessionId, Int32(clampedColumns), Int32(clampedRows))
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(clampedColumns), Int32(clampedRows))
         }
     }
 
@@ -290,6 +291,15 @@ final class ShellRuntimeSession: ObservableObject {
                     PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
                 }
             }
+        }
+    }
+
+    private func applyPendingWinsize() {
+        let cols = pendingColumns
+        let rows = pendingRows
+        guard cols > 0, rows > 0 else { return }
+        withRuntimeContext {
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(cols), Int32(rows))
         }
     }
 

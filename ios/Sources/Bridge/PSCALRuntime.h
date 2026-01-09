@@ -141,6 +141,8 @@ void PSCALRuntimeUnregisterSessionOutputHandler(uint64_t session_id);
 
 /// Updates the virtual terminal size for a session-backed PTY.
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows);
+/// Updates the session PTY size and notifies the session thread (SIGWINCH).
+void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int rows);
 
 /// Requests the UI to open an additional shell tab (iOS only).
 int pscalRuntimeOpenShellTab(void);

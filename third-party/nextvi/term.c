@@ -581,6 +581,10 @@ void term_suspend(void)
 
 void term_commit(void)
 {
+	if (!term_sbuf) {
+		term_record = 0;
+		return;
+	}
 	term_write(term_sbuf->s, term_sbuf->s_n);
 	sbuf_cut(term_sbuf, 0);
 	term_record = 0;
@@ -589,6 +593,11 @@ void term_commit(void)
 static void term_out(char *s)
 {
 	if (term_record) {
+		if (!term_sbuf) {
+			term_record = 0;
+			term_write(s, strlen(s));
+			return;
+		}
 		sbufn_str(term_sbuf, s);
 	} else {
 		term_write(s, strlen(s));

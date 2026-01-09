@@ -304,7 +304,7 @@ final class TerminalBuffer {
         while true {
             var pending: [UInt8] = []
             var completions: [() -> Void] = []
-            inputQueue.sync {
+            inputQueue.sync(flags: .barrier) {
                 pending = bufferedInput
                 bufferedInput.removeAll()
                 completions = pendingCompletions
@@ -324,7 +324,7 @@ final class TerminalBuffer {
             }
         }
         var needsAnotherDrain = false
-        inputQueue.sync {
+        inputQueue.sync(flags: .barrier) {
             if bufferedInput.isEmpty {
                 drainScheduled = false
             } else {
@@ -340,7 +340,7 @@ final class TerminalBuffer {
     
     func consumeInput(count: Int) -> [UInt8] {
         var result: [UInt8] = []
-        inputQueue.sync {
+        inputQueue.sync(flags: .barrier) {
             guard count > 0 else { return }
             let slice = bufferedInput.prefix(count)
             result.append(contentsOf: slice)
