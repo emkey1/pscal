@@ -20,3 +20,5 @@ ios/PSCAL.xcodeproj/xcuserdata/mke.xcuserdatad/
 ios/DerivedData/
 tmp/
 .xcode-deriv/
+
+.swp

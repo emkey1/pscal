@@ -230,6 +230,7 @@ final class TerminalKeyInputView: UITextView {
         makeCommand(input: UIKeyCommand.inputDownArrow, output: "\u{1B}[B")
         makeCommand(input: UIKeyCommand.inputLeftArrow, output: "\u{1B}[D")
         makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
+        makeCommand(input: "\t", output: "\t")
         makeCommand(input: "\r", output: "\r")
         return commands
     }
@@ -481,6 +482,15 @@ final class TerminalKeyInputView: UITextView {
 
     private func handle(press: UIPress) -> Bool {
         guard let key = press.key else { return false }
+
+        if key.keyCode == .keyboardTab {
+            if key.modifierFlags.contains(.shift) {
+                onInput?("\u{1B}[Z")
+            } else {
+                onInput?("\t")
+            }
+            return true
+        }
 
         if key.modifierFlags.contains(.control),
            let scalar = key.charactersIgnoringModifiers.lowercased().unicodeScalars.first {

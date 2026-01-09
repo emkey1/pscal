@@ -685,7 +685,7 @@ static bool PSCALRuntimeQueueOutput(const char *buffer, size_t length) {
     }
     if (!s_output_ring.active) {
         pthread_mutex_unlock(&s_output_ring.lock);
-        return true;
+        return false;
     }
     size_t space = s_output_ring.capacity > s_output_ring.size
         ? (s_output_ring.capacity - s_output_ring.size)

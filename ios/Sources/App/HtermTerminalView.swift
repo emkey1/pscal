@@ -1158,7 +1158,6 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
 
     private func canReceiveInputFocus() -> Bool {
         guard isActiveForInput else { return false }
-        guard isTerminalLoaded else { return false }
         guard let window, window.isKeyWindow else { return false }
         return isEffectivelyVisible()
     }
@@ -1195,7 +1194,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     private func updateInputEnabled() {
-        let enabled = isActiveForInput && isTerminalLoaded
+        let enabled = isActiveForInput
         if keyInputView.inputEnabled != enabled {
             keyInputView.inputEnabled = enabled
         }

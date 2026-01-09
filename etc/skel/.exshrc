@@ -7,7 +7,7 @@
 # Shortcut to get to home dir, make terminal size correct.  Yes, this is a 
 # kludge
 cd
-stty reset
+resize
 
 # ---------------------------------------------------------------------------
 # PATH management helpers
