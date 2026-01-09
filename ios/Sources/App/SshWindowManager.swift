@@ -87,28 +87,28 @@ final class TerminalTabManager: ObservableObject {
     func closeSelectedTab() {
         let tab = selectedTab
         if tab.id == shellId {
-            tabInitLog("closeSelectedTab ignored root id=\(tab.id)")
+            tabInitLog("closeSelectedTab root id=\(tab.id)")
+            if case .shell(let runtime) = tab.kind {
+                runtime.requestClose()
+            }
             return
         }
+        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        let removedId = removeTab(at: index)
+        tabInitLog("closeSelectedTab removed id=\(removedId) tabs=\(tabs.count)")
         switch tab.kind {
         case .shell(let runtime):
-            if let status = runtime.exitStatus {
-                _ = closeShellTab(runtime: runtime, status: status)
-            } else {
+            if runtime.exitStatus == nil {
                 tabInitLog("closeSelectedTab request shell id=\(tab.id)")
                 runtime.requestClose()
             }
         case .shellSession(let session):
-            if let status = session.exitStatus {
-                handleSessionExit(sessionId: session.sessionId, status: status)
-            } else {
+            if session.exitStatus == nil {
                 tabInitLog("closeSelectedTab request shellSession id=\(tab.id)")
                 session.requestClose()
             }
         case .ssh(let session):
-            if let status = session.exitStatus {
-                handleSessionExit(sessionId: session.sessionId, status: status)
-            } else {
+            if session.exitStatus == nil {
                 tabInitLog("closeSelectedTab request ssh id=\(tab.id)")
                 session.requestClose()
             }
@@ -139,24 +139,9 @@ final class TerminalTabManager: ObservableObject {
             tabInitLog("closeShellTab ignored root id=\(tabs[index].id)")
             return .root
         }
-        let removedId = tabs[index].id
-        tabs.remove(at: index)
+        let removedId = removeTab(at: index)
         logMultiTab("shell tab exit id=\(removedId) status=\(status)")
         tabInitLog("closeShellTab removed id=\(removedId) tabs=\(tabs.count)")
-        if selectedId == removedId {
-            if let shellTab = tabs.first(where: { tab in
-                switch tab.kind {
-                case .shell, .shellSession:
-                    return true
-                case .ssh:
-                    return false
-                }
-            }) {
-                selectedId = shellTab.id
-            } else if let first = tabs.first {
-                selectedId = first.id
-            }
-        }
         return .closed
     }
 
@@ -208,10 +193,16 @@ final class TerminalTabManager: ObservableObject {
         case .ssh(let session):
             session.markExited(status: status)
         }
+        let removedId = removeTab(at: index)
+        logMultiTab("session exit id=\(removedId) status=\(status)")
+        tabInitLog("sessionExit removed id=\(removedId) tabs=\(tabs.count) selectedId=\(selectedId)")
+    }
+
+    @discardableResult
+    private func removeTab(at index: Int) -> UInt64 {
+        let removedId = tabs[index].id
         tabs.remove(at: index)
-        logMultiTab("session exit id=\(sessionId) status=\(status)")
-        tabInitLog("sessionExit removed id=\(sessionId) tabs=\(tabs.count) selectedId=\(selectedId)")
-        if selectedId == sessionId {
+        if selectedId == removedId {
             if let shellTab = tabs.first(where: { tab in
                 switch tab.kind {
                 case .shell, .shellSession:
@@ -225,6 +216,7 @@ final class TerminalTabManager: ObservableObject {
                 selectedId = first.id
             }
         }
+        return removedId
     }
 
     var selectedTab: Tab {

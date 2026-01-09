@@ -916,7 +916,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
         releaseHandlerContext()
         stopOutputDrain()
-        DispatchQueue.main.async {
+        Task { @MainActor in
             let tabId = self.stateQueue.sync { self.tabId }
             let closeResult = TerminalTabManager.shared.closeShellTab(tabId: tabId,
                                                                      runtime: self,
