@@ -291,6 +291,7 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
 void vprocSessionClearOutputHandler(uint64_t session_id);
 /* Write input data directly to a session PTY master. */
 ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len);
+ssize_t vprocSessionWriteToMasterMode(uint64_t session_id, const void *buf, size_t len, bool blocking);
 /* Ensure session input is initialized for the current session. */
 VProcSessionInput *vprocSessionInputEnsureShim(void);
 /* Inject input into the current session input queue. */

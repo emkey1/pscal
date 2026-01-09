@@ -2504,7 +2504,10 @@ static bool vprocSessionGetOutputHandler(uint64_t session_id,
     return false;
 }
 
-ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len) {
+ssize_t vprocSessionWriteToMasterMode(uint64_t session_id,
+                                      const void *buf,
+                                      size_t len,
+                                      bool blocking) {
     if (session_id == 0 || !buf || len == 0) {
         errno = EINVAL;
         return -1;
@@ -2529,21 +2532,57 @@ ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t l
         errno = EBADF;
         return -1;
     }
+    unsigned prev_flags = 0;
+    bool restore_flags = false;
+    if (!blocking) {
+        lock(&master->lock);
+        prev_flags = master->flags;
+        master->flags |= O_NONBLOCK;
+        unlock(&master->lock);
+        restore_flags = true;
+    }
     size_t off = 0;
     while (off < len) {
         ssize_t w = master->ops->write(master, (const unsigned char *)buf + off, len - off);
         if (w < 0) {
-            if (w == _EINTR || w == _EAGAIN) {
+            if (w == _EINTR) {
                 continue;
+            }
+            if (w == _EAGAIN && !blocking) {
+                if (restore_flags) {
+                    lock(&master->lock);
+                    master->flags = prev_flags;
+                    unlock(&master->lock);
+                }
+                pscal_fd_close(master);
+                errno = pscalCompatErrno((int)w);
+                return off > 0 ? (ssize_t)off : -1;
+            }
+            if (restore_flags) {
+                lock(&master->lock);
+                master->flags = prev_flags;
+                unlock(&master->lock);
             }
             pscal_fd_close(master);
             errno = pscalCompatErrno((int)w);
-            return -1;
+            return off > 0 ? (ssize_t)off : -1;
+        }
+        if (w == 0) {
+            break;
         }
         off += (size_t)w;
     }
+    if (restore_flags) {
+        lock(&master->lock);
+        master->flags = prev_flags;
+        unlock(&master->lock);
+    }
     pscal_fd_close(master);
     return (ssize_t)off;
+}
+
+ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len) {
+    return vprocSessionWriteToMasterMode(session_id, buf, len, true);
 }
 
 static bool vprocShellOwnsForegroundLocked(int shell_pid, int *out_fgid) {
@@ -2594,6 +2633,10 @@ static void *vprocSessionInputThread(void *arg) {
         free(ctx);
         return NULL;
     }
+    VProcSessionStdio *session = ctx->session;
+    if (session) {
+        vprocSessionStdioActivate(session);
+    }
     if (ctx->shell_pid > 0) {
         vprocSetShellSelfPid(ctx->shell_pid);
     }
@@ -2601,7 +2644,6 @@ static void *vprocSessionInputThread(void *arg) {
         vprocSetKernelPid(ctx->kernel_pid);
     }
 
-    VProcSessionStdio *session = ctx->session;
     VProcSessionInput *input = session ? session->input : NULL;
     int fd = session ? session->stdin_host_fd : -1;
     struct pscal_fd *pscal_fd = session ? session->stdin_pscal_fd : NULL;
@@ -2727,6 +2769,9 @@ static void *vprocSessionInputThread(void *arg) {
             pthread_cond_broadcast(&input->cv);
         }
         pthread_mutex_unlock(&input->mu);
+    }
+    if (session) {
+        vprocSessionStdioActivate(NULL);
     }
     free(ctx);
     return NULL;

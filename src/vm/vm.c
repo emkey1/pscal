@@ -4592,7 +4592,7 @@ static bool builtinUsesGlobalStructures(const char* name) {
         "erase",          "gotoxy",        "hidecursor",    "highvideo",
         "ioresult",       "insline",       "invertcolors",  "lowvideo",
         "normvideo",      "normalcolors",  "paramcount",    "paramstr",
-        "read",           "readln",        "rename",        "reset",
+        "rename",         "reset",
         "rewrite",        "screenrows",    "screencols",    "showcursor",
         "textbackground", "textbackgrounde","textcolor",     "textcolore",
         "underlinetext",  "window",        "wherex",        "wherey",

@@ -317,6 +317,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var promptKickPending: Bool = true
     private var forceRestartPending: Bool = false
     private var closeOnExit: Bool = false
+    private var awaitingExitConfirmation: Bool = false
+    private var tabId: UInt64 = 0
     private var shellContext: UnsafeMutableRawPointer?
     private var runtimeContext: OpaquePointer?
     private var outputDrainTimer: DispatchSourceTimer?
@@ -697,13 +699,31 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func send(_ text: String) {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         guard let data = normalized.data(using: .utf8), !data.isEmpty else { return }
+        var exitConfirmInput: String?
         var consumedForRestart = false
         stateQueue.sync {
+            if awaitingExitConfirmation {
+                awaitingExitConfirmation = false
+                exitConfirmInput = normalized
+                return
+            }
             if waitingForRestart {
                 waitingForRestart = false
                 consumedForRestart = true
                 started = false
             }
+        }
+        if let exitConfirmInput {
+            let trimmed = exitConfirmInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let first = trimmed.lowercased().first
+            if first == "y" {
+                Task { @MainActor in
+                    TerminalTabManager.shared.requestAppExit()
+                }
+            } else {
+                DispatchQueue.main.async { self.start() }
+            }
+            return
         }
         if consumedForRestart {
             DispatchQueue.main.async { self.start() }
@@ -819,10 +839,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func requestClose() {
-        stateQueue.async {
-            self.closeOnExit = true
-        }
+        withState { closeOnExit = true }
         send("\u{04}")
+    }
+
+    func assignTabId(_ id: UInt64) {
+        stateQueue.async {
+            self.tabId = id
+        }
     }
 
     func currentScreenText(maxLength: Int = 8000) -> String {
@@ -892,24 +916,37 @@ final class PscalRuntimeBootstrap: ObservableObject {
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
         releaseHandlerContext()
         stopOutputDrain()
-        let shouldClose = stateQueue.sync { closeOnExit }
-        if shouldClose {
-            stateQueue.async { self.closeOnExit = false }
-            DispatchQueue.main.async {
-                TerminalTabManager.shared.closeShellTab(runtime: self, status: status)
-            }
-            return
-        }
-        stateQueue.async {
-            self.started = false
-            if self.forceRestartPending {
-                self.waitingForRestart = false
-            } else {
-                self.waitingForRestart = true
-            }
-            self.skipRcNextStart = true
-        }
         DispatchQueue.main.async {
+            let tabId = self.stateQueue.sync { self.tabId }
+            let closeResult = TerminalTabManager.shared.closeShellTab(tabId: tabId,
+                                                                     runtime: self,
+                                                                     status: status)
+            switch closeResult {
+            case .closed:
+                self.stateQueue.async { self.closeOnExit = false }
+                return
+            case .missing:
+                if self !== PscalRuntimeBootstrap.shared {
+                    self.stateQueue.async { self.closeOnExit = false }
+                    return
+                }
+            case .root:
+                break
+            }
+
+            self.stateQueue.async {
+                self.closeOnExit = false
+                self.started = false
+                if self.forceRestartPending {
+                    self.waitingForRestart = false
+                    self.awaitingExitConfirmation = false
+                } else {
+                    self.waitingForRestart = false
+                    self.awaitingExitConfirmation = true
+                }
+                self.skipRcNextStart = true
+            }
+
             let forced = self.stateQueue.sync { self.forceRestartPending }
             self.exitStatus = status
             self.setEditorModeActive(false)
@@ -917,7 +954,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 self.stateQueue.async { self.forceRestartPending = false }
                 self.start()
             } else {
-                let banner = "\r\nexsh exited (status=\(status)). Press any key to restart…\r\n"
+                let banner = "\r\nThis will exit the app. Are you sure? [y/N]\r\n"
                 if let data = banner.data(using: .utf8) {
                     self.terminalBuffer.append(data: data) {
                         self.scheduleRender()

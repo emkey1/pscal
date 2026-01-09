@@ -1026,6 +1026,19 @@ static void PSCALRuntimeWriteMasterWithBackoff(uint64_t session_id, const char *
     }
 }
 
+static ssize_t PSCALRuntimeWriteMasterNonBlocking(uint64_t session_id, const char *data, size_t length) {
+    if (session_id == 0 || !data || length == 0) {
+        return 0;
+    }
+    if (PSCALRuntimeIODebugEnabled()) {
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] write master nb session=%llu len=%zu\n",
+            (unsigned long long)session_id,
+            length);
+    }
+    return vprocSessionWriteToMasterMode(session_id, data, length, false);
+}
+
 typedef enum {
     PSCALRuntimeInputKindFd = 0,
     PSCALRuntimeInputKindSession = 1
@@ -1086,15 +1099,55 @@ static void *PSCALRuntimeInputWriterThread(void *arg) {
 
         switch (chunk->kind) {
         case PSCALRuntimeInputKindSession:
-            PSCALRuntimeWriteMasterWithBackoff(chunk->session_id, chunk->data, chunk->length);
+            {
+                ssize_t wrote = PSCALRuntimeWriteMasterNonBlocking(chunk->session_id, chunk->data, chunk->length);
+                bool should_requeue = false;
+                if (wrote < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        wrote = 0;
+                        should_requeue = true;
+                    }
+                } else if ((size_t)wrote < chunk->length) {
+                    should_requeue = true;
+                }
+                if (should_requeue) {
+                    size_t remaining = chunk->length - (size_t)wrote;
+                    if (remaining > 0) {
+                        if (wrote > 0) {
+                            memmove(chunk->data, chunk->data + wrote, remaining);
+                        }
+                        chunk->length = remaining;
+                        chunk->next = NULL;
+                        pthread_mutex_lock(&s_input_queue_mu);
+                        if (!s_input_queue_shutdown &&
+                            s_input_queue_bytes + remaining <= kInputQueueMaxBytes) {
+                            if (s_input_queue_tail) {
+                                s_input_queue_tail->next = chunk;
+                            } else {
+                                s_input_queue_head = chunk;
+                            }
+                            s_input_queue_tail = chunk;
+                            s_input_queue_bytes += remaining;
+                            pthread_cond_signal(&s_input_queue_cv);
+                            pthread_mutex_unlock(&s_input_queue_mu);
+                            chunk = NULL;
+                            usleep(2000);
+                        } else {
+                            pthread_mutex_unlock(&s_input_queue_mu);
+                        }
+                    }
+                }
+            }
             break;
         case PSCALRuntimeInputKindFd:
             PSCALRuntimeWriteWithBackoff(chunk->fd, chunk->data, chunk->length);
             break;
         }
 
-        free(chunk->data);
-        free(chunk);
+        if (chunk) {
+            free(chunk->data);
+            free(chunk);
+        }
     }
     PSCALRuntimeSetCurrentContext(prev_ctx);
     return NULL;

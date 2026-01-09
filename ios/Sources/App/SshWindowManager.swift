@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import UIKit
 import Darwin
 
 @MainActor
@@ -24,6 +25,12 @@ final class TerminalTabManager: ObservableObject {
         let kind: Kind
     }
 
+    enum ShellCloseResult {
+        case closed
+        case root
+        case missing
+    }
+
     private let shellId: UInt64 = PSCALRuntimeNextSessionId()
     @Published private(set) var tabs: [Tab]
     @Published var selectedId: UInt64 {
@@ -40,6 +47,7 @@ final class TerminalTabManager: ObservableObject {
         let shellTab = Tab(id: shellId, title: "Shell", kind: .shell(runtime))
         tabs = [shellTab]
         selectedId = shellId
+        runtime.assignTabId(shellId)
         logMultiTab("init shell tab id=\(shellId) runtime=\(runtime.runtimeId)")
         tabInitLog("manager init shellTab=\(shellId) runtime=\(runtime.runtimeId) thread=\(Thread.isMainThread ? "main" : "bg")")
     }
@@ -69,6 +77,7 @@ final class TerminalTabManager: ObservableObject {
         let tab = Tab(id: newId, title: title, kind: .shell(runtime))
         tabs.append(tab)
         selectedId = newId
+        runtime.assignTabId(newId)
         logMultiTab("open shell tab id=\(newId) runtime=\(runtime.runtimeId)")
         tabInitLog("openShellTab created id=\(newId) runtime=\(runtime.runtimeId) title=\(title)")
         tabInitLog("openShellTab selectedId=\(selectedId) tabs=\(tabs.count)")
@@ -84,7 +93,7 @@ final class TerminalTabManager: ObservableObject {
         switch tab.kind {
         case .shell(let runtime):
             if let status = runtime.exitStatus {
-                closeShellTab(runtime: runtime, status: status)
+                _ = closeShellTab(runtime: runtime, status: status)
             } else {
                 tabInitLog("closeSelectedTab request shell id=\(tab.id)")
                 runtime.requestClose()
@@ -106,16 +115,29 @@ final class TerminalTabManager: ObservableObject {
         }
     }
 
-    func closeShellTab(runtime: PscalRuntimeBootstrap, status: Int32) {
-        guard let index = tabs.firstIndex(where: { tab in
-            if case .shell(let tabRuntime) = tab.kind {
-                return tabRuntime === runtime
+    @discardableResult
+    func closeShellTab(runtime: PscalRuntimeBootstrap, status: Int32) -> ShellCloseResult {
+        closeShellTab(tabId: 0, runtime: runtime, status: status)
+    }
+
+    @discardableResult
+    func closeShellTab(tabId: UInt64, runtime: PscalRuntimeBootstrap, status: Int32) -> ShellCloseResult {
+        let index: Int? = {
+            if tabId != 0, let byId = tabs.firstIndex(where: { $0.id == tabId }) {
+                return byId
             }
-            return false
-        }) else { return }
+            return tabs.firstIndex(where: { tab in
+                if case .shell(let tabRuntime) = tab.kind {
+                    return tabRuntime === runtime
+                }
+                return false
+            })
+        }()
+        guard let index else { return .missing }
+        guard case .shell = tabs[index].kind else { return .missing }
         if tabs[index].id == shellId {
             tabInitLog("closeShellTab ignored root id=\(tabs[index].id)")
-            return
+            return .root
         }
         let removedId = tabs[index].id
         tabs.remove(at: index)
@@ -134,6 +156,20 @@ final class TerminalTabManager: ObservableObject {
             } else if let first = tabs.first {
                 selectedId = first.id
             }
+        }
+        return .closed
+    }
+
+    func requestAppExit() {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if scenes.isEmpty {
+            exit(0)
+        }
+        for scene in scenes {
+            UIApplication.shared.requestSceneSessionDestruction(scene.session, options: nil, errorHandler: nil)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            exit(0)
         }
     }
 

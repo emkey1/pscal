@@ -40,6 +40,11 @@
 
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/vproc.h"
+#if defined(__APPLE__)
+extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak_import));
+#else
+extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
+#endif
 typedef struct {
     FILE *fp;
     int host_fd;
@@ -3319,6 +3324,16 @@ static void vmEnableRawMode(void) {
 // Read()/ReadLn().  This undoes any prior ReadKey-induced raw mode,
 // discards leftover input, ensures echoing, and makes the cursor visible.
 static void vmPrepareCanonicalInput(void) {
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (session_stdio && vprocSessionStdioIsDefault(session_stdio) &&
+        PSCALRuntimeGetCurrentRuntimeStdio) {
+        VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+        if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio)) {
+            vprocSessionStdioActivate(runtime_stdio);
+        }
+    }
+#endif
     vmRestoreTerminal();
     pthread_mutex_lock(&vm_term_mutex);
     struct termios term;
@@ -3331,6 +3346,14 @@ static void vmPrepareCanonicalInput(void) {
         }
         if ((term.c_iflag & ICRNL) == 0) {
             term.c_iflag |= ICRNL;
+            changed = true;
+        }
+        if (term.c_iflag & IGNCR) {
+            term.c_iflag &= ~IGNCR;
+            changed = true;
+        }
+        if (term.c_iflag & INLCR) {
+            term.c_iflag &= ~INLCR;
             changed = true;
         }
         if (term.c_cc[VERASE] != 0x7f) {
@@ -3369,16 +3392,56 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         return false;
     }
     int fd = fileno(stream);
+#if defined(PSCAL_TARGET_IOS)
+    FILE *stdin_stream = stdin;
+    bool is_stdin_stream = (stream == stdin_stream);
+    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (fd < 0 && is_stdin_stream) {
+        fd = STDIN_FILENO;
+    }
+#else
+    bool is_stdin_stream = (stream == stdin);
+#endif
     if (fd < 0) {
         return false;
     }
 
     size_t len = 0;
     vmEnsureSigintPipe();
-    bool use_interruptible = (stream == stdin && pscalRuntimeStdinIsInteractive());
+    bool use_interruptible = (is_stdin_stream && pscalRuntimeStdinIsInteractive());
 #if defined(PSCAL_TARGET_IOS)
-    if (stream == stdin) {
+    if (is_stdin_stream) {
         use_interruptible = true;
+    }
+    bool use_session_read = false;
+    VProcSessionStdio *session_stdio = NULL;
+    if (is_stdin_stream) {
+        session_stdio = vprocSessionStdioCurrent();
+        if (session_stdio && vprocSessionStdioIsDefault(session_stdio) &&
+            PSCALRuntimeGetCurrentRuntimeStdio) {
+            VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+            if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio)) {
+                session_stdio = runtime_stdio;
+                vprocSessionStdioActivate(session_stdio);
+            }
+        }
+        if (session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
+            bool has_host_stdin = (session_stdio->stdin_host_fd >= 0);
+            bool has_pscal_stdin = (session_stdio->stdin_pscal_fd != NULL);
+            if (has_host_stdin && !has_pscal_stdin) {
+                use_session_read = true;
+            }
+        }
+    }
+    if (tool_dbg && is_stdin_stream) {
+        fprintf(stderr,
+                "[readln] init fd=%d use_session=%d use_interruptible=%d session=%p host=%d pscal=%p\n",
+                fd,
+                (int)use_session_read,
+                (int)use_interruptible,
+                (void *)session_stdio,
+                session_stdio ? session_stdio->stdin_host_fd : -1,
+                session_stdio ? (void *)session_stdio->stdin_pscal_fd : NULL);
     }
 #endif
     if (use_interruptible) {
@@ -3396,8 +3459,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 read_is_host = false;
             }
         }
-        bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
-        if (tool_dbg && stream == stdin) {
+        if (tool_dbg && is_stdin_stream) {
             fprintf(stderr,
                     "[readln] start stdin fd=%d read_fd=%d host=%d host_fd=%d\n",
                     fd, read_fd, (int)read_is_host, host_fd);
@@ -3445,6 +3507,46 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                                 errno, strerror(errno));
                     }
                 }
+            }
+#endif
+#if defined(PSCAL_TARGET_IOS)
+            if (use_session_read) {
+                char ch;
+                ssize_t n = vprocSessionReadInputShimMode(&ch, 1, false);
+                if (n == 0) {
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] session read EOF len=%zu\n", len);
+                    }
+                    break;
+                }
+                if (n < 0) {
+                    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                        continue;
+                    }
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] session read error=%d (%s)\n",
+                                errno, strerror(errno));
+                    }
+                    break;
+                }
+                if (ch == 0x03) { // Ctrl-C
+                    if (vm) {
+                        vm->abort_requested = true;
+                        vm->exit_requested = true;
+                    }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (ch == '\r') {
+                    saw_newline = true;
+                    break;
+                }
+                if (ch == '\n') {
+                    saw_newline = true;
+                    break;
+                }
+                buffer[len++] = ch;
+                continue;
             }
 #endif
             fd_set rfds;
@@ -3569,7 +3671,12 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 return false;
             }
             if (ch == '\r') {
+#if defined(PSCAL_TARGET_IOS)
+                saw_newline = true;
+                break;
+#else
                 continue;
+#endif
             }
             if (ch == '\n') {
                 saw_newline = true;
@@ -3595,6 +3702,12 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
     }
     buffer[strcspn(buffer, "\r\n")] = '\0';
     return true;
+}
+
+static void vmCommitLastIoError(int value) {
+    pthread_mutex_lock(&globals_mutex);
+    last_io_error = value;
+    pthread_mutex_unlock(&globals_mutex);
 }
 
 // Attempts to get the current cursor position using ANSI DSR query.
@@ -5684,14 +5797,19 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
     bool first_arg_is_file_by_value = false;
-    last_io_error = 0;
+    int io_error = 0;
 
     // Determine input stream: allow FILE or ^FILE
     if (arg_count > 0) {
         const Value* a0 = &args[0];
         if (a0->type == TYPE_POINTER && a0->ptr_val) a0 = (const Value*)a0->ptr_val;
         if (a0->type == TYPE_FILE) {
-            if (!a0->f_val) { runtimeError(vm, "File not open for Read."); last_io_error = 1; return makeVoid(); }
+            if (!a0->f_val) {
+                runtimeError(vm, "File not open for Read.");
+                io_error = 1;
+                vmCommitLastIoError(io_error);
+                return makeVoid();
+            }
             input_stream = a0->f_val;
             var_start_index = 1;
             if (args[0].type == TYPE_FILE) first_arg_is_file_by_value = true;
@@ -5705,14 +5823,14 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
     for (int i = var_start_index; i < arg_count; i++) {
         if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
             runtimeError(vm, "Read requires VAR parameters to read into.");
-            last_io_error = 1;
+            io_error = 1;
             break;
         }
         Value* dst = (Value*)args[i].ptr_val;
 
         if (dst->type == TYPE_CHAR) {
             int ch = fgetc(input_stream);
-            if (ch == EOF) { last_io_error = feof(input_stream) ? 0 : 1; break; }
+            if (ch == EOF) { io_error = feof(input_stream) ? 0 : 1; break; }
             dst->c_val = ch;
             SET_INT_VALUE(dst, dst->c_val);
             continue;
@@ -5720,7 +5838,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
 
         char buffer[1024];
         if (fscanf(input_stream, "%1023s", buffer) != 1) {
-            last_io_error = feof(input_stream) ? 0 : 1;
+            io_error = feof(input_stream) ? 0 : 1;
             break;
         }
 
@@ -5730,21 +5848,21 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
             case TYPE_BYTE: {
                 errno = 0;
                 long long v = strtoll(buffer, NULL, 10);
-                if (errno == ERANGE) { last_io_error = 1; v = 0; }
+                if (errno == ERANGE) { io_error = 1; v = 0; }
                 SET_INT_VALUE(dst, v);
                 break;
             }
             case TYPE_FLOAT: {
                 errno = 0;
                 float v = strtof(buffer, NULL);
-                if (errno == ERANGE) { last_io_error = 1; v = 0.0f; }
+                if (errno == ERANGE) { io_error = 1; v = 0.0f; }
                 SET_REAL_VALUE(dst, v);
                 break;
             }
             case TYPE_REAL: {
                 errno = 0;
                 double v = strtod(buffer, NULL);
-                if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
+                if (errno == ERANGE) { io_error = 1; v = 0.0; }
                 SET_REAL_VALUE(dst, v);
                 break;
             }
@@ -5755,7 +5873,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                     SET_INT_VALUE(dst, 0);
                 } else {
                     SET_INT_VALUE(dst, 0);
-                    last_io_error = 1;
+                    io_error = 1;
                 }
                 break;
             }
@@ -5764,19 +5882,19 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 dst->type = TYPE_STRING;
                 if (dst->s_val) { free(dst->s_val); }
                 dst->s_val = strdup(buffer);
-                if (!dst->s_val) { last_io_error = 1; }
+                if (!dst->s_val) { io_error = 1; }
                 break;
             }
             default:
                 runtimeError(vm, "Cannot Read into a variable of type %s.", varTypeToString(dst->type));
-                last_io_error = 1;
+                io_error = 1;
                 i = arg_count;
                 break;
         }
     }
 
-    if (!last_io_error && ferror(input_stream)) last_io_error = 1;
-    else if (last_io_error != 1) last_io_error = 0;
+    if (!io_error && ferror(input_stream)) io_error = 1;
+    else if (io_error != 1) io_error = 0;
 
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }
 
@@ -5784,6 +5902,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
         vmEnableRawMode();
     }
 
+    vmCommitLastIoError(io_error);
     return makeVoid();
 }
 
@@ -5793,14 +5912,19 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     bool first_arg_is_file_by_value = false;
     // Clear any previous IO error so a successful read won't report stale
     // failures from earlier operations (e.g. failed parse on a prior call).
-    last_io_error = 0;
+    int io_error = 0;
 
     // 1) Determine input stream: allow FILE or ^FILE
     if (arg_count > 0) {
         const Value* a0 = &args[0];
         if (a0->type == TYPE_POINTER && a0->ptr_val) a0 = (const Value*)a0->ptr_val;
         if (a0->type == TYPE_FILE) {
-            if (!a0->f_val) { runtimeError(vm, "File not open for Readln."); last_io_error = 1; return makeVoid(); }
+            if (!a0->f_val) {
+                runtimeError(vm, "File not open for Readln.");
+                io_error = 1;
+                vmCommitLastIoError(io_error);
+                return makeVoid();
+            }
             input_stream = a0->f_val;
             var_start_index = 1;
             // If the actual arg0 on the stack is a FILE by value (not a pointer),
@@ -5817,10 +5941,11 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     // 2) Read full line
     char line_buffer[1024];
     if (!vmReadLineInterruptible(vm, input_stream, line_buffer, sizeof(line_buffer))) {
-        last_io_error = feof(input_stream) ? 0 : 1;
+        io_error = feof(input_stream) ? 0 : 1;
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
         if (input_stream == stdin) vmEnableRawMode();
+        vmCommitLastIoError(io_error);
         return makeVoid();
     }
     line_buffer[strcspn(line_buffer, "\r\n")] = '\0';
@@ -5828,7 +5953,11 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     // 3) Parse vars from buffer
     const char* p = line_buffer;
     for (int i = var_start_index; i < arg_count; i++) {
-        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) { runtimeError(vm, "Readln requires VAR parameters to read into."); last_io_error = 1; break; }
+        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
+            runtimeError(vm, "Readln requires VAR parameters to read into.");
+            io_error = 1;
+            break;
+        }
         Value* dst = (Value*)args[i].ptr_val;
 
         while (isspace((unsigned char)*p)) p++;
@@ -5851,7 +5980,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 char* endp = NULL;
                 long long v = strtoll(p, &endp, 10);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                if (endp == p || errno == ERANGE) { io_error = 1; v = 0; }
                 SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
@@ -5865,7 +5994,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 char* endp = NULL;
                 unsigned long long v = strtoull(p, &endp, 10);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                if (endp == p || errno == ERANGE) { io_error = 1; v = 0; }
                 SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
@@ -5876,7 +6005,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 char* endp = NULL;
                 long double v = strtold(p, &endp);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
+                if (endp == p || errno == ERANGE) { io_error = 1; v = 0.0; }
                 SET_REAL_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
@@ -5892,7 +6021,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                     errno = 0;
                     char* endp = NULL;
                     long long v = strtoll(p, &endp, 10);
-                    if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                    if (endp == p || errno == ERANGE) { io_error = 1; v = 0; }
                     SET_INT_VALUE(dst, v ? 1 : 0);
                     p = endp ? endp : p;
                 }
@@ -5905,7 +6034,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 } else {
                     dst->c_val = '\0';
                     SET_INT_VALUE(dst, 0);
-                    last_io_error = 1;
+                    io_error = 1;
                 }
                 break;
             }
@@ -5914,7 +6043,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 char* tmp = strdup(p);
                 if (!tmp) {
                     runtimeError(vm, "Out of memory in Readln.");
-                    last_io_error = 1;
+                    io_error = 1;
                     break;
                 }
                 if (dst->type == TYPE_STRING && dst->s_val) {
@@ -5928,14 +6057,14 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
 
             default:
                 runtimeError(vm, "Cannot Readln into a variable of type %s.", varTypeToString(dst->type));
-                last_io_error = 1;
+                io_error = 1;
                 i = arg_count;
                 break;
         }
     }
 
-    if (!last_io_error && ferror(input_stream)) last_io_error = 1;
-    else if (last_io_error != 1) last_io_error = 0;
+    if (!io_error && ferror(input_stream)) io_error = 1;
+    else if (io_error != 1) io_error = 0;
 
     // ***NEW***: neuter FILE-by-value arg so VM cleanup won’t fclose()
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
@@ -5944,6 +6073,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
         vmEnableRawMode();
     }
 
+    vmCommitLastIoError(io_error);
     return makeVoid();
 }
 

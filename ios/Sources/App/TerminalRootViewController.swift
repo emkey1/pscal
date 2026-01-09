@@ -3,21 +3,45 @@ import UIKit
 
 @MainActor
 final class TerminalWindow: UIWindow {
+    private lazy var commandKeyCommands: [UIKeyCommand] = {
+        let newTab = UIKeyCommand(input: "t",
+                                  modifierFlags: [.command],
+                                  action: #selector(handleNewTabCommand))
+        newTab.discoverabilityTitle = "New Tab"
+        let closeTab = UIKeyCommand(input: "w",
+                                    modifierFlags: [.command],
+                                    action: #selector(handleCloseTabCommand))
+        closeTab.discoverabilityTitle = "Close Tab"
+        if #available(iOS 15.0, *) {
+            newTab.wantsPriorityOverSystemBehavior = true
+            closeTab.wantsPriorityOverSystemBehavior = true
+        }
+        return [newTab, closeTab]
+    }()
+
+    override var keyCommands: [UIKeyCommand]? {
+        commandKeyCommands
+    }
+
     override func sendEvent(_ event: UIEvent) {
-        if handleCommandKey(event) {
+        if let pressesEvent = event as? UIPressesEvent, handleCommandKey(pressesEvent) {
             return
         }
         super.sendEvent(event)
     }
 
-    private func handleCommandKey(_ event: UIEvent) -> Bool {
-        guard let presses = event.allPresses, !presses.isEmpty else {
+    private func handleCommandKey(_ event: UIPressesEvent) -> Bool {
+        let presses = event.allPresses
+        guard !presses.isEmpty else {
             return false
         }
-        for press in presses where press.type == .key {
+        for press in presses {
+            if press.phase != .began {
+                continue
+            }
             guard let key = press.key else { continue }
-            if key.isRepeat { continue }
-            let modifiers = key.modifierFlags.intersection([.command, .shift, .alternate, .control])
+            let allowed: UIKeyModifierFlags = [.command, .shift, .alternate, .control]
+            let modifiers = key.modifierFlags.intersection(allowed)
             guard modifiers == .command else { continue }
             let input = key.charactersIgnoringModifiers.lowercased()
             switch input {
@@ -32,6 +56,14 @@ final class TerminalWindow: UIWindow {
             }
         }
         return false
+    }
+
+    @objc private func handleNewTabCommand() {
+        _ = TerminalTabManager.shared.openShellTab()
+    }
+
+    @objc private func handleCloseTabCommand() {
+        TerminalTabManager.shared.closeSelectedTab()
     }
 }
 

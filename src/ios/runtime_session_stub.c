@@ -1,7 +1,15 @@
-#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
-/* Host test stubs for iOS runtime hooks. */
 #include <pthread.h>
 #include <stdint.h>
+
+typedef struct VProcSessionStdio VProcSessionStdio;
+
+__attribute__((weak))
+VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
+    return NULL;
+}
+
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+/* Host test stubs for iOS runtime hooks. */
 
 typedef struct ShellRuntimeState ShellRuntimeState;
 typedef struct PSCALRuntimeContext PSCALRuntimeContext;
