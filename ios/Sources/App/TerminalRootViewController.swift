@@ -1,6 +1,40 @@
 import SwiftUI
 import UIKit
 
+@MainActor
+final class TerminalWindow: UIWindow {
+    override func sendEvent(_ event: UIEvent) {
+        if handleCommandKey(event) {
+            return
+        }
+        super.sendEvent(event)
+    }
+
+    private func handleCommandKey(_ event: UIEvent) -> Bool {
+        guard let presses = event.allPresses, !presses.isEmpty else {
+            return false
+        }
+        for press in presses where press.type == .key {
+            guard let key = press.key else { continue }
+            if key.isRepeat { continue }
+            let modifiers = key.modifierFlags.intersection([.command, .shift, .alternate, .control])
+            guard modifiers == .command else { continue }
+            let input = key.charactersIgnoringModifiers.lowercased()
+            switch input {
+            case "w":
+                TerminalTabManager.shared.closeSelectedTab()
+                return true
+            case "t":
+                _ = TerminalTabManager.shared.openShellTab()
+                return true
+            default:
+                break
+            }
+        }
+        return false
+    }
+}
+
 /// UIKit shell that hosts the SwiftUI TerminalView and relies on keyboardLayoutGuide
 /// to keep the terminal aligned with the on-screen keyboard.
 final class TerminalRootViewController: UIViewController {

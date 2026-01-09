@@ -209,7 +209,7 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
                options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
 
-        let window = UIWindow(windowScene: windowScene)
+        let window = TerminalWindow(windowScene: windowScene)
         let root = TerminalRootViewController()
         window.rootViewController = root
         self.window = window
@@ -237,7 +237,7 @@ class EditorSceneDelegate: UIResponder, UIWindowSceneDelegate {
                options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let controller = TerminalEditorViewController()
-        let window = UIWindow(windowScene: windowScene)
+        let window = TerminalWindow(windowScene: windowScene)
         window.rootViewController = controller
         self.window = window
         window.makeKeyAndVisible()
