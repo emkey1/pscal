@@ -8,6 +8,17 @@ VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
     return NULL;
 }
 
+__attribute__((weak))
+void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx) {
+    (void)stdio_ctx;
+}
+
+__attribute__((weak))
+int PSCALRuntimeSetTabTitle(const char *title) {
+    (void)title;
+    return -1;
+}
+
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 /* Host test stubs for iOS runtime hooks. */
 

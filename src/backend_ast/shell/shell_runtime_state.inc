@@ -387,6 +387,12 @@ typedef struct {
     int spool_fd;
     size_t spool_size;
     bool spool_owned;
+    int stdin_fd;
+    int stdout_fd;
+    int stderr_fd;
+    bool stdin_owned;
+    bool stdout_owned;
+    bool stderr_owned;
 } ShellPipelineSession;
 #endif
 
@@ -3316,9 +3322,10 @@ static ShellReadLineResult shellReadLineFromFd(int fd,
     return SHELL_READ_LINE_OK;
 }
 
-static ShellReadLineResult shellReadLineFromStream(FILE *stream,
-                                                   char **out_line,
-                                                   size_t *out_length) {
+static ShellReadLineResult __attribute__((unused))
+shellReadLineFromStream(FILE *stream,
+                        char **out_line,
+                        size_t *out_length) {
     if (out_line) {
         *out_line = NULL;
     }

@@ -28,12 +28,36 @@
             "category": "pipeline_ios",
             "description": "Empty pipeline input should not hang and should surface nonzero status from grep.",
             "script": "Tests/exsh/tests/pipeline_empty_ios.exsh",
-            "expect": "runtime_ok",
-            "env": {
-                "RUN_VPROC_TESTS": "1"
-            },
-            "expected_stdout": "pipeline-empty:start\npipeline-empty:status:1"
-        },
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-empty:start\npipeline-empty:status:1"
+  },
+  {
+    "id": "pipeline_bg_redirect_ios",
+    "name": "Background redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background command with redirection writes to file and completes",
+    "script": "Tests/exsh/tests/pipeline_bg_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-redirect:start\nhello-bg\npipeline-bg-redirect:end"
+  },
+  {
+    "id": "pipeline_bg_pipe_redirect_ios",
+    "name": "Background pipeline redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background pipeline output redirected to file and replayed",
+    "script": "Tests/exsh/tests/pipeline_bg_pipe_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-pipe-redirect:start\nhistory         Print the interactive history list.\npipeline-bg-pipe-redirect:end"
+  },
         {
             "id": "conditionals_loop",
             "name": "Conditionals execute matching branches",

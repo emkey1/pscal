@@ -32,20 +32,10 @@ int LogAppend = 1;
 void logInit() {
   str path = getenv("PSCALI_BG_STDOUT");
   if (path != "") {
-    str mode = "w";
-    str appendFlag = getenv("PSCALI_BG_STDOUT_APPEND");
-    if (appendFlag == "1") {
-      mode = "a";
-      LogAppend = 1;
-    } else {
-      LogAppend = 0;
-    }
-    LogFile = fopen(path, mode);
-    if (!LogFile) {
-      /* If the target cannot be opened, swallow output instead of spamming the terminal. */
-      LogFile = fopen("/dev/null", "w");
-    }
-    LogEnabled = 1;
+    /* When stdout is redirected by the shell, rely on that redirection rather
+     * than managing a separate logfile here. */
+    LogEnabled = 0;
+    return;
   }
 }
 

@@ -9,6 +9,12 @@
 #define PIPE_SPOOL_FD(ctx) ((ctx)->session.spool_fd)
 #define PIPE_SPOOL_SIZE(ctx) ((ctx)->session.spool_size)
 #define PIPE_SPOOL_OWNED(ctx) ((ctx)->session.spool_owned)
+#define PIPE_STDOUT_FD(ctx) ((ctx)->session.stdout_fd)
+#define PIPE_STDERR_FD(ctx) ((ctx)->session.stderr_fd)
+#define PIPE_STDIN_FD(ctx) ((ctx)->session.stdin_fd)
+#define PIPE_STDOUT_OWNED(ctx) ((ctx)->session.stdout_owned)
+#define PIPE_STDERR_OWNED(ctx) ((ctx)->session.stderr_owned)
+#define PIPE_STDIN_OWNED(ctx) ((ctx)->session.stdin_owned)
 
 static void shellVprocFormatLabel(const ShellCommand *cmd, char *out, size_t out_sz) {
     if (!out || out_sz == 0) {
@@ -1184,6 +1190,13 @@ static void shellInstallVprocSigintHandler(VProc *vp) {
     sa.sa_handler = shellVprocSigintHandler;
     (void)vprocSigaction(vprocPid(vp), SIGINT, &sa, NULL);
 }
+
+/* Open a background redirection target, falling back to the raw path when
+ * pathTruncateExpand produces a non-existent path (common under host stubs). */
+static int shellBgOpenPath(const char *raw_path,
+                           bool append,
+                           char *out_final,
+                           size_t out_final_sz);
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
@@ -1414,9 +1427,9 @@ static void *shellInProcessBackgroundMain(void *arg) {
 #endif
     size_t redir_count = cmd ? cmd->redir_count : 0;
     bool redir_dbg = getenv("PSCALI_REDIR_DEBUG") != NULL;
-    if (tool_dbg && (redir_dbg || pipe_dbg)) {
+    if (tool_dbg || redir_dbg || pipe_dbg) {
         fprintf(stderr, "[bg-stage] redir_count=%zu\n", redir_count);
-        if (redir_dbg && cmd && cmd->redirs) {
+        if (cmd && cmd->redirs && (redir_dbg || tool_dbg)) {
             for (size_t ri = 0; ri < redir_count; ++ri) {
                 ShellRedirection *r = &cmd->redirs[ri];
                 fprintf(stderr, "[bg-stage]   redir[%zu] fd=%d kind=%d path=%s dup=%d flags=0x%x\n",
@@ -1465,22 +1478,14 @@ static void *shellInProcessBackgroundMain(void *arg) {
         stdin_fd = open("/dev/null", O_RDONLY);
     }
 
-    char resolved_stdout[PATH_MAX];
-    char resolved_stderr[PATH_MAX];
     const char *stdout_env = stdout_raw;
     const char *stderr_env = stderr_raw;
-    if (tool_dbg && (redir_dbg || pipe_dbg)) {
+    if (tool_dbg || redir_dbg || pipe_dbg) {
         fprintf(stderr, "[bg-stage] stdout_raw=%s stderr_raw=%s\n",
                 stdout_raw ? stdout_raw : "<null>",
                 stderr_raw ? stderr_raw : "<null>");
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (stdout_raw && pathTruncateExpand(stdout_raw, resolved_stdout, sizeof(resolved_stdout))) {
-        stdout_env = resolved_stdout;
-    }
-    if (stderr_raw && pathTruncateExpand(stderr_raw, resolved_stderr, sizeof(resolved_stderr))) {
-        stderr_env = resolved_stderr;
-    }
     if (tool_dbg) {
         fprintf(stderr, "[bg-stage] cmd=%s stdout_raw=%s stderr_raw=%s\n",
                 cmd && cmd->argc > 0 ? cmd->argv[0] : "<null>",
@@ -1492,6 +1497,44 @@ static void *shellInProcessBackgroundMain(void *arg) {
     char *stderr_path = stderr_env ? strdup(stderr_env) : NULL;
     ctx->stdout_path = stdout_path;
     ctx->stderr_path = stderr_path;
+    int vm_stdout = -1;
+    int vm_stderr = -1;
+    /* If stderr was requested to follow stdout, reuse the stdout handle (after open). */
+    int bg_status = 0;
+#if defined(PSCAL_TARGET_IOS)
+    VProc *vp = NULL;
+#endif
+
+    if (stdout_path && *stdout_path) {
+        char resolved_out[PATH_MAX];
+        vm_stdout = shellBgOpenPath(stdout_path, stdout_append, resolved_out, sizeof(resolved_out));
+        if (vm_stdout >= 0 && resolved_out[0]) {
+            free(stdout_path);
+            stdout_path = strdup(resolved_out);
+        }
+        if (tool_dbg || redir_dbg) {
+            fprintf(stderr, "[bg-stage] open stdout '%s' fd=%d err=%s\n",
+                    stdout_path ? stdout_path : "<null>",
+                    vm_stdout, (vm_stdout < 0) ? strerror(errno) : "ok");
+        }
+    }
+    if (stderr_path && *stderr_path) {
+        char resolved_err[PATH_MAX];
+        vm_stderr = shellBgOpenPath(stderr_path, stderr_append, resolved_err, sizeof(resolved_err));
+        if (vm_stderr >= 0 && resolved_err[0]) {
+            free(stderr_path);
+            stderr_path = strdup(resolved_err);
+        }
+        if (tool_dbg || redir_dbg) {
+            fprintf(stderr, "[bg-stage] open stderr '%s' fd=%d err=%s\n",
+                    stderr_path ? stderr_path : "<null>",
+                    vm_stderr, (vm_stderr < 0) ? strerror(errno) : "ok");
+        }
+    }
+    if (stdout_path && stderr_path && strcmp(stdout_path, stderr_path) == 0 && vm_stdout >= 0) {
+        vm_stderr = vm_stdout;
+    }
+    /* Now that paths may have been rewritten, export the final paths for tools. */
     if (stdout_path) {
         setenv("PSCALI_BG_STDOUT", stdout_path, 1);
         setenv("PSCALI_BG_STDOUT_APPEND", stdout_append ? "1" : "0", 1);
@@ -1505,43 +1548,6 @@ static void *shellInProcessBackgroundMain(void *arg) {
     } else {
         unsetenv("PSCALI_BG_STDERR");
         unsetenv("PSCALI_BG_STDERR_APPEND");
-    }
-    int vm_stdout = -1;
-    int vm_stderr = -1;
-    /* If stderr was requested to follow stdout, reuse the stdout handle (after open). */
-    int bg_status = 0;
-#if defined(PSCAL_TARGET_IOS)
-    VProc *vp = NULL;
-#endif
-
-    if (stdout_path && *stdout_path) {
-        int flags = O_CREAT | O_WRONLY | (stdout_append ? O_APPEND : O_TRUNC);
-        vm_stdout = open(stdout_path, flags, 0666);
-        if (tool_dbg) {
-            fprintf(stderr, "[bg-stage] open stdout '%s' fd=%d err=%s\n",
-                    stdout_path, vm_stdout, (vm_stdout < 0) ? strerror(errno) : "ok");
-            if (vm_stdout < 0) {
-                fprintf(stderr, "[bg-stage] open stdout '%s' failed: %s\n", stdout_path, strerror(errno));
-            } else if (pipe_dbg) {
-                fprintf(stderr, "[bg-stage] opened stdout '%s' host_fd=%d\n", stdout_path, vm_stdout);
-            }
-        }
-    }
-    if (stderr_path && *stderr_path) {
-        int flags = O_CREAT | O_WRONLY | (stderr_append ? O_APPEND : O_TRUNC);
-        vm_stderr = open(stderr_path, flags, 0666);
-        if (tool_dbg) {
-            fprintf(stderr, "[bg-stage] open stderr '%s' fd=%d err=%s\n",
-                    stderr_path, vm_stderr, (vm_stderr < 0) ? strerror(errno) : "ok");
-            if (vm_stderr < 0) {
-                fprintf(stderr, "[bg-stage] open stderr '%s' failed: %s\n", stderr_path, strerror(errno));
-            } else if (pipe_dbg) {
-                fprintf(stderr, "[bg-stage] opened stderr '%s' host_fd=%d\n", stderr_path, vm_stderr);
-            }
-        }
-    }
-    if (stdout_path && stderr_path && strcmp(stdout_path, stderr_path) == 0 && vm_stdout >= 0) {
-        vm_stderr = vm_stdout;
     }
 #if defined(PSCAL_TARGET_IOS)
     vp = shellCreateVProcForStage(stdin_fd,
@@ -1806,18 +1812,141 @@ static void *shellInProcessWorkerMain(void *arg) {
 
 static int shellFinishPipeline(const ShellCommand *tail_cmd);
 
+#if defined(PSCAL_TARGET_IOS)
+static bool shellDupOntoTarget(VProc *vp, int src_fd, int target_fd, bool dbg, const char *label);
+static void shellBgEnsureParentDir(const char *path) {
+    if (!path || !*path) {
+        return;
+    }
+    const char *last_slash = strrchr(path, '/');
+    if (!last_slash || last_slash == path) {
+        /* No parent component or root only. */
+        return;
+    }
+    char buf[PATH_MAX];
+    size_t len = (size_t)(last_slash - path);
+    if (len >= sizeof(buf)) {
+        return;
+    }
+    memcpy(buf, path, len);
+    buf[len] = '\0';
+    /* Create each segment of the parent path. */
+    for (char *p = buf + 1; *p; ++p) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(buf, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(buf, 0777);
+}
+static int shellBgOpenPath(const char *raw_path,
+                           bool append,
+                           char *out_final,
+                           size_t out_final_sz) {
+    if (out_final && out_final_sz > 0) {
+        out_final[0] = '\0';
+    }
+    if (!raw_path || !*raw_path) {
+        return -1;
+    }
+    const char *open_path = raw_path;
+    char expanded[PATH_MAX];
+    bool expanded_ok = pathTruncateExpand(raw_path, expanded, sizeof(expanded));
+    if (expanded_ok) {
+        open_path = expanded;
+    }
+    shellBgEnsureParentDir(open_path);
+    int flags = O_CREAT | O_WRONLY | (append ? O_APPEND : O_TRUNC);
+    int fd = open(open_path, flags, 0666);
+    if (fd < 0 && expanded_ok) {
+        /* Fallback to raw path if the expansion produced an inaccessible path
+         * (common under host test stubs). */
+        shellBgEnsureParentDir(raw_path);
+        fd = open(raw_path, flags, 0666);
+        if (fd >= 0) {
+            open_path = raw_path;
+        }
+    }
+    if (fd >= 0 && out_final && out_final_sz > 0) {
+        snprintf(out_final, out_final_sz, "%s", open_path);
+    }
+    return fd;
+}
+static void shellPipelineSessionCloseSpool(ShellPipelineContext *ctx) {
+    if (!ctx) {
+        return;
+    }
+    if (PIPE_SPOOL_FD(ctx) >= 0 && PIPE_SPOOL_OWNED(ctx)) {
+        vprocHostClose(PIPE_SPOOL_FD(ctx));
+    }
+    PIPE_SPOOL_FD(ctx) = -1;
+    PIPE_SPOOL_SIZE(ctx) = 0;
+    PIPE_SPOOL_OWNED(ctx) = false;
+}
+
+static void shellPipelineSessionCloseStdStreams(ShellPipelineContext *ctx) {
+    if (!ctx) {
+        return;
+    }
+    if (PIPE_STDIN_FD(ctx) >= 0 && PIPE_STDIN_OWNED(ctx)) {
+        vprocHostClose(PIPE_STDIN_FD(ctx));
+    }
+    if (PIPE_STDOUT_FD(ctx) >= 0 && PIPE_STDOUT_OWNED(ctx)) {
+        vprocHostClose(PIPE_STDOUT_FD(ctx));
+    }
+    if (PIPE_STDERR_FD(ctx) >= 0 && PIPE_STDERR_OWNED(ctx)) {
+        vprocHostClose(PIPE_STDERR_FD(ctx));
+    }
+    PIPE_STDIN_FD(ctx) = -1;
+    PIPE_STDOUT_FD(ctx) = -1;
+    PIPE_STDERR_FD(ctx) = -1;
+    PIPE_STDIN_OWNED(ctx) = false;
+    PIPE_STDOUT_OWNED(ctx) = false;
+    PIPE_STDERR_OWNED(ctx) = false;
+}
+
+static void shellPipelineSessionRestoreStdStreams(ShellPipelineContext *ctx) {
+    if (!ctx) {
+        return;
+    }
+    if (PIPE_STDIN_FD(ctx) >= 0) {
+        vprocHostDup2(PIPE_STDIN_FD(ctx), STDIN_FILENO);
+        shellResetStandardStream(STDIN_FILENO);
+    }
+    if (PIPE_STDOUT_FD(ctx) >= 0) {
+        vprocHostDup2(PIPE_STDOUT_FD(ctx), STDOUT_FILENO);
+        shellResetStandardStream(STDOUT_FILENO);
+    }
+    if (PIPE_STDERR_FD(ctx) >= 0) {
+        vprocHostDup2(PIPE_STDERR_FD(ctx), STDERR_FILENO);
+        shellResetStandardStream(STDERR_FILENO);
+    }
+    shellPipelineSessionCloseStdStreams(ctx);
+}
+
+static void shellPipelineSessionSnapshotStdStreams(ShellPipelineContext *ctx) {
+    if (!ctx) {
+        return;
+    }
+    shellPipelineSessionCloseStdStreams(ctx);
+    PIPE_STDIN_FD(ctx) = vprocHostDup(STDIN_FILENO);
+    PIPE_STDOUT_FD(ctx) = vprocHostDup(STDOUT_FILENO);
+    PIPE_STDERR_FD(ctx) = vprocHostDup(STDERR_FILENO);
+    PIPE_STDIN_OWNED(ctx) = PIPE_STDIN_FD(ctx) >= 0;
+    PIPE_STDOUT_OWNED(ctx) = PIPE_STDOUT_FD(ctx) >= 0;
+    PIPE_STDERR_OWNED(ctx) = PIPE_STDERR_FD(ctx) >= 0;
+}
+#endif
+
 static void shellResetPipeline(void) {
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     if (!ctx->active) {
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (PIPE_SPOOL_FD(ctx) >= 0) {
-        vprocHostClose(PIPE_SPOOL_FD(ctx));
-        PIPE_SPOOL_FD(ctx) = -1;
-        PIPE_SPOOL_SIZE(ctx) = 0;
-        PIPE_SPOOL_OWNED(ctx) = false;
-    }
+    shellPipelineSessionRestoreStdStreams(ctx);
+    shellPipelineSessionCloseSpool(ctx);
     ctx->in_process = false;
     ctx->in_process_worker = false;
 #endif
@@ -1861,12 +1990,8 @@ static void shellAbortPipeline(void) {
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    if (PIPE_SPOOL_FD(ctx) >= 0) {
-        vprocHostClose(PIPE_SPOOL_FD(ctx));
-        PIPE_SPOOL_FD(ctx) = -1;
-        PIPE_SPOOL_SIZE(ctx) = 0;
-        PIPE_SPOOL_OWNED(ctx) = false;
-    }
+    shellPipelineSessionRestoreStdStreams(ctx);
+    shellPipelineSessionCloseSpool(ctx);
 #endif
     if (ctx->pipes) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
@@ -1916,9 +2041,8 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
 #if defined(PSCAL_TARGET_IOS)
     ctx->in_process = true;
     ctx->in_process_worker = false;
-    PIPE_SPOOL_FD(ctx) = -1;
-    PIPE_SPOOL_SIZE(ctx) = 0;
-    PIPE_SPOOL_OWNED(ctx) = false;
+    shellPipelineSessionCloseSpool(ctx);
+    shellPipelineSessionSnapshotStdStreams(ctx);
 #endif
     ctx->pids = calloc(stages, sizeof(pid_t));
     if (!ctx->pids) {
@@ -2946,8 +3070,14 @@ static int shellRunBuiltinInProcess(VM *vm,
     size_t backup_capacity = 0;
     int status = 127;
     bool applied_redirs = false;
-
-    bool allow_missing_backup = gShellRuntime.pipeline.active;
+#if defined(PSCAL_TARGET_IOS)
+    bool pipeline_in_process = gShellRuntime.pipeline.active &&
+                               gShellRuntime.pipeline.in_process &&
+                               !gShellBackgroundWorkerActive;
+#else
+    bool pipeline_in_process = false;
+#endif
+    bool allow_missing_backup = pipeline_in_process;
     if (stdin_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDIN_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stdin failed\n");
@@ -3232,6 +3362,15 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 (int)cmd->background, ctx->stage_count, stage_pos);
     }
     if (pipeline_tail && ctx->background && ctx->stage_count == 1) {
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+        /* In the host test shim build, run background stages inline to avoid
+         * thread/pipeline interactions that are stubbed out. */
+        if (pipe_dbg) {
+            fprintf(stderr, "[pipeline-bg] stub build: running background inline\n");
+        }
+        ctx->background = false;
+        cmd->background = false;
+#else
         if (pipe_dbg) {
             fprintf(stderr, "[pipeline-bg] attempt tail=%d ctx_bg=%d cmd_bg=%d stages=%zu\n",
                     (int)pipeline_tail, (int)ctx->background, (int)cmd->background, ctx->stage_count);
@@ -3311,6 +3450,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         shellUpdateStatus(1);
         shellResetPipeline();
         return true;
+#endif
     }
 #endif
     int stdin_fd = -1;

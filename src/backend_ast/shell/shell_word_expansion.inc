@@ -2781,7 +2781,9 @@ static void shellRemoveJobAt(size_t index) {
     }
 }
 
+#if defined(PSCAL_TARGET_IOS)
 static ShellJob *shellFindJobByPid(pid_t pid);
+#endif
 
 static size_t shellAllocateJobId(void) {
     size_t candidate = 1;

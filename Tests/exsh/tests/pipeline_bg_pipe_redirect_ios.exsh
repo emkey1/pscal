@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+tmp="./exsh-bg-pipe-redirect.$$"
+rm -f "$tmp"
+echo "pipeline-bg-pipe-redirect:start"
+help -l > "$tmp" &
+wait
+grep history "$tmp" || echo "missing-history"
+rm -f "$tmp"
+echo "pipeline-bg-pipe-redirect:end"
+exit 0
