@@ -3573,24 +3573,20 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
-            /* Prefer preloading the buffer to avoid blocking reads on odd fd types. */
+            /* Try to preload into memory and write synchronously to avoid feed threads hanging. */
             bool loaded_buffer = false;
+            const size_t kSpoolPreloadLimit =
 #if defined(PSCAL_TARGET_IOS)
-            const size_t kSpoolPreloadLimit = 64 * 1024 * 1024;
+                64 * 1024 * 1024;
 #else
-            const size_t kSpoolPreloadLimit = SIZE_MAX;
+                SIZE_MAX;
 #endif
-            off_t end = vprocHostLseek(input_spool_fd, 0, SEEK_END);
-            if (end >= 0) {
-                (void)vprocHostLseek(input_spool_fd, 0, SEEK_SET);
-            }
-            if (end > 0 && (size_t)end <= kSpoolPreloadLimit) {
-                size_t size = (size_t)end;
-                char *buf = (char *)malloc(size ? size : 1);
+            if (ctx->spool_size > 0 && ctx->spool_size <= kSpoolPreloadLimit) {
+                char *buf = (char *)malloc(ctx->spool_size);
                 if (buf) {
                     size_t off = 0;
-                    while (off < size) {
-                        ssize_t r = vprocHostRead(input_spool_fd, buf + off, size - off);
+                    while (off < ctx->spool_size) {
+                        ssize_t r = vprocHostRead(input_spool_fd, buf + off, ctx->spool_size - off);
                         if (r < 0) {
                             if (errno == EINTR) continue;
                             break;
@@ -3600,18 +3596,31 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                         }
                         off += (size_t)r;
                     }
-                    if (off == size) {
-                        feed.data = buf;
-                        feed.len = size;
-                        feed.src_fd = -1;
-                        feed_owns_data = true;
+                    if (off == ctx->spool_size) {
+                        /* Push the preloaded buffer and close the write end so readers see EOF. */
+                        size_t wrote = 0;
+                        while (wrote < ctx->spool_size) {
+                            ssize_t w = vprocHostWrite(input_pipe[1], buf + wrote, ctx->spool_size - wrote);
+                            if (w < 0) {
+                                if (errno == EINTR) continue;
+                                break;
+                            }
+                            wrote += (size_t)w;
+                        }
+                        vprocHostClose(input_pipe[1]);
+                        input_pipe[1] = -1;
+                        free(buf);
+                        stdin_fd = input_pipe[0];
+                        input_pipe[0] = -1;
                         loaded_buffer = true;
                     } else {
                         free(buf);
+                        vprocHostLseek(input_spool_fd, 0, SEEK_SET);
                     }
                 }
             }
             if (!loaded_buffer) {
+                /* Fall back to threaded feed. */
                 feed.src_fd = vprocHostDup(input_spool_fd);
                 if (feed.src_fd < 0) {
                     runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
@@ -3619,18 +3628,18 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                     return false;
                 }
                 vprocHostLseek(feed.src_fd, 0, SEEK_SET);
+                feed.fd = input_pipe[1];
+                input_pipe[1] = -1;
+                if (vprocHostPthreadCreate(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
+                    feed_thread_started = true;
+                } else {
+                    runtimeError(vm, "pipeline: failed to start feeder");
+                    shellUpdateStatus(1);
+                    goto cleanup;
+                }
+                stdin_fd = input_pipe[0];
+                input_pipe[0] = -1;
             }
-            feed.fd = input_pipe[1];
-            input_pipe[1] = -1;
-            if (vprocHostPthreadCreate(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
-                feed_thread_started = true;
-            } else {
-                runtimeError(vm, "pipeline: failed to start feeder");
-                shellUpdateStatus(1);
-                goto cleanup;
-            }
-            stdin_fd = input_pipe[0];
-            input_pipe[0] = -1;
         }
     }
 
