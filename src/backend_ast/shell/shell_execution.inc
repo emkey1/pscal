@@ -3513,6 +3513,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     pthread_t feed_thread;
     bool feed_thread_started = false;
     ShellPipelineFeed feed = { .data = NULL, .len = 0, .fd = -1, .src_fd = -1, .err = 0 };
+    bool feed_owns_data = false;
     pthread_t capture_thread;
     bool capture_thread_started = false;
     ShellPipelineCapture capture = { .fd = -1, .spool_fd = -1, .size = 0, .capacity = 0, .err = 0, .buffer = NULL };
@@ -3572,13 +3573,57 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
-            feed.src_fd = vprocHostDup(input_spool_fd);
-            if (feed.src_fd < 0) {
-                runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
+            /* Prefer preloading the buffer to avoid blocking reads on odd fd types. */
+            bool loaded_buffer = false;
+#if defined(PSCAL_TARGET_IOS)
+            const size_t kSpoolPreloadLimit = 2 * 1024 * 1024;
+#else
+            const size_t kSpoolPreloadLimit = SIZE_MAX;
+#endif
+            off_t end = vprocHostLseek(input_spool_fd, 0, SEEK_END);
+            if (end >= 0 && (size_t)end <= kSpoolPreloadLimit) {
+                if (vprocHostLseek(input_spool_fd, 0, SEEK_SET) == 0) {
+                    size_t size = (size_t)end;
+                    char *buf = NULL;
+                    if (size == 0) {
+                        buf = (char *)malloc(1);
+                    } else {
+                        buf = (char *)malloc(size);
+                    }
+                    if (buf) {
+                        size_t off = 0;
+                        while (off < size) {
+                            ssize_t r = vprocHostRead(input_spool_fd, buf + off, size - off);
+                            if (r < 0) {
+                                if (errno == EINTR) continue;
+                                break;
+                            }
+                            if (r == 0) {
+                                break;
+                            }
+                            off += (size_t)r;
+                        }
+                        if (off == size) {
+                            feed.data = buf;
+                            feed.len = size;
+                            feed.src_fd = -1;
+                            feed_owns_data = true;
+                            loaded_buffer = true;
+                        } else {
+                            free(buf);
+                        }
+                    }
+                }
             }
-            vprocHostLseek(feed.src_fd, 0, SEEK_SET);
+            if (!loaded_buffer) {
+                feed.src_fd = vprocHostDup(input_spool_fd);
+                if (feed.src_fd < 0) {
+                    runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
+                    shellUpdateStatus(errno ? errno : 1);
+                    return false;
+                }
+                vprocHostLseek(feed.src_fd, 0, SEEK_SET);
+            }
             feed.fd = input_pipe[1];
             input_pipe[1] = -1;
             if (vprocHostPthreadCreate(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
@@ -3980,6 +4025,11 @@ cleanup:
             runtimeError(vm, "pipeline: failed to feed input: %s", strerror(feed.err));
             shellUpdateStatus(feed.err);
         }
+    }
+    if (feed_owns_data && feed.data) {
+        free((void *)feed.data);
+        feed.data = NULL;
+        feed.len = 0;
     }
 
     if (!pipeline_head && input_spool_fd >= 0) {
