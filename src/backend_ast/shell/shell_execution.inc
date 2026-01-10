@@ -3551,7 +3551,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         }
         vprocHostLseek(input_spool_fd, 0, SEEK_SET);
         stdin_fd = input_spool_fd;
-        input_spool_fd = -1; /* keep ctx->spool_fd open for tail cleanup */
+        input_spool_fd = -1; /* keep session spool open for tail cleanup */
         if (getenv("PSCALI_PIPE_DEBUG")) {
             fprintf(stderr, "[pipe] using spool_fd=%d size=%zu as stdin\n", stdin_fd, PIPE_SPOOL_SIZE(ctx));
         }
