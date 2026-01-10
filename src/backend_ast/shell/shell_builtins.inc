@@ -17,6 +17,7 @@
 #include "common/path_truncate.h"
 #include "smallclue/smallclue.h"
 #include "ios/vproc.h"
+extern int PSCALRuntimeSetTabTitle(const char *title);
 static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
     if (!input) {
         return NULL;
@@ -3139,6 +3140,29 @@ Value vmBuiltinShellStdioInfo(VM *vm, int arg_count, Value *args) {
 #endif
 
     shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellTabName(VM *vm, int arg_count, Value *args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "tabname: expected a single title string");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+#if defined(PSCAL_TARGET_IOS)
+    const char *title = args[0].s_val;
+    int rc = PSCALRuntimeSetTabTitle(title);
+    if (rc != 0) {
+        runtimeError(vm, "tabname: unable to update tab title");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    shellUpdateStatus(0);
+#else
+    (void)args;
+    runtimeError(vm, "tabname: tab naming is only available on iOS/iPadOS builds");
+    shellUpdateStatus(1);
+#endif
     return makeVoid();
 }
 

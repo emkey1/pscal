@@ -2505,6 +2505,38 @@ invoke_cleanup:
     return true;
 }
 
+#if defined(PSCAL_TARGET_IOS)
+extern int PSCALRuntimeSetTabTitle(const char *title);
+
+static const char *shellSshTargetFromCommand(const ShellCommand *cmd) {
+    if (!cmd || cmd->argc <= 1) {
+        return NULL;
+    }
+    bool skip_next = false;
+    for (size_t i = 1; i < cmd->argc; ++i) {
+        const char *arg = cmd->argv[i];
+        if (!arg) {
+            continue;
+        }
+        if (skip_next) {
+            skip_next = false;
+            continue;
+        }
+        if (strcmp(arg, "-l") == 0 || strcmp(arg, "-p") == 0 ||
+            strcmp(arg, "-i") == 0 || strcmp(arg, "-F") == 0 ||
+            strcmp(arg, "-o") == 0 || strcmp(arg, "-b") == 0) {
+            skip_next = true;
+            continue;
+        }
+        if (arg[0] == '-') {
+            continue;
+        }
+        return arg;
+    }
+    return NULL;
+}
+#endif
+
 static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || cmd->argc == 0 || !cmd->argv[0] || *cmd->argv[0] == '\0') {
         return false;
@@ -2552,6 +2584,16 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
             lookup = canonical ? canonical : name;
         }
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (canonical && strcasecmp(canonical, "ssh") == 0) {
+        const char *target = shellSshTargetFromCommand(cmd);
+        if (target && *target) {
+            char label[64];
+            snprintf(label, sizeof(label), "SSH %s", target);
+            (void)PSCALRuntimeSetTabTitle(label);
+        }
+    }
+#endif
 #if defined(PSCAL_TARGET_IOS)
     if (!handler && is_runtime_builtin && shellDispatchIOSFrontendBuiltin(vm, cmd)) {
         return true;

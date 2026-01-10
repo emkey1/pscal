@@ -21,7 +21,8 @@ final class TerminalTabManager: ObservableObject {
         }
 
         let id: UInt64
-        let title: String
+        var title: String
+        var sessionId: UInt64?
         let kind: Kind
     }
 
@@ -44,7 +45,10 @@ final class TerminalTabManager: ObservableObject {
 
     private init() {
         let runtime = PscalRuntimeBootstrap.shared
-        let shellTab = Tab(id: shellId, title: "Shell", kind: .shell(runtime))
+        let shellTab = Tab(id: shellId,
+                          title: TerminalTabManager.sanitizeTitle("Shell"),
+                          sessionId: nil,
+                          kind: .shell(runtime))
         tabs = [shellTab]
         selectedId = shellId
         runtime.assignTabId(shellId)
@@ -72,9 +76,9 @@ final class TerminalTabManager: ObservableObject {
             }
         }.count
         let newId = PSCALRuntimeNextSessionId()
-        let title = "Shell \(shellCount + 1)"
+        let title = TerminalTabManager.sanitizeTitle("Shell \(shellCount + 1)")
         let runtime = PscalRuntimeBootstrap()
-        let tab = Tab(id: newId, title: title, kind: .shell(runtime))
+        let tab = Tab(id: newId, title: title, sessionId: nil, kind: .shell(runtime))
         tabs.append(tab)
         selectedId = newId
         runtime.assignTabId(newId)
@@ -172,8 +176,8 @@ final class TerminalTabManager: ObservableObject {
             tabInitLog("openSshSession start failed errno=\(err)")
             return -(err == 0 ? EIO : err)
         }
-        let title = sshTitle(argv: argv)
-        let tab = Tab(id: sessionId, title: title, kind: .ssh(session))
+        let title = TerminalTabManager.sanitizeTitle(sshTitle(argv: argv))
+        let tab = Tab(id: sessionId, title: title, sessionId: sessionId, kind: .ssh(session))
         tabs.append(tab)
         selectedId = sessionId
         logMultiTab("open ssh tab id=\(sessionId) title=\(title)")
@@ -254,6 +258,27 @@ final class TerminalTabManager: ObservableObject {
             return "SSH \(arg)"
         }
         return "SSH"
+    }
+
+    fileprivate func registerShellSession(tabId: UInt64, sessionId: UInt64) {
+        guard sessionId != 0, let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        tabs[idx].sessionId = sessionId
+    }
+
+    fileprivate func updateTitle(forSessionId sessionId: UInt64, rawTitle: String) -> Bool {
+        guard sessionId != 0 else { return false }
+        guard let idx = tabs.firstIndex(where: { $0.sessionId == sessionId }) else { return false }
+        let title = TerminalTabManager.sanitizeTitle(rawTitle)
+        tabs[idx].title = title
+        return true
+    }
+
+    fileprivate static func sanitizeTitle(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "Session"
+        }
+        return String(trimmed.prefix(15))
     }
 
     private func logMultiTab(_ message: String) {
@@ -404,6 +429,17 @@ func pscalRuntimeOpenShellTab() -> Int32 {
         return result
     }
     return -EAGAIN
+}
+
+@_cdecl("pscalRuntimeSetTabTitleForSession")
+func pscalRuntimeSetTabTitleForSession(_ sessionId: UInt64, _ titlePtr: UnsafePointer<CChar>?) -> Int32 {
+    let raw = titlePtr.map { String(cString: $0) } ?? ""
+    if let success = runOnMainBlocking("setTabTitle", work: {
+        TerminalTabManager.shared.updateTitle(forSessionId: sessionId, rawTitle: raw)
+    }), success {
+        return 0
+    }
+    return -EINVAL
 }
 
 @_cdecl("pscalRuntimeSshSessionExited")

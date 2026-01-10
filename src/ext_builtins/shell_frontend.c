@@ -116,6 +116,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
     registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);
+    registerShellBuiltin(category, command_group, "tabname", vmBuiltinShellTabName);
 #endif
     registerShellBuiltin(category, command_group, "stdioinfo", vmBuiltinShellStdioInfo);
 }

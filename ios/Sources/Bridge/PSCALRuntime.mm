@@ -84,6 +84,7 @@ extern "C" {
     ShellRuntimeState *shellRuntimeCreateContext(void);
     ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx);
     void shellRuntimeDestroyContext(ShellRuntimeState *ctx);
+    int32_t pscalRuntimeSetTabTitleForSession(uint64_t session_id, const char *title);
 }
 
 static const size_t kOutputBacklogLimit = 512 * 1024;
@@ -350,6 +351,14 @@ void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) {
 
 PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) {
     return PSCALRuntimeCurrentContext();
+}
+
+uint64_t PSCALRuntimeCurrentSessionId(void) {
+    uint64_t session_id = 0;
+    pthread_mutex_lock(&s_runtime_mutex);
+    session_id = s_runtime_session_id;
+    pthread_mutex_unlock(&s_runtime_mutex);
+    return session_id;
 }
 
 VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
@@ -1694,6 +1703,14 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
     if (active && runtime_thread) {
         pthread_kill(runtime_thread, SIGWINCH);
     }
+}
+
+int PSCALRuntimeSetTabTitle(const char *title) {
+    uint64_t session_id = PSCALRuntimeCurrentSessionId();
+    if (session_id == 0 || !title) {
+        return -1;
+    }
+    return (int)pscalRuntimeSetTabTitleForSession(session_id, title);
 }
 
 void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int rows) {

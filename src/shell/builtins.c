@@ -142,6 +142,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"smallclue-help", "smallclue-help", -1},
     {"dmesg", "dmesg", -1},
     {"licenses", "licenses", -1},
+    {"tabname", "tabname", -1},
 #endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},

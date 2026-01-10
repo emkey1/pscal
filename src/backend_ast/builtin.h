@@ -203,6 +203,7 @@ Value vmBuiltinShellGetopts(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellMapfile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTrue(struct VM_s* vm, int arg_count, Value* args);
 #ifdef PSCAL_TARGET_IOS
+Value vmBuiltinShellTabName(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCat(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellClear(struct VM_s* vm, int arg_count, Value* args);

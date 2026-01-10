@@ -25,6 +25,8 @@ void PSCALRuntimeDestroyRuntimeContext(PSCALRuntimeContext *ctx);
 void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
 /// Returns the runtime context for the current thread (shared context if unset).
 PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
+/// Returns the active session id for the current runtime context (0 if none).
+uint64_t PSCALRuntimeCurrentSessionId(void);
 /// Returns the VProc session stdio stored in the current runtime context.
 VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void);
 /// Sets the VProc session stdio for the current runtime context.
@@ -72,6 +74,8 @@ void PSCALRuntimeConfigureAsanReportPath(const char *path);
 /// Updates the PTY window size (columns/rows). Safe to call before launching;
 /// the size will be applied once exsh starts.
 void PSCALRuntimeUpdateWindowSize(int columns, int rows);
+/// Requests the UI to update the current tab title (iOS only).
+int PSCALRuntimeSetTabTitle(const char *title);
 
 void pscalRuntimeDebugLog(const char *message);
 void PSCALRuntimeLogLine(const char *message);

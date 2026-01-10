@@ -319,6 +319,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var closeOnExit: Bool = false
     private var awaitingExitConfirmation: Bool = false
     private var tabId: UInt64 = 0
+    private var sessionId: UInt64 = 0
     private var shellContext: UnsafeMutableRawPointer?
     private var runtimeContext: OpaquePointer?
     private var outputDrainTimer: DispatchSourceTimer?
@@ -662,6 +663,15 @@ final class PscalRuntimeBootstrap: ObservableObject {
                     let rows = Int32(metrics.rows)
                     if cols > 0 && rows > 0 {
                         PSCALRuntimeUpdateWindowSize(cols, rows)
+                    }
+
+                    let sessionId = PSCALRuntimeCurrentSessionId()
+                    if sessionId != 0 {
+                        self.stateQueue.async { self.sessionId = sessionId }
+                        DispatchQueue.main.async {
+                            TerminalTabManager.shared.registerShellSession(tabId: self.tabId,
+                                                                           sessionId: sessionId)
+                        }
                     }
                 }
             }
