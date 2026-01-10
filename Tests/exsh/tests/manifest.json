@@ -352,6 +352,48 @@
             "expected_stdout": "jobs-wait:start\njobs:before-start\n[1] Running sleep 0.4\njobs:before-end\nbg:ran\njobs:after-start\njobs:after-end\njobs-wait:end"
         },
         {
+            "id": "jobs_wait_all",
+            "name": "wait without args reaps all jobs",
+            "category": "jobs",
+            "description": "wait with no arguments should wait for all active jobs (bash-compatible).",
+            "script": "Tests/exsh/tests/jobs_wait_all.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "jobs-wait-all:start\njobs:before-start\n[1] Running sleep 1\n[2] Running sleep 1\njobs:before-end\njobs:after-start\njobs:after-end\njobs-wait-all:end"
+        },
+        {
+            "id": "jobspec_kill_stability",
+            "name": "job-spec kill keeps ids stable",
+            "category": "jobs",
+            "description": "Job-spec resolution mirrors bash: ids stay stable after deletions and %N targets the original job.",
+            "script": "Tests/exsh/tests/jobspec_kill.exsh",
+            "expect": "runtime_ok"
+        },
+        {
+            "id": "jobspec_kill_vproc_required",
+            "name": "job-spec kill required (vproc)",
+            "category": "jobs",
+            "description": "Enforce job-spec kill availability when running the iOS/vproc build.",
+            "script": "Tests/exsh/tests/jobspec_kill.exsh",
+            "expect": "runtime_ok",
+            "env": {
+                "REQUIRE_JOBSPEC": "1",
+                "JOBSPEC_VPROC_ONLY": "1"
+            }
+        },
+        {
+            "id": "jobspec_kill_shell_vproc",
+            "name": "job-spec kill works with shell vproc active",
+            "category": "jobs",
+            "description": "Runs the jobspec kill regression with PSCALI_SHELL_VPROC enabled so builtin redirections and error suppression exercise the vproc fd table.",
+            "script": "Tests/exsh/tests/jobspec_kill.exsh",
+            "expect": "runtime_ok",
+            "env": {
+                "REQUIRE_JOBSPEC": "1",
+                "JOBSPEC_VPROC_ONLY": "1",
+                "PSCALI_SHELL_VPROC": "1"
+            }
+        },
+        {
             "id": "lexer_assignment_context",
             "name": "Assignment detection respects arithmetic words",
             "category": "lexer",
@@ -700,6 +742,15 @@
             "expected_stderr_substring": "printf: usage"
         },
         {
+            "id": "shebang_exec_slash_command",
+            "name": "shebang script dispatches through exec path",
+            "category": "runtime",
+            "description": "Executable paths containing slashes should be executed via their shebang interpreter instead of failing builtin lookup.",
+            "script": "Tests/exsh/tests/shebang_exec.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "shebang-fixture"
+        },
+        {
             "id": "times_builtin",
             "name": "times reports CPU usage lines",
             "category": "builtins",
@@ -707,6 +758,54 @@
             "script": "Tests/exsh/tests/times_builtin.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "status:0\nline_count:2\nfirst_format:ok\nsecond_format:ok\n"
+        },
+        {
+            "id": "watch_top_vproc",
+            "name": "watch/top produce distinct vprocs (vproc)",
+            "category": "jobs",
+            "description": "Running `watch -n ... top` should show both `watch ...` and the spawned `top` as distinct synthetic tasks in the vproc-backed `top` listing.",
+            "script": "Tests/exsh/tests/watch_top_vproc.exsh",
+            "expect": "runtime_ok"
+        },
+        {
+            "id": "watch_top_foreground_vproc",
+            "name": "watch/top foreground keeps shell label (vproc)",
+            "category": "jobs",
+            "description": "Running `watch -n ... top` in the foreground should still create a distinct vproc for watch and the watched command without overwriting the shell CMD label.",
+            "script": "Tests/exsh/tests/watch_top_foreground_vproc.exsh",
+            "expect": "runtime_ok"
+        },
+        {
+            "id": "lps_shell_label",
+            "name": "lps keeps shell cmd label (vproc)",
+            "category": "jobs",
+            "description": "Running the iOS-only synthetic `lps` builtin should not relabel the shell vproc entry as `lps`.",
+            "script": "Tests/exsh/tests/lps_shell_label.exsh",
+            "expect": "runtime_ok"
+        },
+        {
+            "id": "top_tree_default",
+            "name": "top defaults to tree view (vproc)",
+            "category": "jobs",
+            "description": "`top` should default to tree output that exposes PPID/SID relationship data.",
+            "script": "Tests/exsh/tests/top_tree_default.exsh",
+            "expect": "runtime_ok"
+        },
+        {
+            "id": "lps_tree_option",
+            "name": "lps supports --tree (vproc)",
+            "category": "jobs",
+            "description": "`lps --tree` should exist and expose PPID/SID relationship data.",
+            "script": "Tests/exsh/tests/lps_tree_option.exsh",
+            "expect": "runtime_ok"
+        },
+        {
+            "id": "kernel_tree_root",
+            "name": "kernel roots vproc tree (vproc)",
+            "category": "jobs",
+            "description": "The synthetic per-session kernel process should exist and be the root, with the shell as its child.",
+            "script": "Tests/exsh/tests/kernel_tree_root.exsh",
+            "expect": "runtime_ok"
         }
     ]
 }

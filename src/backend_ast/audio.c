@@ -2,13 +2,10 @@
 
 #include "audio.h"
 #include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
-#include "utils.h" // For EXIT_FAILURE_HANDLER
+#include "core/utils.h" // For EXIT_FAILURE_HANDLER
 #include "pscal_paths.h"
 #include <stdio.h>
 #include <string.h> // For strdup
-#ifdef SDL
-#include <SDL2/SDL.h> // Need basic SDL for SDL_InitSubSystem, SDL_WasInit
-#endif
 #include "vm/vm.h" // <<< ADDED: For VM struct and runtimeError prototype
 
 
@@ -59,14 +56,14 @@ void audioInitSystem(void) {
     DEBUG_PRINT("[DEBUG AUDIO] Initializing sound system...\n");
 
     // Initialize SDL audio subsystem (if it hasn't been by SDL_Init(SDL_INIT_VIDEO))
-    if (!SDL_WasInit(SDL_INIT_AUDIO)) {
-         DEBUG_PRINT("[DEBUG AUDIO] SDL_INIT_AUDIO not yet initialized. Calling SDL_InitSubSystem(SDL_INIT_AUDIO).\n");
-        if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
-            fprintf(stderr, "Runtime error: SDL_InitSubSystem(SDL_INIT_AUDIO) failed: %s\n", SDL_GetError());
+    if ((PSCAL_SDL_WAS_INIT(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) == 0) {
+         DEBUG_PRINT("[DEBUG AUDIO] SDL_INIT_AUDIO not yet initialized. Calling SDL_Init(SDL_INIT_AUDIO).\n");
+        if (PSCAL_SDL_INIT_SUBSYSTEM(SDL_INIT_AUDIO) < 0) {
+            fprintf(stderr, "Runtime error: SDL_Init(SDL_INIT_AUDIO) failed: %s\n", SDL_GetError());
             // Decide whether this is a fatal error or if we can continue without sound
             EXIT_FAILURE_HANDLER(); // For now, treat as fatal
         }
-        DEBUG_PRINT("[DEBUG AUDIO] SDL_InitSubSystem(SDL_INIT_AUDIO) successful.\n");
+        DEBUG_PRINT("[DEBUG AUDIO] SDL_Init(SDL_INIT_AUDIO) successful.\n");
     } else {
          DEBUG_PRINT("[DEBUG AUDIO] SDL_INIT_AUDIO already initialized.\n");
     }

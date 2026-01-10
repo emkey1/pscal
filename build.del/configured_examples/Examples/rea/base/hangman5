@@ -1,0 +1,641 @@
+#!/usr/bin/env rea
+// CRT routines like GotoXY and TextColor are available as built-ins,
+// but color constants come from the CRT unit.
+#import "crt";
+
+// --- Game configuration ---
+const int MAX_WRONG = 8;
+
+// Layout rows relative to the top margin
+const int HEADER_ROW = 1;
+const int SUBTITLE_ROW = 2;
+const int WORD_ROW = 4;
+const int HANGMAN_ROW = 6;
+const int GUESSBAR_ROW = 15;
+const int GUESSED_ROW = 17;
+const int PROMPT_ROW = 19;
+const int MSG_ROW = 21;
+
+const int GAME_HEIGHT = 24;
+const int MAX_ELEMENT_WIDTH = 40;
+const int HANGMAN_WIDTH = 12;
+const int BORDER_PADDING = 2;
+
+const char CornerTL = '╔';
+const char CornerTR = '╗';
+const char CornerBL = '╚';
+const char CornerBR = '╝';
+const char LineH = '═';
+const char LineV = '║';
+
+str ConfiguredWordsPath = "/usr/local/pscal/etc/words";
+
+bool contains(str s, char c) {
+  int i = 1;
+  while (i <= length(s)) {
+    if (s[i] == c) return true;
+    i = i + 1;
+  }
+  return false;
+}
+
+str sortString(str s) {
+  int i = 1;
+  while (i <= length(s)) {
+    int j = i + 1;
+    while (j <= length(s)) {
+      if (s[i] > s[j]) {
+        char t = s[i];
+        s[i] = s[j];
+        s[j] = t;
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  return s;
+}
+
+
+// --- Word repository ---
+class WordRepository {
+  // store up to 2048 words loaded from the system dictionary
+  str words[2048];
+  int count;
+
+  str normalizeSlashes(str input) {
+    str result = input;
+    int i = 1;
+    while (i <= length(result)) {
+      int code = ord(result[i]);
+      if (code == 92) {
+        result[i] = '/';
+      }
+      i = i + 1;
+    }
+    return result;
+  }
+
+  str scriptDirectory() {
+    str script = paramstr(0);
+    if (length(script) == 0) return "";
+    script = my.normalizeSlashes(script);
+    int len = length(script);
+    while (len > 0 && script[len] == '/') {
+      len = len - 1;
+    }
+    if (len <= 0) return "";
+    int i = len;
+    while (i > 0 && script[i] != '/') {
+      i = i - 1;
+    }
+    if (i <= 0) return "";
+    if (i == 1 && script[1] == '/') return "/";
+    str dir = "";
+    int j = 1;
+    while (j < i) {
+      dir = dir + script[j];
+      j = j + 1;
+    }
+    return dir;
+  }
+
+  bool hasResolvedPath(str path) {
+    if (length(path) == 0) return false;
+    return path[1] != '@';
+  }
+
+  bool isWhitespace(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+  }
+
+  str trim(str input) {
+    int len = length(input);
+    if (len == 0) return "";
+    int start = 1;
+    while (start <= len && my.isWhitespace(input[start])) {
+      start = start + 1;
+    }
+    if (start > len) return "";
+    int finish = len;
+    while (finish >= start && my.isWhitespace(input[finish])) {
+      finish = finish - 1;
+    }
+    if (finish < start) return "";
+    str result = "";
+    int i = start;
+    while (i <= finish) {
+      result = result + input[i];
+      i = i + 1;
+    }
+    return result;
+  }
+
+  str buildCandidate(str base, int depth, str leaf) {
+    str candidate = "";
+    if (length(base) > 0) {
+      candidate = base;
+      int last = length(candidate);
+      if (last > 0) {
+        char tail = candidate[last];
+        int tailCode = ord(tail);
+        if (tail != '/' && tailCode != 92) {
+          candidate = candidate + "/";
+        }
+      }
+    }
+    int step = 0;
+    while (step < depth) {
+      candidate = candidate + "../";
+      step = step + 1;
+    }
+    candidate = candidate + leaf;
+    return candidate;
+  }
+
+  str loadInstallRootFile(str path) {
+    if (!fileexists(path)) {
+      return "";
+    }
+    text f;
+    assign(f, path);
+    reset(f);
+    str line = "";
+    if (!eof(f)) {
+      readln(f, line);
+    }
+    close(f);
+    return my.trim(my.normalizeSlashes(line));
+  }
+
+  str installRootFromBase(str base, int maxDepth) {
+    if (maxDepth < 0) return "";
+    int depth = 0;
+    while (depth <= maxDepth) {
+      str candidate = my.buildCandidate(base, depth, "pscal_install_root.txt");
+      str resolved = my.loadInstallRootFile(candidate);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+      str buildCandidatePath = my.buildCandidate(base, depth, "build/pscal_install_root.txt");
+      resolved = my.loadInstallRootFile(buildCandidatePath);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+      depth = depth + 1;
+    }
+    return "";
+  }
+
+  str detectInstallRoot() {
+    str envRoot = my.normalizeSlashes(getenv("PSCAL_INSTALL_ROOT"));
+    if (length(envRoot) > 0) {
+      return envRoot;
+    }
+    str scriptDir = my.scriptDirectory();
+    if (length(scriptDir) > 0) {
+      str resolved = my.installRootFromBase(scriptDir, 6);
+      if (length(resolved) > 0) {
+        return resolved;
+      }
+    }
+    str resolved = my.installRootFromBase("", 6);
+    if (length(resolved) > 0) {
+      return resolved;
+    }
+    return "";
+  }
+
+  bool loadFromBase(str base, int maxDepth) {
+    if (maxDepth < 0) return false;
+    int depth = 0;
+    while (depth <= maxDepth) {
+      str candidate = my.buildCandidate(base, depth, "etc/words");
+      if (my.load(candidate)) {
+        return true;
+      }
+      depth = depth + 1;
+    }
+    return false;
+  }
+
+  void WordRepository() {
+    my.count = 0;
+
+    bool ok = false;
+    if (paramcount() > 0) {
+      ok = my.load(paramstr(1));
+    }
+    if (!ok) {
+      if (my.hasResolvedPath(ConfiguredWordsPath)) {
+        ok = my.load(ConfiguredWordsPath);
+      }
+    }
+    if (!ok) {
+      str installRoot = my.detectInstallRoot();
+      if (length(installRoot) > 0) {
+        ok = my.load(my.buildCandidate(installRoot, 0, "etc/words"));
+      }
+    }
+    if (!ok) {
+      str scriptDir = my.scriptDirectory();
+      if (length(scriptDir) > 0) {
+        ok = my.loadFromBase(scriptDir, 8);
+      }
+    }
+    if (!ok) {
+      ok = my.loadFromBase("", 8);
+    }
+    if (!ok) {
+      writeln("Unable to load hangman dictionary. Pass a dictionary path (rea hangman5 <path>) or set PSCAL_INSTALL_ROOT.");
+      halt(1);
+    }
+  }
+
+  bool load(str path) {
+    if (!fileexists(path)) {
+      return false;
+    }
+    text f;
+    assign(f, path);
+    reset(f);
+    str line;
+    while (!eof(f) && my.count < 2048) {
+      readln(f, line);
+      int wordLen = length(line);
+      if (wordLen >= 6 && wordLen <= 9) {
+        bool valid = true;
+        str w = "";
+        setlength(w, wordLen);
+        int j = 1;
+        while (j <= wordLen) {
+          char ch = line[j];
+          if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+            w[j] = toupper(ch);
+          } else {
+            valid = false;
+          }
+          j = j + 1;
+        }
+        if (valid) {
+          my.count = my.count + 1;
+          my.words[my.count] = w;
+        }
+      }
+    }
+    close(f);
+    return my.count > 0;
+  }
+
+  str randomWord() {
+    int cnt = my.count;
+    if (cnt == 0) return "";
+    int idx = random(cnt) + 1;
+    return my.words[idx];
+  }
+}
+
+// --- View class handles all rendering ---
+class HangmanView {
+  int vHeaderRow, vSubtitleRow, vWordRow, vHangmanRow, vGuessBarRow, vGuessedRow, vPromptRow, vMsgRow;
+  int borderTop, borderBottom, borderLeft, borderRight;
+  int centerCol, hangmanCol, effectiveWidth;
+
+  void HangmanView() {
+    int cols = screencols();
+    int rows = screenrows();
+    int topMargin = int((rows - GAME_HEIGHT) / 2);
+
+    my.vHeaderRow = topMargin + HEADER_ROW;
+    my.vSubtitleRow = topMargin + SUBTITLE_ROW;
+    my.vWordRow = topMargin + WORD_ROW;
+    my.vHangmanRow = topMargin + HANGMAN_ROW;
+    my.vGuessBarRow = topMargin + GUESSBAR_ROW;
+    my.vGuessedRow = topMargin + GUESSED_ROW;
+    my.vPromptRow = topMargin + PROMPT_ROW;
+    my.vMsgRow = topMargin + MSG_ROW;
+
+    my.borderTop = topMargin;
+    my.borderBottom = topMargin + GAME_HEIGHT;
+    my.centerCol = int(cols / 2);
+    my.hangmanCol = my.centerCol - int(HANGMAN_WIDTH / 2);
+    my.borderLeft = my.centerCol - int(MAX_ELEMENT_WIDTH / 2) - BORDER_PADDING;
+    my.borderRight = my.centerCol + int(MAX_ELEMENT_WIDTH / 2) + BORDER_PADDING;
+    my.effectiveWidth = my.borderRight - my.borderLeft - 1;
+  }
+
+  int centerPadding(str s) {
+    int pad = int((my.effectiveWidth - length(s)) / 2);
+    if (pad < 0) pad = 0;
+    return pad;
+  }
+
+  void drawBorder() {
+    TextColor(CRT.LightGreen);
+    GotoXY(my.borderLeft, my.borderTop); write(CornerTL);
+    GotoXY(my.borderRight, my.borderTop); write(CornerTR);
+    GotoXY(my.borderLeft, my.borderBottom); write(CornerBL);
+    GotoXY(my.borderRight, my.borderBottom); write(CornerBR);
+
+    int x = my.borderLeft + 1;
+    while (x < my.borderRight) {
+      GotoXY(x, my.borderTop); write(LineH);
+      GotoXY(x, my.borderBottom); write(LineH);
+      x = x + 1;
+    }
+
+    int y = my.borderTop + 1;
+    while (y < my.borderBottom) {
+      GotoXY(my.borderLeft, y); write(LineV);
+      GotoXY(my.borderRight, y); write(LineV);
+      y = y + 1;
+    }
+    TextColor(CRT.White);
+  }
+
+  void drawHangman(int wrong) {
+    int r = my.vHangmanRow;
+    int c = my.hangmanCol + 2;
+    GotoXY(c, r); write(" +---+  ");
+    r = r + 1;
+    GotoXY(c, r); write(" |   |  ");
+    r = r + 1;
+    switch (wrong) {
+      case 0:
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 1:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 2:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write(" |   |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 3:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|   |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 4:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|\\  |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 5:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|\\  |  "); r = r + 1;
+        GotoXY(c, r); write("/    |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 6:
+        GotoXY(c, r); write(" O   |  "); r = r + 1;
+        GotoXY(c, r); write("/|\\  |  "); r = r + 1;
+        GotoXY(c, r); write("/ \\  |  "); r = r + 1;
+        GotoXY(c, r); write("     |  "); r = r + 1;
+        break;
+      case 7:
+        GotoXY(c, r); write(" O   |"); r = r + 1;
+        GotoXY(c, r); write("/|\\  |"); r = r + 1;
+        GotoXY(c - 1, r); write("_/ \\  |"); r = r + 1;
+        GotoXY(c, r); write("     |"); r = r + 1;
+        break;
+      default:
+        GotoXY(c, r); write(" O   |"); r = r + 1;
+        GotoXY(c, r); write("/|\\  |"); r = r + 1;
+        GotoXY(c - 1, r); write("_/ \\_ |"); r = r + 1;
+        GotoXY(c, r); write("     |"); r = r + 1;
+        break;
+    }
+    GotoXY(c, r); write("=========");
+  }
+
+  void drawGuessesBar(int wrong) {
+    int remaining = MAX_WRONG - wrong;
+    int padding = int((my.effectiveWidth - (14 + MAX_WRONG + 6)) / 2);
+    if (padding < 0) padding = 0;
+    GotoXY(my.borderLeft + 1 + padding, my.vGuessBarRow);
+    int i = 1;
+    write("Guesses Left: ");
+    TextColor(CRT.LightGreen);
+    while (i <= remaining) { write("#"); i = i + 1; }
+    TextColor(CRT.LightRed);
+    i = 1;
+    while (i <= wrong) { write("#"); i = i + 1; }
+    TextColor(CRT.White);
+    write(" ["); write(remaining); write("/"); write(MAX_WRONG); write("]");
+  }
+
+  void render(str display, str guessed, int wrong) {
+    TextBackground(CRT.Black);
+    TextColor(CRT.White);
+    ClrScr();
+    my.drawBorder();
+    int pad;
+    pad = my.centerPadding("Welcome to Hangman!");
+    GotoXY(my.borderLeft + 1 + pad, my.vHeaderRow); TextColor(CRT.LightGreen); writeln("Welcome to Hangman!"); TextColor(CRT.White);
+    pad = my.centerPadding("(Guess a letter or ? for hint)");
+    GotoXY(my.borderLeft + 1 + pad, my.vSubtitleRow); writeln("(Guess a letter or ? for hint)");
+    pad = my.centerPadding(display);
+    GotoXY(my.borderLeft + 1 + pad, my.vWordRow); writeln(display);
+    my.drawHangman(wrong);
+    my.drawGuessesBar(wrong);
+    if (length(guessed) > 0) {
+      str g = sortString(guessed);
+      str msg = "Letters chosen so far: " + g;
+      pad = my.centerPadding(msg);
+      GotoXY(my.borderLeft + 1 + pad, my.vGuessedRow); writeln(msg);
+    }
+  }
+
+  bool showHint(str word, str display, bool hintUsed) {
+    int pad;
+    if (hintUsed) {
+      pad = my.centerPadding("Hint used already.");
+      GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln("Hint used already.");
+    } else {
+      int hintIndex = -1;
+      int attempts = 0;
+      while (attempts < length(word) * 2 && hintIndex == -1) {
+        int i = random(length(word)) + 1;
+        if (display[i] == '_') hintIndex = i;
+        attempts = attempts + 1;
+      }
+      if (hintIndex == -1) {
+        pad = my.centerPadding("No more hints available.");
+        GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln("No more hints available.");
+      } else {
+        str hintMsg = "Hint: letter at position " + inttostr(hintIndex) + " is '" + word[hintIndex] + "'";
+        pad = my.centerPadding(hintMsg);
+        GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln(hintMsg);
+        hintUsed = true;
+      }
+    }
+    HideCursor();
+    pad = my.centerPadding("Press Enter to continue...");
+    GotoXY(my.borderLeft + 1 + pad, my.vMsgRow + 1); writeln("Press Enter to continue...");
+    str pause; readln(pause);
+    ShowCursor();
+    return hintUsed;
+  }
+
+  void showMessage(str msg) {
+    int pad = my.centerPadding(msg);
+    GotoXY(my.borderLeft + 1 + pad, my.vMsgRow); writeln(msg);
+  }
+
+  void showMessageAt(str msg, int row) {
+    int pad = my.centerPadding(msg);
+    GotoXY(my.borderLeft + 1 + pad, row); writeln(msg);
+  }
+}
+
+// --- Game logic ---
+class HangmanGame {
+  WordRepository repo;
+  HangmanView view;
+  str chosen;
+  str display;
+  str guessed;
+  int wrong;
+  bool hintUsed;
+  int wins;
+  int losses;
+  bool hasWord;
+
+  void HangmanGame() {
+    my.repo = new WordRepository();
+    my.repo.WordRepository();
+    my.view = new HangmanView();
+    my.view.HangmanView();
+    my.chosen = "";
+    my.display = "";
+    my.guessed = "";
+    my.wins = 0;
+    my.losses = 0;
+    my.hasWord = false;
+  }
+
+  void startRound() {
+    randomize();
+    my.chosen = my.repo.randomWord();
+    my.display = "";
+    my.guessed = "";
+    my.wrong = 0;
+    my.hintUsed = false;
+    my.hasWord = length(my.chosen) > 0;
+    if (!my.hasWord) {
+      my.display = "(no words)";
+      return;
+    }
+    int i = 1;
+    while (i <= length(my.chosen)) {
+      my.display = my.display + "_";
+      i = i + 1;
+    }
+  }
+
+  bool handleGuess(char c) {
+    bool hit = false;
+    int i = 1;
+    while (i <= length(my.chosen)) {
+      if (my.chosen[i] == c) {
+        my.display[i] = c;
+        hit = true;
+      }
+      i = i + 1;
+    }
+    if (!hit) my.wrong = my.wrong + 1;
+    my.guessed = my.guessed + c;
+    return my.display == my.chosen;
+  }
+
+  void playRound() {
+    if (!my.hasWord) {
+      my.view.render(my.display, my.guessed, my.wrong);
+      TextColor(CRT.LightRed);
+      my.view.showMessage("No words available. Run with a dictionary path (rea hangman5 <path>).");
+      TextColor(CRT.White);
+      HideCursor();
+      my.view.showMessageAt("Press Enter to continue...", my.view.vMsgRow + 1);
+      str pause; readln(pause);
+      ShowCursor();
+      return;
+    }
+    bool win = false;
+    str msg;
+    while (my.wrong < MAX_WRONG && my.display != my.chosen) {
+      my.view.render(my.display, my.guessed, my.wrong);
+      int pad = my.view.centerPadding("Enter a letter: ");
+      GotoXY(my.view.borderLeft + 1 + pad, my.view.vPromptRow);
+      write("Enter a letter: ");
+      str line; readln(line);
+      if (length(line) == 0) continue;
+      char g = toupper(line[1]);
+      if (g == '?') {
+        my.hintUsed = my.view.showHint(my.chosen, my.display, my.hintUsed);
+        continue;
+      }
+      if (contains(my.guessed, g)) {
+        my.view.showMessage("Already guessed.");
+        continue;
+      }
+      win = my.handleGuess(g);
+    }
+
+    my.view.render(my.display, my.guessed, my.wrong);
+    if (my.display == my.chosen) {
+      TextColor(CRT.Green);
+      my.view.showMessage("You guessed the word!");
+      TextColor(CRT.White);
+      my.wins = my.wins + 1;
+    } else {
+      TextColor(CRT.LightRed);
+      msg = "Sorry, the word was " + my.chosen;
+      my.view.showMessage(msg);
+      TextColor(CRT.White);
+      my.losses = my.losses + 1;
+    }
+    str scoreMsg = "Score: " + inttostr(my.wins) + " wins / " + inttostr(my.losses) + " losses";
+    my.view.showMessageAt(scoreMsg, my.view.vMsgRow + 1);
+    HideCursor();
+    my.view.showMessageAt("Press Enter...", my.view.vMsgRow + 2);
+    str pause; readln(pause);
+    ShowCursor();
+  }
+
+  void play() {
+    bool again = true;
+    while (again) {
+      my.startRound();
+      my.playRound();
+      // Clear previous prompt line and ask inside border
+      GotoXY(my.view.borderLeft + 1, my.view.vMsgRow + 2);
+      int i = 1;
+      while (i <= my.view.effectiveWidth) { write(" "); i = i + 1; }
+      int pad = my.view.centerPadding("Play again? (Y/N): ");
+      GotoXY(my.view.borderLeft + 1 + pad, my.view.vMsgRow + 2);
+      write("Play again? (Y/N): ");
+      str ans; readln(ans);
+      if (length(ans) == 0) { again = true; }
+      else {
+        char r = toupper(ans[1]);
+        if (r == 'Y') again = true; else again = false;
+      }
+    }
+    writeln(); // Move curser down a line to look nicer
+  }
+}
+
+HangmanGame game = new HangmanGame();
+game.HangmanGame();
+game.play();

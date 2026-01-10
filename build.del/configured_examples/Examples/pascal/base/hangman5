@@ -1,0 +1,730 @@
+#!/usr/bin/env pascal
+program HangmanGameWithPointers;
+
+uses CRT, SysUtils;
+
+const
+  MAX_WRONG = 8;  { maximum number of wrong guesses }
+  MIN_LENGTH = 6;
+  MAX_LENGTH = 9; { NOTE: Ensure this matches TWordNode data length }
+  // Constants for RELATIVE screen layout (vertical offsets from topMargin)
+  HEADER_ROW = 1;
+  SUBTITLE_ROW = 2;
+  WORD_ROW = 4;
+  // Gap row = 5
+  HANGMAN_ROW = 6; // Start row for hangman drawing
+  // Hangman takes 8 rows (6 to 13 relative)
+  GUESSBAR_ROW = 15; // Row for the guess bar
+  GUESSED_ROW = 17; // Row for guessed letters
+  PROMPT_ROW = 19; // Row for input prompt
+  MSG_ROW = 21;    // Row for messages
+  GAME_HEIGHT = 22; // Estimated total lines used by the layout
+  // { *** ADDED Constants for Border/Content Width *** }
+  MAX_ELEMENT_WIDTH = 40; // Max width for centered text elements
+  HANGMAN_WIDTH = 12;     // Approx width of hangman drawing
+  BORDER_PADDING = 2;     // Spaces between content and border walls (each side)
+  // For DrawBorder()
+  CornerTL = '╔'; CornerTR = '╗'; CornerBL = '╚'; CornerBR = '╝';
+  LineH = '═'; LineV = '║';
+  CONFIGURED_WORDS_PATH = '/usr/local/pscal/etc/words';
+
+type
+  PWordNode = ^TWordNode;
+  TWordNode = record
+    data: string[MAX_LENGTH]; { Store word directly - adjust size if needed }
+    next: PWordNode;
+  end;
+
+var
+  chosen: string;
+  display: string;
+  guessed: string;
+  letter: char;
+  i, j, wrong: integer;
+  found: boolean;
+  hintUsed: boolean;
+  wins, losses: integer;
+  replay: char;
+  isHintRequest : boolean;
+  maxContentWidth : Integer;
+  termWidth, termHeight : integer;
+  centerCol : integer;
+  hangmanStartCol : integer;
+  padding : integer;
+  title, subtitle, guessedMsg, promptMsg, msg, scoreMsg : string;
+  winsStr, lossesStr : string;
+  topMargin : integer;
+  vHeaderRow, vSubtitleRow, vWordRow, vHangmanRow, vGuessBarRow, vGuessedRow, vPromptRow, vMsgRow : integer;
+  borderTop, borderBottom, borderLeft, borderRight : integer;
+  windowWidth : integer;
+  effectiveWidth : integer;
+
+  { *** ADDED: Global Variables for Word List *** }
+  wordListHead: PWordNode;
+  wordListCount: Integer;
+  { *** END ADDED *** }
+
+function DefaultWordListPath: string;
+var
+  root: string;
+begin
+  root := GetEnv('PSCAL_INSTALL_ROOT_RESOLVED');
+  if root = '' then
+    root := GetEnv('PSCALI_INSTALL_ROOT');
+  if root = '' then
+    root := GetEnv('PSCAL_INSTALL_ROOT');
+  if root = '' then
+    root := '.';
+  if (Length(root) > 0) and (root[Length(root)] = '/') then
+    Delete(root, Length(root), 1);
+  DefaultWordListPath := root + '/etc/words';
+end;
+
+{---------------------------------------------------------------------
+  Helper Functions (UpperCaseStr, SortString - unchanged)
+---------------------------------------------------------------------}
+function UpperCaseStr(s: string): 
+  string; var i: integer; 
+
+begin 
+  for i := 1 to length(s) do s[i] := UpCase(s[i]); 
+  UpperCaseStr := s; 
+end;
+
+procedure SortString(var s: string); 
+  var i, j: integer; 
+  temp: char; 
+
+begin 
+  for i := 1 to length(s) - 1 do for j := i + 1 to length(s) do if s[i] > s[j] 
+    then begin temp := s[i]; s[i] := s[j]; s[j] := temp; 
+  end; 
+end;
+
+{---------------------------------------------------------------------
+  Word List Handling (NEW / MODIFIED)
+---------------------------------------------------------------------}
+
+{ Reads words from file, adds valid ones to a linked list (prepends). }
+{ Returns the count of valid words added. }
+function LoadWordList(var listHead: PWordNode; filename: string): integer;
+var
+  f: Text;
+  word: string;
+  i: integer;
+  valid: boolean;
+  newNode: PWordNode;
+  count: integer;
+begin
+  listHead := nil;  { Start with an empty list }
+  count := 0;
+  assign(f, filename);
+  {$I-} reset(f); {$I+}
+  if IOResult <> 0 then
+  begin
+    writeln('Error opening word file: ', filename);
+    LoadWordList := 0; { Return 0 on error }
+    exit; { Exit the function }
+  end;
+  {$I+}
+
+  writeln('Loading word list from ', filename, '...');
+  while not eof(f) do
+  begin
+    readln(f, word);
+    word := UpperCaseStr(word); { Convert to uppercase immediately }
+    valid := true;
+    if (length(word) < MIN_LENGTH) or (length(word) > MAX_LENGTH) then
+      valid := false
+    else
+      for i := 1 to length(word) do
+        if not (word[i] in ['A'..'Z']) then
+          valid := false;
+
+    if valid then
+    begin
+      inc(count);
+      { Create new node }
+      new(newNode);
+      if newNode = nil then { Check allocation }
+      begin
+          writeln('Memory allocation failed while loading words!');
+          halt(1);
+      end;
+      newNode^.data := word; { Assign data }
+      { Prepend to list (simpler than appending) }
+      newNode^.next := listHead;
+      listHead := newNode;
+    end;
+  end;
+  close(f);
+  writeln(count, ' valid words loaded.');
+  LoadWordList := count; { Return the count }
+end;
+
+{ Chooses a random word from the pre-loaded linked list. }
+function ChooseRandomWordFromList(listHead: PWordNode; listCount: Integer): string;
+var
+  target, i: integer;
+  tempPtr: PWordNode;
+begin
+  if (listCount <= 0) or (listHead = nil) then
+  begin
+    writeln('Error: Word list is empty or invalid.');
+    ChooseRandomWordFromList := ''; { Return empty on error }
+    exit;
+  end;
+
+  target := Random(listCount) + 1; { 1 to listCount }
+  tempPtr := listHead;
+
+  // Traverse to the target node
+  for i := 1 to target - 1 do
+  begin
+    if tempPtr^.next = nil then // Safety check, should not happen if count is correct
+    begin
+       writeln('Error: List shorter than expected count during random selection.');
+       ChooseRandomWordFromList := listHead^.data; { Return first word as fallback }
+       exit;
+    end;
+    tempPtr := tempPtr^.next;
+  end;
+
+  // Return the data from the target node
+  ChooseRandomWordFromList := tempPtr^.data;
+end;
+
+{ Frees all nodes in the linked list. }
+procedure DisposeWordList(var listHead: PWordNode);
+var
+  current, nextNode: PWordNode;
+begin
+  writeln('Cleaning up word list memory...');
+  current := listHead;
+  while current <> nil do
+  begin
+    nextNode := current^.next; { Store pointer to the next node }
+    dispose(current);        { Dispose the current node }
+    current := nextNode;       { Move to the next node }
+  end;
+  listHead := nil;             { Reset head pointer }
+  writeln('Word list memory freed.');
+end;
+
+
+{---------------------------------------------------------------------
+  Drawing Procedures (Unchanged logic, rely on calculated positions)
+---------------------------------------------------------------------}
+procedure DrawBorder(Top, Bottom, Left, Right: Integer);
+var
+  i: integer;
+  isValid: Boolean;
+begin
+  TextColor(Blue);
+  isValid := (Top >= 1) and (Bottom <= ScreenRows) and (Left >= 1) and (Right <= ScreenCols) and (Top < Bottom) and (Left < Right);
+  if isValid then
+  begin
+    GotoXY(Left, Top);
+    Write(CornerTL);
+    GotoXY(Right, Top);
+    Write(CornerTR);
+    GotoXY(Left, Bottom);
+    Write(CornerBL);
+    GotoXY(Right, Bottom);
+    Write(CornerBR);
+
+    for i := Left + 1 to Right - 1 do
+    begin
+      GotoXY(i, Top);
+      Write(LineH);
+      GotoXY(i, Bottom);
+      Write(LineH);
+    end;
+
+    for i := Top + 1 to Bottom - 1 do
+    begin
+      GotoXY(Left, i);
+      Write(LineV);
+      GotoXY(Right, i);
+      Write(LineV);
+    end;
+  end;
+end;
+
+procedure DrawHangman(wrong: integer; startCol: integer);
+var
+  lineOffset: integer;
+begin
+  StartCol := StartCol + 2;
+  lineOffset := 0;
+  GotoXY(startCol, vHangmanRow + lineOffset);
+  write(' +---+  ');
+  lineOffset := lineOffset + 1;
+  GotoXY(startCol, vHangmanRow + lineOffset);
+  write(' |   |  ');
+  lineOffset := lineOffset + 1;
+  case wrong of
+    0:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    1:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    2:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' |   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    3:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    4:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    5:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/    |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    6:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/ \  |  ');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |  ');
+      lineOffset := lineOffset + 1;
+    end;
+    7:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol - 1, vHangmanRow + lineOffset);
+      write('_/ \  |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |');
+      lineOffset := lineOffset + 1;
+    end;
+    8:
+    begin
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write(' O   |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('/|\  |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol - 1, vHangmanRow + lineOffset);
+      write('_/ \_ |');
+      lineOffset := lineOffset + 1;
+      GotoXY(startCol, vHangmanRow + lineOffset);
+      write('     |');
+      lineOffset := lineOffset + 1;
+    end;
+  end;
+  GotoXY(startCol, vHangmanRow + lineOffset);
+  write('=========');
+  writeln;
+end;
+
+procedure ShowGuessesBar(wrong: integer; startCol: integer; width: integer);
+var
+  i: integer;
+  remaining: integer;
+  barContent: string;
+  padding: integer;
+  barWidth: integer;
+  remStr, maxStr: string;
+begin
+  remaining := MAX_WRONG - wrong;
+  remStr := IntToStr(remaining);
+  maxStr := IntToStr(MAX_WRONG);
+  TextColor(White);
+  barContent := 'Guesses Left: ';
+  for i := 1 to remaining do
+    barContent := barContent + '#';
+  for i := 1 to wrong do
+    barContent := barContent + '#';
+  barContent := barContent + ' [' + remStr + '/' + maxStr + ']';
+  barWidth := length(barContent);
+  padding := (width - barWidth) div 2;
+  if padding < 0 then
+    padding := 0;
+  GotoXY(startCol, vGuessBarRow);
+  for i := 1 to padding do
+    write(' ');
+  write('Guesses Left: ');
+  TextColor(LightGreen);
+  for i := 1 to remaining do
+    write('#');
+  TextColor(LightRed);
+  for i := 1 to wrong do
+    write('#');
+  TextColor(White);
+  write(' [' + remStr + '/' + maxStr + ']');
+  writeln;
+end;
+
+procedure ShowHint(word: string; display: string; var hintUsed: boolean; startCol: integer; width: integer);
+var
+  i, attempts: integer;
+  hintIndex: integer;
+  pause: string;
+  msg: string;
+  padding: integer;
+  hintIndexStr: string;
+begin
+  GotoXY(startCol, vMsgRow);
+  if hintUsed then
+    msg := 'Hint Used Already.'
+  else
+  begin
+    hintIndex := -1;
+    attempts := 0;
+    repeat
+      i := Random(length(word)) + 1;
+      if display[i] = '_' then
+        hintIndex := i;
+      inc(attempts);
+    until (hintIndex <> -1) or (attempts > length(word) * 2) or (display = word);
+    if hintIndex <> -1 then
+    begin
+      hintIndexStr := IntToStr(hintIndex);
+      msg := 'Hint: Letter at position ' + hintIndexStr + ' is ''' + word[hintIndex] + '''';
+      TextColor(Cyan);
+      hintUsed := true;
+    end
+    else
+    begin
+      msg := 'No more hints available.';
+      TextColor(White);
+    end;
+  end;
+  padding := (width - length(msg)) div 2;
+  if padding < 0 then
+    padding := 0;
+  for i := 1 to padding do
+    write(' ');
+  write(msg);
+  TextColor(White);
+  GotoXY(startCol, vMsgRow + 1);
+  msg := 'Press Enter to Continue:';
+  padding := (width - length(msg)) div 2;
+  if padding < 0 then
+    padding := 0;
+  for i := 1 to padding do
+    write(' ');
+  write(msg);
+  readln(pause);
+  GotoXY(startCol, vMsgRow);
+  GotoXY(startCol, vMsgRow + 1);
+  GotoXY(startCol, vPromptRow);
+end;
+
+{---------------------------------------------------------------------
+  Main Program Block
+---------------------------------------------------------------------}
+begin
+  ClrScr;
+  NormVideo;
+  TextBackground(Black);
+  writeln('Initializing Hangman...');
+
+  // --- Load word list ONCE ---
+  wordListCount := LoadWordList(wordListHead, DefaultWordListPath);
+  if wordListCount = 0 then
+  begin
+    writeln('Failed to load word list. Exiting.');
+    halt(1);
+  end;
+
+  // Initialize overall game stats
+  wins := 0;
+  losses := 0;
+
+  // Main game replay loop
+  repeat
+    Randomize; // Reseed random generator for each new game
+
+    // --- Get terminal dimensions & Calculate Layout (Same as before) ---
+    termWidth := ScreenCols;
+    termHeight := ScreenRows;
+    maxContentWidth := MAX_ELEMENT_WIDTH;
+    if (40 + MAX_LENGTH) > maxContentWidth then maxContentWidth := 40 + MAX_LENGTH;
+    if HANGMAN_WIDTH > maxContentWidth then maxContentWidth := HANGMAN_WIDTH;
+    if length('Play again? (Y/Enter=Yes, N=No): ') > maxContentWidth then maxContentWidth := length('Play again? (Y/Enter=Yes, N=No): ');
+    windowWidth := maxContentWidth + (BORDER_PADDING * 2);
+    if windowWidth >= termWidth then windowWidth := termWidth - 2;
+    if windowWidth < 10 then windowWidth := 10;
+    padding := (termWidth - windowWidth) div 2;
+    borderLeft := padding + 1;
+    borderRight := termWidth - padding;
+    if borderLeft < 1 then borderLeft := 1;
+    if borderRight > termWidth then borderRight := termWidth;
+    if borderLeft >= borderRight - 1 then begin borderLeft := 1; borderRight := termWidth; end;
+    topMargin := (termHeight - GAME_HEIGHT) div 2 + 1;
+    if topMargin < 1 then topMargin := 1;
+    borderTop := topMargin - 1;
+    if borderTop < 1 then borderTop := 1;
+    borderBottom := topMargin + GAME_HEIGHT;
+    if borderBottom > termHeight then borderBottom := termHeight;
+    if borderTop >= borderBottom - 1 then begin borderTop := 1; borderBottom := termHeight; topMargin := 2; end;
+    vHeaderRow := topMargin + HEADER_ROW - 1;
+    vSubtitleRow := topMargin + SUBTITLE_ROW - 1;
+    vWordRow := topMargin + WORD_ROW - 1;
+    vHangmanRow := topMargin + HANGMAN_ROW - 1;
+    vGuessBarRow := topMargin + GUESSBAR_ROW - 1;
+    vGuessedRow := topMargin + GUESSED_ROW - 1;
+    vPromptRow := topMargin + PROMPT_ROW - 1;
+    vMsgRow := topMargin + MSG_ROW - 1;
+    effectiveWidth := borderRight - borderLeft - 1;
+    if effectiveWidth < 1 then effectiveWidth := 1;
+    centerCol := ((effectiveWidth - MAX_ELEMENT_WIDTH) div 2) + borderLeft + 1;
+    if centerCol < borderLeft + 1 then centerCol := borderLeft + 1;
+    hangmanStartCol := ((effectiveWidth - HANGMAN_WIDTH) div 2) + borderLeft + 1;
+    if hangmanStartCol < borderLeft + 1 then hangmanStartCol := borderLeft + 1;
+    // --- End Layout Calculation ---
+
+    // --- Initialize Game State for this round ---
+    chosen := ChooseRandomWordFromList(wordListHead, wordListCount); { <<< MODIFIED }
+    if chosen = '' then begin writeln('Error selecting word!'); halt(1); end;
+
+    display := '';
+    guessed := '';
+    hintUsed := false;
+    wrong := 0;
+    for i := 1 to length(chosen) do display := display + '_';
+
+    // --- Main Game Loop (Guessing phase) ---
+    while (wrong < MAX_WRONG) and (display <> chosen) do
+    begin
+      // The following is a feature/bug.  There has to be something already drawn before 
+      // ClrScr will do the correct thing.  So we draw the border twice.
+      DrawBorder(borderTop, borderBottom, borderLeft, borderRight);
+      ClrScr;
+      DrawBorder(borderTop, borderBottom, borderLeft, borderRight);
+
+      // Display Title
+      title := 'Welcome to Hangman!';
+      padding := (effectiveWidth - length(title)) div 2; if padding < 0 then padding := 0;
+      GotoXY(borderLeft + 1 + padding, vHeaderRow);
+      TextColor(LightGreen); write(title); TextColor(White);
+
+      // Display Subtitle
+      subtitle := '(Guess a letter, or ? for a hint)';
+      padding := (effectiveWidth - length(subtitle)) div 2; if padding < 0 then padding := 0;
+      GotoXY(borderLeft + 1 + padding, vSubtitleRow); write(subtitle);
+
+      // Display Word
+      padding := (effectiveWidth - length(display)) div 2; if padding < 0 then padding := 0;
+      GotoXY(borderLeft + 1 + padding, vWordRow); write(display);
+
+      // Draw Hangman graphic
+      DrawHangman(wrong, hangmanStartCol);
+
+      // Show Guesses Left Bar
+      ShowGuessesBar(wrong, centerCol, MAX_ELEMENT_WIDTH);
+
+      // Show Guessed Letters
+      SortString(guessed);
+      guessedMsg := '';
+      if length(guessed) > 0 then guessedMsg := 'Letters chosen so far: ' + guessed;
+      padding := (effectiveWidth - length(guessedMsg)) div 2; if padding < 0 then padding := 0;
+      GotoXY(borderLeft + 1, vGuessedRow);
+      GotoXY(borderLeft + 1 + padding, vGuessedRow);
+      if length(guessedMsg) > 0 then write(guessedMsg);
+
+      // --- Get Player Input ---
+      isHintRequest := false;
+      promptMsg := 'Enter a letter (A-Z, or ? for hint): ';
+      padding := (effectiveWidth - length(promptMsg)) div 2; if padding < 0 then padding := 0;
+      repeat
+        GotoXY(borderLeft + 1, vPromptRow);
+        GotoXY(borderLeft + 1 + padding, vPromptRow);
+        write(promptMsg);
+        TextColor(White);
+        readln(letter);
+        letter := UpCase(letter);
+      until (letter in ['A'..'Z']) or (letter = '?');
+
+      // --- Process Player Input ---
+      GotoXY(borderLeft + 1, vMsgRow);
+      GotoXY(borderLeft + 1, vMsgRow + 1);
+
+      if (letter = '?') then // Hint request
+      begin
+        isHintRequest := true;
+        ShowHint(chosen, display, hintUsed, centerCol, MAX_ELEMENT_WIDTH);
+      end;
+
+      if not isHintRequest then // Letter guess
+      begin
+          if pos(letter, guessed) > 0 then // Already guessed
+          begin
+            msg := 'You already guessed ''' + letter + '''. Try again.';
+            padding := (effectiveWidth - length(msg)) div 2; if padding < 0 then padding := 0;
+            GotoXY(borderLeft + 1 + padding, vMsgRow);
+            TextColor(Yellow); write(msg); TextColor(White);
+            GotoXY(borderLeft + 1, vMsgRow + 1);
+            msg := 'Press Enter...';
+            padding := (effectiveWidth - length(msg)) div 2; if padding < 0 then padding := 0;
+            GotoXY(borderLeft + 1 + padding, vMsgRow + 1);
+            write(msg); readln;
+          end
+          else // New letter guess
+          begin
+            guessed := guessed + letter; // Add to guessed string
+            found := false;
+            // Check if letter is in the word and update display
+            for i := 1 to length(chosen) do
+              if chosen[i] = letter then
+              begin
+                display[i] := letter;
+                found := true;
+              end;
+            // Increment wrong count if letter not found
+            if not found then wrong := wrong + 1;
+          end;
+      end; // End of processing letter guess
+
+      // Position cursor neatly after prompt for next loop iteration (optional)
+        GotoXY(borderLeft + 1 + padding + length(promptMsg) + 1, vPromptRow);
+
+    end; // End of main game while loop
+
+    // --- Game Over Display ---
+    ClrScr;
+    DrawBorder(borderTop, borderBottom, borderLeft, borderRight);
+
+    title := 'Hangman Game Over';
+    padding := (effectiveWidth - length(title)) div 2; if padding < 0 then padding := 0;
+    GotoXY(borderLeft + 1 + padding, vHeaderRow); TextColor(LightGreen); write(title); TextColor(White);
+
+    padding := (effectiveWidth - length(display)) div 2; if padding < 0 then padding := 0;
+    GotoXY(borderLeft + 1 + padding, vWordRow); write(display);
+
+    DrawHangman(wrong, hangmanStartCol);
+    ShowGuessesBar(wrong, centerCol, MAX_ELEMENT_WIDTH);
+
+    SortString(guessed);
+    guessedMsg := ''; if length(guessed) > 0 then guessedMsg := 'Letters chosen: ' + guessed;
+    padding := (effectiveWidth - length(guessedMsg)) div 2; if padding < 0 then padding := 0;
+    GotoXY(borderLeft + 1, vGuessedRow);
+    GotoXY(borderLeft + 1 + padding, vGuessedRow);
+    if length(guessedMsg) > 0 then write(guessedMsg);
+
+    GotoXY(borderLeft + 1, vMsgRow - 1);
+    if display = chosen then
+    begin
+      TextColor(Green); msg := 'Congratulations, you guessed the word: ' + chosen; inc(wins);
+    end
+    else
+    begin
+      TextColor(LightRed); msg := 'Sorry, you lost. The word was: ' + chosen; inc(losses);
+    end;
+    padding := (effectiveWidth - length(msg)) div 2; if padding < 0 then padding := 0;
+    GotoXY(borderLeft + 1 + padding, vMsgRow);
+    write(msg); TextColor(White);
+
+    GotoXY(borderLeft + 1, vMsgRow + 1);
+    winsStr := IntToStr(wins); lossesStr := IntToStr(losses);
+    scoreMsg := 'Score: ' + winsStr + ' wins / ' + lossesStr + ' losses';
+    padding := (effectiveWidth - length(scoreMsg)) div 2; if padding < 0 then padding := 0;
+    GotoXY(borderLeft + 1 + padding, vMsgRow + 1);
+    write(scoreMsg);
+
+    promptMsg := 'Play again? (Y/Enter=Yes, N=No): ';
+    padding := (effectiveWidth - length(promptMsg)) div 2; if padding < 0 then padding := 0;
+    GotoXY(borderLeft + 1 + padding, vMsgRow + 3);
+
+    write(promptMsg);
+    repeat replay := ReadKey; if replay = #0 then Delay(10); until (replay <> #0);
+    write(replay);
+
+
+  until not ( (UpCase(replay) = 'Y') or (replay = #10) or (replay = #13) );
+
+  writeln;
+
+  // --- Dispose of the word list BEFORE final end. ---
+  DisposeWordList(wordListHead);
+
+end. // End main program

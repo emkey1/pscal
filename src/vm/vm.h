@@ -202,6 +202,11 @@ typedef struct VM_s {
     Thread* owningThread;        // Non-NULL when running inside a worker slot
     int threadId;                // Slot index for owningThread (0 for main VM)
 
+    /* Frontend-specific context; e.g., exsh per-VM shell state. */
+    void* frontendContext;
+    /* String indexing mode: true for shell-style (0-based), false for Pascal/REA (1-based). */
+    bool shellIndexing;
+
     // Optional tracing: when >0, print execution of first N instructions
     int trace_head_instructions;
     int trace_executed;
@@ -239,6 +244,7 @@ void runtimeError(VM* vm, const char* format, ...);
 void runtimeWarning(VM* vm, const char* format, ...);
 void vmDumpStackInfo(VM* vm);
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message);
+void vmSetSuppressStateDump(bool suppress);
 void vmSetVerboseErrors(bool enabled);
 void vmOpcodeProfileDump(void);
 bool vmOpcodeProfileIsEnabled(void);

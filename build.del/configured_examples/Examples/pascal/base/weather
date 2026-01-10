@@ -1,0 +1,359 @@
+#!/usr/bin/env pascal
+program DisplayWeather;
+
+uses CRT, SysUtils; // Assuming CRT for file ops, SysUtils for ParamStr etc.
+
+const
+  MAX_SUBSTR_LEN = 1024;                         // Max length for copy/pos substrings
+  CONFIGURED_API_KEY_PATH = '/usr/local/pscal/lib/openweathermap.key';
+
+type
+  // mstream type assumed to be available implicitly or via SysUtils/other unit
+  // If not, add: THandle = LongInt; mstream = THandle;
+
+var
+  response: string;
+  ms: mstream; // Assumed type, adjust if necessary based on apiSend return type
+  url: string;
+  location, description, tempStr, humidityStr, windStr: string;
+  startPos, endPos, searchPos: integer; // searchPos reused for different searches
+  currentZipCode : string;
+  apiKeyFromFile : string; // Variable for API Key
+  tempC, tempF : real;      // Temperatures in Celsius and Fahrenheit
+  valCode : integer;        // Error code for StrToReal
+
+function DefaultApiKeyPath: string;
+begin
+  DefaultApiKeyPath := CONFIGURED_API_KEY_PATH;
+end;
+
+// --- Function to read API key from file ---
+function TryReadApiKeyFromFile(filename: string): string;
+var
+  keyFile: Text;
+  keyRead: string;
+begin
+  TryReadApiKeyFromFile := '';
+  assign(keyFile, filename);
+  {$I-}
+  reset(keyFile);
+  {$I+}
+
+  if IOResult <> 0 then
+    exit;
+
+  if eof(keyFile) then
+  begin
+    close(keyFile);
+    exit;
+  end;
+
+  readln(keyFile, keyRead);
+  close(keyFile);
+
+  keyRead := Trim(keyRead);
+  if keyRead <> '' then
+    TryReadApiKeyFromFile := keyRead;
+end;
+// --- END TryReadApiKeyFromFile ---
+
+// --- Function to obtain API key ---
+function LoadApiKey(): string;
+var
+  envKey, homeDir, keyPath, keyFromFile: string;
+begin
+  envKey := GetEnv('OPENWEATHER_API_KEY');
+  if envKey <> '' then
+  begin
+    LoadApiKey := envKey;
+    exit;
+  end;
+
+  homeDir := GetEnv('HOME');
+  if homeDir <> '' then
+  begin
+    if homeDir[length(homeDir)] = '/' then
+      keyPath := homeDir + '.pscal/etc/openweathermap.key'
+    else
+      keyPath := homeDir + '/.pscal/etc/openweathermap.key';
+
+    keyFromFile := TryReadApiKeyFromFile(keyPath);
+    if keyFromFile <> '' then
+    begin
+      LoadApiKey := keyFromFile;
+      exit;
+    end;
+  end
+  else
+    keyPath := '~/.pscal/etc/openweathermap.key';
+
+  keyFromFile := TryReadApiKeyFromFile(DefaultApiKeyPath);
+  if keyFromFile <> '' then
+  begin
+    LoadApiKey := keyFromFile;
+    exit;
+  end;
+
+  writeln('Error: Unable to determine OpenWeather API key.');
+  writeln('Set the OPENWEATHER_API_KEY environment variable or create ', keyPath,
+          ' with your OpenWeather API key.');
+  halt(1);
+end;
+// --- END LoadApiKey ---
+
+
+// --- Helper function ExtractStringValue ---
+function ExtractStringValue(jsonString: string; key: string; startSearchPos: integer): string;
+var
+  keyPos, valueStartPos, relEndPos : integer;
+  searchPattern, subStr : string; // Removed debugSubStr
+begin
+  ExtractStringValue := '';
+  searchPattern := '"' + key + '":"';
+  // Use min to prevent overflow if startSearchPos is near end of jsonString
+  subStr := copy(jsonString, startSearchPos,
+                 min(length(jsonString) - startSearchPos + 1, MAX_SUBSTR_LEN));
+  keyPos := pos(searchPattern, subStr);
+
+  if keyPos > 0 then
+  begin
+    valueStartPos := startSearchPos + keyPos + length(searchPattern) - 1;
+    // Use min again for safety when looking for the closing quote
+    subStr := copy(jsonString, valueStartPos,
+                   min(length(jsonString) - valueStartPos + 1, MAX_SUBSTR_LEN));
+    relEndPos := pos('"', subStr);
+    if relEndPos > 0 then
+    begin
+      ExtractStringValue := copy(jsonString, valueStartPos, relEndPos - 1); // Copy correct length
+    end;
+  end;
+end;
+
+// --- Helper function ExtractNumericValueStr ---
+function ExtractNumericValueStr(jsonString: string; key: string; startSearchPos: integer): string;
+var
+  keyPos, valueStartPos, relCommaPos, relBracePos, relEndPos : integer;
+  searchPattern, subStr : string; // Removed tempResult as it wasn't strictly needed
+begin
+  ExtractNumericValueStr := '';
+  searchPattern := '"' + key + '":';
+  // Use min for safety
+  subStr := copy(jsonString, startSearchPos,
+                 min(length(jsonString) - startSearchPos + 1, MAX_SUBSTR_LEN));
+  keyPos := pos(searchPattern, subStr);
+
+  if keyPos > 0 then
+  begin
+    valueStartPos := startSearchPos + keyPos + length(searchPattern) - 1;
+    // Skip leading spaces after colon without relying on short-circuit evaluation
+    while valueStartPos <= length(jsonString) do
+    begin
+      if jsonString[valueStartPos] <> ' ' then
+        break;
+      inc(valueStartPos);
+    end;
+
+    // Use min for safety when searching for end delimiter
+    subStr := copy(jsonString, valueStartPos,
+                   min(length(jsonString) - valueStartPos + 1, MAX_SUBSTR_LEN));
+    relCommaPos := pos(',', subStr);
+    relBracePos := pos('}', subStr);
+
+    // Determine end position robustly
+    if (relCommaPos > 0) and (relBracePos > 0) then
+        relEndPos := min(relCommaPos, relBracePos)
+    else if relCommaPos > 0 then
+        relEndPos := relCommaPos
+    else if relBracePos > 0 then
+        relEndPos := relBracePos
+    else
+        relEndPos := length(subStr) + 1; // Use end of substring if no comma/brace found
+
+    // Extract the value up to the determined end position
+    ExtractNumericValueStr := copy(subStr, 1, relEndPos - 1);
+  end;
+end;
+
+// --- Convert string to real ---
+// Parses a simple decimal string like "123.45" into a real value.
+// Returns position of error (1-based) in code, or 0 on success.
+function StrToReal(s: string; var code: integer): real;
+var
+  i, lenS: integer;
+  negative: boolean;
+  intPart, fracPart: real;
+  divisor: real;
+  ch: char;
+  digitsFound: boolean;
+begin
+  lenS := length(s);
+  code := 0;
+  i := 1;
+  negative := False;
+  intPart := 0;
+  fracPart := 0;
+  divisor := 1;
+  digitsFound := False;
+
+  if lenS = 0 then
+  begin
+    code := 1;
+    StrToReal := 0;
+    exit;
+  end;
+
+  if i <= lenS then
+  begin
+    ch := s[i];
+    if ch = '-' then
+    begin
+      negative := True;
+      inc(i);
+    end
+    else if ch = '+' then
+      inc(i);
+  end;
+
+  // Parse integer part
+  while i <= lenS do
+  begin
+    ch := s[i];
+    if (ch < '0') or (ch > '9') then
+      break;
+    intPart := intPart * 10 + (Ord(ch) - Ord('0'));
+    inc(i);
+    digitsFound := True;
+    if i > lenS then
+      break;
+  end;
+
+  // Parse fractional part
+  if i <= lenS then
+  begin
+    if s[i] = '.' then
+    begin
+      inc(i);
+      while i <= lenS do
+      begin
+        ch := s[i];
+        if (ch < '0') or (ch > '9') then
+          break;
+        fracPart := fracPart * 10 + (Ord(ch) - Ord('0'));
+        divisor := divisor * 10;
+        inc(i);
+        digitsFound := True;
+        if i > lenS then
+          break;
+      end;
+    end;
+  end;
+
+  if not digitsFound then
+  begin
+    code := i;
+    StrToReal := 0;
+    exit;
+  end;
+
+  // Skip any trailing spaces without triggering out-of-bounds access
+  while i <= lenS do
+  begin
+    if s[i] <> ' ' then
+      break;
+    inc(i);
+  end;
+
+  // If there are leftover characters, report position of error
+  if i <= lenS then
+    code := i
+  else
+    code := 0;
+
+  if negative then
+    StrToReal := -(intPart + fracPart / divisor)
+  else
+    StrToReal := intPart + fracPart / divisor;
+end;
+
+// --- Main Program ---
+begin
+
+  // --- Read API Key ---
+  apiKeyFromFile := LoadApiKey();
+  // { DEBUG: Key debug lines removed }
+
+  // --- Check for command-line argument for Zip Code ---
+  if ParamCount >= 1 then
+  begin
+    ClrScr;
+    currentZipCode := ParamStr(1);
+  end
+  else
+  begin
+    writeln;
+    writeln('Usage: weather <zipcode>');
+    halt(1);
+  end;
+  // ---------------------------------------
+
+  writeln('Fetching weather data for ', currentZipCode, '...');
+  writeln;
+
+  // Construct the request URL
+  url := 'http://api.openweathermap.org/data/2.5/weather?zip=' + currentZipCode + ',us&appid=' + apiKeyFromFile + '&units=metric';
+  // { DEBUG: URL debug lines removed }
+
+  // Perform the API call
+  ms := apiSend(url, '');
+
+  // Convert the memory stream response to a string
+  response := apiReceive(ms);
+  // { DEBUG: Raw response debug lines removed }
+
+  // Free the memory stream (if applicable)
+  // memorystreamfree(ms);
+
+  writeln('--- Current Weather ---');
+
+  // --- Parse and display results ---
+  location := ExtractStringValue(response, 'name', 1);
+  if location <> '' then writeln('Location:       ', location)
+  else writeln('Location:       Not Found');
+
+  description := '';
+  searchPos := pos('"weather":[{', response);
+  if searchPos > 0 then description := ExtractStringValue(response, 'description', searchPos);
+  if description <> '' then writeln('Conditions:     ', description)
+  else writeln('Conditions:     Not Found');
+
+  tempStr := '';
+  searchPos := pos('"main":{', response);
+  if searchPos > 0 then tempStr := ExtractNumericValueStr(response, 'temp', searchPos);
+  if tempStr <> '' then
+  begin
+    tempC := StrToReal(tempStr, valCode);
+    if valCode = 0 then
+    begin
+      tempF := tempC * 9 / 5 + 32;
+      writeln('Temperature:    ', tempStr, ' C (', tempF:0:1, ' F)');
+    end
+    else
+      writeln('Temperature:    ', tempStr, ' C');
+  end
+  else writeln('Temperature:    Not Found');
+
+  humidityStr := '';
+  // Reuse searchPos from temp search if "main" object was found
+  if searchPos > 0 then humidityStr := ExtractNumericValueStr(response, 'humidity', searchPos);
+  if humidityStr <> '' then writeln('Humidity:       ', humidityStr, '%')
+  else writeln('Humidity:       Not Found');
+
+  windStr := '';
+  searchPos := pos('"wind":{', response);
+  if searchPos > 0 then windStr := ExtractNumericValueStr(response, 'speed', searchPos);
+  if windStr <> '' then writeln('Wind Speed:     ', windStr, ' m/s')
+  else writeln('Wind Speed:     Not Found');
+
+  writeln;
+
+end.

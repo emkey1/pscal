@@ -4,6 +4,9 @@
 #include <stdbool.h>
 
 #include "Pascal/globals.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,6 +49,9 @@ int shellRunSource(const char *source,
                    const char *path,
                    const ShellRunOptions *options,
                    bool *out_exit_requested);
+#if defined(PSCAL_TARGET_IOS)
+int shellMaybeExecShebangTool(const char *path, char *const *argv);
+#endif
 
 #ifdef __cplusplus
 }

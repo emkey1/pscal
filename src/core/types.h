@@ -11,6 +11,11 @@
 #include <stdint.h>
 #include "list.h"
 #include <stdbool.h>
+#include "common/frontend_symbol_aliases.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+#include "ios/vproc_stdio_shim.h"
+#endif
 
 // Default record size used for untyped files when RESET/REWRITE omit an
 // explicit size. Turbo Pascal historically defaults to 128 bytes; mirror that
@@ -133,6 +138,8 @@ typedef struct ValueStruct {
             ClosureEnvPayload *payload;
         } interface;
     };
+    uint8_t *array_raw;
+    bool array_is_packed;
     AST *base_type_node; // AST node defining the type this pointer points to
                          // Needed for new(), dispose(), dereferencing type checks.
 

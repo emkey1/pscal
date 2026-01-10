@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <inttypes.h>
+#include <errno.h>
+#include <time.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -18,6 +20,8 @@
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
 #include "Pascal/globals.h"
+#include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
 #include "backend_ast/audio.h"
 #include "Pascal/parser.h"
 #include "ast/ast.h"
@@ -26,6 +30,11 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+#endif
+
+static bool vmHandleGlobalInterrupt(VM* vm);
 
 #if defined(__GNUC__) || defined(__clang__)
 #define VM_USE_COMPUTED_GOTO 1
@@ -397,33 +406,37 @@ static bool vmResolveStringIndex(VM* vm,
                                  size_t* out_offset,
                                  bool allow_length_query,
                                  bool* out_length_query) {
-#ifndef FRONTEND_SHELL
-    if (allow_length_query && raw_index == 0) {
+    bool is_shell_frontend = vm ? vm->shellIndexing : frontendIsShell();
+
+    if (!is_shell_frontend)
+    {
+        if (allow_length_query && raw_index == 0) {
+            if (out_length_query) {
+                *out_length_query = true;
+            }
+            if (out_offset) {
+                *out_offset = 0;
+            }
+            return true;
+        }
+
+        if (raw_index < 1 || (size_t)raw_index > len) {
+            runtimeError(vm,
+                         "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
+                         raw_index,
+                         len);
+            return false;
+        }
+
         if (out_length_query) {
-            *out_length_query = true;
+            *out_length_query = false;
         }
         if (out_offset) {
-            *out_offset = 0;
+            *out_offset = (size_t)(raw_index - 1);
         }
         return true;
     }
 
-    if (raw_index < 1 || (size_t)raw_index > len) {
-        runtimeError(vm,
-                     "Runtime Error: String index (%lld) out of bounds for string of length %zu.",
-                     raw_index,
-                     len);
-        return false;
-    }
-
-    if (out_length_query) {
-        *out_length_query = false;
-    }
-    if (out_offset) {
-        *out_offset = (size_t)(raw_index - 1);
-    }
-    return true;
-#else
     (void)allow_length_query;
     if (raw_index < 0 || (size_t)raw_index >= len) {
         runtimeError(vm,
@@ -440,7 +453,30 @@ static bool vmResolveStringIndex(VM* vm,
         *out_offset = (size_t)raw_index;
     }
     return true;
-#endif
+}
+
+static VarType vmResolveArrayElementType(AST* arrayType) {
+    if (!arrayType || arrayType->type != AST_ARRAY_TYPE) {
+        return TYPE_UNKNOWN;
+    }
+    AST* elem = arrayType->right;
+    if (!elem) {
+        return TYPE_UNKNOWN;
+    }
+    if (elem->type == AST_TYPE_REFERENCE && elem->token && elem->token->value) {
+        AST* looked = lookupType(elem->token->value);
+        if (looked) {
+            if (looked->type == AST_TYPE_DECL && looked->left) {
+                elem = looked->left;
+            } else {
+                elem = looked;
+            }
+        }
+    }
+    if (elem->type == AST_TYPE_DECL && elem->left) {
+        elem = elem->left;
+    }
+    return elem ? elem->var_type : TYPE_UNKNOWN;
 }
 
 static Value makeOwnedString(char* data, size_t len) {
@@ -456,11 +492,10 @@ static Value makeOwnedString(char* data, size_t len) {
 }
 
 static unsigned long long vmDisplayIndexFromOffset(size_t offset) {
-#ifndef FRONTEND_SHELL
+    if (frontendIsShell()) {
+        return (unsigned long long)offset;
+    }
     return (unsigned long long)(offset + 1);
-#else
-    return (unsigned long long)offset;
-#endif
 }
 
 static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
@@ -1014,6 +1049,12 @@ static bool vmThreadPrepareWorkerVm(Thread* thread, VM* owner, ThreadJob* job, i
         thread->vm->threadOwner = owner;
         thread->vm->trace_head_instructions = owner->trace_head_instructions;
     }
+#if defined(PSCAL_TARGET_IOS)
+    globalSymbols = thread->vm->vmGlobalSymbols;
+    constGlobalSymbols = thread->vm->vmConstGlobalSymbols;
+    procedure_table = thread->vm->procedureTable;
+    current_procedure_table = thread->vm->procedureTable;
+#endif
     thread->vm->trace_executed = 0;
     thread->vm->owningThread = thread;
     thread->vm->threadId = threadId;
@@ -1183,6 +1224,10 @@ static void* threadStart(void* arg) {
     }
 
     while (!atomic_load(&owner->shuttingDownWorkers) && !atomic_load(&thread->killRequested)) {
+        (void)vmHandleGlobalInterrupt(owner);
+        if (atomic_load(&owner->shuttingDownWorkers) || atomic_load(&thread->killRequested)) {
+            break;
+        }
         if (!job) {
             pthread_mutex_lock(&owner->threadRegistryLock);
             owner->availableWorkers++;
@@ -1208,7 +1253,7 @@ static void* threadStart(void* arg) {
         vmThreadAssignInternalName(thread, threadId, job->name);
         thread->queuedAt = job->queuedAt;
         thread->currentJob = job;
-        thread->poolWorker = thread->poolWorker || job->submitOnly;
+        thread->poolWorker = job->submitOnly;
         thread->active = true;
         atomic_store(&thread->cancelRequested, false);
         atomic_store(&thread->paused, false);
@@ -1226,8 +1271,14 @@ static void* threadStart(void* arg) {
             atomic_store(&thread->cancelRequested, true);
         }
 
+        VM* workerVm = thread->vm;
         bool canceled = atomic_load(&thread->cancelRequested);
         bool killed = atomic_load(&thread->killRequested) || atomic_load(&owner->shuttingDownWorkers);
+
+        if (vmHandleGlobalInterrupt(owner) || vmHandleGlobalInterrupt(workerVm)) {
+            canceled = true;
+            killed = true;
+        }
 
         if (!canceled && !killed) {
             clock_gettime(CLOCK_REALTIME, &thread->startedAt);
@@ -1236,7 +1287,6 @@ static void* threadStart(void* arg) {
             pthread_mutex_unlock(&thread->stateMutex);
         }
 
-        VM* workerVm = thread->vm;
         if (!workerVm) {
             canceled = true;
         }
@@ -1643,6 +1693,86 @@ int vmSpawnBuiltinThread(VM* vm, int builtinId, const char* builtinName, int arg
                            handler, builtinId, builtinName, submitOnly, threadName);
 }
 
+static void vmMarkAbortRequested(VM* vm) {
+    if (!vm) {
+        return;
+    }
+    vm->abort_requested = true;
+    vm->exit_requested = true;
+    if (vm->threadOwner) {
+        vm->threadOwner->abort_requested = true;
+        vm->threadOwner->exit_requested = true;
+    }
+}
+
+static bool vmConsumeInterruptRequest(VM* vm) {
+    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+    if (vmHandleGlobalInterrupt(root)) {
+        return true;
+    }
+    if (pscalRuntimeConsumeSigint()) {
+        vmMarkAbortRequested(root ? root : vm);
+        (void)vmHandleGlobalInterrupt(root);
+        return true;
+    }
+    if (root && (root->abort_requested || root->exit_requested)) {
+        return true;
+    }
+    return false;
+}
+
+static bool vmHandleGlobalInterrupt(VM* vm) {
+    bool pending = pscalRuntimeInterruptFlag() || pscalRuntimeSigintPending();
+    if (!pending && vm) {
+        pending = vm->abort_requested || vm->exit_requested;
+    }
+    if (!pending) {
+        return false;
+    }
+
+    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+    if (root) {
+        root->abort_requested = true;
+        root->exit_requested = true;
+        atomic_store(&root->shuttingDownWorkers, true);
+        if (root->jobQueue) {
+            pthread_mutex_lock(&root->jobQueue->mutex);
+            root->jobQueue->shuttingDown = true;
+            pthread_cond_broadcast(&root->jobQueue->cond);
+            pthread_mutex_unlock(&root->jobQueue->mutex);
+        }
+        for (int i = 1; i < VM_MAX_THREADS; ++i) {
+            Thread* thread = &root->threads[i];
+            if (!thread->inPool) {
+                continue;
+            }
+            atomic_store(&thread->cancelRequested, true);
+            atomic_store(&thread->killRequested, true);
+            if (thread->vm) {
+                thread->vm->abort_requested = true;
+                thread->vm->exit_requested = true;
+            }
+            vmThreadWakeStateWaiters(thread);
+            pthread_mutex_lock(&thread->resultMutex);
+            pthread_cond_broadcast(&thread->resultCond);
+            pthread_mutex_unlock(&thread->resultMutex);
+        }
+        vmThreadJobQueueWake(root->jobQueue);
+    }
+    pscalRuntimeClearInterruptFlag();
+    return true;
+}
+
+static void vmComputeDeadline(struct timespec* out, long millis) {
+    if (!out) {
+        return;
+    }
+    clock_gettime(CLOCK_REALTIME, out);
+    out->tv_nsec += millis * 1000000L;
+    out->tv_sec += out->tv_nsec / 1000000000L;
+    out->tv_nsec = out->tv_nsec % 1000000000L;
+}
+
 void vmThreadStoreResult(VM* vm, const Value* result, bool success) {
     if (!vm || !vm->owningThread) {
         return;
@@ -1685,7 +1815,21 @@ bool vmThreadTakeResult(VM* vm, int threadId, Value* outResult, bool takeValue, 
             pthread_mutex_unlock(&thread->resultMutex);
             return false;
         }
-        pthread_cond_wait(&thread->resultCond, &thread->resultMutex);
+        if (vmConsumeInterruptRequest(vm)) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            vmThreadCancel(vm, threadId);
+            return false;
+        }
+        struct timespec deadline;
+        vmComputeDeadline(&deadline, 100);
+        int wait_status = pthread_cond_timedwait(&thread->resultCond, &thread->resultMutex, &deadline);
+        if (wait_status == ETIMEDOUT || wait_status == EINTR) {
+            continue;
+        }
+        if (wait_status != 0) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            return false;
+        }
     }
 
     if (outStatus) {
@@ -1757,7 +1901,21 @@ static bool joinThreadInternal(VM* vm, int id) {
             pthread_mutex_unlock(&thread->resultMutex);
             return false;
         }
-        pthread_cond_wait(&thread->resultCond, &thread->resultMutex);
+        if (vmConsumeInterruptRequest(vm)) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            vmThreadCancel(vm, id);
+            return false;
+        }
+        struct timespec deadline;
+        vmComputeDeadline(&deadline, 100);
+        int wait_status = pthread_cond_timedwait(&thread->resultCond, &thread->resultMutex, &deadline);
+        if (wait_status == ETIMEDOUT || wait_status == EINTR) {
+            continue;
+        }
+        if (wait_status != 0) {
+            pthread_mutex_unlock(&thread->resultMutex);
+            return false;
+        }
     }
     pthread_mutex_unlock(&thread->resultMutex);
     return true;
@@ -1767,13 +1925,38 @@ static void joinThread(VM* vm, int id) {
     if (!vm) {
         return;
     }
-    if (!vmThreadTakeResult(vm, id, NULL, true, NULL, true)) {
-        joinThreadInternal(vm, id);
-    }
+    joinThreadInternal(vm, id);
 }
 
 bool vmJoinThreadById(VM* vm, int id) {
-    return joinThreadInternal(vm, id);
+    joinThread(vm, id);
+
+    /* Ensure any pending status/result is consumed so the worker can be reused. */
+    if (vm && id > 0 && id < VM_MAX_THREADS) {
+        vmThreadTakeResult(vm, id, NULL, false, NULL, true);
+        Thread *thread = &vm->threads[id];
+        if (thread && thread->inPool && thread->syncInitialized) {
+            bool mark_ready = false;
+            pthread_mutex_lock(&thread->resultMutex);
+            if (!thread->statusReady) {
+                thread->statusFlag = true;
+                thread->statusReady = false;
+                thread->statusConsumed = true;
+                thread->resultConsumed = true;
+                mark_ready = true;
+            } else if (thread->statusConsumed && (!thread->resultReady || thread->resultConsumed)) {
+                mark_ready = true;
+            }
+            pthread_mutex_unlock(&thread->resultMutex);
+            if (mark_ready) {
+                pthread_mutex_lock(&thread->stateMutex);
+                thread->readyForReuse = true;
+                pthread_cond_broadcast(&thread->stateCond);
+                pthread_mutex_unlock(&thread->stateMutex);
+            }
+        }
+    }
+    return true;
 }
 
 bool vmThreadAssignName(VM* vm, int threadId, const char* name) {
@@ -2161,7 +2344,20 @@ static void assignRealToIntChecked(VM* vm, Value* dest, long double real_val) {
     }
 }
 
+static bool g_suppress_vm_state_dump = false;
+
 void vmDumpStackInfoDetailed(VM* vm, const char* context_message) {
+#if defined(PSCAL_TARGET_IOS)
+    (void)vm;
+    (void)context_message;
+    return;
+#endif
+    const char *force_dump = getenv("PSCAL_VM_DUMP");
+    if (g_suppress_vm_state_dump) {
+        if (!force_dump || *force_dump == '\0' || *force_dump == '0') {
+            return;
+        }
+    }
     if (!vm) return; // Safety check
 
     fprintf(stderr, "\n--- VM State Dump (%s) ---\n", context_message ? context_message : "Runtime Context");
@@ -2199,6 +2395,10 @@ void vmDumpStackInfo(VM* vm) {
     // Print stack contents for more detailed debugging:
     fprintf(stderr, "[VM_DEBUG] Stack Contents: ");
     vmDumpStackInternal(vm, false);
+}
+
+void vmSetSuppressStateDump(bool suppress) {
+    g_suppress_vm_state_dump = suppress;
 }
 
 static bool vmSetContains(const Value* setVal, const Value* itemVal) {
@@ -2300,21 +2500,22 @@ static void emitRuntimeLocation(VM* vm, const char* label) {
 }
 
 void runtimeWarning(VM* vm, const char* format, ...) {
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         fflush(stdout);
         resetTextAttributes(stdout);
         fflush(stdout);
     }
-    if (isatty(STDERR_FILENO)) {
+    if (pscalRuntimeStderrIsInteractive()) {
         resetTextAttributes(stderr);
     }
 
+    char message[1024];
     va_list args;
     va_start(args, format);
-    vfprintf(stderr, format, args);
+    vsnprintf(message, sizeof(message), format, args);
     va_end(args);
-    fputc('\n', stderr);
-    fflush(stderr);
+    write(STDERR_FILENO, message, strlen(message));
+    write(STDERR_FILENO, "\n", 1);
 
     if (s_vmVerboseErrors) {
         emitRuntimeLocation(vm, "[Warning Location]");
@@ -2327,28 +2528,31 @@ void runtimeError(VM* vm, const char* format, ...) {
         vm->abort_requested = true;
     }
 
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         fflush(stdout);
         resetTextAttributes(stdout);
         fflush(stdout);
     }
-    if (isatty(STDERR_FILENO)) {
+    if (pscalRuntimeStderrIsInteractive()) {
         resetTextAttributes(stderr);
     }
 
+    char message[1024];
     va_list args;
     va_start(args, format);
-    vfprintf(stderr, format, args);
+    vsnprintf(message, sizeof(message), format, args);
     va_end(args);
-    fputc('\n', stderr);
-    fflush(stderr);
+    write(STDERR_FILENO, message, strlen(message));
+    write(STDERR_FILENO, "\n", 1);
 
     size_t instruction_offset = 0;
     int error_line = 0;
     bool have_runtime_location = false;
     if (vm) {
         computeRuntimeLocation(vm, &instruction_offset, &error_line);
+#if !defined(PSCAL_TARGET_IOS)
         fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
+#endif
         have_runtime_location = true;
     }
 
@@ -2438,6 +2642,14 @@ static void push(VM* vm, Value value) { // Using your original name 'push'
     }
     *vm->stackTop = value;
     vm->stackTop++;
+}
+
+static Value copyInterfaceReceiverAlias(Value* receiverCell) {
+    Value alias = copyValueForStack(receiverCell);
+    if (alias.type == TYPE_POINTER && alias.base_type_node == OWNED_POINTER_SENTINEL) {
+        alias.base_type_node = NULL;
+    }
+    return alias;
 }
 
 static Symbol* findProcedureByAddress(HashTable* table, uint16_t address) {
@@ -3055,6 +3267,61 @@ static Value vmHostBoxInterface(VM* vm) {
         }
     }
 
+    if (!tableSlotPtr && receiverVal.type == TYPE_POINTER && receiverVal.ptr_val) {
+        bool invalid_type = false;
+        Value* existingRecord = resolveRecord(&receiverVal, &invalid_type);
+        if (!invalid_type && existingRecord && existingRecord->type == TYPE_RECORD) {
+            FieldValue* hiddenField = existingRecord->record_val;
+            if (hiddenField) {
+                tableSlotPtr = &hiddenField->value;
+                tableValuePtr = tableSlotPtr;
+                if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
+                    tableValuePtr = (Value*)tableValuePtr->ptr_val;
+                }
+            }
+        }
+    }
+
+    if (receiverVal.type != TYPE_POINTER) {
+        Value* clone = (Value*)malloc(sizeof(Value));
+        if (!clone) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Out of memory boxing interface receiver.");
+            return makeNil();
+        }
+        *clone = makeCopyOfValue(&receiverVal);
+        receiverVal = makePointer(clone, NULL);
+        receiverVal.base_type_node = OWNED_POINTER_SENTINEL;
+
+        bool invalid_type = false;
+        Value* clonedRecord = resolveRecord(&receiverVal, &invalid_type);
+        if (!clonedRecord || invalid_type || clonedRecord->type != TYPE_RECORD) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Unable to resolve cloned receiver for interface boxing.");
+            return makeNil();
+        }
+        FieldValue* hiddenField = clonedRecord->record_val;
+        if (!hiddenField) {
+            freeValue(&classNameVal);
+            freeValue(&typeNameVal);
+            freeValue(&receiverVal);
+            freeValue(&tablePtrVal);
+            runtimeError(vm, "VM Error: Cloned receiver lacks vtable storage.");
+            return makeNil();
+        }
+        tableSlotPtr = &hiddenField->value;
+        tableValuePtr = tableSlotPtr;
+        if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
+            tableValuePtr = (Value*)tableValuePtr->ptr_val;
+        }
+    }
+
     const char* class_name_str = (classNameVal.type == TYPE_STRING && classNameVal.s_val)
                                      ? classNameVal.s_val
                                      : NULL;
@@ -3109,6 +3376,10 @@ static Value vmHostBoxInterface(VM* vm) {
     }
 
     *receiverCell = makeCopyOfValue(&receiverVal);
+    if (receiverCell->type == TYPE_POINTER && receiverCell->base_type_node == NULL &&
+        receiverVal.base_type_node == OWNED_POINTER_SENTINEL) {
+        receiverCell->base_type_node = OWNED_POINTER_SENTINEL;
+    }
     *tableCell = makePointer(tableValuePtr, NULL);
     const char* class_identity_source = class_name_str ? class_name_str : "";
     size_t class_identity_len = strlen(class_identity_source);
@@ -3141,6 +3412,9 @@ static Value vmHostBoxInterface(VM* vm) {
     releaseClosureEnv(payload);
     freeValue(&classNameVal);
     freeValue(&typeNameVal);
+    if (receiverVal.type == TYPE_POINTER && receiverVal.base_type_node == OWNED_POINTER_SENTINEL) {
+        receiverVal.base_type_node = NULL;
+    }
     freeValue(&receiverVal);
     freeValue(&tablePtrVal);
     return iface;
@@ -3258,13 +3532,13 @@ static Value vmHostInterfaceLookup(VM* vm) {
         return makeNil();
     }
 
-    Value receiverCopy = copyValueForStack(receiverCell);
+    Value receiverCopy = copyInterfaceReceiverAlias(receiverCell);
 
     if (vm->vmGlobalSymbols) {
         pthread_mutex_lock(&globals_mutex);
         Symbol* myselfSym = hashTableLookup(vm->vmGlobalSymbols, "myself");
         if (myselfSym) {
-            updateSymbol("myself", copyValueForStack(receiverCell));
+            updateSymbol("myself", copyInterfaceReceiverAlias(receiverCell));
         }
         pthread_mutex_unlock(&globals_mutex);
     }
@@ -3349,7 +3623,7 @@ static Value vmHostInterfaceAssert(VM* vm) {
         return makeNil();
     }
 
-    Value result = copyValueForStack(receiverCell);
+    Value result = copyInterfaceReceiverAlias(receiverCell);
 
     freeValue(&targetTypeVal);
     freeValue(&ifaceVal);
@@ -3591,7 +3865,6 @@ static Value vmHostPrintf(VM* vm) {
     return makeInt(0);
 }
 
-#ifdef FRONTEND_SHELL
 static Value vmHostShellLastStatusHost(VM* vm) {
     return vmHostShellLastStatus(vm);
 }
@@ -3619,42 +3892,6 @@ static Value vmHostShellPollJobsHost(VM* vm) {
 static Value vmHostShellLoopIsReadyHost(VM* vm) {
     return vmHostShellLoopIsReady(vm);
 }
-#else
-static Value vmHostShellLastStatusHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopCheckConditionHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopCheckBodyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopExecuteBodyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopAdvanceHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellPollJobsHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-
-static Value vmHostShellLoopIsReadyHost(VM* vm) {
-    (void)vm;
-    return makeNil();
-}
-#endif
 
 // --- Host Function Registration ---
 bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
@@ -3813,6 +4050,8 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 
     vm->owningThread = NULL;
     vm->threadId = 0;
+    vm->frontendContext = NULL;
+    vm->shellIndexing = frontendIsShell();
 
     for (int i = 0; i < MAX_HOST_FUNCTIONS; i++) {
         vm->host_functions[i] = NULL;
@@ -3891,6 +4130,8 @@ void freeVM(VM* vm) {
         vm->jobQueue = NULL;
     }
     pthread_mutex_destroy(&vm->threadRegistryLock);
+
+    vm->frontendContext = NULL;
 
     if (vm->mutexOwner == vm) {
         for (int i = 0; i < vm->mutexCount; i++) {
@@ -4176,6 +4417,11 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
         }
         if (lower_bounds) free(lower_bounds);
         if (upper_bounds) free(upper_bounds);
+        if (dimension_count > 0 && array_val.dimensions == 0) {
+            runtimeError(vm, "VM Error: Failed to allocate array for global '%s'.", varNameVal.s_val);
+            freeValue(&array_val);
+            return INTERPRET_RUNTIME_ERROR;
+        }
 
         Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, varNameVal.s_val);
         if (sym == NULL) {
@@ -4346,7 +4592,7 @@ static bool builtinUsesGlobalStructures(const char* name) {
         "erase",          "gotoxy",        "hidecursor",    "highvideo",
         "ioresult",       "insline",       "invertcolors",  "lowvideo",
         "normvideo",      "normalcolors",  "paramcount",    "paramstr",
-        "read",           "readln",        "rename",        "reset",
+        "rename",         "reset",
         "rewrite",        "screenrows",    "screencols",    "showcursor",
         "textbackground", "textbackgrounde","textcolor",     "textcolore",
         "underlinetext",  "window",        "wherex",        "wherey",
@@ -4362,10 +4608,21 @@ static bool builtinUsesGlobalStructures(const char* name) {
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
 
+    /* Defensive: ensure symbol tables exist so DEFINE_GLOBAL and similar ops
+     * never dereference an uninitialized pointer (can happen after frontend
+     * state swaps on iOS). */
+    if (!globals) {
+        globals = createHashTable();
+    }
+    if (!const_globals) {
+        const_globals = createHashTable();
+    }
+
     vm->chunk = chunk;
     vm->ip = vm->chunk->code + entry;
     vm->lastInstruction = vm->ip;
     vm->abort_requested = false;
+    vm->shellIndexing = frontendIsShell();
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
     vm->vmConstGlobalSymbols = const_globals; // Table of constant globals (no locking)
@@ -4632,6 +4889,14 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
 
     uint8_t instruction_val;
     for (;;) {
+#if defined(PSCAL_TARGET_IOS)
+        if (vprocWaitIfStopped(vprocCurrent())) {
+            continue;
+        }
+#endif
+        if (vmConsumeInterruptRequest(vm)) {
+            /* VM abort flag is set; let the normal exit/abort handling run. */
+        }
         if (pending_exit_flag && *pending_exit_flag) {
             shellRuntimeMaybeRequestPendingExit(vm);
         }
@@ -5626,13 +5891,11 @@ comparison_error_label:
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-#ifndef FRONTEND_SHELL
-                        if (wants_length) {
+                        if (!frontendIsShell() && wants_length) {
                             push(vm, makePointer(base_val, STRING_LENGTH_SENTINEL));
                             freeValue(&operand);
                             break;
                         }
-#endif
 
                         push(vm, makePointer(&base_val->s_val[char_offset], STRING_CHAR_PTR_SENTINEL));
                         freeValue(&operand);
@@ -5669,7 +5932,15 @@ comparison_error_label:
                         int dims = arrayType->child_count;
                         temp_wrapper.type = TYPE_ARRAY;
                         temp_wrapper.dimensions = dims;
-                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.element_type = vmResolveArrayElementType(arrayType);
+                        temp_wrapper.array_is_packed = isPackedByteElementType(temp_wrapper.element_type);
+                        if (temp_wrapper.array_is_packed) {
+                            temp_wrapper.array_raw = (uint8_t*)operand.ptr_val;
+                            temp_wrapper.array_val = NULL;
+                        } else {
+                            temp_wrapper.array_val = (Value*)operand.ptr_val;
+                            temp_wrapper.array_raw = NULL;
+                        }
                         temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
                         temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
                         if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
@@ -5721,7 +5992,20 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
+                if (array_val_ptr->array_is_packed) {
+                    if (!array_val_ptr->array_raw) {
+                        runtimeError(vm, "VM Error: Packed array storage missing.");
+                        freeValue(&operand);
+                        if (using_wrapper) {
+                            free(temp_wrapper.lower_bounds);
+                            free(temp_wrapper.upper_bounds);
+                        }
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makePointer(&array_val_ptr->array_raw[offset], BYTE_ARRAY_PTR_SENTINEL));
+                } else {
+                    push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
+                }
 
                 if (operand.type == TYPE_POINTER) {
                     freeValue(&operand);
@@ -5773,7 +6057,15 @@ comparison_error_label:
                         int dims = arrayType->child_count;
                         temp_wrapper.type = TYPE_ARRAY;
                         temp_wrapper.dimensions = dims;
-                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.element_type = vmResolveArrayElementType(arrayType);
+                        temp_wrapper.array_is_packed = isPackedByteElementType(temp_wrapper.element_type);
+                        if (temp_wrapper.array_is_packed) {
+                            temp_wrapper.array_raw = (uint8_t*)operand.ptr_val;
+                            temp_wrapper.array_val = NULL;
+                        } else {
+                            temp_wrapper.array_val = (Value*)operand.ptr_val;
+                            temp_wrapper.array_raw = NULL;
+                        }
                         temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
                         temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
                         if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
@@ -5821,7 +6113,20 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, makePointer(&array_val_ptr->array_val[flat_offset], NULL));
+                if (array_val_ptr->array_is_packed) {
+                    if (!array_val_ptr->array_raw) {
+                        runtimeError(vm, "VM Error: Packed array storage missing.");
+                        freeValue(&operand);
+                        if (using_wrapper) {
+                            free(temp_wrapper.lower_bounds);
+                            free(temp_wrapper.upper_bounds);
+                        }
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makePointer(&array_val_ptr->array_raw[flat_offset], BYTE_ARRAY_PTR_SENTINEL));
+                } else {
+                    push(vm, makePointer(&array_val_ptr->array_val[flat_offset], NULL));
+                }
 
                 if (operand.type == TYPE_POINTER) {
                     freeValue(&operand);
@@ -5864,15 +6169,11 @@ comparison_error_label:
                             return INTERPRET_RUNTIME_ERROR;
                         }
 
-#ifndef FRONTEND_SHELL
-                        if (wants_length) {
+                        if (!frontendIsShell() && wants_length) {
                             push(vm, makeInt((long long)len));
                             freeValue(&operand);
                             break;
                         }
-#else
-                        (void)wants_length;
-#endif
 
                         char ch = base_val->s_val ? base_val->s_val[char_offset] : '\0';
                         push(vm, makeChar(ch));
@@ -5919,7 +6220,15 @@ comparison_error_label:
                         int dims = arrayType->child_count;
                         temp_wrapper.type = TYPE_ARRAY;
                         temp_wrapper.dimensions = dims;
-                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.element_type = vmResolveArrayElementType(arrayType);
+                        temp_wrapper.array_is_packed = isPackedByteElementType(temp_wrapper.element_type);
+                        if (temp_wrapper.array_is_packed) {
+                            temp_wrapper.array_raw = (uint8_t*)operand.ptr_val;
+                            temp_wrapper.array_val = NULL;
+                        } else {
+                            temp_wrapper.array_val = (Value*)operand.ptr_val;
+                            temp_wrapper.array_raw = NULL;
+                        }
                         temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
                         temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
                         if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
@@ -5971,7 +6280,20 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, copyValueForStack(&array_val_ptr->array_val[offset]));
+                if (array_val_ptr->array_is_packed) {
+                    if (!array_val_ptr->array_raw) {
+                        runtimeError(vm, "VM Error: Packed array storage missing.");
+                        freeValue(&operand);
+                        if (using_wrapper) {
+                            free(temp_wrapper.lower_bounds);
+                            free(temp_wrapper.upper_bounds);
+                        }
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makeByte(array_val_ptr->array_raw[offset]));
+                } else {
+                    push(vm, copyValueForStack(&array_val_ptr->array_val[offset]));
+                }
 
                 freeValue(&operand);
                 if (using_wrapper) {
@@ -6022,7 +6344,15 @@ comparison_error_label:
                         int dims = arrayType->child_count;
                         temp_wrapper.type = TYPE_ARRAY;
                         temp_wrapper.dimensions = dims;
-                        temp_wrapper.array_val = (Value*)operand.ptr_val;
+                        temp_wrapper.element_type = vmResolveArrayElementType(arrayType);
+                        temp_wrapper.array_is_packed = isPackedByteElementType(temp_wrapper.element_type);
+                        if (temp_wrapper.array_is_packed) {
+                            temp_wrapper.array_raw = (uint8_t*)operand.ptr_val;
+                            temp_wrapper.array_val = NULL;
+                        } else {
+                            temp_wrapper.array_val = (Value*)operand.ptr_val;
+                            temp_wrapper.array_raw = NULL;
+                        }
                         temp_wrapper.lower_bounds = malloc(sizeof(int) * dims);
                         temp_wrapper.upper_bounds = malloc(sizeof(int) * dims);
                         if (!temp_wrapper.lower_bounds || !temp_wrapper.upper_bounds) {
@@ -6068,7 +6398,20 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                push(vm, copyValueForStack(&array_val_ptr->array_val[flat_offset]));
+                if (array_val_ptr->array_is_packed) {
+                    if (!array_val_ptr->array_raw) {
+                        runtimeError(vm, "VM Error: Packed array storage missing.");
+                        freeValue(&operand);
+                        if (using_wrapper) {
+                            free(temp_wrapper.lower_bounds);
+                            free(temp_wrapper.upper_bounds);
+                        }
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makeByte(array_val_ptr->array_raw[flat_offset]));
+                } else {
+                    push(vm, copyValueForStack(&array_val_ptr->array_val[flat_offset]));
+                }
 
                 freeValue(&operand);
                 if (using_wrapper) {
@@ -6115,17 +6458,53 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
-#ifndef FRONTEND_SHELL
+                } else if (pointer_to_lvalue.base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
+                    uint8_t* byte_target_addr = (uint8_t*)pointer_to_lvalue.ptr_val;
+                    if (byte_target_addr == NULL) {
+                        runtimeError(vm, "VM Error: Attempting to assign to a NULL byte address.");
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    unsigned long long stored = 0;
+                    bool range_error = false;
+                    if (isRealType(value_to_set.type)) {
+                        long double real_val = AS_REAL(value_to_set);
+                        if (real_val < 0.0L) {
+                            range_error = true;
+                            stored = 0;
+                        } else if (real_val > (long double)UINT8_MAX) {
+                            range_error = true;
+                            stored = UINT8_MAX;
+                        } else {
+                            stored = (unsigned long long)real_val;
+                        }
+                    } else if (isIntlikeType(value_to_set.type)) {
+                        long long val = AS_INTEGER(value_to_set);
+                        if (val < 0 || val > 255) {
+                            range_error = true;
+                        }
+                        stored = (unsigned long long)(val & 0xFF);
+                    } else {
+                        runtimeError(vm, "VM Error: Type mismatch for byte assignment. Expected numeric type, got %s.",
+                                     varTypeToString(value_to_set.type));
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (range_error) {
+                        runtimeWarning(vm, "Warning: Range check error assigning to BYTE.");
+                    }
+                    *byte_target_addr = (uint8_t)stored;
                 } else if (pointer_to_lvalue.base_type_node == STRING_LENGTH_SENTINEL) {
-                    runtimeError(vm, "VM Error: Cannot assign to string length.");
-                    freeValue(&value_to_set);
-                    freeValue(&pointer_to_lvalue);
-                    return INTERPRET_RUNTIME_ERROR;
-                } else
-#else
-                } else
-#endif
-                {
+                    if (!frontendIsShell()) {
+                        runtimeError(vm, "VM Error: Cannot assign to string length.");
+                        freeValue(&value_to_set);
+                        freeValue(&pointer_to_lvalue);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                } else {
                     // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
                     if (!target_lvalue_ptr) {
@@ -6298,16 +6677,20 @@ comparison_error_label:
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     push(vm, makeChar(*char_target_addr));
-#ifndef FRONTEND_SHELL
-                } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL) {
+                } else if (pointer_val.base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
+                    uint8_t* byte_target_addr = (uint8_t*)pointer_val.ptr_val;
+                    if (byte_target_addr == NULL) {
+                        runtimeError(vm, "VM Error: Attempting to dereference a NULL byte address.");
+                        freeValue(&pointer_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    push(vm, makeByte(*byte_target_addr));
+                } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL && !frontendIsShell()) {
                     // Special case: request for string length via element 0.
                     Value* str_val = (Value*)pointer_val.ptr_val;
                     size_t len = (str_val && str_val->s_val) ? strlen(str_val->s_val) : 0;
                     push(vm, makeInt((long long)len));
                 } else {
-#else
-                } else {
-#endif
                     Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
                     if (target_lvalue_ptr == NULL) {
                         runtimeError(vm, "VM Error: GET_INDIRECT on a nil pointer.");
@@ -6341,21 +6724,18 @@ comparison_error_label:
                          return INTERPRET_RUNTIME_ERROR;
                      }
                      result_char = str[char_offset];
-                 } else if (base_val.type == TYPE_CHAR) {
-#ifdef FRONTEND_SHELL
-                     if (pscal_index != 0) {
-                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 0, got %lld.", pscal_index);
-                         freeValue(&index_val); freeValue(&base_val);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-#else
-                     if (pscal_index != 1) {
-                         runtimeError(vm, "Runtime Error: Index for a CHAR type must be 1, got %lld.", pscal_index);
-                         freeValue(&index_val); freeValue(&base_val);
-                         return INTERPRET_RUNTIME_ERROR;
-                     }
-#endif
-                     result_char = base_val.c_val;
+                } else if (base_val.type == TYPE_CHAR) {
+                    long long expected_index = frontendIsShell() ? 0 : 1;
+                    if (pscal_index != expected_index) {
+                        runtimeError(vm,
+                                     "Runtime Error: Index for a CHAR type must be %lld, got %lld.",
+                                     expected_index,
+                                     pscal_index);
+                        freeValue(&index_val);
+                        freeValue(&base_val);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    result_char = base_val.c_val;
                  } else {
                      runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));
                      freeValue(&index_val); freeValue(&base_val);
@@ -6954,6 +7334,14 @@ comparison_error_label:
                     array_val = makeEmptyArray(elem_var_type, elem_type_def);
                 }
 
+                if (dimension_count > 0 && array_val.dimensions == 0) {
+                    runtimeError(vm, "VM Error: Failed to allocate array for local slot %u.", slot);
+                    freeValue(&array_val);
+                    free(lower_idx);
+                    free(upper_idx);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
                 free(lower_idx);
                 free(upper_idx);
 
@@ -7048,6 +7436,14 @@ comparison_error_label:
                     free(upper_bounds);
                 } else {
                     array_val = makeEmptyArray(elem_var_type, elem_type_def);
+                }
+
+                if (dimension_count > 0 && array_val.dimensions == 0) {
+                    runtimeError(vm, "VM Error: Failed to allocate array for field %u.", field_index);
+                    freeValue(&array_val);
+                    free(lower_idx);
+                    free(upper_idx);
+                    return INTERPRET_RUNTIME_ERROR;
                 }
 
                 free(lower_idx);

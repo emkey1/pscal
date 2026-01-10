@@ -50,12 +50,13 @@ schemes:
    configurations.  Setting it at the project level will cascade to every
    target.
 3. Open the **Build Phases** tab, expand **Link Binary With Libraries**, and add
-   `SDL2.framework`, `SDL2_ttf.framework`, and `SDL2_mixer.framework` (or the
-   dynamic libraries from Homebrew if you prefer `.dylib`s).
+   the SDL frameworks you have installed (for example `SDL3.framework`,
+   `SDL3_ttf.framework`, and `SDL3_mixer.framework`, or the SDL2 equivalents)—
+   or point the project at the corresponding Homebrew `.dylib`s if you prefer.
 4. The generated project now seeds common SDL include locations—Homebrew's
    `/opt/homebrew/include`, `/usr/local/include`, and the standard
-   `SDL2.framework` headers—so most macOS setups work without extra tweaks. If
-   your installation lives somewhere else, add its parent folder to
+   `SDL3.framework`/`SDL2.framework` headers—so most macOS setups work without
+   extra tweaks. If your installation lives somewhere else, add its parent folder to
    **Header Search Paths**.
 5. Clean and rebuild; SDL-only examples such as
    `Examples/pascal/sdl/MultiBouncingBalls` will now launch from within Xcode.

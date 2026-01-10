@@ -1,0 +1,682 @@
+#!/usr/bin/env rea
+// OpenWeather One Call forecast demo.
+// Documentation: https://openweathermap.org/api/one-call-3
+// Usage: OPENWEATHER_API_KEY=<key> ./openweather_forecast <zip> [country] [units]
+
+str pad2(int value) {
+  if (value < 10) {
+    return "0" + inttostr(value);
+  }
+  return inttostr(value);
+}
+
+bool stringContains(str haystack, str needle) {
+  int hayLen = length(haystack);
+  int needleLen = length(needle);
+  if (needleLen == 0) {
+    return true;
+  }
+  if (needleLen > hayLen) {
+    return false;
+  }
+  int i = 1;
+  while (i <= hayLen - needleLen + 1) {
+    int j = 0;
+    bool match = true;
+    while (j < needleLen) {
+      if (haystack[i + j] != needle[j + 1]) {
+        match = false;
+        break;
+      }
+      j = j + 1;
+    }
+    if (match) {
+      return true;
+    }
+    i = i + 1;
+  }
+  return false;
+}
+
+str formatUtcOffset(int offsetSeconds) {
+  int absSeconds = offsetSeconds;
+  str sign = "+";
+  if (absSeconds < 0) {
+    sign = "-";
+    absSeconds = -absSeconds;
+  }
+  int hours = absSeconds / 3600;
+  int minutes = (absSeconds % 3600) / 60;
+  return sign + pad2(hours) + ":" + pad2(minutes);
+}
+
+str formatDateTime(int epochSeconds, int offsetSeconds) {
+  int total = epochSeconds + offsetSeconds;
+  if (total < 0) {
+    total = 0;
+  }
+  int days = total / 86400;
+  int secondsOfDay = total % 86400;
+  int hour = secondsOfDay / 3600;
+  int minute = (secondsOfDay % 3600) / 60;
+
+  int z = days + 719468;
+  int era;
+  if (z >= 0) {
+    era = z / 146097;
+  } else {
+    era = (z - 146096) / 146097;
+  }
+  int doe = z - era * 146097;
+  int yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  int year = yoe + era * 400;
+  int doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  int mp = (5 * doy + 2) / 153;
+  int day = doy - (153 * mp + 2) / 5 + 1;
+  int month;
+  if (mp < 10) {
+    month = mp + 3;
+  } else {
+    month = mp - 9;
+  }
+  if (month <= 2) {
+    year = year + 1;
+  }
+
+  str date = inttostr(year) + "-" + pad2(month) + "-" + pad2(day);
+  return date + " " + pad2(hour) + ":" + pad2(minute);
+}
+
+str trimWhitespace(str value) {
+  int left = 1;
+  int right = length(value);
+  while (left <= right && (value[left] == ' ' || value[left] == '\t' ||
+         value[left] == '\n' || value[left] == '\r')) {
+    left = left + 1;
+  }
+  while (right >= left && (value[right] == ' ' || value[right] == '\t' ||
+         value[right] == '\n' || value[right] == '\r')) {
+    right = right - 1;
+  }
+  if (right < left) {
+    return "";
+  }
+  int resultLen = right - left + 1;
+  str trimmed;
+  setlength(trimmed, resultLen);
+  int i = 0;
+  while (i < resultLen) {
+    trimmed[i + 1] = value[left + i];
+    i = i + 1;
+  }
+  return trimmed;
+}
+
+str tryReadApiKeyFromFile(str path) {
+  if (!fileexists(path)) {
+    return "";
+  }
+  text f;
+  assign(f, path);
+  reset(f);
+  if (eof(f)) {
+    close(f);
+    return "";
+  }
+  str line;
+  readln(f, line);
+  close(f);
+  return trimWhitespace(line);
+}
+
+str ConfiguredApiKeyPath = "/usr/local/pscal/lib/openweathermap.key";
+
+str resolveApiKey() {
+  str envKey = getenv("OPENWEATHER_API_KEY");
+  if (envKey != "") {
+    return envKey;
+  }
+
+  str home = getenv("HOME");
+  str desiredPath = "~/.pscal/etc/openweathermap.key";
+  if (home != "") {
+    if (home[length(home)] == '/') {
+      desiredPath = home + ".pscal/etc/openweathermap.key";
+    } else {
+      desiredPath = home + "/.pscal/etc/openweathermap.key";
+    }
+    str fileKey = tryReadApiKeyFromFile(desiredPath);
+    if (fileKey != "") {
+      return fileKey;
+    }
+  }
+
+  str legacyKey = tryReadApiKeyFromFile(ConfiguredApiKeyPath);
+  if (legacyKey != "") {
+    return legacyKey;
+  }
+
+  writeln("Error: Unable to determine OpenWeather API key.");
+  writeln("Set the OPENWEATHER_API_KEY environment variable or create ~/.pscal/etc/openweathermap.key with your key.");
+  return "";
+}
+
+void printCurrentConditions(int currentHandle, str tempUnitSymbol) {
+  float currentTemp = 0.0;
+  int humidity = -1;
+  str currentSummary = "";
+  str summaryText = "";
+  int currentTempHandle = -1;
+  int humidityHandle = -1;
+  int weatherArrayHandle = -1;
+  int weatherLen = 0;
+  int weatherEntry = -1;
+  int descHandle = -1;
+
+  if (currentHandle < 0) {
+    return;
+  }
+
+  currentTemp = 0.0;
+  humidity = -1;
+  currentSummary = "";
+  summaryText = "";
+  weatherLen = 0;
+  weatherEntry = -1;
+  descHandle = -1;
+
+  currentTempHandle = YyjsonGetKey(currentHandle, "temp");
+  if (currentTempHandle >= 0) {
+    currentTemp = YyjsonGetNumber(currentTempHandle);
+    YyjsonFreeValue(currentTempHandle);
+  }
+
+  humidityHandle = YyjsonGetKey(currentHandle, "humidity");
+  if (humidityHandle >= 0) {
+    humidity = (int)YyjsonGetInt(humidityHandle);
+    YyjsonFreeValue(humidityHandle);
+  }
+
+  weatherArrayHandle = YyjsonGetKey(currentHandle, "weather");
+  if (weatherArrayHandle >= 0) {
+    weatherLen = YyjsonGetLength(weatherArrayHandle);
+    if (weatherLen > 0) {
+      weatherEntry = YyjsonGetIndex(weatherArrayHandle, 0);
+      if (weatherEntry >= 0) {
+        descHandle = YyjsonGetKey(weatherEntry, "description");
+        if (descHandle >= 0) {
+          currentSummary = YyjsonGetString(descHandle);
+          YyjsonFreeValue(descHandle);
+        }
+        YyjsonFreeValue(weatherEntry);
+      }
+    }
+    YyjsonFreeValue(weatherArrayHandle);
+  }
+
+  summaryText = currentSummary;
+  if (summaryText == "") {
+    summaryText = "No description";
+  }
+  if (humidity >= 0) {
+    printf("Current: %.1f%s, %s (humidity %d%%)\n", currentTemp, tempUnitSymbol, summaryText, humidity);
+  } else {
+    printf("Current: %.1f%s, %s\n", currentTemp, tempUnitSymbol, summaryText);
+  }
+
+  YyjsonFreeValue(currentHandle);
+}
+
+void printDailyForecast(int dailyHandle, int timezoneOffset, str tempUnitSymbol) {
+  int dailyLen = 0;
+  int daysToShow = 0;
+  int i = 0;
+  int dayHandle = -1;
+  int dtHandle = -1;
+  int dt = 0;
+  str dayLabel = "";
+  int tempBlock = -1;
+  int minHandle = -1;
+  int maxHandle = -1;
+  float minTemp = 0.0;
+  float maxTemp = 0.0;
+  int popHandle = -1;
+  float pop = -1.0;
+  int rainHandle = -1;
+  float rain = -1.0;
+  int snowHandle = -1;
+  float snow = -1.0;
+  int weatherHandle = -1;
+  int weatherLen = 0;
+  int weatherEntry = -1;
+  int descHandle = -1;
+  str summary = "";
+
+  if (dailyHandle < 0) {
+    return;
+  }
+
+  dailyLen = YyjsonGetLength(dailyHandle);
+  if (dailyLen > 0) {
+    writeln("\nDaily forecast:");
+  }
+
+  daysToShow = dailyLen;
+  if (daysToShow > 7) {
+    daysToShow = 7;
+  }
+
+  i = 0;
+  while (i < daysToShow) {
+    dayHandle = YyjsonGetIndex(dailyHandle, i);
+    if (dayHandle >= 0) {
+      dtHandle = YyjsonGetKey(dayHandle, "dt");
+      dt = 0;
+      if (dtHandle >= 0) {
+        dt = (int)YyjsonGetInt(dtHandle);
+        YyjsonFreeValue(dtHandle);
+      }
+
+      dayLabel = formatDateTime(dt, timezoneOffset);
+
+      minTemp = 0.0;
+      maxTemp = 0.0;
+      tempBlock = YyjsonGetKey(dayHandle, "temp");
+      if (tempBlock >= 0) {
+        minHandle = YyjsonGetKey(tempBlock, "min");
+        if (minHandle >= 0) {
+          minTemp = YyjsonGetNumber(minHandle);
+          YyjsonFreeValue(minHandle);
+        }
+        maxHandle = YyjsonGetKey(tempBlock, "max");
+        if (maxHandle >= 0) {
+          maxTemp = YyjsonGetNumber(maxHandle);
+          YyjsonFreeValue(maxHandle);
+        }
+        YyjsonFreeValue(tempBlock);
+      }
+
+      pop = -1.0;
+      popHandle = YyjsonGetKey(dayHandle, "pop");
+      if (popHandle >= 0) {
+        pop = YyjsonGetNumber(popHandle);
+        YyjsonFreeValue(popHandle);
+      }
+
+      rain = -1.0;
+      rainHandle = YyjsonGetKey(dayHandle, "rain");
+      if (rainHandle >= 0) {
+        rain = YyjsonGetNumber(rainHandle);
+        YyjsonFreeValue(rainHandle);
+      }
+
+      snow = -1.0;
+      snowHandle = YyjsonGetKey(dayHandle, "snow");
+      if (snowHandle >= 0) {
+        snow = YyjsonGetNumber(snowHandle);
+        YyjsonFreeValue(snowHandle);
+      }
+
+      summary = "";
+      weatherHandle = YyjsonGetKey(dayHandle, "weather");
+      if (weatherHandle >= 0) {
+        weatherLen = YyjsonGetLength(weatherHandle);
+        if (weatherLen > 0) {
+          weatherEntry = YyjsonGetIndex(weatherHandle, 0);
+          if (weatherEntry >= 0) {
+            descHandle = YyjsonGetKey(weatherEntry, "description");
+            if (descHandle >= 0) {
+              summary = YyjsonGetString(descHandle);
+              YyjsonFreeValue(descHandle);
+            }
+            YyjsonFreeValue(weatherEntry);
+          }
+        }
+        YyjsonFreeValue(weatherHandle);
+      }
+
+      if (summary == "") {
+        summary = "No description";
+      }
+
+      printf("  %s — %s. High %.1f%s / Low %.1f%s", dayLabel, summary, maxTemp, tempUnitSymbol, minTemp, tempUnitSymbol);
+      if (pop >= 0.0) {
+        printf(", precip %.0f%%", pop * 100.0);
+      }
+      if (rain >= 0.0) {
+        printf(", rain %.1f mm", rain);
+      }
+      if (snow >= 0.0) {
+        printf(", snow %.1f mm", snow);
+      }
+      printf("\n");
+
+      YyjsonFreeValue(dayHandle);
+    }
+    i = i + 1;
+  }
+
+  YyjsonFreeValue(dailyHandle);
+}
+
+int main() {
+  if (!hasextbuiltin("yyjson", "YyjsonRead")) {
+    writeln("Error: yyjson extended built-ins are required. Rebuild with yyjson support enabled.");
+    return 1;
+  }
+
+  str apiKey = resolveApiKey();
+  if (apiKey == "") {
+    return 1;
+  }
+
+  int argc = paramcount();
+  str programName = paramstr(0);
+  if (argc < 1) {
+    writeln("Usage: ", programName, " <zip> [country] [units]");
+    writeln("  country defaults to US; units may be imperial, metric, or standard.");
+    return 1;
+  }
+
+  str zip = paramstr(1);
+  str country = "US";
+  if (argc >= 2) {
+    str c = paramstr(2);
+    if (c != "") {
+      country = c;
+    }
+  }
+
+  str unitsInput = "imperial";
+  if (argc >= 3) {
+    str u = paramstr(3);
+    if (u != "") {
+      unitsInput = u;
+    }
+  }
+
+  str unitsParam;
+  str tempUnitSymbol;
+  if (unitsInput == "imperial" || unitsInput == "Imperial" || unitsInput == "IMPERIAL") {
+    unitsParam = "imperial";
+    tempUnitSymbol = "°F";
+  } else if (unitsInput == "metric" || unitsInput == "Metric" || unitsInput == "METRIC") {
+    unitsParam = "metric";
+    tempUnitSymbol = "°C";
+  } else if (unitsInput == "standard" || unitsInput == "Standard" || unitsInput == "STANDARD") {
+    unitsParam = "standard";
+    tempUnitSymbol = "K";
+  } else {
+    writeln("Warning: Unknown units '", unitsInput, "'. Falling back to 'imperial'.");
+    unitsParam = "imperial";
+    tempUnitSymbol = "°F";
+  }
+
+  int session = httpsession();
+  if (session < 0) {
+    writeln("Error: Unable to allocate an HTTP session.");
+    return 1;
+  }
+
+  httpsetheader(session, "Accept", "application/json");
+
+  bool ok = true;
+  int exitCode = 0;
+  float lat = 0.0;
+  float lon = 0.0;
+  str resolvedZip = zip;
+  str placeName = "";
+  str stateName = "";
+  str countryName = "";
+  mstream geoOut;
+  bool geoOutAllocated = false;
+  mstream forecastOut;
+  bool forecastOutAllocated = false;
+  int timezoneOffset = 0;
+  str timezoneName = "";
+  str locationLine = "";
+  str offsetStr = "";
+  int tzHandle = -1;
+  int tzOffsetHandle = -1;
+  int currentHandle = -1;
+  int dailyHandle = -1;
+  int forecastDoc = -1;
+  int rootHandle = -1;
+  int codHandle = -1;
+  int messageHandle = -1;
+
+  if (ok) {
+    str geocodeUrl = "https://api.openweathermap.org/geo/1.0/zip?zip=" + zip + "," + country + "&appid=" + apiKey;
+    geoOut = mstreamcreate();
+    geoOutAllocated = true;
+    int geoStatus = httprequest(session, "GET", geocodeUrl, nil, geoOut);
+    str geoBody = mstreambuffer(geoOut);
+
+    if (geoStatus != 200) {
+      writeln("Geocoding request failed with HTTP status ", geoStatus, ".");
+      if (geoBody != "") {
+        writeln("Response: ", geoBody);
+      }
+      ok = false;
+      exitCode = 1;
+    } else {
+      int geoDoc = YyjsonRead(geoBody);
+      if (geoDoc < 0) {
+        writeln("Error: Failed to parse geocoding response as JSON.");
+        ok = false;
+        exitCode = 1;
+      } else {
+        int geoRoot = YyjsonGetRoot(geoDoc);
+        int latHandle = YyjsonGetKey(geoRoot, "lat");
+        int lonHandle = YyjsonGetKey(geoRoot, "lon");
+        if (latHandle < 0 || lonHandle < 0) {
+          int messageHandle = YyjsonGetKey(geoRoot, "message");
+          if (messageHandle >= 0) {
+            writeln("Geocoding API error: ", YyjsonGetString(messageHandle));
+            YyjsonFreeValue(messageHandle);
+          } else {
+            writeln("Geocoding response was missing coordinates.");
+          }
+          if (latHandle >= 0) { YyjsonFreeValue(latHandle); }
+          if (lonHandle >= 0) { YyjsonFreeValue(lonHandle); }
+          ok = false;
+          exitCode = 1;
+        } else {
+          int zipHandle;
+          int nameHandle;
+          int stateHandle;
+          int countryHandle;
+
+          lat = YyjsonGetNumber(latHandle);
+          lon = YyjsonGetNumber(lonHandle);
+          YyjsonFreeValue(latHandle);
+          YyjsonFreeValue(lonHandle);
+
+          zipHandle = YyjsonGetKey(geoRoot, "zip");
+          if (zipHandle >= 0) {
+            resolvedZip = YyjsonGetString(zipHandle);
+            YyjsonFreeValue(zipHandle);
+          }
+          nameHandle = YyjsonGetKey(geoRoot, "name");
+          if (nameHandle >= 0) {
+            placeName = YyjsonGetString(nameHandle);
+            YyjsonFreeValue(nameHandle);
+          }
+          stateHandle = YyjsonGetKey(geoRoot, "state");
+          if (stateHandle >= 0) {
+            stateName = YyjsonGetString(stateHandle);
+            YyjsonFreeValue(stateHandle);
+          }
+          countryHandle = YyjsonGetKey(geoRoot, "country");
+          if (countryHandle >= 0) {
+            countryName = YyjsonGetString(countryHandle);
+            YyjsonFreeValue(countryHandle);
+          }
+        }
+        YyjsonFreeValue(geoRoot);
+        YyjsonDocFree(geoDoc);
+      }
+    }
+  }
+
+  if (geoOutAllocated) {
+    mstreamfree(geoOut);
+    geoOutAllocated = false;
+  }
+
+  if (ok) {
+    str latStr = realtostr(lat);
+    str lonStr = realtostr(lon);
+    bool useLegacyEndpoint = false;
+    bool attemptComplete = false;
+
+    while (ok && !attemptComplete) {
+      str forecastUrl;
+      if (useLegacyEndpoint) {
+        forecastUrl = "https://api.openweathermap.org/data/2.5/onecall?lat=" + latStr + "&lon=" + lonStr + "&units=" + unitsParam + "&exclude=minutely,alerts&appid=" + apiKey;
+      } else {
+        forecastUrl = "https://api.openweathermap.org/data/3.0/onecall?lat=" + latStr + "&lon=" + lonStr + "&units=" + unitsParam + "&exclude=minutely,alerts&appid=" + apiKey;
+      }
+
+      forecastOut = mstreamcreate();
+      forecastOutAllocated = true;
+      int forecastStatus = httprequest(session, "GET", forecastUrl, nil, forecastOut);
+      str forecastBody = mstreambuffer(forecastOut);
+
+      if (forecastStatus != 200) {
+        bool canFallback = (!useLegacyEndpoint && forecastStatus == 401 && forecastBody != "" &&
+                            (stringContains(forecastBody, "One Call 3.0") ||
+                             stringContains(forecastBody, "requires a separate subscription") ||
+                             stringContains(forecastBody, "\"cod\":401")));
+        if (canFallback) {
+          writeln("Received HTTP 401 from One Call 3.0 endpoint; retrying with legacy One Call 2.5.");
+          mstreamfree(forecastOut);
+          forecastOutAllocated = false;
+          useLegacyEndpoint = true;
+          continue;
+        }
+
+        writeln("Forecast request failed with HTTP status ", forecastStatus, ".");
+        if (forecastBody != "") {
+          writeln("Response: ", forecastBody);
+        }
+        ok = false;
+        exitCode = 1;
+        attemptComplete = true;
+      } else {
+        forecastDoc = YyjsonRead(forecastBody);
+        if (forecastDoc < 0) {
+          writeln("Error: Failed to parse forecast response as JSON.");
+          ok = false;
+          exitCode = 1;
+        } else {
+          rootHandle = YyjsonGetRoot(forecastDoc);
+          bool forecastOk = true;
+          codHandle = YyjsonGetKey(rootHandle, "cod");
+
+          if (codHandle >= 0) {
+            messageHandle = YyjsonGetKey(rootHandle, "message");
+            if (messageHandle >= 0) {
+              writeln("One Call API error: ", YyjsonGetString(messageHandle));
+              YyjsonFreeValue(messageHandle);
+              messageHandle = -1;
+            } else {
+              writeln("One Call API returned an error response.");
+            }
+            YyjsonFreeValue(codHandle);
+            codHandle = -1;
+            forecastOk = false;
+            ok = false;
+            exitCode = 1;
+          }
+
+          if (forecastOk) {
+            timezoneName = "";
+            timezoneOffset = 0;
+            locationLine = "";
+            offsetStr = "";
+            tzHandle = -1;
+            tzOffsetHandle = -1;
+            currentHandle = -1;
+            dailyHandle = -1;
+
+            tzHandle = YyjsonGetKey(rootHandle, "timezone");
+            if (tzHandle >= 0) {
+              timezoneName = YyjsonGetString(tzHandle);
+              YyjsonFreeValue(tzHandle);
+              tzHandle = -1;
+            }
+            tzOffsetHandle = YyjsonGetKey(rootHandle, "timezone_offset");
+            if (tzOffsetHandle >= 0) {
+              timezoneOffset = (int)YyjsonGetInt(tzOffsetHandle);
+              YyjsonFreeValue(tzOffsetHandle);
+              tzOffsetHandle = -1;
+            }
+
+            if (placeName != "") {
+              locationLine = "Forecast for " + placeName;
+              if (stateName != "") {
+                locationLine = locationLine + ", " + stateName;
+              }
+              if (countryName != "") {
+                locationLine = locationLine + " " + countryName;
+              }
+              locationLine = locationLine + " (" + resolvedZip + ")";
+            } else {
+              locationLine = "Forecast for " + resolvedZip;
+              if (countryName != "") {
+                locationLine = locationLine + " " + countryName;
+              }
+            }
+
+            writeln(locationLine);
+            writeln("Coordinates: ", latStr, ", ", lonStr);
+            offsetStr = formatUtcOffset(timezoneOffset);
+            if (timezoneName != "") {
+              writeln("Timezone: ", timezoneName, " (UTC", offsetStr, ")");
+            } else {
+              writeln("Timezone offset: UTC", offsetStr);
+            }
+            writeln("Units: ", unitsParam, " (temperature in ", tempUnitSymbol, ")");
+            if (useLegacyEndpoint) {
+              writeln("(Using One Call 2.5 legacy endpoint due to 3.0 subscription requirements.)");
+            }
+
+            currentHandle = YyjsonGetKey(rootHandle, "current");
+            if (currentHandle >= 0) {
+              printCurrentConditions(currentHandle, tempUnitSymbol);
+            }
+
+            dailyHandle = YyjsonGetKey(rootHandle, "daily");
+            if (dailyHandle >= 0) {
+              printDailyForecast(dailyHandle, timezoneOffset, tempUnitSymbol);
+            } else {
+              writeln("No daily forecast data was returned.");
+            }
+          }
+
+          if (rootHandle >= 0) {
+            YyjsonFreeValue(rootHandle);
+            rootHandle = -1;
+          }
+          if (forecastDoc >= 0) {
+            YyjsonDocFree(forecastDoc);
+            forecastDoc = -1;
+          }
+        }
+
+        attemptComplete = true;
+      }
+    }
+  }
+
+  if (forecastOutAllocated) {
+    mstreamfree(forecastOut);
+    forecastOutAllocated = false;
+  }
+
+  httpclose(session);
+  return exitCode;
+}
+
+main();

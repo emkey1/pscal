@@ -28,6 +28,19 @@
       "expected_stdout": "pipeline_subshell\n"
     },
     {
+      "id": "pager_force_pipeline",
+      "name": "Pager forced in pipeline",
+      "category": "pipelines",
+      "description": "Forces more to run with injected input so pipeline paging stays in-process without a TTY.",
+      "script": "pager_force_pipeline.exsh",
+      "expect": "runtime_ok",
+      "env": {
+        "PSCALI_PAGER_FORCE": "1",
+        "PSCALI_PAGER_TEST_INPUT": " ",
+        "LINES": "24"
+      }
+    },
+    {
       "id": "function_global_mutation",
       "name": "Functions mutate globals without local",
       "category": "functions",

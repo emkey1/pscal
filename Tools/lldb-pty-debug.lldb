@@ -1,0 +1,87 @@
+breakpoint set -n pscalPtyEnsureDevptsEntry
+breakpoint command add -e false
+frame variable pty_num
+expr -l c -- (size_t)gVProcSessionPtys.count
+expr -l c -- gVProcSessionPtys.count > 0 ? gVProcSessionPtys.items[0].session_id : 0
+expr -l c -- gVProcSessionPtys.count > 0 ? (void *)gVProcSessionPtys.items[0].pty_master : (void *)0
+expr -l c -- gVProcSessionPtys.count > 0 ? (void *)gVProcSessionPtys.items[0].pty_slave : (void *)0
+expr -l c -- gVProcSessionPtys.count > 1 ? gVProcSessionPtys.items[1].session_id : 0
+expr -l c -- gVProcSessionPtys.count > 1 ? (void *)gVProcSessionPtys.items[1].pty_master : (void *)0
+expr -l c -- gVProcSessionPtys.count > 1 ? (void *)gVProcSessionPtys.items[1].pty_slave : (void *)0
+DONE
+
+breakpoint set -n pty_master_init
+breakpoint command add -e false
+frame variable tty
+expr -l c -- (struct tty *)tty
+expr -l c -- ((struct tty *)tty)->driver
+expr -l c -- ((struct tty *)tty)->num
+expr -l c -- ((struct tty *)tty)->pty.other
+expr -l c -- ((struct tty *)tty)->refcount
+expr -l c -- ((struct tty *)tty)->ever_opened
+DONE
+
+breakpoint set -n PSCALRuntimeCreateShellSession
+breakpoint command add -e false
+frame variable session_id out_read_fd out_write_fd
+expr -l c -- out_read_fd ? *out_read_fd : -1
+expr -l c -- out_write_fd ? *out_write_fd : -1
+DONE
+
+breakpoint set -n vprocSessionStdioInitWithPty
+breakpoint command add -e false
+register read x0
+expr -l c -- (VProcSessionStdio *)$x0
+expr -l c -- ((VProcSessionStdio *)$x0) ? ((VProcSessionStdio *)$x0)->session_id : 0
+expr -l c -- $x0 ? (void *)((VProcSessionStdio *)$x0)->pty_master : (void *)0
+expr -l c -- $x0 ? (void *)((VProcSessionStdio *)$x0)->pty_slave : (void *)0
+DONE
+
+breakpoint set -n vprocSessionStdioActivate
+breakpoint modify -c "stdio_ctx != 0"
+breakpoint command add -e false
+register read x0
+expr -l c -- (VProcSessionStdio *)$x0
+expr -l c -- ((VProcSessionStdio *)$x0) ? ((VProcSessionStdio *)$x0)->session_id : 0
+expr -l c -- $x0 ? (void *)((VProcSessionStdio *)$x0)->stdin_pscal_fd : (void *)0
+expr -l c -- $x0 ? (void *)((VProcSessionStdio *)$x0)->stdout_pscal_fd : (void *)0
+expr -l c -- $x0 ? (void *)((VProcSessionStdio *)$x0)->stderr_pscal_fd : (void *)0
+DONE
+
+breakpoint set -n shellSetupSelfVproc
+breakpoint command add -e false
+expr -l c -- vprocCurrent()
+expr -l c -- vprocSessionStdioCurrent()
+expr -l c -- vprocSessionStdioCurrent() ? vprocSessionStdioCurrent()->session_id : 0
+DONE
+
+breakpoint set -n tty_write
+breakpoint command add -e false
+register read x0 x1 x2 x3
+expr -l c -- (struct pscal_fd *)$x0
+expr -l c -- ((struct pscal_fd *)$x0) ? ((struct pscal_fd *)$x0)->tty : (struct tty *)0
+expr -l c -- ((struct pscal_fd *)$x0) && ((struct pscal_fd *)$x0)->tty ? ((struct pscal_fd *)$x0)->tty->pty.other : (struct tty *)0
+expr -l c -- ((struct pscal_fd *)$x0) && ((struct pscal_fd *)$x0)->tty ? ((struct pscal_fd *)$x0)->tty->driver : (struct tty_driver *)0
+expr -l c -- ((struct pscal_fd *)$x0) && ((struct pscal_fd *)$x0)->tty && ((struct pscal_fd *)$x0)->tty->pty.other ? ((struct pscal_fd *)$x0)->tty->pty.other->driver : (struct tty_driver *)0
+expr -l c -- vprocSessionStdioCurrent()
+expr -l c -- vprocSessionStdioCurrent() ? vprocSessionStdioCurrent()->session_id : 0
+expr -l c -- vprocSessionStdioCurrent() ? (void *)vprocSessionStdioCurrent()->stdout_pscal_fd : (void *)0
+expr -l c -- vprocSessionStdioCurrent() && vprocSessionStdioCurrent()->stdout_pscal_fd ? vprocSessionStdioCurrent()->stdout_pscal_fd->tty : (struct tty *)0
+expr -l c -- vprocSessionStdioCurrent() && vprocSessionStdioCurrent()->stdout_pscal_fd && vprocSessionStdioCurrent()->stdout_pscal_fd->tty ? vprocSessionStdioCurrent()->stdout_pscal_fd->tty->pty.other : (struct tty *)0
+expr -l c -- vprocCurrent()
+expr -l c -- vprocCurrent() ? vprocPid(vprocCurrent()) : -1
+DONE
+
+breakpoint set -n vprocSessionPtyOutputThread
+breakpoint command add -e false
+register read x0
+expr -l c -- (VProcSessionStdio *)$x0
+expr -l c -- ((VProcSessionStdio *)$x0) ? ((VProcSessionStdio *)$x0)->session_id : 0
+expr -l c -- $x0 ? (void *)((VProcSessionStdio *)$x0)->pty_master : (void *)0
+expr -l c -- ((VProcSessionStdio *)$x0) && ((VProcSessionStdio *)$x0)->pty_master ? ((VProcSessionStdio *)$x0)->pty_master->tty : (struct tty *)0
+expr -l c -- $x0 ? (void *)((VProcSessionStdio *)$x0)->pty_slave : (void *)0
+expr -l c -- ((VProcSessionStdio *)$x0) && ((VProcSessionStdio *)$x0)->pty_slave ? ((VProcSessionStdio *)$x0)->pty_slave->tty : (struct tty *)0
+expr -l c -- ((VProcSessionStdio *)$x0) ? ((VProcSessionStdio *)$x0)->output_handler : (VProcSessionOutputHandler)0
+expr -l c -- ((VProcSessionStdio *)$x0) ? ((VProcSessionStdio *)$x0)->pty_active : false
+expr -l c -- ((VProcSessionStdio *)$x0) ? ((VProcSessionStdio *)$x0)->pty_out_fd : -1
+DONE

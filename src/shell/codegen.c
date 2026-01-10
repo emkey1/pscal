@@ -284,7 +284,7 @@ static bool gatherLoopConditionSpec(const ShellLoop *loop, LoopConditionSpec *ou
     }
     if (cond->type == SHELL_COMMAND_SIMPLE) {
         const ShellWordArray *words = &cond->data.simple.words;
-        if (cond->data.simple.redirections.count > 0 || words->count == 0) {
+        if (cond->redirections.count > 0 || words->count == 0) {
             return false;
         }
         const ShellWord *first = words->items[0];
@@ -359,7 +359,7 @@ static bool gatherLoopConditionSpec(const ShellLoop *loop, LoopConditionSpec *ou
         return true;
     } else if (cond->type == SHELL_COMMAND_ARITHMETIC) {
         const char *expr = cond->data.arithmetic.expression ? cond->data.arithmetic.expression : "";
-        if (cond->data.arithmetic.redirections.count > 0) {
+        if (cond->redirections.count > 0) {
             return false;
         }
         out_spec->arith_expression = strdup(expr);
@@ -492,7 +492,7 @@ static BodyCommandType classifyBodyCommand(const ShellCommand *cmd) {
     switch (cmd->type) {
         case SHELL_COMMAND_SIMPLE: {
             const ShellWordArray *words = &cmd->data.simple.words;
-            const ShellRedirectionArray *redirs = &cmd->data.simple.redirections;
+            const ShellRedirectionArray *redirs = &cmd->redirections;
             if (redirs->count > 0) {
                 return BODY_CMD_OTHER;
             }
@@ -539,7 +539,7 @@ static BodyCommandType classifyBodyCommand(const ShellCommand *cmd) {
             return BODY_CMD_OTHER;
         }
         case SHELL_COMMAND_ARITHMETIC: {
-            const ShellRedirectionArray *redirs = &cmd->data.arithmetic.redirections;
+            const ShellRedirectionArray *redirs = &cmd->redirections;
             if (redirs->count > 0) {
                 return BODY_CMD_OTHER;
             }
@@ -883,7 +883,7 @@ static void compileSimple(BytecodeChunk *chunk, const ShellCommand *command, boo
             emitPushWord(chunk, word, line);
             arg_count++;
         }
-        const ShellRedirectionArray *redirs = &command->data.simple.redirections;
+        const ShellRedirectionArray *redirs = &command->redirections;
         for (size_t i = 0; i < redirs->count; ++i) {
             const ShellRedirection *redir = redirs->items[i];
             char *serialized = buildRedirectionMetadata(redir);
@@ -1042,12 +1042,36 @@ static void compileLogical(BytecodeChunk *chunk, const ShellLogicalList *logical
     free(patch_sites);
 }
 
-static void compileSubshell(BytecodeChunk *chunk, const ShellProgram *body, int line, int index) {
-    char meta[64];
-    snprintf(meta, sizeof(meta), "subshell=%d", index);
+static void compileSubshell(BytecodeChunk *chunk, const ShellCommand *command) {
+    if (!command) {
+        return;
+    }
+    const ShellProgram *body = command->data.subshell.body;
+    int line = command->line;
+    int index = command->exec.pipeline_index;
+    char meta[128];
+    snprintf(meta, sizeof(meta), "mode=enter;subshell=%d", index);
     emitPushString(chunk, meta, line);
-    emitBuiltinProc(chunk, "__shell_subshell", 1, line);
+    size_t arg_count = 1;
+    /* Serialize any attached redirections for the enter phase. */
+    const ShellRedirectionArray *enter_redirs = shellCommandGetRedirections(command);
+    if (enter_redirs && enter_redirs->count > 0) {
+        for (size_t i = 0; i < enter_redirs->count && arg_count < 255; ++i) {
+            const ShellRedirection *redir = enter_redirs->items[i];
+            char *serialized = buildRedirectionMetadata(redir);
+            if (serialized) {
+                emitPushString(chunk, serialized, line);
+                free(serialized);
+            } else {
+                emitPushString(chunk, "redir:fd=;type=;word=;dup=;here=", line);
+            }
+            arg_count++;
+        }
+    }
+    emitBuiltinProc(chunk, "__shell_subshell", (uint8_t)arg_count, line);
     compileProgram(chunk, body);
+    emitPushString(chunk, "mode=leave", line);
+    emitBuiltinProc(chunk, "__shell_subshell", 1, line);
 }
 
 static void compileLoop(BytecodeChunk *chunk, const ShellCommand *command, bool runs_in_background) {
@@ -1509,7 +1533,7 @@ static void compileCommand(BytecodeChunk *chunk, const ShellCommand *command, bo
             compileLogical(chunk, command->data.logical, command->line);
             break;
         case SHELL_COMMAND_SUBSHELL:
-            compileSubshell(chunk, command->data.subshell.body, command->line, command->exec.pipeline_index);
+            compileSubshell(chunk, command);
             break;
         case SHELL_COMMAND_BRACE_GROUP:
             compileProgram(chunk, command->data.brace_group.body);

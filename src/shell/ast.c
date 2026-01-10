@@ -615,15 +615,15 @@ static ShellCommand *shellCreateCommandInternal(ShellCommandType type) {
     command->exec.is_pipeline_head = false;
     command->exec.is_pipeline_tail = false;
     command->exec.is_async_parent = false;
+    shellRedirectionArrayInit(&command->redirections);
     if (type == SHELL_COMMAND_SIMPLE) {
         shellWordArrayInit(&command->data.simple.words);
-        shellRedirectionArrayInit(&command->data.simple.redirections);
     } else if (type == SHELL_COMMAND_ARITHMETIC) {
         command->data.arithmetic.expression = NULL;
-        shellRedirectionArrayInit(&command->data.arithmetic.redirections);
     } else if (type == SHELL_COMMAND_BRACE_GROUP) {
         command->data.brace_group.body = NULL;
-        shellRedirectionArrayInit(&command->data.brace_group.redirections);
+    } else if (type == SHELL_COMMAND_SUBSHELL) {
+        command->data.subshell.body = NULL;
     }
     return command;
 }
@@ -802,14 +802,18 @@ static ShellRedirectionArray *shellCommandResolveRedirections(ShellCommand *comm
         return NULL;
     }
     switch (command->type) {
-        case SHELL_COMMAND_SIMPLE:
-            return &command->data.simple.redirections;
-        case SHELL_COMMAND_ARITHMETIC:
-            return &command->data.arithmetic.redirections;
-        case SHELL_COMMAND_BRACE_GROUP:
-            return &command->data.brace_group.redirections;
         case SHELL_COMMAND_LOOP:
             return command->data.loop ? &command->data.loop->redirections : NULL;
+        case SHELL_COMMAND_SIMPLE:
+        case SHELL_COMMAND_ARITHMETIC:
+        case SHELL_COMMAND_PIPELINE:
+        case SHELL_COMMAND_LOGICAL:
+        case SHELL_COMMAND_SUBSHELL:
+        case SHELL_COMMAND_BRACE_GROUP:
+        case SHELL_COMMAND_CONDITIONAL:
+        case SHELL_COMMAND_CASE:
+        case SHELL_COMMAND_FUNCTION:
+            return &command->redirections;
         default:
             return NULL;
     }
@@ -820,14 +824,18 @@ static const ShellRedirectionArray *shellCommandResolveRedirectionsConst(const S
         return NULL;
     }
     switch (command->type) {
-        case SHELL_COMMAND_SIMPLE:
-            return &command->data.simple.redirections;
-        case SHELL_COMMAND_ARITHMETIC:
-            return &command->data.arithmetic.redirections;
-        case SHELL_COMMAND_BRACE_GROUP:
-            return &command->data.brace_group.redirections;
         case SHELL_COMMAND_LOOP:
             return (command->data.loop) ? &command->data.loop->redirections : NULL;
+        case SHELL_COMMAND_SIMPLE:
+        case SHELL_COMMAND_ARITHMETIC:
+        case SHELL_COMMAND_PIPELINE:
+        case SHELL_COMMAND_LOGICAL:
+        case SHELL_COMMAND_SUBSHELL:
+        case SHELL_COMMAND_BRACE_GROUP:
+        case SHELL_COMMAND_CONDITIONAL:
+        case SHELL_COMMAND_CASE:
+        case SHELL_COMMAND_FUNCTION:
+            return &command->redirections;
         default:
             return NULL;
     }
@@ -858,11 +866,9 @@ void shellFreeCommand(ShellCommand *command) {
     switch (command->type) {
         case SHELL_COMMAND_SIMPLE:
             shellWordArrayFree(&command->data.simple.words);
-            shellRedirectionArrayFree(&command->data.simple.redirections);
             break;
         case SHELL_COMMAND_ARITHMETIC:
             free(command->data.arithmetic.expression);
-            shellRedirectionArrayFree(&command->data.arithmetic.redirections);
             break;
         case SHELL_COMMAND_PIPELINE:
             shellFreePipeline(command->data.pipeline);
@@ -875,7 +881,6 @@ void shellFreeCommand(ShellCommand *command) {
             break;
         case SHELL_COMMAND_BRACE_GROUP:
             shellFreeProgram(command->data.brace_group.body);
-            shellRedirectionArrayFree(&command->data.brace_group.redirections);
             break;
         case SHELL_COMMAND_LOOP:
             shellFreeLoop(command->data.loop);
@@ -890,6 +895,7 @@ void shellFreeCommand(ShellCommand *command) {
             shellFreeFunction(command->data.function);
             break;
     }
+    shellRedirectionArrayFree(&command->redirections);
     free(command);
 }
 
@@ -1109,9 +1115,11 @@ static void shellDumpCommandJson(FILE *out, const ShellCommand *command, int ind
             fprintf(out, ",\n");
             shellPrintIndent(out, indent + 4);
             fprintf(out, "\"redirections\": [\n");
-            for (size_t i = 0; i < command->data.simple.redirections.count; ++i) {
-                shellDumpRedirectionJson(out, command->data.simple.redirections.items[i], indent + 6);
-                if (i + 1 < command->data.simple.redirections.count) {
+            const ShellRedirectionArray *simple_redirs = shellCommandGetRedirections(command);
+            size_t simple_redir_count = simple_redirs ? simple_redirs->count : 0;
+            for (size_t i = 0; i < simple_redir_count; ++i) {
+                shellDumpRedirectionJson(out, simple_redirs->items[i], indent + 6);
+                if (i + 1 < simple_redir_count) {
                     fprintf(out, ",\n");
                 } else {
                     fprintf(out, "\n");

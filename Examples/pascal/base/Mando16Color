@@ -28,7 +28,7 @@ BEGIN
   ClrScr; // Optional: Clear screen if implemented
 
   Width := ScreenCols;
-  Height := ScreenRows;
+  Height := ScreenRows - 1;
 
   WriteLn('Calculating Mandelbrot (', Width, 'x', Height, ') with color...');
 

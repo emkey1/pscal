@@ -73,6 +73,45 @@ Casting a record pointer to an interface now boxes two things for you: the recei
 
 The net effect: you can assign different concrete records to the same interface variable without hand-writing glue code.
 
+### Go-Style Interface Roundtrip
+
+The compiler emits the interface boxing helper automatically—you can return a record value, assign it to an interface, and call methods with no boilerplate:
+
+```pascal
+program GoInterfaceDemo;
+
+type
+  Logger = interface
+    procedure Log(const msg: string);
+  end;
+
+type
+  ConsoleLogger = record
+    tag: string;
+    procedure Log(const msg: string);
+  end;
+
+procedure ConsoleLogger.Log(const msg: string);
+begin
+  writeln(tag, ': ', msg);
+end;
+
+function MakeLogger(const tag: string): Logger;
+var
+  inst: ConsoleLogger;
+begin
+  inst.tag := tag;
+  MakeLogger := inst;
+end;
+
+var L: Logger;
+begin
+  L := MakeLogger('demo');
+  L.Log('hello world');
+end.
+```
+No pointer aliases or `virtual` annotations required—the boxing flow described above kicks in automatically whenever a record is assigned to an interface.
+
 ## Debugging Tips
 - If a closure crashes when invoked, check the capture count mismatch error—the VM reports when the emitted metadata and runtime payload disagree.【F:src/vm/vm.c†L2724-L2755】
 - Use the bytecode disassembler to confirm the closure host calls are present; `CALL_HOST HOST_FN_CREATE_CLOSURE` will appear right after the captured values are pushed.【F:src/compiler/compiler.c†L994-L1003】

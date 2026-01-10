@@ -1,0 +1,59 @@
+(lldb) frame variable capture capture_thread capture_thread_started need_spool ctx->spool_fd ctx->spool_size
+(ShellPipelineCapture) capture = (fd = 3, spool_fd = 7, size = 1, capacity = 0, err = 0, buffer = 0x0000000000000000)
+(pthread_t) capture_thread = 0x0000000171407000
+(bool) capture_thread_started = true
+(bool) need_spool = true
+(int) ctx->spool_fd = -1
+(size_t) ctx->spool_size = 0
+(lldb) frame variable capture vm
+(ShellPipelineCapture) capture = (fd = 3, spool_fd = 7, size = 1, capacity = 0, err = 0, buffer = 0x0000000000000000)
+(VM *) vm = 0x0000000bce000000
+(lldb) frame variable capture vm_stdin_fd vm_stderr_fd vm_stdout_fd
+(ShellPipelineCapture) capture = (fd = 3, spool_fd = 7, size = 1, capacity = 0, err = 0, buffer = 0x0000000000000000)
+(int) vm_stdin_fd = -1
+(int) vm_stderr_fd = -1
+(int) vm_stdout_fd = -1
+(lldb) frame variable capture vm_stdin_adopted vm_stderr_adopted vm_stdout_adopted
+(ShellPipelineCapture) capture = (fd = 3, spool_fd = 7, size = 1, capacity = 0, err = 0, buffer = 0x0000000000000000)
+(bool) vm_stdin_adopted = false
+(bool) vm_stderr_adopted = false
+(bool) vm_stdout_adopted = true
+
+
+  - Jobspec self-test (built into exsh on iOS): exsh testjobs (covers job ids/kill/%1/%2).
+  - Background redirection sanity: (echo "This is stdout"; echo "This is stderr" >&2) > all_output.txt 2>&1 and verify file contents.
+  - Simple bg redirect: echo "foo" > e.out & and check prompt returns and e.out contains foo.
+  - Web server redirect: ./sws > web.log & and confirm web.log is populated and shell stays up.
+  - Pipeline: cat /etc/hosts | head (or any non-empty file) to verify capture/join behavior.
+  - Interactive Pascal demo: Examples/pascal/base/hangman5 run twice to ensure TTY/stdio stays intact.
+
+  1. PSCALI_TOOL_DEBUG=1 vproc-test --session
+  2. PSCALI_TOOL_DEBUG=1 vproc-test --vproc
+  3. PSCALI_TOOL_DEBUG=1 vproc-test --fork
+
+  PSCALI_TOOL_DEBUG=1 ssh -vvvvv -o PreferredAuthentications=password -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no mke@192.168.8.243
+======
+
+• Updated the interpose/vproc symbol resolution to use libSystem.B.dylib (with fallbacks) instead of /usr/lib/system/libsystem_*, which doesn’t exist on your macOS. That failure was
+  causing raw open/stat lookups to return ENOSYS, which in turn breaks CoreFoundation bundle/appearance loading and leads to the CFBundle/NSAppearance crashes you’re seeing.
+
+  - src/ios/vproc.c: added a libSystem handle helper and switched vprocResolveSymbol to use it, with RTLD_NEXT/RTLD_DEFAULT fallback to avoid ENOSYS.
+  - ios/Sources/Bridge/PSCALInterpose.c: same libSystem handle helper; kernel/system/pthread symbol resolution now uses it instead of the missing libsystem_* paths.
+
+  Build: xcodebuild -project ios/PSCAL.xcodeproj -scheme PscalApp -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData-PscalApp-mac CODE_SIGNING_REQUIRED=NO
+  CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY='' build (succeeded; Xcode emitted CoreSimulator connection warnings only).
+
+  Next steps:
+
+  1. open build/DerivedData-PscalApp-mac/Build/Products/Debug-maccatalyst/PSCAL.app
+  2. If it still exits/crashes, paste the new .ips header + the first ~200 lines, plus log stream --predicate 'process == "PSCAL"' --info --debug --style compact output from a fresh
+     launch.
+======
+
+
+
+
+Adds
+o vproc (Virtual Processes).  PSCAL on iOS/iPadOS now has the ability to run m
+o Terminal scrolling when not using nextvi now works
+o /dev/location and /dev/ttyGPS work.  They return the same info currently

@@ -4,9 +4,73 @@
 #include "vm/string_sentinels.h"
 #include "runtime/shaders/terrain/terrain_shader.h"
 
+#if defined(SDL) && defined(PSCAL_TARGET_IOS)
+
+#include "backend_ast/pscal_sdl_runtime.h"
+
+static Value landscapeUnsupportedBuiltin(VM* vm, const char* name) {
+    runtimeError(vm, "%s is not supported on iOS builds (OpenGL renderers unavailable).",
+                 name);
+    return makeVoid();
+}
+
+#define DEFINE_LANDSCAPE_STUB(fn, label)              \
+    static Value fn(VM* vm, int arg_count, Value* args) { \
+        (void)arg_count;                              \
+        (void)args;                                   \
+        return landscapeUnsupportedBuiltin(vm, label);\
+    }
+
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeConfigureProcedural, "LandscapeConfigureProcedural");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawTerrain, "LandscapeDrawTerrain");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawWater, "LandscapeDrawWater");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapePrecomputeWorldCoords, "LandscapePrecomputeWorldCoords");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapePrecomputeWaterOffsets,
+                      "LandscapePrecomputeWaterOffsets");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeBuildHeightField, "LandscapeBuildHeightField");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeBakeVertexData, "LandscapeBakeVertexData");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeSetPalettePreset, "LandscapeSetPalettePreset");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeSetLightingPreset, "LandscapeSetLightingPreset");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawSkyDome, "LandscapeDrawSkyDome");
+DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawCloudLayer, "LandscapeDrawCloudLayer");
+
+#undef DEFINE_LANDSCAPE_STUB
+
+void registerLandscapeBuiltins(void) {
+    registerVmBuiltin("landscapeconfigureprocedural", vmBuiltinLandscapeConfigureProcedural,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeConfigureProcedural");
+    registerVmBuiltin("landscapedrawterrain", vmBuiltinLandscapeDrawTerrain,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawTerrain");
+    registerVmBuiltin("landscapedrawwater", vmBuiltinLandscapeDrawWater,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawWater");
+    registerVmBuiltin("landscapeprecomputeworldcoords", vmBuiltinLandscapePrecomputeWorldCoords,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapePrecomputeWorldCoords");
+    registerVmBuiltin("landscapeprecomputewateroffsets", vmBuiltinLandscapePrecomputeWaterOffsets,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapePrecomputeWaterOffsets");
+    registerVmBuiltin("landscapebuildheightfield", vmBuiltinLandscapeBuildHeightField,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeBuildHeightField");
+    registerVmBuiltin("landscapebakevertexdata", vmBuiltinLandscapeBakeVertexData,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeBakeVertexData");
+    registerVmBuiltin("landscapesetpalettepreset", vmBuiltinLandscapeSetPalettePreset,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeSetPalettePreset");
+    registerVmBuiltin("landscapesetlightingpreset", vmBuiltinLandscapeSetLightingPreset,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeSetLightingPreset");
+    registerVmBuiltin("landscapedrawskydome", vmBuiltinLandscapeDrawSkyDome,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawSkyDome");
+    registerVmBuiltin("landscapedrawcloudlayer", vmBuiltinLandscapeDrawCloudLayer,
+                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawCloudLayer");
+}
+
+#else
+
 #ifdef SDL
-#include "backend_ast/sdl.h"
-#include <SDL2/SDL_opengl.h>
+#include "backend_ast/pscal_sdl_runtime.h"
+#if defined(PSCAL_TARGET_IOS)
+#include <OpenGLES/ES3/gl.h>
+#include <OpenGLES/ES3/glext.h>
+#else
+#include PSCALI_SDL_OPENGL_HEADER
+#endif
 #include "runtime/terrain/terrain_generator.h"
 #include "runtime/shaders/sky/sky_dome.h"
 #include "runtime/shaders/sky/cloud_layer.h"
@@ -1669,3 +1733,5 @@ void registerLandscapeBuiltins(void) {
                       BUILTIN_TYPE_PROCEDURE, "LandscapeDrawCloudLayer");
 #endif
 }
+
+#endif /* SDL && PSCAL_TARGET_IOS */

@@ -4,6 +4,27 @@
 #include "Pascal/globals.h"
 #include <strings.h>
 
+#ifdef FRONTEND_REA
+#undef lookupType
+#undef insertType
+#undef newASTNode
+#undef setTypeAST
+#undef setRight
+#undef addChild
+#undef freeAST
+#undef dumpAST
+#undef copyAST
+#undef evaluateCompileTimeValue
+#endif
+
+AST* newASTNode(ASTNodeType type, Token* token);
+void setTypeAST(AST* node, VarType type);
+void setRight(AST* parent, AST* child);
+void addChild(AST* parent, AST* child);
+void freeAST(AST* node);
+AST* copyAST(AST* node);
+Value evaluateCompileTimeValue(AST* node);
+
 // Simple type table integration for the Rea front end.
 //
 // The Pascal front end maintains a global linked list of TypeEntry records
@@ -12,7 +33,7 @@
 // minimal functionality required by the parser: inserting newly declared types
 // and looking them up by name.
 
-AST* lookupType(const char* name) {
+AST* rea_lookupType(const char* name) {
     // First search any user-defined types that have been registered via
     // insertType().  The table lives in globals.c and is shared across the
     // front ends.
@@ -56,7 +77,7 @@ AST* lookupType(const char* name) {
     return node;
 }
 
-void insertType(const char* name, AST* typeDef) {
+void rea_insertType(const char* name, AST* typeDef) {
     if (!name || !typeDef) return;
 
     TypeEntry* entry = (TypeEntry*)malloc(sizeof(TypeEntry));
@@ -65,4 +86,32 @@ void insertType(const char* name, AST* typeDef) {
     entry->typeAST = copyAST(typeDef);
     entry->next = type_table;
     type_table = entry;
+}
+
+AST* rea_newASTNode(ASTNodeType type, Token* token) {
+    return newASTNode(type, token);
+}
+
+void rea_setTypeAST(AST* node, VarType type) {
+    setTypeAST(node, type);
+}
+
+void rea_setRight(AST* parent, AST* child) {
+    setRight(parent, child);
+}
+
+void rea_addChild(AST* parent, AST* child) {
+    addChild(parent, child);
+}
+
+void rea_freeAST(AST* node) {
+    freeAST(node);
+}
+
+AST* rea_copyAST(AST* node) {
+    return copyAST(node);
+}
+
+Value rea_evaluateCompileTimeValue(AST* node) {
+    return evaluateCompileTimeValue(node);
 }

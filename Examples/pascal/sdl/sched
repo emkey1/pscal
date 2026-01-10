@@ -1,0 +1,190 @@
+program UI_Demo;
+
+uses
+  CRT; { For ReadKey, KeyPressed }
+
+const
+  PixelWidth = 640;
+  PixelHeight = 480;
+  DefaultFont = '/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+  FontSize = 14;
+
+type
+  { --- 1. Define the Interface --- }
+  { This interface will be used to manage all UI components }
+  IComponent = interface
+    procedure Draw;
+    function HandleKey(key: char): boolean; { Returns true if key was handled }
+  end;
+
+  { --- 2. Define the Closure (Procedure Pointer) Type --- }
+  { This will be the type for our 'OnClick' event handler }
+  { }
+  TNotifyEvent = procedure();
+
+  { --- 3. Define the Label Record --- }
+  PLabel = ^TLabel;
+  TLabel = record
+    X, Y: integer;
+    Caption: string;
+    procedure Draw; virtual;
+    function HandleKey(key: char): boolean; virtual;
+  end;
+
+  { --- 4. Define the Button Record --- }
+  PButton = ^PButton;
+  TButton = record
+    X, Y, W, H: integer;
+    Caption: string;
+    IsFocused: boolean;
+    OnClick: TNotifyEvent; { Stores the closure }
+    procedure Draw; virtual;
+    function HandleKey(key: char): boolean; virtual;
+  end;
+
+var
+  Components: array of IComponent; { Dynamic array of interfaces }
+  lblInfo: PLabel;
+  btn1, btn2: PButton;
+  key: char;
+  i: integer;
+  counter: integer; { This will be 'captured' by the closure }
+
+{ --- Label Implementation --- }
+
+procedure TLabel.Draw;
+begin
+  { We know SetRGBColor works for OutTextXY }
+  SetRGBColor(255, 255, 255); { White text }
+  OutTextXY(X, Y, Caption);
+end;
+
+function TLabel.HandleKey(key: char): boolean;
+begin
+  Result := False; { Labels don't handle input }
+end;
+
+{ --- Button Implementation --- }
+
+procedure TButton.Draw;
+begin
+  { This is the critical test: does SetRGBColor work for FillRect? }
+  if IsFocused then
+    SetRGBColor(0, 150, 255) { Blue if focused }
+  else
+    SetRGBColor(100, 100, 100); { Gray if not }
+  
+  FillRect(X, Y, W, H);
+
+  { Draw the button text }
+  SetRGBColor(0, 0, 0); { Black text }
+  OutTextXY(X + 10, Y + (H div 2) - (FontSize div 2), Caption);
+end;
+
+function TButton.HandleKey(key: char): boolean;
+begin
+  Result := False;
+  if IsFocused then
+  begin
+    if (key = #13) or (key = #10) then { Enter key }
+    begin
+      if OnClick <> nil then
+        OnClick(); { <-- 5. Execute the closure! }
+      Result := True;
+    end;
+  end;
+end;
+
+{ --- 6. Define the Nested Procedures (The Closures) --- }
+{ These procedures are nested inside the main program block }
+{ so they can 'capture' 'counter' and 'lblInfo' }
+{ }
+
+procedure HandleButton1Click;
+begin
+  counter := counter + 1;
+  { We use IntToStr, which is a documented built-in }
+  lblInfo^.Caption := 'Button 1 clicked ' + IntToStr(counter) + ' times!';
+end;
+
+procedure HandleButton2Click;
+begin
+  lblInfo^.Caption := 'Button 2 clicked! Resetting count.';
+  counter := 0;
+end;
+
+
+{ --- MAIN PROGRAM --- }
+begin
+  { Use the 2D+Text pipeline }
+  InitGraph(PixelWidth, PixelHeight, 'Closure & Interface Demo');
+  InitTextSystem(DefaultFont, FontSize);
+
+  counter := 0;
+  
+  { 7. Allocate Records on the heap }
+  New(lblInfo);
+  New(btn1);
+  New(btn2);
+
+  { 8. Init Label }
+  lblInfo^.X := 10;
+  lblInfo^.Y := 10;
+  lblInfo^.Caption := 'Press Tab to focus, Enter to click. ESC to exit.';
+
+  { 9. Init Button 1 }
+  btn1^.X := 10; btn1^.Y := 40; btn1^.W := 150; btn1^.H := 30;
+  btn1^.Caption := 'Click Me';
+  btn1^.IsFocused := True; { Start focused }
+  btn1^.OnClick := @HandleButton1Click; { <-- Assign the closure }
+
+  { 10. Init Button 2 }
+  btn2^.X := 10; btn2^.Y := 80; btn2^.W := 150; btn2^.H := 30;
+  btn2^.Caption := 'Reset Count';
+  btn2^.IsFocused := False;
+  btn2^.OnClick := @HandleButton2Click; { <-- Assign the closure }
+
+  { 11. Populate Component List (Boxing records into interfaces) }
+  { }
+  SetLength(Components, 3);
+  Components[0] := IComponent(lblInfo);
+  Components[1] := IComponent(btn1);
+  Components[2] := IComponent(btn2);
+
+  { 12. Main Loop }
+  repeat
+    { Clear screen to black }
+    SetRGBColor(0, 0, 0); 
+    FillRect(0, 0, PixelWidth, PixelHeight);
+
+    { Draw all components via interface dispatch }
+    for i := 0 to High(Components) do
+      Components[i].Draw;
+    
+    UpdateScreen;
+
+    { Handle Input }
+    key := ReadKey;
+    if key = #9 then { Tab Key }
+    begin
+      { Simple focus toggle }
+      btn1^.IsFocused := not btn1^.IsFocused;
+      btn2^.IsFocused := not btn2^.IsFocused;
+    end
+    else
+    begin
+      { Pass key to focused button }
+      if btn1^.IsFocused then
+        btn1^.HandleKey(key)
+      else if btn2^.IsFocused then
+        btn2^.HandleKey(key);
+    end;
+    
+  until key = #27; { ESC key }
+
+  { 13. Cleanup }
+  CloseGraph;
+  Dispose(lblInfo);
+  Dispose(btn1);
+  Dispose(btn2);
+end.

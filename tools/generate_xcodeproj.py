@@ -25,17 +25,26 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 SDL_HEADER_HINTS = [
+    "/Library/Frameworks/SDL3.framework/Headers",
+    "$(HOME)/Library/Frameworks/SDL3.framework/Headers",
     "/Library/Frameworks/SDL2.framework/Headers",
     "$(HOME)/Library/Frameworks/SDL2.framework/Headers",
     "/opt/homebrew/include",
+    "/opt/homebrew/include/SDL3",
     "/opt/homebrew/include/SDL2",
+    "/opt/homebrew/opt/sdl3/include",
+    "/opt/homebrew/opt/sdl3/include/SDL3",
     "/opt/homebrew/opt/sdl2/include",
     "/opt/homebrew/opt/sdl2/include/SDL2",
     "/usr/local/include",
+    "/usr/local/include/SDL3",
     "/usr/local/include/SDL2",
+    "/usr/local/opt/sdl3/include",
+    "/usr/local/opt/sdl3/include/SDL3",
     "/usr/local/opt/sdl2/include",
     "/usr/local/opt/sdl2/include/SDL2",
     "/usr/include",
+    "/usr/include/SDL3",
     "/usr/include/SDL2",
 ]
 

@@ -14,7 +14,7 @@ There are currently four front end languages:
 
 The code base is written in C and consists of a hand‑written lexer and parser, a bytecode compiler and a stack‑based virtual machine.  
 
-Optional SDL2 support adds graphics and audio capabilities, and there is built‑in support for CURL, yyjson and SQLite with others easily added.
+Optional SDL2/SDL3 support adds graphics and audio capabilities, and there is built‑in support for CURL, yyjson and SQLite with others easily added.
 
 The PSCAL suite is extensible through extended builtins.  Check the Docs directory for additional details on this.
 
@@ -26,7 +26,7 @@ The PSCAL suite is extensible through extended builtins.  Check the Docs directo
 - C compiler with C11 support
 - [CMake](https://cmake.org/) 3.24 or newer
 - [libcurl](https://curl.se/libcurl/)
-- **Optional**: SDL2, SDL2_image, SDL2_mixer and SDL2_ttf when building with `-DSDL=ON`
+- **Optional**: SDL2 or SDL3 plus the matching `SDL*_image`, `SDL*_mixer` and `SDL*_ttf` libraries when building with `-DSDL=ON`
 
 On Debian/Ubuntu the required packages can be installed with:
 
@@ -42,7 +42,7 @@ sudo apt-get install build-essential cmake libcurl4-openssl-dev \
 git clone https://github.com/emkey1/pscal.git
 cd pscal
 mkdir build && cd build
-cmake ..            # add -DSDL=ON to enable SDL support, add -DRELEASE_BUILD=ON to append _REL and keep optional extended builtins enabled
+cmake ..            # add -DSDL=ON to enable SDL support, optionally add -DPSCAL_USE_SDL3=ON to prefer SDL3, add -DRELEASE_BUILD=ON to append _REL and keep optional extended builtins enabled
 make
 ```
 
@@ -277,6 +277,21 @@ variables from a script.
 Control-flow helpers (`if`, loop syntax) are currently placeholders that execute
 both branches. Gate behaviour using the exported status variable until the VM
 gains proper jump support for the exsh front end.
+
+### iOS/vproc parity testing on macOS
+
+To exercise the iOS-style virtual-process path on macOS (without a simulator/device), build a host binary that defines `PSCAL_TARGET_IOS` and runs the vproc code:
+
+```sh
+Tests/run_exsh_ios_host_tests.sh          # configures build/ios-host, builds exsh, runs jobspec sanity
+# or manually:
+cmake -S . -B build/ios-host -DPSCAL_FORCE_IOS=ON -DVPROC_ENABLE_STUBS_FOR_TESTS=ON -DPSCAL_BUILD_STATIC_LIBS=ON -DSDL=OFF -DPSCAL_USE_BUNDLED_CURL=OFF
+cmake --build build/ios-host --target exsh
+python Tests/exsh/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobspec
+```
+
+The exsh harness accepts `--executable` to point at any built exsh, so you can run the full manifest against the iOS-flavored binary when debugging vproc/job-control behavior.
+Use `-DPSCAL_FORCE_IOS=ON` to enable iOS mode on macOS; this defines `PSCAL_TARGET_IOS` and injects the vproc shim include so behavior matches the iOS/iPadOS app build.
 
 More details and operational tips live in
 [Docs/exsh_overview.md](Docs/exsh_overview.md).

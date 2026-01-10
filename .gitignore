@@ -1,14 +1,12 @@
 build/
 Examples/Clike/typescript
-Pscal.xcodeproj/
-!xcode/Pscal.xcodeproj/
 test_pscal_lib/
 typescript
 links
 Misc/old
 .gitignore
 .bin
-
+third-party/SDL/*
 Tests/edge_input.txt
 Tests/readln_test.txt
 Tests/async_test_src.txt
@@ -16,3 +14,11 @@ Tests/async_test_dst.txt
 Tests/src_to_file.txt
 Tests/dst_to_file.txt
 Tests/headers_test.txt
+third-party/curl-8.17.0
+ios/PSCAL.xcodeproj/project.xcworkspace/xcuserdata/
+ios/PSCAL.xcodeproj/xcuserdata/mke.xcuserdatad/
+ios/DerivedData/
+tmp/
+.xcode-deriv/
+
+.swp

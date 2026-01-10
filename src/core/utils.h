@@ -1,8 +1,10 @@
 #ifndef UTILS_H
 #define UTILS_H
-#include "parser.h"
-#include "symbol.h"
-#include "vm.h"
+#include "Pascal/parser.h"
+#include "symbol/symbol.h"
+#include "vm/vm.h"
+
+#define OWNED_POINTER_SENTINEL ((AST*)(uintptr_t)(-1))
 
 #define PASCAL_DEFAULT_FLOAT_PRECISION 6
 /* =======================
@@ -104,6 +106,14 @@ static inline bool isRealType(VarType t) {
         default:
             return false;
     }
+}
+
+static inline bool isPackedByteElementType(VarType t) {
+    return t == TYPE_BYTE;
+}
+
+static inline bool arrayUsesPackedBytes(const Value* v) {
+    return v && v->type == TYPE_ARRAY && v->array_is_packed;
 }
 
 static inline bool isOrdinalType(VarType t) {

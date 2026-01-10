@@ -1,0 +1,265 @@
+#!/usr/bin/env rea
+// SDL Inner Planets with True Sun Scale in Rea using OOP and threads.
+// Only Mercury, Venus, and Earth with its Moon are simulated. The Sun is
+// scaled to its actual radius relative to astronomical units.
+
+const int NumPlanets = 3;
+const float OrbitSpeedScale = 0.10;
+
+bool quit = false;
+int posMutex = mutex();
+float earthMonths = 0.0;
+
+str ConfiguredFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+
+str resolveFontPath() {
+  str legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+
+  if (length(ConfiguredFontPath) > 0 && ConfiguredFontPath[1] != '@' && fileexists(ConfiguredFontPath)) {
+    return ConfiguredFontPath;
+  }
+  if (fileexists(legacyFontPath)) {
+    return legacyFontPath;
+  }
+  if (fileexists(repoFontPath1)) {
+    return repoFontPath1;
+  }
+  return repoFontPath2;
+}
+
+
+const float SunMinRadiusPixels = 32.0;
+const float PlanetVisualScale = 12.0;
+
+class Planet {
+  int orbit;
+  float size;
+
+  float speed; // radians per update
+
+  int r;
+  int g;
+  int b;
+  float angle;
+  float posX;
+  float posY;
+  int centerX;
+  int centerY;
+  int tid;
+  int isEarth;
+
+    Planet init(int o, float s, float spdDeg, int red, int green, int blue, int cx, int cy) {
+      myself.orbit = o;
+      myself.size = s;
+      // Store angular speed in radians for precise updates even below 1 degree
+      myself.speed = spdDeg * 0.017453292519943295; // degrees -> radians
+      myself.r = red;
+      myself.g = green;
+      myself.b = blue;
+      myself.centerX = cx;
+      myself.centerY = cy;
+      myself.isEarth = 0;
+      // Initialize angle in radians as well
+      myself.angle = random(360) * 0.017453292519943295;
+      myself.posX = cx + cos(myself.angle) * o;
+      myself.posY = cy + sin(myself.angle) * o;
+      return myself;
+    }
+
+    void updateWorker() {
+      while (!quit) {
+        myself.angle = myself.angle + myself.speed;
+        if (myself.angle >= 6.283185307179586) myself.angle = myself.angle - 6.283185307179586; // 2*pi
+        float px = myself.centerX + cos(myself.angle) * myself.orbit;
+        float py = myself.centerY + sin(myself.angle) * myself.orbit;
+        lock(posMutex);
+        myself.posX = px;
+        myself.posY = py;
+        if (myself.isEarth) {
+          earthMonths = earthMonths + (myself.speed / 6.283185307179586) * 12;
+        }
+        unlock(posMutex);
+        delay(16);
+      }
+    }
+
+    void start() {
+      myself.tid = spawn myself.updateWorker();
+    }
+
+    // Wait for the worker thread to finish. "join" is a reserved keyword in
+    // Rea, so give the method a more explicit name to avoid confusion with the
+    // built-in thread operation.
+    void joinThread() {
+      join myself.tid;
+    }
+
+    void draw() {
+      setrgbcolor(myself.r, myself.g, myself.b);
+      // Round the scaled radius so small planets like Mercury don't disappear
+      int drawRadius = round(myself.size * PlanetVisualScale);
+      if (drawRadius < 1) {
+        drawRadius = 1;
+      }
+      fillcircle(trunc(myself.posX), trunc(myself.posY), drawRadius);
+    }
+
+    float getPosX() {
+      return myself.posX;
+    }
+
+    float getPosY() {
+      return myself.posY;
+    }
+  }
+
+class SolarSystemApp {
+  const int WindowWidth = 1280;
+  const int WindowHeight = 1024;
+  const int TargetFPS = 60;
+  const float SunRadiusAU = 0.00465; // Sun radius expressed in AU
+  const float MercuryRadiusAU = 0.0000163;
+  const float VenusRadiusAU   = 0.0000405;
+  const float EarthRadiusAU   = 0.0000426;
+
+  const float MoonRadiusAU    = 0.0000116;
+  const float MoonOrbitAU     = 0.00257;
+
+
+    int FrameDelay;
+    int centerX;
+    int centerY;
+    float AUScale; // pixels per astronomical unit
+    int sunRadius; // Sun radius in pixels
+    float SizeScale; // scale factor applied to all body sizes for visibility
+    Planet planets[NumPlanets + 1];
+    float moonOrbit;
+    float moonSize;
+    float moonAngle;
+    float moonSpeed;
+
+  void SolarSystemApp() {
+    // no special initialization needed beyond defaults
+  }
+
+  void initPlanets() {
+    int orbit;
+    float radius;
+    // Mercury - 0.39 AU orbit, true radius
+    orbit = trunc(myself.AUScale * 0.39);
+    radius = myself.AUScale * MercuryRadiusAU * myself.SizeScale;
+    myself.planets[1] = new Planet(); myself.planets[1].init(orbit, radius, 4.7 * OrbitSpeedScale, 169, 169, 169, myself.centerX, myself.centerY);
+    // Venus - 0.72 AU orbit, true radius
+    orbit = trunc(myself.AUScale * 0.72);
+    radius = myself.AUScale * VenusRadiusAU * myself.SizeScale;
+    myself.planets[2] = new Planet(); myself.planets[2].init(orbit, radius, 3.5 * OrbitSpeedScale, 218, 165, 32, myself.centerX, myself.centerY);
+    // Earth - 1.00 AU orbit, true radius
+    orbit = trunc(myself.AUScale * 1.00);
+    radius = myself.AUScale * EarthRadiusAU * myself.SizeScale;
+    myself.planets[3] = new Planet(); myself.planets[3].init(orbit, radius, 3.0 * OrbitSpeedScale,   0, 102, 255, myself.centerX, myself.centerY);
+    myself.planets[3].isEarth = 1;
+
+    // Moon - orbits Earth at 0.00257 AU with true radius
+    myself.moonOrbit = myself.AUScale * MoonOrbitAU;
+    if (myself.moonOrbit < 8.0) {
+      myself.moonOrbit = 8.0;
+    }
+    myself.moonSize = myself.AUScale * MoonRadiusAU * myself.SizeScale;
+    myself.moonAngle = random(360) * 0.017453292519943295;
+    myself.moonSpeed = 40.0 * 0.017453292519943295 * OrbitSpeedScale;
+  }
+
+  void startThreads() {
+    int i = 1;
+    while (i <= NumPlanets) {
+      myself.planets[i].start();
+      i = i + 1;
+    }
+  }
+
+  void draw() {
+    lock(posMutex);
+    cleardevice();
+    setrgbcolor(255, 255, 0); // Sun
+    fillcircle(myself.centerX, myself.centerY, myself.sunRadius);
+    int i = 1;
+    while (i <= NumPlanets) {
+      myself.planets[i].draw();
+      i = i + 1;
+    }
+    // Update and draw Earth's Moon
+    myself.moonAngle = myself.moonAngle + myself.moonSpeed;
+    if (myself.moonAngle >= 6.283185307179586) myself.moonAngle = myself.moonAngle - 6.283185307179586;
+    setrgbcolor(200, 200, 200);
+    int moonDrawRadius = round(myself.moonSize * PlanetVisualScale);
+    if (moonDrawRadius < 2) moonDrawRadius = 2;
+    fillcircle(
+      trunc(myself.planets[3].getPosX() + cos(myself.moonAngle) * myself.moonOrbit),
+      trunc(myself.planets[3].getPosY() + sin(myself.moonAngle) * myself.moonOrbit),
+      moonDrawRadius);
+    str monthStr = "Earth months elapsed: " + inttostr(trunc(earthMonths));
+    outtextxy(getmaxx() - 220, 16, monthStr);
+    unlock(posMutex);
+    updatescreen();
+  }
+
+  void joinThreads() {
+    int i = 1;
+    while (i <= NumPlanets) {
+      myself.planets[i].joinThread();
+      i = i + 1;
+    }
+  }
+
+  void run() {
+    initgraph(WindowWidth, WindowHeight, "Rea SDL Sun-Scaled Inner Planets");
+    myself.centerX = getmaxx() / 2;
+    myself.centerY = getmaxy() / 2;
+    // Scale astronomical units so Earth's orbit stays fully on screen with a small margin
+    myself.AUScale = (myself.centerY - 10) / 1.0;
+    // Calculate a size scaling factor so the Sun remains visible while keeping
+    // the same proportion for planet sizes.
+    float rawSun = myself.AUScale * SunRadiusAU;
+
+    myself.SizeScale = SunMinRadiusPixels / rawSun;
+    if (myself.SizeScale < 1.0) {
+      myself.SizeScale = 1.0;
+    }
+    myself.sunRadius = trunc(rawSun * myself.SizeScale);
+    inittextsystem(resolveFontPath(), 16);
+    randomize();
+    myself.FrameDelay = trunc(1000 / TargetFPS);
+    myself.initPlanets();
+    // Start planet worker threads using the current object instance
+    myself.startThreads();
+    writeln("Sun-scaled inner planets simulation running. Press Q to quit.");
+    while (!quit) {
+      if (quitrequested()) {
+        quit = true;
+        break;
+      }
+      int keyCode = pollkeyany();
+      while (keyCode != 0) {
+        if (keyCode == 'q' || keyCode == 'Q') {
+          quit = true;
+          break;
+        }
+        keyCode = pollkeyany();
+      }
+      if (quit) break;
+      // Draw all planets based on their updated positions
+      myself.draw();
+      // Use the object's frame delay to pace the main loop and yield time to
+      // planet worker threads, ensuring smooth motion.
+      graphloop(myself.FrameDelay);
+    }
+    // Wait for all planet worker threads to finish before shutting down
+    myself.joinThreads();
+    closegraph();
+    writeln("Simulation finished.");
+  }
+}
+SolarSystemApp app = new SolarSystemApp();
+app.run();

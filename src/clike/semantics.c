@@ -1088,12 +1088,15 @@ static void analyzeStmt(ASTNodeClike *node, ScopeStack *scopes, VarType retType)
 
 static void analyzeFunction(ASTNodeClike *func) {
     if (!func || !func->right) return;
-    ScopeStack scopes = {0};
+    ScopeStack *scopes = (ScopeStack *)calloc(1, sizeof(ScopeStack));
+    if (!scopes) {
+        return;
+    }
 
     // Global scope available to all functions
-    ssPush(&scopes);
+    ssPush(scopes);
     for (int i = 0; i < globalVars.count; ++i) {
-        ssAdd(&scopes,
+        ssAdd(scopes,
               globalVars.entries[i].name,
               globalVars.entries[i].type,
               globalVars.entries[i].decl,
@@ -1101,17 +1104,18 @@ static void analyzeFunction(ASTNodeClike *func) {
     }
 
     // Function scope for parameters/local variables
-    ssPush(&scopes);
+    ssPush(scopes);
     if (func->left) {
         for (int i = 0; i < func->left->child_count; ++i) {
             ASTNodeClike *p = func->left->children[i];
             char *name = tokenToCString(p->token);
-            ssAdd(&scopes, name, p->var_type, p, p->is_const);
+            ssAdd(scopes, name, p->var_type, p, p->is_const);
             free(name);
         }
     }
-    analyzeStmt(func->right, &scopes, func->var_type);
-    while (scopes.depth > 0) ssPop(&scopes);
+    analyzeStmt(func->right, scopes, func->var_type);
+    while (scopes->depth > 0) ssPop(scopes);
+    free(scopes);
 }
 
 void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
@@ -1226,18 +1230,29 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
 
     // Process global variable declarations so functions can reference them.
     globalVars.count = 0;
-    ScopeStack globalsScope = {0};
-    ssPush(&globalsScope);
+    ScopeStack *globalsScope = (ScopeStack *)calloc(1, sizeof(ScopeStack));
+    if (!globalsScope) {
+        if (modules) {
+            for (int i = 0; i < clike_import_count; ++i) {
+                if (modules[i].prog) freeASTClike(modules[i].prog);
+                if (modules[i].source) free(modules[i].source);
+                if (modules[i].allocated_path) free(modules[i].allocated_path);
+            }
+            free(modules);
+        }
+        return;
+    }
+    ssPush(globalsScope);
     for (int i = 0; i < clike_import_count; ++i) {
         if (!modules[i].prog) continue;
         for (int j = 0; j < modules[i].prog->child_count; ++j) {
             ASTNodeClike *decl = modules[i].prog->children[j];
             if (decl->type == TCAST_VAR_DECL) {
                 char *name = tokenToCString(decl->token);
-                if (ssAdd(&globalsScope, name, decl->var_type, decl, decl->is_const)) {
+                if (ssAdd(globalsScope, name, decl->var_type, decl, decl->is_const)) {
                     vtAdd(&globalVars, name, decl->var_type, decl, decl->is_const);
                 }
-                if (decl->left) analyzeExpr(decl->left, &globalsScope);
+                if (decl->left) analyzeExpr(decl->left, globalsScope);
                 free(name);
             }
         }
@@ -1246,14 +1261,14 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
         ASTNodeClike *decl = program->children[i];
         if (decl->type == TCAST_VAR_DECL) {
             char *name = tokenToCString(decl->token);
-            if (ssAdd(&globalsScope, name, decl->var_type, decl, decl->is_const)) {
+            if (ssAdd(globalsScope, name, decl->var_type, decl, decl->is_const)) {
                 vtAdd(&globalVars, name, decl->var_type, decl, decl->is_const);
             }
-            if (decl->left) analyzeExpr(decl->left, &globalsScope);
+            if (decl->left) analyzeExpr(decl->left, globalsScope);
             free(name);
         }
     }
-    ssPop(&globalsScope);
+    ssPop(globalsScope);
 
     for (int i = 0; i < clike_import_count; ++i) {
         if (!modules[i].prog) continue;
@@ -1274,6 +1289,25 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
         if (modules[i].allocated_path) free(modules[i].allocated_path);
     }
     free(modules);
+    free(globalsScope);
 
-    for (int i = 0; i < functionCount; ++i) free(functions[i].name);
+    for (int i = 0; i < functionCount; ++i) {
+        free(functions[i].name);
+        functions[i].name = NULL;
+    }
+}
+
+void clikeResetSemanticsState(void) {
+    vtFree(&globalVars);
+    for (int i = 0; i < functionCount; ++i) {
+        if (functions[i].name) {
+            free(functions[i].name);
+            functions[i].name = NULL;
+        }
+        functions[i].type = TYPE_UNKNOWN;
+        functions[i].has_definition = 0;
+        functions[i].defined_line = 0;
+        functions[i].defined_column = 0;
+    }
+    functionCount = 0;
 }

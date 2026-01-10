@@ -23,6 +23,53 @@ int wins = 0;
 int losses = 0;
 str ConfiguredWordsPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/etc/words";
 
+int path_exists(str path) {
+    return length(path) > 0 && fileexists(path);
+}
+
+str join_path(str base, str segment) {
+    if (length(base) == 0) return segment;
+    if (length(segment) == 0) return base;
+    if (base[strlen(base)] == '/') {
+        return base + segment;
+    }
+    return base + "/" + segment;
+}
+
+str resolve_words_path() {
+    str candidate;
+    str envValue;
+
+    envValue = getenv("PSCALI_WORDS_PATH");
+    if (path_exists(envValue)) return envValue;
+
+    envValue = getenv("PSCALI_ETC_ROOT");
+    if (length(envValue) > 0) {
+        candidate = join_path(envValue, "words");
+        if (path_exists(candidate)) return candidate;
+    }
+
+    envValue = getenv("PSCALI_WORKSPACE_ROOT");
+    if (length(envValue) > 0) {
+        candidate = join_path(envValue, "etc/words");
+        if (path_exists(candidate)) return candidate;
+    }
+
+    envValue = getenv("PSCAL_EXAMPLES_ROOT");
+    if (length(envValue) > 0) {
+        candidate = join_path(envValue, "../etc/words");
+        if (path_exists(candidate)) return candidate;
+    }
+
+    if (path_exists(ConfiguredWordsPath)) return ConfiguredWordsPath;
+
+    candidate = "../../etc/words"; if (path_exists(candidate)) return candidate;
+    candidate = "../etc/words"; if (path_exists(candidate)) return candidate;
+    candidate = "etc/words"; if (path_exists(candidate)) return candidate;
+    candidate = "/etc/words"; if (path_exists(candidate)) return candidate;
+
+    return "";
+}
 
 int center_padding(str s) {
     int pad;
@@ -354,14 +401,24 @@ int main() {
     int word_count;
     int playing, result, padding;
     str input, scoreMsg, promptMsg;
+    str wordsPath;
 
     // Use the first command line argument as the word list if provided.
     if (paramcount() > 0) {
-        words = load_words(paramstr(1), &word_count, 6, 9, 2048);
+        wordsPath = paramstr(1);
     } else {
-        words = load_words(ConfiguredWordsPath, &word_count, 6, 9, 2048);
+        wordsPath = resolve_words_path();
     }
-    if (word_count == 0) { printf("No words loaded.\n"); return 0; }
+    if (length(wordsPath) == 0) {
+        printf("Unable to locate a words list. Provide hangman5 <path> or install etc/words.\n");
+        return 0;
+    }
+
+    words = load_words(wordsPath, &word_count, 6, 9, 2048);
+    if (word_count == 0) {
+        printf("No words loaded from %s.\n", wordsPath);
+        return 0;
+    }
 
     randomize();
     playing = 1;
@@ -384,4 +441,3 @@ int main() {
     cleanup_words(words);
     return 0;
 }
-

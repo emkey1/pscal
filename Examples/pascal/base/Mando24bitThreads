@@ -1,0 +1,289 @@
+#!/usr/bin/env pascal
+PROGRAM Mandelbrot24BitThreads;
+
+CONST
+  MaxIter         = 100;
+  EscapeRadiusSq  = 4.0;
+  MinX            = -2.0;
+  MaxX            = 1.0;
+  MinY            = -1.0;
+  MaxY            = 1.0;
+  
+  // Threading Configuration
+  ThreadCount     = 4;
+  
+  // Buffer Limits (must stay under the runtime safety cap)
+  MaxBufferCols   = 1200;
+  MaxBufferRows   = 1100;
+
+  // Color Frequency for the vibrant look
+  Freq            = 0.1;
+
+TYPE
+  // Record to hold 24-bit color data for a single pixel
+  TRGB = record
+    R, G, B: Byte;
+    IsInside: Boolean; // True if point is inside the Mandelbrot set
+  end;
+
+  TRowRange = record
+    StartRow: Integer;
+    EndRow: Integer;
+  end;
+  PRowRange = ^TRowRange;
+
+VAR
+  Width, Height   : Integer;
+  ScaleX, ScaleY  : Real;
+  DrawChar        : Char;
+  
+  // Buffer now stores RGB records instead of Byte indices
+  ColorBuffer     : array[1..MaxBufferRows, 1..MaxBufferCols] of TRGB;
+  
+  ThreadHandles   : array[0..ThreadCount - 1] of Integer;
+  RowMutex        : Integer;
+  NextRow         : Integer;
+  ThreadingEnabled: Boolean;
+
+// ---------------------------------------------------------
+// Computational Logic (Runs on Background Threads)
+// ---------------------------------------------------------
+PROCEDURE ComputeRow(Row: Integer);
+VAR
+  Col            : Integer;
+  cx, cy         : Real;
+  zx, zy         : Real;
+  xTemp          : Real;
+  iter           : Integer;
+  PixelData      : TRGB;
+  FUNCTION ClampByte(v: Integer): Byte;
+  BEGIN
+    IF v < 0 THEN v := 0 ELSE IF v > 255 THEN v := 255;
+    ClampByte := Byte(v);
+  END;
+BEGIN
+  IF (Row < 1) OR (Row > Height) THEN EXIT;
+
+  cy := MinY + Row * ScaleY;
+
+  FOR Col := 1 TO Width DO
+  BEGIN
+    cx := MinX + Col * ScaleX;
+    zx := 0.0;
+    zy := 0.0;
+    iter := 0;
+
+    // The heavy math
+    WHILE (iter < MaxIter) AND ((zx*zx + zy*zy) < EscapeRadiusSq) DO
+    BEGIN
+      xTemp := zx*zx - zy*zy + cx;
+      zy := 2.0 * zx * zy + cy;
+      zx := xTemp;
+      iter := iter + 1;
+    END;
+
+    // Determine Color based on the "Vibrant Dark" algorithm
+    IF iter = MaxIter THEN
+    BEGIN
+      PixelData.IsInside := TRUE;
+      PixelData.R := 0;
+      PixelData.G := 0;
+      PixelData.B := 0;
+    END
+    ELSE
+    BEGIN
+      PixelData.IsInside := FALSE;
+      // Sine wave math for 24-bit gradient
+      PixelData.R := ClampByte(Trunc((Sin(Freq * iter + 0.0) + 1.0) * 127.5));
+      PixelData.G := ClampByte(Trunc((Sin(Freq * iter + 2.0) + 1.0) * 127.5));
+      PixelData.B := ClampByte(Trunc((Sin(Freq * iter + 4.0) + 1.0) * 127.5));
+    END;
+
+    ColorBuffer[Row, Col] := PixelData;
+  END;
+END;
+
+PROCEDURE ComputeRowRange(startRow, endRow: Integer);
+VAR
+  Row: Integer;
+BEGIN
+  IF startRow < 1 THEN startRow := 1;
+  IF endRow > Height THEN endRow := Height;
+  IF endRow < startRow THEN EXIT;
+
+  FOR Row := startRow TO endRow DO
+    ComputeRow(Row);
+END;
+
+// ---------------------------------------------------------
+// Threading Infrastructure
+// ---------------------------------------------------------
+FUNCTION TryGetNextRow(VAR rowOut: Integer): Boolean;
+BEGIN
+  TryGetNextRow := FALSE;
+  IF (NOT ThreadingEnabled) OR (RowMutex < 0) THEN EXIT;
+
+  lock(RowMutex);
+  IF NextRow <= Height THEN
+  BEGIN
+    rowOut := NextRow;
+    NextRow := NextRow + 1;
+    TryGetNextRow := TRUE;
+  END;
+  unlock(RowMutex);
+END;
+
+PROCEDURE ComputeRows(rangePtr: PRowRange);
+VAR
+  Row: Integer;
+  startRow, endRow: Integer;
+BEGIN
+  // If no specific range is passed, use the global work queue (Worker Thread)
+  IF rangePtr = NIL THEN
+  BEGIN
+    IF NOT ThreadingEnabled THEN EXIT;
+    WHILE TryGetNextRow(Row) DO
+      ComputeRow(Row);
+    EXIT;
+  END;
+
+  // Fallback for single-threaded or specific range calls
+  startRow := rangePtr^.StartRow;
+  endRow := rangePtr^.EndRow;
+  ComputeRowRange(startRow, endRow);
+END;
+
+PROCEDURE SpawnThreads;
+VAR
+  i, handle: Integer;
+  anyThread: Boolean;
+BEGIN
+  ThreadingEnabled := FALSE;
+  RowMutex := mutex();
+  
+  IF RowMutex < 0 THEN
+  BEGIN
+    // Mutex creation failed, fall back to single thread
+    RowMutex := -1;
+    FOR i := 0 TO ThreadCount - 1 DO ThreadHandles[i] := -1;
+    EXIT;
+  END;
+
+  NextRow := 1;
+  ThreadingEnabled := TRUE;
+  anyThread := FALSE;
+
+  FOR i := 0 TO ThreadCount - 1 DO
+  BEGIN
+    ThreadHandles[i] := -1;
+    handle := CreateThread(@ComputeRows, NIL);
+    IF handle >= 0 THEN
+    BEGIN
+      ThreadHandles[i] := handle;
+      anyThread := TRUE;
+    END;
+  END;
+
+  IF NOT anyThread THEN
+  BEGIN
+    ThreadingEnabled := FALSE;
+    destroy(RowMutex);
+    RowMutex := -1;
+  END;
+END;
+
+PROCEDURE JoinThreads;
+VAR
+  i: Integer;
+BEGIN
+  FOR i := 0 TO ThreadCount - 1 DO
+    IF ThreadHandles[i] >= 0 THEN
+      WaitForThread(ThreadHandles[i]);
+
+  IF RowMutex >= 0 THEN
+  BEGIN
+    destroy(RowMutex);
+    RowMutex := -1;
+  END;
+  ThreadingEnabled := FALSE;
+END;
+
+// ---------------------------------------------------------
+// Rendering (Runs on Main Thread)
+// ---------------------------------------------------------
+PROCEDURE DisplayBuffer;
+VAR
+  Row, Col: Integer;
+  Pixel: TRGB;
+BEGIN
+  FOR Row := 1 TO Height DO
+  BEGIN
+    GotoXY(1, Row);
+    FOR Col := 1 TO Width DO
+    BEGIN
+      Pixel := ColorBuffer[Row, Col];
+      
+      IF Pixel.IsInside THEN
+      BEGIN
+        // Negative Space: Reset attributes and print a space
+        Write(#27'[0m '); 
+      END
+      ELSE
+      BEGIN
+        // 24-Bit Color: Print ANSI RGB sequence
+        Write(#27'[38;2;', Pixel.R, ';', Pixel.G, ';', Pixel.B, 'm#');
+      END;
+    END;
+  END;
+END;
+
+// ---------------------------------------------------------
+// Main Entry
+// ---------------------------------------------------------
+BEGIN
+  Width := ScreenCols;
+  Height := ScreenRows - 1; // Leave room for status line
+
+  ClrScr; // Clear screen initially
+
+  IF ThreadCount <= 0 THEN
+  BEGIN
+    WriteLn('ThreadCount must be positive.');
+    EXIT;
+  END;
+
+  IF (Width > MaxBufferCols) OR (Height > MaxBufferRows) THEN
+  BEGIN
+    WriteLn('Screen size ', Width, 'x', Height, ' exceeds buffer limits.');
+    EXIT;
+  END;
+
+  WriteLn('Calculating TrueColor Mandelbrot (', Width, 'x', Height, ') using ', ThreadCount, ' threads...');
+
+  ScaleX := (MaxX - MinX) / Width;
+  ScaleY := (MaxY - MinY) / Height;
+  DrawChar := '#';
+
+  // 1. Launch threads to fill the ColorBuffer
+  SpawnThreads;
+  
+  // If threads failed to spawn, do work on main thread
+  IF ThreadingEnabled THEN
+    ComputeRows(NIL) // Main thread can also act as a worker if desired, or just wait. 
+                     // Here we act as a worker to speed things up.
+  ELSE
+    ComputeRowRange(1, Height);
+
+  // 2. Wait for all calculations to finish
+  JoinThreads;
+
+  // 3. Render the result to the terminal
+  DisplayBuffer;
+
+  // 4. Cleanup
+  Write(#27'[0m'); // Reset attributes
+  GotoXY(1, Height + 1);
+  Write('Calculation complete. Press any key to exit.');
+  ReadKey;
+  WriteLn;
+END.

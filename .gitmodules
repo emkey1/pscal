@@ -1,0 +1,6 @@
+[submodule "src/smallclue"]
+	path = src/smallclue
+	url = https://github.com/emkey1/smallclue.git
+[submodule "third-party/SDL"]
+	path = third-party/SDL
+	url = https://github.com/libsdl-org/SDL_mixer.git

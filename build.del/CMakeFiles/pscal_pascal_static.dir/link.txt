@@ -1,0 +1,2 @@
+/usr/bin/ar qc libpscal_pascal_static.a CMakeFiles/pscal_pascal_static.dir/src/Pascal/main.c.o CMakeFiles/pscal_pascal_static.dir/src/Pascal/lexer.c.o CMakeFiles/pscal_pascal_static.dir/src/Pascal/parser.c.o CMakeFiles/pscal_pascal_static.dir/src/Pascal/semantic.c.o CMakeFiles/pscal_pascal_static.dir/src/Pascal/opt.c.o
+/usr/bin/ranlib libpscal_pascal_static.a

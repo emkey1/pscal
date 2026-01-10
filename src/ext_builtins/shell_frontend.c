@@ -81,6 +81,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "bg", vmBuiltinShellBg);
     registerShellBuiltin(category, command_group, "wait", vmBuiltinShellWait);
     registerShellBuiltin(category, command_group, "WaitForThread", vmBuiltinShellWaitForThread);
+    registerShellBuiltin(category, thread_group, "ps-threads", vmBuiltinShellPsThreads);
     registerShellBuiltin(category, thread_group, "ThreadSpawnBuiltin", vmBuiltinThreadSpawnBuiltin);
     registerShellBuiltin(category, thread_group, "ThreadGetResult", vmBuiltinThreadGetResult);
     registerShellBuiltin(category, thread_group, "ThreadGetStatus", vmBuiltinThreadGetStatus);
@@ -98,4 +99,23 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "echo", vmBuiltinShellEcho);
     registerShellBuiltin(category, command_group, "true", vmBuiltinShellTrue);
     registerShellBuiltin(category, command_group, "false", vmBuiltinShellFalse);
+#ifdef PSCAL_TARGET_IOS
+    registerShellBuiltin(category, command_group, "pascal", vmBuiltinShellPascal);
+#ifdef BUILD_DASCAL
+    registerShellBuiltin(category, command_group, "dascal", vmBuiltinShellDascal);
+#endif
+    registerShellBuiltin(category, command_group, "clike", vmBuiltinShellClike);
+    registerShellBuiltin(category, command_group, "rea", vmBuiltinShellRea);
+    registerShellBuiltin(category, command_group, "exsh", vmBuiltinShellExshTool);
+    registerShellBuiltin(category, command_group, "pscalvm", vmBuiltinShellPscalVm);
+    registerShellBuiltin(category, command_group, "pscaljson2bc", vmBuiltinShellPscalJson2bc);
+#ifdef BUILD_PSCALD
+    registerShellBuiltin(category, command_group, "pscald", vmBuiltinShellPscald);
+#endif
+    registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
+    registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
+    registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
+    registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);
+#endif
+    registerShellBuiltin(category, command_group, "stdioinfo", vmBuiltinShellStdioInfo);
 }

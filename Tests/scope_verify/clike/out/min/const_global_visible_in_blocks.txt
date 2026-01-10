@@ -1,0 +1,21 @@
+Test: const_global_visible_in_blocks
+Category: const_scope
+Expectation: runtime_ok
+Description: Global constants remain readable inside nested blocks without mutation.
+Reason: expected exit 0 but got 1
+Exit code: 1
+--- stdout ---
+<empty>
+--- stderr ---
+Runtime Error: Operands must be numbers for arithmetic operation '+' (or strings/chars for '+'). Got UNKNOWN_VAR_TYPE and INTEGER
+[Error Location] Offset: 18, Line: 5
+--- source ---
+#include <stdio.h>
+
+        const int LIMIT = 7;
+        int main() {
+            int total = LIMIT + 3;
+            printf("total=%d
+", total);
+            return 0;
+        }

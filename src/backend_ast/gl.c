@@ -1,10 +1,16 @@
 #ifdef SDL
 #include "backend_ast/gl.h"
-#include "backend_ast/sdl.h"
+#include "backend_ast/graphics_3d_backend.h"
+#include "backend_ast/pscal_sdl_runtime.h"
 #include "core/utils.h"
 #include "vm/vm.h"
 
-#include <SDL2/SDL_opengl.h>
+#if defined(PSCAL_TARGET_IOS)
+#include <OpenGLES/ES1/gl.h>
+#else
+#include "core/sdl_headers.h"
+#include PSCALI_SDL_OPENGL_HEADER
+#endif
 #include <stdbool.h>
 #include <strings.h>
 #include <math.h>
@@ -574,7 +580,7 @@ Value vmBuiltinGlclearcolor(VM* vm, int arg_count, Value* args) {
         if (comps[i] > 1.0f) comps[i] = 1.0f;
     }
 
-    glClearColor(comps[0], comps[1], comps[2], comps[3]);
+    gfx3dClearColor(comps[0], comps[1], comps[2], comps[3]);
     return makeVoid();
 }
 
@@ -594,7 +600,7 @@ Value vmBuiltinGlclear(VM* vm, int arg_count, Value* args) {
         mask = (GLbitfield)AS_INTEGER(args[0]);
     }
 
-    glClear(mask);
+    gfx3dClear(mask);
     return makeVoid();
 }
 
@@ -613,11 +619,7 @@ Value vmBuiltinGlcleardepth(VM* vm, int arg_count, Value* args) {
     if (depth < 0.0) depth = 0.0;
     if (depth > 1.0) depth = 1.0;
 
-#ifdef GL_ES_VERSION_2_0
-    glClearDepthf((GLfloat)depth);
-#else
-    glClearDepth((GLclampd)depth);
-#endif
+    gfx3dClearDepth(depth);
     return makeVoid();
 }
 
@@ -635,8 +637,8 @@ Value vmBuiltinGlviewport(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glViewport((GLint)AS_INTEGER(args[0]), (GLint)AS_INTEGER(args[1]),
-               (GLsizei)AS_INTEGER(args[2]), (GLsizei)AS_INTEGER(args[3]));
+    gfx3dViewport((int)AS_INTEGER(args[0]), (int)AS_INTEGER(args[1]),
+                  (int)AS_INTEGER(args[2]), (int)AS_INTEGER(args[3]));
     return makeVoid();
 }
 
@@ -653,7 +655,7 @@ Value vmBuiltinGlmatrixmode(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glMatrixMode(mode);
+    gfx3dMatrixMode(mode);
     return makeVoid();
 }
 
@@ -664,7 +666,7 @@ Value vmBuiltinGlloadidentity(VM* vm, int arg_count, Value* args) {
     }
     if (!ensureGlContext(vm, "GLLoadIdentity")) return makeVoid();
 
-    glLoadIdentity();
+    gfx3dLoadIdentity();
     return makeVoid();
 }
 
@@ -683,7 +685,7 @@ Value vmBuiltinGltranslatef(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glTranslatef(vals[0], vals[1], vals[2]);
+    gfx3dTranslatef(vals[0], vals[1], vals[2]);
     return makeVoid();
 }
 
@@ -702,7 +704,7 @@ Value vmBuiltinGlrotatef(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glRotatef(vals[0], vals[1], vals[2], vals[3]);
+    gfx3dRotatef(vals[0], vals[1], vals[2], vals[3]);
     return makeVoid();
 }
 
@@ -721,7 +723,7 @@ Value vmBuiltinGlscalef(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glScalef(vals[0], vals[1], vals[2]);
+    gfx3dScalef(vals[0], vals[1], vals[2]);
     return makeVoid();
 }
 
@@ -745,11 +747,7 @@ Value vmBuiltinGlfrustum(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-#ifdef GL_ES_VERSION_2_0
-    glFrustumf((GLfloat)vals[0], (GLfloat)vals[1], (GLfloat)vals[2], (GLfloat)vals[3], (GLfloat)vals[4], (GLfloat)vals[5]);
-#else
-    glFrustum(vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]);
-#endif
+    gfx3dFrustum(vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]);
     return makeVoid();
 }
 
@@ -787,11 +785,7 @@ Value vmBuiltinGlperspective(VM* vm, int arg_count, Value* args) {
     double right = top * aspect;
     double left = -right;
 
-#ifdef GL_ES_VERSION_2_0
-    glFrustumf((GLfloat)left, (GLfloat)right, (GLfloat)bottom, (GLfloat)top, (GLfloat)nearPlane, (GLfloat)farPlane);
-#else
-    glFrustum(left, right, bottom, top, nearPlane, farPlane);
-#endif
+    gfx3dFrustum(left, right, bottom, top, nearPlane, farPlane);
     return makeVoid();
 }
 
@@ -802,7 +796,7 @@ Value vmBuiltinGlpushmatrix(VM* vm, int arg_count, Value* args) {
     }
     if (!ensureGlContext(vm, "GLPushMatrix")) return makeVoid();
 
-    glPushMatrix();
+    gfx3dPushMatrix();
     return makeVoid();
 }
 
@@ -813,7 +807,7 @@ Value vmBuiltinGlpopmatrix(VM* vm, int arg_count, Value* args) {
     }
     if (!ensureGlContext(vm, "GLPopMatrix")) return makeVoid();
 
-    glPopMatrix();
+    gfx3dPopMatrix();
     return makeVoid();
 }
 
@@ -830,7 +824,7 @@ Value vmBuiltinGlbegin(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glBegin(primitive);
+    gfx3dBegin(primitive);
     return makeVoid();
 }
 
@@ -841,7 +835,7 @@ Value vmBuiltinGlend(VM* vm, int arg_count, Value* args) {
     }
     if (!ensureGlContext(vm, "GLEnd")) return makeVoid();
 
-    glEnd();
+    gfx3dEnd();
     return makeVoid();
 }
 
@@ -862,7 +856,7 @@ Value vmBuiltinGlcolor3f(VM* vm, int arg_count, Value* args) {
         if (vals[i] > 1.0f) vals[i] = 1.0f;
     }
 
-    glColor3f(vals[0], vals[1], vals[2]);
+    gfx3dColor3f(vals[0], vals[1], vals[2]);
     return makeVoid();
 }
 
@@ -883,7 +877,7 @@ Value vmBuiltinGlcolor4f(VM* vm, int arg_count, Value* args) {
         if (vals[i] > 1.0f) vals[i] = 1.0f;
     }
 
-    glColor4f(vals[0], vals[1], vals[2], vals[3]);
+    gfx3dColor4f(vals[0], vals[1], vals[2], vals[3]);
     return makeVoid();
 }
 
@@ -902,7 +896,7 @@ Value vmBuiltinGlvertex3f(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glVertex3f(vals[0], vals[1], vals[2]);
+    gfx3dVertex3f(vals[0], vals[1], vals[2]);
     return makeVoid();
 }
 
@@ -921,7 +915,7 @@ Value vmBuiltinGlnormal3f(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glNormal3f(vals[0], vals[1], vals[2]);
+    gfx3dNormal3f(vals[0], vals[1], vals[2]);
     return makeVoid();
 }
 
@@ -938,7 +932,7 @@ Value vmBuiltinGlenable(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glEnable(cap);
+    gfx3dEnable(cap);
     return makeVoid();
 }
 
@@ -955,7 +949,7 @@ Value vmBuiltinGldisable(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glDisable(cap);
+    gfx3dDisable(cap);
     return makeVoid();
 }
 
@@ -972,7 +966,7 @@ Value vmBuiltinGlshademodel(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glShadeModel(mode);
+    gfx3dShadeModel(mode);
     return makeVoid();
 }
 
@@ -1003,7 +997,7 @@ Value vmBuiltinGllightfv(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glLightfv(light, pname, values);
+    gfx3dLightfv(light, pname, values);
     return makeVoid();
 }
 
@@ -1034,7 +1028,7 @@ Value vmBuiltinGlmaterialfv(VM* vm, int arg_count, Value* args) {
         }
     }
 
-    glMaterialfv(face, pname, values);
+    gfx3dMaterialfv(face, pname, values);
     return makeVoid();
 }
 
@@ -1067,7 +1061,7 @@ Value vmBuiltinGlmaterialf(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glMaterialf(face, pname, value);
+    gfx3dMaterialf(face, pname, value);
     return makeVoid();
 }
 
@@ -1090,7 +1084,7 @@ Value vmBuiltinGlcolormaterial(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glColorMaterial(face, mode);
+    gfx3dColorMaterial(face, mode);
     return makeVoid();
 }
 
@@ -1113,7 +1107,7 @@ Value vmBuiltinGlblendfunc(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glBlendFunc(sfactor, dfactor);
+    gfx3dBlendFunc(sfactor, dfactor);
     return makeVoid();
 }
 
@@ -1130,7 +1124,7 @@ Value vmBuiltinGlcullface(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glCullFace(mode);
+    gfx3dCullFace(mode);
     return makeVoid();
 }
 
@@ -1154,9 +1148,9 @@ Value vmBuiltinGldepthtest(VM* vm, int arg_count, Value* args) {
     }
 
     if (enable) {
-        glEnable(GL_DEPTH_TEST);
+        gfx3dEnable(GL_DEPTH_TEST);
     } else {
-        glDisable(GL_DEPTH_TEST);
+        gfx3dDisable(GL_DEPTH_TEST);
     }
     return makeVoid();
 }
@@ -1180,7 +1174,7 @@ Value vmBuiltinGldepthmask(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glDepthMask(enable ? GL_TRUE : GL_FALSE);
+    gfx3dDepthMask(enable ? GL_TRUE : GL_FALSE);
     return makeVoid();
 }
 
@@ -1197,7 +1191,7 @@ Value vmBuiltinGldepthfunc(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glDepthFunc(func);
+    gfx3dDepthFunc(func);
     return makeVoid();
 }
 
@@ -1218,7 +1212,7 @@ Value vmBuiltinGllinewidth(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    glLineWidth(width);
+    gfx3dLineWidth(width);
     return makeVoid();
 }
 
@@ -1232,7 +1226,11 @@ Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
     }
 
     int accelerated = 0;
+#if defined(PSCALI_SDL3)
+    if (!SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated)) {
+#else
     if (SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated) != 0) {
+#endif
         runtimeError(vm, "GLIsHardwareAccelerated: SDL_GL_GetAttribute failed: %s", SDL_GetError());
         return makeBoolean(false);
     }
@@ -1285,10 +1283,10 @@ Value vmBuiltinGlsaveframebufferpng(VM* vm, int arg_count, Value* args) {
         return makeBoolean(false);
     }
 
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadBuffer(GL_BACK);
-    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    GLenum error = glGetError();
+    gfx3dPixelStorei(GL_PACK_ALIGNMENT, 1);
+    gfx3dReadBuffer(GL_BACK);
+    gfx3dReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    GLenum error = gfx3dGetError();
     if (error != GL_NO_ERROR) {
         free(pixels);
         runtimeError(vm, "%s failed to read pixels (GL error %u).", name, (unsigned int)error);

@@ -1,0 +1,18 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/mke/PBuild/build/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/math/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/strings/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/system/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/yyjson/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/sqlite/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/user/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/threed/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/graphics/cmake_install.cmake",
+		"/Users/mke/PBuild/build/src/ext_builtins/openai/cmake_install.cmake",
+		"/Users/mke/PBuild/build/Examples/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

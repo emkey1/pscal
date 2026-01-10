@@ -1,3 +1,9 @@
+#if defined(__APPLE__)
+#ifndef GLES_SILENCE_DEPRECATION
+#define GLES_SILENCE_DEPRECATION 1
+#endif
+#endif
+
 #include "runtime/shaders/shader_common.h"
 
 #ifdef SDL

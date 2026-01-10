@@ -4,6 +4,7 @@
 #include "core/list.h"
 #include "compiler/compiler.h"
 #include "Pascal/parser.h"
+#include "Pascal/type_registry.h"
 #include "core/utils.h"
 #include "core/types.h"
 #include "globals.h"
@@ -70,8 +71,6 @@ static void registerRecordMethods(Parser *parser, const char *recordName, AST *r
 static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
-static TypeEntry *findTypeEntry(const char *name);
-static void reserveTypePlaceholder(const char *name, VarType kind);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -1293,116 +1292,6 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
     #endif
 }
 
-static TypeEntry *findTypeEntry(const char *name) {
-    if (!name) {
-        return NULL;
-    }
-
-    for (TypeEntry *entry = type_table; entry; entry = entry->next) {
-        if (entry->name && strcasecmp(entry->name, name) == 0) {
-            return entry;
-        }
-    }
-
-    return NULL;
-}
-
-static void reserveTypePlaceholder(const char *name, VarType kind) {
-    if (!name) {
-        return;
-    }
-
-    TypeEntry *existing = findTypeEntry(name);
-    if (existing) {
-        if (!existing->typeAST) {
-            AST *placeholder = newASTNode(AST_INTERFACE, NULL);
-            setTypeAST(placeholder, kind);
-            existing->typeAST = placeholder;
-        } else if (existing->typeAST->var_type == TYPE_UNKNOWN && kind != TYPE_UNKNOWN) {
-            setTypeAST(existing->typeAST, kind);
-        }
-        return;
-    }
-
-    TypeEntry *entry = malloc(sizeof(TypeEntry));
-    if (!entry) {
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    entry->name = strdup(name);
-    if (!entry->name) {
-        free(entry);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    AST *placeholder = newASTNode(AST_INTERFACE, NULL);
-    if (!placeholder) {
-        free(entry->name);
-        free(entry);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    setTypeAST(placeholder, kind);
-    entry->typeAST = placeholder;
-    entry->next = type_table;
-    type_table = entry;
-}
-
-void insertType(const char *name, AST *typeAST) {
-    if (!name || !typeAST) {
-        return;
-    }
-
-    TypeEntry *existing = findTypeEntry(name);
-    AST *copy = copyAST(typeAST);
-    if (!copy) {
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    if (existing) {
-        if (existing->typeAST) {
-            freeAST(existing->typeAST);
-        }
-        existing->typeAST = copy;
-        return;
-    }
-
-    TypeEntry *entry = malloc(sizeof(TypeEntry));
-    if (!entry) {
-        freeAST(copy);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    entry->name = strdup(name);
-    if (!entry->name) {
-        free(entry);
-        freeAST(copy);
-        EXIT_FAILURE_HANDLER();
-        return;
-    }
-
-    entry->typeAST = copy;
-    entry->next = type_table;
-    type_table = entry;
-}
-
-AST *lookupType(const char *name) {
-    TypeEntry *entry = type_table;
-    while (entry) {
-        // Ensure entry->name is not NULL before comparing
-        if (entry->name && name && strcasecmp(entry->name, name) == 0) { // <<< USE strcasecmp
-            return entry->typeAST;
-        }
-        entry = entry->next;
-    }
-    return NULL;
-}
-
 
 // In emkey1/pscal/pscal-working/src/parser.c
 // Make sure DEBUG_PRINT is defined, e.g., in utils.h or globals.h:
@@ -1414,6 +1303,7 @@ AST *lookupType(const char *name) {
 
 AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
     main_parser->current_unit_name_context = NULL;
+    resetCompilerConstants();
     Token *copiedProgToken = copyToken(main_parser->current_token);
     if (!copiedProgToken && main_parser->current_token) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
     DEBUG_PRINT("buildProgramAST: About to eat PROGRAM. Current: %s ('%s')\n", main_parser->current_token ? tokenTypeToString(main_parser->current_token->type) : "NULL_TOKEN_TYPE", main_parser->current_token && main_parser->current_token->value ? main_parser->current_token->value : "NULL_TOKEN_VALUE");
@@ -3622,7 +3512,7 @@ AST *simpleExpression(Parser *parser) {
     }
 
     // Parse the first term
-    node = term(parser);
+    node = pascalTerm(parser);
     if (!node || node->type == AST_NOOP) {
         // term should have reported error
         if(signToken) freeToken(signToken); // Free sign token if unused
@@ -3648,7 +3538,7 @@ AST *simpleExpression(Parser *parser) {
         if (!opCopied) { EXIT_FAILURE_HANDLER(); }
         eat(parser, opOriginal->type); // Eat original op token
 
-        AST *right = term(parser); // Parse the next term
+        AST *right = pascalTerm(parser); // Parse the next term
         if (!right || right->type == AST_NOOP) {
             // term should have reported error
             // errorParser(parser, "Expected term after additive operator"); // Already reported
@@ -3670,7 +3560,7 @@ AST *simpleExpression(Parser *parser) {
 
 // term: Parses factors combined with multiplicative operators (*, /, DIV, MOD, AND, SHL, SHR).
 // term ::= factor { multiplicative_op factor }
-AST *term(Parser *parser) {
+AST *pascalTerm(Parser *parser) {
     AST *node = factor(parser);
     if (!node || node->type == AST_NOOP) {
        // factor should have reported error
@@ -4174,4 +4064,3 @@ static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken) {
     if (typeNameCopy) free(typeNameCopy);
     return typeRef;
 }
-

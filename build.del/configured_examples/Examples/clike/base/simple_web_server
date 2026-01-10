@@ -1,0 +1,670 @@
+#!/usr/bin/env clike
+
+// Simple CLike web server
+// - Listens on port 5555 by default
+// - Creates a temporary htdocs directory under TMPDIR (or /tmp) and populates it with default assets
+// - Multithreaded: spawns a handler thread per connection
+// - Note: current socketBind binds all interfaces; by default we only advertise
+//   localhost. Serving is minimal and for demo/testing.
+
+int Port = 5555;
+str RootDir;
+str IndexPath;
+str Body;
+text GFile;
+str ConfiguredAssetRoot = "/usr/local/pscal/lib/misc/simple_web_server/htdocs";
+
+// Worker pool + simple ring queue for accepted connections
+int MaxThreads = 8;                   // configurable via CLI
+const int MaxQueueCapacity = 256;     // hard maximum for queue storage
+int QCap = 64;                        // effective queue capacity (<= MaxQueueCapacity)
+int q[MaxQueueCapacity];
+int qHead = 0;
+int qTail = 0;
+int qCount = 0;
+int qmu; // mutex handle
+
+// Simple metrics
+int GAccepted = 0;
+int GEnqueued = 0;
+int GDropped = 0;
+int GServed = 0;
+
+// Helpers
+str resolveTempDir() {
+  str dir = "/tmp";
+  dir = fsNormalizePath(dir);
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMPDIR");
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMP");
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("TEMP");
+  if (dir == "" || !fsPathExists(dir)) dir = getenv("HOME");
+  if (dir == "" || !fsPathExists(dir)) dir = ".";
+  str normalized = fsNormalizePath(dir);
+  if (normalized == "") return dir;
+  return normalized;
+}
+
+str ensureTrailingSlash(str path) {
+  int len = length(path);
+  if (len == 0) return "/tmp/";
+  str last = copy(path, len, 1);
+  if (last == "/" || last == "\\") return path;
+  return path + "/";
+}
+
+int endswith(str s, str suffix) {
+  int ls = length(s);
+  int lf = length(suffix);
+  if (lf > ls) return 0;
+  str tail = copy(s, ls - lf + 1, lf);
+  return tail == suffix ? 1 : 0;
+}
+
+str contentType(str path) {
+  if (endswith(path, ".html") || endswith(path, ".htm")) return "text/html";
+  if (endswith(path, ".css")) return "text/css";
+  if (endswith(path, ".js")) return "application/javascript";
+  if (endswith(path, ".json")) return "application/json";
+  if (endswith(path, ".txt")) return "text/plain";
+  if (endswith(path, ".png")) return "image/png";
+  if (endswith(path, ".jpg") || endswith(path, ".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
+
+// Percent-decode %XX sequences (valid hex only). Leaves other characters unchanged.
+str decodePercent(str s) {
+  str out = "";
+  int i = 1;
+  while (i <= length(s)) {
+    if (copy(s, i, 1) == "%" && i + 2 <= length(s)) {
+      str h1 = copy(s, i + 1, 1);
+      str h2 = copy(s, i + 2, 1);
+      int v1 = -1; int v2 = -1;
+      // hex digit to value
+      if (h1 >= "0" && h1 <= "9") v1 = ord(h1) - ord("0");
+      else if (h1 >= "a" && h1 <= "f") v1 = 10 + (ord(h1) - ord("a"));
+      else if (h1 >= "A" && h1 <= "F") v1 = 10 + (ord(h1) - ord("A"));
+      if (h2 >= "0" && h2 <= "9") v2 = ord(h2) - ord("0");
+      else if (h2 >= "a" && h2 <= "f") v2 = 10 + (ord(h2) - ord("a"));
+      else if (h2 >= "A" && h2 <= "F") v2 = 10 + (ord(h2) - ord("A"));
+      if (v1 >= 0 && v2 >= 0) {
+        int val = v1 * 16 + v2;
+        out = out + tochar(val);
+        i = i + 3;
+        continue;
+      }
+    }
+    out = out + copy(s, i, 1);
+    i = i + 1;
+  }
+  return out;
+}
+
+// Remove all occurrences of ".." to prevent directory traversal.
+// Normalize a relative path: remove "..", remove "./" and collapse "//".
+str normalizePath(str s) {
+  // Canonicalize path by processing segments and handling '.' and '..'.
+  // Input is expected to be relative (no leading '/').
+  str out = "";
+  int i = 1;
+  while (i <= length(s)) {
+    // Skip any slashes
+    while (i <= length(s) && copy(s, i, 1) == "/") i = i + 1;
+    if (i > length(s)) break;
+    // Capture next segment until slash or end
+    int j = i;
+    while (j <= length(s) && copy(s, j, 1) != "/") j = j + 1;
+    int segLen = j - i;
+    str seg = copy(s, i, segLen);
+    if (seg == "" || seg == ".") {
+      // skip
+    } else if (seg == "..") {
+      // pop last segment from out if any
+      if (length(out) > 0) {
+        int k = 1; int last = 0;
+        while (k <= length(out)) { if (copy(out, k, 1) == "/") last = k; k = k + 1; }
+        if (last > 0) out = copy(out, 1, last - 1); else out = "";
+      }
+    } else {
+      out = (length(out) > 0) ? out + "/" + seg : seg;
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+str pad2(int n) {
+  str s = inttostr(n);
+  if (length(s) < 2) s = "0" + s;
+  return s;
+}
+
+str timestamp() {
+  int yr = 0, mo = 0, dy = 0, dow = 0;
+  int hh = 0, mi = 0, ss = 0, hs = 0;
+  getdate(&yr, &mo, &dy, &dow);
+  gettime(&hh, &mi, &ss, &hs);
+  str ts = inttostr(yr) + "-" + pad2(mo) + "-" + pad2(dy)
+           + " " + pad2(hh) + ":" + pad2(mi) + ":" + pad2(ss);
+  return ts;
+}
+
+int isDirectory(str path) {
+  int attr = getfattr(path);
+  return (attr & 16) != 0 ? 1 : 0;
+}
+
+int copyFile(str src, str dst) {
+  mstream ms = mstreamcreate();
+  int loaded = mstreamloadfromfile(&ms, src);
+  if (!loaded) {
+    mstreamfree(&ms);
+    return 0;
+  }
+  mstreamsavetofile(&ms, dst);
+  mstreamfree(&ms);
+  return 1;
+}
+
+int copyDirectory(str src, str dst) {
+  if (!isDirectory(src)) return 0;
+  mkdir(dst);
+  str entries = "";
+  str name = findfirst(src);
+  while (name != "") {
+    entries = entries + name + "\n";
+    name = findnext();
+  }
+  int idx = 1;
+  int success = 1;
+  while (idx <= length(entries)) {
+    int j = idx;
+    while (j <= length(entries) && copy(entries, j, 1) != "\n") j = j + 1;
+    int segLen = j - idx;
+    if (segLen > 0) {
+      str entry = copy(entries, idx, segLen);
+      if (entry == "." || entry == "..") {
+        idx = j + 1;
+        continue;
+      }
+      str srcPath = src + "/" + entry;
+      str dstPath = dst + "/" + entry;
+      if (isDirectory(srcPath)) {
+        if (!copyDirectory(srcPath, dstPath)) success = 0;
+      } else {
+        if (!copyFile(srcPath, dstPath)) success = 0;
+      }
+    }
+    idx = j + 1;
+  }
+  return success;
+}
+
+void serveConn(int c) {
+  // Read request
+  mstream req = socketreceive(c, 2048);
+  str reqText = mstreambuffer(req);
+  // Parse request line robustly: take first line then split by spaces
+  int ln = pos(reqText, "\r\n");
+  if (ln == 0) ln = pos(reqText, "\n");
+  str firstLine = (ln > 0) ? copy(reqText, 1, ln - 1) : reqText;
+  // Manually parse method and path from firstLine to avoid any pos/copy off-by-one
+  int flen = length(firstLine);
+  int i = 1;
+  // skip leading spaces
+  while (i <= flen && copy(firstLine, i, 1) == " ") i = i + 1;
+  int mstart = i;
+  while (i <= flen && copy(firstLine, i, 1) != " ") i = i + 1;
+  str method = (mstart <= flen) ? copy(firstLine, mstart, i - mstart) : "";
+  while (i <= flen && copy(firstLine, i, 1) == " ") i = i + 1;
+  int pstart = i;
+  while (i <= flen && copy(firstLine, i, 1) != " ") i = i + 1;
+  str path = (pstart <= flen && i > pstart) ? copy(firstLine, pstart, i - pstart) : "/";
+  // Strip query string
+  int qidx = pos(path, "?");
+  if (qidx > 0) path = copy(path, 1, qidx - 1);
+  // Percent-decode the URL path
+  path = decodePercent(path);
+
+  str respBody;
+  int code = 200;
+  str ctype = "text/html";
+  // For logging: show what we served (listing, index, or resolved relative path)
+  str logDetail = "";
+  if (path == "/") {
+    // Prefer index.html if present; otherwise return listing
+    if (fileexists(IndexPath)) {
+      str rel = "index.html";
+      str fullPath = IndexPath;
+      mstream ms = mstreamcreate();
+      int ok = mstreamloadfromfile(&ms, fullPath);
+      if (ok) {
+        respBody = mstreambuffer(ms);
+        code = 200;
+        ctype = "text/html";
+        logDetail = "index.html";
+        mstreamfree(&ms);
+      } else {
+        // Fallback to listing if read failed for any reason
+        mstreamfree(&ms);
+        str listing = "<html><body><h1>Index of /</h1><ul>";
+        str name = findfirst(RootDir);
+        while (name != "") {
+          listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
+          name = findnext();
+        }
+        listing = listing + "</ul></body></html>";
+        respBody = listing;
+        code = 200;
+        ctype = "text/html";
+        logDetail = "(listing)";
+      }
+    } else {
+      // Directory listing of RootDir
+      str listing = "<html><body><h1>Index of /</h1><ul>";
+      str name = findfirst(RootDir);
+      while (name != "") {
+        listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
+        name = findnext();
+      }
+      listing = listing + "</ul></body></html>";
+      respBody = listing;
+      code = 200;
+      ctype = "text/html";
+      logDetail = "(listing)";
+    }
+  } else if (path == "/index.html") {
+    // If a real index.html exists on disk, serve it; otherwise use the default Body
+    if (fileexists(IndexPath)) {
+      mstream ms = mstreamcreate();
+      int ok = mstreamloadfromfile(&ms, IndexPath);
+      if (ok) {
+        respBody = mstreambuffer(ms);
+        code = 200;
+        ctype = "text/html";
+        logDetail = "index.html";
+        mstreamfree(&ms);
+      } else {
+        // Fallback to in-memory Body if disk read failed unexpectedly
+        mstreamfree(&ms);
+        respBody = Body;
+        code = 200;
+        ctype = "text/html";
+        logDetail = "index.html (fallback)";
+      }
+    } else {
+      respBody = Body;
+      code = 200;
+      ctype = "text/html";
+      logDetail = "index.html (default)";
+    }
+  } else {
+    // Serve file under RootDir
+    str rel = (copy(path, 1, 1) == "/") ? copy(path, 2, length(path) - 1) : path;
+    rel = normalizePath(rel);
+    str fullPath = RootDir + "/" + rel;
+    if (fileexists(fullPath)) {
+      mstream ms = mstreamcreate();
+      int ok = mstreamloadfromfile(&ms, fullPath);
+      if (ok) {
+        respBody = mstreambuffer(ms);
+        code = 200;
+        ctype = contentType(rel);
+        mstreamfree(&ms);
+        logDetail = rel;
+      } else {
+        // Read failed even though file exists; return 500
+        mstreamfree(&ms);
+        respBody = "<html><body>Internal Server Error</body></html>";
+        code = 500;
+        ctype = "text/html";
+        logDetail = rel;
+      }
+    } else {
+      // Not found; do not attempt to load to avoid VM runtimeError
+      respBody = "<html><body>Not Found</body></html>";
+      code = 404;
+      ctype = "text/html";
+      logDetail = rel;
+    }
+  }
+  int len = length(respBody);
+  str status = (code == 200) ? "200 OK" : "404 Not Found";
+  str hdr = "HTTP/1.1 " + status + "\r\n"
+            + "Content-Type: " + ctype + "\r\n"
+            + "Content-Length: " + inttostr(len) + "\r\n\r\n";
+  socketsend(c, hdr);
+  socketsend(c, respBody);
+  int depth = 0, served = 0, enq = 0, drop = 0;
+  lock(qmu); depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; unlock(qmu);
+  str ts = timestamp();
+  printf("%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n", ts, method, path, code, logDetail, depth, served, enq, drop);
+  socketclose(c);
+}
+
+void qinit() { qmu = mutex(); qHead = 0; qTail = 0; qCount = 0; }
+int enqueue(int c) {
+  int ok = 0;
+  lock(qmu);
+  if (qCount < QCap) {
+    q[qTail] = c;
+    qTail = (qTail + 1) % QCap;
+    qCount = qCount + 1;
+    GEnqueued = GEnqueued + 1;
+    ok = 1;
+  }
+  unlock(qmu);
+  return ok;
+}
+int dequeue() {
+  int v = -1;
+  lock(qmu);
+  if (qCount > 0) {
+    v = q[qHead];
+    qHead = (qHead + 1) % QCap;
+    qCount = qCount - 1;
+  }
+  unlock(qmu);
+  return v;
+}
+void worker() {
+  while (1) {
+    int c = dequeue();
+    if (c >= 0) {
+      serveConn(c);
+      lock(qmu); GServed = GServed + 1; unlock(qmu);
+    } else {
+      delay(10);
+    }
+  }
+}
+
+void heartbeat() {
+  int prevServed = 0;
+  while (1) {
+    delay(60000); // ~60s
+    int depth = 0, served = 0, enq = 0, drop = 0, acc = 0, cap = 0, thr = 0;
+    lock(qmu);
+      depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; acc = GAccepted; cap = QCap; thr = MaxThreads;
+    unlock(qmu);
+    int dps = served - prevServed;
+    prevServed = served;
+    printf("%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n", timestamp(), depth, cap, thr, acc, enq, served, drop, dps);
+  }
+}
+
+str fsTrimTrailingSlashes(str path) {
+  int len = length(path);
+  while (len > 1 && copy(path, len, 1) == "/") {
+    path = copy(path, 1, len - 1);
+    len = len - 1;
+  }
+  if (len == 0) return "";
+  return path;
+}
+
+str fsStripLeadingCurrent(str path) {
+  while (length(path) >= 2) {
+    str first = copy(path, 1, 1);
+    str second = copy(path, 2, 1);
+    if (first != "." || (second != "/" && second != "\\")) {
+      break;
+    }
+    if (length(path) == 2) {
+      return "";
+    }
+    path = copy(path, 3, length(path) - 2);
+  }
+  return path;
+}
+
+str fsNormalizePath(str path) {
+  if (strlen(path) == 0) return "";
+  if (copy(path, 1, 1) == "/") return fsTrimTrailingSlashes(path);
+  str cleaned = fsStripLeadingCurrent(path);
+  str pwd = getenv("PWD");
+  if (strlen(pwd) == 0) {
+    return fsTrimTrailingSlashes(cleaned);
+  }
+  str base = fsTrimTrailingSlashes(pwd);
+  if (strlen(cleaned) == 0) {
+    return base;
+  }
+  if (strlen(base) == 0) {
+    return fsTrimTrailingSlashes(cleaned);
+  }
+  if (strlen(base) == 1 && copy(base, 1, 1) == "/") {
+    return fsTrimTrailingSlashes(base + cleaned);
+  }
+  return fsTrimTrailingSlashes(base + "/" + cleaned);
+}
+
+str fsPathDirname(str path) {
+  if (strlen(path) == 0) return "";
+  str cleaned = fsTrimTrailingSlashes(path);
+  int len = length(cleaned);
+  if (len == 0) return "";
+  if (len == 1 && copy(cleaned, 1, 1) == "/") return "/";
+  int i = len;
+  while (i > 0 && copy(cleaned, i, 1) != "/") i = i - 1;
+  if (i <= 0) return "";
+  if (i == 1) return "/";
+  return fsTrimTrailingSlashes(copy(cleaned, 1, i - 1));
+}
+
+str fsPathJoin(str base, str rel) {
+  if (strlen(rel) == 0) return fsTrimTrailingSlashes(base);
+  if (strlen(base) == 0) return rel;
+  str normalizedBase = fsTrimTrailingSlashes(base);
+  if (copy(rel, 1, 1) == "/") {
+    if (strlen(normalizedBase) == 1 && copy(normalizedBase, 1, 1) == "/") {
+      return rel;
+    }
+    return normalizedBase + rel;
+  }
+  if (strlen(normalizedBase) == 1 && copy(normalizedBase, 1, 1) == "/") {
+    return normalizedBase + rel;
+  }
+  return normalizedBase + "/" + rel;
+}
+
+int fsPathExists(str path) {
+  if (strlen(path) == 0) return 0;
+  if (fileexists(path)) return 1;
+  if (isDirectory(path)) return 1;
+  return 0;
+}
+
+str resolveAssetRoot() {
+  str candidate = ConfiguredAssetRoot;
+  str placeholder = "/usr/local/pscal";
+  int placeholderLen = length(placeholder);
+  int idx = pos(candidate, placeholder);
+  if (idx > 0) {
+    str envRoot = getenv("PSCAL_INSTALL_ROOT_RESOLVED");
+    if (envRoot == "") envRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (envRoot != "") {
+      str prefix = idx > 1 ? copy(candidate, 1, idx - 1) : "";
+      str suffix = "";
+      int suffixStart = idx + placeholderLen;
+      if (suffixStart <= length(candidate)) {
+        suffix = copy(candidate, suffixStart, length(candidate) - suffixStart + 1);
+      }
+      candidate = fsNormalizePath(prefix + envRoot + suffix);
+    } else {
+      candidate = "";
+    }
+  } else {
+    candidate = fsNormalizePath(candidate);
+  }
+  if (candidate != "" && isDirectory(candidate)) return candidate;
+
+  str envAsset = fsNormalizePath(getenv("PSCAL_ASSET_ROOT"));
+  if (envAsset != "" && isDirectory(envAsset)) return envAsset;
+
+  str installBase = getenv("PSCAL_INSTALL_ROOT_RESOLVED");
+  if (installBase == "") installBase = getenv("PSCAL_INSTALL_ROOT");
+  installBase = fsNormalizePath(installBase);
+  if (installBase != "") {
+    str fallback = fsPathJoin(installBase, "misc/htdocs");
+    if (isDirectory(fallback)) return fallback;
+    fallback = fsPathJoin(installBase, "lib/misc/simple_web_server/htdocs");
+    if (isDirectory(fallback)) return fallback;
+  }
+
+  str local = fsNormalizePath("lib/misc/simple_web_server/htdocs");
+  if (local != "" && isDirectory(local)) return local;
+  local = fsNormalizePath("misc/htdocs");
+  if (local != "" && isDirectory(local)) return local;
+
+  if (isDirectory("/usr/local/pscal/misc/htdocs")) return "/usr/local/pscal/misc/htdocs";
+  if (isDirectory("/usr/local/pscal/lib/misc/simple_web_server/htdocs")) {
+    return "/usr/local/pscal/lib/misc/simple_web_server/htdocs";
+  }
+  if (isDirectory("/usr/local/share/pscal/misc/htdocs")) {
+    return "/usr/local/share/pscal/misc/htdocs";
+  }
+  return "";
+}
+
+str fsDefaultInstallRoot() {
+  str scriptPath = fsNormalizePath(paramstr(0));
+  if (strlen(scriptPath) == 0) return "";
+  str dir = fsPathDirname(scriptPath);
+  if (strlen(dir) == 0) return "";
+  dir = fsPathDirname(dir);
+  if (strlen(dir) == 0) return "";
+  dir = fsPathDirname(dir);
+  if (strlen(dir) == 0) return "";
+  dir = fsPathDirname(dir);
+  return dir;
+}
+
+void initFiles() {
+  int pid = getpid();
+  str pidStr = inttostr(pid);
+  str base = ensureTrailingSlash(resolveTempDir());
+  RootDir = base + "htdocs." + pidStr;
+  mkdir(RootDir);
+  IndexPath = RootDir + "/index.html";
+  Body = "<html><body>Hello from the CLike web server</body></html>";
+  str source = resolveAssetRoot();
+  int copied = 0;
+  if (strlen(source) > 0 && isDirectory(source)) {
+    copied = copyDirectory(source, RootDir);
+  }
+  if (strlen(source) > 0) {
+    printf("Asset root: %s\n", source);
+  } else {
+    printf("Asset root: (fallback inline page)\n");
+  }
+  if (!copied && strlen(source) > 0) {
+    printf("Warning: copyDirectory failed from %s (copied=%d)\n", source, copied);
+  }
+  // Fallback: ensure at least a basic index exists if copy failed or missing.
+  if (!fileexists(IndexPath)) {
+    GFile = fopen(IndexPath, "w");
+    fprintf(GFile, "%s\n", Body);
+    fclose(GFile);
+    printf("Using inline default index page.\n");
+  } else {
+    printf("Copied sample site into %s\n", RootDir);
+  }
+}
+
+int main() {
+  initFiles();
+  qinit();
+  // Optional: read port and root dir from args: [port] [rootdir]
+  if (paramcount() >= 1) {
+    str a1 = paramstr(1);
+    int parsed = 0; int code = -1;
+    val(a1, &parsed, &code);
+    if (code == 0 && parsed > 0 && parsed < 65536) {
+      Port = parsed;
+      if (paramcount() >= 2) {
+        RootDir = paramstr(2);
+        IndexPath = RootDir + "/index.html";
+      }
+    } else {
+      // First arg is root dir
+      RootDir = a1;
+      IndexPath = RootDir + "/index.html";
+      if (paramcount() >= 2) {
+        str a2 = paramstr(2);
+        parsed = 0; code = -1;
+        val(a2, &parsed, &code);
+        if (code == 0 && parsed > 0 && parsed < 65536) Port = parsed;
+      }
+    }
+    // Ensure directory exists and index.html present
+    mkdir(RootDir);
+    if (!fileexists(IndexPath)) {
+      GFile = fopen(IndexPath, "w");
+      fprintf(GFile, "%s\n", Body);
+      fclose(GFile);
+    }
+    // Optional: threads and queue capacity
+    if (paramcount() >= 3) {
+      int parsedT = 0; int codeT = -1;
+      val(paramstr(3), &parsedT, &codeT);
+      if (codeT == 0 && parsedT > 0 && parsedT <= 64) MaxThreads = parsedT;
+    }
+    if (paramcount() >= 4) {
+      int parsedQ = 0; int codeQ = -1;
+      val(paramstr(4), &parsedQ, &codeQ);
+      if (codeQ == 0) {
+        if (parsedQ < 8) parsedQ = 8;
+        if (parsedQ > MaxQueueCapacity) parsedQ = MaxQueueCapacity;
+        lock(qmu); QCap = parsedQ; qHead = 0; qTail = 0; qCount = 0; unlock(qmu);
+      }
+    }
+  }
+  printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+
+
+  printf("Root: %s\n", RootDir);
+
+  int srv = socketcreate(0);
+  if (srv < 0) { printf("socketcreate failed\n"); return 1; }
+  // Bind and listen; current API binds all interfaces (INADDR_ANY)
+  // Bind explicitly to localhost by default
+  int bindrc = socketbindaddr(srv, "127.0.0.1", Port);
+  if (bindrc != 0) {
+    printf("socketbind failed: %d\n", socketlasterror());
+    return 1;
+  }
+  if (socketlisten(srv, 16) != 0) {
+    printf("socketlisten failed: %d\n", socketlasterror());
+    return 1;
+  }
+  printf("Waiting for connections... (Ctrl+C to quit)\n");
+  // Heartbeat: periodically report metrics
+  spawn heartbeat();
+  // Start worker pool
+  int i = 0;
+  while (i < MaxThreads) { spawn worker(); i = i + 1; }
+  while (1) {
+    int c = socketaccept(srv);
+    if (c >= 0) {
+      lock(qmu); GAccepted = GAccepted + 1; unlock(qmu);
+      // Backpressure: retry enq a few times, then drop
+      int tries = 0; int ok = 0;
+      while (tries < 5) {
+        ok = enqueue(c);
+        if (ok) break;
+        delay(10);
+        tries = tries + 1;
+      }
+      if (!ok) {
+        socketclose(c);
+        lock(qmu); GDropped = GDropped + 1; unlock(qmu);
+      }
+    } else {
+      // Small sleep to avoid busy loop on transient errors
+      delay(10);
+    }
+  }
+  socketclose(srv);
+  return 0;
+}

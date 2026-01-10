@@ -5,12 +5,10 @@
 #include "Pascal/globals.h"
 #include "symbol/symbol.h"
 #include "backend_ast/builtin.h"
+#include "common/frontend_kind.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-int gParamCount = 0;
-char **gParamValues = NULL;
 
 /* Local copy of initSymbolSystem from main.c to set up tables. */
 static void initSymbolSystem(void) {
@@ -42,15 +40,22 @@ static void initSymbolSystem(void) {
 
 static const char *PSCALVM_USAGE = "Usage: pscalvm <bytecode_file> [program_parameters...]\n";
 
-int main(int argc, char* argv[]) {
+int pscalvm_main(int argc, char* argv[]) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
+#define PSCALVM_RETURN(value)           \
+    do {                                \
+        int __vm_rc = (value);          \
+        frontendPopKind(previousKind);  \
+        return __vm_rc;                 \
+    } while (0)
     vmInitTerminalState();
     if (argc >= 2 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
         printf("%s", PSCALVM_USAGE);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        PSCALVM_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
     if (argc < 2) {
         fprintf(stderr, "%s", PSCALVM_USAGE);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        PSCALVM_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
 
     const char* bytecode_path = argv[1];
@@ -64,7 +69,7 @@ int main(int argc, char* argv[]) {
     initBytecodeChunk(&chunk);
     if (!loadBytecodeFromFile(bytecode_path, &chunk)) {
         fprintf(stderr, "Failed to load bytecode from %s\n", bytecode_path);
-        return vmExitWithCleanup(EXIT_FAILURE);
+        PSCALVM_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
 
     VM vm;
@@ -76,6 +81,12 @@ int main(int argc, char* argv[]) {
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
     if (procedure_table) freeHashTable(procedure_table);
 
-    return vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE);
+    PSCALVM_RETURN(vmExitWithCleanup(result == INTERPRET_OK ? EXIT_SUCCESS : EXIT_FAILURE));
 }
+#undef PSCALVM_RETURN
 
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char* argv[]) {
+    return pscalvm_main(argc, argv);
+}
+#endif

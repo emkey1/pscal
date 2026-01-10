@@ -24,7 +24,7 @@ Rea builds with the same prerequisites as the rest of PSCAL:
 - C11-capable compiler (clang or GCC recommended).
 - CMake 3.24 or newer.
 - libcurl for networking helpers.
-- Optional: SDL2, SDL2_image, SDL2_mixer, SDL2_ttf for graphics samples.
+- Optional: SDL2 or SDL3 with the matching SDL_image/SDL_mixer/SDL_ttf add-ons for graphics samples.
 - Python 3.9+ to run the scope harness and manifest tooling.
 
 ### 1.3 Building the Rea Front End

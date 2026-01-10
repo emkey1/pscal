@@ -12,11 +12,10 @@ flowchart LR
     Bytecode --> VM[Stack-based VM]
 
     VM --> Backend[Core built-ins]
-    Backend --> SDL[SDL2]
+    Backend --> SDL[SDL2/SDL3]
     Backend --> libcurl
     VM --> ExtBuiltins[Extended built-ins]
 
     Core[Utilities & symbol tables] --- FrontEnds
     Core --- Compiler
     Core --- VM
-

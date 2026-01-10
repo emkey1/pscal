@@ -184,14 +184,13 @@ typedef struct ShellCommand {
     ShellExecutionMetadata exec;
     int line;
     int column;
+    ShellRedirectionArray redirections;
     union {
         struct {
             ShellWordArray words;
-            ShellRedirectionArray redirections;
         } simple;
         struct {
             char *expression;
-            ShellRedirectionArray redirections;
         } arithmetic;
         ShellPipeline *pipeline;
         ShellLogicalList *logical;

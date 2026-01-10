@@ -1,0 +1,39 @@
+name,category,expect,exit_code,pass,reason
+block_shadow_preserves_outer,block_scope,runtime_ok,0,yes,ok
+block_conditional_inner_isolated,block_scope,runtime_ok,0,yes,ok
+block_loop_variable_redeclare,block_scope,runtime_ok,0,yes,ok
+block_inner_reference_error,block_scope,compile_error,1,yes,error observed as expected
+block_loop_variable_leak_error,block_scope,compile_error,1,yes,error observed as expected
+block_random_shadowing_ok,block_scope,runtime_ok,0,yes,ok
+block_random_leak_error,block_scope,compile_error,1,yes,error observed as expected
+function_parameter_shadows_global,function_scope,runtime_ok,0,yes,ok
+function_mutual_recursion_scope,function_scope,runtime_ok,0,yes,ok
+function_parameter_leak_error,function_scope,compile_error,1,yes,error observed as expected
+function_forward_reference_local_error,function_scope,compile_error,1,yes,error observed as expected
+function_duplicate_parameter_error,function_scope,compile_error,1,yes,error observed as expected
+function_random_shadowing_ok,function_scope,runtime_ok,0,yes,ok
+function_random_leak_error,function_scope,compile_error,1,yes,error observed as expected
+const_global_visible_in_blocks,const_scope,runtime_ok,0,yes,ok
+const_shadow_by_local_allowed,const_scope,runtime_ok,0,yes,ok
+const_function_scope_independent,const_scope,runtime_ok,0,yes,ok
+const_reassignment_error,const_scope,compile_error,1,yes,error observed as expected
+const_block_reassignment_error,const_scope,compile_error,1,yes,error observed as expected
+const_random_shadow_pass,const_scope,runtime_ok,0,yes,ok
+const_random_assign_error,const_scope,compile_error,1,yes,error observed as expected
+type_struct_usage_ok,type_scope,runtime_ok,0,yes,ok
+type_struct_shadow_variable,type_scope,runtime_ok,0,yes,ok
+type_struct_redefinition_error,type_scope,compile_error,1,yes,error observed as expected
+type_random_struct_pass,type_scope,runtime_ok,0,yes,ok
+import_function_visible,import_scope,runtime_ok,0,yes,ok
+import_duplicate_definition_error,import_scope,compile_error,1,yes,error observed as expected
+import_random_usage_ok,import_scope,runtime_ok,0,yes,ok
+name_resolution_prefers_inner,resolution_scope,runtime_ok,0,yes,ok
+name_resolution_unknown_identifier_error,resolution_scope,compile_error,1,yes,error observed as expected
+name_resolution_import_variable_shadow,resolution_scope,runtime_ok,0,yes,ok
+name_resolution_random_shadow_pass,resolution_scope,runtime_ok,0,yes,ok
+hoist_function_call_before_decl,hoisting_scope,runtime_ok,0,yes,ok
+hoist_mutual_recursion_forward,hoisting_scope,runtime_ok,0,yes,ok
+hoist_variable_use_before_decl_error,hoisting_scope,compile_error,1,yes,error observed as expected
+hoist_random_variable_error,hoisting_scope,compile_error,1,yes,error observed as expected
+integration_scope_import_shadow_mix,integration,runtime_ok,0,yes,ok
+thread_wrappers_spawn_queue,integration,runtime_ok,0,yes,ok

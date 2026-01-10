@@ -8,8 +8,9 @@
 #define PSCAL_AUDIO_H
 
 #ifdef SDL
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_mixer.h>
+#include "core/sdl_headers.h"
+#include PSCALI_SDL_HEADER
+#include PSCALI_SDL_MIXER_HEADER
 #include "types.h"
 #include "ast/ast.h"
 

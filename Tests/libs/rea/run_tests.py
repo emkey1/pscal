@@ -228,12 +228,23 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
 def start_server() -> tuple[socketserver.TCPServer, str]:
     """Start the local HTTP server for exercising the Http module."""
-    # Bind explicitly to 127.0.0.1 so the tests always use IPv4.
+    # Bind explicitly to 127.0.0.1 on an ephemeral port to avoid sandboxed port restrictions.
     server = socketserver.TCPServer(("127.0.0.1", 0), _RequestHandler, bind_and_activate=False)
-    # Avoid "Address already in use" when rerunning quickly.
     server.allow_reuse_address = True
-    server.server_bind()
-    server.server_activate()
+    if hasattr(socket, "SO_REUSEPORT"):
+        try:
+            server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except OSError:
+            pass
+    try:
+        server.server_bind()
+        server.server_activate()
+    except PermissionError:
+        server.server_close()
+        return None, ""
+    except Exception:
+        server.server_close()
+        raise
     host, port = server.server_address
     base_url = f"http://{host}:{port}"
     thread = threading.Thread(target=server.serve_forever, name="rea-http-server", daemon=True)
@@ -243,6 +254,8 @@ def start_server() -> tuple[socketserver.TCPServer, str]:
 
 def stop_server(server: socketserver.TCPServer) -> None:
     """Shut down the local HTTP server."""
+    if server is None:
+        return
     try:
         server.shutdown()
     finally:
@@ -296,6 +309,9 @@ def main() -> int:
         return 1
 
     server, base_url = start_server()
+    if server is None:
+        print("Skipping Rea library http tests: loopback bind not permitted.", file=sys.stderr)
+        return 0
     tmp_dir = Path(tempfile.mkdtemp(prefix="rea_lib_tests_"))
     home_dir = tmp_dir / "home"
     home_dir.mkdir(parents=True, exist_ok=True)

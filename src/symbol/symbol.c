@@ -99,6 +99,18 @@ int hashFunctionName(const char *name) {
     return hash % HASHTABLE_SIZE; // Map hash value to an index within the table size
 }
 
+static bool ensureGlobalSymbolsTable(void) {
+    if (globalSymbols) {
+        return true;
+    }
+    globalSymbols = createHashTable();
+    if (!globalSymbols) {
+        EXIT_FAILURE_HANDLER();
+        return false;
+    }
+    return true;
+}
+
 
 /**
  * Internal helper to look up a symbol in a specific hash table.
@@ -173,7 +185,7 @@ Symbol *lookupGlobalSymbol(const char *name) {
     // Use the internal hash table lookup helper
     if (!globalSymbols) { // Defensive check if global table is not initialized
         fprintf(stderr, "Internal error: globalSymbols hash table is NULL.\n");
-        return NULL;
+        globalSymbols = createHashTable();
     }
     return hashTableLookup(globalSymbols, name);
 }
@@ -197,11 +209,16 @@ Symbol *lookupLocalSymbol(const char *name) {
  * @param name The symbol name string to look up.
  * @return A pointer to the found Symbol structure.
  */
-Symbol *lookupSymbol(const char *name) {
+Symbol *lookupSymbolOptional(const char *name) {
     Symbol *sym = lookupLocalSymbol(name);
     if (!sym) {
         sym = lookupGlobalSymbol(name);
     }
+    return sym;
+}
+
+Symbol *lookupSymbol(const char *name) {
+    Symbol *sym = lookupSymbolOptional(name);
     if (!sym) {
         fprintf(stderr, "Runtime error: Symbol '%s' not found.\n", name);
 #ifdef DEBUG
@@ -243,6 +260,9 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
         }
     }
 
+    if (!globalSymbols) {
+        globalSymbols = createHashTable();
+    }
     // Check for duplicates before inserting (optional - currently just warns/returns)
     // If strict "duplicate identifier" errors are needed, this check should be here
     // before allocation. For now, let's match the previous behavior and allow
@@ -306,19 +326,14 @@ void insertGlobalSymbol(const char *name, VarType type, AST *type_def) {
     DEBUG_PRINT("[DEBUG SYMBOL] Created Symbol '%s' at %p (Value @ %p, base_type_node @ %p).\n",
                 new_symbol->name, (void*)new_symbol, (void*)new_symbol->value, (void*)(new_symbol->value ? new_symbol->value->base_type_node : NULL));
 
-    // The globalSymbols hash table must be created before calling this function.
-    if (!globalSymbols) {
-         fprintf(stderr, "Internal error: globalSymbols hash table is NULL during insertGlobalSymbol.\n");
-         // Clean up allocated symbol and value before exiting
-         if (new_symbol->value) {
-             freeValue(new_symbol->value); // Free the contents of the Value struct
-             free(new_symbol->value);      // Then free the Value struct itself
-         }
-         if (new_symbol->name) {
-             free(new_symbol->name);
-         }
-         free(new_symbol); // Free the Symbol struct
-         EXIT_FAILURE_HANDLER();
+    if (!ensureGlobalSymbolsTable()) {
+        if (new_symbol->value) {
+            freeValue(new_symbol->value);
+            free(new_symbol->value);
+        }
+        free(new_symbol->name);
+        free(new_symbol);
+        return;
     }
     hashTableInsert(globalSymbols, new_symbol);
 
@@ -330,9 +345,8 @@ void insertGlobalAlias(const char *name, Symbol *target) {
         return;
     }
 
-    if (!globalSymbols) {
-        fprintf(stderr, "Internal error: globalSymbols hash table is NULL during insertGlobalAlias.\n");
-        EXIT_FAILURE_HANDLER();
+    if (!ensureGlobalSymbolsTable()) {
+        return;
     }
 
     if (lookupGlobalSymbol(name)) {
@@ -392,10 +406,27 @@ void insertConstGlobalSymbol(const char *name, Value val) {
     }
     if (!constGlobalSymbols) {
         fprintf(stderr, "Internal error: constGlobalSymbols hash table is NULL during insertConstGlobalSymbol.\n");
-        EXIT_FAILURE_HANDLER();
+        constGlobalSymbols = createHashTable();
+        if (!constGlobalSymbols) {
+            EXIT_FAILURE_HANDLER();
+            return;
+        }
     }
-    if (hashTableLookup(constGlobalSymbols, name)) {
-        return; // Already inserted
+    Symbol *existing = hashTableLookup(constGlobalSymbols, name);
+    if (existing) {
+        existing->type = val.type;
+        existing->is_const = true;
+        if (existing->value) {
+            freeValue(existing->value);
+        } else {
+            existing->value = malloc(sizeof(Value));
+            if (!existing->value) {
+                fprintf(stderr, "Memory allocation error (malloc Value) in insertConstGlobalSymbol\n");
+                EXIT_FAILURE_HANDLER();
+            }
+        }
+        *(existing->value) = makeCopyOfValue(&val);
+        return;
     }
 
     Symbol *new_symbol = malloc(sizeof(Symbol));
@@ -679,6 +710,9 @@ void popProcedureTable(bool free_table) {
 
 /** Looks up a procedure by name in the current procedure table scope chain. */
 Symbol *lookupProcedure(const char *name) {
+    if (!current_procedure_table && procedure_table) {
+        current_procedure_table = procedure_table;
+    }
     for (HashTable *tbl = current_procedure_table; tbl; tbl = tbl->parent) {
         Symbol *sym = hashTableLookup(tbl, name);
         if (sym) {

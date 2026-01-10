@@ -1,0 +1,5 @@
+echo context_smoke:start
+exsh -c 'echo nested_run:1'
+echo context_smoke:after_nested_1
+exsh -c 'echo nested_run:2'
+echo context_smoke:end

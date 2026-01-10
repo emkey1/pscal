@@ -81,10 +81,13 @@ def load_manifest(path: Path) -> List[TestCase]:
     return tests
 
 
-def ensure_executable() -> Path:
-    exe = REPO_ROOT / "build" / "bin" / "exsh"
+def ensure_executable(path_override: Optional[str]) -> Path:
+    if path_override:
+        exe = Path(path_override).expanduser()
+    else:
+        exe = REPO_ROOT / "build" / "bin" / "exsh"
     if not exe.exists():
-        raise FileNotFoundError(f"exsh executable not found at {exe}; build the project first")
+        raise FileNotFoundError(f"exsh executable not found at {exe}; build the project first or pass --executable")
     return exe
 
 
@@ -174,6 +177,20 @@ def evaluate(
     reason: Optional[str] = None
     passed = True
 
+    # Allow tests to self-skip (return 77) without failing the suite.
+    if exsh_proc.returncode == 77:
+        return TestResult(
+            case=case,
+            passed=True,
+            reason="skipped",
+            stdout=stdout_text,
+            stderr=stderr_text,
+            returncode=exsh_proc.returncode,
+            bash_stdout=bash_proc.stdout if bash_proc else None,
+            bash_stderr=bash_proc.stderr if bash_proc else None,
+            bash_returncode=bash_proc.returncode if bash_proc else None,
+        )
+
     if case.expect == "runtime_ok":
         if exsh_proc.returncode != 0:
             passed = False
@@ -254,6 +271,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST, help="Path to test manifest")
     parser.add_argument("--only", type=str, default=None, help="Run only tests whose id contains this substring")
     parser.add_argument("--list", action="store_true", help="List available tests and exit")
+    parser.add_argument("--executable", type=str, default=None, help="Override path to exsh executable")
     parser.add_argument("--bash-cmd", type=str, default=None, help="Override bash command used for match_bash expectations")
     return parser.parse_args(argv)
 
@@ -275,7 +293,7 @@ def main(argv: List[str]) -> int:
         return 1
 
     try:
-        executable = ensure_executable()
+        executable = ensure_executable(args.executable)
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 1

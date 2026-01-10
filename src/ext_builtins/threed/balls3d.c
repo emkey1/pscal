@@ -3,8 +3,10 @@
 #include "vm/vm.h"
 
 #ifdef SDL
-#include "backend_ast/sdl.h"
-#include <SDL2/SDL_opengl.h>
+#include "backend_ast/graphics_3d_backend.h"
+#include "backend_ast/pscal_sdl_runtime.h"
+#include "core/sdl_headers.h"
+#include PSCALI_SDL_OPENGL_HEADER
 #endif
 
 #include <limits.h>
@@ -240,7 +242,7 @@ static bool ensureGlContext(VM* vm, const char* name) {
 
 static void destroySphereDisplayList(void) {
     if (gSphereDisplayListCache.initialized && gSphereDisplayListCache.displayListId != 0) {
-        glDeleteLists(gSphereDisplayListCache.displayListId, 1);
+        gfx3dDeleteLists(gSphereDisplayListCache.displayListId, 1);
     }
     gSphereDisplayListCache.displayListId = 0;
     gSphereDisplayListCache.initialized = false;
@@ -256,7 +258,7 @@ static void drawUnitSphereImmediate(int stacks, int slices) {
         double cosPhi1 = cos(phi1);
         double sinPhi1 = sin(phi1);
 
-        glBegin(GL_TRIANGLE_STRIP);
+        gfx3dBegin(GL_TRIANGLE_STRIP);
         for (int slice = 0; slice <= slices; ++slice) {
             double theta = 2.0 * pi * slice / (double)slices;
             double cosTheta = cos(theta);
@@ -265,16 +267,16 @@ static void drawUnitSphereImmediate(int stacks, int slices) {
             float n1x = (float)(cosPhi1 * cosTheta);
             float n1y = (float)sinPhi1;
             float n1z = (float)(cosPhi1 * sinTheta);
-            glNormal3f(n1x, n1y, n1z);
-            glVertex3f(n1x, n1y, n1z);
+            gfx3dNormal3f(n1x, n1y, n1z);
+            gfx3dVertex3f(n1x, n1y, n1z);
 
             float n0x = (float)(cosPhi0 * cosTheta);
             float n0y = (float)sinPhi0;
             float n0z = (float)(cosPhi0 * sinTheta);
-            glNormal3f(n0x, n0y, n0z);
-            glVertex3f(n0x, n0y, n0z);
+            gfx3dNormal3f(n0x, n0y, n0z);
+            gfx3dVertex3f(n0x, n0y, n0z);
         }
-        glEnd();
+        gfx3dEnd();
     }
 }
 
@@ -288,16 +290,16 @@ static bool ensureSphereDisplayList(int stacks, int slices) {
         return true;
     }
 
-    GLuint newList = glGenLists(1);
+    GLuint newList = gfx3dGenLists(1);
     if (newList == 0) {
         gSphereDisplayListSupported = false;
         destroySphereDisplayList();
         return false;
     }
 
-    glNewList(newList, GL_COMPILE);
+    gfx3dNewList(newList, GL_COMPILE);
     drawUnitSphereImmediate(stacks, slices);
-    glEndList();
+    gfx3dEndList();
 
     destroySphereDisplayList();
     gSphereDisplayListCache.displayListId = newList;
@@ -332,7 +334,7 @@ static Value vmBuiltinBouncingBalls3DDrawUnitSphereFast(VM* vm, int arg_count,
     }
 
     if (ensureSphereDisplayList(stacks, slices) && gSphereDisplayListCache.displayListId != 0) {
-        glCallList(gSphereDisplayListCache.displayListId);
+        gfx3dCallList(gSphereDisplayListCache.displayListId);
         return makeVoid();
     }
 

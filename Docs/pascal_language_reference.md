@@ -225,6 +225,60 @@ Types are defined in a `type` block.
         field2: string;
       end;
     ```
+
+    > **Note:** Traditional Turbo/Delphi `object`/`class` syntax is deliberately
+    > omitted.  PSCAL Pascal achieves polymorphism with plain `record`s that may
+    > declare `virtual` methods, closures, and Go-style interface boxing (see
+    > `Docs/go_style_closure_interface_demo.md`).  Keywords such as `class`,
+    > `object`, and `implements` are not recognised by the parser; use records +
+    > interfaces instead.
+
+#### Closures and Go-style composition
+
+PSCAL Pascal’s “OO” story mirrors Go: you build concrete records with `virtual`
+methods, capture state via nested routines, and expose behaviour through
+interfaces.  From `Docs/go_style_closure_interface_demo.md`:
+
+```pascal
+type
+  TClosureRunner = record
+    labelText: string;
+    nextValue: function: integer;  { closure producing the next tick }
+    procedure Run; virtual;
+  end;
+
+procedure TClosureRunner.Run;
+var
+  runner: ^TClosureRunner;
+  next: function: integer;
+begin
+  runner := myself;          { implicit when called via an interface }
+  next := runner^.nextValue; { closure captured in factory }
+  writeln(runner^.labelText, ' tick=', next());
+end;
+
+function MakeRunner(const name: string): IRunnable;
+var
+  current: integer;
+  runner: ^TClosureRunner;
+
+  function Next: integer;
+  begin
+    Inc(current, 2);
+    Next := current;
+  end;
+begin
+  New(runner);
+  runner^.labelText := name;
+  runner^.nextValue := @Next;     { closure escapes via record field }
+  MakeRunner := IRunnable(runner); { boxed record behaves like Go interface }
+end;
+```
+
+Nested closures (`Next`) capture lexical variables (`current`) even after the
+factory returns.  When you cast a pointer to an interface (`IRunnable(runner)`),
+the runtime boxes the record and its vtable, giving you Go-style method sets
+without introducing new syntax.
 * **`array`:**
     ```pascal
     type

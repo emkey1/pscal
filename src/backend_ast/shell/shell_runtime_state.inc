@@ -9,6 +9,8 @@
 #include "vm/vm.h"
 #include "Pascal/globals.h"
 #include "pscal_paths.h"
+#include "common/runtime_tty.h"
+#include "ios/vproc.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -37,10 +39,248 @@
 #include <pthread.h>
 #include <time.h>
 
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    FILE *fp;
+    int host_fd;
+    int std_fd;
+} ShellVprocStream;
+
+typedef struct {
+    int std_fd;
+    bool can_read;
+    bool can_write;
+} ShellVprocShimCookie;
+
+static __thread ShellVprocStream gShellVprocStdout = { NULL, -1, STDOUT_FILENO };
+static __thread ShellVprocStream gShellVprocStderr = { NULL, -1, STDERR_FILENO };
+static __thread ShellVprocStream gShellVprocStdin = { NULL, -1, STDIN_FILENO };
+
+static FILE *shellVprocStreamFallback(int std_fd) {
+    if (std_fd == STDIN_FILENO) {
+        return stdin;
+    }
+    if (std_fd == STDOUT_FILENO) {
+        return stdout;
+    }
+    return stderr;
+}
+
+static int shellVprocShimRead(void *cookie, char *buf, int len) {
+    ShellVprocShimCookie *ctx = (ShellVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_read || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocReadShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int shellVprocShimWrite(void *cookie, const char *buf, int len) {
+    ShellVprocShimCookie *ctx = (ShellVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_write || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocWriteShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int shellVprocShimClose(void *cookie) {
+    free(cookie);
+    return 0;
+}
+
+static FILE *shellVprocStreamOpenShim(int std_fd,
+                                      ShellVprocStream *cache,
+                                      const char *mode,
+                                      int buf_mode) {
+    if (!cache || !mode) {
+        return shellVprocStreamFallback(std_fd);
+    }
+
+    if (cache->fp && cache->host_fd < 0) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    ShellVprocShimCookie *cookie = (ShellVprocShimCookie *)calloc(1, sizeof(ShellVprocShimCookie));
+    if (!cookie) {
+        return shellVprocStreamFallback(std_fd);
+    }
+    cookie->std_fd = std_fd;
+    cookie->can_read = strchr(mode, 'r') != NULL;
+    cookie->can_write = (strchr(mode, 'w') != NULL) || (strchr(mode, 'a') != NULL);
+
+    FILE *fp = funopen(cookie,
+                       cookie->can_read ? shellVprocShimRead : NULL,
+                       cookie->can_write ? shellVprocShimWrite : NULL,
+                       NULL,
+                       shellVprocShimClose);
+    if (!fp) {
+        free(cookie);
+        return shellVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = -1;
+    return fp;
+}
+
+static FILE *shellVprocStreamOpen(int std_fd,
+                                  ShellVprocStream *cache,
+                                  const char *mode,
+                                  int buf_mode) {
+    if (!cache || !mode) {
+        return shellVprocStreamFallback(std_fd);
+    }
+
+    int host_fd = std_fd;
+    bool use_host_stream = true;
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int translated = vprocTranslateFd(vp, std_fd);
+        if (translated >= 0) {
+            host_fd = translated;
+        } else {
+            use_host_stream = false;
+        }
+    }
+
+    if (!vp) {
+        use_host_stream = true;
+    }
+
+    if (!use_host_stream) {
+        return shellVprocStreamOpenShim(std_fd, cache, mode, buf_mode);
+    }
+
+    if (cache->fp && cache->host_fd == host_fd) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    int dup_fd = -1;
+#ifdef F_DUPFD_CLOEXEC
+    dup_fd = fcntl(host_fd, F_DUPFD_CLOEXEC, 0);
+    if (dup_fd < 0 && errno == EINVAL) {
+        dup_fd = -1;
+    }
+#endif
+    if (dup_fd < 0) {
+        dup_fd = dup(host_fd);
+    }
+    if (dup_fd < 0) {
+        return shellVprocStreamFallback(std_fd);
+    }
+
+    FILE *fp = fdopen(dup_fd, mode);
+    if (!fp) {
+        close(dup_fd);
+        return shellVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = host_fd;
+    return fp;
+}
+
+static FILE *shellVprocStdout(void) {
+    int buf_mode = pscalRuntimeStdoutIsInteractive() ? _IOLBF : _IOFBF;
+    return shellVprocStreamOpen(STDOUT_FILENO, &gShellVprocStdout, "w", buf_mode);
+}
+
+static FILE *shellVprocStderr(void) {
+    return shellVprocStreamOpen(STDERR_FILENO, &gShellVprocStderr, "w", _IONBF);
+}
+
+static FILE *shellVprocStdin(void) {
+    return shellVprocStreamOpen(STDIN_FILENO, &gShellVprocStdin, "r", -1);
+}
+
+static int shellVprocPuts(const char *text) {
+    FILE *out = shellVprocStdout();
+    const char *value = text ? text : "(null)";
+    if (fputs(value, out) == EOF) {
+        return EOF;
+    }
+    return fputc('\n', out);
+}
+
+static void shellVprocPerror(const char *label) {
+    int saved_errno = errno;
+    FILE *errfp = shellVprocStderr();
+    if (label && *label) {
+        fprintf(errfp, "%s: %s\n", label, strerror(saved_errno));
+    } else {
+        fprintf(errfp, "%s\n", strerror(saved_errno));
+    }
+    errno = saved_errno;
+}
+
+static void shellFlushVprocStreams(void) {
+    if (gShellVprocStdout.fp) {
+        fflush(gShellVprocStdout.fp);
+    }
+    if (gShellVprocStderr.fp) {
+        fflush(gShellVprocStderr.fp);
+    }
+}
+
+static void shellCloseVprocStream(ShellVprocStream *stream) {
+    if (!stream || !stream->fp) {
+        return;
+    }
+    fclose(stream->fp);
+    stream->fp = NULL;
+    stream->host_fd = -1;
+}
+
+static void shellCloseVprocStreams(void) {
+    shellCloseVprocStream(&gShellVprocStdout);
+    shellCloseVprocStream(&gShellVprocStderr);
+    shellCloseVprocStream(&gShellVprocStdin);
+}
+#else
+static void shellFlushVprocStreams(void) {}
+static void __attribute__((unused)) shellCloseVprocStreams(void) {}
+#endif
+
 static void shellFlushStandardStreams(void) {
+    shellFlushVprocStreams();
     fflush(stdout);
     fflush(stderr);
 }
+
+static void shellResetStandardStream(int fd);
 
 #if defined(__GLIBC__) || defined(__ANDROID__)
 #define SHELL_HAVE_SECURE_GETENV 1
@@ -101,20 +341,9 @@ typedef struct {
     ShellArrayKind kind;
 } ShellArrayVariable;
 
-static ShellArrayVariable *gShellArrayVars = NULL;
-static size_t gShellArrayVarCount = 0;
-static size_t gShellArrayVarCapacity = 0;
-static int gShellAssociativeArraySupport = -1;
-static int gShellBindInteractiveStatus = -1;
-
 typedef struct {
     char *name;
 } ShellReadonlyEntry;
-
-static ShellReadonlyEntry *gShellReadonlyVars = NULL;
-static size_t gShellReadonlyVarCount = 0;
-static size_t gShellReadonlyVarCapacity = 0;
-static char *gShellReadonlyErrorName = NULL;
 
 typedef struct ShellAlias {
     char *name;
@@ -127,6 +356,145 @@ typedef struct {
     unsigned long hits;
 } ShellHashEntry;
 
+typedef struct {
+    char **entries;
+    size_t count;
+    size_t capacity;
+} ShellHistory;
+
+typedef struct ShellTrapEntry {
+    ShellTrapAction action;
+    char *command;
+} ShellTrapEntry;
+
+typedef struct ShellJob {
+    pid_t pgid;
+    pid_t *pids;
+    size_t pid_count;
+    size_t id;
+    bool running;
+    bool stopped;
+    bool disowned;
+    int last_status;
+    char *command;
+} ShellJob;
+
+typedef struct ShellLocalScopeFrame ShellLocalScopeFrame;
+typedef struct ShellLoopFrame ShellLoopFrame;
+
+typedef struct {
+    bool active;
+    size_t stage_count;
+    bool negated;
+    bool *merge_stderr;
+    pid_t *pids;
+    int (*pipes)[2];
+    size_t launched;
+    bool background;
+    int last_status;
+    pid_t pgid;
+#if defined(PSCAL_TARGET_IOS)
+    bool in_process;
+    bool in_process_worker;
+    int spool_fd;
+    size_t spool_size;
+#endif
+} ShellPipelineContext;
+
+typedef struct ShellRuntimeState {
+    int last_status;
+    ShellPipelineContext pipeline;
+    pid_t shell_pgid;
+    pid_t last_bg_pid;
+    int tty_fd;
+    bool job_control_enabled;
+    bool job_control_initialized;
+    bool errexit_enabled;
+    bool errexit_pending;
+    bool errexit_defer_active;
+    bool trap_enabled;
+    bool posix_mode;
+    bool local_scope_active;
+    bool break_requested;
+    bool continue_requested;
+    bool pipeline_subshell_active;
+    int break_requested_levels;
+    int continue_requested_levels;
+    char **dir_stack;
+    size_t dir_stack_count;
+    size_t dir_stack_capacity;
+    bool dir_stack_initialised;
+    ShellHashEntry *hash_entries;
+    size_t hash_count;
+    size_t hash_capacity;
+    char **disabled_builtins;
+    size_t disabled_builtin_count;
+    size_t disabled_builtin_capacity;
+    int getopts_index;
+    int getopts_offset;
+    unsigned long scalar_cache_hits;
+    unsigned long scalar_cache_misses;
+    unsigned long scalar_cache_stores;
+    size_t scalar_cache_generation;
+    size_t scalar_capture_peak_depth;
+    ShellHistory history;
+    char *arg0;
+    ShellTrapEntry signal_traps[NSIG];
+    ShellTrapEntry exit_trap;
+    bool trap_executing;
+    int script_depth;
+    int condition_depth;
+    size_t job_next_id;
+    ShellJob *jobs;
+    size_t job_count;
+    size_t last_removed_job_id;
+    int last_removed_job_status;
+    bool last_removed_job_valid;
+    ShellArrayVariable *array_vars;
+    size_t array_var_count;
+    size_t array_var_capacity;
+    int associative_array_support;
+    int bind_interactive_status;
+    ShellReadonlyEntry *readonly_vars;
+    size_t readonly_var_count;
+    size_t readonly_var_capacity;
+    char *readonly_error_name;
+    /* Per-context locals/loops/history stacks */
+    ShellLocalScopeFrame *local_scope_stack;
+    size_t local_scope_depth;
+    size_t local_scope_capacity;
+    ShellLoopFrame *loop_stack;
+    size_t loop_stack_size;
+    size_t loop_stack_capacity;
+} ShellRuntimeState;
+
+static ShellRuntimeState *shellGetContext(void);
+static void shellSetContext(ShellRuntimeState *ctx);
+
+#define SC() (shellGetContext())
+
+#define gShellLocalScopeStack (SC()->local_scope_stack)
+#define gShellLocalScopeDepth (SC()->local_scope_depth)
+#define gShellLocalScopeCapacity (SC()->local_scope_capacity)
+#define gShellArrayVars (SC()->array_vars)
+#define gShellArrayVarCount (SC()->array_var_count)
+#define gShellArrayVarCapacity (SC()->array_var_capacity)
+#define gShellAssociativeArraySupport (SC()->associative_array_support)
+#define gShellBindInteractiveStatus (SC()->bind_interactive_status)
+#define gShellReadonlyVars (SC()->readonly_vars)
+#define gShellReadonlyVarCount (SC()->readonly_var_count)
+#define gShellReadonlyVarCapacity (SC()->readonly_var_capacity)
+#define gShellReadonlyErrorName (SC()->readonly_error_name)
+#define gShellHistory (SC()->history)
+#define gShellArg0 (SC()->arg0)
+#define gShellSignalTraps (SC()->signal_traps)
+#define gShellExitTrap (SC()->exit_trap)
+#define gShellTrapExecuting (SC()->trap_executing)
+#define gShellScriptDepth (SC()->script_depth)
+#define gShellConditionDepth (SC()->condition_depth)
+#define gShellJobs (SC()->jobs)
+#define gShellJobCount (SC()->job_count)
+
 static const char *kShellCommandDefaultPath =
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
@@ -134,6 +502,7 @@ typedef enum {
     SHELL_COMMAND_RESULT_ALIAS,
     SHELL_COMMAND_RESULT_FUNCTION,
     SHELL_COMMAND_RESULT_BUILTIN,
+    SHELL_COMMAND_RESULT_APPLET,
     SHELL_COMMAND_RESULT_FILE
 } ShellCommandResultKind;
 
@@ -141,15 +510,6 @@ typedef struct {
     ShellCommandResultKind kind;
     char *detail;
 } ShellCommandResult;
-
-typedef struct {
-    char **entries;
-    size_t count;
-    size_t capacity;
-} ShellHistory;
-
-static ShellHistory gShellHistory = {NULL, 0, 0};
-static char *gShellArg0 = NULL;
 
 typedef struct {
     char *function;
@@ -591,7 +951,7 @@ static ShellOptionEntry gShellOptions[] = {
     {"dirspell", false},
     {"dotglob", false},
     {"execfail", false},
-    {"expand_aliases", false},
+    {"expand_aliases", true},
     {"extdebug", false},
     {"extglob", false},
     {"extquote", true},
@@ -905,56 +1265,6 @@ typedef struct {
     int column;
 } ShellCommand;
 
-typedef struct {
-    bool active;
-    size_t stage_count;
-    bool negated;
-    bool *merge_stderr;
-    pid_t *pids;
-    int (*pipes)[2];
-    size_t launched;
-    bool background;
-    int last_status;
-    pid_t pgid;
-} ShellPipelineContext;
-
-typedef struct {
-    int last_status;
-    ShellPipelineContext pipeline;
-    pid_t shell_pgid;
-    int tty_fd;
-    bool job_control_enabled;
-    bool job_control_initialized;
-    bool errexit_enabled;
-    bool errexit_pending;
-    bool errexit_defer_active;
-    bool trap_enabled;
-    bool posix_mode;
-    bool local_scope_active;
-    bool break_requested;
-    bool continue_requested;
-    bool pipeline_subshell_active;
-    int break_requested_levels;
-    int continue_requested_levels;
-    char **dir_stack;
-    size_t dir_stack_count;
-    size_t dir_stack_capacity;
-    bool dir_stack_initialised;
-    ShellHashEntry *hash_entries;
-    size_t hash_count;
-    size_t hash_capacity;
-    char **disabled_builtins;
-    size_t disabled_builtin_count;
-    size_t disabled_builtin_capacity;
-    int getopts_index;
-    int getopts_offset;
-    unsigned long scalar_cache_hits;
-    unsigned long scalar_cache_misses;
-    unsigned long scalar_cache_stores;
-    size_t scalar_cache_generation;
-    size_t scalar_capture_peak_depth;
-} ShellRuntimeState;
-
 typedef enum {
     SHELL_LOOP_KIND_WHILE,
     SHELL_LOOP_KIND_UNTIL,
@@ -997,15 +1307,11 @@ typedef struct {
     bool is_array_literal;
 } ShellLocalVariable;
 
-typedef struct {
+typedef struct ShellLocalScopeFrame {
     ShellLocalVariable *variables;
     size_t count;
     size_t capacity;
 } ShellLocalScopeFrame;
-
-static ShellLocalScopeFrame *gShellLocalScopeStack = NULL;
-static size_t gShellLocalScopeDepth = 0;
-static size_t gShellLocalScopeCapacity = 0;
 
 static void shellLocalVariableDispose(ShellLocalVariable *var) {
     if (!var) {
@@ -1291,6 +1597,7 @@ typedef struct {
     int saved_fd;
     bool saved_valid;
     bool was_closed;
+    bool use_vproc;
 } ShellExecRedirBackup;
 
 static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t count);
@@ -1298,7 +1605,7 @@ static void shellFreeExecRedirBackups(ShellExecRedirBackup *backups, size_t coun
 static void shellFreeRedirections(ShellCommand *cmd);
 static void shellAbortPipeline(void);
 
-typedef struct {
+typedef struct ShellLoopFrame {
     ShellLoopKind kind;
     bool skip_body;
     bool break_pending;
@@ -1333,14 +1640,15 @@ typedef struct {
     bool pipeline_prev_pipeline_flag;
 } ShellLoopFrame;
 
-static ShellLoopFrame *gShellLoopStack = NULL;
-static size_t gShellLoopStackSize = 0;
-static size_t gShellLoopStackCapacity = 0;
+#define gShellLoopStack (SC()->loop_stack)
+#define gShellLoopStackSize (SC()->loop_stack_size)
+#define gShellLoopStackCapacity (SC()->loop_stack_capacity)
 
-static ShellRuntimeState gShellRuntime = {
+static ShellRuntimeState gShellRuntimeDefault = {
     .last_status = 0,
     .pipeline = {0},
     .shell_pgid = 0,
+    .last_bg_pid = 0,
     .tty_fd = -1,
     .job_control_enabled = false,
     .job_control_initialized = false,
@@ -1371,8 +1679,43 @@ static ShellRuntimeState gShellRuntime = {
     .scalar_cache_misses = 0,
     .scalar_cache_stores = 0,
     .scalar_cache_generation = 0,
-    .scalar_capture_peak_depth = 0
+    .scalar_capture_peak_depth = 0,
+    .history = {NULL, 0, 0},
+    .arg0 = NULL,
+    .signal_traps = { {SHELL_TRAP_ACTION_DEFAULT, NULL} },
+    .exit_trap = {SHELL_TRAP_ACTION_DEFAULT, NULL},
+    .trap_executing = false,
+    .script_depth = 0,
+    .condition_depth = 0,
+    .job_next_id = 1,
+    .jobs = NULL,
+    .job_count = 0,
+    .last_removed_job_id = 0,
+    .last_removed_job_status = 0,
+    .last_removed_job_valid = false,
+    .array_vars = NULL,
+    .array_var_count = 0,
+    .array_var_capacity = 0,
+    .associative_array_support = -1,
+    .bind_interactive_status = -1,
+    .readonly_vars = NULL,
+    .readonly_var_count = 0,
+    .readonly_var_capacity = 0,
+    .readonly_error_name = NULL
 };
+
+/* Default to the global runtime state to avoid pathological recursion when
+ * shellGetContext() is first called before an explicit activation. */
+static __thread ShellRuntimeState *gShellRuntimeCtx = &gShellRuntimeDefault;
+static __thread ShellRuntimeState *gShellContextStack[8] = {0};
+static __thread size_t gShellContextDepth = 0;
+static __thread bool gShellCurrentBuiltinBackground = false;
+static __thread bool gShellBackgroundWorkerActive = false;
+static __thread bool gShellSkipHostStdio = false;
+/* Per-thread to avoid cross-session stdio restoration on iOS. */
+static __thread int gShellSavedStdFds[3] = { -1, -1, -1 };
+
+#define gShellRuntime (*shellGetContext())
 
 static unsigned long gShellStatusVersion = 0;
 static bool gShellStatusSticky = false;
@@ -1382,6 +1725,56 @@ static volatile sig_atomic_t gShellExitOnSignalFlag = 0;
 static bool gShellArithmeticErrorPending = false;
 static VM *gShellCurrentVm = NULL;
 static volatile sig_atomic_t gShellPendingSignals[NSIG] = {0};
+void shellResetJobIds(void) {
+    gShellRuntimeDefault.job_next_id = 1;
+    if (SC()) {
+        SC()->job_next_id = 1;
+    }
+}
+
+static ShellRuntimeState *shellGetContext(void) {
+    static __thread bool resolving = false;
+    if (resolving) {
+        return &gShellRuntimeDefault;
+    }
+    resolving = true;
+    ShellRuntimeState *ctx = gShellRuntimeCtx ? gShellRuntimeCtx : &gShellRuntimeDefault;
+    resolving = false;
+    return ctx;
+}
+
+static void shellSetContext(ShellRuntimeState *ctx) {
+    gShellRuntimeCtx = ctx ? ctx : &gShellRuntimeDefault;
+}
+
+static void shellContextPush(ShellRuntimeState *ctx) {
+    if (gShellContextDepth < (sizeof(gShellContextStack) / sizeof(gShellContextStack[0]))) {
+        gShellContextStack[gShellContextDepth++] = ctx;
+    }
+}
+
+static ShellRuntimeState *shellContextPop(void) {
+    if (gShellContextDepth == 0) {
+        return &gShellRuntimeDefault;
+    }
+    ShellRuntimeState *ctx = gShellContextStack[gShellContextDepth - 1];
+    gShellContextDepth--;
+    return ctx ? ctx : &gShellRuntimeDefault;
+}
+
+ShellRuntimeState *shellRuntimeCurrentContext(void) {
+    return shellGetContext();
+}
+
+ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx) {
+    ShellRuntimeState *previous = shellGetContext();
+    shellSetContext(ctx);
+    return previous;
+}
+
+bool shellRuntimeCurrentBuiltinBackground(void) {
+    return gShellCurrentBuiltinBackground;
+}
 static unsigned int gShellRandomSeed = 0;
 static bool gShellRandomSeedInitialized = false;
 static bool gShellInteractiveMode = false;
@@ -1475,17 +1868,6 @@ static bool shellRuntimeBuiltinDisabled(const char *name) {
     }
     return false;
 }
-
-typedef struct {
-    ShellTrapAction action;
-    char *command;
-} ShellTrapEntry;
-
-static ShellTrapEntry gShellSignalTraps[NSIG];
-static ShellTrapEntry gShellExitTrap = {SHELL_TRAP_ACTION_DEFAULT, NULL};
-static bool gShellTrapExecuting = false;
-static int gShellScriptDepth = 0;
-static int gShellConditionDepth = 0;
 
 static void shellUpdateStatus(int status);
 static void shellSignalHandler(int signo);
@@ -2121,6 +2503,32 @@ bool shellRuntimeIsInteractive(void) {
     return gShellInteractiveMode;
 }
 
+static void shellRuntimeRememberStandardFds(void) {
+    if (gShellSavedStdFds[0] < 0) gShellSavedStdFds[0] = dup(STDIN_FILENO);
+    if (gShellSavedStdFds[1] < 0) gShellSavedStdFds[1] = dup(STDOUT_FILENO);
+    if (gShellSavedStdFds[2] < 0) gShellSavedStdFds[2] = dup(STDERR_FILENO);
+    for (int i = 0; i < 3; ++i) {
+        if (gShellSavedStdFds[i] >= 0) {
+            fcntl(gShellSavedStdFds[i], F_SETFD, FD_CLOEXEC);
+        }
+    }
+}
+
+void shellRuntimeEnsureStandardFds(void) {
+    shellRuntimeRememberStandardFds();
+    int targets[3] = { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
+    for (int i = 0; i < 3; ++i) {
+        if (targets[i] < 0) {
+            continue;
+        }
+        int rc = fcntl(targets[i], F_GETFD);
+        if (rc < 0 && errno == EBADF && gShellSavedStdFds[i] >= 0) {
+            dup2(gShellSavedStdFds[i], targets[i]);
+            shellResetStandardStream(targets[i]);
+        }
+    }
+}
+
 static void shellRandomEnsureSeeded(void) {
     if (gShellRandomSeedInitialized) {
         return;
@@ -2517,11 +2925,389 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
     frame->redirs_active = false;
 }
 
+ShellRuntimeState *shellRuntimeCreateContext(void) {
+    const ShellRuntimeState *template_ctx = shellRuntimeCurrentContext();
+    if (!template_ctx) {
+        template_ctx = &gShellRuntimeDefault;
+    }
+    ShellRuntimeState *ctx = (ShellRuntimeState *)calloc(1, sizeof(ShellRuntimeState));
+    if (!ctx) {
+        return NULL;
+    }
+    *ctx = *template_ctx;
+    ctx->pipeline = (ShellPipelineContext){0};
+    ctx->last_removed_job_id = 0;
+    ctx->last_removed_job_status = 0;
+    ctx->last_removed_job_valid = false;
+    /* Deep-copy owned runtime state so contexts do not share pointers. */
+    ctx->dir_stack = NULL;
+    ctx->dir_stack_count = 0;
+    ctx->dir_stack_capacity = 0;
+    ctx->dir_stack_initialised = template_ctx->dir_stack_initialised;
+    if (template_ctx->dir_stack_count > 0 &&
+        template_ctx->dir_stack) {
+        ctx->dir_stack = (char **)calloc(template_ctx->dir_stack_count, sizeof(char *));
+        if (ctx->dir_stack) {
+            ctx->dir_stack_capacity = template_ctx->dir_stack_count;
+            for (size_t i = 0; i < template_ctx->dir_stack_count; ++i) {
+                if (template_ctx->dir_stack[i]) {
+                    ctx->dir_stack[i] = strdup(template_ctx->dir_stack[i]);
+                    if (ctx->dir_stack[i]) {
+                        ctx->dir_stack_count++;
+                    }
+                }
+            }
+        }
+    }
+
+    ctx->hash_entries = NULL;
+    ctx->hash_count = 0;
+    ctx->hash_capacity = 0;
+    if (template_ctx->hash_count > 0 && template_ctx->hash_entries) {
+        ctx->hash_entries =
+            (ShellHashEntry *)calloc(template_ctx->hash_count, sizeof(ShellHashEntry));
+        if (ctx->hash_entries) {
+            ctx->hash_capacity = template_ctx->hash_count;
+            ctx->hash_count = template_ctx->hash_count;
+            for (size_t i = 0; i < ctx->hash_count; ++i) {
+                ShellHashEntry *dst = &ctx->hash_entries[i];
+                const ShellHashEntry *src = &template_ctx->hash_entries[i];
+                dst->hits = src->hits;
+                if (src->name) {
+                    dst->name = strdup(src->name);
+                }
+                if (src->path) {
+                    dst->path = strdup(src->path);
+                }
+            }
+        }
+    }
+
+    ctx->disabled_builtins = NULL;
+    ctx->disabled_builtin_count = 0;
+    ctx->disabled_builtin_capacity = 0;
+    if (template_ctx->disabled_builtin_count > 0 &&
+        template_ctx->disabled_builtins) {
+        ctx->disabled_builtins = (char **)calloc(template_ctx->disabled_builtin_count,
+                                                 sizeof(char *));
+        if (ctx->disabled_builtins) {
+            ctx->disabled_builtin_capacity = template_ctx->disabled_builtin_count;
+            for (size_t i = 0; i < template_ctx->disabled_builtin_count; ++i) {
+                if (template_ctx->disabled_builtins[i]) {
+                    ctx->disabled_builtins[i] = strdup(template_ctx->disabled_builtins[i]);
+                    if (ctx->disabled_builtins[i]) {
+                        ctx->disabled_builtin_count++;
+                    }
+                }
+            }
+        }
+    }
+
+    ctx->history.entries = NULL;
+    ctx->history.count = 0;
+    ctx->history.capacity = 0;
+    if (template_ctx->history.count > 0 && template_ctx->history.entries) {
+        ctx->history.entries =
+            (char **)calloc(template_ctx->history.count, sizeof(char *));
+        if (ctx->history.entries) {
+            ctx->history.capacity = template_ctx->history.count;
+            for (size_t i = 0; i < template_ctx->history.count; ++i) {
+                if (template_ctx->history.entries[i]) {
+                    ctx->history.entries[i] = strdup(template_ctx->history.entries[i]);
+                    if (ctx->history.entries[i]) {
+                        ctx->history.count++;
+                    }
+                }
+            }
+        }
+    }
+
+    ctx->arg0 = template_ctx->arg0 ? strdup(template_ctx->arg0) : NULL;
+
+    for (int i = 0; i < NSIG; ++i) {
+        ctx->signal_traps[i].action = template_ctx->signal_traps[i].action;
+        ctx->signal_traps[i].command = template_ctx->signal_traps[i].command ?
+                                           strdup(template_ctx->signal_traps[i].command) :
+                                           NULL;
+    }
+    ctx->exit_trap.action = template_ctx->exit_trap.action;
+    ctx->exit_trap.command =
+        template_ctx->exit_trap.command ? strdup(template_ctx->exit_trap.command) : NULL;
+
+    ctx->jobs = NULL;
+    ctx->job_count = 0;
+    if (template_ctx->job_count > 0 && template_ctx->jobs) {
+        ctx->jobs = (ShellJob *)calloc(template_ctx->job_count, sizeof(ShellJob));
+        if (ctx->jobs) {
+            ctx->job_count = template_ctx->job_count;
+            for (size_t i = 0; i < ctx->job_count; ++i) {
+                const ShellJob *src = &template_ctx->jobs[i];
+                ShellJob *dst = &ctx->jobs[i];
+                dst->pgid = src->pgid;
+                dst->running = src->running;
+                dst->stopped = src->stopped;
+                dst->disowned = src->disowned;
+                dst->last_status = src->last_status;
+                if (src->pid_count > 0 && src->pids) {
+                    dst->pids = (pid_t *)calloc(src->pid_count, sizeof(pid_t));
+                    if (dst->pids) {
+                        memcpy(dst->pids, src->pids, src->pid_count * sizeof(pid_t));
+                        dst->pid_count = src->pid_count;
+                    }
+                }
+                dst->command = src->command ? strdup(src->command) : NULL;
+            }
+        }
+    }
+
+    ctx->array_vars = NULL;
+    ctx->array_var_count = 0;
+    ctx->array_var_capacity = 0;
+    if (template_ctx->array_var_count > 0 && template_ctx->array_vars) {
+        ctx->array_vars = (ShellArrayVariable *)calloc(template_ctx->array_var_count,
+                                                       sizeof(ShellArrayVariable));
+        if (ctx->array_vars) {
+            ctx->array_var_capacity = template_ctx->array_var_count;
+            for (size_t i = 0; i < template_ctx->array_var_count; ++i) {
+                ShellArrayVariable *dst = &ctx->array_vars[i];
+                const ShellArrayVariable *src = &template_ctx->array_vars[i];
+                dst->name = src->name ? strdup(src->name) : NULL;
+                dst->kind = src->kind;
+                dst->count = src->count;
+                if (src->count > 0 && src->values) {
+                    dst->values = (char **)calloc(src->count, sizeof(char *));
+                    if (dst->values) {
+                        for (size_t j = 0; j < src->count; ++j) {
+                            if (src->values[j]) {
+                                dst->values[j] = strdup(src->values[j]);
+                            }
+                        }
+                    }
+                }
+                if (src->kind == SHELL_ARRAY_KIND_ASSOCIATIVE && src->count > 0 && src->keys) {
+                    dst->keys = (char **)calloc(src->count, sizeof(char *));
+                    if (dst->keys) {
+                        for (size_t j = 0; j < src->count; ++j) {
+                            if (src->keys[j]) {
+                                dst->keys[j] = strdup(src->keys[j]);
+                            }
+                        }
+                    }
+                }
+                ctx->array_var_count++;
+            }
+        }
+    }
+
+    ctx->readonly_vars = NULL;
+    ctx->readonly_var_count = 0;
+    ctx->readonly_var_capacity = 0;
+    if (template_ctx->readonly_var_count > 0 && template_ctx->readonly_vars) {
+        ctx->readonly_vars = (ShellReadonlyEntry *)calloc(template_ctx->readonly_var_count,
+                                                          sizeof(ShellReadonlyEntry));
+        if (ctx->readonly_vars) {
+            ctx->readonly_var_capacity = template_ctx->readonly_var_count;
+            for (size_t i = 0; i < template_ctx->readonly_var_count; ++i) {
+                if (template_ctx->readonly_vars[i].name) {
+                    ctx->readonly_vars[i].name = strdup(template_ctx->readonly_vars[i].name);
+                    if (ctx->readonly_vars[i].name) {
+                        ctx->readonly_var_count++;
+                    }
+                }
+            }
+        }
+    }
+    ctx->readonly_error_name =
+        template_ctx->readonly_error_name ? strdup(template_ctx->readonly_error_name) : NULL;
+
+    ctx->local_scope_stack = NULL;
+    ctx->local_scope_depth = 0;
+    ctx->local_scope_capacity = 0;
+    ctx->loop_stack = NULL;
+    ctx->loop_stack_size = 0;
+    ctx->loop_stack_capacity = 0;
+    return ctx;
+}
+
+void shellRuntimeDestroyContext(ShellRuntimeState *ctx) {
+    if (!ctx || ctx == &gShellRuntimeDefault) {
+        return;
+    }
+    if (ctx->history.entries) {
+        for (size_t i = 0; i < ctx->history.count; ++i) {
+            free(ctx->history.entries[i]);
+        }
+        free(ctx->history.entries);
+        ctx->history.entries = NULL;
+        ctx->history.count = 0;
+        ctx->history.capacity = 0;
+    }
+    if (ctx->arg0) {
+        free(ctx->arg0);
+        ctx->arg0 = NULL;
+    }
+    for (int i = 0; i < NSIG; ++i) {
+        shellTrapClearEntry(&ctx->signal_traps[i]);
+    }
+    shellTrapClearEntry(&ctx->exit_trap);
+    if (ctx->jobs) {
+        for (size_t i = 0; i < ctx->job_count; ++i) {
+            ShellJob *job = &ctx->jobs[i];
+            free(job->pids);
+            job->pids = NULL;
+            job->pid_count = 0;
+            free(job->command);
+            job->command = NULL;
+        }
+        free(ctx->jobs);
+        ctx->jobs = NULL;
+        ctx->job_count = 0;
+    }
+    if (ctx->array_vars) {
+        for (size_t i = 0; i < ctx->array_var_count; ++i) {
+            shellArrayVariableClear(&ctx->array_vars[i]);
+        }
+        free(ctx->array_vars);
+        ctx->array_vars = NULL;
+        ctx->array_var_count = 0;
+        ctx->array_var_capacity = 0;
+    }
+    if (ctx->readonly_vars) {
+        for (size_t i = 0; i < ctx->readonly_var_count; ++i) {
+            free(ctx->readonly_vars[i].name);
+        }
+        free(ctx->readonly_vars);
+        ctx->readonly_vars = NULL;
+        ctx->readonly_var_count = 0;
+        ctx->readonly_var_capacity = 0;
+    }
+    if (ctx->readonly_error_name) {
+        free(ctx->readonly_error_name);
+        ctx->readonly_error_name = NULL;
+    }
+    if (ctx->local_scope_stack) {
+        size_t depth = ctx->local_scope_depth;
+        for (size_t i = 0; i < depth; ++i) {
+            shellLocalScopeFrameReset(&ctx->local_scope_stack[i]);
+        }
+        free(ctx->local_scope_stack);
+        ctx->local_scope_stack = NULL;
+        ctx->local_scope_depth = 0;
+        ctx->local_scope_capacity = 0;
+    }
+    if (ctx->loop_stack) {
+        size_t size = ctx->loop_stack_size;
+        for (size_t i = 0; i < size; ++i) {
+            shellLoopFrameFreeData(&ctx->loop_stack[i]);
+        }
+        free(ctx->loop_stack);
+        ctx->loop_stack = NULL;
+        ctx->loop_stack_size = 0;
+        ctx->loop_stack_capacity = 0;
+    }
+    if (ctx->dir_stack) {
+        for (size_t i = 0; i < ctx->dir_stack_count; ++i) {
+            free(ctx->dir_stack[i]);
+        }
+        free(ctx->dir_stack);
+        ctx->dir_stack = NULL;
+        ctx->dir_stack_count = 0;
+        ctx->dir_stack_capacity = 0;
+    }
+    if (ctx->disabled_builtins) {
+        for (size_t i = 0; i < ctx->disabled_builtin_count; ++i) {
+            free(ctx->disabled_builtins[i]);
+        }
+        free(ctx->disabled_builtins);
+        ctx->disabled_builtins = NULL;
+        ctx->disabled_builtin_count = 0;
+        ctx->disabled_builtin_capacity = 0;
+    }
+    if (ctx->hash_entries) {
+        for (size_t i = 0; i < ctx->hash_count; ++i) {
+            free(ctx->hash_entries[i].name);
+            free(ctx->hash_entries[i].path);
+        }
+        free(ctx->hash_entries);
+        ctx->hash_entries = NULL;
+        ctx->hash_count = 0;
+        ctx->hash_capacity = 0;
+    }
+    free(ctx);
+}
+
 typedef enum {
     SHELL_READ_LINE_OK,
     SHELL_READ_LINE_EOF,
     SHELL_READ_LINE_ERROR
 } ShellReadLineResult;
+
+static ShellReadLineResult shellReadLineFromFd(int fd,
+                                               char **out_line,
+                                               size_t *out_length) {
+    if (out_line) {
+        *out_line = NULL;
+    }
+    if (out_length) {
+        *out_length = 0;
+    }
+    if (fd < 0) {
+        return SHELL_READ_LINE_ERROR;
+    }
+
+    size_t capacity = 128;
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        return SHELL_READ_LINE_ERROR;
+    }
+
+    size_t length = 0;
+    bool saw_any = false;
+    while (true) {
+        char ch = '\0';
+        ssize_t n = read(fd, &ch, 1);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            free(buffer);
+            return SHELL_READ_LINE_ERROR;
+        }
+        if (n == 0) {
+            if (!saw_any) {
+                free(buffer);
+                return SHELL_READ_LINE_EOF;
+            }
+            break;
+        }
+        saw_any = true;
+        if (length + 1 >= capacity) {
+            size_t new_capacity = capacity * 2;
+            char *resized = (char *)realloc(buffer, new_capacity);
+            if (!resized) {
+                free(buffer);
+                return SHELL_READ_LINE_ERROR;
+            }
+            buffer = resized;
+            capacity = new_capacity;
+        }
+        buffer[length++] = ch;
+        if (ch == '\n') {
+            break;
+        }
+    }
+
+    buffer[length] = '\0';
+    if (out_line) {
+        *out_line = buffer;
+    } else {
+        free(buffer);
+    }
+    if (out_length) {
+        *out_length = length;
+    }
+    return SHELL_READ_LINE_OK;
+}
 
 static ShellReadLineResult shellReadLineFromStream(FILE *stream,
                                                    char **out_line,
@@ -3313,14 +4099,22 @@ static void shellLoopRequestContinueLevels(int levels) {
     }
 }
 
-static VM *shellSwapCurrentVm(VM *vm) {
+VM *shellSwapCurrentVm(VM *vm) {
     VM *previous = gShellCurrentVm;
+    shellContextPush(shellGetContext());
     gShellCurrentVm = vm;
+    ShellRuntimeState *ctx = NULL;
+    if (vm && vm->frontendContext) {
+        ctx = (ShellRuntimeState *)vm->frontendContext;
+    }
+    shellSetContext(ctx);
     return previous;
 }
 
-static void shellRestoreCurrentVm(VM *vm) {
+void shellRestoreCurrentVm(VM *vm) {
     gShellCurrentVm = vm;
+    ShellRuntimeState *restore = shellContextPop();
+    shellSetContext(restore);
 }
 
 static void shellInitJobControlState(void) {
@@ -3336,7 +4130,7 @@ static void shellInitJobControlState(void) {
         return;
     }
 
-    if (!isatty(gShellRuntime.tty_fd)) {
+    if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.tty_fd = -1;
         return;
     }
@@ -3348,6 +4142,25 @@ static void shellInitJobControlState(void) {
     (void)sigaction(SIGTTIN, &ignore_action, NULL);
     (void)sigaction(SIGTTOU, &ignore_action, NULL);
 
+#if defined(PSCAL_TARGET_IOS)
+    pid_t shell_pid = (pid_t)vprocGetShellSelfPid();
+    if (shell_pid <= 0) {
+        shell_pid = getpid();
+    }
+    pid_t current_pgid = (shell_pid > 0) ? (pid_t)vprocGetPgid((int)shell_pid) : -1;
+    if (current_pgid <= 0) {
+        current_pgid = shell_pid;
+    }
+    gShellRuntime.shell_pgid = current_pgid;
+    gShellRuntime.job_control_enabled = true;
+    if (shell_pid > 0 && current_pgid > 0) {
+        int sid = vprocGetSid((int)shell_pid);
+        if (sid > 0) {
+            vprocSetForegroundPgid(sid, (int)current_pgid);
+        }
+    }
+    return;
+#else
     pid_t shell_pid = getpid();
     pid_t current_pgid = getpgrp();
     if (current_pgid != shell_pid) {
@@ -3359,6 +4172,7 @@ static void shellInitJobControlState(void) {
     }
 
     gShellRuntime.shell_pgid = current_pgid;
+#endif
 }
 
 static void shellEnsureJobControl(void) {
@@ -3373,12 +4187,21 @@ static void shellEnsureJobControl(void) {
         gShellRuntime.job_control_enabled = false;
         return;
     }
-
-    if (!isatty(gShellRuntime.tty_fd)) {
-        gShellRuntime.job_control_enabled = false;
-        gShellRuntime.tty_fd = -1;
-        return;
+#if defined(PSCAL_TARGET_IOS)
+    gShellRuntime.job_control_enabled = true;
+    if (gShellRuntime.shell_pgid <= 0) {
+        int shell_pid = vprocGetShellSelfPid();
+        if (shell_pid > 0) {
+            gShellRuntime.shell_pgid = vprocGetPgid(shell_pid);
+        } else {
+            gShellRuntime.shell_pgid = getpgrp();
+        }
+        if (gShellRuntime.shell_pgid <= 0 && shell_pid > 0) {
+            gShellRuntime.shell_pgid = shell_pid;
+        }
     }
+    return;
+#endif
 
     pid_t pgid = getpgrp();
     if (pgid <= 0) {
@@ -3387,6 +4210,13 @@ static void shellEnsureJobControl(void) {
     }
 
     gShellRuntime.shell_pgid = pgid;
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    if (sid > 0) {
+        vprocSetForegroundPgid(sid, (int)pgid);
+    }
+#endif
 
     while (true) {
         pid_t foreground = tcgetpgrp(gShellRuntime.tty_fd);
@@ -3415,6 +4245,13 @@ static void shellJobControlSetForeground(pid_t pgid) {
     if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0 || pgid <= 0) {
         return;
     }
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    if (sid > 0) {
+        vprocSetForegroundPgid(sid, (int)pgid);
+    }
+#endif
     while (tcsetpgrp(gShellRuntime.tty_fd, pgid) != 0) {
         if (errno == EINTR) {
             continue;
@@ -3427,6 +4264,13 @@ static void shellJobControlRestoreForeground(void) {
     if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0) {
         return;
     }
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    if (sid > 0 && gShellRuntime.shell_pgid > 0) {
+        vprocSetForegroundPgid(sid, (int)gShellRuntime.shell_pgid);
+    }
+#endif
     pid_t target = gShellRuntime.shell_pgid > 0 ? gShellRuntime.shell_pgid : getpgrp();
     if (target <= 0) {
         return;
@@ -3497,20 +4341,6 @@ static void shellCaseStackPop(void) {
         gShellCaseStack.capacity = 0;
     }
 }
-
-typedef struct {
-    pid_t pgid;
-    pid_t *pids;
-    size_t pid_count;
-    bool running;
-    bool stopped;
-    bool disowned;
-    int last_status;
-    char *command;
-} ShellJob;
-
-static ShellJob *gShellJobs = NULL;
-static size_t gShellJobCount = 0;
 
 typedef enum {
     SHELL_META_SUBSTITUTION_DOLLAR,

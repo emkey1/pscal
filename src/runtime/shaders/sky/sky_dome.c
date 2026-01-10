@@ -1,3 +1,9 @@
+#if defined(__APPLE__)
+#ifndef GLES_SILENCE_DEPRECATION
+#define GLES_SILENCE_DEPRECATION 1
+#endif
+#endif
+
 #include "runtime/shaders/sky/sky_dome.h"
 
 #ifdef SDL
@@ -5,6 +11,16 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(PSCAL_TARGET_IOS)
+static void skySetIdentity(float m[16]) {
+    if (!m) return;
+    for (int i = 0; i < 16; ++i) {
+        m[i] = 0.0f;
+    }
+    m[0] = m[5] = m[10] = m[15] = 1.0f;
+}
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -200,8 +216,13 @@ void skyDomeDraw(SkyDome *dome, float radius, const float horizonColor[3], const
 
     float modelView[16];
     float projection[16];
+#if defined(PSCAL_TARGET_IOS)
+    skySetIdentity(modelView);
+    skySetIdentity(projection);
+#else
     glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
     glGetFloatv(GL_PROJECTION_MATRIX, projection);
+#endif
 
     float mvp[16];
     multiplyMat4(projection, modelView, mvp);

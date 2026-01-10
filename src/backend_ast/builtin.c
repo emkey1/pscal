@@ -3,6 +3,8 @@
 #include "core/version.h"
 #include "symbol/symbol.h"
 #include "Pascal/globals.h"                  // Assuming globals.h is directly in src/
+#include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
 #include "backend_ast/builtin_network_api.h"
 #include "vm/vm.h"
 #include "vm/string_sentinels.h"
@@ -10,10 +12,12 @@
 // Standard library includes remain the same
 #include <math.h>
 #include <termios.h> // For tcgetattr, tcsetattr, etc. (Terminal I/O)
+#include <poll.h>
 #include <signal.h>  // For signal handling (SIGINT)
 #include <unistd.h>  // For read, write, STDIN_FILENO, STDOUT_FILENO, isatty
 #include <ctype.h>   // For isdigit
 #include <errno.h>   // For errno
+#include <stdatomic.h>
 #include <sys/ioctl.h> // For ioctl, FIONREAD (Terminal I/O)
 #include <stdint.h>  // For fixed-width integer types like uint8_t
 #include <stdbool.h> // For bool, true, false (IMPORTANT - GCC needs this for 'bool')
@@ -27,9 +31,218 @@
 #include <time.h>    // For date/time functions
 #include <sys/time.h> // For gettimeofday
 #include <sys/resource.h>
+#include <sys/select.h>
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 #include <stdatomic.h>
+#include <signal.h>
+#include <fcntl.h>
+
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
+#if defined(__APPLE__)
+extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak_import));
+#else
+extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
+#endif
+typedef struct {
+    FILE *fp;
+    int host_fd;
+    int std_fd;
+} VmVprocStream;
+
+typedef struct {
+    int std_fd;
+    bool can_read;
+    bool can_write;
+} VmVprocShimCookie;
+
+static __thread VmVprocStream gVmVprocStdout = { NULL, -1, STDOUT_FILENO };
+static __thread VmVprocStream gVmVprocStderr = { NULL, -1, STDERR_FILENO };
+static __thread VmVprocStream gVmVprocStdin = { NULL, -1, STDIN_FILENO };
+
+static FILE *vmVprocStreamFallback(int std_fd) {
+    if (std_fd == STDIN_FILENO) {
+        return stdin;
+    }
+    if (std_fd == STDOUT_FILENO) {
+        return stdout;
+    }
+    return stderr;
+}
+
+static int vmVprocShimRead(void *cookie, char *buf, int len) {
+    VmVprocShimCookie *ctx = (VmVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_read || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocReadShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int vmVprocShimWrite(void *cookie, const char *buf, int len) {
+    VmVprocShimCookie *ctx = (VmVprocShimCookie *)cookie;
+    if (!ctx || !ctx->can_write || !buf || len <= 0) {
+        errno = EBADF;
+        return -1;
+    }
+    ssize_t res = vprocWriteShim(ctx->std_fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        res = INT_MAX;
+    }
+    return (int)res;
+}
+
+static int vmVprocShimClose(void *cookie) {
+    free(cookie);
+    return 0;
+}
+
+static FILE *vmVprocStreamOpenShim(int std_fd,
+                                   VmVprocStream *cache,
+                                   const char *mode,
+                                   int buf_mode) {
+    if (!cache || !mode) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    if (cache->fp && cache->host_fd < 0) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    VmVprocShimCookie *cookie = (VmVprocShimCookie *)calloc(1, sizeof(VmVprocShimCookie));
+    if (!cookie) {
+        return vmVprocStreamFallback(std_fd);
+    }
+    cookie->std_fd = std_fd;
+    cookie->can_read = strchr(mode, 'r') != NULL;
+    cookie->can_write = (strchr(mode, 'w') != NULL) || (strchr(mode, 'a') != NULL);
+
+    FILE *fp = funopen(cookie,
+                       cookie->can_read ? vmVprocShimRead : NULL,
+                       cookie->can_write ? vmVprocShimWrite : NULL,
+                       NULL,
+                       vmVprocShimClose);
+    if (!fp) {
+        free(cookie);
+        return vmVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = -1;
+    return fp;
+}
+
+static FILE *vmVprocStreamOpen(int std_fd,
+                               VmVprocStream *cache,
+                               const char *mode,
+                               int buf_mode) {
+    if (!cache || !mode) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    int host_fd = std_fd;
+    bool use_host_stream = true;
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int translated = vprocTranslateFd(vp, std_fd);
+        if (translated >= 0) {
+            host_fd = translated;
+        } else {
+            use_host_stream = false;
+        }
+    } else {
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (session && !vprocSessionStdioIsDefault(session)) {
+            use_host_stream = false;
+        }
+    }
+
+    if (!use_host_stream) {
+        return vmVprocStreamOpenShim(std_fd, cache, mode, buf_mode);
+    }
+
+    if (host_fd < 0) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    if (cache->fp && cache->host_fd == host_fd) {
+        return cache->fp;
+    }
+
+    if (cache->fp) {
+        fflush(cache->fp);
+        fclose(cache->fp);
+        cache->fp = NULL;
+    }
+    cache->host_fd = -1;
+
+    int dup_fd = -1;
+#ifdef F_DUPFD_CLOEXEC
+    dup_fd = fcntl(host_fd, F_DUPFD_CLOEXEC, 0);
+    if (dup_fd < 0 && errno == EINVAL) {
+        dup_fd = -1;
+    }
+#endif
+    if (dup_fd < 0) {
+        dup_fd = dup(host_fd);
+    }
+    if (dup_fd < 0) {
+        return vmVprocStreamFallback(std_fd);
+    }
+
+    FILE *fp = fdopen(dup_fd, mode);
+    if (!fp) {
+        close(dup_fd);
+        return vmVprocStreamFallback(std_fd);
+    }
+    if (buf_mode >= 0) {
+        setvbuf(fp, NULL, buf_mode, 0);
+    }
+    cache->fp = fp;
+    cache->host_fd = host_fd;
+    return fp;
+}
+
+static FILE *vmVprocStdout(void) {
+    int buf_mode = pscalRuntimeStdoutIsInteractive() ? _IOLBF : _IOFBF;
+    return vmVprocStreamOpen(STDOUT_FILENO, &gVmVprocStdout, "w", buf_mode);
+}
+
+static FILE *vmVprocStderr(void) {
+    return vmVprocStreamOpen(STDERR_FILENO, &gVmVprocStderr, "w", _IONBF);
+}
+
+static FILE *vmVprocStdin(void) {
+    return vmVprocStreamOpen(STDIN_FILENO, &gVmVprocStdin, "r", -1);
+}
+
+#undef stdin
+#undef stdout
+#undef stderr
+#define stdin vmVprocStdin()
+#define stdout vmVprocStdout()
+#define stderr vmVprocStderr()
+#endif
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -47,7 +260,7 @@ void shellRuntimeSetLastStatusSticky(int status);
 
 /* SDL-backed builtins are registered dynamically when available. */
 #ifdef SDL
-#include "backend_ast/sdl.h"
+#include "backend_ast/pscal_sdl_runtime.h"
 #define SDL_READKEY_BUFFER_CAPACITY 8
 static int gSdlReadKeyBuffer[SDL_READKEY_BUFFER_CAPACITY];
 static int gSdlReadKeyBufferStart = 0;
@@ -1103,6 +1316,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"gllinewidth", NULL},
     {"gldepthmask", NULL},
     {"gldepthfunc", NULL},
+    {"fflush", vmBuiltinFflush},
     {"to be filled", NULL}
 };
 
@@ -1996,6 +2210,28 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
+// fflush([file])
+Value vmBuiltinFflush(VM* vm, int arg_count, Value* args) {
+    if (arg_count == 0) {
+        fflush(NULL);
+        return makeInt(0);
+    }
+    if (arg_count != 1) {
+        runtimeError(vm, "fflush expects (file).");
+        return makeInt(0);
+    }
+    const Value* farg = &args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) {
+        farg = (const Value*)farg->ptr_val;
+    }
+    if (farg->type != TYPE_FILE || !farg->f_val) {
+        runtimeError(vm, "fflush requires a valid file argument.");
+        return makeInt(0);
+    }
+    fflush(farg->f_val);
+    return makeInt(0);
+}
+
 // fopen(path, mode) -> FILE
 Value vmBuiltinFopen(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
@@ -2096,6 +2332,7 @@ static bool resizeDynamicArrayValue(VM* vm,
 
     VarType element_type = array_value->element_type;
     AST* element_type_def = array_value->element_type_def;
+    bool use_packed = isPackedByteElementType(element_type);
 
     int* new_lower = (int*)malloc(sizeof(int) * dimension_count);
     int* new_upper = (int*)malloc(sizeof(int) * dimension_count);
@@ -2146,7 +2383,7 @@ static bool resizeDynamicArrayValue(VM* vm,
     }
 
     size_t old_total = 0;
-    if (array_value->array_val && array_value->dimensions > 0 &&
+    if (array_value->dimensions > 0 &&
         array_value->lower_bounds && array_value->upper_bounds) {
         old_total = 1;
         for (int i = 0; i < array_value->dimensions; ++i) {
@@ -2160,22 +2397,33 @@ static bool resizeDynamicArrayValue(VM* vm,
     }
 
     Value* new_elements = NULL;
+    unsigned char* new_raw = NULL;
     int* copy_lower = NULL;
     int* copy_upper = NULL;
     int* copy_indices = NULL;
     if (new_total > 0) {
-        new_elements = (Value*)malloc(sizeof(Value) * new_total);
-        if (!new_elements) {
-            runtimeError(vm, "SetLength: memory allocation failed for array contents.");
-            goto setlength_cleanup_failure;
+        if (use_packed) {
+            new_raw = (unsigned char*)calloc(new_total, sizeof(unsigned char));
+            if (!new_raw) {
+                runtimeError(vm, "SetLength: memory allocation failed for packed array contents.");
+                goto setlength_cleanup_failure;
+            }
+        } else {
+            new_elements = (Value*)malloc(sizeof(Value) * new_total);
+            if (!new_elements) {
+                runtimeError(vm, "SetLength: memory allocation failed for array contents.");
+                goto setlength_cleanup_failure;
+            }
+
+            for (size_t i = 0; i < new_total; ++i) {
+                new_elements[i] = makeValueForType(element_type, element_type_def, NULL);
+            }
         }
 
-        for (size_t i = 0; i < new_total; ++i) {
-            new_elements[i] = makeValueForType(element_type, element_type_def, NULL);
-        }
-
-        if (old_total > 0 && array_value->array_val && array_value->lower_bounds &&
-            array_value->upper_bounds && array_value->dimensions == dimension_count) {
+        if (old_total > 0 && array_value->lower_bounds &&
+            array_value->upper_bounds && array_value->dimensions == dimension_count &&
+            ((use_packed && (array_value->array_raw || array_value->array_val)) ||
+             (!use_packed && array_value->array_val))) {
             copy_lower = (int*)malloc(sizeof(int) * dimension_count);
             copy_upper = (int*)malloc(sizeof(int) * dimension_count);
             if (!copy_lower || !copy_upper) {
@@ -2219,8 +2467,18 @@ static bool resizeDynamicArrayValue(VM* vm,
                 while (true) {
                     int old_offset = computeFlatOffset(&old_array_stub, copy_indices);
                     int new_offset = computeFlatOffset(&new_array_stub, copy_indices);
-                    freeValue(&new_elements[new_offset]);
-                    new_elements[new_offset] = makeCopyOfValue(&array_value->array_val[old_offset]);
+                    if (use_packed) {
+                        unsigned char byte = 0;
+                        if (array_value->array_is_packed && array_value->array_raw) {
+                            byte = array_value->array_raw[old_offset];
+                        } else if (array_value->array_val) {
+                            byte = valueToByte(&array_value->array_val[old_offset]);
+                        }
+                        new_raw[new_offset] = byte;
+                    } else {
+                        freeValue(&new_elements[new_offset]);
+                        new_elements[new_offset] = makeCopyOfValue(&array_value->array_val[old_offset]);
+                    }
 
                     int dim = dimension_count - 1;
                     while (dim >= 0) {
@@ -2252,7 +2510,10 @@ static bool resizeDynamicArrayValue(VM* vm,
         copy_upper = NULL;
     }
 
-    if (array_value->array_val) {
+    if (array_value->array_is_packed) {
+        free(array_value->array_raw);
+        array_value->array_raw = NULL;
+    } else if (array_value->array_val) {
         for (size_t i = 0; i < old_total; ++i) {
             freeValue(&array_value->array_val[i]);
         }
@@ -2264,6 +2525,8 @@ static bool resizeDynamicArrayValue(VM* vm,
     array_value->lower_bounds = new_lower;
     array_value->upper_bounds = new_upper;
     array_value->array_val = new_elements;
+    array_value->array_raw = new_raw;
+    array_value->array_is_packed = use_packed;
     array_value->dimensions = dimension_count;
     array_value->lower_bound = (dimension_count >= 1) ? new_lower[0] : 0;
     array_value->upper_bound = (dimension_count >= 1) ? new_upper[0] : -1;
@@ -2272,6 +2535,7 @@ static bool resizeDynamicArrayValue(VM* vm,
 
     if (new_total == 0) {
         array_value->array_val = NULL;
+        array_value->array_raw = NULL;
     }
 
     return true;
@@ -2291,6 +2555,9 @@ setlength_cleanup_failure:
             freeValue(&new_elements[i]);
         }
         free(new_elements);
+    }
+    if (new_raw) {
+        free(new_raw);
     }
     free(new_lower);
     free(new_upper);
@@ -2491,6 +2758,10 @@ typedef struct {
 #define VM_COLOR_STACK_MAX 16
 static _Thread_local VmColorState vm_color_stack[VM_COLOR_STACK_MAX];
 static _Thread_local int vm_color_stack_depth = 0;
+static volatile sig_atomic_t g_vm_sigint_seen = 0;
+static int g_vm_sigint_pipe[2] = {-1, -1};
+static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
+static atomic_bool g_vm_interrupt_broadcast = false;
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -2516,6 +2787,29 @@ static void vmCreateThreadKey(void) {
 
 static int vmTcgetattr(int fd, struct termios *term) {
     int res;
+#if defined(PSCAL_TARGET_IOS)
+    if (term) {
+#if defined(TIOCGETA)
+        do {
+            res = vprocIoctlShim(fd, TIOCGETA, term);
+        } while (res < 0 && errno == EINTR);
+        if (res == 0) {
+            return 0;
+        }
+#endif
+#if defined(TCGETS)
+        do {
+            res = vprocIoctlShim(fd, TCGETS, term);
+        } while (res < 0 && errno == EINTR);
+        if (res == 0) {
+            return 0;
+        }
+#endif
+        if (vprocSessionStdioFetchTermios(fd, term)) {
+            return 0;
+        }
+    }
+#endif
     do {
         res = tcgetattr(fd, term);
     } while (res < 0 && errno == EINTR);
@@ -2524,18 +2818,125 @@ static int vmTcgetattr(int fd, struct termios *term) {
 
 static int vmTcsetattr(int fd, int optional_actions, const struct termios *term) {
     int res;
+#if defined(PSCAL_TARGET_IOS)
+    int cmd = 0;
+#if defined(TCSETS)
+    switch (optional_actions) {
+        case TCSANOW:
+            cmd = TCSETS;
+            break;
+        case TCSADRAIN:
+            cmd = TCSETSW;
+            break;
+        case TCSAFLUSH:
+            cmd = TCSETSF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#elif defined(TIOCSETA)
+    switch (optional_actions) {
+        case TCSANOW:
+            cmd = TIOCSETA;
+            break;
+        case TCSADRAIN:
+            cmd = TIOCSETAW;
+            break;
+        case TCSAFLUSH:
+            cmd = TIOCSETAF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#endif
+    if (cmd != 0) {
+        do {
+            res = vprocIoctlShim(fd, (unsigned long)cmd, (void *)term);
+        } while (res < 0 && errno == EINTR);
+        if (res == 0) {
+            return 0;
+        }
+    }
+    if (vprocSessionStdioApplyTermios(fd, optional_actions, term)) {
+        return 0;
+    }
+#endif
     do {
         res = tcsetattr(fd, optional_actions, term);
     } while (res < 0 && errno == EINTR);
     return res;
 }
 
+static bool vmTermiosIsRaw(const struct termios *term) {
+    if (!term) {
+        return false;
+    }
+    return (term->c_lflag & (ICANON | ECHO)) == 0;
+}
+
+static bool vmTermiosDebugEnabled(void) {
+    return (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
+}
+
+static void vmLogTermios(const char *tag, const struct termios *term) {
+    if (!vmTermiosDebugEnabled() || !tag || !term) {
+        return;
+    }
+    fprintf(stderr,
+            "[termios] %s lflag=0x%lx iflag=0x%lx oflag=0x%lx cflag=0x%lx vmin=%u vtime=%u verase=0x%02x raw=%d icanon=%d echo=%d icrnl=%d\n",
+            tag,
+            (unsigned long)term->c_lflag,
+            (unsigned long)term->c_iflag,
+            (unsigned long)term->c_oflag,
+            (unsigned long)term->c_cflag,
+            (unsigned int)term->c_cc[VMIN],
+            (unsigned int)term->c_cc[VTIME],
+            (unsigned int)term->c_cc[VERASE],
+            vmTermiosIsRaw(term) ? 1 : 0,
+            (term->c_lflag & ICANON) ? 1 : 0,
+            (term->c_lflag & ECHO) ? 1 : 0,
+            (term->c_iflag & ICRNL) ? 1 : 0);
+}
+
 static void vmRestoreTerminal(void) {
     pthread_mutex_lock(&vm_term_mutex);
-    if (vm_termios_saved && vm_raw_mode) {
-        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios) == 0) {
-            vm_raw_mode = 0;
+    if (!vm_termios_saved) {
+        if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) == 0) {
+            vm_termios_saved = 1;
         }
+    }
+
+    if (vm_termios_saved) {
+        if (vmTermiosDebugEnabled()) {
+            vmLogTermios("restore target", &vm_orig_termios);
+        }
+        bool should_restore = vm_raw_mode;
+        struct termios current;
+        if (vmTcgetattr(STDIN_FILENO, &current) == 0) {
+            vmLogTermios("restore current", &current);
+            if ((current.c_lflag & (ICANON | ECHO)) != (vm_orig_termios.c_lflag & (ICANON | ECHO))) {
+                should_restore = true;
+            }
+        } else if (vmTermiosDebugEnabled()) {
+            fprintf(stderr, "[termios] restore get failed errno=%d\n", errno);
+        }
+        if (should_restore) {
+            if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] restore apply raw_mode=%d\n", vm_raw_mode);
+            }
+            if (vmTcsetattr(STDIN_FILENO, TCSANOW, &vm_orig_termios) == 0) {
+                vm_raw_mode = 0;
+                vmLogTermios("restore applied", &vm_orig_termios);
+            } else if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] restore set failed errno=%d\n", errno);
+            }
+        } else if (vmTermiosDebugEnabled()) {
+            fprintf(stderr, "[termios] restore skipped raw_mode=%d\n", vm_raw_mode);
+        }
+    } else if (vmTermiosDebugEnabled()) {
+        fprintf(stderr, "[termios] restore skipped (termios not saved)\n");
     }
     pthread_mutex_unlock(&vm_term_mutex);
 }
@@ -2547,7 +2948,7 @@ static int vmQueryColor(const char *query, char *dest, size_t dest_size) {
     size_t i = 0;
     char ch;
 
-    if (!isatty(STDIN_FILENO))
+    if (!pscalRuntimeStdinIsInteractive())
         return -1;
 
     if (vmTcgetattr(STDIN_FILENO, &oldt) < 0)
@@ -2640,7 +3041,7 @@ static void vmRestoreColorState(void) {
 // atexit handler: restore terminal settings and ensure cursor visibility
 static void vmAtExitCleanup(void) {
     vmRestoreTerminal();
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         const char show_cursor[] = "\x1B[?25h"; // Ensure cursor is visible
         if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
             perror("vmAtExitCleanup: write show_cursor");
@@ -2653,6 +3054,14 @@ static void vmAtExitCleanup(void) {
 
 // Signal handler to ensure terminal state is restored on interrupts.
 static void vmSignalHandler(int signum) {
+    if (signum == SIGINT) {
+        g_vm_sigint_seen = 1;
+        if (g_vm_sigint_pipe[1] >= 0) {
+            char c = 'i';
+            (void)write(g_vm_sigint_pipe[1], &c, 1);
+        }
+        return;
+    }
     if (vm_raw_mode || vm_alt_screen_depth > 0)
         vmAtExitCleanup();
     _exit(128 + signum);
@@ -2665,10 +3074,12 @@ static void vmRegisterRestoreHandlers(void) {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
+#if !defined(PSCAL_TARGET_IOS)
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGQUIT, &sa, NULL);
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGSEGV, &sa, NULL);
+#endif
 }
 
 static void vmSetupTermHandlers(void) {
@@ -2686,6 +3097,148 @@ static void vmSetupTermHandlers(void) {
     pthread_once(&vm_restore_once, vmRegisterRestoreHandlers);
 }
 
+static void init_pipe_once(void);
+
+static void vmEnsureSigintPipe(void) {
+    pthread_once(&g_vm_sigint_pipe_once, init_pipe_once);
+}
+
+static void init_pipe_once(void) {
+#if defined(PSCAL_TARGET_IOS)
+    int host_pipe[2] = {-1, -1};
+    if (vprocHostPipe(host_pipe) != 0) {
+        g_vm_sigint_pipe[0] = -1;
+        g_vm_sigint_pipe[1] = -1;
+        return;
+    }
+    g_vm_sigint_pipe[0] = host_pipe[0];
+    g_vm_sigint_pipe[1] = host_pipe[1];
+#else
+    if (pipe(g_vm_sigint_pipe) != 0) {
+        g_vm_sigint_pipe[0] = -1;
+        g_vm_sigint_pipe[1] = -1;
+        return;
+    }
+#endif
+    for (int i = 0; i < 2; ++i) {
+        int target_fd = g_vm_sigint_pipe[i];
+        fcntl(target_fd, F_SETFD, FD_CLOEXEC);
+        int flags = fcntl(target_fd, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(target_fd, F_SETFL, flags | O_NONBLOCK);
+        }
+    }
+}
+
+// Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
+void pscalRuntimeRequestSigint(void) {
+#if defined(PSCAL_TARGET_IOS)
+    bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
+    bool from_vproc = (vprocCurrent() != NULL);
+    int shell_pid = vprocGetShellSelfPid();
+    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+    if (fg_pgid <= 0 && shell_pid > 0) {
+        fg_pgid = vprocGetPgid(shell_pid);
+    }
+    int shell_pgid = (shell_pid > 0) ? vprocGetPgid(shell_pid) : -1;
+    if (!from_vproc && shell_pid > 0 && fg_pgid > 0 && shell_pgid > 0 && fg_pgid != shell_pgid) {
+        int rc = vprocKillShim(-fg_pgid, SIGINT);
+        if (dbg) {
+            fprintf(stderr,
+                    "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d kill_rc=%d errno=%d\n",
+                    shell_pid, shell_pgid, sid, fg_pgid, rc, errno);
+        }
+    } else if (dbg && shell_pid > 0) {
+        fprintf(stderr,
+                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d\n",
+                shell_pid, shell_pgid, sid, fg_pgid);
+    }
+#endif
+    g_vm_sigint_seen = 1;
+    atomic_store(&g_vm_interrupt_broadcast, true);
+    if (g_vm_sigint_pipe[1] >= 0) {
+        char c = 'i';
+#if defined(PSCAL_TARGET_IOS)
+        (void)vprocHostWrite(g_vm_sigint_pipe[1], &c, 1);
+#else
+        (void)write(g_vm_sigint_pipe[1], &c, 1);
+#endif
+    }
+}
+
+void pscalRuntimeRequestSigtstp(void) {
+#if defined(PSCAL_TARGET_IOS)
+    bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid <= 0) {
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] no shell pid\n");
+        }
+        return;
+    }
+    int sid = vprocGetSid(shell_pid);
+    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+    if (fg_pgid <= 0) {
+        fg_pgid = vprocGetPgid(shell_pid);
+    }
+    if (fg_pgid <= 0) {
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] no fg pgid shell=%d sid=%d\n", shell_pid, sid);
+        }
+        return;
+    }
+    int shell_pgid = vprocGetPgid(shell_pid);
+    if (shell_pgid > 0 && fg_pgid == shell_pgid) {
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] fg pgid matches shell pgid=%d sid=%d\n", shell_pgid, sid);
+        }
+        return;
+    }
+    if (dbg) {
+        fprintf(stderr, "[sigtstp] shell=%d shell_pgid=%d sid=%d fg=%d\n",
+                shell_pid, shell_pgid, sid, fg_pgid);
+    }
+    int rc = vprocKillShim(-fg_pgid, SIGTSTP);
+    if (dbg) {
+        fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, errno);
+    }
+#else
+    raise(SIGTSTP);
+#endif
+}
+
+bool pscalRuntimeSigintPending(void) {
+    return g_vm_sigint_seen != 0;
+}
+
+bool pscalRuntimeInterruptFlag(void) {
+    return atomic_load(&g_vm_interrupt_broadcast);
+}
+
+void pscalRuntimeClearInterruptFlag(void) {
+    atomic_store(&g_vm_interrupt_broadcast, false);
+}
+
+bool pscalRuntimeConsumeSigint(void) {
+    if (!g_vm_sigint_seen && g_vm_sigint_pipe[0] < 0) {
+        return false;
+    }
+    bool seen = g_vm_sigint_seen != 0;
+    g_vm_sigint_seen = 0;
+    if (g_vm_sigint_pipe[0] >= 0) {
+        char drain[8];
+#if defined(PSCAL_TARGET_IOS)
+        while (vprocHostRead(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+        }
+#else
+        while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
+        }
+#endif
+    }
+    return seen;
+}
+
 void vmInitTerminalState(void) {
     vmSetupTermHandlers();
     vmPushColorState();
@@ -2697,7 +3250,7 @@ void vmInitTerminalState(void) {
 // occurs before any terminal cleanup is performed.
 void vmPauseBeforeExit(void) {
     // Only pause when running interactively.
-    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+    if (!pscalRuntimeStdinIsInteractive() || !pscalRuntimeStdoutIsInteractive())
         return;
 
     sleep(10);
@@ -2731,17 +3284,27 @@ static void vmEnableRawMode(void) {
     vmSetupTermHandlers();
     pthread_mutex_lock(&vm_term_mutex);
     if (vm_raw_mode) {
-        pthread_mutex_unlock(&vm_term_mutex);
-        return;
+        struct termios current;
+        if (vmTcgetattr(STDIN_FILENO, &current) == 0 && vmTermiosIsRaw(&current)) {
+            if (vmTermiosDebugEnabled()) {
+                vmLogTermios("raw already", &current);
+            }
+            pthread_mutex_unlock(&vm_term_mutex);
+            return;
+        }
     }
 
     if (!vm_termios_saved) {
         if (vmTcgetattr(STDIN_FILENO, &vm_orig_termios) != 0) {
+            if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] raw get failed errno=%d\n", errno);
+            }
             pthread_mutex_unlock(&vm_term_mutex);
             return;
         }
         vm_termios_saved = 1;
     }
+    vmLogTermios("raw base", &vm_orig_termios);
 
     struct termios raw = vm_orig_termios;
     raw.c_lflag &= ~(ICANON | ECHO);
@@ -2750,6 +3313,9 @@ static void vmEnableRawMode(void) {
 
     if (vmTcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
         vm_raw_mode = 1;
+        vmLogTermios("raw applied", &raw);
+    } else if (vmTermiosDebugEnabled()) {
+        fprintf(stderr, "[termios] raw set failed errno=%d\n", errno);
     }
     pthread_mutex_unlock(&vm_term_mutex);
 }
@@ -2758,13 +3324,390 @@ static void vmEnableRawMode(void) {
 // Read()/ReadLn().  This undoes any prior ReadKey-induced raw mode,
 // discards leftover input, ensures echoing, and makes the cursor visible.
 static void vmPrepareCanonicalInput(void) {
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (session_stdio && vprocSessionStdioIsDefault(session_stdio) &&
+        PSCALRuntimeGetCurrentRuntimeStdio) {
+        VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+        if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio)) {
+            vprocSessionStdioActivate(runtime_stdio);
+        }
+    }
+#endif
     vmRestoreTerminal();
+    pthread_mutex_lock(&vm_term_mutex);
+    struct termios term;
+    if (vmTcgetattr(STDIN_FILENO, &term) == 0) {
+        vmLogTermios("canon before", &term);
+        bool changed = false;
+        if ((term.c_lflag & (ICANON | ECHO)) != (ICANON | ECHO)) {
+            term.c_lflag |= (ICANON | ECHO);
+            changed = true;
+        }
+        if ((term.c_iflag & ICRNL) == 0) {
+            term.c_iflag |= ICRNL;
+            changed = true;
+        }
+        if (term.c_iflag & IGNCR) {
+            term.c_iflag &= ~IGNCR;
+            changed = true;
+        }
+        if (term.c_iflag & INLCR) {
+            term.c_iflag &= ~INLCR;
+            changed = true;
+        }
+        if (term.c_cc[VERASE] != 0x7f) {
+            term.c_cc[VERASE] = 0x7f;
+            changed = true;
+        }
+        if (term.c_cc[VMIN] != 1 || term.c_cc[VTIME] != 0) {
+            term.c_cc[VMIN] = 1;
+            term.c_cc[VTIME] = 0;
+            changed = true;
+        }
+        if (changed) {
+            if (vmTcsetattr(STDIN_FILENO, TCSANOW, &term) == 0) {
+                vm_raw_mode = 0;
+                vmLogTermios("canon after", &term);
+            } else if (vmTermiosDebugEnabled()) {
+                fprintf(stderr, "[termios] canon set failed errno=%d\n", errno);
+            }
+        } else if (vmTermiosDebugEnabled()) {
+            fprintf(stderr, "[termios] canon unchanged raw_mode=%d\n", vm_raw_mode);
+        }
+    } else if (vmTermiosDebugEnabled()) {
+        fprintf(stderr, "[termios] canon get failed errno=%d\n", errno);
+    }
+    pthread_mutex_unlock(&vm_term_mutex);
     tcflush(STDIN_FILENO, TCIFLUSH);
     const char show_cursor[] = "\x1B[?25h";
     if (write(STDOUT_FILENO, show_cursor, sizeof(show_cursor) - 1) != (ssize_t)(sizeof(show_cursor) - 1)) {
         perror("vmPrepareCanonicalInput: write show_cursor");
     }
     fflush(stdout);
+}
+
+static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t buffer_sz) {
+    if (!stream || !buffer || buffer_sz == 0) {
+        return false;
+    }
+    int fd = fileno(stream);
+#if defined(PSCAL_TARGET_IOS)
+    FILE *stdin_stream = stdin;
+    bool is_stdin_stream = (stream == stdin_stream);
+    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (fd < 0 && is_stdin_stream) {
+        fd = STDIN_FILENO;
+    }
+#else
+    bool is_stdin_stream = (stream == stdin);
+#endif
+    if (fd < 0) {
+        return false;
+    }
+
+    size_t len = 0;
+    vmEnsureSigintPipe();
+    bool use_interruptible = (is_stdin_stream && pscalRuntimeStdinIsInteractive());
+#if defined(PSCAL_TARGET_IOS)
+    if (is_stdin_stream) {
+        use_interruptible = true;
+    }
+    bool use_session_read = false;
+    VProcSessionStdio *session_stdio = NULL;
+    if (is_stdin_stream) {
+        session_stdio = vprocSessionStdioCurrent();
+        if (session_stdio && vprocSessionStdioIsDefault(session_stdio) &&
+            PSCALRuntimeGetCurrentRuntimeStdio) {
+            VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+            if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio)) {
+                session_stdio = runtime_stdio;
+                vprocSessionStdioActivate(session_stdio);
+            }
+        }
+        if (session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
+            bool has_host_stdin = (session_stdio->stdin_host_fd >= 0);
+            bool has_pscal_stdin = (session_stdio->stdin_pscal_fd != NULL);
+            if (has_host_stdin && !has_pscal_stdin) {
+                use_session_read = true;
+            }
+        }
+    }
+    if (tool_dbg && is_stdin_stream) {
+        fprintf(stderr,
+                "[readln] init fd=%d use_session=%d use_interruptible=%d session=%p host=%d pscal=%p\n",
+                fd,
+                (int)use_session_read,
+                (int)use_interruptible,
+                (void *)session_stdio,
+                session_stdio ? session_stdio->stdin_host_fd : -1,
+                session_stdio ? (void *)session_stdio->stdin_pscal_fd : NULL);
+    }
+#endif
+    if (use_interruptible) {
+#if defined(PSCAL_TARGET_IOS)
+        int read_fd = fd;
+        VProc *vp = vprocCurrent();
+        bool read_is_host = (vp == NULL);
+        int host_fd = -1;
+        if (vp) {
+            host_fd = vprocTranslateFd(vp, fd);
+            if (host_fd >= 0) {
+                read_fd = host_fd;
+                read_is_host = true;
+            } else {
+                read_is_host = false;
+            }
+        }
+        if (tool_dbg && is_stdin_stream) {
+            fprintf(stderr,
+                    "[readln] start stdin fd=%d read_fd=%d host=%d host_fd=%d\n",
+                    fd, read_fd, (int)read_is_host, host_fd);
+        }
+#else
+        int read_fd = fd;
+#endif
+        int sigint_fd = g_vm_sigint_pipe[0];
+        bool sigint_host = false;
+#if defined(PSCAL_TARGET_IOS)
+        if (sigint_fd >= 0) {
+            sigint_host = true;
+        }
+#endif
+        bool saw_newline = false;
+        while (len < buffer_sz - 1) {
+            if (g_vm_sigint_seen) {
+                g_vm_sigint_seen = 0;
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            if (vm && (vm->abort_requested || vm->exit_requested)) {
+                buffer[0] = '\0';
+                return false;
+            }
+#if defined(PSCAL_TARGET_IOS)
+            if (sigint_fd >= 0 && !read_is_host) {
+                char drain[8];
+                ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
+                if (drained > 0) {
+                    if (vm) {
+                        vm->abort_requested = true;
+                        vm->exit_requested = true;
+                    }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
+                                errno, strerror(errno));
+                    }
+                }
+            }
+#endif
+#if defined(PSCAL_TARGET_IOS)
+            if (use_session_read) {
+                char ch;
+                ssize_t n = vprocSessionReadInputShimMode(&ch, 1, false);
+                if (n == 0) {
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] session read EOF len=%zu\n", len);
+                    }
+                    break;
+                }
+                if (n < 0) {
+                    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                        continue;
+                    }
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] session read error=%d (%s)\n",
+                                errno, strerror(errno));
+                    }
+                    break;
+                }
+                if (ch == 0x03) { // Ctrl-C
+                    if (vm) {
+                        vm->abort_requested = true;
+                        vm->exit_requested = true;
+                    }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (ch == '\r') {
+                    saw_newline = true;
+                    break;
+                }
+                if (ch == '\n') {
+                    saw_newline = true;
+                    break;
+                }
+                buffer[len++] = ch;
+                continue;
+            }
+#endif
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            struct timeval tv;
+            tv.tv_sec = 0;
+            tv.tv_usec = 100 * 1000; // 100ms
+            int ready = -1;
+#if defined(PSCAL_TARGET_IOS)
+            if (read_is_host) {
+                FD_SET(read_fd, &rfds);
+                if (sigint_fd >= 0) {
+                    FD_SET(sigint_fd, &rfds);
+                }
+                int maxfd = read_fd;
+                if (sigint_fd >= 0 && sigint_fd > maxfd) {
+                    maxfd = sigint_fd;
+                }
+                ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+            } else {
+                FD_SET(read_fd, &rfds);
+                ready = vprocSelectShim(read_fd + 1, &rfds, NULL, NULL, &tv);
+            }
+#else
+            FD_SET(read_fd, &rfds);
+            if (sigint_fd >= 0) {
+                FD_SET(sigint_fd, &rfds);
+            }
+            int maxfd = read_fd;
+            if (sigint_fd >= 0 && sigint_fd > maxfd) {
+                maxfd = sigint_fd;
+            }
+            ready = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+#endif
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                if (errno == EBADF) {
+#if defined(PSCAL_TARGET_IOS)
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] select EBADF read_fd=%d sigint_fd=%d\n",
+                                read_fd, sigint_fd);
+                    }
+#endif
+                    return false;
+                }
+                if (errno == EINTR) {
+                    continue;
+                }
+#if defined(PSCAL_TARGET_IOS)
+                if (tool_dbg && stream == stdin) {
+                    fprintf(stderr, "[readln] select error=%d (%s) read_fd=%d sigint_fd=%d\n",
+                            errno, strerror(errno), read_fd, sigint_fd);
+                }
+#endif
+                break;
+            }
+            if (ready == 0) {
+                continue;
+            }
+#if defined(PSCAL_TARGET_IOS)
+            if (read_is_host && sigint_fd >= 0 && FD_ISSET(sigint_fd, &rfds)) {
+#else
+            if (sigint_fd >= 0 && FD_ISSET(sigint_fd, &rfds)) {
+#endif
+                char drain[8];
+#if defined(PSCAL_TARGET_IOS)
+                if (sigint_host) {
+                    while (vprocHostRead(sigint_fd, drain, sizeof(drain)) > 0) {
+                    }
+                } else {
+                    while (read(sigint_fd, drain, sizeof(drain)) > 0) {
+                    }
+                }
+#else
+                (void)sigint_host;
+                while (read(sigint_fd, drain, sizeof(drain)) > 0) {
+                }
+#endif
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            char ch;
+#if defined(PSCAL_TARGET_IOS)
+            ssize_t n = read_is_host ? vprocHostRead(read_fd, &ch, 1)
+                                     : vprocReadShim(read_fd, &ch, 1);
+#else
+            ssize_t n = read(read_fd, &ch, 1);
+#endif
+            if (n == 0) {
+#if defined(PSCAL_TARGET_IOS)
+                if (tool_dbg && stream == stdin) {
+                    fprintf(stderr, "[readln] read EOF read_fd=%d host=%d len=%zu\n",
+                            read_fd, (int)read_is_host, len);
+                }
+#endif
+                break;
+            }
+            if (n < 0) {
+                if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                    continue;
+                }
+#if defined(PSCAL_TARGET_IOS)
+                if (tool_dbg && stream == stdin) {
+                    fprintf(stderr, "[readln] read error=%d (%s) read_fd=%d host=%d\n",
+                            errno, strerror(errno), read_fd, (int)read_is_host);
+                }
+#endif
+                break;
+            }
+            if (ch == 0x03) { // Ctrl-C
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                buffer[0] = '\0';
+                return false;
+            }
+            if (ch == '\r') {
+#if defined(PSCAL_TARGET_IOS)
+                saw_newline = true;
+                break;
+#else
+                continue;
+#endif
+            }
+            if (ch == '\n') {
+                saw_newline = true;
+                break;
+            }
+            buffer[len++] = ch;
+        }
+        buffer[len] = '\0';
+#if defined(PSCAL_TARGET_IOS)
+        if (tool_dbg && stream == stdin) {
+            fprintf(stderr, "[readln] done len=%zu saw_nl=%d eof=%d\n",
+                    len, (int)saw_newline, (int)feof(stream));
+        }
+#endif
+        if (saw_newline || len > 0 || feof(stream)) {
+            return true;
+        }
+        return false;
+    }
+
+    if (fgets(buffer, buffer_sz, stream) == NULL) {
+        return false;
+    }
+    buffer[strcspn(buffer, "\r\n")] = '\0';
+    return true;
+}
+
+static void vmCommitLastIoError(int value) {
+    pthread_mutex_lock(&globals_mutex);
+    last_io_error = value;
+    pthread_mutex_unlock(&globals_mutex);
 }
 
 // Attempts to get the current cursor position using ANSI DSR query.
@@ -2777,13 +3720,14 @@ static int getCursorPosition(int *row, int *col) {
     char ch;
     int ret_status = -1; // Default to critical failure
     int read_errno = 0; // Store errno from read() operation
+    bool termiosApplied = false;
 
     // Default row/col in case of non-critical failure
     *row = 1;
     *col = 1;
 
     // --- Check if Input is a Terminal ---
-    if (!isatty(STDIN_FILENO)) {
+    if (!pscalRuntimeStdinIsInteractive()) {
         fprintf(stderr, "Warning: Cannot get cursor position (stdin is not a TTY).\n");
         return 0; // Treat as non-critical failure, return default 1,1
     }
@@ -2808,6 +3752,7 @@ static int getCursorPosition(int *row, int *col) {
         errno = setup_errno; // Restore errno for accurate reporting
         return -1; // Critical failure
     }
+    termiosApplied = true;
 
     // --- Write DSR Query ---
     const char *dsr_query = "\x1B[6n"; // ANSI Device Status Report for cursor position
@@ -2850,9 +3795,11 @@ static int getCursorPosition(int *row, int *col) {
     buf[i] = '\0'; // Null-terminate the buffer
 
     // --- Restore Original Terminal Settings ---
-    if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
-        perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
-        // Continue processing, but be aware terminal might be left in raw mode
+    if (termiosApplied) {
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
+            perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
+            // Continue processing, but be aware terminal might be left in raw mode
+        }
     }
 
     // --- Parse Response ---
@@ -2891,7 +3838,11 @@ Value vmBuiltinKeypressed(VM* vm, int arg_count, Value* args) {
     vmEnableRawMode();
 
     int bytes_available = 0;
+#if defined(PSCAL_TARGET_IOS)
+    vprocIoctlShim(STDIN_FILENO, FIONREAD, &bytes_available);
+#else
     ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
+#endif
     return makeBoolean(bytes_available > 0);
 }
 
@@ -2910,10 +3861,18 @@ Value vmBuiltinPollkeyany(VM* vm, int arg_count, Value* args) {
 
     vmEnableRawMode();
     int bytes_available = 0;
+#if defined(PSCAL_TARGET_IOS)
+    vprocIoctlShim(STDIN_FILENO, FIONREAD, &bytes_available);
+#else
     ioctl(STDIN_FILENO, FIONREAD, &bytes_available);
+#endif
     if (bytes_available > 0) {
         unsigned char ch_byte = 0;
+#if defined(PSCAL_TARGET_IOS)
+        if (vprocReadShim(STDIN_FILENO, &ch_byte, 1) == 1) {
+#else
         if (read(STDIN_FILENO, &ch_byte, 1) == 1) {
+#endif
             return makeInt((int)ch_byte);
         }
     }
@@ -2940,7 +3899,11 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         vmEnableRawMode();
 
         unsigned char ch_byte;
+#if defined(PSCAL_TARGET_IOS)
+        if (vprocReadShim(STDIN_FILENO, &ch_byte, 1) != 1) {
+#else
         if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
+#endif
             ch_byte = '\0';
         }
         c = ch_byte;
@@ -3128,7 +4091,7 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         bool color_was_applied = applyCurrentTextAttributes(stdout);
         fputs("\x1B[2J\x1B[H", stdout);
         if (color_was_applied) {
@@ -3280,7 +4243,7 @@ Value vmBuiltinPushscreen(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "PushScreen expects no arguments.");
         return makeVoid();
     }
-    if (isatty(STDOUT_FILENO)) {
+    if (pscalRuntimeStdoutIsInteractive()) {
         vmPushColorState();
         if (vm_alt_screen_depth == 0) {
             const char enter_alt[] = "\x1B[?1049h";
@@ -3304,7 +4267,7 @@ Value vmBuiltinPopscreen(VM* vm, int arg_count, Value* args) {
     if (vm_alt_screen_depth > 0) {
         vm_alt_screen_depth--;
         vmPopColorState();
-        if (isatty(STDOUT_FILENO)) {
+        if (pscalRuntimeStdoutIsInteractive()) {
             if (vm_alt_screen_depth == 0) {
                 const char exit_alt[] = "\x1B[?1049l";
                 if (write(STDOUT_FILENO, exit_alt, sizeof(exit_alt) - 1) != (ssize_t)(sizeof(exit_alt) - 1)) {
@@ -4465,12 +5428,15 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
         goto cleanup;
     }
 
-    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
     } else {
         bufferValue = (Value*)args[1].ptr_val;
-        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (bufferValue && bufferValue->type == TYPE_POINTER &&
+            (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;
         }
@@ -4546,21 +5512,36 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
                 parameterError = true;
                 goto cleanup;
             }
-            tempBuffer = (unsigned char*)malloc(bytesToRead);
-            if (!tempBuffer) {
-                runtimeError(vm, "BlockRead: memory allocation failed.");
-                last_io_error = 1;
-                parameterError = true;
-                goto cleanup;
-            }
-            errno = 0;
-            performedIO = true;
-            bytesProcessed = fread(tempBuffer, 1, bytesToRead, stream);
-            if (bytesProcessed < bytesToRead && ferror(stream)) {
-                last_io_error = errno ? errno : 1;
-            }
-            for (size_t i = 0; i < bytesProcessed && bufferValue->array_val; ++i) {
-                assignByteToValue(&bufferValue->array_val[i], tempBuffer[i]);
+            if (bufferValue->array_is_packed && bufferValue->element_type == TYPE_BYTE) {
+                if (!bufferValue->array_raw && bytesToRead > 0) {
+                    runtimeError(vm, "BlockRead: packed byte buffer is NULL.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fread(bufferValue->array_raw, 1, bytesToRead, stream);
+                if (bytesProcessed < bytesToRead && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
+            } else {
+                tempBuffer = (unsigned char*)malloc(bytesToRead);
+                if (!tempBuffer) {
+                    runtimeError(vm, "BlockRead: memory allocation failed.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fread(tempBuffer, 1, bytesToRead, stream);
+                if (bytesProcessed < bytesToRead && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
+                for (size_t i = 0; i < bytesProcessed && bufferValue->array_val; ++i) {
+                    assignByteToValue(&bufferValue->array_val[i], tempBuffer[i]);
+                }
             }
         } else {
             performedIO = true;
@@ -4665,12 +5646,15 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
         goto cleanup;
     }
 
-    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL) {
+    if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
     } else {
         bufferValue = (Value*)args[1].ptr_val;
-        if (bufferValue && bufferValue->type == TYPE_POINTER && bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (bufferValue && bufferValue->type == TYPE_POINTER &&
+            (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;
         }
@@ -4746,21 +5730,36 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
                 parameterError = true;
                 goto cleanup;
             }
-            tempBuffer = (unsigned char*)malloc(bytesToWrite);
-            if (!tempBuffer) {
-                runtimeError(vm, "BlockWrite: memory allocation failed.");
-                last_io_error = 1;
-                parameterError = true;
-                goto cleanup;
-            }
-            for (size_t i = 0; i < bytesToWrite && bufferValue->array_val; ++i) {
-                tempBuffer[i] = valueToByte(&bufferValue->array_val[i]);
-            }
-            errno = 0;
-            performedIO = true;
-            bytesProcessed = fwrite(tempBuffer, 1, bytesToWrite, stream);
-            if (bytesProcessed < bytesToWrite && ferror(stream)) {
-                last_io_error = errno ? errno : 1;
+            if (bufferValue->array_is_packed && bufferValue->element_type == TYPE_BYTE) {
+                if (!bufferValue->array_raw && bytesToWrite > 0) {
+                    runtimeError(vm, "BlockWrite: packed byte buffer is NULL.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fwrite(bufferValue->array_raw, 1, bytesToWrite, stream);
+                if (bytesProcessed < bytesToWrite && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
+            } else {
+                tempBuffer = (unsigned char*)malloc(bytesToWrite);
+                if (!tempBuffer) {
+                    runtimeError(vm, "BlockWrite: memory allocation failed.");
+                    last_io_error = 1;
+                    parameterError = true;
+                    goto cleanup;
+                }
+                for (size_t i = 0; i < bytesToWrite && bufferValue->array_val; ++i) {
+                    tempBuffer[i] = valueToByte(&bufferValue->array_val[i]);
+                }
+                errno = 0;
+                performedIO = true;
+                bytesProcessed = fwrite(tempBuffer, 1, bytesToWrite, stream);
+                if (bytesProcessed < bytesToWrite && ferror(stream)) {
+                    last_io_error = errno ? errno : 1;
+                }
             }
         } else {
             performedIO = true;
@@ -4798,14 +5797,19 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
     FILE* input_stream = stdin;
     int var_start_index = 0;
     bool first_arg_is_file_by_value = false;
-    last_io_error = 0;
+    int io_error = 0;
 
     // Determine input stream: allow FILE or ^FILE
     if (arg_count > 0) {
         const Value* a0 = &args[0];
         if (a0->type == TYPE_POINTER && a0->ptr_val) a0 = (const Value*)a0->ptr_val;
         if (a0->type == TYPE_FILE) {
-            if (!a0->f_val) { runtimeError(vm, "File not open for Read."); last_io_error = 1; return makeVoid(); }
+            if (!a0->f_val) {
+                runtimeError(vm, "File not open for Read.");
+                io_error = 1;
+                vmCommitLastIoError(io_error);
+                return makeVoid();
+            }
             input_stream = a0->f_val;
             var_start_index = 1;
             if (args[0].type == TYPE_FILE) first_arg_is_file_by_value = true;
@@ -4819,14 +5823,14 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
     for (int i = var_start_index; i < arg_count; i++) {
         if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
             runtimeError(vm, "Read requires VAR parameters to read into.");
-            last_io_error = 1;
+            io_error = 1;
             break;
         }
         Value* dst = (Value*)args[i].ptr_val;
 
         if (dst->type == TYPE_CHAR) {
             int ch = fgetc(input_stream);
-            if (ch == EOF) { last_io_error = feof(input_stream) ? 0 : 1; break; }
+            if (ch == EOF) { io_error = feof(input_stream) ? 0 : 1; break; }
             dst->c_val = ch;
             SET_INT_VALUE(dst, dst->c_val);
             continue;
@@ -4834,7 +5838,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
 
         char buffer[1024];
         if (fscanf(input_stream, "%1023s", buffer) != 1) {
-            last_io_error = feof(input_stream) ? 0 : 1;
+            io_error = feof(input_stream) ? 0 : 1;
             break;
         }
 
@@ -4844,21 +5848,21 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
             case TYPE_BYTE: {
                 errno = 0;
                 long long v = strtoll(buffer, NULL, 10);
-                if (errno == ERANGE) { last_io_error = 1; v = 0; }
+                if (errno == ERANGE) { io_error = 1; v = 0; }
                 SET_INT_VALUE(dst, v);
                 break;
             }
             case TYPE_FLOAT: {
                 errno = 0;
                 float v = strtof(buffer, NULL);
-                if (errno == ERANGE) { last_io_error = 1; v = 0.0f; }
+                if (errno == ERANGE) { io_error = 1; v = 0.0f; }
                 SET_REAL_VALUE(dst, v);
                 break;
             }
             case TYPE_REAL: {
                 errno = 0;
                 double v = strtod(buffer, NULL);
-                if (errno == ERANGE) { last_io_error = 1; v = 0.0; }
+                if (errno == ERANGE) { io_error = 1; v = 0.0; }
                 SET_REAL_VALUE(dst, v);
                 break;
             }
@@ -4869,7 +5873,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                     SET_INT_VALUE(dst, 0);
                 } else {
                     SET_INT_VALUE(dst, 0);
-                    last_io_error = 1;
+                    io_error = 1;
                 }
                 break;
             }
@@ -4878,19 +5882,19 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
                 dst->type = TYPE_STRING;
                 if (dst->s_val) { free(dst->s_val); }
                 dst->s_val = strdup(buffer);
-                if (!dst->s_val) { last_io_error = 1; }
+                if (!dst->s_val) { io_error = 1; }
                 break;
             }
             default:
                 runtimeError(vm, "Cannot Read into a variable of type %s.", varTypeToString(dst->type));
-                last_io_error = 1;
+                io_error = 1;
                 i = arg_count;
                 break;
         }
     }
 
-    if (!last_io_error && ferror(input_stream)) last_io_error = 1;
-    else if (last_io_error != 1) last_io_error = 0;
+    if (!io_error && ferror(input_stream)) io_error = 1;
+    else if (io_error != 1) io_error = 0;
 
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }
 
@@ -4898,6 +5902,7 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
         vmEnableRawMode();
     }
 
+    vmCommitLastIoError(io_error);
     return makeVoid();
 }
 
@@ -4907,14 +5912,19 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     bool first_arg_is_file_by_value = false;
     // Clear any previous IO error so a successful read won't report stale
     // failures from earlier operations (e.g. failed parse on a prior call).
-    last_io_error = 0;
+    int io_error = 0;
 
     // 1) Determine input stream: allow FILE or ^FILE
     if (arg_count > 0) {
         const Value* a0 = &args[0];
         if (a0->type == TYPE_POINTER && a0->ptr_val) a0 = (const Value*)a0->ptr_val;
         if (a0->type == TYPE_FILE) {
-            if (!a0->f_val) { runtimeError(vm, "File not open for Readln."); last_io_error = 1; return makeVoid(); }
+            if (!a0->f_val) {
+                runtimeError(vm, "File not open for Readln.");
+                io_error = 1;
+                vmCommitLastIoError(io_error);
+                return makeVoid();
+            }
             input_stream = a0->f_val;
             var_start_index = 1;
             // If the actual arg0 on the stack is a FILE by value (not a pointer),
@@ -4930,11 +5940,12 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
 
     // 2) Read full line
     char line_buffer[1024];
-    if (fgets(line_buffer, sizeof(line_buffer), input_stream) == NULL) {
-        last_io_error = feof(input_stream) ? 0 : 1;
+    if (!vmReadLineInterruptible(vm, input_stream, line_buffer, sizeof(line_buffer))) {
+        io_error = feof(input_stream) ? 0 : 1;
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
         if (input_stream == stdin) vmEnableRawMode();
+        vmCommitLastIoError(io_error);
         return makeVoid();
     }
     line_buffer[strcspn(line_buffer, "\r\n")] = '\0';
@@ -4942,7 +5953,11 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     // 3) Parse vars from buffer
     const char* p = line_buffer;
     for (int i = var_start_index; i < arg_count; i++) {
-        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) { runtimeError(vm, "Readln requires VAR parameters to read into."); last_io_error = 1; break; }
+        if (args[i].type != TYPE_POINTER || !args[i].ptr_val) {
+            runtimeError(vm, "Readln requires VAR parameters to read into.");
+            io_error = 1;
+            break;
+        }
         Value* dst = (Value*)args[i].ptr_val;
 
         while (isspace((unsigned char)*p)) p++;
@@ -4965,7 +5980,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 char* endp = NULL;
                 long long v = strtoll(p, &endp, 10);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                if (endp == p || errno == ERANGE) { io_error = 1; v = 0; }
                 SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
@@ -4979,7 +5994,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 char* endp = NULL;
                 unsigned long long v = strtoull(p, &endp, 10);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                if (endp == p || errno == ERANGE) { io_error = 1; v = 0; }
                 SET_INT_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
@@ -4990,7 +6005,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 errno = 0;
                 char* endp = NULL;
                 long double v = strtold(p, &endp);
-                if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0.0; }
+                if (endp == p || errno == ERANGE) { io_error = 1; v = 0.0; }
                 SET_REAL_VALUE(dst, v);
                 p = endp ? endp : p;
                 break;
@@ -5006,7 +6021,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                     errno = 0;
                     char* endp = NULL;
                     long long v = strtoll(p, &endp, 10);
-                    if (endp == p || errno == ERANGE) { last_io_error = 1; v = 0; }
+                    if (endp == p || errno == ERANGE) { io_error = 1; v = 0; }
                     SET_INT_VALUE(dst, v ? 1 : 0);
                     p = endp ? endp : p;
                 }
@@ -5019,7 +6034,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 } else {
                     dst->c_val = '\0';
                     SET_INT_VALUE(dst, 0);
-                    last_io_error = 1;
+                    io_error = 1;
                 }
                 break;
             }
@@ -5028,7 +6043,7 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 char* tmp = strdup(p);
                 if (!tmp) {
                     runtimeError(vm, "Out of memory in Readln.");
-                    last_io_error = 1;
+                    io_error = 1;
                     break;
                 }
                 if (dst->type == TYPE_STRING && dst->s_val) {
@@ -5042,14 +6057,14 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
 
             default:
                 runtimeError(vm, "Cannot Readln into a variable of type %s.", varTypeToString(dst->type));
-                last_io_error = 1;
+                io_error = 1;
                 i = arg_count;
                 break;
         }
     }
 
-    if (!last_io_error && ferror(input_stream)) last_io_error = 1;
-    else if (last_io_error != 1) last_io_error = 0;
+    if (!io_error && ferror(input_stream)) io_error = 1;
+    else if (io_error != 1) io_error = 0;
 
     // ***NEW***: neuter FILE-by-value arg so VM cleanup won’t fclose()
     if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
@@ -5058,7 +6073,52 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
         vmEnableRawMode();
     }
 
+    vmCommitLastIoError(io_error);
     return makeVoid();
+}
+
+static bool vmTraceStdoutEnabled(void) {
+    static int trace_mode = -1;
+    if (trace_mode < 0) {
+        const char *env = getenv("REA_TRACE_STDOUT");
+        if (!env || !*env) {
+            env = getenv("PSCAL_TRACE_STDOUT");
+        }
+        trace_mode = (env && *env && env[0] != '0') ? 1 : 0;
+    }
+    return trace_mode == 1;
+}
+
+static void vmTraceDescribeValue(const Value *val) {
+    if (!val) {
+        fprintf(stderr, "  [TRACE stdout] <null value>\n");
+        return;
+    }
+    switch (val->type) {
+        case TYPE_STRING:
+            fprintf(stderr, "  [TRACE stdout] string: \"%.*s\"\n",
+                    80, val->s_val ? val->s_val : "");
+            break;
+        case TYPE_CHAR:
+            fprintf(stderr, "  [TRACE stdout] char: %d\n", val->c_val);
+            break;
+        case TYPE_BOOLEAN:
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT32:
+        case TYPE_INT64:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+            fprintf(stderr, "  [TRACE stdout] int: %lld\n", (long long)AS_INTEGER(*val));
+            break;
+        case TYPE_REAL:
+        case TYPE_FLOAT:
+            fprintf(stderr, "  [TRACE stdout] real: %Lf\n", (long double)AS_REAL(*val));
+            break;
+        default:
+            fprintf(stderr, "  [TRACE stdout] value type %d\n", val->type);
+            break;
+    }
 }
 
 Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
@@ -5130,6 +6190,10 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+    bool trace_stdout = vmTraceStdoutEnabled() && (output_stream == stdout);
+    if (trace_stdout) {
+        fprintf(stderr, "[TRACE stdout] write call: newline=%d args=%d\n", newline ? 1 : 0, print_arg_count);
+    }
     bool color_was_applied = false;
     if (output_stream == stdout) {
         color_was_applied = applyCurrentTextAttributes(output_stream);
@@ -5144,6 +6208,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             if (!writeBinaryElement(output_stream, &val, binary_element_type, binary_element_size, &write_error)) {
                 last_io_error = write_error != 0 ? write_error : 1;
                 break;
+            }
+            if (trace_stdout) {
+                vmTraceDescribeValue(&val);
             }
             prev = val;
             has_prev = true;
@@ -5185,6 +6252,9 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             if (add_space) {
                 fputc(' ', output_stream);
             }
+        }
+        if (trace_stdout) {
+            vmTraceDescribeValue(&val);
         }
         if (suppress_spacing_flag && val.type == TYPE_BOOLEAN) {
             fputs(val.i_val ? "1" : "0", output_stream);
@@ -5356,18 +6426,91 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     snprintf(cmd, len, "%s %s", path, cmdline);
-    int res = system(cmd);
+    int result = -1;
+#ifdef PSCAL_TARGET_IOS
+    runtimeError(vm, "dosExec is unavailable on iOS builds.");
+#else
+    result = system(cmd);
+#endif
     free(cmd);
-    return makeInt(res);
+    return makeInt(result);
+}
+
+static int dosMkdirParents(const char *path) {
+    if (!path || !*path) {
+        errno = EINVAL;
+        return -1;
+    }
+    char *tmp = strdup(path);
+    if (!tmp) {
+        errno = ENOMEM;
+        return -1;
+    }
+    size_t len = strlen(tmp);
+    if (len > 1 && tmp[len - 1] == '/') {
+        tmp[len - 1] = '\0';
+    }
+    char *p = tmp;
+    /* Skip leading slash so we don't try to mkdir("/") */
+    if (*p == '/') {
+        p++;
+    }
+    int rc = 0;
+    for (; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+            rc = -1;
+            break;
+        }
+        *p = '/';
+    }
+    if (rc == 0) {
+        if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+            rc = -1;
+        }
+    }
+    free(tmp);
+    return rc;
 }
 
 Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) {
-        runtimeError(vm, "dosMkdir expects 1 string argument.");
-        return makeInt(errno);
+    bool parents = false;
+    int first_path_idx = 0;
+    if (arg_count <= 0) {
+        runtimeError(vm, "dosMkdir expects at least one path.");
+        return makeInt(EINVAL);
     }
-    int rc = mkdir(AS_STRING(args[0]), 0777);
-    return makeInt(rc == 0 ? 0 : errno);
+    /* Accept optional flags like -p, ignoring others for now. */
+    if (args[0].type == TYPE_STRING && AS_STRING(args[0])[0] == '-') {
+        const char *opt = AS_STRING(args[0]);
+        if (strcmp(opt, "-p") == 0) {
+            parents = true;
+        } else {
+            runtimeError(vm, "dosMkdir: unsupported option '%s'", opt);
+            return makeInt(EINVAL);
+        }
+        first_path_idx = 1;
+    }
+    int last_err = 0;
+    bool any = false;
+    for (int i = first_path_idx; i < arg_count; i++) {
+        if (args[i].type != TYPE_STRING) {
+            runtimeError(vm, "dosMkdir: path %d is not a string", i - first_path_idx + 1);
+            return makeInt(EINVAL);
+        }
+        const char *path = AS_STRING(args[i]);
+        any = true;
+        int rc = parents ? dosMkdirParents(path) : mkdir(path, 0777);
+        if (rc != 0 && errno != EEXIST) {
+            last_err = errno ? errno : EIO;
+        }
+    }
+    if (!any) {
+        runtimeError(vm, "dosMkdir expects at least one path.");
+        return makeInt(EINVAL);
+    }
+    return makeInt(last_err);
 }
 
 Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {
@@ -5908,7 +7051,25 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     long long ms = AS_INTEGER(args[0]);
-    if (ms > 0) usleep((useconds_t)ms * 1000);
+    if (ms > 0) {
+        const long long slice_ms = 200;
+        long long remaining = ms;
+        while (remaining > 0) {
+            if (pscalRuntimeConsumeSigint()) {
+                if (vm) {
+                    vm->abort_requested = true;
+                    vm->exit_requested = true;
+                }
+                break;
+            }
+            if (vm && (vm->abort_requested || vm->exit_requested)) {
+                break;
+            }
+            long long step = remaining > slice_ms ? slice_ms : remaining;
+            usleep((useconds_t)step * 1000);
+            remaining -= step;
+        }
+    }
     return makeVoid();
 }
 
@@ -6074,15 +7235,18 @@ static Value makeThreadStateRecord(int threadId, const Thread* thread) {
     FieldValue* head = NULL;
     FieldValue* tail = NULL;
     const char* thread_name = (thread && thread->name[0] != '\0') ? thread->name : "";
+    bool include_pool = thread &&
+                        (thread->poolWorker ||
+                         (thread_name && *thread_name && strstr(thread_name, "pool") != NULL));
     if (!appendThreadField(&head, &tail, "id", makeInt(threadId)) ||
         !appendThreadField(&head, &tail, "name", makeString(thread_name))) {
         freeFieldValue(head);
         return makeRecord(NULL);
     }
 
-    const bool active = thread && thread->active;
+    bool active = thread && thread->active;
     const bool in_pool = thread && thread->inPool;
-    const bool reported_idle = thread &&
+    bool reported_idle = thread &&
         (thread->idle ||
          thread->readyForReuse ||
          (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL));
@@ -6090,13 +7254,19 @@ static Value makeThreadStateRecord(int threadId, const Thread* thread) {
     const bool awaiting_reuse = thread && thread->awaitingReuse;
     const bool ready_for_reuse = thread && thread->readyForReuse;
     const bool status_ready = thread && thread->statusReady;
-    const bool status_flag = thread && thread->statusFlag;
+    bool status_flag = thread && thread->statusFlag;
     const bool status_consumed = thread && thread->statusConsumed;
     const bool result_ready = thread && thread->resultReady;
     const bool result_consumed = thread && thread->resultConsumed;
     const bool paused = thread ? atomic_load(&thread->paused) : false;
     const bool cancel_requested = thread ? atomic_load(&thread->cancelRequested) : false;
     const bool kill_requested = thread ? atomic_load(&thread->killRequested) : false;
+
+    if ((frontendIsPascal() || frontendIsRea()) && include_pool) {
+        active = false;
+        reported_idle = true;
+        status_flag = false;
+    }
 
     if (!appendThreadField(&head, &tail, "active", makeBoolean(active ? 1 : 0)) ||
         !appendThreadField(&head, &tail, "in_pool", makeBoolean(in_pool ? 1 : 0)) ||
@@ -6248,8 +7418,18 @@ static bool jsonAppendArrayRecursive(JsonBuffer *buffer, const Value *array,
         indices[dimension] = idx;
         if (dimension + 1 >= array->dimensions) {
             int offset = computeFlatOffset((Value *)array, indices);
-            if (!jsonAppendValue(buffer, &array->array_val[offset])) {
-                return false;
+            if (arrayUsesPackedBytes(array)) {
+                if (!array->array_raw) {
+                    return false;
+                }
+                Value temp = makeByte(array->array_raw[offset]);
+                if (!jsonAppendValue(buffer, &temp)) {
+                    return false;
+                }
+            } else {
+                if (!jsonAppendValue(buffer, &array->array_val[offset])) {
+                    return false;
+                }
             }
         } else {
             if (!jsonAppendArrayRecursive(buffer, array, dimension + 1, indices)) {
@@ -6261,7 +7441,8 @@ static bool jsonAppendArrayRecursive(JsonBuffer *buffer, const Value *array,
 }
 
 static bool jsonAppendArray(JsonBuffer *buffer, const Value *array) {
-    if (!array || array->dimensions <= 0 || !array->array_val ||
+    if (!array || array->dimensions <= 0 ||
+        (!array->array_val && !arrayUsesPackedBytes(array)) ||
         !array->lower_bounds || !array->upper_bounds) {
         return jsonBufferAppendFormat(buffer, "[]");
     }
@@ -6378,27 +7559,23 @@ static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool 
         runtimeError(vm, "%s received an unknown builtin identifier.", opName);
         return makeInt(-1);
     }
-    if (!threadBuiltinIsAllowlisted(builtin_id)) {
-        runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
-        if (shellRuntimeSetLastStatusSticky) {
-            shellRuntimeSetLastStatusSticky(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
+        if (!threadBuiltinIsAllowlisted(builtin_id)) {
+            runtimeError(vm, "Builtin '%s' is not approved for threaded execution.", builtin_name);
+            if (shellRuntimeSetLastStatusSticky) {
+                shellRuntimeSetLastStatusSticky(1);
+                if (frontendIsShell() && vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = false;
+                }
+            } else if (shellRuntimeSetLastStatus) {
+                shellRuntimeSetLastStatus(1);
+                if (frontendIsShell() && vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = false;
+                }
             }
-#endif
-        } else if (shellRuntimeSetLastStatus) {
-            shellRuntimeSetLastStatus(1);
-#if defined(FRONTEND_SHELL)
-            if (vm) {
-                vm->abort_requested = false;
-                vm->exit_requested = false;
-            }
-#endif
+            return makeInt(-1);
         }
-        return makeInt(-1);
-    }
 
     int options_index = -1;
     ThreadRequestOptions options;
@@ -6476,6 +7653,11 @@ Value vmBuiltinWaitForThread(VM* vm, int arg_count, Value* args) {
         }
     }
     if (!joined) {
+        bool aborted = (thread_vm && (thread_vm->abort_requested || thread_vm->exit_requested)) ||
+                       (vm && (vm->abort_requested || vm->exit_requested));
+        if (aborted) {
+            return makeInt(-1);
+        }
         runtimeError(vm, "WaitForThread received invalid thread id %d.", id);
         return makeInt(-1);
     }
@@ -6557,6 +7739,11 @@ Value vmBuiltinThreadGetResult(VM* vm, int arg_count, Value* args) {
         if (vmThreadTakeResult(vm, thread_id, &result, true, &status, consume_status)) {
             return result;
         }
+    }
+
+    if ((vm && (vm->abort_requested || vm->exit_requested)) ||
+        (thread_vm && (thread_vm->abort_requested || thread_vm->exit_requested))) {
+        return makeNil();
     }
 
     runtimeError(vm, "Thread %d has no stored result.", thread_id);
@@ -6669,6 +7856,14 @@ Value vmBuiltinThreadGetStatus(VM* vm, int arg_count, Value* args) {
         }
     }
 
+    if ((vm && (vm->abort_requested || vm->exit_requested)) ||
+        (thread_vm && (thread_vm->abort_requested || thread_vm->exit_requested))) {
+        if (drop_result) {
+            freeValue(&dropped);
+        }
+        return makeBoolean(false);
+    }
+
     runtimeError(vm, "Thread %d has no stored status.", thread_id);
     if (drop_result) {
         freeValue(&dropped);
@@ -6778,7 +7973,10 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     pthread_mutex_lock(&thread_vm->threadRegistryLock);
     int active_count = 0;
     for (int i = 1; i < VM_MAX_THREADS; ++i) {
-        if (thread_vm->threads[i].inPool && thread_vm->threads[i].poolWorker) {
+        Thread *thread = &thread_vm->threads[i];
+        const char *name = thread->name;
+        bool include = thread->poolWorker || (name && *name && strstr(name, "pool") != NULL);
+        if (thread->inPool && include && !thread->readyForReuse) {
             active_count++;
         }
     }
@@ -6793,7 +7991,9 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     int index = 0;
     for (int i = 1; i < VM_MAX_THREADS && index < active_count; ++i) {
         Thread* thread = &thread_vm->threads[i];
-        if (!thread->inPool || !thread->poolWorker) {
+        const char *name = thread->name;
+        bool include = thread->poolWorker || (name && *name && strstr(name, "pool") != NULL);
+        if (!thread->inPool || thread->readyForReuse || !include) {
             continue;
         }
         Value entry = makeThreadStateRecord(i, thread);
@@ -6823,7 +8023,9 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
     int emitted = 0;
     for (int i = 1; i < VM_MAX_THREADS && ok; ++i) {
         Thread *thread = &thread_vm->threads[i];
-        if (!thread->inPool || !thread->poolWorker) {
+        const char *thread_name = thread->name;
+        bool include = thread->poolWorker || (thread_name && *thread_name && strstr(thread_name, "pool") != NULL);
+        if (!thread->inPool || thread->readyForReuse || !include) {
             continue;
         }
         if (emitted > 0) {
@@ -6833,9 +8035,16 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
             break;
         }
         const char *name = (thread->name[0] != '\0') ? thread->name : "";
-        const bool reported_idle = thread->idle ||
-                                   thread->readyForReuse ||
-                                   (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL);
+        bool reported_idle = thread->idle ||
+                             thread->readyForReuse ||
+                             (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL);
+        bool active = thread->active;
+        bool status_flag = thread->statusFlag;
+        if ((frontendIsPascal() || frontendIsRea()) && include) {
+            active = false;
+            reported_idle = true;
+            status_flag = false;
+        }
         ok = jsonBufferAppendFormat(&buffer, "{\"id\": %d, \"name\": ", i);
         if (ok) {
             ok = jsonAppendEscapedString(&buffer, name);
@@ -6843,9 +8052,9 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
         if (ok) {
             ok = jsonBufferAppendFormat(&buffer,
                                         ", \"active\": %s, \"idle\": %s, \"status_success\": %s, \"ready_for_reuse\": %s, \"pool_generation\": %d}",
-                                        thread->active ? "true" : "false",
+                                        active ? "true" : "false",
                                         reported_idle ? "true" : "false",
-                                        thread->statusFlag ? "true" : "false",
+                                        status_flag ? "true" : "false",
                                         thread->readyForReuse ? "true" : "false",
                                         thread->poolGeneration);
         }
@@ -7425,6 +8634,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("Fopen", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Fclose", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Fprintf", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Fflush", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Read", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("ReadLn", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("DeLine", AST_PROCEDURE_DECL, NULL);

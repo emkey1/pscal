@@ -8,36 +8,298 @@
 #include <string.h>
 #include <strings.h>
 #include <signal.h>
+#include <pthread.h>
 #include <termios.h>
 #include <time.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <wchar.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#if defined(PSCAL_TARGET_IOS)
+#include <dlfcn.h>
+#endif
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
 #include "shell/opt.h"
 #include "shell/builtins.h"
+#include "vm/vm.h"
 #include "shell/runner.h"
 #include "core/preproc.h"
 #include "core/build_info.h"
 #include "core/cache.h"
 #include "compiler/bytecode.h"
 #include "backend_ast/builtin.h"
+#include "ext_builtins/register.h"
 #include "Pascal/globals.h"
 #include "vm/vm.h"
 #include "symbol/symbol.h"
+#include "common/frontend_kind.h"
+#include "common/runtime_tty.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_truncate.h"
+#include "ios/vproc.h"
+#include "ios/tty/pscal_pty.h"
+#if defined(__has_include)
+#  if __has_include("PSCALRuntime.h")
+#    include "PSCALRuntime.h"
+#    define PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP 1
+#  else
+#    define PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP 0
+#  endif
+#else
+#  define PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP 0
+#endif
+#if !PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP
+#  if defined(__APPLE__)
+extern void PSCALRuntimeInterposeBootstrap(void) __attribute__((weak_import));
+#    if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak_import));
+#    endif
+#  else
+extern void PSCALRuntimeInterposeBootstrap(void) __attribute__((weak));
+#    if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
+#    endif
+#  endif
+#endif
+#endif
 
-int gParamCount = 0;
-char **gParamValues = NULL;
+static _Thread_local struct termios gInteractiveOriginalTermios;
+static _Thread_local volatile sig_atomic_t gInteractiveTermiosValid = 0;
+static _Thread_local struct sigaction gInteractiveOldSigintAction;
+static _Thread_local volatile sig_atomic_t gInteractiveHasOldSigint = 0;
+static _Thread_local struct sigaction gInteractiveOldSigtstpAction;
+static _Thread_local volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
+static _Thread_local bool gInteractiveLineDrawn = false;
+#if defined(PSCAL_TARGET_IOS)
+static _Thread_local VProc *gShellSelfVproc = NULL;
+static _Thread_local bool gShellSelfVprocActivated = false;
+static void shellDebugLog(const char *message) {
+    if (!message || message[0] == '\0') {
+        return;
+    }
+#if defined(__APPLE__)
+    static void (*log_line)(const char *message) = NULL;
+    static int log_line_checked = 0;
+    if (!log_line_checked) {
+        log_line_checked = 1;
+        log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
+    }
+    if (log_line) {
+        log_line(message);
+        return;
+    }
+#endif
+    if (&pscalRuntimeDebugLog != NULL) {
+        pscalRuntimeDebugLog(message);
+    }
+}
 
-static struct termios gInteractiveOriginalTermios;
-static volatile sig_atomic_t gInteractiveTermiosValid = 0;
-static struct sigaction gInteractiveOldSigintAction;
-static volatile sig_atomic_t gInteractiveHasOldSigint = 0;
-static struct sigaction gInteractiveOldSigtstpAction;
-static volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
+static void shellDebugLogf(const char *format, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, format);
+    int written = vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    if (written <= 0) {
+        return;
+    }
+#if defined(__APPLE__)
+    static void (*log_line)(const char *message) = NULL;
+    static int log_line_checked = 0;
+    if (!log_line_checked) {
+        log_line_checked = 1;
+        log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
+    }
+    if (log_line) {
+        log_line(buffer);
+        return;
+    }
+#endif
+    if (&pscalRuntimeDebugLog != NULL) {
+        pscalRuntimeDebugLog(buffer);
+    }
+}
+
+static void shellAdoptControllingTty(VProcSessionStdio *session_stdio) {
+    if (!session_stdio) {
+        return;
+    }
+    struct pscal_fd *tty_fd = session_stdio->stdin_pscal_fd
+        ? session_stdio->stdin_pscal_fd
+        : session_stdio->pty_slave;
+    if (!tty_fd || !tty_fd->ops || !tty_fd->ops->ioctl) {
+        return;
+    }
+    int rc = tty_fd->ops->ioctl(tty_fd, TIOCSCTTY_, NULL);
+    if (rc < 0 && getenv("PSCALI_VPROC_DEBUG")) {
+        shellDebugLogf("[vproc] TIOCSCTTY failed rc=%d\n", rc);
+    }
+}
+static void shellSetupSelfVproc(void) {
+    if (gShellSelfVproc) {
+        return;
+    }
+
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    bool is_default_stdio = vprocSessionStdioIsDefault(session_stdio);
+    if (session_stdio && is_default_stdio &&
+        session_stdio->stdin_host_fd < 0 &&
+        session_stdio->stdout_host_fd < 0 &&
+        session_stdio->stderr_host_fd < 0) {
+        vprocSessionStdioInit(session_stdio, 0);
+    }
+    if (session_stdio && is_default_stdio && vprocSessionStdioNeedsRefresh(session_stdio)) {
+        vprocSessionStdioRefresh(session_stdio, 0);
+    }
+
+    int kernel_pid = vprocEnsureKernelPid();
+    if (kernel_pid > 0 && session_stdio && session_stdio->kernel_pid <= 0) {
+        session_stdio->kernel_pid = kernel_pid;
+    }
+    if (session_stdio && is_default_stdio) {
+        vprocSessionStdioSetDefault(session_stdio);
+    }
+
+    int session_stdin = (session_stdio && session_stdio->stdin_host_fd >= 0) ? session_stdio->stdin_host_fd : -2;
+    int session_stdout = (session_stdio && session_stdio->stdout_host_fd >= 0) ? session_stdio->stdout_host_fd : -1;
+    int session_stderr = (session_stdio && session_stdio->stderr_host_fd >= 0) ? session_stdio->stderr_host_fd : -1;
+    bool use_pscal_stdio = session_stdio && session_stdio->stdin_pscal_fd;
+    if (getenv("PSCALI_VPROC_DEBUG")) {
+        shellDebugLogf("[vproc] setup self stdio=%p default=%d pscal=%d host=(%d,%d,%d)\n",
+                       (void *)session_stdio,
+                       session_stdio ? (int)vprocSessionStdioIsDefault(session_stdio) : -1,
+                       use_pscal_stdio ? 1 : 0,
+                       session_stdin,
+                       session_stdout,
+                       session_stderr);
+    }
+    if (use_pscal_stdio) {
+        session_stdin = -2;
+        session_stdout = -2;
+        session_stderr = -2;
+    }
+    if (gShellSelfVproc) {
+        if (!gShellSelfVprocActivated) {
+            vprocActivate(gShellSelfVproc);
+            gShellSelfVprocActivated = true;
+        }
+        if (use_pscal_stdio) {
+            (void)vprocAdoptPscalStdio(gShellSelfVproc,
+                                       session_stdio->stdin_pscal_fd,
+                                       session_stdio->stdout_pscal_fd,
+                                       session_stdio->stderr_pscal_fd);
+            shellAdoptControllingTty(session_stdio);
+        }
+        return;
+    }
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.stdin_fd = session_stdin;
+    opts.stdout_fd = session_stdout;
+    opts.stderr_fd = session_stderr;
+    int shell_pid_hint = vprocReservePid();
+    opts.pid_hint = shell_pid_hint;
+    gShellSelfVproc = vprocCreate(&opts);
+    if (!gShellSelfVproc) {
+        /* Some iOS entrypoints may not have stdio wired up at the time the
+         * shell starts. Fall back to /dev/null for stdin so we still get a
+         * stable session leader entry for job control and process listings. */
+        opts.stdin_fd = -2;
+        gShellSelfVproc = vprocCreate(&opts);
+    }
+    if (gShellSelfVproc) {
+        vprocRegisterThread(gShellSelfVproc, pthread_self());
+        int shell_pid = vprocPid(gShellSelfVproc);
+        vprocSetShellSelfPid(shell_pid);
+        vprocSetShellSelfTid(pthread_self());
+        if (kernel_pid > 0 && kernel_pid != shell_pid) {
+            vprocSetParent(shell_pid, kernel_pid);
+        }
+        (void)vprocSetSid(shell_pid, shell_pid);
+        (void)vprocSetPgid(shell_pid, shell_pid);
+        (void)vprocSetForegroundPgid(shell_pid, shell_pid);
+        vprocSetCommandLabel(shell_pid, "shell");
+        vprocRegisterTidHint(shell_pid, pthread_self());
+        /* Always activate the shell's vproc so shims and stdio inheritance work
+         * consistently for pipelines and background workers. */
+        vprocActivate(gShellSelfVproc);
+        if (use_pscal_stdio) {
+            (void)vprocAdoptPscalStdio(gShellSelfVproc,
+                                       session_stdio->stdin_pscal_fd,
+                                       session_stdio->stdout_pscal_fd,
+                                       session_stdio->stderr_pscal_fd);
+            shellAdoptControllingTty(session_stdio);
+        }
+        gShellSelfVprocActivated = true;
+    } else if (shell_pid_hint > 0) {
+        /* Ensure the shell has a stable synthetic pid even if the fd table
+         * could not be initialised. */
+        vprocSetShellSelfPid(shell_pid_hint);
+        vprocSetShellSelfTid(pthread_self());
+        if (kernel_pid > 0 && kernel_pid != shell_pid_hint) {
+            vprocSetParent(shell_pid_hint, kernel_pid);
+        }
+        (void)vprocSetSid(shell_pid_hint, shell_pid_hint);
+        (void)vprocSetPgid(shell_pid_hint, shell_pid_hint);
+        (void)vprocSetForegroundPgid(shell_pid_hint, shell_pid_hint);
+        vprocSetCommandLabel(shell_pid_hint, "shell");
+        vprocRegisterTidHint(shell_pid_hint, pthread_self());
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            shellDebugLogf("[vproc] shell self-vproc init failed; using pid=%d without fd table\n", shell_pid_hint);
+        }
+    }
+}
+
+static void shellTeardownSelfVproc(int status) {
+    if (!gShellSelfVproc) {
+        return;
+    }
+    extern VProcSessionStdio *vprocSessionStdioCurrent(void);
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    int sid = vprocGetSid(vprocPid(gShellSelfVproc));
+    if (sid <= 0) {
+        sid = vprocGetSid(vprocGetShellSelfPid());
+    }
+    if (sid > 0) {
+        vprocTerminateSession(sid);
+    }
+    if (gShellSelfVprocActivated) {
+        vprocDeactivate();
+        gShellSelfVprocActivated = false;
+    }
+    vprocMarkExit(gShellSelfVproc, status);
+    vprocDestroy(gShellSelfVproc);
+    gShellSelfVproc = NULL;
+    if (session_stdio) {
+        if (session_stdio->stdin_host_fd >= 0) close(session_stdio->stdin_host_fd);
+        if (session_stdio->stdout_host_fd >= 0) close(session_stdio->stdout_host_fd);
+        if (session_stdio->stderr_host_fd >= 0) close(session_stdio->stderr_host_fd);
+        session_stdio->stdin_host_fd = -1;
+        session_stdio->stdout_host_fd = -1;
+        session_stdio->stderr_host_fd = -1;
+    }
+
+    vprocSetKernelPid(0);
+}
+
+static void shellEnsureSelfVprocActive(void) {
+    if (!gShellSelfVproc) {
+        return;
+    }
+    if (vprocCurrent() == NULL) {
+        vprocActivate(gShellSelfVproc);
+        gShellSelfVprocActivated = true;
+    }
+}
+#endif
 
 static bool interactiveUpdateScratch(char **scratch, const char *buffer, size_t length);
+static size_t interactiveCommonPrefixLength(char **items, size_t count);
 
 static int interactiveTerminalWidth(void) {
     struct winsize ws;
@@ -133,6 +395,42 @@ static const unsigned char *interactiveSkipAnsiSequence(const unsigned char *p) 
     return p;
 }
 
+static int interactiveGlyphWidth(const char *s, size_t max_len, size_t *out_bytes) {
+    if (out_bytes) {
+        *out_bytes = 1;
+    }
+    if (!s || max_len == 0) {
+        return 0;
+    }
+    mbstate_t st;
+    memset(&st, 0, sizeof(st));
+    wchar_t wc;
+    size_t consumed = mbrtowc(&wc, s, max_len, &st);
+    if (consumed == (size_t)-1 || consumed == (size_t)-2 || consumed == 0) {
+        if (out_bytes) {
+            *out_bytes = 1;
+        }
+        return 1;
+    }
+    if (out_bytes) {
+        *out_bytes = consumed;
+    }
+    int width = wcwidth(wc);
+    if (width < 0) {
+        width = 0;
+    }
+    return width;
+}
+
+static void interactiveAdvanceColumns(size_t term_width,
+                                      size_t *row,
+                                      size_t *col,
+                                      size_t width) {
+    for (size_t i = 0; i < width; ++i) {
+        interactiveAdvancePosition(term_width, row, col, ' ');
+    }
+}
+
 static void interactiveComputeDisplayMetrics(const char *prompt,
                                              const char *buffer,
                                              size_t length,
@@ -148,23 +446,38 @@ static void interactiveComputeDisplayMetrics(const char *prompt,
     size_t total_rows = 1;
 
     if (prompt) {
-        const unsigned char *p = (const unsigned char *)prompt;
+        const char *p = prompt;
         while (*p) {
-            if (*p == '\033') {
-                const unsigned char *next = interactiveSkipAnsiSequence(p);
-                if (next == p) {
+            if ((unsigned char)*p == '\033') {
+                const unsigned char *next = interactiveSkipAnsiSequence((const unsigned char *)p);
+                if (next == (const unsigned char *)p) {
                     ++p;
                 } else {
-                    p = next;
+                    p = (const char *)next;
                 }
                 continue;
             }
-            interactiveAdvancePosition(term_width, &row, &col, *p);
+            if (*p == '\n' || *p == '\r' || *p == '\t') {
+                interactiveAdvancePosition(term_width, &row, &col, (unsigned char)*p);
+                if (*p == '\n' || *p == '\r') {
+                    size_t used_rows = row + 1;
+                    if (used_rows > total_rows) {
+                        total_rows = used_rows;
+                    }
+                }
+                ++p;
+                continue;
+            }
+            size_t bytes = 1;
+            int width = interactiveGlyphWidth(p, strlen(p), &bytes);
+            if (width > 0) {
+                interactiveAdvanceColumns(term_width, &row, &col, (size_t)width);
+            }
             size_t used_rows = row + 1;
             if (used_rows > total_rows) {
                 total_rows = used_rows;
             }
-            ++p;
+            p += bytes;
         }
     }
 
@@ -174,17 +487,34 @@ static void interactiveComputeDisplayMetrics(const char *prompt,
     }
 
     if (buffer && length > 0) {
-        for (size_t i = 0; i < length; ++i) {
-            if (i == cursor && out_cursor_row && out_cursor_col) {
+        size_t byte_index = 0;
+        while (byte_index < length) {
+            if (byte_index == cursor && out_cursor_row && out_cursor_col) {
                 *out_cursor_row = row;
                 *out_cursor_col = col;
             }
-            interactiveAdvancePosition(term_width, &row, &col,
-                                       (unsigned char)buffer[i]);
+            unsigned char c = (unsigned char)buffer[byte_index];
+            if (c == '\n' || c == '\r' || c == '\t') {
+                interactiveAdvancePosition(term_width, &row, &col, c);
+                if (c == '\n' || c == '\r') {
+                    size_t used_rows = row + 1;
+                    if (used_rows > total_rows) {
+                        total_rows = used_rows;
+                    }
+                }
+                byte_index++;
+                continue;
+            }
+            size_t bytes = 1;
+            int width = interactiveGlyphWidth(buffer + byte_index, length - byte_index, &bytes);
+            if (width > 0) {
+                interactiveAdvanceColumns(term_width, &row, &col, (size_t)width);
+            }
             size_t used_rows = row + 1;
             if (used_rows > total_rows) {
                 total_rows = used_rows;
             }
+            byte_index += bytes;
         }
     }
 
@@ -204,9 +534,69 @@ static void interactiveComputeDisplayMetrics(const char *prompt,
     }
 }
 
+static int shellTcgetattr(int fd, struct termios *termios) {
+#if defined(PSCAL_TARGET_IOS)
+    if (!termios) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(TIOCGETA)
+    if (vprocIoctlShim(fd, TIOCGETA, termios) == 0) {
+        return 0;
+    }
+#elif defined(TCGETS)
+    if (vprocIoctlShim(fd, TCGETS, termios) == 0) {
+        return 0;
+    }
+#endif
+#endif
+    return tcgetattr(fd, termios);
+}
+
+static int shellTcsetattr(int fd, int action, const struct termios *termios) {
+#if defined(PSCAL_TARGET_IOS)
+    if (!termios) {
+        errno = EINVAL;
+        return -1;
+    }
+    unsigned long cmd = 0;
+#if defined(TIOCSETA) && defined(TIOCSETAW) && defined(TIOCSETAF)
+    switch (action) {
+        case TCSANOW:
+            cmd = TIOCSETA;
+            break;
+        case TCSADRAIN:
+            cmd = TIOCSETAW;
+            break;
+        case TCSAFLUSH:
+            cmd = TIOCSETAF;
+            break;
+    }
+#elif defined(TCSETS) && defined(TCSETSW) && defined(TCSETSF)
+    switch (action) {
+        case TCSANOW:
+            cmd = TCSETS;
+            break;
+        case TCSADRAIN:
+            cmd = TCSETSW;
+            break;
+        case TCSAFLUSH:
+            cmd = TCSETSF;
+            break;
+    }
+#endif
+    if (cmd != 0) {
+        if (vprocIoctlShim(fd, cmd, (void *)termios) == 0) {
+            return 0;
+        }
+    }
+#endif
+    return tcsetattr(fd, action, termios);
+}
+
 static void interactiveRestoreTerminal(void) {
     if (gInteractiveTermiosValid) {
-        (void)tcsetattr(STDIN_FILENO, TCSAFLUSH, &gInteractiveOriginalTermios);
+        (void)shellTcsetattr(STDIN_FILENO, TCSAFLUSH, &gInteractiveOriginalTermios);
         gInteractiveTermiosValid = 0;
     }
 }
@@ -249,8 +639,19 @@ static const char *SHELL_USAGE =
     "     --verbose                 Print compilation/cache status messages.\n"
     "     -d                          Enable verbose VM error diagnostics.\n";
 
-static char *readStream(FILE *stream) {
-    if (!stream) {
+static ssize_t shellReadFd(int fd, void *buf, size_t count) {
+    if (count == 0) {
+        return 0;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    return vprocReadShim(fd, buf, count);
+#else
+    return read(fd, buf, count);
+#endif
+}
+
+static char *readStreamFd(int fd) {
+    if (fd < 0) {
         return NULL;
     }
     size_t capacity = 4096;
@@ -271,17 +672,95 @@ static char *readStream(FILE *stream) {
             capacity = new_capacity;
         }
         size_t chunk_size = capacity - length - 1;
-        size_t read_count = fread(buffer + length, 1, chunk_size, stream);
-        length += read_count;
-        if (read_count < chunk_size) {
-            if (ferror(stream)) {
+        ssize_t read_count = shellReadFd(fd, buffer + length, chunk_size);
+        if (read_count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+            free(buffer);
+            return NULL;
+        }
+        if (read_count == 0) {
+            break;
+        }
+        length += (size_t)read_count;
+    }
+    buffer[length] = '\0';
+    return buffer;
+}
+
+static char *readLineFd(int fd, ssize_t *out_len, int *out_error) {
+    if (out_len) {
+        *out_len = 0;
+    }
+    if (out_error) {
+        *out_error = 0;
+    }
+    if (fd < 0) {
+        if (out_error) {
+            *out_error = EBADF;
+        }
+        return NULL;
+    }
+    size_t capacity = 128;
+    char *buffer = (char *)malloc(capacity);
+    if (!buffer) {
+        if (out_error) {
+            *out_error = ENOMEM;
+        }
+        return NULL;
+    }
+    size_t length = 0;
+    while (true) {
+        unsigned char ch = 0;
+        ssize_t read_count = shellReadFd(fd, &ch, 1);
+        if (read_count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
+                continue;
+            }
+            if (out_error) {
+                *out_error = errno;
+            }
+            free(buffer);
+            return NULL;
+        }
+        if (read_count == 0) {
+            if (length == 0) {
                 free(buffer);
                 return NULL;
             }
             break;
         }
+        if (length + 2 > capacity) {
+            size_t new_capacity = capacity * 2;
+            char *new_buffer = (char *)realloc(buffer, new_capacity);
+            if (!new_buffer) {
+                if (out_error) {
+                    *out_error = ENOMEM;
+                }
+                free(buffer);
+                return NULL;
+            }
+            buffer = new_buffer;
+            capacity = new_capacity;
+        }
+        buffer[length++] = (char)ch;
+        if (ch == '\n') {
+            break;
+        }
     }
     buffer[length] = '\0';
+    if (out_len) {
+        *out_len = (ssize_t)length;
+    }
     return buffer;
 }
 
@@ -351,6 +830,14 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
     if (out_status) {
         *out_status = EXIT_SUCCESS;
     }
+    const char *skip_rc = getenv("EXSH_SKIP_RC");
+    if (skip_rc && skip_rc[0] && strcmp(skip_rc, "0") != 0) {
+        return false;
+    }
+    const char *no_rc = getenv("EXSH_NO_RC");
+    if (no_rc && no_rc[0] && strcmp(no_rc, "0") != 0) {
+        return false;
+    }
     const char *home = getenv("HOME");
     if (!home || !*home) {
         return false;
@@ -377,6 +864,26 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
             return false;
         }
     }
+    const char *disable_name = ".exshrc.disable";
+    size_t disable_len = strlen(disable_name);
+    size_t disable_path_len = home_len + (needs_separator ? 1 : 0) + disable_len + 1;
+    char *disable_path = (char *)malloc(disable_path_len);
+    if (disable_path) {
+        if (needs_separator) {
+            snprintf(disable_path, disable_path_len, "%s/%s", home, disable_name);
+        } else {
+            snprintf(disable_path, disable_path_len, "%s%s", home, disable_name);
+        }
+        if (access(disable_path, F_OK) == 0) {
+            fprintf(stderr,
+                    "exsh: startup file disabled by '%s'\n",
+                    disable_path);
+            free(disable_path);
+            free(rc_path);
+            return false;
+        }
+        free(disable_path);
+    }
     if (access(rc_path, F_OK) != 0) {
         free(rc_path);
         return false;
@@ -385,6 +892,29 @@ static bool shellRunStartupConfig(const ShellRunOptions *base_options, int *out_
     if (!source) {
         free(rc_path);
         return false;
+    }
+    if (source[0] == '#' && source[1] == '!') {
+        const char *line_end = strchr(source, '\n');
+        size_t line_len = line_end ? (size_t)(line_end - source) : strlen(source);
+        bool looks_like_exsh = false;
+        if (line_len > 2) {
+            const char *interp = source + 2;
+            const char *interp_end = source + line_len;
+            for (const char *p = interp; p + 3 < interp_end; ++p) {
+                if (p[0] == 'e' && p[1] == 'x' && p[2] == 's' && p[3] == 'h') {
+                    looks_like_exsh = true;
+                    break;
+                }
+            }
+        }
+        if (!looks_like_exsh) {
+            fprintf(stderr,
+                    "exsh: skipping startup file '%s' (non-exsh shebang)\n",
+                    rc_path);
+            free(source);
+            free(rc_path);
+            return false;
+        }
     }
 
     ShellRunOptions rc_options = {0};
@@ -729,7 +1259,7 @@ static char *shellFormatPrompt(const char *input) {
 static char *shellResolveInteractivePrompt(void) {
     const char *env_prompt = getenv("PS1");
     if (!env_prompt || !*env_prompt) {
-        env_prompt = "exsh$ ";
+        env_prompt = "\\e[38;5;39mexsh\\e[0m \\e[1;35m\\W\\e[0m ⚡ ";
     }
     char *formatted = shellFormatPrompt(env_prompt);
     if (formatted) {
@@ -755,6 +1285,41 @@ static size_t shellPromptLineBreakCount(const char *prompt) {
         return 0;
     }
     return (total_rows > 0) ? (total_rows - 1) : 0;
+}
+
+static void shellWriteStdout(const char *buf, size_t len) {
+    if (!buf || len == 0) {
+        return;
+    }
+    size_t off = 0;
+    while (off < len) {
+#if defined(PSCAL_TARGET_IOS)
+        ssize_t w = vprocWriteShim(STDOUT_FILENO, buf + off, len - off);
+#else
+        ssize_t w = write(STDOUT_FILENO, buf + off, len - off);
+#endif
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (w == 0) {
+            break;
+        }
+        off += (size_t)w;
+    }
+}
+
+static void shellWriteStdoutStr(const char *str) {
+    if (!str) {
+        return;
+    }
+    shellWriteStdout(str, strlen(str));
+}
+
+static void shellWriteStdoutChar(char ch) {
+    shellWriteStdout(&ch, 1);
 }
 
 static void redrawInteractiveLine(const char *prompt,
@@ -783,43 +1348,42 @@ static void redrawInteractiveLine(const char *prompt,
                                      &end_row,
                                      &end_col);
 
-    fputs("\r", stdout);
-    for (size_t i = 0; i < previous_prompt_lines; ++i) {
-        fputs("\033[A", stdout);
+    size_t rows_to_prompt = gInteractiveLineDrawn ? previous_prompt_lines : 0;
+    for (size_t i = 0; i < rows_to_prompt; ++i) {
+        shellWriteStdoutStr("\033[A");
     }
-    fputs("\033[J", stdout);
+    shellWriteStdoutStr("\r");
+    shellWriteStdoutStr("\033[J");
     if (prompt) {
-        fputs(prompt, stdout);
+        shellWriteStdoutStr(prompt);
     }
     if (buffer && length > 0) {
-        fwrite(buffer, 1, length, stdout);
+        shellWriteStdout(buffer, length);
     }
-    fflush(stdout);
 
     if (end_row > cursor_row) {
         size_t diff = end_row - cursor_row;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[A", stdout);
+            shellWriteStdoutStr("\033[A");
         }
     } else if (cursor_row > end_row) {
         size_t diff = cursor_row - end_row;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[B", stdout);
+            shellWriteStdoutStr("\033[B");
         }
     }
 
     if (end_col > cursor_col) {
         size_t diff = end_col - cursor_col;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[D", stdout);
+            shellWriteStdoutStr("\033[D");
         }
     } else if (cursor_col > end_col) {
         size_t diff = cursor_col - end_col;
         for (size_t i = 0; i < diff; ++i) {
-            fputs("\033[C", stdout);
+            shellWriteStdoutStr("\033[C");
         }
     }
-    fflush(stdout);
 
     if (displayed_length) {
         *displayed_length = length;
@@ -828,6 +1392,7 @@ static void redrawInteractiveLine(const char *prompt,
         *displayed_prompt_lines =
             (total_rows > 0) ? (total_rows - 1) : 0;
     }
+    gInteractiveLineDrawn = true;
 }
 
 static bool interactiveEnsureCapacity(char **buffer, size_t *capacity, size_t needed) {
@@ -1074,14 +1639,14 @@ static bool interactiveFindHistoryMatch(const char *query,
 }
 
 static void interactiveRenderSearchPrompt(const char *query, const char *match) {
-    fputs("\r", stdout);
-    fputs("\033[K", stdout);
+    shellWriteStdoutStr("\r");
+    shellWriteStdoutStr("\033[K");
+    shellWriteStdoutStr("(reverse-i-search) '");
+    shellWriteStdoutStr(query ? query : "");
+    shellWriteStdoutStr("': ");
     if (match) {
-        fprintf(stdout, "(reverse-i-search) '%s': %s", query ? query : "", match);
-    } else {
-        fprintf(stdout, "(reverse-i-search) '%s': ", query ? query : "");
+        shellWriteStdoutStr(match);
     }
-    fflush(stdout);
 }
 
 static bool interactiveReverseSearch(const char *prompt,
@@ -1125,7 +1690,7 @@ static bool interactiveReverseSearch(const char *prompt,
 
     while (true) {
         unsigned char input = 0;
-        ssize_t count = read(STDIN_FILENO, &input, 1);
+        ssize_t count = shellReadFd(STDIN_FILENO, &input, 1);
         if (count <= 0) {
             break;
         }
@@ -1137,8 +1702,8 @@ static bool interactiveReverseSearch(const char *prompt,
             memcpy(*buffer, saved_line, saved_length + 1);
             *length = saved_length;
             *cursor = saved_cursor;
-            fputs("\r", stdout);
-            fputs("\033[K", stdout);
+            shellWriteStdoutStr("\r");
+            shellWriteStdoutStr("\033[K");
             redrawInteractiveLine(prompt,
                                   *buffer,
                                   *length,
@@ -1181,8 +1746,7 @@ static bool interactiveReverseSearch(const char *prompt,
                 match = NULL;
                 has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
                 if (!has_match) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
             }
             interactiveRenderSearchPrompt(query, has_match ? match : NULL);
@@ -1198,12 +1762,10 @@ static bool interactiveReverseSearch(const char *prompt,
                 match = NULL;
                 has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
                 if (!has_match) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             interactiveRenderSearchPrompt(query, has_match ? match : NULL);
             continue;
@@ -1226,19 +1788,17 @@ static bool interactiveReverseSearch(const char *prompt,
             match = NULL;
             has_match = interactiveFindHistoryMatch(query, next_start, &match, &match_index);
             if (!has_match) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             interactiveRenderSearchPrompt(query, has_match ? match : NULL);
             continue;
         }
 
-        fputc('\a', stdout);
-        fflush(stdout);
+        shellWriteStdoutChar('\a');
     }
 
-    fputs("\r", stdout);
-    fputs("\033[K", stdout);
+    shellWriteStdoutStr("\r");
+    shellWriteStdoutStr("\033[K");
     redrawInteractiveLine(prompt,
                           *buffer,
                           *length,
@@ -1398,7 +1958,7 @@ static bool interactiveWordLooksDynamic(const char *word) {
     return false;
 }
 
-static size_t interactiveCommonPrefixLength(char *const *items, size_t count) {
+static size_t interactiveCommonPrefixLength(char **items, size_t count) {
     if (!items || count == 0) {
         return 0;
     }
@@ -1420,6 +1980,150 @@ static size_t interactiveCommonPrefixLength(char *const *items, size_t count) {
         prefix_len = j;
     }
     return prefix_len;
+}
+
+static void interactiveFreeMatches(char **matches, size_t count) {
+    if (!matches) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        free(matches[i]);
+    }
+    free(matches);
+}
+
+typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+
+typedef struct {
+    const char *prefix;
+    size_t prefix_len;
+    char ***matches;
+    size_t *count;
+    size_t *capacity;
+} InteractiveCompletionContext;
+
+static bool interactiveAddCompletionMatch(const char *name,
+                                          const char *prefix,
+                                          size_t prefix_len,
+                                          char ***matches,
+                                          size_t *count,
+                                          size_t *capacity) {
+    if (!name || !*name || !matches || !count || !capacity) {
+        return true;
+    }
+    if (prefix_len > 0 && strncasecmp(name, prefix, prefix_len) != 0) {
+        return true;
+    }
+    for (size_t i = 0; i < *count; ++i) {
+        const char *existing = (*matches)[i];
+        if (existing && strcasecmp(existing, name) == 0) {
+            return true;
+        }
+    }
+    if (*count >= *capacity) {
+        size_t new_cap = (*capacity > 0) ? (*capacity * 2) : 8;
+        char **resized = (char **)realloc(*matches, new_cap * sizeof(char *));
+        if (!resized) {
+            return false;
+        }
+        *matches = resized;
+        *capacity = new_cap;
+    }
+    char *copy = strdup(name);
+    if (!copy) {
+        return false;
+    }
+    (*matches)[(*count)++] = copy;
+    return true;
+}
+
+static void interactiveBuiltinCompletionVisitor(const char *name,
+                                                const char *canonical,
+                                                int id,
+                                                void *context) {
+    (void)canonical;
+    (void)id;
+    InteractiveCompletionContext *ctx = (InteractiveCompletionContext *)context;
+    if (!ctx) {
+        return;
+    }
+    (void)interactiveAddCompletionMatch(name,
+                                        ctx->prefix,
+                                        ctx->prefix_len,
+                                        ctx->matches,
+                                        ctx->count,
+                                        ctx->capacity);
+}
+
+static bool interactiveCollectPathExecutables(const char *prefix,
+                                              size_t prefix_len,
+                                              char ***matches,
+                                              size_t *count,
+                                              size_t *capacity) {
+    const char *path_env = getenv("PATH");
+    if (!path_env || !*path_env) {
+        return true;
+    }
+
+    char *copy = strdup(path_env);
+    if (!copy) {
+        return false;
+    }
+
+    bool ok = true;
+    char *saveptr = NULL;
+    char *dir = strtok_r(copy, ":", &saveptr);
+    while (ok && dir) {
+        const char *real_dir = (*dir == '\0') ? "." : dir;
+        DIR *d = opendir(real_dir);
+        if (d) {
+            struct dirent *ent = NULL;
+            while (ok && (ent = readdir(d)) != NULL) {
+                if (ent->d_name[0] == '\0') {
+                    continue;
+                }
+                if (ent->d_name[0] == '.' && prefix_len == 0) {
+                    continue;
+                }
+                char full[PATH_MAX];
+                size_t dir_len = strlen(real_dir);
+                size_t name_len = strlen(ent->d_name);
+                if (dir_len + 1 + name_len + 1 >= sizeof(full)) {
+                    continue;
+                }
+                memcpy(full, real_dir, dir_len);
+                if (dir_len > 0 && real_dir[dir_len - 1] != '/') {
+                    full[dir_len] = '/';
+                    dir_len += 1;
+                }
+                memcpy(full + dir_len, ent->d_name, name_len + 1);
+                struct stat st;
+                if (stat(full, &st) != 0) {
+                    continue;
+                }
+                if (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
+                    continue;
+                }
+                if (access(full, X_OK) != 0) {
+                    continue;
+                }
+                if (!interactiveAddCompletionMatch(ent->d_name,
+                                                   prefix,
+                                                   prefix_len,
+                                                   matches,
+                                                   count,
+                                                   capacity)) {
+                    ok = false;
+                    break;
+                }
+            }
+            closedir(d);
+        }
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+
+    free(copy);
+    return ok;
 }
 
 static void interactivePrintMatchesInColumns(char *const *items, size_t count) {
@@ -1449,8 +2153,8 @@ static void interactivePrintMatchesInColumns(char *const *items, size_t count) {
             if (!items[i]) {
                 continue;
             }
-            fputs(items[i], stdout);
-            fputc('\n', stdout);
+            shellWriteStdoutStr(items[i]);
+            shellWriteStdoutChar('\n');
         }
         return;
     }
@@ -1487,18 +2191,18 @@ static void interactivePrintMatchesInColumns(char *const *items, size_t count) {
             }
             const char *entry = entries[entry_index];
             size_t len = strlen(entry);
-            fputs(entry, stdout);
+            shellWriteStdoutStr(entry);
             if (col + 1 < columns) {
                 size_t next_index = (col + 1) * rows + row;
                 if (next_index < valid_count) {
                     size_t padding = (col_width > len) ? (col_width - len) : 1;
                     for (size_t pad = 0; pad < padding; ++pad) {
-                        fputc(' ', stdout);
+                        shellWriteStdoutChar(' ');
                     }
                 }
             }
         }
-        fputc('\n', stdout);
+        shellWriteStdoutChar('\n');
     }
 
     free(entries);
@@ -1530,14 +2234,132 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    size_t pattern_len = word_len + 2;
+    const char *glob_base = word;
+    size_t glob_base_len = word_len;
+    bool had_trailing_slash = (word_len > 0 && word[word_len - 1] == '/');
+#if defined(PSCAL_TARGET_IOS)
+    bool glob_used_virtual = false;
+    if (pathTruncateEnabled() && word_len > 0 && word[0] == '/') {
+        char word_copy[PATH_MAX];
+        if (word_len < sizeof(word_copy)) {
+            memcpy(word_copy, word, word_len);
+            word_copy[word_len] = '\0';
+            char expanded[PATH_MAX];
+            if (pathTruncateExpand(word_copy, expanded, sizeof(expanded))) {
+                glob_base = expanded;
+                glob_base_len = strlen(expanded);
+                glob_used_virtual = true;
+            }
+        }
+    }
+#endif
+    while (glob_base_len > 1 && glob_base[glob_base_len - 1] == '/') {
+        glob_base_len--;
+    }
+
+    size_t command_start = 0;
+    size_t command_len = 0;
+    bool completing_command = false;
+    bool command_is_cd = false;
+    if (interactiveExtractCommandToken(*buffer,
+                                       *length,
+                                       word_start,
+                                       &command_start,
+                                       &command_len)) {
+        completing_command = (word_start == command_start);
+        if (command_len == 2 && strncasecmp(*buffer + command_start, "cd", command_len) == 0) {
+            command_is_cd = true;
+        }
+    }
+
+    if (completing_command && strchr(word, '/') == NULL) {
+        char **matches = NULL;
+        size_t match_count = 0;
+        size_t match_capacity = 0;
+
+        InteractiveCompletionContext ctx = {
+            .prefix = word,
+            .prefix_len = word_len,
+            .matches = &matches,
+            .count = &match_count,
+            .capacity = &match_capacity
+        };
+        shellVisitBuiltins(interactiveBuiltinCompletionVisitor, &ctx);
+        bool path_ok = interactiveCollectPathExecutables(word, word_len, &matches, &match_count, &match_capacity);
+        if (match_count > 0) {
+            size_t replacement_len = 0;
+            bool append_space = false;
+            if (match_count == 1) {
+                replacement_len = strlen(matches[0]);
+                append_space = true;
+            } else {
+                replacement_len = interactiveCommonPrefixLength(matches, match_count);
+                if (replacement_len <= word_len) {
+                    shellWriteStdoutChar('\n');
+                    interactivePrintMatchesInColumns(matches, match_count);
+                    interactiveFreeMatches(matches, match_count);
+
+                    *cursor = *length;
+                    redrawInteractiveLine(prompt,
+                                          *buffer,
+                                          *length,
+                                          *cursor,
+                                          displayed_length,
+                                          displayed_prompt_lines);
+                    if (scratch) {
+                        interactiveUpdateScratch(scratch, *buffer, *length);
+                    }
+                    return true;
+                }
+            }
+
+            size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+            if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
+                interactiveFreeMatches(matches, match_count);
+                return false;
+            }
+
+            memcpy(*buffer + word_start, matches[0], replacement_len);
+            if (append_space) {
+                (*buffer)[word_start + replacement_len] = ' ';
+                replacement_len += 1;
+            }
+            *length = word_start + replacement_len;
+            (*buffer)[*length] = '\0';
+
+            *cursor = *length;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            if (scratch) {
+                interactiveUpdateScratch(scratch, *buffer, *length);
+            }
+            interactiveFreeMatches(matches, match_count);
+            return true;
+        }
+        interactiveFreeMatches(matches, match_count);
+        if (!path_ok) {
+            return false;
+        }
+    }
+
+    size_t pattern_len = glob_base_len + (had_trailing_slash ? 3 : 2);
     char *pattern = (char *)malloc(pattern_len);
     if (!pattern) {
         return false;
     }
-    memcpy(pattern, word, word_len);
-    pattern[word_len] = '*';
-    pattern[word_len + 1] = '\0';
+    memcpy(pattern, glob_base, glob_base_len);
+    size_t write_idx = glob_base_len;
+    if (had_trailing_slash) {
+        if (write_idx == 0 || pattern[write_idx - 1] != '/') {
+            pattern[write_idx++] = '/';
+        }
+    }
+    pattern[write_idx++] = '*';
+    pattern[write_idx] = '\0';
 
     glob_t results;
     memset(&results, 0, sizeof(results));
@@ -1549,23 +2371,26 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         return false;
     }
 
-    size_t command_start = 0;
-    size_t command_len = 0;
-    bool command_is_cd = false;
-    if (interactiveExtractCommandToken(*buffer,
-                                       *length,
-                                       word_start,
-                                       &command_start,
-                                       &command_len) &&
-        word_start > command_start) {
-        const char *command = *buffer + command_start;
-        if (command_len == 2) {
-            if (strncasecmp(command, "cd", command_len) == 0) {
-                command_is_cd = true;
+#if defined(PSCAL_TARGET_IOS)
+    if (glob_used_virtual) {
+        for (size_t i = 0; i < results.gl_pathc; ++i) {
+            const char *match = results.gl_pathv[i];
+            if (!match) {
+                continue;
+            }
+            char stripped[PATH_MAX];
+            if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
+                char *copy = strdup(stripped);
+                if (copy) {
+                    free(results.gl_pathv[i]);
+                    results.gl_pathv[i] = copy;
+                }
             }
         }
     }
+#endif
 
+    /* command_is_cd is computed above when finding the command token. */
     if (command_is_cd) {
         size_t write_index = 0;
         for (size_t i = 0; i < results.gl_pathc; ++i) {
@@ -1587,6 +2412,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
 
     size_t replacement_len = 0;
     bool append_space = false;
+    bool append_slash = false;
     if (results.gl_pathc == 1) {
         const char *match = results.gl_pathv[0];
         if (!match) {
@@ -1600,10 +2426,9 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     } else {
         replacement_len = interactiveCommonPrefixLength(results.gl_pathv, results.gl_pathc);
         if (replacement_len <= word_len) {
-            putchar('\n');
+            shellWriteStdoutChar('\n');
             interactivePrintMatchesInColumns(results.gl_pathv, results.gl_pathc);
             globfree(&results);
-            fflush(stdout);
 
             *cursor = *length;
             redrawInteractiveLine(prompt,
@@ -1619,13 +2444,36 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+    /* If PATH_TRUNCATE is active, double-check directory matches so we keep the trailing slash. */
+#if defined(PSCAL_TARGET_IOS)
+    if (glob_used_virtual && results.gl_pathv[0] && replacement_len > 0) {
+        const char *visible = results.gl_pathv[0];
+        char expanded[PATH_MAX];
+        const char *real_path = visible;
+        if (pathTruncateExpand(visible, expanded, sizeof(expanded))) {
+            real_path = expanded;
+        }
+        struct stat st;
+        if (real_path && stat(real_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (visible[replacement_len - 1] != '/') {
+                append_slash = true;
+            }
+            append_space = false;
+        }
+    }
+#endif
+
+    size_t total_len = word_start + replacement_len + (append_slash ? 1 : 0) + (append_space ? 1 : 0);
     if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
         globfree(&results);
         return false;
     }
 
     memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
+    if (append_slash) {
+        (*buffer)[word_start + replacement_len] = '/';
+        replacement_len += 1;
+    }
     if (append_space) {
         (*buffer)[word_start + replacement_len] = ' ';
         replacement_len += 1;
@@ -1723,10 +2571,143 @@ static char *interactiveExpandTilde(const char *line) {
     return result;
 }
 
+static char *interactiveRewriteCombinedRedirects(const char *line) {
+    if (!line) {
+        return NULL;
+    }
+    size_t len = strlen(line);
+    size_t capacity = len + 32;
+    char *out = (char *)malloc(capacity);
+    if (!out) {
+        return NULL;
+    }
+    size_t out_len = 0;
+    bool in_single = false;
+    bool in_double = false;
+    bool escaped = false;
+
+    for (size_t i = 0; line[i] != '\0'; ++i) {
+        char c = line[i];
+        if (escaped) {
+            if (out_len + 2 >= capacity) {
+                capacity *= 2;
+                char *resized = (char *)realloc(out, capacity);
+                if (!resized) {
+                    free(out);
+                    return NULL;
+                }
+                out = resized;
+            }
+            out[out_len++] = c;
+            escaped = false;
+            continue;
+        }
+        if (c == '\\' && !in_single) {
+            if (out_len + 2 >= capacity) {
+                capacity *= 2;
+                char *resized = (char *)realloc(out, capacity);
+                if (!resized) {
+                    free(out);
+                    return NULL;
+                }
+                out = resized;
+            }
+            out[out_len++] = c;
+            escaped = true;
+            continue;
+        }
+        if (c == '\'' && !in_double) {
+            in_single = !in_single;
+        } else if (c == '"' && !in_single) {
+            in_double = !in_double;
+        }
+
+        if (!in_single && !in_double && c == '&' && line[i + 1] == '>') {
+            bool append = (line[i + 2] == '>');
+            size_t j = i + (append ? 3 : 2);
+            /* Skip whitespace */
+            while (line[j] == ' ' || line[j] == '\t') {
+                j++;
+            }
+            /* Capture the following word (respect simple quotes/backslashes) */
+            bool word_single = false, word_double = false, word_escaped = false;
+            size_t start = j;
+            size_t end = j;
+            for (; line[end] != '\0'; ++end) {
+                char wc = line[end];
+                if (word_escaped) {
+                    word_escaped = false;
+                    continue;
+                }
+                if (wc == '\\') {
+                    word_escaped = true;
+                    continue;
+                }
+                if (wc == '\'' && !word_double) {
+                    word_single = !word_single;
+                    continue;
+                }
+                if (wc == '"' && !word_single) {
+                    word_double = !word_double;
+                    continue;
+                }
+                if (!word_single && !word_double && isspace((unsigned char)wc)) {
+                    break;
+                }
+            }
+            if (start >= end) {
+                /* No target found; emit original chars */
+                goto copy_char;
+            }
+            size_t path_len = end - start;
+            /* Emit > or >> then space then path then " 2>&1" */
+            const char *extra = " 2>&1";
+            size_t extra_len = strlen(extra);
+            size_t needed = out_len + (append ? 2 : 1) + 1 + path_len + extra_len + 1;
+            if (needed > capacity) {
+                capacity = needed + len + 16;
+                char *resized = (char *)realloc(out, capacity);
+                if (!resized) {
+                    free(out);
+                    return NULL;
+                }
+                out = resized;
+            }
+            out[out_len++] = '>';
+            if (append) {
+                out[out_len++] = '>';
+            }
+            out[out_len++] = ' ';
+            memcpy(out + out_len, line + start, path_len);
+            out_len += path_len;
+            memcpy(out + out_len, extra, extra_len);
+            out_len += extra_len;
+            i = end - 1;
+            continue;
+        }
+
+copy_char:
+        if (out_len + 2 >= capacity) {
+            capacity *= 2;
+            char *resized = (char *)realloc(out, capacity);
+            if (!resized) {
+                free(out);
+                return NULL;
+            }
+            out = resized;
+        }
+        out[out_len++] = c;
+    }
+
+    out[out_len] = '\0';
+    return out;
+}
+
 static char *readInteractiveLine(const char *prompt,
                                  bool *out_eof,
                                  bool *out_editor_failed) {
     bool installed_sigint_handler = false;
+    const bool has_real_tty = pscalRuntimeStdinHasRealTTY();
     if (out_eof) {
         *out_eof = false;
     }
@@ -1738,54 +2719,65 @@ static char *readInteractiveLine(const char *prompt,
     }
 
     struct termios original_termios;
-    if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-
-    struct termios raw_termios = original_termios;
-    raw_termios.c_lflag &= ~(ICANON | ECHO);
-    raw_termios.c_cc[VMIN] = 1;
-    raw_termios.c_cc[VTIME] = 0;
-    gInteractiveOriginalTermios = original_termios;
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-    gInteractiveTermiosValid = 1;
-
+    struct termios raw_termios;
     struct sigaction sigint_action;
-    memset(&sigint_action, 0, sizeof(sigint_action));
-    sigemptyset(&sigint_action.sa_mask);
-    sigint_action.sa_handler = interactiveSigintHandler;
-    if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
-        interactiveRestoreTerminal();
-        if (out_editor_failed) {
-            *out_editor_failed = true;
-        }
-        return NULL;
-    }
-    gInteractiveHasOldSigint = 1;
-    installed_sigint_handler = true;
-
     struct sigaction sigtstp_action;
-    memset(&sigtstp_action, 0, sizeof(sigtstp_action));
-    sigemptyset(&sigtstp_action.sa_mask);
-    sigtstp_action.sa_handler = SIG_IGN;
-    if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
-        interactiveRestoreSigintHandler();
-        installed_sigint_handler = false;
-        interactiveRestoreTerminal();
-        if (out_editor_failed) {
-            *out_editor_failed = true;
+    if (has_real_tty) {
+        if (shellTcgetattr(STDIN_FILENO, &original_termios) != 0) {
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
         }
-        return NULL;
+
+        raw_termios = original_termios;
+        raw_termios.c_lflag &= ~(ICANON | ECHO);
+        raw_termios.c_cc[VMIN] = 1;
+        raw_termios.c_cc[VTIME] = 0;
+        gInteractiveOriginalTermios = original_termios;
+        if (shellTcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveTermiosValid = 1;
+
+        memset(&sigint_action, 0, sizeof(sigint_action));
+        sigemptyset(&sigint_action.sa_mask);
+        sigint_action.sa_handler = interactiveSigintHandler;
+        if (sigaction(SIGINT, &sigint_action, &gInteractiveOldSigintAction) != 0) {
+            interactiveRestoreTerminal();
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveHasOldSigint = 1;
+        installed_sigint_handler = true;
+
+        memset(&sigtstp_action, 0, sizeof(sigtstp_action));
+        sigemptyset(&sigtstp_action.sa_mask);
+#if !defined(PSCAL_TARGET_IOS)
+        sigtstp_action.sa_handler = SIG_IGN;
+        if (sigaction(SIGTSTP, &sigtstp_action, &gInteractiveOldSigtstpAction) != 0) {
+            interactiveRestoreSigintHandler();
+            installed_sigint_handler = false;
+            interactiveRestoreTerminal();
+            if (out_editor_failed) {
+                *out_editor_failed = true;
+            }
+            return NULL;
+        }
+        gInteractiveHasOldSigtstp = 1;
+#endif
+    } else {
+        memset(&original_termios, 0, sizeof(original_termios));
+        memset(&raw_termios, 0, sizeof(raw_termios));
+        memset(&sigint_action, 0, sizeof(sigint_action));
+        memset(&sigtstp_action, 0, sizeof(sigtstp_action));
+        gInteractiveTermiosValid = 0;
     }
-    gInteractiveHasOldSigtstp = 1;
 
     size_t capacity = 128;
     char *buffer = (char *)malloc(capacity);
@@ -1804,25 +2796,34 @@ static char *readInteractiveLine(const char *prompt,
     size_t length = 0;
     size_t displayed_length = 0;
     size_t displayed_prompt_lines = shellPromptLineBreakCount(prompt);
-    size_t history_index = 0;
+    gInteractiveLineDrawn = false;
     size_t cursor = 0;
+    size_t history_index = 0;
     char *scratch = NULL;
     interactiveUpdateScratch(&scratch, buffer, length);
     char *kill_buffer = NULL;
     size_t alt_dot_offset = 0;
     bool alt_dot_active = false;
 
-    fputs(prompt, stdout);
-    fflush(stdout);
+    redrawInteractiveLine(prompt,
+                          buffer,
+                          length,
+                          cursor,
+                          &displayed_length,
+                          &displayed_prompt_lines);
 
     bool done = false;
     bool eof_requested = false;
 
     while (!done) {
         unsigned char ch = 0;
-        ssize_t read_count = read(STDIN_FILENO, &ch, 1);
+        ssize_t read_count = shellReadFd(STDIN_FILENO, &ch, 1);
         if (read_count < 0) {
             if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);
                 continue;
             }
             eof_requested = true;
@@ -1835,8 +2836,7 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (ch == '\r' || ch == '\n') {
-            fputc('\n', stdout);
-            fflush(stdout);
+            shellWriteStdoutChar('\n');
             done = true;
             alt_dot_active = false;
             break;
@@ -1862,8 +2862,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -1871,8 +2870,11 @@ static char *readInteractiveLine(const char *prompt,
         if (ch == 3) { /* Ctrl-C */
             alt_dot_active = false;
             alt_dot_offset = 0;
-            fputs("^C\n", stdout);
-            fflush(stdout);
+            shellWriteStdoutStr("^C\n");
+#if defined(PSCAL_TARGET_IOS)
+            raise(SIGINT);
+            shellRuntimeProcessPendingSignals();
+#endif
             length = 0;
             cursor = 0;
             buffer[0] = '\0';
@@ -1880,12 +2882,39 @@ static char *readInteractiveLine(const char *prompt,
             displayed_prompt_lines = shellPromptLineBreakCount(prompt);
             history_index = 0;
             interactiveUpdateScratch(&scratch, buffer, length);
-            fputs(prompt, stdout);
-            fflush(stdout);
+            shellWriteStdoutStr(prompt);
             continue;
         }
 
         if (ch == 26) { /* Ctrl-Z */
+#if defined(PSCAL_TARGET_IOS)
+            /* On iOS, deliver SIGTSTP to the running builtin/VM and reset the prompt. */
+            alt_dot_active = false;
+            alt_dot_offset = 0;
+            shellWriteStdoutStr("^Z\n");
+            raise(SIGTSTP);
+#if defined(PSCAL_TARGET_IOS)
+            shellRuntimeProcessPendingSignals();
+#endif
+            length = 0;
+            cursor = 0;
+            buffer[0] = '\0';
+            displayed_length = 0;
+            displayed_prompt_lines = shellPromptLineBreakCount(prompt);
+            history_index = 0;
+            interactiveUpdateScratch(&scratch, buffer, length);
+            redrawInteractiveLine(prompt,
+                                  buffer,
+                                  length,
+                                  cursor,
+                                  &displayed_length,
+                                  &displayed_prompt_lines);
+            continue;
+#endif
+            if (!has_real_tty) {
+                shellWriteStdoutStr("job control (Ctrl-Z) not supported on this terminal\n");
+                continue;
+            }
             alt_dot_active = false;
             alt_dot_offset = 0;
             interactiveRestoreSigintHandler();
@@ -1893,7 +2922,7 @@ static char *readInteractiveLine(const char *prompt,
             interactiveRestoreSigtstpHandler();
             interactiveRestoreTerminal();
             raise(SIGTSTP);
-            if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
+            if (shellTcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_termios) != 0) {
                 if (out_editor_failed) {
                     *out_editor_failed = true;
                 }
@@ -1934,7 +2963,7 @@ static char *readInteractiveLine(const char *prompt,
         if (ch == 12) { /* Ctrl-L */
             alt_dot_active = false;
             alt_dot_offset = 0;
-            fputs("\033[H\033[J", stdout);
+            shellWriteStdoutStr("\033[H\033[J");
             redrawInteractiveLine(prompt,
                                   buffer,
                                   length,
@@ -1970,8 +2999,7 @@ static char *readInteractiveLine(const char *prompt,
                                               &displayed_prompt_lines,
                                               &history_index,
                                               &scratch)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -1988,8 +3016,7 @@ static char *readInteractiveLine(const char *prompt,
                                                 &displayed_prompt_lines,
                                                 &history_index,
                                                 &scratch)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2008,11 +3035,9 @@ static char *readInteractiveLine(const char *prompt,
                                           &history_index,
                                           &scratch,
                                           &submit_line)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             } else if (submit_line) {
-                fputc('\n', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\n');
                 done = true;
                 break;
             }
@@ -2024,8 +3049,7 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor > 0) {
                 if (!interactiveSetKillBuffer(&kill_buffer, buffer, cursor)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 memmove(buffer, buffer + cursor, length - cursor + 1);
@@ -2040,8 +3064,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2051,8 +3074,7 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor < length) {
                 if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, length - cursor)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 buffer[cursor] = '\0';
@@ -2067,8 +3089,7 @@ static char *readInteractiveLine(const char *prompt,
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
                 interactiveSetKillBuffer(&kill_buffer, NULL, 0);
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2080,8 +3101,7 @@ static char *readInteractiveLine(const char *prompt,
             if (prev < cursor) {
                 size_t removed_len = cursor - prev;
                 if (!interactiveSetKillBuffer(&kill_buffer, buffer + prev, removed_len)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 memmove(buffer + prev, buffer + cursor, length - cursor + 1);
@@ -2096,8 +3116,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2112,8 +3131,7 @@ static char *readInteractiveLine(const char *prompt,
                                            &cursor,
                                            kill_buffer,
                                            kill_len)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     continue;
                 }
                 redrawInteractiveLine(prompt,
@@ -2125,8 +3143,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             alt_dot_active = false;
             continue;
@@ -2153,8 +3170,7 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2171,8 +3187,7 @@ static char *readInteractiveLine(const char *prompt,
                                       &displayed_length,
                                       &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2189,8 +3204,7 @@ static char *readInteractiveLine(const char *prompt,
                                       &displayed_length,
                                       &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2200,11 +3214,14 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor > 0) {
                 cursor--;
-                fputs("\033[D", stdout);
-                fflush(stdout);
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2214,11 +3231,14 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             if (cursor < length) {
                 cursor++;
-                fputs("\033[C", stdout);
-                fflush(stdout);
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             }
             continue;
         }
@@ -2239,19 +3259,26 @@ static char *readInteractiveLine(const char *prompt,
                 history_index = 0;
                 interactiveUpdateScratch(&scratch, buffer, length);
             } else {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
+                /* Ensure the prompt stays intact even when backspace is hit at
+                 * the start of input. */
+                redrawInteractiveLine(prompt,
+                                      buffer,
+                                      length,
+                                      cursor,
+                                      &displayed_length,
+                                      &displayed_prompt_lines);
             }
             continue;
         }
 
         if (ch == 27) { /* Escape sequence */
             unsigned char seq[3];
-            if (read(STDIN_FILENO, &seq[0], 1) <= 0) {
+            if (shellReadFd(STDIN_FILENO, &seq[0], 1) <= 0) {
                 continue;
             }
             if (seq[0] == '[') {
-                if (read(STDIN_FILENO, &seq[1], 1) <= 0) {
+                if (shellReadFd(STDIN_FILENO, &seq[1], 1) <= 0) {
                     continue;
                 }
                 if (seq[1] == 'A') { /* Up arrow */
@@ -2266,8 +3293,7 @@ static char *readInteractiveLine(const char *prompt,
                                                       &displayed_prompt_lines,
                                                       &history_index,
                                                       &scratch)) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] == 'B') { /* Down arrow */
@@ -2282,8 +3308,7 @@ static char *readInteractiveLine(const char *prompt,
                                                         &displayed_prompt_lines,
                                                         &history_index,
                                                         &scratch)) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] == 'C') { /* Right arrow */
@@ -2291,11 +3316,14 @@ static char *readInteractiveLine(const char *prompt,
                     alt_dot_offset = 0;
                     if (cursor < length) {
                         cursor++;
-                        fputs("\033[C", stdout);
-                        fflush(stdout);
+                        redrawInteractiveLine(prompt,
+                                              buffer,
+                                              length,
+                                              cursor,
+                                              &displayed_length,
+                                              &displayed_prompt_lines);
                     } else {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] == 'D') { /* Left arrow */
@@ -2303,15 +3331,18 @@ static char *readInteractiveLine(const char *prompt,
                     alt_dot_offset = 0;
                     if (cursor > 0) {
                         cursor--;
-                        fputs("\033[D", stdout);
-                        fflush(stdout);
+                        redrawInteractiveLine(prompt,
+                                              buffer,
+                                              length,
+                                              cursor,
+                                              &displayed_length,
+                                              &displayed_prompt_lines);
                     } else {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                     }
                     continue;
                 } else if (seq[1] >= '0' && seq[1] <= '9') {
-                    if (read(STDIN_FILENO, &seq[2], 1) <= 0) {
+                    if (shellReadFd(STDIN_FILENO, &seq[2], 1) <= 0) {
                         continue;
                     }
                     if (seq[1] == '3' && seq[2] == '~') { /* Delete */
@@ -2330,8 +3361,7 @@ static char *readInteractiveLine(const char *prompt,
                             history_index = 0;
                             interactiveUpdateScratch(&scratch, buffer, length);
                         } else {
-                            fputc('\a', stdout);
-                            fflush(stdout);
+                            shellWriteStdoutChar('\a');
                         }
                         continue;
                     }
@@ -2349,8 +3379,7 @@ static char *readInteractiveLine(const char *prompt,
                                           &displayed_length,
                                           &displayed_prompt_lines);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == 'b' || seq[0] == 'B') { /* Alt+B */
@@ -2366,8 +3395,7 @@ static char *readInteractiveLine(const char *prompt,
                                           &displayed_length,
                                           &displayed_prompt_lines);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == 'd' || seq[0] == 'D') { /* Alt+D */
@@ -2377,8 +3405,7 @@ static char *readInteractiveLine(const char *prompt,
                 if (next > cursor) {
                     size_t removed_len = next - cursor;
                     if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, removed_len)) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                         continue;
                     }
                     memmove(buffer + cursor, buffer + next, length - next + 1);
@@ -2392,8 +3419,7 @@ static char *readInteractiveLine(const char *prompt,
                     history_index = 0;
                     interactiveUpdateScratch(&scratch, buffer, length);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == 't' || seq[0] == 'T') { /* Alt+T */
@@ -2406,8 +3432,7 @@ static char *readInteractiveLine(const char *prompt,
                             current_start++;
                         }
                         if (current_start >= length) {
-                            fputc('\a', stdout);
-                            fflush(stdout);
+                            shellWriteStdoutChar('\a');
                             continue;
                         }
                     } else {
@@ -2424,8 +3449,7 @@ static char *readInteractiveLine(const char *prompt,
                         prev_end--;
                     }
                     if (prev_end == 0) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                         continue;
                     }
                     size_t prev_start = prev_end;
@@ -2437,8 +3461,7 @@ static char *readInteractiveLine(const char *prompt,
                     size_t word2_len = current_end - current_start;
                     char *temp = (char *)malloc(length + 1);
                     if (!temp) {
-                        fputc('\a', stdout);
-                        fflush(stdout);
+                        shellWriteStdoutChar('\a');
                         continue;
                     }
                     memcpy(temp, buffer, prev_start);
@@ -2462,8 +3485,7 @@ static char *readInteractiveLine(const char *prompt,
                     history_index = 0;
                     interactiveUpdateScratch(&scratch, buffer, length);
                 } else {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                 }
                 continue;
             } else if (seq[0] == '.') { /* Alt+. */
@@ -2474,15 +3496,13 @@ static char *readInteractiveLine(const char *prompt,
                 }
                 char *argument = NULL;
                 if (!interactiveExtractLastArgument(alt_dot_offset, &argument)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     continue;
                 }
                 if (!argument) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     continue;
@@ -2494,8 +3514,7 @@ static char *readInteractiveLine(const char *prompt,
                                            &cursor,
                                            argument,
                                            arg_len)) {
-                    fputc('\a', stdout);
-                    fflush(stdout);
+                    shellWriteStdoutChar('\a');
                     free(argument);
                     alt_dot_active = false;
                     alt_dot_offset = 0;
@@ -2529,8 +3548,7 @@ static char *readInteractiveLine(const char *prompt,
                                                 &displayed_length,
                                                 &displayed_prompt_lines,
                                                 &scratch)) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
             } else {
                 history_index = 0;
             }
@@ -2540,8 +3558,7 @@ static char *readInteractiveLine(const char *prompt,
         if (!isprint(ch)) {
             alt_dot_active = false;
             alt_dot_offset = 0;
-            fputc('\a', stdout);
-            fflush(stdout);
+            shellWriteStdoutChar('\a');
             continue;
         }
 
@@ -2555,8 +3572,7 @@ static char *readInteractiveLine(const char *prompt,
             }
             char *new_buffer = (char *)realloc(buffer, new_capacity);
             if (!new_buffer) {
-                fputc('\a', stdout);
-                fflush(stdout);
+                shellWriteStdoutChar('\a');
                 continue;
             }
             buffer = new_buffer;
@@ -2619,9 +3635,20 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     exec_opts.exit_on_signal = false;
 
     int last_status = shellRuntimeLastStatus();
-    bool tty = isatty(STDIN_FILENO);
+    bool tty = pscalRuntimeStdinIsInteractive();
+    const char *force_no_tty = getenv("PSCAL_FORCE_NO_TTY");
+    if (force_no_tty && *force_no_tty && force_no_tty[0] != '0') {
+        tty = false;
+    }
 
     while (true) {
+#if defined(PSCAL_TARGET_IOS)
+        shellEnsureSelfVprocActive();
+#endif
+        pscalRuntimeConsumeSigint();
+        pscalRuntimeClearInterruptFlag();
+        shellRuntimeEnsureStandardFds();
+        shellRuntimeRestoreForeground();
         char *prompt_storage = shellResolveInteractivePrompt();
         const char *prompt = prompt_storage ? prompt_storage : "exsh$ ";
         char *line = NULL;
@@ -2630,26 +3657,37 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         if (tty) {
             line = readInteractiveLine(prompt, &interactive_eof, &editor_failed);
             if (!line && editor_failed) {
+#if defined(PSCAL_TARGET_IOS)
+                if (pscalRuntimeStdinIsInteractive() && !pscalRuntimeStdinHasRealTTY()) {
+                    usleep(1000);
+                    free(prompt_storage);
+                    continue;
+                }
+#endif
                 tty = false;
             }
             if (!line && interactive_eof) {
-                fputc('\n', stdout);
+                shellWriteStdoutChar('\n');
                 free(prompt_storage);
                 break;
             }
         }
-        size_t line_capacity = 0;
         ssize_t read = 0;
         if (!line) {
-            if (isatty(STDIN_FILENO)) {
-                fputs(prompt, stdout);
-                fflush(stdout);
+            if (pscalRuntimeStdinIsInteractive()) {
+                shellWriteStdoutStr(prompt);
             }
-            read = getline(&line, &line_capacity, stdin);
-            if (read < 0) {
-                free(line);
-                if (isatty(STDIN_FILENO)) {
-                    fputc('\n', stdout);
+            int read_err = 0;
+            line = readLineFd(STDIN_FILENO, &read, &read_err);
+            if (!line) {
+                int saved_errno = read_err;
+                shellRuntimeEnsureStandardFds();
+                if (saved_errno == EBADF || saved_errno == EIO) {
+                    free(prompt_storage);
+                    continue;
+                }
+                if (pscalRuntimeStdinIsInteractive()) {
+                    shellWriteStdoutChar('\n');
                 }
                 free(prompt_storage);
                 break;
@@ -2683,15 +3721,24 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             free(line);
             continue;
         }
-        if (used_history && isatty(STDIN_FILENO)) {
-            printf("%s\n", expanded_line);
-            fflush(stdout);
+        if (used_history && pscalRuntimeStdinIsInteractive()) {
+            shellWriteStdoutStr(expanded_line);
+            shellWriteStdoutChar('\n');
         }
         if (history_error) {
             free(history_error);
         }
         free(line);
         line = expanded_line;
+
+        char *rewritten_line = interactiveRewriteCombinedRedirects(line);
+        if (!rewritten_line) {
+            fprintf(stderr, "exsh: failed to rewrite redirects\n");
+            free(line);
+            continue;
+        }
+        free(line);
+        line = rewritten_line;
 
         char *expanded_tilde = interactiveExpandTilde(line);
         if (!expanded_tilde) {
@@ -2712,11 +3759,51 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     return last_status;
 }
 
-int main(int argc, char **argv) {
+int exsh_main(int argc, char **argv) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_SHELL);
+#if defined(PSCAL_TARGET_IOS)
+#define EXSH_RETURN(value)                             \
+    do {                                               \
+        int __exsh_rc = (value);                       \
+        shellTeardownSelfVproc(__exsh_rc);             \
+        frontendPopKind(previousKind);                 \
+        return __exsh_rc;                              \
+    } while (0)
+#else
+#define EXSH_RETURN(value)                             \
+    do {                                               \
+        int __exsh_rc = (value);                       \
+        frontendPopKind(previousKind);                 \
+        return __exsh_rc;                              \
+    } while (0)
+#endif
     ShellRunOptions options = {0};
     options.frontend_path = (argc > 0) ? argv[0] : "exsh";
     options.quiet = true;
     options.suppress_warnings = true;
+
+    registerShellFrontendBuiltins();
+    vmSetSuppressStateDump(true);
+
+#if defined(PSCAL_TARGET_IOS)
+    if (getenv("PSCALI_PIPE_DEBUG")) {
+        char logbuf[1024];
+        int written = snprintf(logbuf, sizeof(logbuf), "[exsh-ios] argc=%d", argc);
+        for (int i = 0; i < argc && written < (int)sizeof(logbuf) - 8; ++i) {
+            int n = snprintf(logbuf + written, sizeof(logbuf) - (size_t)written,
+                             " argv[%d]='%s'", i, argv[i] ? argv[i] : "(null)");
+            if (n <= 0) {
+                break;
+            }
+            written += n;
+        }
+        shellDebugLog(logbuf);
+    }
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    shellSetupSelfVproc();
+#endif
+
     shellRuntimeSetArg0(options.frontend_path);
     shellRuntimeSetInteractive(false);
 
@@ -2727,14 +3814,50 @@ int main(int argc, char **argv) {
     const char *command_arg0 = NULL;
     int command_param_start = -1;
 
+    /* Self-hosted jobspec test helper for environments (iOS) where the test
+     * script file is not present on disk. Invoked as `exsh testjobs`. */
+    static const char *kJobspecSelfTest =
+        "set -e\n"
+        "set -m\n"
+        "echo --DB1--\n"
+        "if [[ foo == foo ]]; then echo OK; else echo BAD; exit 1; fi\n"
+        "echo --J1--\n"
+        "sleep 60 &\n"
+        "sleep 60 &\n"
+        "jobs\n"
+        "echo --K1--\n"
+        "kill %1\n"
+        "sleep 1\n"
+        "echo --J2--\n"
+        "jobs\n"
+        "echo --K2--\n"
+        "kill %2 || true\n"
+        "sleep 1\n"
+        "echo --J3--\n"
+        "jobs\n"
+        "echo --M1--\n"
+        "sleep 60 &\n"
+        "sleep 60 &\n"
+        "sleep 60 &\n"
+        "echo --J4--\n"
+        "jobs\n"
+        "echo --Kmid--\n"
+        "kill %2\n"
+        "sleep 1\n"
+        "echo --J5--\n"
+        "jobs\n"
+        "echo --Kall--\n"
+        "kill %1 || true\n"
+        "kill %3 || true\n";
+
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("%s", SHELL_USAGE);
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "-v") == 0) {
             printf("Shell Frontend Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
-            return vmExitWithCleanup(EXIT_SUCCESS);
+            EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[i], "--dump-ast-json") == 0) {
             options.dump_ast_json = 1;
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) {
@@ -2764,7 +3887,7 @@ int main(int argc, char **argv) {
                 }
                 const char *program_name = (slash && slash[1]) ? slash + 1 : program;
                 fprintf(stderr, "%s: -c: option requires an argument\n", program_name);
-                return vmExitWithCleanup(2);
+                EXSH_RETURN(vmExitWithCleanup(2));
             }
             command_string = argv[i + 1];
             if (i + 2 < argc) {
@@ -2776,8 +3899,14 @@ int main(int argc, char **argv) {
             break;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n%s\n", argv[i], SHELL_USAGE);
-            return EXIT_FAILURE;
+            EXSH_RETURN(EXIT_FAILURE);
         } else {
+            if (strcmp(argv[i], "testjobs") == 0) {
+                command_string = kJobspecSelfTest;
+                command_param_start = argc;
+                command_arg0 = argv[0];
+                break;
+            }
             path = argv[i];
             arg_start_index = i + 1;
             break;
@@ -2786,7 +3915,7 @@ int main(int argc, char **argv) {
 
     if (dump_ext_builtins_flag) {
         shellDumpBuiltins(stdout);
-        return vmExitWithCleanup(EXIT_SUCCESS);
+        EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
     setenv("EXSH_LAST_STATUS", "0", 1);
@@ -2796,7 +3925,7 @@ int main(int argc, char **argv) {
         shellRuntimeSetInteractive(false);
         char *src = shellLoadFile(path);
         if (!src) {
-            return EXIT_FAILURE;
+            EXSH_RETURN(EXIT_FAILURE);
         }
         if (arg_start_index < argc) {
             gParamCount = argc - arg_start_index;
@@ -2810,7 +3939,7 @@ int main(int argc, char **argv) {
         (void)exit_requested;
         free(src);
         shellRuntimeSetArg0(options.frontend_path);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     if (command_string) {
@@ -2835,27 +3964,27 @@ int main(int argc, char **argv) {
         int status = shellRunSource(command_string, "<command>", &command_options, &exit_requested);
         (void)exit_requested;
         shellRuntimeSetArg0(options.frontend_path);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     gParamCount = 0;
     gParamValues = NULL;
 
-    if (isatty(STDIN_FILENO)) {
+    if (pscalRuntimeStdinIsInteractive()) {
         shellRuntimeSetInteractive(true);
+        shellRuntimeInitJobControl();
         int rc_status = EXIT_SUCCESS;
         if (shellRunStartupConfig(&options, &rc_status)) {
-            return vmExitWithCleanup(rc_status);
+            EXSH_RETURN(vmExitWithCleanup(rc_status));
         }
-        shellRuntimeInitJobControl();
         int status = runInteractiveSession(&options);
-        return vmExitWithCleanup(status);
+        EXSH_RETURN(vmExitWithCleanup(status));
     }
 
     shellRuntimeSetInteractive(false);
-    char *stdin_src = readStream(stdin);
+    char *stdin_src = readStreamFd(STDIN_FILENO);
     if (!stdin_src) {
-        return EXIT_FAILURE;
+        EXSH_RETURN(EXIT_FAILURE);
     }
 
     ShellRunOptions stdin_opts = options;
@@ -2865,5 +3994,334 @@ int main(int argc, char **argv) {
     int status = shellRunSource(stdin_src, "<stdin>", &stdin_opts, &exit_requested);
     (void)exit_requested;
     free(stdin_src);
-    return vmExitWithCleanup(status);
+    EXSH_RETURN(vmExitWithCleanup(status));
 }
+#undef EXSH_RETURN
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
+#elif defined(PSCAL_TARGET_IOS) && defined(SDL)
+#include "SDL_main.h"
+int SDL_main(int argc, char **argv) {
+    return exsh_main(argc, argv);
+}
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    int argc;
+    char **argv;
+    struct pscal_fd *pty_master;
+    struct pscal_fd *pty_slave;
+    uint64_t session_id;
+    PSCALRuntimeContext *runtime_ctx;
+} ShellSessionContext;
+
+/* Ensure shell session threads have enough stack for frontends (rea/clike). */
+#define SHELL_SESSION_THREAD_STACK_SZ (32 * 1024 * 1024)
+
+extern void pscalRuntimeShellSessionExited(uint64_t session_id, int status) __attribute__((weak));
+extern void pscalRuntimeKernelSessionExited(uint64_t session_id, int status) __attribute__((weak));
+extern void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) __attribute__((weak));
+extern ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t session_id) __attribute__((weak));
+extern void PSCALRuntimeRegisterSessionContext(uint64_t session_id) __attribute__((weak));
+extern void PSCALRuntimeUnregisterSessionContext(uint64_t session_id) __attribute__((weak));
+extern PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) __attribute__((weak));
+extern void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) __attribute__((weak));
+extern void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx) __attribute__((weak));
+
+static void shellSessionNotifyExit(uint64_t session_id, int status) {
+    if (pscalRuntimeShellSessionExited) {
+        pscalRuntimeShellSessionExited(session_id, status);
+    }
+    if (pscalRuntimeKernelSessionExited) {
+        pscalRuntimeKernelSessionExited(session_id, status);
+    }
+}
+
+static char **shellCopyArgv(int argc, char **argv) {
+    if (argc <= 0 || !argv) {
+        return NULL;
+    }
+    char **copy = (char **)calloc((size_t)argc, sizeof(char *));
+    if (!copy) {
+        return NULL;
+    }
+    for (int i = 0; i < argc; ++i) {
+        const char *src = argv[i] ? argv[i] : "";
+        copy[i] = strdup(src);
+        if (!copy[i]) {
+            for (int j = 0; j < i; ++j) {
+                free(copy[j]);
+            }
+            free(copy);
+            return NULL;
+        }
+    }
+    return copy;
+}
+
+static void shellFreeArgv(char **argv, int argc) {
+    if (!argv) {
+        return;
+    }
+    for (int i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+static void shellCloseSessionFds(ShellSessionContext *ctx) {
+    if (!ctx) {
+        return;
+    }
+    if (ctx->pty_master) {
+        pscal_fd_close(ctx->pty_master);
+        ctx->pty_master = NULL;
+    }
+    if (ctx->pty_slave) {
+        pscal_fd_close(ctx->pty_slave);
+        ctx->pty_slave = NULL;
+    }
+}
+
+static bool shellIoDebugEnabled(void) {
+    const char *env = getenv("PSCALI_IO_DEBUG");
+    if (!env || env[0] == '\0') {
+        return false;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static void *shellRunSessionThread(void *arg) {
+    ShellSessionContext *ctx = (ShellSessionContext *)arg;
+    if (!ctx) {
+        return NULL;
+    }
+    PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            shellDebugLogf("[session] id=%llu runtime_ctx=%p\n",
+                           (unsigned long long)ctx->session_id,
+                           (void *)ctx->runtime_ctx);
+        }
+    }
+    int status = 255;
+    int kernel_pid = vprocEnsureKernelPid();
+    VProcSessionStdio *session_stdio = vprocSessionStdioCreate();
+    if (!session_stdio) {
+        shellCloseSessionFds(ctx);
+        shellSessionNotifyExit(ctx->session_id, status);
+        shellFreeArgv(ctx->argv, ctx->argc);
+        free(ctx);
+        if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+            PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+        }
+        return NULL;
+    }
+    if (vprocSessionStdioInitWithPty(session_stdio,
+                                     ctx->pty_slave,
+                                     ctx->pty_master,
+                                     ctx->session_id,
+                                     kernel_pid) != 0) {
+        vprocSessionStdioDestroy(session_stdio);
+        shellCloseSessionFds(ctx);
+        shellSessionNotifyExit(ctx->session_id, status);
+        shellFreeArgv(ctx->argv, ctx->argc);
+        free(ctx);
+        return NULL;
+    }
+    vprocSessionStdioActivate(session_stdio);
+    if (PSCALRuntimeSetCurrentRuntimeStdio) {
+        PSCALRuntimeSetCurrentRuntimeStdio(session_stdio);
+    }
+    if (shellIoDebugEnabled()) {
+        shellDebugLogf("[session-io] activate id=%llu stdio=%p pty_active=%d\n",
+                       (unsigned long long)ctx->session_id,
+                       (void *)session_stdio,
+                       session_stdio->pty_active ? 1 : 0);
+    }
+    if (getenv("PSCALI_VPROC_DEBUG")) {
+        shellDebugLogf("[session] id=%llu stdio=%p pty_slave=%p pty_master=%p\n",
+                       (unsigned long long)ctx->session_id,
+                       (void *)session_stdio,
+                       (void *)session_stdio->pty_slave,
+                       (void *)session_stdio->pty_master);
+    }
+    if (pscalRuntimeRegisterShellThread) {
+        pscalRuntimeRegisterShellThread(ctx->session_id, pthread_self());
+    }
+    ctx->pty_slave = NULL;
+    ctx->pty_master = NULL;
+
+    ShellRuntimeState *session_ctx = NULL;
+    bool session_ctx_owned = false;
+    if (pscalRuntimeShellContextForSession) {
+        session_ctx = pscalRuntimeShellContextForSession(ctx->session_id);
+    }
+    if (!session_ctx) {
+        session_ctx = shellRuntimeCreateContext();
+        session_ctx_owned = (session_ctx != NULL);
+    }
+    if (session_ctx) {
+        ShellRuntimeState *prev_ctx = shellRuntimeActivateContext(session_ctx);
+        shellRuntimeInitSignals();
+        status = exsh_main(ctx->argc, ctx->argv);
+        shellRuntimeActivateContext(prev_ctx);
+        if (session_ctx_owned) {
+            shellRuntimeDestroyContext(session_ctx);
+        }
+    }
+
+    if (PSCALRuntimeSetCurrentRuntimeStdio) {
+        PSCALRuntimeSetCurrentRuntimeStdio(NULL);
+    }
+    if (session_stdio) {
+        vprocSessionStdioActivate(NULL);
+        vprocSessionStdioDestroy(session_stdio);
+    }
+
+    shellSessionNotifyExit(ctx->session_id, status);
+    shellFreeArgv(ctx->argv, ctx->argc);
+    free(ctx);
+    if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+    }
+    return NULL;
+}
+
+int PSCALRuntimeCreateShellSession(int argc,
+                                   char **argv,
+                                   uint64_t session_id,
+                                   int *out_read_fd,
+                                   int *out_write_fd) {
+    if (argc <= 0 || !argv) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!out_read_fd || !out_write_fd) {
+        errno = EINVAL;
+        return -1;
+    }
+    *out_read_fd = -1;
+    *out_write_fd = -1;
+
+#if PSCAL_HAS_RUNTIME_INTERPOSE_BOOTSTRAP
+    PSCALRuntimeInterposeBootstrap();
+#else
+    if (PSCALRuntimeInterposeBootstrap) {
+        PSCALRuntimeInterposeBootstrap();
+    }
+#endif
+    (void)vprocEnsureKernelPid();
+
+    if (shellIoDebugEnabled()) {
+        shellDebugLogf("[session-io] create id=%llu argc=%d argv0=%s\n",
+                       (unsigned long long)session_id,
+                       argc,
+                       (argc > 0 && argv && argv[0]) ? argv[0] : "(null)");
+    }
+    struct pscal_fd *pty_master = NULL;
+    struct pscal_fd *pty_slave = NULL;
+    int pty_num = -1;
+    int pty_err = pscalPtyOpenMaster(O_RDWR, &pty_master, &pty_num);
+    if (pty_err < 0) {
+        errno = pscalCompatErrno(pty_err);
+        return -1;
+    }
+    pty_err = pscalPtyUnlock(pty_master);
+    if (pty_err < 0) {
+        if (pty_master) pscal_fd_close(pty_master);
+        errno = pscalCompatErrno(pty_err);
+        return -1;
+    }
+    pty_err = pscalPtyOpenSlave(pty_num, O_RDWR, &pty_slave);
+    if (pty_err < 0) {
+        if (pty_master) pscal_fd_close(pty_master);
+        errno = pscalCompatErrno(pty_err);
+        return -1;
+    }
+
+    ShellSessionContext *ctx = (ShellSessionContext *)calloc(1, sizeof(ShellSessionContext));
+    if (!ctx) {
+        errno = ENOMEM;
+        if (pty_master) pscal_fd_close(pty_master);
+        if (pty_slave) pscal_fd_close(pty_slave);
+        return -1;
+    }
+    ctx->argc = argc;
+    ctx->pty_master = pty_master;
+    ctx->pty_slave = pty_slave;
+    ctx->session_id = session_id;
+    ctx->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+        ? PSCALRuntimeGetCurrentRuntimeContext()
+        : NULL;
+    if (shellIoDebugEnabled()) {
+        shellDebugLogf("[session-io] setup id=%llu ctx=%p pty=(%p,%p)\n",
+                       (unsigned long long)session_id,
+                       (void *)ctx->runtime_ctx,
+                       (void *)pty_master,
+                       (void *)pty_slave);
+    }
+    ctx->argv = shellCopyArgv(argc, argv);
+    if (!ctx->argv) {
+        shellCloseSessionFds(ctx);
+        free(ctx);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    if (PSCALRuntimeRegisterSessionContext) {
+        PSCALRuntimeRegisterSessionContext(session_id);
+    }
+
+    pthread_t thread;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    size_t stack_size = (size_t)SHELL_SESSION_THREAD_STACK_SZ;
+    if (stack_size < (size_t)PTHREAD_STACK_MIN) {
+        stack_size = (size_t)PTHREAD_STACK_MIN;
+    }
+    int attr_err = pthread_attr_setstacksize(&attr, stack_size);
+    int err = vprocHostPthreadCreate(&thread, attr_err == 0 ? &attr : NULL, shellRunSessionThread, ctx);
+    pthread_attr_destroy(&attr);
+    if (err != 0) {
+        if (PSCALRuntimeUnregisterSessionContext) {
+            PSCALRuntimeUnregisterSessionContext(session_id);
+        }
+        shellFreeArgv(ctx->argv, ctx->argc);
+        shellCloseSessionFds(ctx);
+        free(ctx);
+        errno = err;
+        return -1;
+    }
+    pthread_detach(thread);
+    *out_read_fd = -1;
+    *out_write_fd = -1;
+    if (shellIoDebugEnabled()) {
+        shellDebugLogf("[session-io] launched id=%llu\n",
+                       (unsigned long long)session_id);
+    }
+    return 0;
+}
+#else
+int PSCALRuntimeCreateShellSession(int argc,
+                                   char **argv,
+                                   uint64_t session_id,
+                                   int *out_read_fd,
+                                   int *out_write_fd) {
+    (void)argc;
+    (void)argv;
+    (void)session_id;
+    (void)out_read_fd;
+    (void)out_write_fd;
+    errno = ENOTSUP;
+    return -1;
+}
+#endif

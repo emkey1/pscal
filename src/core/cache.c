@@ -868,8 +868,16 @@ static bool writeValue(FILE* f, const Value* v) {
                     total *= span;
                 }
             }
-            for (int i = 0; i < total; i++) {
-                if (!writeValue(f, &v->array_val[i])) return false;
+            if (total > 0 && arrayUsesPackedBytes(v)) {
+                if (!v->array_raw) return false;
+                for (int i = 0; i < total; i++) {
+                    Value temp = makeByte(v->array_raw[i]);
+                    if (!writeValue(f, &temp)) return false;
+                }
+            } else {
+                for (int i = 0; i < total; i++) {
+                    if (!writeValue(f, &v->array_val[i])) return false;
+                }
             }
             break;
         }
@@ -1019,6 +1027,18 @@ static bool readChunkCore(FILE* f,
         if (!chunk->constants) {
             free(chunk->code);
             free(chunk->lines);
+            chunk->code = NULL;
+            chunk->lines = NULL;
+            RETURN_FALSE;
+        }
+        chunk->global_symbol_cache = (Symbol**)calloc((size_t)const_count, sizeof(Symbol*));
+        if (!chunk->global_symbol_cache) {
+            free(chunk->code);
+            free(chunk->lines);
+            free(chunk->constants);
+            chunk->code = NULL;
+            chunk->lines = NULL;
+            chunk->constants = NULL;
             RETURN_FALSE;
         }
     }
@@ -1149,6 +1169,7 @@ static bool readChunkCore(FILE* f,
             freeValue(sym->value);
             *(sym->value) = val;
             sym->is_const = true;
+            insertConstGlobalSymbol(name, *(sym->value));
         } else {
             freeValue(&val);
         }
@@ -1346,6 +1367,8 @@ static void hashValue(uint64_t* hash, const Value* v, ChunkHashContext* ctx) {
                 for (int i = 0; i < total; ++i) {
                     hashValue(hash, &v->array_val[i], ctx);
                 }
+            } else if (total > 0 && arrayUsesPackedBytes(v) && v->array_raw) {
+                fnv1aUpdate(hash, v->array_raw, (size_t)total);
             }
             break;
         }
@@ -1381,6 +1404,8 @@ static void hashValue(uint64_t* hash, const Value* v, ChunkHashContext* ctx) {
 }
 
 static bool readValue(FILE* f, Value* out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(Value));
     if (fread(&out->type, sizeof(out->type), 1, f) != 1) return false;
     switch (out->type) {
         case TYPE_INTEGER:
@@ -1420,6 +1445,7 @@ static bool readValue(FILE* f, Value* out) {
             break; }
         case TYPE_CHAR:
             if (fread(&out->c_val, sizeof(out->c_val), 1, f) != 1) return false;
+            SET_INT_VALUE(out, out->c_val);
             break;
         case TYPE_STRING: {
             int len = 0;
@@ -1469,6 +1495,7 @@ static bool readValue(FILE* f, Value* out) {
             if (fread(&dims, sizeof(dims), 1, f) != 1) return false;
             out->dimensions = dims;
             if (fread(&out->element_type, sizeof(out->element_type), 1, f) != 1) return false;
+            out->array_is_packed = isPackedByteElementType(out->element_type);
             if (dims > 0) {
                 out->lower_bounds = (int*)malloc(sizeof(int) * dims);
                 out->upper_bounds = (int*)malloc(sizeof(int) * dims);
@@ -1490,11 +1517,23 @@ static bool readValue(FILE* f, Value* out) {
                 total *= span;
             }
             out->array_val = NULL;
+            out->array_raw = NULL;
             if (total > 0) {
-                out->array_val = (Value*)calloc((size_t)total, sizeof(Value));
-                if (!out->array_val) return false;
-                for (int i = 0; i < total; i++) {
-                    if (!readValue(f, &out->array_val[i])) return false;
+                if (out->array_is_packed) {
+                    out->array_raw = (uint8_t*)calloc((size_t)total, sizeof(uint8_t));
+                    if (!out->array_raw) return false;
+                    for (int i = 0; i < total; i++) {
+                        Value temp;
+                        if (!readValue(f, &temp)) return false;
+                        out->array_raw[i] = (unsigned char)AS_INTEGER(temp);
+                        freeValue(&temp);
+                    }
+                } else {
+                    out->array_val = (Value*)calloc((size_t)total, sizeof(Value));
+                    if (!out->array_val) return false;
+                    for (int i = 0; i < total; i++) {
+                        if (!readValue(f, &out->array_val[i])) return false;
+                    }
                 }
             }
             break;
@@ -1985,6 +2024,15 @@ bool loadBytecodeFromCache(const char* source_path,
                 frontend_for_cache = resolved_frontend;
             }
         }
+    }
+    /* If we cannot resolve the frontend path, avoid using potentially stale
+     * cached bytecode that was produced by a different binary (common when
+     * in-process tool runners set argv[0] to just the tool name). */
+    if (frontend_path && frontend_path[0] && !frontend_for_cache) {
+        free(prefix);
+        free(sanitized_base);
+        free(dir);
+        return false;
     }
 
     size_t candidate_count = 0;

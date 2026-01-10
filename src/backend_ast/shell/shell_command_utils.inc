@@ -1,5 +1,49 @@
 /* Auto-generated include: command assembly helpers and metadata parsing. Included from shell.c. */
 #include "shell/runner.h"
+#include <stdlib.h>
+#include <string.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#include "common/path_truncate.h"
+extern void pscalRuntimeDebugLog(const char *message);
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#undef stdin
+#undef stdout
+#undef stderr
+#undef printf
+#undef puts
+#undef putchar
+#undef perror
+#define stdin shellVprocStdin()
+#define stdout shellVprocStdout()
+#define stderr shellVprocStderr()
+#define printf(...) fprintf(stdout, __VA_ARGS__)
+#define puts(text) shellVprocPuts((text))
+#define putchar(ch) fputc((ch), stdout)
+#define perror(label) shellVprocPerror((label))
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#define SHELL_GETCWD(buf, len) pscalPathVirtualized_getcwd((buf), (len))
+#define SHELL_CHDIR(path) pscalPathVirtualized_chdir((path))
+#else
+#define SHELL_GETCWD(buf, len) getcwd((buf), (len))
+#define SHELL_CHDIR(path) chdir((path))
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+static const char *shellVisiblePath(const char *path, char *buffer, size_t buffer_len) {
+    if (!path) {
+        return NULL;
+    }
+    if (pathTruncateStrip(path, buffer, buffer_len)) {
+        return buffer;
+    }
+    return path;
+}
+#endif
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
 static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
 static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal);
@@ -200,6 +244,69 @@ typedef struct {
     int error;
 } ShellCommandSubReadContext;
 
+static char **shellCommandSubSnapshotEnv(void) {
+    extern char **environ;
+    size_t count = 0;
+    for (char **cursor = environ; cursor && *cursor; ++cursor) {
+        count++;
+    }
+    char **copy = (char **)calloc(count + 1, sizeof(char *));
+    if (!copy) {
+        return NULL;
+    }
+    size_t written = 0;
+    for (char **cursor = environ; cursor && *cursor; ++cursor) {
+        copy[written] = strdup(*cursor);
+        if (!copy[written]) {
+            for (size_t i = 0; i < written; ++i) {
+                free(copy[i]);
+            }
+            free(copy);
+            return NULL;
+        }
+        written++;
+    }
+    copy[written] = NULL;
+    return copy;
+}
+
+static void shellCommandSubRestoreEnv(char **snapshot) {
+    if (!snapshot) {
+        return;
+    }
+    /* Clear current environment; emulate clearenv for platforms that do not expose it. */
+    extern char **environ;
+    if (environ) {
+        for (char **cursor = environ; *cursor; ++cursor) {
+            const char *entry = *cursor;
+            const char *eq = entry ? strchr(entry, '=') : NULL;
+            if (!eq || entry == eq) {
+                continue;
+            }
+            size_t name_len = (size_t)(eq - entry);
+            char *name = (char *)malloc(name_len + 1);
+            if (!name) {
+                continue;
+            }
+            memcpy(name, entry, name_len);
+            name[name_len] = '\0';
+            unsetenv(name);
+            free(name);
+        }
+    }
+    for (char **cursor = snapshot; *cursor; ++cursor) {
+        /* putenv takes ownership of the provided string; duplicate so we can free the snapshot. */
+        char *dup = strdup(*cursor);
+        if (dup) {
+            putenv(dup);
+        }
+    }
+    for (char **cursor = snapshot; *cursor; ++cursor) {
+        free(*cursor);
+    }
+    free(snapshot);
+}
+
 static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
     if (!ctx || ctx->fd < 0) {
         return;
@@ -236,12 +343,6 @@ static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
     ctx->fd = -1;
 }
 
-static void *shellCommandSubstitutionReader(void *arg) {
-    ShellCommandSubReadContext *ctx = (ShellCommandSubReadContext *)arg;
-    shellCommandSubstitutionDrain(ctx);
-    return NULL;
-}
-
 static char *shellRunCommandSubstitution(const char *command) {
     const char *source = command ? command : "";
     ShellScalarCacheEntry *cached_entry = NULL;
@@ -256,15 +357,13 @@ static char *shellRunCommandSubstitution(const char *command) {
     size_t result_length = 0;
     bool from_cache = false;
 
-    ShellCommandSubReadContext reader;
-    reader.fd = -1;
-    reader.buffer = NULL;
-    reader.length = 0;
-    reader.capacity = 0;
-    reader.error = 0;
-
-    pthread_t reader_thread;
-    bool reader_started = false;
+    ShellCommandSubReadContext reader = {
+        .fd = -1,
+        .buffer = NULL,
+        .length = 0,
+        .capacity = 0,
+        .error = 0,
+    };
 
     int pipes[2] = {-1, -1};
     int saved_stdout = -1;
@@ -279,6 +378,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool local_scope_pushed = false;
     bool previous_local_scope_flag = gShellRuntime.local_scope_active;
     bool previous_pipeline_flag = gShellRuntime.pipeline_subshell_active;
+    char **env_snapshot = NULL;
 
     if (*source) {
         cached_entry = shellScalarCacheFind(source);
@@ -332,10 +432,6 @@ static char *shellRunCommandSubstitution(const char *command) {
     pipes[1] = -1;
 
     reader.fd = pipes[0];
-    reader_started = (pthread_create(&reader_thread, NULL, shellCommandSubstitutionReader, &reader) == 0);
-    if (!reader_started) {
-        /* Fallback to synchronous draining if thread creation fails. */
-    }
 
     memset(&opts, 0, sizeof(opts));
     opts.no_cache = 1;
@@ -349,12 +445,9 @@ static char *shellRunCommandSubstitution(const char *command) {
     status = EXIT_FAILURE;
 
     shellSymbolTableScopeInit(&table_scope);
-    if (!shellSymbolTableScopeIsActive()) {
-        if (!shellSymbolTableScopePush(&table_scope)) {
-            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
-        } else {
-            scope_pushed = true;
-        }
+    scope_pushed = shellSymbolTableScopePush(&table_scope);
+    if (!scope_pushed && !shellSymbolTableScopeIsActive()) {
+        fprintf(stderr, "shell: failed to allocate symbol tables.\n");
     }
 
     can_run = scope_pushed || shellSymbolTableScopeIsActive();
@@ -370,6 +463,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
     if (can_run) {
+        env_snapshot = shellCommandSubSnapshotEnv();
         status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
     }
 
@@ -394,11 +488,8 @@ static char *shellRunCommandSubstitution(const char *command) {
         saved_stdout = -1;
     }
 
-    if (reader_started) {
-        pthread_join(reader_thread, NULL);
-    } else {
-        shellCommandSubstitutionDrain(&reader);
-    }
+    /* Drain synchronously to avoid background lifetime issues. */
+    shellCommandSubstitutionDrain(&reader);
 
     if (reader.fd >= 0) {
         close(reader.fd);
@@ -437,6 +528,9 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
 substitution_finish:
+    if (reader.error && !exit_requested) {
+        shellUpdateStatus(reader.error);
+    }
     if (capture_frame) {
         capture_frame->entry = stored_entry;
         capture_frame->from_cache = from_cache;
@@ -460,20 +554,9 @@ substitution_finish:
         shellCaptureStackPop();
     }
 
-    if (stdout_redirected && saved_stdout >= 0) {
-        dup2(saved_stdout, STDOUT_FILENO);
-    }
-    if (saved_stdout >= 0) {
-        close(saved_stdout);
-    }
-    if (pipes[0] >= 0) {
-        close(pipes[0]);
-    }
-    if (pipes[1] >= 0) {
-        close(pipes[1]);
-    }
-    if (reader.fd >= 0) {
-        close(reader.fd);
+    if (env_snapshot) {
+        shellCommandSubRestoreEnv(env_snapshot);
+        env_snapshot = NULL;
     }
 
     if (!result) {
@@ -487,6 +570,12 @@ static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, s
         return false;
     }
     size_t needed = *length + extra + 1; // +1 for null terminator
+    if (*capacity == 0 && *buffer != NULL) {
+        /* If the caller passed a non-owned or stale pointer with no capacity
+         * metadata, reset to NULL so we allocate fresh storage rather than
+         * reallocating an invalid pointer. */
+        *buffer = NULL;
+    }
     if (needed <= *capacity) {
         return true;
     }
@@ -3136,12 +3225,42 @@ static bool shellDirectoryStackEnsureInitialised(VM *vm, const char *builtin) {
         return true;
     }
     char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) {
-        shellDirectoryStackReportErrno(vm, builtin);
-        shellUpdateStatus(errno ? errno : 1);
-        return false;
+    const char *initial_path = NULL;
+    if (getcwd(cwd, sizeof(cwd))) {
+        initial_path = cwd;
     }
-    char *copy = strdup(cwd);
+    if (!initial_path || *initial_path == '\0') {
+        const char *home = shellSafeGetenv("PSCALI_REAL_HOME");
+        if (!home || !*home) {
+            home = shellSafeGetenv("HOME");
+        }
+        initial_path = (home && *home) ? home : ".";
+    }
+    char resolved[PATH_MAX];
+    const char *expanded_path = initial_path;
+#if defined(PSCAL_TARGET_IOS)
+    char virtual_expanded[PATH_MAX];
+    if (pathTruncateExpand(initial_path, virtual_expanded, sizeof(virtual_expanded))) {
+        expanded_path = virtual_expanded;
+    }
+#endif
+    const char *source_path = expanded_path;
+    if (realpath(expanded_path, resolved)) {
+        source_path = resolved;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    {
+        char logBuf[PATH_MAX * 2];
+        snprintf(logBuf, sizeof(logBuf),
+                 "[exsh] init dir stack: PSCALI_REAL_HOME=%s HOME=%s expanded=%s resolved=%s",
+                 shellSafeGetenv("PSCALI_REAL_HOME") ? shellSafeGetenv("PSCALI_REAL_HOME") : "(null)",
+                 shellSafeGetenv("HOME") ? shellSafeGetenv("HOME") : "(null)",
+                 expanded_path,
+                 source_path);
+        pscalRuntimeDebugLog(logBuf);
+    }
+#endif
+    char *copy = strdup(source_path);
     if (!copy) {
         shellDirectoryStackReportError(vm, builtin, "out of memory");
         shellUpdateStatus(1);
@@ -3200,17 +3319,29 @@ static bool shellDirectoryStackAssignTopOwned(char *path) {
 }
 
 static bool shellDirectoryStackUpdateEnvironment(const char *old_cwd, const char *new_cwd) {
+    const char *new_value = new_cwd;
+    const char *old_value = old_cwd;
+#if defined(PSCAL_TARGET_IOS)
+    char new_visible[PATH_MAX];
+    char old_visible[PATH_MAX];
     if (new_cwd) {
-        if (!shellSetTrackedVariable("PWD", new_cwd, false)) {
+        new_value = shellVisiblePath(new_cwd, new_visible, sizeof(new_visible));
+    }
+    if (old_cwd) {
+        old_value = shellVisiblePath(old_cwd, old_visible, sizeof(old_visible));
+    }
+#endif
+    if (new_value) {
+        if (!shellSetTrackedVariable("PWD", new_value, false)) {
             return false;
         }
     }
-    if (old_cwd) {
-        if (!shellSetTrackedVariable("OLDPWD", old_cwd, false)) {
-            if (new_cwd) {
+    if (old_value) {
+        if (!shellSetTrackedVariable("OLDPWD", old_value, false)) {
+            if (new_value) {
                 const char *current = shellSafeGetenv("PWD");
-                if (!current || strcmp(current, old_cwd) != 0) {
-                    (void)shellSetTrackedVariable("PWD", old_cwd, false);
+                if (!current || strcmp(current, old_value) != 0) {
+                    (void)shellSetTrackedVariable("PWD", old_value, false);
                 }
             }
             return false;
@@ -3230,28 +3361,33 @@ static bool shellDirectoryStackChdir(VM *vm,
         return false;
     }
     char old_cwd[PATH_MAX];
-    if (!getcwd(old_cwd, sizeof(old_cwd))) {
+    if (!SHELL_GETCWD(old_cwd, sizeof(old_cwd))) {
         shellDirectoryStackReportErrno(vm, builtin);
         shellUpdateStatus(errno ? errno : 1);
         return false;
     }
-    if (chdir(target) != 0) {
+    if (SHELL_CHDIR(target) != 0) {
+#if defined(PSCAL_TARGET_IOS)
+        char logBuf[PATH_MAX + 64];
+        snprintf(logBuf, sizeof(logBuf), "[exsh] chdir failed target=%s errno=%d", target ? target : "(null)", errno);
+        pscalRuntimeDebugLog(logBuf);
+#endif
         shellDirectoryStackReportErrno(vm, builtin);
         shellUpdateStatus(errno ? errno : 1);
         return false;
     }
     char new_cwd[PATH_MAX];
-    if (!getcwd(new_cwd, sizeof(new_cwd))) {
+    if (!SHELL_GETCWD(new_cwd, sizeof(new_cwd))) {
         shellDirectoryStackReportErrno(vm, builtin);
         shellUpdateStatus(errno ? errno : 1);
-        (void)chdir(old_cwd);
+        (void)SHELL_CHDIR(old_cwd);
         return false;
     }
     char *new_copy = strdup(new_cwd);
     if (!new_copy) {
         shellDirectoryStackReportError(vm, builtin, "out of memory");
         shellUpdateStatus(1);
-        (void)chdir(old_cwd);
+        (void)SHELL_CHDIR(old_cwd);
         return false;
     }
     char *old_copy = NULL;
@@ -3261,7 +3397,7 @@ static bool shellDirectoryStackChdir(VM *vm,
             shellDirectoryStackReportError(vm, builtin, "out of memory");
             shellUpdateStatus(1);
             free(new_copy);
-            (void)chdir(old_cwd);
+            (void)SHELL_CHDIR(old_cwd);
             return false;
         }
     }

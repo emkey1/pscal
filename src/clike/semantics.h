@@ -4,5 +4,6 @@
 #include "clike/ast.h"
 
 void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path);
+void clikeResetSemanticsState(void);
 
 #endif

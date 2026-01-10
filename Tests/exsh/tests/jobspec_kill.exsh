@@ -1,0 +1,140 @@
+set -e
+
+# This test validates job-spec kill parity with bash:
+# - Job IDs remain stable while jobs run.
+# - Killing %N removes that job without renumbering others.
+#
+# The harness treats exit code 77 as a skip.
+
+set -m
+
+maybe_skip_jobspec() {
+    sleep 1 &
+    pid=$!
+    set +e
+    kill %1 >/dev/null 2>&1
+    rc=$?
+    set -e
+    kill "$pid" >/dev/null 2>&1 || true
+    wait "$pid" 2>/dev/null || true
+
+    if [ "${REQUIRE_JOBSPEC:-0}" = "1" ]; then
+        if [ "$rc" -ne 0 ]; then
+            echo "FAIL: job-spec kill unavailable but REQUIRED" >&2
+            exit 1
+        fi
+        return 0
+    fi
+
+    if [ "$rc" -ne 0 ]; then
+        exit 77
+    fi
+    return 0
+}
+
+tmp_base="./.exsh-jobspec-$$"
+tmp_jobs_1="${tmp_base}-jobs1"
+tmp_jobs_2="${tmp_base}-jobs2"
+tmp_jobs_3="${tmp_base}-jobs3"
+tmp_jobs_probe="${tmp_base}-probe"
+
+kill_expect_ok() {
+    set +e
+    kill "$@" >/dev/null 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
+        echo "FAIL: kill $* failed (rc=$rc)" >&2
+        jobs >&2 || true
+        exit 1
+    fi
+}
+
+file_contains_jobid() {
+    path="$1"
+    jobid="$2"
+    if ! grep "[${jobid}]" "$path" >/dev/null 2>&1; then
+        echo "FAIL: expected output to contain: [${jobid}]" >&2
+        echo "OUTPUT:" >&2
+        while read dump_line; do
+            echo "$dump_line" >&2
+        done < "$path"
+        exit 1
+    fi
+}
+
+file_not_contains_jobid() {
+    path="$1"
+    jobid="$2"
+    if grep "[${jobid}]" "$path" >/dev/null 2>&1; then
+        echo "FAIL: expected output to NOT contain: [${jobid}]" >&2
+        echo "OUTPUT:" >&2
+        while read dump_line; do
+            echo "$dump_line" >&2
+        done < "$path"
+        exit 1
+    fi
+}
+
+case_kill_percent_one() {
+    sleep 60 &
+    sleep 60 &
+
+    jobs > "$tmp_jobs_1"
+    file_contains_jobid "$tmp_jobs_1" 1
+    file_contains_jobid "$tmp_jobs_1" 2
+
+    # `kill -0 %N` should be a non-destructive probe, like bash.
+    kill_expect_ok -0 %1
+    jobs > "$tmp_jobs_probe"
+    file_contains_jobid "$tmp_jobs_probe" 1
+
+    kill_expect_ok %1
+    sleep 0.05
+
+    jobs > "$tmp_jobs_2"
+    file_not_contains_jobid "$tmp_jobs_2" 1
+    file_contains_jobid "$tmp_jobs_2" 2
+
+    kill_expect_ok %2
+    sleep 0.05
+
+    jobs > "$tmp_jobs_3"
+    file_not_contains_jobid "$tmp_jobs_3" 1
+    file_not_contains_jobid "$tmp_jobs_3" 2
+}
+
+case_kill_middle_preserves_ids() {
+    sleep 60 &
+    sleep 60 &
+    sleep 60 &
+
+    jobs > "$tmp_jobs_1"
+    file_contains_jobid "$tmp_jobs_1" 1
+    file_contains_jobid "$tmp_jobs_1" 2
+    file_contains_jobid "$tmp_jobs_1" 3
+
+    kill_expect_ok -0 %2
+    kill_expect_ok %2
+    sleep 0.05
+
+    jobs > "$tmp_jobs_2"
+    file_contains_jobid "$tmp_jobs_2" 1
+    file_contains_jobid "$tmp_jobs_2" 3
+    file_not_contains_jobid "$tmp_jobs_2" 2
+
+    kill_expect_ok %1
+    kill_expect_ok %3
+}
+
+maybe_skip_jobspec
+
+# Only enforce job-spec kill on vproc builds when explicitly enabled.
+if [ "${JOBSPEC_VPROC_ONLY:-0}" = "1" ] && [ "${RUN_VPROC_TESTS:-0}" != "1" ]; then
+    exit 77
+fi
+
+case_kill_percent_one
+case_kill_middle_preserves_ids
+
+rm -f "$tmp_jobs_1" "$tmp_jobs_2" "$tmp_jobs_3" "$tmp_jobs_probe" >/dev/null 2>&1 || true

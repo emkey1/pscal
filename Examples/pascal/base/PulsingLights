@@ -1,0 +1,69 @@
+  program PulsingLights;
+
+  uses
+    mathlib;
+
+  type
+    TBrightnessFn = function: integer;
+
+    ILight = interface
+      procedure Pulse;
+    end;
+
+    PClosureLight = ^TClosureLight;
+    TClosureLight = record
+      name: string;
+      sample: TBrightnessFn;
+      procedure Pulse; virtual;
+    end;
+
+  function MakeLight(const name: string; base, swing: integer): ILight;
+  var
+    phase: integer;
+    light: PClosureLight;
+
+    function NextBrightness: integer;
+    begin
+      phase := (phase + 17) mod 360;  { arbitrary step }
+      NextBrightness := base + Trunc(swing * sin(phase * MathLibPiConst / 180));
+    end;
+  begin
+    New(light);
+    phase := 0;
+    light^.name := name;
+    light^.sample := @NextBrightness;
+    MakeLight := ILight(light);
+  end;
+
+  procedure TClosureLight.Pulse;
+  var
+    selfRef: PClosureLight;
+    sampler: TBrightnessFn;
+  begin
+    selfRef := myself;
+    sampler := selfRef^.sample;
+    WriteLn(selfRef^.name, ' brightness=', sampler());
+  end;
+
+  procedure RunShow;
+  var
+    stage: array[0..2] of ILight;
+    tick: integer;
+  begin
+    stage[0] := MakeLight('blue', 50, 30);
+    stage[1] := MakeLight('amber', 60, 20);
+    stage[2] := MakeLight('white', 70, 10);
+
+    for tick := 1 to 5 do
+    begin
+      WriteLn('-- pulse ', tick, ' --');
+      stage[0].Pulse;
+      stage[1].Pulse;
+      stage[2].Pulse;
+      WriteLn;
+    end;
+  end;
+
+  begin
+    RunShow;
+  end.

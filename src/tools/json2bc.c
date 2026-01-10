@@ -13,9 +13,7 @@
 #include "Pascal/globals.h"
 #include "core/cache.h"
 #include "core/utils.h"
-
-int gParamCount = 0;
-char **gParamValues = NULL;
+#include "common/frontend_kind.h"
 
 static const char* USAGE =
     "Usage: pscaljson2bc [--dump-bytecode | --dump-bytecode-only] [-o <out.bc>] [<ast.json>]\n"
@@ -97,7 +95,14 @@ static void predeclare_procedures(AST* node) {
     }
 }
 
-int main(int argc, char** argv) {
+int pscaljson2bc_main(int argc, char** argv) {
+    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
+#define JSON2BC_RETURN(value)           \
+    do {                                \
+        int __json2bc_rc = (value);     \
+        frontendPopKind(previousKind);  \
+        return __json2bc_rc;            \
+    } while (0)
     int dump_bc = 0, dump_only = 0;
     const char* in_path = NULL;
     const char* out_path = NULL;
@@ -105,29 +110,29 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("%s", USAGE);
-            return EXIT_SUCCESS;
+            JSON2BC_RETURN(EXIT_SUCCESS);
         } else if (strcmp(argv[i], "--dump-bytecode") == 0) { dump_bc = 1; }
         else if (strcmp(argv[i], "--dump-bytecode-only") == 0) { dump_bc = 1; dump_only = 1; }
         else if ((strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) && i+1 < argc) { out_path = argv[++i]; }
-        else if (argv[i][0] == '-') { fprintf(stderr, "%s", USAGE); return EXIT_FAILURE; }
+        else if (argv[i][0] == '-') { fprintf(stderr, "%s", USAGE); JSON2BC_RETURN(EXIT_FAILURE); }
         else { in_path = argv[i]; }
     }
 
     FILE* in = stdin;
     if (in_path && strcmp(in_path, "-") != 0) {
         in = fopen(in_path, "rb");
-        if (!in) { perror("open input"); return EXIT_FAILURE; }
+        if (!in) { perror("open input"); JSON2BC_RETURN(EXIT_FAILURE); }
     }
     char* json = slurp(in);
     if (in != stdin) fclose(in);
-    if (!json) { fprintf(stderr, "Failed to read input.\n"); return EXIT_FAILURE; }
+    if (!json) { fprintf(stderr, "Failed to read input.\n"); JSON2BC_RETURN(EXIT_FAILURE); }
 
     AST* root = loadASTFromJSON(json);
     free(json);
     if (!root) { fprintf(stderr, "Failed to parse AST JSON.\n");
         // Best-effort: avoid leaving a stale or partial output file on failure.
         if (out_path && strcmp(out_path, "-") != 0) { unlink(out_path); }
-        return EXIT_FAILURE; }
+        JSON2BC_RETURN(EXIT_FAILURE); }
 
     initSymbolSystemMinimal();
     registerAllBuiltins();
@@ -152,7 +157,7 @@ int main(int argc, char** argv) {
         if (globalSymbols) freeHashTable(globalSymbols);
         if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
         if (out_path && strcmp(out_path, "-") != 0) { unlink(out_path); }
-        return EXIT_FAILURE;
+        JSON2BC_RETURN(EXIT_FAILURE);
     }
 
     if (dump_bc) {
@@ -166,7 +171,7 @@ int main(int argc, char** argv) {
             freeTypeTable();
             if (globalSymbols) freeHashTable(globalSymbols);
             if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-            return EXIT_SUCCESS;
+            JSON2BC_RETURN(EXIT_SUCCESS);
         }
     }
 
@@ -181,7 +186,7 @@ int main(int argc, char** argv) {
             freeTypeTable();
             if (globalSymbols) freeHashTable(globalSymbols);
             if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-            return EXIT_FAILURE;
+            JSON2BC_RETURN(EXIT_FAILURE);
         }
     } else {
         FILE* out = stdout;
@@ -200,5 +205,12 @@ int main(int argc, char** argv) {
     freeTypeTable();
     if (globalSymbols) freeHashTable(globalSymbols);
     if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
-    return EXIT_SUCCESS;
+    JSON2BC_RETURN(EXIT_SUCCESS);
 }
+#undef JSON2BC_RETURN
+
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
+int main(int argc, char** argv) {
+    return pscaljson2bc_main(argc, argv);
+}
+#endif

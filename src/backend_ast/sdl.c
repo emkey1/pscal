@@ -5,25 +5,200 @@
 //  Created by Michael Miller on 5/7/25.
 //
 #ifdef SDL
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-// Include SDL_mixer header directly
-#include <SDL2/SDL_mixer.h>
-#include <SDL2/SDL_syswm.h>
+#include "core/sdl_headers.h"
+#include PSCALI_SDL_HEADER
+#include PSCALI_SDL_IMAGE_HEADER
+#include PSCALI_SDL_TTF_HEADER
+#include PSCALI_SDL_MIXER_HEADER
+#if PSCALI_HAS_SYSWM
+#include PSCALI_SDL_SYSWM_HEADER
+#endif
 // Include audio.h directly (declares MAX_SOUNDS and gLoadedSounds)
 #include "audio.h"
 
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "sdl_ios_dispatch.h"
+static void sdlLogEvent(const char *label, const SDL_Event *event);
+#if defined(PSCAL_TARGET_IOS)
+#include <dispatch/dispatch.h>
+#include <pthread.h>
+static inline void sdlRunOnMainThreadSync(void (^block)(void)) {
+    if (pthread_main_np() != 0) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+}
 
-#include "sdl.h" // This header includes SDL/SDL_ttf headers
+void sdlFlushSpuriousQuitEvents(void) {
+    SDL_FlushEvent(SDL_QUIT);
+    SDL_FlushEvent(SDL_APP_TERMINATING);
+    SDL_FlushEvent(SDL_APP_WILLENTERBACKGROUND);
+    SDL_FlushEvent(SDL_APP_DIDENTERBACKGROUND);
+}
+#else
+void sdlFlushSpuriousQuitEvents(void) { }
+#endif
+
+#ifdef DEBUG
+static const char* sdlDescribeEventType(Uint32 type) {
+    switch (type) {
+        case SDL_QUIT: return "SDL_QUIT";
+        case SDL_APP_TERMINATING: return "SDL_APP_TERMINATING";
+        case SDL_APP_WILLENTERBACKGROUND: return "SDL_APP_WILLENTERBACKGROUND";
+        case SDL_APP_DIDENTERBACKGROUND: return "SDL_APP_DIDENTERBACKGROUND";
+        case SDL_APP_WILLENTERFOREGROUND: return "SDL_APP_WILLENTERFOREGROUND";
+        case SDL_APP_DIDENTERFOREGROUND: return "SDL_APP_DIDENTERFOREGROUND";
+        case SDL_KEYDOWN: return "SDL_KEYDOWN";
+        case SDL_KEYUP: return "SDL_KEYUP";
+        case SDL_MOUSEBUTTONDOWN: return "SDL_MOUSEBUTTONDOWN";
+        case SDL_MOUSEBUTTONUP: return "SDL_MOUSEBUTTONUP";
+        case SDL_MOUSEMOTION: return "SDL_MOUSEMOTION";
+        case SDL_WINDOWEVENT: return "SDL_WINDOWEVENT";
+        default: break;
+    }
+    return "UNKNOWN";
+}
+
+static void sdlDumpEvent(const char *label, const SDL_Event *event) {
+    if (!label || !event) {
+        return;
+    }
+    SDL_DEBUG_LOG("%s: %s (%u)", label, sdlDescribeEventType(event->type), event->type);
+}
+#else
+#define sdlDumpEvent(label, event) ((void)0)
+#endif
+
+#ifdef DEBUG
+static void sdlLogEvent(const char *label, const SDL_Event *event) {
+    if (!label || !event) {
+        return;
+    }
+    SDL_DEBUG_LOG("%s: %s (%u)", label, sdlDescribeEventType(event->type), event->type);
+}
+#else
+static void sdlLogEvent(const char *label, const SDL_Event *event) {
+    (void)label;
+    (void)event;
+}
+#endif
+
+#include "pscal_sdl_runtime.h" // Includes SDL family headers and SDL declarations
 #include "Pascal/globals.h" // Includes SDL.h and SDL_ttf.h via its includes, and audio.h
 
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
+#include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#ifdef DEBUG
+static SDL_SpinLock gSdlDebugLogLock = 0;
+static FILE* gSdlDebugLogFile = NULL;
+static bool gSdlDebugLogInitialized = false;
+static char gSdlDebugLogPath[PATH_MAX];
+
+static void sdlDebugEnsureDirectoryForPath(const char* path) {
+    if (!path) {
+        return;
+    }
+    const char* lastSlash = strrchr(path, '/');
+    if (!lastSlash) {
+        return;
+    }
+
+    size_t dirLen = (size_t)(lastSlash - path);
+    char directory[PATH_MAX];
+    if (dirLen == 0 || dirLen >= sizeof(directory)) {
+        return;
+    }
+    memcpy(directory, path, dirLen);
+    directory[dirLen] = '\0';
+    mkdir(directory, 0755);
+}
+
+static const char* sdlDebugResolveLogPath(void) {
+    if (gSdlDebugLogPath[0] != '\0') {
+        return gSdlDebugLogPath;
+    }
+
+    const char* overridePath = getenv("PSCAL_SDL_LOG_PATH");
+    if (overridePath && *overridePath) {
+        snprintf(gSdlDebugLogPath, sizeof(gSdlDebugLogPath), "%s", overridePath);
+        return gSdlDebugLogPath;
+    }
+
+    const char* home = getenv("HOME");
+    if (home && *home) {
+        snprintf(gSdlDebugLogPath, sizeof(gSdlDebugLogPath), "%s/Documents/pscal_sdl_log.txt", home);
+    } else {
+        snprintf(gSdlDebugLogPath, sizeof(gSdlDebugLogPath), "/tmp/pscal_sdl_log.txt");
+    }
+
+    return gSdlDebugLogPath;
+}
+
+static FILE* sdlDebugOpenLogFile(void) {
+    if (gSdlDebugLogInitialized) {
+        return gSdlDebugLogFile;
+    }
+
+    gSdlDebugLogInitialized = true;
+    const char* logPath = sdlDebugResolveLogPath();
+    if (!logPath || *logPath == '\0') {
+        return NULL;
+    }
+
+    sdlDebugEnsureDirectoryForPath(logPath);
+    gSdlDebugLogFile = fopen(logPath, "a");
+    if (!gSdlDebugLogFile) {
+        return NULL;
+    }
+
+    setvbuf(gSdlDebugLogFile, NULL, _IOLBF, 0);
+    fprintf(gSdlDebugLogFile, "\n==== SDL debug log started (pid=%d) ===\n", (int)getpid());
+    fflush(gSdlDebugLogFile);
+    return gSdlDebugLogFile;
+}
+
+static void sdlDebugLogf(const char* fmt, ...) {
+    FILE* logFile = sdlDebugOpenLogFile();
+    if (!logFile) {
+        return;
+    }
+
+    SDL_AtomicLock(&gSdlDebugLogLock);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(logFile, fmt, args);
+    va_end(args);
+    fflush(logFile);
+    SDL_AtomicUnlock(&gSdlDebugLogLock);
+}
+
+static void sdlLogBreakRequestedChange(const char* reason, int newValue) {
+    sdlDebugLogf("[BREAK] %s -> %d\n", reason ? reason : "(unknown)", newValue);
+}
+
+#define SDL_DEBUG_LOG(fmt, ...) sdlDebugLogf("[DEBUG SDL] " fmt, ##__VA_ARGS__)
+#define SDL_DEBUG_SET_BREAK_REQUESTED(value, reason) \
+    do { \
+        atomic_store(&break_requested, (value)); \
+        sdlLogBreakRequestedChange((reason), (value)); \
+    } while (0)
+#else
+#define sdlDebugLogf(...) ((void)0)
+#define sdlLogBreakRequestedChange(...) ((void)0)
+#define SDL_DEBUG_LOG(...) ((void)0)
+#define SDL_DEBUG_SET_BREAK_REQUESTED(value, reason) \
+    atomic_store(&break_requested, (value))
+#endif
 
 #ifdef ENABLE_EXT_BUILTIN_3D
 extern void cleanupBalls3DRenderingResources(void);
@@ -49,6 +224,7 @@ int gSdlFontSize   = 16;
 SDL_Texture* gSdlTextures[MAX_SDL_TEXTURES];
 int gSdlTextureWidths[MAX_SDL_TEXTURES];
 int gSdlTextureHeights[MAX_SDL_TEXTURES];
+int gSdlTextureAccesses[MAX_SDL_TEXTURES];
 bool gSdlTtfInitialized = false;
 bool gSdlImageInitialized = false; // Tracks if IMG_Init was called for PNG/JPG etc.
 
@@ -64,6 +240,93 @@ static bool gX11WmAtomsInitialized = false;
 static SDL_Keycode gPendingKeycodes[MAX_PENDING_KEYCODES];
 static int gPendingKeyStart = 0;
 static int gPendingKeyCount = 0;
+static const int kTextureAccessInvalid = -1;
+
+#if defined(PSCALI_SDL3)
+static bool isWindowCloseEvent(const SDL_Event* event) {
+    return event && event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+}
+#else
+static bool isWindowCloseEvent(const SDL_Event* event) {
+    return event && event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_CLOSE;
+}
+#endif
+
+bool sdlTextInputActive(void) {
+#if defined(PSCALI_SDL3)
+    if (!gSdlWindow) {
+        return false;
+    }
+    return SDL_TextInputActive(gSdlWindow);
+#else
+    return SDL_IsTextInputActive();
+#endif
+}
+
+void sdlStartTextInput(void) {
+#if defined(PSCALI_SDL3)
+    if (gSdlWindow) {
+        SDL_StartTextInput(gSdlWindow);
+    }
+#else
+    SDL_StartTextInput();
+#endif
+}
+
+void sdlStopTextInput(void) {
+#if defined(PSCAL_TARGET_IOS)
+    sdlRunOnMainThreadSync(^{
+#if defined(PSCALI_SDL3)
+        if (gSdlWindow) {
+            SDL_StopTextInput(gSdlWindow);
+        }
+#else
+        SDL_StopTextInput();
+#endif
+    });
+#else
+#if defined(PSCALI_SDL3)
+    if (gSdlWindow) {
+        SDL_StopTextInput(gSdlWindow);
+    }
+#else
+    SDL_StopTextInput();
+#endif
+#endif
+}
+
+static void applyWindowBorderOffsets(int* winX, int* winY) {
+    if (!winX || !winY) {
+        return;
+    }
+#if defined(PSCALI_SDL3)
+    if (gSdlWindow) {
+        int borderTop = 0, borderLeft = 0, borderBottom = 0, borderRight = 0;
+        if (SDL_GetWindowBordersSize(gSdlWindow,
+                                     &borderTop,
+                                     &borderLeft,
+                                     &borderBottom,
+                                     &borderRight)) {
+            *winX += borderLeft;
+            *winY += borderTop;
+        }
+    }
+#elif defined(SDL_VERSION_ATLEAST)
+#if SDL_VERSION_ATLEAST(2,0,5)
+    if (gSdlWindow) {
+        int borderTop = 0, borderLeft = 0, borderBottom = 0, borderRight = 0;
+        if (SDL_GetWindowBordersSize(gSdlWindow,
+                                     &borderTop,
+                                     &borderLeft,
+                                     &borderBottom,
+                                     &borderRight) == 0) {
+            *winX += borderLeft;
+            *winY += borderTop;
+        }
+    }
+#endif
+#endif
+}
 
 static bool isPrintableKeycode(SDL_Keycode code) {
     return code >= 32 && code <= 126;
@@ -143,6 +406,7 @@ static void enqueueUtf8Text(const char* text) {
     }
 }
 
+#if PSCALI_HAS_SYSWM
 static void handleSysWmEvent(const SDL_Event* event) {
 #ifdef SDL_VIDEO_DRIVER_X11
     if (!event || event->type != SDL_SYSWMEVENT) {
@@ -190,6 +454,11 @@ static void handleSysWmEvent(const SDL_Event* event) {
     (void)event;
 #endif
 }
+#else
+static void handleSysWmEvent(const SDL_Event* event) {
+    (void)event;
+}
+#endif
 
 static bool dequeuePendingKeycode(SDL_Keycode* outCode) {
     if (gPendingKeyCount == 0) {
@@ -221,17 +490,21 @@ static int sdlInputWatch(void* userdata, SDL_Event* event) {
         return 0;
     }
 
+#if PSCALI_HAS_SYSWM
     if (event->type == SDL_SYSWMEVENT) {
+        sdlLogEvent("EventWatch", event);
         handleSysWmEvent(event);
         return 0;
     }
+#endif
 
+    sdlLogEvent("EventWatch", event);
     if (event->type == SDL_QUIT) {
-        break_requested = 1;
+        SDL_DEBUG_SET_BREAK_REQUESTED(1, "EventWatch SDL_QUIT");
     } else if (event->type == SDL_KEYDOWN) {
         SDL_Keycode sym = event->key.keysym.sym;
         if (sym == SDLK_ESCAPE || sym == SDLK_q) {
-            break_requested = 1;
+            SDL_DEBUG_SET_BREAK_REQUESTED(1, "EventWatch hotkey");
         }
     }
 
@@ -361,6 +634,7 @@ void initializeTextureSystem(void) {
         gSdlTextures[i] = NULL;
         gSdlTextureWidths[i] = 0;
         gSdlTextureHeights[i] = 0;
+        gSdlTextureAccesses[i] = kTextureAccessInvalid;
     }
 }
 
@@ -375,11 +649,11 @@ void sdlEnsureInputWatch(void) {
     }
 }
 
-void cleanupSdlWindowResources(void) {
+static void cleanupSdlWindowResourcesInternal(void) {
     resetPendingKeycodes();
 
-    if (gSdlInitialized && SDL_IsTextInputActive()) {
-        SDL_StopTextInput();
+    if (gSdlInitialized && sdlTextInputActive()) {
+        sdlStopTextInput();
     }
 
     if (gSdlGLContext) {
@@ -387,21 +661,21 @@ void cleanupSdlWindowResources(void) {
         SDL_GL_DeleteContext(gSdlGLContext);
         gSdlGLContext = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_GL_DeleteContext successful.\n");
+        SDL_DEBUG_LOG("cleanupSdlWindowResources: SDL_GL_DeleteContext successful.\n");
         #endif
     }
     if (gSdlRenderer) {
         SDL_DestroyRenderer(gSdlRenderer);
         gSdlRenderer = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyRenderer successful.\n");
+        SDL_DEBUG_LOG("cleanupSdlWindowResources: SDL_DestroyRenderer successful.\n");
         #endif
     }
     if (gSdlWindow) {
         SDL_DestroyWindow(gSdlWindow);
         gSdlWindow = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] cleanupSdlWindowResources: SDL_DestroyWindow successful.\n");
+        SDL_DEBUG_LOG("cleanupSdlWindowResources: SDL_DestroyWindow successful.\n");
         #endif
     }
     gSdlWidth = 0;
@@ -410,6 +684,16 @@ void cleanupSdlWindowResources(void) {
     gSdlCurrentColor.g = 255;
     gSdlCurrentColor.b = 255;
     gSdlCurrentColor.a = 255;
+}
+
+void cleanupSdlWindowResources(void) {
+#if defined(PSCAL_TARGET_IOS)
+    sdlRunOnMainThreadSync(^{
+        cleanupSdlWindowResourcesInternal();
+    });
+#else
+    cleanupSdlWindowResourcesInternal();
+#endif
 }
 
 // Helper to find a free texture slot or return an error ID
@@ -422,24 +706,24 @@ int findFreeTextureID(void) {
     return -1; // No free slots
 }
 
-void sdlCleanupAtExit(void) {
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] Running sdlCleanupAtExit (Final Program Exit Cleanup)...\n");
-    #endif
+static void sdlCleanupAtExitInternal(void) {
+#ifdef DEBUG
+    SDL_DEBUG_LOG("Running sdlCleanupAtExit (Final Program Exit Cleanup)...\n");
+#endif
 
     // --- Clean up SDL_ttf resources ---
     if (gSdlFont) {
         TTF_CloseFont(gSdlFont);
         gSdlFont = NULL;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: TTF_CloseFont successful.\n");
+        SDL_DEBUG_LOG("sdlCleanupAtExit: TTF_CloseFont successful.\n");
         #endif
     }
     if (gSdlTtfInitialized) {
         TTF_Quit();
         gSdlTtfInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: TTF_Quit successful.\n");
+        SDL_DEBUG_LOG("sdlCleanupAtExit: TTF_Quit successful.\n");
         #endif
     }
 
@@ -448,7 +732,7 @@ void sdlCleanupAtExit(void) {
         IMG_Quit();
         gSdlImageInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: IMG_Quit successful.\n");
+        SDL_DEBUG_LOG("sdlCleanupAtExit: IMG_Quit successful.\n");
         #endif
     }
     // --- END NEW SECTION ---
@@ -495,22 +779,32 @@ void sdlCleanupAtExit(void) {
         gSdlInputWatchInstalled = false;
     }
 
-    cleanupSdlWindowResources();
+    cleanupSdlWindowResourcesInternal();
     if (gSdlInitialized) {
         SDL_Quit();
         gSdlInitialized = false;
         #ifdef DEBUG
-        fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit: SDL_Quit successful.\n");
+        SDL_DEBUG_LOG("sdlCleanupAtExit: SDL_Quit successful.\n");
         #endif
     }
 
-    #ifdef DEBUG
-    fprintf(stderr, "[DEBUG SDL] sdlCleanupAtExit finished.\n");
-    #endif
+#ifdef DEBUG
+    SDL_DEBUG_LOG("sdlCleanupAtExit finished.\n");
+#endif
+}
+
+void sdlCleanupAtExit(void) {
+#if defined(PSCAL_TARGET_IOS)
+    sdlRunOnMainThreadSync(^{
+        sdlCleanupAtExitInternal();
+    });
+#else
+    sdlCleanupAtExitInternal();
+#endif
 }
 
 
-Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph) {
     if (arg_count != 3 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING) {
         runtimeError(vm, "VM Error: InitGraph expects (Integer, Integer, String)");
         return makeVoid();
@@ -524,8 +818,12 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         gSdlInitialized = true;
 
         // Allow clicks to focus the window on macOS and avoid dropped initial events
+#ifdef SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+#endif
+#if PSCALI_HAS_SYSWM
         SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+#endif
     }
 
     cleanupSdlWindowResources();
@@ -539,7 +837,15 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
     
+    gSdlWindow = NULL;
+#if defined(PSCALI_SDL3)
+    gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_SHOWN);
+    if (gSdlWindow) {
+        SDL_SetWindowPosition(gSdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+#else
     gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
+#endif
     if (!gSdlWindow) {
         runtimeError(vm, "Runtime error: SDL_CreateWindow failed: %s", SDL_GetError());
         return makeVoid();
@@ -548,7 +854,15 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     gSdlWidth = width;
     gSdlHeight = height;
 
+    gSdlRenderer = NULL;
+#if defined(PSCALI_SDL3)
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, NULL);
+    if (gSdlRenderer) {
+        SDL_SetRenderVSync(gSdlRenderer, 1);
+    }
+#else
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#endif
     if (!gSdlRenderer) {
         runtimeError(vm, "Runtime error: SDL_CreateRenderer failed: %s", SDL_GetError());
         SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
@@ -564,27 +878,30 @@ Value vmBuiltinInitgraph(VM* vm, int arg_count, Value* args) {
     SDL_PumpEvents(); // Process any pending events so the window becomes visible
     SDL_RaiseWindow(gSdlWindow); // Ensure the window appears in the foreground
 #if SDL_VERSION_ATLEAST(2,0,5)
+#ifndef PSCALI_SDL3
     SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
+#endif
 #endif
 
     gSdlCurrentColor.r = 255; gSdlCurrentColor.g = 255; gSdlCurrentColor.b = 255; gSdlCurrentColor.a = 255;
 
     sdlEnsureInputWatch();
+    sdlFlushSpuriousQuitEvents();
 
-    if (!SDL_IsTextInputActive()) {
-        SDL_StartTextInput();
+    if (!sdlTextInputActive()) {
+        sdlStartTextInput();
     }
 
     return makeVoid();
 }
 
-Value vmBuiltinClosegraph(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinClosegraph) {
     if (arg_count != 0) runtimeError(vm, "CloseGraph expects 0 arguments.");
     cleanupSdlWindowResources();
     return makeVoid();
 }
 
-Value vmBuiltinFillrect(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinFillrect) {
     if (arg_count != 4) { runtimeError(vm, "FillRect expects 4 integer arguments."); return makeVoid(); }
     // ... type checks for all 4 args being integer ...
     SDL_Rect rect;
@@ -599,7 +916,7 @@ Value vmBuiltinFillrect(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinUpdatetexture) {
     if (arg_count != 2) {
         runtimeError(vm, "UpdateTexture expects 2 arguments (TextureID: Integer; PixelData: ARRAY OF Byte).");
         return makeVoid();
@@ -641,11 +958,24 @@ Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    for (int i = 0; i < expectedPscalArraySize; ++i) {
-        c_pixel_buffer[i] = (unsigned char)AS_INTEGER(pixelDataVal.array_val[i]);
+    if (arrayUsesPackedBytes(&pixelDataVal)) {
+        if (!pixelDataVal.array_raw) {
+            free(c_pixel_buffer);
+            runtimeError(vm, "UpdateTexture PixelData buffer is NULL.");
+            return makeVoid();
+        }
+        memcpy(c_pixel_buffer, pixelDataVal.array_raw, (size_t)expectedPscalArraySize);
+    } else {
+        for (int i = 0; i < expectedPscalArraySize; ++i) {
+            c_pixel_buffer[i] = (unsigned char)AS_INTEGER(pixelDataVal.array_val[i]);
+        }
     }
 
+#if defined(PSCALI_SDL3)
+    if (!SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch)) {
+#else
     if (SDL_UpdateTexture(gSdlTextures[textureID], NULL, c_pixel_buffer, pitch) != 0) {
+#endif
         runtimeError(vm, "SDL_UpdateTexture failed: %s", SDL_GetError());
     }
 
@@ -653,13 +983,13 @@ Value vmBuiltinUpdatetexture(struct VM_s* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinUpdatescreen(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinUpdatescreen) {
     if (arg_count != 0) runtimeError(vm, "UpdateScreen expects 0 arguments.");
     if (gSdlRenderer) SDL_RenderPresent(gSdlRenderer);
     return makeVoid();
 }
 
-Value vmBuiltinCleardevice(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinCleardevice) {
     if (arg_count != 0) {
         runtimeError(vm, "Runtime error: ClearDevice expects 0 arguments.");
         return makeVoid();
@@ -673,32 +1003,32 @@ Value vmBuiltinCleardevice(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGetmaxx(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGetmaxx) {
     if (arg_count != 0) runtimeError(vm, "GetMaxX expects 0 arguments.");
     return makeInt(gSdlWidth > 0 ? gSdlWidth - 1 : 0);
 }
 
-Value vmBuiltinGetmaxy(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGetmaxy) {
     if (arg_count != 0) runtimeError(vm, "GetMaxY expects 0 arguments.");
     return makeInt(gSdlHeight > 0 ? gSdlHeight - 1 : 0);
 }
 
-Value vmBuiltinGetticks(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGetticks) {
     if (arg_count != 0) {
         runtimeError(vm, "GetTicks expects 0 arguments.");
         return makeInt(0);
     }
-    return makeInt((long long)SDL_GetTicks());
+    return makeInt((long long)PSCAL_SDL_GET_TICKS());
 }
 
-Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGetscreensize) {
     if (arg_count != 2) {
         runtimeError(vm, "GetScreenSize expects 2 arguments.");
-        return makeVoid();
+        return makeBoolean(false);
     }
     if (args[0].type != TYPE_POINTER || args[1].type != TYPE_POINTER) {
         runtimeError(vm, "GetScreenSize requires VAR parameters, but a non-pointer type was received.");
-        return makeVoid();
+        return makeBoolean(false);
     }
 
     Value* width_ptr = (Value*)args[0].ptr_val;
@@ -706,7 +1036,7 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
 
     if (!width_ptr || !height_ptr) {
         runtimeError(vm, "GetScreenSize received a NIL pointer for a VAR parameter.");
-        return makeVoid();
+        return makeBoolean(false);
     }
 
     int width = 0;
@@ -733,16 +1063,42 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
             gSdlHeight = height;
         }
     } else {
+#if defined(PSCAL_TARGET_IOS)
+        /* On iOS SDL forbids initializing video from background threads before main
+         * has run. After SDL_main this branch is not used because gSdlWindow is set. */
+        width = gSdlWidth > 0 ? gSdlWidth : 1024;
+        height = gSdlHeight > 0 ? gSdlHeight : 768;
+        return makeBoolean(true);
+#else
         bool initialized_video = false;
-        Uint32 was_init = SDL_WasInit(SDL_INIT_VIDEO);
+        Uint32 was_init = PSCAL_SDL_WAS_INIT(SDL_INIT_VIDEO);
         if ((was_init & SDL_INIT_VIDEO) == 0) {
-            if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+            if (PSCAL_SDL_INIT_SUBSYSTEM(SDL_INIT_VIDEO) != 0) {
                 runtimeError(vm, "Unable to initialize SDL video subsystem for GetScreenSize: %s", SDL_GetError());
-                return makeVoid();
+                return makeBoolean(false);
             }
             initialized_video = true;
         }
 
+#if defined(PSCALI_SDL3)
+        SDL_DisplayID displayId = SDL_GetPrimaryDisplay();
+        const SDL_DisplayMode* mode = NULL;
+        if (displayId) {
+            mode = SDL_GetDesktopDisplayMode(displayId);
+            if (!mode) {
+                mode = SDL_GetCurrentDisplayMode(displayId);
+            }
+        }
+        if (!mode || mode->w <= 0 || mode->h <= 0) {
+            if (initialized_video) {
+                PSCAL_SDL_QUIT_SUBSYSTEM(SDL_INIT_VIDEO);
+            }
+            runtimeError(vm, "Unable to query display size for GetScreenSize: %s", SDL_GetError());
+            return makeBoolean(false);
+        }
+        width = mode->w;
+        height = mode->h;
+#else
         SDL_DisplayMode mode;
         int display_status = SDL_GetDesktopDisplayMode(0, &mode);
         if (display_status != 0 || mode.w <= 0 || mode.h <= 0) {
@@ -751,18 +1107,20 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
 
         if (display_status != 0 || mode.w <= 0 || mode.h <= 0) {
             if (initialized_video) {
-                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+                PSCAL_SDL_QUIT_SUBSYSTEM(SDL_INIT_VIDEO);
             }
             runtimeError(vm, "Unable to query display size for GetScreenSize: %s", SDL_GetError());
-            return makeVoid();
+            return makeBoolean(false);
         }
 
         width = mode.w;
         height = mode.h;
+#endif
 
         if (initialized_video) {
-            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            PSCAL_SDL_QUIT_SUBSYSTEM(SDL_INIT_VIDEO);
         }
+#endif
     }
 
     freeValue(width_ptr);
@@ -770,10 +1128,10 @@ Value vmBuiltinGetscreensize(VM* vm, int arg_count, Value* args) {
     freeValue(height_ptr);
     *height_ptr = makeInt(height);
 
-    return makeVoid();
+    return makeBoolean(true);
 }
 
-Value vmBuiltinSetrgbcolor(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinSetrgbcolor) {
     if (arg_count != 3) { runtimeError(vm, "SetRGBColor expects 3 arguments."); return makeVoid(); }
     gSdlCurrentColor.r = (Uint8)AS_INTEGER(args[0]);
     gSdlCurrentColor.g = (Uint8)AS_INTEGER(args[1]);
@@ -785,14 +1143,14 @@ Value vmBuiltinSetrgbcolor(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinQuittextsystem(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinQuittextsystem) {
     if (arg_count != 0) runtimeError(vm, "QuitTextSystem expects 0 arguments.");
     if (gSdlFont) { TTF_CloseFont(gSdlFont); gSdlFont = NULL; }
     if (gSdlTtfInitialized) { TTF_Quit(); gSdlTtfInitialized = false; }
     return makeVoid();
 }
 
-Value vmBuiltinGettextsize(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGettextsize) {
     if (arg_count != 3) { runtimeError(vm, "GetTextSize expects 3 arguments."); return makeVoid(); }
     if (!gSdlFont) { runtimeError(vm, "Font not initialized for GetTextSize."); return makeVoid(); }
     
@@ -809,7 +1167,7 @@ Value vmBuiltinGettextsize(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGetmousestate) {
     if (arg_count != 3 && arg_count != 4) {
         runtimeError(vm, "GetMouseState expects 3 or 4 arguments.");
         return makeVoid();
@@ -863,14 +1221,7 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
 
     int win_x = 0, win_y = 0;
     SDL_GetWindowPosition(gSdlWindow, &win_x, &win_y);
-#if SDL_VERSION_ATLEAST(2,0,5)
-    int border_top = 0, border_left = 0, border_bottom = 0, border_right = 0;
-    if (SDL_GetWindowBordersSize(gSdlWindow, &border_top, &border_left,
-                                 &border_bottom, &border_right) == 0) {
-        win_x += border_left;
-        win_y += border_top;
-    }
-#endif
+    applyWindowBorderOffsets(&win_x, &win_y);
     mse_x = global_x - win_x;
     mse_y = global_y - win_y;
     int win_w = 0, win_h = 0; SDL_GetWindowSize(gSdlWindow, &win_w, &win_h);
@@ -960,17 +1311,20 @@ Value vmBuiltinGetmousestate(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinDestroytexture(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinDestroytexture) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) { runtimeError(vm, "DestroyTexture expects 1 integer argument."); return makeVoid(); }
     int textureID = (int)AS_INTEGER(args[0]);
     if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID]) {
         SDL_DestroyTexture(gSdlTextures[textureID]);
         gSdlTextures[textureID] = NULL;
+        gSdlTextureWidths[textureID] = 0;
+        gSdlTextureHeights[textureID] = 0;
+        gSdlTextureAccesses[textureID] = kTextureAccessInvalid;
     }
     return makeVoid();
 }
 
-Value vmBuiltinRendercopyrect(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinRendercopyrect) {
     if (arg_count != 5) {
         fprintf(stderr, "Runtime error: RenderCopyRect expects 5 arguments.\n");
         return makeVoid();
@@ -994,14 +1348,14 @@ Value vmBuiltinRendercopyrect(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinSetalphablend(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinSetalphablend) {
     if (arg_count != 1 || args[0].type != TYPE_BOOLEAN) { runtimeError(vm, "SetAlphaBlend expects 1 boolean argument."); return makeVoid(); }
     SDL_BlendMode mode = AS_BOOLEAN(args[0]) ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE;
     if (gSdlRenderer) SDL_SetRenderDrawBlendMode(gSdlRenderer, mode);
     return makeVoid();
 }
 
-Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinRendertexttotexture) {
     if (arg_count != 4) { runtimeError(vm, "RenderTextToTexture expects 4 arguments."); return makeInt(-1); }
     if (!gSdlFont) { runtimeError(vm, "Font not initialized for RenderTextToTexture."); return makeInt(-1); }
 
@@ -1011,6 +1365,8 @@ Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
     SDL_Surface* surf = TTF_RenderUTF8_Solid(gSdlFont, text, color);
     if (!surf) return makeInt(-1);
 
+    int surfaceWidth = surf->w;
+    int surfaceHeight = surf->h;
     SDL_Texture* tex = SDL_CreateTextureFromSurface(gSdlRenderer, surf);
     SDL_FreeSurface(surf);
     if (!tex) return makeInt(-1);
@@ -1020,13 +1376,15 @@ Value vmBuiltinRendertexttotexture(VM* vm, int arg_count, Value* args) {
     if (free_slot == -1) { SDL_DestroyTexture(tex); return makeInt(-1); }
 
     gSdlTextures[free_slot] = tex;
-    SDL_QueryTexture(tex, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
+    gSdlTextureWidths[free_slot] = surfaceWidth;
+    gSdlTextureHeights[free_slot] = surfaceHeight;
+    gSdlTextureAccesses[free_slot] = SDL_TEXTUREACCESS_STATIC;
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
 
     return makeInt(free_slot);
 }
 
-Value vmBuiltinInittextsystem(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInittextsystem) {
     if (arg_count != 2) {
         runtimeError(vm, "InitTextSystem expects 2 arguments (FontFileName: String; FontSize: Integer).");
         return makeVoid();
@@ -1072,7 +1430,7 @@ Value vmBuiltinInittextsystem(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinCreatetargettexture(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinCreatetargettexture) {
     if (arg_count != 2) { runtimeError(vm, "CreateTargetTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before CreateTargetTexture."); return makeInt(-1); }
 
@@ -1094,10 +1452,11 @@ Value vmBuiltinCreatetargettexture(VM* vm, int arg_count, Value* args) {
     gSdlTextures[textureID] = newTexture;
     gSdlTextureWidths[textureID] = width;
     gSdlTextureHeights[textureID] = height;
+    gSdlTextureAccesses[textureID] = SDL_TEXTUREACCESS_TARGET;
     return makeInt(textureID);
 }
 
-Value vmBuiltinCreatetexture(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinCreatetexture) {
     if (arg_count != 2) { runtimeError(vm, "CreateTexture expects 2 arguments (Width, Height: Integer)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized before CreateTexture."); return makeInt(-1); }
 
@@ -1119,10 +1478,11 @@ Value vmBuiltinCreatetexture(VM* vm, int arg_count, Value* args) {
     gSdlTextures[textureID] = newTexture;
     gSdlTextureWidths[textureID] = width;
     gSdlTextureHeights[textureID] = height;
+    gSdlTextureAccesses[textureID] = SDL_TEXTUREACCESS_STREAMING;
     return makeInt(textureID);
 }
 
-Value vmBuiltinDrawcircle(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinDrawcircle) {
     if (arg_count != 3) { runtimeError(vm, "DrawCircle expects 3 integer arguments (CenterX, CenterY, Radius)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawCircle."); return makeVoid(); }
 
@@ -1161,7 +1521,7 @@ Value vmBuiltinDrawcircle(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinDrawline(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinDrawline) {
     if (arg_count != 4) { runtimeError(vm, "DrawLine expects 4 integer arguments (x1, y1, x2, y2)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawLine."); return makeVoid(); }
 
@@ -1178,7 +1538,7 @@ Value vmBuiltinDrawline(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinDrawpolygon(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinDrawpolygon) {
     if (arg_count != 2) { runtimeError(vm, "DrawPolygon expects 2 arguments (PointsArray, NumPoints)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for DrawPolygon."); return makeVoid(); }
 
@@ -1217,7 +1577,7 @@ Value vmBuiltinDrawpolygon(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinDrawrect(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinDrawrect) {
     if (arg_count != 4) { runtimeError(vm, "DrawRect expects 4 integer arguments (X1, Y1, X2, Y2)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics mode not initialized before DrawRect."); return makeVoid(); }
 
@@ -1240,7 +1600,7 @@ Value vmBuiltinDrawrect(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGetpixelcolor(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGetpixelcolor) {
     if (arg_count != 6) { runtimeError(vm, "GetPixelColor expects 6 arguments (X, Y: Integer; var R, G, B, A: Byte)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics not initialized for GetPixelColor."); return makeVoid(); }
 
@@ -1262,14 +1622,25 @@ Value vmBuiltinGetpixelcolor(VM* vm, int arg_count, Value* args) {
     SDL_Rect pixelRect = {x, y, 1, 1};
     Uint8 rgba[4] = {0, 0, 0, 0};
 
-    SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_RGBA32);
-    if (!surface) { runtimeError(vm, "Could not create surface for GetPixelColor: %s", SDL_GetError()); return makeVoid(); }
+#if defined(PSCALI_SDL3)
+    SDL_Surface* surface = SDL_RenderReadPixels(gSdlRenderer, &pixelRect);
+    if (!surface) {
+        runtimeError(vm, "SDL_RenderReadPixels failed in GetPixelColor: %s", SDL_GetError());
+        return makeVoid();
+    }
+#else
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, 1, 1, 32, SDL_PIXELFORMAT_RGBA32);
+    if (!surface) {
+        runtimeError(vm, "Could not create surface for GetPixelColor: %s", SDL_GetError());
+        return makeVoid();
+    }
 
     if (SDL_RenderReadPixels(gSdlRenderer, &pixelRect, surface->format->format, surface->pixels, surface->pitch) != 0) {
         runtimeError(vm, "SDL_RenderReadPixels failed in GetPixelColor: %s", SDL_GetError());
         SDL_FreeSurface(surface);
         return makeVoid();
     }
+#endif
 
     Uint32 pixelValue = ((Uint32*)surface->pixels)[0];
     SDL_GetRGBA(pixelValue, surface->format, &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
@@ -1284,7 +1655,7 @@ Value vmBuiltinGetpixelcolor(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinLoadimagetotexture(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinLoadimagetotexture) {
     if (arg_count != 1 || args[0].type != TYPE_STRING) { runtimeError(vm, "LoadImageToTexture expects 1 argument (FilePath: String)."); return makeInt(-1); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before LoadImageToTexture."); return makeInt(-1); }
 
@@ -1298,16 +1669,29 @@ Value vmBuiltinLoadimagetotexture(VM* vm, int arg_count, Value* args) {
     int free_slot = findFreeTextureID();
     if (free_slot == -1) { runtimeError(vm, "No free texture slots available for LoadImageToTexture."); return makeInt(-1); }
 
-    SDL_Texture* newTexture = IMG_LoadTexture(gSdlRenderer, filePath);
-    if (!newTexture) { runtimeError(vm, "Failed to load image '%s' as texture: %s", filePath, IMG_GetError()); return makeInt(-1); }
+    SDL_Surface* surface = IMG_Load(filePath);
+    if (!surface) {
+        runtimeError(vm, "Failed to load image '%s': %s", filePath, IMG_GetError());
+        return makeInt(-1);
+    }
+
+    SDL_Texture* newTexture = SDL_CreateTextureFromSurface(gSdlRenderer, surface);
+    if (!newTexture) {
+        runtimeError(vm, "Failed to create texture from '%s': %s", filePath, SDL_GetError());
+        SDL_FreeSurface(surface);
+        return makeInt(-1);
+    }
 
     gSdlTextures[free_slot] = newTexture;
-    SDL_QueryTexture(newTexture, NULL, NULL, &gSdlTextureWidths[free_slot], &gSdlTextureHeights[free_slot]);
+    gSdlTextureWidths[free_slot] = surface->w;
+    gSdlTextureHeights[free_slot] = surface->h;
+    gSdlTextureAccesses[free_slot] = SDL_TEXTUREACCESS_STATIC;
     SDL_SetTextureBlendMode(newTexture, SDL_BLENDMODE_BLEND);
+    SDL_FreeSurface(surface);
     return makeInt(free_slot);
 }
 
-Value vmBuiltinOuttextxy(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinOuttextxy) {
     if (arg_count != 3) { runtimeError(vm, "OutTextXY expects 3 arguments (X, Y: Integer; Text: String)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before OutTextXY."); return makeVoid(); }
     if (!gSdlTtfInitialized || !gSdlFont) { runtimeError(vm, "Text system or font not initialized before OutTextXY."); return makeVoid(); }
@@ -1332,7 +1716,7 @@ Value vmBuiltinOuttextxy(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinRendercopy(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinRendercopy) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         fprintf(stderr, "Runtime error: RenderCopy expects 1 argument (TextureID: Integer).\n");
         return makeVoid();
@@ -1352,7 +1736,7 @@ Value vmBuiltinRendercopy(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinRendercopyex) {
     if (arg_count != 13) {
         fprintf(stderr, "Runtime error: RenderCopyEx expects 13 arguments.\n");
         return makeVoid();
@@ -1406,7 +1790,7 @@ Value vmBuiltinRendercopyex(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinSetcolor(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinSetcolor) {
     if (arg_count != 1 || (!IS_INTLIKE(args[0]) && args[0].type != TYPE_BYTE)) {
         runtimeError(vm, "SetColor expects 1 argument (color index 0-255).");
         return makeVoid();
@@ -1437,7 +1821,7 @@ Value vmBuiltinSetcolor(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinSetrendertarget) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) { runtimeError(vm, "SetRenderTarget expects 1 argument (TextureID: Integer)."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlRenderer) { runtimeError(vm, "Graphics system not initialized before SetRenderTarget."); return makeVoid(); }
 
@@ -1445,16 +1829,11 @@ Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
 
     SDL_Texture* targetTexture = NULL;
     if (textureID >= 0 && textureID < MAX_SDL_TEXTURES && gSdlTextures[textureID] != NULL) {
-        Uint32 format;
-        int access;
-        int w, h;
-        if (SDL_QueryTexture(gSdlTextures[textureID], &format, &access, &w, &h) == 0) {
-            if (access == SDL_TEXTUREACCESS_TARGET) {
-                targetTexture = gSdlTextures[textureID];
-            } else {
-                runtimeError(vm, "TextureID %d was not created with Target access. Cannot set as render target.", textureID);
-            }
-        } else { runtimeError(vm, "Could not query texture %d for SetRenderTarget: %s", textureID, SDL_GetError()); }
+        if (gSdlTextureAccesses[textureID] == SDL_TEXTUREACCESS_TARGET) {
+            targetTexture = gSdlTextures[textureID];
+        } else {
+            runtimeError(vm, "TextureID %d was not created with Target access. Cannot set as render target.", textureID);
+        }
     } else if (textureID >= MAX_SDL_TEXTURES || (textureID >=0 && gSdlTextures[textureID] == NULL)) {
         runtimeError(vm, "Invalid TextureID %d passed to SetRenderTarget. Defaulting to screen.", textureID);
     }
@@ -1463,7 +1842,7 @@ Value vmBuiltinSetrendertarget(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinIskeydown(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinIskeydown) {
     if (arg_count != 1) {
         runtimeError(vm, "IsKeyDown expects exactly 1 argument (string name or key code).");
         return makeBoolean(false);
@@ -1498,7 +1877,7 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
     SDL_Keycode queuedCode;
     if (dequeuePendingKeycode(&queuedCode)) {
         if (queuedCode == SDLK_q) {
-            atomic_store(&break_requested, 1);
+            SDL_DEBUG_SET_BREAK_REQUESTED(1, "PollNextKey queued SDLK_q");
         }
         *outCode = queuedCode;
         return true;
@@ -1506,27 +1885,34 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        sdlLogEvent("PollEvent", &event);
+#if PSCALI_HAS_SYSWM
+#if PSCALI_HAS_SYSWM
+#if PSCALI_HAS_SYSWM
         if (event.type == SDL_SYSWMEVENT) {
             handleSysWmEvent(&event);
             continue;
         }
+#endif
+#endif
+#endif
 
         if (event.type == SDL_QUIT) {
-            atomic_store(&break_requested, 1);
+            SDL_DEBUG_SET_BREAK_REQUESTED(1, "PollNextKey SDL_QUIT");
             return false;
         }
 
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+        if (isWindowCloseEvent(&event)) {
             continue;
         }
 
         if (event.type == SDL_KEYDOWN) {
             SDL_Keycode sym = event.key.keysym.sym;
             if (sym == SDLK_q) {
-                atomic_store(&break_requested, 1);
+                SDL_DEBUG_SET_BREAK_REQUESTED(1, "PollNextKey SDL_KEYDOWN q");
             }
 
-            bool textActive = SDL_IsTextInputActive();
+            bool textActive = sdlTextInputActive();
             if (!textActive || !isPrintableKeycode(sym)) {
                 enqueuePendingKeycode(sym);
             }
@@ -1547,7 +1933,7 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
     return false;
 }
 
-Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinPollkey) {
     if (arg_count != 0) {
         runtimeError(vm, "PollKey expects 0 arguments.");
         return makeInt(0);
@@ -1559,12 +1945,13 @@ Value vmBuiltinPollkey(VM* vm, int arg_count, Value* args) {
 
     SDL_Keycode code;
     if (sdlPollNextKey(&code)) {
+        SDL_DEBUG_LOG("PollKey returning code=%d\n", (int)code);
         return makeInt((int)code);
     }
     return makeInt(0);
 }
 
-Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinWaitkeyevent) {
     if (arg_count != 0) { runtimeError(vm, "WaitKeyEvent expects 0 arguments."); return makeVoid(); }
     if (!gSdlInitialized || !gSdlWindow) { runtimeError(vm, "Graphics mode not initialized before WaitKeyEvent."); return makeVoid(); }
 
@@ -1576,23 +1963,26 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     int waiting = 1;
     while (waiting) {
         if (SDL_WaitEvent(&event)) {
+            sdlLogEvent("WaitKeyEvent", &event);
+#if PSCALI_HAS_SYSWM
             if (event.type == SDL_SYSWMEVENT) {
                 handleSysWmEvent(&event);
                 continue;
             }
+#endif
 
+#if defined(PSCAL_TARGET_IOS)
             if (event.type == SDL_QUIT) {
-                break_requested = 1;
-                waiting = 0;
-            } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+                continue;
+            } else if (isWindowCloseEvent(&event)) {
                 continue;
             } else if (event.type == SDL_KEYDOWN) {
                 SDL_Keycode sym = event.key.keysym.sym;
                 if (sym == SDLK_q) {
-                    atomic_store(&break_requested, 1);
+                    SDL_DEBUG_SET_BREAK_REQUESTED(1, "WaitKey(iOS) SDL_KEYDOWN q");
                 }
 
-                bool textActive = SDL_IsTextInputActive();
+                bool textActive = sdlTextInputActive();
                 if (!textActive || !isPrintableKeycode(sym)) {
                     enqueuePendingKeycode(sym);
                     waiting = 0;
@@ -1601,6 +1991,28 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
                 enqueueUtf8Text(event.text.text);
                 waiting = 0;
             }
+#else
+        if (event.type == SDL_QUIT) {
+            SDL_DEBUG_SET_BREAK_REQUESTED(1, "WaitKey SDL_QUIT");
+            waiting = 0;
+        } else if (isWindowCloseEvent(&event)) {
+            continue;
+        } else if (event.type == SDL_KEYDOWN) {
+            SDL_Keycode sym = event.key.keysym.sym;
+            if (sym == SDLK_q) {
+                SDL_DEBUG_SET_BREAK_REQUESTED(1, "WaitKey SDL_KEYDOWN q");
+            }
+
+            bool textActive = sdlTextInputActive();
+            if (!textActive || !isPrintableKeycode(sym)) {
+                enqueuePendingKeycode(sym);
+                waiting = 0;
+            }
+            } else if (event.type == SDL_TEXTINPUT) {
+                enqueueUtf8Text(event.text.text);
+                waiting = 0;
+            }
+#endif
         } else {
             runtimeError(vm, "SDL_WaitEvent failed: %s", SDL_GetError());
             waiting = 0;
@@ -1609,7 +2021,7 @@ Value vmBuiltinWaitkeyevent(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinFillcircle) {
     if (arg_count != 3) {
         runtimeError(vm, "FillCircle expects 3 integer arguments (CenterX, CenterY, Radius).");
         return makeVoid();
@@ -1683,7 +2095,7 @@ Value vmBuiltinFillcircle(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGraphloop) {
     if (arg_count != 1) {
         runtimeError(vm, "GraphLoop expects 1 argument (milliseconds).");
         return makeVoid();
@@ -1710,8 +2122,8 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
     if (ms < 0) ms = 0;
 
     if (gSdlInitialized && gSdlWindow && gSdlRenderer) {
-        Uint32 startTime = SDL_GetTicks();
-        Uint32 targetTime = startTime + (Uint32)ms;
+        Uint64 startTime = PSCAL_SDL_GET_TICKS();
+        Uint64 targetTime = startTime + (Uint64)ms;
         SDL_Event event;
 
         /*
@@ -1724,17 +2136,19 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
             SDL_PumpEvents();
 
             while (SDL_PollEvent(&event)) {
+#if PSCALI_HAS_SYSWM
                 if (event.type == SDL_SYSWMEVENT) {
                     handleSysWmEvent(&event);
                     continue;
                 }
+#endif
 
                 if (event.type == SDL_QUIT) {
-                    break_requested = 1;
+                    SDL_DEBUG_SET_BREAK_REQUESTED(1, "GraphLoop SDL_QUIT");
                     return makeVoid();
                 }
 
-                if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+                if (isWindowCloseEvent(&event)) {
                     /* Swallow window close requests; _NET_WM_PING is handled separately in handleSysWmEvent. */
                     continue;
                 }
@@ -1742,10 +2156,10 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                 if (event.type == SDL_KEYDOWN) {
                     SDL_Keycode sym = event.key.keysym.sym;
                     if (sym == SDLK_q) {
-                        atomic_store(&break_requested, 1);
+                        SDL_DEBUG_SET_BREAK_REQUESTED(1, "GraphLoop SDL_KEYDOWN q");
                     }
 
-                    bool textActive = SDL_IsTextInputActive();
+                    bool textActive = sdlTextInputActive();
                     if (!textActive || !isPrintableKeycode(sym)) {
                         enqueuePendingKeycode(sym);
                     }
@@ -1758,25 +2172,25 @@ Value vmBuiltinGraphloop(VM* vm, int arg_count, Value* args) {
                 return makeVoid();
             }
 
-            Uint32 now = SDL_GetTicks();
+            Uint64 now = PSCAL_SDL_GET_TICKS();
             if (now >= targetTime) {
                 break;
             }
 
-            Uint32 remaining = targetTime - now;
+            Uint64 remaining = targetTime - now;
             if (remaining > 10) {
                 remaining = 10;
             }
 
             if (remaining > 0) {
-                SDL_Delay(remaining);
+                SDL_Delay((Uint32)remaining);
             }
         }
     }
     return makeVoid();
 }
 
-Value vmBuiltinPutpixel(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinPutpixel) {
     if (arg_count != 2) {
         runtimeError(vm, "PutPixel expects 2 arguments (X, Y).");
         return makeVoid();
@@ -1832,21 +2246,21 @@ static void pumpKeyEvents(void) {
         }
 
         if (event.type == SDL_QUIT) {
-            atomic_store(&break_requested, 1);
+            SDL_DEBUG_SET_BREAK_REQUESTED(1, "PumpKeyEvents SDL_QUIT");
             continue;
         }
 
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+        if (isWindowCloseEvent(&event)) {
             continue;
         }
 
         if (event.type == SDL_KEYDOWN) {
             SDL_Keycode sym = event.key.keysym.sym;
             if (sym == SDLK_q) {
-                atomic_store(&break_requested, 1);
+                SDL_DEBUG_SET_BREAK_REQUESTED(1, "PumpKeyEvents SDL_KEYDOWN q");
             }
 
-            bool textActive = SDL_IsTextInputActive();
+            bool textActive = sdlTextInputActive();
             if (!textActive || !isPrintableKeycode(sym)) {
                 enqueuePendingKeycode(sym);
             }
@@ -1886,22 +2300,23 @@ SDL_Keycode sdlWaitNextKeycode(void) {
             continue;
         }
 
+        sdlLogEvent("WaitNextKey", &event);
         if (event.type == SDL_QUIT) {
-            atomic_store(&break_requested, 1);
+            SDL_DEBUG_SET_BREAK_REQUESTED(1, "WaitNextKey SDL_QUIT");
             return SDLK_UNKNOWN;
         }
 
-        if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) {
+        if (isWindowCloseEvent(&event)) {
             continue;
         }
 
         if (event.type == SDL_KEYDOWN) {
             SDL_Keycode sym = event.key.keysym.sym;
             if (sym == SDLK_q) {
-                atomic_store(&break_requested, 1);
+                SDL_DEBUG_SET_BREAK_REQUESTED(1, "WaitNextKey SDL_KEYDOWN q");
             }
 
-            bool textActive = SDL_IsTextInputActive();
+            bool textActive = sdlTextInputActive();
             if (!textActive || !isPrintableKeycode(sym)) {
                 enqueuePendingKeycode(sym);
             }

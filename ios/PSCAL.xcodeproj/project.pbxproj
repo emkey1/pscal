@@ -1,0 +1,900 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		145F4FC72BE071D600603B3F /* PscalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FC62BE071D600603B3F /* PscalApp.swift */; };
+		145F4FC92BE071D600603B3F /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FC82BE071D600603B3F /* TerminalView.swift */; };
+		145F4FCB2BE071F400603B3F /* PscalRuntimeBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FCA2BE071F400603B3F /* PscalRuntimeBootstrap.swift */; };
+		145F4FCB2BE071F400603B4E /* TerminalGeometryHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */; };
+		145F4FCD2BE0722600603B3F /* PSCALRuntime.mm in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FCC2BE0722600603B3F /* PSCALRuntime.mm */; };
+		5C0F3D872F00000100ABCD02 /* PSCALInterpose.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C0F3D872F00000100ABCD01 /* PSCALInterpose.c */; };
+		145F4FD22BE0727A00603B3F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 145F4FD12BE0727A00603B3F /* SwiftUI.framework */; };
+		145F4FD42BE0727A00603B3F /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 145F4FD32BE0727A00603B3F /* UIKit.framework */; };
+		1A7B6C1E3F00123400ABC011 /* SshRuntimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */; };
+		1A7B6C1E3F00123400ABC012 /* SshTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC002 /* SshTerminalView.swift */; };
+		1A7B6C1E3F00123400ABC013 /* SshWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */; };
+		1A7B6C1E3F00123400ABC014 /* ShellRuntimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC004 /* ShellRuntimeSession.swift */; };
+		1A7B6C1E3F00123400ABC015 /* ShellTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC005 /* ShellTerminalView.swift */; };
+		14A5C5F42BE13E6500CEF0B9 /* TerminalBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14A5C5F32BE13E6500CEF0B9 /* TerminalBuffer.swift */; };
+		14B7F7E12BE5F46B00E6D40B /* EditorWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B7F7E02BE5F46B00E6D40B /* EditorWindowManager.swift */; };
+		14CF02B42BE1481D0037FB7E /* KeyboardAwareHostingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CF02B32BE1481D0037FB7E /* KeyboardAwareHostingController.swift */; };
+		14E9F2052BE2B8D400A1E3C0 /* Examples in Resources */ = {isa = PBXBuildFile; fileRef = 14E9F2042BE2B8D400A1E3C0 /* Examples */; };
+		14E9F2212BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */; };
+		14F2C4F82BE1B12300DE9FD9 /* TerminalInputBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */; };
+		5DFF9B122EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */; };
+		5F1AA0112EC6F00100000001 /* lib in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0012EC6F00100000001 /* lib */; };
+		5F1AA0122EC6F00100000001 /* fonts in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0022EC6F00100000001 /* fonts */; };
+		5F1AA0132EC6F00100000001 /* etc in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0032EC6F00100000001 /* etc */; };
+		5F1AA0142EC6F00100000001 /* Docs in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0042EC6F00100000001 /* Docs */; };
+		5F1AA0152EC6F00100000001 /* TestsLibs in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0052EC6F00100000001 /* TestsLibs */; };
+		5F73F4B32FCA5B9A00EFC123 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */; };
+		5F9A00252F00000100ABC001 /* TerminalWeb in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00152F00000100ABC001 /* TerminalWeb */; };
+		5FFFD0023FFAA00000AAA001 /* PathTruncation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */; };
+		5FFFD0043FFAA00000AAA001 /* TerminalFontSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */; };
+		5FFFD0063FFAA00000AAA001 /* TerminalGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */; };
+		5FFFD0083FFAA00000AAA001 /* TerminalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0073FFAA00000AAA001 /* TerminalRenderer.swift */; };
+		5FFFD00A3FFAA00000AAA001 /* TerminalSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0093FFAA00000AAA001 /* TerminalSelection.swift */; };
+		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
+		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
+		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
+		5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9A00312F00000100ABC001 /* HtermTerminalView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		145F4FBE2BE0719A00603B3F /* PSCAL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PSCAL.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		145F4FC62BE071D600603B3F /* PscalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PscalApp.swift; sourceTree = "<group>"; };
+		145F4FC82BE071D600603B3F /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		145F4FCA2BE071F400603B3F /* PscalRuntimeBootstrap.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PscalRuntimeBootstrap.swift; sourceTree = "<group>"; };
+		145F4FCC2BE0722600603B3F /* PSCALRuntime.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = PSCALRuntime.mm; sourceTree = "<group>"; };
+		145F4FCE2BE0722600603B3F /* PSCALRuntime.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PSCALRuntime.h; sourceTree = "<group>"; };
+		5C0F3D872F00000100ABCD01 /* PSCALInterpose.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = PSCALInterpose.c; sourceTree = "<group>"; };
+		145F4FD02BE0725200603B3F /* PscalApp-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "PscalApp-Bridging-Header.h"; sourceTree = "<group>"; };
+		145F4FD12BE0727A00603B3F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		145F4FD32BE0727A00603B3F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		145F4FDA2BE072E500603B3F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshRuntimeSession.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC002 /* SshTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshTerminalView.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshWindowManager.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC004 /* ShellRuntimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRuntimeSession.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC005 /* ShellTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellTerminalView.swift; sourceTree = "<group>"; };
+		14A5C5F32BE13E6500CEF0B9 /* TerminalBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBuffer.swift; sourceTree = "<group>"; };
+		14B7F7E02BE5F46B00E6D40B /* EditorWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorWindowManager.swift; sourceTree = "<group>"; };
+		14CF02B32BE1481D0037FB7E /* KeyboardAwareHostingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAwareHostingController.swift; sourceTree = "<group>"; };
+		14E9F2042BE2B8D400A1E3C0 /* Examples */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Examples; path = ../Examples; sourceTree = "<group>"; };
+		14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeAssetInstaller.swift; sourceTree = "<group>"; };
+		14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalInputBridge.swift; sourceTree = "<group>"; };
+		5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "PSCALIOS-LinkerWorkaround.xcconfig"; sourceTree = "<group>"; };
+		5F1AA0012EC6F00100000001 /* lib */ = {isa = PBXFileReference; lastKnownFileType = folder; name = lib; path = ../lib; sourceTree = "<group>"; };
+		5F1AA0022EC6F00100000001 /* fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = fonts; path = ../fonts; sourceTree = "<group>"; };
+		5F1AA0032EC6F00100000001 /* etc */ = {isa = PBXFileReference; lastKnownFileType = folder; name = etc; path = ../etc; sourceTree = "<group>"; };
+		5F1AA0042EC6F00100000001 /* Docs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Docs; path = ../Docs; sourceTree = "<group>"; };
+		5F1AA0052EC6F00100000001 /* TestsLibs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TestsLibs; path = ../Tests/libs; sourceTree = "<group>"; };
+		5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerminalGeometryHelper.swift; sourceTree = "<group>"; };
+		5F9A00312F00000100ABC001 /* HtermTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HtermTerminalView.swift; sourceTree = "<group>"; };
+		5F9A00152F00000100ABC001 /* TerminalWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TerminalWeb; path = TerminalWeb; sourceTree = "<group>"; };
+		5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathTruncation.swift; sourceTree = "<group>"; };
+		5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontSettings.swift; sourceTree = "<group>"; };
+		5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalGeometry.swift; sourceTree = "<group>"; };
+		5FFFD0073FFAA00000AAA001 /* TerminalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRenderer.swift; sourceTree = "<group>"; };
+		5FFFD0093FFAA00000AAA001 /* TerminalSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSelection.swift; sourceTree = "<group>"; };
+		5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
+		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
+		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
+		DEAD00012C0FF00D00DEAD00 /* src */ = {isa = PBXFileReference; lastKnownFileType = folder; name = src; path = ../src; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		145F4FBB2BE0719A00603B3F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				145F4FD22BE0727A00603B3F /* SwiftUI.framework in Frameworks */,
+				145F4FD42BE0727A00603B3F /* UIKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		145F4FB52BE0719A00603B3F /* PSCAL */ = {
+			isa = PBXGroup;
+			children = (
+				145F4FC02BE0719A00603B3F /* Sources */,
+				14E9F2042BE2B8D400A1E3C0 /* Examples */,
+				5F1AA0012EC6F00100000001 /* lib */,
+				5F1AA0022EC6F00100000001 /* fonts */,
+				5F1AA0032EC6F00100000001 /* etc */,
+				5F1AA0042EC6F00100000001 /* Docs */,
+				5F1AA0052EC6F00100000001 /* TestsLibs */,
+				DEAD00012C0FF00D00DEAD00 /* src */,
+				145F4FBE2BE0719A00603B3F /* PSCAL.app */,
+				145F4FD12BE0727A00603B3F /* SwiftUI.framework */,
+				145F4FD32BE0727A00603B3F /* UIKit.framework */,
+				5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */,
+				5D8F07B52ECB57F000431C40 /* Frameworks */,
+			);
+			name = PSCAL;
+			sourceTree = "<group>";
+		};
+		145F4FC02BE0719A00603B3F /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				145F4FD92BE072D600603B3F /* App */,
+				145F4FCF2BE0723C00603B3F /* Bridge */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		145F4FCF2BE0723C00603B3F /* Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				145F4FCE2BE0722600603B3F /* PSCALRuntime.h */,
+				145F4FCC2BE0722600603B3F /* PSCALRuntime.mm */,
+				5C0F3D872F00000100ABCD01 /* PSCALInterpose.c */,
+				145F4FD02BE0725200603B3F /* PscalApp-Bridging-Header.h */,
+			);
+			path = Bridge;
+			sourceTree = "<group>";
+		};
+		145F4FD92BE072D600603B3F /* App */ = {
+			isa = PBXGroup;
+			children = (
+				145F4FC62BE071D600603B3F /* PscalApp.swift */,
+				145F4FC82BE071D600603B3F /* TerminalView.swift */,
+				145F4FCA2BE071F400603B3F /* PscalRuntimeBootstrap.swift */,
+				5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */,
+				5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */,
+				5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */,
+				5F9A00312F00000100ABC001 /* HtermTerminalView.swift */,
+				5F9A00152F00000100ABC001 /* TerminalWeb */,
+				14B7F7E02BE5F46B00E6D40B /* EditorWindowManager.swift */,
+				1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */,
+				1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */,
+				1A7B6C1E3F00123400ABC002 /* SshTerminalView.swift */,
+				1A7B6C1E3F00123400ABC004 /* ShellRuntimeSession.swift */,
+				1A7B6C1E3F00123400ABC005 /* ShellTerminalView.swift */,
+				14CF02B32BE1481D0037FB7E /* KeyboardAwareHostingController.swift */,
+				5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */,
+				5FFFD0073FFAA00000AAA001 /* TerminalRenderer.swift */,
+				5FFFD0093FFAA00000AAA001 /* TerminalSelection.swift */,
+				5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */,
+				5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */,
+				5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */,
+				14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */,
+				14A5C5F32BE13E6500CEF0B9 /* TerminalBuffer.swift */,
+				14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */,
+				5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */,
+				145F4FDA2BE072E500603B3F /* Info.plist */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		5D8F07B52ECB57F000431C40 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		145F4FBD2BE0719A00603B3F /* PSCALApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 145F4FD52BE0729000603B3F /* Build configuration list for PBXNativeTarget "PSCALApp" */;
+			buildPhases = (
+				145F4FBA2BE0719A00603B3F /* Sources */,
+				145F4FBB2BE0719A00603B3F /* Frameworks */,
+				5DFF9B992EC3E8CC004DFE5A /* Embed Tool Runner */,
+				145F4FBC2BE0719A00603B3F /* Resources */,
+				5F73F4B42FCA5CB000EFC123 /* Bundle Toolchain Data */,
+				5DFF9BA02EC3E8CC004DFE5B /* Fix Tool Runner Permissions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PSCALApp;
+			productName = PscalApp;
+			productReference = 145F4FBE2BE0719A00603B3F /* PSCAL.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		145F4FB62BE0719A00603B3F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2610;
+				ORGANIZATIONNAME = PSCAL;
+				TargetAttributes = {
+					145F4FBD2BE0719A00603B3F = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = 145F4FB92BE0719A00603B3F /* Build configuration list for PBXProject "PSCAL" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 145F4FB52BE0719A00603B3F /* PSCAL */;
+			productRefGroup = 145F4FB52BE0719A00603B3F /* PSCAL */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				145F4FBD2BE0719A00603B3F /* PSCALApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		145F4FBC2BE0719A00603B3F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				14E9F2052BE2B8D400A1E3C0 /* Examples in Resources */,
+				5F73F4B32FCA5B9A00EFC123 /* Assets.xcassets in Resources */,
+				5F9A00252F00000100ABC001 /* TerminalWeb in Resources */,
+				5F1AA0112EC6F00100000001 /* lib in Resources */,
+				5F1AA0122EC6F00100000001 /* fonts in Resources */,
+				5F1AA0132EC6F00100000001 /* etc in Resources */,
+				5F1AA0142EC6F00100000001 /* Docs in Resources */,
+				5F1AA0152EC6F00100000001 /* TestsLibs in Resources */,
+				5DFF9B122EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		5DFF9B992EC3E8CC004DFE5A /* Embed Tool Runner */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Tool Runner";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/pscal_tool_runner.deflate",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/pscal_tool_runner",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\ncase \"${PLATFORM_NAME:-}\" in\n    iphoneos*)\n        platform_dir=\"ios-device\"\n        ;;\n    *)\n        platform_dir=\"ios-simulator\"\n        ;;\nesac\n\nfallback_deflate=\"${PROJECT_DIR}/Tools/pscal_tool_runner.deflate\"\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\n/bin/mkdir -p \"${bundle_root}\"\nraw_dest=\"${bundle_root}/pscal_tool_runner\"\ncompressed_dest=\"${bundle_root}/pscal_tool_runner.deflate\"\nlicense_dest=\"${bundle_root}/Docs/Licenses\"\n\n# Do not bundle the raw runner executable (App Store rejects extra binaries).\n/bin/rm -f \"${raw_dest}\"\n\n# Bundle license texts for the in-app viewer.\n/bin/mkdir -p \"${license_dest}\"\n/bin/cp -f \"${PROJECT_DIR}/../LICENSE\" \"${license_dest}/pscal_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssl-3.6.0/LICENSE.txt\" \"${license_dest}/openssl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/curl-8.17.0/COPYING\" \"${license_dest}/curl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/SDL/LICENSE.txt\" \"${license_dest}/sdl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/nextvi/LICENSE\" \"${license_dest}/nextvi_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssh-10.2p1/LICENCE\" \"${license_dest}/openssh_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../src/third_party/yyjson/LICENSE\" \"${license_dest}/yyjson_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/hterm/LICENSE\" \"${license_dest}/hterm_LICENSE.txt\" || true\n\nif [ -f \"${fallback_deflate}\" ]; then\n    /bin/cp -f \"${fallback_deflate}\" \"${compressed_dest}\"\nelse\n    echo \"[pscal_tool_runner] warning: missing runner payload (no fallback deflate).\" 1>&2\nfi\n";
+		};
+		5DFF9BA02EC3E8CC004DFE5B /* Fix Tool Runner Permissions */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Fix Tool Runner Permissions";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/fix_tool_runner_permissions.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\nrunner=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/pscal_tool_runner\"\nif [ -f \"${runner}\" ]; then\n    /bin/rm -f \"${runner}\" || true\nfi\nstamp=\"${DERIVED_FILE_DIR}/fix_tool_runner_permissions.stamp\"\n/bin/mkdir -p \"${DERIVED_FILE_DIR}\"\ntouch \"${stamp}\"\n";
+		};
+		5F73F4B42FCA5CB000EFC123 /* Bundle Toolchain Data */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle Toolchain Data";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_lib.stamp",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_fonts.stamp",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_etc.stamp",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_docs.stamp",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_testslibs.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\ntoolchain_root=\"${PROJECT_DIR}/..\"\nmkdir -p \"${bundle_root}\"\n\ncopy_dir() {\n    local src=\"$1\"\n    local dest_name=\"$2\"\n    local stamp=\"$3\"\n    if [ ! -d \"${src}\" ]; then\n        echo \"[bundle toolchain] warning: missing ${src}\" >&2\n        return\n    fi\n    /usr/bin/rsync -a --delete \"${src}/\" \"${bundle_root}/${dest_name}/\"\n    /usr/bin/touch \"${bundle_root}/${stamp}\"\n}\n\ncopy_dir \"${toolchain_root}/lib\" \"lib\" .bundle_lib.stamp\ncopy_dir \"${toolchain_root}/fonts\" \"fonts\" .bundle_fonts.stamp\ncopy_dir \"${toolchain_root}/etc\" \"etc\" .bundle_etc.stamp\ncopy_dir \"${toolchain_root}/Docs\" \"Docs\" .bundle_docs.stamp\ncopy_dir \"${toolchain_root}/Tests/libs\" \"TestsLibs\" .bundle_testslibs.stamp\n\nlicense_dest=\"${bundle_root}/Docs/Licenses\"\n/bin/mkdir -p \"${license_dest}\"\n/bin/cp -f \"${toolchain_root}/LICENSE\" \"${license_dest}/pscal_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/openssl-3.6.0/LICENSE.txt\" \"${license_dest}/openssl_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/curl-8.17.0/COPYING\" \"${license_dest}/curl_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/SDL/LICENSE.txt\" \"${license_dest}/sdl_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/nextvi/LICENSE\" \"${license_dest}/nextvi_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/openssh-10.2p1/LICENCE\" \"${license_dest}/openssh_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/src/third_party/yyjson/LICENSE\" \"${license_dest}/yyjson_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/hterm/LICENSE\" \"${license_dest}/hterm_LICENSE.txt\" || true\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		145F4FBA2BE0719A00603B3F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5C0F3D872F00000100ABCD02 /* PSCALInterpose.c in Sources */,
+				145F4FCD2BE0722600603B3F /* PSCALRuntime.mm in Sources */,
+				14A5C5F42BE13E6500CEF0B9 /* TerminalBuffer.swift in Sources */,
+				14CF02B42BE1481D0037FB7E /* KeyboardAwareHostingController.swift in Sources */,
+				14F2C4F82BE1B12300DE9FD9 /* TerminalInputBridge.swift in Sources */,
+				145F4FC72BE071D600603B3F /* PscalApp.swift in Sources */,
+				145F4FC92BE071D600603B3F /* TerminalView.swift in Sources */,
+				14B7F7E12BE5F46B00E6D40B /* EditorWindowManager.swift in Sources */,
+				1A7B6C1E3F00123400ABC013 /* SshWindowManager.swift in Sources */,
+				1A7B6C1E3F00123400ABC011 /* SshRuntimeSession.swift in Sources */,
+				1A7B6C1E3F00123400ABC012 /* SshTerminalView.swift in Sources */,
+				1A7B6C1E3F00123400ABC014 /* ShellRuntimeSession.swift in Sources */,
+				1A7B6C1E3F00123400ABC015 /* ShellTerminalView.swift in Sources */,
+				145F4FCB2BE071F400603B3F /* PscalRuntimeBootstrap.swift in Sources */,
+				145F4FCB2BE071F400603B4E /* TerminalGeometryHelper.swift in Sources */,
+				14E9F2212BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift in Sources */,
+				5FFFD0023FFAA00000AAA001 /* PathTruncation.swift in Sources */,
+				5FFFD0043FFAA00000AAA001 /* TerminalFontSettings.swift in Sources */,
+				5FFFD0063FFAA00000AAA001 /* TerminalGeometry.swift in Sources */,
+				5FFFD0083FFAA00000AAA001 /* TerminalRenderer.swift in Sources */,
+				5FFFD00A3FFAA00000AAA001 /* TerminalSelection.swift in Sources */,
+				5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */,
+				5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */,
+				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
+				5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		145F4FD62BE0729000603B3F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../src",
+					"$(PROJECT_DIR)/../third-party/nextvi",
+					"$(PROJECT_DIR)/Sources/Bridge",
+					"$(PROJECT_DIR)/../build/ios-simulator/generated",
+					"$(PROJECT_DIR)/../build/ios-device/generated",
+				);
+				"HEADER_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(PROJECT_DIR)/../src",
+					"$(PROJECT_DIR)/../third-party/nextvi",
+					"$(PROJECT_DIR)/Sources/Bridge",
+					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/generated",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				"ARCHS[sdk=macosx*]" = arm64;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../build/ios-simulator",
+					"$(PROJECT_DIR)/../build/ios-device",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/../build/ios-device";
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(PROJECT_DIR)/../build/ios-simulator";
+				"LIBRARY_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)",
+					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/third-party/openssl/install/lib",
+					"$(SDKROOT)/usr/lib",
+				);
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				"EXCLUDED_ARCHS[sdk=macosx*]" = x86_64;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+				);
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lz",
+					"-lsqlite3",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					OpenGLES,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-Wl,-ignore_auto_link_library,SwiftUICore",
+					"-Wl,-ignore_auto_link_library,UIUtilities",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lz",
+					"-lsqlite3",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					OpenGLES,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-Wl,-ignore_auto_link_library,SwiftUICore",
+					"-Wl,-ignore_auto_link_library,UIUtilities",
+				);
+				"OTHER_LDFLAGS[sdk=macosx*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lz",
+					"-lsqlite3",
+					"-lcurl",
+					"-lssl",
+					"-lcrypto",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-Wl,-ignore_auto_link_library,SwiftUICore",
+					"-Wl,-ignore_auto_link_library,UIUtilities",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xlinker",
+					"-ignore_auto_link_library",
+					"-Xlinker",
+					SwiftUICore,
+					"-Xlinker",
+					"-ignore_auto_link_library",
+					"-Xlinker",
+					UIUtilities,
+				);
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridge/PscalApp-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		145F4FD72BE0729000603B3F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../src",
+					"$(PROJECT_DIR)/../third-party/nextvi",
+					"$(PROJECT_DIR)/Sources/Bridge",
+					"$(PROJECT_DIR)/../build/ios-simulator/generated",
+					"$(PROJECT_DIR)/../build/ios-device/generated",
+				);
+				"HEADER_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(PROJECT_DIR)/../src",
+					"$(PROJECT_DIR)/../third-party/nextvi",
+					"$(PROJECT_DIR)/Sources/Bridge",
+					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/generated",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				"ARCHS[sdk=macosx*]" = arm64;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../build/ios-simulator",
+					"$(PROJECT_DIR)/../build/ios-device",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "$(PROJECT_DIR)/../build/ios-device";
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(PROJECT_DIR)/../build/ios-simulator";
+				"LIBRARY_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)",
+					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/third-party/openssl/install/lib",
+					"$(SDKROOT)/usr/lib",
+				);
+				"EXCLUDED_ARCHS[sdk=macosx*]" = x86_64;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+				);
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lz",
+					"-lsqlite3",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					OpenGLES,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-Wl,-ignore_auto_link_library,SwiftUICore",
+					"-Wl,-ignore_auto_link_library,UIUtilities",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lz",
+					"-lsqlite3",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					OpenGLES,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+				);
+				"OTHER_LDFLAGS[sdk=macosx*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lz",
+					"-lsqlite3",
+					"-lcurl",
+					"-lssl",
+					"-lcrypto",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalApp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xlinker",
+					"-ignore_auto_link_library",
+					"-Xlinker",
+					SwiftUICore,
+					"-Xlinker",
+					"-ignore_auto_link_library",
+					"-Xlinker",
+					UIUtilities,
+				);
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridge/PscalApp-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		145F4FD82BE0729000603B3F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/App/PSCAL.maccatalyst.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = UYU5FM4LQ4;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"PSCAL_NO_CLI_ENTRYPOINTS=1",
+					"PSCALI_IOS_APP=1",
+					"PSCALI_IGNORE_SESSION_LOCKS=1",
+				);
+				INFOPLIST_FILE = Sources/App/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PSCAL;
+				PRODUCT_NAME = PSCAL;
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				"TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
+			};
+			name = Debug;
+		};
+		145F4FD92BE0729000603B3F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/App/PSCAL.maccatalyst.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = UYU5FM4LQ4;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"PSCAL_NO_CLI_ENTRYPOINTS=1",
+					"PSCALI_IOS_APP=1",
+					"PSCALI_IGNORE_SESSION_LOCKS=1",
+				);
+				INFOPLIST_FILE = Sources/App/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PSCAL;
+				PRODUCT_NAME = PSCAL;
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				"TARGETED_DEVICE_FAMILY[sdk=macosx*]" = "2,6";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		145F4FB92BE0719A00603B3F /* Build configuration list for PBXProject "PSCAL" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				145F4FD62BE0729000603B3F /* Debug */,
+				145F4FD72BE0729000603B3F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		145F4FD52BE0729000603B3F /* Build configuration list for PBXNativeTarget "PSCALApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				145F4FD82BE0729000603B3F /* Debug */,
+				145F4FD92BE0729000603B3F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 145F4FB62BE0719A00603B3F /* Project object */;
+}

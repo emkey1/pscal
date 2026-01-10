@@ -12,7 +12,9 @@
 #include "core/types.h" // For Value struct, as constants will be Values
 #include "symbol/symbol.h" // For HashTable definition
 
-#define GLOBAL_INLINE_CACHE_SLOT_SIZE ((int)sizeof(Symbol*))
+#define GLOBAL_INLINE_CACHE_SLOT_SIZE 8
+_Static_assert(sizeof(Symbol*) <= GLOBAL_INLINE_CACHE_SLOT_SIZE,
+               "GLOBAL_INLINE_CACHE_SLOT_SIZE is too small for Symbol* pointers");
 
 // --- Opcode Definitions ---
 typedef enum {

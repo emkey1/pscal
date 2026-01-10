@@ -1,0 +1,342 @@
+#!/usr/bin/env rea
+// Interactive Mandelbrot demo for the Rea front end (extended builtin version).
+// Left click to zoom in, right click to zoom out, Q to quit.
+// Uses the extended builtin MandelbrotRow. Requires SDL support.
+
+str ConfiguredFontPath = "/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+
+str resolveFontPath() {
+  str legacyFontPath = "/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath1 = "fonts/Roboto/static/Roboto-Regular.ttf";
+  str repoFontPath2 = "../../fonts/Roboto/static/Roboto-Regular.ttf";
+
+  if (length(ConfiguredFontPath) > 0 && ConfiguredFontPath[1] != '@' && fileexists(ConfiguredFontPath)) {
+    return ConfiguredFontPath;
+  }
+  if (fileexists(legacyFontPath)) {
+    return legacyFontPath;
+  }
+  if (fileexists(repoFontPath1)) {
+    return repoFontPath1;
+  }
+  return repoFontPath2;
+}
+
+class MandelbrotApp {
+  const int Width = 1024;
+  const int Height = 768;
+  const int BytesPerPixel = 4;
+  const int ScreenUpdateInterval = 1;
+  const int UpdateQuantum = 4;
+  const double ZoomFactor = 2.0;
+  const int ButtonLeft = 1;
+  const int ButtonRight = 4;
+  const int ThreadCount = 6;
+  const int KEY_LEFT = 1073741904;
+  const int KEY_RIGHT = 1073741903;
+  const int KEY_UP = 1073741906;
+  const int KEY_DOWN = 1073741905;
+
+  byte pixels[Width * Height * BytesPerPixel];
+  double minRe;
+  double maxRe;
+  double minIm;
+  double maxIm;
+  double reFactor;
+  double imFactor;
+  int textureID;
+  bool quit;
+  bool cancel;
+  bool computing;
+  int prevButtons;
+  bool rowDone[Height];
+  int threadStart[ThreadCount];
+  int threadEnd[ThreadCount];
+  int rowMutex;
+  int quitMutex;
+  int tids[ThreadCount];
+  int lastUpdatedRows;
+  int pollCounter;
+  int baseIterations;
+  int iterationStep;
+  int maxIterationCap;
+  int currentIterations;
+  double initialSpanRe;
+
+  str renderStatusLabel() {
+    return "Rendering... (max " + inttostr(myself.currentIterations) + ")";
+  }
+
+  void updateIterationLimit() {
+    double baseSpan = myself.initialSpanRe;
+    double span = myself.maxRe - myself.minRe;
+    int zoomSteps = 0;
+    if (baseSpan <= 0.0) { baseSpan = span; }
+    if (span <= 0.0) { span = baseSpan; }
+    if (baseSpan > 0.0 && span > 0.0) {
+      double ratio = baseSpan / span;
+      if (ratio > 1.0) {
+        while (ratio >= 2.0 && (myself.baseIterations + (zoomSteps + 1) * myself.iterationStep) <= myself.maxIterationCap) {
+          zoomSteps = zoomSteps + 1;
+          ratio = ratio / 2.0;
+        }
+      }
+    }
+    if (zoomSteps < 0) zoomSteps = 0;
+    myself.currentIterations = myself.baseIterations + zoomSteps * myself.iterationStep;
+    if (myself.currentIterations > myself.maxIterationCap) {
+      myself.currentIterations = myself.maxIterationCap;
+    }
+  }
+
+  void init() {
+    myself.minRe = -2.0;
+    myself.maxRe = 1.0;
+    myself.minIm = -1.2;
+    double widthSpan = myself.maxRe - myself.minRe;
+    double aspect = double(myself.Height) / double(myself.Width);
+    myself.maxIm = myself.minIm + widthSpan * aspect;
+    initgraph(myself.Width, myself.Height, "Rea Mandelbrot (ext)");
+    inittextsystem(resolveFontPath(), 18);
+    myself.textureID = createtexture(myself.Width, myself.Height);
+    if (myself.textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }
+    myself.quit = false;
+    myself.cancel = false;
+    myself.computing = false;
+    myself.prevButtons = 0;
+    myself.rowMutex = mutex();
+    myself.quitMutex = mutex();
+    int i;
+    for (i = 0; i < myself.ThreadCount; i = i + 1) { myself.tids[i] = -1; }
+    myself.lastUpdatedRows = 0;
+    myself.pollCounter = 0;
+    myself.baseIterations = 100;
+    myself.iterationStep = 50;
+    myself.maxIterationCap = 1000;
+    myself.currentIterations = myself.baseIterations;
+    myself.initialSpanRe = myself.maxRe - myself.minRe;
+    if (myself.initialSpanRe <= 0.0) { myself.initialSpanRe = 1.0; }
+    myself.updateIterationLimit();
+  }
+
+  int getQuit() {
+    bool q; lock(myself.quitMutex); q = myself.quit; unlock(myself.quitMutex); return q;
+  }
+  void setQuit(bool v) {
+    lock(myself.quitMutex); myself.quit = v; unlock(myself.quitMutex);
+  }
+  bool getCancel() {
+    bool c; lock(myself.rowMutex); c = myself.cancel; unlock(myself.rowMutex); return c;
+  }
+  void setCancel(bool v) {
+    lock(myself.rowMutex); myself.cancel = v; unlock(myself.rowMutex);
+  }
+
+  void computeRows(int startY, int endY) {
+    int row[Width];
+    int x, y, n, R, G, B, idx;
+    double c_im;
+    for (y = startY; y <= endY && !myself.getQuit() && !myself.getCancel(); y = y + 1) {
+      c_im = myself.maxIm - y * myself.imFactor;
+      mandelbrotrow(myself.minRe, myself.reFactor, c_im, myself.currentIterations, myself.Width - 1, row);
+      idx = y * myself.Width * myself.BytesPerPixel;
+      for (x = 0; x < myself.Width; x = x + 1) {
+        n = row[x];
+        if (n == myself.currentIterations) { R = G = B = 0; }
+        else { R = (n * 5) % 256; G = (n * 7 + 85) % 256; B = (n * 11 + 170) % 256; }
+        myself.pixels[idx + 0] = char(R);
+        myself.pixels[idx + 1] = char(G);
+        myself.pixels[idx + 2] = char(B);
+        myself.pixels[idx + 3] = char(255);
+        idx = idx + myself.BytesPerPixel;
+      }
+      lock(myself.rowMutex);
+      myself.rowDone[y] = true;
+      unlock(myself.rowMutex);
+    }
+  }
+
+  void computeRowsWorker(int idx) {
+    if (idx < 0 || idx >= myself.ThreadCount) return;
+    myself.computeRows(myself.threadStart[idx], myself.threadEnd[idx]);
+  }
+
+  void finishThreads() {
+    int i;
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; }
+    }
+  }
+
+  void startCompute() {
+    int i;
+    int y;
+    // Avoid clearing the entire pixel buffer at once; rows will overwrite their regions.
+    double widthSpan = myself.maxRe - myself.minRe;
+    double aspect = double(myself.Height) / double(myself.Width);
+    myself.maxIm = myself.minIm + widthSpan * aspect;
+    double heightSpan = myself.maxIm - myself.minIm;
+    myself.reFactor = widthSpan / double(myself.Width - 1);
+    myself.imFactor = heightSpan / double(myself.Height - 1);
+    for (i = 0; i < myself.Height; i = i + 1) { myself.rowDone[i] = false; }
+
+    int rowsPerThread = myself.Height / myself.ThreadCount;
+    int extra = myself.Height % myself.ThreadCount;
+    int startY = 0;
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      int endY = startY + rowsPerThread - 1;
+      if (extra > 0) { endY = endY + 1; extra = extra - 1; }
+      myself.threadStart[i] = startY;
+      myself.threadEnd[i] = endY;
+      startY = endY + 1;
+    }
+
+    for (i = 0; i < myself.ThreadCount; i = i + 1) {
+      myself.tids[i] = spawn myself.computeRowsWorker(i);
+    }
+    myself.computing = true;
+  }
+
+  void pollCompute() {
+    int y;
+    int doneCount;
+    bool done;
+    int adaptiveQuantum;
+    bool initialFrame;
+    bool periodicTick;
+    bool shouldUpdate;
+    bool allDone;
+    int y2;
+    if (!myself.computing) return;
+    y = 0;
+    doneCount = 0;
+    while (y < myself.Height) {
+      lock(myself.rowMutex);
+      done = myself.rowDone[y];
+      unlock(myself.rowMutex);
+      if (done) doneCount = doneCount + 1;
+      y = y + 1;
+    }
+    adaptiveQuantum = (myself.Height / (myself.ThreadCount * 8));
+    if (adaptiveQuantum < myself.UpdateQuantum) adaptiveQuantum = myself.UpdateQuantum;
+    initialFrame = (doneCount > 0 && myself.lastUpdatedRows == 0);
+    myself.pollCounter = myself.pollCounter + 1;
+    periodicTick = ((myself.pollCounter & 3) == 0);
+    shouldUpdate = (initialFrame || (periodicTick && (doneCount > myself.lastUpdatedRows)) || (doneCount == myself.Height));
+    if (shouldUpdate) {
+      updatetexture(myself.textureID, myself.pixels);
+      cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, myself.renderStatusLabel()); updatescreen();
+      myself.lastUpdatedRows = doneCount;
+    }
+    // Finalize when all rows are done or cancelled
+    if ((doneCount == myself.Height) || myself.getCancel()) {
+      if (doneCount > myself.lastUpdatedRows) {
+        updatetexture(myself.textureID, myself.pixels);
+        cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, myself.renderStatusLabel()); updatescreen();
+        myself.lastUpdatedRows = doneCount;
+      }
+      myself.finishThreads();
+      myself.computing = false;
+      myself.lastUpdatedRows = 0;
+    }
+  }
+
+  void zoom(int px, int py, double factor) {
+    double reFactor = (myself.maxRe - myself.minRe) / double(myself.Width - 1);
+    double imFactor = (myself.maxIm - myself.minIm) / double(myself.Height - 1);
+    double centerRe = myself.minRe + (px + 0.5) * reFactor;
+    double centerIm = myself.maxIm - (py + 0.5) * imFactor;
+    double widthRe = (myself.maxRe - myself.minRe) * factor;
+    double heightIm = (myself.maxIm - myself.minIm) * factor;
+    myself.minRe = centerRe - widthRe / 2.0;
+    myself.maxRe = centerRe + widthRe / 2.0;
+    myself.minIm = centerIm - heightIm / 2.0;
+    myself.maxIm = centerIm + heightIm / 2.0;
+    myself.updateIterationLimit();
+  }
+
+  bool handleInput() {
+    graphloop(0);
+    bool changed = false;
+    bool keyboardChanged = false;
+    int key = pollkeyany();
+    while (key != 0) {
+      if (key == 'q' || key == 'Q') {
+        myself.setQuit(true);
+        return false;
+      }
+      double widthRe = (myself.maxRe - myself.minRe);
+      double heightIm = (myself.maxIm - myself.minIm);
+      double dx = widthRe * 0.5;
+      double dy = heightIm * 0.5;
+      if (key == myself.KEY_LEFT) { myself.minRe -= dx; myself.maxRe -= dx; changed = true; keyboardChanged = true; }
+      else if (key == myself.KEY_RIGHT) { myself.minRe += dx; myself.maxRe += dx; changed = true; keyboardChanged = true; }
+      else if (key == myself.KEY_UP) { myself.minIm += dy; myself.maxIm += dy; changed = true; keyboardChanged = true; }
+      else if (key == myself.KEY_DOWN) { myself.minIm -= dy; myself.maxIm -= dy; changed = true; keyboardChanged = true; }
+      key = pollkeyany();
+    }
+    int x = 0;
+    int y = 0;
+    int b = 0;
+    int inside = 0;
+    getmousestate(x, y, b, inside);
+    if (inside == 0) {
+      b = 0;
+    }
+    int winW = getmaxx() + 1;
+    int winH = getmaxy() + 1;
+    if (winW > 0 && winH > 0) {
+      if (x >= winW) x = winW - 1;
+      if (y >= winH) y = winH - 1;
+      if (winW != myself.Width) { x = (x * myself.Width) / winW; if (x >= myself.Width) x = myself.Width - 1; }
+      if (winH != myself.Height) { y = (y * myself.Height) / winH; if (y >= myself.Height) y = myself.Height - 1; }
+    }
+    if ((b & myself.ButtonLeft) != 0 && (myself.prevButtons & myself.ButtonLeft) == 0) {
+      myself.zoom(x, y, 1.0 / myself.ZoomFactor);
+      changed = true;
+    } else if ((b & myself.ButtonRight) != 0 && (myself.prevButtons & myself.ButtonRight) == 0) {
+      myself.zoom(x, y, myself.ZoomFactor);
+      changed = true;
+    }
+    myself.prevButtons = b;
+    if (keyboardChanged) {
+      myself.updateIterationLimit();
+    }
+    return changed;
+  }
+
+  void run() {
+    myself.init();
+    bool needRender = true;
+    while (!myself.getQuit()) {
+      if (needRender && !myself.computing) {
+        myself.startCompute();
+        needRender = false;
+      }
+      myself.pollCompute();
+      delay(1);
+      if (myself.handleInput()) {
+        myself.setCancel(true);
+        if (myself.computing) {
+          int i;
+          for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
+          myself.computing = false;
+        }
+        myself.setCancel(false);
+        needRender = true;
+        updatetexture(myself.textureID, myself.pixels);
+        cleardevice(); rendercopy(myself.textureID); outtextxy(8, 8, myself.renderStatusLabel()); updatescreen();
+      }
+    }
+    if (myself.computing) {
+      int i;
+      for (i = 0; i < myself.ThreadCount; i = i + 1) { if (myself.tids[i] >= 0) { join myself.tids[i]; myself.tids[i] = -1; } }
+    }
+    destroytexture(myself.textureID);
+    quittextsystem();
+    closegraph();
+  }
+}
+
+MandelbrotApp app = new MandelbrotApp();
+app.run();

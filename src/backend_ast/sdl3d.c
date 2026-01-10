@@ -1,9 +1,34 @@
 #ifdef SDL
-#include "sdl.h"
+#include "pscal_sdl_runtime.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "sdl_ios_dispatch.h"
 
-Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
+static bool sdlGlSetAttribute(SDL_GLattr attr, int value) {
+#if defined(PSCALI_SDL3)
+    return SDL_GL_SetAttribute(attr, value);
+#else
+    return SDL_GL_SetAttribute(attr, value) == 0;
+#endif
+}
+
+static bool sdlGlMakeCurrent(SDL_Window* window, SDL_GLContext context) {
+#if defined(PSCALI_SDL3)
+    return SDL_GL_MakeCurrent(window, context);
+#else
+    return SDL_GL_MakeCurrent(window, context) == 0;
+#endif
+}
+
+static bool sdlGlSetSwapIntervalValue(int interval) {
+#if defined(PSCALI_SDL3)
+    return SDL_GL_SetSwapInterval(interval);
+#else
+    return SDL_GL_SetSwapInterval(interval) == 0;
+#endif
+}
+
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph3d) {
     if (arg_count != 5 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING
         || !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
         runtimeError(vm, "VM Error: InitGraph3D expects (Integer, Integer, String, Integer, Integer)");
@@ -17,8 +42,12 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
         }
         gSdlInitialized = true;
 
+#ifdef SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+#endif
+#if PSCALI_HAS_SYSWM
         SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+#endif
     }
 
     cleanupSdlWindowResources();
@@ -38,19 +67,26 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthBits) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilBits) != 0 ||
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0) {
+    if (!sdlGlSetAttribute(SDL_GL_RED_SIZE, 8) ||
+        !sdlGlSetAttribute(SDL_GL_GREEN_SIZE, 8) ||
+        !sdlGlSetAttribute(SDL_GL_BLUE_SIZE, 8) ||
+        !sdlGlSetAttribute(SDL_GL_ALPHA_SIZE, 8) ||
+        !sdlGlSetAttribute(SDL_GL_DEPTH_SIZE, depthBits) ||
+        !sdlGlSetAttribute(SDL_GL_STENCIL_SIZE, stencilBits) ||
+        !sdlGlSetAttribute(SDL_GL_DOUBLEBUFFER, 1)) {
         runtimeError(vm, "Runtime error: SDL_GL_SetAttribute failed: %s", SDL_GetError());
         return makeVoid();
     }
 
+#if defined(PSCALI_SDL3)
+    gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+    if (gSdlWindow) {
+        SDL_SetWindowPosition(gSdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+#else
     gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                   width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+#endif
     if (!gSdlWindow) {
         runtimeError(vm, "Runtime error: SDL_CreateWindow failed: %s", SDL_GetError());
         return makeVoid();
@@ -66,14 +102,14 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (SDL_GL_MakeCurrent(gSdlWindow, gSdlGLContext) != 0) {
+    if (!sdlGlMakeCurrent(gSdlWindow, gSdlGLContext)) {
         runtimeError(vm, "Runtime error: SDL_GL_MakeCurrent failed: %s", SDL_GetError());
         SDL_GL_DeleteContext(gSdlGLContext); gSdlGLContext = NULL;
         SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
         return makeVoid();
     }
 
-    SDL_GL_SetSwapInterval(1);
+    sdlGlSetSwapIntervalValue(1);
 
     gSdlRenderer = NULL;
     initializeTextureSystem();
@@ -81,46 +117,56 @@ Value vmBuiltinInitgraph3d(VM* vm, int arg_count, Value* args) {
     SDL_PumpEvents();
     SDL_RaiseWindow(gSdlWindow);
 #if SDL_VERSION_ATLEAST(2,0,5)
+#ifndef PSCALI_SDL3
     SDL_SetWindowInputFocus(gSdlWindow);
 #endif
+#endif
     sdlEnsureInputWatch();
+    sdlFlushSpuriousQuitEvents();
 
-    if (!SDL_IsTextInputActive()) {
-        SDL_StartTextInput();
+    if (!sdlTextInputActive()) {
+        sdlStartTextInput();
     }
 
     return makeVoid();
 }
 
-Value vmBuiltinClosegraph3d(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinClosegraph3d) {
     if (arg_count != 0) runtimeError(vm, "CloseGraph3D expects 0 arguments.");
     cleanupSdlWindowResources();
     return makeVoid();
 }
 
-Value vmBuiltinGlsetswapinterval(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGlsetswapinterval) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "GLSetSwapInterval expects 1 integer argument.");
         return makeVoid();
     }
+#if defined(PSCAL_TARGET_IOS)
+    return makeVoid();
+#else
     if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
         runtimeError(vm, "Runtime error: GLSetSwapInterval requires an active OpenGL window. Call InitGraph3D first.");
         return makeVoid();
     }
 
     int interval = (int)AS_INTEGER(args[0]);
-    if (SDL_GL_SetSwapInterval(interval) != 0) {
+    if (!sdlGlSetSwapIntervalValue(interval)) {
         runtimeError(vm, "Runtime error: SDL_GL_SetSwapInterval failed: %s", SDL_GetError());
     }
 
     return makeVoid();
+#endif
 }
 
-Value vmBuiltinGlswapwindow(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGlswapwindow) {
     if (arg_count != 0) {
         runtimeError(vm, "GLSwapWindow expects 0 arguments.");
         return makeVoid();
     }
+#if defined(PSCAL_TARGET_IOS)
+    return makeVoid();
+#else
     if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
         runtimeError(vm, "Runtime error: GLSwapWindow requires an active OpenGL window. Call InitGraph3D first.");
         return makeVoid();
@@ -128,6 +174,7 @@ Value vmBuiltinGlswapwindow(VM* vm, int arg_count, Value* args) {
 
     SDL_GL_SwapWindow(gSdlWindow);
     return makeVoid();
+#endif
 }
 
 #endif // SDL

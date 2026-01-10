@@ -48,7 +48,7 @@ AST *readStatement(Parser *parser);
 AST *readlnStatement(Parser *parser);
 AST *exprList(Parser *parser);
 AST *expr(Parser *parser);
-AST *term(Parser *parser);
+AST *pascalTerm(Parser *parser);
 AST *unitParser(Parser *parser, int recursion_depth, const char* unit_name_being_parsed, BytecodeChunk* chunk);
 AST *enumDeclaration(Parser *parser);
 AST *spawnStatement(Parser *parser);
@@ -64,7 +64,7 @@ Token *peekToken(Parser *parser);
 
 AST *expression(Parser *parser);        // New top-level expression parser
 AST *simpleExpression(Parser *parser);  // Handles additive ops
-AST *term(Parser *parser);              // Handles multiplicative ops (modified)
+AST *pascalTerm(Parser *parser);              // Handles multiplicative ops (modified)
 AST *factor(Parser *parser);            // Handles primaries, NOT, parens (modified)
 AST *parseSetConstructor(Parser *parser);
 AST *parseWriteArguments(Parser *parser);

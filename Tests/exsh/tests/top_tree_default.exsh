@@ -1,0 +1,43 @@
+set -e
+
+# Regression: `top` should default to tree output that exposes relationship
+# info (PPID/SID columns) so multiple shells/sessions can be understood.
+#
+# The harness treats exit code 77 as a skip.
+
+if [ "${RUN_VPROC_TESTS:-0}" != "1" ]; then
+    exit 77
+fi
+
+tmp_base="./.exsh-top-tree-$$"
+tmp_out="${tmp_base}.out"
+
+rm -f "$tmp_out"
+
+top >"$tmp_out"
+
+found_header=0
+found_shell=0
+
+while IFS= read -r line; do
+    case "$line" in
+        ("PID "*"PPID "*"SID "*) found_header=1 ;;
+    esac
+    case "$line" in
+        (*" shell") found_shell=1 ;;
+    esac
+done <"$tmp_out"
+
+if [ "$found_header" -ne 1 ]; then
+    echo "FAIL: top header missing PPID/SID columns" >&2
+    cat "$tmp_out" >&2
+    exit 1
+fi
+
+if [ "$found_shell" -ne 1 ]; then
+    echo "FAIL: top output missing shell row" >&2
+    cat "$tmp_out" >&2
+    exit 1
+fi
+
+rm -f "$tmp_out"

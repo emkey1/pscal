@@ -7,13 +7,18 @@
 #include <pthread.h> // For mutex guarding of global tables
 #include <stdatomic.h> // For atomic flags shared across threads
 
-#include "types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
+#include "core/types.h" // Provides TypeEntry, Value, List, AST forward decl etc.
 #ifdef SDL
-#include "backend_ast/sdl.h"   // For SDL related externs or types if any directly in globals.h
+#include "backend_ast/pscal_sdl_runtime.h"   // For SDL related externs or types if any directly in globals.h
                    // (It's better if specific SDL globals are in sdl.h and sdl.c)
 #endif
 
 // --- EXIT_FAILURE_HANDLER Macro ---
+// iOS builds should not call exit(3) from library code; force suppression there.
+#if defined(PSCAL_TARGET_IOS) && !defined(SUPPRESS_EXIT)
+#define SUPPRESS_EXIT
+#endif
+
 #ifdef SUPPRESS_EXIT
     #define EXIT_FAILURE_HANDLER() fprintf(stderr, "Suppressed exit call from %s:%d\n", __FILE__, __LINE__)
 #else
@@ -22,6 +27,19 @@
 
 #define MAX_SYMBOL_LENGTH 255
 #define MAX_ID_LENGTH 256
+
+// Per-session thread-local storage for iOS multi-tab isolation.
+#ifndef PSCAL_THREAD_LOCAL
+#if defined(PSCAL_TARGET_IOS)
+#if defined(__cplusplus)
+#define PSCAL_THREAD_LOCAL thread_local
+#else
+#define PSCAL_THREAD_LOCAL _Thread_local
+#endif
+#else
+#define PSCAL_THREAD_LOCAL
+#endif
+#endif
 
 // --- Forward Declarations and Typedefs needed by this file ---
 // These types are defined in symbol.h
@@ -38,14 +56,14 @@ extern "C" {
 #endif
 
 // --- Global Variable EXTERN Declarations ---
-extern HashTable *globalSymbols;
-extern HashTable *constGlobalSymbols;
-extern HashTable *localSymbols;
-extern Symbol *current_function_symbol;
+extern PSCAL_THREAD_LOCAL HashTable *globalSymbols;
+extern PSCAL_THREAD_LOCAL HashTable *constGlobalSymbols;
+extern PSCAL_THREAD_LOCAL HashTable *localSymbols;
+extern PSCAL_THREAD_LOCAL Symbol *current_function_symbol;
 
-extern HashTable *procedure_table; // Procedure table is now a HashTable
-extern HashTable *current_procedure_table; // Pointer to current procedure scope
-extern TypeEntry *type_table;      // TypeEntry definition comes from types.h
+extern PSCAL_THREAD_LOCAL HashTable *procedure_table; // Procedure table is now a HashTable
+extern PSCAL_THREAD_LOCAL HashTable *current_procedure_table; // Pointer to current procedure scope
+extern PSCAL_THREAD_LOCAL TypeEntry *type_table;      // TypeEntry definition comes from types.h
 
 // --- CRT State Variables ---
 extern int gCurrentTextColor;
@@ -67,15 +85,16 @@ extern int gWindowBottom;
 #define MAX_RECURSION_DEPTH 10
 extern int gParamCount;
 extern char **gParamValues;
+extern bool gParamValuesOwned;
 // extern AST *globalRoot; // Defined in main.c typically
 
 extern int last_io_error;
 extern int typeWarn;
 
 #ifdef DEBUG
-extern int dumpExec;
+extern PSCAL_THREAD_LOCAL int dumpExec;
 // Assuming List is defined in types.h or list.h (which types.h might include)
-extern List *inserted_global_names;
+extern PSCAL_THREAD_LOCAL List *inserted_global_names;
 #endif
 
 extern atomic_int break_requested;

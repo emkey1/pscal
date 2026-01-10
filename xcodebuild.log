@@ -1,0 +1,86 @@
+2025-11-14 17:47:34.970 xcodebuild[76877:14848815]  DVTFilePathFSEvents: Failed to start fs event stream.
+2025-11-14 17:47:35.323 xcodebuild[76877:14848813] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+2025-11-14 17:47:36.314 xcodebuild[76877:14848816] CoreSimulatorService connection became invalid.  Simulator services will no longer be available.
+2025-11-14 17:47:36.315 xcodebuild[76877:14848816] Logging connecton invalid: <OS_xpc_error: <dictionary: 0x1eed80960> { count = 1, transaction: 0, voucher = 0x0, contents =
+	"XPCErrorDescription" => <string: 0x1eed80aa8> { string cache = 0x0, length = 18, contents = "Connection invalid" }
+}>
+2025-11-14 17:47:36.315 xcodebuild[76877:14849003] Error opening log file (/Users/mke/Library/Logs/CoreSimulator/CoreSimulator.com.apple.dt.xcodebuild.log): Operation not permitted
+[-[SimServiceContext sendRequest:]:1743] ERROR : Unable to deliver request ({
+    "developer_dir" = "/Applications/Xcode.app/Contents/Developer";
+    request = "set_developer_dir";
+}) because we are not connected to CoreSimulatorService.
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project PSCAL.xcodeproj -scheme PscalApp -sdk iphonesimulator -configuration Debug CODE_SIGNING_ALLOWED=NO build
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+    SDKROOT = iphonesimulator26.1
+
+2025-11-14 17:47:36.380 xcodebuild[76877:14848813] [MT] DVTAssertions: Warning in DVTFrameworks/DVTFoundation/FileTypes/DVTFileDataTypeDetection.m:79
+Details:  detectedTypeIdentifier (com.apple.binary-property-list) does not conform to matchedTypeIdentifier in MagicFileDataTypeDetector extenson com.apple.property-list. When both are specified, this conformance is required unless overridden by setting allowNonInheritance. extension.identifier:Xcode.MagicFileDataTypeDetector.BinaryPlist
+Object:   <DVTFileDataTypeDetectionMagicCache: 0xb8e26b660>
+Method:   -initWithExtension:
+Thread:   <_NSMainThread: 0x100c7e230>{number = 1, name = main}
+Please file a bug at https://feedbackassistant.apple.com with this warning message and any useful information you can provide.
+2025-11-14 17:47:36.387 xcodebuild[76877:14848813] [MT] DVTAssertions: Warning in DVTFrameworks/DVTFoundation/FileTypes/DVTFileDataTypeDetection.m:79
+Details:  detectedTypeIdentifier (com.apple.xml-property-list) does not conform to matchedTypeIdentifier in MagicFileDataTypeDetector extenson com.apple.property-list. When both are specified, this conformance is required unless overridden by setting allowNonInheritance. extension.identifier:Xcode.MagicFileDataTypeDetector.XMLPlist
+Object:   <DVTFileDataTypeDetectionMagicCache: 0xb8e274ba0>
+Method:   -initWithExtension:
+Thread:   <_NSMainThread: 0x100c7e230>{number = 1, name = main}
+Please file a bug at https://feedbackassistant.apple.com with this warning message and any useful information you can provide.
+2025-11-14 17:47:36.488 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open log store at /Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Build
+2025-11-14 17:47:36.488 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open Build log store: Error Domain=IDEFoundationErrorDomain Code=1 "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Build': (513) You don’t have permission to save the file “Build” in the folder “Logs”." UserInfo={NSLocalizedDescription=Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Build': (513) You don’t have permission to save the file “Build” in the folder “Logs”.}. User info: {
+    NSLocalizedDescription = "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Build': (513) You don\U2019t have permission to save the file \U201cBuild\U201d in the folder \U201cLogs\U201d.";
+}.
+2025-11-14 17:47:36.516 xcodebuild[76877:14849003]  DVTProvisioningProfileManager: Failed to load profile "/Users/mke/Library/Developer/Xcode/UserData/Provisioning Profiles/3007a115-4d6a-4dd9-94b3-96386115f2be.mobileprovision" (Error Domain=DVTProvisioningProfileProviderErrorDomain Code=1 "Failed to load profile." UserInfo={NSLocalizedDescription=Failed to load profile., NSLocalizedRecoverySuggestion=Profile is missing the required UUID property.})
+2025-11-14 17:47:36.516 xcodebuild[76877:14849007]  DVTProvisioningProfileManager: Failed to load profile "/Users/mke/Library/Developer/Xcode/UserData/Provisioning Profiles/05ca53dc-f40e-434c-bb31-b8e24ffa9f43.mobileprovision" (Error Domain=DVTProvisioningProfileProviderErrorDomain Code=1 "Failed to load profile." UserInfo={NSLocalizedDescription=Failed to load profile., NSLocalizedRecoverySuggestion=Profile is missing the required UUID property.})
+2025-11-14 17:47:36.517 xcodebuild[76877:14849006]  DVTProvisioningProfileManager: Failed to load profile "/Users/mke/Library/Developer/Xcode/UserData/Provisioning Profiles/11156f53-51a4-4050-ae41-3cd41a1d3f95.mobileprovision" (Error Domain=DVTProvisioningProfileProviderErrorDomain Code=1 "Failed to load profile." UserInfo={NSLocalizedDescription=Failed to load profile., NSLocalizedRecoverySuggestion=Profile is missing the required UUID property.})
+[-[SimServiceContext initWithDeveloperDir:connectionType:error:]:450] WARN  : Unable to discover any Simulator runtimes. Developer Directory is /Applications/Xcode.app/Contents/Developer.
+[-[SimDiskImageManager init]:175] ERROR : Could not kickstart simdiskimaged; SimDiskImageManager services will not be available: Error Domain=NSPOSIXErrorDomain Code=53 "Software caused connection abort" UserInfo={NSLocalizedDescription=Error returned in reply from CoreSimulatorService: Connection invalid}
+[-[SimDiskImageManager _onQueue_checkConnection:]:239] ERROR : simdiskimaged returned error (invalid), marking disconnected.
+[-[SimServiceContext initWithDeveloperDir:connectionType:error:]_block_invoke:486] ERROR : Could not get list of trusted mount directories: Error Domain=com.apple.CoreSimulator.SimError Code=410 "The service used to manage runtime disk images (simdiskimaged) crashed or is not responding" UserInfo={NSLocalizedDescription=The service used to manage runtime disk images (simdiskimaged) crashed or is not responding}
+[-[SimDiskImageManager _onQueue_checkConnection:]:239] ERROR : simdiskimaged returned error (invalid), marking disconnected.
+[-[SimServiceContext sendRequest:reply:error:]:1763] ERROR : Unable to deliver request ({
+    request = "notification_subscription";
+    "set_path" = "/Users/mke/Library/Developer/CoreSimulator/Devices";
+}) because we are not connected to CoreSimulatorService.
+2025-11-14 17:47:36.560 xcodebuild[76877:14848816] Error Domain=NSPOSIXErrorDomain Code=61 "Connection refused" UserInfo={NSLocalizedDescription=CoreSimulatorService connection became invalid.  Simulator services will no longer be available.}
+[-[SimServiceContext sendRequest:reply:error:]:1763] ERROR : Unable to deliver request ({
+    request = "notification_subscription";
+    "set_path" = "/Users/mke/Library/Developer/CoreSimulator/Devices";
+}) because we are not connected to CoreSimulatorService.
+2025-11-14 17:47:36.562 xcodebuild[76877:14848816]  iOSSimulator: [SimServiceContext defaultDeviceSetWithError:] returned nil (Error Domain=NSPOSIXErrorDomain Code=61 "Connection refused" UserInfo={NSLocalizedFailureReason=Failed to subscribe to notifications from CoreSimulatorService., NSLocalizedDescription=Failed to initialize simulator device set., NSUnderlyingError=0xb8e3d0a50 {Error Domain=NSPOSIXErrorDomain Code=61 "Connection refused" UserInfo={NSLocalizedDescription=CoreSimulatorService connection became invalid.  Simulator services will no longer be available.}}}). Simulator device support disabled.
+2025-11-14 17:47:36.562 xcodebuild[76877:14848815] Error Domain=NSPOSIXErrorDomain Code=61 "Connection refused" UserInfo={NSLocalizedDescription=CoreSimulatorService connection became invalid.  Simulator services will no longer be available.}
+2025-11-14 17:47:36.563 xcodebuild[76877:14848815]  IDESimulatorAvailability: startObservingSimulatorUpdates() FAILED to register SimDeviceSet observer
+2025-11-14 17:47:36.575 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open log store at /Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Localization
+2025-11-14 17:47:36.575 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open Localization log store: Error Domain=IDEFoundationErrorDomain Code=1 "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Localization': (513) You don’t have permission to save the file “Localization” in the folder “Logs”." UserInfo={NSLocalizedDescription=Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Localization': (513) You don’t have permission to save the file “Localization” in the folder “Logs”.}. User info: {
+    NSLocalizedDescription = "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Localization': (513) You don\U2019t have permission to save the file \U201cLocalization\U201d in the folder \U201cLogs\U201d.";
+}.
+2025-11-14 17:47:36.576 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open log store at /Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Launch
+2025-11-14 17:47:36.577 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open Launch log store: Error Domain=IDEFoundationErrorDomain Code=1 "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Launch': (513) You don’t have permission to save the file “Launch” in the folder “Logs”." UserInfo={NSLocalizedDescription=Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Launch': (513) You don’t have permission to save the file “Launch” in the folder “Logs”.}. User info: {
+    NSLocalizedDescription = "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Launch': (513) You don\U2019t have permission to save the file \U201cLaunch\U201d in the folder \U201cLogs\U201d.";
+}.
+2025-11-14 17:47:36.579 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open log store at /Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Package
+2025-11-14 17:47:36.579 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open Package log store: Error Domain=IDEFoundationErrorDomain Code=1 "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Package': (513) You don’t have permission to save the file “Package” in the folder “Logs”." UserInfo={NSLocalizedDescription=Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Package': (513) You don’t have permission to save the file “Package” in the folder “Logs”.}. User info: {
+    NSLocalizedDescription = "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Package': (513) You don\U2019t have permission to save the file \U201cPackage\U201d in the folder \U201cLogs\U201d.";
+}.
+2025-11-14 17:47:36.729 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open log store at /Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Test
+2025-11-14 17:47:36.729 xcodebuild[76877:14848813] [MT] IDELogStore: Failed to open Test log store: Error Domain=IDEFoundationErrorDomain Code=1 "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Test': (513) You don’t have permission to save the file “Test” in the folder “Logs”." UserInfo={NSLocalizedDescription=Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Test': (513) You don’t have permission to save the file “Test” in the folder “Logs”.}. User info: {
+    NSLocalizedDescription = "Unable to create log store directory at '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq/Logs/Test': (513) You don\U2019t have permission to save the file \U201cTest\U201d in the folder \U201cLogs\U201d.";
+}.
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:iOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-iphonesimulator:placeholder, name:Any iOS Simulator Device }
+{ platform:macOS, arch:arm64, variant:Designed for [iPad,iPhone], id:00006001-000409AE21F8801E, name:My Mac }
+{ platform:iOS, id:dvtdevice-DVTiPhonePlaceholder-iphoneos:placeholder, name:Any iOS Device }
+{ platform:iOS, id:00008030-000165412E99802E, name:IPhone 2020, error:IPhone 2020 is not connected Xcode will continue when IPhone 2020 is connected and unlocked. }
+{ platform:iOS, id:00008103-001E302622EB001E, name:M1 iPad, error:M1 iPad is not connected Xcode will continue when M1 iPad is connected and unlocked. }
+{ platform:iOS, id:00008020-001C25E21E09002E, name:Michael’s iPad 10.5, error:Michael’s iPad 10.5 is not connected Xcode will continue when Michael’s iPad 10.5 is connected and unlocked. }
+Build Preparation
+Couldn't create workspace arena folder '/Users/mke/Library/Developer/Xcode/DerivedData/PSCAL-anvfevpigpxrzghagwbzajcwawhq': You don’t have permission to save the file “PSCAL-anvfevpigpxrzghagwbzajcwawhq” in the folder “DerivedData”.
+
+** BUILD FAILED **
+
+
+The following build commands failed:
+	Building project PSCAL with scheme PscalApp and configuration Debug
+(1 failure)

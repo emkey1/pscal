@@ -14,5 +14,6 @@ AST *reaGetModuleAST(int index);
 const char *reaGetModulePath(int index);
 const char *reaGetModuleName(int index);
 char *reaResolveImportPath(const char *path);
+void reaSemanticResetState(void);
 
 #endif /* REA_SEMANTIC_H */

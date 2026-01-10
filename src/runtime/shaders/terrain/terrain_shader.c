@@ -1,3 +1,9 @@
+#if defined(__APPLE__)
+#ifndef GLES_SILENCE_DEPRECATION
+#define GLES_SILENCE_DEPRECATION 1
+#endif
+#endif
+
 #include "runtime/shaders/terrain/terrain_shader.h"
 
 #include <math.h>
@@ -477,8 +483,13 @@ const TerrainShaderHandles *terrainShaderBind(const TerrainGenerator *generator)
 
     float modelView[16];
     float projection[16];
+#if defined(PSCAL_TARGET_IOS)
+    terrainSetIdentity(modelView);
+    terrainSetIdentity(projection);
+#else
     glGetFloatv(GL_MODELVIEW_MATRIX, modelView);
     glGetFloatv(GL_PROJECTION_MATRIX, projection);
+#endif
 
     float mvp[16];
     multiplyMat4(projection, modelView, mvp);

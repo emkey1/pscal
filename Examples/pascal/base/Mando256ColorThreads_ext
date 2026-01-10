@@ -180,7 +180,7 @@ END;
 
 BEGIN
   Width := ScreenCols;
-  Height := ScreenRows;
+  Height := ScreenRows - 1;
 
   ClrScr;
 

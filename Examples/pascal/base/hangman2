@@ -62,11 +62,60 @@ begin
       end;
 end;
 
+function JoinPath(const baseDir, leaf: string): string;
+begin
+  if baseDir = '' then
+    JoinPath := leaf
+  else if (baseDir[Length(baseDir)] = '/') then
+    JoinPath := baseDir + leaf
+  else
+    JoinPath := baseDir + '/' + leaf;
+end;
+
+function EnvPathCandidate(const envName, leaf: string): string;
+var
+  envValue: string;
+begin
+  envValue := GetEnvironmentVariable(envName);
+  if envValue = '' then
+    EnvPathCandidate := ''
+  else
+    EnvPathCandidate := JoinPath(envValue, leaf);
+end;
+
 function ResolveWordsPath: string;
 var
   baseDir, candidate: string;
   i: integer;
 begin
+  candidate := GetEnvironmentVariable('PSCALI_WORDS_PATH');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    ResolveWordsPath := candidate;
+    exit;
+  end;
+
+  candidate := EnvPathCandidate('PSCALI_ETC_ROOT', 'words');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    ResolveWordsPath := candidate;
+    exit;
+  end;
+
+  candidate := EnvPathCandidate('PSCALI_WORKSPACE_ROOT', 'etc/words');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    ResolveWordsPath := candidate;
+    exit;
+  end;
+
+  candidate := EnvPathCandidate('PSCAL_EXAMPLES_ROOT', '../etc/words');
+  if (candidate <> '') and FileExists(candidate) then
+  begin
+    ResolveWordsPath := candidate;
+    exit;
+  end;
+
   if Pos('PSCAL_INSTALL_ROOT', CONFIGURED_WORDS_PATH) = 0 then
   begin
     if FileExists(CONFIGURED_WORDS_PATH) then
@@ -460,4 +509,3 @@ begin
   // Loop back to start a new game if condition was met
 
 end. // End main program
-

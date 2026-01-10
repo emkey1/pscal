@@ -2,7 +2,7 @@
 #ifndef symbol_h
 #define symbol_h
 
-#include "types.h" // For VarType, Value (which includes FieldValue and TypeEntry)
+#include "core/types.h" // For VarType, Value (which includes FieldValue and TypeEntry)
 
 // Forward declare AST as its full definition might not be needed here,
 // and ast.h includes symbol.h creating a potential for cycles if not careful.
@@ -67,6 +67,7 @@ typedef struct SymbolTable_s HashTable;
 
 // --- Public Symbol Table Interface Prototypes ---
 Symbol *lookupSymbol(const char *name);
+Symbol *lookupSymbolOptional(const char *name);
 Symbol *lookupGlobalSymbol(const char *name);
 Symbol *lookupLocalSymbol(const char *name);
 void updateSymbol(const char *name, Value val);

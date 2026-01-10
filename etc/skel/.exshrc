@@ -4,6 +4,11 @@
 # sensible defaults while remaining easy to extend.  Copy it to your home
 # directory and adjust any sections that need to be customised.
 
+# Shortcut to get to home dir, make terminal size correct.  Yes, this is a 
+# kludge
+cd
+resize
+
 # ---------------------------------------------------------------------------
 # PATH management helpers
 # ---------------------------------------------------------------------------
@@ -38,33 +43,80 @@ if [ -z "${EDITOR:-}" ]; then
     export EDITOR=vi
 fi
 
+# Edit to your preference
+USER="user"
+HOST="iDevice"
+
 # Provide coloured prompts when attached to a terminal.  The prompt tokens are
 # the same as Bash's \u, \h, \W, \t, etc.  Non-interactive sessions keep the
 # minimal "exsh$" prompt so scripts are unaffected.
 if [ -t 1 ]; then
-    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]\u@\h \[\033[1;34m\]\W\[\033[0m\]\$ "
+    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]$USER@$HOST \[\033[1;34m\]\W\[\033[0m\] ⚡ "
 else
     export PS1="exsh$ "
 fi
 
 # Keep the terminal safe for pagers that consult $LESS.
-if [ -z "${LESS:-}" ]; then
-    export LESS=FRX
-fi
+#if [ -z "${LESS:-}" ]; then
+#    export LESS=FRX
+#fi
 
 # ---------------------------------------------------------------------------
 # Handy aliases
 # ---------------------------------------------------------------------------
-# Quality-of-life aliases modelled after common Unix shells.
-alias ls='ls --color=auto'
-alias ll='ls -alF'
-alias la='ls -A'
-alias l='ls -CF'
+# Quality-of-life aliases modelled after common Unix shells. Some
+# environments expose a slimmed-down `ls` (e.g. the iPad smallclue bundle),
+# so probe for the fancy flags before enabling them so `ls` keeps working.
+if [ -n "${PSCALI_CONTAINER_ROOT:-}" ]; then
+    alias ls='builtin ls'
+    alias ll='ls -al'
+    alias la='ls -a'
+    alias l='ls -l'
+else
+    _exshrc_ls_supports() {
+        if builtin ls "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        command ls "$@" >/dev/null 2>&1
+    }
+
+    if _exshrc_ls_supports --color=auto; then
+        alias ls='builtin ls --color=auto'
+    else
+        alias ls='builtin ls'
+    fi
+
+    if _exshrc_ls_supports -alF; then
+        alias ll='ls -alF'
+    else
+        alias ll='ls -al'
+    fi
+
+    if _exshrc_ls_supports -A; then
+        alias la='ls -A'
+    else
+        alias la='ls -a'
+    fi
+
+    if _exshrc_ls_supports -CF; then
+        alias l='ls -CF'
+    else
+        alias l='ls -l'
+    fi
+
+    unset -f _exshrc_ls_supports
+fi
+
 alias grep='grep --color=auto'
 alias ..='cd ..'
 alias ...='cd ../..'
 alias reload='. ~/.exshrc'
 alias hist='history'
+
+alias reset='stty reset'
+
+alias man='smallclue-elp'
+alias host='nslookup'
 
 # ---------------------------------------------------------------------------
 # Thread pool tuning & metrics
@@ -78,10 +130,22 @@ alias hist='history'
 # The helpers below make it easy to inspect `ThreadStats` output while working
 # interactively. Set PSCALSHELL_THREAD_METRICS=1 to print a snapshot at login.
 threadpool_report() {
-    builtin ThreadStats
+    builtin ThreadStatsJson | python3 - <<'PY'
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    sys.stderr.write(f"threadstats: failed to parse JSON: {e}\n")
+    sys.exit(1)
+print("id\tgen\tname\tactive\tready\tstatus")
+for t in data:
+    print(f"{t.get('id')}\t{t.get('pool_generation', 0)}\t{t.get('name','')}"
+          f"\t{bool(t.get('active'))}\t{bool(t.get('ready_for_reuse'))}\t{bool(t.get('status_success'))}")
+PY
 }
 
 alias threadpool='threadpool_report'
+alias ps-threads='builtin ps-threads'
 
 if [ "${PSCALSHELL_THREAD_METRICS:-0}" != "0" ]; then
     echo "[exsh] worker pool snapshot"
@@ -142,3 +206,5 @@ fi
 if [ -r "$HOME/.exshrc.local" ]; then
     . "$HOME/.exshrc.local"
 fi
+
+# alias ssh='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'

@@ -8,6 +8,8 @@
 #include <stddef.h>
 
 struct VM_s;
+struct ShellRuntimeState;
+typedef struct ShellRuntimeState ShellRuntimeState;
 
 typedef Value (*VmBuiltinFn)(struct VM_s* vm, int arg_count, Value* args);
 
@@ -61,6 +63,7 @@ Value vmBuiltinUpcase(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPos(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinPrintf(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFprintf(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinFflush(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFopen(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFclose(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFilesize(struct VM_s* vm, int arg_count, Value* args);
@@ -184,6 +187,9 @@ Value vmBuiltinShellFg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBg(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWait(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellWaitForThread(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPs(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPsThreads(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellStdioInfo(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellBuiltin(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellColon(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEcho(struct VM_s* vm, int arg_count, Value* args);
@@ -196,6 +202,27 @@ Value vmBuiltinShellWhich(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellGetopts(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellMapfile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTrue(struct VM_s* vm, int arg_count, Value* args);
+#ifdef PSCAL_TARGET_IOS
+Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellCat(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellClear(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPascal(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellChmod(struct VM_s* vm, int arg_count, Value* args);
+#ifdef BUILD_DASCAL
+Value vmBuiltinShellDascal(struct VM_s* vm, int arg_count, Value* args);
+#endif
+Value vmBuiltinShellClike(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellRea(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPscalVm(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPscalJson2bc(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellExshTool(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellGwin(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellResize(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellEditorDump(struct VM_s* vm, int arg_count, Value* args);
+#ifdef BUILD_PSCALD
+Value vmBuiltinShellPscald(struct VM_s* vm, int arg_count, Value* args);
+#endif
+#endif
 Value vmHostShellLastStatus(struct VM_s* vm);
 Value vmHostShellLoopAdvance(struct VM_s* vm);
 Value vmHostShellLoopCheckCondition(struct VM_s* vm);
@@ -216,6 +243,7 @@ void shellRuntimeRecordHistory(const char *line);
 void shellRuntimeSetArg0(const char *name);
 const char *shellRuntimeGetArg0(void);
 void shellRuntimeInitJobControl(void);
+void shellRuntimeRestoreForeground(void);
 void shellRuntimeInitSignals(void);
 void shellRuntimeProcessPendingSignals(void);
 bool shellRuntimeParseSignal(const char *text, int *out_signo);
@@ -230,6 +258,11 @@ void shellRuntimeEnterCondition(void);
 void shellRuntimeLeaveCondition(void);
 bool shellRuntimeEvaluatingCondition(void);
 void shellRuntimeAbandonConditionEvaluation(void);
+ShellRuntimeState *shellRuntimeCreateContext(void);
+ShellRuntimeState *shellRuntimeCurrentContext(void);
+ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx);
+bool shellRuntimeCurrentBuiltinBackground(void);
+void shellRuntimeDestroyContext(ShellRuntimeState *ctx);
 void shellRuntimeRequestExit(void);
 void shellRuntimePushScript(void);
 void shellRuntimePopScript(void);
@@ -242,6 +275,11 @@ bool shellRuntimeIsInteractive(void);
 void shellRuntimeSetExitOnSignal(bool enabled);
 bool shellRuntimeExitOnSignal(void);
 size_t shellRuntimeHistoryCount(void);
+void shellRuntimeEnsureStandardFds(void);
+struct VM_s *shellSwapCurrentVm(struct VM_s *vm);
+void shellRestoreCurrentVm(struct VM_s *vm);
+void shellRuntimeSetLastStatus(int status);
+void shellRuntimeSetLastStatusSticky(int status);
 bool shellRuntimeHistoryGetEntry(size_t reverse_index, char **out_line);
 bool shellRuntimeExpandHistoryReference(const char *input,
                                         char **out_line,
@@ -325,6 +363,15 @@ void registerAllBuiltins(void);
 
 /* Save and restore terminal state for the VM. */
 void vmInitTerminalState(void);
+
+// Returns true if SIGINT was requested via pscalRuntimeRequestSigint (e.g. UI)
+// and clears any pending flag/pipe.
+bool pscalRuntimeConsumeSigint(void);
+void pscalRuntimeRequestSigint(void);
+void pscalRuntimeRequestSigtstp(void);
+bool pscalRuntimeSigintPending(void);
+bool pscalRuntimeInterruptFlag(void);
+void pscalRuntimeClearInterruptFlag(void);
 
 /* Pause for ten seconds and require a key press before exit when running
  * interactively. */

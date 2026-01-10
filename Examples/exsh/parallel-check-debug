@@ -1,0 +1,64 @@
+#!/usr/bin/env exsh
+#
+# parallel-check-debug [host1] [host2] ...
+# Same as parallel-check but dumps ThreadStatsJson after spawning.
+
+set -o pipefail
+
+if [ "$#" -eq 0 ]; then
+    echo "Usage: $0 <host-to-check> [host-to-check]..." >&2
+    exit 1
+fi
+
+printf "checker: Spawning health checks for %s hosts...\n" "$#"
+
+thread_records_list=""
+
+# 1. Spawn all threads
+for host in "$@"; do
+    tid=$(builtin ThreadSpawnBuiltin str:dnslookup "str:$host")
+    label="check:$host"
+    builtin ThreadSetName "$tid" "str:$label" >/dev/null 2>&1 || true
+
+    if [ -z "$thread_records_list" ]; then
+        thread_records_list="$tid|$host"
+    else
+        thread_records_list="$thread_records_list $tid|$host"
+    fi
+done
+
+echo "checker: thread snapshot:"
+builtin ThreadStatsJson
+
+printf "checker: All checks running. Waiting for completion...\n"
+echo "---"
+
+success_count=0
+fail_count=0
+
+# 2. Wait and check status
+for record in $thread_records_list; do
+    tid=${record%%|*}
+    host=${record#*|}
+
+    WaitForThread "$tid"
+    join_status=$EXSH_LAST_STATUS
+
+    # Drop cached payload/status in one call to avoid double-probing errors.
+    builtin ThreadGetResult "$tid" bool:true >/dev/null 2>&1 || true
+
+    if [ "$join_status" -eq 0 ]; then
+        printf "UP:   %-30s (Resolved)\n" "$host"
+        ((success_count++))
+    else
+        printf "DOWN: %-30s (Resolve failed)\n" "$host"
+        ((fail_count++))
+    fi
+done
+
+echo "---"
+printf "checker: Complete. Success: %s, Failed: %s\n" "$success_count" "$fail_count"
+
+if [ "$fail_count" -gt 0 ]; then
+    exit 1
+fi

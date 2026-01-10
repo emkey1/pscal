@@ -13,6 +13,8 @@ str IndexPath;
 str Body;
 text GFile;
 str ConfiguredAssetRoot = "@PSCAL_INSTALL_ROOT_RESOLVED@/lib/misc/simple_web_server/htdocs";
+str ConfiguredDocumentRoot = "@PSCALI_SYSFILES_ROOT@";
+str ConfiguredTmpRoot = "@PSCALI_WORKSPACE_ROOT@";
 
 // Worker pool + simple ring queue for accepted connections
 int MaxThreads = 8;                   // configurable via CLI
@@ -23,6 +25,29 @@ int qHead = 0;
 int qTail = 0;
 int qCount = 0;
 int qmu; // mutex handle
+int LogEnabled = 0;
+text LogFile;
+int LogAppend = 1;
+
+void logInit() {
+  str path = getenv("PSCALI_BG_STDOUT");
+  if (path != "") {
+    str mode = "w";
+    str appendFlag = getenv("PSCALI_BG_STDOUT_APPEND");
+    if (appendFlag == "1") {
+      mode = "a";
+      LogAppend = 1;
+    } else {
+      LogAppend = 0;
+    }
+    LogFile = fopen(path, mode);
+    if (!LogFile) {
+      /* If the target cannot be opened, swallow output instead of spamming the terminal. */
+      LogFile = fopen("/dev/null", "w");
+    }
+    LogEnabled = 1;
+  }
+}
 
 // Simple metrics
 int GAccepted = 0;
@@ -31,17 +56,46 @@ int GDropped = 0;
 int GServed = 0;
 
 // Helpers
+str ensureDirCandidate(str candidate) {
+  if (candidate == "") return "";
+  str normalized = fsNormalizePath(candidate);
+  if (normalized != "") candidate = normalized;
+  if (!fsPathExists(candidate)) {
+    mkdir(candidate);
+  }
+  if (fsPathExists(candidate)) {
+    return candidate;
+  }
+  return "";
+}
+
 str resolveTempDir() {
-  str dir = "/tmp";
-  dir = fsNormalizePath(dir);
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMPDIR");
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("TMP");
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("TEMP");
-  if (dir == "" || !fsPathExists(dir)) dir = getenv("HOME");
-  if (dir == "" || !fsPathExists(dir)) dir = ".";
-  str normalized = fsNormalizePath(dir);
-  if (normalized == "") return dir;
-  return normalized;
+  str candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
+  if (candidate != "") return candidate;
+
+  str workspace = fsNormalizePath(getenv("PSCALI_WORKSPACE_ROOT"));
+  if (workspace == "") workspace = fsNormalizePath(getenv("PSCAL_WORKSPACE_ROOT"));
+  if (workspace == "") workspace = fsNormalizePath(getenv("PSCALI_SYSFILES_ROOT"));
+  if (workspace != "") {
+    str combined = fsPathJoin(workspace, "tmp");
+    candidate = ensureDirCandidate(combined);
+    if (candidate != "") return candidate;
+  }
+
+  candidate = ensureDirCandidate(getenv("TMPDIR"));
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(getenv("TMP"));
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(getenv("TEMP"));
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(getenv("HOME"));
+  if (candidate != "") return candidate;
+
+  candidate = ensureDirCandidate("/tmp");
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(".");
+  if (candidate != "") return candidate;
+  return "/tmp";
 }
 
 str ensureTrailingSlash(str path) {
@@ -338,7 +392,14 @@ void serveConn(int c) {
   int depth = 0, served = 0, enq = 0, drop = 0;
   lock(qmu); depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; unlock(qmu);
   str ts = timestamp();
-  printf("%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n", ts, method, path, code, logDetail, depth, served, enq, drop);
+  if (LogEnabled) {
+    fprintf(LogFile, "%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
+            ts, method, path, code, logDetail, depth, served, enq, drop);
+    fflush(LogFile);
+  } else {
+    printf("%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
+           ts, method, path, code, logDetail, depth, served, enq, drop);
+  }
   socketclose(c);
 }
 
@@ -389,7 +450,14 @@ void heartbeat() {
     unlock(qmu);
     int dps = served - prevServed;
     prevServed = served;
-    printf("%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n", timestamp(), depth, cap, thr, acc, enq, served, drop, dps);
+    if (LogEnabled) {
+      fprintf(LogFile, "%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n",
+              timestamp(), depth, cap, thr, acc, enq, served, drop, dps);
+      fflush(LogFile);
+    } else {
+      printf("%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n",
+             timestamp(), depth, cap, thr, acc, enq, served, drop, dps);
+    }
   }
 }
 
@@ -554,25 +622,29 @@ void initFiles() {
     copied = copyDirectory(source, RootDir);
   }
   if (strlen(source) > 0) {
-    printf("Asset root: %s\n", source);
+    if (LogEnabled) { fprintf(LogFile, "Asset root: %s\n", source); fflush(LogFile); }
+    /* Silence when not redirected: avoid spamming terminal */
   } else {
-    printf("Asset root: (fallback inline page)\n");
+    if (LogEnabled) { fprintf(LogFile, "Asset root: (fallback inline page)\n"); fflush(LogFile); }
   }
   if (!copied && strlen(source) > 0) {
-    printf("Warning: copyDirectory failed from %s (copied=%d)\n", source, copied);
+    if (LogEnabled) { fprintf(LogFile, "Warning: copyDirectory failed from %s (copied=%d)\n", source, copied); fflush(LogFile); }
   }
   // Fallback: ensure at least a basic index exists if copy failed or missing.
   if (!fileexists(IndexPath)) {
     GFile = fopen(IndexPath, "w");
     fprintf(GFile, "%s\n", Body);
     fclose(GFile);
-    printf("Using inline default index page.\n");
+    if (LogEnabled) { fprintf(LogFile, "Using inline default index page.\n"); fflush(LogFile); }
+    else { printf("Using inline default index page.\n"); }
   } else {
-    printf("Copied sample site into %s\n", RootDir);
+    if (LogEnabled) { fprintf(LogFile, "Copied sample site into %s\n", RootDir); fflush(LogFile); }
+    else { printf("Copied sample site into %s\n", RootDir); }
   }
 }
 
 int main() {
+  logInit();
   initFiles();
   qinit();
   // Optional: read port and root dir from args: [port] [rootdir]
@@ -620,25 +692,36 @@ int main() {
       }
     }
   }
-  printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
-
-
-  printf("Root: %s\n", RootDir);
+  if (LogEnabled) {
+    fprintf(LogFile, "Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+    fprintf(LogFile, "Root: %s\n", RootDir);
+    fflush(LogFile);
+  } else {
+    printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+    printf("Root: %s\n", RootDir);
+  }
 
   int srv = socketcreate(0);
-  if (srv < 0) { printf("socketcreate failed\n"); return 1; }
+  if (srv < 0) {
+    if (LogEnabled) { fprintf(LogFile, "socketcreate failed\n"); fflush(LogFile); }
+    else { printf("socketcreate failed\n"); }
+    return 1;
+  }
   // Bind and listen; current API binds all interfaces (INADDR_ANY)
   // Bind explicitly to localhost by default
   int bindrc = socketbindaddr(srv, "127.0.0.1", Port);
   if (bindrc != 0) {
-    printf("socketbind failed: %d\n", socketlasterror());
+    if (LogEnabled) { fprintf(LogFile, "socketbind failed: %d\n", socketlasterror()); fflush(LogFile); }
+    else { printf("socketbind failed: %d\n", socketlasterror()); }
     return 1;
   }
   if (socketlisten(srv, 16) != 0) {
-    printf("socketlisten failed: %d\n", socketlasterror());
+    if (LogEnabled) { fprintf(LogFile, "socketlisten failed: %d\n", socketlasterror()); fflush(LogFile); }
+    else { printf("socketlisten failed: %d\n", socketlasterror()); }
     return 1;
   }
-  printf("Waiting for connections... (Ctrl+C to quit)\n");
+  if (LogEnabled) { fprintf(LogFile, "Waiting for connections... (Ctrl+C to quit)\n"); fflush(LogFile); }
+  else { printf("Waiting for connections... (Ctrl+C to quit)\n"); }
   // Heartbeat: periodically report metrics
   spawn heartbeat();
   // Start worker pool

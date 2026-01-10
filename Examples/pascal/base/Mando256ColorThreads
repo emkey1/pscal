@@ -181,7 +181,7 @@ PROCEDURE DisplayBuffer;
 VAR
   Row, Col: Integer;
 BEGIN
-  FOR Row := 1 TO Height DO
+  FOR Row := 1 TO Height - 1 DO
   BEGIN
     GotoXY(1, Row);
     FOR Col := 1 TO Width DO
@@ -194,7 +194,7 @@ END;
 
 BEGIN
   Width := ScreenCols;
-  Height := ScreenRows;
+  Height := ScreenRows - 1;
 
   ClrScr;
 

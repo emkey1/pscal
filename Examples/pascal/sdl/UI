@@ -1,0 +1,184 @@
+#!/usr/bin/env pascal
+program InterfaceDrivenUI;
+
+  uses
+    CRT,
+    SysUtils;
+
+  const
+    PixelWidth  = 640;
+    PixelHeight = 480;
+    FontPath    = '/usr/local/pscal/fonts/Roboto/static/Roboto-Regular.ttf';
+    FontSize    = 14;
+
+  type
+    TNotifyEvent = procedure;
+
+    IAction = interface
+      procedure Run;
+    end;
+
+    PClosureAction = ^TClosureAction;
+    TClosureAction = record
+      handler : TNotifyEvent;
+      procedure Run; virtual;
+    end;
+
+  function WrapAction(callback: TNotifyEvent): IAction;
+  var
+    action: PClosureAction;
+  begin
+    New(action);
+    action^.handler := callback;
+    WrapAction := IAction(action);
+  end;
+
+  procedure TClosureAction.Run;
+  var
+    selfRef: PClosureAction;
+    cb     : TNotifyEvent;
+  begin
+    selfRef := myself;
+    cb := selfRef^.handler;
+    if Assigned(cb) then
+      cb();
+  end;
+
+  type
+    IComponent = interface
+      procedure Draw;
+      function HandleKey(key: char): boolean;
+    end;
+
+    PLabel = ^TLabel;
+    TLabel = record
+      X, Y: integer;
+      Caption: string;
+      procedure Draw; virtual;
+      function HandleKey(key: char): boolean; virtual;
+    end;
+
+    PButton = ^TButton;
+    TButton = record
+      X, Y, W, H: integer;
+      Caption: string;
+      IsFocused: boolean;
+      Action: IAction;
+      procedure Draw; virtual;
+      function HandleKey(key: char): boolean; virtual;
+    end;
+
+  procedure TLabel.Draw;
+  begin
+    SetRGBColor(255, 255, 255);
+    OutTextXY(X, Y, Caption);
+  end;
+
+  function TLabel.HandleKey(key: char): boolean;
+  begin
+    HandleKey := False;
+  end;
+
+  procedure TButton.Draw;
+  begin
+    if IsFocused then
+      SetRGBColor(0, 150, 255)
+    else
+      SetRGBColor(100, 100, 100);
+
+    FillRect(X, Y, W, H);
+    SetRGBColor(0, 0, 0);
+    OutTextXY(X + 10, Y + (H div 2) - (FontSize div 2), Caption);
+  end;
+
+  function TButton.HandleKey(key: char): boolean;
+  begin
+    HandleKey := False;
+    if not IsFocused then Exit;
+
+    if (key = #13) or (key = #10) then begin
+      if Action <> nil then Action.Run;
+      HandleKey := True;
+    end;
+  end;
+
+  var
+    components: array of IComponent;
+    lblInfo: PLabel;
+    btn1, btn2: PButton;
+    counter: integer;
+    key: char;
+    i: integer;
+
+  procedure InitLabel(out L: PLabel; AX, AY: integer; const Text: string);
+  begin
+    New(L);
+    L^.X := AX;
+    L^.Y := AY;
+    L^.Caption := Text;
+  end;
+
+  procedure InitButton(out B: PButton; AX, AY, AW, AH: integer; const Text: string; action: IAction);
+  begin
+    New(B);
+    B^.X := AX; B^.Y := AY; B^.W := AW; B^.H := AH;
+    B^.Caption := Text;
+    B^.IsFocused := False;
+    B^.Action := action;
+  end;
+
+  procedure HandleButton1Click;
+  begin
+    Inc(counter);
+    lblInfo^.Caption := 'Button 1 clicked ' + IntToStr(counter) + ' times!';
+  end;
+
+  procedure HandleButton2Click;
+  begin
+    counter := 0;
+    lblInfo^.Caption := 'Button 2 clicked! Resetting count.';
+  end;
+
+  begin
+    InitGraph(PixelWidth, PixelHeight, 'Interface/Closure UI');
+    InitTextSystem(FontPath, FontSize);
+    counter := 0;
+
+    InitLabel(lblInfo, 10, 10,
+              'Tab switches focus, Enter clicks, ESC exits.');
+    InitButton(btn1, 10, 50, 170, 32, 'Click Me', WrapAction(@HandleButton1Click));
+    btn1^.IsFocused := True;
+    InitButton(btn2, 10, 95, 170, 32, 'Reset Count', WrapAction(@HandleButton2Click));
+
+    SetLength(components, 3);
+    components[0] := IComponent(lblInfo);
+    components[1] := IComponent(btn1);
+    components[2] := IComponent(btn2);
+
+    repeat
+      SetRGBColor(0, 0, 0);
+      FillRect(0, 0, PixelWidth, PixelHeight);
+
+      for i := 0 to High(components) do
+        components[i].Draw;
+
+      UpdateScreen;
+
+      key := ReadKey;
+      if key = #9 then begin
+        btn1^.IsFocused := not btn1^.IsFocused;
+        btn2^.IsFocused := not btn2^.IsFocused;
+      end else begin
+        if btn1^.IsFocused then
+          components[1].HandleKey(key)
+        else
+          components[2].HandleKey(key);
+      end;
+    until key = #27;
+
+    CloseGraph;
+    Dispose(lblInfo);
+    Dispose(btn1);
+    Dispose(btn2);
+  end.
+

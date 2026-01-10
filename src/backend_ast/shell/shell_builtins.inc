@@ -2,9 +2,248 @@
 #include "shell/runner.h"
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include "ios/vproc.h"
+#include "ios/vproc_tree.h"
+#include <sys/types.h>
+#include <sys/stat.h>
+#if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
+#include "common/path_truncate.h"
+#include "smallclue/smallclue.h"
+#include "ios/vproc.h"
+static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
+    if (!input) {
+        return NULL;
+    }
+    if (pathTruncateExpand(input, buffer, buffer_len)) {
+        return buffer;
+    }
+    return input;
+}
+#endif
+#include <pthread.h>
+#include <sys/ioctl.h>
+#include <setjmp.h>
+#ifdef PSCAL_TARGET_IOS
+#include <signal.h>
+#include <dirent.h>
+#include <spawn.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include "common/pascal_state.h"
+#include "clike/state.h"
+#include "rea/state.h"
+extern bool pscalRuntimeConsumeSigint(void);
+extern char **environ;
+extern void pscalShowGwinMessage(const char *message);
+extern void pscalEditorDump(void);
+
+typedef struct {
+    struct sigaction sigint;
+    struct sigaction sigquit;
+    struct sigaction sigterm;
+    struct sigaction sigtstp;
+    struct sigaction sigabrt;
+    struct sigaction sigsegv;
+    sigset_t sigmask;
+    bool have_sigint;
+    bool have_sigquit;
+    bool have_sigterm;
+    bool have_sigtstp;
+    bool have_sigabrt;
+    bool have_sigsegv;
+    bool have_sigmask;
+} ShellSignalBackup;
+
+typedef struct {
+    int saved_fds[3];
+    bool saved_valid[3];
+} ShellStdFdBackup;
+
+static bool shellToolTcgetattr(int fd, struct termios *termios) {
+    if (!termios) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (vprocIoctlShim(fd, TIOCGETA, termios) == 0) {
+        return true;
+    }
+#ifdef TCGETS
+    if (vprocIoctlShim(fd, TCGETS, termios) == 0) {
+        return true;
+    }
+#endif
+#endif
+    return tcgetattr(fd, termios) == 0;
+}
+
+static bool shellToolTcsetattr(int fd, int action, const struct termios *termios) {
+    if (!termios) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    int cmd = 0;
+#if defined(TCSETS)
+    switch (action) {
+        case TCSANOW:
+            cmd = TCSETS;
+            break;
+        case TCSADRAIN:
+            cmd = TCSETSW;
+            break;
+        case TCSAFLUSH:
+            cmd = TCSETSF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#elif defined(TIOCSETA)
+    switch (action) {
+        case TCSANOW:
+            cmd = TIOCSETA;
+            break;
+        case TCSADRAIN:
+            cmd = TIOCSETAW;
+            break;
+        case TCSAFLUSH:
+            cmd = TIOCSETAF;
+            break;
+        default:
+            cmd = 0;
+            break;
+    }
+#endif
+    if (cmd != 0 && vprocIoctlShim(fd, cmd, (void *)termios) == 0) {
+        return true;
+    }
+#endif
+    return tcsetattr(fd, action, termios) == 0;
+}
+
+static void shellSaveSignalState(ShellSignalBackup *backup) {
+    if (!backup) {
+        return;
+    }
+    memset(backup, 0, sizeof(*backup));
+    backup->have_sigint = (sigaction(SIGINT, NULL, &backup->sigint) == 0);
+    backup->have_sigquit = (sigaction(SIGQUIT, NULL, &backup->sigquit) == 0);
+    backup->have_sigterm = (sigaction(SIGTERM, NULL, &backup->sigterm) == 0);
+    backup->have_sigtstp = (sigaction(SIGTSTP, NULL, &backup->sigtstp) == 0);
+    backup->have_sigabrt = (sigaction(SIGABRT, NULL, &backup->sigabrt) == 0);
+    backup->have_sigsegv = (sigaction(SIGSEGV, NULL, &backup->sigsegv) == 0);
+    backup->have_sigmask = (pthread_sigmask(SIG_SETMASK, NULL, &backup->sigmask) == 0);
+}
+
+static void shellRestoreSignalState(const ShellSignalBackup *backup) {
+    if (!backup) {
+        return;
+    }
+    if (backup->have_sigint) {
+        sigaction(SIGINT, &backup->sigint, NULL);
+    }
+    if (backup->have_sigquit) {
+        sigaction(SIGQUIT, &backup->sigquit, NULL);
+    }
+    if (backup->have_sigterm) {
+        sigaction(SIGTERM, &backup->sigterm, NULL);
+    }
+    if (backup->have_sigtstp) {
+        sigaction(SIGTSTP, &backup->sigtstp, NULL);
+    }
+    if (backup->have_sigabrt) {
+        sigaction(SIGABRT, &backup->sigabrt, NULL);
+    }
+    if (backup->have_sigsegv) {
+        sigaction(SIGSEGV, &backup->sigsegv, NULL);
+    }
+    if (backup->have_sigmask) {
+        pthread_sigmask(SIG_SETMASK, &backup->sigmask, NULL);
+    }
+}
+
+static void shellSaveStandardFds(ShellStdFdBackup *backup) {
+    if (!backup) {
+        return;
+    }
+    memset(backup, 0, sizeof(*backup));
+    int targets[3] = { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
+    for (int i = 0; i < 3; ++i) {
+        int fd = dup(targets[i]);
+        if (fd >= 0) {
+            fcntl(fd, F_SETFD, FD_CLOEXEC);
+            backup->saved_fds[i] = fd;
+            backup->saved_valid[i] = true;
+        } else {
+            backup->saved_fds[i] = -1;
+            backup->saved_valid[i] = false;
+        }
+    }
+}
+
+static void shellRestoreStandardFds(ShellStdFdBackup *backup, bool dbg) {
+    if (!backup) {
+        return;
+    }
+    int targets[3] = { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
+    for (int i = 0; i < 3; ++i) {
+        if (!backup->saved_valid[i] || backup->saved_fds[i] < 0) {
+            continue;
+        }
+        if (dup2(backup->saved_fds[i], targets[i]) == 0) {
+            shellResetStandardStream(targets[i]);
+        } else if (dbg) {
+            fprintf(stderr,
+                    "[tool-inline] restore fd=%d failed err=%s\n",
+                    targets[i],
+                    strerror(errno));
+        }
+        close(backup->saved_fds[i]);
+        backup->saved_fds[i] = -1;
+        backup->saved_valid[i] = false;
+    }
+}
+
+static void shellInvalidateFrontendState(FrontendKind kind) {
+    switch (kind) {
+        case FRONTEND_KIND_PASCAL:
+            pascalInvalidateGlobalState();
+            break;
+        case FRONTEND_KIND_CLIKE:
+            clikeInvalidateGlobalState();
+            break;
+        case FRONTEND_KIND_REA:
+            reaInvalidateGlobalState();
+            break;
+        case FRONTEND_KIND_SHELL:
+            pascalInvalidateGlobalState();
+            break;
+        default:
+            pascalInvalidateGlobalState();
+            break;
+    }
+}
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#undef stdin
+#undef stdout
+#undef stderr
+#define stdin shellVprocStdin()
+#define stdout shellVprocStdout()
+#define stderr shellVprocStderr()
+#define printf(...) fprintf(stdout, __VA_ARGS__)
+#define puts(text) shellVprocPuts((text))
+#define putchar(ch) fputc((ch), stdout)
+#define perror(label) shellVprocPerror((label))
+#endif
 
 static const char *shellTypesetArithmeticErrorFormat(void) {
     static int cached_style = -1;
@@ -641,10 +880,96 @@ Value vmBuiltinShellOr(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+typedef struct {
+    ShellExecRedirBackup *backups;
+    size_t backup_count;
+} ShellSubshellFrame;
+
+static ShellSubshellFrame *gShellSubshellStack = NULL;
+static size_t gShellSubshellStackSize = 0;
+static size_t gShellSubshellStackCapacity = 0;
+
+static bool shellSubshellStackPush(ShellExecRedirBackup *backups, size_t backup_count) {
+    if (gShellSubshellStackSize >= gShellSubshellStackCapacity) {
+        size_t new_cap = (gShellSubshellStackCapacity == 0) ? 4 : (gShellSubshellStackCapacity * 2);
+        ShellSubshellFrame *resized = (ShellSubshellFrame *)realloc(gShellSubshellStack, new_cap * sizeof(ShellSubshellFrame));
+        if (!resized) {
+            return false;
+        }
+        gShellSubshellStack = resized;
+        gShellSubshellStackCapacity = new_cap;
+    }
+    ShellSubshellFrame *slot = &gShellSubshellStack[gShellSubshellStackSize++];
+    slot->backups = backups;
+    slot->backup_count = backup_count;
+    return true;
+}
+
+static ShellSubshellFrame shellSubshellStackPop(void) {
+    ShellSubshellFrame frame = {0};
+    if (gShellSubshellStackSize == 0) {
+        return frame;
+    }
+    frame = gShellSubshellStack[--gShellSubshellStackSize];
+    return frame;
+}
+
 Value vmBuiltinShellSubshell(VM *vm, int arg_count, Value *args) {
     VM *previous_vm = shellSwapCurrentVm(vm);
-    (void)arg_count;
-    (void)args;
+    const char *meta = (arg_count > 0 && args[0].type == TYPE_STRING) ? args[0].s_val : "";
+    bool leave = (meta && strstr(meta, "mode=leave") != NULL);
+    if (leave) {
+        ShellSubshellFrame frame = shellSubshellStackPop();
+        if (frame.backups) {
+            shellRestoreExecRedirections(frame.backups, frame.backup_count);
+            shellFreeExecRedirBackups(frame.backups, frame.backup_count);
+        }
+        shellRestoreCurrentVm(previous_vm);
+        return makeVoid();
+    }
+
+    ShellCommand cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    bool ok = true;
+    ShellExecRedirBackup *backups = NULL;
+    size_t backup_count = 0;
+    for (int i = 1; i < arg_count; ++i) {
+        Value entry = args[i];
+        if (entry.type != TYPE_STRING || !entry.s_val) {
+            ok = false;
+            break;
+        }
+        if (!shellAddRedirection(&cmd, entry.s_val)) {
+            ok = false;
+            break;
+        }
+    }
+    if (ok && cmd.redir_count > 0) {
+        if (!shellApplyExecRedirections(vm ? vm : gShellCurrentVm, &cmd, &backups, &backup_count)) {
+            ok = false;
+        }
+    }
+    if (cmd.redirs) {
+        shellFreeRedirections(&cmd);
+        cmd.redirs = NULL;
+        cmd.redir_count = 0;
+    }
+    if (ok && (backups || backup_count == 0)) {
+        if (!shellSubshellStackPush(backups, backup_count)) {
+            if (backups) {
+                shellRestoreExecRedirections(backups, backup_count);
+                shellFreeExecRedirBackups(backups, backup_count);
+            }
+            ok = false;
+        }
+    } else if (backups) {
+        shellRestoreExecRedirections(backups, backup_count);
+        shellFreeExecRedirBackups(backups, backup_count);
+    }
+    if (!ok) {
+        runtimeError(vm, "subshell: failed to apply redirections");
+        shellUpdateStatus(1);
+    }
     shellRestoreCurrentVm(previous_vm);
     return makeVoid();
 }
@@ -1071,8 +1396,37 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                     }
                     if (shellWordShouldGlob(word_flags, field_value)) {
                         glob_t glob_result;
-                        int glob_status = glob(field_value, 0, NULL, &glob_result);
+                        const char *glob_pattern = field_value;
+#if defined(PSCAL_TARGET_IOS)
+                        char expanded_pattern[PATH_MAX];
+                        bool glob_used_virtual = false;
+                        if (field_value[0] == '/' &&
+                            pathTruncateEnabled() &&
+                            pathTruncateExpand(field_value, expanded_pattern, sizeof(expanded_pattern))) {
+                            glob_pattern = expanded_pattern;
+                            glob_used_virtual = true;
+                        }
+#endif
+                        int glob_status = glob(glob_pattern, 0, NULL, &glob_result);
                         if (glob_status == 0) {
+#if defined(PSCAL_TARGET_IOS)
+                            if (glob_used_virtual) {
+                                for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
+                                    char *match = glob_result.gl_pathv[g];
+                                    if (!match) {
+                                        continue;
+                                    }
+                                    char stripped[PATH_MAX];
+                                    if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
+                                        char *copy = strdup(stripped);
+                                        if (copy) {
+                                            free(glob_result.gl_pathv[g]);
+                                            glob_result.gl_pathv[g] = copy;
+                                        }
+                                    }
+                                }
+                            }
+#endif
                             bool glob_ok = true;
                             for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
                                 char *dup = strdup(glob_result.gl_pathv[g]);
@@ -2187,7 +2541,7 @@ static bool shellEvaluateFileUnary(const char *op,
             *out_result = false;
             return true;
         }
-        *out_result = (fd >= 0 && isatty((int)fd));
+        *out_result = (fd >= 0 && pscalRuntimeFdIsInteractive((int)fd));
         return true;
     }
 
@@ -2323,6 +2677,16 @@ static bool shellEvaluateFileBinary(const char *left,
 
 Value vmBuiltinShellDoubleBracket(VM *vm, int arg_count, Value *args) {
     (void)vm;
+    /* Be tolerant of unmatched parsing so that [[ ... ]] still works even if
+     * the rewrite step failed and left a trailing "]]" argument. */
+    while (arg_count > 0) {
+        const Value *last = &args[arg_count - 1];
+        const char *text = (last->type == TYPE_STRING && last->s_val) ? last->s_val : "";
+        if (strcmp(text, "]]") != 0) {
+            break;
+        }
+        arg_count--;
+    }
     bool negate = false;
     int index = 0;
     while (index < arg_count) {
@@ -2425,7 +2789,10 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
 
     int remaining = arg_count - arg_index;
     if (remaining <= 0) {
-        path = shellSafeGetenv("HOME");
+        path = shellSafeGetenv("PSCALI_REAL_HOME");
+        if (!path || !*path) {
+            path = shellSafeGetenv("HOME");
+        }
         if (!path) {
             runtimeError(vm, "cd: HOME not set");
             shellUpdateStatus(1);
@@ -2446,6 +2813,16 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     if (!shellDirectoryStackEnsureInitialised(vm, "cd")) {
         return makeVoid();
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    char resolved_target[PATH_MAX];
+    if (path) {
+        const char *expanded = shellResolvePathForIOS(path, resolved_target, sizeof(resolved_target));
+        if (expanded) {
+            path = expanded;
+        }
+    }
+#endif
 
     char *new_cwd = NULL;
     char *old_cwd = NULL;
@@ -2501,10 +2878,1259 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
         shellUpdateStatus(errno ? errno : 1);
         return makeVoid();
     }
+#if defined(PSCAL_TARGET_IOS)
+    char display[PATH_MAX];
+    const char *visible = pathTruncateStrip(cwd, display, sizeof(display)) ? display : cwd;
+    printf("%s\n", visible);
+#else
     printf("%s\n", cwd);
+#endif
     shellUpdateStatus(0);
     return makeVoid();
 }
+
+static void shellCatEmitEscaped(int ch) {
+    if (ch == '\n') {
+        fputc('\n', stdout);
+        return;
+    }
+    if (ch == '\t') {
+        fputs("^I", stdout);
+        return;
+    }
+    if (ch == '\r') {
+        fputs("^M", stdout);
+        return;
+    }
+    if (ch < 32) {
+        fputc('^', stdout);
+        fputc(ch + 64, stdout);
+        return;
+    }
+    if (ch == 127) {
+        fputs("^?", stdout);
+        return;
+    }
+    if (ch & 0x80) {
+        fputs("M-", stdout);
+        shellCatEmitEscaped(ch & 0x7F);
+        return;
+    }
+    fputc(ch, stdout);
+}
+
+static int shellCatStream(FILE *stream, bool show_nonprinting) {
+    char buffer[4096];
+    while (true) {
+        size_t read_bytes = fread(buffer, 1, sizeof(buffer), stream);
+        if (read_bytes > 0) {
+            if (show_nonprinting) {
+                for (size_t i = 0; i < read_bytes; ++i) {
+                    shellCatEmitEscaped((unsigned char)buffer[i]);
+                }
+            } else {
+                if (fwrite(buffer, 1, read_bytes, stdout) != read_bytes) {
+                    return errno ? errno : 1;
+                }
+            }
+        }
+        if (read_bytes < sizeof(buffer)) {
+            if (feof(stream)) {
+                break;
+            }
+            if (ferror(stream)) {
+                return errno ? errno : 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int shellCatPath(const char *path, bool show_nonprinting) {
+    if (!path || strcmp(path, "-") == 0) {
+        return shellCatStream(stdin, show_nonprinting);
+    }
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        fprintf(stderr, "cat: %s: %s\n", path ? path : "", strerror(errno));
+        return errno ? errno : 1;
+    }
+    int rc = shellCatStream(fp, show_nonprinting);
+    fclose(fp);
+    if (rc != 0) {
+        fprintf(stderr, "cat: %s: %s\n", path, strerror(errno ? errno : EIO));
+    }
+    return rc;
+}
+
+Value vmBuiltinShellCat(VM *vm, int arg_count, Value *args) {
+    bool show_nonprinting = false;
+    int index = 0;
+    (void)vm;
+
+    while (index < arg_count) {
+        const Value *arg = &args[index];
+        if (arg->type != TYPE_STRING || !arg->s_val || arg->s_val[0] != '-') {
+            break;
+        }
+        const char *opt = arg->s_val + 1;
+        if (*opt == '\0') {
+            break;
+        }
+        for (; *opt; ++opt) {
+            if (*opt == 'v') {
+                show_nonprinting = true;
+            } else if (*opt == '-') {
+                opt++;
+                break;
+            } else {
+                runtimeError(vm, "cat: unknown option -- '%c'", *opt);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        index++;
+        if (opt[-1] == '-') {
+            break;
+        }
+    }
+    int status = 0;
+    if (index >= arg_count) {
+        status = shellCatPath("-", show_nonprinting);
+    } else {
+        for (int i = index; i < arg_count; ++i) {
+            const Value *arg = &args[i];
+            if (arg->type != TYPE_STRING || !arg->s_val) {
+                runtimeError(vm, "cat: expected string arguments");
+                status = 1;
+                break;
+            }
+            int rc = shellCatPath(arg->s_val, show_nonprinting);
+            if (rc != 0 && status == 0) status = rc;
+        }
+    }
+    shellUpdateStatus(status);
+    return makeVoid();
+}
+
+Value vmBuiltinShellChmod(VM *vm, int arg_count, Value *args) {
+#ifdef PSCAL_TARGET_IOS
+    if (arg_count < 2) {
+        runtimeError(vm, "chmod: usage: chmod MODE file [file ...]");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {
+        runtimeError(vm, "chmod: invalid mode");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    char *endptr = NULL;
+    errno = 0;
+    long parsed = strtol(args[0].s_val, &endptr, 8);
+    if (errno != 0 || !endptr || *endptr != '\0' || parsed < 0 || parsed > 07777) {
+        runtimeError(vm, "chmod: %s: invalid mode", args[0].s_val);
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    mode_t mode = (mode_t)parsed;
+    int final_status = 0;
+    for (int i = 1; i < arg_count; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val || args[i].s_val[0] == '\0') {
+            runtimeError(vm, "chmod: expected file paths");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        if (chmod(args[i].s_val, mode) != 0) {
+            fprintf(stderr, "chmod: %s: %s\n", args[i].s_val, strerror(errno));
+            if (final_status == 0) {
+                final_status = errno ? errno : 1;
+            }
+        }
+    }
+    shellUpdateStatus(final_status);
+    return makeVoid();
+#else
+    runtimeError(vm, "chmod: not supported on this platform");
+    shellUpdateStatus(1);
+    return makeVoid();
+#endif
+}
+
+Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "clear: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    const char *sequence = "\x1B[2J\x1B[H";
+    if (fputs(sequence, stdout) == EOF) {
+        runtimeError(vm, "clear: failed to write escape sequence");
+        shellUpdateStatus(errno ? errno : 1);
+        return makeVoid();
+    }
+    fflush(stdout);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellStdioInfo(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count > 0) {
+        if (arg_count == 1 && args[0].type == TYPE_STRING && args[0].s_val &&
+            (strcmp(args[0].s_val, "--help") == 0 || strcmp(args[0].s_val, "-h") == 0)) {
+            printf("stdioinfo\n");
+            printf("  Show shell stdio and session routing details.\n");
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+        runtimeError(vm, "stdioinfo: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    printf("stdioinfo:\n");
+    printf("  fds: stdin=%d stdout=%d stderr=%d\n", STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO);
+    printf("  isatty: stdin=%d stdout=%d stderr=%d\n",
+           isatty(STDIN_FILENO) != 0,
+           isatty(STDOUT_FILENO) != 0,
+           isatty(STDERR_FILENO) != 0);
+    printf("  interactive: stdin=%d stdout=%d stderr=%d\n",
+           pscalRuntimeFdIsInteractive(STDIN_FILENO) ? 1 : 0,
+           pscalRuntimeFdIsInteractive(STDOUT_FILENO) ? 1 : 0,
+           pscalRuntimeFdIsInteractive(STDERR_FILENO) ? 1 : 0);
+    printf("  real_tty: stdin=%d stdout=%d stderr=%d\n",
+           pscalRuntimeFdHasRealTTY(STDIN_FILENO) ? 1 : 0,
+           pscalRuntimeFdHasRealTTY(STDOUT_FILENO) ? 1 : 0,
+           pscalRuntimeFdHasRealTTY(STDERR_FILENO) ? 1 : 0);
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    bool session_default = !session || vprocSessionStdioIsDefault(session);
+    printf("  session: ptr=%p default=%d session_id=%llu kernel_pid=%d\n",
+           (void *)session,
+           session_default ? 1 : 0,
+           session ? (unsigned long long)session->session_id : 0ull,
+           session ? session->kernel_pid : 0);
+    if (session) {
+        printf("  host_fds: stdin=%d stdout=%d stderr=%d\n",
+               session->stdin_host_fd,
+               session->stdout_host_fd,
+               session->stderr_host_fd);
+        printf("  pscal_fds: stdin=%p stdout=%p stderr=%p\n",
+               (void *)session->stdin_pscal_fd,
+               (void *)session->stdout_pscal_fd,
+               (void *)session->stderr_pscal_fd);
+        printf("  pty: active=%d master=%p slave=%p\n",
+               session->pty_active ? 1 : 0,
+               (void *)session->pty_master,
+               (void *)session->pty_slave);
+    }
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        printf("  vproc: ptr=%p pid=%d\n", (void *)vp, vprocPid(vp));
+        printf("  shim_map: stdin=%d stdout=%d stderr=%d\n",
+               vprocTranslateFd(vp, STDIN_FILENO),
+               vprocTranslateFd(vp, STDOUT_FILENO),
+               vprocTranslateFd(vp, STDERR_FILENO));
+    } else {
+        printf("  vproc: <none>\n");
+    }
+#endif
+
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+#ifdef PSCAL_TARGET_IOS
+static void shellApplyWindowSize(int rows, int cols) {
+    if (rows <= 0 || cols <= 0) {
+        return;
+    }
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", rows);
+    setenv("LINES", buffer, 1);
+    snprintf(buffer, sizeof(buffer), "%d", cols);
+    setenv("COLUMNS", buffer, 1);
+    printf("\x1b[8;%d;%dt", rows, cols);
+    fflush(stdout);
+}
+
+Value vmBuiltinShellResize(VM *vm, int arg_count, Value *args) {
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "resize: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    int rows = pscalRuntimeDetectWindowRows();
+    int cols = pscalRuntimeDetectWindowCols();
+    if (rows <= 0 || cols <= 0) {
+        runtimeError(vm, "resize: unable to detect terminal size");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    shellApplyWindowSize(rows, cols);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
+    char *piped_message = NULL;
+    if (!pscalRuntimeStdinIsInteractive()) {
+        size_t cap = 1024;
+        size_t len = 0;
+        piped_message = (char *)malloc(cap);
+        if (piped_message) {
+            int ch = 0;
+            while ((ch = fgetc(stdin)) != EOF) {
+                if (len + 1 >= cap) {
+                    size_t new_cap = cap * 2;
+                    char *resized = (char *)realloc(piped_message, new_cap);
+                    if (!resized) {
+                        free(piped_message);
+                        piped_message = NULL;
+                        break;
+                    }
+                    piped_message = resized;
+                    cap = new_cap;
+                }
+                piped_message[len++] = (char)ch;
+            }
+            if (piped_message) {
+                while (len > 0 && (piped_message[len - 1] == '\n' || piped_message[len - 1] == '\r')) {
+                    len--;
+                }
+                piped_message[len] = '\0';
+                if (len == 0) {
+                    free(piped_message);
+                    piped_message = NULL;
+                }
+            }
+        }
+    }
+
+    const char *message = piped_message ? piped_message : "gwin for the win";
+    if (arg_count > 0) {
+        if (args[0].type != TYPE_STRING || !args[0].s_val) {
+            runtimeError(vm, "gwin: expected an optional message string");
+            shellUpdateStatus(1);
+            free(piped_message);
+            return makeVoid();
+        }
+        message = args[0].s_val;
+    }
+    pscalShowGwinMessage(message);
+    shellUpdateStatus(0);
+    if (piped_message) {
+        free(piped_message);
+    }
+    return makeVoid();
+}
+
+Value vmBuiltinShellEditorDump(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    (void)args;
+    if (arg_count != 0) {
+        runtimeError(vm, "editordump: unexpected arguments");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    pscalEditorDump();
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+#endif
+
+#ifdef PSCAL_TARGET_IOS
+
+typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
+
+extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
+
+static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
+                                         int argc,
+                                         char **argv,
+                                         bool dbg) {
+    ShellSignalBackup sig_backup;
+    ShellStdFdBackup fd_backup;
+    VProcSessionStdio *prev_session = vprocSessionStdioCurrent();
+    VProcSessionStdio *active_session = prev_session;
+    VProc *prev_vproc = vprocCurrent();
+    struct termios stdin_termios;
+    bool stdin_termios_valid = false;
+    shellSaveSignalState(&sig_backup);
+    shellSaveStandardFds(&fd_backup);
+    if (dbg) {
+        int stdin_host = STDIN_FILENO;
+        VProc *vp = vprocCurrent();
+        if (vp) {
+            int translated = vprocTranslateFd(vp, STDIN_FILENO);
+            if (translated >= 0) {
+                stdin_host = translated;
+            }
+        }
+        fprintf(stderr,
+                "[tool-inline] stdio save stdin=%d host=%d tty=%d vproc=%p session=%p\n",
+                STDIN_FILENO,
+                stdin_host,
+                pscalRuntimeStdinHasRealTTY() ? 1 : 0,
+                (void *)prev_vproc,
+                (void *)prev_session);
+    }
+    if (PSCALRuntimeGetCurrentRuntimeStdio) {
+        VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+        if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio) &&
+            (!active_session || vprocSessionStdioIsDefault(active_session))) {
+            active_session = runtime_stdio;
+        }
+    }
+    if (active_session && active_session != prev_session) {
+        vprocSessionStdioActivate(active_session);
+    }
+    if (shellToolTcgetattr(STDIN_FILENO, &stdin_termios)) {
+        stdin_termios_valid = true;
+    }
+    int status = entry(argc, argv);
+    shellFlushStandardStreams();
+    if (prev_session) {
+        vprocSessionStdioActivate(prev_session);
+    } else {
+        vprocSessionStdioActivate(NULL);
+    }
+    if (prev_vproc) {
+        vprocActivate(prev_vproc);
+    } else {
+        vprocDeactivate();
+    }
+    shellRestoreStandardFds(&fd_backup, dbg);
+    if (stdin_termios_valid) {
+        shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
+    }
+    shellCloseVprocStreams();
+    if (dbg) {
+        int stdin_host = STDIN_FILENO;
+        VProc *vp = vprocCurrent();
+        if (vp) {
+            int translated = vprocTranslateFd(vp, STDIN_FILENO);
+            if (translated >= 0) {
+                stdin_host = translated;
+            }
+        }
+        fprintf(stderr,
+                "[tool-inline] stdio restore stdin=%d host=%d tty=%d vproc=%p session=%p\n",
+                STDIN_FILENO,
+                stdin_host,
+                pscalRuntimeStdinHasRealTTY() ? 1 : 0,
+                (void *)vprocCurrent(),
+                (void *)vprocSessionStdioCurrent());
+    }
+    shellRestoreSignalState(&sig_backup);
+    shellRuntimeEnsureStandardFds();
+    shellEnsureJobControl();
+    shellJobControlRestoreForeground();
+    if (dbg) {
+        int shell_pid = vprocGetShellSelfPid();
+        int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+        int fg = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+        fprintf(stderr,
+                "[tool-inline] restore complete shell=%d sid=%d fg=%d\n",
+                shell_pid,
+                sid,
+                fg);
+    }
+    return status;
+}
+
+#define SHELL_TOOL_THREAD_STACK_SZ (8 * 1024 * 1024)
+
+typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+extern PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) __attribute__((weak));
+extern void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) __attribute__((weak));
+
+typedef struct {
+    ShellToolEntryFn entry;
+    int argc;
+    char **argv;
+    bool argv_owned;
+    FrontendKind frontend_kind;
+    VProcSessionStdio *session_stdio;
+    VProc *session_vproc;
+    PSCALRuntimeContext *runtime_ctx;
+    int stdout_fd;
+    int stderr_fd;
+    int status;
+    volatile int finished;
+    pthread_t worker_thread;
+    pthread_t main_thread;
+    bool use_shell_context;
+} ShellToolThreadContext;
+
+static __thread sigjmp_buf gShellThreadJumpBuf;
+static __thread int gShellThreadLastSignal = 0;
+
+static void shellThreadSigintHandler(int signo) {
+    gShellThreadLastSignal = signo;
+    siglongjmp(gShellThreadJumpBuf, 1);
+}
+
+static void *shellToolThreadMain(void *arg) {
+    ShellToolThreadContext *ctx = (ShellToolThreadContext *)arg;
+    if (!ctx || !ctx->entry) {
+        if (ctx) {
+            ctx->status = 127;
+            ctx->finished = 1;
+        }
+        return NULL;
+    }
+    bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            fprintf(stderr,
+                    "[tool-thread] runtime ctx=%p\n",
+                    (void *)ctx->runtime_ctx);
+        }
+    }
+    VProcSessionStdio *prev_stdio = vprocSessionStdioCurrent();
+    if (ctx->session_stdio) {
+        vprocSessionStdioActivate(ctx->session_stdio);
+    }
+    bool vproc_active = false;
+    if (ctx->session_vproc) {
+        vprocRegisterThread(ctx->session_vproc, pthread_self());
+        vprocActivate(ctx->session_vproc);
+        vproc_active = true;
+    }
+    if (dbg) {
+        fprintf(stderr, "[tool-thread] worker start argc=%d entry=%p vproc=%p\n",
+                ctx->argc, (void *)ctx->entry, (void *)ctx->session_vproc);
+    }
+    (void)ctx->stdout_fd;
+    (void)ctx->stderr_fd;
+
+    /* Unblock SIGINT for this thread */
+    sigset_t unblock_mask;
+    sigemptyset(&unblock_mask);
+    sigaddset(&unblock_mask, SIGINT);
+    sigaddset(&unblock_mask, SIGTSTP);
+    pthread_sigmask(SIG_UNBLOCK, &unblock_mask, NULL);
+
+    /* Install safe termination handler */
+    struct sigaction sa, old_sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = shellThreadSigintHandler;
+    sigemptyset(&sa.sa_mask);
+    /* SA_RESTART is purposely omitted so we interrupt blocking calls */
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, &old_sa);
+    struct sigaction sa_tstp, old_sa_tstp;
+    memset(&sa_tstp, 0, sizeof(sa_tstp));
+    sa_tstp.sa_handler = shellThreadSigintHandler;
+    sigemptyset(&sa_tstp.sa_mask);
+    sa_tstp.sa_flags = 0;
+    sigaction(SIGTSTP, &sa_tstp, &old_sa_tstp);
+
+    FrontendKind previous_kind = frontendPushKind(ctx->frontend_kind);
+    ShellRuntimeState *thread_ctx = NULL;
+    ShellRuntimeState *prev_ctx = NULL;
+    if (ctx->use_shell_context) {
+        thread_ctx = shellRuntimeCreateContext();
+        prev_ctx = shellRuntimeActivateContext(thread_ctx);
+    }
+
+    gShellThreadLastSignal = 0;
+    if (sigsetjmp(gShellThreadJumpBuf, 1) == 0) {
+        if (ctx->stdout_fd >= 0) {
+            dup2(ctx->stdout_fd, STDOUT_FILENO);
+        }
+        if (ctx->stderr_fd >= 0) {
+            dup2(ctx->stderr_fd, STDERR_FILENO);
+        }
+        if (ctx->stdout_fd >= 0) {
+            close(ctx->stdout_fd);
+            ctx->stdout_fd = -1;
+        }
+        if (ctx->stderr_fd >= 0 && ctx->stderr_fd != ctx->stdout_fd) {
+            close(ctx->stderr_fd);
+            ctx->stderr_fd = -1;
+        }
+        ctx->status = ctx->entry(ctx->argc, ctx->argv);
+    } else {
+        /* Interrupted */
+        if (gShellThreadLastSignal == SIGTSTP) {
+            ctx->status = 128 + SIGTSTP;
+        } else {
+            ctx->status = 130;
+        }
+    }
+
+    if (ctx->use_shell_context) {
+        shellRuntimeActivateContext(prev_ctx);
+        shellRuntimeDestroyContext(thread_ctx);
+    }
+    frontendPopKind(previous_kind);
+
+    if (ctx->argv_owned && ctx->argv) {
+        for (int i = 0; i < ctx->argc; ++i) {
+            free(ctx->argv[i]);
+        }
+        free(ctx->argv);
+        ctx->argv = NULL;
+    }
+
+    (void)ctx->status;
+
+    /* Restore signal handler */
+    sigaction(SIGINT, &old_sa, NULL);
+    sigaction(SIGTSTP, &old_sa_tstp, NULL);
+    if (ctx->session_stdio) {
+        vprocSessionStdioActivate(prev_stdio);
+    }
+    if (vproc_active) {
+        vprocDeactivate();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+    }
+    if (dbg) {
+        fprintf(stderr, "[tool-thread] worker done status=%d\n", ctx->status);
+    }
+    return NULL;
+}
+
+static void *shellToolWaiterMain(void *arg) {
+    ShellToolThreadContext *ctx = (ShellToolThreadContext *)arg;
+    pthread_join(ctx->worker_thread, NULL);
+    ctx->finished = 1;
+    pthread_kill(ctx->main_thread, SIGURG);
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr, "[tool-thread] waiter signaled main\n");
+    }
+    return NULL;
+}
+
+static int shellRunToolInThread(ShellToolEntryFn entry,
+                                int argc,
+                                char **argv,
+                                FrontendKind frontend_kind,
+                                bool use_shell_context,
+                                bool background) {
+    if (!entry) {
+        return 127;
+    }
+    if (background) {
+        ShellToolThreadContext *context =
+            (ShellToolThreadContext *)calloc(1, sizeof(ShellToolThreadContext));
+        if (!context) {
+            return entry(argc, argv);
+        }
+        /* Avoid racing with shared argv if the caller frees it after return. */
+        context->argv_owned = false;
+        if (argv) {
+            context->argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+            if (context->argv) {
+                context->argv_owned = true;
+                for (int i = 0; i < argc; ++i) {
+                    if (argv[i]) {
+                        context->argv[i] = strdup(argv[i]);
+                        if (!context->argv[i]) {
+                            context->argv_owned = false;
+                            break;
+                        }
+                    }
+                }
+                context->argv[argc] = NULL;
+            }
+        }
+        if (context->argv_owned == false) {
+            /* Cloning failed; run synchronously to avoid use-after-free. */
+            free(context->argv);
+            free(context);
+            return entry(argc, argv);
+        }
+        context->entry = entry;
+        context->argc = argc;
+        context->status = 0;
+        context->finished = 0;
+        context->main_thread = pthread_self();
+        context->frontend_kind = frontend_kind;
+        context->use_shell_context = use_shell_context;
+        context->session_stdio = vprocSessionStdioCurrent();
+        context->session_vproc = vprocCurrent();
+        context->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+            ? PSCALRuntimeGetCurrentRuntimeContext()
+            : NULL;
+        context->stdout_fd = dup(STDOUT_FILENO);
+        context->stderr_fd = dup(STDERR_FILENO);
+        if (getenv("PSCALI_VPROC_DEBUG")) {
+            fprintf(stderr,
+                    "[tool-thread] spawn bg stdio=%p vproc=%p stdout_fd=%d stderr_fd=%d\n",
+                    (void *)context->session_stdio,
+                    (void *)context->session_vproc,
+                    context->stdout_fd,
+                    context->stderr_fd);
+        }
+
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
+        int create_rc = pthread_create(&context->worker_thread, &attr, shellToolThreadMain, context);
+        pthread_attr_destroy(&attr);
+        if (create_rc != 0) {
+            free(context);
+            return entry(argc, argv);
+        }
+        pthread_detach(context->worker_thread);
+        return 0;
+    }
+
+    ShellToolThreadContext context;
+    memset(&context, 0, sizeof(context));
+    context.entry = entry;
+    context.argc = argc;
+    context.argv = argv;
+    context.status = 127;
+    context.finished = 0;
+    context.main_thread = pthread_self();
+    context.frontend_kind = frontend_kind;
+    context.use_shell_context = use_shell_context;
+    context.session_stdio = vprocSessionStdioCurrent();
+    context.session_vproc = vprocCurrent();
+    context.runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+        ? PSCALRuntimeGetCurrentRuntimeContext()
+        : NULL;
+    /* Foreground runs keep the caller's stdio; use -1 to skip dup2. */
+    context.stdout_fd = -1;
+    context.stderr_fd = -1;
+    if (getenv("PSCALI_VPROC_DEBUG")) {
+        fprintf(stderr,
+                "[tool-thread] spawn fg stdio=%p vproc=%p\n",
+                (void *)context.session_stdio,
+                (void *)context.session_vproc);
+    }
+
+    /* Block SIGINT and SIGURG on Main */
+    sigset_t new_mask, old_mask;
+    sigemptyset(&new_mask);
+    sigaddset(&new_mask, SIGINT);
+    sigaddset(&new_mask, SIGURG);
+    pthread_sigmask(SIG_BLOCK, &new_mask, &old_mask);
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
+    int create_rc = pthread_create(&context.worker_thread, &attr, shellToolThreadMain, &context);
+    pthread_attr_destroy(&attr);
+    if (create_rc != 0) {
+        pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+        if (!use_shell_context) {
+            return entry(argc, argv);
+        }
+        ShellRuntimeState *ctx = shellRuntimeCreateContext();
+        ShellRuntimeState *prev = shellRuntimeActivateContext(ctx);
+        int status = entry(argc, argv);
+        shellRuntimeActivateContext(prev);
+        shellRuntimeDestroyContext(ctx);
+        return status;
+    }
+
+    /* Spawn waiter */
+    pthread_t waiter_thread;
+    if (pthread_create(&waiter_thread, NULL, shellToolWaiterMain, &context) != 0) {
+        /* If waiter fails, just join worker directly (SIGINT won't work properly but we can't do much) */
+        pthread_join(context.worker_thread, NULL);
+        pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+        return context.status;
+    }
+
+    /* Main Loop */
+    sigset_t wait_mask;
+    sigemptyset(&wait_mask);
+    sigaddset(&wait_mask, SIGINT);
+    sigaddset(&wait_mask, SIGURG);
+
+    while (!context.finished) {
+        sigset_t pending;
+        sigemptyset(&pending);
+        if (pscalRuntimeConsumeSigint()) {
+            pthread_kill(context.worker_thread, SIGINT);
+        }
+        if (sigpending(&pending) == 0 && sigismember(&pending, SIGINT)) {
+            pthread_kill(context.worker_thread, SIGINT);
+        }
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 200 * 1000 * 1000; /* 200ms */
+        nanosleep(&ts, NULL);
+        /* Poll for completion to avoid hanging if SIGURG never arrives. */
+    }
+
+    pthread_join(waiter_thread, NULL);
+    pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+    return context.status;
+}
+
+static const int kShellToolRunnerUnavailable = -32768;
+
+static int __attribute__((unused)) shellSpawnToolProcess(const char *tool_name, int argc, char **argv) {
+    const char *runner = getenv("PSCALI_TOOL_RUNNER_PATH");
+    if (!runner || !*runner) {
+        (void)tool_name;
+        return kShellToolRunnerUnavailable;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (session && !vprocSessionStdioIsDefault(session)) {
+        return kShellToolRunnerUnavailable;
+    }
+#endif
+
+    size_t child_count = (size_t)argc + 1; // runner path + tool argv vector
+    char **child_argv = (char **)calloc(child_count + 1, sizeof(char *));
+    if (!child_argv) {
+        fprintf(stderr, "%s: out of memory launching tool runner\n", tool_name);
+        return 1;
+    }
+
+    child_argv[0] = (char *)runner;
+    for (int i = 0; i < argc; ++i) {
+        child_argv[i + 1] = argv[i];
+    }
+
+    pid_t pid = 0;
+    int spawn_rc = posix_spawn(&pid, runner, NULL, NULL, child_argv, environ);
+    free(child_argv);
+    if (spawn_rc == EPERM || spawn_rc == ENOSYS) {
+        return kShellToolRunnerUnavailable;
+    }
+    if (spawn_rc != 0) {
+        fprintf(stderr, "%s: failed to launch tool runner: %s\n", tool_name, strerror(spawn_rc));
+        return 127;
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("waitpid");
+        return 127;
+    }
+
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 1;
+}
+
+static Value shellRunToolBuiltin(VM *vm,
+                                 const char *tool_name,
+                                 ShellToolEntryFn entry,
+                                 FrontendKind target_kind,
+                                 int arg_count,
+                                 Value *args) {
+    if (getenv("PSCALI_PIPE_DEBUG")) {
+        fprintf(stderr, "[tool-dispatch] name=%s argc=%d\n", tool_name ? tool_name : "<null>", arg_count + 1);
+    }
+#if defined(PSCAL_TARGET_IOS)
+    bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    /* Special-case exsh: on iOS we cannot exec a new process, so run exsh_main inline
+     * with the provided arguments to preserve -c/script execution. */
+    if (tool_name && strcmp(tool_name, "exsh") == 0 && entry) {
+        int argc = arg_count + 1;
+        char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+        if (!argv) {
+            shellUpdateStatus(127);
+            return makeVoid();
+        }
+        argv[0] = strdup("exsh");
+        for (int i = 0; i < arg_count; ++i) {
+            const Value *v = &args[i];
+            const char *s = (v->type == TYPE_STRING && v->s_val) ? v->s_val : "";
+            argv[i + 1] = strdup(s);
+        }
+        int status = entry(argc, argv);
+        for (int i = 0; i <= argc; ++i) {
+            free(argv[i]);
+        }
+        free(argv);
+        shellUpdateStatus(status);
+        return makeVoid();
+    }
+#endif
+    FrontendKind previous_kind = frontendPushKind(target_kind);
+    if (!entry) {
+        runtimeError(vm, "%s: tool entrypoint unavailable", tool_name);
+        shellUpdateStatus(127);
+        frontendPopKind(previous_kind);
+        return makeVoid();
+    }
+
+    PascalGlobalState pascal_state;
+    pascalPushGlobalState(&pascal_state);
+
+    const int saved_param_count = gParamCount;
+    char **saved_param_values = gParamValues;
+    bool saved_param_owned = gParamValuesOwned;
+
+    const int argc = arg_count + 1;
+    // Add one extra slot so argv[argc] stays NULL like a real C argv vector.
+    char **argv = (char **)calloc((size_t)(argc + 1), sizeof(char *));
+    if (!argv) {
+        runtimeError(vm, "%s: out of memory", tool_name);
+        shellUpdateStatus(1);
+        pascalPopGlobalState(&pascal_state);
+        frontendPopKind(previous_kind);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    argv[0] = strdup(tool_name);
+    if (!argv[0]) {
+        ok = false;
+    }
+
+    for (int i = 0; ok && i < arg_count; ++i) {
+        const Value *arg = &args[i];
+        if (arg->type != TYPE_STRING) {
+            runtimeError(vm, "%s: expected string arguments", tool_name);
+            ok = false;
+            break;
+        }
+        const char *src = arg->s_val ? arg->s_val : "";
+        argv[i + 1] = strdup(src);
+        if (!argv[i + 1]) {
+            runtimeError(vm, "%s: out of memory", tool_name);
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        int status = kShellToolRunnerUnavailable;
+#if !defined(PSCAL_TARGET_IOS)
+        status = shellSpawnToolProcess(tool_name, argc, argv);
+#endif
+        if (status == kShellToolRunnerUnavailable && entry) {
+            bool needs_shell_ctx = (target_kind == FRONTEND_KIND_SHELL);
+            bool background = shellRuntimeCurrentBuiltinBackground();
+#if defined(PSCAL_TARGET_IOS)
+            /* When running inside the background worker thread, always execute
+             * inline so the worker's redirections (stdout/stderr to files) are
+             * honored. */
+            if (gShellBackgroundWorkerActive) {
+                background = true;
+            }
+            fprintf(stderr, "[tool-dispatch] name=%s bg=%d worker=%d argc=%d\n",
+                    tool_name ? tool_name : "<null>", (int)background, (int)gShellBackgroundWorkerActive, argc);
+            if (background && gShellBackgroundWorkerActive) {
+                fprintf(stderr, "[tool-inline] %s argc=%d (bg worker)\n", tool_name, argc);
+                for (int i = 0; i < argc; ++i) {
+                    fprintf(stderr, "[tool-inline] argv[%d]=%s\n", i, argv[i] ? argv[i] : "(null)");
+                }
+                /* Already running inside a background worker: execute inline so redirections
+                 * remain active for this thread. */
+                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg);
+                fprintf(stderr, "[tool-inline] %s exit=%d\n", tool_name, status);
+            } else if (background || target_kind == FRONTEND_KIND_SHELL) {
+                fprintf(stderr, "[tool-thread] %s argc=%d bg=%d\n", tool_name, argc, (int)background);
+                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background);
+                fprintf(stderr, "[tool-thread] %s dispatched status=%d\n", tool_name, status);
+            } else {
+                /* Run non-shell frontends inline on iOS to avoid repeated
+                 * cross-thread state swaps that can leave symbol tables in an
+                 * inconsistent state. */
+                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg);
+            }
+            shellInvalidateFrontendState(target_kind);
+            /* The frontend reset tears down its own symbol tables; reattach the saved
+             * shell tables so pascalPopGlobalState does not attempt to free
+             * already-destroyed structures. */
+            globalSymbols = pascal_state.globalSymbols;
+            constGlobalSymbols = pascal_state.constGlobalSymbols;
+            localSymbols = pascal_state.localSymbols;
+            procedure_table = pascal_state.procedure_table;
+            current_procedure_table = pascal_state.current_procedure_table;
+            type_table = pascal_state.type_table;
+            /* For inline/background runs, return the actual worker status so the shell
+             * prompt reflects tool success/failure. */
+            gShellRuntime.last_status = status;
+#else
+            if (needs_shell_ctx || background) {
+                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background);
+            } else {
+                status = entry(argc, argv);
+            }
+            pascalInvalidateGlobalState();
+#endif
+        } else if (status == kShellToolRunnerUnavailable) {
+            fprintf(stderr, "%s: tool runner unavailable and no builtin entry.\n", tool_name);
+            status = 127;
+        }
+        fflush(NULL);
+        shellUpdateStatus(status);
+    } else {
+        shellUpdateStatus(1);
+    }
+
+    for (int i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+
+    gParamCount = saved_param_count;
+    gParamValues = saved_param_values;
+    gParamValuesOwned = saved_param_owned;
+    pascalPopGlobalState(&pascal_state);
+
+    Value result = makeVoid();
+    /* For synchronous iOS runs, the worker thread will set gShellRuntime.last_status.
+     * Use that value when available to avoid a default 127 on success. */
+    int final_status = shellRuntimeLastStatus();
+    shellUpdateStatus(final_status);
+    if (getenv("PSCALI_PIPE_DEBUG")) {
+        fprintf(stderr, "[tool-dispatch] %s final status=%d\n", tool_name ? tool_name : "<null>", final_status);
+    }
+    frontendPopKind(previous_kind);
+    return result;
+}
+
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ShellStringVector;
+
+static void shellStringVectorFree(ShellStringVector *vec) {
+    if (!vec) {
+        return;
+    }
+    for (size_t i = 0; i < vec->count; ++i) {
+        free(vec->items[i]);
+    }
+    free(vec->items);
+    vec->items = NULL;
+    vec->count = 0;
+    vec->capacity = 0;
+}
+
+static bool shellStringVectorPush(ShellStringVector *vec, const char *value) {
+    if (!vec || !value) {
+        return false;
+    }
+    if (vec->count == vec->capacity) {
+        size_t new_cap = vec->capacity ? vec->capacity * 2 : 32;
+        char **resized = (char **)realloc(vec->items, new_cap * sizeof(char *));
+        if (!resized) {
+            return false;
+        }
+        vec->items = resized;
+        vec->capacity = new_cap;
+    }
+    vec->items[vec->count] = strdup(value);
+    if (!vec->items[vec->count]) {
+        return false;
+    }
+    vec->count++;
+    return true;
+}
+
+static int shellLsCompare(const void *a, const void *b) {
+    const char *const *lhs = (const char *const *)a;
+    const char *const *rhs = (const char *const *)b;
+    return strcasecmp(*lhs, *rhs);
+}
+
+static int shellBuiltinListDirectory(const char *path, bool show_all, bool show_almost_all) {
+    DIR *dir = opendir(path);
+    if (!dir) {
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+        return errno ? errno : 1;
+    }
+
+    ShellStringVector entries = {0};
+    errno = 0;
+    struct dirent *dent;
+    while ((dent = readdir(dir)) != NULL) {
+        if (dent->d_name[0] == '.') {
+            if (!show_all) {
+                if (!show_almost_all) {
+                    continue;
+                }
+                if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0) {
+                    continue;
+                }
+            }
+        }
+        if (!shellStringVectorPush(&entries, dent->d_name)) {
+            errno = ENOMEM;
+            break;
+        }
+    }
+    int err = errno;
+    closedir(dir);
+
+    if (err && err != 0) {
+        shellStringVectorFree(&entries);
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(err));
+        return err;
+    }
+
+    qsort(entries.items, entries.count, sizeof(char *), shellLsCompare);
+    for (size_t i = 0; i < entries.count; ++i) {
+        printf("%s\n", entries.items[i]);
+    }
+    shellStringVectorFree(&entries);
+    return 0;
+}
+
+static int shellBuiltinListPath(const char *path, bool show_all, bool show_almost_all, bool print_header, bool needs_spacing) {
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
+        return errno ? errno : 1;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        printf("%s\n", path);
+        return 0;
+    }
+
+    if (print_header) {
+        if (needs_spacing) {
+            printf("\n");
+        }
+        printf("%s:\n", path);
+    }
+    return shellBuiltinListDirectory(path, show_all, show_almost_all);
+}
+
+Value vmBuiltinShellLs(VM *vm, int arg_count, Value *args) {
+    bool show_all = false;
+    bool show_almost_all = false;
+    int index = 0;
+    while (index < arg_count) {
+        if (args[index].type != TYPE_STRING || !args[index].s_val) {
+            break;
+        }
+        const char *word = args[index].s_val;
+        if (word[0] != '-') {
+            break;
+        }
+        if (strcmp(word, "--") == 0) {
+            index++;
+            break;
+        }
+        for (const char *opt = word + 1; *opt; ++opt) {
+            if (*opt == 'a') {
+                show_all = true;
+                show_almost_all = false;
+            } else if (*opt == 'A') {
+                if (!show_all) {
+                    show_almost_all = true;
+                }
+            } else {
+                runtimeError(vm, "ls: unsupported option -%c", *opt);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+        }
+        index++;
+    }
+
+    int path_count = arg_count - index;
+    const char *default_path = ".";
+    const char **paths = NULL;
+    if (path_count <= 0) {
+        path_count = 1;
+        paths = &default_path;
+    } else {
+        paths = (const char **)malloc(sizeof(const char *) * (size_t)path_count);
+        if (!paths) {
+            runtimeError(vm, "ls: out of memory");
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        for (int i = 0; i < path_count; ++i) {
+            const Value *arg = &args[index + i];
+            if (arg->type != TYPE_STRING || !arg->s_val) {
+                runtimeError(vm, "ls: expected string path arguments");
+                free(paths);
+                shellUpdateStatus(1);
+                return makeVoid();
+            }
+            paths[i] = arg->s_val;
+        }
+    }
+
+    int final_status = 0;
+    for (int i = 0; i < path_count; ++i) {
+        int rc = shellBuiltinListPath(paths[i], show_all, show_almost_all, path_count > 1, i > 0);
+        if (rc != 0 && final_status == 0) {
+            final_status = rc;
+        }
+    }
+    if (paths != &default_path) {
+        free(paths);
+    }
+    shellUpdateStatus(final_status);
+    return makeVoid();
+}
+
+extern int pascal_main(int argc, char *argv[]);
+extern int clike_main(int argc, char *argv[]);
+extern int rea_main(int argc, char *argv[]);
+extern int pscalvm_main(int argc, char *argv[]);
+extern int pscaljson2bc_main(int argc, char **argv);
+extern int exsh_main(int argc, char *argv[]);
+#ifdef BUILD_DASCAL
+extern int dascal_main(int argc, char *argv[]);
+#endif
+#ifdef BUILD_PSCALD
+extern int pscald_main(int argc, char *argv[]);
+#endif
+
+Value vmBuiltinShellPascal(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pascal", pascal_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+#ifdef BUILD_DASCAL
+Value vmBuiltinShellDascal(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "dascal", dascal_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+#endif
+
+Value vmBuiltinShellClike(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "clike", clike_main, FRONTEND_KIND_CLIKE, arg_count, args);
+}
+
+Value vmBuiltinShellRea(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "rea", rea_main, FRONTEND_KIND_REA, arg_count, args);
+}
+
+Value vmBuiltinShellPscalVm(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscalvm", pscalvm_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+Value vmBuiltinShellPscalJson2bc(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscaljson2bc", pscaljson2bc_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+Value vmBuiltinShellExshTool(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "exsh", exsh_main, FRONTEND_KIND_SHELL, arg_count, args);
+}
+
+#ifdef BUILD_PSCALD
+Value vmBuiltinShellPscald(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscald", pscald_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+#endif
+
+#endif /* PSCAL_TARGET_IOS */
 
 Value vmBuiltinShellDirs(VM *vm, int arg_count, Value *args) {
     (void)args;
@@ -3963,10 +5589,9 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     size_t line_length = 0;
     if (ok) {
         if (prompt) {
-            fputs(prompt, stdout);
-            fflush(stdout);
+            write(STDOUT_FILENO, prompt, strlen(prompt));
         }
-        read_result = shellReadLineFromStream(stdin, &line, &line_length);
+        read_result = shellReadLineFromFd(STDIN_FILENO, &line, &line_length);
         if (read_result == SHELL_READ_LINE_OK && line_length > 0 && line[line_length - 1] == '\n') {
             line[--line_length] = '\0';
         }
@@ -4346,7 +5971,7 @@ Value vmBuiltinShellMapfile(VM *vm, int arg_count, Value *args) {
     for (;;) {
         char *line = NULL;
         size_t line_length = 0;
-        ShellReadLineResult result = shellReadLineFromStream(stdin, &line, &line_length);
+        ShellReadLineResult result = shellReadLineFromFd(STDIN_FILENO, &line, &line_length);
         if (result == SHELL_READ_LINE_ERROR) {
             runtimeError(vm, "mapfile: failed to read input");
             ok = false;
@@ -5452,9 +7077,32 @@ static bool shellCommandCollectInfo(const char *name,
         }
     }
 
-    if (shellIsRuntimeBuiltin(name)) {
-        const char *canonical = shellBuiltinCanonicalName(name);
-        if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_BUILTIN, canonical)) {
+    bool is_runtime_builtin = shellIsRuntimeBuiltin(name);
+    const char *canonical = NULL;
+    bool canonical_override = false;
+    if (name && *name) {
+        canonical = shellBuiltinCanonicalName(name);
+        if (canonical && *canonical && strcmp(canonical, name) != 0 &&
+            shellIsRuntimeBuiltin(canonical)) {
+            canonical_override = true;
+        }
+    }
+    bool applet_registered = false;
+#if defined(PSCAL_TARGET_IOS)
+    const SmallclueApplet *applet = smallclueFindApplet(name);
+    if (applet) {
+        applet_registered = smallclueIsRegisteredBuiltinName(name);
+    }
+    if (applet && applet_registered && !canonical_override) {
+        if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_APPLET, applet->name)) {
+            goto error;
+        }
+    }
+#endif
+
+    if (is_runtime_builtin && (!applet_registered || canonical_override)) {
+        const char *builtin_name = canonical ? canonical : name;
+        if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_BUILTIN, builtin_name)) {
             goto error;
         }
     }
@@ -5497,6 +7145,8 @@ static const char *shellCommandResultKindLabel(ShellCommandResultKind kind) {
             return "function";
         case SHELL_COMMAND_RESULT_BUILTIN:
             return "builtin";
+        case SHELL_COMMAND_RESULT_APPLET:
+            return "smallclue applet";
         case SHELL_COMMAND_RESULT_FILE:
             return "file";
     }
@@ -5516,6 +7166,9 @@ static void shellCommandPrintVerbose(const char *name, const ShellCommandResult 
             break;
         case SHELL_COMMAND_RESULT_BUILTIN:
             printf("%s is a shell builtin\n", name);
+            break;
+        case SHELL_COMMAND_RESULT_APPLET:
+            printf("%s is a smallclue applet\n", name);
             break;
         case SHELL_COMMAND_RESULT_FILE:
             printf("%s is %s\n", name, result->detail ? result->detail : "");
@@ -6257,6 +7910,12 @@ Value vmBuiltinShellWhich(VM *vm, int arg_count, Value *args) {
                 case SHELL_COMMAND_RESULT_BUILTIN:
                     if (!silent) {
                         printf("%s: shell builtin\n", name);
+                    }
+                    printed = true;
+                    break;
+                case SHELL_COMMAND_RESULT_APPLET:
+                    if (!silent) {
+                        printf("%s: smallclue applet\n", name);
                     }
                     printed = true;
                     break;
@@ -7037,6 +8696,60 @@ Value vmBuiltinShellContinue(VM *vm, int arg_count, Value *args) {
 static ShellAlias *gShellAliases = NULL;
 static size_t gShellAliasCount = 0;
 
+static void shellWriteAllFd(int fd, const char *buf, size_t len) {
+    if (fd < 0 || !buf || len == 0) {
+        return;
+    }
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, buf + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (n == 0) {
+            break;
+        }
+        off += (size_t)n;
+    }
+}
+
+static void shellFdVprintf(int fd, const char *fmt, va_list ap) {
+    if (!fmt) {
+        return;
+    }
+    char stack_buf[768];
+    va_list ap2;
+    va_copy(ap2, ap);
+    int needed = vsnprintf(stack_buf, sizeof(stack_buf), fmt, ap2);
+    va_end(ap2);
+    if (needed < 0) {
+        return;
+    }
+    if ((size_t)needed < sizeof(stack_buf)) {
+        shellWriteAllFd(fd, stack_buf, (size_t)needed);
+        return;
+    }
+    size_t cap = (size_t)needed + 1;
+    char *heap = (char *)malloc(cap);
+    if (!heap) {
+        shellWriteAllFd(fd, stack_buf, strlen(stack_buf));
+        return;
+    }
+    vsnprintf(heap, cap, fmt, ap);
+    shellWriteAllFd(fd, heap, (size_t)needed);
+    free(heap);
+}
+
+static void shellFdPrintf(int fd, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    shellFdVprintf(fd, fmt, ap);
+    va_end(ap);
+}
+
 static void shellReportRecoverableError(VM *vm, bool with_location, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -7056,11 +8769,11 @@ static void shellReportRecoverableError(VM *vm, bool with_location, const char *
     }
 
     if (script && line > 0) {
-        fprintf(stderr, "%s: line %d: %s\n", script, line, message);
+        shellFdPrintf(STDERR_FILENO, "%s: line %d: %s\n", script, line, message);
     } else if (script) {
-        fprintf(stderr, "%s: %s\n", script, message);
+        shellFdPrintf(STDERR_FILENO, "%s: %s\n", script, message);
     } else {
-        fprintf(stderr, "%s\n", message);
+        shellFdPrintf(STDERR_FILENO, "%s\n", message);
     }
 
     if (vm) {
@@ -7413,6 +9126,25 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         NULL,
         0
     },
+#if defined(PSCAL_TARGET_IOS)
+    {
+        "smallclue-help",
+        "List available smallclue applets.",
+        "smallclue-help",
+        "Prints the iOS smallclue applet catalog with brief descriptions.",
+        NULL,
+        0
+    },
+#endif
+    {
+        "stdioinfo",
+        "Show stdio routing and session state.",
+        "stdioinfo",
+        "Prints the current stdin/stdout/stderr descriptor mapping, TTY state,"
+        " and on iOS the active vproc session/PTY wiring.",
+        NULL,
+        0
+    },
     {
         "caller",
         "Report information about active call frames.",
@@ -7436,6 +9168,27 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "List active background jobs.",
         "jobs",
         "Reports each tracked job with its index, status, and command line.",
+        NULL,
+        0
+    },
+    {
+        "lps",
+        "Show synthetic vproc tasks on iOS.",
+        "lps",
+        "Displays the shell-managed virtual processes instead of the host process"
+        " table. Columns include the synthetic PID/PGID, state, and associated"
+        " command when available. On platforms with fork/exec support the external"
+        " ps is still used.",
+        NULL,
+        0
+    },
+    {
+        "top",
+        "Live view of synthetic vprocs on iOS.",
+        "top",
+        "Prints a one-shot table of synthetic vproc state including pid, pgid,"
+        " foreground marker, state, and utime/stime counters. Additional fields"
+        " will be added as process emulation grows.",
         NULL,
         0
     },
@@ -7498,6 +9251,15 @@ static const ShellHelpTopic kShellHelpTopics[] = {
         "Print the current working directory.",
         "pwd",
         "Outputs the absolute path returned by getcwd(3).",
+        NULL,
+        0
+    },
+    {
+        "chmod",
+        "Change file permissions.",
+        "chmod MODE file [file ...]",
+        "Applies the octal MODE to each file path. Only numeric modes are supported "
+        "on iOS builds.",
         NULL,
         0
     },
@@ -7946,23 +9708,185 @@ Value vmBuiltinShellHistory(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static ShellJob *shellFindJobByPid(pid_t pid) {
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        ShellJob *job = &gShellJobs[i];
+        if (!job->pids) {
+            continue;
+        }
+        for (size_t j = 0; j < job->pid_count; ++j) {
+            if (job->pids[j] == pid) {
+                return job;
+            }
+        }
+    }
+    return NULL;
+}
+
+static const char *shellPsStateForEntry(const ShellJob *job, const VProcSnapshot *snap) {
+    if (snap && snap->exited) {
+        return "exited";
+    }
+    if (job && job->disowned) {
+        return "disowned";
+    }
+    if ((snap && snap->stopped) || (job && job->stopped)) {
+        return "stopped";
+    }
+    if (job && job->running) {
+        return "running";
+    }
+    return "running";
+}
+
+static void shellPsPrintLine(pid_t pid, pid_t pgid, const char *state, int utime_cs, int stime_cs, const char *command) {
+    char pgid_buf[16];
+    if (pgid > 0) {
+        snprintf(pgid_buf, sizeof(pgid_buf), "%d", (int)pgid);
+    } else {
+        snprintf(pgid_buf, sizeof(pgid_buf), "-");
+    }
+    double utime_s = 0.0, stime_s = 0.0;
+    vprocFormatCpuTimes(utime_cs, stime_cs, &utime_s, &stime_s);
+    printf("%-6d %-6s %-9s %-6.1f %-6.1f %s\n", (int)pid, pgid_buf,
+           state ? state : "running", utime_s, stime_s, command ? command : "");
+}
+
+static void shellPsPrintLineTree(const VProcSnapshot *snap,
+                                 pid_t pgid,
+                                 const char *state,
+                                 const char *command,
+                                 int depth) {
+    if (!snap) {
+        return;
+    }
+    char pgid_buf[16];
+    if (pgid > 0) {
+        snprintf(pgid_buf, sizeof(pgid_buf), "%d", (int)pgid);
+    } else {
+        snprintf(pgid_buf, sizeof(pgid_buf), "-");
+    }
+
+    double utime_s = 0.0, stime_s = 0.0;
+    vprocFormatCpuTimes(snap->rusage_utime, snap->rusage_stime, &utime_s, &stime_s);
+
+    char indent[96];
+    size_t used = 0;
+    for (int d = 0; d < depth && used + 2 < sizeof(indent); ++d) {
+        indent[used++] = ' ';
+        indent[used++] = ' ';
+    }
+    indent[used] = '\0';
+
+    printf("%-6d %-6d %-6s %-6d %-9s %-6.1f %-6.1f %s%s\n",
+           (int)snap->pid,
+           (int)snap->parent_pid,
+           pgid_buf,
+           (int)snap->sid,
+           state ? state : "running",
+           utime_s,
+           stime_s,
+           indent,
+           command ? command : "");
+}
+#endif
+
+static int shellJobIndexCompareById(const void *left, const void *right) {
+    size_t lhs = *(const size_t *)left;
+    size_t rhs = *(const size_t *)right;
+    size_t lhs_id = gShellJobs[lhs].id;
+    size_t rhs_id = gShellJobs[rhs].id;
+    if (lhs_id < rhs_id) {
+        return -1;
+    }
+    if (lhs_id > rhs_id) {
+        return 1;
+    }
+    return 0;
+}
+
 Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
     (void)vm;
     (void)arg_count;
     (void)args;
     shellCollectJobs();
-    size_t visible_index = 0;
-    for (size_t i = 0; i < gShellJobCount; ++i) {
-        ShellJob *job = &gShellJobs[i];
+    size_t current_index = SIZE_MAX;
+    size_t previous_index = SIZE_MAX;
+    for (size_t i = gShellJobCount; i > 0; --i) {
+        ShellJob *job = &gShellJobs[i - 1];
         if (job->disowned) {
             continue;
         }
-        ++visible_index;
-        const char *state = job->stopped ? "Stopped" : "Running";
-        const char *command = job->command ? job->command : "";
-        printf("[%zu] %s %s\n", visible_index, state, command);
+        if (current_index == SIZE_MAX) {
+            current_index = i - 1;
+        } else {
+            previous_index = i - 1;
+            break;
+        }
     }
-    fflush(stdout);
+
+    size_t visible_count = 0;
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        if (!gShellJobs[i].disowned) {
+            visible_count++;
+        }
+    }
+    bool show_markers = shellRuntimeIsInteractive();
+
+    size_t *indices = NULL;
+    if (visible_count > 0) {
+        indices = malloc(sizeof(size_t) * visible_count);
+    }
+    if (indices) {
+        size_t idx_count = 0;
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            if (!gShellJobs[i].disowned) {
+                indices[idx_count++] = i;
+            }
+        }
+        if (idx_count > 1) {
+            qsort(indices, idx_count, sizeof(size_t), shellJobIndexCompareById);
+        }
+        for (size_t i = 0; i < idx_count; ++i) {
+            size_t job_index = indices[i];
+            ShellJob *job = &gShellJobs[job_index];
+            const char *state = job->stopped ? "Stopped" : "Running";
+            const char *command = job->command ? job->command : "";
+            if (show_markers) {
+                char marker = ' ';
+                if (job_index == current_index) {
+                    marker = '+';
+                } else if (job_index == previous_index) {
+                    marker = '-';
+                }
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
+            } else {
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %s %s\n", job->id, state, command);
+            }
+        }
+        free(indices);
+    } else {
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            ShellJob *job = &gShellJobs[i];
+            if (job->disowned) {
+                continue;
+            }
+            const char *state = job->stopped ? "Stopped" : "Running";
+            const char *command = job->command ? job->command : "";
+            if (show_markers) {
+                char marker = ' ';
+                if (i == current_index) {
+                    marker = '+';
+                } else if (i == previous_index) {
+                    marker = '-';
+                }
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
+            } else {
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %s %s\n", job->id, state, command);
+            }
+        }
+    }
     shellUpdateStatus(0);
     return makeVoid();
 }
@@ -8064,6 +9988,34 @@ static bool shellKillParseSignal(Value value, bool numeric_only, int *out_signo)
     return false;
 }
 
+static bool shellKillTryJobSpec(const char *text, size_t *out_index) {
+    if (!text || !*text || !out_index) {
+        return false;
+    }
+    while (isspace((unsigned char)*text)) {
+        ++text;
+    }
+    if (*text != '%') {
+        return false;
+    }
+    ++text;
+    while (isspace((unsigned char)*text)) {
+        ++text;
+    }
+    if (!*text) {
+        return false;
+    }
+    char *endptr = NULL;
+    long vis = strtol(text, &endptr, 10);
+    while (endptr && *endptr && isspace((unsigned char)*endptr)) {
+        ++endptr;
+    }
+    if (endptr && *endptr == '\0' && vis > 0) {
+        return shellJobFindVisibleIndex((size_t)vis, out_index);
+    }
+    return false;
+}
+
 static void shellKillPrintSignalTable(void) {
     int column = 0;
     char name[32];
@@ -8087,43 +10039,103 @@ static void shellKillPrintSignalTable(void) {
 
 static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int signo) {
     if (index >= gShellJobCount) {
-        runtimeError(vm, "kill: invalid job index");
+        fprintf(stderr, "kill: invalid job index\n");
         return false;
     }
     ShellJob *job = &gShellJobs[index];
-    if (job->pgid > 0) {
-        if (kill(-job->pgid, signo) != 0) {
-            runtimeError(vm, "kill: %s: %s",
-                         spec_text ? spec_text : "job",
-                         strerror(errno));
-            return false;
-        }
-        return true;
-    }
     bool sent = false;
+    bool probe = (signo == 0);
+    bool terminate = !probe &&
+                     !(signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU || signo == SIGCONT);
+    bool synthetic = (vprocSnapshot(NULL, 0) > 0);
+    if (probe) {
+        if (job->pgid > 0 && vprocKillShim(-job->pgid, 0) == 0) {
+            return true;
+        }
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            pid_t pid = job->pids[i];
+            if (pid <= 0) {
+                continue;
+            }
+            if (vprocKillShim(pid, 0) == 0) {
+                return true;
+            }
+        }
+        fprintf(stderr, "kill: %s: no associated processes\n", spec_text ? spec_text : "job");
+        return false;
+    }
+    if (terminate && job->pgid > 0) {
+        /* Deliver to the whole synthetic group; safer for pipelines and job-spec parity. */
+        if (vprocKillShim(-job->pgid, signo) == 0) {
+            sent = true;
+        }
+    }
+
     for (size_t i = 0; i < job->pid_count; ++i) {
         pid_t pid = job->pids[i];
         if (pid <= 0) {
             continue;
         }
+        if (!terminate || !sent) {
+            /* If group kill failed or we are delivering non-terminating signals, send per-pid. */
+            if (vprocKillShim(pid, signo) != 0) {
+                fprintf(stderr, "kill: %s: %s\n",
+                        spec_text ? spec_text : "job",
+                        strerror(errno));
+                return false;
+            }
+        }
         sent = true;
-        if (kill(pid, signo) != 0) {
-            runtimeError(vm, "kill: %s: %s",
-                         spec_text ? spec_text : "job",
-                         strerror(errno));
-            return false;
+        int status = 0;
+        pid_t res = vprocWaitPidShim(pid, &status, terminate ? 0 : (WNOHANG | WUNTRACED | WCONTINUED));
+        if (res > 0 && (WIFEXITED(status) || WIFSIGNALED(status))) {
+            if (!terminate) {
+                job->pids[i] = -1;
+            }
+        } else if (res > 0 && WIFSTOPPED(status)) {
+            job->stopped = true;
+            job->running = false;
+        } else if (!terminate) {
+            job->pids[i] = -1;
         }
     }
     if (!sent) {
-        runtimeError(vm, "kill: %s: no associated processes",
-                     spec_text ? spec_text : "job");
+        fprintf(stderr, "kill: %s: no associated processes\n",
+                spec_text ? spec_text : "job");
         return false;
     }
+    if (signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU) {
+        job->last_status = 128 + signo;
+        job->running = false;
+        job->stopped = true;
+    } else {
+        job->last_status = 128 + signo;
+        job->running = false;
+        job->stopped = false;
+    }
+    if (terminate) {
+        shellRemoveJobAt(index);
+        shellCollectJobs();
+        return true;
+    }
+    (void)synthetic; /* avoid unused warning on non-iOS builds */
     return true;
 }
 
 Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
+    bool kill_dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    if (kill_dbg) {
+        fprintf(stderr, "[kill] job_count=%zu args=%d\n", gShellJobCount, arg_count);
+        for (size_t i = 0; i < gShellJobCount; ++i) {
+            ShellJob *job = &gShellJobs[i];
+            fprintf(stderr, "[kill]   job idx=%zu id=%zu pgid=%d disowned=%d stopped=%d running=%d pid_count=%zu\n",
+                    i, job->id, (int)job->pgid, (int)job->disowned, (int)job->stopped, (int)job->running, job->pid_count);
+            for (size_t j = 0; j < job->pid_count; ++j) {
+                fprintf(stderr, "[kill]     pid[%zu]=%d\n", j, (int)job->pids[j]);
+            }
+        }
+    }
 
     bool parsing_options = true;
     bool expect_signal_value = false;
@@ -8141,7 +10153,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
             bool numeric_only = (pending_option == 'n');
             int signo = 0;
             if (!shellKillParseSignal(value, numeric_only, &signo)) {
-                runtimeError(vm, "kill: invalid signal");
+                fprintf(stderr, "kill: invalid signal\n");
                 shellUpdateStatus(1);
                 return makeVoid();
             }
@@ -8200,7 +10212,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     }
 
     if (expect_signal_value) {
-        runtimeError(vm, "kill: option requires an argument");
+        fprintf(stderr, "kill: option requires an argument\n");
         shellUpdateStatus(1);
         return makeVoid();
     }
@@ -8216,7 +10228,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
                 if (shellKillParseLong(value, &numeric)) {
                     char name[32];
                     if (!shellRuntimeSignalName((int)numeric, false, name, sizeof(name))) {
-                        runtimeError(vm, "kill: %ld: unknown signal", numeric);
+                        fprintf(stderr, "kill: %ld: unknown signal\n", numeric);
                         ok = false;
                         continue;
                     }
@@ -8230,7 +10242,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
                 }
                 int signo = 0;
                 if (!shellRuntimeParseSignal(value.s_val, &signo)) {
-                    runtimeError(vm, "kill: invalid signal '%s'", value.s_val);
+                    fprintf(stderr, "kill: invalid signal '%s'\n", value.s_val);
                     ok = false;
                     continue;
                 }
@@ -8242,7 +10254,7 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     }
 
     if (operand_start >= arg_count) {
-        runtimeError(vm, "kill: missing operand");
+        fprintf(stderr, "kill: missing operand\n");
         shellUpdateStatus(1);
         return makeVoid();
     }
@@ -8250,33 +10262,68 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     bool overall_ok = true;
     for (int i = operand_start; i < arg_count; ++i) {
         Value target = args[i];
-        if (target.type == TYPE_STRING && target.s_val && target.s_val[0] == '%' && target.s_val[1] != '\0') {
-            size_t index = 0;
-            if (!shellParseJobSpecifier(vm, "kill", target, &index)) {
-                overall_ok = false;
+        if (target.type == TYPE_STRING && target.s_val) {
+            const char *text = target.s_val;
+            while (isspace((unsigned char)*text)) {
+                ++text;
+            }
+            if (*text == '%') {
+                size_t index = 0;
+                if (shellKillTryJobSpec(text, &index) && index < gShellJobCount) {
+                    if (!shellKillSignalJob(vm, target.s_val, index, signal_number)) {
+                        overall_ok = false;
+                    }
+                } else {
+                    fprintf(stderr, "kill: %s: no such job\n", target.s_val);
+                    overall_ok = false;
+                }
                 continue;
             }
-            if (!shellKillSignalJob(vm, target.s_val, index, signal_number)) {
-                overall_ok = false;
-            }
-            continue;
         }
         long pid_value = 0;
         if (!shellKillParseLong(target, &pid_value)) {
             if (target.type == TYPE_STRING && target.s_val) {
-                runtimeError(vm, "kill: invalid pid '%s'", target.s_val);
+                fprintf(stderr, "kill: invalid pid '%s'\n", target.s_val);
             } else {
-                runtimeError(vm, "kill: invalid pid");
+                fprintf(stderr, "kill: invalid pid\n");
             }
             overall_ok = false;
             continue;
         }
-        if (kill((pid_t)pid_value, signal_number) != 0) {
-            runtimeError(vm, "kill: (%ld) %s", pid_value, strerror(errno));
+        int rc = 0;
+#if defined(PSCAL_TARGET_IOS)
+        pid_t target_pid = (pid_t)pid_value;
+        if (target_pid < 0) {
+            pid_t pgid = -target_pid;
+            bool any = false;
+            for (size_t j = 0; j < gShellJobCount; ++j) {
+                ShellJob *job = &gShellJobs[j];
+                if (job->pgid == pgid) {
+                    for (size_t k = 0; k < job->pid_count; ++k) {
+                        if (job->pids[k] > 0) {
+                            any = true;
+                            vprocKillShim(job->pids[k], signal_number);
+                        }
+                    }
+                }
+            }
+            if (!any) {
+                rc = vprocKillShim(target_pid, signal_number);
+            }
+        } else {
+            rc = vprocKillShim((pid_t)pid_value, signal_number);
+        }
+#else
+        rc = kill((pid_t)pid_value, signal_number);
+#endif
+        if (rc != 0) {
+            fprintf(stderr, "kill: (%ld) %s\n", pid_value, strerror(errno));
             overall_ok = false;
         }
     }
 
+    /* Pull in any state changes caused by the signals (stops, exits) so jobs/
+     * lps reflect the new status immediately. */
     shellCollectJobs();
     shellUpdateStatus(overall_ok ? 0 : 1);
     return makeVoid();
@@ -8284,27 +10331,33 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
+    shellEnsureJobControl();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "fg", arg_count, args, &index)) {
         shellUpdateStatus(1);
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
-    shellEnsureJobControl();
     bool job_control = gShellRuntime.job_control_enabled && job->pgid > 0;
     if (job_control) {
         shellJobControlSetForeground(job->pgid);
     }
-    if (job->pgid > 0) {
-        if (kill(-job->pgid, SIGCONT) != 0 && errno != ESRCH) {
-            /* ignore */
+    /* Continue every pid; we do not rely on pgid because vproc uses thread ids. */
+    for (size_t i = 0; i < job->pid_count; ++i) {
+        pid_t pid = job->pids[i];
+        if (pid > 0) {
+#if defined(PSCAL_TARGET_IOS)
+            vprocKillShim(pid, SIGCONT);
+#else
+            kill(pid, SIGCONT);
+#endif
         }
-    } else {
-        for (size_t i = 0; i < job->pid_count; ++i) {
-            pid_t pid = job->pids[i];
-            if (pid > 0) {
-                kill(pid, SIGCONT);
-            }
+    }
+    if (job_control) {
+        if (job->command && job->command[0]) {
+            shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued  %s\n", job->id, job->command);
+        } else {
+            shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued\n", job->id);
         }
     }
     job->stopped = false;
@@ -8318,7 +10371,7 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
         int status = 0;
         pid_t res;
         do {
-            res = waitpid(pid, &status, WUNTRACED);
+            res = vprocWaitPidShim(pid, &status, WUNTRACED);
         } while (res < 0 && errno == EINTR);
         if (res < 0) {
             continue;
@@ -8346,22 +10399,21 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
+    shellEnsureJobControl();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "bg", arg_count, args, &index)) {
         shellUpdateStatus(1);
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
-    if (job->pgid > 0) {
-        if (kill(-job->pgid, SIGCONT) != 0 && errno != ESRCH) {
-            /* ignore */
-        }
-    } else {
-        for (size_t i = 0; i < job->pid_count; ++i) {
-            pid_t pid = job->pids[i];
-            if (pid > 0) {
-                kill(pid, SIGCONT);
-            }
+    for (size_t i = 0; i < job->pid_count; ++i) {
+        pid_t pid = job->pids[i];
+        if (pid > 0) {
+#if defined(PSCAL_TARGET_IOS)
+            vprocKillShim(pid, SIGCONT);
+#else
+            kill(pid, SIGCONT);
+#endif
         }
     }
     job->stopped = false;
@@ -8373,13 +10425,107 @@ Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
 Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
     size_t visible_count = shellJobVisibleCount();
-    if (visible_count == 0 && arg_count == 0) {
-        shellUpdateStatus(0);
+    if (arg_count == 1 && gShellJobCount == 0 && gShellRuntime.last_removed_job_valid) {
+        long target = -1;
+        Value spec = args[0];
+        if (spec.type == TYPE_STRING && spec.s_val) {
+            const char *text = spec.s_val;
+            if (text[0] == '%') {
+                text++;
+            }
+            if (text && *text) {
+                char *end = NULL;
+                long parsed = strtol(text, &end, 10);
+                if (end && *end == '\0' && parsed > 0) {
+                    target = parsed;
+                }
+            }
+        } else if (IS_INTLIKE(spec)) {
+            target = (long)AS_INTEGER(spec);
+        }
+        if (target > 0 && gShellRuntime.last_removed_job_id == (size_t)target) {
+            int status = gShellRuntime.last_removed_job_status;
+            gShellRuntime.last_removed_job_valid = false;
+            shellUpdateStatus(status);
+            return makeVoid();
+        }
+    }
+    if (arg_count == 0) {
+        if (visible_count == 0) {
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+        int final_status = 0;
+        while (shellJobVisibleCount() > 0) {
+            /* Match Bash's tendency to treat the most recent job as "current". */
+            size_t index = 0;
+            bool found = false;
+            for (size_t i = gShellJobCount; i > 0; --i) {
+                ShellJob *job = &gShellJobs[i - 1];
+                if (!job->disowned) {
+                    index = i - 1;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                break;
+            }
+            ShellJob *job = &gShellJobs[index];
+            int job_status = job->last_status;
+            for (size_t i = 0; i < job->pid_count; ++i) {
+                pid_t pid = job->pids[i];
+                if (pid <= 0) {
+                    continue;
+                }
+                int status = 0;
+                pid_t res;
+                do {
+                    res = vprocWaitPidShim(pid, &status, 0);
+                } while (res < 0 && errno == EINTR);
+                if (res < 0) {
+                    continue;
+                }
+                job_status = shellStatusFromWait(status);
+                job->pids[i] = -1;
+            }
+            shellRemoveJobAt(index);
+            final_status = job_status;
+            shellCollectJobs();
+        }
+        shellUpdateStatus(final_status);
         return makeVoid();
     }
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "wait", arg_count, args, &index)) {
-        shellUpdateStatus(1);
+        int fallback_status = 1;
+        if (arg_count == 1) {
+            long target = -1;
+            Value spec = args[0];
+            if (spec.type == TYPE_STRING && spec.s_val) {
+                const char *text = spec.s_val;
+                if (text[0] == '%') {
+                    text++;
+                }
+                if (text && *text) {
+                    char *end = NULL;
+                    long parsed = strtol(text, &end, 10);
+                    if (end && *end == '\0' && parsed > 0) {
+                        target = parsed;
+                    }
+                }
+            } else if (IS_INTLIKE(spec)) {
+                target = (long)AS_INTEGER(spec);
+            }
+            if (target > 0 && gShellRuntime.last_removed_job_valid &&
+                gShellRuntime.last_removed_job_id == (size_t)target) {
+                fallback_status = gShellRuntime.last_removed_job_status;
+                gShellRuntime.last_removed_job_valid = false;
+                shellUpdateStatus(fallback_status);
+                return makeVoid();
+            }
+        }
+        shellUpdateStatus(fallback_status);
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
@@ -8392,7 +10538,7 @@ Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
         int status = 0;
         pid_t res;
         do {
-            res = waitpid(pid, &status, 0);
+            res = vprocWaitPidShim(pid, &status, 0);
         } while (res < 0 && errno == EINTR);
         if (res < 0) {
             continue;
@@ -8476,7 +10622,15 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
     }
 
     bool status_flag = true;
+    bool consumed = false;
     if (vmThreadTakeResult(thread_vm, (int)thread_id, NULL, false, &status_flag, true)) {
+        consumed = true;
+    } else if (thread_vm && thread_vm != vm &&
+               vmThreadTakeResult(vm, (int)thread_id, NULL, false, &status_flag, true)) {
+        consumed = true;
+        thread_vm = vm;
+    }
+    if (consumed) {
         shellUpdateStatus(status_flag ? 0 : 1);
     } else {
         shellUpdateStatus(0);
@@ -8486,6 +10640,164 @@ Value vmBuiltinShellWaitForThread(VM *vm, int arg_count, Value *args) {
     }
     return makeVoid();
 }
+
+Value vmBuiltinShellPsThreads(VM *vm, int arg_count, Value *args) {
+    (void)arg_count;
+    (void)args;
+
+    VM *root = vm && vm->threadOwner ? vm->threadOwner : vm;
+    Value stats_json = vmBuiltinThreadStatsJson(root, 0, NULL);
+    const char *text = (stats_json.type == TYPE_STRING && stats_json.s_val) ? stats_json.s_val : "[]";
+    printf("%s\n", text);
+    freeValue(&stats_json);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+#if !defined(PSCAL_TARGET_IOS)
+Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
+    (void)arg_count;
+    (void)args;
+    runtimeError(vm, "ps: synthetic process view is only available on iOS");
+    shellUpdateStatus(1);
+    return makeVoid();
+}
+#else
+Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
+    (void)vm;
+    bool tree = false;
+    for (int i = 0; i < arg_count; ++i) {
+        if (args[i].type != TYPE_STRING || !args[i].s_val) {
+            continue;
+        }
+        const char *opt = args[i].s_val;
+        if (strcmp(opt, "--tree") == 0) {
+            tree = true;
+        } else if (strcmp(opt, "--flat") == 0) {
+            tree = false;
+        } else if (strcmp(opt, "--help") == 0 || strcmp(opt, "-h") == 0) {
+            printf("lps [--tree|--flat]\n");
+            printf("  Show PSCAL synthetic process list.\n");
+            printf("  --flat (default) show flat list.\n");
+            printf("  --tree render parent/child tree.\n");
+            shellUpdateStatus(0);
+            return makeVoid();
+        } else {
+            printf("lps: unknown option '%s'\n", opt);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+    }
+    shellCollectJobs();
+
+    size_t snapshot_cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snapshots = NULL;
+    if (snapshot_cap > 0) {
+        snapshots = (VProcSnapshot *)calloc(snapshot_cap, sizeof(VProcSnapshot));
+    }
+    size_t snapshot_count = snapshots ? vprocSnapshot(snapshots, snapshot_cap) : 0;
+
+    size_t seen_cap = snapshot_count + gShellJobCount * 2 + 4;
+    pid_t *seen = (pid_t *)calloc(seen_cap ? seen_cap : 1, sizeof(pid_t));
+    size_t seen_count = 0;
+
+    if (tree) {
+        printf("%-6s %-6s %-6s %-6s %-9s %-6s %-6s %s\n",
+               "PID", "PPID", "PGID", "SID", "STATE", "UTIME", "STIME", "CMD");
+
+        size_t row_cap = snapshot_count ? snapshot_count : 1;
+        VProcTreeRow *rows = (VProcTreeRow *)calloc(row_cap, sizeof(VProcTreeRow));
+        size_t row_count = rows ? vprocBuildTreeRows(snapshots, snapshot_count, rows, row_cap) : 0;
+        if (rows && row_count > row_cap) {
+            VProcTreeRow *grown = (VProcTreeRow *)realloc(rows, row_count * sizeof(VProcTreeRow));
+            if (grown) {
+                rows = grown;
+                row_cap = row_count;
+            }
+            row_count = rows ? vprocBuildTreeRows(snapshots, snapshot_count, rows, row_cap) : 0;
+        }
+
+        if (rows) {
+            for (size_t r = 0; r < row_count && r < row_cap; ++r) {
+                const VProcTreeRow *row = &rows[r];
+                if (!row || row->snapshot_index >= snapshot_count) {
+                    continue;
+                }
+                const VProcSnapshot *snap = &snapshots[row->snapshot_index];
+                if (!snap || snap->pid <= 0) {
+                    continue;
+                }
+                ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
+                pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
+                const char *cmd = (job && job->command) ? job->command
+                                : (snap->command[0] ? snap->command
+                                : (snap->comm[0] ? snap->comm
+                                : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+                const char *state = shellPsStateForEntry(job, snap);
+                shellPsPrintLineTree(snap, pgid, state, cmd, row->depth);
+                if (seen && seen_count < seen_cap) {
+                    seen[seen_count++] = (pid_t)snap->pid;
+                }
+            }
+            free(rows);
+        }
+    } else {
+        printf("%-6s %-6s %-9s %-6s %-6s %s\n", "PID", "PGID", "STATE", "UTIME", "STIME", "CMD");
+        for (size_t i = 0; i < snapshot_count; ++i) {
+            const VProcSnapshot *snap = &snapshots[i];
+            if (!snap || snap->pid <= 0) {
+                continue;
+            }
+            ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
+            pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
+            const char *cmd = (job && job->command) ? job->command
+                            : (snap->command[0] ? snap->command
+                            : (snap->comm[0] ? snap->comm
+                            : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+            const char *state = shellPsStateForEntry(job, snap);
+            shellPsPrintLine((pid_t)snap->pid, pgid, state, snap->rusage_utime, snap->rusage_stime, cmd);
+            if (seen && seen_count < seen_cap) {
+                seen[seen_count++] = (pid_t)snap->pid;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        ShellJob *job = &gShellJobs[i];
+        if (!job->pids || job->pid_count == 0) {
+            continue;
+        }
+        for (size_t j = 0; j < job->pid_count; ++j) {
+            pid_t pid = job->pids[j];
+            if (pid <= 0) {
+                continue;
+            }
+            bool already_seen = false;
+            for (size_t k = 0; k < seen_count; ++k) {
+                if (seen[k] == pid) {
+                    already_seen = true;
+                    break;
+                }
+            }
+            if (already_seen) {
+                continue;
+            }
+            pid_t pgid = job->pgid > 0 ? job->pgid : pid;
+            const char *state = job->disowned ? "disowned"
+                                              : (job->stopped ? "stopped"
+                                                              : (job->running ? "running" : "exited"));
+            const char *cmd = job->command ? job->command : "";
+            shellPsPrintLine(pid, pgid, state, 0, 0, cmd);
+        }
+    }
+
+    free(snapshots);
+    free(seen);
+    shellUpdateStatus(0);
+    return makeVoid();
+}
+
+#endif
 
 Value vmBuiltinShellBuiltin(VM *vm, int arg_count, Value *args) {
     if (arg_count < 1 || args[0].type != TYPE_STRING || !args[0].s_val || args[0].s_val[0] == '\0') {

@@ -1,0 +1,16 @@
+Index: elvis-2.2.0/doc/elvis.html
+===================================================================
+--- elvis-2.2.0.orig/doc/elvis.html	2009-03-03 20:44:08.000000000 +0530
++++ elvis-2.2.0/doc/elvis.html	2009-03-03 21:10:43.000000000 +0530
+@@ -30,9 +30,9 @@
+    <li><a href="elvisqr.html">          &nbsp;B. Quick Reference</a>
+    <li><a href="howto.html">		&nbsp;C. How To...</a>
+    <li><a href="elvis.man">		elvis(1) Man-page for elvis</a>
+-   <li><a href="ctags.man">		ctags(1) Man-page for ctags (or elvtags)</a>
++   <li><a href="elvtags.man">		elvtags(1) Man-page for ctags (or elvtags)</a>
+    <li><a href="ref.man">		ref(1) Man-page for ref</a>
+-   <li><a href="fmt.man">		fmt(1) Man-page for fmt (or elvfmt)</a>
++   <li><a href="elvmt.man">		fmt(1) Man-page for fmt (or elvfmt)</a>
+    <li><a href="elvgdb.man">		elvgdb(1) Man-page for elvgdb</a>
+ </menu>
+ 
