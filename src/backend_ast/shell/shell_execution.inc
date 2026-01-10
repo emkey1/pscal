@@ -3137,7 +3137,7 @@ static int shellRunBuiltinInProcess(VM *vm,
     int status = 127;
     bool applied_redirs = false;
 
-    bool allow_missing_backup = gShellRuntime.pipeline.in_process;
+    bool allow_missing_backup = gShellRuntime.pipeline.active;
     if (stdin_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDIN_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stdin failed\n");
