@@ -6,6 +6,13 @@
 #include "Pascal/globals.h"
 #include <stdbool.h>
 #include <stddef.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
+#define PSCAL_TAB_TITLE_SUPPORT 1
+#endif
 
 struct VM_s;
 struct ShellRuntimeState;
@@ -202,8 +209,10 @@ Value vmBuiltinShellWhich(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellGetopts(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellMapfile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTrue(struct VM_s* vm, int arg_count, Value* args);
-#ifdef PSCAL_TARGET_IOS
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
 Value vmBuiltinShellTabName(struct VM_s* vm, int arg_count, Value* args);
+#endif
+#ifdef PSCAL_TARGET_IOS
 Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCat(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellClear(struct VM_s* vm, int arg_count, Value* args);

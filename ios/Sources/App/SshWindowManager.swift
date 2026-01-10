@@ -266,9 +266,15 @@ final class TerminalTabManager: ObservableObject {
     }
 
     fileprivate func updateTitle(forSessionId sessionId: UInt64, rawTitle: String) -> Bool {
-        guard sessionId != 0 else { return false }
-        guard let idx = tabs.firstIndex(where: { $0.sessionId == sessionId }) else { return false }
+        let targetSessionId = sessionId
+        let targetIdx = tabs.firstIndex(where: { $0.sessionId == targetSessionId }) ??
+            tabs.firstIndex(where: { $0.sessionId == nil && $0.id == selectedId }) ??
+            tabs.firstIndex(where: { $0.sessionId == nil })
+        guard let idx = targetIdx else { return false }
         let title = TerminalTabManager.sanitizeTitle(rawTitle)
+        if tabs[idx].sessionId == nil && targetSessionId != 0 {
+            tabs[idx].sessionId = targetSessionId
+        }
         tabs[idx].title = title
         return true
     }

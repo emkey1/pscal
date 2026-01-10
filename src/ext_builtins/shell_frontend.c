@@ -116,6 +116,8 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
     registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);
+#endif
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
     registerShellBuiltin(category, command_group, "tabname", vmBuiltinShellTabName);
 #endif
     registerShellBuiltin(category, command_group, "stdioinfo", vmBuiltinShellStdioInfo);

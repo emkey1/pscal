@@ -17,7 +17,6 @@
 #include "common/path_truncate.h"
 #include "smallclue/smallclue.h"
 #include "ios/vproc.h"
-extern int PSCALRuntimeSetTabTitle(const char *title);
 static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
     if (!input) {
         return NULL;
@@ -27,6 +26,14 @@ static const char *shellResolvePathForIOS(const char *input, char *buffer, size_
     }
     return input;
 }
+#endif
+#if !defined(PSCAL_TAB_TITLE_SUPPORT)
+#if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
+#define PSCAL_TAB_TITLE_SUPPORT 1
+#endif
+#endif
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
+extern int PSCALRuntimeSetTabTitle(const char *title);
 #endif
 #include <pthread.h>
 #include <sys/ioctl.h>
@@ -3149,7 +3156,7 @@ Value vmBuiltinShellTabName(VM *vm, int arg_count, Value *args) {
         shellUpdateStatus(1);
         return makeVoid();
     }
-#if defined(PSCAL_TARGET_IOS)
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
     const char *title = args[0].s_val;
     int rc = PSCALRuntimeSetTabTitle(title);
     if (rc != 0) {

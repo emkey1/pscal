@@ -7,6 +7,11 @@
 #define stdout shellVprocStdout()
 #define stderr shellVprocStderr()
 #endif
+#if !defined(PSCAL_TAB_TITLE_SUPPORT)
+#if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
+#define PSCAL_TAB_TITLE_SUPPORT 1
+#endif
+#endif
 
 static char *shellExpandWord(const char *text,
                              uint8_t flags,
@@ -2505,7 +2510,7 @@ invoke_cleanup:
     return true;
 }
 
-#if defined(PSCAL_TARGET_IOS)
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
 extern int PSCALRuntimeSetTabTitle(const char *title);
 
 static const char *shellSshTargetFromCommand(const ShellCommand *cmd) {
@@ -2584,7 +2589,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
             lookup = canonical ? canonical : name;
         }
     }
-#if defined(PSCAL_TARGET_IOS)
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
     if (canonical && strcasecmp(canonical, "ssh") == 0) {
         const char *target = shellSshTargetFromCommand(cmd);
         if (target && *target) {
