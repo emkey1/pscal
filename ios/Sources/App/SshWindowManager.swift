@@ -42,6 +42,7 @@ final class TerminalTabManager: ObservableObject {
             }
         }
     }
+    private var nextShellOrdinal: Int = 1
 
     private init() {
         let runtime = PscalRuntimeBootstrap.shared
@@ -51,6 +52,7 @@ final class TerminalTabManager: ObservableObject {
                           kind: .shell(runtime))
         tabs = [shellTab]
         selectedId = shellId
+        nextShellOrdinal = 2
         runtime.assignTabId(shellId)
         logMultiTab("init shell tab id=\(shellId) runtime=\(runtime.runtimeId)")
         tabInitLog("manager init shellTab=\(shellId) runtime=\(runtime.runtimeId) thread=\(Thread.isMainThread ? "main" : "bg")")
@@ -67,16 +69,12 @@ final class TerminalTabManager: ObservableObject {
 
     func openShellTab() -> Int32 {
         tabInitLog("openShellTab request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
-        let shellCount = tabs.filter { tab in
-            switch tab.kind {
-            case .shell, .shellSession:
-                return true
-            case .ssh:
-                return false
-            }
-        }.count
         let newId = PSCALRuntimeNextSessionId()
-        let title = TerminalTabManager.sanitizeTitle("Shell \(shellCount + 1)")
+        if nextShellOrdinal < 1 {
+            nextShellOrdinal = 1
+        }
+        let title = TerminalTabManager.sanitizeTitle("Shell \(nextShellOrdinal)")
+        nextShellOrdinal += 1
         let runtime = PscalRuntimeBootstrap()
         let tab = Tab(id: newId, title: title, sessionId: nil, kind: .shell(runtime))
         tabs.append(tab)
