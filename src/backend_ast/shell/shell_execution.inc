@@ -3536,16 +3536,16 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             return false;
         }
         input_spool_fd = ctx->spool_fd;
-        vprocHostLseek(input_spool_fd, 0, SEEK_SET);
-        stdin_fd = vprocHostDup(input_spool_fd);
-        if (stdin_fd < 0) {
-            runtimeError(vm, "pipeline: failed to reopen buffer: %s", strerror(errno));
-            shellUpdateStatus(errno ? errno : 1);
+        if (input_spool_fd < 0) {
+            runtimeError(vm, "pipeline: missing intermediate buffer");
+            shellUpdateStatus(1);
             return false;
         }
-        vprocHostLseek(stdin_fd, 0, SEEK_SET);
+        vprocHostLseek(input_spool_fd, 0, SEEK_SET);
+        stdin_fd = input_spool_fd;
+        input_spool_fd = -1; /* keep ctx->spool_fd open for tail cleanup */
         if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] using spool_fd=%d size=%zu as stdin\n", input_spool_fd, ctx->spool_size);
+            fprintf(stderr, "[pipe] using spool_fd=%d size=%zu as stdin\n", stdin_fd, ctx->spool_size);
         }
     }
 
@@ -3926,11 +3926,6 @@ cleanup:
         }
         vprocHostClose(capture.spool_fd);
         capture.spool_fd = -1;
-    }
-
-    if (!pipeline_head && input_spool_fd >= 0) {
-        vprocHostClose(input_spool_fd);
-        input_spool_fd = -1;
     }
 
     if (need_spool && output_pipe[1] >= 0) {
