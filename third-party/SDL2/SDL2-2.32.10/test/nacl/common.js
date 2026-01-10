@@ -120,7 +120,22 @@ var common = (function() {
    * @param {number} height The height to create the plugin.
    * @param {Object} attrs Dictionary of attributes to set on the module.
    */
+  function isSafeModuleName(name) {
+    // Allow only simple, safe characters in module names to avoid
+    // reinterpreting DOM-controlled text in sensitive contexts.
+    // This preserves existing valid names while rejecting injected data.
+    return typeof name === 'string' && /^[A-Za-z0-9._-]+$/.test(name);
+  }
+
   function createNaClModule(name, tool, path, width, height, attrs) {
+    if (!isSafeModuleName(name)) {
+      // Do not create or attach a module for an invalid name derived from the DOM.
+      if (typeof updateStatus === 'function') {
+        updateStatus('Invalid Native Client module name.');
+      }
+      return;
+    }
+
     var moduleEl = document.createElement('embed');
     moduleEl.setAttribute('name', 'nacl_module');
     moduleEl.setAttribute('id', 'nacl_module');

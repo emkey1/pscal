@@ -2506,15 +2506,12 @@ invoke_cleanup:
 }
 
 static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
-    if (!cmd || cmd->argc == 0) {
+    if (!cmd || cmd->argc == 0 || !cmd->argv[0] || *cmd->argv[0] == '\0') {
         return false;
     }
     const char *name = cmd->argv[0];
     if (!cmd->ignore_functions && shellInvokeFunction(vm, cmd)) {
         return true;
-    }
-    if (!name || *name == '\0') {
-        return false;
     }
     const char *canonical = shellBuiltinCanonicalName(name);
     const char *lookup = canonical ? canonical : name;
@@ -2565,7 +2562,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
             return false;
         }
         fprintf(stderr, "[builtin-missing] name=%s canonical=%s\n",
-                name ? name : "<null>",
+                name,
                 canonical ? canonical : "<null>");
         const char *label = canonical ? canonical : name;
         if (vm) {
