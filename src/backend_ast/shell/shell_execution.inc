@@ -87,23 +87,6 @@ static void shellVprocLabelScopeEnd(ShellVprocLabelScope *scope) {
     scope->prev_label[0] = '\0';
 }
 
-static int shellHostFdForShimmedFd(int fd) {
-    if (fd < 0) {
-        return fd;
-    }
-    VProc *vp = vprocCurrent();
-    if (!vp) {
-        return fd;
-    }
-    int saved_errno = errno;
-    int host_fd = vprocTranslateFd(vp, fd);
-    if (host_fd >= 0) {
-        return host_fd;
-    }
-    errno = saved_errno;
-    return fd;
-}
-
 static VProc *shellCreateVProcForStage(int stdin_host,
                                        int stdout_host,
                                        int stderr_host,
@@ -1365,86 +1348,6 @@ static void *shellShebangBackgroundMain(void *arg) {
     return NULL;
 }
 
-typedef struct {
-    int read_fd;
-    int file_fd;
-    int mirror_fd; /* duplicate of original stdout/stderr so the shell prompt stays visible */
-    int err;
-} ShellPipelineTee;
-
-static void *shellPipelineTeeThread(void *arg) {
-    ShellPipelineTee *tee = (ShellPipelineTee *)arg;
-    bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
-    if (dbg) {
-        fprintf(stderr, "[tee] start read_fd=%d file_fd=%d mirror_fd=%d\n",
-                tee->read_fd, tee->file_fd, tee->mirror_fd);
-    }
-    const size_t chunk = 4096;
-    char *tmp = malloc(chunk);
-    if (!tmp) {
-        tee->err = ENOMEM;
-        close(tee->read_fd);
-        close(tee->file_fd);
-        return NULL;
-    }
-    for (;;) {
-        ssize_t res = read(tee->read_fd, tmp, chunk);
-        if (res < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            tee->err = errno ? errno : EIO;
-            break;
-        }
-        if (res == 0) {
-            break;
-        }
-        ssize_t written = 0;
-        while (written < res) {
-            ssize_t to_write = (size_t)res - (size_t)written;
-            ssize_t w = write(tee->file_fd, tmp + written, to_write);
-            if (w < 0) {
-                if (errno == EINTR) continue;
-                tee->err = errno ? errno : EIO;
-                if (dbg) {
-                    fprintf(stderr, "[tee] write file_fd=%d error=%s\n",
-                            tee->file_fd, strerror(errno));
-                }
-                goto done;
-            }
-            written += w;
-        }
-        if (tee->mirror_fd >= 0) {
-            ssize_t echoed = 0;
-            while (echoed < res) {
-                ssize_t e = write(tee->mirror_fd, tmp + echoed, (size_t)res - (size_t)echoed);
-                if (e < 0) {
-                    if (errno == EINTR) continue;
-                    /* Do not fail the tee on mirror errors; keep file writes authoritative. */
-                    if (dbg) {
-                        fprintf(stderr, "[tee] mirror write fd=%d error=%s\n",
-                                tee->mirror_fd, strerror(errno));
-                    }
-                    break;
-                }
-                echoed += e;
-            }
-        }
-    }
-
-done:
-    close(tee->read_fd);
-    close(tee->file_fd);
-    if (tee->mirror_fd >= 0) {
-        close(tee->mirror_fd);
-    }
-    free(tmp);
-    if (dbg) {
-        fprintf(stderr, "[tee] exit err=%d\n", tee->err);
-    }
-    return NULL;
-}
-
 static void *shellInProcessBackgroundMain(void *arg) {
     ShellBackgroundStageCtx *ctx = (ShellBackgroundStageCtx *)arg;
     if (!ctx) {
@@ -2312,28 +2215,6 @@ static bool shellCommandIsExecBuiltin(const ShellCommand *cmd) {
     return strcasecmp(canonical, "exec") == 0;
 }
 
-static bool shellExecRedirBackupPush(const ShellExecRedirBackup *backup,
-                                     ShellExecRedirBackup **backups,
-                                     size_t *count,
-                                     size_t *capacity) {
-    if (!backup || !backups || !count || !capacity) {
-        return false;
-    }
-    if (*capacity == 0 || *count >= *capacity) {
-        size_t new_capacity = (*capacity == 0) ? 4 : (*capacity * 2);
-        ShellExecRedirBackup *resized =
-            (ShellExecRedirBackup *)realloc(*backups, new_capacity * sizeof(ShellExecRedirBackup));
-        if (!resized) {
-            return false;
-        }
-        *backups = resized;
-        *capacity = new_capacity;
-    }
-    (*backups)[*count] = *backup;
-    (*count)++;
-    return true;
-}
-
 static bool shellEnsureExecRedirBackup(int target_fd,
                                        int avoid_fd,
                                        ShellExecRedirBackup **backups,
@@ -2997,84 +2878,6 @@ static void *shellPipelineCaptureThread(void *arg) {
     free(tmp);
     vprocHostClose(cap->fd);
     cap->fd = -1;
-    return NULL;
-}
-
-typedef struct {
-    const char *data;
-    size_t len;
-    int fd;
-    int src_fd;
-    int err;
-} ShellPipelineFeed;
-
-static void *shellPipelineFeedThread(void *arg) {
-    ShellPipelineFeed *feed = (ShellPipelineFeed *)arg;
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
-    const size_t chunk = 4096;
-    if (feed->src_fd >= 0) {
-        char buf[4096];
-        for (;;) {
-            ssize_t r = vprocHostRead(feed->src_fd, buf, sizeof(buf));
-            if (r < 0) {
-                if (errno == EINTR) continue;
-                feed->err = errno ? errno : EIO;
-                if (dbg) fprintf(stderr, "[pipe-feed] read err=%s\n", strerror(feed->err));
-                break;
-            }
-            if (r == 0) {
-                break;
-            }
-            size_t off = 0;
-            while (off < (size_t)r) {
-                ssize_t w = vprocHostWrite(feed->fd, buf + off, (size_t)r - off);
-                if (w < 0) {
-                    if (errno == EINTR) continue;
-                    if (errno == EPIPE) {
-                        /* Consumer closed; treat as normal completion. */
-                        feed->err = 0;
-                        off = (size_t)r;
-                        vprocHostClose(feed->fd);
-                        feed->fd = -1;
-                        if (dbg) fprintf(stderr, "[pipe-feed] EPIPE after %zu bytes (src_fd=%d)\n", off, feed->src_fd);
-                        return NULL;
-                    }
-                    feed->err = errno ? errno : EIO;
-                    if (dbg) fprintf(stderr, "[pipe-feed] write err=%s\n", strerror(feed->err));
-                    off = (size_t)r;
-                    break;
-                }
-                off += (size_t)w;
-            }
-        }
-        vprocHostClose(feed->src_fd);
-        feed->src_fd = -1;
-    } else {
-        size_t offset = 0;
-        while (offset < feed->len) {
-            size_t to_write = feed->len - offset;
-            if (to_write > chunk) {
-                to_write = chunk;
-            }
-            ssize_t res = vprocHostWrite(feed->fd, feed->data + offset, to_write);
-            if (res < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                if (errno == EPIPE) {
-                    feed->err = 0;
-                    if (dbg) fprintf(stderr, "[pipe-feed] EPIPE buffered after %zu bytes\n", offset);
-                    break;
-                }
-                feed->err = errno ? errno : EIO;
-                if (dbg) fprintf(stderr, "[pipe-feed] buffered write err=%s\n", strerror(feed->err));
-                break;
-            }
-            offset += (size_t)res;
-        }
-    }
-    vprocHostClose(feed->fd);
-    feed->fd = -1;
     return NULL;
 }
 
