@@ -9832,6 +9832,7 @@ Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
             visible_count++;
         }
     }
+    bool show_markers = shellRuntimeIsInteractive();
 
     size_t *indices = NULL;
     if (visible_count > 0) {
@@ -9852,13 +9853,17 @@ Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
             ShellJob *job = &gShellJobs[job_index];
             const char *state = job->stopped ? "Stopped" : "Running";
             const char *command = job->command ? job->command : "";
-            char marker = ' ';
-            if (job_index == current_index) {
-                marker = '+';
-            } else if (job_index == previous_index) {
-                marker = '-';
+            if (show_markers) {
+                char marker = ' ';
+                if (job_index == current_index) {
+                    marker = '+';
+                } else if (job_index == previous_index) {
+                    marker = '-';
+                }
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
+            } else {
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %s %s\n", job->id, state, command);
             }
-            shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
         }
         free(indices);
     } else {
@@ -9869,13 +9874,17 @@ Value vmBuiltinShellJobs(VM *vm, int arg_count, Value *args) {
             }
             const char *state = job->stopped ? "Stopped" : "Running";
             const char *command = job->command ? job->command : "";
-            char marker = ' ';
-            if (i == current_index) {
-                marker = '+';
-            } else if (i == previous_index) {
-                marker = '-';
+            if (show_markers) {
+                char marker = ' ';
+                if (i == current_index) {
+                    marker = '+';
+                } else if (i == previous_index) {
+                    marker = '-';
+                }
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
+            } else {
+                shellFdPrintf(STDOUT_FILENO, "[%zu] %s %s\n", job->id, state, command);
             }
-            shellFdPrintf(STDOUT_FILENO, "[%zu] %c %s %s\n", job->id, marker, state, command);
         }
     }
     shellUpdateStatus(0);
@@ -10105,7 +10114,6 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         job->stopped = false;
     }
     if (terminate) {
-        /* Drop the job immediately for terminating signals to keep numbering stable. */
         shellRemoveJobAt(index);
         shellCollectJobs();
         return true;
@@ -10323,13 +10331,13 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
+    shellEnsureJobControl();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "fg", arg_count, args, &index)) {
         shellUpdateStatus(1);
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
-    shellEnsureJobControl();
     bool job_control = gShellRuntime.job_control_enabled && job->pgid > 0;
     if (job_control) {
         shellJobControlSetForeground(job->pgid);
@@ -10345,10 +10353,12 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
 #endif
         }
     }
-    if (job->command && job->command[0]) {
-        shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued  %s\n", job->id, job->command);
-    } else {
-        shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued\n", job->id);
+    if (job_control) {
+        if (job->command && job->command[0]) {
+            shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued  %s\n", job->id, job->command);
+        } else {
+            shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued\n", job->id);
+        }
     }
     job->stopped = false;
     job->running = true;
@@ -10389,6 +10399,7 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
 
 Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
+    shellEnsureJobControl();
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "bg", arg_count, args, &index)) {
         shellUpdateStatus(1);
@@ -10414,6 +10425,31 @@ Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
 Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
     size_t visible_count = shellJobVisibleCount();
+    if (arg_count == 1 && gShellJobCount == 0 && gShellRuntime.last_removed_job_valid) {
+        long target = -1;
+        Value spec = args[0];
+        if (spec.type == TYPE_STRING && spec.s_val) {
+            const char *text = spec.s_val;
+            if (text[0] == '%') {
+                text++;
+            }
+            if (text && *text) {
+                char *end = NULL;
+                long parsed = strtol(text, &end, 10);
+                if (end && *end == '\0' && parsed > 0) {
+                    target = parsed;
+                }
+            }
+        } else if (IS_INTLIKE(spec)) {
+            target = (long)AS_INTEGER(spec);
+        }
+        if (target > 0 && gShellRuntime.last_removed_job_id == (size_t)target) {
+            int status = gShellRuntime.last_removed_job_status;
+            gShellRuntime.last_removed_job_valid = false;
+            shellUpdateStatus(status);
+            return makeVoid();
+        }
+    }
     if (arg_count == 0) {
         if (visible_count == 0) {
             shellUpdateStatus(0);
@@ -10462,7 +10498,34 @@ Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
     }
     size_t index = 0;
     if (!shellResolveJobIndex(vm, "wait", arg_count, args, &index)) {
-        shellUpdateStatus(1);
+        int fallback_status = 1;
+        if (arg_count == 1) {
+            long target = -1;
+            Value spec = args[0];
+            if (spec.type == TYPE_STRING && spec.s_val) {
+                const char *text = spec.s_val;
+                if (text[0] == '%') {
+                    text++;
+                }
+                if (text && *text) {
+                    char *end = NULL;
+                    long parsed = strtol(text, &end, 10);
+                    if (end && *end == '\0' && parsed > 0) {
+                        target = parsed;
+                    }
+                }
+            } else if (IS_INTLIKE(spec)) {
+                target = (long)AS_INTEGER(spec);
+            }
+            if (target > 0 && gShellRuntime.last_removed_job_valid &&
+                gShellRuntime.last_removed_job_id == (size_t)target) {
+                fallback_status = gShellRuntime.last_removed_job_status;
+                gShellRuntime.last_removed_job_valid = false;
+                shellUpdateStatus(fallback_status);
+                return makeVoid();
+            }
+        }
+        shellUpdateStatus(fallback_status);
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];

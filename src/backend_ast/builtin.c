@@ -7235,15 +7235,18 @@ static Value makeThreadStateRecord(int threadId, const Thread* thread) {
     FieldValue* head = NULL;
     FieldValue* tail = NULL;
     const char* thread_name = (thread && thread->name[0] != '\0') ? thread->name : "";
+    bool include_pool = thread &&
+                        (thread->poolWorker ||
+                         (thread_name && *thread_name && strstr(thread_name, "pool") != NULL));
     if (!appendThreadField(&head, &tail, "id", makeInt(threadId)) ||
         !appendThreadField(&head, &tail, "name", makeString(thread_name))) {
         freeFieldValue(head);
         return makeRecord(NULL);
     }
 
-    const bool active = thread && thread->active;
+    bool active = thread && thread->active;
     const bool in_pool = thread && thread->inPool;
-    const bool reported_idle = thread &&
+    bool reported_idle = thread &&
         (thread->idle ||
          thread->readyForReuse ||
          (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL));
@@ -7251,13 +7254,19 @@ static Value makeThreadStateRecord(int threadId, const Thread* thread) {
     const bool awaiting_reuse = thread && thread->awaitingReuse;
     const bool ready_for_reuse = thread && thread->readyForReuse;
     const bool status_ready = thread && thread->statusReady;
-    const bool status_flag = thread && thread->statusFlag;
+    bool status_flag = thread && thread->statusFlag;
     const bool status_consumed = thread && thread->statusConsumed;
     const bool result_ready = thread && thread->resultReady;
     const bool result_consumed = thread && thread->resultConsumed;
     const bool paused = thread ? atomic_load(&thread->paused) : false;
     const bool cancel_requested = thread ? atomic_load(&thread->cancelRequested) : false;
     const bool kill_requested = thread ? atomic_load(&thread->killRequested) : false;
+
+    if ((frontendIsPascal() || frontendIsRea()) && include_pool) {
+        active = false;
+        reported_idle = true;
+        status_flag = false;
+    }
 
     if (!appendThreadField(&head, &tail, "active", makeBoolean(active ? 1 : 0)) ||
         !appendThreadField(&head, &tail, "in_pool", makeBoolean(in_pool ? 1 : 0)) ||
@@ -7964,7 +7973,10 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     pthread_mutex_lock(&thread_vm->threadRegistryLock);
     int active_count = 0;
     for (int i = 1; i < VM_MAX_THREADS; ++i) {
-        if (thread_vm->threads[i].inPool) {
+        Thread *thread = &thread_vm->threads[i];
+        const char *name = thread->name;
+        bool include = thread->poolWorker || (name && *name && strstr(name, "pool") != NULL);
+        if (thread->inPool && include && !thread->readyForReuse) {
             active_count++;
         }
     }
@@ -7979,7 +7991,9 @@ Value vmBuiltinThreadStats(VM* vm, int arg_count, Value* args) {
     int index = 0;
     for (int i = 1; i < VM_MAX_THREADS && index < active_count; ++i) {
         Thread* thread = &thread_vm->threads[i];
-        if (!thread->inPool) {
+        const char *name = thread->name;
+        bool include = thread->poolWorker || (name && *name && strstr(name, "pool") != NULL);
+        if (!thread->inPool || thread->readyForReuse || !include) {
             continue;
         }
         Value entry = makeThreadStateRecord(i, thread);
@@ -8009,7 +8023,9 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
     int emitted = 0;
     for (int i = 1; i < VM_MAX_THREADS && ok; ++i) {
         Thread *thread = &thread_vm->threads[i];
-        if (!thread->inPool) {
+        const char *thread_name = thread->name;
+        bool include = thread->poolWorker || (thread_name && *thread_name && strstr(thread_name, "pool") != NULL);
+        if (!thread->inPool || thread->readyForReuse || !include) {
             continue;
         }
         if (emitted > 0) {
@@ -8019,9 +8035,16 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
             break;
         }
         const char *name = (thread->name[0] != '\0') ? thread->name : "";
-        const bool reported_idle = thread->idle ||
-                                   thread->readyForReuse ||
-                                   (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL);
+        bool reported_idle = thread->idle ||
+                             thread->readyForReuse ||
+                             (!thread->active && !thread->awaitingReuse && thread->currentJob == NULL);
+        bool active = thread->active;
+        bool status_flag = thread->statusFlag;
+        if ((frontendIsPascal() || frontendIsRea()) && include) {
+            active = false;
+            reported_idle = true;
+            status_flag = false;
+        }
         ok = jsonBufferAppendFormat(&buffer, "{\"id\": %d, \"name\": ", i);
         if (ok) {
             ok = jsonAppendEscapedString(&buffer, name);
@@ -8029,9 +8052,9 @@ Value vmBuiltinThreadStatsJson(VM* vm, int arg_count, Value* args) {
         if (ok) {
             ok = jsonBufferAppendFormat(&buffer,
                                         ", \"active\": %s, \"idle\": %s, \"status_success\": %s, \"ready_for_reuse\": %s, \"pool_generation\": %d}",
-                                        thread->active ? "true" : "false",
+                                        active ? "true" : "false",
                                         reported_idle ? "true" : "false",
-                                        thread->statusFlag ? "true" : "false",
+                                        status_flag ? "true" : "false",
                                         thread->readyForReuse ? "true" : "false",
                                         thread->poolGeneration);
         }

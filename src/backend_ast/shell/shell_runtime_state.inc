@@ -447,6 +447,9 @@ typedef struct ShellRuntimeState {
     size_t job_next_id;
     ShellJob *jobs;
     size_t job_count;
+    size_t last_removed_job_id;
+    int last_removed_job_status;
+    bool last_removed_job_valid;
     ShellArrayVariable *array_vars;
     size_t array_var_count;
     size_t array_var_capacity;
@@ -1687,6 +1690,9 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .job_next_id = 1,
     .jobs = NULL,
     .job_count = 0,
+    .last_removed_job_id = 0,
+    .last_removed_job_status = 0,
+    .last_removed_job_valid = false,
     .array_vars = NULL,
     .array_var_count = 0,
     .array_var_capacity = 0,
@@ -2920,25 +2926,32 @@ static void shellLoopFrameFreeData(ShellLoopFrame *frame) {
 }
 
 ShellRuntimeState *shellRuntimeCreateContext(void) {
+    const ShellRuntimeState *template_ctx = shellRuntimeCurrentContext();
+    if (!template_ctx) {
+        template_ctx = &gShellRuntimeDefault;
+    }
     ShellRuntimeState *ctx = (ShellRuntimeState *)calloc(1, sizeof(ShellRuntimeState));
     if (!ctx) {
         return NULL;
     }
-    *ctx = gShellRuntimeDefault;
+    *ctx = *template_ctx;
     ctx->pipeline = (ShellPipelineContext){0};
+    ctx->last_removed_job_id = 0;
+    ctx->last_removed_job_status = 0;
+    ctx->last_removed_job_valid = false;
     /* Deep-copy owned runtime state so contexts do not share pointers. */
     ctx->dir_stack = NULL;
     ctx->dir_stack_count = 0;
     ctx->dir_stack_capacity = 0;
-    ctx->dir_stack_initialised = gShellRuntimeDefault.dir_stack_initialised;
-    if (gShellRuntimeDefault.dir_stack_count > 0 &&
-        gShellRuntimeDefault.dir_stack) {
-        ctx->dir_stack = (char **)calloc(gShellRuntimeDefault.dir_stack_count, sizeof(char *));
+    ctx->dir_stack_initialised = template_ctx->dir_stack_initialised;
+    if (template_ctx->dir_stack_count > 0 &&
+        template_ctx->dir_stack) {
+        ctx->dir_stack = (char **)calloc(template_ctx->dir_stack_count, sizeof(char *));
         if (ctx->dir_stack) {
-            ctx->dir_stack_capacity = gShellRuntimeDefault.dir_stack_count;
-            for (size_t i = 0; i < gShellRuntimeDefault.dir_stack_count; ++i) {
-                if (gShellRuntimeDefault.dir_stack[i]) {
-                    ctx->dir_stack[i] = strdup(gShellRuntimeDefault.dir_stack[i]);
+            ctx->dir_stack_capacity = template_ctx->dir_stack_count;
+            for (size_t i = 0; i < template_ctx->dir_stack_count; ++i) {
+                if (template_ctx->dir_stack[i]) {
+                    ctx->dir_stack[i] = strdup(template_ctx->dir_stack[i]);
                     if (ctx->dir_stack[i]) {
                         ctx->dir_stack_count++;
                     }
@@ -2950,15 +2963,15 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
     ctx->hash_entries = NULL;
     ctx->hash_count = 0;
     ctx->hash_capacity = 0;
-    if (gShellRuntimeDefault.hash_count > 0 && gShellRuntimeDefault.hash_entries) {
+    if (template_ctx->hash_count > 0 && template_ctx->hash_entries) {
         ctx->hash_entries =
-            (ShellHashEntry *)calloc(gShellRuntimeDefault.hash_count, sizeof(ShellHashEntry));
+            (ShellHashEntry *)calloc(template_ctx->hash_count, sizeof(ShellHashEntry));
         if (ctx->hash_entries) {
-            ctx->hash_capacity = gShellRuntimeDefault.hash_count;
-            ctx->hash_count = gShellRuntimeDefault.hash_count;
+            ctx->hash_capacity = template_ctx->hash_count;
+            ctx->hash_count = template_ctx->hash_count;
             for (size_t i = 0; i < ctx->hash_count; ++i) {
                 ShellHashEntry *dst = &ctx->hash_entries[i];
-                const ShellHashEntry *src = &gShellRuntimeDefault.hash_entries[i];
+                const ShellHashEntry *src = &template_ctx->hash_entries[i];
                 dst->hits = src->hits;
                 if (src->name) {
                     dst->name = strdup(src->name);
@@ -2973,15 +2986,15 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
     ctx->disabled_builtins = NULL;
     ctx->disabled_builtin_count = 0;
     ctx->disabled_builtin_capacity = 0;
-    if (gShellRuntimeDefault.disabled_builtin_count > 0 &&
-        gShellRuntimeDefault.disabled_builtins) {
-        ctx->disabled_builtins = (char **)calloc(gShellRuntimeDefault.disabled_builtin_count,
+    if (template_ctx->disabled_builtin_count > 0 &&
+        template_ctx->disabled_builtins) {
+        ctx->disabled_builtins = (char **)calloc(template_ctx->disabled_builtin_count,
                                                  sizeof(char *));
         if (ctx->disabled_builtins) {
-            ctx->disabled_builtin_capacity = gShellRuntimeDefault.disabled_builtin_count;
-            for (size_t i = 0; i < gShellRuntimeDefault.disabled_builtin_count; ++i) {
-                if (gShellRuntimeDefault.disabled_builtins[i]) {
-                    ctx->disabled_builtins[i] = strdup(gShellRuntimeDefault.disabled_builtins[i]);
+            ctx->disabled_builtin_capacity = template_ctx->disabled_builtin_count;
+            for (size_t i = 0; i < template_ctx->disabled_builtin_count; ++i) {
+                if (template_ctx->disabled_builtins[i]) {
+                    ctx->disabled_builtins[i] = strdup(template_ctx->disabled_builtins[i]);
                     if (ctx->disabled_builtins[i]) {
                         ctx->disabled_builtin_count++;
                     }
@@ -2993,14 +3006,14 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
     ctx->history.entries = NULL;
     ctx->history.count = 0;
     ctx->history.capacity = 0;
-    if (gShellRuntimeDefault.history.count > 0 && gShellRuntimeDefault.history.entries) {
+    if (template_ctx->history.count > 0 && template_ctx->history.entries) {
         ctx->history.entries =
-            (char **)calloc(gShellRuntimeDefault.history.count, sizeof(char *));
+            (char **)calloc(template_ctx->history.count, sizeof(char *));
         if (ctx->history.entries) {
-            ctx->history.capacity = gShellRuntimeDefault.history.count;
-            for (size_t i = 0; i < gShellRuntimeDefault.history.count; ++i) {
-                if (gShellRuntimeDefault.history.entries[i]) {
-                    ctx->history.entries[i] = strdup(gShellRuntimeDefault.history.entries[i]);
+            ctx->history.capacity = template_ctx->history.count;
+            for (size_t i = 0; i < template_ctx->history.count; ++i) {
+                if (template_ctx->history.entries[i]) {
+                    ctx->history.entries[i] = strdup(template_ctx->history.entries[i]);
                     if (ctx->history.entries[i]) {
                         ctx->history.count++;
                     }
@@ -3009,26 +3022,26 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
         }
     }
 
-    ctx->arg0 = gShellRuntimeDefault.arg0 ? strdup(gShellRuntimeDefault.arg0) : NULL;
+    ctx->arg0 = template_ctx->arg0 ? strdup(template_ctx->arg0) : NULL;
 
     for (int i = 0; i < NSIG; ++i) {
-        ctx->signal_traps[i].action = gShellRuntimeDefault.signal_traps[i].action;
-        ctx->signal_traps[i].command = gShellRuntimeDefault.signal_traps[i].command ?
-                                           strdup(gShellRuntimeDefault.signal_traps[i].command) :
+        ctx->signal_traps[i].action = template_ctx->signal_traps[i].action;
+        ctx->signal_traps[i].command = template_ctx->signal_traps[i].command ?
+                                           strdup(template_ctx->signal_traps[i].command) :
                                            NULL;
     }
-    ctx->exit_trap.action = gShellRuntimeDefault.exit_trap.action;
+    ctx->exit_trap.action = template_ctx->exit_trap.action;
     ctx->exit_trap.command =
-        gShellRuntimeDefault.exit_trap.command ? strdup(gShellRuntimeDefault.exit_trap.command) : NULL;
+        template_ctx->exit_trap.command ? strdup(template_ctx->exit_trap.command) : NULL;
 
     ctx->jobs = NULL;
     ctx->job_count = 0;
-    if (gShellRuntimeDefault.job_count > 0 && gShellRuntimeDefault.jobs) {
-        ctx->jobs = (ShellJob *)calloc(gShellRuntimeDefault.job_count, sizeof(ShellJob));
+    if (template_ctx->job_count > 0 && template_ctx->jobs) {
+        ctx->jobs = (ShellJob *)calloc(template_ctx->job_count, sizeof(ShellJob));
         if (ctx->jobs) {
-            ctx->job_count = gShellRuntimeDefault.job_count;
+            ctx->job_count = template_ctx->job_count;
             for (size_t i = 0; i < ctx->job_count; ++i) {
-                const ShellJob *src = &gShellRuntimeDefault.jobs[i];
+                const ShellJob *src = &template_ctx->jobs[i];
                 ShellJob *dst = &ctx->jobs[i];
                 dst->pgid = src->pgid;
                 dst->running = src->running;
@@ -3050,14 +3063,14 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
     ctx->array_vars = NULL;
     ctx->array_var_count = 0;
     ctx->array_var_capacity = 0;
-    if (gShellRuntimeDefault.array_var_count > 0 && gShellRuntimeDefault.array_vars) {
-        ctx->array_vars = (ShellArrayVariable *)calloc(gShellRuntimeDefault.array_var_count,
+    if (template_ctx->array_var_count > 0 && template_ctx->array_vars) {
+        ctx->array_vars = (ShellArrayVariable *)calloc(template_ctx->array_var_count,
                                                        sizeof(ShellArrayVariable));
         if (ctx->array_vars) {
-            ctx->array_var_capacity = gShellRuntimeDefault.array_var_count;
-            for (size_t i = 0; i < gShellRuntimeDefault.array_var_count; ++i) {
+            ctx->array_var_capacity = template_ctx->array_var_count;
+            for (size_t i = 0; i < template_ctx->array_var_count; ++i) {
                 ShellArrayVariable *dst = &ctx->array_vars[i];
-                const ShellArrayVariable *src = &gShellRuntimeDefault.array_vars[i];
+                const ShellArrayVariable *src = &template_ctx->array_vars[i];
                 dst->name = src->name ? strdup(src->name) : NULL;
                 dst->kind = src->kind;
                 dst->count = src->count;
@@ -3089,14 +3102,14 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
     ctx->readonly_vars = NULL;
     ctx->readonly_var_count = 0;
     ctx->readonly_var_capacity = 0;
-    if (gShellRuntimeDefault.readonly_var_count > 0 && gShellRuntimeDefault.readonly_vars) {
-        ctx->readonly_vars = (ShellReadonlyEntry *)calloc(gShellRuntimeDefault.readonly_var_count,
+    if (template_ctx->readonly_var_count > 0 && template_ctx->readonly_vars) {
+        ctx->readonly_vars = (ShellReadonlyEntry *)calloc(template_ctx->readonly_var_count,
                                                           sizeof(ShellReadonlyEntry));
         if (ctx->readonly_vars) {
-            ctx->readonly_var_capacity = gShellRuntimeDefault.readonly_var_count;
-            for (size_t i = 0; i < gShellRuntimeDefault.readonly_var_count; ++i) {
-                if (gShellRuntimeDefault.readonly_vars[i].name) {
-                    ctx->readonly_vars[i].name = strdup(gShellRuntimeDefault.readonly_vars[i].name);
+            ctx->readonly_var_capacity = template_ctx->readonly_var_count;
+            for (size_t i = 0; i < template_ctx->readonly_var_count; ++i) {
+                if (template_ctx->readonly_vars[i].name) {
+                    ctx->readonly_vars[i].name = strdup(template_ctx->readonly_vars[i].name);
                     if (ctx->readonly_vars[i].name) {
                         ctx->readonly_var_count++;
                     }
@@ -3105,7 +3118,7 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
         }
     }
     ctx->readonly_error_name =
-        gShellRuntimeDefault.readonly_error_name ? strdup(gShellRuntimeDefault.readonly_error_name) : NULL;
+        template_ctx->readonly_error_name ? strdup(template_ctx->readonly_error_name) : NULL;
 
     ctx->local_scope_stack = NULL;
     ctx->local_scope_depth = 0;

@@ -2522,6 +2522,9 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         return false;
     }
     bool is_runtime_builtin = shellIsRuntimeBuiltin(lookup);
+    if (!is_runtime_builtin) {
+        return false;
+    }
     VmBuiltinFn handler = getVmBuiltinHandler(lookup);
     if (!handler && canonical && canonical != name) {
         handler = getVmBuiltinHandler(name);
@@ -2715,6 +2718,12 @@ static void shellRemoveJobAt(size_t index) {
         return;
     }
     ShellJob *job = &gShellJobs[index];
+    ShellRuntimeState *ctx = shellGetContext();
+    if (ctx) {
+        ctx->last_removed_job_id = job->id;
+        ctx->last_removed_job_status = job->last_status;
+        ctx->last_removed_job_valid = true;
+    }
     shellFreeJob(job);
     if (index + 1 < gShellJobCount) {
         memmove(&gShellJobs[index],
@@ -3165,6 +3174,25 @@ static bool shellJobFindVisibleIndex(size_t visible_number, size_t *out_index) {
     return false;
 }
 
+static bool shellFindJobIndexByPid(pid_t pid, size_t *out_index) {
+    if (!out_index || pid <= 0) {
+        return false;
+    }
+    for (size_t i = 0; i < gShellJobCount; ++i) {
+        ShellJob *job = &gShellJobs[i];
+        if (!job->pids || job->pid_count == 0) {
+            continue;
+        }
+        for (size_t j = 0; j < job->pid_count; ++j) {
+            if (job->pids[j] == pid) {
+                *out_index = i;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static bool shellParseJobSpecifier(VM *vm, const char *name, Value spec, size_t *out_index) {
     if (spec.type == TYPE_STRING && spec.s_val) {
         const char *text = spec.s_val;
@@ -3181,6 +3209,11 @@ static bool shellParseJobSpecifier(VM *vm, const char *name, Value spec, size_t 
             runtimeError(vm, "%s: invalid job '%s'", name, spec.s_val);
             return false;
         }
+        size_t pid_index = 0;
+        if (shellFindJobIndexByPid((pid_t)index, &pid_index)) {
+            *out_index = pid_index;
+            return true;
+        }
         if (!shellJobFindVisibleIndex((size_t)index, out_index)) {
             runtimeError(vm, "%s: invalid job '%s'", name, spec.s_val);
             return false;
@@ -3193,6 +3226,11 @@ static bool shellParseJobSpecifier(VM *vm, const char *name, Value spec, size_t 
         if (index <= 0) {
             runtimeError(vm, "%s: invalid job index", name);
             return false;
+        }
+        size_t pid_index = 0;
+        if (shellFindJobIndexByPid((pid_t)index, &pid_index)) {
+            *out_index = pid_index;
+            return true;
         }
         if (shellJobFindVisibleIndex((size_t)index, out_index)) {
             return true;

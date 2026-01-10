@@ -1253,7 +1253,7 @@ static void* threadStart(void* arg) {
         vmThreadAssignInternalName(thread, threadId, job->name);
         thread->queuedAt = job->queuedAt;
         thread->currentJob = job;
-        thread->poolWorker = thread->poolWorker || job->submitOnly;
+        thread->poolWorker = job->submitOnly;
         thread->active = true;
         atomic_store(&thread->cancelRequested, false);
         atomic_store(&thread->paused, false);

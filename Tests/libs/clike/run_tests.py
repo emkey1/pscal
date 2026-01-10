@@ -135,10 +135,25 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
 def start_server() -> tuple[socketserver.TCPServer, str]:
     """Start the local HTTP server for exercising the Http module."""
+    # Bind to loopback on an ephemeral port to avoid permission issues on systems that
+    # block low ports in sandboxed environments.
     server = socketserver.TCPServer(("127.0.0.1", 0), _RequestHandler, bind_and_activate=False)
     server.allow_reuse_address = True
-    server.server_bind()
-    server.server_activate()
+    if hasattr(socket, "SO_REUSEPORT"):
+        try:
+            server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except OSError:
+            # Not fatal; fall back to default reuse settings.
+            pass
+    try:
+        server.server_bind()
+        server.server_activate()
+    except PermissionError:
+        server.server_close()
+        return None, ""
+    except Exception:
+        server.server_close()
+        raise
     host, port = server.server_address
     base_url = f"http://{host}:{port}"
     thread = threading.Thread(target=server.serve_forever, name="clike-http-server", daemon=True)
@@ -148,6 +163,8 @@ def start_server() -> tuple[socketserver.TCPServer, str]:
 
 def stop_server(server: socketserver.TCPServer) -> None:
     """Shut down the local HTTP server."""
+    if server is None:
+        return
     try:
         server.shutdown()
     finally:
@@ -203,6 +220,9 @@ def main() -> int:
         return 1
 
     server, base_url = start_server()
+    if server is None:
+        print("Skipping CLike library http tests: loopback bind not permitted.", file=sys.stderr)
+        return 0
     tmp_dir = Path(tempfile.mkdtemp(prefix="clike_lib_tests_"))
     home_dir = tmp_dir / "home"
     home_dir.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,7 @@
 /* Auto-generated include: command assembly helpers and metadata parsing. Included from shell.c. */
 #include "shell/runner.h"
+#include <stdlib.h>
+#include <string.h>
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
@@ -242,6 +244,69 @@ typedef struct {
     int error;
 } ShellCommandSubReadContext;
 
+static char **shellCommandSubSnapshotEnv(void) {
+    extern char **environ;
+    size_t count = 0;
+    for (char **cursor = environ; cursor && *cursor; ++cursor) {
+        count++;
+    }
+    char **copy = (char **)calloc(count + 1, sizeof(char *));
+    if (!copy) {
+        return NULL;
+    }
+    size_t written = 0;
+    for (char **cursor = environ; cursor && *cursor; ++cursor) {
+        copy[written] = strdup(*cursor);
+        if (!copy[written]) {
+            for (size_t i = 0; i < written; ++i) {
+                free(copy[i]);
+            }
+            free(copy);
+            return NULL;
+        }
+        written++;
+    }
+    copy[written] = NULL;
+    return copy;
+}
+
+static void shellCommandSubRestoreEnv(char **snapshot) {
+    if (!snapshot) {
+        return;
+    }
+    /* Clear current environment; emulate clearenv for platforms that do not expose it. */
+    extern char **environ;
+    if (environ) {
+        for (char **cursor = environ; *cursor; ++cursor) {
+            const char *entry = *cursor;
+            const char *eq = entry ? strchr(entry, '=') : NULL;
+            if (!eq || entry == eq) {
+                continue;
+            }
+            size_t name_len = (size_t)(eq - entry);
+            char *name = (char *)malloc(name_len + 1);
+            if (!name) {
+                continue;
+            }
+            memcpy(name, entry, name_len);
+            name[name_len] = '\0';
+            unsetenv(name);
+            free(name);
+        }
+    }
+    for (char **cursor = snapshot; *cursor; ++cursor) {
+        /* putenv takes ownership of the provided string; duplicate so we can free the snapshot. */
+        char *dup = strdup(*cursor);
+        if (dup) {
+            putenv(dup);
+        }
+    }
+    for (char **cursor = snapshot; *cursor; ++cursor) {
+        free(*cursor);
+    }
+    free(snapshot);
+}
+
 static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
     if (!ctx || ctx->fd < 0) {
         return;
@@ -313,6 +378,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool local_scope_pushed = false;
     bool previous_local_scope_flag = gShellRuntime.local_scope_active;
     bool previous_pipeline_flag = gShellRuntime.pipeline_subshell_active;
+    char **env_snapshot = NULL;
 
     if (*source) {
         cached_entry = shellScalarCacheFind(source);
@@ -379,12 +445,9 @@ static char *shellRunCommandSubstitution(const char *command) {
     status = EXIT_FAILURE;
 
     shellSymbolTableScopeInit(&table_scope);
-    if (!shellSymbolTableScopeIsActive()) {
-        if (!shellSymbolTableScopePush(&table_scope)) {
-            fprintf(stderr, "shell: failed to allocate symbol tables.\n");
-        } else {
-            scope_pushed = true;
-        }
+    scope_pushed = shellSymbolTableScopePush(&table_scope);
+    if (!scope_pushed && !shellSymbolTableScopeIsActive()) {
+        fprintf(stderr, "shell: failed to allocate symbol tables.\n");
     }
 
     can_run = scope_pushed || shellSymbolTableScopeIsActive();
@@ -400,6 +463,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
     if (can_run) {
+        env_snapshot = shellCommandSubSnapshotEnv();
         status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
     }
 
@@ -488,6 +552,11 @@ substitution_finish:
 
     if (capture_pushed) {
         shellCaptureStackPop();
+    }
+
+    if (env_snapshot) {
+        shellCommandSubRestoreEnv(env_snapshot);
+        env_snapshot = NULL;
     }
 
     if (!result) {

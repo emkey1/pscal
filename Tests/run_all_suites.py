@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
-SUITE_KEYS = ["core", "library", "scope"]
+BASE_SUITE_KEYS = ["core", "library", "scope"]
+OPTIONAL_SUITE_KEYS = ["ios"]
+SUITE_KEYS = BASE_SUITE_KEYS + OPTIONAL_SUITE_KEYS
 
 
 def locate_repo_root(start: Path) -> Path:
@@ -104,10 +106,17 @@ def main(argv: Sequence[str]) -> int:
         default="",
         help="Extra arguments (shlex-split) forwarded to Tests/scope_verify/run_all_scope_tests.py.",
     )
+    parser.add_argument(
+        "--include-ios",
+        action="store_true",
+        help="Run the iOS/iPadOS portability suite (opt-in, off by default).",
+    )
     args = parser.parse_args(argv)
 
     skip = set(args.skip or [])
-    selected = [key for key in SUITE_KEYS if key not in skip]
+    selected = [key for key in BASE_SUITE_KEYS if key not in skip]
+    if args.include_ios and "ios" not in skip:
+        selected.append("ios")
 
     if not selected:
         print("No suites selected. Use --skip judiciously or omit it altogether.")
@@ -129,6 +138,10 @@ def main(argv: Sequence[str]) -> int:
         scope_script = tests_root / "scope_verify" / "run_all_scope_tests.py"
         extra = shlex_split(args.scope_args)
         commands["scope"] = ([args.python, str(scope_script), *extra], repo_root, False)
+
+    if "ios" in selected:
+        ios_script = tests_root / "run_ios_port_tests.sh"
+        commands["ios"] = (["bash", str(ios_script)], tests_root, False)
 
     summary: List[Tuple[str, int]] = []
     for key in selected:

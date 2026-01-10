@@ -30,17 +30,26 @@ if(APPLE AND CMAKE_OSX_SYSROOT)
         endif()
     endif()
 endif()
+# Fall back to directory-name heuristic when toolchains don’t inject macabi flags.
+if(NOT PSCAL_MACCATALYST AND APPLE)
+    string(TOLOWER "${CMAKE_BINARY_DIR}" _pscal_binary_dir_lower)
+    if(_pscal_binary_dir_lower MATCHES "maccatalyst")
+        set(PSCAL_MACCATALYST ON)
+    endif()
+endif()
 if(PSCAL_MACCATALYST)
     # Mac Catalyst runs under iOS-style sandboxing; enable iOS shims and defs.
     set(PSCAL_PLATFORM_IOS ON)
 endif()
 
-set(PSCAL_USE_HOST_OPENSSL OFF)
-if(PSCAL_FORCE_IOS AND NOT PSCAL_REAL_IOS AND NOT PSCAL_MACCATALYST)
-    set(PSCAL_USE_HOST_OPENSSL ON)
-endif()
-if(PSCAL_MACCATALYST)
-    set(PSCAL_USE_HOST_OPENSSL ON)
+if(NOT DEFINED PSCAL_USE_HOST_OPENSSL)
+    set(PSCAL_USE_HOST_OPENSSL OFF)
+    if(PSCAL_FORCE_IOS AND NOT PSCAL_REAL_IOS AND NOT PSCAL_MACCATALYST)
+        set(PSCAL_USE_HOST_OPENSSL ON)
+    endif()
+    if(PSCAL_MACCATALYST)
+        set(PSCAL_USE_HOST_OPENSSL ON)
+    endif()
 endif()
 
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
@@ -472,10 +481,14 @@ include_directories(
     src/compiler
     src/vm
     src/third_party/yyjson
-    src/smallclue/src
-    src/smallclue
     lib
 )
+if(PSCAL_PLATFORM_IOS)
+    include_directories(
+        src/smallclue/src
+        src/smallclue
+    )
+endif()
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
     include_directories(${PSCAL_SQLITE_INCLUDE_DIRS})
 endif()
@@ -935,11 +948,6 @@ set(PSCAL_CORE_SOURCES
     src/common/frontend_kind.c
     src/common/runtime_paths.c
     src/common/pascal_state.c
-    src/smallclue/src/core.c
-    src/smallclue/src/integration.c
-    src/smallclue/src/nextvi_app.c
-    src/smallclue/src/openssh_app.c
-    src/smallclue/src/vproc_test_app.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
@@ -948,6 +956,18 @@ set(PSCAL_CORE_SOURCES
     src/runtime/shaders/sky/sky_dome.c
     src/runtime/shaders/sky/cloud_layer.c
 )
+
+set(SMALLCLUE_SOURCES
+    src/smallclue/src/core.c
+    src/smallclue/src/integration.c
+    src/smallclue/src/nextvi_app.c
+    src/smallclue/src/openssh_app.c
+    src/smallclue/src/vproc_test_app.c
+)
+
+if(PSCAL_PLATFORM_IOS)
+    list(APPEND PSCAL_CORE_SOURCES ${SMALLCLUE_SOURCES})
+endif()
 
 set(PSCAL_OPENSSH_ROOT third-party/openssh-10.2p1)
 set(PSCAL_OPENSSH_COMMON_SOURCES
@@ -1223,18 +1243,18 @@ endif()
 add_subdirectory(src/ext_builtins)
 list(APPEND PSCAL_CORE_SOURCES ${PSCAL_EXT_BUILTIN_SOURCES})
 list(APPEND PSCAL_CORE_SOURCES src/third_party/yyjson/yyjson.c)
-	if(PSCAL_PLATFORM_IOS)
-	    list(APPEND PSCAL_CORE_SOURCES src/common/frontend_symbol_wrappers.c)
-	    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc.c)
-	    list(APPEND PSCAL_CORE_SOURCES src/ios/vproc_tree.c)
-	    list(APPEND PSCAL_CORE_SOURCES
-	        src/ios/tty/ish_compat.c
-	        src/ios/tty/pscal_fd.c
-	        src/ios/tty/pscal_tty.c
-	        src/ios/tty/pscal_pty.c
-	        src/ios/tty/pscal_tty_host.c
-	    )
-	endif()
+if(PSCAL_PLATFORM_IOS)
+    list(APPEND PSCAL_CORE_SOURCES
+        src/common/frontend_symbol_wrappers.c
+        src/ios/vproc.c
+        src/ios/vproc_tree.c
+        src/ios/tty/ish_compat.c
+        src/ios/tty/pscal_fd.c
+        src/ios/tty/pscal_tty.c
+        src/ios/tty/pscal_pty.c
+        src/ios/tty/pscal_tty_host.c
+    )
+endif()
 
 set(PASCAL_FRONTEND_SOURCES
     src/Pascal/main.c
@@ -1298,6 +1318,11 @@ if(PSCAL_HAS_LIBCURL)
     endif()
 endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
+if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
+    if(OPENSSL_INCLUDE_DIR)
+        target_include_directories(pscal_core_static PRIVATE ${OPENSSL_INCLUDE_DIR})
+    endif()
+endif()
 target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
@@ -2058,52 +2083,58 @@ endif()
 
 # Optional smallclue extras
 option(SMALLCLUE_WITH_EXSH "Enable the exsh front end as the smallclue 'sh' applet" OFF)
-if(SMALLCLUE_WITH_EXSH)
+if(NOT PSCAL_PLATFORM_IOS AND SMALLCLUE_WITH_EXSH)
+    message(WARNING "SMALLCLUE_WITH_EXSH is ignored on non-iOS builds; disabling for host toolchains.")
+    set(SMALLCLUE_WITH_EXSH OFF CACHE BOOL "Enable the exsh front end as the smallclue 'sh' applet" FORCE)
+endif()
+if(PSCAL_PLATFORM_IOS AND SMALLCLUE_WITH_EXSH)
     target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_EXSH)
 endif()
 
-add_executable(smallclue
-    src/smallclue/src/main.c
-)
-set(_SMALLCLUE_LINK_LIBS m Threads::Threads)
-if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
-    list(APPEND _SMALLCLUE_LINK_LIBS CURL::libcurl)
-endif()
-if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
-    list(APPEND _SMALLCLUE_LINK_LIBS pscal_exsh_static)
-    target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
-elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
-    message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
-else()
-    list(APPEND _SMALLCLUE_LINK_LIBS pscal_core_static)
-endif()
-if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
-    list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SQLITE_LIBS})
-endif()
-if(SDL)
-    target_link_directories(smallclue PRIVATE
-        ${PC_SDL_IMAGE_LIBRARY_DIRS}
-        ${PC_SDL_MIXER_LIBRARY_DIRS}
-        ${PC_SDL_TTF_LIBRARY_DIRS}
+if(PSCAL_PLATFORM_IOS)
+    add_executable(smallclue
+        src/smallclue/src/main.c
     )
-    list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
-    list(APPEND _SMALLCLUE_LINK_LIBS
-        ${PC_SDL_IMAGE_LIBRARIES}
-        ${PC_SDL_MIXER_LIBRARIES}
-        ${PC_SDL_TTF_LIBRARIES}
-        ${PC_SDL_IMAGE_LDFLAGS_OTHER}
-        ${PC_SDL_MIXER_LDFLAGS_OTHER}
-        ${PC_SDL_TTF_LDFLAGS_OTHER}
-        ${PSCAL_SDL_PLATFORM_LIBS}
-    )
-    if(PSCAL_OPENGL_TARGET)
-        list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_OPENGL_TARGET})
-    elseif(OPENGL_LIBRARIES)
-        list(APPEND _SMALLCLUE_LINK_LIBS ${OPENGL_LIBRARIES})
+    set(_SMALLCLUE_LINK_LIBS m Threads::Threads)
+    if(PSCAL_HAS_LIBCURL AND TARGET CURL::libcurl)
+        list(APPEND _SMALLCLUE_LINK_LIBS CURL::libcurl)
     endif()
+    if(SMALLCLUE_WITH_EXSH AND TARGET pscal_exsh_static)
+        list(APPEND _SMALLCLUE_LINK_LIBS pscal_exsh_static)
+        target_compile_definitions(smallclue PRIVATE SMALLCLUE_WITH_EXSH)
+    elseif(SMALLCLUE_WITH_EXSH AND NOT TARGET pscal_exsh_static)
+        message(FATAL_ERROR "SMALLCLUE_WITH_EXSH=ON but pscal_exsh_static is not available. Enable PSCAL_BUILD_STATIC_LIBS or ensure exsh static target is built.")
+    else()
+        list(APPEND _SMALLCLUE_LINK_LIBS pscal_core_static)
+    endif()
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SQLITE_LIBS})
+    endif()
+    if(SDL)
+        target_link_directories(smallclue PRIVATE
+            ${PC_SDL_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL_MIXER_LIBRARY_DIRS}
+            ${PC_SDL_TTF_LIBRARY_DIRS}
+        )
+        list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
+        list(APPEND _SMALLCLUE_LINK_LIBS
+            ${PC_SDL_IMAGE_LIBRARIES}
+            ${PC_SDL_MIXER_LIBRARIES}
+            ${PC_SDL_TTF_LIBRARIES}
+            ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+            ${PC_SDL_MIXER_LDFLAGS_OTHER}
+            ${PC_SDL_TTF_LDFLAGS_OTHER}
+            ${PSCAL_SDL_PLATFORM_LIBS}
+        )
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND _SMALLCLUE_LINK_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND _SMALLCLUE_LINK_LIBS ${OPENGL_LIBRARIES})
+        endif()
+    endif()
+    list(REMOVE_DUPLICATES _SMALLCLUE_LINK_LIBS)
+    target_link_libraries(smallclue PRIVATE ${_SMALLCLUE_LINK_LIBS})
 endif()
-list(REMOVE_DUPLICATES _SMALLCLUE_LINK_LIBS)
-target_link_libraries(smallclue PRIVATE ${_SMALLCLUE_LINK_LIBS})
 
 if(PSCAL_PLATFORM_IOS)
     add_executable(pscal_tool_runner src/ios/tool_runner_main.c)

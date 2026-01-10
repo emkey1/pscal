@@ -60,12 +60,6 @@ echo
 echo "Tiny Tests End"
 
 echo "====================================="
-echo "Running iOS vproc tests"
-bash ./run_ios_vproc_tests.sh
-echo
-echo "iOS vproc tests End"
-echo
-echo "====================================="
 echo "Running Example Program Tests"
 python3 ./examples/run_examples.py
 echo "Example Program Tests End"
