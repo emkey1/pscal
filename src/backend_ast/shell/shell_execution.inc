@@ -3510,10 +3510,6 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     int capture_writer_fd = -1;
     int capture_writer_vfd = -1;
     bool ok = false;
-    pthread_t feed_thread;
-    bool feed_thread_started = false;
-    ShellPipelineFeed feed = { .data = NULL, .len = 0, .fd = -1, .src_fd = -1, .err = 0 };
-    bool feed_owns_data = false;
     pthread_t capture_thread;
     bool capture_thread_started = false;
     ShellPipelineCapture capture = { .fd = -1, .spool_fd = -1, .size = 0, .capacity = 0, .err = 0, .buffer = NULL };
@@ -3541,105 +3537,15 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         }
         input_spool_fd = ctx->spool_fd;
         vprocHostLseek(input_spool_fd, 0, SEEK_SET);
-        bool pager_tail = pipeline_tail &&
-                          cmd->argc > 0 &&
-                          (strcmp(cmd->argv[0], "less") == 0 || strcmp(cmd->argv[0], "more") == 0);
-        bool empty_spool = (ctx->spool_size == 0);
-        if (pager_tail) {
-            stdin_fd = vprocHostDup(input_spool_fd);
-            if (stdin_fd < 0) {
-                runtimeError(vm, "pipeline: failed to reopen pager buffer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            vprocHostLseek(stdin_fd, 0, SEEK_SET);
-            if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] pager tail using spool_fd=%d size=%zu\n", input_spool_fd, ctx->spool_size);
-            }
-        } else if (empty_spool) {
-            /* Nothing captured; avoid spinning up a feeder thread. */
-            stdin_fd = vprocHostOpen("/dev/null", O_RDONLY);
-            if (stdin_fd < 0) {
-                runtimeError(vm, "pipeline: failed to open /dev/null: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] empty spool -> /dev/null\n");
-            }
-        } else {
-            if (vprocHostPipe(input_pipe) != 0) {
-                runtimeError(vm, "pipeline: failed to allocate input buffer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            /* Try to preload into memory and write synchronously to avoid feed threads hanging. */
-            bool loaded_buffer = false;
-            const size_t kSpoolPreloadLimit =
-#if defined(PSCAL_TARGET_IOS)
-                64 * 1024 * 1024;
-#else
-                SIZE_MAX;
-#endif
-            if (ctx->spool_size > 0 && ctx->spool_size <= kSpoolPreloadLimit) {
-                char *buf = (char *)malloc(ctx->spool_size);
-                if (buf) {
-                    size_t off = 0;
-                    while (off < ctx->spool_size) {
-                        ssize_t r = vprocHostRead(input_spool_fd, buf + off, ctx->spool_size - off);
-                        if (r < 0) {
-                            if (errno == EINTR) continue;
-                            break;
-                        }
-                        if (r == 0) {
-                            break;
-                        }
-                        off += (size_t)r;
-                    }
-                    if (off == ctx->spool_size) {
-                        /* Push the preloaded buffer and close the write end so readers see EOF. */
-                        size_t wrote = 0;
-                        while (wrote < ctx->spool_size) {
-                            ssize_t w = vprocHostWrite(input_pipe[1], buf + wrote, ctx->spool_size - wrote);
-                            if (w < 0) {
-                                if (errno == EINTR) continue;
-                                break;
-                            }
-                            wrote += (size_t)w;
-                        }
-                        vprocHostClose(input_pipe[1]);
-                        input_pipe[1] = -1;
-                        free(buf);
-                        stdin_fd = input_pipe[0];
-                        input_pipe[0] = -1;
-                        loaded_buffer = true;
-                    } else {
-                        free(buf);
-                        vprocHostLseek(input_spool_fd, 0, SEEK_SET);
-                    }
-                }
-            }
-            if (!loaded_buffer) {
-                /* Fall back to threaded feed. */
-                feed.src_fd = vprocHostDup(input_spool_fd);
-                if (feed.src_fd < 0) {
-                    runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
-                    shellUpdateStatus(errno ? errno : 1);
-                    return false;
-                }
-                vprocHostLseek(feed.src_fd, 0, SEEK_SET);
-                feed.fd = input_pipe[1];
-                input_pipe[1] = -1;
-                if (vprocHostPthreadCreate(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
-                    feed_thread_started = true;
-                } else {
-                    runtimeError(vm, "pipeline: failed to start feeder");
-                    shellUpdateStatus(1);
-                    goto cleanup;
-                }
-                stdin_fd = input_pipe[0];
-                input_pipe[0] = -1;
-            }
+        stdin_fd = vprocHostDup(input_spool_fd);
+        if (stdin_fd < 0) {
+            runtimeError(vm, "pipeline: failed to reopen buffer: %s", strerror(errno));
+            shellUpdateStatus(errno ? errno : 1);
+            return false;
+        }
+        vprocHostLseek(stdin_fd, 0, SEEK_SET);
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipe] using spool_fd=%d size=%zu as stdin\n", input_spool_fd, ctx->spool_size);
         }
     }
 
@@ -4022,21 +3928,6 @@ cleanup:
         capture.spool_fd = -1;
     }
 
-    if (feed_thread_started) {
-        pthread_join(feed_thread, NULL);
-        feed_thread_started = false;
-        if (feed.err != 0) {
-            ok = false;
-            runtimeError(vm, "pipeline: failed to feed input: %s", strerror(feed.err));
-            shellUpdateStatus(feed.err);
-        }
-    }
-    if (feed_owns_data && feed.data) {
-        free((void *)feed.data);
-        feed.data = NULL;
-        feed.len = 0;
-    }
-
     if (!pipeline_head && input_spool_fd >= 0) {
         vprocHostClose(input_spool_fd);
         input_spool_fd = -1;
@@ -4045,11 +3936,6 @@ cleanup:
     if (need_spool && output_pipe[1] >= 0) {
         vprocHostClose(output_pipe[1]);
         output_pipe[1] = -1;
-    }
-
-    if (!feed_thread_started && feed.fd >= 0) {
-        vprocHostClose(feed.fd);
-        feed.fd = -1;
     }
 
     if (ok && pipeline_tail) {
