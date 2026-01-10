@@ -3576,42 +3576,38 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             /* Prefer preloading the buffer to avoid blocking reads on odd fd types. */
             bool loaded_buffer = false;
 #if defined(PSCAL_TARGET_IOS)
-            const size_t kSpoolPreloadLimit = 2 * 1024 * 1024;
+            const size_t kSpoolPreloadLimit = 64 * 1024 * 1024;
 #else
             const size_t kSpoolPreloadLimit = SIZE_MAX;
 #endif
             off_t end = vprocHostLseek(input_spool_fd, 0, SEEK_END);
-            if (end >= 0 && (size_t)end <= kSpoolPreloadLimit) {
-                if (vprocHostLseek(input_spool_fd, 0, SEEK_SET) == 0) {
-                    size_t size = (size_t)end;
-                    char *buf = NULL;
-                    if (size == 0) {
-                        buf = (char *)malloc(1);
-                    } else {
-                        buf = (char *)malloc(size);
+            if (end >= 0) {
+                (void)vprocHostLseek(input_spool_fd, 0, SEEK_SET);
+            }
+            if (end > 0 && (size_t)end <= kSpoolPreloadLimit) {
+                size_t size = (size_t)end;
+                char *buf = (char *)malloc(size ? size : 1);
+                if (buf) {
+                    size_t off = 0;
+                    while (off < size) {
+                        ssize_t r = vprocHostRead(input_spool_fd, buf + off, size - off);
+                        if (r < 0) {
+                            if (errno == EINTR) continue;
+                            break;
+                        }
+                        if (r == 0) {
+                            break;
+                        }
+                        off += (size_t)r;
                     }
-                    if (buf) {
-                        size_t off = 0;
-                        while (off < size) {
-                            ssize_t r = vprocHostRead(input_spool_fd, buf + off, size - off);
-                            if (r < 0) {
-                                if (errno == EINTR) continue;
-                                break;
-                            }
-                            if (r == 0) {
-                                break;
-                            }
-                            off += (size_t)r;
-                        }
-                        if (off == size) {
-                            feed.data = buf;
-                            feed.len = size;
-                            feed.src_fd = -1;
-                            feed_owns_data = true;
-                            loaded_buffer = true;
-                        } else {
-                            free(buf);
-                        }
+                    if (off == size) {
+                        feed.data = buf;
+                        feed.len = size;
+                        feed.src_fd = -1;
+                        feed_owns_data = true;
+                        loaded_buffer = true;
+                    } else {
+                        free(buf);
                     }
                 }
             }
