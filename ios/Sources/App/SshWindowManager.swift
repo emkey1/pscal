@@ -260,7 +260,7 @@ final class TerminalTabManager: ObservableObject {
         return "SSH"
     }
 
-    fileprivate func registerShellSession(tabId: UInt64, sessionId: UInt64) {
+    func registerShellSession(tabId: UInt64, sessionId: UInt64) {
         guard sessionId != 0, let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         tabs[idx].sessionId = sessionId
     }
