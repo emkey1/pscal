@@ -382,6 +382,14 @@ typedef struct ShellJob {
 typedef struct ShellLocalScopeFrame ShellLocalScopeFrame;
 typedef struct ShellLoopFrame ShellLoopFrame;
 
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    int spool_fd;
+    size_t spool_size;
+    bool spool_owned;
+} ShellPipelineSession;
+#endif
+
 typedef struct {
     bool active;
     size_t stage_count;
@@ -396,8 +404,7 @@ typedef struct {
 #if defined(PSCAL_TARGET_IOS)
     bool in_process;
     bool in_process_worker;
-    int spool_fd;
-    size_t spool_size;
+    ShellPipelineSession session;
 #endif
 } ShellPipelineContext;
 

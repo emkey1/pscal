@@ -5,6 +5,10 @@
 #include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/tty/pscal_fd.h"
+#define PIPE_SESSION(ctx) (&(ctx)->session)
+#define PIPE_SPOOL_FD(ctx) ((ctx)->session.spool_fd)
+#define PIPE_SPOOL_SIZE(ctx) ((ctx)->session.spool_size)
+#define PIPE_SPOOL_OWNED(ctx) ((ctx)->session.spool_owned)
 
 static void shellVprocFormatLabel(const ShellCommand *cmd, char *out, size_t out_sz) {
     if (!out || out_sz == 0) {
@@ -1905,10 +1909,11 @@ static void shellResetPipeline(void) {
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (ctx->spool_fd >= 0) {
-        vprocHostClose(ctx->spool_fd);
-        ctx->spool_fd = -1;
-        ctx->spool_size = 0;
+    if (PIPE_SPOOL_FD(ctx) >= 0) {
+        vprocHostClose(PIPE_SPOOL_FD(ctx));
+        PIPE_SPOOL_FD(ctx) = -1;
+        PIPE_SPOOL_SIZE(ctx) = 0;
+        PIPE_SPOOL_OWNED(ctx) = false;
     }
     ctx->in_process = false;
     ctx->in_process_worker = false;
@@ -1953,10 +1958,11 @@ static void shellAbortPipeline(void) {
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    if (ctx->spool_fd >= 0) {
-        vprocHostClose(ctx->spool_fd);
-        ctx->spool_fd = -1;
-        ctx->spool_size = 0;
+    if (PIPE_SPOOL_FD(ctx) >= 0) {
+        vprocHostClose(PIPE_SPOOL_FD(ctx));
+        PIPE_SPOOL_FD(ctx) = -1;
+        PIPE_SPOOL_SIZE(ctx) = 0;
+        PIPE_SPOOL_OWNED(ctx) = false;
     }
 #endif
     if (ctx->pipes) {
@@ -2007,8 +2013,9 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
 #if defined(PSCAL_TARGET_IOS)
     ctx->in_process = true;
     ctx->in_process_worker = false;
-    ctx->spool_fd = -1;
-    ctx->spool_size = 0;
+    PIPE_SPOOL_FD(ctx) = -1;
+    PIPE_SPOOL_SIZE(ctx) = 0;
+    PIPE_SPOOL_OWNED(ctx) = false;
 #endif
     ctx->pids = calloc(stages, sizeof(pid_t));
     if (!ctx->pids) {
@@ -3531,12 +3538,12 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     bool worker_started = false;
 
     if (!pipeline_head) {
-        if (ctx->spool_fd < 0) {
+        if (PIPE_SPOOL_FD(ctx) < 0) {
             runtimeError(vm, "pipeline: missing intermediate buffer");
             shellUpdateStatus(1);
             return false;
         }
-        input_spool_fd = ctx->spool_fd;
+        input_spool_fd = PIPE_SPOOL_FD(ctx);
         if (input_spool_fd < 0) {
             runtimeError(vm, "pipeline: missing intermediate buffer");
             shellUpdateStatus(1);
@@ -3546,7 +3553,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         stdin_fd = input_spool_fd;
         input_spool_fd = -1; /* keep ctx->spool_fd open for tail cleanup */
         if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] using spool_fd=%d size=%zu as stdin\n", stdin_fd, ctx->spool_size);
+            fprintf(stderr, "[pipe] using spool_fd=%d size=%zu as stdin\n", stdin_fd, PIPE_SPOOL_SIZE(ctx));
         }
     }
 
@@ -3800,13 +3807,14 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         status = shellRunBuiltinInProcess(vm, cmd, run_stdin_fd, run_stdout_fd, run_stderr_fd, apply_exec_redirs);
     }
     if (need_spool && direct_spool && capture.spool_fd >= 0) {
-        ctx->spool_fd = capture.spool_fd;
-        off_t end = vprocHostLseek(ctx->spool_fd, 0, SEEK_END);
+        PIPE_SPOOL_FD(ctx) = capture.spool_fd;
+        PIPE_SPOOL_OWNED(ctx) = true;
+        off_t end = vprocHostLseek(PIPE_SPOOL_FD(ctx), 0, SEEK_END);
         if (end >= 0) {
-            ctx->spool_size = (size_t)end;
-            vprocHostLseek(ctx->spool_fd, 0, SEEK_SET);
+            PIPE_SPOOL_SIZE(ctx) = (size_t)end;
+            vprocHostLseek(PIPE_SPOOL_FD(ctx), 0, SEEK_SET);
         } else {
-            ctx->spool_size = 0;
+            PIPE_SPOOL_SIZE(ctx) = 0;
         }
         capture.spool_fd = -1;
     }
@@ -3814,8 +3822,8 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         fprintf(stderr, "[pipe] stage cmd=%s status=%d spool_fd=%d size=%zu\n",
                 (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
                 status,
-                ctx->spool_fd,
-                ctx->spool_size);
+                PIPE_SPOOL_FD(ctx),
+                PIPE_SPOOL_SIZE(ctx));
     }
     ctx->last_status = status;
     bool ctx_valid = ctx->active && ctx->pids && stage_pos < ctx->stage_count;
@@ -3902,16 +3910,17 @@ cleanup:
                 fprintf(stderr, "[pipe] capture thread done size=%zu spool_fd=%d\n",
                         capture.size, capture.spool_fd);
             }
-            if (ctx->spool_fd >= 0) {
-                vprocHostClose(ctx->spool_fd);
+            if (PIPE_SPOOL_FD(ctx) >= 0) {
+                vprocHostClose(PIPE_SPOOL_FD(ctx));
             }
-            ctx->spool_fd = capture.spool_fd;
-            ctx->spool_size = capture.size;
+            PIPE_SPOOL_FD(ctx) = capture.spool_fd;
+            PIPE_SPOOL_SIZE(ctx) = capture.size;
+            PIPE_SPOOL_OWNED(ctx) = true;
             if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] captured size=%zu\n", ctx->spool_size);
+                fprintf(stderr, "[pipe] captured size=%zu\n", PIPE_SPOOL_SIZE(ctx));
             }
-            if (ctx->spool_fd >= 0) {
-                vprocHostLseek(ctx->spool_fd, 0, SEEK_SET);
+            if (PIPE_SPOOL_FD(ctx) >= 0) {
+                vprocHostLseek(PIPE_SPOOL_FD(ctx), 0, SEEK_SET);
             }
             capture.spool_fd = -1;
         }
