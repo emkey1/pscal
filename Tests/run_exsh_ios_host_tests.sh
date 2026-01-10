@@ -27,3 +27,5 @@ RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable 
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only top_tree_default
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only lps_tree_option
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only kernel_tree_root
+RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_help_grep_ios
+RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_empty_ios

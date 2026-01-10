@@ -11,6 +11,30 @@
             "expected_stdout": "pipeline:start\nalpha\npipeline:end"
         },
         {
+            "id": "pipeline_help_grep_ios",
+            "name": "Pipeline help through grep (iOS)",
+            "category": "pipeline_ios",
+            "description": "Ensure pipeline spool/hand-off works for help output piped into grep.",
+            "script": "Tests/exsh/tests/pipeline_help_grep_ios.exsh",
+            "expect": "runtime_ok",
+            "env": {
+                "RUN_VPROC_TESTS": "1"
+            },
+            "expected_stdout": "pipeline-help-grep:start\nbuiltin: history\npipeline-help-grep:status:0"
+        },
+        {
+            "id": "pipeline_empty_ios",
+            "name": "Pipeline empty spool (iOS)",
+            "category": "pipeline_ios",
+            "description": "Empty pipeline input should not hang and should surface nonzero status from grep.",
+            "script": "Tests/exsh/tests/pipeline_empty_ios.exsh",
+            "expect": "runtime_ok",
+            "env": {
+                "RUN_VPROC_TESTS": "1"
+            },
+            "expected_stdout": "pipeline-empty:start\npipeline-empty:status:1"
+        },
+        {
             "id": "conditionals_loop",
             "name": "Conditionals execute matching branches",
             "category": "control",
