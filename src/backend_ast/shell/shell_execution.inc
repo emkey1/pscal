@@ -3137,10 +3137,11 @@ static int shellRunBuiltinInProcess(VM *vm,
     int status = 127;
     bool applied_redirs = false;
 
+    bool allow_missing_backup = gShellRuntime.pipeline.in_process;
     if (stdin_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDIN_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stdin failed\n");
-            goto cleanup;
+            if (!allow_missing_backup) goto cleanup;
         }
         if (!shellDupOntoTarget(active_vp, stdin_fd, STDIN_FILENO, pipe_dbg, "stdin")) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup stdin failed\n");
@@ -3150,7 +3151,7 @@ static int shellRunBuiltinInProcess(VM *vm,
     if (stdout_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDOUT_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stdout failed\n");
-            goto cleanup;
+            if (!allow_missing_backup) goto cleanup;
         }
         if (!shellDupOntoTarget(active_vp, stdout_fd, STDOUT_FILENO, pipe_dbg, "stdout")) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup stdout failed\n");
@@ -3160,7 +3161,7 @@ static int shellRunBuiltinInProcess(VM *vm,
     if (stderr_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDERR_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] backup stderr failed\n");
-            goto cleanup;
+            if (!allow_missing_backup) goto cleanup;
         }
         if (!shellDupOntoTarget(active_vp, stderr_fd, STDERR_FILENO, pipe_dbg, "stderr")) {
             if (tool_dbg && pipe_dbg) fprintf(stderr, "[run-builtin] dup stderr failed\n");
