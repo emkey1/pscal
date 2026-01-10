@@ -127,6 +127,7 @@ void registerShellFrontendBuiltins(void) {
 #endif
 #if defined(PSCAL_TAB_TITLE_SUPPORT)
     registerShellBuiltin(category, command_group, "tabname", vmBuiltinShellTabName);
+    registerShellBuiltin(category, command_group, "tname", vmBuiltinShellTabName);
 #endif
     registerShellBuiltin(category, command_group, "stdioinfo", vmBuiltinShellStdioInfo);
 }
