@@ -1017,7 +1017,75 @@ spawn_cleanup:
     return prep_error;
 }
 
+typedef struct {
+    pid_t pid;
+    int status_raw;
+    int status_mapped;
+    bool stopped;
+    bool continued;
+} ShellWaitResult;
+
 static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
+    ShellWaitResult res = { .pid = pid, .status_raw = 0, .status_mapped = 0, .stopped = false, .continued = false };
+    int err = 0;
+    int status = 0;
+    int options = allow_stop ? WUNTRACED : 0;
+    pid_t waited;
+    do {
+        waited = vprocWaitPidShim(pid, &status, options);
+    } while (waited < 0 && errno == EINTR);
+    if (waited < 0) {
+        err = errno;
+    }
+    res.status_raw = status;
+    if (WIFSTOPPED(status)) {
+        res.stopped = true;
+        res.status_mapped = 128 + WSTOPSIG(status);
+    } else if (WIFEXITED(status)) {
+        res.status_mapped = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        res.status_mapped = 128 + WTERMSIG(status);
+    } else {
+        res.status_mapped = status;
+    }
+    if (status_out) {
+        *status_out = res.status_mapped;
+    }
+    if (out_stopped) {
+        *out_stopped = res.stopped;
+    }
+    return err;
+}
+
+static int shellWaitPidDetailed(pid_t pid, bool allow_stop, ShellWaitResult *out) {
+    ShellWaitResult tmp;
+    ShellWaitResult *res = out ? out : &tmp;
+    memset(res, 0, sizeof(*res));
+    res->pid = pid;
+
+    int options = allow_stop ? WUNTRACED : 0;
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = vprocWaitPidShim(pid, &status, options);
+    } while (waited < 0 && errno == EINTR);
+    if (waited < 0) {
+        return errno;
+    }
+
+    res->status_raw = status;
+    if (WIFSTOPPED(status)) {
+        res->stopped = true;
+        res->status_mapped = 128 + WSTOPSIG(status);
+    } else if (WIFEXITED(status)) {
+        res->status_mapped = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        res->status_mapped = 128 + WTERMSIG(status);
+    } else {
+        res->status_mapped = status;
+    }
+    return 0;
+}
     if (out_stopped) {
         *out_stopped = false;
     }
