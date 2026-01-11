@@ -14,6 +14,9 @@ func PSCALRuntimeOnProcessGroupEmpty(_ pgid: Int32) {
     }
 }
 
+@_silgen_name("pscalTtyCurrentPgid")
+private func c_pscalTtyCurrentPgid() -> Int32
+
 // MARK: - C Bridge Helpers
 
 private func withCStringPointerRuntime<T>(_ string: String, _ body: (UnsafePointer<CChar>) -> T) -> T? {
@@ -684,7 +687,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                                                                            sessionId: sessionId)
                         }
                     }
-                    let pgid = Int(pscalTtyCurrentPgid())
+                    let pgid = Int(c_pscalTtyCurrentPgid())
                     if pgid > 0 {
                         self.stateQueue.async { self.shellPgid = pgid }
                         DispatchQueue.main.async {
