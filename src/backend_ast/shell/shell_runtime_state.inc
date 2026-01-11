@@ -4163,7 +4163,7 @@ static void shellJobControlDetectCapabilities(void) {
 #if defined(PSCAL_TARGET_IOS)
     caps.has_tcsetpgrp = false;
     caps.has_pgid = true;
-    caps.has_stop_signals = false;
+    caps.has_stop_signals = true;
     caps.has_foreground_control = true;
     caps.has_killpg = true;
 #else
