@@ -1789,6 +1789,10 @@ static void shellHandlePendingSignal(int signo) {
 
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
         bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled && shellJobControlSupportsStops();
+        bool dispatched = false;
+        if (signo == SIGINT || stop_request) {
+            dispatched = shellJobControlDispatchForegroundSignal(signo);
+        }
         if (gShellCurrentVm && !stop_request) {
             gShellCurrentVm->exit_requested = true;
             gShellCurrentVm->current_builtin_name = "signal";
@@ -1806,7 +1810,7 @@ static void shellHandlePendingSignal(int signo) {
 
         bool propagate_default =
             (gShellExitOnSignalFlag && (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) &&
-             !gShellRuntime.trap_enabled && !command_trap);
+             !gShellRuntime.trap_enabled && !command_trap && !dispatched);
 #if defined(PSCAL_TARGET_IOS)
         if (signo == SIGTSTP) {
             /* Never let SIGTSTP stop the host app; handle it logically instead. */

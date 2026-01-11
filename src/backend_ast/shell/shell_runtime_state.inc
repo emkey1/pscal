@@ -4223,6 +4223,16 @@ static SHELL_JC_UNUSED void shellJobControlRestoreShellIo(void) {
     }
 }
 
+static bool shellJobControlDispatchForegroundSignal(int signo) {
+    if (!gShellRuntime.job_control_enabled || gShellJobControlCtx.fg_pgid <= 0) {
+        return false;
+    }
+    if (signo == SIGTSTP && !shellJobControlSupportsStops()) {
+        return false;
+    }
+    return shellJobControlSendPgid(gShellJobControlCtx.fg_pgid, signo) == 0;
+}
+
 static void shellInitJobControlState(void) {
     if (gShellRuntime.job_control_initialized) {
         return;
@@ -4365,6 +4375,7 @@ static void shellJobControlSetForeground(pid_t pgid) {
         gShellRuntime.tty_fd < 0 || pgid <= 0) {
         return;
     }
+    gShellJobControlCtx.fg_pgid = pgid;
 #if defined(PSCAL_TARGET_IOS)
     int shell_pid = vprocGetShellSelfPid();
     int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
@@ -4388,6 +4399,7 @@ static void shellJobControlRestoreForeground(void) {
         gShellRuntime.tty_fd < 0) {
         return;
     }
+    gShellJobControlCtx.fg_pgid = 0;
 #if defined(PSCAL_TARGET_IOS)
     int shell_pid = vprocGetShellSelfPid();
     int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
