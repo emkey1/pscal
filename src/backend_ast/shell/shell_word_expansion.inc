@@ -2971,6 +2971,58 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     return job;
 }
 
+static void shellJobMarkRunning(ShellJob *job) {
+    if (!job) {
+        return;
+    }
+    job->running = true;
+    job->stopped = false;
+}
+
+static void shellJobMarkStopped(ShellJob *job, int status) {
+    if (!job) {
+        return;
+    }
+    job->running = false;
+    job->stopped = true;
+    job->last_status = status;
+}
+
+static bool shellJobSendSignal(const ShellJob *job, int signo, bool prefer_group) {
+    if (!job || signo <= 0) {
+        return false;
+    }
+    bool delivered = false;
+    if (prefer_group && job->pgid > 0) {
+        if (shellJobControlSendPgid(job->pgid, signo) == 0) {
+            delivered = true;
+        }
+    }
+    if (!prefer_group || !delivered) {
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            pid_t pid = job->pids[i];
+            if (pid <= 0) {
+                continue;
+            }
+            if (shellJobControlSendPid(pid, signo) == 0) {
+                delivered = true;
+            }
+        }
+    }
+    return delivered;
+}
+
+static bool shellJobContinue(ShellJob *job, bool prefer_group) {
+    if (!job) {
+        return false;
+    }
+    bool ok = shellJobSendSignal(job, SIGCONT, prefer_group);
+    if (ok) {
+        shellJobMarkRunning(job);
+    }
+    return ok;
+}
+
 static int shellCollectJobs(void) {
 #if defined(PSCAL_TARGET_IOS)
     int shell_pid = 0;
