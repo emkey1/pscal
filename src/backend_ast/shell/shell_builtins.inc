@@ -10377,11 +10377,7 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
     for (size_t i = 0; i < job->pid_count; ++i) {
         pid_t pid = job->pids[i];
         if (pid > 0) {
-#if defined(PSCAL_TARGET_IOS)
-            vprocKillShim(pid, SIGCONT);
-#else
-            kill(pid, SIGCONT);
-#endif
+            shellJobControlSendPid(pid, SIGCONT);
         }
     }
     if (job_control) {
@@ -10440,11 +10436,7 @@ Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
     for (size_t i = 0; i < job->pid_count; ++i) {
         pid_t pid = job->pids[i];
         if (pid > 0) {
-#if defined(PSCAL_TARGET_IOS)
-            vprocKillShim(pid, SIGCONT);
-#else
-            kill(pid, SIGCONT);
-#endif
+            shellJobControlSendPid(pid, SIGCONT);
         }
     }
     job->stopped = false;

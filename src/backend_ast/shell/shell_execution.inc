@@ -2245,19 +2245,11 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 continue;
             }
             if (gShellExitRequested || gShellRuntime.break_requested) {
-#if defined(PSCAL_TARGET_IOS)
                 if (ctx->pgid > 0) {
-                    vprocKillShim(-ctx->pgid, SIGTERM);
+                    shellJobControlSendPgid(ctx->pgid, SIGTERM);
                 } else {
-                    vprocKillShim(pid, SIGTERM);
+                    shellJobControlSendPid(pid, SIGTERM);
                 }
-#else
-                if (ctx->pgid > 0) {
-                    kill(-ctx->pgid, SIGTERM);
-                } else {
-                    kill(pid, SIGTERM);
-                }
-#endif
                 continue;
             }
             bool stopped = false;

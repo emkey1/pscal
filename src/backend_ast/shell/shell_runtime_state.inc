@@ -414,6 +414,15 @@ typedef struct {
 #endif
 } ShellPipelineContext;
 
+typedef struct {
+    bool has_job_control;
+    bool has_tcsetpgrp;
+    bool has_pgid;
+    bool has_stop_signals;
+    bool has_foreground_control;
+    bool has_killpg;
+} ShellJobControlCaps;
+
 typedef struct ShellRuntimeState {
     int last_status;
     ShellPipelineContext pipeline;
@@ -422,6 +431,7 @@ typedef struct ShellRuntimeState {
     int tty_fd;
     bool job_control_enabled;
     bool job_control_initialized;
+    ShellJobControlCaps job_control_caps;
     bool errexit_enabled;
     bool errexit_pending;
     bool errexit_defer_active;
@@ -507,6 +517,7 @@ static void shellSetContext(ShellRuntimeState *ctx);
 #define gShellConditionDepth (SC()->condition_depth)
 #define gShellJobs (SC()->jobs)
 #define gShellJobCount (SC()->job_count)
+#define gShellJobControlCaps (SC()->job_control_caps)
 
 static const char *kShellCommandDefaultPath =
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
@@ -1665,6 +1676,7 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .tty_fd = -1,
     .job_control_enabled = false,
     .job_control_initialized = false,
+    .job_control_caps = {false, false, false, false, false, false},
     .errexit_enabled = false,
     .errexit_pending = false,
     .errexit_defer_active = false,
@@ -4131,21 +4143,48 @@ void shellRestoreCurrentVm(VM *vm) {
     shellSetContext(restore);
 }
 
+static void shellJobControlDetectCapabilities(void) {
+    ShellJobControlCaps caps;
+    memset(&caps, 0, sizeof(caps));
+
+    caps.has_job_control = shellRuntimeIsInteractive();
+#if defined(PSCAL_TARGET_IOS)
+    caps.has_tcsetpgrp = false;
+    caps.has_pgid = true;
+    caps.has_stop_signals = false;
+    caps.has_foreground_control = true;
+    caps.has_killpg = true;
+#else
+    caps.has_tcsetpgrp = true;
+    caps.has_pgid = true;
+    caps.has_stop_signals = true;
+    caps.has_foreground_control = true;
+    caps.has_killpg = true;
+#endif
+
+    gShellRuntime.job_control_caps = caps;
+}
+
 static void shellInitJobControlState(void) {
     if (gShellRuntime.job_control_initialized) {
         return;
     }
 
+    shellJobControlDetectCapabilities();
     gShellRuntime.job_control_initialized = true;
     gShellRuntime.tty_fd = STDIN_FILENO;
 
     if (gShellRuntime.tty_fd < 0) {
         gShellRuntime.tty_fd = -1;
+        gShellRuntime.job_control_caps.has_job_control = false;
+        gShellRuntime.job_control_caps.has_foreground_control = false;
         return;
     }
 
     if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.tty_fd = -1;
+        gShellRuntime.job_control_caps.has_job_control = false;
+        gShellRuntime.job_control_caps.has_foreground_control = false;
         return;
     }
 
@@ -4192,6 +4231,7 @@ static void shellInitJobControlState(void) {
 static void shellEnsureJobControl(void) {
     if (!shellRuntimeIsInteractive()) {
         gShellRuntime.job_control_enabled = false;
+        gShellRuntime.job_control_caps.has_job_control = false;
         return;
     }
 
@@ -4199,6 +4239,7 @@ static void shellEnsureJobControl(void) {
 
     if (gShellRuntime.tty_fd < 0) {
         gShellRuntime.job_control_enabled = false;
+        gShellRuntime.job_control_caps.has_job_control = false;
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
@@ -4220,6 +4261,8 @@ static void shellEnsureJobControl(void) {
     pid_t pgid = getpgrp();
     if (pgid <= 0) {
         gShellRuntime.job_control_enabled = false;
+        gShellRuntime.job_control_caps.has_job_control = false;
+        gShellRuntime.job_control_caps.has_foreground_control = false;
         return;
     }
 
@@ -4239,6 +4282,8 @@ static void shellEnsureJobControl(void) {
                 continue;
             }
             gShellRuntime.job_control_enabled = false;
+            gShellRuntime.job_control_caps.has_job_control = false;
+            gShellRuntime.job_control_caps.has_foreground_control = false;
             return;
         }
         if (foreground == pgid) {
@@ -4250,13 +4295,16 @@ static void shellEnsureJobControl(void) {
                 continue;
             }
             gShellRuntime.job_control_enabled = false;
+            gShellRuntime.job_control_caps.has_job_control = false;
+            gShellRuntime.job_control_caps.has_foreground_control = false;
             return;
         }
     }
 }
 
 static void shellJobControlSetForeground(pid_t pgid) {
-    if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0 || pgid <= 0) {
+    if (!gShellRuntime.job_control_enabled || !gShellRuntime.job_control_caps.has_foreground_control ||
+        gShellRuntime.tty_fd < 0 || pgid <= 0) {
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
@@ -4266,6 +4314,9 @@ static void shellJobControlSetForeground(pid_t pgid) {
         vprocSetForegroundPgid(sid, (int)pgid);
     }
 #endif
+    if (!gShellRuntime.job_control_caps.has_tcsetpgrp) {
+        return;
+    }
     while (tcsetpgrp(gShellRuntime.tty_fd, pgid) != 0) {
         if (errno == EINTR) {
             continue;
@@ -4275,7 +4326,8 @@ static void shellJobControlSetForeground(pid_t pgid) {
 }
 
 static void shellJobControlRestoreForeground(void) {
-    if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0) {
+    if (!gShellRuntime.job_control_enabled || !gShellRuntime.job_control_caps.has_foreground_control ||
+        gShellRuntime.tty_fd < 0) {
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
@@ -4285,6 +4337,9 @@ static void shellJobControlRestoreForeground(void) {
         vprocSetForegroundPgid(sid, (int)gShellRuntime.shell_pgid);
     }
 #endif
+    if (!gShellRuntime.job_control_caps.has_tcsetpgrp) {
+        return;
+    }
     pid_t target = gShellRuntime.shell_pgid > 0 ? gShellRuntime.shell_pgid : getpgrp();
     if (target <= 0) {
         return;
@@ -4295,6 +4350,28 @@ static void shellJobControlRestoreForeground(void) {
         }
         break;
     }
+}
+
+static int shellJobControlSendSignal(pid_t target, int signo, bool process_group) {
+    if (target == 0 || signo <= 0) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    pid_t send_target = process_group ? -target : target;
+    return vprocKillShim(send_target, signo);
+#else
+    pid_t send_target = process_group ? -target : target;
+    return kill(send_target, signo);
+#endif
+}
+
+static int shellJobControlSendPgid(pid_t pgid, int signo) {
+    return shellJobControlSendSignal(pgid, signo, true);
+}
+
+static int shellJobControlSendPid(pid_t pid, int signo) {
+    return shellJobControlSendSignal(pid, signo, false);
 }
 
 typedef struct {
