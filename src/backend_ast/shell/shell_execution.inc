@@ -2134,9 +2134,7 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                     job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
                 }
                 if (job) {
-                    job->stopped = true;
-                    job->running = false;
-                    job->last_status = final_status;
+                    shellJobMarkStopped(job, final_status);
                 }
 #if defined(PSCAL_TARGET_IOS)
                 shellPrintJobSuspended(job, tail_cmd);
@@ -2162,8 +2160,7 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[0];
                     ShellJob *job = shellRegisterJob(bg_pgid, ctx->pids, ctx->launched, tail_cmd);
                     if (job) {
-                        job->running = true;
-                        job->stopped = false;
+                        shellJobMarkRunning(job);
                         job->last_status = 0;
                     }
                     gShellRuntime.last_bg_pid = bg_pgid;
@@ -2277,16 +2274,14 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
 
         shellRuntimeProcessPendingSignals();
 
-        if (stopped_job && job_control) {
-            ShellJob *job = NULL;
-            if (tail_cmd) {
-                job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
-            }
-            if (job) {
-                job->stopped = true;
-                job->running = false;
-                job->last_status = final_status;
-            }
+            if (stopped_job && job_control) {
+                ShellJob *job = NULL;
+                if (tail_cmd) {
+                    job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+                }
+                if (job) {
+                    shellJobMarkStopped(job, final_status);
+                }
 #if defined(PSCAL_TARGET_IOS)
             shellPrintJobSuspended(job, tail_cmd);
 #endif
@@ -2302,8 +2297,7 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
         }
         if (job) {
-            job->running = true;
-            job->stopped = false;
+            shellJobMarkRunning(job);
             job->last_status = 0;
         }
         final_status = 0;
@@ -3422,8 +3416,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             if (bg_ctx->synthetic_pid > 0) {
                 ShellJob *job = shellRegisterJob(bg_ctx->synthetic_pid, ctx->pids, ctx->launched, cmd);
                 if (job) {
-                    job->running = true;
-                    job->stopped = false;
+                    shellJobMarkRunning(job);
                     job->last_status = 0;
                 }
                 bg_ctx->job_id = job ? (int)job->id : 0;
@@ -4374,9 +4367,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 job_pids[0] = child;
                 ShellJob *job = shellRegisterJob(child, job_pids, 1, cmd);
                 if (job) {
-                    job->stopped = true;
-                    job->running = false;
-                    job->last_status = status;
+                    shellJobMarkStopped(job, status);
                 }
 #if defined(PSCAL_TARGET_IOS)
                 shellPrintJobSuspended(job, cmd);
@@ -4387,19 +4378,18 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 return makeVoid();
             }
         } else {
-            pid_t job_pids[1];
-            job_pids[0] = child;
-            gShellRuntime.last_bg_pid = child;
-            ShellJob *job = shellRegisterJob(child, job_pids, 1, cmd);
-            if (job) {
-                job->running = true;
-                job->stopped = false;
-                job->last_status = 0;
-            }
-        #if defined(PSCAL_TARGET_IOS)
-            shellPrintJobStarted(job, child);
-        #endif
-            status = 0;
+        pid_t job_pids[1];
+        job_pids[0] = child;
+        gShellRuntime.last_bg_pid = child;
+        ShellJob *job = shellRegisterJob(child, job_pids, 1, cmd);
+        if (job) {
+            shellJobMarkRunning(job);
+            job->last_status = 0;
+        }
+    #if defined(PSCAL_TARGET_IOS)
+        shellPrintJobStarted(job, child);
+    #endif
+        status = 0;
         }
         shellUpdateStatus(status);
         shellRuntimeProcessPendingSignals();

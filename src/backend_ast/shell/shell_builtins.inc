@@ -10377,8 +10377,7 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
             shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued\n", job->id);
         }
     }
-    job->stopped = false;
-    job->running = true;
+    shellJobMarkRunning(job);
     int final_status = job->last_status;
     for (size_t i = 0; i < job->pid_count; ++i) {
         pid_t pid = job->pids[i];
@@ -10394,9 +10393,7 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
             continue;
         }
         if (WIFSTOPPED(status)) {
-            job->stopped = true;
-            job->running = false;
-            job->last_status = shellStatusFromWait(status);
+            shellJobMarkStopped(job, shellStatusFromWait(status));
             if (job_control) {
                 shellJobControlRestoreForeground();
             }
