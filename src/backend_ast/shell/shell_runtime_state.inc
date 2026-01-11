@@ -379,6 +379,15 @@ typedef struct ShellJob {
     char *command;
 } ShellJob;
 
+typedef struct {
+    pid_t fg_job_id;
+    pid_t fg_pgid;
+    bool saved_stdio_valid;
+    int saved_stdio[3];
+    bool saved_termios_valid;
+    struct termios saved_termios;
+} ShellJobControlContext;
+
 typedef struct ShellLocalScopeFrame ShellLocalScopeFrame;
 typedef struct ShellLoopFrame ShellLoopFrame;
 
@@ -473,6 +482,7 @@ typedef struct ShellRuntimeState {
     size_t last_removed_job_id;
     int last_removed_job_status;
     bool last_removed_job_valid;
+    ShellJobControlContext job_control_ctx;
     ShellArrayVariable *array_vars;
     size_t array_var_count;
     size_t array_var_capacity;
@@ -518,6 +528,7 @@ static void shellSetContext(ShellRuntimeState *ctx);
 #define gShellJobs (SC()->jobs)
 #define gShellJobCount (SC()->job_count)
 #define gShellJobControlCaps (SC()->job_control_caps)
+#define gShellJobControlCtx (SC()->job_control_ctx)
 
 static const char *kShellCommandDefaultPath =
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
@@ -1677,6 +1688,7 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .job_control_enabled = false,
     .job_control_initialized = false,
     .job_control_caps = {false, false, false, false, false, false},
+    .job_control_ctx = {0, 0, false, {-1, -1, -1}, false, {0}},
     .errexit_enabled = false,
     .errexit_pending = false,
     .errexit_defer_active = false,
@@ -4167,6 +4179,48 @@ static void shellJobControlDetectCapabilities(void) {
 
 static inline bool shellJobControlSupportsStops(void) {
     return gShellRuntime.job_control_caps.has_stop_signals;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#define SHELL_JC_UNUSED __attribute__((unused))
+#else
+#define SHELL_JC_UNUSED
+#endif
+
+static SHELL_JC_UNUSED void shellJobControlSaveShellIo(void) {
+    ShellJobControlContext *jc = &gShellJobControlCtx;
+    if (!jc) {
+        return;
+    }
+    if (!jc->saved_stdio_valid) {
+        for (int i = 0; i < 3; ++i) {
+            jc->saved_stdio[i] = dup(i);
+            if (jc->saved_stdio[i] >= 0) {
+                fcntl(jc->saved_stdio[i], F_SETFD, FD_CLOEXEC);
+            }
+        }
+        jc->saved_stdio_valid = true;
+    }
+    if (!jc->saved_termios_valid && gShellRuntime.tty_fd >= 0 && tcgetattr(gShellRuntime.tty_fd, &jc->saved_termios) == 0) {
+        jc->saved_termios_valid = true;
+    }
+}
+
+static SHELL_JC_UNUSED void shellJobControlRestoreShellIo(void) {
+    ShellJobControlContext *jc = &gShellJobControlCtx;
+    if (!jc) {
+        return;
+    }
+    if (jc->saved_stdio_valid) {
+        for (int i = 0; i < 3; ++i) {
+            if (jc->saved_stdio[i] >= 0) {
+                (void)dup2(jc->saved_stdio[i], i);
+            }
+        }
+    }
+    if (jc->saved_termios_valid && gShellRuntime.tty_fd >= 0) {
+        (void)tcsetattr(gShellRuntime.tty_fd, TCSADRAIN, &jc->saved_termios);
+    }
 }
 
 static void shellInitJobControlState(void) {
