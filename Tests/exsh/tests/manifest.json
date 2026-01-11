@@ -15,12 +15,12 @@
             "name": "Pipeline help through grep (iOS)",
             "category": "pipeline_ios",
             "description": "Ensure pipeline spool/hand-off works for help output piped into grep.",
-            "script": "Tests/exsh/tests/pipeline_help_grep_ios.exsh",
-            "expect": "runtime_ok",
-            "env": {
-                "RUN_VPROC_TESTS": "1"
-            },
-            "expected_stdout": "pipeline-help-grep:start\nbuiltin: history\npipeline-help-grep:status:0"
+        "script": "Tests/exsh/tests/pipeline_help_grep_ios.exsh",
+        "expect": "runtime_ok",
+        "env": {
+            "RUN_VPROC_TESTS": "1"
+        },
+        "expected_stdout": "pipeline-help-grep:start\nhistory     Print the interactive history list.\npipeline-help-grep:status:0"
         },
         {
             "id": "pipeline_empty_ios",
@@ -52,11 +52,11 @@
     "category": "pipeline_ios",
     "description": "Background pipeline output redirected to file and replayed",
     "script": "Tests/exsh/tests/pipeline_bg_pipe_redirect_ios.exsh",
-    "expect": "runtime_ok",
-    "env": {
-      "RUN_VPROC_TESTS": "1"
-    },
-    "expected_stdout": "pipeline-bg-pipe-redirect:start\nhistory         Print the interactive history list.\npipeline-bg-pipe-redirect:end"
+        "expect": "runtime_ok",
+        "env": {
+            "RUN_VPROC_TESTS": "1"
+        },
+        "expected_stdout": "pipeline-bg-pipe-redirect:start\nhistory     Print the interactive history list.\npipeline-bg-pipe-redirect:end"
   },
         {
             "id": "conditionals_loop",
@@ -410,9 +410,9 @@
     },
     {
         "id": "jobs_stop_resume",
-        "name": "SIGTSTP stops jobs and bg resumes",
+        "name": "SIGSTOP stops jobs and SIGCONT resumes",
         "category": "jobs",
-        "description": "Sending TSTP stops a job; bg restarts it and wait observes completion.",
+        "description": "Sending STOP stops a job; CONT restarts it and wait observes completion.",
         "script": "Tests/exsh/tests/jobs_stop_resume.exsh",
         "expect": "runtime_ok",
         "expected_stdout": "jobs-stop-resume:start\njobs:after-start\n[1] Running sleep 2\n[1] Stopped sleep 2\n[1] Running sleep 2\njobs-stop-resume:end"

@@ -1,11 +1,12 @@
 echo "jobs-stop-resume:start"
 sleep 2 &
+pid=$!
 echo "jobs:after-start"
 jobs
-kill -s TSTP %1
+kill -s STOP "$pid"
 sleep 0.1
 jobs
-bg %1
+kill -CONT "$pid"
 jobs
-wait %1
+wait "$pid"
 echo "jobs-stop-resume:end"
