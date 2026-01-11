@@ -19,6 +19,11 @@ int PSCALRuntimeSetTabTitle(const char *title) {
     return -1;
 }
 
+__attribute__((weak))
+void PSCALRuntimeOnProcessGroupEmpty(int pgid) {
+    (void)pgid;
+}
+
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 /* Host test stubs for iOS runtime hooks. */
 

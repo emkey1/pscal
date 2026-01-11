@@ -4,6 +4,13 @@ import Darwin
 import CoreLocation
 import UIKit
 
+@_cdecl("PSCALRuntimeOnProcessGroupEmpty")
+func PSCALRuntimeOnProcessGroupEmpty(_ pgid: Int32) {
+    DispatchQueue.main.async {
+        TerminalTabManager.shared.closeTabForPgid(Int(pgid))
+    }
+}
+
 // MARK: - C Bridge Helpers
 
 private func withCStringPointerRuntime<T>(_ string: String, _ body: (UnsafePointer<CChar>) -> T) -> T? {
@@ -337,6 +344,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var htermHistoryHead: Int = 0
     private let htermHistoryMaxBytes: Int = 2 * 1024 * 1024
     private var htermHistoryNeedsReplay: Bool = true
+    private var shellPgid: Int = 0
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -673,6 +681,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
                                                                            sessionId: sessionId)
                         }
                     }
+                    let pgid = Int(pscalTtyCurrentPgid())
+                    if pgid > 0 {
+                        self.stateQueue.async { self.shellPgid = pgid }
+                        DispatchQueue.main.async {
+                            TerminalTabManager.shared.registerShellPgid(pgid,
+                                                                         tabId: self.tabId)
+                        }
+                    }
                 }
             }
 
@@ -859,6 +875,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
     }
 
+    func currentShellPgid() -> Int {
+        return stateQueue.sync { shellPgid }
+    }
+
     func currentScreenText(maxLength: Int = 8000) -> String {
         let text = screenText.string
         let utf8 = text.utf8
@@ -924,6 +944,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
         runtimeDebugLog("[Runtime] exsh exit detected (status=\(status)); awaiting user to restart")
         let stackSymbols = Thread.callStackSymbols.joined(separator: "\n")
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
+        let pgid = self.stateQueue.sync { self.shellPgid }
+        if pgid > 0 {
+            DispatchQueue.main.async {
+                TerminalTabManager.shared.unregisterShellPgid(pgid)
+            }
+            self.stateQueue.async { self.shellPgid = 0 }
+        }
         releaseHandlerContext()
         stopOutputDrain()
         Task { @MainActor in

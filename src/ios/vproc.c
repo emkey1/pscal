@@ -1489,6 +1489,8 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry);
 static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
 static void vprocTaskTableRepairLocked(void);
 
+__attribute__((weak)) void PSCALRuntimeOnProcessGroupEmpty(int pgid);
+
 static VProcTaskTable gVProcTasks = {
     .items = NULL,
     .count = 0,
@@ -1500,6 +1502,24 @@ static VProcTaskEntry *gVProcTasksItemsStable = NULL;
 static size_t gVProcTasksCapacityStable = 0;
 
 /* -- Helper Functions -- */
+
+static void vprocMaybeNotifyPgidEmptyLocked(int pgid) {
+    if (pgid <= 0) {
+        return;
+    }
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (!entry || entry->pid <= 0) {
+            continue;
+        }
+        if (entry->pgid == pgid && !entry->exited) {
+            return;
+        }
+    }
+    if (PSCALRuntimeOnProcessGroupEmpty) {
+        PSCALRuntimeOnProcessGroupEmpty(pgid);
+    }
+}
 
 static void vprocSetCommLocked(VProcTaskEntry *entry, const char *label) {
     if (!entry) return;
@@ -4821,6 +4841,7 @@ void vprocMarkExit(VProc *vp, int status) {
         } else {
             vprocNotifyParentSigchldLocked(entry, VPROC_SIGCHLD_EVENT_EXIT);
         }
+        vprocMaybeNotifyPgidEmptyLocked(entry->pgid);
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);

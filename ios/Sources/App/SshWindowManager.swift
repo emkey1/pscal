@@ -43,6 +43,7 @@ final class TerminalTabManager: ObservableObject {
         }
     }
     private var nextShellOrdinal: Int = 1
+    private var pgidToTab: [Int: UInt64] = [:]
 
     private init() {
         let runtime = PscalRuntimeBootstrap.shared
@@ -84,6 +85,26 @@ final class TerminalTabManager: ObservableObject {
         tabInitLog("openShellTab created id=\(newId) runtime=\(runtime.runtimeId) title=\(title)")
         tabInitLog("openShellTab selectedId=\(selectedId) tabs=\(tabs.count)")
         return 0
+    }
+    
+    func registerShellPgid(_ pgid: Int, tabId: UInt64) {
+        guard pgid > 0 else { return }
+        pgidToTab[pgid] = tabId
+    }
+
+    func unregisterShellPgid(_ pgid: Int) {
+        pgidToTab.removeValue(forKey: pgid)
+    }
+
+    func closeTabForPgid(_ pgid: Int) {
+        guard pgid > 0 else { return }
+        guard let tabId = pgidToTab[pgid],
+              let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        let tab = tabs[index]
+        pgidToTab.removeValue(forKey: pgid)
+        if case .shell(let runtime) = tab.kind {
+            _ = closeShellTab(tabId: tab.id, runtime: runtime, status: 0)
+        }
     }
 
     func closeSelectedTab() {
@@ -140,6 +161,12 @@ final class TerminalTabManager: ObservableObject {
         if tabs[index].id == shellId {
             tabInitLog("closeShellTab ignored root id=\(tabs[index].id)")
             return .root
+        }
+        if case .shell(let runtime) = tabs[index].kind {
+            let pgid = runtime.currentShellPgid()
+            if pgid > 0 {
+                pgidToTab.removeValue(forKey: pgid)
+            }
         }
         let removedId = removeTab(at: index)
         logMultiTab("shell tab exit id=\(removedId) status=\(status)")
