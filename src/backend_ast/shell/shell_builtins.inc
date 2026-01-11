@@ -10117,19 +10117,22 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         }
         sent = true;
         int status = 0;
-        ShellWaitResult wait_res;
-        int err = shellWaitPidDetailed(pid, !terminate, &wait_res);
-        if (err != 0) {
-            continue;
-        }
-        if (wait_res.stopped) {
-            shellJobMarkStopped(job, wait_res.status_mapped);
-        } else if (WIFEXITED(wait_res.status_raw) || WIFSIGNALED(wait_res.status_raw)) {
-            if (!terminate) {
+        if (!terminate) {
+            ShellWaitResult wait_res;
+            int err = shellWaitPidDetailed(pid, true, &wait_res);
+            if (err != 0) {
+                continue;
+            }
+            if (wait_res.stopped) {
+                shellJobMarkStopped(job, wait_res.status_mapped);
+            } else if (WIFEXITED(wait_res.status_raw) || WIFSIGNALED(wait_res.status_raw)) {
+                job->pids[i] = -1;
+            } else {
                 job->pids[i] = -1;
             }
-        } else if (!terminate) {
-            job->pids[i] = -1;
+        } else {
+            int status = 0;
+            (void)vprocWaitPidShim(pid, &status, WNOHANG);
         }
     }
     if (!sent) {
