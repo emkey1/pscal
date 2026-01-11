@@ -2171,20 +2171,19 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 if (pid <= 0) {
                     continue;
                 }
-                bool stopped = false;
-                int status = 0;
-                int err = shellWaitPid(pid, &status, job_control, &stopped);
-                if (err != 0) {
-                    continue;
-                }
-                if (stopped) {
-                    stopped_job = true;
-                    final_status = status;
-                } else {
-                    final_status = status;
-                    ctx->pids[i] = -1;
-                }
+            ShellWaitResult wait_res;
+            int err = shellWaitPidDetailed(pid, job_control, &wait_res);
+            if (err != 0) {
+                continue;
             }
+            if (wait_res.stopped) {
+                stopped_job = true;
+                final_status = wait_res.status_mapped;
+            } else {
+                final_status = wait_res.status_mapped;
+                ctx->pids[i] = -1;
+            }
+        }
 
             if (job_control) {
                 shellJobControlRestoreForeground();
@@ -2317,17 +2316,16 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 }
                 continue;
             }
-            bool stopped = false;
-            int status = 0;
-            int err = shellWaitPid(pid, &status, job_control, &stopped);
+            ShellWaitResult wait_res;
+            int err = shellWaitPidDetailed(pid, job_control, &wait_res);
             if (err != 0) {
                 continue;
             }
-            if (stopped) {
+            if (wait_res.stopped) {
                 stopped_job = true;
-                final_status = status;
+                final_status = wait_res.status_mapped;
             } else {
-                final_status = status;
+                final_status = wait_res.status_mapped;
                 ctx->pids[i] = -1;
             }
         }
@@ -4422,7 +4420,10 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             if (job_control) {
                 shellJobControlSetForeground(child);
             }
-            shellWaitPid(child, &status, job_control, &stopped);
+            ShellWaitResult wait_res_child;
+            shellWaitPidDetailed(child, job_control, &wait_res_child);
+            status = wait_res_child.status_mapped;
+            stopped = wait_res_child.stopped;
             if (job_control) {
                 shellJobControlRestoreForeground();
             }
