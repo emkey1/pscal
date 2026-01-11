@@ -10078,9 +10078,8 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
     bool probe = (signo == 0);
     bool terminate = !probe &&
                      !(signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU || signo == SIGCONT);
-    bool synthetic = (vprocSnapshot(NULL, 0) > 0);
     if (probe) {
-        if (job->pgid > 0 && vprocKillShim(-job->pgid, 0) == 0) {
+        if (job->pgid > 0 && shellJobControlSendPgid(job->pgid, 0) == 0) {
             return true;
         }
         for (size_t i = 0; i < job->pid_count; ++i) {
@@ -10088,7 +10087,7 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
             if (pid <= 0) {
                 continue;
             }
-            if (vprocKillShim(pid, 0) == 0) {
+            if (shellJobControlSendPid(pid, 0) == 0) {
                 return true;
             }
         }
@@ -10097,7 +10096,7 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
     }
     if (terminate && job->pgid > 0) {
         /* Deliver to the whole synthetic group; safer for pipelines and job-spec parity. */
-        if (vprocKillShim(-job->pgid, signo) == 0) {
+        if (shellJobControlSendPgid(job->pgid, signo) == 0) {
             sent = true;
         }
     }
@@ -10109,7 +10108,7 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         }
         if (!terminate || !sent) {
             /* If group kill failed or we are delivering non-terminating signals, send per-pid. */
-            if (vprocKillShim(pid, signo) != 0) {
+            if (shellJobControlSendPid(pid, signo) != 0) {
                 fprintf(stderr, "kill: %s: %s\n",
                         spec_text ? spec_text : "job",
                         strerror(errno));
@@ -10322,7 +10321,6 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
             continue;
         }
         int rc = 0;
-#if defined(PSCAL_TARGET_IOS)
         pid_t target_pid = (pid_t)pid_value;
         if (target_pid < 0) {
             pid_t pgid = -target_pid;
@@ -10333,20 +10331,17 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
                     for (size_t k = 0; k < job->pid_count; ++k) {
                         if (job->pids[k] > 0) {
                             any = true;
-                            vprocKillShim(job->pids[k], signal_number);
+                            shellJobControlSendPid(job->pids[k], signal_number);
                         }
                     }
                 }
             }
             if (!any) {
-                rc = vprocKillShim(target_pid, signal_number);
+                rc = shellJobControlSendPgid(pgid, signal_number);
             }
         } else {
-            rc = vprocKillShim((pid_t)pid_value, signal_number);
+            rc = shellJobControlSendPid(target_pid, signal_number);
         }
-#else
-        rc = kill((pid_t)pid_value, signal_number);
-#endif
         if (rc != 0) {
             fprintf(stderr, "kill: (%ld) %s\n", pid_value, strerror(errno));
             overall_ok = false;
