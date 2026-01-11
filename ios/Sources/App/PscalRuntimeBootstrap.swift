@@ -1,6 +1,9 @@
 import Combine
 import Foundation
 import Darwin
+#if canImport(pscal_terminal_host)
+import pscal_terminal_host
+#endif
 import CoreLocation
 import UIKit
 
