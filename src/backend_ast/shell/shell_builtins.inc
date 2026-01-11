@@ -10149,7 +10149,6 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         shellCollectJobs();
         return true;
     }
-    (void)synthetic; /* avoid unused warning on non-iOS builds */
     return true;
 }
 

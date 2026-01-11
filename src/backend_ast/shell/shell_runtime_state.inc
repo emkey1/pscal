@@ -4223,6 +4223,8 @@ static SHELL_JC_UNUSED void shellJobControlRestoreShellIo(void) {
     }
 }
 
+static int shellJobControlSendPgid(pid_t pgid, int signo);
+
 static bool shellJobControlDispatchForegroundSignal(int signo) {
     if (!gShellRuntime.job_control_enabled || gShellJobControlCtx.fg_pgid <= 0) {
         return false;

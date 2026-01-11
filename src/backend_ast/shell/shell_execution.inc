@@ -1086,34 +1086,6 @@ static int shellWaitPidDetailed(pid_t pid, bool allow_stop, ShellWaitResult *out
     }
     return 0;
 }
-    if (out_stopped) {
-        *out_stopped = false;
-    }
-    int status = 0;
-    int options = allow_stop ? WUNTRACED : 0;
-    pid_t waited;
-    do {
-        waited = vprocWaitPidShim(pid, &status, options);
-    } while (waited < 0 && errno == EINTR);
-    if (waited < 0) {
-        return errno;
-    }
-    if (out_stopped && WIFSTOPPED(status)) {
-        *out_stopped = true;
-    }
-    if (status_out) {
-        if (WIFEXITED(status)) {
-            *status_out = WEXITSTATUS(status);
-        } else if (WIFSIGNALED(status)) {
-            *status_out = 128 + WTERMSIG(status);
-        } else if (WIFSTOPPED(status)) {
-            *status_out = 128 + WSTOPSIG(status);
-        } else {
-            *status_out = status;
-        }
-    }
-    return 0;
-}
 
 #if defined(PSCAL_TARGET_IOS)
 static void shellFdPrintf(int fd, const char *fmt, ...);
