@@ -1,0 +1,11 @@
+echo "jobs-stop-resume:start"
+sleep 2 &
+echo "jobs:after-start"
+jobs
+kill -s TSTP %1
+sleep 0.1
+jobs
+bg %1
+jobs
+wait %1
+echo "jobs-stop-resume:end"

@@ -406,8 +406,17 @@
             "description": "wait with no arguments should wait for all active jobs (bash-compatible).",
             "script": "Tests/exsh/tests/jobs_wait_all.exsh",
             "expect": "runtime_ok",
-            "expected_stdout": "jobs-wait-all:start\njobs:before-start\n[1] Running sleep 1\n[2] Running sleep 1\njobs:before-end\njobs:after-start\njobs:after-end\njobs-wait-all:end"
-        },
+        "expected_stdout": "jobs-wait-all:start\njobs:before-start\n[1] Running sleep 1\n[2] Running sleep 1\njobs:before-end\njobs:after-start\njobs:after-end\njobs-wait-all:end"
+    },
+    {
+        "id": "jobs_stop_resume",
+        "name": "SIGTSTP stops jobs and bg resumes",
+        "category": "jobs",
+        "description": "Sending TSTP stops a job; bg restarts it and wait observes completion.",
+        "script": "Tests/exsh/tests/jobs_stop_resume.exsh",
+        "expect": "runtime_ok",
+        "expected_stdout": "jobs-stop-resume:start\njobs:after-start\n[1] Running sleep 2\n[1] Stopped sleep 2\n[1] Running sleep 2\njobs-stop-resume:end"
+    },
         {
             "id": "jobspec_kill_stability",
             "name": "job-spec kill keeps ids stable",
