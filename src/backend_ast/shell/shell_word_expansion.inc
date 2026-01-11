@@ -1788,7 +1788,7 @@ static void shellHandlePendingSignal(int signo) {
     }
 
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
-        bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled;
+        bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled && shellJobControlSupportsStops();
         if (gShellCurrentVm && !stop_request) {
             gShellCurrentVm->exit_requested = true;
             gShellCurrentVm->current_builtin_name = "signal";

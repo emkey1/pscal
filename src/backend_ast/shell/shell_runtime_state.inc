@@ -4165,6 +4165,10 @@ static void shellJobControlDetectCapabilities(void) {
     gShellRuntime.job_control_caps = caps;
 }
 
+static inline bool shellJobControlSupportsStops(void) {
+    return gShellRuntime.job_control_caps.has_stop_signals;
+}
+
 static void shellInitJobControlState(void) {
     if (gShellRuntime.job_control_initialized) {
         return;
