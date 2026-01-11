@@ -10117,14 +10117,17 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         }
         sent = true;
         int status = 0;
-        pid_t res = vprocWaitPidShim(pid, &status, terminate ? 0 : (WNOHANG | WUNTRACED | WCONTINUED));
-        if (res > 0 && (WIFEXITED(status) || WIFSIGNALED(status))) {
+        ShellWaitResult wait_res;
+        int err = shellWaitPidDetailed(pid, !terminate, &wait_res);
+        if (err != 0) {
+            continue;
+        }
+        if (wait_res.stopped) {
+            shellJobMarkStopped(job, wait_res.status_mapped);
+        } else if (WIFEXITED(wait_res.status_raw) || WIFSIGNALED(wait_res.status_raw)) {
             if (!terminate) {
                 job->pids[i] = -1;
             }
-        } else if (res > 0 && WIFSTOPPED(status)) {
-            job->stopped = true;
-            job->running = false;
         } else if (!terminate) {
             job->pids[i] = -1;
         }
@@ -10134,12 +10137,10 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
                 spec_text ? spec_text : "job");
         return false;
     }
+    job->last_status = 128 + signo;
     if (signo == SIGTSTP || signo == SIGSTOP || signo == SIGTTIN || signo == SIGTTOU) {
-        job->last_status = 128 + signo;
-        job->running = false;
-        job->stopped = true;
+        shellJobMarkStopped(job, job->last_status);
     } else {
-        job->last_status = 128 + signo;
         job->running = false;
         job->stopped = false;
     }
