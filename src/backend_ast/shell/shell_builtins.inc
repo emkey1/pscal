@@ -10479,15 +10479,12 @@ Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
                 if (pid <= 0) {
                     continue;
                 }
-                int status = 0;
-                pid_t res;
-                do {
-                    res = vprocWaitPidShim(pid, &status, 0);
-                } while (res < 0 && errno == EINTR);
-                if (res < 0) {
+                ShellWaitResult wait_res;
+                int err = shellWaitPidDetailed(pid, false, &wait_res);
+                if (err != 0) {
                     continue;
                 }
-                job_status = shellStatusFromWait(status);
+                job_status = wait_res.status_mapped;
                 job->pids[i] = -1;
             }
             shellRemoveJobAt(index);
@@ -10536,15 +10533,12 @@ Value vmBuiltinShellWait(VM *vm, int arg_count, Value *args) {
         if (pid <= 0) {
             continue;
         }
-        int status = 0;
-        pid_t res;
-        do {
-            res = vprocWaitPidShim(pid, &status, 0);
-        } while (res < 0 && errno == EINTR);
-        if (res < 0) {
+        ShellWaitResult wait_res;
+        int err = shellWaitPidDetailed(pid, false, &wait_res);
+        if (err != 0) {
             continue;
         }
-        final_status = shellStatusFromWait(status);
+        final_status = wait_res.status_mapped;
         job->pids[i] = -1;
     }
     shellRemoveJobAt(index);
