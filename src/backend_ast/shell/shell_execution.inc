@@ -1215,6 +1215,9 @@ typedef struct {
     int status;
     bool prev_bg_flag;
     bool prev_worker_flag;
+    bool stopped;
+    pthread_mutex_t stop_mu;
+    pthread_cond_t stop_cv;
 } ShellInProcessWorkerCtx;
 #endif
 
@@ -1229,6 +1232,8 @@ static void shellInProcessWorkerCleanup(void *arg) {
     if (!ctx) {
         return;
     }
+    pthread_mutex_destroy(&ctx->stop_mu);
+    pthread_cond_destroy(&ctx->stop_cv);
 
     if (ctx->stdin_fd >= 0) {
         if (ctx->stdin_is_vproc) {
@@ -1829,6 +1834,8 @@ static void *shellInProcessWorkerMain(void *arg) {
         free(ctx);
         return NULL;
     }
+    pthread_mutex_init(&ctx->stop_mu, NULL);
+    pthread_cond_init(&ctx->stop_cv, NULL);
     ctx->status = W_EXITCODE(128 + SIGINT, 0);
     ctx->prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
         ? PSCALRuntimeGetCurrentRuntimeContext()

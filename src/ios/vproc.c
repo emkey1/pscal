@@ -1640,6 +1640,9 @@ typedef struct {
     int kernel_pid;
     bool detach;
     PSCALRuntimeContext *runtime_ctx;
+    pthread_mutex_t *worker_stop_mu;
+    pthread_cond_t *worker_stop_cv;
+    bool *worker_stopped;
 } VProcThreadStartCtx;
 
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
