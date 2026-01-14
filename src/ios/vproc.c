@@ -3791,6 +3791,10 @@ static int vprocLocationDeviceOpenHost(int flags) {
         return -1;
     }
     bool debug = vprocLocationDebugEnabled();
+    char payload[sizeof(gLocationDevice.last_payload)];
+    size_t payload_len = 0;
+    bool flush_payload = false;
+    int readers_after = 0;
     pthread_mutex_lock(&gLocationDevice.mu);
     if (!gLocationDevice.enabled) {
         pthread_mutex_unlock(&gLocationDevice.mu);
@@ -3810,6 +3814,18 @@ static int vprocLocationDeviceOpenHost(int flags) {
         return -1;
     }
     int duped = vprocCloneFd(gLocationDevice.read_fd);
+    if (duped >= 0) {
+        gLocationDevice.readers++;
+        readers_after = gLocationDevice.readers;
+        if (gLocationDevice.has_payload && gLocationDevice.last_len > 0) {
+            payload_len = gLocationDevice.last_len;
+            if (payload_len >= sizeof(payload)) {
+                payload_len = sizeof(payload) - 1;
+            }
+            memcpy(payload, gLocationDevice.last_payload, payload_len);
+            flush_payload = true;
+        }
+    }
     pthread_mutex_unlock(&gLocationDevice.mu);
     if (duped < 0) {
         return -1;
@@ -3820,14 +3836,13 @@ static int vprocLocationDeviceOpenHost(int flags) {
             fcntl(duped, F_SETFL, rflags | O_NONBLOCK);
         }
     }
-    gLocationDevice.readers++;
     if (debug) {
         vprocLocationDebugf("open /dev/location -> host fd %d (nonblock=%s) readers=%d",
-                            duped, (flags & O_NONBLOCK) ? "true" : "false", gLocationDevice.readers);
+                            duped, (flags & O_NONBLOCK) ? "true" : "false", readers_after);
     }
     /* If we already have a payload buffered, push it immediately to the new reader. */
-    if (gLocationDevice.has_payload && gLocationDevice.last_len > 0) {
-        (void)vprocHostWriteRaw(duped, gLocationDevice.last_payload, gLocationDevice.last_len);
+    if (flush_payload && payload_len > 0) {
+        (void)vprocHostWriteRaw(duped, payload, payload_len);
     }
     return duped;
 }
@@ -4627,10 +4642,6 @@ int vprocHostOpen(const char *path, int flags, ...) {
         va_end(ap);
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (vprocPathIsLegacyGpsDevice(path)) {
-        errno = ENOENT;
-        return -1;
-    }
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpenHost(flags);
     }
@@ -7705,6 +7716,7 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
 }
 
 int vprocDupShim(int fd) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostDup(fd);
@@ -7735,6 +7747,7 @@ int vprocDupShim(int fd) {
 }
 
 int vprocDup2Shim(int fd, int target) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostDup2(fd, target);
@@ -7772,6 +7785,7 @@ static bool vprocHasFd(VProc *vp, int fd) {
 }
 
 int vprocCloseShim(int fd) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostClose(fd);
@@ -7788,6 +7802,7 @@ int vprocCloseShim(int fd) {
 }
 
 int vprocFsyncShim(int fd) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostFsyncRaw(fd);
@@ -7805,6 +7820,7 @@ int vprocFsyncShim(int fd) {
 }
 
 int vprocPipeShim(int pipefd[2]) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostPipe(pipefd);
@@ -9015,6 +9031,7 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
 }
 
 int vprocOpenShim(const char *path, int flags, ...) {
+    vprocDeliverPendingSignalsForCurrent();
     int mode = 0;
     if (flags & O_CREAT) {
         va_list ap;
@@ -9119,10 +9136,34 @@ int vprocOpenShim(const char *path, int flags, ...) {
             errno = ENOTSUP;
             return -1;
         }
+        VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+        uint64_t session_id = (session_stdio && !vprocSessionStdioIsDefault(session_stdio))
+                ? session_stdio->session_id
+                : 0;
+        struct pscal_fd *session_slave = NULL;
+        if (session_id != 0) {
+            int slave_flags = O_RDWR;
+            if (flags & O_NONBLOCK) {
+                slave_flags |= O_NONBLOCK;
+            }
+            int slave_err = pscalPtyOpenSlave(pty_num, slave_flags, &session_slave);
+            if (slave_err < 0) {
+                session_slave = NULL;
+            }
+        }
         int slot = vprocInsertPscalFd(vp, pty);
         if (slot < 0) {
             pscal_fd_close(pty);
+            if (session_slave) {
+                pscal_fd_close(session_slave);
+            }
             return -1;
+        }
+        if (session_id != 0 && session_slave) {
+            vprocSessionPtyRegister(session_id, session_slave, pty);
+        }
+        if (session_slave) {
+            pscal_fd_close(session_slave);
         }
         return slot;
     }
@@ -9144,10 +9185,6 @@ int vprocOpenShim(const char *path, int flags, ...) {
             return -1;
         }
         return slot;
-    }
-    if (vprocPathIsLegacyGpsDevice(path)) {
-        errno = ENOENT;
-        return -1;
     }
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpen(vp, flags);

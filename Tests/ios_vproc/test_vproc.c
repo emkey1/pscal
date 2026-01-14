@@ -14,6 +14,7 @@
 #include <time.h>
 #define PATH_VIRTUALIZATION_NO_MACROS 1
 #include "common/path_virtualization.h"
+#include "ios/tty/pscal_pty.h"
 
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 void pscalRuntimeDebugLog(const char *message) {
@@ -1095,6 +1096,7 @@ static void assert_sighandler_resets_with_sa_resethand(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
     int pid = vprocPid(vp);
+    vprocRegisterThread(vp, pthread_self());
     struct sigaction sa = {0};
     sa.sa_handler = handler_resetting;
     sa.sa_flags = SA_RESETHAND;
@@ -1422,6 +1424,65 @@ static void assert_passthrough_when_inactive(void) {
     assert(strcmp(buf, "pass") == 0);
     close(fd);
     unlink(tmpl);
+}
+
+static void assert_gps_alias_reads_location_payload(void) {
+    const char *payload = "gps-payload";
+    /* Seed the virtual location device. */
+    assert(vprocLocationDeviceWrite(payload, strlen(payload)) == (ssize_t)strlen(payload));
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int fd = vprocOpenShim("/dev/gps", O_RDONLY);
+    assert(fd >= 0);
+    char buf[32] = {0};
+    ssize_t r = vprocReadShim(fd, buf, sizeof(buf));
+    assert(r == (ssize_t)strlen(payload));
+    assert(strncmp(buf, payload, (size_t)r) == 0);
+    assert(vprocCloseShim(fd) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_device_stat_bypasses_truncation(void) {
+    struct stat st;
+    /* Should hit the real device path, not PATH_TRUNCATE expansion. */
+    assert(pscalPathVirtualized_stat("/dev/ptmx", &st) == 0);
+}
+
+static void assert_ptmx_open_registers_session(void) {
+    /* Create a session with an initial pty to seed session_id. */
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+
+    uint64_t session_id = 1234;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int fd = vprocOpenShim("/dev/ptmx", O_RDWR | O_NOCTTY);
+    assert(fd >= 0);
+    /* Master registered with session should accept writes via session API. */
+    const char *msg = "hi";
+    assert(vprocSessionWriteToMaster(session_id, msg, 2) == 2);
+    assert(vprocCloseShim(fd) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    vprocSessionStdioDestroy(session);
 }
 
 static void assert_job_id_and_label_round_trip(void) {
@@ -1796,6 +1857,12 @@ int main(void) {
     assert_write_reads_back();
     fprintf(stderr, "TEST passthrough_when_inactive\n");
     assert_passthrough_when_inactive();
+    fprintf(stderr, "TEST gps_alias_reads_location_payload\n");
+    assert_gps_alias_reads_location_payload();
+    fprintf(stderr, "TEST device_stat_bypasses_truncation\n");
+    assert_device_stat_bypasses_truncation();
+    fprintf(stderr, "TEST ptmx_open_registers_session\n");
+    assert_ptmx_open_registers_session();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;

@@ -133,6 +133,9 @@ static void pathVirtualizedStripInPlace(char *buffer, size_t current_length) {
 }
 
 int pscalPathVirtualized_chdir(const char *path) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return chdir(path);
+    }
     if (!pathVirtualizationActive()) {
         return chdir(path);
     }
@@ -154,6 +157,9 @@ char *pscalPathVirtualized_getcwd(char *buffer, size_t size) {
 }
 
 int pscalPathVirtualized_stat(const char *path, struct stat *buf) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return stat(path, buf);
+    }
     if (!pathVirtualizationActive()) {
         return stat(path, buf);
     }
@@ -164,6 +170,9 @@ int pscalPathVirtualized_stat(const char *path, struct stat *buf) {
 }
 
 int pscalPathVirtualized_lstat(const char *path, struct stat *buf) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return lstat(path, buf);
+    }
     if (!pathVirtualizationActive()) {
         return lstat(path, buf);
     }
@@ -174,6 +183,9 @@ int pscalPathVirtualized_lstat(const char *path, struct stat *buf) {
 }
 
 int pscalPathVirtualized_access(const char *path, int mode) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return access(path, mode);
+    }
     if (!pathVirtualizationActive()) {
         return access(path, mode);
     }
@@ -183,6 +195,9 @@ int pscalPathVirtualized_access(const char *path, int mode) {
 }
 
 int pscalPathVirtualized_mkdir(const char *path, mode_t mode) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return mkdir(path, mode);
+    }
     if (!pathVirtualizationActive()) {
         return mkdir(path, mode);
     }
@@ -192,6 +207,9 @@ int pscalPathVirtualized_mkdir(const char *path, mode_t mode) {
 }
 
 int pscalPathVirtualized_rmdir(const char *path) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return rmdir(path);
+    }
     if (!pathVirtualizationActive()) {
         return rmdir(path);
     }
@@ -201,6 +219,9 @@ int pscalPathVirtualized_rmdir(const char *path) {
 }
 
 int pscalPathVirtualized_unlink(const char *path) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return unlink(path);
+    }
     if (!pathVirtualizationActive()) {
         return unlink(path);
     }
@@ -210,6 +231,9 @@ int pscalPathVirtualized_unlink(const char *path) {
 }
 
 int pscalPathVirtualized_remove(const char *path) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return remove(path);
+    }
     if (!pathVirtualizationActive()) {
         return remove(path);
     }
@@ -219,6 +243,10 @@ int pscalPathVirtualized_remove(const char *path) {
 }
 
 int pscalPathVirtualized_rename(const char *oldpath, const char *newpath) {
+    if (pathVirtualizedIsVprocDevicePath(oldpath) ||
+        pathVirtualizedIsVprocDevicePath(newpath)) {
+        return rename(oldpath, newpath);
+    }
     if (!pathVirtualizationActive()) {
         return rename(oldpath, newpath);
     }
@@ -231,6 +259,9 @@ int pscalPathVirtualized_rename(const char *oldpath, const char *newpath) {
 }
 
 DIR *pscalPathVirtualized_opendir(const char *name) {
+    if (pathVirtualizedIsVprocDevicePath(name)) {
+        return opendir(name);
+    }
     if (!pathVirtualizationActive()) {
         return opendir(name);
     }
@@ -241,6 +272,9 @@ DIR *pscalPathVirtualized_opendir(const char *name) {
 }
 
 int pscalPathVirtualized_symlink(const char *target, const char *linkpath) {
+    if (pathVirtualizedIsVprocDevicePath(linkpath)) {
+        return symlink(target, linkpath);
+    }
     if (!pathVirtualizationActive()) {
         return symlink(target, linkpath);
     }
@@ -250,6 +284,9 @@ int pscalPathVirtualized_symlink(const char *target, const char *linkpath) {
 }
 
 ssize_t pscalPathVirtualized_readlink(const char *path, char *buf, size_t size) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return readlink(path, buf, size);
+    }
     if (!pathVirtualizationActive()) {
         return readlink(path, buf, size);
     }
@@ -265,6 +302,9 @@ ssize_t pscalPathVirtualized_readlink(const char *path, char *buf, size_t size) 
 }
 
 char *pscalPathVirtualized_realpath(const char *path, char *resolved_path) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        return realpath(path, resolved_path);
+    }
     if (!pathVirtualizationActive()) {
         return realpath(path, resolved_path);
     }
