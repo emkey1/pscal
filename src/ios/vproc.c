@@ -53,6 +53,7 @@ __attribute__((weak)) void pscalRuntimeRequestSigint(void);
 __attribute__((weak)) void pscalRuntimeDebugLog(const char *message);
 __attribute__((weak)) PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
 __attribute__((weak)) void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
+__attribute__((weak)) int pscalRuntimeCurrentForegroundPgid(void);
 #endif
 
 #if defined(__APPLE__)
@@ -1277,16 +1278,174 @@ static VProcSessionStdio gSessionStdioDefault = {
 static _Thread_local VProcSessionStdio *gSessionStdioTls = NULL;
 static pthread_mutex_t gSessionInputInitMu = PTHREAD_MUTEX_INITIALIZER;
 static const char *kLocationDevicePath = "/dev/location";
-static const char *kLegacyGpsDevicePath = "/dev/ttyGPS";
+static const char *kLegacyGpsDevicePath = "/dev/gps";
+static const char *kLegacyGpsDevicePath2 = "/dev/ttyGPS";
 
 typedef struct {
     pthread_mutex_t mu;
     int read_fd;
     int write_fd;
+    int stub_fd;
+    int readers;
+    char last_payload[128];
+    size_t last_len;
+    bool has_payload;
     bool enabled;
 } VProcLocationDevice;
 
-static VProcLocationDevice gLocationDevice = { PTHREAD_MUTEX_INITIALIZER, -1, -1, false };
+static VProcLocationDevice gLocationDevice = { PTHREAD_MUTEX_INITIALIZER, -1, -1, -1, 0, true };
+static bool vprocLocationDebugEnabled(void);
+static void vprocLocationDebugf(const char *fmt, ...);
+
+typedef struct {
+    struct pscal_fd *pscal_fd;
+    int host_fd;
+} VProcLocationPscalEntry;
+
+static struct {
+    VProcLocationPscalEntry *items;
+    size_t count;
+    size_t capacity;
+    pthread_mutex_t mu;
+} gLocationPscalMap = { NULL, 0, 0, PTHREAD_MUTEX_INITIALIZER };
+
+static void vprocLocationPscalMapEnsureCapacity(size_t needed) {
+    if (gLocationPscalMap.capacity >= needed) {
+        return;
+    }
+    size_t new_cap = gLocationPscalMap.capacity ? gLocationPscalMap.capacity * 2 : 8;
+    while (new_cap < needed) {
+        new_cap *= 2;
+    }
+    VProcLocationPscalEntry *resized = realloc(gLocationPscalMap.items, new_cap * sizeof(VProcLocationPscalEntry));
+    if (!resized) {
+        return;
+    }
+    gLocationPscalMap.items = resized;
+    gLocationPscalMap.capacity = new_cap;
+}
+
+static void vprocLocationPscalMapAdd(struct pscal_fd *fd, int host_fd) {
+    if (!fd || host_fd < 0) {
+        return;
+    }
+    pthread_mutex_lock(&gLocationPscalMap.mu);
+    vprocLocationPscalMapEnsureCapacity(gLocationPscalMap.count + 1);
+    if (gLocationPscalMap.count < gLocationPscalMap.capacity) {
+        gLocationPscalMap.items[gLocationPscalMap.count].pscal_fd = fd;
+        gLocationPscalMap.items[gLocationPscalMap.count].host_fd = host_fd;
+        gLocationPscalMap.count++;
+    }
+    pthread_mutex_unlock(&gLocationPscalMap.mu);
+}
+
+static int vprocLocationPscalMapHostFd(struct pscal_fd *fd) {
+    int host_fd = -1;
+    pthread_mutex_lock(&gLocationPscalMap.mu);
+    for (size_t i = 0; i < gLocationPscalMap.count; ++i) {
+        VProcLocationPscalEntry *entry = &gLocationPscalMap.items[i];
+        if (entry->pscal_fd == fd) {
+            host_fd = entry->host_fd;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&gLocationPscalMap.mu);
+    return host_fd;
+}
+
+static void vprocLocationPscalMapRemove(struct pscal_fd *fd) {
+    if (!fd) return;
+    pthread_mutex_lock(&gLocationPscalMap.mu);
+    for (size_t i = 0; i < gLocationPscalMap.count; ++i) {
+        if (gLocationPscalMap.items[i].pscal_fd != fd) {
+            continue;
+        }
+        size_t last = gLocationPscalMap.count - 1;
+        if (i != last) {
+            gLocationPscalMap.items[i] = gLocationPscalMap.items[last];
+        }
+        gLocationPscalMap.count--;
+        break;
+    }
+    pthread_mutex_unlock(&gLocationPscalMap.mu);
+}
+
+/* Forward declaration; defined later. */
+static void vprocDeliverPendingSignalsForCurrent(void);
+static bool vprocCurrentHasPendingSignals(void);
+
+static ssize_t vprocLocationPscalRead(struct pscal_fd *fd, void *buf, size_t bufsize) {
+    if (!fd || !buf || bufsize == 0) {
+        return _EINVAL;
+    }
+    int host_fd = vprocLocationPscalMapHostFd(fd);
+    if (host_fd < 0) {
+        return _EBADF;
+    }
+    while (true) {
+        vprocDeliverPendingSignalsForCurrent();
+        if (vprocCurrentHasPendingSignals()) {
+            return _EINTR;
+        }
+        ssize_t r = vprocHostReadRaw(host_fd, buf, bufsize);
+        if (r > 0) {
+            return r;
+        }
+        if (r == 0) {
+            return 0;
+        }
+        int err = errno;
+        if (err == EINTR) {
+            return _EINTR;
+        }
+        if (err == EAGAIN || err == EWOULDBLOCK) {
+            usleep(1000);
+            continue;
+        }
+        return -err;
+    }
+}
+
+static int vprocLocationPscalPoll(struct pscal_fd *fd) {
+    int host_fd = vprocLocationPscalMapHostFd(fd);
+    if (host_fd < 0) {
+        return 0;
+    }
+    struct pollfd pfd = { .fd = host_fd, .events = POLLIN | POLLPRI, .revents = 0 };
+    int rc = vprocHostPollRaw(&pfd, 1, 0);
+    if (rc < 0) {
+        return 0;
+    }
+    return pfd.revents;
+}
+
+static void vprocLocationDeviceCloseLocked(void);
+
+static int vprocLocationPscalClose(struct pscal_fd *fd) {
+    int host_fd = vprocLocationPscalMapHostFd(fd);
+    vprocLocationPscalMapRemove(fd);
+    if (host_fd >= 0) {
+        vprocHostCloseRaw(host_fd);
+    }
+    pthread_mutex_lock(&gLocationDevice.mu);
+    if (gLocationDevice.readers > 0) {
+        gLocationDevice.readers--;
+    }
+    if (gLocationDevice.readers == 0) {
+        vprocLocationDeviceCloseLocked();
+    }
+    pthread_mutex_unlock(&gLocationDevice.mu);
+    return 0;
+}
+
+static const struct pscal_fd_ops kVprocLocationFdOps = {
+    .read = vprocLocationPscalRead,
+    .write = NULL,
+    .poll = vprocLocationPscalPoll,
+    .ioctl_size = NULL,
+    .ioctl = NULL,
+    .close = vprocLocationPscalClose,
+};
 
 typedef struct {
     uint64_t session_id;
@@ -1488,6 +1647,9 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 static void vprocClearEntryLocked(VProcTaskEntry *entry);
 static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
 static void vprocTaskTableRepairLocked(void);
+static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty);
+static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid);
+static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
 
 __attribute__((weak)) void PSCALRuntimeOnProcessGroupEmpty(int pgid);
 
@@ -2019,9 +2181,7 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
     }
     if (action == VPROC_SIG_STOP) {
         if (entry->stop_unsupported) {
-            if (sig == SIGTSTP && pscalRuntimeRequestSigint) {
-                pscalRuntimeRequestSigint();
-            }
+            vprocQueuePendingSignalLocked(entry, sig);
             return;
         }
         entry->stopped = true;
@@ -2177,8 +2337,9 @@ static void vprocDispatchControlSignal(VProc *vp, int sig) {
     }
 }
 
-static void vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
+static bool vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
     uint32_t pending = entry->pending_signals;
+    bool exit_current = false;
     for (int sig = 1; sig < 32; ++sig) {
         uint32_t mask = vprocSigMask(sig);
         if (!(pending & mask)) continue;
@@ -2190,9 +2351,15 @@ static void vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
             continue;
         }
         vprocApplySignalLocked(entry, sig);
+        /* If this is the current thread and the action was a terminating
+         * default, arrange to self-terminate after we drop the lock. */
+        if (action == VPROC_SIG_KILL && vprocEntryIsCurrentThreadLocked(entry) && entry->exited) {
+            exit_current = true;
+        }
         entry->pending_signals &= ~mask;
         entry->pending_counts[sig] = 0;
     }
+    return exit_current;
 }
 
 typedef struct {
@@ -2633,18 +2800,34 @@ static void vprocDispatchControlSignalToForeground(int shell_pid, int sig) {
         return;
     }
     int target_fgid = -1;
+    int shell_pgid = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
-    bool shell_owns_fg = vprocShellOwnsForegroundLocked(shell_pid, &target_fgid);
+    VProcTaskEntry *shell_entry = vprocTaskFindLocked(shell_pid);
+    if (shell_entry) {
+        shell_pgid = shell_entry->pgid;
+    }
+    (void)vprocShellOwnsForegroundLocked(shell_pid, &target_fgid);
     pthread_mutex_unlock(&gVProcTasks.mu);
-    if (shell_owns_fg || target_fgid <= 0) {
+    int override_fg = (pscalRuntimeCurrentForegroundPgid) ? pscalRuntimeCurrentForegroundPgid() : -1;
+    if (override_fg > 0) {
+        target_fgid = override_fg;
+    } else if (target_fgid <= 0) {
+        target_fgid = shell_pgid;
+    }
+    if (target_fgid > 0) {
+        int rc = vprocKillShim(-target_fgid, sig);
 #if defined(PSCAL_TARGET_IOS)
-        if (sig == SIGINT && pscalRuntimeRequestSigint) {
+        if (rc < 0 && sig == SIGINT && pscalRuntimeRequestSigint) {
             pscalRuntimeRequestSigint();
         }
 #endif
         return;
     }
-    (void)vprocKillShim(-target_fgid, sig);
+#if defined(PSCAL_TARGET_IOS)
+    if (sig == SIGINT && pscalRuntimeRequestSigint) {
+        pscalRuntimeRequestSigint();
+    }
+#endif
 }
 
 static void *vprocSessionInputThread(void *arg) {
@@ -3142,7 +3325,7 @@ static void vprocNotifyPidSigchldLocked(int target_pid, VProcSigchldEvent evt) {
     target_entry->sigchld_events++;
     vprocQueuePendingSignalLocked(target_entry, SIGCHLD);
     if (!target_entry->sigchld_blocked) {
-        vprocDeliverPendingSignalsLocked(target_entry);
+        (void)vprocDeliverPendingSignalsLocked(target_entry);
     }
 }
 
@@ -3278,15 +3461,132 @@ static bool vprocPathMatches(const char *path, const char *target) {
     if (!path || !target) {
         return false;
     }
-    return strcmp(path, target) == 0;
+    if (strcmp(path, target) == 0) {
+        return true;
+    }
+    /* Allow any sandbox path that still ends with the target (e.g., /var/.../dev/location). */
+    const char *sub = strstr(path, target);
+    if (sub && strcmp(sub, target) == 0) {
+        return true;
+    }
+    /* Allow sandboxed prefixes (e.g., /private/var/.../dev/location). */
+    size_t target_len = strlen(target);
+    size_t path_len = strlen(path);
+    if (path_len >= target_len) {
+        if (strcmp(path + (path_len - target_len), target) == 0) {
+            return true;
+        }
+    }
+    if (strncmp(path, "/private", 8) == 0) {
+        const char *trimmed = path + 8;
+        if (strcmp(trimmed, target) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool vprocLocationDebugEnabled(void) {
+    static int checked = 0;
+    static bool enabled = false;
+    if (!checked) {
+        const char *env = getenv("PSCALI_LOCATION_DEBUG");
+        if (env && env[0] != '\0' && strcmp(env, "0") != 0) {
+            enabled = true;
+        }
+        checked = 1;
+    }
+    return enabled;
+}
+
+static void vprocLocationDebugf(const char *fmt, ...) {
+    if (!fmt || !vprocLocationDebugEnabled()) {
+        return;
+    }
+    char buf[256];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    vprocDebugLogf("%s", buf);
+}
+
+static void vprocEnsurePathParent(const char *path) {
+    if (!path || path[0] != '/') {
+        return;
+    }
+    char buf[PATH_MAX];
+    strncpy(buf, path, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    size_t len = strlen(buf);
+    for (size_t i = 1; i < len; ++i) {
+        if (buf[i] == '/') {
+            buf[i] = '\0';
+            (void)mkdir(buf, 0777);
+            buf[i] = '/';
+        }
+    }
+}
+
+static void vprocLocationDeviceEnsureStub(void) {
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    const char *path = kLocationDevicePath;
+    if (pathTruncateEnabled() && pathTruncateExpand(kLocationDevicePath, expanded, sizeof(expanded))) {
+        path = expanded;
+    }
+    if (vprocLocationDebugEnabled()) {
+        vprocLocationDebugf("ensuring location stub at %s", path);
+    }
+    vprocEnsurePathParent(path);
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        if (!S_ISFIFO(st.st_mode)) {
+            if (unlink(path) != 0 && vprocLocationDebugEnabled()) {
+                vprocLocationDebugf("failed to unlink non-fifo location stub %s: %s",
+                                    path,
+                                    strerror(errno));
+            }
+        }
+    }
+    if (mkfifo(path, 0666) != 0 && errno != EEXIST) {
+        if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("failed to mkfifo location stub at %s: %s",
+                                path,
+                                strerror(errno));
+        }
+    }
+    if (gLocationDevice.stub_fd < 0) {
+        int fd = vprocHostOpenRawInternal(path, O_RDWR | O_NONBLOCK, 0666, true);
+        if (fd >= 0) {
+            gLocationDevice.stub_fd = fd;
+            if (vprocLocationDebugEnabled()) {
+                vprocLocationDebugf("opened location stub fifo fd=%d", fd);
+            }
+        } else if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("failed to open location stub fifo %s: %s",
+                                path,
+                                strerror(errno));
+        }
+    }
+#else
+    (void)kLocationDevicePath;
+#endif
 }
 
 static bool vprocPathIsLocationDevice(const char *path) {
-    return vprocPathMatches(path, kLocationDevicePath);
+    if (vprocPathMatches(path, kLocationDevicePath)) {
+        return true;
+    }
+    /* Backward compatibility: some callers still open /dev/gps. */
+    if (vprocPathMatches(path, kLegacyGpsDevicePath)) {
+        return true;
+    }
+    return vprocPathMatches(path, kLegacyGpsDevicePath2);
 }
 
 static bool vprocPathIsLegacyGpsDevice(const char *path) {
-    return vprocPathMatches(path, kLegacyGpsDevicePath);
+    return vprocPathMatches(path, kLegacyGpsDevicePath) || vprocPathMatches(path, kLegacyGpsDevicePath2);
 }
 
 static bool vprocPathIsDevTty(const char *path) {
@@ -3442,14 +3742,28 @@ static void vprocLocationDeviceCloseLocked(void) {
         vprocHostCloseRaw(gLocationDevice.write_fd);
         gLocationDevice.write_fd = -1;
     }
+    if (gLocationDevice.stub_fd >= 0) {
+        vprocHostCloseRaw(gLocationDevice.stub_fd);
+        gLocationDevice.stub_fd = -1;
+    }
+    gLocationDevice.readers = 0;
+    gLocationDevice.has_payload = false;
+    gLocationDevice.last_len = 0;
 }
 
 static int vprocLocationDeviceEnsurePipeLocked(void) {
     if (gLocationDevice.read_fd >= 0 && gLocationDevice.write_fd >= 0) {
         return 0;
     }
+    if (vprocLocationDebugEnabled()) {
+        vprocLocationDebugf("creating location pipe");
+    }
+    vprocLocationDeviceEnsureStub();
     int fds[2];
     if (vprocHostPipeRaw(fds) != 0) {
+        if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("location pipe creation failed: %s", strerror(errno));
+        }
         return -1;
     }
     for (size_t i = 0; i < 2; ++i) {
@@ -3464,6 +3778,9 @@ static int vprocLocationDeviceEnsurePipeLocked(void) {
     }
     gLocationDevice.read_fd = fds[0];
     gLocationDevice.write_fd = fds[1];
+    if (vprocLocationDebugEnabled()) {
+        vprocLocationDebugf("location pipe ready read=%d write=%d", gLocationDevice.read_fd, gLocationDevice.write_fd);
+    }
     return 0;
 }
 
@@ -3473,15 +3790,22 @@ static int vprocLocationDeviceOpenHost(int flags) {
         errno = EACCES;
         return -1;
     }
+    bool debug = vprocLocationDebugEnabled();
     pthread_mutex_lock(&gLocationDevice.mu);
     if (!gLocationDevice.enabled) {
         pthread_mutex_unlock(&gLocationDevice.mu);
+        if (debug) {
+            vprocLocationDebugf("open /dev/location denied (device disabled)");
+        }
         errno = ENOENT;
         return -1;
     }
     if (vprocLocationDeviceEnsurePipeLocked() != 0) {
         int err = errno;
         pthread_mutex_unlock(&gLocationDevice.mu);
+        if (debug) {
+            vprocLocationDebugf("open /dev/location failed to ensure pipe: %s", strerror(err));
+        }
         errno = err;
         return -1;
     }
@@ -3496,6 +3820,15 @@ static int vprocLocationDeviceOpenHost(int flags) {
             fcntl(duped, F_SETFL, rflags | O_NONBLOCK);
         }
     }
+    gLocationDevice.readers++;
+    if (debug) {
+        vprocLocationDebugf("open /dev/location -> host fd %d (nonblock=%s) readers=%d",
+                            duped, (flags & O_NONBLOCK) ? "true" : "false", gLocationDevice.readers);
+    }
+    /* If we already have a payload buffered, push it immediately to the new reader. */
+    if (gLocationDevice.has_payload && gLocationDevice.last_len > 0) {
+        (void)vprocHostWriteRaw(duped, gLocationDevice.last_payload, gLocationDevice.last_len);
+    }
     return duped;
 }
 
@@ -3507,24 +3840,49 @@ static int vprocLocationDeviceOpen(VProc *vp, int flags) {
     if (!vp) {
         return host_fd;
     }
-    int slot = vprocInsert(vp, host_fd);
-    if (slot < 0) {
+    struct pscal_fd *loc_fd = pscal_fd_create(&kVprocLocationFdOps);
+    if (!loc_fd) {
         vprocHostClose(host_fd);
+        errno = ENOMEM;
+        return -1;
+    }
+    vprocLocationPscalMapAdd(loc_fd, host_fd);
+    if (flags & O_NONBLOCK) {
+        int rflags = fcntl(host_fd, F_GETFL);
+        if (rflags >= 0) {
+            fcntl(host_fd, F_SETFL, rflags | O_NONBLOCK);
+        }
+    }
+    int slot = vprocInsertPscalFd(vp, loc_fd);
+    if (slot < 0) {
+        vprocLocationPscalMapRemove(loc_fd);
+        pscal_fd_close(loc_fd);
+        pthread_mutex_lock(&gLocationDevice.mu);
+        if (gLocationDevice.readers > 0) {
+            gLocationDevice.readers--;
+        }
+        pthread_mutex_unlock(&gLocationDevice.mu);
     }
     return slot;
 }
 
 void vprocLocationDeviceSetEnabled(bool enabled) {
     pthread_mutex_lock(&gLocationDevice.mu);
-    if (gLocationDevice.enabled == enabled) {
-        pthread_mutex_unlock(&gLocationDevice.mu);
-        return;
-    }
+    bool changed = (gLocationDevice.enabled != enabled);
     gLocationDevice.enabled = enabled;
     if (!enabled) {
+        if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("location device disabled (changed=%s)", changed ? "true" : "false");
+        }
         vprocLocationDeviceCloseLocked();
     } else {
-        (void)vprocLocationDeviceEnsurePipeLocked();
+        if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("location device enabled (changed=%s)", changed ? "true" : "false");
+        }
+        vprocLocationDeviceEnsureStub();
+        if (vprocLocationDeviceEnsurePipeLocked() != 0 && vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("location pipe setup failed during enable: %s", strerror(errno));
+        }
     }
     pthread_mutex_unlock(&gLocationDevice.mu);
 }
@@ -3533,20 +3891,35 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
     if (!data || len == 0) {
         return 0;
     }
+    bool debug = vprocLocationDebugEnabled();
     pthread_mutex_lock(&gLocationDevice.mu);
     if (!gLocationDevice.enabled) {
         pthread_mutex_unlock(&gLocationDevice.mu);
+        if (debug) {
+            vprocLocationDebugf("write rejected; location device disabled");
+        }
         errno = ENOENT;
         return -1;
     }
+    /* Cache the latest payload so new readers get it immediately. */
+    size_t copy_len = len < sizeof(gLocationDevice.last_payload) ? len : sizeof(gLocationDevice.last_payload) - 1;
+    memcpy(gLocationDevice.last_payload, data, copy_len);
+    gLocationDevice.last_payload[copy_len] = '\0';
+    gLocationDevice.last_len = copy_len;
+    gLocationDevice.has_payload = (copy_len > 0);
+
     if (vprocLocationDeviceEnsurePipeLocked() != 0) {
         int err = errno;
         pthread_mutex_unlock(&gLocationDevice.mu);
+        if (debug) {
+            vprocLocationDebugf("write rejected; pipe missing: %s", strerror(err));
+        }
         errno = err;
         return -1;
     }
     const unsigned char *bytes = (const unsigned char *)data;
     ssize_t total = 0;
+    /* Write to the vproc pipe first. */
     while ((size_t)total < len) {
         ssize_t wrote = vprocHostWriteRaw(gLocationDevice.write_fd, bytes + total, len - (size_t)total);
         if (wrote > 0) {
@@ -3561,10 +3934,23 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
         }
         int err = errno;
         pthread_mutex_unlock(&gLocationDevice.mu);
+        if (debug) {
+            vprocLocationDebugf("write failed after %zd/%zu bytes: %s", total, len, strerror(err));
+        }
         errno = err;
         return -1;
     }
+    /* Mirror into the stub fifo so non-virtualized readers (if any) see updates. */
+    if (gLocationDevice.stub_fd >= 0) {
+        ssize_t wrote = vprocHostWriteRaw(gLocationDevice.stub_fd, data, len);
+        if (debug && wrote < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EPIPE) {
+            vprocLocationDebugf("stub write failed: %s", strerror(errno));
+        }
+    }
     pthread_mutex_unlock(&gLocationDevice.mu);
+    if (debug) {
+        vprocLocationDebugf("write success bytes=%zd requested=%zu", total, len);
+    }
     return total;
 }
 
@@ -5002,7 +5388,30 @@ int vprocGetSid(int pid) {
     return sid;
 }
 
-int vprocSetForegroundPgid(int sid, int fg_pgid) {
+static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid) {
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    /* Keep the controlling TTY's foreground group aligned with the vproc
+     * session leader so job-control signals flow to the right pgid. */
+    if (sid <= 0 || fg_pgid <= 0) {
+        return;
+    }
+    struct pscal_fd *pscal_fd = vprocSessionPscalFdForStd(STDIN_FILENO);
+    if (pscal_fd) {
+        if (pscal_fd->ops && pscal_fd->ops->ioctl) {
+            dword_t fg = (dword_t)fg_pgid;
+            (void)pscal_fd->ops->ioctl(pscal_fd, TIOCSPGRP_, &fg);
+        }
+        pscal_fd_close(pscal_fd);
+        return;
+    }
+    (void)vprocHostTcsetpgrpRaw(STDIN_FILENO, (pid_t)fg_pgid);
+#else
+    (void)sid;
+    (void)fg_pgid;
+#endif
+}
+
+static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty) {
     if (sid <= 0 || fg_pgid <= 0) {
         errno = EINVAL;
         return -1;
@@ -5034,7 +5443,14 @@ int vprocSetForegroundPgid(int sid, int fg_pgid) {
         errno = ESRCH;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (rc == 0 && sync_tty) {
+        vprocSyncForegroundPgidToSessionTty(sid, fg_pgid);
+    }
     return rc;
+}
+
+int vprocSetForegroundPgid(int sid, int fg_pgid) {
+    return vprocSetForegroundPgidInternal(sid, fg_pgid, true);
 }
 
 int vprocGetForegroundPgid(int sid) {
@@ -5537,6 +5953,18 @@ int vprocKillShim(pid_t pid, int sig) {
                     (int)pid, sig, target, entry->pid, (void *)entry->tid);
         }
 
+        bool shell_thread = gShellSelfTidValid && pthread_equal(entry->tid, gShellSelfTid);
+
+        if (shell_thread && (sig == SIGINT || sig == SIGTSTP)) {
+#if defined(PSCAL_TARGET_IOS)
+            if (sig == SIGINT && pscalRuntimeRequestSigint) {
+                pscalRuntimeRequestSigint();
+            }
+#endif
+            vprocQueuePendingSignalLocked(entry, sig);
+            continue;
+        }
+
         if (vprocSignalBlockedLocked(entry, sig)) {
             vprocQueuePendingSignalLocked(entry, sig);
             continue;
@@ -5883,6 +6311,9 @@ int vprocTcsetpgrpShim(int fd, pid_t pgid) {
     rc = 0;
 out_tcset:
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (rc == 0) {
+        vprocSyncForegroundPgidToSessionTty(sid, (int)pgid);
+    }
     return rc;
 }
 
@@ -6825,10 +7256,29 @@ static void vprocDeliverPendingSignalsForCurrent(void) {
     }
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
+    bool exit_current = false;
     if (entry) {
-        vprocDeliverPendingSignalsLocked(entry);
+        exit_current = vprocDeliverPendingSignalsLocked(entry);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (exit_current) {
+        pthread_exit(NULL);
+    }
+}
+
+static bool vprocCurrentHasPendingSignals(void) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return false;
+    }
+    bool pending = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
+    if (entry) {
+        pending = (entry->pending_signals != 0) || entry->exited || entry->zombie || entry->stopped;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return pending;
 }
 
 int vprocSigpending(int pid, sigset_t *set) {
@@ -7149,7 +7599,7 @@ void pscalTtySetForegroundPgid(int sid, int fg_pgid) {
     if (sid <= 0 || fg_pgid <= 0) {
         return;
     }
-    (void)vprocSetForegroundPgid(sid, fg_pgid);
+    (void)vprocSetForegroundPgidInternal(sid, fg_pgid, false);
 }
 
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows) {

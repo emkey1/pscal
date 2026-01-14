@@ -69,6 +69,10 @@ static bool pathVirtualizedIsVprocDevicePath(const char *path) {
     if (!path || path[0] != '/') {
         return false;
     }
+    /* Allow container-prefixed device paths anywhere in the string. */
+    if (strstr(path, "/dev/location") != NULL || strstr(path, "/dev/gps") != NULL) {
+        return true;
+    }
     const char *candidate = path;
     if (strncmp(path, "/private", 8) == 0) {
         candidate = path + 8;
@@ -78,7 +82,9 @@ static bool pathVirtualizedIsVprocDevicePath(const char *path) {
     }
     if (strcmp(candidate, "/dev/tty") == 0 ||
         strcmp(candidate, "/dev/console") == 0 ||
-        strcmp(candidate, "/dev/ptmx") == 0) {
+        strcmp(candidate, "/dev/ptmx") == 0 ||
+        strcmp(candidate, "/dev/location") == 0 ||
+        strcmp(candidate, "/dev/gps") == 0) {
         return true;
     }
     if (strncmp(candidate, "/dev/pts/", 9) == 0) {

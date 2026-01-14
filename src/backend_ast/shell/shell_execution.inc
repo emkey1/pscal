@@ -2165,6 +2165,11 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 shellHandlePendingSignal(final_status - 128);
             }
 
+            /* In-process stages don't get WIFSTOPPED; treat 148 (128+SIGTSTP) as a stop. */
+            if (job_control && !stopped_job && final_status == 128 + SIGTSTP) {
+                stopped_job = true;
+            }
+
             shellRuntimeProcessPendingSignals();
 
             if (stopped_job && job_control) {
@@ -3708,6 +3713,8 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             if (pscal_stdin) {
                 has_stdin = true;
                 pscal_fd_close(pscal_stdin);
+            } else if (vprocTranslateFd(vp, STDIN_FILENO) >= 0) {
+                has_stdin = true;
             }
         }
         if (gShellRuntime.job_control_enabled && ctx->pgid > 0 && has_stdin) {

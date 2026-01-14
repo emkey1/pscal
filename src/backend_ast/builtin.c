@@ -3208,6 +3208,23 @@ void pscalRuntimeRequestSigtstp(void) {
 #endif
 }
 
+int pscalRuntimeCurrentForegroundPgid(void) {
+#if defined(PSCAL_TARGET_IOS)
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid > 0) {
+        int sid = vprocGetSid(shell_pid);
+        int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+        if (fg_pgid <= 0) {
+            fg_pgid = vprocGetPgid(shell_pid);
+        }
+        if (fg_pgid > 0) {
+            return fg_pgid;
+        }
+    }
+#endif
+    return -1;
+}
+
 bool pscalRuntimeSigintPending(void) {
     return g_vm_sigint_seen != 0;
 }

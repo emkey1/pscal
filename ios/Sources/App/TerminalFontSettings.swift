@@ -119,7 +119,8 @@ final class TerminalFontSettings: ObservableObject {
         if UserDefaults.standard.object(forKey: locationDeviceKey) != nil {
             locationDeviceEnabled = UserDefaults.standard.bool(forKey: locationDeviceKey)
         } else {
-            locationDeviceEnabled = false
+            // Default to enabled so /dev/location is present unless the user opts out.
+            locationDeviceEnabled = true
         }
         LocationDeviceProvider.shared.setDeviceEnabled(locationDeviceEnabled)
 

@@ -2212,8 +2212,16 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
 
     private let queue = DispatchQueue(label: "com.pscal.location.device")
     private let locationManager: CLLocationManager
+    private let debugEnabled: Bool = {
+        guard let raw = ProcessInfo.processInfo.environment["PSCALI_LOCATION_DEBUG"] else {
+            return false
+        }
+        return !raw.isEmpty && raw != "0"
+    }()
+    private var lastLocationRequest: TimeInterval = 0
+    private let locationRequestInterval: TimeInterval = 5.0
     private var started = false
-    private var deviceEnabled = false
+    private var deviceEnabled = true
     private var locationActive = false
     private var latestLocation: CLLocation?
     private var sendTimer: DispatchSourceTimer?
@@ -2229,8 +2237,12 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
 
     func start() {
         queue.async {
-            guard !self.started else { return }
+            if self.started {
+                self.debugLog("start ignored (already started, enabled=\(self.deviceEnabled))")
+                return
+            }
             self.started = true
+            self.debugLog("start triggered (enabled=\(self.deviceEnabled))")
             self.syncDeviceStateLocked()
         }
     }
@@ -2238,11 +2250,13 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     func setDeviceEnabled(_ enabled: Bool) {
         queue.async {
             self.deviceEnabled = enabled
+            self.debugLog("setDeviceEnabled(\(enabled)) started=\(self.started)")
             self.syncDeviceStateLocked()
         }
     }
 
     private func syncDeviceStateLocked() {
+        debugLog("syncDeviceStateLocked started=\(started) enabled=\(deviceEnabled)")
         PscalRuntimeBootstrap.shared.withRuntimeContext {
             PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
         }
@@ -2259,11 +2273,14 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func startLocationUpdatesLocked() {
         guard !locationActive else { return }
         locationActive = true
+        debugLog("starting location updates")
         DispatchQueue.main.async {
             self.requestAuthorizationIfNeeded()
             self.locationManager.startUpdatingLocation()
+            self.requestLocationIfStaleLocked(force: true)
             if let initial = self.locationManager.location {
                 self.queue.async { self.latestLocation = initial }
+                self.queue.async { self.sendLatestLocationLocked() }
             }
         }
     }
@@ -2271,6 +2288,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func stopLocationUpdatesLocked() {
         guard locationActive else { return }
         locationActive = false
+        debugLog("stopping location updates")
         DispatchQueue.main.async {
             self.locationManager.stopUpdatingLocation()
         }
@@ -2281,6 +2299,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + sendInterval, repeating: sendInterval)
         timer.setEventHandler { [weak self] in
+            self?.requestLocationIfStaleLocked(force: false)
             self?.sendLatestLocationLocked()
         }
         timer.resume()
@@ -2311,6 +2330,9 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
                 if err != EAGAIN && err != EWOULDBLOCK && err != EPIPE {
                     runtimeDebugLog("Location device write failed: \(String(cString: strerror(err)))")
                 }
+                if debugEnabled {
+                    debugLog("write failed len=\(buffer.count) errno=\(err)")
+                }
             }
         }
     }
@@ -2319,12 +2341,15 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
             locationManager.requestWhenInUseAuthorization()
+        } else if status == .authorizedWhenInUse || status == .authorizedAlways {
+            locationManager.startUpdatingLocation()
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         if status == .denied || status == .restricted {
             queue.async {
+                self.debugLog("authorization restricted/denied; stopping updates")
                 self.stopLocationUpdatesLocked()
             }
         }
@@ -2333,17 +2358,42 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
         queue.async {
+            if self.debugEnabled {
+                self.debugLog(String(format: "didUpdateLocations lat=%.5f lon=%.5f",
+                                     latest.coordinate.latitude,
+                                     latest.coordinate.longitude))
+            }
             self.latestLocation = latest
+            self.sendLatestLocationLocked()
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         runtimeDebugLog("Location device error: \(error.localizedDescription)")
+        if debugEnabled {
+            debugLog("didFailWithError \(error.localizedDescription)")
+        }
     }
 
     private static func createLocationPayload(location: CLLocation) -> String {
         let lat = location.coordinate.latitude
         let lon = location.coordinate.longitude
         return String(format: "%+.6f,%+.6f\n", lat, lon)
+    }
+
+    private func debugLog(_ message: String) {
+        guard debugEnabled else { return }
+        runtimeDebugLog("[location] \(message)")
+    }
+
+    private func requestLocationIfStaleLocked(force: Bool) {
+        let now = Date().timeIntervalSinceReferenceDate
+        if !force && now - lastLocationRequest < locationRequestInterval {
+            return
+        }
+        lastLocationRequest = now
+        DispatchQueue.main.async {
+            self.locationManager.requestLocation()
+        }
     }
 }

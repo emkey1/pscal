@@ -382,6 +382,7 @@ void pscalRuntimeRequestSigtstp(void);
 bool pscalRuntimeSigintPending(void);
 bool pscalRuntimeInterruptFlag(void);
 void pscalRuntimeClearInterruptFlag(void);
+int pscalRuntimeCurrentForegroundPgid(void);
 
 /* Pause for ten seconds and require a key press before exit when running
  * interactively. */
