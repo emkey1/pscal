@@ -1202,6 +1202,7 @@ typedef struct {
     VProc *vp;
     VProcSessionStdio *session_stdio;
     PSCALRuntimeContext *runtime_ctx;
+    PSCALRuntimeContext *prev_runtime_ctx;
     int stdin_fd;
     int stdout_fd;
     int stderr_fd;
@@ -1211,6 +1212,9 @@ typedef struct {
     bool apply_exec_redirs;
     int shell_pid;
     int kernel_pid;
+    int status;
+    bool prev_bg_flag;
+    bool prev_worker_flag;
 } ShellInProcessWorkerCtx;
 #endif
 
@@ -1218,6 +1222,55 @@ typedef struct {
 static void shellVprocSigintHandler(int signo) {
     (void)signo;
     pscalRuntimeRequestSigint();
+}
+
+static void shellInProcessWorkerCleanup(void *arg) {
+    ShellInProcessWorkerCtx *ctx = (ShellInProcessWorkerCtx *)arg;
+    if (!ctx) {
+        return;
+    }
+
+    if (ctx->stdin_fd >= 0) {
+        if (ctx->stdin_is_vproc) {
+            vprocCloseShim(ctx->stdin_fd);
+        } else {
+            vprocHostClose(ctx->stdin_fd);
+        }
+        ctx->stdin_fd = -1;
+    }
+    if (ctx->stdout_fd >= 0) {
+        if (ctx->stdout_is_vproc) {
+            vprocCloseShim(ctx->stdout_fd);
+        } else {
+            vprocHostClose(ctx->stdout_fd);
+        }
+        ctx->stdout_fd = -1;
+    }
+    if (ctx->stderr_fd >= 0 && ctx->stderr_fd != ctx->stdout_fd) {
+        if (ctx->stderr_is_vproc) {
+            vprocCloseShim(ctx->stderr_fd);
+        } else {
+            vprocHostClose(ctx->stderr_fd);
+        }
+        ctx->stderr_fd = -1;
+    }
+
+    vprocDeactivate();
+    vprocMarkExit(ctx->vp, ctx->status);
+    vprocDestroy(ctx->vp);
+
+    gShellBackgroundWorkerActive = ctx->prev_worker_flag;
+    gShellCurrentBuiltinBackground = ctx->prev_bg_flag;
+
+    if (ctx->session_stdio) {
+        vprocSessionStdioActivate(NULL);
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && ctx->prev_runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(ctx->prev_runtime_ctx);
+    }
+    shellFreeCommand(ctx->cmd);
+    free(ctx->cmd);
+    free(ctx);
 }
 
 static void shellInstallVprocSigintHandler(VProc *vp) {
@@ -1776,10 +1829,10 @@ static void *shellInProcessWorkerMain(void *arg) {
         free(ctx);
         return NULL;
     }
-    PSCALRuntimeContext *prev_runtime_ctx = NULL;
-    if (PSCALRuntimeGetCurrentRuntimeContext) {
-        prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
-    }
+    ctx->status = W_EXITCODE(128 + SIGINT, 0);
+    ctx->prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+        ? PSCALRuntimeGetCurrentRuntimeContext()
+        : NULL;
     if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
         PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
     }
@@ -1793,59 +1846,24 @@ static void *shellInProcessWorkerMain(void *arg) {
         vprocSetKernelPid(ctx->kernel_pid);
     }
 
-    bool prev_bg_flag = gShellCurrentBuiltinBackground;
-    bool prev_worker_flag = gShellBackgroundWorkerActive;
+    ctx->prev_bg_flag = gShellCurrentBuiltinBackground;
+    ctx->prev_worker_flag = gShellBackgroundWorkerActive;
     gShellCurrentBuiltinBackground = false;
     gShellBackgroundWorkerActive = true;
+
+    pthread_cleanup_push(shellInProcessWorkerCleanup, ctx);
 
     vprocRegisterThread(ctx->vp, pthread_self());
     vprocActivate(ctx->vp);
 
-    int status = shellRunBuiltinInProcess(ctx->vm,
-                                          ctx->cmd,
-                                          ctx->stdin_fd,
-                                          ctx->stdout_fd,
-                                          ctx->stderr_fd,
-                                          ctx->apply_exec_redirs);
+    ctx->status = shellRunBuiltinInProcess(ctx->vm,
+                                           ctx->cmd,
+                                           ctx->stdin_fd,
+                                           ctx->stdout_fd,
+                                           ctx->stderr_fd,
+                                           ctx->apply_exec_redirs);
 
-    if (ctx->stdin_fd >= 0) {
-        if (ctx->stdin_is_vproc) {
-            vprocCloseShim(ctx->stdin_fd);
-        } else {
-            vprocHostClose(ctx->stdin_fd);
-        }
-    }
-    if (ctx->stdout_fd >= 0) {
-        if (ctx->stdout_is_vproc) {
-            vprocCloseShim(ctx->stdout_fd);
-        } else {
-            vprocHostClose(ctx->stdout_fd);
-        }
-    }
-    if (ctx->stderr_fd >= 0 && ctx->stderr_fd != ctx->stdout_fd) {
-        if (ctx->stderr_is_vproc) {
-            vprocCloseShim(ctx->stderr_fd);
-        } else {
-            vprocHostClose(ctx->stderr_fd);
-        }
-    }
-
-    vprocDeactivate();
-    vprocMarkExit(ctx->vp, status);
-    vprocDestroy(ctx->vp);
-
-    gShellBackgroundWorkerActive = prev_worker_flag;
-    gShellCurrentBuiltinBackground = prev_bg_flag;
-
-    if (ctx->session_stdio) {
-        vprocSessionStdioActivate(NULL);
-    }
-    if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
-        PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
-    }
-    shellFreeCommand(ctx->cmd);
-    free(ctx->cmd);
-    free(ctx);
+    pthread_cleanup_pop(1);
     return NULL;
 }
 #endif
@@ -3507,6 +3525,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     int status = 0;
     bool run_in_worker = false;
     bool worker_started = false;
+    const char *disable_worker = getenv("PSCALI_DISABLE_WORKER");
 
     if (!pipeline_head) {
         if (PIPE_SPOOL_FD(ctx) < 0) {
@@ -3566,7 +3585,12 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 
     bool apply_exec_redirs = cmd && cmd->redir_count > 0;
 #if defined(PSCAL_TARGET_IOS)
-    if (!ctx->background && !cmd->background && ctx->stage_count == 1 && !need_spool) {
+    if (!ctx->background &&
+        !cmd->background &&
+        ctx->stage_count == 1 &&
+        !need_spool &&
+        !(disable_worker && *disable_worker)) {
+        run_in_worker = true;
         if (shellShouldRunSmallclueInWorker(cmd)) {
             run_in_worker = true;
         }
