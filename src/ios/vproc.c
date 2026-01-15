@@ -6130,7 +6130,7 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
         vprocSetCommandLabel(pid, label);
     }
 
-    if (vprocIsShellSelfThread()) {
+    if (vprocIsShellSelfThread() && !force_new_vproc) {
         pthread_mutex_lock(&gVProcTasks.mu);
         VProcTaskEntry *entry = vprocTaskFindLocked(pid);
         if (entry) {

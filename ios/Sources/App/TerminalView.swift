@@ -169,8 +169,12 @@ struct TerminalContentView: View {
                         isActive: isActive,
                         onInput: handleInput,
                         onPaste: handlePaste,
-                        onInterrupt: { runtime.send("\u{03}") },
-                        onSuspend: { runtime.send("\u{1A}") },
+                        onInterrupt: {
+                            pscalRuntimeRequestSigint()
+                        },
+                        onSuspend: {
+                            pscalRuntimeRequestSigtstp()
+                        },
                         onResize: { cols, rows in
                             runtime.updateTerminalSize(columns: cols, rows: rows)
                             hasMeasuredGeometry = true

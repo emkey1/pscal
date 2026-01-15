@@ -54,8 +54,12 @@ private struct ShellTerminalContentView: View {
                 isActive: isActive,
                 onInput: handleInput,
                 onPaste: handlePaste,
-                onInterrupt: { session.send("\u{03}") },
-                onSuspend: { session.send("\u{1A}") },
+                onInterrupt: {
+                    pscalRuntimeRequestSigint()
+                },
+                onSuspend: {
+                    pscalRuntimeRequestSigtstp()
+                },
                 onResize: { cols, rows in
                     tabInitLog("ShellTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
                     hasMeasuredGeometry = true

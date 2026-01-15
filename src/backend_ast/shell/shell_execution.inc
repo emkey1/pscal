@@ -3318,17 +3318,19 @@ static int shellRunBuiltinInProcess(VM *vm,
                         char label[96] = {0};
                         shellVprocFormatLabel(cmd, label, sizeof(label));
                         VProcCommandScope vproc_scope;
-                        bool inherit_pgid = !(cmd && cmd->background);
-                        if (gShellRuntime.pipeline.active && gShellRuntime.pipeline.background) {
-                            inherit_pgid = false;
-                        }
+                        bool inherit_pgid = false;
                         bool scoped = vprocCommandScopeBegin(&vproc_scope,
                                                              label[0] ? label : (cmd->argv && cmd->argv[0] ? cmd->argv[0] : "task"),
-                                                             false,
+                                                             true,
                                                              inherit_pgid);
 #endif
                         sc_status = smallclueDispatchApplet(applet, argc, argv_copy);
 #if defined(PSCAL_TARGET_IOS)
+                        const char *dbg = getenv("SMALLCLUE_DEBUG");
+                        if (dbg && *dbg) {
+                            fprintf(stderr, "[smallclue] dispatched applet pid=%d pgid=%d\n",
+                                    vproc_scope.pid, vprocGetPgid(vproc_scope.pid));
+                        }
                         if (scoped) {
                             vprocCommandScopeEnd(&vproc_scope, sc_status);
                         }
