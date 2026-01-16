@@ -5,6 +5,7 @@
 #include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/tty/pscal_fd.h"
+#include <unistd.h>
 #define PIPE_SESSION(ctx) (&(ctx)->session)
 #define PIPE_SPOOL_FD(ctx) ((ctx)->session.spool_fd)
 #define PIPE_SPOOL_SIZE(ctx) ((ctx)->session.spool_size)
@@ -15,6 +16,26 @@
 #define PIPE_STDOUT_OWNED(ctx) ((ctx)->session.stdout_owned)
 #define PIPE_STDERR_OWNED(ctx) ((ctx)->session.stderr_owned)
 #define PIPE_STDIN_OWNED(ctx) ((ctx)->session.stdin_owned)
+
+static int gShellPagerVirtualTTYFd = -1;
+
+static void shellPagerPushVirtualTTYOverride(int fd) {
+    if (gShellPagerVirtualTTYFd >= 0) {
+        close(gShellPagerVirtualTTYFd);
+    }
+    gShellPagerVirtualTTYFd = fd;
+}
+
+static void shellPagerPopVirtualTTYOverride(void) {
+    if (gShellPagerVirtualTTYFd >= 0) {
+        close(gShellPagerVirtualTTYFd);
+        gShellPagerVirtualTTYFd = -1;
+    }
+}
+
+static int shellPagerGetVirtualTTYOverride(void) {
+    return gShellPagerVirtualTTYFd;
+}
 
 static void shellVprocFormatLabel(const ShellCommand *cmd, char *out, size_t out_sz) {
     if (!out || out_sz == 0) {
@@ -3611,6 +3632,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     bool vm_stdin_adopted = false;
     bool vm_stdout_adopted = false;
     bool vm_stderr_adopted = false;
+    bool pushed_virtual_tty = false;
 #endif
     bool use_pipe_fds = ctx && ctx->pipes && ctx->stage_count > 1;
     bool need_spool = !use_pipe_fds && !pipeline_tail;
@@ -3619,6 +3641,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     int status = 0;
     bool run_in_worker = false;
     bool worker_started = false;
+    const char *enable_worker = getenv("PSCALI_ENABLE_WORKER");
     const char *disable_worker = getenv("PSCALI_DISABLE_WORKER");
 
     if (use_pipe_fds) {
@@ -3727,9 +3750,20 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         stderr_fd = stdout_fd;
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    if (stdin_fd >= 0 && !pushed_virtual_tty) {
+        int dup_fd = dup(STDIN_FILENO);
+        if (dup_fd >= 0) {
+            shellPagerPushVirtualTTYOverride(dup_fd);
+            pushed_virtual_tty = true;
+        }
+    }
+#endif
+
     bool apply_exec_redirs = cmd && cmd->redir_count > 0;
 #if defined(PSCAL_TARGET_IOS)
-    if (!ctx->background &&
+    if (enable_worker && *enable_worker &&
+        !ctx->background &&
         !cmd->background &&
         ctx->stage_count == 1 &&
         !need_spool &&
@@ -4086,6 +4120,13 @@ cleanup:
         vprocHostClose(capture.spool_fd);
         capture.spool_fd = -1;
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (pushed_virtual_tty) {
+        shellPagerPopVirtualTTYOverride();
+        pushed_virtual_tty = false;
+    }
+#endif
 
     if (feed_thread_started) {
         pthread_join(feed_thread, NULL);
