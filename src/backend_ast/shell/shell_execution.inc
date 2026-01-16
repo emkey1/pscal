@@ -3185,18 +3185,8 @@ static int shellRunBuiltinInProcess(VM *vm,
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
     bool prev_skip_host = gShellSkipHostStdio;
-    bool want_skip_host = false;
-    /* Only skip host stdio when not redirecting; pipelines still need host dup. */
-    bool has_redirect = (stdin_fd >= 0) || (stdout_fd >= 0) || (stderr_fd >= 0);
-    if (!gShellBackgroundWorkerActive &&
-        gShellRuntime.pipeline.in_process &&
-        !has_redirect &&
-        cmd && cmd->argv && cmd->argv[0] &&
-        (strcasecmp(cmd->argv[0], "less") == 0 ||
-         strcasecmp(cmd->argv[0], "more") == 0)) {
-        want_skip_host = true;
-    }
-    gShellSkipHostStdio = gShellSkipHostStdio || want_skip_host;
+    /* Leave host stdio untouched so pagers and pipelines can stream output. */
+    gShellSkipHostStdio = gShellSkipHostStdio;
     if (pipe_dbg) {
         fprintf(stderr, "[run-builtin] active_vp=%p stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
                 (void *)active_vp, stdin_fd, stdout_fd, stderr_fd);
