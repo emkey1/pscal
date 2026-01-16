@@ -19,6 +19,7 @@
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include <termios.h>
 #include <limits.h>
 #include <sys/time.h>
@@ -41,6 +42,14 @@
 #include "ios/tty/pscal_tty_host.h"
 
 typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+typedef enum {
+    VPROC_RESOURCE_GENERIC = 0,
+    VPROC_RESOURCE_SOCKET = 1,
+    VPROC_RESOURCE_PIPE = 2,
+} VProcResourceKind;
+
+static void vprocResourceTrack(VProc *vp, int host_fd, VProcResourceKind kind);
+static void vprocResourceRemove(VProc *vp, int host_fd);
 
 #if defined(PSCAL_TARGET_IOS)
 #define PATH_VIRTUALIZATION_NO_MACROS 1
@@ -333,6 +342,51 @@ static int vprocHostPipeRaw(int pipefd[2]) {
     if (fn) {
         vprocInterposeBypassEnter();
         int res = fn(pipefd);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostSocketRaw(int domain, int type, int protocol) {
+    static int (*fn)(int, int, int) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, int, int))vprocResolveSymbol("socket");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(domain, type, protocol);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostAcceptRaw(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    static int (*fn)(int, struct sockaddr *, socklen_t *) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, struct sockaddr *, socklen_t *))vprocResolveSymbol("accept");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(fd, addr, addrlen);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostSocketpairRaw(int domain, int type, int protocol, int sv[2]) {
+    static int (*fn)(int, int, int, int[2]) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, int, int, int[2]))vprocResolveSymbol("socketpair");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(domain, type, protocol, sv);
         vprocInterposeBypassExit();
         return res;
     }
@@ -1199,6 +1253,11 @@ typedef struct {
     VProcFdKind kind;
 } VProcFdEntry;
 
+typedef struct {
+    int host_fd;
+    VProcResourceKind kind;
+} VProcResourceEntry;
+
 struct VProc {
     pthread_mutex_t mu;     // ADDED: Protects the FD table shared by threads
     VProcFdEntry *entries;
@@ -1213,6 +1272,9 @@ struct VProc {
     bool stdin_from_session;
     VProcWinsize winsize;
     int pid;
+    VProcResourceEntry *resources;
+    size_t resource_count;
+    size_t resource_capacity;
 };
 
 static int vprocSessionHostFdForStd(int std_fd);
@@ -1280,6 +1342,107 @@ static pthread_mutex_t gSessionInputInitMu = PTHREAD_MUTEX_INITIALIZER;
 static const char *kLocationDevicePath = "/dev/location";
 static const char *kLegacyGpsDevicePath = "/dev/gps";
 static const char *kLegacyGpsDevicePath2 = "/dev/ttyGPS";
+
+static void vprocResourceEnsureCapacity(VProc *vp, size_t needed) {
+    if (!vp) {
+        return;
+    }
+    if (vp->resource_capacity >= needed) {
+        return;
+    }
+    size_t new_cap = vp->resource_capacity ? vp->resource_capacity * 2 : 8;
+    while (new_cap < needed) {
+        new_cap *= 2;
+    }
+    VProcResourceEntry *resized = realloc(vp->resources, new_cap * sizeof(VProcResourceEntry));
+    if (!resized) {
+        return;
+    }
+    vp->resources = resized;
+    vp->resource_capacity = new_cap;
+}
+
+static void vprocResourceTrackLocked(VProc *vp, int host_fd, VProcResourceKind kind) {
+    if (!vp || host_fd < 0) {
+        return;
+    }
+    for (size_t i = 0; i < vp->resource_count; ++i) {
+        if (vp->resources[i].host_fd == host_fd) {
+            vp->resources[i].kind = kind;
+            return;
+        }
+    }
+    vprocResourceEnsureCapacity(vp, vp->resource_count + 1);
+    if (vp->resource_count < vp->resource_capacity) {
+        vp->resources[vp->resource_count].host_fd = host_fd;
+        vp->resources[vp->resource_count].kind = kind;
+        vp->resource_count++;
+    }
+}
+
+static void vprocResourceTrack(VProc *vp, int host_fd, VProcResourceKind kind) {
+    if (!vp || host_fd < 0) {
+        return;
+    }
+    pthread_mutex_lock(&vp->mu);
+    vprocResourceTrackLocked(vp, host_fd, kind);
+    pthread_mutex_unlock(&vp->mu);
+}
+
+static bool vprocResourceRemoveLocked(VProc *vp, int host_fd) {
+    if (!vp || host_fd < 0) {
+        return false;
+    }
+    for (size_t i = 0; i < vp->resource_count; ++i) {
+        if (vp->resources[i].host_fd != host_fd) {
+            continue;
+        }
+        size_t last = vp->resource_count - 1;
+        if (i != last) {
+            vp->resources[i] = vp->resources[last];
+        }
+        vp->resource_count--;
+        return true;
+    }
+    return false;
+}
+
+static void vprocResourceRemove(VProc *vp, int host_fd) {
+    if (!vp || host_fd < 0) {
+        return;
+    }
+    pthread_mutex_lock(&vp->mu);
+    (void)vprocResourceRemoveLocked(vp, host_fd);
+    pthread_mutex_unlock(&vp->mu);
+}
+
+static void vprocResourceCloseAllLocked(VProc *vp) {
+    if (!vp) {
+        return;
+    }
+    for (size_t i = 0; i < vp->resource_count; ++i) {
+        int fd = vp->resources[i].host_fd;
+        if (fd < 0) {
+            continue;
+        }
+#if defined(PSCAL_TARGET_IOS)
+        vprocHostCloseRaw(fd);
+#else
+        close(fd);
+#endif
+        vp->resources[i].host_fd = -1;
+    }
+    vp->resource_count = 0;
+}
+
+static void vprocResourceCloseAll(VProc *vp) {
+    if (!vp) {
+        return;
+    }
+    pthread_mutex_lock(&vp->mu);
+    vprocResourceCloseAllLocked(vp);
+    pthread_mutex_unlock(&vp->mu);
+}
 
 typedef struct {
     pthread_mutex_t mu;
@@ -3402,6 +3565,7 @@ static int vprocInsertLocked(VProc *vp, int host_fd) {
     vp->entries[slot].host_fd = host_fd;
     vp->entries[slot].pscal_fd = NULL;
     vp->entries[slot].kind = VPROC_FD_HOST;
+    vprocResourceTrackLocked(vp, host_fd, VPROC_RESOURCE_GENERIC);
     return slot;
 }
 
@@ -4367,21 +4531,30 @@ void vprocDestroy(VProc *vp) {
                    vp->entries[i].host_fd != vp->stdin_host_fd &&
                    vp->entries[i].host_fd != vp->stdout_host_fd &&
                    vp->entries[i].host_fd != vp->stderr_host_fd) {
-            vprocHostClose(vp->entries[i].host_fd);
+            (void)vprocResourceRemoveLocked(vp, vp->entries[i].host_fd);
+            vprocHostCloseRaw(vp->entries[i].host_fd);
         }
         vp->entries[i].host_fd = -1;
         vp->entries[i].pscal_fd = NULL;
         vp->entries[i].kind = VPROC_FD_NONE;
     }
     if (vp->stdin_host_fd >= 0) {
-        vprocHostClose(vp->stdin_host_fd);
+        (void)vprocResourceRemoveLocked(vp, vp->stdin_host_fd);
+        vprocHostCloseRaw(vp->stdin_host_fd);
     }
     if (vp->stdout_host_fd >= 0) {
-        vprocHostClose(vp->stdout_host_fd);
+        (void)vprocResourceRemoveLocked(vp, vp->stdout_host_fd);
+        vprocHostCloseRaw(vp->stdout_host_fd);
     }
     if (vp->stderr_host_fd >= 0) {
-        vprocHostClose(vp->stderr_host_fd);
+        (void)vprocResourceRemoveLocked(vp, vp->stderr_host_fd);
+        vprocHostCloseRaw(vp->stderr_host_fd);
     }
+    vprocResourceCloseAllLocked(vp);
+    free(vp->resources);
+    vp->resources = NULL;
+    vp->resource_capacity = 0;
+    vp->resource_count = 0;
     free(vp->entries);
     vp->entries = NULL;
     if (gVProcCurrent == vp) {
@@ -4658,9 +4831,55 @@ int vprocHostOpen(const char *path, int flags, ...) {
 
 int vprocHostPipe(int pipefd[2]) {
 #if defined(PSCAL_TARGET_IOS)
-    return vprocHostPipeRaw(pipefd);
+    int rc = vprocHostPipeRaw(pipefd);
+    VProc *vp = vprocForThread();
+    if (rc == 0 && vp) {
+        vprocResourceTrack(vp, pipefd[0], VPROC_RESOURCE_PIPE);
+        vprocResourceTrack(vp, pipefd[1], VPROC_RESOURCE_PIPE);
+    }
+    return rc;
 #else
     return pipe(pipefd);
+#endif
+}
+
+int vprocHostSocket(int domain, int type, int protocol) {
+#if defined(PSCAL_TARGET_IOS)
+    int fd = vprocHostSocketRaw(domain, type, protocol);
+    VProc *vp = vprocForThread();
+    if (vp && fd >= 0) {
+        vprocResourceTrack(vp, fd, VPROC_RESOURCE_SOCKET);
+    }
+    return fd;
+#else
+    return socket(domain, type, protocol);
+#endif
+}
+
+int vprocHostAccept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+#if defined(PSCAL_TARGET_IOS)
+    int res = vprocHostAcceptRaw(fd, addr, addrlen);
+    VProc *vp = vprocForThread();
+    if (vp && res >= 0) {
+        vprocResourceTrack(vp, res, VPROC_RESOURCE_SOCKET);
+    }
+    return res;
+#else
+    return accept(fd, addr, addrlen);
+#endif
+}
+
+int vprocHostSocketpair(int domain, int type, int protocol, int sv[2]) {
+#if defined(PSCAL_TARGET_IOS)
+    int rc = vprocHostSocketpairRaw(domain, type, protocol, sv);
+    VProc *vp = vprocForThread();
+    if (rc == 0 && vp) {
+        vprocResourceTrack(vp, sv[0], VPROC_RESOURCE_PIPE);
+        vprocResourceTrack(vp, sv[1], VPROC_RESOURCE_PIPE);
+    }
+    return rc;
+#else
+    return socketpair(domain, type, protocol, sv);
 #endif
 }
 
@@ -4682,6 +4901,10 @@ int vprocHostFsync(int fd) {
 
 int vprocHostClose(int fd) {
 #if defined(PSCAL_TARGET_IOS)
+    VProc *vp = vprocForThread();
+    if (vp) {
+        vprocResourceRemove(vp, fd);
+    }
     return vprocHostCloseRaw(fd);
 #else
     return close(fd);
@@ -4767,7 +4990,8 @@ int vprocDup2(VProc *vp, int fd, int target) {
         if (vp->entries[target].kind == VPROC_FD_PSCAL && vp->entries[target].pscal_fd) {
             pscal_fd_close(vp->entries[target].pscal_fd);
         } else if (vp->entries[target].kind == VPROC_FD_HOST && vp->entries[target].host_fd >= 0) {
-            vprocHostClose(vp->entries[target].host_fd);
+            vprocResourceRemoveLocked(vp, vp->entries[target].host_fd);
+            vprocHostCloseRaw(vp->entries[target].host_fd);
         }
         vp->entries[target].host_fd = -1;
         vp->entries[target].pscal_fd = pscal_fd;
@@ -4811,7 +5035,8 @@ int vprocDup2(VProc *vp, int fd, int target) {
         bool preserve_controlling_stdin =
             (target == STDIN_FILENO) && (vp->entries[target].host_fd == vp->stdin_host_fd);
         if (!preserve_controlling_stdin) {
-            vprocHostClose(vp->entries[target].host_fd);
+            vprocResourceRemoveLocked(vp, vp->entries[target].host_fd);
+            vprocHostCloseRaw(vp->entries[target].host_fd);
         }
         vp->entries[target].host_fd = -1;
     }
@@ -4879,7 +5104,8 @@ int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src) {
     }
     if (vp->entries[target_fd].kind == VPROC_FD_HOST && vp->entries[target_fd].host_fd >= 0 &&
         !(target_fd == STDIN_FILENO && vp->entries[target_fd].host_fd == vp->stdin_host_fd)) {
-        vprocHostClose(vp->entries[target_fd].host_fd);
+        vprocResourceRemoveLocked(vp, vp->entries[target_fd].host_fd);
+        vprocHostCloseRaw(vp->entries[target_fd].host_fd);
     }
     int cloned = vprocCloneFd(host_src);
     if (cloned < 0) {
@@ -4939,6 +5165,9 @@ int vprocClose(VProc *vp, int fd) {
             return vprocSetCompatErrno(rc);
         }
         return 0;
+    }
+    if (host >= 0) {
+        vprocResourceRemove(vp, host);
     }
     return vprocHostClose(host);
 }
@@ -7829,6 +8058,37 @@ int vprocPipeShim(int pipefd[2]) {
         return vprocHostPipe(pipefd);
     }
     return vprocPipe(vp, pipefd);
+}
+
+int vprocSocketShim(int domain, int type, int protocol) {
+    vprocDeliverPendingSignalsForCurrent();
+    int fd = vprocHostSocket(domain, type, protocol);
+    VProc *vp = vprocForThread();
+    if (vp && fd >= 0) {
+        vprocResourceTrack(vp, fd, VPROC_RESOURCE_SOCKET);
+    }
+    return fd;
+}
+
+int vprocAcceptShim(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    vprocDeliverPendingSignalsForCurrent();
+    int res = vprocHostAccept(fd, addr, addrlen);
+    VProc *vp = vprocForThread();
+    if (vp && res >= 0) {
+        vprocResourceTrack(vp, res, VPROC_RESOURCE_SOCKET);
+    }
+    return res;
+}
+
+int vprocSocketpairShim(int domain, int type, int protocol, int sv[2]) {
+    vprocDeliverPendingSignalsForCurrent();
+    int rc = vprocHostSocketpair(domain, type, protocol, sv);
+    VProc *vp = vprocForThread();
+    if (rc == 0 && vp) {
+        vprocResourceTrack(vp, sv[0], VPROC_RESOURCE_PIPE);
+        vprocResourceTrack(vp, sv[1], VPROC_RESOURCE_PIPE);
+    }
+    return rc;
 }
 
 int vprocFstatShim(int fd, struct stat *st) {

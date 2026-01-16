@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <dirent.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -94,6 +95,12 @@ int vprocHostDup(int fd);
 int vprocHostOpen(const char *path, int flags, ...);
 /* Create a host pipe without routing through the shim table. */
 int vprocHostPipe(int pipefd[2]);
+/* Create a host socket without routing through the shim table. */
+int vprocHostSocket(int domain, int type, int protocol);
+/* Accept a host socket without routing through the shim table. */
+int vprocHostAccept(int fd, struct sockaddr *addr, socklen_t *addrlen);
+/* Create a host socketpair without routing through the shim table. */
+int vprocHostSocketpair(int domain, int type, int protocol, int sv[2]);
 /* Seek on a host descriptor without routing through the shim table. */
 off_t vprocHostLseek(int fd, off_t offset, int whence);
 /* Sync a host descriptor without routing through the shim table. */
@@ -162,6 +169,9 @@ int vprocDup2Shim(int fd, int target);
 int vprocCloseShim(int fd);
 int vprocFsyncShim(int fd);
 int vprocPipeShim(int pipefd[2]);
+int vprocSocketShim(int domain, int type, int protocol);
+int vprocAcceptShim(int fd, struct sockaddr *addr, socklen_t *addrlen);
+int vprocSocketpairShim(int domain, int type, int protocol, int sv[2]);
 int vprocFstatShim(int fd, struct stat *st);
 int vprocStatShim(const char *path, struct stat *st);
 int vprocLstatShim(const char *path, struct stat *st);

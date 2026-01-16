@@ -8,6 +8,9 @@
 #include <pthread.h>
 #include <sched.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <signal.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -78,6 +81,89 @@ static void assert_pipe_round_trip(void) {
     assert(vprocCloseShim(p[1]) == 0);
     vprocDeactivate();
     vprocDestroy(vp);
+}
+
+static void assert_pipe_cross_vproc(void) {
+    int p[2];
+    assert(vprocHostPipe(p) == 0);
+
+    VProc *writer = vprocCreate(NULL);
+    VProc *reader = vprocCreate(NULL);
+    assert(writer && reader);
+
+    vprocActivate(writer);
+    int wfd = vprocAdoptHostFd(writer, p[1]);
+    assert(wfd >= 0);
+    const char *msg = "ok";
+    assert(vprocWriteShim(wfd, msg, 2) == 2);
+    assert(vprocCloseShim(wfd) == 0);
+    vprocDeactivate();
+    vprocDestroy(writer);
+
+    vprocActivate(reader);
+    int rfd = vprocAdoptHostFd(reader, p[0]);
+    char buf[4] = {0};
+    assert(vprocReadShim(rfd, buf, sizeof(buf)) == 2);
+    assert(strncmp(buf, "ok", 2) == 0);
+    assert(vprocReadShim(rfd, buf, sizeof(buf)) == 0);
+    assert(vprocCloseShim(rfd) == 0);
+    vprocDeactivate();
+    vprocDestroy(reader);
+}
+
+static void assert_socket_closed_on_destroy(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    assert(s >= 0);
+    int reuse = 1;
+    assert(setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == 0);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    socklen_t addrlen = sizeof(addr);
+    int bind_rc = bind(s, (struct sockaddr *)&addr, addrlen);
+    if (bind_rc != 0) {
+        if (errno == EPERM || errno == EACCES) {
+            /* Some sandboxes block AF_INET binds; fall back to a socketpair-based closure check. */
+            close(s);
+            vprocDeactivate();
+            vprocDestroy(vp);
+
+            int sv[2];
+            assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+            VProc *sp = vprocCreate(NULL);
+            assert(sp);
+            vprocActivate(sp);
+            int tracked = vprocAdoptHostFd(sp, sv[0]);
+            assert(tracked >= 0);
+            vprocDeactivate();
+            vprocDestroy(sp);
+            char tmp;
+            assert(read(sv[1], &tmp, 1) == 0);
+            close(sv[1]);
+            return;
+        }
+        fprintf(stderr, "bind failed: %s\n", strerror(errno));
+    }
+    assert(bind_rc == 0);
+    assert(getsockname(s, (struct sockaddr *)&addr, &addrlen) == 0);
+    int port = ntohs(addr.sin_port);
+    assert(listen(s, 1) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+
+    int s2 = socket(AF_INET, SOCK_STREAM, 0);
+    assert(s2 >= 0);
+    assert(setsockopt(s2, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == 0);
+    addr.sin_port = htons(port);
+    assert(bind(s2, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    close(s2);
 }
 
 static void assert_dup2_isolated(void) {
@@ -1751,6 +1837,10 @@ int main(void) {
     setenv("PATH_TRUNCATE", "/tmp", 1);
     fprintf(stderr, "TEST pipe_round_trip\n");
     assert_pipe_round_trip();
+    fprintf(stderr, "TEST pipe_cross_vproc\n");
+    assert_pipe_cross_vproc();
+    fprintf(stderr, "TEST socket_closed_on_destroy\n");
+    assert_socket_closed_on_destroy();
     fprintf(stderr, "TEST dup2_isolated\n");
     assert_dup2_isolated();
     fprintf(stderr, "TEST stdin_redirected\n");

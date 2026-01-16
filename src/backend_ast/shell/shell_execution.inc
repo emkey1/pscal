@@ -2134,7 +2134,7 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
         for (size_t i = 0; i < stages - 1; ++i) {
             ctx->pipes[i][0] = -1;
             ctx->pipes[i][1] = -1;
-            if (pipe(ctx->pipes[i]) != 0) {
+            if (vprocHostPipe(ctx->pipes[i]) != 0) {
                 shellResetPipeline();
                 return false;
             }
@@ -3087,8 +3087,11 @@ static int shellRunBuiltinInProcess(VM *vm,
     VProc *active_vp = vprocCurrent();
     bool prev_skip_host = gShellSkipHostStdio;
     bool want_skip_host = false;
+    /* Only skip host stdio when not redirecting; pipelines still need host dup. */
+    bool has_redirect = (stdin_fd >= 0) || (stdout_fd >= 0) || (stderr_fd >= 0);
     if (!gShellBackgroundWorkerActive &&
         gShellRuntime.pipeline.in_process &&
+        !has_redirect &&
         cmd && cmd->argv && cmd->argv[0] &&
         (strcasecmp(cmd->argv[0], "less") == 0 ||
          strcasecmp(cmd->argv[0], "more") == 0)) {
@@ -3528,15 +3531,26 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     bool vm_stdout_adopted = false;
     bool vm_stderr_adopted = false;
 #endif
-    bool need_spool = !pipeline_tail;
-    bool direct_spool = true;
+    bool use_pipe_fds = ctx && ctx->pipes && ctx->stage_count > 1;
+    bool need_spool = !use_pipe_fds && !pipeline_tail;
+    bool direct_spool = !use_pipe_fds;
     int input_spool_fd = -1;
     int status = 0;
     bool run_in_worker = false;
     bool worker_started = false;
     const char *disable_worker = getenv("PSCALI_DISABLE_WORKER");
 
-    if (!pipeline_head) {
+    if (use_pipe_fds) {
+        if (!pipeline_head && ctx->pipes) {
+            stdin_fd = ctx->pipes[stage_pos - 1][0];
+        }
+        if (!pipeline_tail && ctx->pipes) {
+            stdout_fd = ctx->pipes[stage_pos][1];
+        }
+        if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos]) {
+            stderr_fd = stdout_fd;
+        }
+    } else if (!pipeline_head) {
         if (PIPE_SPOOL_FD(ctx) < 0) {
             runtimeError(vm, "pipeline: missing intermediate buffer");
             shellUpdateStatus(1);
@@ -3894,6 +3908,14 @@ cleanup:
         if (capture_writer_fd >= 0) {
             vprocHostClose(capture_writer_fd);
             capture_writer_fd = -1;
+        }
+    }
+    if (use_pipe_fds && ctx && ctx->pipes) {
+        if (!pipeline_head && stage_pos > 0) {
+            ctx->pipes[stage_pos - 1][0] = -1;
+        }
+        if (!pipeline_tail) {
+            ctx->pipes[stage_pos][1] = -1;
         }
     }
     if (capture_thread_started) {
@@ -4256,10 +4278,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             shellScalarCacheInvalidate();
             return makeVoid();
         }
-        bool pipeline_uses_pipes = true;
-#if defined(PSCAL_TARGET_IOS)
-        pipeline_uses_pipes = !ctx->in_process;
-#endif
+        bool pipeline_uses_pipes = ctx->pipes != NULL;
         if (pipeline_uses_pipes && ctx->stage_count > 1) {
             if (!pipeline_head) {
                 stdin_fd = ctx->pipes[idx - 1][0];

@@ -20,6 +20,9 @@
 #undef close
 #undef fsync
 #undef pipe
+#undef socket
+#undef accept
+#undef socketpair
 #undef fstat
 #undef stat
 #undef lstat
@@ -59,6 +62,9 @@
 #define close vprocCloseShim
 #define fsync vprocFsyncShim
 #define pipe  vprocPipeShim
+#define socket vprocSocketShim
+#define accept vprocAcceptShim
+#define socketpair vprocSocketpairShim
 #define fstat vprocFstatShim
 #define stat(path, buf) vprocStatShim((path), (buf))
 #define lstat(path, buf) vprocLstatShim((path), (buf))
