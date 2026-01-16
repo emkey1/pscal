@@ -4063,10 +4063,16 @@ cleanup:
     }
     if (use_pipe_fds && ctx && ctx->pipes) {
         if (!pipeline_head && stage_pos > 0) {
-            ctx->pipes[stage_pos - 1][0] = -1;
+            if (ctx->pipes[stage_pos - 1][0] >= 0) {
+                vprocHostClose(ctx->pipes[stage_pos - 1][0]);
+                ctx->pipes[stage_pos - 1][0] = -1;
+            }
         }
         if (!pipeline_tail) {
-            ctx->pipes[stage_pos][1] = -1;
+            if (ctx->pipes[stage_pos][1] >= 0) {
+                vprocHostClose(ctx->pipes[stage_pos][1]);
+                ctx->pipes[stage_pos][1] = -1;
+            }
         }
     }
     if (capture_thread_started) {
