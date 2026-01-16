@@ -2142,7 +2142,11 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
             return false;
         }
     }
-    if (stages > 1) {
+    if (stages > 1
+#if defined(PSCAL_TARGET_IOS)
+        && !ctx->in_process
+#endif
+    ) {
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
         if (!ctx->pipes) {
             shellResetPipeline();
