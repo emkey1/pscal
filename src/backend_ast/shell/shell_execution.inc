@@ -3678,29 +3678,17 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 fprintf(stderr, "[pipe] empty spool -> /dev/null\n");
             }
         } else {
-            if (vprocHostPipe(input_pipe) != 0) {
-                runtimeError(vm, "pipeline: failed to allocate input buffer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            feed.src_fd = vprocHostDup(input_spool_fd);
-            if (feed.src_fd < 0) {
+            stdin_fd = vprocHostDup(input_spool_fd);
+            if (stdin_fd < 0) {
                 runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
                 shellUpdateStatus(errno ? errno : 1);
                 return false;
             }
-            vprocHostLseek(feed.src_fd, 0, SEEK_SET);
-            feed.fd = input_pipe[1];
-            input_pipe[1] = -1;
-            if (vprocHostPthreadCreate(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
-                feed_thread_started = true;
-            } else {
-                runtimeError(vm, "pipeline: failed to start feeder");
-                shellUpdateStatus(1);
-                goto cleanup;
+            vprocHostLseek(stdin_fd, 0, SEEK_SET);
+            if (getenv("PSCALI_PIPE_DEBUG")) {
+                fprintf(stderr, "[pipe] tail dup spool_fd=%d size=%zu to stdin_fd=%d\n",
+                        input_spool_fd, PIPE_SPOOL_SIZE(ctx), stdin_fd);
             }
-            stdin_fd = input_pipe[0];
-            input_pipe[0] = -1;
         }
     }
 
