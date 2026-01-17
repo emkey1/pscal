@@ -81,6 +81,7 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity);
 
 int vprocTranslateFd(VProc *vp, int fd);
 struct pscal_fd *vprocGetPscalFd(VProc *vp, int fd);
+int vprocCreateInprocPipe(struct pscal_fd **out_read, struct pscal_fd **out_write);
 int vprocDup(VProc *vp, int fd);
 int vprocDup2(VProc *vp, int fd, int target);
 /* Sync vproc table entry to a host fd already duplicated onto target_fd. */
@@ -149,6 +150,7 @@ int vprocSetSid(int pid, int sid);
 int vprocGetPgid(int pid);
 int vprocGetSid(int pid);
 void vprocSetStopUnsupported(int pid, bool stop_unsupported);
+void vprocSetPipelineStage(bool active);
 int vprocSetForegroundPgid(int sid, int fg_pgid);
 int vprocGetForegroundPgid(int sid);
 int vprocNextJobIdSeed(void);

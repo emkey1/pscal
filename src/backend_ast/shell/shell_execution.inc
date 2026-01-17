@@ -119,11 +119,12 @@ static VProc *shellCreateVProcForStage(int stdin_host,
                                        int stderr_host,
                                        int cols,
                                        int rows,
-                                       int pid_hint) {
+                                       int pid_hint,
+                                       bool inherit_pscal_stdio) {
     (void)vprocEnsureKernelPid();
-    /* Always inherit stdio from the active vproc; never fall back to session
-     * stdio here. Background workers must not mutate the interactive session's
-     * fds. */
+    /* Optionally inherit stdio from the active vproc; never fall back to the
+     * interactive session if the caller disables inheritance. Background workers
+     * must not mutate the interactive session's fds. */
     bool stdin_force_null = (stdin_host == -2);
     bool stdin_use_pscal = false;
     bool stdout_use_pscal = false;
@@ -131,7 +132,8 @@ static VProc *shellCreateVProcForStage(int stdin_host,
     struct pscal_fd *pscal_stdin = NULL;
     struct pscal_fd *pscal_stdout = NULL;
     struct pscal_fd *pscal_stderr = NULL;
-    VProc *active = vprocCurrent();
+    VProc *active = inherit_pscal_stdio ? vprocCurrent() : NULL;
+    VProcSessionStdio *session_stdio = inherit_pscal_stdio ? vprocSessionStdioCurrent() : NULL;
     if (active) {
         if (!stdin_force_null && stdin_host < 0) {
             int translated = vprocTranslateFd(active, STDIN_FILENO);
@@ -159,6 +161,19 @@ static VProc *shellCreateVProcForStage(int stdin_host,
                 pscal_stderr = vprocGetPscalFd(active, STDERR_FILENO);
                 stderr_use_pscal = (pscal_stderr != NULL);
             }
+        }
+    } else if (session_stdio) {
+        if (!stdin_force_null && stdin_host < 0 && session_stdio->stdin_pscal_fd) {
+            pscal_stdin = pscal_fd_retain(session_stdio->stdin_pscal_fd);
+            stdin_use_pscal = (pscal_stdin != NULL);
+        }
+        if (stdout_host < 0 && session_stdio->stdout_pscal_fd) {
+            pscal_stdout = pscal_fd_retain(session_stdio->stdout_pscal_fd);
+            stdout_use_pscal = (pscal_stdout != NULL);
+        }
+        if (stderr_host < 0 && session_stdio->stderr_pscal_fd) {
+            pscal_stderr = pscal_fd_retain(session_stdio->stderr_pscal_fd);
+            stderr_use_pscal = (pscal_stderr != NULL);
         }
     }
     if (!stdin_force_null && stdin_host < 0 && !stdin_use_pscal) {
@@ -1240,6 +1255,19 @@ typedef struct {
     pthread_mutex_t stop_mu;
     pthread_cond_t stop_cv;
 } ShellInProcessWorkerCtx;
+
+typedef struct {
+    VM *vm;
+    ShellPipelineContext *ctx;
+    ShellCommand *cmd;
+    size_t stage_pos;
+    bool pipeline_head;
+    bool pipeline_tail;
+    VProcSessionStdio *session_stdio;
+#if defined(PSCAL_TARGET_IOS)
+    PSCALRuntimeContext *runtime_ctx;
+#endif
+} ShellPipelineStageThreadCtx;
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
@@ -1674,7 +1702,8 @@ static void *shellInProcessBackgroundMain(void *arg) {
                                   vm_stderr,
                                   pscalRuntimeDetectWindowCols(),
                                   pscalRuntimeDetectWindowRows(),
-                                  ctx->synthetic_pid > 0 ? ctx->synthetic_pid : -1);
+                                  ctx->synthetic_pid > 0 ? ctx->synthetic_pid : -1,
+                                  true);
     if (!vp) {
         runtimeError(vm, "background: failed to allocate vproc");
         goto cleanup;
@@ -2035,12 +2064,48 @@ static void shellResetPipeline(void) {
     shellPipelineSessionCloseSpool(ctx);
     ctx->in_process = false;
     ctx->in_process_worker = false;
+    ctx->session_stdio = NULL;
+    if (ctx->pscal_pipe_read || ctx->pscal_pipe_write) {
+        size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
+        for (size_t i = 0; i < pipe_count; ++i) {
+            if (ctx->pscal_pipe_read && ctx->pscal_pipe_read[i]) {
+                pscal_fd_close(ctx->pscal_pipe_read[i]);
+                ctx->pscal_pipe_read[i] = NULL;
+            }
+            if (ctx->pscal_pipe_write && ctx->pscal_pipe_write[i]) {
+                pscal_fd_close(ctx->pscal_pipe_write[i]);
+                ctx->pscal_pipe_write[i] = NULL;
+            }
+        }
+        free(ctx->pscal_pipe_read);
+        free(ctx->pscal_pipe_write);
+        ctx->pscal_pipe_read = NULL;
+        ctx->pscal_pipe_write = NULL;
+    }
+    if (ctx->threads) {
+        free(ctx->threads);
+        ctx->threads = NULL;
+    }
+    if (ctx->thread_started) {
+        free(ctx->thread_started);
+        ctx->thread_started = NULL;
+    }
+    if (ctx->stage_status) {
+        free(ctx->stage_status);
+        ctx->stage_status = NULL;
+    }
 #endif
     if (ctx->pipes) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
-            if (ctx->pipes[i][0] >= 0) close(ctx->pipes[i][0]);
-            if (ctx->pipes[i][1] >= 0) close(ctx->pipes[i][1]);
+            if (ctx->pipes[i][0] >= 0) {
+                close(ctx->pipes[i][0]);
+                ctx->pipes[i][0] = -1;
+            }
+            if (ctx->pipes[i][1] >= 0) {
+                close(ctx->pipes[i][1]);
+                ctx->pipes[i][1] = -1;
+            }
         }
         free(ctx->pipes);
         ctx->pipes = NULL;
@@ -2078,6 +2143,33 @@ static void shellAbortPipeline(void) {
 #if defined(PSCAL_TARGET_IOS)
     shellPipelineSessionRestoreStdStreams(ctx);
     shellPipelineSessionCloseSpool(ctx);
+#endif
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->pscal_pipe_read || ctx->pscal_pipe_write) {
+        size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
+        for (size_t i = 0; i < pipe_count; ++i) {
+            if (ctx->pscal_pipe_read && ctx->pscal_pipe_read[i]) {
+                pscal_fd_close(ctx->pscal_pipe_read[i]);
+                ctx->pscal_pipe_read[i] = NULL;
+            }
+            if (ctx->pscal_pipe_write && ctx->pscal_pipe_write[i]) {
+                pscal_fd_close(ctx->pscal_pipe_write[i]);
+                ctx->pscal_pipe_write[i] = NULL;
+            }
+        }
+        free(ctx->pscal_pipe_read);
+        free(ctx->pscal_pipe_write);
+        ctx->pscal_pipe_read = NULL;
+        ctx->pscal_pipe_write = NULL;
+    }
+    if (ctx->thread_started && ctx->threads) {
+        for (size_t i = 0; i < ctx->stage_count; ++i) {
+            if (ctx->thread_started[i]) {
+                pthread_join(ctx->threads[i], NULL);
+                ctx->thread_started[i] = false;
+            }
+        }
+    }
 #endif
     if (ctx->pipes) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
@@ -2127,8 +2219,10 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
 #if defined(PSCAL_TARGET_IOS)
     ctx->in_process = true;
     ctx->in_process_worker = false;
+    ctx->session_stdio = vprocSessionStdioCurrent();
     shellPipelineSessionCloseSpool(ctx);
     shellPipelineSessionSnapshotStdStreams(ctx);
+    fprintf(stderr, "[pipe] ensure stages=%zu in_process=1\n", stages);
 #endif
     ctx->pids = calloc(stages, sizeof(pid_t));
     if (!ctx->pids) {
@@ -2142,11 +2236,46 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
             return false;
         }
     }
-    if (stages > 1
+    if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        && !ctx->in_process
-#endif
-    ) {
+        bool use_pscal_pipes = getenv("PSCALI_PIPE_PSCAL") != NULL;
+        if (!use_pscal_pipes) {
+            ctx->pscal_pipe_read = NULL;
+            ctx->pscal_pipe_write = NULL;
+        }
+        ctx->pipes = calloc(stages - 1, sizeof(int[2]));
+        if (!ctx->pipes) {
+            shellResetPipeline();
+            return false;
+        }
+        if (use_pscal_pipes) {
+            ctx->pscal_pipe_read = (struct pscal_fd **)calloc(stages - 1, sizeof(struct pscal_fd *));
+            ctx->pscal_pipe_write = (struct pscal_fd **)calloc(stages - 1, sizeof(struct pscal_fd *));
+            if (!ctx->pscal_pipe_read || !ctx->pscal_pipe_write) {
+                shellResetPipeline();
+                return false;
+            }
+        }
+        for (size_t i = 0; i < stages - 1; ++i) {
+            ctx->pipes[i][0] = -1;
+            ctx->pipes[i][1] = -1;
+            if (use_pscal_pipes) {
+                if (vprocCreateInprocPipe(&ctx->pscal_pipe_read[i], &ctx->pscal_pipe_write[i]) != 0) {
+                    shellResetPipeline();
+                    return false;
+                }
+                fprintf(stderr, "[pipe] ensure idx=%zu read=%p write=%p\n",
+                        i, (void *)ctx->pscal_pipe_read[i], (void *)ctx->pscal_pipe_write[i]);
+            } else {
+                if (vprocHostPipe(ctx->pipes[i]) != 0) {
+                    shellResetPipeline();
+                    return false;
+                }
+                fprintf(stderr, "[pipe] ensure host idx=%zu r=%d w=%d\n",
+                        i, ctx->pipes[i][0], ctx->pipes[i][1]);
+            }
+        }
+#else
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
         if (!ctx->pipes) {
             shellResetPipeline();
@@ -2160,7 +2289,23 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
                 return false;
             }
         }
+#endif
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (stages > 0) {
+        ctx->threads = (pthread_t *)calloc(stages, sizeof(pthread_t));
+        ctx->thread_started = (bool *)calloc(stages, sizeof(bool));
+        ctx->stage_status = (int *)calloc(stages, sizeof(int));
+        if (!ctx->threads || !ctx->thread_started || !ctx->stage_status) {
+            shellResetPipeline();
+            return false;
+        }
+        for (size_t i = 0; i < stages; ++i) {
+            ctx->thread_started[i] = false;
+            ctx->stage_status[i] = 0;
+        }
+    }
+#endif
     return true;
 }
 
@@ -2570,6 +2715,11 @@ static bool shellDupOntoTarget(VProc *vp, int src_fd, int target_fd, bool dbg, c
     int host_src = src_fd;
 #if defined(PSCAL_TARGET_IOS)
     bool skip_host_dup = gShellBackgroundWorkerActive || gShellSkipHostStdio;
+    /* In-process pipelines must still duplicate host stdio so downstream stages
+     * see the correct descriptors; ignore skip_host_dup in that case. */
+    if (gShellRuntime.pipeline.active && gShellRuntime.pipeline.in_process) {
+        skip_host_dup = false;
+    }
     if (vp) {
         int translated = vprocTranslateFd(vp, src_fd);
         if (translated >= 0) {
@@ -2623,6 +2773,9 @@ static void shellRestoreExecRedirections(ShellExecRedirBackup *backups, size_t c
 #if defined(PSCAL_TARGET_IOS)
     VProc *active_vp = vprocCurrent();
     bool skip_host_restore = gShellBackgroundWorkerActive || gShellSkipHostStdio;
+    if (gShellRuntime.pipeline.active && gShellRuntime.pipeline.in_process) {
+        skip_host_restore = false;
+    }
 #else
     VProc *active_vp = NULL;
     bool skip_host_restore = false;
@@ -3001,163 +3154,6 @@ static bool __attribute__((unused)) shellPipelineReadPipeToBuffer(int fd, char *
     return true;
 }
 
-typedef struct {
-    int fd;
-    int spool_fd;
-    size_t size;
-    size_t capacity;
-    int err;
-    char *buffer; /* only used when spool_fd < 0 */
-} ShellPipelineCapture;
-
-static bool shellPipelineCaptureGrow(ShellPipelineCapture *cap, size_t add) {
-    if (cap->spool_fd >= 0) {
-        return true;
-    }
-    size_t need = cap->size + add;
-    if (need <= cap->capacity) {
-        return true;
-    }
-    size_t new_cap = cap->capacity ? cap->capacity * 2 : 4096;
-    while (new_cap < need) {
-        new_cap *= 2;
-    }
-    char *new_buf = realloc(cap->buffer, new_cap);
-    if (!new_buf) {
-        return false;
-    }
-    cap->buffer = new_buf;
-    cap->capacity = new_cap;
-    return true;
-}
-
-static void *shellPipelineCaptureThread(void *arg) {
-    ShellPipelineCapture *cap = (ShellPipelineCapture *)arg;
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
-    const size_t chunk = 4096;
-    char *tmp = malloc(chunk);
-    if (!tmp) {
-        cap->err = ENOMEM;
-        vprocHostClose(cap->fd);
-        return NULL;
-    }
-    for (;;) {
-        ssize_t res = vprocHostRead(cap->fd, tmp, chunk);
-        if (res < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            cap->err = errno ? errno : EIO;
-            if (dbg) fprintf(stderr, "[pipe-capture] read err=%s\n", strerror(cap->err));
-            break;
-        }
-        if (res == 0) {
-            if (dbg) fprintf(stderr, "[pipe-capture] EOF\n");
-            break;
-        }
-        if (!shellPipelineCaptureGrow(cap, (size_t)res)) {
-            cap->err = ENOMEM;
-            if (dbg) fprintf(stderr, "[pipe-capture] grow ENOMEM\n");
-            break;
-        }
-        if (cap->spool_fd >= 0) {
-            ssize_t written = vprocHostWrite(cap->spool_fd, tmp, (size_t)res);
-            if (written < 0) {
-                cap->err = errno ? errno : EIO;
-                if (dbg) fprintf(stderr, "[pipe-capture] spool write err=%s\n", strerror(cap->err));
-                break;
-            }
-            cap->size += (size_t)written;
-        } else {
-            memcpy(cap->buffer + cap->size, tmp, (size_t)res);
-            cap->size += (size_t)res;
-        }
-        if (dbg) fprintf(stderr, "[pipe-capture] read=%zd total=%zu\n", res, cap->size);
-    }
-    free(tmp);
-    vprocHostClose(cap->fd);
-    cap->fd = -1;
-    return NULL;
-}
-
-typedef struct {
-    const char *data;
-    size_t len;
-    int fd;
-    int src_fd;
-    int err;
-} ShellPipelineFeed;
-
-static void *shellPipelineFeedThread(void *arg) {
-    ShellPipelineFeed *feed = (ShellPipelineFeed *)arg;
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
-    const size_t chunk = 4096;
-    if (feed->src_fd >= 0) {
-        char buf[4096];
-        for (;;) {
-            ssize_t r = vprocHostRead(feed->src_fd, buf, sizeof(buf));
-            if (r < 0) {
-                if (errno == EINTR) continue;
-                feed->err = errno ? errno : EIO;
-                if (dbg) fprintf(stderr, "[pipe-feed] read err=%s\n", strerror(feed->err));
-                break;
-            }
-            if (r == 0) {
-                break;
-            }
-            size_t off = 0;
-            while (off < (size_t)r) {
-                ssize_t w = vprocHostWrite(feed->fd, buf + off, (size_t)r - off);
-                if (w < 0) {
-                    if (errno == EINTR) continue;
-                    if (errno == EPIPE) {
-                        /* Consumer closed; treat as normal completion. */
-                        feed->err = 0;
-                        off = (size_t)r;
-                        vprocHostClose(feed->fd);
-                        feed->fd = -1;
-                        if (dbg) fprintf(stderr, "[pipe-feed] EPIPE after %zu bytes (src_fd=%d)\n", off, feed->src_fd);
-                        return NULL;
-                    }
-                    feed->err = errno ? errno : EIO;
-                    if (dbg) fprintf(stderr, "[pipe-feed] write err=%s\n", strerror(feed->err));
-                    off = (size_t)r;
-                    break;
-                }
-                off += (size_t)w;
-            }
-        }
-        vprocHostClose(feed->src_fd);
-        feed->src_fd = -1;
-    } else {
-        size_t offset = 0;
-        while (offset < feed->len) {
-            size_t to_write = feed->len - offset;
-            if (to_write > chunk) {
-                to_write = chunk;
-            }
-            ssize_t res = vprocHostWrite(feed->fd, feed->data + offset, to_write);
-            if (res < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                if (errno == EPIPE) {
-                    feed->err = 0;
-                    if (dbg) fprintf(stderr, "[pipe-feed] EPIPE buffered after %zu bytes\n", offset);
-                    break;
-                }
-                feed->err = errno ? errno : EIO;
-                if (dbg) fprintf(stderr, "[pipe-feed] buffered write err=%s\n", strerror(feed->err));
-                break;
-            }
-            offset += (size_t)res;
-        }
-    }
-    vprocHostClose(feed->fd);
-    feed->fd = -1;
-    return NULL;
-}
-
 static int shellPipelineCreateSpoolFile(void) {
     const char *tmp_root = getenv("TMPDIR");
     if (!tmp_root || !*tmp_root) {
@@ -3183,14 +3179,22 @@ static int shellRunBuiltinInProcess(VM *vm,
     bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
     bool redir_dbg = getenv("PSCALI_REDIR_DEBUG") != NULL;
 #if defined(PSCAL_TARGET_IOS)
+    bool pipeline_in_process = gShellRuntime.pipeline.active &&
+                               gShellRuntime.pipeline.in_process &&
+                               !gShellBackgroundWorkerActive;
     VProc *active_vp = vprocCurrent();
     bool prev_skip_host = gShellSkipHostStdio;
-    /* Leave host stdio untouched so pagers and pipelines can stream output. */
-    gShellSkipHostStdio = gShellSkipHostStdio;
+    /* Background workers share the interactive stdio; avoid touching host fds. */
+    if (gShellBackgroundWorkerActive) {
+        gShellSkipHostStdio = true;
+    }
     if (pipe_dbg) {
         fprintf(stderr, "[run-builtin] active_vp=%p stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
                 (void *)active_vp, stdin_fd, stdout_fd, stderr_fd);
     }
+#else
+    bool pipeline_in_process = false;
+    VProc *active_vp = NULL;
 #endif
     if (redir_dbg) {
         fprintf(stderr, "[redir] cmd=%s argc=%zu redir_count=%zu apply_exec=%d\n",
@@ -3216,13 +3220,6 @@ static int shellRunBuiltinInProcess(VM *vm,
     size_t backup_capacity = 0;
     int status = 127;
     bool applied_redirs = false;
-#if defined(PSCAL_TARGET_IOS)
-    bool pipeline_in_process = gShellRuntime.pipeline.active &&
-                               gShellRuntime.pipeline.in_process &&
-                               !gShellBackgroundWorkerActive;
-#else
-    bool pipeline_in_process = false;
-#endif
     bool allow_missing_backup = pipeline_in_process;
     if (stdin_fd >= 0) {
         if (!shellEnsureExecRedirBackup(STDIN_FILENO, -1, &backups, &backup_count, &backup_capacity)) {
@@ -3486,322 +3483,88 @@ cleanup:
     return status;
 }
 
-static bool shellPipelineExecuteStageInProcess(VM *vm,
-                                               ShellPipelineContext *ctx,
-                                               ShellCommand *cmd,
-                                               size_t stage_pos,
-                                               bool pipeline_head,
-                                               bool pipeline_tail) {
-    if (!ctx || !ctx->active || !ctx->pids || stage_pos >= ctx->stage_count) {
-        runtimeError(vm, "pipeline: invalid context");
-        shellUpdateStatus(1);
-        if (ctx) {
-            shellAbortPipeline();
-        }
-        return false;
-    }
-#if defined(PSCAL_TARGET_IOS)
-    bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
-    if (pipe_dbg) {
-        fprintf(stderr,
-                "[pipeline-bg] stage entry head=%d tail=%d ctx_active=%d ctx_bg=%d cmd_bg=%d stages=%zu pos=%zu\n",
-                (int)pipeline_head, (int)pipeline_tail,
-                (int)ctx->active, (int)ctx->background,
-                (int)cmd->background, ctx->stage_count, stage_pos);
-    }
-    if (pipeline_tail && ctx->background && ctx->stage_count == 1) {
-#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
-        /* In the host test shim build, run background stages inline to avoid
-         * thread/pipeline interactions that are stubbed out. */
-        if (pipe_dbg) {
-            fprintf(stderr, "[pipeline-bg] stub build: running background inline\n");
-        }
-        ctx->background = false;
-        cmd->background = false;
-#else
-        if (pipe_dbg) {
-            fprintf(stderr, "[pipeline-bg] attempt tail=%d ctx_bg=%d cmd_bg=%d stages=%zu\n",
-                    (int)pipeline_tail, (int)ctx->background, (int)cmd->background, ctx->stage_count);
-        }
-        ShellBackgroundStageCtx *bg_ctx =
-            (ShellBackgroundStageCtx *)calloc(1, sizeof(ShellBackgroundStageCtx));
-        ShellCommand *cloned = shellCloneCommandForBackground(cmd);
-        if (!bg_ctx || !cloned) {
-            free(bg_ctx);
-            shellFreeCommand(cloned);
-            free(cloned);
-            runtimeError(vm, "pipeline: unable to allocate background context");
-            shellUpdateStatus(1);
-            shellResetPipeline();
-            shellRuntimeProcessPendingSignals();
-            return true;
-        }
-        bg_ctx->vm = vm;
-        bg_ctx->cmd = cloned;
-        bg_ctx->synthetic_pid = vprocReservePid();
-#if defined(PSCAL_TARGET_IOS)
-        bg_ctx->shell_pid = vprocGetShellSelfPid();
-        bg_ctx->kernel_pid = vprocGetKernelPid();
-#endif
-
-        if (ctx->pids && stage_pos < ctx->stage_count) {
-            ctx->pids[stage_pos] = bg_ctx->synthetic_pid;
-            ctx->pgid = bg_ctx->synthetic_pid;
-            ctx->launched = stage_pos + 1;
-        }
-
-        /* Reset pipeline on the main thread before detaching so prompt can return. */
-        ctx->last_status = 0;
-        shellUpdateStatus(0);
-        shellRuntimeProcessPendingSignals();
-
-        pthread_t tid;
-        pthread_attr_t attr;
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
-        int create_rc = vprocHostPthreadCreate(&tid, &attr, shellInProcessBackgroundMain, bg_ctx);
-        if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipeline-bg] pthread_create rc=%d ctx=%p\n", create_rc, (void *)bg_ctx);
-        }
-        if (create_rc == 0) {
-            pthread_detach(tid);
-            pthread_attr_destroy(&attr);
-            if (getenv("PSCALI_PIPE_DEBUG")) {
-                pid_t pgid_dbg = ctx->pgid;
-                pid_t pid_dbg = (bg_ctx && bg_ctx->synthetic_pid > 0) ? bg_ctx->synthetic_pid : -1;
-                fprintf(stderr, "[pipeline-bg] bg thread launched pid=%d pgid=%d stage_pos=%zu launched=%zu\n",
-                        (int)pid_dbg, (int)pgid_dbg, stage_pos, ctx->launched);
-            }
-            if (bg_ctx->synthetic_pid > 0) {
-                gShellRuntime.last_bg_pid = bg_ctx->synthetic_pid;
-            }
-            if (bg_ctx->synthetic_pid > 0) {
-                ShellJob *job = shellRegisterJob(bg_ctx->synthetic_pid, ctx->pids, ctx->launched, cmd);
-                if (job) {
-                    shellJobMarkRunning(job);
-                    job->last_status = 0;
-                }
-                bg_ctx->job_id = job ? (int)job->id : 0;
-#if defined(PSCAL_TARGET_IOS)
-                shellPrintJobStarted(job, bg_ctx->synthetic_pid);
-#endif
-            }
-            shellResetPipeline();
-            return true;
-        }
-        pthread_attr_destroy(&attr);
-        shellFreeCommand(cloned);
-        free(cloned);
-        free(bg_ctx);
-        runtimeError(vm, "pipeline: failed to launch background worker");
-        shellUpdateStatus(1);
-        shellResetPipeline();
-        return true;
-#endif
-    }
-#endif
+static int shellPipelineRunStage(VM *vm,
+                                 ShellPipelineContext *ctx,
+                                 ShellCommand *cmd,
+                                 size_t stage_pos,
+                                 bool pipeline_head,
+                                 bool pipeline_tail) {
     int stdin_fd = -1;
     int stdout_fd = -1;
     int stderr_fd = -1;
-    int input_pipe[2] = { -1, -1 };
-    int output_pipe[2] = { -1, -1 };
-    int capture_writer_fd = -1;
-    int capture_writer_vfd = -1;
-    bool ok = false;
-    pthread_t feed_thread;
-    bool feed_thread_started = false;
-    ShellPipelineFeed feed = { .data = NULL, .len = 0, .fd = -1, .src_fd = -1, .err = 0 };
-    pthread_t capture_thread;
-    bool capture_thread_started = false;
-    ShellPipelineCapture capture = { .fd = -1, .spool_fd = -1, .size = 0, .capacity = 0, .err = 0, .buffer = NULL };
-#if defined(PSCAL_TARGET_IOS)
-    VProc *vp = NULL;
-    int vm_stdin_fd = -1;
-    int vm_stdout_fd = -1;
-    int vm_stderr_fd = -1;
-    bool vm_stdin_adopted = false;
-    bool vm_stdout_adopted = false;
-    bool vm_stderr_adopted = false;
-    bool pushed_virtual_tty = false;
-#endif
-    bool use_pipe_fds = ctx && ctx->pipes && ctx->stage_count > 1;
-    bool need_spool = !use_pipe_fds && !pipeline_tail;
-    bool direct_spool = !use_pipe_fds;
-    int input_spool_fd = -1;
+    struct pscal_fd *stdin_pscal = NULL;
+    struct pscal_fd *stdout_pscal = NULL;
+    struct pscal_fd *stderr_pscal = NULL;
     int status = 0;
-    bool run_in_worker = false;
-    bool worker_started = false;
-    const char *enable_worker = getenv("PSCALI_ENABLE_WORKER");
-    const char *disable_worker = getenv("PSCALI_DISABLE_WORKER");
+    bool apply_exec_redirs = cmd && cmd->redir_count > 0;
+    bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
 
-    if (use_pipe_fds) {
-        if (!pipeline_head && ctx->pipes) {
+    bool pipeline_in_process = ctx && ctx->in_process;
+    fprintf(stderr,
+            "[pipe] stage=%zu head=%d tail=%d in_process=%d stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
+            stage_pos, (int)pipeline_head, (int)pipeline_tail,
+            (int)pipeline_in_process, stdin_fd, stdout_fd, stderr_fd);
+
+    if (!pipeline_head) {
+#if defined(PSCAL_TARGET_IOS)
+        if (pipeline_in_process && ctx->pscal_pipe_read) {
+            stdin_pscal = ctx->pscal_pipe_read[stage_pos - 1];
+            stdin_fd = -2;
+            fprintf(stderr, "[pipe] stage=%zu stdin uses pscal=%p (idx=%zu)\n",
+                    stage_pos, (void *)stdin_pscal, stage_pos - 1);
+        } else
+#endif
+        {
             stdin_fd = ctx->pipes[stage_pos - 1][0];
         }
-        if (!pipeline_tail && ctx->pipes) {
+    }
+    if (!pipeline_tail) {
+#if defined(PSCAL_TARGET_IOS)
+        if (pipeline_in_process && ctx->pscal_pipe_write) {
+            stdout_pscal = ctx->pscal_pipe_write[stage_pos];
+            stdout_fd = -2;
+            fprintf(stderr, "[pipe] stage=%zu stdout uses pscal=%p (idx=%zu)\n",
+                    stage_pos, (void *)stdout_pscal, stage_pos);
+        } else
+#endif
+        {
             stdout_fd = ctx->pipes[stage_pos][1];
         }
-        if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos]) {
-            stderr_fd = stdout_fd;
-        }
-    } else if (!pipeline_head) {
-        if (PIPE_SPOOL_FD(ctx) < 0) {
-            runtimeError(vm, "pipeline: missing intermediate buffer");
-            shellUpdateStatus(1);
-            return false;
-        }
-        input_spool_fd = PIPE_SPOOL_FD(ctx);
-        vprocHostLseek(input_spool_fd, 0, SEEK_SET);
-        bool pager_tail = pipeline_tail &&
-                          cmd && cmd->argc > 0 &&
-                          (strcmp(cmd->argv[0], "less") == 0 || strcmp(cmd->argv[0], "more") == 0);
-        bool empty_spool = (PIPE_SPOOL_SIZE(ctx) == 0);
-        if (pager_tail) {
-            stdin_fd = vprocHostDup(input_spool_fd);
-            if (stdin_fd < 0) {
-                runtimeError(vm, "pipeline: failed to reopen pager buffer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            vprocHostLseek(stdin_fd, 0, SEEK_SET);
-            if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] pager tail using spool_fd=%d size=%zu\n", input_spool_fd, PIPE_SPOOL_SIZE(ctx));
-            }
-        } else if (empty_spool) {
-            stdin_fd = vprocHostOpen("/dev/null", O_RDONLY);
-            if (stdin_fd < 0) {
-                runtimeError(vm, "pipeline: failed to open /dev/null: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] empty spool -> /dev/null\n");
-            }
-        } else {
-            if (vprocHostPipe(input_pipe) != 0) {
-                runtimeError(vm, "pipeline: failed to allocate input buffer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            feed.src_fd = vprocHostDup(input_spool_fd);
-            if (feed.src_fd < 0) {
-                runtimeError(vm, "pipeline: failed to duplicate buffer fd: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                return false;
-            }
-            vprocHostLseek(feed.src_fd, 0, SEEK_SET);
-            feed.fd = input_pipe[1];
-            input_pipe[1] = -1;
-            if (vprocHostPthreadCreate(&feed_thread, NULL, shellPipelineFeedThread, &feed) == 0) {
-                feed_thread_started = true;
-            } else {
-                runtimeError(vm, "pipeline: failed to start feeder");
-                shellUpdateStatus(1);
-                goto cleanup;
-            }
-            stdin_fd = input_pipe[0];
-            input_pipe[0] = -1;
-        }
     }
-
-    if (need_spool) {
-        if (direct_spool) {
-            capture.spool_fd = shellPipelineCreateSpoolFile();
-            if (capture.spool_fd < 0) {
-                runtimeError(vm, "pipeline: failed to allocate spool storage: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                goto cleanup;
-            }
-            stdout_fd = vprocHostDup(capture.spool_fd);
-            if (stdout_fd < 0) {
-                runtimeError(vm, "pipeline: failed to open spool writer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                goto cleanup;
-            }
-            capture_writer_fd = stdout_fd;
-        } else {
-            if (vprocHostPipe(output_pipe) != 0) {
-                runtimeError(vm, "pipeline: unable to allocate buffer: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                goto cleanup;
-            }
-            stdout_fd = output_pipe[1];
-            capture_writer_fd = output_pipe[1];
-            capture.spool_fd = shellPipelineCreateSpoolFile();
-            if (capture.spool_fd < 0) {
-                runtimeError(vm, "pipeline: failed to allocate spool storage: %s", strerror(errno));
-                shellUpdateStatus(errno ? errno : 1);
-                goto cleanup;
-            }
-        }
-    }
-
-    if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos] && stdout_fd >= 0) {
-        stderr_fd = stdout_fd;
-    }
-
+    if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos]) {
 #if defined(PSCAL_TARGET_IOS)
-    if (stdin_fd >= 0 && !pushed_virtual_tty) {
-        int dup_fd = dup(STDIN_FILENO);
-        if (dup_fd >= 0) {
-            shellPagerPushVirtualTTYOverride(dup_fd);
-            pushed_virtual_tty = true;
-        }
-    }
+        if (stdout_pscal) {
+            stderr_pscal = stdout_pscal;
+            stderr_fd = -2;
+            fprintf(stderr, "[pipe] stage=%zu stderr merged to stdout pscal\n",
+                    stage_pos);
+        } else
 #endif
-
-    bool apply_exec_redirs = cmd && cmd->redir_count > 0;
-#if defined(PSCAL_TARGET_IOS)
-    if (enable_worker && *enable_worker &&
-        !ctx->background &&
-        !cmd->background &&
-        ctx->stage_count == 1 &&
-        !need_spool &&
-        !(disable_worker && *disable_worker)) {
-        run_in_worker = true;
-        if (shellShouldRunSmallclueInWorker(cmd)) {
-            run_in_worker = true;
-        }
-    }
-#endif
-    if (need_spool && !direct_spool && output_pipe[0] >= 0) {
-        capture.fd = output_pipe[0];
-        output_pipe[0] = -1;
-        if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] capture setup fd=%d writer=%d spool_fd=%d writer_vfd=%d\n",
-                    capture.fd, stdout_fd, capture.spool_fd, capture_writer_vfd);
-        }
-        if (vprocHostPthreadCreate(&capture_thread, NULL, shellPipelineCaptureThread, &capture) == 0) {
-            capture_thread_started = true;
-        } else {
-            runtimeError(vm, "pipeline: failed to start capture thread");
-            shellUpdateStatus(1);
-            goto cleanup;
+        {
+            stderr_fd = (stdout_fd >= 0) ? stdout_fd : STDOUT_FILENO;
         }
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    vp = shellCreateVProcForStage(stdin_fd,
-                                  stdout_fd,
-                                  stderr_fd,
-                                  pscalRuntimeDetectWindowCols(),
-                                  pscalRuntimeDetectWindowRows(),
-                                  -1);
+    VProc *vp = shellCreateVProcForStage(stdin_fd,
+                                         stdout_fd,
+                                         stderr_fd,
+                                         pscalRuntimeDetectWindowCols(),
+                                         pscalRuntimeDetectWindowRows(),
+                                         -1,
+                                         (!pipeline_in_process || pipeline_head || pipeline_tail));
     if (!vp) {
         runtimeError(vm, "pipeline: failed to allocate vproc");
         shellUpdateStatus(1);
-        goto cleanup;
-    }
-    if (run_in_worker) {
-        shellInstallVprocSigintHandler(vp);
+        return 1;
     }
     int shell_pid = vprocGetShellSelfPid();
     if (shell_pid > 0) {
         vprocSetParent(vprocPid(vp), shell_pid);
-    }
-    int shell_sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
-    if (shell_sid > 0) {
-        vprocSetSid(vprocPid(vp), shell_sid);
+        int shell_sid = vprocGetSid(shell_pid);
+        if (shell_sid > 0) {
+            vprocSetSid(vprocPid(vp), shell_sid);
+        }
     }
     pid_t group = (ctx->pgid > 0) ? ctx->pgid
                 : ((ctx->launched > 0 && ctx->pids) ? ctx->pids[0] : -1);
@@ -3810,358 +3573,266 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     }
     vprocSetPgid(vprocPid(vp), group);
     ctx->pgid = group;
-    /* Label the vproc so ps/top output is readable. */
-    if (cmd && cmd->argc > 0 && cmd->argv) {
-        char label[96] = {0};
-        size_t used = 0;
-        for (size_t i = 0; i < cmd->argc && used + 1 < sizeof(label); ++i) {
-            const char *part = cmd->argv[i] ? cmd->argv[i] : "";
-            size_t len = strlen(part);
-            if (used + len + 1 >= sizeof(label)) {
-                len = sizeof(label) - used - 1;
-            }
-            memcpy(label + used, part, len);
-            used += len;
-            if (used + 1 < sizeof(label) && i + 1 < cmd->argc) {
-                label[used++] = ' ';
-            }
-        }
-        label[used] = '\0';
-        if (label[0]) {
-            vprocSetCommandLabel(vprocPid(vp), label);
-        }
-    }
-    int stdout_host_fd = stdout_fd;
-    int stderr_host_fd = stderr_fd;
-    if (vp) {
-        if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] vproc adopt stdin=%d stdout=%d stderr=%d\n",
-                    stdin_fd, stdout_fd, stderr_fd);
-        }
-        if (stdin_fd >= 0) {
-            int vfd = vprocAdoptHostFd(vp, stdin_fd);
-            if (vfd >= 0) {
-                vm_stdin_fd = vfd;
-                vm_stdin_adopted = true;
-                stdin_fd = -1;
-            }
-        }
-        if (stdout_fd >= 0) {
-            int vfd = vprocAdoptHostFd(vp, stdout_fd);
-            if (vfd >= 0) {
-                vm_stdout_fd = vfd;
-                vm_stdout_adopted = true;
-                stdout_fd = -1;
-                capture_writer_vfd = vfd;
-                if (output_pipe[1] == stdout_host_fd) {
-                    output_pipe[1] = -1;
-                }
-                if (stderr_host_fd == stdout_host_fd) {
-                    vm_stderr_fd = vfd;
-                    vm_stderr_adopted = true;
-                    stderr_fd = -1;
-                }
-            }
-        }
-        if (!vm_stderr_adopted && stderr_fd >= 0) {
-            int vfd = vprocAdoptHostFd(vp, stderr_fd);
-            if (vfd >= 0) {
-                vm_stderr_fd = vfd;
-                vm_stderr_adopted = true;
-                stderr_fd = -1;
-            }
-        }
-        if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] vproc adopt stdin=%d stdout=%d stderr=%d\n",
-                    stdin_fd, stdout_fd, stderr_fd);
-        }
-    }
-    if (!run_in_worker) {
-        vprocRegisterThread(vp, pthread_self());
-        vprocActivate(vp);
-    }
-#endif
-    int run_stdin_fd = stdin_fd;
-    int run_stdout_fd = stdout_fd;
-    int run_stderr_fd = stderr_fd;
 #if defined(PSCAL_TARGET_IOS)
-    if (vm_stdin_adopted) {
-        run_stdin_fd = vm_stdin_fd;
-    }
-    if (vm_stdout_adopted) {
-        run_stdout_fd = vm_stdout_fd;
-    }
-    if (vm_stderr_adopted) {
-        run_stderr_fd = vm_stderr_fd;
-    }
-#endif
-
-#if defined(PSCAL_TARGET_IOS)
-    if (shellRuntimeIsInteractive() && !cmd->background && !ctx->background) {
+    /* Keep pipeline stages in the foreground when possible, but always disable
+     * stop semantics so SIGTTIN/TTOU do not park inline stages. */
+    if (!ctx->background && !cmd->background && shellRuntimeIsInteractive()) {
         shellEnsureJobControl();
-        bool has_stdin = (run_stdin_fd >= 0);
-        if (!has_stdin && vp) {
-            struct pscal_fd *pscal_stdin = vprocGetPscalFd(vp, STDIN_FILENO);
-            if (pscal_stdin) {
-                has_stdin = true;
-                pscal_fd_close(pscal_stdin);
-            } else if (vprocTranslateFd(vp, STDIN_FILENO) >= 0) {
-                has_stdin = true;
-            }
-        }
-        if (gShellRuntime.job_control_enabled && ctx->pgid > 0 && has_stdin) {
+        if (gShellRuntime.job_control_enabled && ctx->pgid > 0) {
             shellJobControlSetForeground(ctx->pgid);
         }
     }
+    vprocSetStopUnsupported(vprocPid(vp), true);
 #endif
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
 
-    if (run_in_worker) {
-        ShellCommand *worker_cmd = shellCloneCommandForBackground(cmd);
-        ShellInProcessWorkerCtx *worker = NULL;
-        if (worker_cmd) {
-            worker = (ShellInProcessWorkerCtx *)calloc(1, sizeof(ShellInProcessWorkerCtx));
-        }
-        if (!worker_cmd || !worker) {
-            shellFreeCommand(worker_cmd);
-            free(worker_cmd);
-            runtimeError(vm, "pipeline: unable to allocate worker");
-            shellUpdateStatus(1);
-            run_in_worker = false;
-        } else {
-            worker->vm = vm;
-            worker->cmd = worker_cmd;
-            worker->vp = vp;
-            worker->session_stdio = vprocSessionStdioCurrent();
-            worker->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
-                ? PSCALRuntimeGetCurrentRuntimeContext()
-                : NULL;
-            worker->stdin_fd = run_stdin_fd;
-            worker->stdout_fd = run_stdout_fd;
-            worker->stderr_fd = run_stderr_fd;
-            worker->stdin_is_vproc = vm_stdin_adopted;
-            worker->stdout_is_vproc = vm_stdout_adopted;
-            worker->stderr_is_vproc = vm_stderr_adopted;
-            worker->apply_exec_redirs = apply_exec_redirs;
-            worker->shell_pid = vprocGetShellSelfPid();
-            worker->kernel_pid = vprocGetKernelPid();
+    if (stdin_pscal) {
+        int arc = vprocAdoptPscalFd(vp, STDIN_FILENO, stdin_pscal);
+        fprintf(stderr, "[pipe] stage=%zu adopt stdin pscal=%p rc=%d errno=%d\n",
+                stage_pos, (void *)stdin_pscal, arc, errno);
+    }
+    if (stdout_pscal) {
+        int arc = vprocAdoptPscalFd(vp, STDOUT_FILENO, stdout_pscal);
+        fprintf(stderr, "[pipe] stage=%zu adopt stdout pscal=%p rc=%d errno=%d\n",
+                stage_pos, (void *)stdout_pscal, arc, errno);
+    }
+    if (stderr_pscal && stderr_pscal != stdout_pscal) {
+        int arc = vprocAdoptPscalFd(vp, STDERR_FILENO, stderr_pscal);
+        fprintf(stderr, "[pipe] stage=%zu adopt stderr pscal=%p rc=%d errno=%d\n",
+                stage_pos, (void *)stderr_pscal, arc, errno);
+    }
 
-            pthread_t worker_thread;
-            pthread_attr_t attr;
-            pthread_attr_init(&attr);
-            pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
-            int create_rc = vprocHostPthreadCreate(&worker_thread, &attr, shellInProcessWorkerMain, worker);
-            pthread_attr_destroy(&attr);
-            if (create_rc == 0) {
-                pthread_detach(worker_thread);
-                worker_started = true;
-                ctx->in_process_worker = true;
-                status = 0;
-            } else {
-                shellFreeCommand(worker_cmd);
-                free(worker_cmd);
-                free(worker);
-                run_in_worker = false;
-            }
+    if (pipeline_in_process) {
+        /* The vproc already owns the correct stdio mapping; drop the raw pipe
+         * fds from the shared table to avoid extra write refs keeping pipes
+         * open after the stage completes. */
+        int close_in = stdin_fd;
+        int close_out = stdout_fd;
+        int close_err = stderr_fd;
+        if (close_in >= 0) {
+            vprocHostClose(close_in);
+            stdin_fd = -1;
         }
-    }
-    if (!run_in_worker) {
-        if (vprocCurrent() != vp) {
-            vprocRegisterThread(vp, pthread_self());
-            vprocActivate(vp);
-        }
-        status = shellRunBuiltinInProcess(vm, cmd, run_stdin_fd, run_stdout_fd, run_stderr_fd, apply_exec_redirs);
-    }
-    if (need_spool && direct_spool && capture.spool_fd >= 0) {
-        PIPE_SPOOL_FD(ctx) = capture.spool_fd;
-        PIPE_SPOOL_OWNED(ctx) = true;
-        off_t end = vprocHostLseek(PIPE_SPOOL_FD(ctx), 0, SEEK_END);
-        if (end >= 0) {
-            PIPE_SPOOL_SIZE(ctx) = (size_t)end;
-            vprocHostLseek(PIPE_SPOOL_FD(ctx), 0, SEEK_SET);
-        } else {
-            PIPE_SPOOL_SIZE(ctx) = 0;
-        }
-        capture.spool_fd = -1;
-    }
-    if (getenv("PSCALI_PIPE_DEBUG")) {
-        fprintf(stderr, "[pipe] stage cmd=%s status=%d spool_fd=%d size=%zu\n",
-                (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
-                status,
-                PIPE_SPOOL_FD(ctx),
-                PIPE_SPOOL_SIZE(ctx));
-    }
-    ctx->last_status = status;
-    bool ctx_valid = ctx->active && ctx->pids && stage_pos < ctx->stage_count;
-    if (ctx_valid) {
-        ctx->pids[stage_pos] = 0;
-#if defined(PSCAL_TARGET_IOS)
-        if (vp) {
-            ctx->pids[stage_pos] = vprocPid(vp);
-        }
-        ctx->launched = stage_pos + 1;
-#else
-        ctx->launched = stage_pos + 1;
-#endif
-    }
-    ok = true;
-
-cleanup:
-#if defined(PSCAL_TARGET_IOS)
-    if (vp && !worker_started) {
-        if (vm_stdin_adopted && run_stdin_fd >= 0) {
-            vprocCloseShim(run_stdin_fd);
-            run_stdin_fd = -1;
-        }
-        if (vm_stdout_adopted && run_stdout_fd >= 0) {
-            vprocCloseShim(run_stdout_fd);
-            run_stdout_fd = -1;
-        }
-        if (vm_stderr_adopted && run_stderr_fd >= 0 &&
-            (!vm_stdout_adopted || run_stderr_fd != run_stdout_fd)) {
-            vprocCloseShim(run_stderr_fd);
-            run_stderr_fd = -1;
-        }
-        /* Ensure any vproc entries that still reference the pipeline writer are closed
-         * so the capture thread can see EOF. */
-        if (capture_writer_vfd >= 0) {
-            vprocCloseShim(capture_writer_vfd);
-            capture_writer_vfd = -1;
-        }
-    }
-#endif
-#if defined(PSCAL_TARGET_IOS)
-    if (!worker_started) {
-        vprocDeactivate();
-        if (vp) {
-            vprocMarkExit(vp, status);
-            vprocDiscard(vprocPid(vp));
-            vprocDestroy(vp);
-        }
-    }
-#endif
-    if (!worker_started) {
-        if (stdin_fd >= 0) vprocHostClose(stdin_fd);
-        if (input_pipe[0] >= 0) vprocHostClose(input_pipe[0]);
-        if (input_pipe[1] >= 0) vprocHostClose(input_pipe[1]);
-        if (stdout_fd >= 0) {
-            vprocHostClose(stdout_fd);
-            if (output_pipe[1] == stdout_fd) {
-                output_pipe[1] = -1;
-            }
+        if (close_out >= 0) {
+            vprocHostClose(close_out);
             stdout_fd = -1;
         }
-        if (capture_writer_fd >= 0) {
-            vprocHostClose(capture_writer_fd);
-            capture_writer_fd = -1;
+        if (close_err >= 0 && close_err != close_out) {
+            vprocHostClose(close_err);
+            stderr_fd = -1;
+        } else {
+            stderr_fd = -1;
         }
-    }
-    if (use_pipe_fds && ctx && ctx->pipes) {
-        if (!pipeline_head && stage_pos > 0) {
-            if (ctx->pipes[stage_pos - 1][0] >= 0) {
-                vprocHostClose(ctx->pipes[stage_pos - 1][0]);
-                ctx->pipes[stage_pos - 1][0] = -1;
-            }
-        }
-        if (!pipeline_tail) {
-            if (ctx->pipes[stage_pos][1] >= 0) {
-                vprocHostClose(ctx->pipes[stage_pos][1]);
-                ctx->pipes[stage_pos][1] = -1;
-            }
-        }
-    }
-    if (capture_thread_started) {
-        if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] capture join fd=%d spool_fd=%d size=%zu err=%d\n",
-                    capture.fd, capture.spool_fd, capture.size, capture.err);
-        }
-        int join_rc = pthread_join(capture_thread, NULL);
-        if (join_rc != 0 && getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] capture join failed rc=%d (%s)\n", join_rc, strerror(join_rc));
-        }
-        capture_thread_started = false;
-        if (capture.err != 0) {
-            ok = false;
-            runtimeError(vm, "pipeline: failed to capture output: %s", strerror(capture.err));
-            shellUpdateStatus(capture.err);
-        }
-        if (need_spool) {
-            if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] capture thread done size=%zu spool_fd=%d\n",
-                        capture.size, capture.spool_fd);
-            }
-            if (PIPE_SPOOL_FD(ctx) >= 0 && PIPE_SPOOL_OWNED(ctx)) {
-                vprocHostClose(PIPE_SPOOL_FD(ctx));
-            }
-            PIPE_SPOOL_FD(ctx) = capture.spool_fd;
-            PIPE_SPOOL_SIZE(ctx) = capture.size;
-            PIPE_SPOOL_OWNED(ctx) = true;
-            if (getenv("PSCALI_PIPE_DEBUG")) {
-                fprintf(stderr, "[pipe] captured size=%zu\n", PIPE_SPOOL_SIZE(ctx));
-            }
-            if (PIPE_SPOOL_FD(ctx) >= 0) {
-                vprocHostLseek(PIPE_SPOOL_FD(ctx), 0, SEEK_SET);
-            }
-            capture.spool_fd = -1;
-        }
-    }
-    if (capture.buffer) {
-        free(capture.buffer);
-        capture.buffer = NULL;
-    }
-    if (capture.spool_fd >= 0) {
-        if (getenv("PSCALI_PIPE_DEBUG")) {
-            fprintf(stderr, "[pipe] capture cleanup spool_fd=%d size=%zu err=%d\n",
-                    capture.spool_fd, capture.size, capture.err);
-        }
-        vprocHostClose(capture.spool_fd);
-        capture.spool_fd = -1;
-    }
-
-#if defined(PSCAL_TARGET_IOS)
-    if (pushed_virtual_tty) {
-        shellPagerPopVirtualTTYOverride();
-        pushed_virtual_tty = false;
     }
 #endif
 
-    if (feed_thread_started) {
-        pthread_join(feed_thread, NULL);
-        feed_thread_started = false;
-        if (feed.err != 0) {
-            ok = false;
-            runtimeError(vm, "pipeline: failed to feed input: %s", strerror(feed.err));
-            shellUpdateStatus(feed.err);
+    status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, stdout_fd, stderr_fd, apply_exec_redirs);
+
+    bool stderr_shared_with_stdout =
+        (stderr_pscal && stdout_pscal && stderr_pscal == stdout_pscal);
+
+    if (!pipeline_tail && stdout_fd >= 0) {
+        vprocHostClose(stdout_fd);
+    }
+    if (!pipeline_head && stdin_fd >= 0) {
+        vprocHostClose(stdin_fd);
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (!pipeline_tail && stdout_pscal) {
+        pscal_fd_close(stdout_pscal);
+        if (ctx->pscal_pipe_write) {
+            ctx->pscal_pipe_write[stage_pos] = NULL;
+        }
+        stdout_pscal = NULL;
+    }
+    if (!pipeline_head && stdin_pscal) {
+        pscal_fd_close(stdin_pscal);
+        if (ctx->pscal_pipe_read) {
+            ctx->pscal_pipe_read[stage_pos - 1] = NULL;
+        }
+        stdin_pscal = NULL;
+    }
+    if (stderr_pscal && !stderr_shared_with_stdout) {
+        pscal_fd_close(stderr_pscal);
+        stderr_pscal = NULL;
+    }
+    if (stderr_shared_with_stdout) {
+        stderr_pscal = NULL;
+    }
+#endif
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->pids && stage_pos < ctx->stage_count) {
+        ctx->pids[stage_pos] = vprocPid(vp);
+        ctx->launched = stage_pos + 1;
+    }
+    vprocMarkExit(vp, status);
+    vprocDeactivate();
+    vprocDestroy(vp);
+#else
+    if (ctx->pids && stage_pos < ctx->stage_count) {
+        ctx->pids[stage_pos] = 0;
+        ctx->launched = stage_pos + 1;
+    }
+#endif
+    return status;
+}
+
+static void *shellPipelineStageThreadMain(void *arg) {
+    ShellPipelineStageThreadCtx *tctx = (ShellPipelineStageThreadCtx *)arg;
+    if (!tctx) {
+        return NULL;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    bool swapped_runtime = false;
+    if (PSCALRuntimeGetCurrentRuntimeContext) {
+        prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
+    }
+    if (PSCALRuntimeSetCurrentRuntimeContext && tctx->runtime_ctx) {
+        PSCALRuntimeSetCurrentRuntimeContext(tctx->runtime_ctx);
+        swapped_runtime = true;
+    }
+    VProcSessionStdio *prev_session_stdio = vprocSessionStdioCurrent();
+    bool swapped_stdio = false;
+    if (tctx->session_stdio && tctx->session_stdio != prev_session_stdio) {
+        vprocSessionStdioActivate(tctx->session_stdio);
+        swapped_stdio = true;
+    }
+#endif
+    vprocSetPipelineStage(true);
+    int status = shellPipelineRunStage(tctx->vm,
+                                       tctx->ctx,
+                                       tctx->cmd,
+                                       tctx->stage_pos,
+                                       tctx->pipeline_head,
+                                       tctx->pipeline_tail);
+    vprocSetPipelineStage(false);
+    if (tctx->ctx && tctx->ctx->stage_status && tctx->stage_pos < tctx->ctx->stage_count) {
+        tctx->ctx->stage_status[tctx->stage_pos] = status;
+    }
+    if (tctx->cmd) {
+        shellFreeCommand(tctx->cmd);
+        free(tctx->cmd);
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (swapped_stdio) {
+        vprocSessionStdioActivate(prev_session_stdio);
+    }
+    if (swapped_runtime && PSCALRuntimeSetCurrentRuntimeContext) {
+        PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+    }
+#endif
+    free(tctx);
+    return NULL;
+}
+
+static bool shellPipelineExecuteStageInProcess(VM *vm,
+                                               ShellPipelineContext *ctx,
+                                               ShellCommand *cmd,
+                                               size_t stage_pos,
+                                               bool pipeline_head,
+                                               bool pipeline_tail) {
+    fprintf(stderr,
+            "[pipe] launch stage=%zu head=%d tail=%d in_process=%d read[%zu]=%p write[%zu]=%p\n",
+            stage_pos,
+            (int)pipeline_head,
+            (int)pipeline_tail,
+            (ctx ? (int)ctx->in_process : 0),
+            (stage_pos > 0) ? stage_pos - 1 : 0,
+            (ctx && stage_pos > 0 && ctx->pscal_pipe_read) ? (void *)ctx->pscal_pipe_read[stage_pos - 1] : NULL,
+            stage_pos,
+            (ctx && ctx->pscal_pipe_write) ? (void *)ctx->pscal_pipe_write[stage_pos] : NULL);
+    if (!ctx || !ctx->active || stage_pos >= ctx->stage_count) {
+        runtimeError(vm, "pipeline: invalid context");
+        shellUpdateStatus(1);
+        if (ctx) {
+            shellAbortPipeline();
+        }
+        return false;
+    }
+    if (ctx->stage_count > 1 && !ctx->pipes) {
+        runtimeError(vm, "pipeline: pipes unavailable");
+        shellUpdateStatus(1);
+        shellAbortPipeline();
+        return false;
+    }
+
+    if (!pipeline_tail) {
+        ShellPipelineStageThreadCtx *tctx =
+            (ShellPipelineStageThreadCtx *)calloc(1, sizeof(ShellPipelineStageThreadCtx));
+        ShellCommand *cloned = shellCloneCommandForBackground(cmd);
+        if (!tctx || !cloned) {
+            free(tctx);
+            shellFreeCommand(cloned);
+            free(cloned);
+            runtimeError(vm, "pipeline: unable to launch stage");
+            shellUpdateStatus(1);
+            shellAbortPipeline();
+            return false;
+        }
+        tctx->vm = vm;
+        tctx->ctx = ctx;
+        tctx->cmd = cloned;
+        tctx->stage_pos = stage_pos;
+        tctx->pipeline_head = pipeline_head;
+        tctx->pipeline_tail = pipeline_tail;
+#if defined(PSCAL_TARGET_IOS)
+        tctx->session_stdio = ctx->session_stdio;
+        tctx->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+            ? PSCALRuntimeGetCurrentRuntimeContext()
+            : NULL;
+#endif
+
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
+        int rc = pthread_create(&ctx->threads[stage_pos], &attr, shellPipelineStageThreadMain, tctx);
+        pthread_attr_destroy(&attr);
+        if (rc != 0) {
+            runtimeError(vm, "pipeline: failed to create stage thread");
+            shellUpdateStatus(1);
+            shellAbortPipeline();
+            return false;
+        }
+        ctx->thread_started[stage_pos] = true;
+        return true;
+    }
+
+    /* Tail stage runs inline so we can join upstream threads afterward. */
+    vprocSetPipelineStage(true);
+    int status = shellPipelineRunStage(vm, ctx, cmd, stage_pos, pipeline_head, pipeline_tail);
+    vprocSetPipelineStage(false);
+    ctx->last_status = status;
+    if (ctx->stage_status && stage_pos < ctx->stage_count) {
+        ctx->stage_status[stage_pos] = status;
+    }
+
+    for (size_t i = 0; i < stage_pos; ++i) {
+        if (ctx->thread_started && ctx->thread_started[i]) {
+            pthread_join(ctx->threads[i], NULL);
+            ctx->thread_started[i] = false;
         }
     }
 
-    if (!pipeline_head && input_spool_fd >= 0) {
-        int closed_fd = input_spool_fd;
-        vprocHostClose(input_spool_fd);
-        input_spool_fd = -1;
-        if (!need_spool && PIPE_SPOOL_FD(ctx) == closed_fd) {
-            PIPE_SPOOL_FD(ctx) = -1;
-            PIPE_SPOOL_SIZE(ctx) = 0;
-            PIPE_SPOOL_OWNED(ctx) = false;
+    /* Proactively close any remaining pipe endpoints now that the pipeline is
+     * complete. This ensures blocked readers see EOF even if an upstream
+     * stage bailed before cleaning up. */
+    if (ctx->pipes) {
+        size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
+        for (size_t i = 0; i < pipe_count; ++i) {
+            if (ctx->pipes[i][0] >= 0) {
+                vprocHostClose(ctx->pipes[i][0]);
+                ctx->pipes[i][0] = -1;
+            }
+            if (ctx->pipes[i][1] >= 0) {
+                vprocHostClose(ctx->pipes[i][1]);
+                ctx->pipes[i][1] = -1;
+            }
         }
     }
 
-    if (!feed_thread_started && feed.fd >= 0) {
-        vprocHostClose(feed.fd);
-        feed.fd = -1;
-    }
-
-    if (need_spool && output_pipe[1] >= 0) {
-        vprocHostClose(output_pipe[1]);
-        output_pipe[1] = -1;
-    }
-
-    if (ok && pipeline_tail) {
-        ctx->background = cmd->background;
-        shellFinishPipeline(cmd);
-        shellRuntimeProcessPendingSignals();
-    }
-
-    return ok;
+    return true;
 }
 #endif /* PSCAL_TARGET_IOS */
 

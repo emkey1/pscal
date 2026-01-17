@@ -1610,6 +1610,245 @@ static const struct pscal_fd_ops kVprocLocationFdOps = {
     .close = vprocLocationPscalClose,
 };
 
+/* -------- In-process pipe (mutex/cond-backed) -------- */
+
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cond_read;
+    pthread_cond_t cond_write;
+    unsigned char *buf;
+    size_t cap;
+    size_t head;
+    size_t tail;
+    size_t count;
+    bool read_closed;
+    bool write_closed;
+    int readers;
+    int writers;
+} VprocInprocPipe;
+
+typedef struct {
+    VprocInprocPipe *pipe;
+    bool is_reader;
+} VprocInprocEnd;
+
+static void vprocInprocPipeFree(VprocInprocPipe *pipe) {
+    if (!pipe) {
+        return;
+    }
+    pthread_mutex_destroy(&pipe->mu);
+    pthread_cond_destroy(&pipe->cond_read);
+    pthread_cond_destroy(&pipe->cond_write);
+    free(pipe->buf);
+    free(pipe);
+}
+
+static ssize_t vprocInprocPipeRead(struct pscal_fd *fd, void *buf, size_t bufsize) {
+    if (!fd || !buf) {
+        return _EBADF;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe || !end->is_reader) {
+        return _EBADF;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    pthread_mutex_lock(&pipe->mu);
+    while (pipe->count == 0 && !pipe->write_closed) {
+        pthread_cond_wait(&pipe->cond_read, &pipe->mu);
+    }
+    if (pipe->count == 0 && pipe->write_closed) {
+        pthread_mutex_unlock(&pipe->mu);
+        return 0;
+    }
+    size_t to_copy = bufsize;
+    if (to_copy > pipe->count) {
+        to_copy = pipe->count;
+    }
+    for (size_t i = 0; i < to_copy; ++i) {
+        ((unsigned char *)buf)[i] = pipe->buf[pipe->head];
+        pipe->head = (pipe->head + 1) % pipe->cap;
+    }
+    pipe->count -= to_copy;
+    pthread_cond_signal(&pipe->cond_write);
+    pthread_mutex_unlock(&pipe->mu);
+    pscal_fd_poll_wakeup(fd, POLLIN);
+    return (ssize_t)to_copy;
+}
+
+static ssize_t vprocInprocPipeWrite(struct pscal_fd *fd, const void *buf, size_t bufsize) {
+    if (!fd || !buf) {
+        return _EBADF;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe || end->is_reader) {
+        return _EBADF;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    pthread_mutex_lock(&pipe->mu);
+    if (pipe->write_closed) {
+        pthread_mutex_unlock(&pipe->mu);
+        return _EPIPE;
+    }
+    while (pipe->count == pipe->cap && !pipe->read_closed) {
+        pthread_cond_wait(&pipe->cond_write, &pipe->mu);
+    }
+    if (pipe->read_closed) {
+        pthread_mutex_unlock(&pipe->mu);
+        return _EPIPE;
+    }
+    size_t space = pipe->cap - pipe->count;
+    size_t to_copy = bufsize;
+    if (to_copy > space) {
+        to_copy = space;
+    }
+    for (size_t i = 0; i < to_copy; ++i) {
+        pipe->buf[pipe->tail] = ((const unsigned char *)buf)[i];
+        pipe->tail = (pipe->tail + 1) % pipe->cap;
+    }
+    pipe->count += to_copy;
+    pthread_cond_signal(&pipe->cond_read);
+    pthread_mutex_unlock(&pipe->mu);
+    pscal_fd_poll_wakeup(fd, POLLOUT);
+    return (ssize_t)to_copy;
+}
+
+static int vprocInprocPipePoll(struct pscal_fd *fd) {
+    if (!fd) {
+        return 0;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe) {
+        return 0;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    int events = 0;
+    pthread_mutex_lock(&pipe->mu);
+    if (end->is_reader) {
+        if (pipe->count > 0) {
+            events |= POLLIN;
+        }
+        if (pipe->write_closed) {
+            events |= POLLHUP;
+        }
+    } else {
+        if (!pipe->read_closed && pipe->count < pipe->cap) {
+            events |= POLLOUT;
+        }
+        if (pipe->read_closed) {
+            events |= POLLERR;
+        }
+    }
+    pthread_mutex_unlock(&pipe->mu);
+    return events;
+}
+
+static int vprocInprocPipeClose(struct pscal_fd *fd) {
+    if (!fd) {
+        return _EBADF;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe) {
+        return _EBADF;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    pthread_mutex_lock(&pipe->mu);
+    if (end->is_reader) {
+        pipe->read_closed = true;
+        if (pipe->readers > 0) {
+            pipe->readers--;
+        }
+    } else {
+        pipe->write_closed = true;
+        if (pipe->writers > 0) {
+            pipe->writers--;
+        }
+    }
+    bool destroy = pipe->read_closed && pipe->write_closed && pipe->readers <= 0 && pipe->writers <= 0;
+    pthread_cond_broadcast(&pipe->cond_read);
+    pthread_cond_broadcast(&pipe->cond_write);
+    pthread_mutex_unlock(&pipe->mu);
+    pscal_fd_poll_wakeup(fd, POLLHUP);
+    free(end);
+    fd->userdata = NULL;
+    if (destroy) {
+        vprocInprocPipeFree(pipe);
+    }
+    return 0;
+}
+
+static const struct pscal_fd_ops kVprocInprocPipeReadOps = {
+    .read = vprocInprocPipeRead,
+    .write = NULL,
+    .poll = vprocInprocPipePoll,
+    .ioctl_size = NULL,
+    .ioctl = NULL,
+    .close = vprocInprocPipeClose,
+};
+
+static const struct pscal_fd_ops kVprocInprocPipeWriteOps = {
+    .read = NULL,
+    .write = vprocInprocPipeWrite,
+    .poll = vprocInprocPipePoll,
+    .ioctl_size = NULL,
+    .ioctl = NULL,
+    .close = vprocInprocPipeClose,
+};
+
+int vprocCreateInprocPipe(struct pscal_fd **out_read, struct pscal_fd **out_write) {
+    if (!out_read || !out_write) {
+        errno = EINVAL;
+        return -1;
+    }
+    *out_read = NULL;
+    *out_write = NULL;
+
+    VprocInprocPipe *pipe = (VprocInprocPipe *)calloc(1, sizeof(VprocInprocPipe));
+    if (!pipe) {
+        errno = ENOMEM;
+        return -1;
+    }
+    pipe->cap = 8192;
+    pipe->buf = (unsigned char *)calloc(pipe->cap, sizeof(unsigned char));
+    pthread_mutex_init(&pipe->mu, NULL);
+    pthread_cond_init(&pipe->cond_read, NULL);
+    pthread_cond_init(&pipe->cond_write, NULL);
+    pipe->readers = 1;
+    pipe->writers = 1;
+
+    VprocInprocEnd *read_end = (VprocInprocEnd *)calloc(1, sizeof(VprocInprocEnd));
+    VprocInprocEnd *write_end = (VprocInprocEnd *)calloc(1, sizeof(VprocInprocEnd));
+    if (!pipe->buf || !read_end || !write_end) {
+        free(read_end);
+        free(write_end);
+        vprocInprocPipeFree(pipe);
+        errno = ENOMEM;
+        return -1;
+    }
+    read_end->pipe = pipe;
+    read_end->is_reader = true;
+    write_end->pipe = pipe;
+    write_end->is_reader = false;
+
+    struct pscal_fd *rfd = pscal_fd_create(&kVprocInprocPipeReadOps);
+    struct pscal_fd *wfd = pscal_fd_create(&kVprocInprocPipeWriteOps);
+    if (!rfd || !wfd) {
+        if (rfd) pscal_fd_close(rfd);
+        if (wfd) pscal_fd_close(wfd);
+        free(read_end);
+        free(write_end);
+        vprocInprocPipeFree(pipe);
+        errno = ENOMEM;
+        return -1;
+    }
+    rfd->userdata = read_end;
+    wfd->userdata = write_end;
+    *out_read = rfd;
+    *out_write = wfd;
+    fprintf(stderr, "[pipe-create] pipe=%p rfd=%p wfd=%p cap=%zu\n",
+            (void *)pipe, (void *)rfd, (void *)wfd, pipe->cap);
+    return 0;
+}
+
 typedef struct {
     uint64_t session_id;
     struct pscal_fd *pty_slave;
@@ -1816,6 +2055,7 @@ static void vprocTaskTableRepairLocked(void);
 static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty);
 static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid);
 static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
+static __thread bool gVprocPipelineStage = false;
 
 __attribute__((weak)) void PSCALRuntimeOnProcessGroupEmpty(int pgid);
 
@@ -2397,6 +2637,11 @@ static bool vprocShouldStopForBackgroundTty(VProc *vp, int sig) {
     bool stopped = false;
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
+    if (entry && entry->stop_unsupported) {
+        /* Pipelines and synthetic tasks that disable stops should never be parked. */
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return false;
+    }
     if (entry && entry->sid > 0) {
         int fg = vprocForegroundPgidLocked(entry->sid);
         if (fg > 0 && entry->pgid != fg) {
@@ -2457,18 +2702,19 @@ bool vprocWaitIfStopped(VProc *vp) {
     bool waited = false;
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry && entry->stop_unsupported && entry->stopped) {
+        /* Clear any lingering stop so readers never block on job-control signals. */
+        entry->stopped = false;
+        entry->continued = true;
+        entry->stop_signo = 0;
+        entry->pending_signals &= ~vprocSigMask(SIGTSTP);
+        pthread_cond_broadcast(&gVProcTasks.cv);
+    }
     if (entry && entry->stop_unsupported) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         return false;
     }
     while (entry && entry->stopped && !entry->exited) {
-        if (entry->stop_unsupported) {
-            entry->stopped = false;
-            entry->continued = true;
-            entry->stop_signo = 0;
-            pthread_cond_broadcast(&gVProcTasks.cv);
-            break;
-        }
         waited = true;
         pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
         if (entry->pid != pid) {
@@ -4362,6 +4608,11 @@ VProc *vprocCreate(const VProcOptions *opts) {
         if (local.job_id > 0) {
             slot->job_id = local.job_id;
         }
+        /* Synthetic vprocs that override stdio (common for pipeline stages) should
+         * never be stopped by terminal job-control signals. */
+        if (local.stdin_fd >= 0 || local.stdout_fd >= 0 || local.stderr_fd >= 0) {
+            slot->stop_unsupported = true;
+        }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 
@@ -4497,6 +4748,9 @@ int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
     pthread_mutex_lock(&vp->mu);
     if ((size_t)target_fd >= vp->capacity) {
         pthread_mutex_unlock(&vp->mu);
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            vprocDebugLogf("[vproc] adopt pscal fd=%d failed: capacity %zu\n", target_fd, vp->capacity);
+        }
         errno = EBADF;
         return -1;
     }
@@ -4512,6 +4766,8 @@ int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
         vp->stderr_host_fd = -1;
     }
     pthread_mutex_unlock(&vp->mu);
+    fprintf(stderr, "[vproc] adopt pscal fd=%d ptr=%p rc=0\n",
+            target_fd, (void *)pscal_fd);
     return 0;
 }
 
@@ -5600,6 +5856,10 @@ void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+void vprocSetPipelineStage(bool active) {
+    gVprocPipelineStage = active;
 }
 
 int vprocGetPgid(int pid) {
@@ -7849,12 +8109,20 @@ int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     return vprocSetSessionWinsize(session_id, cols, rows);
 }
 
+static int gVprocPipelineReadLogCount = 0;
+static int gVprocPipelineWriteLogCount = 0;
+
 ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (vp) {
         struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
         if (pscal_fd) {
+            if (gVprocPipelineStage && gVprocPipelineReadLogCount < 32) {
+                gVprocPipelineReadLogCount++;
+                fprintf(stderr, "[vproc-read] fd=%d using pscal=%p count=%zu\n",
+                        fd, (void *)pscal_fd, count);
+            }
             ssize_t res = pscal_fd->ops->read(pscal_fd, buf, count);
             pscal_fd_close(pscal_fd);
             if (res < 0) {
@@ -7879,7 +8147,8 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     if (controlling_stdin) {
         (void)vprocWaitIfStopped(vp);
     }
-    if (controlling_stdin && vprocShouldStopForBackgroundTty(vprocCurrent(), SIGTTIN)) {
+    if (controlling_stdin && !gVprocPipelineStage &&
+        vprocShouldStopForBackgroundTty(vprocCurrent(), SIGTTIN)) {
         errno = EINTR;
         return -1;
     }
@@ -7896,6 +8165,11 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     if (vp) {
         struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
         if (pscal_fd) {
+            if (gVprocPipelineStage && gVprocPipelineWriteLogCount < 32) {
+                gVprocPipelineWriteLogCount++;
+                fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
+                        fd, (void *)pscal_fd, count);
+            }
             ssize_t res = pscal_fd->ops->write(pscal_fd, buf, count);
             pscal_fd_close(pscal_fd);
             if (res < 0) {
@@ -7911,13 +8185,6 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     bool is_stderr = false;
     vprocSessionResolveOutputFd(session, fd, &is_stdout, &is_stderr);
     host = shimTranslate(fd, 1);
-    if ((is_stdout || is_stderr) && session && !vprocSessionStdioIsDefault(session) && host >= 0) {
-        int session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
-        if (!vprocSessionFdMatchesHost(host, session_host_fd)) {
-            is_stdout = false;
-            is_stderr = false;
-        }
-    }
     if ((is_stdout || is_stderr) && session && !vprocSessionStdioIsDefault(session)) {
         struct pscal_fd *target =
             is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
@@ -7926,10 +8193,17 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
         }
         if (target && target->ops && target->ops->write) {
             ssize_t res = target->ops->write(target, buf, count);
-            if (res >= 0) {
-                return res;
+            if (res < 0) {
+                return vprocSetCompatErrno((int)res);
             }
-            return vprocSetCompatErrno((int)res);
+            /* Mirror to the host side as well when it differs so Xcode still sees logs. */
+            if (host >= 0) {
+                int session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
+                if (session_host_fd < 0 || !vprocSessionFdMatchesHost(host, session_host_fd)) {
+                    (void)vprocHostWrite(host, buf, count);
+                }
+            }
+            return res;
         }
     }
 #else

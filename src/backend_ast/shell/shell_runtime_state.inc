@@ -419,7 +419,13 @@ typedef struct {
 #if defined(PSCAL_TARGET_IOS)
     bool in_process;
     bool in_process_worker;
+    VProcSessionStdio *session_stdio;
     ShellPipelineSession session;
+    pthread_t *threads;
+    bool *thread_started;
+    int *stage_status;
+    struct pscal_fd **pscal_pipe_read;
+    struct pscal_fd **pscal_pipe_write;
 #endif
 } ShellPipelineContext;
 
