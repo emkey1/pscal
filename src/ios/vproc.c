@@ -8202,7 +8202,18 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     bool is_stderr = false;
     vprocSessionResolveOutputFd(session, fd, &is_stdout, &is_stderr);
     host = shimTranslate(fd, 1);
-    if ((is_stdout || is_stderr) && session && !vprocSessionStdioIsDefault(session)) {
+    bool use_session_output = false;
+    int session_host_fd = -1;
+    if (is_stdout || is_stderr) {
+        session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
+    }
+    if ((is_stdout || is_stderr) &&
+        session &&
+        !vprocSessionStdioIsDefault(session)) {
+        use_session_output = (session_host_fd >= 0 && host >= 0 &&
+                              vprocSessionFdMatchesHost(host, session_host_fd));
+    }
+    if (use_session_output && session) {
         struct pscal_fd *target =
             is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
         if (!target) {
@@ -8214,11 +8225,8 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
                 return vprocSetCompatErrno((int)res);
             }
             /* Mirror to the host side as well when it differs so Xcode still sees logs. */
-            if (host >= 0) {
-                int session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
-                if (session_host_fd < 0 || !vprocSessionFdMatchesHost(host, session_host_fd)) {
-                    (void)vprocHostWrite(host, buf, count);
-                }
+            if (host >= 0 && session_host_fd >= 0 && !vprocSessionFdMatchesHost(host, session_host_fd)) {
+                (void)vprocHostWrite(host, buf, count);
             }
             return res;
         }
