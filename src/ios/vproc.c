@@ -8266,25 +8266,37 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     if (host < 0) {
         host = shimTranslate(fd, 1);
     }
-    if (host < 0) {
-        /* As a last resort, try the controlling TTY so output is not dropped when
-         * session/host resolution fails. This mirrors typical Unix behaviour for
-         * interactive pipelines. */
-        int tty = vprocHostOpen("/dev/tty", O_WRONLY);
-        if (tty < 0) {
-            tty = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
+    /* Prefer the controlling TTY when stdout/stderr is a terminal; otherwise
+     * honor explicit redirections (pipes, files). */
+    int write_fd = host;
+    if (write_fd >= 0) {
+        int is_tty = isatty(write_fd);
+        if (is_tty) {
+            int tty_fd = vprocHostOpen("/dev/tty", O_WRONLY);
+            if (tty_fd < 0) {
+                tty_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
+            }
+            if (tty_fd >= 0) {
+                write_fd = tty_fd;
+            }
         }
-        if (tty >= 0) {
-            ssize_t res = vprocHostWrite(tty, buf, count);
-            vprocHostClose(tty);
-            return res;
+    } else {
+        write_fd = vprocHostOpen("/dev/tty", O_WRONLY);
+        if (write_fd < 0) {
+            write_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
         }
+    }
+    if (write_fd < 0) {
         return -1;
     }
     if (getenv("PSCALI_TOOL_DEBUG")) {
-        vprocDebugLogf( "[vwrite] fd=%d -> host=%d count=%zu\n", fd, host, count);
+        vprocDebugLogf( "[vwrite] fd=%d -> host=%d write_fd=%d count=%zu\n", fd, host, write_fd, count);
     }
-    return vprocHostWrite(host, buf, count);
+    ssize_t res = vprocHostWrite(write_fd, buf, count);
+    if (write_fd != host) {
+        vprocHostClose(write_fd);
+    }
+    return res;
 }
 
 int vprocDupShim(int fd) {
