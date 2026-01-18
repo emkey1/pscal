@@ -8242,10 +8242,43 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
 #else
     host = shimTranslate(fd, 1);
 #endif
+    /* If host resolution failed, fall back to the session stream or host fd so
+     * stdout/stderr is not dropped when stdio is virtualised. */
+    if (host < 0) {
+        if (session && (is_stdout || is_stderr)) {
+            struct pscal_fd *fallback =
+                is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
+            if (!fallback) {
+                fallback = session->pty_slave;
+            }
+            if (fallback && fallback->ops && fallback->ops->write) {
+                ssize_t res = fallback->ops->write(fallback, buf, count);
+                if (res < 0) {
+                    return vprocSetCompatErrno((int)res);
+                }
+                return res;
+            }
+            if (session_host_fd >= 0) {
+                host = session_host_fd;
+            }
+        }
+    }
     if (host < 0) {
         host = shimTranslate(fd, 1);
     }
     if (host < 0) {
+        /* As a last resort, try the controlling TTY so output is not dropped when
+         * session/host resolution fails. This mirrors typical Unix behaviour for
+         * interactive pipelines. */
+        int tty = vprocHostOpen("/dev/tty", O_WRONLY);
+        if (tty < 0) {
+            tty = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
+        }
+        if (tty >= 0) {
+            ssize_t res = vprocHostWrite(tty, buf, count);
+            vprocHostClose(tty);
+            return res;
+        }
         return -1;
     }
     if (getenv("PSCALI_TOOL_DEBUG")) {
