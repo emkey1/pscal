@@ -1129,6 +1129,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             debugLog("Hterm[\(controller.instanceId)]: view attached " +
                      "window=\(String(describing: window)) hidden=\(isHidden) alpha=\(alpha)")
             attachHandler?()
+            if pendingFocus {
+                requestFocus()
+            }
             return
         }
         if !isAttached {

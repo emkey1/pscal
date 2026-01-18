@@ -725,6 +725,12 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 				close(dfd);
 				return -2;
 			}
+#if defined(__APPLE__) && defined(F_FULLFSYNC)
+			if (fcntl(dfd, F_FULLFSYNC) != 0) {
+				ex_write_debugf("[nextvi-write] fallback fullfsync failed err=%d %s",
+					errno, strerror(errno));
+			}
+#endif
 			if (close(dfd) < 0) {
 				ex_write_debugf("[nextvi-write] fallback close failed err=%d %s",
 					errno, strerror(errno));
@@ -738,6 +744,14 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 		return -2;
 #endif
 	}
+#if defined(__APPLE__) && defined(F_FULLFSYNC)
+	else {
+		if (fcntl(fd, F_FULLFSYNC) != 0) {
+			ex_write_debugf("[nextvi-write] fullfsync failed err=%d %s",
+				errno, strerror(errno));
+		}
+	}
+#endif
 	if (close(fd) < 0) {
 		ex_write_debugf("[nextvi-write] close failed err=%d %s",
 			errno, strerror(errno));
@@ -792,6 +806,12 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 				close(dfd);
 				return -2;
 			}
+#if defined(__APPLE__) && defined(F_FULLFSYNC)
+			if (fcntl(dfd, F_FULLFSYNC) != 0) {
+				ex_write_debugf("[nextvi-write] fallback rename fullfsync failed err=%d %s",
+					errno, strerror(errno));
+			}
+#endif
 			if (close(dfd) < 0) {
 				ex_write_debugf("[nextvi-write] fallback rename close failed err=%d %s",
 					errno, strerror(errno));

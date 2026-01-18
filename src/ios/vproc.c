@@ -4537,7 +4537,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
 #if defined(PSCAL_TARGET_IOS)
     VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
     bool inherit_pscal_stdio = false;
-    if (session_stdio && !vprocSessionStdioIsDefault(session_stdio) &&
+    if (session_stdio &&
         session_stdio->stdin_pscal_fd &&
         session_stdio->stdout_pscal_fd &&
         session_stdio->stderr_pscal_fd &&
@@ -4548,7 +4548,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
         if (getenv("PSCALI_VPROC_DEBUG")) {
             vprocDebugLogf( "[vproc] inherit pscal stdio from session\n");
         }
-    } else if (vproc_dbg && session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
+    } else if (vproc_dbg && session_stdio) {
         vprocDebugLogf(
                 "[vproc] skip pscal stdio inherit stdin=%d stdout=%d stderr=%d opts=(%d,%d,%d)\n",
                 session_stdio->stdin_pscal_fd ? 1 : 0,
@@ -8202,26 +8202,11 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     bool is_stderr = false;
     vprocSessionResolveOutputFd(session, fd, &is_stdout, &is_stderr);
     host = shimTranslate(fd, 1);
-    bool use_session_output = false;
     int session_host_fd = -1;
     if (is_stdout || is_stderr) {
         session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
     }
     if ((is_stdout || is_stderr) && session) {
-        bool session_has_virtual =
-            (session->stdout_pscal_fd != NULL) ||
-            (session->stderr_pscal_fd != NULL) ||
-            (session->pty_slave != NULL);
-        if (session_has_virtual) {
-            if (host < 0) {
-                use_session_output = true;
-            } else if (session_host_fd >= 0 &&
-                       vprocSessionFdMatchesHost(host, session_host_fd)) {
-                use_session_output = true;
-            }
-        }
-    }
-    if (use_session_output && session) {
         struct pscal_fd *target =
             is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
         if (!target) {
@@ -8230,11 +8215,35 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
         if (target && target->ops && target->ops->write) {
             ssize_t res = target->ops->write(target, buf, count);
             if (res < 0) {
-                return vprocSetCompatErrno((int)res);
+                /* If the virtual stream rejected the write, fall back to a
+                 * concrete host fd to avoid dropping output. */
+                int fallback_host = host;
+                if (fallback_host < 0 && session_host_fd >= 0) {
+                    fallback_host = session_host_fd;
+                }
+                if (fallback_host < 0) {
+                    int tty_fd = vprocHostOpen("/dev/tty", O_WRONLY);
+                    if (tty_fd < 0) {
+                        tty_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
+                    }
+                    if (tty_fd >= 0) {
+                        fallback_host = tty_fd;
+                    }
+                }
+                if (fallback_host >= 0) {
+                    res = vprocHostWrite(fallback_host, buf, count);
+                    if (fallback_host != host && fallback_host != session_host_fd) {
+                        vprocHostClose(fallback_host);
+                    }
+                }
+            } else {
+                /* Mirror to the host side as well when it differs so Xcode still sees logs. */
+                if (host >= 0 && session_host_fd >= 0 && !vprocSessionFdMatchesHost(host, session_host_fd)) {
+                    (void)vprocHostWrite(host, buf, count);
+                }
             }
-            /* Mirror to the host side as well when it differs so Xcode still sees logs. */
-            if (host >= 0 && session_host_fd >= 0 && !vprocSessionFdMatchesHost(host, session_host_fd)) {
-                (void)vprocHostWrite(host, buf, count);
+            if (res < 0) {
+                return vprocSetCompatErrno((int)res);
             }
             return res;
         }
@@ -8266,25 +8275,16 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     if (host < 0) {
         host = shimTranslate(fd, 1);
     }
-    /* Prefer the controlling TTY when stdout/stderr is a terminal; otherwise
-     * honor explicit redirections (pipes, files). */
     int write_fd = host;
-    if (write_fd >= 0) {
-        int is_tty = isatty(write_fd);
-        if (is_tty) {
-            int tty_fd = vprocHostOpen("/dev/tty", O_WRONLY);
-            if (tty_fd < 0) {
-                tty_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
-            }
-            if (tty_fd >= 0) {
-                write_fd = tty_fd;
-            }
+    if (write_fd < 0 && session_host_fd >= 0) {
+        write_fd = session_host_fd;
+    }
+    if (write_fd < 0) {
+        int tty_fd = vprocHostOpen("/dev/tty", O_WRONLY);
+        if (tty_fd < 0) {
+            tty_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
         }
-    } else {
-        write_fd = vprocHostOpen("/dev/tty", O_WRONLY);
-        if (write_fd < 0) {
-            write_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
-        }
+        write_fd = tty_fd;
     }
     if (write_fd < 0) {
         return -1;
