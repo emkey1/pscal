@@ -2216,6 +2216,10 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private var deviceEnabled = true
     private var locationActive = false
     private var latestLocation: CLLocation?
+    private var lastLocationRequest: TimeInterval = 0
+    private let locationRequestInterval: TimeInterval = 5.0
+    private var requestTimer: DispatchSourceTimer?
+    private let requestInterval: TimeInterval = 1.0
 
     private override init() {
         locationManager = CLLocationManager()
@@ -2252,8 +2256,10 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         }
         if started && deviceEnabled {
             startLocationUpdatesLocked()
+            startRequestTimerLocked()
         } else {
             stopLocationUpdatesLocked()
+            stopRequestTimerLocked()
         }
     }
 
@@ -2279,6 +2285,22 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         DispatchQueue.main.async {
             self.locationManager.stopUpdatingLocation()
         }
+    }
+
+    private func startRequestTimerLocked() {
+        guard requestTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + requestInterval, repeating: requestInterval)
+        timer.setEventHandler { [weak self] in
+            self?.requestLocationIfStaleLocked(force: false)
+        }
+        timer.resume()
+        requestTimer = timer
+    }
+
+    private func stopRequestTimerLocked() {
+        requestTimer?.cancel()
+        requestTimer = nil
     }
 
     private func sendLatestLocationLocked() {
@@ -2357,6 +2379,11 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func requestLocationIfStaleLocked(force: Bool) {
+        let now = Date().timeIntervalSinceReferenceDate
+        if !force && now - lastLocationRequest < locationRequestInterval {
+            return
+        }
+        lastLocationRequest = now
         DispatchQueue.main.async {
             self.locationManager.requestLocation()
         }
