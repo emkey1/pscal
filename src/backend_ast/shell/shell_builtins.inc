@@ -3856,8 +3856,10 @@ static Value shellRunToolBuiltin(VM *vm,
             if (gShellBackgroundWorkerActive) {
                 background = true;
             }
-            fprintf(stderr, "[tool-dispatch] name=%s bg=%d worker=%d argc=%d\n",
+            if (getenv("PSCALI_PIPE_DEBUG")) {
+                fprintf(stderr, "[tool-dispatch] name=%s bg=%d worker=%d argc=%d\n",
                     tool_name ? tool_name : "<null>", (int)background, (int)gShellBackgroundWorkerActive, argc);
+            }
             if (background && gShellBackgroundWorkerActive) {
                 fprintf(stderr, "[tool-inline] %s argc=%d (bg worker)\n", tool_name, argc);
                 for (int i = 0; i < argc; ++i) {

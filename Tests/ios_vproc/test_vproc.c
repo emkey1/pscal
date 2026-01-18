@@ -294,6 +294,59 @@ static void assert_isolation_between_vprocs(void) {
     close(pipe_b[1]);
 }
 
+static void assert_dev_tty_available_in_pipeline(void) {
+    struct pscal_fd *pty_master = NULL;
+    struct pscal_fd *pty_slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &pty_master, &pty_num) == 0);
+    assert(pscalPtyUnlock(pty_master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &pty_slave) == 0);
+
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, pty_slave, pty_master, 777, 1) == 0);
+    vprocSessionStdioActivate(session);
+
+    VProc *shell = vprocCreate(NULL);
+    assert(shell);
+    int shell_pid = vprocPid(shell);
+    vprocActivate(shell);
+    assert(vprocAdoptPscalStdio(shell,
+                                session->stdin_pscal_fd,
+                                session->stdout_pscal_fd,
+                                session->stderr_pscal_fd) == 0);
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetSid(shell_pid, shell_pid);
+    vprocSetPgid(shell_pid, shell_pid);
+    vprocSetForegroundPgid(shell_pid, shell_pid);
+    vprocDeactivate();
+
+    int pipefd[2];
+    assert(vprocHostPipe(pipefd) == 0);
+    VProcOptions opts = vprocDefaultOptions();
+    opts.stdin_fd = pipefd[0];
+    opts.stdout_fd = pipefd[1];
+    opts.stderr_fd = pipefd[1];
+    VProc *stage = vprocCreate(&opts);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    assert(stage);
+    vprocSetSid(vprocPid(stage), shell_pid);
+    vprocSetPgid(vprocPid(stage), shell_pid);
+    vprocActivate(stage);
+
+    int tty_vfd = vprocOpenShim("/dev/tty", O_RDWR, 0);
+    assert(tty_vfd >= 0);
+    assert(vprocIsattyShim(tty_vfd) == 1);
+    assert(vprocCloseShim(tty_vfd) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(stage);
+    vprocDestroy(shell);
+    vprocSessionStdioActivate(NULL);
+    vprocSessionStdioDestroy(session);
+}
+
 typedef struct {
     int pid;
 } VProcWaitArg;
@@ -1853,6 +1906,8 @@ int main(void) {
     assert_open_and_read_via_shim();
     fprintf(stderr, "TEST isolation_between_vprocs\n");
     assert_isolation_between_vprocs();
+    fprintf(stderr, "TEST dev_tty_available_in_pipeline\n");
+    assert_dev_tty_available_in_pipeline();
     fprintf(stderr, "TEST wait_on_synthetic_pid\n");
     assert_wait_on_synthetic_pid();
     fprintf(stderr, "TEST kill_negative_pid_routes_to_thread\n");

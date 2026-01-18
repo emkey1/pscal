@@ -38,12 +38,6 @@ private let runtimeLogMirrorsToConsole: Bool = {
     return value != "0"
 }()
 
-private func editorDebugMirrorsToConsole() -> Bool {
-    guard let raw = getenv("PSCALI_DEBUG_EDITOR") else { return false }
-    let value = String(cString: raw)
-    return !value.isEmpty && value != "0"
-}
-
 private let runtimeDebugMirrorEnabled: Bool = {
     guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_MIRROR_TERMINAL"] else {
         return false
@@ -231,9 +225,9 @@ func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
     guard let message = message else { return }
     let msg = String(cString: message)
     appendRuntimeDebugLog(msg)
-    if editorDebugMirrorsToConsole() && !runtimeLogMirrorsToConsole {
-        NSLog("%@", msg)
-    }
+    /* Mirror to the Xcode console only when explicitly requested via
+     * PSCALI_RUNTIME_STDERR; editor debug tracing should remain in the
+     * runtime log file by default to avoid noisy console spam. */
     // Debug logging is global/shared
     PscalRuntimeBootstrap.shared.forwardDebugLogToTerminalIfEnabled(msg)
 }

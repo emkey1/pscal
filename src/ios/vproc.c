@@ -4545,7 +4545,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
         local.stdout_fd == -1 &&
         local.stderr_fd == -1) {
         inherit_pscal_stdio = true;
-        if (vproc_dbg) {
+        if (getenv("PSCALI_VPROC_DEBUG")) {
             vprocDebugLogf( "[vproc] inherit pscal stdio from session\n");
         }
     } else if (vproc_dbg && session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
@@ -4766,8 +4766,10 @@ int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
         vp->stderr_host_fd = -1;
     }
     pthread_mutex_unlock(&vp->mu);
-    fprintf(stderr, "[vproc] adopt pscal fd=%d ptr=%p rc=0\n",
-            target_fd, (void *)pscal_fd);
+    if (getenv("PSCALI_VPROC_DEBUG")) {
+        fprintf(stderr, "[vproc] adopt pscal fd=%d ptr=%p rc=0\n",
+                target_fd, (void *)pscal_fd);
+    }
     return 0;
 }
 
@@ -4974,10 +4976,8 @@ static void *vprocThreadTrampoline(void *arg) {
     }
 
     if (vp) {
-        // FIX: Report exit status to the task table before dying
-        // Assuming the thread return value is the exit code (intptr_t cast)
-        int exit_code = (int)(intptr_t)res;
-        vprocMarkExit(vp, W_EXITCODE(exit_code, 0));
+        /* Threads share the owning vproc; do not mark the process as exited on
+         * thread teardown. */
         vprocDeactivate();
     }
 
@@ -7231,6 +7231,21 @@ void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx) {
                  gSessionStdioTls ? (void *)gSessionStdioTls->stdin_pscal_fd : NULL,
                  gSessionStdioTls ? (void *)gSessionStdioTls->stdout_pscal_fd : NULL,
                  gSessionStdioTls ? (void *)gSessionStdioTls->stderr_pscal_fd : NULL);
+    /* Ensure the session PTY is marked as the controlling terminal for this
+     * session so /dev/tty resolves for non-leader vprocs (pipeline stages). */
+    if (gSessionStdioTls && gSessionStdioTls->pty_slave && gSessionStdioTls->pty_slave->tty) {
+        struct tty *tty = gSessionStdioTls->pty_slave->tty;
+        int sid = pscalTtyCurrentSid();
+        if (sid > 0) {
+            lock(&tty->lock);
+            if (tty->session == 0) {
+                tty->session = (pid_t_)sid;
+                tty->fg_group = (pid_t_)sid;
+            }
+            unlock(&tty->lock);
+            pscalTtySetControlling(tty);
+        }
+    }
     if (!gSessionStdioTls || vprocSessionStdioIsDefault(gSessionStdioTls)) {
         gShellSelfPid = 0;
     } else if (gSessionStdioTls->shell_pid > 0) {
@@ -8167,8 +8182,10 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
         if (pscal_fd) {
             if (gVprocPipelineStage && gVprocPipelineWriteLogCount < 32) {
                 gVprocPipelineWriteLogCount++;
-                fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
-                        fd, (void *)pscal_fd, count);
+                if (getenv("PSCALI_VPROC_DEBUG")) {
+                    fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
+                            fd, (void *)pscal_fd, count);
+                }
             }
             ssize_t res = pscal_fd->ops->write(pscal_fd, buf, count);
             pscal_fd_close(pscal_fd);
@@ -9594,7 +9611,41 @@ int vprocOpenShim(const char *path, int flags, ...) {
     if (vprocPathIsDevTty(path)) {
         struct pscal_fd *tty_fd = NULL;
         int err = pscalTtyOpenControlling(flags, &tty_fd);
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (err == _ENXIO || err == _ENOTTY) {
+            /* If this vproc never claimed a controlling TTY, bind the session
+             * PTY as the controlling terminal for the current sid and retry. */
+            int sid = vprocGetsidShim(0);
+            if (session && session->pty_slave && session->pty_slave->tty && sid > 0) {
+                struct tty *tty = session->pty_slave->tty;
+                lock(&tty->lock);
+                if (tty->session == 0 || tty->session == (pid_t_)sid) {
+                    if (tty->session == 0) {
+                        tty->session = (pid_t_)sid;
+                        int fg = vprocGetForegroundPgid(sid);
+                        tty->fg_group = (fg > 0) ? (pid_t_)fg : (pid_t_)sid;
+                    }
+                    unlock(&tty->lock);
+                    pscalTtySetControlling(tty);
+                    err = pscalTtyOpenControlling(flags, &tty_fd);
+                } else {
+                    unlock(&tty->lock);
+                }
+            }
+        }
         if (err < 0) {
+            /* Fall back to the session PTY if present so /dev/tty resolves for
+             * pipeline stages that otherwise lack a controlling terminal. */
+            if (session && session->pty_slave) {
+                struct pscal_fd *retained = pscal_fd_retain(session->pty_slave);
+                if (retained) {
+                    int slot = vprocInsertPscalFd(vp, retained);
+                    if (slot >= 0) {
+                        return slot;
+                    }
+                    pscal_fd_close(retained);
+                }
+            }
             return vprocSetCompatErrno(err);
         }
         if (!vp) {

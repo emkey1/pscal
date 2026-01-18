@@ -1311,6 +1311,7 @@ static void shellInProcessWorkerCleanup(void *arg) {
 
     vprocDeactivate();
     vprocMarkExit(ctx->vp, ctx->status);
+    vprocDiscard(vprocPid(ctx->vp));
     vprocDestroy(ctx->vp);
 
     gShellBackgroundWorkerActive = ctx->prev_worker_flag;
@@ -2222,7 +2223,7 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     ctx->session_stdio = vprocSessionStdioCurrent();
     shellPipelineSessionCloseSpool(ctx);
     shellPipelineSessionSnapshotStdStreams(ctx);
-    fprintf(stderr, "[pipe] ensure stages=%zu in_process=1\n", stages);
+//    fprintf(stderr, "[pipe] ensure stages=%zu in_process=1\n", stages);
 #endif
     ctx->pids = calloc(stages, sizeof(pid_t));
     if (!ctx->pids) {
@@ -2264,15 +2265,15 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
                     shellResetPipeline();
                     return false;
                 }
-                fprintf(stderr, "[pipe] ensure idx=%zu read=%p write=%p\n",
-                        i, (void *)ctx->pscal_pipe_read[i], (void *)ctx->pscal_pipe_write[i]);
+               // fprintf(stderr, "[pipe] ensure idx=%zu read=%p write=%p\n",
+                //        i, (void *)ctx->pscal_pipe_read[i], (void *)ctx->pscal_pipe_write[i]);
             } else {
                 if (vprocHostPipe(ctx->pipes[i]) != 0) {
                     shellResetPipeline();
                     return false;
                 }
-                fprintf(stderr, "[pipe] ensure host idx=%zu r=%d w=%d\n",
-                        i, ctx->pipes[i][0], ctx->pipes[i][1]);
+             //   fprintf(stderr, "[pipe] ensure host idx=%zu r=%d w=%d\n",
+              //          i, ctx->pipes[i][0], ctx->pipes[i][1]);
             }
         }
 #else
@@ -3500,18 +3501,18 @@ static int shellPipelineRunStage(VM *vm,
     bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
 
     bool pipeline_in_process = ctx && ctx->in_process;
-    fprintf(stderr,
-            "[pipe] stage=%zu head=%d tail=%d in_process=%d stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
-            stage_pos, (int)pipeline_head, (int)pipeline_tail,
-            (int)pipeline_in_process, stdin_fd, stdout_fd, stderr_fd);
+//    fprintf(stderr,
+//            "[pipe] stage=%zu head=%d tail=%d in_process=%d stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
+ //           stage_pos, (int)pipeline_head, (int)pipeline_tail,
+  //          (int)pipeline_in_process, stdin_fd, stdout_fd, stderr_fd);
 
     if (!pipeline_head) {
 #if defined(PSCAL_TARGET_IOS)
         if (pipeline_in_process && ctx->pscal_pipe_read) {
             stdin_pscal = ctx->pscal_pipe_read[stage_pos - 1];
             stdin_fd = -2;
-            fprintf(stderr, "[pipe] stage=%zu stdin uses pscal=%p (idx=%zu)\n",
-                    stage_pos, (void *)stdin_pscal, stage_pos - 1);
+          //  fprintf(stderr, "[pipe] stage=%zu stdin uses pscal=%p (idx=%zu)\n",
+           //         stage_pos, (void *)stdin_pscal, stage_pos - 1);
         } else
 #endif
         {
@@ -3523,8 +3524,8 @@ static int shellPipelineRunStage(VM *vm,
         if (pipeline_in_process && ctx->pscal_pipe_write) {
             stdout_pscal = ctx->pscal_pipe_write[stage_pos];
             stdout_fd = -2;
-            fprintf(stderr, "[pipe] stage=%zu stdout uses pscal=%p (idx=%zu)\n",
-                    stage_pos, (void *)stdout_pscal, stage_pos);
+       //     fprintf(stderr, "[pipe] stage=%zu stdout uses pscal=%p (idx=%zu)\n",
+        //            stage_pos, (void *)stdout_pscal, stage_pos);
         } else
 #endif
         {
@@ -3536,8 +3537,8 @@ static int shellPipelineRunStage(VM *vm,
         if (stdout_pscal) {
             stderr_pscal = stdout_pscal;
             stderr_fd = -2;
-            fprintf(stderr, "[pipe] stage=%zu stderr merged to stdout pscal\n",
-                    stage_pos);
+        //    fprintf(stderr, "[pipe] stage=%zu stderr merged to stdout pscal\n",
+         //           stage_pos);
         } else
 #endif
         {
@@ -3589,18 +3590,18 @@ static int shellPipelineRunStage(VM *vm,
 
     if (stdin_pscal) {
         int arc = vprocAdoptPscalFd(vp, STDIN_FILENO, stdin_pscal);
-        fprintf(stderr, "[pipe] stage=%zu adopt stdin pscal=%p rc=%d errno=%d\n",
-                stage_pos, (void *)stdin_pscal, arc, errno);
+   //     fprintf(stderr, "[pipe] stage=%zu adopt stdin pscal=%p rc=%d errno=%d\n",
+    //            stage_pos, (void *)stdin_pscal, arc, errno);
     }
     if (stdout_pscal) {
         int arc = vprocAdoptPscalFd(vp, STDOUT_FILENO, stdout_pscal);
-        fprintf(stderr, "[pipe] stage=%zu adopt stdout pscal=%p rc=%d errno=%d\n",
-                stage_pos, (void *)stdout_pscal, arc, errno);
+//        fprintf(stderr, "[pipe] stage=%zu adopt stdout pscal=%p rc=%d errno=%d\n",
+ //               stage_pos, (void *)stdout_pscal, arc, errno);
     }
     if (stderr_pscal && stderr_pscal != stdout_pscal) {
         int arc = vprocAdoptPscalFd(vp, STDERR_FILENO, stderr_pscal);
-        fprintf(stderr, "[pipe] stage=%zu adopt stderr pscal=%p rc=%d errno=%d\n",
-                stage_pos, (void *)stderr_pscal, arc, errno);
+//        fprintf(stderr, "[pipe] stage=%zu adopt stderr pscal=%p rc=%d errno=%d\n",
+ //               stage_pos, (void *)stderr_pscal, arc, errno);
     }
 
     if (pipeline_in_process) {
@@ -3668,6 +3669,7 @@ static int shellPipelineRunStage(VM *vm,
     }
     vprocMarkExit(vp, status);
     vprocDeactivate();
+    vprocDiscard(vprocPid(vp));
     vprocDestroy(vp);
 #else
     if (ctx->pids && stage_pos < ctx->stage_count) {
@@ -3733,16 +3735,16 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                                                size_t stage_pos,
                                                bool pipeline_head,
                                                bool pipeline_tail) {
-    fprintf(stderr,
-            "[pipe] launch stage=%zu head=%d tail=%d in_process=%d read[%zu]=%p write[%zu]=%p\n",
-            stage_pos,
-            (int)pipeline_head,
-            (int)pipeline_tail,
-            (ctx ? (int)ctx->in_process : 0),
-            (stage_pos > 0) ? stage_pos - 1 : 0,
-            (ctx && stage_pos > 0 && ctx->pscal_pipe_read) ? (void *)ctx->pscal_pipe_read[stage_pos - 1] : NULL,
-            stage_pos,
-            (ctx && ctx->pscal_pipe_write) ? (void *)ctx->pscal_pipe_write[stage_pos] : NULL);
+//    fprintf(stderr,
+ //           "[pipe] launch stage=%zu head=%d tail=%d in_process=%d read[%zu]=%p write[%zu]=%p\n",
+  //          stage_pos,
+   //         (int)pipeline_head,
+    //        (int)pipeline_tail,
+     //       (ctx ? (int)ctx->in_process : 0),
+      //      (stage_pos > 0) ? stage_pos - 1 : 0,
+       //     (ctx && stage_pos > 0 && ctx->pscal_pipe_read) ? (void *)ctx->pscal_pipe_read[stage_pos - 1] : NULL,
+        //    stage_pos,
+         //   (ctx && ctx->pscal_pipe_write) ? (void *)ctx->pscal_pipe_write[stage_pos] : NULL);
     if (!ctx || !ctx->active || stage_pos >= ctx->stage_count) {
         runtimeError(vm, "pipeline: invalid context");
         shellUpdateStatus(1);
