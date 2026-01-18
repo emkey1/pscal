@@ -2930,7 +2930,7 @@ static void vprocSessionResolveOutputFd(VProcSessionStdio *session, int fd, bool
     if (is_stderr) {
         *is_stderr = false;
     }
-    if (!session || vprocSessionStdioIsDefault(session) || !is_stdout || !is_stderr) {
+    if (!session || !is_stdout || !is_stderr) {
         return;
     }
     if (fd == STDOUT_FILENO) {
@@ -8206,7 +8206,22 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     if (is_stdout || is_stderr) {
         session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
     }
+    bool use_session_output = false;
     if ((is_stdout || is_stderr) && session) {
+        bool session_has_virtual =
+            (session->stdout_pscal_fd != NULL) ||
+            (session->stderr_pscal_fd != NULL) ||
+            (session->pty_slave != NULL);
+        if (session_has_virtual) {
+            if (host < 0) {
+                use_session_output = true;
+            } else if (session_host_fd >= 0 &&
+                       vprocSessionFdMatchesHost(host, session_host_fd)) {
+                use_session_output = true;
+            }
+        }
+    }
+    if (use_session_output && session) {
         struct pscal_fd *target =
             is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
         if (!target) {

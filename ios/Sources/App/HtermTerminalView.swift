@@ -727,6 +727,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     private let controller: HtermTerminalController
     private let scrollView: ScrollbarView
     private let keyInputView: TerminalKeyInputView
+    private var focusRetry: DispatchWorkItem?
     private var pendingFocus = false
     private var isAttached = false
     private var isActiveForInput = true
@@ -841,9 +842,27 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             pendingFocus = true
             return
         }
-        if !keyInputView.isFirstResponder {
-            keyInputView.becomeFirstResponder()
+        if keyInputView.isFirstResponder {
+            pendingFocus = false
+            focusRetry?.cancel()
+            return
         }
+        let became = keyInputView.becomeFirstResponder()
+        if became {
+            pendingFocus = false
+            focusRetry?.cancel()
+            return
+        }
+        pendingFocus = true
+        focusRetry?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.pendingFocus {
+                self.requestFocus()
+            }
+        }
+        focusRetry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
     func syncFocusFromTerminal() {
