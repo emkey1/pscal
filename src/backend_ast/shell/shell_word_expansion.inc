@@ -1909,6 +1909,194 @@ static bool shellHistoryEnsureCapacity(size_t needed) {
     return true;
 }
 
+static bool shellHistoryPersistenceEnabled(void) {
+    return gShellRuntime.history_persist_enabled &&
+           gShellRuntime.history_path &&
+           gShellRuntime.history_path[0] != '\0';
+}
+
+static void shellHistoryTrimMemoryLimit(void) {
+    if (gShellRuntime.history_size_limit == 0) {
+        return;
+    }
+    if (gShellHistory.count <= gShellRuntime.history_size_limit) {
+        return;
+    }
+    size_t excess = gShellHistory.count - gShellRuntime.history_size_limit;
+    for (size_t i = 0; i < excess; ++i) {
+        free(gShellHistory.entries[i]);
+        gShellHistory.entries[i] = NULL;
+    }
+    memmove(gShellHistory.entries,
+            gShellHistory.entries + excess,
+            (gShellHistory.count - excess) * sizeof(char *));
+    gShellHistory.count -= excess;
+}
+
+static void shellHistoryRewriteFileTail(size_t keep) {
+    if (!shellHistoryPersistenceEnabled() || keep == 0) {
+        return;
+    }
+    const char *path = gShellRuntime.history_path;
+    if (!path) {
+        return;
+    }
+    char tmp_path[PATH_MAX];
+    int written = snprintf(tmp_path, sizeof(tmp_path), "%s.tmpXXXXXX", path);
+    if (written < 0 || (size_t)written >= sizeof(tmp_path)) {
+        return;
+    }
+    int tmp_fd = mkstemp(tmp_path);
+    if (tmp_fd < 0) {
+        return;
+    }
+    size_t start = 0;
+    if (gShellHistory.count > keep) {
+        start = gShellHistory.count - keep;
+    }
+    for (size_t i = start; i < gShellHistory.count; ++i) {
+        const char *entry = gShellHistory.entries[i];
+        if (!entry) {
+            continue;
+        }
+        (void)write(tmp_fd, entry, strlen(entry));
+        (void)write(tmp_fd, "\n", 1);
+    }
+    fsync(tmp_fd);
+    close(tmp_fd);
+    if (rename(tmp_path, path) != 0) {
+        unlink(tmp_path);
+    } else {
+        shellHistoryTrimMemoryLimit();
+    }
+}
+
+static void shellHistoryAppendToFile(const char *line) {
+    if (!shellHistoryPersistenceEnabled() || !line || gShellRuntime.history_loading) {
+        return;
+    }
+    int fd = open(gShellRuntime.history_path,
+                  O_WRONLY | O_CREAT | O_APPEND
+#ifdef O_CLOEXEC
+                  | O_CLOEXEC
+#endif
+                  ,
+                  0600);
+    if (fd < 0) {
+        return;
+    }
+    size_t len = strlen(line);
+    if (len > 0) {
+        (void)write(fd, line, len);
+    }
+    (void)write(fd, "\n", 1);
+    fsync(fd);
+    close(fd);
+    if (gShellRuntime.history_file_size_limit > 0 &&
+        gShellHistory.count > gShellRuntime.history_file_size_limit) {
+        shellHistoryRewriteFileTail(gShellRuntime.history_file_size_limit);
+    }
+}
+
+static char *shellHistoryResolvePath(const char *raw_path) {
+    if (!raw_path || !*raw_path) {
+        return NULL;
+    }
+    char path_buf[PATH_MAX];
+    const char *source = raw_path;
+    if (raw_path[0] == '~') {
+        const char *home = shellSafeGetenv("HOME");
+        if (!home || !*home) {
+            return NULL;
+        }
+        const char *rest = raw_path + 1;
+        int written = snprintf(path_buf, sizeof(path_buf), "%s%s",
+                               home,
+                               (*rest == '/') ? rest : (*rest ? rest : ""));
+        if (written < 0 || (size_t)written >= sizeof(path_buf)) {
+            return NULL;
+        }
+        source = path_buf;
+    } else {
+        size_t len = strlen(raw_path);
+        if (len + 1 > sizeof(path_buf)) {
+            return NULL;
+        }
+        memcpy(path_buf, raw_path, len + 1);
+        source = path_buf;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    if (pathTruncateExpand(source, expanded, sizeof(expanded))) {
+        return strdup(expanded);
+    }
+#endif
+    return strdup(source);
+}
+
+static size_t shellHistoryParseSizeEnv(const char *name, size_t fallback) {
+    if (!name) {
+        return fallback;
+    }
+    const char *value = shellSafeGetenv(name);
+    if (!value || !*value) {
+        return fallback;
+    }
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || parsed <= 0) {
+        return fallback;
+    }
+    return (size_t)parsed;
+}
+
+void shellHistoryLoadFromFile(void) {
+    if (!shellHistoryPersistenceEnabled() || gShellRuntime.history_loaded_from_file) {
+        return;
+    }
+    const char *path = gShellRuntime.history_path;
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return;
+    }
+    gShellRuntime.history_loading = true;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t nread = 0;
+    while ((nread = getline(&line, &cap, fp)) != -1) {
+        if (nread > 0 && (line[nread - 1] == '\n' || line[nread - 1] == '\r')) {
+            line[nread - 1] = '\0';
+        }
+        shellRuntimeRecordHistory(line);
+        shellHistoryTrimMemoryLimit();
+    }
+    free(line);
+    fclose(fp);
+    gShellRuntime.history_loading = false;
+    gShellRuntime.history_loaded_from_file = true;
+}
+
+void shellHistoryConfigurePersistenceFromEnv(void) {
+    const char *histfile = shellSafeGetenv("HISTFILE");
+    if (!histfile || !*histfile) {
+        gShellRuntime.history_persist_enabled = false;
+        return;
+    }
+    char *resolved = shellHistoryResolvePath(histfile);
+    if (!resolved) {
+        gShellRuntime.history_persist_enabled = false;
+        return;
+    }
+    free(gShellRuntime.history_path);
+    gShellRuntime.history_path = resolved;
+    gShellRuntime.history_persist_enabled = true;
+    gShellRuntime.history_append_mode = true;
+    gShellRuntime.history_size_limit = shellHistoryParseSizeEnv("HISTSIZE", 1000);
+    gShellRuntime.history_file_size_limit =
+        shellHistoryParseSizeEnv("HISTFILESIZE",
+                                 gShellRuntime.history_size_limit ? gShellRuntime.history_size_limit : 0);
+}
+
 void shellRuntimeRecordHistory(const char *line) {
     if (!line) {
         return;
@@ -1940,6 +2128,10 @@ void shellRuntimeRecordHistory(const char *line) {
     memcpy(copy, line, len);
     copy[len] = '\0';
     gShellHistory.entries[gShellHistory.count++] = copy;
+    shellHistoryTrimMemoryLimit();
+    if (shellRuntimeIsInteractive()) {
+        shellHistoryAppendToFile(copy);
+    }
 }
 
 size_t shellRuntimeHistoryCount(void) {

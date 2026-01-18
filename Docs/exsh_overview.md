@@ -74,6 +74,13 @@ subsequent sessions can navigate, search, and reinsert previous commands. Tilde
 expansion runs after history resolution so `!$` and friends can still be joined
 with home-directory shortcuts.【F:src/shell/main.c†L2295-L2335】【F:src/backend_ast/shell.c†L3733-L3800】【F:src/backend_ast/shell.c†L3865-L3923】
 
+History persistence is opt-in. Set `HISTFILE` (for example to
+`$HOME/.exsh_history`) to load existing entries at startup and append each new
+interactive line. `HISTSIZE` limits the in-memory list, and `HISTFILESIZE`
+prunes the on-disk history to the last N entries (both default to 1000/2000
+when unset). Writes use append mode to avoid clobbering other tabs; trimming
+only rewrites the tail of the file when limits are exceeded.【F:src/shell/main.c†L3636-L3640】【F:src/backend_ast/shell/shell_word_expansion.inc†L196-L289】
+
 ## Bytecode caching
 
 Compiled scripts are cached in `~/.pscal/bc_cache`. Cache entries are now keyed

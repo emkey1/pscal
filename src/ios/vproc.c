@@ -4185,10 +4185,7 @@ static int vprocLocationDeviceEnsurePipeLocked(void) {
             fcntl(fds[i], F_SETFD, flags | FD_CLOEXEC);
         }
     }
-    int wflags = fcntl(fds[1], F_GETFL);
-    if (wflags >= 0) {
-        fcntl(fds[1], F_SETFL, wflags | O_NONBLOCK);
-    }
+    /* Keep write end blocking so producers wait for readers. */
     gLocationDevice.read_fd = fds[0];
     gLocationDevice.write_fd = fds[1];
     if (vprocLocationDebugEnabled()) {
@@ -4204,9 +4201,6 @@ static int vprocLocationDeviceOpenHost(int flags) {
         return -1;
     }
     bool debug = vprocLocationDebugEnabled();
-    char payload[sizeof(gLocationDevice.last_payload)];
-    size_t payload_len = 0;
-    bool flush_payload = false;
     int readers_after = 0;
     pthread_mutex_lock(&gLocationDevice.mu);
     if (!gLocationDevice.enabled) {
@@ -4230,14 +4224,6 @@ static int vprocLocationDeviceOpenHost(int flags) {
     if (duped >= 0) {
         gLocationDevice.readers++;
         readers_after = gLocationDevice.readers;
-        if (gLocationDevice.has_payload && gLocationDevice.last_len > 0) {
-            payload_len = gLocationDevice.last_len;
-            if (payload_len >= sizeof(payload)) {
-                payload_len = sizeof(payload) - 1;
-            }
-            memcpy(payload, gLocationDevice.last_payload, payload_len);
-            flush_payload = true;
-        }
     }
     pthread_mutex_unlock(&gLocationDevice.mu);
     if (duped < 0) {
@@ -4252,10 +4238,6 @@ static int vprocLocationDeviceOpenHost(int flags) {
     if (debug) {
         vprocLocationDebugf("open /dev/location -> host fd %d (nonblock=%s) readers=%d",
                             duped, (flags & O_NONBLOCK) ? "true" : "false", readers_after);
-    }
-    /* If we already have a payload buffered, push it immediately to the new reader. */
-    if (flush_payload && payload_len > 0) {
-        (void)vprocHostWriteRaw(duped, payload, payload_len);
     }
     return duped;
 }
@@ -4329,13 +4311,6 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
         errno = ENOENT;
         return -1;
     }
-    /* Cache the latest payload so new readers get it immediately. */
-    size_t copy_len = len < sizeof(gLocationDevice.last_payload) ? len : sizeof(gLocationDevice.last_payload) - 1;
-    memcpy(gLocationDevice.last_payload, data, copy_len);
-    gLocationDevice.last_payload[copy_len] = '\0';
-    gLocationDevice.last_len = copy_len;
-    gLocationDevice.has_payload = (copy_len > 0);
-
     if (vprocLocationDeviceEnsurePipeLocked() != 0) {
         int err = errno;
         pthread_mutex_unlock(&gLocationDevice.mu);

@@ -476,6 +476,13 @@ typedef struct ShellRuntimeState {
     size_t scalar_cache_generation;
     size_t scalar_capture_peak_depth;
     ShellHistory history;
+    char *history_path;
+    size_t history_size_limit;
+    size_t history_file_size_limit;
+    bool history_persist_enabled;
+    bool history_append_mode;
+    bool history_loaded_from_file;
+    bool history_loading;
     char *arg0;
     ShellTrapEntry signal_traps[NSIG];
     ShellTrapEntry exit_trap;
@@ -1724,6 +1731,13 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .scalar_cache_generation = 0,
     .scalar_capture_peak_depth = 0,
     .history = {NULL, 0, 0},
+    .history_path = NULL,
+    .history_size_limit = 0,
+    .history_file_size_limit = 0,
+    .history_persist_enabled = false,
+    .history_append_mode = true,
+    .history_loaded_from_file = false,
+    .history_loading = false,
     .arg0 = NULL,
     .signal_traps = { {SHELL_TRAP_ACTION_DEFAULT, NULL} },
     .exit_trap = {SHELL_TRAP_ACTION_DEFAULT, NULL},
@@ -3049,6 +3063,13 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
     ctx->history.entries = NULL;
     ctx->history.count = 0;
     ctx->history.capacity = 0;
+    ctx->history_path = template_ctx->history_path ? strdup(template_ctx->history_path) : NULL;
+    ctx->history_size_limit = template_ctx->history_size_limit;
+    ctx->history_file_size_limit = template_ctx->history_file_size_limit;
+    ctx->history_persist_enabled = template_ctx->history_persist_enabled;
+    ctx->history_append_mode = template_ctx->history_append_mode;
+    ctx->history_loaded_from_file = false;
+    ctx->history_loading = false;
     if (template_ctx->history.count > 0 && template_ctx->history.entries) {
         ctx->history.entries =
             (char **)calloc(template_ctx->history.count, sizeof(char *));
@@ -3184,6 +3205,10 @@ void shellRuntimeDestroyContext(ShellRuntimeState *ctx) {
         ctx->history.entries = NULL;
         ctx->history.count = 0;
         ctx->history.capacity = 0;
+    }
+    if (ctx->history_path) {
+        free(ctx->history_path);
+        ctx->history_path = NULL;
     }
     if (ctx->arg0) {
         free(ctx->arg0);

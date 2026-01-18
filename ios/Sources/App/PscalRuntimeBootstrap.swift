@@ -2212,14 +2212,10 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         }
         return !raw.isEmpty && raw != "0"
     }()
-    private var lastLocationRequest: TimeInterval = 0
-    private let locationRequestInterval: TimeInterval = 5.0
     private var started = false
     private var deviceEnabled = true
     private var locationActive = false
     private var latestLocation: CLLocation?
-    private var sendTimer: DispatchSourceTimer?
-    private let sendInterval: TimeInterval = 1.0
 
     private override init() {
         locationManager = CLLocationManager()
@@ -2256,10 +2252,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         }
         if started && deviceEnabled {
             startLocationUpdatesLocked()
-            startSendTimerLocked()
-            sendLatestLocationLocked()
         } else {
-            stopSendTimerLocked()
             stopLocationUpdatesLocked()
         }
     }
@@ -2286,23 +2279,6 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         DispatchQueue.main.async {
             self.locationManager.stopUpdatingLocation()
         }
-    }
-
-    private func startSendTimerLocked() {
-        guard sendTimer == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + sendInterval, repeating: sendInterval)
-        timer.setEventHandler { [weak self] in
-            self?.requestLocationIfStaleLocked(force: false)
-            self?.sendLatestLocationLocked()
-        }
-        timer.resume()
-        sendTimer = timer
-    }
-
-    private func stopSendTimerLocked() {
-        sendTimer?.cancel()
-        sendTimer = nil
     }
 
     private func sendLatestLocationLocked() {
@@ -2381,11 +2357,6 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func requestLocationIfStaleLocked(force: Bool) {
-        let now = Date().timeIntervalSinceReferenceDate
-        if !force && now - lastLocationRequest < locationRequestInterval {
-            return
-        }
-        lastLocationRequest = now
         DispatchQueue.main.async {
             self.locationManager.requestLocation()
         }

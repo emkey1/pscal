@@ -21,6 +21,10 @@
 #if defined(PSCAL_TARGET_IOS)
 #include <dlfcn.h>
 #endif
+
+void shellHistoryConfigurePersistenceFromEnv(void);
+void shellHistoryLoadFromFile(void);
+
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
@@ -3640,6 +3644,8 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     if (force_no_tty && *force_no_tty && force_no_tty[0] != '0') {
         tty = false;
     }
+    shellHistoryConfigurePersistenceFromEnv();
+    shellHistoryLoadFromFile();
 
     while (true) {
 #if defined(PSCAL_TARGET_IOS)

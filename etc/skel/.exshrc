@@ -56,6 +56,19 @@ else
     export PS1="exsh$ "
 fi
 
+# Persist interactive history like Bash. Set HISTFILE/HISTSIZE/HISTFILESIZE
+# to control the file path and the number of entries kept in memory/on disk.
+if [ -z "${HISTFILE:-}" ]; then
+    export HISTFILE="$HOME/.exsh_history"
+fi
+if [ -z "${HISTSIZE:-}" ]; then
+    export HISTSIZE=1000
+fi
+if [ -z "${HISTFILESIZE:-}" ]; then
+    export HISTFILESIZE=2000
+fi
+export HISTAPPEND=1
+
 # Keep the terminal safe for pagers that consult $LESS.
 #if [ -z "${LESS:-}" ]; then
 #    export LESS=FRX
