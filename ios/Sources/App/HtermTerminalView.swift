@@ -1180,7 +1180,15 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
 
     private func canReceiveInputFocus() -> Bool {
         guard isActiveForInput else { return false }
-        guard let window, window.isKeyWindow else { return false }
+        guard window != nil else { return false }
+        if !isAppActive() {
+            return false
+        }
+        if let window, window.isKeyWindow {
+            return isEffectivelyVisible()
+        }
+        /* On iPad we can attach before the window is key; allow focus to be
+         * requested and retried so the keyboard appears without an extra tap. */
         return isEffectivelyVisible()
     }
 

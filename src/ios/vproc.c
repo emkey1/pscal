@@ -8207,6 +8207,10 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
         session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
     }
     bool use_session_output = false;
+    bool host_is_tty = false;
+    if (host >= 0 && is_stdout) {
+        host_is_tty = isatty(host);
+    }
     if ((is_stdout || is_stderr) && session) {
         bool session_has_virtual =
             (session->stdout_pscal_fd != NULL) ||
@@ -8217,6 +8221,8 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
                 use_session_output = true;
             } else if (session_host_fd >= 0 &&
                        vprocSessionFdMatchesHost(host, session_host_fd)) {
+                use_session_output = true;
+            } else if (host_is_tty) {
                 use_session_output = true;
             }
         }
