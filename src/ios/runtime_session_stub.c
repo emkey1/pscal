@@ -25,6 +25,7 @@ void PSCALRuntimeOnProcessGroupEmpty(int pgid) {
 }
 
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+__attribute__((weak))
 int pscalRuntimeCurrentForegroundPgid(void) {
     return -1;
 }

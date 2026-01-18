@@ -8207,11 +8207,19 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     if (is_stdout || is_stderr) {
         session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
     }
-    if ((is_stdout || is_stderr) &&
-        session &&
-        !vprocSessionStdioIsDefault(session)) {
-        use_session_output = (session_host_fd >= 0 && host >= 0 &&
-                              vprocSessionFdMatchesHost(host, session_host_fd));
+    if ((is_stdout || is_stderr) && session) {
+        bool session_has_virtual =
+            (session->stdout_pscal_fd != NULL) ||
+            (session->stderr_pscal_fd != NULL) ||
+            (session->pty_slave != NULL);
+        if (session_has_virtual) {
+            if (host < 0) {
+                use_session_output = true;
+            } else if (session_host_fd >= 0 &&
+                       vprocSessionFdMatchesHost(host, session_host_fd)) {
+                use_session_output = true;
+            }
+        }
     }
     if (use_session_output && session) {
         struct pscal_fd *target =
