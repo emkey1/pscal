@@ -221,3 +221,8 @@ if [ -r "$HOME/.exshrc.local" ]; then
 fi
 
 # alias ssh='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+# Enable saving history
+export HISTFILE="$HOME/.ex_history"
+export HISTSIZE=1000
+export HISTFILESIZE=2000

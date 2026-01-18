@@ -4164,6 +4164,32 @@ static void vprocLocationDeviceCloseLocked(void) {
     gLocationDevice.last_len = 0;
 }
 
+static void vprocLocationDrainPipeLocked(void) {
+    if (gLocationDevice.read_fd < 0) {
+        return;
+    }
+    int old_flags = fcntl(gLocationDevice.read_fd, F_GETFL);
+    bool restore_flags = false;
+    if (old_flags >= 0 && (old_flags & O_NONBLOCK) == 0) {
+        fcntl(gLocationDevice.read_fd, F_SETFL, old_flags | O_NONBLOCK);
+        restore_flags = true;
+    }
+    unsigned char buf[256];
+    for (;;) {
+        ssize_t r = vprocHostReadRaw(gLocationDevice.read_fd, buf, sizeof(buf));
+        if (r > 0) {
+            continue;
+        }
+        if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            break;
+        }
+        break;
+    }
+    if (restore_flags) {
+        fcntl(gLocationDevice.read_fd, F_SETFL, old_flags);
+    }
+}
+
 static int vprocLocationDeviceEnsurePipeLocked(void) {
     if (gLocationDevice.read_fd >= 0 && gLocationDevice.write_fd >= 0) {
         return 0;
@@ -4185,7 +4211,7 @@ static int vprocLocationDeviceEnsurePipeLocked(void) {
             fcntl(fds[i], F_SETFD, flags | FD_CLOEXEC);
         }
     }
-    /* Keep write end blocking so producers wait for readers. */
+    /* Keep both ends blocking so producers/readers synchronize like a normal device. */
     gLocationDevice.read_fd = fds[0];
     gLocationDevice.write_fd = fds[1];
     if (vprocLocationDebugEnabled()) {
@@ -4238,6 +4264,13 @@ static int vprocLocationDeviceOpenHost(int flags) {
     if (debug) {
         vprocLocationDebugf("open /dev/location -> host fd %d (nonblock=%s) readers=%d",
                             duped, (flags & O_NONBLOCK) ? "true" : "false", readers_after);
+    }
+    if (gLocationDevice.has_payload && gLocationDevice.last_len > 0) {
+        size_t payload_len = gLocationDevice.last_len;
+        if (payload_len >= sizeof(gLocationDevice.last_payload)) {
+            payload_len = sizeof(gLocationDevice.last_payload) - 1;
+        }
+        (void)vprocHostWriteRaw(duped, gLocationDevice.last_payload, payload_len);
     }
     return duped;
 }
@@ -4311,6 +4344,19 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
         errno = ENOENT;
         return -1;
     }
+    /* Cache latest payload for new readers. */
+    size_t copy_len = len < sizeof(gLocationDevice.last_payload) ? len : sizeof(gLocationDevice.last_payload) - 1;
+    memcpy(gLocationDevice.last_payload, data, copy_len);
+    gLocationDevice.last_payload[copy_len] = '\0';
+    gLocationDevice.last_len = copy_len;
+    gLocationDevice.has_payload = (copy_len > 0);
+
+    /* If no readers are attached, just keep the cache. */
+    if (gLocationDevice.readers == 0) {
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        return (ssize_t)len;
+    }
+
     if (vprocLocationDeviceEnsurePipeLocked() != 0) {
         int err = errno;
         pthread_mutex_unlock(&gLocationDevice.mu);
@@ -4320,9 +4366,12 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
         errno = err;
         return -1;
     }
+
+    /* Drop queued data so only the latest payload is delivered. */
+    vprocLocationDrainPipeLocked();
+
     const unsigned char *bytes = (const unsigned char *)data;
     ssize_t total = 0;
-    /* Write to the vproc pipe first. */
     while ((size_t)total < len) {
         ssize_t wrote = vprocHostWriteRaw(gLocationDevice.write_fd, bytes + total, len - (size_t)total);
         if (wrote > 0) {
@@ -4332,10 +4381,10 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
         if (wrote == 0) {
             break;
         }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        int err = errno;
+        if (err == EAGAIN || err == EWOULDBLOCK) {
             break;
         }
-        int err = errno;
         pthread_mutex_unlock(&gLocationDevice.mu);
         if (debug) {
             vprocLocationDebugf("write failed after %zd/%zu bytes: %s", total, len, strerror(err));
@@ -4343,7 +4392,7 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
         errno = err;
         return -1;
     }
-    /* Mirror into the stub fifo so non-virtualized readers (if any) see updates. */
+
     if (gLocationDevice.stub_fd >= 0) {
         ssize_t wrote = vprocHostWriteRaw(gLocationDevice.stub_fd, data, len);
         if (debug && wrote < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EPIPE) {
