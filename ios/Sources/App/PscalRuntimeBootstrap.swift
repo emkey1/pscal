@@ -2227,6 +2227,8 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.pausesLocationUpdatesAutomatically = false
     }
 
     func start() {
@@ -2332,17 +2334,20 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func requestAuthorizationIfNeeded() {
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
-            locationManager.requestWhenInUseAuthorization()
+            locationManager.requestAlwaysAuthorization()
         } else if status == .authorizedWhenInUse || status == .authorizedAlways {
             locationManager.startUpdatingLocation()
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        if status == .denied || status == .restricted {
-            queue.async {
+        queue.async {
+            if status == .denied || status == .restricted {
                 self.debugLog("authorization restricted/denied; stopping updates")
                 self.stopLocationUpdatesLocked()
+            } else if status == .authorizedAlways || status == .authorizedWhenInUse {
+                self.debugLog("authorization granted; starting updates")
+                self.startLocationUpdatesLocked()
             }
         }
     }
