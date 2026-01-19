@@ -4251,6 +4251,8 @@ static int vprocLocationDeviceOpenHost(int flags) {
         gLocationDevice.readers++;
         readers_after = gLocationDevice.readers;
     }
+    bool flush_payload = gLocationDevice.has_payload && gLocationDevice.last_len > 0;
+    size_t payload_len = gLocationDevice.last_len;
     pthread_mutex_unlock(&gLocationDevice.mu);
     if (duped < 0) {
         return -1;
@@ -4264,6 +4266,12 @@ static int vprocLocationDeviceOpenHost(int flags) {
     if (debug) {
         vprocLocationDebugf("open /dev/location -> host fd %d (nonblock=%s) readers=%d",
                             duped, (flags & O_NONBLOCK) ? "true" : "false", readers_after);
+    }
+    if (flush_payload && payload_len > 0) {
+        if (payload_len >= sizeof(gLocationDevice.last_payload)) {
+            payload_len = sizeof(gLocationDevice.last_payload) - 1;
+        }
+        (void)vprocHostWriteRaw(duped, gLocationDevice.last_payload, payload_len);
     }
     return duped;
 }
@@ -4343,12 +4351,6 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
     gLocationDevice.last_payload[copy_len] = '\0';
     gLocationDevice.last_len = copy_len;
     gLocationDevice.has_payload = (copy_len > 0);
-
-    /* If no readers are attached, keep the cache and return. */
-    if (gLocationDevice.readers == 0) {
-        pthread_mutex_unlock(&gLocationDevice.mu);
-        return (ssize_t)len;
-    }
 
     if (vprocLocationDeviceEnsurePipeLocked() != 0) {
         int err = errno;
