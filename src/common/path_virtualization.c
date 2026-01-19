@@ -391,6 +391,32 @@ int pscalPathVirtualized_open(const char *path, int oflag, ...) {
 }
 
 FILE *pscalPathVirtualized_fopen(const char *path, const char *mode) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        int flags = O_RDONLY;
+        if (mode && (mode[0] == 'w' || mode[0] == 'a')) {
+            flags = O_WRONLY | O_CREAT;
+            if (mode[0] == 'w') {
+                flags |= O_TRUNC;
+            } else {
+                flags |= O_APPEND;
+            }
+        }
+        if (mode && strchr(mode, '+')) {
+            flags = (flags & ~O_ACCMODE) | O_RDWR;
+        }
+#ifdef O_CLOEXEC
+        flags |= O_CLOEXEC;
+#endif
+        int fd = vprocOpenShim(path, flags);
+        if (fd < 0) {
+            return NULL;
+        }
+        FILE *fp = fdopen(fd, mode);
+        if (!fp) {
+            close(fd);
+        }
+        return fp;
+    }
     if (!pathVirtualizationActive()) {
         return fopen(path, mode);
     }
