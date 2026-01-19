@@ -2227,7 +2227,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
-        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.allowsBackgroundLocationUpdates = false
         locationManager.pausesLocationUpdatesAutomatically = false
     }
 
@@ -2334,7 +2334,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func requestAuthorizationIfNeeded() {
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
-            locationManager.requestAlwaysAuthorization()
+            locationManager.requestWhenInUseAuthorization()
         } else if status == .authorizedWhenInUse || status == .authorizedAlways {
             locationManager.startUpdatingLocation()
         }
