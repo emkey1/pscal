@@ -2334,7 +2334,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func requestAuthorizationIfNeeded() {
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
-            locationManager.requestWhenInUseAuthorization()
+            locationManager.requestAlwaysAuthorization()
         } else if status == .authorizedWhenInUse || status == .authorizedAlways {
             locationManager.startUpdatingLocation()
         }
