@@ -118,6 +118,9 @@ int vprocIsattyShim(int fd);
 void vprocLocationDeviceSetEnabled(bool enabled);
 /* Write a payload to the virtual location device. */
 ssize_t vprocLocationDeviceWrite(const void *data, size_t len);
+typedef void (*VprocLocationReadersChangedFn)(int readers, void *context);
+/* Register an observer for reader count changes on /dev/location. */
+void vprocLocationDeviceRegisterReaderObserver(VprocLocationReadersChangedFn cb, void *context);
 /* Read from the shared session input queue (stdin) on iOS. */
 ssize_t vprocSessionReadInputShim(void *buf, size_t count);
 /* Read from the shared session input queue with nonblocking support. */
@@ -437,13 +440,6 @@ static inline int vprocHostFsync(int fd) { return fsync(fd); }
 static inline int vprocHostClose(int fd) { return close(fd); }
 static inline ssize_t vprocHostRead(int fd, void *buf, size_t count) { return read(fd, buf, count); }
 static inline ssize_t vprocHostWrite(int fd, const void *buf, size_t count) { return write(fd, buf, count); }
-static inline void vprocLocationDeviceSetEnabled(bool enabled) { (void)enabled; }
-static inline ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
-    (void)data;
-    (void)len;
-    errno = ENODEV;
-    return -1;
-}
 static inline int vprocIoctlShim(int fd, unsigned long request, ...) {
     va_list ap;
     va_start(ap, request);
@@ -508,6 +504,18 @@ static inline ssize_t vprocReadlinkShim(const char *path, char *buf, size_t size
 static inline char *vprocRealpathShim(const char *path, char *resolved_path) { return realpath(path, resolved_path); }
 static inline off_t vprocLseekShim(int fd, off_t offset, int whence) { return lseek(fd, offset, whence); }
 static inline int vprocIsattyShim(int fd) { return isatty(fd); }
+static inline void vprocLocationDeviceSetEnabled(bool enabled) { (void)enabled; }
+static inline ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
+    (void)data;
+    (void)len;
+    errno = ENODEV;
+    return -1;
+}
+typedef void (*VprocLocationReadersChangedFn)(int readers, void *context);
+static inline void vprocLocationDeviceRegisterReaderObserver(VprocLocationReadersChangedFn cb, void *context) {
+    (void)cb;
+    (void)context;
+}
 static inline int vprocOpenShim(const char *path, int flags, ...) {
     int mode = 0;
     if (flags & O_CREAT) {

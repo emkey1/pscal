@@ -1587,6 +1587,155 @@ static void assert_gps_alias_reads_location_payload(void) {
     vprocDestroy(vp);
 }
 
+typedef struct {
+    const char *payload;
+} location_writer_ctx;
+
+static void *location_writer_thread(void *arg) {
+    location_writer_ctx *ctx = (location_writer_ctx *)arg;
+    usleep(50000); /* 50ms */
+    assert(vprocLocationDeviceWrite(ctx->payload, strlen(ctx->payload)) == (ssize_t)strlen(ctx->payload));
+    return NULL;
+}
+
+static void assert_location_read_returns_full_line_and_eof(void) {
+    const char *payload = "abcde12345\n";
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int fd = vprocOpenShim("/dev/location", O_RDONLY);
+    assert(fd >= 0);
+
+    /* Delay writing so the first read blocks until the payload arrives. */
+    pthread_t writer;
+    location_writer_ctx ctx = { .payload = payload };
+    int rc = pthread_create(&writer, NULL, location_writer_thread, &ctx);
+    assert(rc == 0);
+
+    char buf[32] = {0};
+    ssize_t r1 = vprocReadShim(fd, buf, sizeof(buf));
+    assert(r1 == (ssize_t)strlen(payload));
+    assert(strcmp(buf, payload) == 0);
+
+    pthread_join(writer, NULL);
+
+    /* Subsequent reads should return EOF so tail-like consumers exit. */
+    errno = 0;
+    ssize_t r2 = vprocReadShim(fd, buf, sizeof(buf));
+    assert(r2 == 0);
+    assert(errno == 0);
+
+    assert(vprocCloseShim(fd) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_location_poll_wakes_on_payload(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int fd = vprocOpenShim("/dev/location", O_RDONLY);
+    assert(fd >= 0);
+
+    struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+    /* No payload yet, should time out. */
+    assert(vprocPollShim(&pfd, 1, 50) == 0);
+
+    const char *payload = "pollwake\n";
+    assert(vprocLocationDeviceWrite(payload, strlen(payload)) == (ssize_t)strlen(payload));
+
+    pfd.revents = 0;
+    assert(vprocPollShim(&pfd, 1, 250) == 1);
+    assert((pfd.revents & POLLIN) != 0);
+
+    char buf[16] = {0};
+    ssize_t r1 = vprocReadShim(fd, buf, sizeof(buf));
+    assert(r1 == (ssize_t)strlen(payload));
+    assert(strcmp(buf, payload) == 0);
+
+    /* After the line is consumed, poll should report hangup (EOF). */
+    pfd.revents = 0;
+    assert(vprocPollShim(&pfd, 1, 0) == 1);
+    assert((pfd.revents & POLLHUP) != 0);
+
+    assert(vprocCloseShim(fd) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_location_disable_unblocks_and_errors(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int fd = vprocOpenShim("/dev/location", O_RDONLY);
+    assert(fd >= 0);
+
+    /* Disable the device globally and ensure readers wake with error. */
+    vprocLocationDeviceSetEnabled(false);
+
+    struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+    int pr = vprocPollShim(&pfd, 1, 200);
+    assert(pr == 1);
+    assert((pfd.revents & POLLHUP) != 0);
+
+    char buf[8];
+    errno = 0;
+    ssize_t r = vprocReadShim(fd, buf, sizeof(buf));
+    assert(r == 0);
+    assert(errno == 0);
+
+    /* Re-enable for subsequent tests. */
+    vprocLocationDeviceSetEnabled(true);
+    assert(vprocCloseShim(fd) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+typedef struct {
+    int values[4];
+    int count;
+} location_observer_state;
+
+static void location_reader_observer(int readers, void *context) {
+    location_observer_state *st = (location_observer_state *)context;
+    if (!st || st->count >= (int)(sizeof(st->values) / sizeof(st->values[0]))) {
+        return;
+    }
+    st->values[st->count++] = readers;
+}
+
+static void assert_location_reader_observer_fires(void) {
+    location_observer_state state = { .values = { -1, -1, -1, -1 }, .count = 0 };
+    vprocLocationDeviceRegisterReaderObserver(location_reader_observer, &state);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int fd = vprocOpenShim("/dev/location", O_RDONLY);
+    assert(fd >= 0);
+    assert(vprocCloseShim(fd) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+
+    /* Initial callback reports current readers (0), then open bumps to 1, close back to 0. */
+    assert(state.count >= 3);
+    assert(state.values[0] == 0);
+    assert(state.values[1] == 1);
+    assert(state.values[2] == 0);
+
+    /* Unregister to avoid leaking across tests. */
+    vprocLocationDeviceRegisterReaderObserver(NULL, NULL);
+}
+
 static void assert_device_stat_bypasses_truncation(void) {
     struct stat st;
     /* Should hit the real device path, not PATH_TRUNCATE expansion. */
@@ -2004,6 +2153,14 @@ int main(void) {
     assert_passthrough_when_inactive();
     fprintf(stderr, "TEST gps_alias_reads_location_payload\n");
     assert_gps_alias_reads_location_payload();
+    fprintf(stderr, "TEST location_read_returns_full_line_and_eof\n");
+    assert_location_read_returns_full_line_and_eof();
+    fprintf(stderr, "TEST location_poll_wakes_on_payload\n");
+    assert_location_poll_wakes_on_payload();
+    fprintf(stderr, "TEST location_disable_unblocks_and_errors\n");
+    assert_location_disable_unblocks_and_errors();
+    fprintf(stderr, "TEST location_reader_observer_fires\n");
+    assert_location_reader_observer_fires();
     fprintf(stderr, "TEST device_stat_bypasses_truncation\n");
     assert_device_stat_bypasses_truncation();
     fprintf(stderr, "TEST ptmx_open_registers_session\n");

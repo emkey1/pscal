@@ -1459,18 +1459,51 @@ typedef struct {
     bool enabled;
 } VProcLocationDevice;
 
-static VProcLocationDevice gLocationDevice = { PTHREAD_MUTEX_INITIALIZER, 0, -1, -1, -1, 0, 0, false, {0}, 0, false, true };
+static VProcLocationDevice gLocationDevice = {
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_COND_INITIALIZER,
+    -1,
+    -1,
+    -1,
+    0,
+    0,
+    false,
+    {0},
+    0,
+    false,
+    true
+};
 static bool vprocLocationDebugEnabled(void);
 static void vprocLocationDebugf(const char *fmt, ...);
 
 typedef struct {
     uint64_t last_seq;
+    size_t offset;
+    size_t len;
+    bool done;
+    char payload[sizeof(((VProcLocationDevice *)0)->last_payload)];
 } VProcLocationReader;
 
 /* Forward declaration; defined later. */
 static void vprocDeliverPendingSignalsForCurrent(void);
 static bool vprocCurrentHasPendingSignals(void);
 static const struct pscal_fd_ops kVprocLocationFdOps;
+typedef void (*VprocLocationReadersChangedFn)(int readers, void *context);
+static VprocLocationReadersChangedFn gLocationReaderObserver = NULL;
+static void *gLocationReaderObserverCtx = NULL;
+static pthread_mutex_t gLocationReaderObserverMu = PTHREAD_MUTEX_INITIALIZER;
+
+static void vprocLocationNotifyObservers(int readers) {
+    VprocLocationReadersChangedFn cb = NULL;
+    void *ctx = NULL;
+    pthread_mutex_lock(&gLocationReaderObserverMu);
+    cb = gLocationReaderObserver;
+    ctx = gLocationReaderObserverCtx;
+    pthread_mutex_unlock(&gLocationReaderObserverMu);
+    if (cb) {
+        cb(readers, ctx);
+    }
+}
 
 /* -------- In-process pipe (mutex/cond-backed) -------- */
 
@@ -3762,16 +3795,11 @@ static bool vprocPathMatches(const char *path, const char *target) {
 }
 
 static bool vprocLocationDebugEnabled(void) {
-    static int checked = 0;
-    static bool enabled = false;
-    if (!checked) {
-        const char *env = getenv("PSCALI_LOCATION_DEBUG");
-        if (env && env[0] != '\0' && strcmp(env, "0") != 0) {
-            enabled = true;
-        }
-        checked = 1;
+    const char *env = getenv("PSCALI_LOCATION_DEBUG");
+    if (env && env[0] != '\0' && strcmp(env, "0") != 0) {
+        return true;
     }
-    return enabled;
+    return false;
 }
 
 static void vprocLocationDebugf(const char *fmt, ...) {
@@ -3803,12 +3831,9 @@ static void vprocEnsurePathParent(const char *path) {
     }
 }
 
-static void vprocLocationDeviceEnsureStub(void) {
-#if defined(PSCAL_TARGET_IOS)
-    char expanded[PATH_MAX];
-    const char *path = kLocationDevicePath;
-    if (pathTruncateEnabled() && pathTruncateExpand(kLocationDevicePath, expanded, sizeof(expanded))) {
-        path = expanded;
+static void vprocLocationEnsureStubPath(const char *path, int *opened_fd) {
+    if (!path) {
+        return;
     }
     if (vprocLocationDebugEnabled()) {
         vprocLocationDebugf("ensuring location stub at %s", path);
@@ -3831,18 +3856,39 @@ static void vprocLocationDeviceEnsureStub(void) {
                                 strerror(errno));
         }
     }
-    if (gLocationDevice.stub_fd < 0) {
+    if (opened_fd && *opened_fd < 0) {
         int fd = vprocHostOpenRawInternal(path, O_RDWR | O_NONBLOCK, 0666, true);
         if (fd >= 0) {
-            gLocationDevice.stub_fd = fd;
+            *opened_fd = fd;
             if (vprocLocationDebugEnabled()) {
-                vprocLocationDebugf("opened location stub fifo fd=%d", fd);
+                vprocLocationDebugf("opened location stub fifo fd=%d path=%s", fd, path);
             }
         } else if (vprocLocationDebugEnabled()) {
             vprocLocationDebugf("failed to open location stub fifo %s: %s",
                                 path,
                                 strerror(errno));
         }
+    }
+}
+
+static void vprocLocationDeviceEnsureStub(void) {
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    const char *path = kLocationDevicePath;
+    if (pathTruncateEnabled() && pathTruncateExpand(kLocationDevicePath, expanded, sizeof(expanded))) {
+        path = expanded;
+    }
+    vprocLocationEnsureStubPath(path, &gLocationDevice.stub_fd);
+    /* Keep legacy aliases discoverable and open to avoid FIFO open blocking. */
+    const char *gps_paths[] = { kLegacyGpsDevicePath, kLegacyGpsDevicePath2 };
+    for (size_t i = 0; i < sizeof(gps_paths) / sizeof(gps_paths[0]); ++i) {
+        const char *gps = gps_paths[i];
+        const char *target = gps;
+        char expanded_gps[PATH_MAX];
+        if (pathTruncateEnabled() && pathTruncateExpand(gps, expanded_gps, sizeof(expanded_gps))) {
+            target = expanded_gps;
+        }
+        vprocLocationEnsureStubPath(target, NULL);
     }
 #else
     (void)kLocationDevicePath;
@@ -4098,7 +4144,9 @@ static int vprocLocationDeviceOpen(VProc *vp, int flags) {
     pthread_mutex_lock(&gLocationDevice.mu);
     vprocLocationEnsureCond();
     gLocationDevice.readers++;
+    int readers = gLocationDevice.readers;
     pthread_mutex_unlock(&gLocationDevice.mu);
+    vprocLocationNotifyObservers(readers);
     int slot = vprocInsertPscalFd(vp, loc_fd);
     if (slot < 0) {
         free(reader);
@@ -4107,7 +4155,9 @@ static int vprocLocationDeviceOpen(VProc *vp, int flags) {
         if (gLocationDevice.readers > 0) {
             gLocationDevice.readers--;
         }
+        readers = gLocationDevice.readers;
         pthread_mutex_unlock(&gLocationDevice.mu);
+        vprocLocationNotifyObservers(readers);
     }
     return slot;
 }
@@ -4120,23 +4170,53 @@ static ssize_t vprocLocationPscalRead(struct pscal_fd *fd, void *buf, size_t buf
     if (!reader) {
         return _EBADF;
     }
+    if (reader->done) {
+        return 0;
+    }
     pthread_mutex_lock(&gLocationDevice.mu);
     vprocLocationEnsureCond();
-    while (gLocationDevice.enabled && (!gLocationDevice.has_payload || reader->last_seq == gLocationDevice.seq)) {
+    while (gLocationDevice.enabled && !reader->done) {
+        /* If the reader already has buffered data, serve it first. */
+        if (reader->len > reader->offset) {
+            break;
+        }
+        /* If there is a fresh payload, copy it into the reader-local buffer. */
+        if (gLocationDevice.has_payload && reader->last_seq != gLocationDevice.seq) {
+            size_t copy_len = gLocationDevice.last_len;
+            if (copy_len >= sizeof(reader->payload)) {
+                copy_len = sizeof(reader->payload) - 1;
+            }
+            memcpy(reader->payload, gLocationDevice.last_payload, copy_len);
+            reader->payload[copy_len] = '\0';
+            reader->len = copy_len;
+            reader->offset = 0;
+            reader->last_seq = gLocationDevice.seq;
+            break;
+        }
         pthread_cond_wait(&gLocationDevice.cond, &gLocationDevice.mu);
     }
     if (!gLocationDevice.enabled) {
         pthread_mutex_unlock(&gLocationDevice.mu);
-        return _ENOENT;
+        reader->done = true;
+        return 0;
     }
-    size_t to_copy = gLocationDevice.last_len;
-    if (to_copy > bufsize) {
-        to_copy = bufsize;
+    /* No data available and already marked done: return EOF. */
+    if (reader->done) {
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        return 0;
     }
-    memcpy(buf, gLocationDevice.last_payload, to_copy);
-    reader->last_seq = gLocationDevice.seq;
+    size_t remaining = reader->len - reader->offset;
+    /* Deliver the entire payload in one read; bail if the caller's buffer is too small. */
+    if (remaining > bufsize) {
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        return _EINVAL;
+    }
+    memcpy(buf, reader->payload + reader->offset, remaining);
+    reader->offset = 0;
+    reader->len = 0;
+    reader->done = true;
     pthread_mutex_unlock(&gLocationDevice.mu);
-    return (ssize_t)to_copy;
+    return (ssize_t)remaining;
 }
 
 static int vprocLocationPscalPoll(struct pscal_fd *fd) {
@@ -4146,8 +4226,10 @@ static int vprocLocationPscalPoll(struct pscal_fd *fd) {
     }
     pthread_mutex_lock(&gLocationDevice.mu);
     int events = 0;
-    if (!gLocationDevice.enabled) {
-        events = POLLERR;
+    if (reader->done || !gLocationDevice.enabled) {
+        events = POLLHUP;
+    } else if (reader->len > reader->offset) {
+        events = POLLIN;
     } else if (gLocationDevice.has_payload && reader->last_seq != gLocationDevice.seq) {
         events = POLLIN;
     }
@@ -4162,7 +4244,9 @@ static int vprocLocationPscalClose(struct pscal_fd *fd) {
     if (gLocationDevice.readers > 0) {
         gLocationDevice.readers--;
     }
+    int readers = gLocationDevice.readers;
     pthread_mutex_unlock(&gLocationDevice.mu);
+    vprocLocationNotifyObservers(readers);
     return 0;
 }
 
@@ -4179,11 +4263,14 @@ void vprocLocationDeviceSetEnabled(bool enabled) {
     pthread_mutex_lock(&gLocationDevice.mu);
     bool changed = (gLocationDevice.enabled != enabled);
     gLocationDevice.enabled = enabled;
+    int readers = gLocationDevice.readers;
     if (!enabled) {
         if (vprocLocationDebugEnabled()) {
             vprocLocationDebugf("location device disabled (changed=%s)", changed ? "true" : "false");
         }
         vprocLocationDeviceCloseLocked();
+        pthread_cond_broadcast(&gLocationDevice.cond);
+        pscal_fd_poll_wakeup(NULL, POLLERR);
     } else {
         if (vprocLocationDebugEnabled()) {
             vprocLocationDebugf("location device enabled (changed=%s)", changed ? "true" : "false");
@@ -4192,8 +4279,12 @@ void vprocLocationDeviceSetEnabled(bool enabled) {
         if (vprocLocationDeviceEnsurePipeLocked() != 0 && vprocLocationDebugEnabled()) {
             vprocLocationDebugf("location pipe setup failed during enable: %s", strerror(errno));
         }
+        pthread_cond_broadcast(&gLocationDevice.cond);
+        pscal_fd_poll_wakeup(NULL, POLLIN);
     }
+    readers = gLocationDevice.readers;
     pthread_mutex_unlock(&gLocationDevice.mu);
+    vprocLocationNotifyObservers(readers);
 }
 
 ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
@@ -4226,10 +4317,25 @@ ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
         }
     }
     pthread_mutex_unlock(&gLocationDevice.mu);
+    pscal_fd_poll_wakeup(NULL, POLLIN);
     if (debug) {
         vprocLocationDebugf("write success bytes=%zu seq=%llu", len, (unsigned long long)gLocationDevice.seq);
     }
     return (ssize_t)len;
+}
+
+void vprocLocationDeviceRegisterReaderObserver(VprocLocationReadersChangedFn cb, void *context) {
+    pthread_mutex_lock(&gLocationReaderObserverMu);
+    gLocationReaderObserver = cb;
+    gLocationReaderObserverCtx = context;
+    pthread_mutex_unlock(&gLocationReaderObserverMu);
+    if (cb) {
+        int readers = 0;
+        pthread_mutex_lock(&gLocationDevice.mu);
+        readers = gLocationDevice.readers;
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        cb(readers, context);
+    }
 }
 
 static int vprocSelectHostFd(VProc *inherit_from, int option_fd, int stdno) {
