@@ -16,7 +16,20 @@ final class TerminalWindow: UIWindow {
             newTab.wantsPriorityOverSystemBehavior = true
             closeTab.wantsPriorityOverSystemBehavior = true
         }
-        return [newTab, closeTab]
+        var commands: [UIKeyCommand] = [newTab, closeTab]
+        for i in 0...9 {
+            let input = "\(i)"
+            let title = (i == 0) ? "Select Tab 10" : "Select Tab \(i)"
+            let select = UIKeyCommand(input: input,
+                                      modifierFlags: [.command, .alternate],
+                                      action: #selector(handleSelectTabCommand(_:)))
+            select.discoverabilityTitle = title
+            if #available(iOS 15.0, *) {
+                select.wantsPriorityOverSystemBehavior = true
+            }
+            commands.append(select)
+        }
+        return commands
     }()
 
     override var keyCommands: [UIKeyCommand]? {
@@ -42,17 +55,27 @@ final class TerminalWindow: UIWindow {
             guard let key = press.key else { continue }
             let allowed: UIKeyModifierFlags = [.command, .shift, .alternate, .control]
             let modifiers = key.modifierFlags.intersection(allowed)
-            guard modifiers == .command else { continue }
+            let hasCommand = modifiers.contains(.command)
+            if !hasCommand {
+                continue
+            }
             let input = key.charactersIgnoringModifiers.lowercased()
-            switch input {
-            case "w":
-                TerminalTabManager.shared.closeSelectedTab()
+            let hasOption = modifiers.contains(.alternate)
+            if hasOption, let number = Int(input) {
+                TerminalTabManager.shared.selectTab(number: number)
                 return true
-            case "t":
-                _ = TerminalTabManager.shared.openShellTab()
-                return true
-            default:
-                break
+            }
+            if modifiers == .command {
+                switch input {
+                case "w":
+                    TerminalTabManager.shared.closeSelectedTab()
+                    return true
+                case "t":
+                    _ = TerminalTabManager.shared.openShellTab()
+                    return true
+                default:
+                    break
+                }
             }
         }
         return false
@@ -64,6 +87,11 @@ final class TerminalWindow: UIWindow {
 
     @objc private func handleCloseTabCommand() {
         TerminalTabManager.shared.closeSelectedTab()
+    }
+
+    @objc private func handleSelectTabCommand(_ command: UIKeyCommand) {
+        guard let raw = command.input, let number = Int(raw) else { return }
+        TerminalTabManager.shared.selectTab(number: number)
     }
 }
 

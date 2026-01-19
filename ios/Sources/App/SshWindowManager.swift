@@ -252,6 +252,16 @@ final class TerminalTabManager: ObservableObject {
         tabs.first(where: { $0.id == selectedId }) ?? tabs[0]
     }
 
+    func selectTab(number: Int) {
+        let target = number == 0 ? 10 : number
+        guard target > 0 else { return }
+        let index = target - 1
+        guard tabs.indices.contains(index) else { return }
+        let tab = tabs[index]
+        tabInitLog("selectTab number=\(target) id=\(tab.id) title=\(tab.title)")
+        selectedId = tab.id
+    }
+
     func sendInputToSelected(_ text: String) {
         guard !text.isEmpty else { return }
         tabInitLog("sendInputToSelected len=\(text.utf8.count) selectedId=\(selectedId)")
