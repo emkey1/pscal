@@ -2220,6 +2220,12 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private let locationRequestInterval: TimeInterval = 5.0
     private var requestTimer: DispatchSourceTimer?
     private let requestInterval: TimeInterval = 1.0
+    private let backgroundLocationAllowed: Bool = {
+        if let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] {
+            return modes.contains("location")
+        }
+        return false
+    }()
 
     private override init() {
         locationManager = CLLocationManager()
@@ -2227,7 +2233,9 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
-        locationManager.allowsBackgroundLocationUpdates = false
+        if backgroundLocationAllowed {
+            locationManager.allowsBackgroundLocationUpdates = true
+        }
         locationManager.pausesLocationUpdatesAutomatically = false
     }
 
