@@ -24,17 +24,18 @@ extern void pscalRuntimeDebugLog(const char *message);
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include "common/path_truncate.h"
+#include "ios/vproc.h"
+#include "ios/tty/pscal_fd.h"
 
 #if defined(PSCAL_TARGET_IOS)
 __attribute__((weak)) int pscalHostOpenRaw(const char *path, int flags, mode_t mode);
-__attribute__((weak)) void *vprocCurrent(void);
-int vprocOpenShim(const char *path, int flags, ...);
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
@@ -106,6 +107,82 @@ static bool pathVirtualizedIsVprocDevicePath(const char *path) {
     return false;
 }
 #endif
+
+static bool vprocFdIsPscal(int fd) {
+#if defined(PSCAL_TARGET_IOS)
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return false;
+    }
+    struct pscal_fd *psfd = vprocGetPscalFd(vp, fd);
+    if (psfd) {
+        pscal_fd_close(psfd);
+        return true;
+    }
+#else
+    (void)fd;
+#endif
+    return false;
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static int vprocStreamRead(void *cookie, char *buf, int len) {
+    if (!buf || len <= 0) {
+        return 0;
+    }
+    int fd = (int)(intptr_t)cookie;
+    ssize_t res = vprocReadShim(fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    return (int)res;
+}
+
+static int vprocStreamWrite(void *cookie, const char *buf, int len) {
+    if (!buf || len <= 0) {
+        return 0;
+    }
+    int fd = (int)(intptr_t)cookie;
+    ssize_t res = vprocWriteShim(fd, buf, (size_t)len);
+    if (res < 0) {
+        return -1;
+    }
+    if (res > INT_MAX) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    return (int)res;
+}
+
+static int vprocStreamClose(void *cookie) {
+    int fd = (int)(intptr_t)cookie;
+    return vprocCloseShim(fd);
+}
+
+static FILE *vprocFdopenCompat(int fd, const char *mode) {
+    bool is_pscal = vprocFdIsPscal(fd);
+    if (!is_pscal) {
+        FILE *fp = fdopen(fd, mode);
+        if (!fp) {
+            vprocCloseShim(fd);
+        }
+        return fp;
+    }
+    FILE *fp = funopen((void *)(intptr_t)fd,
+                       vprocStreamRead,
+                       vprocStreamWrite,
+                       NULL,
+                       vprocStreamClose);
+    if (!fp) {
+        vprocCloseShim(fd);
+    }
+    return fp;
+}
+#endif /* PSCAL_TARGET_IOS */
 
 static const char *pathVirtualizedExpand(const char *input, char *buffer, size_t buffer_len) {
     if (!input) {
@@ -411,11 +488,7 @@ FILE *pscalPathVirtualized_fopen(const char *path, const char *mode) {
         if (fd < 0) {
             return NULL;
         }
-        FILE *fp = fdopen(fd, mode);
-        if (!fp) {
-            close(fd);
-        }
-        return fp;
+        return vprocFdopenCompat(fd, mode);
     }
     if (!pathVirtualizationActive()) {
         return fopen(path, mode);
@@ -426,6 +499,12 @@ FILE *pscalPathVirtualized_fopen(const char *path, const char *mode) {
 }
 
 FILE *pscalPathVirtualized_freopen(const char *path, const char *mode, FILE *stream) {
+    if (pathVirtualizedIsVprocDevicePath(path)) {
+        if (stream) {
+            fclose(stream);
+        }
+        return pscalPathVirtualized_fopen(path, mode);
+    }
     if (!pathVirtualizationActive()) {
         return freopen(path, mode, stream);
     }

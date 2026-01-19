@@ -43,5 +43,6 @@ This note summarizes how the virtual process (vproc) and pseudo-tty (vpty) layer
 - Verify the shims are active: in LLDB, break on `vprocLocationDeviceOpen` or `vprocOpenShim` while `cat /dev/location` runs. If it doesn’t hit, the shim is bypassed.
 - Inspect vproc task state via `vprocSnapshot` or the `gVProcTasks` table to ensure pgid/sid/fg_pgid are set when debugging job control.
 - For PTY issues, confirm `/dev/ptmx` and `/dev/pts/*` open paths hit `pscalPtyOpenMaster/Slave` and that the session pty entry in `gVProcSessionPtys` is populated.
+- For `/dev/location`, a stub FIFO is created (including legacy `/dev/gps` aliases) under the sandbox so `stat`/`ls` succeed even outside a vproc. Each reader blocks until a new payload arrives; partial reads drain a single payload; poll wakes on new data or disable. Reader count changes are observable via `vprocLocationDeviceRegisterReaderObserver`, which the iOS host uses to pause CoreLocation when no readers are present.
 
 This overview should give enough context to reason about how applets, front-end interpreters, nextvi, and other tools interact with the virtual process/pty layers on iOS/Catalyst, and where to look when job control or device handling behaves unexpectedly. 

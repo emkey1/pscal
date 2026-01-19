@@ -1788,6 +1788,10 @@ int PSCALRuntimeWriteLocationDevice(const char *utf8, size_t length) {
     return res < 0 ? -1 : (int)res;
 }
 
+void PSCALRuntimeRegisterLocationReaderObserver(PSCALLocationReaderObserver cb, void *context) {
+    vprocLocationDeviceRegisterReaderObserver(cb, context);
+}
+
 void *PSCALRuntimeCreateShellContext(void) {
     return (void *)shellRuntimeCreateContext();
 }

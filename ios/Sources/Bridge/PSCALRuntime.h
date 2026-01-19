@@ -13,6 +13,7 @@ typedef void (*PSCALRuntimeSessionOutputHandler)(uint64_t session_id,
                                                  const char *utf8,
                                                  size_t length,
                                                  void *context);
+typedef void (*PSCALLocationReaderObserver)(int readers, void *context);
 
 typedef struct PSCALRuntimeContext PSCALRuntimeContext;
 typedef struct VProcSessionStdio VProcSessionStdio;
@@ -109,6 +110,8 @@ void PSCALRuntimeSetLocationDeviceEnabled(int enabled);
 
 /// Writes a payload into the virtual /dev/location device.
 int PSCALRuntimeWriteLocationDevice(const char *utf8, size_t length);
+/// Registers an observer for /dev/location reader count changes (iOS only).
+void PSCALRuntimeRegisterLocationReaderObserver(PSCALLocationReaderObserver cb, void *context);
 
 /// Creates/destroys an isolated shell runtime context for embedding scenarios
 /// (e.g. multiple iPadOS windows). The caller owns the returned pointer.

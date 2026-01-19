@@ -690,6 +690,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                         }
                     }
                 }
+                DispatchQueue.main.async {
+                    LocationDeviceProvider.shared.runtimeBecameReady()
+                }
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -2204,116 +2207,109 @@ func pscalElvisDump() {
 final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     static let shared = LocationDeviceProvider()
 
-    private let queue = DispatchQueue(label: "com.pscal.location.device")
+    private static let readerObserver: PSCALLocationReaderObserver = { count, ctx in
+        guard let ctx else { return }
+        let provider = Unmanaged<LocationDeviceProvider>.fromOpaque(ctx).takeUnretainedValue()
+        provider.handleReaderCountChanged(Int(count))
+    }
+
     private let locationManager: CLLocationManager
-    private let debugEnabled: Bool = {
-        guard let raw = ProcessInfo.processInfo.environment["PSCALI_LOCATION_DEBUG"] else {
-            return false
-        }
-        return !raw.isEmpty && raw != "0"
-    }()
     private var started = false
     private var deviceEnabled = true
     private var locationActive = false
     private var latestLocation: CLLocation?
-    private var lastLocationRequest: TimeInterval = 0
-    private let locationRequestInterval: TimeInterval = 5.0
-    private var requestTimer: DispatchSourceTimer?
-    private let requestInterval: TimeInterval = 1.0
-    private let backgroundLocationAllowed: Bool = {
-        if let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] {
-            return modes.contains("location")
-        }
-        return false
-    }()
-
+    private var readerCount: Int = 0
     private override init() {
         locationManager = CLLocationManager()
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
-        if backgroundLocationAllowed {
-            locationManager.allowsBackgroundLocationUpdates = true
-        }
+        locationManager.allowsBackgroundLocationUpdates = true
         locationManager.pausesLocationUpdatesAutomatically = false
+        DispatchQueue.main.async {
+            self.locationManager.requestAlwaysAuthorization()
+            self.locationManager.startUpdatingLocation()
+            self.locationManager.requestLocation()
+        }
+        PSCALRuntimeRegisterLocationReaderObserver(Self.readerObserver,
+                                                   Unmanaged.passUnretained(self).toOpaque())
     }
 
     func start() {
-        queue.async {
-            if self.started {
-                self.debugLog("start ignored (already started, enabled=\(self.deviceEnabled))")
-                return
-            }
-            self.started = true
-            self.debugLog("start triggered (enabled=\(self.deviceEnabled))")
-            self.syncDeviceStateLocked()
+        if started {
+            debugLog("start ignored (already started, enabled=\(deviceEnabled))")
+            return
         }
+        started = true
+        debugLog("start triggered (enabled=\(deviceEnabled))")
+        syncDeviceState()
     }
 
     func setDeviceEnabled(_ enabled: Bool) {
-        queue.async {
-            self.deviceEnabled = enabled
-            self.debugLog("setDeviceEnabled(\(enabled)) started=\(self.started)")
-            self.syncDeviceStateLocked()
-        }
+        deviceEnabled = enabled
+        debugLog("setDeviceEnabled(\(enabled)) started=\(started)")
+        syncDeviceState()
     }
 
-    private func syncDeviceStateLocked() {
-        debugLog("syncDeviceStateLocked started=\(started) enabled=\(deviceEnabled)")
-        PscalRuntimeBootstrap.shared.withRuntimeContext {
-            PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
-        }
-        if started && deviceEnabled {
-            startLocationUpdatesLocked()
-            startRequestTimerLocked()
-        } else {
-            stopLocationUpdatesLocked()
-            stopRequestTimerLocked()
-        }
+    func runtimeBecameReady() {
+        debugLog("runtimeBecameReady; syncing state")
+        syncDeviceState()
+        sendLatestLocation()
     }
 
-    private func startLocationUpdatesLocked() {
-        guard !locationActive else { return }
+    private func syncDeviceState() {
+        debugLog("syncDeviceState started=\(started) enabled=\(deviceEnabled) readers=\(readerCount)")
+        PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
+        if !started {
+            stopLocationUpdates()
+            return
+        }
+        if !deviceEnabled {
+            stopLocationUpdates()
+            return
+        }
+        startLocationUpdates()
+        sendLatestLocation()
+    }
+
+    private func startLocationUpdates() {
+        if locationActive {
+            return
+        }
         locationActive = true
         debugLog("starting location updates")
-        DispatchQueue.main.async {
+        let performStart = { [weak self] in
+            guard let self else { return }
             self.requestAuthorizationIfNeeded()
             self.locationManager.startUpdatingLocation()
-            self.requestLocationIfStaleLocked(force: true)
+            self.requestLocationOnce(force: true)
             if let initial = self.locationManager.location {
-                self.queue.async { self.latestLocation = initial }
-                self.queue.async { self.sendLatestLocationLocked() }
+                self.latestLocation = initial
+                self.sendLatestLocation()
             }
         }
+        if Thread.isMainThread {
+            performStart()
+        } else {
+            DispatchQueue.main.async(execute: performStart)
+        }
     }
 
-    private func stopLocationUpdatesLocked() {
-        guard locationActive else { return }
+    private func stopLocationUpdates() {
+        if !locationActive {
+            return
+        }
         locationActive = false
         debugLog("stopping location updates")
-        DispatchQueue.main.async {
-            self.locationManager.stopUpdatingLocation()
+        if Thread.isMainThread {
+            locationManager.stopUpdatingLocation()
+        } else {
+            DispatchQueue.main.async { self.locationManager.stopUpdatingLocation() }
         }
     }
 
-    private func startRequestTimerLocked() {
-        guard requestTimer == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + requestInterval, repeating: requestInterval)
-        timer.setEventHandler { [weak self] in
-            self?.requestLocationIfStaleLocked(force: false)
-        }
-        timer.resume()
-        requestTimer = timer
-    }
-
-    private func stopRequestTimerLocked() {
-        requestTimer?.cancel()
-        requestTimer = nil
-    }
-
-    private func sendLatestLocationLocked() {
+    private func sendLatestLocation() {
         guard deviceEnabled, let location = latestLocation else { return }
         let payload = LocationDeviceProvider.createLocationPayload(location: location)
         sendPayload(payload)
@@ -2323,17 +2319,19 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         guard let data = payload.data(using: .utf8), !data.isEmpty else { return }
         data.withUnsafeBytes { buffer in
             guard let base = buffer.baseAddress else { return }
-            let res = PscalRuntimeBootstrap.shared.withRuntimeContext {
-                PSCALRuntimeWriteLocationDevice(base.assumingMemoryBound(to: CChar.self),
-                                                buffer.count)
+            let res = PSCALRuntimeWriteLocationDevice(base.assumingMemoryBound(to: CChar.self),
+                                                      buffer.count)
+            if debugEnabled() {
+                if res >= 0 {
+                    debugLog(String(format: "write ok len=%zu", buffer.count))
+                } else {
+                    debugLog(String(format: "write failed len=%zu errno=%d", buffer.count, errno))
+                }
             }
             if res < 0 {
                 let err = errno
                 if err != EAGAIN && err != EWOULDBLOCK && err != EPIPE {
                     runtimeDebugLog("Location device write failed: \(String(cString: strerror(err)))")
-                }
-                if debugEnabled {
-                    debugLog("write failed len=\(buffer.count) errno=\(err)")
                 }
             }
         }
@@ -2342,41 +2340,50 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func requestAuthorizationIfNeeded() {
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
-            locationManager.requestAlwaysAuthorization()
+            DispatchQueue.main.async {
+                self.locationManager.requestAlwaysAuthorization()
+            }
         } else if status == .authorizedWhenInUse || status == .authorizedAlways {
-            locationManager.startUpdatingLocation()
+            DispatchQueue.main.async {
+                self.locationManager.startUpdatingLocation()
+            }
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        queue.async {
-            if status == .denied || status == .restricted {
-                self.debugLog("authorization restricted/denied; stopping updates")
-                self.stopLocationUpdatesLocked()
-            } else if status == .authorizedAlways || status == .authorizedWhenInUse {
-                self.debugLog("authorization granted; starting updates")
-                self.startLocationUpdatesLocked()
-            }
+        debugLog("authorization changed: \(status.rawValue)")
+        switch status {
+        case .denied, .restricted:
+            debugLog("authorization restricted/denied; stopping updates")
+            stopLocationUpdates()
+        case .authorizedAlways, .authorizedWhenInUse:
+            debugLog("authorization granted; starting updates")
+            startLocationUpdates()
+            requestLocationOnce(force: true)
+        default:
+            break
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
-        queue.async {
-            if self.debugEnabled {
-                self.debugLog(String(format: "didUpdateLocations lat=%.5f lon=%.5f",
-                                     latest.coordinate.latitude,
-                                     latest.coordinate.longitude))
-            }
-            self.latestLocation = latest
-            self.sendLatestLocationLocked()
-        }
+        debugLog(String(format: "didUpdateLocations lat=%.5f lon=%.5f",
+                        latest.coordinate.latitude,
+                        latest.coordinate.longitude))
+        latestLocation = latest
+        sendLatestLocation()
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         runtimeDebugLog("Location device error: \(error.localizedDescription)")
-        if debugEnabled {
-            debugLog("didFailWithError \(error.localizedDescription)")
+        debugLog("didFailWithError \(error.localizedDescription)")
+    }
+
+    private func handleReaderCountChanged(_ count: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.readerCount = max(0, count)
+            self.syncDeviceState()
         }
     }
 
@@ -2387,18 +2394,32 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func debugLog(_ message: String) {
-        guard debugEnabled else { return }
+        guard debugEnabled() else { return }
         runtimeDebugLog("[location] \(message)")
+        NSLog("[location] %@", message)
     }
 
-    private func requestLocationIfStaleLocked(force: Bool) {
-        let now = Date().timeIntervalSinceReferenceDate
-        if !force && now - lastLocationRequest < locationRequestInterval {
+    private func debugEnabled() -> Bool {
+        guard let raw = getenv("PSCALI_LOCATION_DEBUG") else { return false }
+        let val = String(cString: raw)
+        return !val.isEmpty && val != "0"
+    }
+
+    private var lastRequestTime: Date?
+    private func requestLocationOnce(force: Bool) {
+        let now = Date()
+        if !force, let last = lastRequestTime, now.timeIntervalSince(last) < 5 {
             return
         }
-        lastLocationRequest = now
-        DispatchQueue.main.async {
+        lastRequestTime = now
+        let request = { [weak self] in
+            guard let self else { return }
             self.locationManager.requestLocation()
+        }
+        if Thread.isMainThread {
+            request()
+        } else {
+            DispatchQueue.main.async(execute: request)
         }
     }
 }
