@@ -3574,6 +3574,17 @@ static int shellPipelineRunStage(VM *vm,
     }
     vprocSetPgid(vprocPid(vp), group);
     ctx->pgid = group;
+    if (cmd && cmd->argv && cmd->argc > 0) {
+        char label[96] = {0};
+        shellVprocFormatLabel(cmd, label, sizeof(label));
+        if (!label[0] && cmd->argv[0]) {
+            strncpy(label, cmd->argv[0], sizeof(label) - 1);
+            label[sizeof(label) - 1] = '\0';
+        }
+        if (label[0]) {
+            vprocSetCommandLabel(vprocPid(vp), label);
+        }
+    }
 #if defined(PSCAL_TARGET_IOS)
     /* Keep pipeline stages in the foreground when possible, but always disable
      * stop semantics so SIGTTIN/TTOU do not park inline stages. */

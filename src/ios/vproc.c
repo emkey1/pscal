@@ -6555,7 +6555,10 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
 
     int owner_pid = (int)vprocGetPidShim();
     int kernel_pid = vprocGetKernelPid();
-    int parent_pid = (kernel_pid > 0) ? kernel_pid : owner_pid;
+    int parent_pid = owner_pid;
+    if (parent_pid <= 0 || parent_pid == pid) {
+        parent_pid = (kernel_pid > 0) ? kernel_pid : owner_pid;
+    }
     if (parent_pid > 0 && parent_pid != pid) {
         vprocSetParent(pid, parent_pid);
     }
