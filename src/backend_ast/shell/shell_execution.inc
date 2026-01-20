@@ -3713,10 +3713,6 @@ static void *shellPipelineStageThreadMain(void *arg) {
     if (tctx->ctx && tctx->ctx->stage_status && tctx->stage_pos < tctx->ctx->stage_count) {
         tctx->ctx->stage_status[tctx->stage_pos] = status;
     }
-    if (tctx->cmd) {
-        shellFreeCommand(tctx->cmd);
-        free(tctx->cmd);
-    }
 #if defined(PSCAL_TARGET_IOS)
     if (swapped_stdio) {
         vprocSessionStdioActivate(prev_session_stdio);
@@ -3725,6 +3721,16 @@ static void *shellPipelineStageThreadMain(void *arg) {
         PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
     }
 #endif
+    /* Let background tail stages complete asynchronously and clean up the pipeline. */
+    if (tctx->pipeline_tail && tctx->ctx && tctx->ctx->background) {
+        tctx->ctx->last_status = status;
+        shellFinishPipeline(tctx->cmd);
+        shellRuntimeProcessPendingSignals();
+    }
+    if (tctx->cmd) {
+        shellFreeCommand(tctx->cmd);
+        free(tctx->cmd);
+    }
     free(tctx);
     return NULL;
 }
@@ -3760,7 +3766,9 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         return false;
     }
 
-    if (!pipeline_tail) {
+    /* Run tail stages on a worker thread when backgrounded so the shell prompt returns. */
+    bool async_tail = ctx->background && pipeline_tail;
+    if (!pipeline_tail || async_tail) {
         ShellPipelineStageThreadCtx *tctx =
             (ShellPipelineStageThreadCtx *)calloc(1, sizeof(ShellPipelineStageThreadCtx));
         ShellCommand *cloned = shellCloneCommandForBackground(cmd);
@@ -4168,6 +4176,10 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             if (!stage_ok) {
                 shellAbortPipeline();
             } else if (pipeline_tail) {
+                if (ctx->background) {
+                    shellScalarCacheInvalidate();
+                    return makeVoid();
+                }
                 if (ctx->in_process_worker) {
                     shellFinishPipeline(cmd);
                     shellRuntimeProcessPendingSignals();
