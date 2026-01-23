@@ -187,6 +187,9 @@ final class TerminalRootViewController: UIViewController {
     private func updateKeyboardInset(overlap: CGFloat) {
         let baseBottomInset = view.safeAreaInsets.bottom
         let extra = max(0, overlap - baseBottomInset)
+        if abs(extra - lastKeyboardOverlap) < 0.5 {
+            return
+        }
         additionalSafeAreaInsets.bottom = extra
         let prev = lastKeyboardOverlap
         lastKeyboardOverlap = extra

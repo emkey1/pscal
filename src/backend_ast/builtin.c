@@ -913,6 +913,150 @@ static _Thread_local unsigned int rand_seed = 1;
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
 
+// Small buffer to requeue bytes we peek during ReadKey (e.g., when skipping
+// DSR responses). Keeps console input lossless when we consume more than one
+// byte while deciding what to return.
+static _Thread_local unsigned char gReadKeyBuf[64];
+static _Thread_local int gReadKeyBufStart = 0;
+static _Thread_local int gReadKeyBufCount = 0;
+
+static bool readKeyBufHasData(void) {
+    return gReadKeyBufCount > 0;
+}
+
+static int readKeyBufPop(void) {
+    if (!readKeyBufHasData()) {
+        return -1;
+    }
+    int value = gReadKeyBuf[gReadKeyBufStart];
+    gReadKeyBufStart = (gReadKeyBufStart + 1) % (int)sizeof(gReadKeyBuf);
+    gReadKeyBufCount--;
+    return value;
+}
+
+static void readKeyBufPush(unsigned char byte) {
+    if (gReadKeyBufCount >= (int)sizeof(gReadKeyBuf)) {
+        return;
+    }
+    int tail = (gReadKeyBufStart + gReadKeyBufCount) % (int)sizeof(gReadKeyBuf);
+    gReadKeyBuf[tail] = byte;
+    gReadKeyBufCount++;
+}
+
+// Fetch a console byte, skipping any stray DSR responses (ESC [ row ; col R)
+// that may have been sent by the terminal for cursor queries. Ensures those
+// sequences do not satisfy ReadKey.
+static int readKeyFetchConsoleByte(void) {
+    for (;;) {
+        if (readKeyBufHasData()) {
+            return readKeyBufPop();
+        }
+        unsigned char ch = 0;
+#if defined(PSCAL_TARGET_IOS)
+        ssize_t n = vprocReadShim(STDIN_FILENO, &ch, 1);
+#else
+        ssize_t n = read(STDIN_FILENO, &ch, 1);
+#endif
+        if (n != 1) {
+            return 0;
+        }
+        if (ch != 0x1B) {
+            return (int)ch;
+        }
+
+        /* Capture the full sequence after ESC to decide if it's a DSR reply. */
+        unsigned char seq[64];
+        size_t seq_len = 0;
+        seq[seq_len++] = 0x1B;
+
+        int orig_flags = fcntl(STDIN_FILENO, F_GETFL);
+        bool toggled_nonblock = false;
+        if (orig_flags != -1 && (orig_flags & O_NONBLOCK) == 0) {
+            if (fcntl(STDIN_FILENO, F_SETFL, orig_flags | O_NONBLOCK) == 0) {
+                toggled_nonblock = true;
+            }
+        }
+
+        const int max_polls = 10;
+        int polls = 0;
+        while (seq_len < sizeof(seq)) {
+            unsigned char b = 0;
+#if defined(PSCAL_TARGET_IOS)
+            ssize_t m = vprocReadShim(STDIN_FILENO, &b, 1);
+#else
+            ssize_t m = read(STDIN_FILENO, &b, 1);
+#endif
+            if (m == 1) {
+                seq[seq_len++] = b;
+                if (b == 'R') {
+                    break; /* likely end of DSR */
+                }
+                continue;
+            }
+            if (m < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) && polls < max_polls) {
+                struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+                (void)poll(&pfd, 1, 20);
+                polls++;
+                continue;
+            }
+            break;
+        }
+
+        if (toggled_nonblock && orig_flags != -1) {
+            fcntl(STDIN_FILENO, F_SETFL, orig_flags);
+        }
+
+        /* Check if the captured sequence is ESC [ digits ; digits R */
+        bool is_dsr = false;
+        size_t r_pos = 0;
+        for (size_t i = 0; i < seq_len; ++i) {
+            if (seq[i] == 'R') {
+                r_pos = i;
+                break;
+            }
+        }
+        if (seq_len >= 4 && seq[0] == 0x1B && seq[1] == '[' && r_pos > 2) {
+            bool ok = true;
+            bool saw_digit = false;
+            bool saw_sep = false;
+            for (size_t i = 2; i < r_pos; ++i) {
+                unsigned char b = seq[i];
+                if (b >= '0' && b <= '9') {
+                    saw_digit = true;
+                    continue;
+                }
+                if (b == ';') {
+                    if (!saw_digit) { ok = false; break; }
+                    saw_sep = true;
+                    saw_digit = false;
+                    continue;
+                }
+                ok = false;
+                break;
+            }
+            if (ok && saw_digit && saw_sep) {
+                is_dsr = true;
+            }
+        }
+
+        if (is_dsr) {
+            /* Discard the DSR sequence and continue. Preserve any trailing bytes after R. */
+            if (seq_len > r_pos + 1) {
+                for (ssize_t i = (ssize_t)seq_len - 1; i > (ssize_t)r_pos; --i) {
+                    readKeyBufPush(seq[(size_t)i]);
+                }
+            }
+            continue;
+        }
+
+        /* Not a DSR; push the captured sequence back (in reverse) and return first byte. */
+        for (ssize_t i = (ssize_t)seq_len - 1; i >= 0; --i) {
+            readKeyBufPush(seq[(size_t)i]);
+        }
+        return readKeyBufPop();
+    }
+}
+
 // ---- CLike-style conversion helpers (Phase 1) ----
 static Value vmBuiltinToInt(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
@@ -3738,6 +3882,8 @@ static int getCursorPosition(int *row, int *col) {
     int ret_status = -1; // Default to critical failure
     int read_errno = 0; // Store errno from read() operation
     bool termiosApplied = false;
+    int stdin_flags = -1;
+    bool restore_blocking = false;
 
     // Default row/col in case of non-critical failure
     *row = 1;
@@ -3745,21 +3891,30 @@ static int getCursorPosition(int *row, int *col) {
 
     // --- Check if Input is a Terminal ---
     if (!pscalRuntimeStdinIsInteractive()) {
-        fprintf(stderr, "Warning: Cannot get cursor position (stdin is not a TTY).\n");
-        return 0; // Treat as non-critical failure, return default 1,1
+        ret_status = 0; // Non-interactive: fall back to default 1,1 silently.
+        goto cleanup;
+    }
+
+    // Some callers may have left stdin in non-blocking mode; temporarily
+    // make it blocking so VTIME/VMIN can take effect.
+    stdin_flags = fcntl(STDIN_FILENO, F_GETFL);
+    if (stdin_flags != -1 && (stdin_flags & O_NONBLOCK)) {
+        if (fcntl(STDIN_FILENO, F_SETFL, stdin_flags & ~O_NONBLOCK) == 0) {
+            restore_blocking = true;
+        }
     }
 
     // --- Save Current Terminal Settings ---
     if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
         perror("getCursorPosition: tcgetattr failed");
-        return -1; // Critical failure
+        goto cleanup; // Critical failure
     }
 
     // --- Prepare and Set Raw Mode ---
     newt = oldt;
     newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
-    newt.c_cc[VMIN] = 0;              // Non-blocking read
-    newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
+    newt.c_cc[VMIN] = 0;              // Non-blocking; we'll poll below
+    newt.c_cc[VTIME] = 0;
 
     if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
         int setup_errno = errno;
@@ -3767,57 +3922,48 @@ static int getCursorPosition(int *row, int *col) {
         // Attempt to restore original settings even if setting new ones failed
         vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
         errno = setup_errno; // Restore errno for accurate reporting
-        return -1; // Critical failure
+        goto cleanup; // Critical failure
     }
     termiosApplied = true;
 
     // --- Write DSR Query ---
-    const char *dsr_query = "\x1B[6n"; // ANSI Device Status Report for cursor position
-    if (write(STDOUT_FILENO, dsr_query, strlen(dsr_query)) == -1) {
+    static const char dsr_query[] = "\x1B[6n"; // ANSI Device Status Report for cursor position
+    if (write(STDOUT_FILENO, dsr_query, sizeof(dsr_query) - 1) == -1) {
         int write_errno = errno;
         perror("getCursorPosition: write DSR query failed");
-        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore terminal settings
         errno = write_errno;
-        return -1; // Critical failure
+        goto cleanup; // Critical failure
     }
 
     // --- Read Response ---
     memset(buf, 0, sizeof(buf));
     i = 0;
-    while (i < (int)sizeof(buf) - 1) {
-        errno = 0; // Clear errno before read
-        ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
-        read_errno = errno; // Store errno immediately after read
-
-        if (bytes_read < 0) { // Read error
-             // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
-             if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
-                 fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
-             } else {
-                 perror("getCursorPosition: read failed");
-             }
-             break; // Exit loop on any read error or timeout
+    int elapsed_ms = 0;
+    const int poll_step_ms = 20;
+    const int max_wait_ms = 3000; // cap total wait to ~3s
+    struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+    while (i < (int)sizeof(buf) - 1 && elapsed_ms <= max_wait_ms) {
+        int pr = poll(&pfd, 1, poll_step_ms);
+        if (pr > 0 && (pfd.revents & POLLIN)) {
+            errno = 0;
+            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+            read_errno = errno;
+            if (bytes_read == 1) {
+                buf[i++] = ch;
+                if (ch == 'R') {
+                    break;
+                }
+                elapsed_ms = 0; // reset timer on progress
+                continue;
+            }
+            if (bytes_read < 0 && (read_errno == EAGAIN || read_errno == EWOULDBLOCK)) {
+                continue;
+            }
+            break;
         }
-        if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
-             fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
-             break;
-        }
-
-        // Store character and check for terminator 'R'
-        buf[i++] = ch;
-        if (ch == 'R') {
-            break; // End of response sequence found
-        }
+        elapsed_ms += poll_step_ms;
     }
     buf[i] = '\0'; // Null-terminate the buffer
-
-    // --- Restore Original Terminal Settings ---
-    if (termiosApplied) {
-        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
-            perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
-            // Continue processing, but be aware terminal might be left in raw mode
-        }
-    }
 
     // --- Parse Response ---
     // Expected format: \x1B[<row>;<col>R
@@ -3844,6 +3990,33 @@ static int getCursorPosition(int *row, int *col) {
          ret_status = 0; // Non-critical failure, return default 1,1
     }
 
+cleanup:
+    /* Flush any pending input so delayed DSR replies don't echo later. */
+    tcflush(STDIN_FILENO, TCIFLUSH);
+    /* Drain any residual DSR bytes so later reads (e.g., ReadKey) are not
+     * satisfied by a leftover ESC[ row ; col R response. */
+    {
+        int cur_flags = fcntl(STDIN_FILENO, F_GETFL);
+        if (cur_flags != -1 && (cur_flags & O_NONBLOCK) == 0) {
+            if (fcntl(STDIN_FILENO, F_SETFL, cur_flags | O_NONBLOCK) == 0) {
+                char discard[64];
+                while (read(STDIN_FILENO, discard, sizeof(discard)) > 0) {
+                }
+                fcntl(STDIN_FILENO, F_SETFL, cur_flags);
+            }
+        }
+    }
+
+    // --- Restore Original Terminal Settings ---
+    if (termiosApplied) {
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
+            perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
+            // Continue processing, but be aware terminal might be left in raw mode
+        }
+    }
+    if (restore_blocking && stdin_flags != -1) {
+        fcntl(STDIN_FILENO, F_SETFL, stdin_flags);
+    }
     return ret_status; // 0 for success or non-critical error, -1 for critical error
 }
 
@@ -3914,16 +4087,7 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
 #endif
     {
         vmEnableRawMode();
-
-        unsigned char ch_byte;
-#if defined(PSCAL_TARGET_IOS)
-        if (vprocReadShim(STDIN_FILENO, &ch_byte, 1) != 1) {
-#else
-        if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
-#endif
-            ch_byte = '\0';
-        }
-        c = ch_byte;
+        c = readKeyFetchConsoleByte();
     }
 
     if (arg_count == 1) {
@@ -4108,15 +4272,35 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (pscalRuntimeStdoutIsInteractive()) {
-        bool color_was_applied = applyCurrentTextAttributes(stdout);
-        fputs("\x1B[2J\x1B[H", stdout);
-        if (color_was_applied) {
-            resetTextAttributes(stdout);
-        }
-        fprintf(stdout, "\x1B[%d;%dH", gWindowTop, gWindowLeft);
-        fflush(stdout);
+    if (!pscalRuntimeStdoutIsInteractive()) {
+        return makeVoid();
     }
+
+    int screen_rows = 24, screen_cols = 80;
+    getTerminalSize(&screen_rows, &screen_cols);
+    int left = gWindowLeft > 0 ? gWindowLeft : 1;
+    int top = gWindowTop > 0 ? gWindowTop : 1;
+    int right = gWindowRight > 0 ? gWindowRight : screen_cols;
+    int bottom = gWindowBottom > 0 ? gWindowBottom : screen_rows;
+    if (left < 1) left = 1;
+    if (top < 1) top = 1;
+    if (right < left) right = left;
+    if (bottom < top) bottom = top;
+    int width = right - left + 1;
+
+    bool color_was_applied = applyCurrentTextAttributes(stdout);
+
+    for (int row = top; row <= bottom; ++row) {
+        fprintf(stdout, "\x1B[%d;%dH", row, left);
+        for (int col = 0; col < width; ++col) {
+            fputc(' ', stdout);
+        }
+    }
+    fprintf(stdout, "\x1B[%d;%dH", top, left);
+    if (color_was_applied) {
+        resetTextAttributes(stdout);
+    }
+    fflush(stdout);
 
     return makeVoid();
 }
@@ -4127,8 +4311,35 @@ Value vmBuiltinClreol(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ClrEol expects no arguments.");
         return makeVoid();
     }
+    int cur_row = 1, cur_col = 1;
+    if (getCursorPosition(&cur_row, &cur_col) != 0) {
+        cur_row = 1;
+        cur_col = 1;
+    }
+    int screen_rows = 24, screen_cols = 80;
+    (void)screen_rows;
+    getTerminalSize(&screen_rows, &screen_cols);
+    int right_edge = gWindowRight > 0 ? gWindowRight : screen_cols;
+    if (right_edge < cur_col) {
+        right_edge = cur_col;
+    }
+    int span = right_edge - cur_col + 1;
     bool color_was_applied = applyCurrentTextAttributes(stdout);
+    /* Send the ANSI sequence for terminals that honor it. */
     printf("\x1B[K");
+    /* Also paint spaces within the current window for terminals that ignore K. */
+    if (span > 0) {
+        fprintf(stdout, "\x1B[%d;%dH", cur_row, cur_col);
+        char spaces[128];
+        memset(spaces, ' ', sizeof(spaces));
+        int remaining = span;
+        while (remaining > 0) {
+            int chunk = remaining > (int)sizeof(spaces) ? (int)sizeof(spaces) : remaining;
+            fwrite(spaces, 1, (size_t)chunk, stdout);
+            remaining -= chunk;
+        }
+        fprintf(stdout, "\x1B[%d;%dH", cur_row, cur_col);
+    }
     if (color_was_applied) {
         resetTextAttributes(stdout);
     }
@@ -4309,10 +4520,21 @@ Value vmBuiltinWindow(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "Window expects 4 integer arguments.");
         return makeVoid();
     }
+    int screen_rows = 24, screen_cols = 80;
+    getTerminalSize(&screen_rows, &screen_cols);
+
     gWindowLeft = (int)AS_INTEGER(args[0]);
     gWindowTop = (int)AS_INTEGER(args[1]);
     gWindowRight = (int)AS_INTEGER(args[2]);
     gWindowBottom = (int)AS_INTEGER(args[3]);
+
+    if (gWindowLeft < 1) gWindowLeft = 1;
+    if (gWindowTop < 1) gWindowTop = 1;
+    if (gWindowRight < gWindowLeft) gWindowRight = gWindowLeft;
+    if (gWindowBottom < gWindowTop) gWindowBottom = gWindowTop;
+    if (gWindowRight > screen_cols) gWindowRight = screen_cols;
+    if (gWindowBottom > screen_rows) gWindowBottom = screen_rows;
+
     printf("\x1B[%d;%dr", gWindowTop, gWindowBottom);
     printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
     fflush(stdout);

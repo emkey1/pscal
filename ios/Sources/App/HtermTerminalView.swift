@@ -3,6 +3,73 @@ import WebKit
 import UIKit
 import Foundation
 
+private final class TerminalResourceSchemeHandler: NSObject, WKURLSchemeHandler {
+    private struct Resource {
+        let data: Data
+        let mimeType: String
+    }
+
+    private let cacheQueue = DispatchQueue(label: "com.pscal.hterm.scheme-cache")
+    private var cache: [String: Resource] = [:]
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        guard let url = urlSchemeTask.request.url else {
+            urlSchemeTask.didFailWithError(NSError(domain: NSURLErrorDomain,
+                                                   code: NSURLErrorBadURL,
+                                                   userInfo: nil))
+            return
+        }
+        let name = url.lastPathComponent.isEmpty ? "term.html" : url.lastPathComponent
+        guard let resource = loadResource(named: name) else {
+            let error = NSError(domain: NSURLErrorDomain,
+                                code: NSURLErrorFileDoesNotExist,
+                                userInfo: [NSLocalizedDescriptionKey: "Missing terminal resource \(name)"])
+            urlSchemeTask.didFailWithError(error)
+            return
+        }
+        let response = URLResponse(url: url,
+                                   mimeType: resource.mimeType,
+                                   expectedContentLength: resource.data.count,
+                                   textEncodingName: "utf-8")
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(resource.data)
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
+        // Nothing to clean up.
+    }
+
+    private func loadResource(named name: String) -> Resource? {
+        let normalized = name.isEmpty ? "term.html" : name
+        if let cached = cacheQueue.sync(execute: { cache[normalized] }) {
+            return cached
+        }
+
+        let mimeType: String
+        switch normalized {
+        case "term.html":
+            mimeType = "text/html"
+        case "term.css":
+            mimeType = "text/css"
+        case "term.js", "hterm_all.js":
+            mimeType = "application/javascript"
+        default:
+            return nil
+        }
+
+        guard let url = Bundle.main.url(forResource: normalized, withExtension: nil, subdirectory: "TerminalWeb"),
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        let resource = Resource(data: data, mimeType: mimeType)
+        cacheQueue.async { [resource] in
+            self.cache[normalized] = resource
+        }
+        return resource
+    }
+}
+
 private final class HtermWebView: WKWebView {
     var onPaste: ((String) -> Void)?
     var onCopy: (() -> Void)?
@@ -91,6 +158,8 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var applicationCursor = false
     private var scrollToBottomPending = false
 
+    private static let terminalScheme = "pscal-terminal"
+    private static let schemeHandler = TerminalResourceSchemeHandler()
     let webView: WKWebView
     private let userContentController: WKUserContentController
     var onInput: ((String) -> Void)?
@@ -135,6 +204,10 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         self.instanceId = Self.nextInstanceId
         let controller = WKUserContentController()
         let config = WKWebViewConfiguration()
+        // Use an isolated process pool per terminal so a busy tab (e.g. watch)
+        // cannot starve web content processes for newly opened tabs.
+        config.processPool = WKProcessPool()
+        config.setURLSchemeHandler(Self.schemeHandler, forURLScheme: Self.terminalScheme)
         config.userContentController = controller
         let debugValue = Self.debugEnabled ? "true" : "false"
         let debugScript = WKUserScript(
@@ -377,14 +450,11 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         if Self.debugEnabled {
             NSLog("Hterm[%d]: loading terminal page %@", instanceId, url.absoluteString)
         }
-        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        webView.load(URLRequest(url: url))
     }
 
     private func terminalPageURL() -> URL? {
-        if let url = Bundle.main.url(forResource: "term", withExtension: "html", subdirectory: "TerminalWeb") {
-            return url
-        }
-        return Bundle.main.url(forResource: "term", withExtension: "html")
+        URL(string: "\(Self.terminalScheme)://terminal/term.html")
     }
 
     private func requestResize() {
@@ -399,27 +469,36 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     }
 
     func updateHostSize(_ size: CGSize, reason: String) {
-        guard size.width > 0, size.height > 0 else {
-            if !didLogZeroHostSize {
-                let sizeString = NSCoder.string(for: size)
-                logTabInit("host size ignored size=\(sizeString) reason=\(reason)")
-                didLogZeroHostSize = true
-            }
-            return
+        var clampedSize = size
+        var didClamp = false
+        if clampedSize.width <= 0 {
+            clampedSize.width = 1
+            didClamp = true
+        }
+        if clampedSize.height <= 0 {
+            clampedSize.height = 1
+            didClamp = true
+        }
+        if didClamp, !didLogZeroHostSize {
+            let sizeString = NSCoder.string(for: size)
+            logTabInit("host size clamped from \(sizeString) reason=\(reason)")
+            didLogZeroHostSize = true
+        } else if didLogZeroHostSize && !didClamp {
+            didLogZeroHostSize = false
         }
         if didLogZeroHostSize {
             didLogZeroHostSize = false
         }
         let wasReady = hostSizeReady
-        let changed = size != hostSize
-        hostSize = size
+        let changed = clampedSize != hostSize
+        hostSize = clampedSize
         hostSizeReady = true
         if !wasReady || changed {
-            let sizeString = NSCoder.string(for: size)
+            let sizeString = NSCoder.string(for: clampedSize)
             logTabInit("host size ready=\(hostSizeReady) size=\(sizeString) reason=\(reason) loaded=\(isLoaded)")
         }
         if Self.debugEnabled && (!wasReady || changed) {
-            let sizeString = NSCoder.string(for: size)
+            let sizeString = NSCoder.string(for: clampedSize)
             NSLog("Hterm[%d]: host size %@ (%@)", instanceId, sizeString, reason)
         }
         if isLoaded && (!wasReady || changed) {
@@ -972,9 +1051,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         updateInputEnabled()
         if loaded {
             updateDisplayAttachment()
-            if isEffectivelyVisible() {
-                controller.updateHostSize(scrollView.bounds.size, reason: "load")
-            }
+            controller.updateHostSize(scrollView.bounds.size, reason: "load")
             if pendingFocus {
                 requestFocus()
             }
@@ -1002,9 +1079,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             updateDisplayAttachment()
         } else if controller.isLoaded {
             updateDisplayAttachment()
-            if isEffectivelyVisible() {
-                controller.updateHostSize(scrollView.bounds.size, reason: "active")
-            }
+            controller.updateHostSize(scrollView.bounds.size, reason: "active")
         }
         handleAttachStateChange()
         updateVisibilityForInput()
@@ -1035,9 +1110,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
                          "contentOffset=\(NSCoder.string(for: scrollView.contentOffset))")
             }
         }
-        if isEffectivelyVisible() {
-            controller.updateHostSize(scrollView.bounds.size, reason: "layout")
-        }
+        controller.updateHostSize(scrollView.bounds.size, reason: "layout")
         clampScrollOffset(reason: "layout")
         updateVisibilityForInput()
     }

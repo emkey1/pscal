@@ -53,6 +53,12 @@
             ReferencedContainer = "container:PSCAL.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+         <CommandLineArgument
+            argument = "PSCALI_PRINT_CHANGES=1"
+            isEnabled = "YES">
+         </CommandLineArgument>
+      </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "PSCALI_PTY_TRACE"
@@ -116,6 +122,11 @@
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "PSCALI_DEBUG_EDITOR"
+            value = "1"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "PSCALI_PRINT_CHANGES"
             value = "1"
             isEnabled = "YES">
          </EnvironmentVariable>

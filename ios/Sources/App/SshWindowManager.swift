@@ -258,6 +258,7 @@ final class TerminalTabManager: ObservableObject {
         let index = target - 1
         guard tabs.indices.contains(index) else { return }
         let tab = tabs[index]
+        guard tab.id != selectedId else { return }
         tabInitLog("selectTab number=\(target) id=\(tab.id) title=\(tab.title)")
         selectedId = tab.id
     }
@@ -332,7 +333,11 @@ struct TerminalTabsRootView: View {
     @ObservedObject private var manager = TerminalTabManager.shared
 
     var body: some View {
-        VStack(spacing: 0) {
+        if TerminalDebugFlags.printChanges {
+            let _ = Self._printChanges()
+            traceViewChanges("TerminalTabsRootView body")
+        }
+        return VStack(spacing: 0) {
             TerminalTabBar(tabs: manager.tabs, selectedId: $manager.selectedId)
             ZStack {
                 let tab = manager.selectedTab
@@ -370,7 +375,9 @@ private struct TerminalTabBar: View {
                         title: tab.title,
                         isSelected: tab.id == selectedId
                     ) {
-                        selectedId = tab.id
+                        if selectedId != tab.id {
+                            selectedId = tab.id
+                        }
                     }
                 }
                 Button(action: { _ = TerminalTabManager.shared.openShellTab() }) {

@@ -3072,7 +3072,8 @@ Value vmBuiltinShellClear(VM *vm, int arg_count, Value *args) {
         shellUpdateStatus(1);
         return makeVoid();
     }
-    const char *sequence = "\x1B[2J\x1B[H";
+    /* Clear screen + scrollback to match typical terminal clear behaviour. */
+    const char *sequence = "\x1B[3J\x1B[H\x1B[2J";
     if (fputs(sequence, stdout) == EOF) {
         runtimeError(vm, "clear: failed to write escape sequence");
         shellUpdateStatus(errno ? errno : 1);

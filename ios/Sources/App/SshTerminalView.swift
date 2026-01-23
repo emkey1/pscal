@@ -8,7 +8,11 @@ struct SshTerminalView: View {
     @State private var focusAnchor: Int = 0
 
     var body: some View {
-        GeometryReader { proxy in
+        if TerminalDebugFlags.printChanges {
+            let _ = Self._printChanges()
+            traceViewChanges("SshTerminalView body")
+        }
+        return GeometryReader { proxy in
             SshTerminalContentView(
                 availableSize: proxy.size,
                 fontSettings: fontSettings,
@@ -40,8 +44,13 @@ private struct SshTerminalContentView: View {
     let isActive: Bool
 
     @State private var hasMeasuredGeometry: Bool = false
+    @State private var lastReportedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
 
     var body: some View {
+        if TerminalDebugFlags.printChanges {
+            let _ = Self._printChanges()
+            traceViewChanges("SshTerminalContentView body")
+        }
         let currentFont = fontSettings.currentFont
 
         return VStack(spacing: 0) {
@@ -58,8 +67,7 @@ private struct SshTerminalContentView: View {
                 onSuspend: { session.send("\u{1A}") },
                 onResize: { cols, rows in
                     tabInitLog("SshTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
-                    hasMeasuredGeometry = true
-                    session.updateTerminalSize(columns: cols, rows: rows)
+                    applyTerminalSize(columns: cols, rows: rows)
                 },
                 onReady: { controller in
                     tabInitLog("SshTerminalView ready session=\(session.sessionId) controller=\(controller.instanceId)")
@@ -134,10 +142,20 @@ private struct SshTerminalContentView: View {
         )
         let columns = max(10, grid.columns)
         let rows = max(4, grid.rows)
-        session.updateTerminalSize(columns: columns, rows: rows)
+        applyTerminalSize(columns: columns, rows: rows)
     }
 
     private func requestInputFocus() {
         focusAnchor &+= 1
+    }
+
+    private func applyTerminalSize(columns: Int, rows: Int) {
+        if !hasMeasuredGeometry {
+            hasMeasuredGeometry = true
+        }
+        let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(columns: columns, rows: rows)
+        guard lastReportedMetrics != metrics else { return }
+        lastReportedMetrics = metrics
+        session.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }

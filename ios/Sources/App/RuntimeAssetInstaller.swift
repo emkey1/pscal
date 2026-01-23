@@ -57,6 +57,8 @@ final class RuntimeAssetInstaller {
 
     private let fileManager = FileManager.default
     private var cachedToolRunnerPath: String?
+    private var skelHomeInstalled: Bool = false
+    private let skelInstallLock = NSLock()
     private let assetsVersion: String = {
         if let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, !build.isEmpty {
             return build
@@ -128,7 +130,18 @@ final class RuntimeAssetInstaller {
         }
         setenv("PSCALI_WORKSPACE_ROOT", workspacePath, 1)
 
-        installSkelHomeIfNeeded()
+        // Only seed the skeleton home once per app launch; subsequent tabs
+        // should respect user edits/removals of ~/.exshrc and other dotfiles.
+        var shouldInstallSkel = false
+        skelInstallLock.lock()
+        if !skelHomeInstalled {
+            skelHomeInstalled = true
+            shouldInstallSkel = true
+        }
+        skelInstallLock.unlock()
+        if shouldInstallSkel {
+            installSkelHomeIfNeeded()
+        }
     }
 
     func ensureToolRunnerExecutable() -> String? {

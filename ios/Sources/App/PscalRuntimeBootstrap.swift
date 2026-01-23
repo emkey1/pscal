@@ -2214,6 +2214,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private let locationManager: CLLocationManager
+    private let workQueue = DispatchQueue(label: "com.pscal.location", qos: .utility)
     private var started = false
     private var deviceEnabled = true
     private var locationActive = false
@@ -2243,22 +2244,30 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         }
         started = true
         debugLog("start triggered (enabled=\(deviceEnabled))")
-        syncDeviceState()
+        scheduleSync()
     }
 
     func setDeviceEnabled(_ enabled: Bool) {
         deviceEnabled = enabled
         debugLog("setDeviceEnabled(\(enabled)) started=\(started)")
-        syncDeviceState()
+        scheduleSync()
     }
 
     func runtimeBecameReady() {
         debugLog("runtimeBecameReady; syncing state")
-        syncDeviceState()
-        sendLatestLocation()
+        scheduleSync()
+        workQueue.async { [weak self] in
+            self?.sendLatestLocation()
+        }
     }
 
     private func syncDeviceState() {
+        workQueue.async { [weak self] in
+            self?.syncDeviceStateImpl()
+        }
+    }
+
+    private func syncDeviceStateImpl() {
         debugLog("syncDeviceState started=\(started) enabled=\(deviceEnabled) readers=\(readerCount)")
         PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
         if !started {
@@ -2380,11 +2389,8 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func handleReaderCountChanged(_ count: Int) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.readerCount = max(0, count)
-            self.syncDeviceState()
-        }
+        readerCount = max(0, count)
+        scheduleSync()
     }
 
     private static func createLocationPayload(location: CLLocation) -> String {
@@ -2403,6 +2409,12 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         guard let raw = getenv("PSCALI_LOCATION_DEBUG") else { return false }
         let val = String(cString: raw)
         return !val.isEmpty && val != "0"
+    }
+
+    private func scheduleSync() {
+        workQueue.async { [weak self] in
+            self?.syncDeviceStateImpl()
+        }
     }
 
     private var lastRequestTime: Date?

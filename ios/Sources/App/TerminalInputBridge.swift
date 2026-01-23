@@ -104,6 +104,17 @@ final class TerminalKeyInputView: UITextView {
     private var hardwareKeyboardConnected: Bool = false
     private var softKeyboardVisible: Bool = false
     private var keyboardObservers: [NSObjectProtocol] = []
+    private let hardwareKeyboardHeightEpsilon: CGFloat = 80.0
+
+    private func isHardwareKeyboard(_ notification: Notification) -> Bool {
+        guard let userInfo = notification.userInfo,
+              let frameValue = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue,
+              let window = window else {
+            return false
+        }
+        let frameInWindow = window.convert(frameValue.cgRectValue, from: nil)
+        return frameInWindow.height < hardwareKeyboardHeightEpsilon
+    }
     
     private struct RepeatCommand {
         let command: UIKeyCommand
@@ -180,8 +191,8 @@ final class TerminalKeyInputView: UITextView {
             return button
         }
 
-        let esc = makeButton("Esc", action: #selector(handleEsc))
-        let ctrl = makeButton("Ctrl", action: #selector(handleCtrlToggle))
+        let esc = makeButton("\u{238B}", action: #selector(handleEsc))
+        let ctrl = makeButton("^", action: #selector(handleCtrlToggle))
         ctrlButton = ctrl
         let up = makeButton("↑", action: #selector(handleUp))
         let down = makeButton("↓", action: #selector(handleDown))
@@ -193,7 +204,8 @@ final class TerminalKeyInputView: UITextView {
         let pipe = makeButton("|", action: #selector(handlePipe))
 
         if UIDevice.current.userInterfaceIdiom == .phone {
-            let tab = makeButton("Tab", action: #selector(handleTab))
+            // Replaced "Tab" with the Unicode symbol \u{21E5}
+            let tab = makeButton("\u{21E5}", action: #selector(handleTab))
             [esc, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         } else {
             [esc, ctrl, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
@@ -544,12 +556,21 @@ final class TerminalKeyInputView: UITextView {
             forName: UIResponder.keyboardWillShowNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             guard let self else { return }
             Task { @MainActor in
                 guard self.inputEnabled else { return }
                 guard let window = self.window, window.isKeyWindow else { return }
-                guard !self.softKeyboardVisible else { return }
+                let isHardware = self.isHardwareKeyboard(notification)
+                if isHardware {
+                    self.hardwareKeyboardConnected = true
+                    self.softKeyboardVisible = false
+                    if self.isFirstResponder {
+                        self.reloadInputViews()
+                    }
+                    return
+                }
+                if self.softKeyboardVisible { return }
                 self.softKeyboardVisible = true
                 self.hardwareKeyboardConnected = false
                 if self.isFirstResponder {
@@ -564,11 +585,20 @@ final class TerminalKeyInputView: UITextView {
             forName: UIResponder.keyboardWillHideNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             guard let self else { return }
             Task { @MainActor in
                 guard self.inputEnabled else { return }
                 guard let window = self.window, window.isKeyWindow else { return }
+                let isHardware = self.isHardwareKeyboard(notification)
+                if isHardware {
+                    self.hardwareKeyboardConnected = true
+                    self.softKeyboardVisible = false
+                    if self.isFirstResponder {
+                        self.reloadInputViews()
+                    }
+                    return
+                }
                 guard self.softKeyboardVisible else { return }
                 self.softKeyboardVisible = false
                 if self.isFirstResponder {

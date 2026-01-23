@@ -8,25 +8,27 @@ import os
 struct TerminalView: View {
     let showsOverlay: Bool
     let isActive: Bool
-    @ObservedObject var runtime: PscalRuntimeBootstrap
+    let runtime: PscalRuntimeBootstrap
 
     @ObservedObject private var fontSettings = TerminalFontSettings.shared
     @State private var showingSettings = false
-    @State private var focusAnchor: Int = 0
 
     init(showsOverlay: Bool = true, isActive: Bool = true, runtime: PscalRuntimeBootstrap) {
         self.showsOverlay = showsOverlay
         self.isActive = isActive
-        _runtime = ObservedObject(wrappedValue: runtime)
+        self.runtime = runtime
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        if TerminalDebugFlags.printChanges {
+            let _ = Self._printChanges()
+            traceViewChanges("TerminalView body")
+        }
+        return ZStack(alignment: .bottomTrailing) {
             GeometryReader { proxy in
                 TerminalContentView(
                     availableSize: proxy.size,
                     fontSettings: fontSettings,
-                    focusAnchor: $focusAnchor,
                     isActive: isActive,
                     runtime: runtime
                 )
@@ -110,7 +112,7 @@ struct TerminalView: View {
     }
 
     private func requestInputFocus() {
-        focusAnchor &+= 1
+        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
     }
 }
 
@@ -122,32 +124,39 @@ struct TerminalContentView: View {
     let availableSize: CGSize
 
     @ObservedObject private var fontSettings: TerminalFontSettings
-    @ObservedObject var runtime: PscalRuntimeBootstrap
-    @Binding private var focusAnchor: Int
+    let runtime: PscalRuntimeBootstrap
     private let isActive: Bool
 
-    @State private var lastLoggedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
+    @State private var lastReportedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
     @State private var hasMeasuredGeometry: Bool = false
     @State private var runtimeStarted: Bool = false
+    @State private var initialFocusRequested: Bool = false
+    @State private var promptKickRemaining: Int = 0
     @State private var localHtermLoaded: Bool = false
     @State private var htermController: HtermTerminalController?
+    @State private var exitStatus: Int32?
+    @State private var editorRenderTokenState: UInt64
 
     init(
         availableSize: CGSize,
         fontSettings: TerminalFontSettings,
-        focusAnchor: Binding<Int>,
         isActive: Bool,
         runtime: PscalRuntimeBootstrap
     ) {
         self.availableSize = availableSize
         _fontSettings = ObservedObject(wrappedValue: fontSettings)
-        _focusAnchor = focusAnchor
         self.isActive = isActive
-        _runtime = ObservedObject(wrappedValue: runtime)
+        self.runtime = runtime
+        _exitStatus = State(initialValue: runtime.exitStatus)
+        _editorRenderTokenState = State(initialValue: runtime.editorRenderToken)
     }
 
     var body: some View {
-        let editorToken = runtime.editorRenderToken
+        if TerminalDebugFlags.printChanges {
+            let _ = Self._printChanges()
+            traceViewChanges("TerminalContentView body")
+        }
+        let editorTokenState = editorRenderTokenState
         let editorActive = runtime.isEditorModeActive()
         let editorVisible = EditorWindowManager.shared.isVisible
         let currentFont = fontSettings.currentFont
@@ -165,7 +174,7 @@ struct TerminalContentView: View {
                         font: currentFont,
                         foregroundColor: fontSettings.foregroundColor,
                         backgroundColor: fontSettings.backgroundColor,
-                        focusToken: focusAnchor,
+                        focusToken: 0,
                         isActive: isActive,
                         onInput: handleInput,
                         onPaste: handlePaste,
@@ -176,8 +185,7 @@ struct TerminalContentView: View {
                             pscalRuntimeRequestSigtstp()
                         },
                         onResize: { cols, rows in
-                            runtime.updateTerminalSize(columns: cols, rows: rows)
-                            hasMeasuredGeometry = true
+                            applyTerminalSize(columns: cols, rows: rows, source: "webview")
                             startRuntimeIfNeeded()
                         },
                         onReady: { controller in
@@ -187,13 +195,19 @@ struct TerminalContentView: View {
                                 tabInitLog("TerminalView loaded runtime=\(runtime.runtimeId) controller=\(controller.instanceId)")
                                 runtime.markHtermLoaded()
                                 DispatchQueue.main.async {
-                                    localHtermLoaded = true
+                                    if !localHtermLoaded {
+                                        localHtermLoaded = true
+                                    }
                                 }
                             }
                             if controller.isLoaded {
                                 runtime.markHtermLoaded()
                                 DispatchQueue.main.async {
-                                    localHtermLoaded = true
+                                    if !localHtermLoaded {
+                                        localHtermLoaded = true
+                                        kickPromptIfNeeded()
+                                        schedulePromptKicks()
+                                    }
                                 }
                             }
                             runtime.attachHtermController(controller)
@@ -210,7 +224,17 @@ struct TerminalContentView: View {
                                 tabInitLog("TerminalView loadState runtime=\(runtime.runtimeId) loaded=true")
                             }
                             DispatchQueue.main.async {
-                                localHtermLoaded = loaded
+                                if localHtermLoaded != loaded {
+                                    localHtermLoaded = loaded
+                                    if loaded {
+                                        kickPromptIfNeeded()
+                                        schedulePromptKicks()
+                                    }
+                                    if loaded && isActive && !initialFocusRequested {
+                                        initialFocusRequested = true
+                                        requestInputFocus()
+                                    }
+                                }
                             }
                         }
                     )
@@ -225,7 +249,7 @@ struct TerminalContentView: View {
                         foregroundColor: fontSettings.foregroundColor,
                         isEditorMode: editorActive,
                         isEditorWindowVisible: editorVisible,
-                        editorRenderToken: editorToken,
+                        editorRenderToken: editorTokenState,
                         font: currentFont,
                         fontPointSize: fontSettings.pointSize,
                         editorSnapshot: runtime.editorBridge.snapshot(),
@@ -234,8 +258,7 @@ struct TerminalContentView: View {
                         mouseMode: runtime.mouseMode,
                         mouseEncoding: runtime.mouseEncoding,
                         onGeometryChange: { cols, rows in
-                            hasMeasuredGeometry = true
-                            runtime.updateTerminalSize(columns: cols, rows: rows)
+                            applyTerminalSize(columns: cols, rows: rows, source: "renderer")
                             startRuntimeIfNeeded()
                         }
                     )
@@ -248,7 +271,7 @@ struct TerminalContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(fontSettings.backgroundColor))
 
-            if let status = runtime.exitStatus {
+            if let status = exitStatus {
                 Divider()
                 Text("Process exited with status \(status)")
                     .font(.footnote)
@@ -272,7 +295,12 @@ struct TerminalContentView: View {
                 ensureHtermControllerIfNeeded()
                 updateTerminalGeometry()
                 startRuntimeIfNeeded()
-                requestInputFocus()
+                if !initialFocusRequested {
+                    initialFocusRequested = true
+                    requestInputFocus()
+                }
+            } else {
+                detachHtermControllerIfNeeded()
             }
         }
         .onAppear {
@@ -280,6 +308,10 @@ struct TerminalContentView: View {
             ensureHtermControllerIfNeeded()
             updateTerminalGeometry()
             startRuntimeIfNeeded()
+            if isActive && !initialFocusRequested {
+                initialFocusRequested = true
+                requestInputFocus()
+            }
         }
         .onChange(of: availableSize) { _ in
             updateTerminalGeometry()
@@ -288,8 +320,17 @@ struct TerminalContentView: View {
             hasMeasuredGeometry = false
             updateTerminalGeometry()
         }
-        .onChange(of: runtime.exitStatus) { _ in
+        .onChange(of: exitStatus) { _ in
             updateTerminalGeometry()
+        }
+        .onReceive(runtime.$exitStatus.removeDuplicates()) { value in
+            exitStatus = value
+        }
+        .onReceive(runtime.$editorRenderToken.removeDuplicates()) { token in
+            editorRenderTokenState = token
+        }
+        .onDisappear {
+            detachHtermControllerIfNeeded()
         }
     }
 
@@ -308,7 +349,7 @@ struct TerminalContentView: View {
     private func updateTerminalGeometry() {
         guard isActive else { return }
         let font = fontSettings.currentFont
-        let showingStatus = runtime.exitStatus != nil
+        let showingStatus = exitStatus != nil
 
         // Calculate usable height for the terminal text area.
         // availableSize.height is the total space from GeometryReader (including padding area).
@@ -331,18 +372,11 @@ struct TerminalContentView: View {
         )
 
         let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(
-            columns: grid.columns,
-            rows: grid.rows
+            columns: max(1, grid.columns),
+            rows: max(1, grid.rows)
         )
-        hasMeasuredGeometry = true
-
-        if lastLoggedMetrics != metrics {
-            RuntimeLogger.runtime.append("[TerminalView] Geometry update: \(availableSize.width)x\(availableSize.height) -> \(metrics.columns) cols x \(metrics.rows) rows")
-            lastLoggedMetrics = metrics
-        }
-        tabInitLog("TerminalView geometry runtime=\(runtime.runtimeId) cols=\(metrics.columns) rows=\(metrics.rows) status=\(showingStatus)")
-
-        runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
+        let context = "\(availableSize.width)x\(availableSize.height) status=\(showingStatus ? 1 : 0)"
+        applyTerminalSize(columns: metrics.columns, rows: metrics.rows, source: context, statusShown: showingStatus)
     }
 
     private func startRuntimeIfNeeded() {
@@ -353,8 +387,12 @@ struct TerminalContentView: View {
         runtimeStarted = true
         tabInitLog("TerminalView start runtime=\(runtime.runtimeId)")
         runtime.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            requestInputFocus()
+        schedulePromptKicks(reset: true)
+        if isActive && !initialFocusRequested {
+            initialFocusRequested = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                requestInputFocus()
+            }
         }
     }
 
@@ -365,7 +403,55 @@ struct TerminalContentView: View {
         }
     }
 
+    private func detachHtermControllerIfNeeded() {
+        guard let controller = htermController else { return }
+        runtime.detachHtermController(controller)
+        htermController = nil
+        localHtermLoaded = false
+    }
+
+    private func applyTerminalSize(columns: Int, rows: Int, source: String? = nil, statusShown: Bool? = nil) {
+        guard columns > 0, rows > 0 else { return }
+        if !hasMeasuredGeometry {
+            hasMeasuredGeometry = true
+        }
+        let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(columns: columns, rows: rows)
+        guard lastReportedMetrics != metrics else {
+            return
+        }
+        lastReportedMetrics = metrics
+        if let source {
+            RuntimeLogger.runtime.append("[TerminalView] Geometry update (\(source)) -> \(metrics.columns) cols x \(metrics.rows) rows")
+        }
+        if let statusShown {
+            tabInitLog("TerminalView geometry runtime=\(runtime.runtimeId) cols=\(metrics.columns) rows=\(metrics.rows) status=\(statusShown)")
+        } else {
+            tabInitLog("TerminalView geometry runtime=\(runtime.runtimeId) cols=\(metrics.columns) rows=\(metrics.rows)")
+        }
+        runtime.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
+    }
+
     private func requestInputFocus() {
-        focusAnchor &+= 1
+        NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
+    }
+
+    private func kickPromptIfNeeded() {
+        guard promptKickRemaining > 0 else { return }
+        promptKickRemaining -= 1
+        runtime.send(" ")
+        runtime.send("\u{7F}")
+    }
+
+    private func schedulePromptKicks(reset: Bool = false) {
+        if reset {
+            promptKickRemaining = 3
+        }
+        kickPromptIfNeeded()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            kickPromptIfNeeded()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            kickPromptIfNeeded()
+        }
     }
 }
