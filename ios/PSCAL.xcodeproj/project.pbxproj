@@ -12,20 +12,20 @@
 		145F4FCB2BE071F400603B3F /* PscalRuntimeBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FCA2BE071F400603B3F /* PscalRuntimeBootstrap.swift */; };
 		145F4FCB2BE071F400603B4E /* TerminalGeometryHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */; };
 		145F4FCD2BE0722600603B3F /* PSCALRuntime.mm in Sources */ = {isa = PBXBuildFile; fileRef = 145F4FCC2BE0722600603B3F /* PSCALRuntime.mm */; };
-		5C0F3D872F00000100ABCD02 /* PSCALInterpose.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C0F3D872F00000100ABCD01 /* PSCALInterpose.c */; };
 		145F4FD22BE0727A00603B3F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 145F4FD12BE0727A00603B3F /* SwiftUI.framework */; };
 		145F4FD42BE0727A00603B3F /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 145F4FD32BE0727A00603B3F /* UIKit.framework */; };
-		1A7B6C1E3F00123400ABC011 /* SshRuntimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */; };
-		1A7B6C1E3F00123400ABC012 /* SshTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC002 /* SshTerminalView.swift */; };
-		1A7B6C1E3F00123400ABC013 /* SshWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */; };
-		1A7B6C1E3F00123400ABC014 /* ShellRuntimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC004 /* ShellRuntimeSession.swift */; };
-		1A7B6C1E3F00123400ABC015 /* ShellTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC005 /* ShellTerminalView.swift */; };
 		14A5C5F42BE13E6500CEF0B9 /* TerminalBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14A5C5F32BE13E6500CEF0B9 /* TerminalBuffer.swift */; };
 		14B7F7E12BE5F46B00E6D40B /* EditorWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B7F7E02BE5F46B00E6D40B /* EditorWindowManager.swift */; };
 		14CF02B42BE1481D0037FB7E /* KeyboardAwareHostingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14CF02B32BE1481D0037FB7E /* KeyboardAwareHostingController.swift */; };
 		14E9F2052BE2B8D400A1E3C0 /* Examples in Resources */ = {isa = PBXBuildFile; fileRef = 14E9F2042BE2B8D400A1E3C0 /* Examples */; };
 		14E9F2212BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */; };
 		14F2C4F82BE1B12300DE9FD9 /* TerminalInputBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */; };
+		1A7B6C1E3F00123400ABC011 /* SshRuntimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */; };
+		1A7B6C1E3F00123400ABC012 /* SshTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC002 /* SshTerminalView.swift */; };
+		1A7B6C1E3F00123400ABC013 /* SshWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */; };
+		1A7B6C1E3F00123400ABC014 /* ShellRuntimeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC004 /* ShellRuntimeSession.swift */; };
+		1A7B6C1E3F00123400ABC015 /* ShellTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7B6C1E3F00123400ABC005 /* ShellTerminalView.swift */; };
+		5C0F3D872F00000100ABCD02 /* PSCALInterpose.c in Sources */ = {isa = PBXBuildFile; fileRef = 5C0F3D872F00000100ABCD01 /* PSCALInterpose.c */; };
 		5DFF9B122EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */; };
 		5F1AA0112EC6F00100000001 /* lib in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0012EC6F00100000001 /* lib */; };
 		5F1AA0122EC6F00100000001 /* fonts in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0022EC6F00100000001 /* fonts */; };
@@ -34,6 +34,7 @@
 		5F1AA0152EC6F00100000001 /* TestsLibs in Resources */ = {isa = PBXBuildFile; fileRef = 5F1AA0052EC6F00100000001 /* TestsLibs */; };
 		5F73F4B32FCA5B9A00EFC123 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */; };
 		5F9A00252F00000100ABC001 /* TerminalWeb in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00152F00000100ABC001 /* TerminalWeb */; };
+		5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9A00312F00000100ABC001 /* HtermTerminalView.swift */; };
 		5FFFD0023FFAA00000AAA001 /* PathTruncation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */; };
 		5FFFD0043FFAA00000AAA001 /* TerminalFontSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */; };
 		5FFFD0063FFAA00000AAA001 /* TerminalGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */; };
@@ -42,7 +43,6 @@
 		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
-		5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9A00312F00000100ABC001 /* HtermTerminalView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,22 +52,22 @@
 		145F4FCA2BE071F400603B3F /* PscalRuntimeBootstrap.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PscalRuntimeBootstrap.swift; sourceTree = "<group>"; };
 		145F4FCC2BE0722600603B3F /* PSCALRuntime.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = PSCALRuntime.mm; sourceTree = "<group>"; };
 		145F4FCE2BE0722600603B3F /* PSCALRuntime.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PSCALRuntime.h; sourceTree = "<group>"; };
-		5C0F3D872F00000100ABCD01 /* PSCALInterpose.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = PSCALInterpose.c; sourceTree = "<group>"; };
 		145F4FD02BE0725200603B3F /* PscalApp-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "PscalApp-Bridging-Header.h"; sourceTree = "<group>"; };
 		145F4FD12BE0727A00603B3F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		145F4FD32BE0727A00603B3F /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		145F4FDA2BE072E500603B3F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshRuntimeSession.swift; sourceTree = "<group>"; };
-		1A7B6C1E3F00123400ABC002 /* SshTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshTerminalView.swift; sourceTree = "<group>"; };
-		1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshWindowManager.swift; sourceTree = "<group>"; };
-		1A7B6C1E3F00123400ABC004 /* ShellRuntimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRuntimeSession.swift; sourceTree = "<group>"; };
-		1A7B6C1E3F00123400ABC005 /* ShellTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellTerminalView.swift; sourceTree = "<group>"; };
 		14A5C5F32BE13E6500CEF0B9 /* TerminalBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalBuffer.swift; sourceTree = "<group>"; };
 		14B7F7E02BE5F46B00E6D40B /* EditorWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorWindowManager.swift; sourceTree = "<group>"; };
 		14CF02B32BE1481D0037FB7E /* KeyboardAwareHostingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAwareHostingController.swift; sourceTree = "<group>"; };
 		14E9F2042BE2B8D400A1E3C0 /* Examples */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Examples; path = ../Examples; sourceTree = "<group>"; };
 		14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeAssetInstaller.swift; sourceTree = "<group>"; };
 		14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalInputBridge.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC001 /* SshRuntimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshRuntimeSession.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC002 /* SshTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshTerminalView.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC003 /* SshWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SshWindowManager.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC004 /* ShellRuntimeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellRuntimeSession.swift; sourceTree = "<group>"; };
+		1A7B6C1E3F00123400ABC005 /* ShellTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellTerminalView.swift; sourceTree = "<group>"; };
+		5C0F3D872F00000100ABCD01 /* PSCALInterpose.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = PSCALInterpose.c; sourceTree = "<group>"; };
 		5DFF9B112EC3E8CC004DFE5A /* PSCALIOS-LinkerWorkaround.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "PSCALIOS-LinkerWorkaround.xcconfig"; sourceTree = "<group>"; };
 		5F1AA0012EC6F00100000001 /* lib */ = {isa = PBXFileReference; lastKnownFileType = folder; name = lib; path = ../lib; sourceTree = "<group>"; };
 		5F1AA0022EC6F00100000001 /* fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = fonts; path = ../fonts; sourceTree = "<group>"; };
@@ -76,8 +76,8 @@
 		5F1AA0052EC6F00100000001 /* TestsLibs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TestsLibs; path = ../Tests/libs; sourceTree = "<group>"; };
 		5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerminalGeometryHelper.swift; sourceTree = "<group>"; };
+		5F9A00152F00000100ABC001 /* TerminalWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; path = TerminalWeb; sourceTree = "<group>"; };
 		5F9A00312F00000100ABC001 /* HtermTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HtermTerminalView.swift; sourceTree = "<group>"; };
-		5F9A00152F00000100ABC001 /* TerminalWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TerminalWeb; path = TerminalWeb; sourceTree = "<group>"; };
 		5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathTruncation.swift; sourceTree = "<group>"; };
 		5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontSettings.swift; sourceTree = "<group>"; };
 		5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalGeometry.swift; sourceTree = "<group>"; };
@@ -350,6 +350,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				"ARCHS[sdk=macosx*]" = arm64;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -381,6 +382,8 @@
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				"EXCLUDED_ARCHS[sdk=macosx*]" = x86_64;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -409,7 +412,6 @@
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/generated",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				"ARCHS[sdk=macosx*]" = arm64;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -427,11 +429,7 @@
 				);
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
-				"EXCLUDED_ARCHS[sdk=macosx*]" = x86_64;
-				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-				);
+				OTHER_LDFLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
@@ -568,21 +566,11 @@
 					"-Wl,-ignore_auto_link_library,SwiftUICore",
 					"-Wl,-ignore_auto_link_library,UIUtilities",
 				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -Xlinker -ignore_auto_link_library -Xlinker SwiftUICore -Xlinker -ignore_auto_link_library -Xlinker UIUtilities";
 				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				OTHER_SWIFT_FLAGS = (
-					"$(inherited)",
-					"-Xlinker",
-					"-ignore_auto_link_library",
-					"-Xlinker",
-					SwiftUICore,
-					"-Xlinker",
-					"-ignore_auto_link_library",
-					"-Xlinker",
-					UIUtilities,
-				);
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridge/PscalApp-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -595,6 +583,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				"ARCHS[sdk=macosx*]" = arm64;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -626,6 +615,8 @@
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				"EXCLUDED_ARCHS[sdk=macosx*]" = x86_64;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -648,7 +639,6 @@
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/generated",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
-				"ARCHS[sdk=macosx*]" = arm64;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -664,11 +654,7 @@
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/third-party/openssl/install/lib",
 					"$(SDKROOT)/usr/lib",
 				);
-				"EXCLUDED_ARCHS[sdk=macosx*]" = x86_64;
-				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-				);
+				OTHER_LDFLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
@@ -801,21 +787,11 @@
 					"-framework",
 					CoreHaptics,
 				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -Xlinker -ignore_auto_link_library -Xlinker SwiftUICore -Xlinker -ignore_auto_link_library -Xlinker UIUtilities";
 				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				OTHER_SWIFT_FLAGS = (
-					"$(inherited)",
-					"-Xlinker",
-					"-ignore_auto_link_library",
-					"-Xlinker",
-					SwiftUICore,
-					"-Xlinker",
-					"-ignore_auto_link_library",
-					"-Xlinker",
-					UIUtilities,
-				);
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OBJC_BRIDGING_HEADER = "Sources/Bridge/PscalApp-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -838,7 +814,7 @@
 				);
 				INFOPLIST_FILE = Sources/App/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PSCAL;
 				PRODUCT_NAME = PSCAL;
@@ -863,7 +839,7 @@
 				);
 				INFOPLIST_FILE = Sources/App/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PSCAL;
 				PRODUCT_NAME = PSCAL;
