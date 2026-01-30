@@ -863,6 +863,11 @@ static void PSCALRuntimeDirectOutputHandler(uint64_t session_id,
     PSCALRuntimeContext *prev_ctx = NULL;
     if (session_ctx) {
         prev_ctx = PSCALRuntimeSetCurrentContext(session_ctx);
+    } else {
+        // No context registered for this session; avoid shared-ring fallback to
+        // prevent cross-session backpressure. Dispatch directly to handlers.
+        PSCALRuntimeDispatchOutput((const char *)buffer, length);
+        return;
     }
     static std::atomic<int> logged{0};
     if (PSCALRuntimeOutputLoggingEnabled() && logged.exchange(1) == 0) {
