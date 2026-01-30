@@ -2324,8 +2324,13 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func sendLatestLocation() {
-        guard deviceEnabled, let location = latestLocation else { return }
-        let payload = LocationDeviceProvider.createLocationPayload(location: location)
+        guard deviceEnabled, let snapshot = latestLocation else { return }
+        // Work off a detached snapshot of the coordinate so we never retain or
+        // dereference a CLLocation instance on a background thread after it has
+        // been updated or released on the main thread.
+        let coord = snapshot.coordinate
+        let payload = LocationDeviceProvider.createLocationPayload(latitude: coord.latitude,
+                                                                   longitude: coord.longitude)
         sendPayload(payload)
     }
 
@@ -2399,8 +2404,14 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private static func createLocationPayload(location: CLLocation) -> String {
-        let lat = location.coordinate.latitude
-        let lon = location.coordinate.longitude
+        return createLocationPayload(latitude: location.coordinate.latitude,
+                                     longitude: location.coordinate.longitude)
+    }
+
+    private static func createLocationPayload(latitude: CLLocationDegrees,
+                                              longitude: CLLocationDegrees) -> String {
+        let lat = latitude
+        let lon = longitude
         return String(format: "%+.6f,%+.6f\n", lat, lon)
     }
 
