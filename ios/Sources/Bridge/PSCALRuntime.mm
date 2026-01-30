@@ -231,6 +231,17 @@ static PSCALRuntimeContext *PSCALRuntimeSetCurrentContext(PSCALRuntimeContext *c
     return prev;
 }
 
+static void PSCALRuntimeBindContextOrLog(PSCALRuntimeContext *ctx, const char *thread_name) {
+    if (!ctx) {
+        static std::atomic<int> logged{0};
+        if (logged.exchange(1, std::memory_order_relaxed) == 0) {
+            PSCALRuntimeDebugLogf("PSCALRuntime: missing context bind on thread %s; using shared context (may stall other tabs)", thread_name ? thread_name : "unknown");
+        }
+        return;
+    }
+    PSCALRuntimeSetCurrentContext(ctx);
+}
+
 // TODO: Replace shared-context macros with explicit context plumbing for multi-session support.
 #define s_output_handler (PSCALRuntimeCurrentContext()->output_handler)
 #define s_exit_handler (PSCALRuntimeCurrentContext()->exit_handler)
@@ -1084,7 +1095,8 @@ static void PSCALRuntimeClearInputQueueLocked(void) {
 
 static void *PSCALRuntimeInputWriterThread(void *arg) {
     PSCALRuntimeContext *ctx = (PSCALRuntimeContext *)arg;
-    PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
+    PSCALRuntimeContext *prev_ctx = PSCALRuntimeCurrentContext();
+    PSCALRuntimeBindContextOrLog(ctx, "pscal-input-writer");
     pthread_setname_np("pscal-input-writer");
     while (true) {
         pthread_mutex_lock(&s_input_queue_mu);
@@ -1305,7 +1317,8 @@ static void PSCALRuntimeWaitForReadable(int fd) {
 
 static void *PSCALRuntimeOutputPump(void *arg) {
     PSCALRuntimeContext *ctx = (PSCALRuntimeContext *)arg;
-    PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
+    PSCALRuntimeContext *prev_ctx = PSCALRuntimeCurrentContext();
+    PSCALRuntimeBindContextOrLog(ctx, "pscal-output-pump");
     vprocRegisterInterposeBypassThread(pthread_self());
     const int fd = s_master_fd;
     char buffer[4096];
@@ -1575,7 +1588,8 @@ typedef struct {
 
 static void *PSCALRuntimeThreadMain(void *arg) {
     PSCALRuntimeThreadContext *context = (PSCALRuntimeThreadContext *)arg;
-    PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(context->ctx);
+    PSCALRuntimeContext *prev_ctx = PSCALRuntimeCurrentContext();
+    PSCALRuntimeBindContextOrLog(context->ctx, "pscal-runtime");
     jmp_buf exit_env;
 #if TARGET_OS_IPHONE
     s_exit_jump_buffer = &exit_env;
