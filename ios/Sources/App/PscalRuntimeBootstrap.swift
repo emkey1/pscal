@@ -627,6 +627,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
             setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
             let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
             setenv("PSCALI_WORKDIR", workdir, 1)
+#if targetEnvironment(macCatalyst)
+            // On Mac Catalyst, path truncation can hide real filesystem roots and
+            // break resource lookups (e.g., words dictionary in examples). Disable it.
+            setenv("PSCALI_PATH_TRUNCATE_DISABLED", "1", 1)
+#endif
             if getenv("PSCALI_PTY_OUTPUT_DIRECT") == nil {
                 setenv("PSCALI_PTY_OUTPUT_DIRECT", "1", 1)
             }
