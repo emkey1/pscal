@@ -4276,30 +4276,8 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    int screen_rows = 24, screen_cols = 80;
-    getTerminalSize(&screen_rows, &screen_cols);
-    int left = gWindowLeft > 0 ? gWindowLeft : 1;
-    int top = gWindowTop > 0 ? gWindowTop : 1;
-    int right = gWindowRight > 0 ? gWindowRight : screen_cols;
-    int bottom = gWindowBottom > 0 ? gWindowBottom : screen_rows;
-    if (left < 1) left = 1;
-    if (top < 1) top = 1;
-    if (right < left) right = left;
-    if (bottom < top) bottom = top;
-    int width = right - left + 1;
-
-    bool color_was_applied = applyCurrentTextAttributes(stdout);
-
-    for (int row = top; row <= bottom; ++row) {
-        fprintf(stdout, "\x1B[%d;%dH", row, left);
-        for (int col = 0; col < width; ++col) {
-            fputc(' ', stdout);
-        }
-    }
-    fprintf(stdout, "\x1B[%d;%dH", top, left);
-    if (color_was_applied) {
-        resetTextAttributes(stdout);
-    }
+    /* Clear scrollback + screen, then home. Matches exsh/clear behavior. */
+    fputs("\x1B[3J\x1B[H\x1B[2J", stdout);
     fflush(stdout);
 
     return makeVoid();
