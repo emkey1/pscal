@@ -3963,6 +3963,32 @@ static int getCursorPosition(int *row, int *col) {
         }
         elapsed_ms += poll_step_ms;
     }
+    // Give a brief grace period for late-arriving bytes so they don't leak into
+    // subsequent user input (observed on iOS terminals).
+    if (i < (int)sizeof(buf) - 1 && buf[i != 0 ? i - 1 : 0] != 'R') {
+        int grace_ms = 100;
+        while (grace_ms > 0 && i < (int)sizeof(buf) - 1) {
+            int pr = poll(&pfd, 1, 10);
+            if (pr > 0 && (pfd.revents & POLLIN)) {
+                errno = 0;
+                ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+                read_errno = errno;
+                if (bytes_read == 1) {
+                    buf[i++] = ch;
+                    if (ch == 'R') {
+                        break;
+                    }
+                    continue;
+                }
+                if (bytes_read < 0 && (read_errno == EAGAIN || read_errno == EWOULDBLOCK)) {
+                    // keep waiting within grace window
+                } else {
+                    break;
+                }
+            }
+            grace_ms -= 10;
+        }
+    }
     buf[i] = '\0'; // Null-terminate the buffer
 
     // --- Parse Response ---
