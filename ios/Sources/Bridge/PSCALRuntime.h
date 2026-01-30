@@ -65,6 +65,8 @@ int PSCALRuntimeLaunchExshWithStackSize(int argc, char* argv[], size_t stackSize
 void PSCALRuntimeSendInput(const char *utf8, size_t length);
 /// Writes UTF-8 input into the specified session (direct PTY mode).
 void PSCALRuntimeSendInputForSession(uint64_t session_id, const char *utf8, size_t length);
+/// Writes UTF-8 input directly to the session master PTY, bypassing the input queue.
+void PSCALRuntimeSendInputUrgent(uint64_t session_id, const char *utf8, size_t length);
 
 /// Returns non-zero while the runtime is active.
 int PSCALRuntimeIsRunning(void);

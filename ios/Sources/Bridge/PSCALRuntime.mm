@@ -1675,6 +1675,19 @@ void PSCALRuntimeSendInputForSession(uint64_t session_id, const char *utf8, size
     PSCALRuntimeEnqueueInput(PSCALRuntimeInputKindSession, session_id, -1, utf8, length);
 }
 
+void PSCALRuntimeSendInputUrgent(uint64_t session_id, const char *utf8, size_t length) {
+    if (!utf8 || length == 0 || session_id == 0) {
+        return;
+    }
+    ssize_t wrote = PSCALRuntimeWriteMasterNonBlocking(session_id, utf8, length);
+    if (wrote < 0 && PSCALRuntimeIODebugEnabled()) {
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] urgent input write failed session=%llu errno=%d\n",
+            (unsigned long long)session_id,
+            errno);
+    }
+}
+
 int PSCALRuntimeIsRunning(void) {
     pthread_mutex_lock(&s_runtime_mutex);
     const bool active = s_runtime_active;

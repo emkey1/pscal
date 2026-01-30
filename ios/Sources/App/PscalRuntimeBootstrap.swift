@@ -485,7 +485,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 if let ctx = createdRuntimeContext {
                     let previous = PSCALRuntimeGetCurrentRuntimeContext()
                     PSCALRuntimeSetCurrentRuntimeContext(ctx)
-                    PSCALRuntimeSendInput(pointer, buffer.count)
+                    let sessionId = PSCALRuntimeCurrentSessionId()
+                    if sessionId != 0 {
+                        PSCALRuntimeSendInputUrgent(sessionId, pointer, buffer.count)
+                    } else {
+                        PSCALRuntimeSendInput(pointer, buffer.count)
+                    }
                     PSCALRuntimeSetCurrentRuntimeContext(previous)
                 } else {
                     PSCALRuntimeSendInput(pointer, buffer.count)
