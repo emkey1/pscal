@@ -236,14 +236,20 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard !Self.didPrimeTabs else { return }
         Self.didPrimeTabs = true
         let manager = TerminalTabManager.shared
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             if manager.tabs.count == 1 {
                 _ = manager.openShellTab()
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
             if manager.tabs.count == 2 {
                 _ = manager.openShellTab()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.80) {
+            // Return focus to the first tab after priming.
+            if manager.tabs.count >= 1 {
+                manager.selectTab(number: 1)
             }
         }
     }
