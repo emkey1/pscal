@@ -433,10 +433,12 @@ final class RuntimeAssetInstaller {
         let workspaceEtcPath = RuntimePaths.workspaceEtcDirectory.path
         if fileManager.fileExists(atPath: workspaceEtcPath) {
             setenv("PSCALI_ETC_ROOT", workspaceEtcPath, 1)
+            setenv("PSCALI_WORDS_PATH", (workspaceEtcPath as NSString).appendingPathComponent("words"), 1)
         } else {
             let bundledEtc = bundleRoot.appendingPathComponent("etc", isDirectory: true)
             if fileManager.fileExists(atPath: bundledEtc.path) {
                 setenv("PSCALI_ETC_ROOT", bundledEtc.path, 1)
+                setenv("PSCALI_WORDS_PATH", bundledEtc.appendingPathComponent("words").path, 1)
             }
         }
         if let etcRootCString = getenv("PSCALI_ETC_ROOT"),
