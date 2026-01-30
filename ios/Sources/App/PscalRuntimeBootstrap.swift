@@ -700,7 +700,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 }
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 // Always send a carriage return to force prompt rendering
                 self.send(" ")
                 self.send("\u{7F}")
@@ -862,7 +862,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             PSCALRuntimeSendSignal(SIGINT)
         }
         // Safety net: if the exit handler doesn't fire promptly, restart anyway.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.35) { [weak self] in
             guard let self = self else { return }
             let stillPending = self.stateQueue.sync { self.forceRestartPending }
             if stillPending {
@@ -1183,7 +1183,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if timeSinceLast < minRenderInterval {
             renderQueued = true
             let delay = minRenderInterval - timeSinceLast
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { [weak self] in
                 self?.performRender(preserveBackground: preserveBackground)
             }
         } else {

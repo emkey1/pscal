@@ -3831,6 +3831,67 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 buffer[0] = '\0';
                 return false;
             }
+
+            /*
+             * Some terminals (notably iOS/macCatalyst hterm) may return a
+             * lingering ANSI cursor-position report (ESC [ rows ; cols R)
+             * that was triggered earlier.  If we leave it in the canonical
+             * input buffer it shows up in prompts like "^[[25;34R" and the
+             * user must backspace it away.  Detect and swallow that sequence
+             * before it reaches user-facing buffers.
+             */
+            if (is_stdin_stream && ch == '\x1B') {
+                char seq[32];
+                seq[0] = ch;
+                size_t seq_len = 1;
+                int pending = 0;
+#if defined(PSCAL_TARGET_IOS)
+                vprocIoctlShim(read_fd, FIONREAD, &pending);
+#else
+                ioctl(read_fd, FIONREAD, &pending);
+#endif
+                if (pending > 0) {
+                    if (pending > (int)(sizeof(seq) - seq_len - 1)) {
+                        pending = (int)(sizeof(seq) - seq_len - 1);
+                    }
+                    ssize_t extra = 0;
+#if defined(PSCAL_TARGET_IOS)
+                    extra = read_is_host ? vprocHostRead(read_fd, seq + seq_len, (size_t)pending)
+                                         : vprocReadShim(read_fd, seq + seq_len, (size_t)pending);
+#else
+                    extra = read(read_fd, seq + seq_len, (size_t)pending);
+#endif
+                    if (extra > 0) {
+                        seq_len += (size_t)extra;
+                    }
+                }
+                seq[seq_len] = '\0';
+                bool looks_dsr = (seq_len >= 4 && seq[0] == '\x1B' && seq[1] == '[' && seq[seq_len - 1] == 'R');
+                bool saw_semi = false;
+                if (looks_dsr) {
+                    for (size_t k = 2; k + 1 < seq_len; k++) {
+                        char c = seq[k];
+                        if (c == ';') {
+                            if (saw_semi) { looks_dsr = false; break; }
+                            saw_semi = true;
+                            continue;
+                        }
+                        if (c < '0' || c > '9') { looks_dsr = false; break; }
+                    }
+                    if (!saw_semi) looks_dsr = false;
+                }
+                if (looks_dsr) {
+                    // Swallow the entire report and start fresh.
+                    len = 0;
+                    continue;
+                }
+                // Not a DSR; push everything we pulled back into the user buffer.
+                for (size_t k = 0; k < seq_len && len < buffer_sz - 1; k++) {
+                    buffer[len++] = seq[k];
+                }
+                continue;
+            }
+
             if (ch == '\r') {
 #if defined(PSCAL_TARGET_IOS)
                 saw_newline = true;

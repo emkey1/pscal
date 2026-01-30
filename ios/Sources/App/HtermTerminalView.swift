@@ -688,7 +688,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         guard !reloadPending else { return }
         reloadPending = true
         logTabInit("reload scheduled")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) { [weak self] in
             guard let self else { return }
             self.reloadPending = false
             self.loadTerminalPage()
@@ -941,7 +941,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             }
         }
         focusRetry = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05, execute: work)
     }
 
     func syncFocusFromTerminal() {

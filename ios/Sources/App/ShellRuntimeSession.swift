@@ -258,7 +258,7 @@ final class ShellRuntimeSession: ObservableObject {
         if timeSinceLast < minRenderInterval {
             renderQueued = true
             let delay = minRenderInterval - timeSinceLast
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { [weak self] in
                 self?.performRender()
             }
         } else {
