@@ -203,6 +203,7 @@ class PscalAppDelegate: NSObject, UIApplicationDelegate {
 @objc(MainSceneDelegate)
 class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
+    private static var didPrimeTabs = false
 
     func scene(_ scene: UIScene,
                willConnectTo session: UISceneSession,
@@ -220,11 +221,31 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
 
         EditorWindowManager.shared.mainSceneDidConnect(session: windowScene.session)
+        primeInitialTabsIfNeeded()
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
         EditorWindowManager.shared.mainSceneDidDisconnect(session: scene.session)
         window = nil
+    }
+
+    /// Historically we opened extra tabs on launch to warm pipelines; this keeps
+    /// that behavior: spawn two additional shell tabs with small delays so the
+    /// PTY/WebView pipeline is ready for user interaction.
+    private func primeInitialTabsIfNeeded() {
+        guard !Self.didPrimeTabs else { return }
+        Self.didPrimeTabs = true
+        let manager = TerminalTabManager.shared
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+            if manager.tabs.count == 1 {
+                _ = manager.openShellTab()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            if manager.tabs.count == 2 {
+                _ = manager.openShellTab()
+            }
+        }
     }
 }
 
