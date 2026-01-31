@@ -2223,7 +2223,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private var started = false
     private var deviceEnabled = true
     private var locationActive = false
-    private var latestLocation: CLLocation?
+    private var latestCoordinate: CLLocationCoordinate2D?
     private var readerCount: Int = 0
     private override init() {
         locationManager = CLLocationManager()
@@ -2262,13 +2262,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         debugLog("runtimeBecameReady; syncing state")
         scheduleSync()
         workQueue.async { [weak self] in
-            self?.sendLatestLocation()
-        }
-    }
-
-    private func syncDeviceState() {
-        workQueue.async { [weak self] in
-            self?.syncDeviceStateImpl()
+            self?.sendLatestLocationLocked()
         }
     }
 
@@ -2284,7 +2278,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
             return
         }
         startLocationUpdates()
-        sendLatestLocation()
+        sendLatestLocationLocked()
     }
 
     private func startLocationUpdates() {
@@ -2299,8 +2293,11 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
             self.locationManager.startUpdatingLocation()
             self.requestLocationOnce(force: true)
             if let initial = self.locationManager.location {
-                self.latestLocation = initial
-                self.sendLatestLocation()
+                let coord = initial.coordinate
+                self.workQueue.async { [weak self] in
+                    self?.latestCoordinate = coord
+                    self?.sendLatestLocationLocked()
+                }
             }
         }
         if Thread.isMainThread {
@@ -2323,22 +2320,13 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         }
     }
 
-    private func sendLatestLocation() {
-        // 1. Guard check and local binding.
-        // 'snapshot' now strongly holds the CLLocation object for the duration of this scope.
-        guard deviceEnabled, let snapshot = latestLocation else { return }
-
-        // 2. Extract the coordinate struct immediately.
-        // CLLocationCoordinate2D is a struct (value type), making it thread-safe to pass around.
-        let latitude = snapshot.coordinate.latitude
-        let longitude = snapshot.coordinate.longitude
-
-        // 3. Create the payload using the local value types.
+    private func sendLatestLocationLocked() {
+        // Must be invoked on workQueue; only value types touched.
+        guard deviceEnabled, let coord = latestCoordinate else { return }
         let payload = LocationDeviceProvider.createLocationPayload(
-            latitude: latitude,
-            longitude: longitude
+            latitude: coord.latitude,
+            longitude: coord.longitude
         )
-
         sendPayload(payload)
     }
 
@@ -2397,8 +2385,11 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         debugLog(String(format: "didUpdateLocations lat=%.5f lon=%.5f",
                         latest.coordinate.latitude,
                         latest.coordinate.longitude))
-        latestLocation = latest
-        sendLatestLocation()
+        let coord = latest.coordinate
+        workQueue.async { [weak self] in
+            self?.latestCoordinate = coord
+            self?.sendLatestLocationLocked()
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
