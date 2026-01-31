@@ -229,9 +229,9 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window = nil
     }
 
-    /// Historically we opened extra tabs on launch to warm pipelines; this keeps
-    /// that behavior: spawn two additional shell tabs with small delays so the
-    /// PTY/WebView pipeline is ready for user interaction.
+    /// Historically we opened extra tabs on launch to warm pipelines; now we
+    /// open exactly two tabs and briefly swap focus between them to exercise
+    /// both pipelines before the user interacts.
     private func primeInitialTabsIfNeeded() {
         guard !Self.didPrimeTabs else { return }
         Self.didPrimeTabs = true
@@ -241,15 +241,17 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
                 _ = manager.openShellTab()
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            if manager.tabs.count == 2 {
-                _ = manager.openShellTab()
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.80) {
-            // Return focus to the first tab after priming.
-            if manager.tabs.count >= 1 {
-                manager.selectTab(number: 1)
+        let focusSteps: [(TimeInterval, Int)] = [
+            (0.55, 2),
+            (0.70, 1),
+            (0.85, 2),
+            (1.00, 1)
+        ]
+        for (delay, tabNumber) in focusSteps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                if tabNumber == 2 && manager.tabs.count < 2 { return }
+                if tabNumber == 1 && manager.tabs.isEmpty { return }
+                manager.selectTab(number: tabNumber)
             }
         }
     }
