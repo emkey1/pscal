@@ -44,6 +44,22 @@ final class TerminalTabManager: ObservableObject {
     }
     private var nextShellOrdinal: Int = 1
     private var pgidToTab: [Int: UInt64] = [:]
+    private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
+        let steps: [(TimeInterval, UInt64)] = [
+            (0.55, primary),
+            (0.95, secondary),
+            (1.35, primary),
+            (1.75, secondary)
+        ]
+        for (delay, targetId) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                if self.tabs.contains(where: { $0.id == targetId }) {
+                    self.selectedId = targetId
+                }
+            }
+        }
+    }
 
     private init() {
         let runtime = PscalRuntimeBootstrap.shared
@@ -70,6 +86,7 @@ final class TerminalTabManager: ObservableObject {
 
     func openShellTab() -> Int32 {
         tabInitLog("openShellTab request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
+        let previousId = selectedId
         let newId = PSCALRuntimeNextSessionId()
         if nextShellOrdinal < 1 {
             nextShellOrdinal = 1
@@ -84,6 +101,7 @@ final class TerminalTabManager: ObservableObject {
         logMultiTab("open shell tab id=\(newId) runtime=\(runtime.runtimeId)")
         tabInitLog("openShellTab created id=\(newId) runtime=\(runtime.runtimeId) title=\(title)")
         tabInitLog("openShellTab selectedId=\(selectedId) tabs=\(tabs.count)")
+        scheduleFocusDance(primary: newId, secondary: previousId)
         return 0
     }
     
