@@ -49,7 +49,7 @@ final class TerminalTabManager: ObservableObject {
             (0.55, primary),
             (0.95, secondary),
             (1.35, primary),
-            (1.75, secondary)
+            (1.75, primary)
         ]
         for (delay, targetId) in steps {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
