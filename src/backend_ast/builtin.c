@@ -3892,6 +3892,11 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 continue;
             }
 
+            if (is_stdin_stream && len > 0 && vmBufferIsPureDsr(buffer, len)) {
+                len = 0;
+                continue;
+            }
+
             if (ch == '\r') {
 #if defined(PSCAL_TARGET_IOS)
                 saw_newline = true;
@@ -3930,6 +3935,25 @@ static void vmCommitLastIoError(int value) {
     pthread_mutex_lock(&globals_mutex);
     last_io_error = value;
     pthread_mutex_unlock(&globals_mutex);
+}
+
+static bool vmBufferIsPureDsr(const char *buf, size_t len) {
+    size_t i = 0;
+    while (i < len && (buf[i] == '\r' || buf[i] == '\n')) i++;
+    if (i >= len || buf[i] != '\x1B') return false;
+    i++;
+    if (i >= len || buf[i] != '[') return false;
+    i++;
+    size_t digits = 0;
+    while (i < len && buf[i] >= '0' && buf[i] <= '9') { digits++; i++; }
+    if (digits == 0 || i >= len || buf[i] != ';') return false;
+    i++;
+    digits = 0;
+    while (i < len && buf[i] >= '0' && buf[i] <= '9') { digits++; i++; }
+    if (digits == 0 || i >= len || buf[i] != 'R') return false;
+    i++;
+    while (i < len && (buf[i] == '\r' || buf[i] == '\n')) i++;
+    return i == len;
 }
 
 // Attempts to get the current cursor position using ANSI DSR query.

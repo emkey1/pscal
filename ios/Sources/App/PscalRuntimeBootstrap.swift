@@ -2324,13 +2324,21 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func sendLatestLocation() {
+        // 1. Guard check and local binding.
+        // 'snapshot' now strongly holds the CLLocation object for the duration of this scope.
         guard deviceEnabled, let snapshot = latestLocation else { return }
-        // Work off a detached snapshot of the coordinate so we never retain or
-        // dereference a CLLocation instance on a background thread after it has
-        // been updated or released on the main thread.
-        let coord = snapshot.coordinate
-        let payload = LocationDeviceProvider.createLocationPayload(latitude: coord.latitude,
-                                                                   longitude: coord.longitude)
+
+        // 2. Extract the coordinate struct immediately.
+        // CLLocationCoordinate2D is a struct (value type), making it thread-safe to pass around.
+        let latitude = snapshot.coordinate.latitude
+        let longitude = snapshot.coordinate.longitude
+
+        // 3. Create the payload using the local value types.
+        let payload = LocationDeviceProvider.createLocationPayload(
+            latitude: latitude,
+            longitude: longitude
+        )
+
         sendPayload(payload)
     }
 
