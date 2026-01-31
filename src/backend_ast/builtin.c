@@ -3548,6 +3548,8 @@ static void vmPrepareCanonicalInput(void) {
     fflush(stdout);
 }
 
+static bool vmBufferIsPureDsr(const char *buf, size_t len);
+
 static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t buffer_sz) {
     if (!stream || !buffer || buffer_sz == 0) {
         return false;
