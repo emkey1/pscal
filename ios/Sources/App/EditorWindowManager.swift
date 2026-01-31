@@ -243,9 +243,9 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         let focusSteps: [(TimeInterval, Int)] = [
             (0.55, 2),
-            (0.70, 1),
-            (0.85, 2),
-            (1.00, 1)
+            (0.95, 1),
+            (1.35, 2),
+            (1.75, 1)
         ]
         for (delay, tabNumber) in focusSteps {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
