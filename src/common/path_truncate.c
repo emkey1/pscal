@@ -26,10 +26,6 @@ static pthread_mutex_t g_pathTruncateMutex = PTHREAD_MUTEX_INITIALIZER;
 
 static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
 static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
-static pthread_mutex_t g_pathTruncateMutex = PTHREAD_MUTEX_INITIALIZER;
-
-static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
-static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
 
 static void write_text_file(const char *path, const char *contents) {
     if (!path || !contents) {
