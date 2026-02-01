@@ -264,11 +264,6 @@ static bool pathTruncateMatchesStoredPrefix(const char *path,
 }
 
 bool pathTruncateEnabled(void) {
-#if defined(PSCAL_TARGET_IOS)
-    /* iOS: disable path truncation to avoid sandbox/realpath stalls and simplify
-     * device handling (/dev/location, /dev/pts). */
-    return false;
-#endif
     const char *prefix = NULL;
     size_t length = 0;
     return pathTruncateFetchPrefix(&prefix, &length);
