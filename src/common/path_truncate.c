@@ -6,6 +6,7 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #if defined(__APPLE__)
@@ -21,6 +22,10 @@ static size_t g_pathTruncatePrimaryLen = 0;
 static char g_pathTruncateAlias[PATH_MAX];
 static size_t g_pathTruncateAliasLen = 0;
 static _Thread_local int g_pathTruncateResolving = 0;
+static pthread_mutex_t g_pathTruncateMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
+static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
 static pthread_mutex_t g_pathTruncateMutex = PTHREAD_MUTEX_INITIALIZER;
 
 static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
@@ -264,9 +269,12 @@ static bool pathTruncateMatchesStoredPrefix(const char *path,
 }
 
 bool pathTruncateEnabled(void) {
+    pathTruncateLock();
     const char *prefix = NULL;
     size_t length = 0;
-    return pathTruncateFetchPrefix(&prefix, &length);
+    bool enabled = pathTruncateFetchPrefix(&prefix, &length);
+    pathTruncateUnlock();
+    return enabled;
 }
 
 static bool pathTruncateCopyString(const char *input, char *out, size_t out_size) {
@@ -285,17 +293,23 @@ static bool pathTruncateCopyString(const char *input, char *out, size_t out_size
 }
 
 bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size) {
+    pathTruncateLock();
     if (!out || out_size == 0) {
+        pathTruncateUnlock();
         errno = EINVAL;
         return false;
     }
     if (!absolute_path) {
-        return pathTruncateCopyString("", out, out_size);
+        bool res = pathTruncateCopyString("", out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
     const char *prefix = NULL;
     size_t prefix_len = 0;
     if (!pathTruncateFetchPrefix(&prefix, &prefix_len)) {
-        return pathTruncateCopyString(absolute_path, out, out_size);
+        bool res = pathTruncateCopyString(absolute_path, out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
 
     const char *source_path = absolute_path;
@@ -309,7 +323,9 @@ bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size) {
     const char *matched_prefix = NULL;
     size_t matched_len = 0;
     if (!pathTruncateMatchesStoredPrefix(source_path, source_len, &matched_prefix, &matched_len)) {
-        return pathTruncateCopyString(source_path, out, out_size);
+        bool res = pathTruncateCopyString(source_path, out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
 
     const char *remainder = source_path + matched_len;
@@ -317,17 +333,22 @@ bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size) {
         remainder++;
     }
     if (*remainder == '\0') {
-        return pathTruncateCopyString("/", out, out_size);
+        bool res = pathTruncateCopyString("/", out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
     int written = snprintf(out, out_size, "/%s", remainder);
     if (written < 0 || (size_t)written >= out_size) {
         errno = ENAMETOOLONG;
+        pathTruncateUnlock();
         return false;
     }
+    pathTruncateUnlock();
     return true;
 }
 
 void pathTruncateApplyEnvironment(const char *prefix) {
+    pathTruncateLock();
     if (prefix && prefix[0] == '/') {
         setenv("PATH_TRUNCATE", prefix, 1);
         /* Seed common root directories so path virtualization has writable parents. */
@@ -356,6 +377,7 @@ void pathTruncateApplyEnvironment(const char *prefix) {
         unsetenv("PATH_TRUNCATE");
     }
     pathTruncateResetCaches();
+    pathTruncateUnlock();
 }
 
 void pathTruncateProvisionDev(const char *prefix) {
@@ -664,26 +686,36 @@ static bool pathTruncateIsSystemPath(const char *path) {
 }
 
 bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
+    pathTruncateLock();
     if (!out || out_size == 0) {
+        pathTruncateUnlock();
         errno = EINVAL;
         return false;
     }
     if (!input_path) {
-        return pathTruncateCopyString("", out, out_size);
+        bool res = pathTruncateCopyString("", out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
     const char *prefix = NULL;
     size_t prefix_len = 0;
     if (!pathTruncateFetchPrefix(&prefix, &prefix_len) || input_path[0] != '/') {
-        return pathTruncateCopyString(input_path, out, out_size);
+        bool res = pathTruncateCopyString(input_path, out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
     if (pathTruncateIsSystemPath(input_path)) {
-        return pathTruncateCopyString(input_path, out, out_size);
+        bool res = pathTruncateCopyString(input_path, out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
     /* Device nodes: leave untouched so they resolve to the real device. */
     if (strcmp(input_path, "/dev/null") == 0 ||
         strcmp(input_path, "/dev/zero") == 0 ||
         strcmp(input_path, "/dev/random") == 0) {
-        return pathTruncateCopyString(input_path, out, out_size);
+        bool res = pathTruncateCopyString(input_path, out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
 
     const char *source_path = input_path;
@@ -698,16 +730,20 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     size_t matched_len = 0;
     if (pathTruncateMatchesStoredPrefix(source_path, source_len, &matched_prefix, &matched_len)) {
         if (matched_prefix == g_pathTruncatePrimary) {
-            return pathTruncateCopyString(source_path, out, out_size);
+            bool res = pathTruncateCopyString(source_path, out, out_size);
+            pathTruncateUnlock();
+            return res;
         }
         size_t suffix_len = source_len - matched_len;
         if (g_pathTruncatePrimaryLen + suffix_len + 1 > out_size) {
             errno = ENAMETOOLONG;
+            pathTruncateUnlock();
             return false;
         }
         memcpy(out, g_pathTruncatePrimary, g_pathTruncatePrimaryLen);
         memcpy(out + g_pathTruncatePrimaryLen, source_path + matched_len, suffix_len);
         out[g_pathTruncatePrimaryLen + suffix_len] = '\0';
+        pathTruncateUnlock();
         return true;
     }
 
@@ -715,16 +751,20 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
     if (*trimmed == '\0') {
         if (g_pathTruncatePrimaryLen >= out_size) {
             errno = ENAMETOOLONG;
+            pathTruncateUnlock();
             return false;
         }
         memcpy(out, g_pathTruncatePrimary, g_pathTruncatePrimaryLen);
         out[g_pathTruncatePrimaryLen] = '\0';
+        pathTruncateUnlock();
         return true;
     }
     int written = snprintf(out, out_size, "%.*s/%s", (int)g_pathTruncatePrimaryLen, g_pathTruncatePrimary, trimmed);
     if (written < 0 || (size_t)written >= out_size) {
         errno = ENAMETOOLONG;
+        pathTruncateUnlock();
         return false;
     }
+    pathTruncateUnlock();
     return true;
 }
