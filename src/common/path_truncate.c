@@ -14,6 +14,7 @@
 #include <sys/mount.h>
 #endif
 #include <time.h>
+#include <pthread.h>
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
