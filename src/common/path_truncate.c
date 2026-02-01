@@ -20,6 +20,10 @@ static size_t g_pathTruncatePrimaryLen = 0;
 static char g_pathTruncateAlias[PATH_MAX];
 static size_t g_pathTruncateAliasLen = 0;
 static _Thread_local int g_pathTruncateResolving = 0;
+static pthread_mutex_t g_pathTruncateMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
+static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
 
 static void write_text_file(const char *path, const char *contents) {
     if (!path || !contents) {
@@ -259,6 +263,11 @@ static bool pathTruncateMatchesStoredPrefix(const char *path,
 }
 
 bool pathTruncateEnabled(void) {
+#if defined(PSCAL_TARGET_IOS)
+    /* iOS: disable path truncation to avoid sandbox/realpath stalls and simplify
+     * device handling (/dev/location, /dev/pts). */
+    return false;
+#endif
     const char *prefix = NULL;
     size_t length = 0;
     return pathTruncateFetchPrefix(&prefix, &length);
