@@ -3657,25 +3657,29 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             }
 #if defined(PSCAL_TARGET_IOS)
             if (sigint_fd >= 0 && !read_is_host) {
-                char drain[8];
-                ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
-                if (drained > 0) {
-                    if (vm) {
-                        vm->abort_requested = true;
-                        vm->exit_requested = true;
+                int pending = 0;
+                vprocIoctlShim(sigint_fd, FIONREAD, &pending);
+                if (pending > 0) {
+                    char drain[8];
+                    ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
+                    if (drained > 0) {
+                        if (vm) {
+                            vm->abort_requested = true;
+                            vm->exit_requested = true;
+                        }
+                        buffer[0] = '\0';
+                        return false;
                     }
-                    buffer[0] = '\0';
-                    return false;
-                }
-                if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                    if (errno == EBADF) {
-                        vmEnsureSigintPipe();
-                        sigint_fd = g_vm_sigint_pipe[0];
-                        continue;
-                    }
-                    if (tool_dbg && stream == stdin) {
-                        fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
-                                errno, strerror(errno));
+                    if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                        if (errno == EBADF) {
+                            vmEnsureSigintPipe();
+                            sigint_fd = g_vm_sigint_pipe[0];
+                            continue;
+                        }
+                        if (tool_dbg && stream == stdin) {
+                            fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
+                                    errno, strerror(errno));
+                        }
                     }
                 }
             }
