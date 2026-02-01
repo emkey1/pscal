@@ -3609,6 +3609,9 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #endif
     if (use_interruptible) {
 #if defined(PSCAL_TARGET_IOS)
+        vmEnsureSigintPipe();
+#endif
+#if defined(PSCAL_TARGET_IOS)
         int read_fd = fd;
         VProc *vp = vprocCurrent();
         bool read_is_host = (vp == NULL);
@@ -3665,6 +3668,11 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                     return false;
                 }
                 if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                    if (errno == EBADF) {
+                        vmEnsureSigintPipe();
+                        sigint_fd = g_vm_sigint_pipe[0];
+                        continue;
+                    }
                     if (tool_dbg && stream == stdin) {
                         fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
                                 errno, strerror(errno));
