@@ -71,7 +71,7 @@
             isEnabled = "NO">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "PSCALI_HERM_DEBUG"
+            key = "PSCALI_TERM_DEBUG"
             value = "1"
             isEnabled = "NO">
          </EnvironmentVariable>
@@ -128,7 +128,12 @@
          <EnvironmentVariable
             key = "PSCALI_PRINT_CHANGES"
             value = "1"
-            isEnabled = "YES">
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "PSCALI_SHELL_DEBUG"
+            value = "1"
+            isEnabled = "NO">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>

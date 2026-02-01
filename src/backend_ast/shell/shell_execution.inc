@@ -2239,7 +2239,10 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        bool use_pscal_pipes = getenv("PSCALI_PIPE_PSCAL") != NULL;
+        /* Default to in-process (pscal) pipes on iOS to avoid host-fd leaks that
+         * can keep pagers like 'less' from ever seeing EOF. Opt out with
+         * PSCALI_PIPE_HOST=1 if host pipes are explicitly needed. */
+        bool use_pscal_pipes = getenv("PSCALI_PIPE_HOST") == NULL;
         if (!use_pscal_pipes) {
             ctx->pscal_pipe_read = NULL;
             ctx->pscal_pipe_write = NULL;
@@ -3511,12 +3514,22 @@ static int shellPipelineRunStage(VM *vm,
         if (pipeline_in_process && ctx->pscal_pipe_read) {
             stdin_pscal = ctx->pscal_pipe_read[stage_pos - 1];
             stdin_fd = -2;
-          //  fprintf(stderr, "[pipe] stage=%zu stdin uses pscal=%p (idx=%zu)\n",
-           //         stage_pos, (void *)stdin_pscal, stage_pos - 1);
         } else
 #endif
         {
-            stdin_fd = ctx->pipes[stage_pos - 1][0];
+            /* Duplicate the pipe endpoint for this stage and drop the shared
+             * reference so EOF can propagate even while other threads run. */
+            int fd = ctx->pipes[stage_pos - 1][0];
+            if (fd >= 0) {
+                int dup_fd = vprocHostDup(fd);
+                if (dup_fd >= 0) {
+                    stdin_fd = dup_fd;
+                    vprocHostClose(fd);
+                    ctx->pipes[stage_pos - 1][0] = -1;
+                } else {
+                    stdin_fd = fd; /* fallback */
+                }
+            }
         }
     }
     if (!pipeline_tail) {
@@ -3524,12 +3537,20 @@ static int shellPipelineRunStage(VM *vm,
         if (pipeline_in_process && ctx->pscal_pipe_write) {
             stdout_pscal = ctx->pscal_pipe_write[stage_pos];
             stdout_fd = -2;
-       //     fprintf(stderr, "[pipe] stage=%zu stdout uses pscal=%p (idx=%zu)\n",
-        //            stage_pos, (void *)stdout_pscal, stage_pos);
         } else
 #endif
         {
-            stdout_fd = ctx->pipes[stage_pos][1];
+            int fd = ctx->pipes[stage_pos][1];
+            if (fd >= 0) {
+                int dup_fd = vprocHostDup(fd);
+                if (dup_fd >= 0) {
+                    stdout_fd = dup_fd;
+                    vprocHostClose(fd);
+                    ctx->pipes[stage_pos][1] = -1;
+                } else {
+                    stdout_fd = fd; /* fallback */
+                }
+            }
         }
     }
     if (ctx->merge_stderr && stage_pos < ctx->stage_count && ctx->merge_stderr[stage_pos]) {
@@ -3724,6 +3745,33 @@ static void *shellPipelineStageThreadMain(void *arg) {
     if (tctx->ctx && tctx->ctx->stage_status && tctx->stage_pos < tctx->ctx->stage_count) {
         tctx->ctx->stage_status[tctx->stage_pos] = status;
     }
+#if defined(PSCAL_TARGET_IOS)
+    /* Belt‑and‑suspenders: drop any pipe endpoints this stage may still hold
+     * in the shared table so downstream readers see EOF promptly. */
+    if (tctx->ctx && tctx->ctx->pipes && tctx->stage_pos < tctx->ctx->stage_count) {
+        size_t idx = tctx->stage_pos;
+        if (idx < tctx->ctx->stage_count - 1 && tctx->ctx->pipes[idx][1] >= 0) {
+            vprocHostClose(tctx->ctx->pipes[idx][1]);
+            tctx->ctx->pipes[idx][1] = -1;
+        }
+        if (idx > 0 && tctx->ctx->pipes[idx - 1][0] >= 0) {
+            vprocHostClose(tctx->ctx->pipes[idx - 1][0]);
+            tctx->ctx->pipes[idx - 1][0] = -1;
+        }
+    }
+    if (tctx->ctx && tctx->ctx->pscal_pipe_write && tctx->stage_pos < tctx->ctx->stage_count - 1) {
+        if (tctx->ctx->pscal_pipe_write[tctx->stage_pos]) {
+            pscal_fd_close(tctx->ctx->pscal_pipe_write[tctx->stage_pos]);
+            tctx->ctx->pscal_pipe_write[tctx->stage_pos] = NULL;
+        }
+    }
+    if (tctx->ctx && tctx->ctx->pscal_pipe_read && tctx->stage_pos > 0) {
+        if (tctx->ctx->pscal_pipe_read[tctx->stage_pos - 1]) {
+            pscal_fd_close(tctx->ctx->pscal_pipe_read[tctx->stage_pos - 1]);
+            tctx->ctx->pscal_pipe_read[tctx->stage_pos - 1] = NULL;
+        }
+    }
+#endif
 #if defined(PSCAL_TARGET_IOS)
     if (swapped_stdio) {
         vprocSessionStdioActivate(prev_session_stdio);
