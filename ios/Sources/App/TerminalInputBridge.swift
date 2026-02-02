@@ -434,7 +434,15 @@ final class TerminalKeyInputView: UITextView {
         NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                         object: nil,
                                         userInfo: ["command": false])
-        super.pressesEnded(presses, with: event)
+        var unhandled: Set<UIPress> = []
+        for press in presses {
+            if !handle(press: press) {
+                unhandled.insert(press)
+            }
+        }
+        if !unhandled.isEmpty {
+            super.pressesEnded(unhandled, with: event)
+        }
     }
 
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
