@@ -320,12 +320,13 @@ final class TerminalTabManager: ObservableObject {
     }
 
     fileprivate func updateTitle(forSessionId sessionId: UInt64, rawTitle: String) -> Bool {
-        let targetIdx: Int?
-        if sessionId == 0 {
-            targetIdx = tabs.firstIndex(where: { $0.id == selectedId })
-        } else {
-            targetIdx = tabs.firstIndex(where: { $0.sessionId == sessionId })
-        }
+        // Prefer an exact session match; otherwise fall back to the currently selected tab, and
+        // finally any tab (first) so that we never fail during early startup when sessionId
+        // registration may lag behind the tab being visible.
+        let targetIdx =
+            tabs.firstIndex(where: { $0.sessionId == sessionId }) ??
+            tabs.firstIndex(where: { $0.id == selectedId }) ??
+            tabs.indices.first
         guard let idx = targetIdx else { return false }
         let title = TerminalTabManager.sanitizeTitle(rawTitle)
         if tabs[idx].sessionId == nil && sessionId != 0 {
