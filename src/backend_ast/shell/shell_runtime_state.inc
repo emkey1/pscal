@@ -4275,14 +4275,20 @@ static void shellInitJobControlState(void) {
     gShellRuntime.job_control_initialized = true;
     gShellRuntime.tty_fd = STDIN_FILENO;
 
+    /* In automated harness runs we sometimes need job control without a real
+     * TTY (non-interactive pipelines). Allow RUN_VPROC_TESTS/PSCALI_SHELL_VPROC
+     * to bypass TTY requirements on all platforms. */
+    bool allow_headless_jc = getenv("RUN_VPROC_TESTS") != NULL ||
+                             getenv("PSCALI_SHELL_VPROC") != NULL;
+
     if (gShellRuntime.tty_fd < 0) {
         gShellRuntime.tty_fd = -1;
-        gShellRuntime.job_control_caps.has_job_control = false;
+        gShellRuntime.job_control_caps.has_job_control = allow_headless_jc;
         gShellRuntime.job_control_caps.has_foreground_control = false;
-        return;
+        if (!allow_headless_jc) return;
     }
 
-    if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
+    if (!allow_headless_jc && !pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.tty_fd = -1;
         gShellRuntime.job_control_caps.has_job_control = false;
         gShellRuntime.job_control_caps.has_foreground_control = false;
@@ -4317,7 +4323,9 @@ static void shellInitJobControlState(void) {
 #else
     pid_t shell_pid = getpid();
     pid_t current_pgid = getpgrp();
-    if (current_pgid != shell_pid) {
+    if (current_pgid <= 0 && allow_headless_jc) {
+        current_pgid = shell_pid > 0 ? shell_pid : getpid();
+    } else if (current_pgid != shell_pid) {
         if (setpgid(0, 0) == 0) {
             current_pgid = shell_pid;
         } else {
@@ -4330,7 +4338,9 @@ static void shellInitJobControlState(void) {
 }
 
 static void shellEnsureJobControl(void) {
-    if (!shellRuntimeIsInteractive()) {
+    bool allow_headless_jc = getenv("RUN_VPROC_TESTS") != NULL ||
+                             getenv("PSCALI_SHELL_VPROC") != NULL;
+    if (!shellRuntimeIsInteractive() && !allow_headless_jc) {
         gShellRuntime.job_control_enabled = false;
         gShellRuntime.job_control_caps.has_job_control = false;
         return;
@@ -4462,7 +4472,13 @@ static int shellJobControlSendSignal(pid_t target, int signo, bool process_group
     }
 #if defined(PSCAL_TARGET_IOS)
     pid_t send_target = process_group ? -target : target;
-    return vprocKillShim(send_target, signo);
+    int rc = vprocKillShim(send_target, signo);
+    if (rc != 0 && errno == ESRCH) {
+        /* Fall back to a host kill when the vproc table has no entry (common in
+         * non-tty test runs where processes may spawn outside the shim). */
+        rc = kill(send_target, signo);
+    }
+    return rc;
 #else
     pid_t send_target = process_group ? -target : target;
     return kill(send_target, signo);
