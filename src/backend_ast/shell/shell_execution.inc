@@ -2239,9 +2239,9 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* Use host pipes for now to avoid PSCAL pipe lifetime/RC issues seen in
-         * interactive pagers (help -l | less) under guard allocators. */
-        bool use_pscal_pipes = false;
+        /* Default to PSCAL in‑process pipes; set PSCALI_PIPE_HOST=1 to force
+         * host pipes when debugging. */
+        bool use_pscal_pipes = getenv("PSCALI_PIPE_HOST") == NULL;
         if (!use_pscal_pipes) {
             ctx->pscal_pipe_read = NULL;
             ctx->pscal_pipe_write = NULL;
