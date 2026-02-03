@@ -402,14 +402,28 @@ final class TerminalKeyInputView: UITextView {
                                             object: nil,
                                             userInfo: ["command": event.modifierFlags.contains(.command)])
         }
-        var unhandled: Set<UIPress> = []
+
+        // Consume all key down events ourselves to avoid UIKit key handling that
+        // can crash when pagers exit. For keys we don't specially map, feed the
+        // characters through the normal insertText path so input still works.
         for press in presses {
-            if !handle(press: press) {
-                unhandled.insert(press)
+            if handle(press: press) {
+                continue
             }
-        }
-        if !unhandled.isEmpty {
-            super.pressesBegan(unhandled, with: event)
+            if let key = press.key {
+                switch key.keyCode {
+                case .keyboardDeleteOrBackspace:
+                    deleteBackward()
+                    continue
+                default:
+                    break
+                }
+                let chars = key.characters
+                if !chars.isEmpty {
+                    insertText(chars)
+                    continue
+                }
+            }
         }
     }
 
@@ -419,37 +433,23 @@ final class TerminalKeyInputView: UITextView {
                                             object: nil,
                                             userInfo: ["command": event.modifierFlags.contains(.command)])
         }
-        var unhandled: Set<UIPress> = []
-        for press in presses {
-            if !handle(press: press) {
-                unhandled.insert(press)
-            }
-        }
-        if !unhandled.isEmpty {
-            super.pressesChanged(unhandled, with: event)
-        }
+        // Swallow changed events; we only care about key down for terminal input.
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                         object: nil,
                                         userInfo: ["command": false])
-        var unhandled: Set<UIPress> = []
-        for press in presses {
-            if !handle(press: press) {
-                unhandled.insert(press)
-            }
-        }
-        if !unhandled.isEmpty {
-            super.pressesEnded(unhandled, with: event)
-        }
+        /* Terminals only need key-down events; swallowing key-up avoids a UIKit
+         * crash observed when exiting pagers like less. */
+        return
     }
 
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                         object: nil,
                                         userInfo: ["command": false])
-        super.pressesCancelled(presses, with: event)
+        // Swallow to keep UIKit out of the loop for hardware keys.
     }
 
     private func arrowSequence(_ direction: String) -> String {
@@ -531,6 +531,14 @@ final class TerminalKeyInputView: UITextView {
         }
 
         switch key.keyCode {
+        case .keyboardUpArrow:
+            onInput?(arrowSequence("A")); return true
+        case .keyboardDownArrow:
+            onInput?(arrowSequence("B")); return true
+        case .keyboardLeftArrow:
+            onInput?(arrowSequence("D")); return true
+        case .keyboardRightArrow:
+            onInput?(arrowSequence("C")); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:

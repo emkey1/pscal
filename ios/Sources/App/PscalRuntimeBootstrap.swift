@@ -2221,7 +2221,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private let locationManager: CLLocationManager
     private let workQueue = DispatchQueue(label: "com.pscal.location", qos: .utility)
     private var started = false
-    private var deviceEnabled = true
+    private var deviceEnabled = false
     private var locationActive = false
     private var latestCoordinate: CLLocationCoordinate2D?
     private var readerCount: Int = 0
@@ -2267,13 +2267,17 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func syncDeviceStateImpl() {
-        debugLog("syncDeviceState started=\(started) enabled=\(deviceEnabled) readers=\(readerCount)")
-        PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
-        if !started {
-            stopLocationUpdates()
-            return
+        let forcedOff = getenv("PSCALI_LOCATION_DISABLED") != nil
+        let forcedOn = getenv("PSCALI_LOCATION_FORCE") != nil
+        let desiredEnabled = forcedOn || (!forcedOff && readerCount > 0)
+
+        if desiredEnabled != deviceEnabled {
+            deviceEnabled = desiredEnabled
+            debugLog("location desiredEnabled=\(desiredEnabled) readers=\(readerCount) forcedOn=\(forcedOn) forcedOff=\(forcedOff)")
         }
-        if !deviceEnabled {
+
+        PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
+        if !started || !deviceEnabled {
             stopLocationUpdates()
             return
         }

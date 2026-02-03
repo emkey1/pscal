@@ -3727,14 +3727,24 @@ static int vprocInsertPscalFd(VProc *vp, struct pscal_fd *fd) {
         errno = EBADF;
         return -1;
     }
+    /* The fd table must own its own reference so callers can freely drop
+     * theirs after insertion. */
+    struct pscal_fd *retained = pscal_fd_retain(fd);
+    if (!retained) {
+        errno = ENOMEM;
+        return -1;
+    }
     pthread_mutex_lock(&vp->mu);
     int slot = vprocAllocSlot(vp);
     if (slot >= 0) {
         vp->entries[slot].host_fd = -1;
-        vp->entries[slot].pscal_fd = fd;
+        vp->entries[slot].pscal_fd = retained;
         vp->entries[slot].kind = VPROC_FD_PSCAL;
     }
     pthread_mutex_unlock(&vp->mu);
+    if (slot < 0) {
+        pscal_fd_close(retained);
+    }
     return slot;
 }
 
@@ -4159,6 +4169,10 @@ static int vprocLocationDeviceOpen(VProc *vp, int flags) {
         pthread_mutex_unlock(&gLocationDevice.mu);
         vprocLocationNotifyObservers(readers);
     }
+    else {
+        /* Transfer ownership to the fd table. */
+        pscal_fd_close(loc_fd);
+    }
     return slot;
 }
 
@@ -4374,6 +4388,7 @@ int vprocReservePid(void) {
         VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
         vprocClearEntryLocked(entry);
         entry = vprocTaskFindLocked(pid);
+        parent_entry = vprocTaskFindLocked(parent_pid);
         if (entry) {
             vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
             entry->parent_pid = parent_pid;
@@ -4448,16 +4463,21 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         (void)vprocTaskEnsureSlotLocked(parent_pid);
     }
     const VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-    if (gVProcTasks.count >= gVProcTasks.capacity) {
-        size_t new_cap = gVProcTasks.capacity ? (gVProcTasks.capacity * 2) : 8;
-        VProcTaskEntry *resized = realloc(gVProcTasks.items, new_cap * sizeof(VProcTaskEntry));
-        if (!resized) {
+    /* Preallocate generously and avoid realloc to keep table pointer stable. */
+    if (gVProcTasks.capacity == 0) {
+        gVProcTasks.capacity = 4096;
+        gVProcTasks.items = (VProcTaskEntry *)calloc(gVProcTasks.capacity, sizeof(VProcTaskEntry));
+        if (!gVProcTasks.items) {
+            gVProcTasks.capacity = 0;
             return NULL;
         }
-        gVProcTasks.items = resized;
-        gVProcTasks.capacity = new_cap;
         gVProcTasksItemsStable = gVProcTasks.items;
         gVProcTasksCapacityStable = gVProcTasks.capacity;
+        parent_entry = vprocTaskFindLocked(parent_pid);
+    }
+    if (gVProcTasks.count >= gVProcTasks.capacity) {
+        errno = EMFILE;
+        return NULL;
     }
     entry = &gVProcTasks.items[gVProcTasks.count++];
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
@@ -4557,17 +4577,22 @@ VProc *vprocCreate(const VProcOptions *opts) {
         if (parent_pid > 0 && parent_pid != vp->pid) {
             (void)vprocTaskEnsureSlotLocked(parent_pid);
         }
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+        /* Clearing can reallocate gVProcTasks.items; reacquire fresh pointers
+         * afterwards to avoid stale references. */
         vprocClearEntryLocked(slot);
-        vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
-        vprocUpdateParentLocked(vp->pid, parent_pid);
-        if (local.job_id > 0) {
-            slot->job_id = local.job_id;
-        }
-        /* Synthetic vprocs that override stdio (common for pipeline stages) should
-         * never be stopped by terminal job-control signals. */
-        if (local.stdin_fd >= 0 || local.stdout_fd >= 0 || local.stderr_fd >= 0) {
-            slot->stop_unsupported = true;
+        slot = vprocTaskFindLocked(vp->pid);
+        if (slot) {
+            VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+            vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
+            vprocUpdateParentLocked(vp->pid, parent_pid);
+            if (local.job_id > 0) {
+                slot->job_id = local.job_id;
+            }
+            /* Synthetic vprocs that override stdio (common for pipeline stages) should
+             * never be stopped by terminal job-control signals. */
+            if (local.stdin_fd >= 0 || local.stdout_fd >= 0 || local.stderr_fd >= 0) {
+                slot->stop_unsupported = true;
+            }
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5154,8 +5179,10 @@ int vprocDup(VProc *vp, int fd) {
     struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
     if (pscal_fd) {
         int slot = vprocInsertPscalFd(vp, pscal_fd);
+        /* vprocInsertPscalFd now retains; drop our temporary ref. */
+        pscal_fd_close(pscal_fd);
         if (slot < 0) {
-            pscal_fd_close(pscal_fd);
+            return -1;
         }
         return slot;
     }
@@ -9302,12 +9329,9 @@ int vprocIoctlShim(int fd, unsigned long request, ...) {
                     res = err;
                 } else {
                     int slot = vprocInsertPscalFd(vp, peer);
-                    if (slot < 0) {
-                        pscal_fd_close(peer);
-                        res = _EMFILE;
-                    } else {
-                        res = slot;
-                    }
+                    /* fd table retains; drop our reference. */
+                    pscal_fd_close(peer);
+                    res = (slot < 0) ? _EMFILE : slot;
                 }
             }
             pscal_fd_close(pscal_fd);
@@ -9681,10 +9705,11 @@ int vprocOpenShim(const char *path, int flags, ...) {
                 struct pscal_fd *retained = pscal_fd_retain(session->pty_slave);
                 if (retained) {
                     int slot = vprocInsertPscalFd(vp, retained);
+                    /* Table retains; release caller ref. */
+                    pscal_fd_close(retained);
                     if (slot >= 0) {
                         return slot;
                     }
-                    pscal_fd_close(retained);
                 }
             }
             return vprocSetCompatErrno(err);
@@ -9695,8 +9720,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
             return -1;
         }
         int slot = vprocInsertPscalFd(vp, tty_fd);
+        /* fd table retains; drop caller ref regardless of outcome. */
+        pscal_fd_close(tty_fd);
         if (slot < 0) {
-            pscal_fd_close(tty_fd);
             return -1;
         }
         return slot;
@@ -9713,8 +9739,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
             return -1;
         }
         int slot = vprocInsertPscalFd(vp, tty_fd);
+        /* fd table retains; release caller ref. */
+        pscal_fd_close(tty_fd);
         if (slot < 0) {
-            pscal_fd_close(tty_fd);
             return -1;
         }
         return slot;
@@ -9733,8 +9760,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
                 return -1;
             }
             int slot = vprocInsertPscalFd(vp, tty_fd);
+            /* fd table retains; release caller ref. */
+            pscal_fd_close(tty_fd);
             if (slot < 0) {
-                pscal_fd_close(tty_fd);
                 return -1;
             }
             return slot;
@@ -9782,18 +9810,22 @@ int vprocOpenShim(const char *path, int flags, ...) {
         }
         int slot = vprocInsertPscalFd(vp, pty);
         if (slot < 0) {
-            pscal_fd_close(pty);
             if (session_slave) {
                 pscal_fd_close(session_slave);
             }
+            /* drop caller ref */
+            pscal_fd_close(pty);
             return -1;
         }
         if (session_id != 0 && session_slave) {
+            /* register retains both ends */
             vprocSessionPtyRegister(session_id, session_slave, pty);
         }
         if (session_slave) {
             pscal_fd_close(session_slave);
         }
+        /* fd table (and session registry) retain; drop caller ref last */
+        pscal_fd_close(pty);
         return slot;
     }
     int pty_num = -1;
@@ -9809,8 +9841,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
             return -1;
         }
         int slot = vprocInsertPscalFd(vp, pty);
+        /* fd table retains; release caller ref. */
+        pscal_fd_close(pty);
         if (slot < 0) {
-            pscal_fd_close(pty);
             return -1;
         }
         return slot;

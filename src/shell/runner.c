@@ -42,8 +42,32 @@ static const char *const kShellCompilerId = "shell";
 
 #if defined(PSCAL_TARGET_IOS)
 extern void pscalRuntimeDebugLog(const char *message);
+
+/* The Swift-side logger allocates, which can trip guard allocators if some
+ * other component has previously scribbled on the heap. To keep the shell
+ * usable even when optional diagnostics are enabled (MallocScribble, guard
+ * malloc, etc.), we make runtime debug logging opt‑in on iOS.
+ *
+ * Enable by setting PSCALI_RUNTIME_DEBUG=1 in the environment. */
+static bool runtimeDebugLogEnabled(void) {
+    static bool initialized = false;
+    static bool enabled = false;
+    if (!initialized) {
+        const char *env = getenv("PSCALI_RUNTIME_DEBUG");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        initialized = true;
+    }
+    return enabled;
+}
+
 static void runtimeDebugLog(const char *message) {
-    if (&pscalRuntimeDebugLog != NULL && message) {
+    if (!message) {
+        return;
+    }
+    if (!runtimeDebugLogEnabled()) {
+        return;
+    }
+    if (&pscalRuntimeDebugLog != NULL) {
         pscalRuntimeDebugLog(message);
     }
 }

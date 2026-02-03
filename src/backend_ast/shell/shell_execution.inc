@@ -2239,10 +2239,9 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* Default to in-process (pscal) pipes on iOS to avoid host-fd leaks that
-         * can keep pagers like 'less' from ever seeing EOF. Opt out with
-         * PSCALI_PIPE_HOST=1 if host pipes are explicitly needed. */
-        bool use_pscal_pipes = getenv("PSCALI_PIPE_HOST") == NULL;
+        /* Use host pipes for now to avoid PSCAL pipe lifetime/RC issues seen in
+         * interactive pagers (help -l | less) under guard allocators. */
+        bool use_pscal_pipes = false;
         if (!use_pscal_pipes) {
             ctx->pscal_pipe_read = NULL;
             ctx->pscal_pipe_write = NULL;
