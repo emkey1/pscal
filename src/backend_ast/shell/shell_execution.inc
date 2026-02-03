@@ -3636,24 +3636,19 @@ static int shellPipelineRunStage(VM *vm,
     }
 
     if (pipeline_in_process) {
-        /* The vproc already owns the correct stdio mapping; drop the raw pipe
-         * fds from the shared table to avoid extra write refs keeping pipes
-         * open after the stage completes. */
-        int close_in = stdin_fd;
-        int close_out = stdout_fd;
-        int close_err = stderr_fd;
-        if (close_in >= 0) {
-            vprocHostClose(close_in);
+        /* For PSCAL pipes we can drop the host dup now because the vproc owns
+         * the pscal endpoints. For host pipes we must keep the host fds open
+         * until after the stage runs or the writer would be closed early. */
+        if (stdin_pscal && stdin_fd >= 0) {
+            vprocHostClose(stdin_fd);
             stdin_fd = -1;
         }
-        if (close_out >= 0) {
-            vprocHostClose(close_out);
+        if (stdout_pscal && stdout_fd >= 0) {
+            vprocHostClose(stdout_fd);
             stdout_fd = -1;
         }
-        if (close_err >= 0 && close_err != close_out) {
-            vprocHostClose(close_err);
-            stderr_fd = -1;
-        } else {
+        if (stderr_pscal && stderr_fd >= 0 && stderr_fd != stdout_fd) {
+            vprocHostClose(stderr_fd);
             stderr_fd = -1;
         }
     }
