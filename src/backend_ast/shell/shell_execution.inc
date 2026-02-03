@@ -3567,13 +3567,15 @@ static int shellPipelineRunStage(VM *vm,
     }
 
 #if defined(PSCAL_TARGET_IOS)
+    bool inherit_pscal_stdio = (!pipeline_in_process) ||
+                               (ctx && ((ctx->pscal_pipe_read != NULL) || (ctx->pscal_pipe_write != NULL)));
     VProc *vp = shellCreateVProcForStage(stdin_fd,
                                          stdout_fd,
                                          stderr_fd,
                                          pscalRuntimeDetectWindowCols(),
                                          pscalRuntimeDetectWindowRows(),
                                          -1,
-                                         (!pipeline_in_process || pipeline_head || pipeline_tail));
+                                         inherit_pscal_stdio);
     if (!vp) {
         runtimeError(vm, "pipeline: failed to allocate vproc");
         shellUpdateStatus(1);
