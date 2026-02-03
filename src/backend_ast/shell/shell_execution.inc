@@ -2239,10 +2239,9 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* Default to PSCAL in‑process pipes so pager output works; host pipes
-         * remain available with PSCALI_PIPE_HOST=1 if you need to debug that
-         * path. */
-        bool use_pscal_pipes = getenv("PSCALI_PIPE_HOST") == NULL;
+        /* Default to host pipes for stability. Opt into PSCAL in‑process pipes
+         * only with PSCALI_PIPE_PSCAL=1 when debugging that path. */
+        bool use_pscal_pipes = getenv("PSCALI_PIPE_PSCAL") != NULL;
         if (!use_pscal_pipes) {
             ctx->pscal_pipe_read = NULL;
             ctx->pscal_pipe_write = NULL;
