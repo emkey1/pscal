@@ -2210,19 +2210,19 @@ static void shellAbortPipeline(void) {
 static bool shellEnsurePipeline(size_t stages, bool negated) {
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
     shellResetPipeline();
-    ctx->stage_count = stages;
-    ctx->negated = negated;
-    ctx->active = true;
-    ctx->launched = 0;
-    ctx->last_status = 0;
-    ctx->background = false;
-    ctx->pgid = -1;
+        ctx->stage_count = stages;
+        ctx->negated = negated;
+        ctx->active = true;
+        ctx->launched = 0;
+        ctx->last_status = 0;
+        ctx->background = false;
+        ctx->pgid = -1;
 #if defined(PSCAL_TARGET_IOS)
-    ctx->in_process = true;
-    ctx->in_process_worker = false;
-    ctx->session_stdio = vprocSessionStdioCurrent();
-    shellPipelineSessionCloseSpool(ctx);
-    shellPipelineSessionSnapshotStdStreams(ctx);
+        ctx->in_process = true;
+        ctx->in_process_worker = false;
+        ctx->session_stdio = vprocSessionStdioCurrent();
+        shellPipelineSessionCloseSpool(ctx);
+        shellPipelineSessionSnapshotStdStreams(ctx);
 //    fprintf(stderr, "[pipe] ensure stages=%zu in_process=1\n", stages);
 #endif
     ctx->pids = calloc(stages, sizeof(pid_t));
@@ -2239,9 +2239,10 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* Default to host pipes for stability; opt into PSCAL pipes with
-         * PSCALI_PIPE_PSCAL=1 if you need in‑process pipes. */
-        bool use_pscal_pipes = getenv("PSCALI_PIPE_PSCAL") != NULL;
+        /* Default to PSCAL in‑process pipes so pager output works; host pipes
+         * remain available with PSCALI_PIPE_HOST=1 if you need to debug that
+         * path. */
+        bool use_pscal_pipes = getenv("PSCALI_PIPE_HOST") == NULL;
         if (!use_pscal_pipes) {
             ctx->pscal_pipe_read = NULL;
             ctx->pscal_pipe_write = NULL;
@@ -3636,9 +3637,7 @@ static int shellPipelineRunStage(VM *vm,
     }
 
     if (pipeline_in_process) {
-        /* For PSCAL pipes we can drop the host dup now because the vproc owns
-         * the pscal endpoints. For host pipes we must keep the host fds open
-         * until after the stage runs or the writer would be closed early. */
+        /* PSCAL pipe path: drop host dup immediately. */
         if (stdin_pscal && stdin_fd >= 0) {
             vprocHostClose(stdin_fd);
             stdin_fd = -1;
@@ -3687,6 +3686,21 @@ static int shellPipelineRunStage(VM *vm,
     if (stderr_shared_with_stdout) {
         stderr_pscal = NULL;
     }
+#if defined(PSCAL_TARGET_IOS)
+    /* For host-pipe pipelines, drop the per-stage pipe fds once the stage has
+     * finished executing so downstream readers can observe EOF promptly. */
+    if (pipeline_in_process && ctx && ctx->pipes && stage_pos < ctx->stage_count) {
+        size_t idx = stage_pos;
+        if (idx < ctx->stage_count - 1 && ctx->pipes[idx][1] >= 0) {
+            vprocHostClose(ctx->pipes[idx][1]);
+            ctx->pipes[idx][1] = -1;
+        }
+        if (idx > 0 && ctx->pipes[idx - 1][0] >= 0) {
+            vprocHostClose(ctx->pipes[idx - 1][0]);
+            ctx->pipes[idx - 1][0] = -1;
+        }
+    }
+#endif
 #endif
 #if defined(PSCAL_TARGET_IOS)
     if (ctx->pids && stage_pos < ctx->stage_count) {
