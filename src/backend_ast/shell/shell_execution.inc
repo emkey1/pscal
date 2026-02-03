@@ -2239,9 +2239,9 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* Default to PSCAL in‑process pipes; set PSCALI_PIPE_HOST=1 to force
-         * host pipes when debugging. */
-        bool use_pscal_pipes = getenv("PSCALI_PIPE_HOST") == NULL;
+        /* Default to host pipes for stability; set PSCALI_PIPE_PSCAL=1 to force
+         * PSCAL in‑process pipes when debugging. */
+        bool use_pscal_pipes = getenv("PSCALI_PIPE_PSCAL") != NULL;
         if (!use_pscal_pipes) {
             ctx->pscal_pipe_read = NULL;
             ctx->pscal_pipe_write = NULL;
