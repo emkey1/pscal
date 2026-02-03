@@ -2239,13 +2239,10 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* Default to host pipes for stability. Opt into PSCAL in‑process pipes
-         * only with PSCALI_PIPE_PSCAL=1 when debugging that path. */
-        bool use_pscal_pipes = getenv("PSCALI_PIPE_PSCAL") != NULL;
-        if (!use_pscal_pipes) {
-            ctx->pscal_pipe_read = NULL;
-            ctx->pscal_pipe_write = NULL;
-        }
+        /* iOS: always use host pipes to avoid PSCAL in-process pipe heap issues. */
+        bool use_pscal_pipes = false;
+        ctx->pscal_pipe_read = NULL;
+        ctx->pscal_pipe_write = NULL;
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
         if (!ctx->pipes) {
             shellResetPipeline();
@@ -2262,20 +2259,9 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
         for (size_t i = 0; i < stages - 1; ++i) {
             ctx->pipes[i][0] = -1;
             ctx->pipes[i][1] = -1;
-            if (use_pscal_pipes) {
-                if (vprocCreateInprocPipe(&ctx->pscal_pipe_read[i], &ctx->pscal_pipe_write[i]) != 0) {
-                    shellResetPipeline();
-                    return false;
-                }
-               // fprintf(stderr, "[pipe] ensure idx=%zu read=%p write=%p\n",
-                //        i, (void *)ctx->pscal_pipe_read[i], (void *)ctx->pscal_pipe_write[i]);
-            } else {
-                if (vprocHostPipe(ctx->pipes[i]) != 0) {
-                    shellResetPipeline();
-                    return false;
-                }
-             //   fprintf(stderr, "[pipe] ensure host idx=%zu r=%d w=%d\n",
-              //          i, ctx->pipes[i][0], ctx->pipes[i][1]);
+            if (vprocHostPipe(ctx->pipes[i]) != 0) {
+                shellResetPipeline();
+                return false;
             }
         }
 #else
@@ -3567,8 +3553,7 @@ static int shellPipelineRunStage(VM *vm,
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    bool inherit_pscal_stdio = (!pipeline_in_process) ||
-                               (ctx && ((ctx->pscal_pipe_read != NULL) || (ctx->pscal_pipe_write != NULL)));
+    bool inherit_pscal_stdio = (!pipeline_in_process);
     VProc *vp = shellCreateVProcForStage(stdin_fd,
                                          stdout_fd,
                                          stderr_fd,
