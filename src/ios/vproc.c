@@ -111,10 +111,20 @@ typedef struct {
 static PscalPasswdEntry *gPscalPasswd = NULL;
 static size_t gPscalPasswdCount = 0;
 static bool gPscalPasswdLoaded = false;
+static char gPscalPasswdPath[PATH_MAX] = {0};
+static dev_t gPscalPasswdDev = 0;
+static ino_t gPscalPasswdIno = 0;
+static time_t gPscalPasswdMtime = 0;
+static off_t gPscalPasswdSize = 0;
 
 static PscalGroupEntry *gPscalGroup = NULL;
 static size_t gPscalGroupCount = 0;
 static bool gPscalGroupLoaded = false;
+static char gPscalGroupPath[PATH_MAX] = {0};
+static dev_t gPscalGroupDev = 0;
+static ino_t gPscalGroupIno = 0;
+static time_t gPscalGroupMtime = 0;
+static off_t gPscalGroupSize = 0;
 
 static void pscalFreePasswd(void) {
     if (!gPscalPasswd) return;
@@ -167,14 +177,23 @@ static const char *pscalEtcPath(const char *leaf, char *buf, size_t buf_len) {
 }
 
 static void pscalLoadPasswd(void) {
-    if (gPscalPasswdLoaded) return;
-    gPscalPasswdLoaded = true;
-    pscalFreePasswd();
     char path[PATH_MAX];
     const char *passwd_path = pscalEtcPath("passwd", path, sizeof(path));
-    if (!passwd_path) {
+    struct stat st;
+    if (!passwd_path || stat(passwd_path, &st) != 0) {
         return;
     }
+    bool needs_reload = !gPscalPasswdLoaded ||
+                        strcmp(gPscalPasswdPath, passwd_path) != 0 ||
+                        st.st_mtime != gPscalPasswdMtime ||
+                        st.st_size != gPscalPasswdSize ||
+                        st.st_ino != gPscalPasswdIno ||
+                        st.st_dev != gPscalPasswdDev;
+    if (!needs_reload) {
+        return;
+    }
+    gPscalPasswdLoaded = true;
+    pscalFreePasswd();
     FILE *fp = fopen(passwd_path, "r");
     if (!fp) {
         return;
@@ -218,17 +237,31 @@ static void pscalLoadPasswd(void) {
     }
     free(line);
     fclose(fp);
+    strlcpy(gPscalPasswdPath, passwd_path, sizeof(gPscalPasswdPath));
+    gPscalPasswdDev = st.st_dev;
+    gPscalPasswdIno = st.st_ino;
+    gPscalPasswdMtime = st.st_mtime;
+    gPscalPasswdSize = st.st_size;
 }
 
 static void pscalLoadGroup(void) {
-    if (gPscalGroupLoaded) return;
-    gPscalGroupLoaded = true;
-    pscalFreeGroup();
     char path[PATH_MAX];
     const char *group_path = pscalEtcPath("group", path, sizeof(path));
-    if (!group_path) {
+    struct stat st;
+    if (!group_path || stat(group_path, &st) != 0) {
         return;
     }
+    bool needs_reload = !gPscalGroupLoaded ||
+                        strcmp(gPscalGroupPath, group_path) != 0 ||
+                        st.st_mtime != gPscalGroupMtime ||
+                        st.st_size != gPscalGroupSize ||
+                        st.st_ino != gPscalGroupIno ||
+                        st.st_dev != gPscalGroupDev;
+    if (!needs_reload) {
+        return;
+    }
+    gPscalGroupLoaded = true;
+    pscalFreeGroup();
     FILE *fp = fopen(group_path, "r");
     if (!fp) {
         return;
@@ -262,6 +295,11 @@ static void pscalLoadGroup(void) {
     }
     free(line);
     fclose(fp);
+    strlcpy(gPscalGroupPath, group_path, sizeof(gPscalGroupPath));
+    gPscalGroupDev = st.st_dev;
+    gPscalGroupIno = st.st_ino;
+    gPscalGroupMtime = st.st_mtime;
+    gPscalGroupSize = st.st_size;
 }
 
 static struct passwd *pscalGetpwuid(uid_t uid) {
