@@ -2239,9 +2239,8 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* iOS: default to host pipes to avoid PSCAL pipe heap issues; allow opt-in via env. */
-        const char *pscal_pipe_env = getenv("PSCALI_PIPE_PSCAL");
-        bool use_pscal_pipes = (pscal_pipe_env && pscal_pipe_env[0] && strcmp(pscal_pipe_env, "0") != 0);
+        /* iOS: host pipes are non-functional for less/pager; stay on PSCAL pipes by default. */
+        bool use_pscal_pipes = true;
         ctx->pscal_pipe_read = NULL;
         ctx->pscal_pipe_write = NULL;
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
@@ -3561,9 +3560,8 @@ static int shellPipelineRunStage(VM *vm,
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    /* For in-process pipelines, inherit PSCAL stdio only when PSCALI_PIPE_PSCAL is set. */
-    const char *pscal_pipe_env = getenv("PSCALI_PIPE_PSCAL");
-    bool inherit_pscal_stdio = (pscal_pipe_env && pscal_pipe_env[0] && strcmp(pscal_pipe_env, "0") != 0);
+    /* For in-process pipelines, always inherit PSCAL stdio; host pipes break pagers on iOS. */
+    bool inherit_pscal_stdio = true;
     VProc *vp = shellCreateVProcForStage(stdin_fd,
                                          stdout_fd,
                                          stderr_fd,
