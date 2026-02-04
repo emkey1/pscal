@@ -156,17 +156,28 @@ static const char *pscalEtcPath(const char *leaf, char *buf, size_t buf_len) {
     if (!leaf || !buf || buf_len == 0) {
         return NULL;
     }
-    const char *roots[] = {
-        getenv("PSCALI_CONTAINER_ROOT"),
-        getenv("HOME"),
-        "/"
+    const char *direct = getenv("PSCALI_ETC_ROOT");
+    if (direct && direct[0] == '/' &&
+        snprintf(buf, buf_len, "%s/%s", direct, leaf) < (int)buf_len &&
+        access(buf, R_OK) == 0) {
+        return buf;
+    }
+
+    const char *container = getenv("PSCALI_CONTAINER_ROOT");
+    const char *home = getenv("HOME");
+    const char *roots[][3] = {
+        { container, "Documents/etc", leaf },
+        { container, "etc", leaf },
+        { home,       "Documents/etc", leaf },
+        { home,       "etc", leaf },
     };
-    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
-        const char *root = roots[i];
-        if (!root || root[0] != '/') {
+    for (size_t i = 0; i < sizeof(roots)/sizeof(roots[0]); ++i) {
+        const char *base = roots[i][0];
+        const char *sub = roots[i][1];
+        if (!base || base[0] != '/') {
             continue;
         }
-        if (snprintf(buf, buf_len, "%s/etc/%s", root, leaf) >= (int)buf_len) {
+        if (snprintf(buf, buf_len, "%s/%s/%s", base, sub, leaf) >= (int)buf_len) {
             continue;
         }
         if (access(buf, R_OK) == 0) {
