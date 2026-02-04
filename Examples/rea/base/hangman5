@@ -21,6 +21,14 @@ const int MAX_ELEMENT_WIDTH = 40;
 const int HANGMAN_WIDTH = 12;
 const int BORDER_PADDING = 2;
 
+/* Rea exposes CRT colors as numeric constants; define the palette we use here to
+ * avoid depending on module-scoped names differing by target. */
+const int Black = 0;
+const int Green = 2;
+const int LightGreen = 10;
+const int LightRed = 12;
+const int White = 15;
+
 const char CornerTL = '╔';
 const char CornerTR = '╗';
 const char CornerBL = '╚';
