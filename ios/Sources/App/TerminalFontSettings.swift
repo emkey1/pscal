@@ -22,6 +22,7 @@ final class TerminalFontSettings: ObservableObject {
     private let foregroundKey = "com.pscal.terminal.foregroundColor"
     private let editorWindowKey = "com.pscal.terminal.nextviWindow"
     private let locationDeviceKey = "com.pscal.terminal.locationDeviceEnabled"
+    private let initialTabCountKey = "com.pscal.terminal.initialTabCount"
 
     static let editorWindowBuildEnabled: Bool = {
 #if EDITOR_FLOATING_WINDOW
@@ -44,6 +45,7 @@ final class TerminalFontSettings: ObservableObject {
     @Published var pathTruncationEnabled: Bool = false
     @Published private(set) var pathTruncationPath: String = ""
     @Published var locationDeviceEnabled: Bool = false
+    @Published var initialTabCount: Int = 1
 
     @Published private(set) var selectedFontID: String
     @Published private(set) var editorWindowEnabled: Bool
@@ -123,6 +125,13 @@ final class TerminalFontSettings: ObservableObject {
             locationDeviceEnabled = true
         }
         LocationDeviceProvider.shared.setDeviceEnabled(locationDeviceEnabled)
+
+        if UserDefaults.standard.object(forKey: initialTabCountKey) != nil {
+            let storedCount = UserDefaults.standard.integer(forKey: initialTabCountKey)
+            initialTabCount = TerminalFontSettings.clampInitialTabCount(storedCount)
+        } else {
+            initialTabCount = 1
+        }
 
         applyPathTruncationPreferences()
     }
@@ -224,6 +233,14 @@ final class TerminalFontSettings: ObservableObject {
         notifyChange()
     }
 
+    func updateInitialTabCount(_ count: Int) {
+        let clamped = TerminalFontSettings.clampInitialTabCount(count)
+        guard clamped != initialTabCount else { return }
+        initialTabCount = clamped
+        UserDefaults.standard.set(clamped, forKey: initialTabCountKey)
+        notifyPreferencesChange()
+    }
+
     func updatePathTruncationEnabled(_ enabled: Bool) {
         guard enabled != pathTruncationEnabled else { return }
         pathTruncationEnabled = enabled
@@ -304,6 +321,17 @@ final class TerminalFontSettings: ObservableObject {
             name: TerminalFontSettings.appearanceDidChangeNotification,
             object: nil
         )
+    }
+
+    private func notifyPreferencesChange() {
+        NotificationCenter.default.post(
+            name: TerminalFontSettings.preferencesDidChangeNotification,
+            object: nil
+        )
+    }
+
+    static func clampInitialTabCount(_ value: Int) -> Int {
+        return min(max(value, 1), 3)
     }
 
     // MARK: Font option discovery

@@ -229,29 +229,17 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window = nil
     }
 
-    /// Historically we opened extra tabs on launch to warm pipelines; now we
-    /// open exactly two tabs and briefly swap focus between them to exercise
-    /// both pipelines before the user interacts.
     private func primeInitialTabsIfNeeded() {
         guard !Self.didPrimeTabs else { return }
         Self.didPrimeTabs = true
         let manager = TerminalTabManager.shared
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            if manager.tabs.count == 1 {
+        let desired = TerminalFontSettings.clampInitialTabCount(TerminalFontSettings.shared.initialTabCount)
+        guard desired > 1 else { return }
+
+        // Open additional tabs (beyond the existing first tab).
+        for _ in 2...desired {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 _ = manager.openShellTab()
-            }
-        }
-        let focusSteps: [(TimeInterval, Int)] = [
-            (0.55, 2),
-            (0.95, 1),
-            (1.35, 2),
-            (1.75, 1)
-        ]
-        for (delay, tabNumber) in focusSteps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                if tabNumber == 2 && manager.tabs.count < 2 { return }
-                if tabNumber == 1 && manager.tabs.isEmpty { return }
-                manager.selectTab(number: tabNumber)
             }
         }
     }

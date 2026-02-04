@@ -121,6 +121,22 @@ struct TerminalSettingsView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+
+                Section(header: Text("Startup")) {
+                    Picker("Tabs on launch", selection: Binding(
+                        get: { settings.initialTabCount },
+                        set: { settings.updateInitialTabCount($0) }
+                    )) {
+                        Text("One").tag(1)
+                        Text("Two").tag(2)
+                        Text("Three").tag(3)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Opens the chosen number of shell tabs when PSCAL starts.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
             }
             .navigationTitle("Terminal Settings")
             .toolbar {

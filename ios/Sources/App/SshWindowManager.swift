@@ -45,18 +45,11 @@ final class TerminalTabManager: ObservableObject {
     private var nextShellOrdinal: Int = 1
     private var pgidToTab: [Int: UInt64] = [:]
     private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
-        let steps: [(TimeInterval, UInt64)] = [
-            (0.55, primary),
-            (0.95, secondary),
-            (1.35, primary),
-            (1.75, primary)
-        ]
-        for (delay, targetId) in steps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self else { return }
-                if self.tabs.contains(where: { $0.id == targetId }) {
-                    self.selectedId = targetId
-                }
+        // Avoid tab switching; just reassert focus on the selected tab a few times.
+        let pulses: [TimeInterval] = [0.55, 0.95, 1.35, 1.75]
+        for delay in pulses {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
             }
         }
     }
