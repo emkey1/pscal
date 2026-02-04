@@ -122,7 +122,7 @@ struct TerminalSettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Section(header: Text("Startup")) {
+                Section(header: Text("Tabs at App Launch")) {
                     Picker("Tabs on launch", selection: Binding(
                         get: { settings.initialTabCount },
                         set: { settings.updateInitialTabCount($0) }
