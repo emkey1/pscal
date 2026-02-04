@@ -307,6 +307,23 @@ __attribute__((weak)) struct passwd *pscalRuntimeHostGetpwnam(const char *name);
 __attribute__((weak)) struct group *pscalRuntimeHostGetgrgid(gid_t gid);
 __attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name);
 
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwuid(uid_t uid) {
+    (void)uid;
+    return NULL;
+}
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwnam(const char *name) {
+    (void)name;
+    return NULL;
+}
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrgid(gid_t gid) {
+    (void)gid;
+    return NULL;
+}
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name) {
+    (void)name;
+    return NULL;
+}
+
 struct passwd *getpwuid(uid_t uid) {
     struct passwd *pw = pscalGetpwuid(uid);
     if (pw) return pw;
