@@ -146,18 +146,22 @@ static const char *pscalEtcPath(const char *leaf, char *buf, size_t buf_len) {
     if (!leaf || !buf || buf_len == 0) {
         return NULL;
     }
-    const char *root = getenv("PSCALI_CONTAINER_ROOT");
-    if (!root || root[0] == '\0') {
-        root = getenv("HOME");
-    }
-    if (!root || root[0] != '/') {
-        return NULL;
-    }
-    if (snprintf(buf, buf_len, "%s/etc/%s", root, leaf) >= (int)buf_len) {
-        return NULL;
-    }
-    if (access(buf, R_OK) == 0) {
-        return buf;
+    const char *roots[] = {
+        getenv("PSCALI_CONTAINER_ROOT"),
+        getenv("HOME"),
+        "/"
+    };
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        const char *root = roots[i];
+        if (!root || root[0] != '/') {
+            continue;
+        }
+        if (snprintf(buf, buf_len, "%s/etc/%s", root, leaf) >= (int)buf_len) {
+            continue;
+        }
+        if (access(buf, R_OK) == 0) {
+            return buf;
+        }
     }
     return NULL;
 }

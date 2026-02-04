@@ -317,6 +317,8 @@ final class RuntimeAssetInstaller {
             }
         }
 
+        ensureEtcFileNamed("passwd", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("group", bundleRoot: bundleRoot)
         ensureEtcSubdirectoryNamed("ssh", bundleRoot: bundleRoot)
     }
 
@@ -374,6 +376,23 @@ final class RuntimeAssetInstaller {
             try copyMissingItems(from: bundleSubdirectory, to: workspaceSubdirectory)
         } catch {
             NSLog("PSCAL iOS: failed to sync etc/%@ assets: %@", name, error.localizedDescription)
+        }
+    }
+
+    private func ensureEtcFileNamed(_ name: String, bundleRoot: URL) {
+        let bundledEtc = bundleRoot.appendingPathComponent("etc", isDirectory: true)
+        let bundleFile = bundledEtc.appendingPathComponent(name, isDirectory: false)
+        guard fileManager.fileExists(atPath: bundleFile.path) else {
+            return
+        }
+        let workspaceFile = RuntimePaths.workspaceEtcDirectory.appendingPathComponent(name, isDirectory: false)
+        do {
+            try ensureWorkspaceDirectoriesExist()
+            if !fileManager.fileExists(atPath: workspaceFile.path) {
+                try fileManager.copyItem(at: bundleFile, to: workspaceFile)
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to ensure etc/%@: %@", name, error.localizedDescription)
         }
     }
 
