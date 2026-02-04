@@ -60,13 +60,9 @@ str ensureDirCandidate(str candidate) {
 }
 
 str resolveTempDir() {
-#if defined(PSCAL_TARGET_IOS)
-  /* iOS/iPadOS: prefer a stable, writable docroot under /var/htdocs. */
+  /* Prefer a stable, writable docroot on all platforms; iOS/iPadOS will land here. */
   str candidate = ensureDirCandidate("/var/htdocs");
   if (candidate != "") return candidate;
-#else
-  str candidate = "";
-#endif
   candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
   if (candidate != "") return candidate;
 
@@ -606,17 +602,14 @@ str fsDefaultInstallRoot() {
 }
 
 void initFiles() {
-  /* Choose a fixed docroot on iOS (/var/htdocs) to simplify access. Fallback to
-   * temp directory on other platforms. */
-#if defined(PSCAL_TARGET_IOS)
+  /* Prefer a fixed docroot (/var/htdocs); fall back to per-run temp dir. */
   str root = ensureDirCandidate("/var/htdocs");
-  if (root == "") root = ensureTrailingSlash(resolveTempDir()) + "htdocs";
-#else
-  int pid = getpid();
-  str pidStr = inttostr(pid);
-  str base = ensureTrailingSlash(resolveTempDir());
-  str root = base + "htdocs." + pidStr;
-#endif
+  if (root == "") {
+    int pid = getpid();
+    str pidStr = inttostr(pid);
+    str base = ensureTrailingSlash(resolveTempDir());
+    root = ensureTrailingSlash(base) + "htdocs." + pidStr;
+  }
   RootDir = root;
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
