@@ -420,27 +420,15 @@ final class TerminalKeyInputView: UITextView {
                                             userInfo: ["command": event.modifierFlags.contains(.command)])
         }
 
-        // Consume all key down events ourselves to avoid UIKit key handling that
-        // can crash when pagers exit. For keys we don't specially map, feed the
-        // characters through the normal insertText path so input still works.
+        var unhandled: [UIPress] = []
         for press in presses {
             if handle(press: press) {
                 continue
             }
-            if let key = press.key {
-                switch key.keyCode {
-                case .keyboardDeleteOrBackspace:
-                    deleteBackward()
-                    continue
-                default:
-                    break
-                }
-                let chars = key.characters
-                if !chars.isEmpty {
-                    insertText(chars)
-                    continue
-                }
-            }
+            unhandled.append(press)
+        }
+        if !unhandled.isEmpty {
+            super.pressesBegan(Set(unhandled), with: event)
         }
     }
 
@@ -450,7 +438,16 @@ final class TerminalKeyInputView: UITextView {
                                             object: nil,
                                             userInfo: ["command": event.modifierFlags.contains(.command)])
         }
-        // Swallow changed events; we only care about key down for terminal input.
+        var unhandled: [UIPress] = []
+        for press in presses {
+            if handle(press: press) {
+                continue
+            }
+            unhandled.append(press)
+        }
+        if !unhandled.isEmpty {
+            super.pressesChanged(Set(unhandled), with: event)
+        }
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -478,16 +475,32 @@ final class TerminalKeyInputView: UITextView {
         if let input = command.input {
             switch input {
             case UIKeyCommand.inputUpArrow:
-                onInput?(arrowSequence("A"))
+                if applicationCursorEnabled {
+                    onInput?("k")
+                } else {
+                    onInput?(arrowSequence("A"))
+                }
                 return
             case UIKeyCommand.inputDownArrow:
-                onInput?(arrowSequence("B"))
+                if applicationCursorEnabled {
+                    onInput?("j")
+                } else {
+                    onInput?(arrowSequence("B"))
+                }
                 return
             case UIKeyCommand.inputLeftArrow:
-                onInput?(arrowSequence("D"))
+                if applicationCursorEnabled {
+                    onInput?("h")
+                } else {
+                    onInput?(arrowSequence("D"))
+                }
                 return
             case UIKeyCommand.inputRightArrow:
-                onInput?(arrowSequence("C"))
+                if applicationCursorEnabled {
+                    onInput?("l")
+                } else {
+                    onInput?(arrowSequence("C"))
+                }
                 return
             case "\r":
                 onInput?("\r")
@@ -520,12 +533,23 @@ final class TerminalKeyInputView: UITextView {
     private func handle(press: UIPress) -> Bool {
         guard let key = press.key else { return false }
 
-        if key.keyCode == .keyboardTab {
-            if key.modifierFlags.contains(.shift) {
-                onInput?("\u{1B}[Z")
-            } else {
-                onInput?("\t")
+        if key.modifierFlags.contains(.command) {
+            let chars = key.charactersIgnoringModifiers
+            switch chars {
+            case "+", "=":
+                handleIncreaseFont()
+                return true
+            case "-":
+                handleDecreaseFont()
+                return true
+            default:
+                break
             }
+        }
+
+        if key.keyCode == .keyboardTab, key.modifierFlags.contains(.shift) {
+            // Preserve Shift+Tab behavior; let plain Tab fall through to keyCommands for repeat.
+            onInput?("\u{1B}[Z")
             return true
         }
 
@@ -548,14 +572,6 @@ final class TerminalKeyInputView: UITextView {
         }
 
         switch key.keyCode {
-        case .keyboardUpArrow:
-            onInput?(arrowSequence("A")); return true
-        case .keyboardDownArrow:
-            onInput?(arrowSequence("B")); return true
-        case .keyboardLeftArrow:
-            onInput?(arrowSequence("D")); return true
-        case .keyboardRightArrow:
-            onInput?(arrowSequence("C")); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:
@@ -563,6 +579,7 @@ final class TerminalKeyInputView: UITextView {
         default:
             break
         }
+        // Let keyCommands handle other keys (hjkl/arrows/tab/etc) so repeat works.
         return false
     }
 

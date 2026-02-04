@@ -1035,6 +1035,14 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
 
     func updateApplicationCursor(_ enabled: Bool) {
         keyInputView.applicationCursorEnabled = enabled
+        // Ensure our native key handler stays first responder when modes change so
+        // arrow/HJKL repeat mapping still runs in full-screen apps like nextvi.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.isActiveForInput {
+                _ = self.keyInputView.becomeFirstResponder()
+            }
+        }
     }
 
     func updateAttachHandlers(onAttach: (() -> Void)?, onDetach: (() -> Void)?) {
