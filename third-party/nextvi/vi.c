@@ -457,10 +457,35 @@ static int vi_search(int cmd, int cnt, int *row, int *off, int msg)
 	return 0;
 }
 
+/* Decode common escape sequences (CSI/SS3 arrows) into canonical
+ * motion keys. This keeps arrow keys usable inside nextvi even when
+ * the terminal sends escape sequences rather than literal hjkl. */
+static int vi_readkey(void)
+{
+	int c0 = term_read();
+	if (c0 != 0x1B)
+		return c0;
+
+	int c1 = term_read();
+	if (c1 == '[' || c1 == 'O') {
+		int c2 = term_read();
+		switch (c2) {
+		case 'A': return 'k'; /* Up */
+		case 'B': return 'j'; /* Down */
+		case 'C': return 'l'; /* Right */
+		case 'D': return 'h'; /* Left */
+		default:
+			term_back(c2);
+		}
+	}
+	term_back(c1);
+	return c0;
+}
+
 /* read a line motion */
 static int vi_motionln(int *row, int cmd, int cnt)
 {
-	int mark, c = term_read();
+	int mark, c = vi_readkey();
 	switch (c) {
 	case '\n':
 	case '+':
@@ -500,7 +525,9 @@ static int vi_motionln(int *row, int cmd, int cnt)
 			*row = lbuf_len(xb) * cnt / 100;
 			break;
 		}
-		term_dec()
+		/* Not a vertical motion: push it back so vi_motion()
+		 * can handle it (e.g., horizontal arrows mapped to h/l). */
+		term_back(c);
 		return 0;
 	}
 	if (*row < 0)
@@ -693,7 +720,7 @@ static int vi_motion(int vc, int *row, int *off)
 		*off = -1;
 		return mv;
 	}
-	mv = term_read();
+	mv = vi_readkey();
 	switch (mv) {
 	case ',':
 	case ';':
@@ -969,6 +996,18 @@ static void vi_change(int r1, int o1, int r2, int o2, int lnmode)
 	char *post, *_post, *ln = lbuf_get(xb, r1);
 	sbuf rsb;
 	int tlen, l1, l2 = 1, postn = 1;
+
+	/* Match POSIX vi behaviour: cw at end-of-line acts like c$, not a
+	 * cross-line join. If the change region starts at or past EOL and the
+	 * motion wandered onto the next line, clamp the target to EOL. */
+	if (!lnmode && r2 > r1) {
+		int eol = lbuf_eol(xb, r1, 1);
+		if (o1 >= eol) {
+			r2 = r1;
+			o2 = eol;
+		}
+	}
+
 	sbuf_smake(sb, xcols)
 	if (lnmode || !ln) {
 		vi_indents(ln, &l1);
