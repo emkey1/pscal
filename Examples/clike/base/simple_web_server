@@ -61,12 +61,13 @@ str ensureDirCandidate(str candidate) {
 
 str resolveTempDir() {
 #if defined(PSCAL_TARGET_IOS)
-  /* iOS/iPadOS: serve from a stable, writable docroot under /var/htdocs so
-   * hterm tabs can all point at the same location and sample content is easy to find. */
+  /* iOS/iPadOS: prefer a stable, writable docroot under /var/htdocs. */
   str candidate = ensureDirCandidate("/var/htdocs");
   if (candidate != "") return candidate;
+#else
+  str candidate = "";
 #endif
-  str candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
+  candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
   if (candidate != "") return candidate;
 
   str workspace = fsNormalizePath(getenv("PSCALI_WORKSPACE_ROOT"));
@@ -605,10 +606,18 @@ str fsDefaultInstallRoot() {
 }
 
 void initFiles() {
+  /* Choose a fixed docroot on iOS (/var/htdocs) to simplify access. Fallback to
+   * temp directory on other platforms. */
+#if defined(PSCAL_TARGET_IOS)
+  str root = ensureDirCandidate("/var/htdocs");
+  if (root == "") root = ensureTrailingSlash(resolveTempDir()) + "htdocs";
+#else
   int pid = getpid();
   str pidStr = inttostr(pid);
   str base = ensureTrailingSlash(resolveTempDir());
-  RootDir = base + "htdocs." + pidStr;
+  str root = base + "htdocs." + pidStr;
+#endif
+  RootDir = root;
   mkdir(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
