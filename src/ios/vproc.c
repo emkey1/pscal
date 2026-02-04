@@ -26,6 +26,8 @@
 #include <time.h>
 #include <poll.h>
 #include <dlfcn.h>
+#include <pwd.h>
+#include <grp.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #include <sys/syscall.h>
@@ -85,6 +87,254 @@ static const void *vprocSelfBase(void) {
     }
     return self_base;
 }
+
+/* ----------------------------------------------------------------------
+ * passwd/group overrides for iOS container
+ * ---------------------------------------------------------------------- */
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    struct passwd pw;
+    char *name;
+    char *passwd;
+    char *gecos;
+    char *dir;
+    char *shell;
+} PscalPasswdEntry;
+
+typedef struct {
+    struct group gr;
+    char *name;
+    char *passwd;
+    gid_t *members_gids; /* unused; placeholder */
+} PscalGroupEntry;
+
+static PscalPasswdEntry *gPscalPasswd = NULL;
+static size_t gPscalPasswdCount = 0;
+static bool gPscalPasswdLoaded = false;
+
+static PscalGroupEntry *gPscalGroup = NULL;
+static size_t gPscalGroupCount = 0;
+static bool gPscalGroupLoaded = false;
+
+static void pscalFreePasswd(void) {
+    if (!gPscalPasswd) return;
+    for (size_t i = 0; i < gPscalPasswdCount; ++i) {
+        free(gPscalPasswd[i].name);
+        free(gPscalPasswd[i].passwd);
+        free(gPscalPasswd[i].gecos);
+        free(gPscalPasswd[i].dir);
+        free(gPscalPasswd[i].shell);
+    }
+    free(gPscalPasswd);
+    gPscalPasswd = NULL;
+    gPscalPasswdCount = 0;
+}
+
+static void pscalFreeGroup(void) {
+    if (!gPscalGroup) return;
+    for (size_t i = 0; i < gPscalGroupCount; ++i) {
+        free(gPscalGroup[i].name);
+        free(gPscalGroup[i].passwd);
+        free(gPscalGroup[i].members_gids);
+    }
+    free(gPscalGroup);
+    gPscalGroup = NULL;
+    gPscalGroupCount = 0;
+}
+
+static const char *pscalEtcPath(const char *leaf, char *buf, size_t buf_len) {
+    if (!leaf || !buf || buf_len == 0) {
+        return NULL;
+    }
+    const char *root = getenv("PSCALI_CONTAINER_ROOT");
+    if (!root || root[0] == '\0') {
+        root = getenv("HOME");
+    }
+    if (!root || root[0] != '/') {
+        return NULL;
+    }
+    if (snprintf(buf, buf_len, "%s/etc/%s", root, leaf) >= (int)buf_len) {
+        return NULL;
+    }
+    if (access(buf, R_OK) == 0) {
+        return buf;
+    }
+    return NULL;
+}
+
+static void pscalLoadPasswd(void) {
+    if (gPscalPasswdLoaded) return;
+    gPscalPasswdLoaded = true;
+    pscalFreePasswd();
+    char path[PATH_MAX];
+    const char *passwd_path = pscalEtcPath("passwd", path, sizeof(path));
+    if (!passwd_path) {
+        return;
+    }
+    FILE *fp = fopen(passwd_path, "r");
+    if (!fp) {
+        return;
+    }
+    char *line = NULL;
+    size_t cap = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
+        char *saveptr = NULL;
+        char *tok_name   = strtok_r(line, ":\n", &saveptr);
+        char *tok_passwd = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_uid    = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_gid    = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_gecos  = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_dir    = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_shell  = strtok_r(NULL, ":\n", &saveptr);
+        if (!tok_name || !tok_passwd || !tok_uid || !tok_gid) {
+            continue;
+        }
+        PscalPasswdEntry *resized = realloc(gPscalPasswd, (gPscalPasswdCount + 1) * sizeof(PscalPasswdEntry));
+        if (!resized) {
+            break;
+        }
+        gPscalPasswd = resized;
+        PscalPasswdEntry *entry = &gPscalPasswd[gPscalPasswdCount++];
+        memset(entry, 0, sizeof(*entry));
+        entry->name   = strdup(tok_name);
+        entry->passwd = strdup(tok_passwd);
+        entry->gecos  = tok_gecos ? strdup(tok_gecos) : strdup("");
+        entry->dir    = tok_dir ? strdup(tok_dir) : strdup("/");
+        entry->shell  = tok_shell ? strdup(tok_shell) : strdup("/bin/sh");
+        entry->pw.pw_name   = entry->name;
+        entry->pw.pw_passwd = entry->passwd;
+        entry->pw.pw_uid    = (uid_t)strtoul(tok_uid, NULL, 10);
+        entry->pw.pw_gid    = (gid_t)strtoul(tok_gid, NULL, 10);
+        entry->pw.pw_gecos  = entry->gecos;
+        entry->pw.pw_dir    = entry->dir;
+        entry->pw.pw_shell  = entry->shell;
+    }
+    free(line);
+    fclose(fp);
+}
+
+static void pscalLoadGroup(void) {
+    if (gPscalGroupLoaded) return;
+    gPscalGroupLoaded = true;
+    pscalFreeGroup();
+    char path[PATH_MAX];
+    const char *group_path = pscalEtcPath("group", path, sizeof(path));
+    if (!group_path) {
+        return;
+    }
+    FILE *fp = fopen(group_path, "r");
+    if (!fp) {
+        return;
+    }
+    char *line = NULL;
+    size_t cap = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
+        char *saveptr = NULL;
+        char *tok_name   = strtok_r(line, ":\n", &saveptr);
+        char *tok_passwd = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_gid    = strtok_r(NULL, ":\n", &saveptr);
+        if (!tok_name || !tok_passwd || !tok_gid) {
+            continue;
+        }
+        PscalGroupEntry *resized = realloc(gPscalGroup, (gPscalGroupCount + 1) * sizeof(PscalGroupEntry));
+        if (!resized) {
+            break;
+        }
+        gPscalGroup = resized;
+        PscalGroupEntry *entry = &gPscalGroup[gPscalGroupCount++];
+        memset(entry, 0, sizeof(*entry));
+        entry->name   = strdup(tok_name);
+        entry->passwd = strdup(tok_passwd);
+        entry->gr.gr_name   = entry->name;
+        entry->gr.gr_passwd = entry->passwd;
+        entry->gr.gr_gid    = (gid_t)strtoul(tok_gid, NULL, 10);
+        entry->gr.gr_mem    = NULL;
+    }
+    free(line);
+    fclose(fp);
+}
+
+static struct passwd *pscalGetpwuid(uid_t uid) {
+    pscalLoadPasswd();
+    for (size_t i = 0; i < gPscalPasswdCount; ++i) {
+        if (gPscalPasswd[i].pw.pw_uid == uid) {
+            return &gPscalPasswd[i].pw;
+        }
+    }
+    return NULL;
+}
+
+static struct passwd *pscalGetpwnam(const char *name) {
+    if (!name) return NULL;
+    pscalLoadPasswd();
+    for (size_t i = 0; i < gPscalPasswdCount; ++i) {
+        if (strcmp(gPscalPasswd[i].pw.pw_name, name) == 0) {
+            return &gPscalPasswd[i].pw;
+        }
+    }
+    return NULL;
+}
+
+static struct group *pscalGetgrgid(gid_t gid) {
+    pscalLoadGroup();
+    for (size_t i = 0; i < gPscalGroupCount; ++i) {
+        if (gPscalGroup[i].gr.gr_gid == gid) {
+            return &gPscalGroup[i].gr;
+        }
+    }
+    return NULL;
+}
+
+static struct group *pscalGetgrnam(const char *name) {
+    if (!name) return NULL;
+    pscalLoadGroup();
+    for (size_t i = 0; i < gPscalGroupCount; ++i) {
+        if (strcmp(gPscalGroup[i].gr.gr_name, name) == 0) {
+            return &gPscalGroup[i].gr;
+        }
+    }
+    return NULL;
+}
+
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwuid(uid_t uid);
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwnam(const char *name);
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrgid(gid_t gid);
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name);
+
+struct passwd *getpwuid(uid_t uid) {
+    struct passwd *pw = pscalGetpwuid(uid);
+    if (pw) return pw;
+    if (pscalRuntimeHostGetpwuid) return pscalRuntimeHostGetpwuid(uid);
+    return NULL;
+}
+
+struct passwd *getpwnam(const char *name) {
+    struct passwd *pw = pscalGetpwnam(name);
+    if (pw) return pw;
+    if (pscalRuntimeHostGetpwnam) return pscalRuntimeHostGetpwnam(name);
+    return NULL;
+}
+
+struct group *getgrgid(gid_t gid) {
+    struct group *gr = pscalGetgrgid(gid);
+    if (gr) return gr;
+    if (pscalRuntimeHostGetgrgid) return pscalRuntimeHostGetgrgid(gid);
+    return NULL;
+}
+
+struct group *getgrnam(const char *name) {
+    struct group *gr = pscalGetgrnam(name);
+    if (gr) return gr;
+    if (pscalRuntimeHostGetgrnam) return pscalRuntimeHostGetgrnam(name);
+    return NULL;
+}
+#endif /* PSCAL_TARGET_IOS */
 
 static void *vprocFilterSelfSymbol(void *sym) {
     if (!sym) {
