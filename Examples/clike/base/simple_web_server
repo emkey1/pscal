@@ -60,6 +60,12 @@ str ensureDirCandidate(str candidate) {
 }
 
 str resolveTempDir() {
+#if defined(PSCAL_TARGET_IOS)
+  /* iOS/iPadOS: serve from a stable, writable docroot under /var/htdocs so
+   * hterm tabs can all point at the same location and sample content is easy to find. */
+  str candidate = ensureDirCandidate("/var/htdocs");
+  if (candidate != "") return candidate;
+#endif
   str candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
   if (candidate != "") return candidate;
 
