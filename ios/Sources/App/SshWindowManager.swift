@@ -46,8 +46,8 @@ final class TerminalTabManager: ObservableObject {
     private var pgidToTab: [Int: UInt64] = [:]
     private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
         // Avoid tab switching; just reassert focus on the selected tab a few times.
-        let base: TimeInterval = 0.20
-        let interval: TimeInterval = 0.15
+        let base: TimeInterval = 0.50
+        let interval: TimeInterval = 0.25
         for i in 0..<6 {
             let delay = base + (interval * Double(i))
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {

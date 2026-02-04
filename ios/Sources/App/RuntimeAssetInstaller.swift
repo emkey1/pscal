@@ -50,6 +50,10 @@ private enum RuntimePaths {
     static var legacySysfilesDirectory: URL {
         documentsDirectory.appendingPathComponent("sysfiles", isDirectory: true)
     }
+
+    static var sandboxVarHtdocsDirectory: URL {
+        documentsDirectory.appendingPathComponent("var/htdocs", isDirectory: true)
+    }
 }
 
 final class RuntimeAssetInstaller {
@@ -414,7 +418,7 @@ final class RuntimeAssetInstaller {
         let bundledHtdocs = bundleRoot.appendingPathComponent("lib/misc/simple_web_server/htdocs", isDirectory: true)
         guard fileManager.fileExists(atPath: bundledHtdocs.path) else { return }
         let targets: [URL] = [
-            URL(fileURLWithPath: "/var/htdocs", isDirectory: true),
+            RuntimePaths.sandboxVarHtdocsDirectory,
             RuntimePaths.homeDirectory.appendingPathComponent("lib/misc/simple_web_server/htdocs", isDirectory: true)
         ]
         let items = (try? fileManager.contentsOfDirectory(at: bundledHtdocs, includingPropertiesForKeys: nil)) ?? []
@@ -489,6 +493,8 @@ final class RuntimeAssetInstaller {
         let tmpPath = RuntimePaths.tmpDirectory.path
         setenv("TMPDIR", tmpPath, 1)
         setenv("SESSIONPATH", "\(tmpPath):~:.", 1)
+        // Preferred docroot for sample web server inside sandbox.
+        setenv("PSCALI_TEMP_DIR", RuntimePaths.sandboxVarHtdocsDirectory.path, 1)
         setenv("HOME", RuntimePaths.homeDirectory.path, 1)
         setenv("TERM", "xterm-256color", 1)
         setenv("COLORTERM", "truecolor", 1)
