@@ -28,7 +28,8 @@ const char CornerBR = '╝';
 const char LineH = '═';
 const char LineV = '║';
 
-str ConfiguredWordsPath = "@PSCAL_INSTALL_ROOT_RESOLVED@/etc/words";
+/* Use container-local words list by default. */
+str ConfiguredWordsPath = "/etc/words";
 
 bool contains(str s, char c) {
   int i = 1;
