@@ -1518,6 +1518,10 @@ typedef struct {
     size_t count;
     bool read_closed;
     bool write_closed;
+    int wait_readers;
+    int wait_writers;
+    int active_ops;
+    bool freed;
     int readers;
     int writers;
 } VprocInprocPipe;
@@ -1538,6 +1542,23 @@ static void vprocInprocPipeFree(VprocInprocPipe *pipe) {
     free(pipe);
 }
 
+static bool vprocInprocPipeShouldDestroy(VprocInprocPipe *pipe) {
+    if (!pipe || pipe->freed) {
+        return false;
+    }
+    bool destroy = pipe->read_closed &&
+                   pipe->write_closed &&
+                   pipe->readers <= 0 &&
+                   pipe->writers <= 0 &&
+                   pipe->active_ops == 0 &&
+                   pipe->wait_readers == 0 &&
+                   pipe->wait_writers == 0;
+    if (destroy) {
+        pipe->freed = true;
+    }
+    return destroy;
+}
+
 static ssize_t vprocInprocPipeRead(struct pscal_fd *fd, void *buf, size_t bufsize) {
     if (!fd || !buf) {
         return _EBADF;
@@ -1548,11 +1569,19 @@ static ssize_t vprocInprocPipeRead(struct pscal_fd *fd, void *buf, size_t bufsiz
     }
     VprocInprocPipe *pipe = end->pipe;
     pthread_mutex_lock(&pipe->mu);
+    pipe->active_ops++;
     while (pipe->count == 0 && !pipe->write_closed) {
+        pipe->wait_readers++;
         pthread_cond_wait(&pipe->cond_read, &pipe->mu);
+        pipe->wait_readers--;
     }
     if (pipe->count == 0 && pipe->write_closed) {
+        pipe->active_ops--;
+        bool destroy = vprocInprocPipeShouldDestroy(pipe);
         pthread_mutex_unlock(&pipe->mu);
+        if (destroy) {
+            vprocInprocPipeFree(pipe);
+        }
         return 0;
     }
     size_t to_copy = bufsize;
@@ -1564,8 +1593,13 @@ static ssize_t vprocInprocPipeRead(struct pscal_fd *fd, void *buf, size_t bufsiz
         pipe->head = (pipe->head + 1) % pipe->cap;
     }
     pipe->count -= to_copy;
+    pipe->active_ops--;
+    bool destroy = vprocInprocPipeShouldDestroy(pipe);
     pthread_cond_signal(&pipe->cond_write);
     pthread_mutex_unlock(&pipe->mu);
+    if (destroy) {
+        vprocInprocPipeFree(pipe);
+    }
     pscal_fd_poll_wakeup(fd, POLLIN);
     return (ssize_t)to_copy;
 }
@@ -1580,15 +1614,24 @@ static ssize_t vprocInprocPipeWrite(struct pscal_fd *fd, const void *buf, size_t
     }
     VprocInprocPipe *pipe = end->pipe;
     pthread_mutex_lock(&pipe->mu);
+    pipe->active_ops++;
     if (pipe->write_closed) {
+        pipe->active_ops--;
         pthread_mutex_unlock(&pipe->mu);
         return _EPIPE;
     }
     while (pipe->count == pipe->cap && !pipe->read_closed) {
+        pipe->wait_writers++;
         pthread_cond_wait(&pipe->cond_write, &pipe->mu);
+        pipe->wait_writers--;
     }
     if (pipe->read_closed) {
+        pipe->active_ops--;
+        bool destroy = vprocInprocPipeShouldDestroy(pipe);
         pthread_mutex_unlock(&pipe->mu);
+        if (destroy) {
+            vprocInprocPipeFree(pipe);
+        }
         return _EPIPE;
     }
     size_t space = pipe->cap - pipe->count;
@@ -1601,8 +1644,13 @@ static ssize_t vprocInprocPipeWrite(struct pscal_fd *fd, const void *buf, size_t
         pipe->tail = (pipe->tail + 1) % pipe->cap;
     }
     pipe->count += to_copy;
+    pipe->active_ops--;
+    bool destroy = vprocInprocPipeShouldDestroy(pipe);
     pthread_cond_signal(&pipe->cond_read);
     pthread_mutex_unlock(&pipe->mu);
+    if (destroy) {
+        vprocInprocPipeFree(pipe);
+    }
     pscal_fd_poll_wakeup(fd, POLLOUT);
     return (ssize_t)to_copy;
 }
@@ -1658,7 +1706,7 @@ static int vprocInprocPipeClose(struct pscal_fd *fd) {
             pipe->writers--;
         }
     }
-    bool destroy = pipe->read_closed && pipe->write_closed && pipe->readers <= 0 && pipe->writers <= 0;
+    bool destroy = vprocInprocPipeShouldDestroy(pipe);
     pthread_cond_broadcast(&pipe->cond_read);
     pthread_cond_broadcast(&pipe->cond_write);
     pthread_mutex_unlock(&pipe->mu);

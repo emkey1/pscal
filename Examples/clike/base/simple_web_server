@@ -616,8 +616,10 @@ void initFiles() {
   Body = "<html><body>Hello from the CLike web server</body></html>";
   str source = resolveAssetRoot();
   int copied = 0;
-  if (strlen(source) > 0 && isDirectory(source)) {
+  int sample_exists = fileexists(IndexPath);
+  if (!sample_exists && strlen(source) > 0 && isDirectory(source)) {
     copied = copyDirectory(source, RootDir);
+    sample_exists = fileexists(IndexPath);
   }
   if (strlen(source) > 0) {
     if (LogEnabled) { fprintf(LogFile, "Asset root: %s\n", source); fflush(LogFile); }
@@ -636,8 +638,13 @@ void initFiles() {
     if (LogEnabled) { fprintf(LogFile, "Using inline default index page.\n"); fflush(LogFile); }
     else { printf("Using inline default index page.\n"); }
   } else {
-    if (LogEnabled) { fprintf(LogFile, "Copied sample site into %s\n", RootDir); fflush(LogFile); }
-    else { printf("Copied sample site into %s\n", RootDir); }
+    if (copied) {
+      if (LogEnabled) { fprintf(LogFile, "Copied sample site into %s\n", RootDir); fflush(LogFile); }
+      else { printf("Copied sample site into %s\n", RootDir); }
+    } else if (LogEnabled) {
+      fprintf(LogFile, "Sample site already present in %s; skipping copy.\n", RootDir);
+      fflush(LogFile);
+    }
   }
 }
 

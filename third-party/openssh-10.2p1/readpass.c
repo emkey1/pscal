@@ -247,6 +247,7 @@ read_passphrase(const char *prompt, int flags)
 		if (prompt[plen - 1] != ' ')
 			(void)write(STDERR_FILENO, " ", 1);
 	}
+	bool prompt_written = (prompt && *prompt);
 	size_t len = 0;
 	char ch = '\0';
 	while (len + 1 < sizeof(buf)) {
@@ -286,6 +287,10 @@ read_passphrase(const char *prompt, int flags)
 readpass_done:
 	if (restore_termios) {
 		(void)vprocSessionStdioApplyTermios(STDIN_FILENO, TCSANOW, &saved_termios);
+	}
+	/* Ensure remote banners begin on a new line after password entry. */
+	if (prompt_written) {
+		(void)write(STDERR_FILENO, "\n", 1);
 	}
 	return ret;
 #endif
