@@ -67,6 +67,7 @@ struct TerminalInputBridge: UIViewRepresentable {
         uiView.onSuspend = onSuspend
         uiView.onNewTab = onNewTab
         uiView.onCloseTab = onCloseTab
+        uiView.invalidateKeyCommandsCache()
 
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
@@ -105,6 +106,7 @@ final class TerminalKeyInputView: UITextView {
     private var softKeyboardVisible: Bool = false
     private var keyboardObservers: [NSObjectProtocol] = []
     private let hardwareKeyboardHeightEpsilon: CGFloat = 80.0
+    private var cachedKeyCommands: [UIKeyCommand]?
 
     private func isHardwareKeyboard(_ notification: Notification) -> Bool {
         guard let userInfo = notification.userInfo,
@@ -191,17 +193,17 @@ final class TerminalKeyInputView: UITextView {
             return button
         }
 
-        let esc = makeButton("\u{238B}", action: #selector(handleEsc))
+        let esc = makeButton("\u{238B}", action: #selector(handleEscAction))
         let ctrl = makeButton("^", action: #selector(handleCtrlToggle))
         ctrlButton = ctrl
-        let up = makeButton("↑", action: #selector(handleUp))
-        let down = makeButton("↓", action: #selector(handleDown))
-        let left = makeButton("←", action: #selector(handleLeft))
-        let right = makeButton("→", action: #selector(handleRight))
-        let fslash = makeButton("/", action: #selector(handleFSlash))
-        let dot = makeButton(".", action: #selector(handleDot))
-        let minus = makeButton("-", action: #selector(handleMinus))
-        let pipe = makeButton("|", action: #selector(handlePipe))
+        let up = makeButton("↑", action: #selector(handleUpAction))
+        let down = makeButton("↓", action: #selector(handleDownAction))
+        let left = makeButton("←", action: #selector(handleLeftAction))
+        let right = makeButton("→", action: #selector(handleRightAction))
+        let fslash = makeButton("/", action: #selector(handleFSlashAction))
+        let dot = makeButton(".", action: #selector(handleDotAction))
+        let minus = makeButton("-", action: #selector(handleMinusAction))
+        let pipe = makeButton("|", action: #selector(handlePipeAction))
 
         if UIDevice.current.userInterfaceIdiom == .phone {
             // Replaced "Tab" with the Unicode symbol \u{21E5}
@@ -269,6 +271,9 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override var keyCommands: [UIKeyCommand]? {
+        if let cache = cachedKeyCommands {
+            return cache
+        }
         var commands = repeatKeyCommands.map { $0.command }
         let increase1 = UIKeyCommand(input: "+", modifierFlags: [.command], action: #selector(handleIncreaseFont))
         let increase2 = UIKeyCommand(input: "=", modifierFlags: [.command], action: #selector(handleIncreaseFont))
@@ -321,7 +326,12 @@ final class TerminalKeyInputView: UITextView {
             commands.append(closeTab)
         }
         commands.append(contentsOf: controlKeyCommands)
+        cachedKeyCommands = commands
         return commands
+    }
+    
+    func invalidateKeyCommandsCache() {
+        cachedKeyCommands = nil
     }
 
     override func insertText(_ text: String) {
@@ -646,7 +656,7 @@ final class TerminalKeyInputView: UITextView {
     }
 
     // MARK: - Accessory button actions
-    @objc private func handleEsc() {
+    @objc private func handleEscAction() {
         onInput?("\u{1B}")
     }
     
@@ -663,35 +673,35 @@ final class TerminalKeyInputView: UITextView {
         sender.configuration = config
     }
 
-    @objc private func handleUp() {
+    @objc private func handleUpAction() {
         onInput?(arrowSequence("A"))
     }
 
-    @objc private func handleDown() {
+    @objc private func handleDownAction() {
         onInput?(arrowSequence("B"))
     }
 
-    @objc private func handleLeft() {
+    @objc private func handleLeftAction() {
         onInput?(arrowSequence("D"))
     }
 
-    @objc private func handleRight() {
+    @objc private func handleRightAction() {
         onInput?(arrowSequence("C"))
     }
 
-    @objc private func handleFSlash() {
+    @objc private func handleFSlashAction() {
         onInput?("/")
     }
 
-    @objc private func handleDot() {
+    @objc private func handleDotAction() {
         onInput?(".")
     }
 
-    @objc private func handleMinus() {
+    @objc private func handleMinusAction() {
         onInput?("-")
     }
    
-    @objc private func handlePipe() {
+    @objc private func handlePipeAction() {
         onInput?("|")
     }
     
