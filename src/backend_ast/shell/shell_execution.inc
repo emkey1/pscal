@@ -2240,13 +2240,21 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
         /* iOS: always use host pipes to avoid PSCAL in-process pipe heap issues. */
-        bool use_pscal_pipes = false;
+        bool use_pscal_pipes = true;
         ctx->pscal_pipe_read = NULL;
         ctx->pscal_pipe_write = NULL;
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
         if (!ctx->pipes) {
             shellResetPipeline();
             return false;
+        }
+        for (size_t i = 0; i < stages - 1; ++i) {
+            ctx->pipes[i][0] = -1;
+            ctx->pipes[i][1] = -1;
+            if (vprocHostPipe(ctx->pipes[i]) != 0) {
+                shellResetPipeline();
+                return false;
+            }
         }
         if (use_pscal_pipes) {
             ctx->pscal_pipe_read = (struct pscal_fd **)calloc(stages - 1, sizeof(struct pscal_fd *));
@@ -2255,13 +2263,12 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
                 shellResetPipeline();
                 return false;
             }
-        }
-        for (size_t i = 0; i < stages - 1; ++i) {
-            ctx->pipes[i][0] = -1;
-            ctx->pipes[i][1] = -1;
-            if (vprocHostPipe(ctx->pipes[i]) != 0) {
-                shellResetPipeline();
-                return false;
+            for (size_t i = 0; i < stages - 1; ++i) {
+                if (vprocCreateInprocPipe(&ctx->pscal_pipe_read[i], &ctx->pscal_pipe_write[i]) != 0 ||
+                    !ctx->pscal_pipe_read[i] || !ctx->pscal_pipe_write[i]) {
+                    shellResetPipeline();
+                    return false;
+                }
             }
         }
 #else
@@ -3553,7 +3560,9 @@ static int shellPipelineRunStage(VM *vm,
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    bool inherit_pscal_stdio = (!pipeline_in_process);
+    /* For iOS in-process pipelines, keep using the session/active PSCAL stdio so
+     * smallclue/less continue to see data (even though this path may crash). */
+    bool inherit_pscal_stdio = true;
     VProc *vp = shellCreateVProcForStage(stdin_fd,
                                          stdout_fd,
                                          stderr_fd,

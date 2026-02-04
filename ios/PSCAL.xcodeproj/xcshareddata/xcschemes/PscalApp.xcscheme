@@ -102,13 +102,13 @@
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "PSCALI_DEBUG_MIRROR_TERMINAL"
-            value = "0"
+            value = "1"
             isEnabled = "NO">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "PSCALI_PAGER_DEBUG"
             value = "1"
-            isEnabled = "NO">
+            isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "PSCALI_REDIR_DEBUG"
