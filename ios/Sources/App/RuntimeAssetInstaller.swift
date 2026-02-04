@@ -122,6 +122,7 @@ final class RuntimeAssetInstaller {
         installWorkspaceExamplesIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceDocsIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceEtcIfNeeded(bundleRoot: bundleRoot)
+        stageSimpleWebServerAssets(bundleRoot: bundleRoot)
         configureRuntimeEnvironment(bundleRoot: bundleRoot)
 
         let workspacePath = RuntimePaths.documentsDirectory.path
@@ -331,6 +332,9 @@ final class RuntimeAssetInstaller {
         if directoryIsEmpty(workspaceExamples) {
             return true
         }
+        if missingCriticalExamples(at: workspaceExamples) {
+            return true
+        }
         guard let data = try? Data(contentsOf: RuntimePaths.workspaceExamplesVersionMarker),
               let recorded = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -338,6 +342,12 @@ final class RuntimeAssetInstaller {
             return true
         }
         return recorded != assetsVersion
+    }
+
+    private func missingCriticalExamples(at root: URL) -> Bool {
+        // At minimum we expect the simple_web_server example to be present.
+        let clikeServer = root.appendingPathComponent("clike/base/simple_web_server", isDirectory: false)
+        return !fileManager.fileExists(atPath: clikeServer.path)
     }
 
     private func ensureEtcSubdirectoryNamed(_ name: String, bundleRoot: URL) {
@@ -397,6 +407,31 @@ final class RuntimeAssetInstaller {
             return true
         }
         return recorded != assetsVersion
+    }
+
+    private func stageSimpleWebServerAssets(bundleRoot: URL) {
+#if os(iOS)
+        let bundledHtdocs = bundleRoot.appendingPathComponent("lib/misc/simple_web_server/htdocs", isDirectory: true)
+        guard fileManager.fileExists(atPath: bundledHtdocs.path) else { return }
+        let targets: [URL] = [
+            URL(fileURLWithPath: "/var/htdocs", isDirectory: true),
+            RuntimePaths.homeDirectory.appendingPathComponent("lib/misc/simple_web_server/htdocs", isDirectory: true)
+        ]
+        let items = (try? fileManager.contentsOfDirectory(at: bundledHtdocs, includingPropertiesForKeys: nil)) ?? []
+        for target in targets {
+            do {
+                try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+                for item in items {
+                    let dst = target.appendingPathComponent(item.lastPathComponent)
+                    if !fileManager.fileExists(atPath: dst.path) {
+                        try fileManager.copyItem(at: item, to: dst)
+                    }
+                }
+            } catch {
+                NSLog("PSCAL iOS: failed to stage simple_web_server assets to %@: %@", target.path, error.localizedDescription)
+            }
+        }
+#endif
     }
 
     private func configureRuntimeEnvironment(bundleRoot: URL) {
