@@ -60,6 +60,11 @@ struct TerminalInputBridge: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalKeyInputView, context: Context) {
+        let needsInvalidation =
+            ((uiView.onCopy == nil) != (onCopy == nil)) ||
+            ((uiView.onNewTab == nil) != (onNewTab == nil)) ||
+            ((uiView.onCloseTab == nil) != (onCloseTab == nil))
+
         uiView.onInput = onInput
         uiView.onPaste = onPaste
         uiView.onCopy = onCopy
@@ -67,7 +72,9 @@ struct TerminalInputBridge: UIViewRepresentable {
         uiView.onSuspend = onSuspend
         uiView.onNewTab = onNewTab
         uiView.onCloseTab = onCloseTab
-        uiView.invalidateKeyCommandsCache()
+        if needsInvalidation {
+            uiView.invalidateKeyCommandsCache()
+        }
 
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
