@@ -45,6 +45,13 @@ int GEnqueued = 0;
 int GDropped = 0;
 int GServed = 0;
 
+// Helper that invokes the VM builtin and provides a safe fallback.
+str remoteAddr(int s) {
+  str r = socketpeeraddr(s);
+  if (r == "") r = "(unknown)";
+  return r;
+}
+
 // Helpers
 str ensureDirCandidate(str candidate) {
   if (candidate == "") return "";
@@ -251,6 +258,8 @@ void serveConn(int c) {
   // Read request
   mstream req = socketreceive(c, 2048);
   str reqText = mstreambuffer(req);
+  // Peer address from builtin; fall back to placeholder if unavailable.
+  str remote = remoteAddr(c);
   // Parse request line robustly: take first line then split by spaces
   int ln = pos(reqText, "\r\n");
   if (ln == 0) ln = pos(reqText, "\n");
@@ -386,12 +395,12 @@ void serveConn(int c) {
   lock(qmu); depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; unlock(qmu);
   str ts = timestamp();
   if (LogEnabled) {
-    fprintf(LogFile, "%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
-            ts, method, path, code, logDetail, depth, served, enq, drop);
+    fprintf(LogFile, "%s [%s] %s %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
+            ts, remote, method, path, code, logDetail, depth, served, enq, drop);
     fflush(LogFile);
   } else {
-    printf("%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
-           ts, method, path, code, logDetail, depth, served, enq, drop);
+    printf("%s [%s] %s %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
+           ts, remote, method, path, code, logDetail, depth, served, enq, drop);
   }
   socketclose(c);
 }
@@ -536,6 +545,16 @@ int fsPathExists(str path) {
   return 0;
 }
 
+int dirIsEmpty(str path) {
+  if (!isDirectory(path)) return 1;
+  str name = findfirst(path);
+  while (name != "") {
+    if (name != "." && name != "..") return 0;
+    name = findnext();
+  }
+  return 1;
+}
+
 str resolveAssetRoot() {
   str candidate = ConfiguredAssetRoot;
   str placeholder = "@PSCAL_INSTALL_ROOT_RESOLVED@";
@@ -611,10 +630,30 @@ void initFiles() {
     root = ensureTrailingSlash(base) + "htdocs." + pidStr;
   }
   RootDir = root;
-  mkdir(RootDir);
+  int preexisting = isDirectory(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
+
+  // If the directory already exists (populated or not), avoid copying bundle assets.
+  // This prevents iOS/iPadOS runs from failing when RuntimeAssetInstaller or a prior
+  // launch has already materialized /var/htdocs.
+  if (preexisting) {
+    if (LogEnabled) {
+      fprintf(LogFile, "Docroot %s already exists; skipping asset copy.\n", RootDir);
+      fflush(LogFile);
+    }
+    // Do not attempt any writes when the docroot already exists; on iOS this
+    // location may be read-only for the process even though the files are present.
+    return;
+  }
+
+  mkdir(RootDir);
   str source = resolveAssetRoot();
+  // Avoid copying from the same directory or overwriting populated roots.
+  if (source == RootDir) {
+    if (LogEnabled) { fprintf(LogFile, "Asset root is already the docroot; skip copy.\n"); fflush(LogFile); }
+    source = "";
+  }
   int copied = 0;
   int sample_exists = fileexists(IndexPath);
   if (!sample_exists && strlen(source) > 0 && isDirectory(source)) {
