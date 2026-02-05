@@ -940,7 +940,12 @@ final class RuntimeAssetInstaller {
     private let embeddedTinyWrapper: String = """
 #!/bin/exsh
 # Tiny wrapper for iOS/iPadOS: run the clike source via shell builtin.
-clike /bin/tiny.clike "$@"
+if [ -n "$PSCALI_WORKSPACE_ROOT" ]; then
+  SCRIPT="$PSCALI_WORKSPACE_ROOT/bin/tiny.clike"
+else
+  SCRIPT="$(dirname "$(dirname "$0")")/bin/tiny.clike"
+fi
+clike "$SCRIPT" "$@"
 """
 
     private let embeddedTinySource: String = """
