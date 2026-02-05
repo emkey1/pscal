@@ -8,6 +8,7 @@
 //   localhost. Serving is minimal and for demo/testing.
 
 int Port = 5555;
+str BindAddr = "127.0.0.1"; // Default binding.  Localhost only.  Change to 0.0.0.0 for all ports.  Dangerous!!!
 str RootDir;
 str IndexPath;
 str Body;
@@ -737,11 +738,11 @@ int main() {
     }
   }
   if (LogEnabled) {
-    fprintf(LogFile, "Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+    fprintf(LogFile, "Serving %s on http://%s.0.0.1:%d\n", IndexPath, BindAddr, Port);
     fprintf(LogFile, "Root: %s\n", RootDir);
     fflush(LogFile);
   } else {
-    printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+    printf("Serving %s on http://%s:%d\n", IndexPath, BindAddr, Port);
     printf("Root: %s\n", RootDir);
   }
 
@@ -753,7 +754,7 @@ int main() {
   }
   // Bind and listen; current API binds all interfaces (INADDR_ANY)
   // Bind explicitly to localhost by default
-  int bindrc = socketbindaddr(srv, "127.0.0.1", Port);
+  int bindrc = socketbindaddr(srv, "%s", Port, BindAddr);
   if (bindrc != 0) {
     if (LogEnabled) { fprintf(LogFile, "socketbind failed: %d\n", socketlasterror()); fflush(LogFile); }
     else { printf("socketbind failed: %d\n", socketlasterror()); }
