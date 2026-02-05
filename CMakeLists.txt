@@ -1939,6 +1939,16 @@ if(NOT PSCAL_PLATFORM_IOS)
     endforeach()
     install(DIRECTORY Docs/
             DESTINATION "${_pscal_runtime_root}/docs")
+    # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
+    install(PROGRAMS bin/tiny
+            DESTINATION "${_pscal_runtime_root}/bin"
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE
+                        WORLD_READ WORLD_EXECUTE)
+    install(FILES src/compiler/bytecode.h
+            DESTINATION "${_pscal_runtime_root}/src/compiler")
+    install(FILES src/core/version.h
+            DESTINATION "${_pscal_runtime_root}/src/core")
     install(DIRECTORY Tests/libs/
             DESTINATION "${_pscal_runtime_root}/etc/tests"
             USE_SOURCE_PERMISSIONS)
