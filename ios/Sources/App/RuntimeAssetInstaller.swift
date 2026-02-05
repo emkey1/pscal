@@ -382,8 +382,19 @@ final class RuntimeAssetInstaller {
                 try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
                 let tinyWrapper = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
                 let tinySource = workspaceBin.appendingPathComponent("tiny.clike", isDirectory: false)
+                let tinyBytecode = workspaceBin.appendingPathComponent("tiny.pbc", isDirectory: false)
                 try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
                 try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
+                // If bundled bytecode present, copy it too so we avoid runtime clike compile.
+                let bundledTinyPbc = bundledBin.appendingPathComponent("tiny.pbc")
+                if fileManager.fileExists(atPath: bundledTinyPbc.path) {
+                    do {
+                        try fileManager.copyItem(at: bundledTinyPbc, to: tinyBytecode)
+                        NSLog("PSCAL iOS: copied bundled tiny.pbc")
+                    } catch {
+                        NSLog("PSCAL iOS: failed to copy tiny.pbc: %@", error.localizedDescription)
+                    }
+                }
 
                 if fileManager.fileExists(atPath: tinyWrapper.path) {
                     try markExecutable(at: tinyWrapper)
