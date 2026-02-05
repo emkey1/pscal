@@ -354,21 +354,44 @@ final class RuntimeAssetInstaller {
         let workspaceBin = RuntimePaths.workspaceBinDirectory
         if needsWorkspaceBinRefresh() {
             do {
+                // Clean slate
                 if fileManager.fileExists(atPath: workspaceBin.path) || isSymbolicLink(at: workspaceBin) {
                     NSLog("PSCAL iOS: removing stale bin at %@", workspaceBin.path)
                     try fileManager.removeItem(at: workspaceBin)
                 }
-                try ensureWorkspaceDirectoriesExist()
+                try ensureDocumentsDirectoryExists()
                 migrateLegacyBinIfNeeded()
-                try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
+
+                var copied = false
                 if fileManager.fileExists(atPath: bundledBin.path) {
                     NSLog("PSCAL iOS: copying bundled bin from %@", bundledBin.path)
-                    try fileManager.copyItem(at: bundledBin, to: workspaceBin)
-                } else {
+                    do {
+                        try fileManager.copyItem(at: bundledBin, to: workspaceBin)
+                        copied = true
+                    } catch {
+                        NSLog("PSCAL iOS: copyItem bin failed (%@); retrying by copying contents", error.localizedDescription)
+                        // Retry by copying contents into an empty dir
+                        try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
+                        let items = try fileManager.contentsOfDirectory(atPath: bundledBin.path)
+                        for item in items {
+                            let src = bundledBin.appendingPathComponent(item)
+                            let dst = workspaceBin.appendingPathComponent(item)
+                            if fileManager.fileExists(atPath: dst.path) {
+                                try fileManager.removeItem(at: dst)
+                            }
+                            try fileManager.copyItem(at: src, to: dst)
+                        }
+                        copied = true
+                    }
+                }
+
+                if !copied {
                     NSLog("PSCAL iOS: bundled bin missing; writing embedded tiny")
+                    try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
                     let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
                     try embeddedTinySource.write(to: tinyPath, atomically: true, encoding: .utf8)
                 }
+
                 let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
                 if fileManager.fileExists(atPath: tinyPath.path) {
                     try markExecutable(at: tinyPath)
