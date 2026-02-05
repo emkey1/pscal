@@ -47,6 +47,26 @@ private enum RuntimePaths {
         documentsDirectory.appendingPathComponent(".etc.version", isDirectory: false)
     }
 
+    static var workspaceBinDirectory: URL {
+        homeDirectory.appendingPathComponent("bin", isDirectory: true)
+    }
+
+    static var workspaceBinVersionMarker: URL {
+        homeDirectory.appendingPathComponent(".bin.version", isDirectory: false)
+    }
+
+    static var workspaceSrcCompilerDirectory: URL {
+        homeDirectory.appendingPathComponent("src/compiler", isDirectory: true)
+    }
+
+    static var workspaceSrcCoreDirectory: URL {
+        homeDirectory.appendingPathComponent("src/core", isDirectory: true)
+    }
+
+    static var workspaceSrcVersionMarker: URL {
+        homeDirectory.appendingPathComponent(".src.version", isDirectory: false)
+    }
+
     static var legacySysfilesDirectory: URL {
         documentsDirectory.appendingPathComponent("sysfiles", isDirectory: true)
     }
@@ -126,6 +146,8 @@ final class RuntimeAssetInstaller {
         installWorkspaceExamplesIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceDocsIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceEtcIfNeeded(bundleRoot: bundleRoot)
+        installWorkspaceBinIfNeeded(bundleRoot: bundleRoot)
+        installWorkspaceSrcIfNeeded(bundleRoot: bundleRoot)
         stageSimpleWebServerAssets(bundleRoot: bundleRoot)
         configureRuntimeEnvironment(bundleRoot: bundleRoot)
 
@@ -326,6 +348,65 @@ final class RuntimeAssetInstaller {
         ensureEtcSubdirectoryNamed("ssh", bundleRoot: bundleRoot)
     }
 
+    private func installWorkspaceBinIfNeeded(bundleRoot: URL) {
+        let bundledBin = bundleRoot.appendingPathComponent("bin", isDirectory: true)
+        guard fileManager.fileExists(atPath: bundledBin.path) else {
+            NSLog("PSCAL iOS: bundle missing bin directory; skipping installation.")
+            return
+        }
+
+        let workspaceBin = RuntimePaths.workspaceBinDirectory
+        if needsWorkspaceBinRefresh() {
+            do {
+                if fileManager.fileExists(atPath: workspaceBin.path) || isSymbolicLink(at: workspaceBin) {
+                    try fileManager.removeItem(at: workspaceBin)
+                }
+                try ensureWorkspaceDirectoriesExist()
+                try fileManager.copyItem(at: bundledBin, to: workspaceBin)
+                // Ensure tiny is executable
+                let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
+                if fileManager.fileExists(atPath: tinyPath.path) {
+                    try markExecutable(at: tinyPath)
+                }
+                try writeWorkspaceBinVersionMarker()
+                NSLog("PSCAL iOS: installed bin assets to %@", workspaceBin.path)
+            } catch {
+                NSLog("PSCAL iOS: failed to install bin assets: %@", error.localizedDescription)
+            }
+        }
+    }
+
+    private func installWorkspaceSrcIfNeeded(bundleRoot: URL) {
+        let bundledCompiler = bundleRoot.appendingPathComponent("src/compiler", isDirectory: true)
+        let bundledCore = bundleRoot.appendingPathComponent("src/core", isDirectory: true)
+        if !fileManager.fileExists(atPath: bundledCompiler.path) || !fileManager.fileExists(atPath: bundledCore.path) {
+            NSLog("PSCAL iOS: bundle missing src headers required by tiny; skipping.")
+            return
+        }
+
+        let workspaceCompiler = RuntimePaths.workspaceSrcCompilerDirectory
+        let workspaceCore = RuntimePaths.workspaceSrcCoreDirectory
+        if needsWorkspaceSrcRefresh() {
+            do {
+                if fileManager.fileExists(atPath: workspaceCompiler.path) || isSymbolicLink(at: workspaceCompiler) {
+                    try fileManager.removeItem(at: workspaceCompiler)
+                }
+                if fileManager.fileExists(atPath: workspaceCore.path) || isSymbolicLink(at: workspaceCore) {
+                    try fileManager.removeItem(at: workspaceCore)
+                }
+                try ensureWorkspaceDirectoriesExist()
+                try fileManager.createDirectory(at: workspaceCompiler, withIntermediateDirectories: true)
+                try fileManager.createDirectory(at: workspaceCore, withIntermediateDirectories: true)
+                try fileManager.copyItem(at: bundledCompiler.appendingPathComponent("bytecode.h"), to: workspaceCompiler.appendingPathComponent("bytecode.h"))
+                try fileManager.copyItem(at: bundledCore.appendingPathComponent("version.h"), to: workspaceCore.appendingPathComponent("version.h"))
+                try writeWorkspaceSrcVersionMarker()
+                NSLog("PSCAL iOS: installed tiny header assets to %@", workspaceCompiler.deletingLastPathComponent().path)
+            } catch {
+                NSLog("PSCAL iOS: failed to install tiny headers: %@", error.localizedDescription)
+            }
+        }
+    }
+
     private func needsWorkspaceExamplesRefresh() -> Bool {
         let workspaceExamples = RuntimePaths.examplesWorkspaceDirectory
         var isDirectory: ObjCBool = false
@@ -358,6 +439,40 @@ final class RuntimeAssetInstaller {
         // At minimum we expect the simple_web_server example to be present.
         let clikeServer = root.appendingPathComponent("clike/base/simple_web_server", isDirectory: false)
         return !fileManager.fileExists(atPath: clikeServer.path)
+    }
+
+    private func needsWorkspaceBinRefresh() -> Bool {
+        let binDir = RuntimePaths.workspaceBinDirectory
+        var isDirectory: ObjCBool = false
+        if !fileManager.fileExists(atPath: binDir.path, isDirectory: &isDirectory) || !isDirectory.boolValue {
+            return true
+        }
+        let tiny = binDir.appendingPathComponent("tiny")
+        if !fileManager.isExecutableFile(atPath: tiny.path) {
+            return true
+        }
+        guard let data = try? Data(contentsOf: RuntimePaths.workspaceBinVersionMarker),
+              let recorded = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !recorded.isEmpty else {
+            return true
+        }
+        return recorded != assetsVersion
+    }
+
+    private func needsWorkspaceSrcRefresh() -> Bool {
+        let compiler = RuntimePaths.workspaceSrcCompilerDirectory.appendingPathComponent("bytecode.h")
+        let core = RuntimePaths.workspaceSrcCoreDirectory.appendingPathComponent("version.h")
+        if !fileManager.fileExists(atPath: compiler.path) || !fileManager.fileExists(atPath: core.path) {
+            return true
+        }
+        guard let data = try? Data(contentsOf: RuntimePaths.workspaceSrcVersionMarker),
+              let recorded = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !recorded.isEmpty else {
+            return true
+        }
+        return recorded != assetsVersion
     }
 
     private func ensureEtcSubdirectoryNamed(_ name: String, bundleRoot: URL) {
@@ -637,6 +752,18 @@ final class RuntimeAssetInstaller {
         try data.write(to: RuntimePaths.workspaceEtcVersionMarker, options: [.atomic])
     }
 
+    private func writeWorkspaceBinVersionMarker() throws {
+        try ensureWorkspaceDirectoriesExist()
+        let data = (assetsVersion + "\n").data(using: .utf8) ?? Data()
+        try data.write(to: RuntimePaths.workspaceBinVersionMarker, options: [.atomic])
+    }
+
+    private func writeWorkspaceSrcVersionMarker() throws {
+        try ensureWorkspaceDirectoriesExist()
+        let data = (assetsVersion + "\n").data(using: .utf8) ?? Data()
+        try data.write(to: RuntimePaths.workspaceSrcVersionMarker, options: [.atomic])
+    }
+
     private func markExecutable(at url: URL) throws {
         try fileManager.setAttributes([.posixPermissions: NSNumber(value: Int16(0o755))],
                                       ofItemAtPath: url.path)
@@ -695,7 +822,10 @@ final class RuntimeAssetInstaller {
         try ensureDocumentsDirectoryExists()
         let requiredDirectories = [
             RuntimePaths.homeDirectory,
-            RuntimePaths.tmpDirectory
+            RuntimePaths.tmpDirectory,
+            RuntimePaths.workspaceBinDirectory,
+            RuntimePaths.workspaceSrcCompilerDirectory,
+            RuntimePaths.workspaceSrcCoreDirectory
         ]
         for directory in requiredDirectories {
             if !fileManager.fileExists(atPath: directory.path) {
