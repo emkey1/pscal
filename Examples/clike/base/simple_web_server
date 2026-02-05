@@ -46,11 +46,6 @@ int GEnqueued = 0;
 int GDropped = 0;
 int GServed = 0;
 
-// Local stub; actual builtin may be unavailable in this clike build.
-str socketpeeraddr(int s) {
-  return "";
-}
-
 // Helper that invokes the VM builtin and provides a safe fallback.
 str remoteAddr(int s) {
   str r = socketpeeraddr(s);
