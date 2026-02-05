@@ -1866,8 +1866,17 @@ if(NOT PSCAL_PLATFORM_IOS)
         )
         list(APPEND PSCAL_CONFIGURED_EXAMPLE_OUTPUTS "${dst}")
     endforeach()
-    add_custom_target(configured_examples ALL
+add_custom_target(configured_examples ALL
         DEPENDS ${PSCAL_CONFIGURED_EXAMPLE_OUTPUTS})
+
+# Precompile tiny (clike) to bytecode for runtime use (iOS/shell wrappers)
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/bin/tiny.pbc
+    COMMAND ${CMAKE_BINARY_DIR}/bin/clike ${CMAKE_SOURCE_DIR}/bin/tiny.clike ${CMAKE_BINARY_DIR}/bin/tiny.pbc
+    DEPENDS clike ${CMAKE_SOURCE_DIR}/bin/tiny.clike
+    COMMENT "Building tiny.pbc"
+    VERBATIM)
+add_custom_target(tiny_pbc ALL DEPENDS ${CMAKE_BINARY_DIR}/bin/tiny.pbc)
 endif()
 
 if(NOT PSCAL_PLATFORM_IOS)
@@ -1939,6 +1948,8 @@ if(NOT PSCAL_PLATFORM_IOS)
     endforeach()
     install(DIRECTORY Docs/
             DESTINATION "${_pscal_runtime_root}/docs")
+    install(FILES ${CMAKE_BINARY_DIR}/bin/tiny.pbc
+            DESTINATION "${_pscal_runtime_root}/bin")
     # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
     install(PROGRAMS bin/tiny
             DESTINATION "${_pscal_runtime_root}/bin"
