@@ -104,6 +104,40 @@ str resolveTempDir() {
   return "/tmp";
 }
 
+int hasIndex(str dir) {
+  if (dir == "") return 0;
+  str idx = dir + "/index.html";
+  return fileexists(idx);
+}
+
+// Resolve a docroot for iOS/iPadOS: prefer app workspace /var/htdocs, then host /var/htdocs, then temp.
+str resolveDocRoot() {
+  // Override hook if explicitly provided.
+  str override = fsNormalizePath(getenv("PSCALI_DOC_ROOT"));
+  if (override != "") {
+    str c = ensureDirCandidate(override);
+    if (c != "") return c;
+  }
+
+  // App sandbox: ${PSCALI_WORKSPACE_ROOT}/var/htdocs
+  str workspace = fsNormalizePath(getenv("PSCALI_WORKSPACE_ROOT"));
+  if (workspace == "") workspace = fsNormalizePath(getenv("PSCAL_WORKSPACE_ROOT"));
+  if (workspace != "") {
+    str c = ensureDirCandidate(fsPathJoin(workspace, "var/htdocs"));
+    if (c != "") return c;
+  }
+
+  // Legacy host path
+  str c = ensureDirCandidate("/var/htdocs");
+  if (c != "") return c;
+
+  // Temp-based fallback
+  int pid = getpid();
+  str pidStr = inttostr(pid);
+  str base = ensureTrailingSlash(resolveTempDir());
+  return ensureTrailingSlash(base) + "htdocs." + pidStr;
+}
+
 str ensureTrailingSlash(str path) {
   int len = length(path);
   if (len == 0) return "/tmp/";
@@ -302,33 +336,16 @@ void serveConn(int c) {
   // For logging: show what we served (listing, index, or resolved relative path)
   str logDetail = "";
   if (path == "/") {
-    // Prefer index.html if present; otherwise return listing
-    if (fileexists(IndexPath)) {
-      str rel = "index.html";
-      str fullPath = IndexPath;
-      mstream ms = mstreamcreate();
-      int ok = mstreamloadfromfile(&ms, fullPath);
-      if (ok) {
-        respBody = mstreambuffer(ms);
-        code = 200;
-        ctype = "text/html";
-        logDetail = "index.html";
-        mstreamfree(&ms);
-      } else {
-        // Fallback to listing if read failed for any reason
-        mstreamfree(&ms);
-        str listing = "<html><body><h1>Index of /</h1><ul>";
-        str name = findfirst(RootDir);
-        while (name != "") {
-          listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
-          name = findnext();
-        }
-        listing = listing + "</ul></body></html>";
-        respBody = listing;
-        code = 200;
-        ctype = "text/html";
-        logDetail = "(listing)";
-      }
+    // Try to serve index.html directly; fall back to listing if read fails.
+    str fullPath = IndexPath;
+    mstream ms = mstreamcreate();
+    int ok = mstreamloadfromfile(&ms, fullPath);
+    if (ok) {
+      respBody = mstreambuffer(ms);
+      code = 200;
+      ctype = "text/html";
+      logDetail = "index.html";
+      mstreamfree(&ms);
     } else {
       // Directory listing of RootDir
       str listing = "<html><body><h1>Index of /</h1><ul>";
@@ -342,27 +359,20 @@ void serveConn(int c) {
       code = 200;
       ctype = "text/html";
       logDetail = "(listing)";
+      mstreamfree(&ms);
     }
   } else if (path == "/index.html") {
-    // If a real index.html exists on disk, serve it; otherwise use the default Body
-    if (fileexists(IndexPath)) {
-      mstream ms = mstreamcreate();
-      int ok = mstreamloadfromfile(&ms, IndexPath);
-      if (ok) {
-        respBody = mstreambuffer(ms);
-        code = 200;
-        ctype = "text/html";
-        logDetail = "index.html";
-        mstreamfree(&ms);
-      } else {
-        // Fallback to in-memory Body if disk read failed unexpectedly
-        mstreamfree(&ms);
-        respBody = Body;
-        code = 200;
-        ctype = "text/html";
-        logDetail = "index.html (fallback)";
-      }
+    // Attempt to serve on-disk index.html; fall back to default Body.
+    mstream ms = mstreamcreate();
+    int ok = mstreamloadfromfile(&ms, IndexPath);
+    if (ok) {
+      respBody = mstreambuffer(ms);
+      code = 200;
+      ctype = "text/html";
+      logDetail = "index.html";
+      mstreamfree(&ms);
     } else {
+      mstreamfree(&ms);
       respBody = Body;
       code = 200;
       ctype = "text/html";
@@ -381,25 +391,16 @@ void serveConn(int c) {
       printf("resolve: rel=%s full=%s exists=%d
 ", rel, fullPath, fileexists(fullPath));
     }
-    if (fileexists(fullPath)) {
-      mstream ms = mstreamcreate();
-      int ok = mstreamloadfromfile(&ms, fullPath);
-      if (ok) {
-        respBody = mstreambuffer(ms);
-        code = 200;
-        ctype = contentType(rel);
-        mstreamfree(&ms);
-        logDetail = rel;
-      } else {
-        // Read failed even though file exists; return 500
-        mstreamfree(&ms);
-        respBody = "<html><body>Internal Server Error</body></html>";
-        code = 500;
-        ctype = "text/html";
-        logDetail = rel;
-      }
+    mstream ms = mstreamcreate();
+    int ok = mstreamloadfromfile(&ms, fullPath);
+    if (ok) {
+      respBody = mstreambuffer(ms);
+      code = 200;
+      ctype = contentType(rel);
+      mstreamfree(&ms);
+      logDetail = rel;
     } else {
-      // Not found; do not attempt to load to avoid VM runtimeError
+      mstreamfree(&ms);
       respBody = "<html><body>Not Found</body></html>";
       code = 404;
       ctype = "text/html";
@@ -643,14 +644,8 @@ str fsDefaultInstallRoot() {
 }
 
 void initFiles() {
-  /* Prefer a fixed docroot (/var/htdocs); fall back to per-run temp dir. */
-  str root = ensureDirCandidate("/var/htdocs");
-  if (root == "") {
-    int pid = getpid();
-    str pidStr = inttostr(pid);
-    str base = ensureTrailingSlash(resolveTempDir());
-    root = ensureTrailingSlash(base) + "htdocs." + pidStr;
-  }
+  /* Prefer sandbox-aware docroot; fall back to legacy /var/htdocs or temp. */
+  str root = resolveDocRoot();
   RootDir = root;
   int preexisting = isDirectory(RootDir);
   IndexPath = RootDir + "/index.html";
