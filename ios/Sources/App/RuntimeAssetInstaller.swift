@@ -47,24 +47,25 @@ private enum RuntimePaths {
         documentsDirectory.appendingPathComponent(".etc.version", isDirectory: false)
     }
 
+    // Workspace root == documentsDirectory; keep bin/src there (not under home/)
     static var workspaceBinDirectory: URL {
-        homeDirectory.appendingPathComponent("bin", isDirectory: true)
+        documentsDirectory.appendingPathComponent("bin", isDirectory: true)
     }
 
     static var workspaceBinVersionMarker: URL {
-        homeDirectory.appendingPathComponent(".bin.version", isDirectory: false)
+        documentsDirectory.appendingPathComponent(".bin.version", isDirectory: false)
     }
 
     static var workspaceSrcCompilerDirectory: URL {
-        homeDirectory.appendingPathComponent("src/compiler", isDirectory: true)
+        documentsDirectory.appendingPathComponent("src/compiler", isDirectory: true)
     }
 
     static var workspaceSrcCoreDirectory: URL {
-        homeDirectory.appendingPathComponent("src/core", isDirectory: true)
+        documentsDirectory.appendingPathComponent("src/core", isDirectory: true)
     }
 
     static var workspaceSrcVersionMarker: URL {
-        homeDirectory.appendingPathComponent(".src.version", isDirectory: false)
+        documentsDirectory.appendingPathComponent(".src.version", isDirectory: false)
     }
 
     static var legacySysfilesDirectory: URL {
@@ -357,6 +358,7 @@ final class RuntimeAssetInstaller {
                     try fileManager.removeItem(at: workspaceBin)
                 }
                 try ensureWorkspaceDirectoriesExist()
+                migrateLegacyBinIfNeeded()
                 if fileManager.fileExists(atPath: bundledBin.path) {
                     try fileManager.copyItem(at: bundledBin, to: workspaceBin)
                 } else {
@@ -391,6 +393,7 @@ final class RuntimeAssetInstaller {
                     try fileManager.removeItem(at: workspaceCore)
                 }
                 try ensureWorkspaceDirectoriesExist()
+                migrateLegacySrcIfNeeded()
                 try fileManager.createDirectory(at: workspaceCompiler, withIntermediateDirectories: true)
                 try fileManager.createDirectory(at: workspaceCore, withIntermediateDirectories: true)
 
@@ -869,6 +872,38 @@ final class RuntimeAssetInstaller {
             NSLog("PSCAL iOS: migrated legacy sysfiles hierarchy into %@", RuntimePaths.documentsDirectory.path)
         } catch {
             NSLog("PSCAL iOS: failed to migrate legacy sysfiles content: %@", error.localizedDescription)
+        }
+    }
+
+    // Migrate old locations (home/bin, home/src/*) into workspace root.
+    private func migrateLegacyBinIfNeeded() {
+        let oldBin = RuntimePaths.homeDirectory.appendingPathComponent("bin", isDirectory: true)
+        guard fileManager.fileExists(atPath: oldBin.path) else { return }
+        let newBin = RuntimePaths.workspaceBinDirectory
+        if fileManager.fileExists(atPath: newBin.path) { return }
+        do {
+            try fileManager.moveItem(at: oldBin, to: newBin)
+        } catch {
+            NSLog("PSCAL iOS: failed to migrate legacy bin: %@", error.localizedDescription)
+        }
+    }
+
+    private func migrateLegacySrcIfNeeded() {
+        let oldCompiler = RuntimePaths.homeDirectory.appendingPathComponent("src/compiler", isDirectory: true)
+        let oldCore = RuntimePaths.homeDirectory.appendingPathComponent("src/core", isDirectory: true)
+        let newCompiler = RuntimePaths.workspaceSrcCompilerDirectory
+        let newCore = RuntimePaths.workspaceSrcCoreDirectory
+        do {
+            if fileManager.fileExists(atPath: oldCompiler.path) && !fileManager.fileExists(atPath: newCompiler.path) {
+                try fileManager.createDirectory(at: newCompiler.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.moveItem(at: oldCompiler, to: newCompiler)
+            }
+            if fileManager.fileExists(atPath: oldCore.path) && !fileManager.fileExists(atPath: newCore.path)) {
+                try fileManager.createDirectory(at: newCore.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.moveItem(at: oldCore, to: newCore)
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to migrate legacy src: %@", error.localizedDescription)
         }
     }
 
