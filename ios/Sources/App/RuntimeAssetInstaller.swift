@@ -355,20 +355,25 @@ final class RuntimeAssetInstaller {
         if needsWorkspaceBinRefresh() {
             do {
                 if fileManager.fileExists(atPath: workspaceBin.path) || isSymbolicLink(at: workspaceBin) {
+                    NSLog("PSCAL iOS: removing stale bin at %@", workspaceBin.path)
                     try fileManager.removeItem(at: workspaceBin)
                 }
                 try ensureWorkspaceDirectoriesExist()
                 migrateLegacyBinIfNeeded()
+                try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
                 if fileManager.fileExists(atPath: bundledBin.path) {
+                    NSLog("PSCAL iOS: copying bundled bin from %@", bundledBin.path)
                     try fileManager.copyItem(at: bundledBin, to: workspaceBin)
                 } else {
-                    try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
+                    NSLog("PSCAL iOS: bundled bin missing; writing embedded tiny")
                     let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
                     try embeddedTinySource.write(to: tinyPath, atomically: true, encoding: .utf8)
                 }
                 let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
                 if fileManager.fileExists(atPath: tinyPath.path) {
                     try markExecutable(at: tinyPath)
+                } else {
+                    NSLog("PSCAL iOS: tiny not found after install at %@", tinyPath.path)
                 }
                 try writeWorkspaceBinVersionMarker()
                 NSLog("PSCAL iOS: installed bin assets to %@", workspaceBin.path)
@@ -387,9 +392,11 @@ final class RuntimeAssetInstaller {
         if needsWorkspaceSrcRefresh() {
             do {
                 if fileManager.fileExists(atPath: workspaceCompiler.path) || isSymbolicLink(at: workspaceCompiler) {
+                    NSLog("PSCAL iOS: removing stale src/compiler at %@", workspaceCompiler.path)
                     try fileManager.removeItem(at: workspaceCompiler)
                 }
                 if fileManager.fileExists(atPath: workspaceCore.path) || isSymbolicLink(at: workspaceCore) {
+                    NSLog("PSCAL iOS: removing stale src/core at %@", workspaceCore.path)
                     try fileManager.removeItem(at: workspaceCore)
                 }
                 try ensureWorkspaceDirectoriesExist()
@@ -398,15 +405,19 @@ final class RuntimeAssetInstaller {
                 try fileManager.createDirectory(at: workspaceCore, withIntermediateDirectories: true)
 
                 if fileManager.fileExists(atPath: bundledCompiler.path) {
+                    NSLog("PSCAL iOS: copying bundled bytecode.h from %@", bundledCompiler.path)
                     try fileManager.copyItem(at: bundledCompiler.appendingPathComponent("bytecode.h"),
                                              to: workspaceCompiler.appendingPathComponent("bytecode.h"))
                 } else {
+                    NSLog("PSCAL iOS: bundled bytecode.h missing; writing embedded header")
                     try embeddedBytecodeHeader.write(to: workspaceCompiler.appendingPathComponent("bytecode.h"), atomically: true, encoding: .utf8)
                 }
                 if fileManager.fileExists(atPath: bundledCore.path) {
+                    NSLog("PSCAL iOS: copying bundled version.h from %@", bundledCore.path)
                     try fileManager.copyItem(at: bundledCore.appendingPathComponent("version.h"),
                                              to: workspaceCore.appendingPathComponent("version.h"))
                 } else {
+                    NSLog("PSCAL iOS: bundled version.h missing; writing embedded header")
                     try embeddedVersionHeader.write(to: workspaceCore.appendingPathComponent("version.h"), atomically: true, encoding: .utf8)
                 }
 
@@ -833,10 +844,7 @@ final class RuntimeAssetInstaller {
         try ensureDocumentsDirectoryExists()
         let requiredDirectories = [
             RuntimePaths.homeDirectory,
-            RuntimePaths.tmpDirectory,
-            RuntimePaths.workspaceBinDirectory,
-            RuntimePaths.workspaceSrcCompilerDirectory,
-            RuntimePaths.workspaceSrcCoreDirectory
+            RuntimePaths.tmpDirectory
         ]
         for directory in requiredDirectories {
             if !fileManager.fileExists(atPath: directory.path) {
