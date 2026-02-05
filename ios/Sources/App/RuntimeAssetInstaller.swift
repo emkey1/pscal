@@ -378,21 +378,17 @@ final class RuntimeAssetInstaller {
                     copied = true
                 }
 
-                if !copied {
-                    NSLog("PSCAL iOS: bundled bin missing; writing embedded tiny wrapper and source")
-                    try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
-                    let tinyWrapper = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
-                    let tinySource = workspaceBin.appendingPathComponent("tiny.clike", isDirectory: false)
-                    try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
-                    try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
-                }
+                                // Always rewrite wrapper/source to ensure correctness
+                try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
+                let tinyWrapper = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
+                let tinySource = workspaceBin.appendingPathComponent("tiny.clike", isDirectory: false)
+                try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
+                try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
 
-                // Ensure wrapper is executable
-                let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
-                if fileManager.fileExists(atPath: tinyPath.path) {
-                    try markExecutable(at: tinyPath)
+                if fileManager.fileExists(atPath: tinyWrapper.path) {
+                    try markExecutable(at: tinyWrapper)
                 } else {
-                    NSLog("PSCAL iOS: tiny wrapper not found after install at %@", tinyPath.path)
+                    NSLog("PSCAL iOS: tiny wrapper not found after install at %@", tinyWrapper.path)
                 }
                 try writeWorkspaceBinVersionMarker()
                 NSLog("PSCAL iOS: installed bin assets to %@", workspaceBin.path)
