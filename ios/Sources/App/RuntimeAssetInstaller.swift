@@ -898,7 +898,7 @@ final class RuntimeAssetInstaller {
                 try fileManager.createDirectory(at: newCompiler.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try fileManager.moveItem(at: oldCompiler, to: newCompiler)
             }
-            if fileManager.fileExists(atPath: oldCore.path) && !fileManager.fileExists(atPath: newCore.path)) {
+            if fileManager.fileExists(atPath: oldCore.path) && !fileManager.fileExists(atPath: newCore.path) {
                 try fileManager.createDirectory(at: newCore.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try fileManager.moveItem(at: oldCore, to: newCore)
             }
