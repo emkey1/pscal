@@ -46,6 +46,11 @@ int GEnqueued = 0;
 int GDropped = 0;
 int GServed = 0;
 
+// Local stub; actual builtin may be unavailable in this clike build.
+str socketpeeraddr(int s) {
+  return "";
+}
+
 // Helper that invokes the VM builtin and provides a safe fallback.
 str remoteAddr(int s) {
   str r = socketpeeraddr(s);
@@ -261,6 +266,14 @@ void serveConn(int c) {
   str reqText = mstreambuffer(req);
   // Peer address from builtin; fall back to placeholder if unavailable.
   str remote = remoteAddr(c);
+  if (LogEnabled) {
+    fprintf(LogFile, "request: from=%s raw_len=%d
+", remote, length(reqText));
+    fflush(LogFile);
+  } else {
+    printf("request: from=%s raw_len=%d
+", remote, length(reqText));
+  }
   // Parse request line robustly: take first line then split by spaces
   int ln = pos(reqText, "\r\n");
   if (ln == 0) ln = pos(reqText, "\n");
@@ -360,6 +373,14 @@ void serveConn(int c) {
     str rel = (copy(path, 1, 1) == "/") ? copy(path, 2, length(path) - 1) : path;
     rel = normalizePath(rel);
     str fullPath = RootDir + "/" + rel;
+    if (LogEnabled) {
+      fprintf(LogFile, "resolve: rel=%s full=%s exists=%d
+", rel, fullPath, fileexists(fullPath));
+      fflush(LogFile);
+    } else {
+      printf("resolve: rel=%s full=%s exists=%d
+", rel, fullPath, fileexists(fullPath));
+    }
     if (fileexists(fullPath)) {
       mstream ms = mstreamcreate();
       int ok = mstreamloadfromfile(&ms, fullPath);
@@ -634,6 +655,16 @@ void initFiles() {
   int preexisting = isDirectory(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
+  if (LogEnabled) {
+    fprintf(LogFile, "initFiles: RootDir=%s preexisting=%d indexExists=%d
+",
+            RootDir, preexisting, fileexists(IndexPath));
+    fflush(LogFile);
+  } else {
+    printf("initFiles: RootDir=%s preexisting=%d indexExists=%d
+",
+           RootDir, preexisting, fileexists(IndexPath));
+  }
 
   // If the directory already exists (populated or not), avoid copying bundle assets.
   // This prevents iOS/iPadOS runs from failing when RuntimeAssetInstaller or a prior
