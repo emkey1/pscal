@@ -25,6 +25,14 @@ str readFile(str path) {
   return buf;
 }
 
+// Resolve repo root: prefer PSCALI_WORKSPACE_ROOT, then dirname(dirname(script))
+str resolveRoot() {
+  str root = getenv("PSCALI_WORKSPACE_ROOT");
+  if (root == "") root = getenv("PSCAL_WORKSPACE_ROOT");
+  if (root != "") return root;
+  return dirname(dirname(paramstr(0)));
+}
+
 // --------- Opcode loader ---------
 const int MAX_OPS = 512;
 str opNames[MAX_OPS];
@@ -32,6 +40,10 @@ int opCount = 0;
 
 void loadOpcodes(str root) {
   str header = root + "/src/compiler/bytecode.h";
+  if (!fileexists(header)) {
+    printf("tiny: bytecode.h missing at %s\n", header);
+    halt(1);
+  }
   str buf = readFile(header);
   int inEnum = 0;
   int i = 1; int len = length(buf);
@@ -268,7 +280,12 @@ void compileProgram(int rootNode){
 
 // --------- VM version ---------
 int vmVersion(str root){
-  str buf = readFile(root + "/src/core/version.h");
+  str verPath = root + "/src/core/version.h";
+  if (!fileexists(verPath)) {
+    printf("tiny: version.h missing at %s\n", verPath);
+    halt(1);
+  }
+  str buf = readFile(verPath);
   int i = 1;
   int n = length(buf);
   while (i <= n) {
@@ -341,13 +358,9 @@ int main(){
   if (paramcount() < 2) { printf("Usage: clike bin/tiny <source.tiny> <out.pbc>\n"); return 1; }
   str srcPath = paramstr(1);
   str outPath = paramstr(2);
-  // repo root: bin/tiny -> bin -> root
-  str root = dirname(dirname(paramstr(0)));
-  if (root == "/" || root == "") {
-    root = getenv("PSCALI_WORKSPACE_ROOT");
-    if (root == "") root = getenv("PSCAL_WORKSPACE_ROOT");
-    if (root == "") root = ".";
-  }
+  str root = resolveRoot();
+  printf("tiny: script=%s root=%s\n", paramstr(0), root);
+  if (!fileexists(srcPath)) { printf("tiny: source %s not found\n", srcPath); return 1; }
   loadOpcodes(root);
   int version = vmVersion(root);
   str source = readFile(srcPath);
