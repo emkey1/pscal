@@ -785,7 +785,7 @@ int main() {
   }
   // Bind and listen; current API binds all interfaces (INADDR_ANY)
   // Bind explicitly to localhost by default
-  int bindrc = socketbindaddr(srv, "%s", Port, BindAddr);
+  int bindrc = socketbindaddr(srv, BindAddr, Port);
   if (bindrc != 0) {
     if (LogEnabled) { fprintf(LogFile, "socketbind failed: %d\n", socketlasterror()); fflush(LogFile); }
     else { printf("socketbind failed: %d\n", socketlasterror()); }
