@@ -364,37 +364,18 @@ final class RuntimeAssetInstaller {
 
                 var copied = false
                 if fileManager.fileExists(atPath: bundledBin.path) {
-                    NSLog("PSCAL iOS: copying bundled bin from %@", bundledBin.path)
-                    do {
-                        try fileManager.copyItem(at: bundledBin, to: workspaceBin)
-                        copied = true
-                    } catch {
-                        NSLog("PSCAL iOS: copyItem bin failed (%@); retrying after remove", error.localizedDescription)
-                        if fileManager.fileExists(atPath: workspaceBin.path) {
-                            try fileManager.removeItem(at: workspaceBin)
+                    NSLog("PSCAL iOS: copying bundled bin contents from %@", bundledBin.path)
+                    try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
+                    let items = try fileManager.contentsOfDirectory(atPath: bundledBin.path)
+                    for item in items {
+                        let src = bundledBin.appendingPathComponent(item)
+                        let dst = workspaceBin.appendingPathComponent(item)
+                        if fileManager.fileExists(atPath: dst.path) || isSymbolicLink(at: dst) {
+                            try fileManager.removeItem(at: dst)
                         }
-                        do {
-                            try fileManager.copyItem(at: bundledBin, to: workspaceBin)
-                            copied = true
-                        } catch {
-                            NSLog("PSCAL iOS: copyItem bin still failing (%@); copying contents instead", error.localizedDescription)
-                        }
+                        try fileManager.copyItem(at: src, to: dst)
                     }
-                    if !copied {
-                        // Retry by copying contents into an empty dir
-                        try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
-                        // Retry by copying contents into an empty dir
-                        let items = try fileManager.contentsOfDirectory(atPath: bundledBin.path)
-                        for item in items {
-                            let src = bundledBin.appendingPathComponent(item)
-                            let dst = workspaceBin.appendingPathComponent(item)
-                            if fileManager.fileExists(atPath: dst.path) {
-                                try fileManager.removeItem(at: dst)
-                            }
-                            try fileManager.copyItem(at: src, to: dst)
-                        }
-                        copied = true
-                    }
+                    copied = true
                 }
 
                 if !copied {
