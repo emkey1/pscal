@@ -369,9 +369,21 @@ final class RuntimeAssetInstaller {
                         try fileManager.copyItem(at: bundledBin, to: workspaceBin)
                         copied = true
                     } catch {
-                        NSLog("PSCAL iOS: copyItem bin failed (%@); retrying by copying contents", error.localizedDescription)
+                        NSLog("PSCAL iOS: copyItem bin failed (%@); retrying after remove", error.localizedDescription)
+                        if fileManager.fileExists(atPath: workspaceBin.path) {
+                            try fileManager.removeItem(at: workspaceBin)
+                        }
+                        do {
+                            try fileManager.copyItem(at: bundledBin, to: workspaceBin)
+                            copied = true
+                        } catch {
+                            NSLog("PSCAL iOS: copyItem bin still failing (%@); copying contents instead", error.localizedDescription)
+                        }
+                    }
+                    if !copied {
                         // Retry by copying contents into an empty dir
                         try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
+                        // Retry by copying contents into an empty dir
                         let items = try fileManager.contentsOfDirectory(atPath: bundledBin.path)
                         for item in items {
                             let src = bundledBin.appendingPathComponent(item)
