@@ -54,8 +54,16 @@ endif()
 
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
     find_package(OpenSSL REQUIRED)
-    set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
-    set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
+    # CMake's FindOpenSSL should provide imported targets, but some environments
+    # (notably newer Homebrew/OpenSSL combos) occasionally omit them. Fall back
+    # to raw library paths when the targets are missing so host builds keep working.
+    if(TARGET OpenSSL::SSL AND TARGET OpenSSL::Crypto)
+        set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
+        set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
+    else()
+        set(PSCAL_OPENSSL_SSL_TARGET ${OPENSSL_SSL_LIBRARY})
+        set(PSCAL_OPENSSL_CRYPTO_TARGET ${OPENSSL_CRYPTO_LIBRARY})
+    endif()
 endif()
 if(PSCAL_PLATFORM_IOS)
     add_compile_definitions(PSCAL_TARGET_IOS __progname=pscal_progname __progname_full=pscal_progname_full)
