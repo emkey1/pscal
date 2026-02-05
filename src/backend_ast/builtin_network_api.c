@@ -2310,6 +2310,42 @@ Value vmBuiltinSocketAccept(VM* vm, int arg_count, Value* args) {
     return makeInt(r);
 }
 
+Value vmBuiltinSocketPeerAddr(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !IS_INTLIKE(args[0])) {
+        runtimeError(vm, "socketPeerAddr expects (socket).");
+        return makeNil();
+    }
+    int s = (int)AS_INTEGER(args[0]);
+    struct sockaddr_storage addr;
+    socklen_t len = sizeof(addr);
+    int rc = getpeername(s, (struct sockaddr *)&addr, &len);
+    if (rc != 0) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeNil();
+    }
+    char host[INET6_ADDRSTRLEN] = {0};
+    void *src = NULL;
+    if (addr.ss_family == AF_INET) {
+        src = &((struct sockaddr_in *)&addr)->sin_addr;
+    } else if (addr.ss_family == AF_INET6) {
+        src = &((struct sockaddr_in6 *)&addr)->sin6_addr;
+    }
+    if (!src || !inet_ntop(addr.ss_family, src, host, sizeof(host))) {
+#ifdef _WIN32
+        setSocketError(WSAGetLastError());
+#else
+        setSocketError(errno);
+#endif
+        return makeNil();
+    }
+    g_socket_last_error = 0;
+    return makeString(host);
+}
+
 Value vmBuiltinSocketSend(VM* vm, int arg_count, Value* args) {
     if (arg_count != 2 || !IS_INTLIKE(args[0])) {
         runtimeError(vm, "socketSend expects (socket, data).");

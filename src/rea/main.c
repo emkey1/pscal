@@ -282,6 +282,10 @@ static void collectUsesClauses(AST* node, List* out) {
 }
 
 int rea_main(int argc, char **argv) {
+    /* Always start from a clean slate in case a prior in-process run aborted
+     * early (e.g., exit()/halt during startup). */
+    reaInvalidateGlobalState();
+
     /* Skip process-wide fd redirection on iOS; background jobs share descriptors with the shell. */
 #if !defined(PSCAL_TARGET_IOS)
     const char *stdout_path = getenv("PSCALI_BG_STDOUT");

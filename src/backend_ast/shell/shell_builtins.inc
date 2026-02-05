@@ -3280,10 +3280,31 @@ typedef int (*ShellToolEntryFn)(int argc, char *argv[]);
 
 extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak));
 
+typedef struct {
+    FrontendKind kind;
+    bool *reset_flag; /* optional */
+} ShellFrontendCleanupCtx;
+
+static void shellFrontendCleanup(void *arg) {
+    ShellFrontendCleanupCtx *ctx = (ShellFrontendCleanupCtx *)arg;
+    if (!ctx) {
+        return;
+    }
+    if (ctx->reset_flag && *ctx->reset_flag) {
+        return;
+    }
+    shellInvalidateFrontendState(ctx->kind);
+    if (ctx->reset_flag) {
+        *ctx->reset_flag = true;
+    }
+}
+
 static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
                                          int argc,
                                          char **argv,
-                                         bool dbg) {
+                                         bool dbg,
+                                         FrontendKind target_kind,
+                                         bool *out_frontend_reset) {
     ShellSignalBackup sig_backup;
     ShellStdFdBackup fd_backup;
     VProcSessionStdio *prev_session = vprocSessionStdioCurrent();
@@ -3323,7 +3344,18 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     if (shellToolTcgetattr(STDIN_FILENO, &stdin_termios)) {
         stdin_termios_valid = true;
     }
-    int status = entry(argc, argv);
+    int status = 0;
+    bool frontend_reset = false;
+    ShellFrontendCleanupCtx cleanup_ctx = {
+        .kind = target_kind,
+        .reset_flag = &frontend_reset,
+    };
+    pthread_cleanup_push(shellFrontendCleanup, &cleanup_ctx);
+    status = entry(argc, argv);
+    pthread_cleanup_pop(1); /* always run cleanup, even on pthread_exit */
+    if (out_frontend_reset) {
+        *out_frontend_reset = frontend_reset;
+    }
     shellFlushStandardStreams();
     if (prev_session) {
         vprocSessionStdioActivate(prev_session);
@@ -3386,6 +3418,7 @@ typedef struct {
     char **argv;
     bool argv_owned;
     FrontendKind frontend_kind;
+    bool frontend_reset_done;
     VProcSessionStdio *session_stdio;
     VProc *session_vproc;
     PSCALRuntimeContext *runtime_ctx;
@@ -3415,6 +3448,11 @@ static void *shellToolThreadMain(void *arg) {
         }
         return NULL;
     }
+    ShellFrontendCleanupCtx cleanup_ctx = {
+        .kind = ctx->frontend_kind,
+        .reset_flag = &ctx->frontend_reset_done,
+    };
+    pthread_cleanup_push(shellFrontendCleanup, &cleanup_ctx);
     bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     PSCALRuntimeContext *prev_runtime_ctx = NULL;
     if (PSCALRuntimeGetCurrentRuntimeContext) {
@@ -3532,6 +3570,7 @@ static void *shellToolThreadMain(void *arg) {
     if (dbg) {
         fprintf(stderr, "[tool-thread] worker done status=%d\n", ctx->status);
     }
+    pthread_cleanup_pop(1);
     return NULL;
 }
 
@@ -3551,7 +3590,8 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
                                 char **argv,
                                 FrontendKind frontend_kind,
                                 bool use_shell_context,
-                                bool background) {
+                                bool background,
+                                bool *out_frontend_reset) {
     if (!entry) {
         return 127;
     }
@@ -3704,6 +3744,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
 
     pthread_join(waiter_thread, NULL);
     pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+    if (out_frontend_reset) {
+        *out_frontend_reset = context.frontend_reset_done;
+    }
     return context.status;
 }
 
@@ -3868,19 +3911,30 @@ static Value shellRunToolBuiltin(VM *vm,
                 }
                 /* Already running inside a background worker: execute inline so redirections
                  * remain active for this thread. */
-                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg);
+                bool frontend_reset = false;
+                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg, target_kind, &frontend_reset);
                 fprintf(stderr, "[tool-inline] %s exit=%d\n", tool_name, status);
             } else if (background || target_kind == FRONTEND_KIND_SHELL) {
                 fprintf(stderr, "[tool-thread] %s argc=%d bg=%d\n", tool_name, argc, (int)background);
-                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background);
+                bool frontend_reset = false;
+                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background, &frontend_reset);
                 fprintf(stderr, "[tool-thread] %s dispatched status=%d\n", tool_name, status);
+                if (!frontend_reset) {
+                    shellInvalidateFrontendState(target_kind);
+                }
             } else {
                 /* Run non-shell frontends inline on iOS to avoid repeated
                  * cross-thread state swaps that can leave symbol tables in an
                  * inconsistent state. */
-                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg);
+                bool frontend_reset = false;
+                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg, target_kind, &frontend_reset);
+                (void)frontend_reset; /* always true for inline */
             }
-            shellInvalidateFrontendState(target_kind);
+            /* For shell frontend, always reset in the caller because the shell
+             * runtime structures are persistent. */
+            if (target_kind == FRONTEND_KIND_SHELL) {
+                shellInvalidateFrontendState(target_kind);
+            }
             /* The frontend reset tears down its own symbol tables; reattach the saved
              * shell tables so pascalPopGlobalState does not attempt to free
              * already-destroyed structures. */
@@ -3895,7 +3949,7 @@ static Value shellRunToolBuiltin(VM *vm,
             gShellRuntime.last_status = status;
 #else
             if (needs_shell_ctx || background) {
-                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background);
+                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, background, NULL);
             } else {
                 status = entry(argc, argv);
             }

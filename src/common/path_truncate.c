@@ -721,6 +721,35 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
         source_path = normalized;
     }
 
+    /* Map /etc and /private/etc to the sandbox etc root when provided. This
+     * keeps dictionary and passwd/group lookups inside the app container even
+     * when PATH_TRUNCATE would otherwise prepend the container root directly. */
+    const char *etc_root = getenv("PSCALI_ETC_ROOT");
+    if (etc_root && etc_root[0] == '/') {
+        const char *etc_suffix = NULL;
+        if (strncmp(source_path, "/etc", 4) == 0 &&
+            (source_path[4] == '/' || source_path[4] == '\0')) {
+            etc_suffix = source_path + 4; /* keep leading slash after /etc */
+        } else if (strncmp(source_path, "/private/etc", 12) == 0 &&
+                   (source_path[12] == '/' || source_path[12] == '\0')) {
+            etc_suffix = source_path + 12;
+        }
+        if (etc_suffix) {
+            size_t root_len = strlen(etc_root);
+            size_t suffix_len = strlen(etc_suffix);
+            if (root_len + suffix_len + 1 <= out_size) {
+                memcpy(out, etc_root, root_len);
+                memcpy(out + root_len, etc_suffix, suffix_len);
+                out[root_len + suffix_len] = '\0';
+                pathTruncateUnlock();
+                return true;
+            }
+            errno = ENAMETOOLONG;
+            pathTruncateUnlock();
+            return false;
+        }
+    }
+
     size_t source_len = strlen(source_path);
     const char *matched_prefix = NULL;
     size_t matched_len = 0;

@@ -319,6 +319,10 @@ final class RuntimeAssetInstaller {
 
         ensureEtcFileNamed("passwd", bundleRoot: bundleRoot)
         ensureEtcFileNamed("group", bundleRoot: bundleRoot)
+        // Ensure word lists are always present even if workspace/etc already exists.
+        ensureEtcFileNamed("words", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("words.short", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("words.many", bundleRoot: bundleRoot)
         ensureEtcSubdirectoryNamed("ssh", bundleRoot: bundleRoot)
     }
 

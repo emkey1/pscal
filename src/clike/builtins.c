@@ -61,6 +61,7 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("getenv", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("getdate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("gettime", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("socketpeeraddr", AST_FUNCTION_DECL, NULL);
 
     /* Math helpers */
     registerBuiltinFunction("arctan", AST_FUNCTION_DECL, NULL);

@@ -35,6 +35,7 @@
 #include "core/preproc.h"
 #include "core/build_info.h"
 #include "common/frontend_kind.h"
+#include "common/pascal_state.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
@@ -474,6 +475,9 @@ static void flushCapturedStderrAtExit(void) {
     } while (0)
 
 int PSCAL_PASCAL_ENTRY_SYMBOL(int argc, char *argv[]) {
+    /* Reset global Pascal state so repeated in-process runs start clean. */
+    pascalInvalidateGlobalState();
+
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
     const char* initTerm = getenv("PSCAL_INIT_TERM");
     if (initTerm && *initTerm && *initTerm != '0') vmInitTerminalState();

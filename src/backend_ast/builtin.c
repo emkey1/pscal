@@ -1461,6 +1461,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"gldepthmask", NULL},
     {"gldepthfunc", NULL},
     {"fflush", vmBuiltinFflush},
+    {"socketpeeraddr", vmBuiltinSocketPeerAddr},
     {"to be filled", NULL}
 };
 
@@ -2906,6 +2907,7 @@ static volatile sig_atomic_t g_vm_sigint_seen = 0;
 static int g_vm_sigint_pipe[2] = {-1, -1};
 static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
 static atomic_bool g_vm_interrupt_broadcast = false;
+static void vmDrainSigintFd(int fd, bool is_host);
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -3274,6 +3276,47 @@ static void init_pipe_once(void) {
     }
 }
 
+static void vmDrainSigintFd(int fd, bool is_host) {
+    if (fd < 0) {
+        return;
+    }
+    // Force non-blocking to avoid wedging on drained host pipes.
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0 && !(flags & O_NONBLOCK)) {
+        (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    while (true) {
+        int pending = 0;
+        if (ioctl(fd, FIONREAD, &pending) != 0) {
+            pending = 0;
+        }
+        char drain[64];
+        size_t want = (pending > (int)sizeof(drain)) ? sizeof(drain)
+                                                     : (pending > 0 ? (size_t)pending : sizeof(drain));
+#if defined(PSCAL_TARGET_IOS)
+        ssize_t n = is_host ? vprocHostRead(fd, drain, want)
+                            : read(fd, drain, want);
+#else
+        (void)is_host;
+        ssize_t n = read(fd, drain, want);
+#endif
+        if (n > 0) {
+            continue;
+        }
+        if (n == 0) {
+            break; // pipe closed
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            break;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+}
+
 // Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
 void pscalRuntimeRequestSigint(void) {
 #if defined(PSCAL_TARGET_IOS)
@@ -3388,14 +3431,13 @@ bool pscalRuntimeConsumeSigint(void) {
     bool seen = g_vm_sigint_seen != 0;
     g_vm_sigint_seen = 0;
     if (g_vm_sigint_pipe[0] >= 0) {
-        char drain[8];
+        vmDrainSigintFd(g_vm_sigint_pipe[0],
 #if defined(PSCAL_TARGET_IOS)
-        while (vprocHostRead(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
-        }
+                        true
 #else
-        while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
-        }
+                        false
 #endif
+        );
     }
     return seen;
 }
@@ -3788,20 +3830,13 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #else
             if (sigint_fd >= 0 && FD_ISSET(sigint_fd, &rfds)) {
 #endif
-                char drain[8];
+                vmDrainSigintFd(sigint_fd,
 #if defined(PSCAL_TARGET_IOS)
-                if (sigint_host) {
-                    while (vprocHostRead(sigint_fd, drain, sizeof(drain)) > 0) {
-                    }
-                } else {
-                    while (read(sigint_fd, drain, sizeof(drain)) > 0) {
-                    }
-                }
+                                sigint_host
 #else
-                (void)sigint_host;
-                while (read(sigint_fd, drain, sizeof(drain)) > 0) {
-                }
+                                false
 #endif
+                );
                 if (vm) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
@@ -8815,6 +8850,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("SocketReceive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("SocketSend", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("SocketSetBlocking", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketPeerAddr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcSin", AST_FUNCTION_DECL, NULL);
