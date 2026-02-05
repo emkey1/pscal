@@ -379,17 +379,20 @@ final class RuntimeAssetInstaller {
                 }
 
                 if !copied {
-                    NSLog("PSCAL iOS: bundled bin missing; writing embedded tiny")
+                    NSLog("PSCAL iOS: bundled bin missing; writing embedded tiny wrapper and source")
                     try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
-                    let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
-                    try embeddedTinySource.write(to: tinyPath, atomically: true, encoding: .utf8)
+                    let tinyWrapper = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
+                    let tinySource = workspaceBin.appendingPathComponent("tiny.clike", isDirectory: false)
+                    try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
+                    try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
                 }
 
+                // Ensure wrapper is executable
                 let tinyPath = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
                 if fileManager.fileExists(atPath: tinyPath.path) {
                     try markExecutable(at: tinyPath)
                 } else {
-                    NSLog("PSCAL iOS: tiny not found after install at %@", tinyPath.path)
+                    NSLog("PSCAL iOS: tiny wrapper not found after install at %@", tinyPath.path)
                 }
                 try writeWorkspaceBinVersionMarker()
                 NSLog("PSCAL iOS: installed bin assets to %@", workspaceBin.path)
@@ -934,6 +937,12 @@ final class RuntimeAssetInstaller {
     // --- Embedded fallbacks to guarantee Tiny assets ship even if the bundle is missing bin/src ---
 
     // Keep in sync with repository bin/tiny (shortened copy to avoid missing asset errors)
+    private let embeddedTinyWrapper: String = """
+#!/bin/exsh
+# Tiny wrapper for iOS/iPadOS: run the clike source via shell builtin.
+clike /bin/tiny.clike "$@"
+"""
+
     private let embeddedTinySource: String = """
 #!/usr/bin/env clike
 /* tiny compiler fallback */
