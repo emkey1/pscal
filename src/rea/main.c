@@ -52,6 +52,7 @@
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
+#include "common/path_virtualization.h"
 
 static void initSymbolSystem(void) {
     globalSymbols = createHashTable();
@@ -440,6 +441,8 @@ int rea_main(int argc, char **argv) {
     gUppercaseBooleans = 0;
     registerAllBuiltins();
     reaRegisterThreadBuiltins();
+    /* memory stream helpers */
+    registerBuiltinFunction("mstreamappendbyte", AST_FUNCTION_DECL, NULL);
     /* C-like style cast helpers */
     registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);

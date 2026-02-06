@@ -49,6 +49,7 @@
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
 #include "common/frontend_kind.h"
+#include "common/path_virtualization.h"
 #include <fcntl.h>
 #include <unistd.h>
 

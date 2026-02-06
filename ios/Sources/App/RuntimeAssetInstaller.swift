@@ -741,24 +741,26 @@ final class RuntimeAssetInstaller {
             }
             return
         }
-        guard isExshrc,
-              let oldData = try? Data(contentsOf: destination),
-              let oldContents = String(data: oldData, encoding: .utf8) else {
-            do {
-                try newContents.write(to: destination, atomically: true, encoding: .utf8)
-            } catch {
-                NSLog("PSCAL iOS: failed to update %@: %@", destination.lastPathComponent, error.localizedDescription)
-            }
-            return
-        }
-        let containsShortPrompt = oldContents.contains("\\W")
-        let containsFullPrompt = oldContents.contains("\\w")
-        if !containsShortPrompt && containsFullPrompt {
+        // For .exshrc, always refresh from the bundled template so fixes (PATH, hangs)
+        // propagate even when a stale file exists. Users can customize via .exshrc.local.
+        if isExshrc {
             do {
                 try newContents.write(to: destination, atomically: true, encoding: .utf8)
             } catch {
                 NSLog("PSCAL iOS: failed to update .exshrc: %@", error.localizedDescription)
             }
+            return
+        }
+        // For other skel entries, only overwrite when contents differ.
+        guard let oldData = try? Data(contentsOf: destination),
+              let oldContents = String(data: oldData, encoding: .utf8),
+              oldContents != newContents else {
+            return
+        }
+        do {
+            try newContents.write(to: destination, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("PSCAL iOS: failed to update %@: %@", destination.lastPathComponent, error.localizedDescription)
         }
     }
 
@@ -946,53 +948,463 @@ final class RuntimeAssetInstaller {
     // Keep in sync with repository bin/tiny (shortened copy to avoid missing asset errors)
     private let embeddedTinyWrapper: String = """
 #!/bin/exsh
-# Tiny wrapper for iOS/iPadOS: run the clike source via shell builtin.
+# Tiny wrapper for iOS/iPadOS: one-arg = compile+run, two-arg = compile only.
 if [ -n "$PSCALI_WORKSPACE_ROOT" ]; then
-  SCRIPT="$PSCALI_WORKSPACE_ROOT/bin/tiny.clike"
+  ROOT="$PSCALI_WORKSPACE_ROOT"
 else
-  SCRIPT="$(dirname "$(dirname "$0")")/bin/tiny.clike"
+  ROOT="$(dirname "$(dirname "$0")")"
+  export PSCALI_WORKSPACE_ROOT="$ROOT"
 fi
-clike "$SCRIPT" "$@"
+BASE="$ROOT/bin"
+TOOL_RUNNER="${PSCALI_TOOL_RUNNER_PATH:-$ROOT/pscal_tool_runner}"
+PATH="$BASE:$PATH"
+if [ -x "$TOOL_RUNNER" ]; then
+  run_clike() { "$TOOL_RUNNER" clike "$@"; }
+elif [ -x "$BASE/clike" ]; then
+  run_clike() { "$BASE/clike" "$@"; }
+else
+  run_clike() { clike "$@"; }
+fi
+if [ -x "$BASE/pscalvm" ]; then
+  run_vm() { "$BASE/pscalvm" "$@"; }
+else
+  run_vm() { pscalvm "$@"; }
+fi
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: tiny <source.tiny> [out.pbc]" 1>&2
+  exit 1
+fi
+if [ "$#" -eq 1 ]; then
+  SRC="$1"
+  case "$SRC" in
+    *.tiny) OUT="${SRC%.tiny}.pbc" ;;
+    *) OUT="${SRC}.pbc" ;;
+  esac
+  run_clike "$BASE/tiny.clike" "$SRC" "$OUT" || exit $?
+  run_vm "$OUT"
+  exit $?
+fi
+if [ -f "$BASE/tiny.pbc" ]; then
+  run_vm "$BASE/tiny.pbc" "$@"
+else
+  run_clike "$BASE/tiny.clike" "$@"
+fi
 """
 
     private let embeddedTinySource: String = """
 #!/usr/bin/env clike
-/* tiny compiler fallback */
-str readFile(str path){mstream ms=mstreamcreate();if(!mstreamloadfromfile(&ms,path)){printf("Error: unable to read %s\\n",path);halt(1);}str buf=mstreambuffer(ms);mstreamfree(&ms);return buf;}
-const int MAX_OPS=512;str opNames[MAX_OPS];int opCount=0;void loadOpcodes(str root){str header=root+"/src/compiler/bytecode.h";str buf=readFile(header);int inEnum=0;int i=1;int len=length(buf);while(i<=len){int j=i;while(j<=len&&copy(buf,j,1)!="\\n")j=j+1;int llen=j-i;str line=copy(buf,i,llen);i=j+1;int p=1;while(p<=llen&&copy(line,p,1)<=" ")p=p+1;str trimmed=copy(line,p,llen-p+1);if(pos("typedef enum",trimmed)==1){inEnum=1;continue;}if(!inEnum)continue;if(trimmed=="}"){break;}int comma=pos(",",trimmed);if(comma==0)continue;str name=copy(trimmed,1,comma-1);int k=length(name);while(k>0&&copy(name,k,1)<=" "){name=copy(name,1,k-1);k=k-1;}if(opCount<MAX_OPS){opNames[opCount]=name;opCount=opCount+1;}}}
-int opcode(str name){for(int i=0;i<opCount;i=i+1)if(opNames[i]==name)return i;str pref="OP_"+name;for(int i=0;i<opCount;i=i+1)if(opNames[i]==pref)return i;printf("Unknown opcode %s\\n",name);halt(1);return -1;}
-const int TYPE_INTEGER=2;const int TYPE_STRING=4;const int INLINE_CACHE_SLOT_SIZE=8;const int MAX_CONST=2048;int constType[MAX_CONST];str constVal[MAX_CONST];int constCount=0;
-int addConstInt(int v){str s=inttostr(v);for(int i=0;i<constCount;i=i+1)if(constType[i]==TYPE_INTEGER&&constVal[i]==s)return i;int idx=constCount;constCount=constCount+1;constType[idx]=TYPE_INTEGER;constVal[idx]=s;return idx;}
-int addConstStr(str s){for(int i=0;i<constCount;i=i+1)if(constType[i]==TYPE_STRING&&constVal[i]==s)return i;int idx=constCount;constCount=constCount+1;constType[idx]=TYPE_STRING;constVal[idx]=s;return idx;}
-const int MAX_CODE=65536;int code[MAX_CODE];int codeLen=0;void emit(int b){code[codeLen]=b&255;codeLen=codeLen+1;}void emitShort(int v){emit((v>>8)&255);emit(v&255);}void emitICS(){for(int i=0;i<INLINE_CACHE_SLOT_SIZE;i=i+1)emit(0);}
-const int MAX_TOK=4096;str tokType[MAX_TOK];str tokVal[MAX_TOK];int tokCount=0;int tokPos=0;
-void tokenize(str src){tokCount=0;tokPos=0;while(1){int a=pos(src,"{");int b=pos(src,"}");if(a>0&&b>a)src=copy(src,1,a-1)+" "+copy(src,b+1,length(src)-b);else break;}int i=1;int n=length(src);while(i<=n){while(i<=n&&(copy(src,i,1)==" "||copy(src,i,1)=="\\n"||copy(src,i,1)=="\\t"||copy(src,i,1)=="\\r"))i=i+1;if(i>n)break;str c=copy(src,i,1);if(c=="{"){while(i<=n&&copy(src,i,1)!="}")i=i+1;i=i+1;continue;}if((c>="A"&&c<="Z")||(c>="a"&&c<="z")||c=="_"){int j=i;while(j<=n){str d=copy(src,j,1);if(!((d>="A"&&d<="Z")||(d>="a"&&d<="z")||(d>="0"&&d<="9")||d=="_"))break;j=j+1;}str id=copy(src,i,j-i);str low=id;if(low=="if"||low=="then"||low=="else"||low=="end"||low=="repeat"||low=="until"||low=="read"||low=="write")tokType[tokCount]=low;else tokType[tokCount]="IDENT";tokVal[tokCount]=id;tokCount=tokCount+1;i=j;continue;}if(c>="0"&&c<="9"){int j=i;while(j<=n&&copy(src,j,1)>="0"&&copy(src,j,1)<="9")j=j+1;tokType[tokCount]="NUMBER";tokVal[tokCount]=copy(src,i,j-i);tokCount=tokCount+1;i=j;continue;}if(c==":"&&i+1<=n&&copy(src,i+1,1)=="="){tokType[tokCount]=":=";tokVal[tokCount]=":=";tokCount=tokCount+1;i=i+2;continue;}if(c=="+"||c=="-"||c=="*"||c=="/"||c=="<"||c=="="||c==";"||c=="("||c==")"){tokType[tokCount]=c;tokVal[tokCount]=c;tokCount=tokCount+1;i=i+1;continue;}printf("Unknown token starting at %s\\n",copy(src,i,5));halt(1);}tokType[tokCount]="EOF";tokVal[tokCount]="";tokCount=tokCount+1;}
-str curType(){return tokType[tokPos];}str curVal(){return tokVal[tokPos];}void consume(str t){if(curType()!=t){printf("Expected %s got %s\\n",t,curType());halt(1);}tokPos=tokPos+1;}
-const int N_PROGRAM=1,N_ASSIGN=2,N_READ=3,N_WRITE=4,N_IF=5,N_REPEAT=6,N_BINOP=7,N_NUM=8,N_VAR=9;const int MAX_NODES=4096;int nType[MAX_NODES];int nA[MAX_NODES];str nS[MAX_NODES];int nChildren[MAX_NODES][8];int nChildCount[MAX_NODES];int nCount=0;
-int newNode(int t){int idx=nCount;nType[idx]=t;nA[idx]=0;nS[idx]="";nChildCount[idx]=0;nCount=nCount+1;return idx;}void addChild(int p,int c){nChildren[p][nChildCount[p]]=c;nChildCount[p]=nChildCount[p]+1;}
-int parseProgram();int parseStmtSeq();int parseStatement();int parseIf();int parseRepeat();int parseExpr();int parseSimpleExpr();int parseTerm();int parseFactor();
-int parseProgram(){int p=newNode(N_PROGRAM);int seq=parseStmtSeq();addChild(p,seq);consume("EOF");return p;}
-int parseStmtSeq(){int seq=newNode(N_PROGRAM);addChild(seq,parseStatement());while(curType()==";"){consume(";");addChild(seq,parseStatement());}return seq;}
-int parseStatement(){str t=curType();if(t=="if")return parseIf();if(t=="repeat")return parseRepeat();if(t=="read"){consume("read");int v=newNode(N_READ);nS[v]=curVal();consume("IDENT");return v;}if(t=="write"){consume("write");int w=newNode(N_WRITE);if(curType()!=";"&&curType()!="until"&&curType()!="end"&&curType()!="else"&&curType()!="EOF")addChild(w,parseExpr());return w;}if(t=="IDENT"){str name=curVal();consume("IDENT");consume(":=");int a=newNode(N_ASSIGN);nS[a]=name;addChild(a,parseExpr());return a;}printf("Unexpected token %s\\n",t);halt(1);return -1;}
-int parseIf(){consume("if");int n=newNode(N_IF);int cond=parseExpr();addChild(n,cond);consume("then");addChild(n,parseStmtSeq());if(curType()=="else"){consume("else");addChild(n,parseStmtSeq());}consume("end");return n;}
-int parseRepeat(){consume("repeat");int n=newNode(N_REPEAT);addChild(n,parseStmtSeq());consume("until");addChild(n,parseExpr());return n;}
-int parseExpr(){int n=parseSimpleExpr();if(curType()=="<"||curType()=="="){str op=curType();consume(op);int r=parseSimpleExpr();int b=newNode(N_BINOP);nS[b]=op;addChild(b,n);addChild(b,r);return b;}return n;}
-int parseSimpleExpr(){int n=parseTerm();while(curType()=="+"||curType()=="-"){str op=curType();consume(op);int r=parseTerm();int b=newNode(N_BINOP);nS[b]=op;addChild(b,n);addChild(b,r);n=b;}return n;}
-int parseTerm(){int n=parseFactor();while(curType()=="*"||curType()=="/"){str op=curType();consume(op);int r=parseFactor();int b=newNode(N_BINOP);nS[b]=op;addChild(b,n);addChild(b,r);n=b;}return n;}
-int parseFactor(){str t=curType();if(t=="("){consume("(");int n=parseExpr();consume(")");return n;}if(t=="NUMBER"){str v=curVal();consume("NUMBER");int n=newNode(N_NUM);nA[n]=atoi(v);return n;}if(t=="IDENT"){str v=curVal();consume("IDENT");int n=newNode(N_VAR);nS[n]=v;return n;}printf("Unexpected token %s\\n",t);halt(1);return -1;}
-str vars[MAX_TOK];int varCount=0;int varIdx(str name){for(int i=0;i<varCount;i=i+1)if(vars[i]==name)return i;return -1;}void collectVars(int node){int t=nType[node];if(t==N_VAR||t==N_READ||t==N_ASSIGN){str nm=nS[node];if(varIdx(nm)<0){vars[varCount]=nm;varCount=varCount+1;}}for(int i=0;i<nChildCount[node];i=i+1)collectVars(nChildren[node][i]);}
-int nameConstIdx[MAX_TOK];int readConst,writeConst,trueConst,falseConst,typeIntConst;
-void emitConst(int idx){if(idx<=255){emit(opcode("CONSTANT"));emit(idx);}else{emit(opcode("CONSTANT16"));emitShort(idx);} }
-void emitDefine(str name){int idx=nameConstIdx[varIdx(name)];if(idx<=255){emit(opcode("DEFINE_GLOBAL"));emit(idx);}else{emit(opcode("DEFINE_GLOBAL16"));emitShort(idx);}emit(TYPE_INTEGER);emitShort(typeIntConst);}
-void emitGetGlobal(str name){int idx=nameConstIdx[varIdx(name)];if(idx<=255){emit(opcode("GET_GLOBAL"));emit(idx);}else{emit(opcode("GET_GLOBAL16"));emitShort(idx);}emitICS();}
-void emitGetGlobalAddr(str name){int idx=nameConstIdx[varIdx(name)];if(idx<=255){emit(opcode("GET_GLOBAL_ADDRESS"));emit(idx);}else{emit(opcode("GET_GLOBAL_ADDRESS16"));emitShort(idx);} }
-void compileExpr(int node){int t=nType[node];if(t==N_NUM){emitConst(addConstInt(nA[node]));return;}if(t==N_VAR){emitGetGlobal(nS[node]);return;}if(t==N_BINOP){compileExpr(nChildren[node][0]);compileExpr(nChildren[node][1]);str op=nS[node];if(op=="+")emit(opcode("ADD"));else if(op=="-")emit(opcode("SUBTRACT"));else if(op=="*")emit(opcode("MULTIPLY"));else if(op=="/")emit(opcode("DIVIDE"));else if(op=="<")emit(opcode("LESS"));else if(op=="=")emit(opcode("EQUAL"));else{printf("Unknown op %s\\n",op);halt(1);}return;}printf("Bad expr node %d\\n",t);halt(1);}
-void compileStmt(int node){int t=nType[node];if(t==N_ASSIGN){compileExpr(nChildren[node][0]);emitGetGlobalAddr(nS[node]);emit(opcode("SWAP"));emit(opcode("SET_INDIRECT"));return;}if(t==N_READ){emitGetGlobalAddr(nS[node]);emit(opcode("CALL_BUILTIN"));emitShort(readConst);emit(1);return;}if(t==N_WRITE){if(nChildCount[node]==0){emitConst(trueConst);emit(opcode("CALL_BUILTIN"));emitShort(writeConst);emit(1);}else{emitConst(falseConst);compileExpr(nChildren[node][0]);emit(opcode("CALL_BUILTIN"));emitShort(writeConst);emit(2);}return;}if(t==N_IF){compileExpr(nChildren[node][0]);emit(opcode("JUMP_IF_FALSE"));int jElse=codeLen;emitShort(0);int thenNode=nChildren[node][1];for(int i=0;i<nChildCount[thenNode];i=i+1)compileStmt(nChildren[thenNode][i]);if(nChildCount[node]>2){emit(opcode("JUMP"));int jEnd=codeLen;emitShort(0);int off=codeLen-(jElse+2);code[jElse]=(off>>8)&255;code[jElse+1]=off&255;int elseNode=nChildren[node][2];for(int i=0;i<nChildCount[elseNode];i=i+1)compileStmt(nChildren[elseNode][i]);off=codeLen-(jEnd+2);code[jEnd]=(off>>8)&255;code[jEnd+1]=off&255;}else{int off=codeLen-(jElse+2);code[jElse]=(off>>8)&255;code[jElse+1]=off&255;}return;}if(t==N_REPEAT){int loopStart=codeLen;int body=nChildren[node][0];for(int i=0;i<nChildCount[body];i=i+1)compileStmt(nChildren[body][i]);compileExpr(nChildren[node][1]);emit(opcode("JUMP_IF_FALSE"));int back=loopStart-(codeLen+2);emitShort(back);return;}printf("Bad stmt node %d\\n",t);halt(1);}
-void compileProgram(int rootNode){for(int i=0;i<varCount;i=i+1)emitDefine(vars[i]);int seq=nChildren[rootNode][0];for(int i=0;i<nChildCount[seq];i=i+1)compileStmt(nChildren[seq][i]);emitConst(trueConst);emit(opcode("CALL_BUILTIN"));emitShort(writeConst);emit(1);emit(opcode("HALT"));}
-int vmVersion(str root){str buf=readFile(root+"/src/core/version.h");int i=1;int n=length(buf);while(i<=n){int j=i;while(j<=n&&copy(buf,j,1)!="\\n")j=j+1;str line=copy(buf,i,j-i);if(pos("PSCAL_VM_VERSION",line)>0){int k=pos("PSCAL_VM_VERSION",line)+length("PSCAL_VM_VERSION");while(k<=length(line)&&copy(line,k,1)==" ")k=k+1;int start=k;while(k<=length(line)&&copy(line,k,1)>="0"&&copy(line,k,1)<="9")k=k+1;return atoi(copy(line,start,k-start));}i=j+1;}printf("VM version not found\\n");halt(1);return 0;}
-str appendByte(str s,int b){return s+tochar(b&255);}str append32(str s,int v){s=appendByte(s,v);s=appendByte(s,(v>>8));s=appendByte(s,(v>>16));s=appendByte(s,(v>>24));return s;}str append64(str s,long long v){int lo=(int)(v&4294967295);int hi=(int)((v>>32)&4294967295);s=append32(s,lo);s=append32(s,hi);return s;}
-void writePbc(str outPath,int version){str out=\"\";int magic=1347634098;out=append32(out,magic);out=append32(out,version);out=append64(out,0);out=append64(out,0);str pathLit=\"tiny\";out=append32(out,-length(pathLit));out=out+pathLit;out=append32(out,codeLen);out=append32(out,constCount);for(int i=0;i<codeLen;i=i+1)out=appendByte(out,code[i]);for(int i=0;i<codeLen;i=i+1)out=append32(out,0);for(int i=0;i<constCount;i=i+1){out=append32(out,constType[i]);if(constType[i]==TYPE_INTEGER){long long v=atoi(constVal[i]);out=append64(out,v);}else{str s=constVal[i];if(s==\"\"){out=append32(out,-1);}else{out=append32(out,length(s));out=out+s;}}}mstream ms=mstreamfromstring(out);mstreamsavetofile(&ms,outPath);mstreamfree(&ms);}
-int main(){if(paramcount()<2){printf("Usage: clike bin/tiny <source.tiny> <out.pbc>\\n");return 1;}str srcPath=paramstr(1);str outPath=paramstr(2);str root=dirname(dirname(paramstr(0)));if(root==\"/\"||root==\"\"){root=getenv(\"PSCALI_WORKSPACE_ROOT\");if(root==\"\")root=getenv(\"PSCAL_WORKSPACE_ROOT\");if(root==\"\")root=\".\";}loadOpcodes(root);int version=vmVersion(root);str source=readFile(srcPath);nCount=0;varCount=0;constCount=0;codeLen=0;tokenize(source);int ast=parseProgram();collectVars(ast);readConst=addConstStr(\"read\");writeConst=addConstStr(\"write\");trueConst=addConstInt(1);falseConst=addConstInt(0);typeIntConst=addConstStr(\"integer\");for(int i=0;i<varCount;i=i+1)nameConstIdx[i]=addConstStr(vars[i]);compileProgram(ast);writePbc(outPath,version);return 0;}
+
+// Tiny language compiler (CLike version)
+// Usage: clike bin/tiny source.tiny output.pbc
+
+// --------- Utility: simple dirname ---------
+str dirname(str path) {
+  int len = length(path);
+  if (len == 0) return "";
+  int i = len;
+  while (i > 0 && copy(path, i, 1) != "/" && copy(path, i, 1) != "\") i = i - 1;
+  if (i <= 1) return "/";
+  return copy(path, 1, i - 1);
+}
+
+// --------- Read entire file ---------
+str readFile(str path) {
+  mstream ms = mstreamcreate();
+  if (!mstreamloadfromfile(&ms, path)) {
+    printf("Error: unable to read %s
+", path);
+    halt(1);
+  }
+  str buf = mstreambuffer(ms);
+  mstreamfree(&ms);
+  return buf;
+}
+
+// Resolve repo root: prefer PSCALI_WORKSPACE_ROOT, then dirname(dirname(script))
+str resolveRoot() {
+  str root = getenv("PSCALI_WORKSPACE_ROOT");
+  if (root == "") root = getenv("PSCAL_WORKSPACE_ROOT");
+  if (root != "") return root;
+  str script = paramstr(0);
+  if (script == "") script = ".";
+  root = dirname(dirname(script));
+  if (root == "" || root == "/") root = ".";
+  return root;
+}
+
+// Derive default output path: replace trailing .tiny with .pbc, else append .pbc
+str defaultOutPath(str src) {
+  int len = length(src);
+  if (len >= 5 && copy(src, len - 4, 5) == ".tiny") {
+    return copy(src, 1, len - 5) + ".pbc";
+  }
+  return src + ".pbc";
+}
+
+// --------- Opcode loader ---------
+const int MAX_OPS = 512;
+str opNames[MAX_OPS];
+int opCount = 0;
+
+void loadOpcodes(str root) {
+  str header = root + "/src/compiler/bytecode.h";
+  if (!fileexists(header)) {
+    printf("tiny: bytecode.h missing at %s
+", header);
+    halt(1);
+  }
+  str buf = readFile(header);
+  int inEnum = 0;
+  int i = 1; int len = length(buf);
+  while (i <= len) {
+    int j = i;
+    while (j <= len && copy(buf, j, 1) != "
+") j = j + 1;
+    int llen = j - i;
+    str line = copy(buf, i, llen);
+    i = j + 1;
+    int p = 1; while (p <= llen && copy(line, p, 1) <= " ") p = p + 1;
+    str trimmed = copy(line, p, llen - p + 1);
+    if (pos("typedef enum", trimmed) == 1) { inEnum = 1; continue; }
+    if (!inEnum) continue;
+    if (trimmed == "}") { break; }
+    int comma = pos(",", trimmed);
+    if (comma == 0) continue;
+    str name = copy(trimmed, 1, comma - 1);
+    int k = length(name);
+    while (k > 0 && copy(name, k, 1) <= " ") { name = copy(name, 1, k - 1); k = k - 1; }
+    if (opCount < MAX_OPS) { opNames[opCount] = name; opCount = opCount + 1; }
+  }
+}
+
+int opcode(str name) {
+  for (int i = 0; i < opCount; i = i + 1) if (opNames[i] == name) return i;
+  str pref = "OP_" + name;
+  for (int i = 0; i < opCount; i = i + 1) if (opNames[i] == pref) return i;
+  printf("Unknown opcode %s
+", name); halt(1); return -1;
+}
+
+// --------- Constants table ---------
+const int TYPE_INTEGER = 2;
+const int TYPE_STRING = 4;
+const int INLINE_CACHE_SLOT_SIZE = 8;
+
+const int MAX_CONST = 2048;
+int constType[MAX_CONST];
+str constVal[MAX_CONST];
+int constCount = 0;
+
+int addConstInt(int v) {
+  str s = inttostr(v);
+  for (int i = 0; i < constCount; i = i + 1)
+    if (constType[i] == TYPE_INTEGER && constVal[i] == s) return i;
+  int idx = constCount; constCount = constCount + 1;
+  constType[idx] = TYPE_INTEGER; constVal[idx] = s; return idx;
+}
+
+int addConstStr(str s) {
+  for (int i = 0; i < constCount; i = i + 1)
+    if (constType[i] == TYPE_STRING && constVal[i] == s) return i;
+  int idx = constCount; constCount = constCount + 1;
+  constType[idx] = TYPE_STRING; constVal[idx] = s; return idx;
+}
+
+// --------- Bytecode buffer ---------
+const int MAX_CODE = 65536;
+int code[MAX_CODE];
+int codeLen = 0;
+void emit(int b) { code[codeLen] = b & 255; codeLen = codeLen + 1; }
+void emitShort(int v) { emit((v >> 8) & 255); emit(v & 255); }
+void emitICS() { for (int i = 0; i < INLINE_CACHE_SLOT_SIZE; i = i + 1) emit(0); }
+
+// --------- Tokenizer / Parser ---------
+const int MAX_TOK = 4096;
+str tokType[MAX_TOK];
+str tokVal[MAX_TOK];
+int tokCount = 0; int tokPos = 0;
+
+void tokenize(str src) {
+  tokCount = 0;
+  tokPos = 0;
+  // strip {comments}
+  while (1) {
+    int a = pos(src, "{"); int b = pos(src, "}");
+    if (a > 0 && b > a) src = copy(src, 1, a - 1) + " " + copy(src, b + 1, length(src) - b);
+    else break;
+  }
+  int i = 1; int n = length(src);
+  while (i <= n) {
+    while (i <= n && (copy(src, i, 1) == " " || copy(src, i, 1) == "
+" || copy(src, i, 1) == "	" || copy(src, i, 1) == "")) i = i + 1;
+    if (i > n) break;
+    str c = copy(src, i, 1);
+    if (c == "{") {
+      while (i <= n && copy(src, i, 1) != "}") i = i + 1;
+      i = i + 1; // skip closing brace
+      continue;
+    }
+    if ((c >= "A" && c <= "Z") || (c >= "a" && c <= "z") || c == "_") {
+      int j = i;
+      while (j <= n) {
+        str d = copy(src, j, 1);
+        if (!((d >= "A" && d <= "Z") || (d >= "a" && d <= "z") || (d >= "0" && d <= "9") || d == "_")) break;
+        j = j + 1;
+      }
+      str id = copy(src, i, j - i);
+      str low = id;
+      if (low == "if" || low == "then" || low == "else" || low == "end" || low == "repeat" || low == "until" || low == "read" || low == "write") tokType[tokCount] = low; else tokType[tokCount] = "IDENT";
+      tokVal[tokCount] = id; tokCount = tokCount + 1; i = j; continue;
+    }
+    if (c >= "0" && c <= "9") {
+      int j = i; while (j <= n && copy(src, j, 1) >= "0" && copy(src, j, 1) <= "9") j = j + 1;
+      tokType[tokCount] = "NUMBER"; tokVal[tokCount] = copy(src, i, j - i); tokCount = tokCount + 1; i = j; continue;
+    }
+    if (c == ":" && i + 1 <= n && copy(src, i + 1, 1) == "=") { tokType[tokCount] = ":="; tokVal[tokCount] = ":="; tokCount = tokCount + 1; i = i + 2; continue; }
+    if (c == "+" || c == "-" || c == "*" || c == "/" || c == "<" || c == "=" || c == ";" || c == "(" || c == ")") { tokType[tokCount] = c; tokVal[tokCount] = c; tokCount = tokCount + 1; i = i + 1; continue; }
+    printf("Unknown token starting at %s
+", copy(src, i, 5)); halt(1);
+  }
+  tokType[tokCount] = "EOF"; tokVal[tokCount] = ""; tokCount = tokCount + 1;
+}
+
+str curType() { return tokType[tokPos]; }
+str curVal() { return tokVal[tokPos]; }
+void consume(str t) { if (curType() != t) { printf("Expected %s got %s
+", t, curType()); halt(1); } tokPos = tokPos + 1; }
+
+// AST
+const int N_PROGRAM=1, N_ASSIGN=2, N_READ=3, N_WRITE=4, N_IF=5, N_REPEAT=6, N_BINOP=7, N_NUM=8, N_VAR=9;
+const int MAX_NODES = 4096;
+int nType[MAX_NODES];
+int nA[MAX_NODES];
+str nS[MAX_NODES];
+int nChildren[MAX_NODES][8];
+int nChildCount[MAX_NODES];
+int nCount = 0;
+
+int newNode(int t) { int idx = nCount; nType[idx]=t; nA[idx]=0; nS[idx]=""; nChildCount[idx]=0; nCount = nCount + 1; return idx; }
+void addChild(int p,int c){ nChildren[p][nChildCount[p]]=c; nChildCount[p]=nChildCount[p]+1; }
+
+int parseProgram(); int parseStmtSeq(); int parseStatement(); int parseIf(); int parseRepeat(); int parseExpr(); int parseSimpleExpr(); int parseTerm(); int parseFactor();
+
+int parseProgram(){ int p=newNode(N_PROGRAM); int seq=parseStmtSeq(); addChild(p,seq); consume("EOF"); return p; }
+int parseStmtSeq(){ int seq=newNode(N_PROGRAM); addChild(seq, parseStatement()); while(curType()==";"){ consume(";"); addChild(seq, parseStatement()); } return seq; }
+int parseStatement(){ str t=curType(); if(t=="if") return parseIf(); if(t=="repeat") return parseRepeat(); if(t=="read"){ consume("read"); int v=newNode(N_READ); nS[v]=curVal(); consume("IDENT"); return v;} if(t=="write"){ consume("write"); int w=newNode(N_WRITE); if(curType()!=";" && curType()!="until" && curType()!="end" && curType()!="else" && curType()!="EOF") addChild(w, parseExpr()); return w;} if(t=="IDENT"){ str name=curVal(); consume("IDENT"); consume(":="); int a=newNode(N_ASSIGN); nS[a]=name; addChild(a, parseExpr()); return a;} printf("Unexpected token %s
+", t); halt(1); return -1; }
+int parseIf(){ consume("if"); int n = newNode(N_IF); int cond = parseExpr(); addChild(n, cond); consume("then"); addChild(n, parseStmtSeq()); if (curType() == "else") { consume("else"); addChild(n, parseStmtSeq()); } consume("end"); return n; }
+int parseRepeat(){ consume("repeat"); int n=newNode(N_REPEAT); addChild(n, parseStmtSeq()); consume("until"); addChild(n, parseExpr()); return n; }
+int parseExpr(){ int n=parseSimpleExpr(); if(curType()=="<"||curType()=="="){ str op=curType(); consume(op); int r=parseSimpleExpr(); int b=newNode(N_BINOP); nS[b]=op; addChild(b,n); addChild(b,r); return b;} return n; }
+int parseSimpleExpr(){ int n=parseTerm(); while(curType()=="+"||curType()=="-"){ str op=curType(); consume(op); int r=parseTerm(); int b=newNode(N_BINOP); nS[b]=op; addChild(b,n); addChild(b,r); n=b;} return n; }
+int parseTerm(){ int n=parseFactor(); while(curType()=="*"||curType()=="/"){ str op=curType(); consume(op); int r=parseFactor(); int b=newNode(N_BINOP); nS[b]=op; addChild(b,n); addChild(b,r); n=b;} return n; }
+int parseFactor(){ str t=curType(); if(t=="("){ consume("("); int n=parseExpr(); consume(")"); return n;} if(t=="NUMBER"){ str v=curVal(); consume("NUMBER"); int n=newNode(N_NUM); nA[n]=atoi(v); return n;} if(t=="IDENT"){ str v=curVal(); consume("IDENT"); int n=newNode(N_VAR); nS[n]=v; return n;} printf("Unexpected token %s
+", t); halt(1); return -1; }
+
+// Var collection
+str vars[MAX_TOK]; int varCount=0;
+int varIdx(str name){ for(int i=0;i<varCount;i=i+1) if(vars[i]==name) return i; return -1; }
+void collectVars(int node){ int t=nType[node]; if(t==N_VAR||t==N_READ||t==N_ASSIGN){ str nm=nS[node]; if(varIdx(nm)<0){ vars[varCount]=nm; varCount=varCount+1; } } for(int i=0;i<nChildCount[node];i=i+1) collectVars(nChildren[node][i]); }
+
+// Codegen helpers
+int nameConstIdx[MAX_TOK];
+int readConst, writeConst, trueConst, falseConst, typeIntConst;
+
+void emitConst(int idx){ if(idx<=255){ emit(opcode("CONSTANT")); emit(idx);} else { emit(opcode("CONSTANT16")); emitShort(idx);} }
+void emitDefine(str name){ int idx=nameConstIdx[varIdx(name)]; if(idx<=255){ emit(opcode("DEFINE_GLOBAL")); emit(idx);} else { emit(opcode("DEFINE_GLOBAL16")); emitShort(idx);} emit(TYPE_INTEGER); emitShort(typeIntConst); }
+void emitGetGlobal(str name){ int idx=nameConstIdx[varIdx(name)]; if(idx<=255){ emit(opcode("GET_GLOBAL")); emit(idx);} else { emit(opcode("GET_GLOBAL16")); emitShort(idx);} emitICS(); }
+void emitGetGlobalAddr(str name){ int idx=nameConstIdx[varIdx(name)]; if(idx<=255){ emit(opcode("GET_GLOBAL_ADDRESS")); emit(idx);} else { emit(opcode("GET_GLOBAL_ADDRESS16")); emitShort(idx);} }
+
+void compileExpr(int node){ int t=nType[node]; if(t==N_NUM){ emitConst(addConstInt(nA[node])); return; } if(t==N_VAR){ emitGetGlobal(nS[node]); return; } if(t==N_BINOP){ compileExpr(nChildren[node][0]); compileExpr(nChildren[node][1]); str op=nS[node]; if(op=="+") emit(opcode("ADD")); else if(op=="-") emit(opcode("SUBTRACT")); else if(op=="*") emit(opcode("MULTIPLY")); else if(op=="/") emit(opcode("DIVIDE")); else if(op=="<") emit(opcode("LESS")); else if(op=="=") emit(opcode("EQUAL")); else { printf("Unknown op %s
+", op); halt(1);} return; } printf("Bad expr node %d
+", t); halt(1); }
+
+void compileStmt(int node){
+  int t = nType[node];
+  if (t == N_ASSIGN) {
+    compileExpr(nChildren[node][0]);
+    emitGetGlobalAddr(nS[node]);
+    emit(opcode("SWAP"));
+    emit(opcode("SET_INDIRECT"));
+    return;
+  }
+  if (t == N_READ) {
+    emitGetGlobalAddr(nS[node]);
+    emit(opcode("CALL_BUILTIN"));
+    emitShort(readConst);
+    emit(1);
+    return;
+  }
+  if (t == N_WRITE) {
+    if (nChildCount[node] == 0) {
+      emitConst(trueConst);
+      emit(opcode("CALL_BUILTIN"));
+      emitShort(writeConst);
+      emit(1);
+    } else {
+      emitConst(falseConst);
+      compileExpr(nChildren[node][0]);
+      emit(opcode("CALL_BUILTIN"));
+      emitShort(writeConst);
+      emit(2);
+    }
+    return;
+  }
+  if (t == N_IF) {
+    compileExpr(nChildren[node][0]);
+    emit(opcode("JUMP_IF_FALSE"));
+    int jElse = codeLen;
+    emitShort(0);
+    int thenNode = nChildren[node][1];
+    for (int i = 0; i < nChildCount[thenNode]; i = i + 1) compileStmt(nChildren[thenNode][i]);
+    if (nChildCount[node] > 2) {
+      emit(opcode("JUMP"));
+      int jEnd = codeLen;
+      emitShort(0);
+      int off = codeLen - (jElse + 2);
+      code[jElse] = (off >> 8) & 255;
+      code[jElse + 1] = off & 255;
+      int elseNode = nChildren[node][2];
+      for (int i = 0; i < nChildCount[elseNode]; i = i + 1) compileStmt(nChildren[elseNode][i]);
+      off = codeLen - (jEnd + 2);
+      code[jEnd] = (off >> 8) & 255;
+      code[jEnd + 1] = off & 255;
+    } else {
+      int off = codeLen - (jElse + 2);
+      code[jElse] = (off >> 8) & 255;
+      code[jElse + 1] = off & 255;
+    }
+    return;
+  }
+  if (t == N_REPEAT) {
+    int loopStart = codeLen;
+    int body = nChildren[node][0];
+    for (int i = 0; i < nChildCount[body]; i = i + 1) compileStmt(nChildren[body][i]);
+    compileExpr(nChildren[node][1]);
+    emit(opcode("JUMP_IF_FALSE"));
+    int back = loopStart - (codeLen + 2);
+    emitShort(back);
+    return;
+  }
+  printf("Bad stmt node %d
+", t);
+  halt(1);
+}
+
+void compileProgram(int rootNode){
+  for(int i=0;i<varCount;i=i+1) emitDefine(vars[i]);
+  int seq=nChildren[rootNode][0];
+  for(int i=0;i<nChildCount[seq];i=i+1) compileStmt(nChildren[seq][i]);
+  emitConst(trueConst); emit(opcode("CALL_BUILTIN")); emitShort(writeConst); emit(1); emit(opcode("HALT"));
+}
+
+// --------- VM version ---------
+int vmVersion(str root){
+  str verPath = root + "/src/core/version.h";
+  if (!fileexists(verPath)) {
+    printf("tiny: version.h missing at %s
+", verPath);
+    halt(1);
+  }
+  str buf = readFile(verPath);
+  int i = 1;
+  int n = length(buf);
+  while (i <= n) {
+    int j = i;
+    while (j <= n && copy(buf, j, 1) != "
+") j = j + 1;
+    str line = copy(buf, i, j - i);
+    if (pos("PSCAL_VM_VERSION", line) > 0) {
+      int k = pos("PSCAL_VM_VERSION", line) + length("PSCAL_VM_VERSION");
+      while (k <= length(line) && copy(line, k, 1) == " ") k = k + 1;
+      int start = k;
+      while (k <= length(line) && copy(line, k, 1) >= "0" && copy(line, k, 1) <= "9") k = k + 1;
+      return atoi(copy(line, start, k - start));
+    }
+    i = j + 1;
+  }
+  printf("VM version not found
+");
+  halt(1);
+  return 0;
+}
+
+// --------- Serialization into a byte string ---------
+str appendByte(str s, int b){ return s + tochar(b & 255); }
+str append32(str s, int v){
+  s = appendByte(s, v);
+  s = appendByte(s, (v >> 8));
+  s = appendByte(s, (v >> 16));
+  s = appendByte(s, (v >> 24));
+  return s;
+}
+str append64(str s, long long v){
+  int lo = (int)(v & 4294967295);
+  int hi = (int)((v >> 32) & 4294967295);
+  s = append32(s, lo);
+  s = append32(s, hi);
+  return s;
+}
+
+void writePbc(str outPath, int version){
+  str out = "";
+  int magic = 1347634098; // 'PSB2'
+  out = append32(out, magic);
+  out = append32(out, version);
+  out = append64(out, 0); // source_hash
+  out = append64(out, 0); // combined_hash
+  str pathLit = "tiny";
+  out = append32(out, -length(pathLit));
+  out = out + pathLit;
+  out = append32(out, codeLen);
+  out = append32(out, constCount);
+  for(int i=0;i<codeLen;i=i+1) out = appendByte(out, code[i]);
+  for(int i=0;i<codeLen;i=i+1) out = append32(out, 0); // lines
+  for(int i=0;i<constCount;i=i+1){
+    out = append32(out, constType[i]);
+    if (constType[i]==TYPE_INTEGER) {
+      long long v = atoi(constVal[i]);
+      out = append64(out, v);
+    } else {
+      str s = constVal[i];
+      if (s == "") { out = append32(out, -1); }
+      else { out = append32(out, length(s)); out = out + s; }
+    }
+  }
+  mstream ms = mstreamfromstring(out);
+  mstreamsavetofile(&ms, outPath);
+  mstreamfree(&ms);
+}
+
+// --------- Main ---------
+int main(){
+  if (paramcount() < 1) { printf("Usage: clike bin/tiny <source.tiny> [out.pbc]
+"); return 1; }
+  str srcPath = paramstr(1);
+  str outPath;
+  if (paramcount() >= 2) outPath = paramstr(2); else outPath = defaultOutPath(srcPath);
+  str root = resolveRoot();
+  if (!fileexists(srcPath)) { printf("tiny: source %s not found
+", srcPath); return 1; }
+  loadOpcodes(root);
+  int version = vmVersion(root);
+  str source = readFile(srcPath);
+  // reset per compilation
+  nCount = 0; varCount = 0; constCount = 0; codeLen = 0;
+  tokenize(source);
+  int ast = parseProgram();
+  collectVars(ast);
+  readConst = addConstStr("read");
+  writeConst = addConstStr("write");
+  trueConst = addConstInt(1);
+  falseConst = addConstInt(0);
+  typeIntConst = addConstStr("integer");
+  for (int i=0;i<varCount;i=i+1) nameConstIdx[i] = addConstStr(vars[i]);
+  compileProgram(ast);
+  writePbc(outPath, version);
+  return 0;
+}
+
 """
 
     // Minimal header snippets Tiny reads; enough to parse VM_VERSION/opcodes

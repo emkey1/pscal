@@ -1,9 +1,68 @@
 #!/bin/exsh
-# Tiny compiler wrapper for iOS: run the clike source via shell builtin.
-# Prefer sandbox root; fall back to relative bin path.
+# Tiny compiler wrapper for iOS: one-arg = compile to default .pbc then run; two-arg = compile only.
+# Resolve workspace root first.
 if [ -n "$PSCALI_WORKSPACE_ROOT" ]; then
-  SCRIPT="$PSCALI_WORKSPACE_ROOT/bin/tiny.clike"
+  ROOT="$PSCALI_WORKSPACE_ROOT"
 else
-  SCRIPT="$(dirname "$(dirname "$0")")/bin/tiny.clike"
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  export PSCALI_WORKSPACE_ROOT="$ROOT"
 fi
-clike "$SCRIPT" "$@"
+
+BASE="$ROOT/bin"
+TOOL_RUNNER="${PSCALI_TOOL_RUNNER_PATH:-$ROOT/pscal_tool_runner}"
+# Put workspace bin first on PATH so shebangs find the staged tools.
+PATH="$BASE:$PATH"
+
+# Prefer tool runner (when present) so we use the app-bundled builtin stack; otherwise fall back to clike.
+if [ -x "$TOOL_RUNNER" ]; then
+  run_clike() { "$TOOL_RUNNER" clike "$@"; }
+elif [ -x "$BASE/clike" ]; then
+  run_clike() { "$BASE/clike" "$@"; }
+else
+  run_clike() { clike "$@"; }
+fi
+
+if [ -x "$BASE/pscalvm" ]; then
+  run_vm() { "$BASE/pscalvm" "$@"; }
+else
+  run_vm() { pscalvm "$@"; }
+fi
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: tiny <source.tiny> [out.pbc]" 1>&2
+  exit 1
+fi
+
+if [ "$#" -eq 1 ]; then
+  SRC="$1"
+  # Normalize source to an absolute path so tiny.clike/pscalvm agree.
+  if ABS_SRC=$(realpath "$SRC" 2>/dev/null); then
+    SRC="$ABS_SRC"
+  fi
+  # Default output: current working directory, not the source directory.
+  base_name="$(basename "$SRC")"
+  case "$base_name" in
+    *.tiny) OUT_BASENAME="${base_name%.tiny}.pbc" ;;
+    *) OUT_BASENAME="${base_name}.pbc" ;;
+  esac
+  OUT="$PWD/$OUT_BASENAME"
+  run_clike "$BASE/tiny.clike" "$SRC" "$OUT" || exit $?
+  if [ ! -f "$OUT" ]; then
+    echo "tiny: expected bytecode at $OUT but it was not created" 1>&2
+    exit 1
+  fi
+  run_vm "$OUT"
+  exit $?
+fi
+
+# >=2 args: compile only; prefer bytecode for speed
+SRC="$1"
+if ABS_SRC=$(realpath "$SRC" 2>/dev/null); then
+  SRC="$ABS_SRC"
+fi
+shift
+if [ -f "$BASE/tiny.pbc" ]; then
+  run_vm "$BASE/tiny.pbc" "$SRC" "$@"
+else
+  run_clike "$BASE/tiny.clike" "$SRC" "$@"
+fi

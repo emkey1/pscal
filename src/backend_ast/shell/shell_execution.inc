@@ -4,8 +4,14 @@
 #include "backend_ast/builtin.h"
 #include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
+#include "common/path_virtualization.h"
 #include "ios/tty/pscal_fd.h"
 #include <unistd.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <stdlib.h>
 #define PIPE_SESSION(ctx) (&(ctx)->session)
 #define PIPE_SPOOL_FD(ctx) ((ctx)->session.spool_fd)
 #define PIPE_SPOOL_SIZE(ctx) ((ctx)->session.spool_size)
@@ -18,6 +24,129 @@
 #define PIPE_STDIN_OWNED(ctx) ((ctx)->session.stdin_owned)
 
 static int gShellPagerVirtualTTYFd = -1;
+
+static bool shellPathHasShebang(const char *path) {
+    if (!path || !*path) {
+        return false;
+    }
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return false;
+    }
+    char header[2];
+    ssize_t n = read(fd, header, sizeof(header));
+    close(fd);
+    return n == 2 && header[0] == '#' && header[1] == '!';
+}
+
+static bool shellPathProbeExecutable(const char *path, char *display, size_t display_size) {
+    if (!path || !*path || !display || display_size == 0) {
+        return false;
+    }
+
+    const char *probes[4];
+    size_t probe_count = 0;
+    probes[probe_count++] = path;
+
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    char stripped[PATH_MAX];
+    if (path[0] == '/' && pathTruncateExpand(path, expanded, sizeof(expanded)) &&
+        strcmp(expanded, path) != 0) {
+        probes[probe_count++] = expanded;
+    }
+    if (path[0] == '/' && pathTruncateStrip(path, stripped, sizeof(stripped)) &&
+        strcmp(stripped, path) != 0) {
+        probes[probe_count++] = stripped;
+        char stripped_expanded[PATH_MAX];
+        if (pathTruncateExpand(stripped, stripped_expanded, sizeof(stripped_expanded)) &&
+            strcmp(stripped_expanded, stripped) != 0) {
+            probes[probe_count++] = stripped_expanded;
+        }
+    }
+#endif
+
+    for (size_t i = 0; i < probe_count; ++i) {
+        const char *candidate = probes[i];
+        if (!candidate || !*candidate) {
+            continue;
+        }
+        struct stat st;
+        if (stat(candidate, &st) != 0 || !S_ISREG(st.st_mode)) {
+            continue;
+        }
+        bool runnable = (access(candidate, X_OK) == 0);
+#if defined(PSCAL_TARGET_IOS)
+        if (!runnable && (st.st_mode & 0111) != 0) {
+            runnable = true;
+        }
+        if (!runnable && access(candidate, R_OK) == 0 && shellPathHasShebang(candidate)) {
+            runnable = true;
+        }
+#endif
+        if (!runnable) {
+            continue;
+        }
+#if defined(PSCAL_TARGET_IOS)
+        if (candidate[0] == '/' && pathTruncateStrip(candidate, display, display_size)) {
+            return true;
+        }
+#endif
+        int copied = snprintf(display, display_size, "%s", candidate);
+        return copied >= 0 && (size_t)copied < display_size;
+    }
+    return false;
+}
+
+static bool shellResolveExecutableCandidate(const char *candidate, char *resolved, size_t resolved_size) {
+    if (!candidate || !resolved || resolved_size == 0) {
+        return false;
+    }
+    return shellPathProbeExecutable(candidate, resolved, resolved_size);
+}
+
+/* Resolve bare command names against PATH for in-process shebang execution. */
+static char *shellFindExecutableOnPath(const char *name) {
+    if (!name || strchr(name, '/')) {
+        return NULL;
+    }
+    char *path_value = shellLookupParameterValue("PATH", strlen("PATH"));
+    const char *path = (path_value && *path_value) ? path_value : getenv("PATH");
+    char *paths = path ? strdup(path) : NULL;
+    char candidate[PATH_MAX];
+    if (paths) {
+        char *saveptr = NULL;
+        char *dir = strtok_r(paths, ":", &saveptr);
+        while (dir) {
+            int len = snprintf(candidate, sizeof(candidate), "%s/%s", dir, name);
+            char resolved[PATH_MAX];
+            if (len > 0 && (size_t)len < sizeof(candidate) &&
+                shellResolveExecutableCandidate(candidate, resolved, sizeof(resolved))) {
+                char *out = strdup(resolved);
+                free(paths);
+                free(path_value);
+                return out;
+            }
+            dir = strtok_r(NULL, ":", &saveptr);
+        }
+        free(paths);
+    }
+#if defined(PSCAL_TARGET_IOS)
+    /* Keep fallback probing in app-root namespace instead of device-root paths. */
+    const char *fallback_dirs[] = { "/bin", "/Documents/bin" };
+    for (size_t i = 0; i < sizeof(fallback_dirs) / sizeof(fallback_dirs[0]); ++i) {
+        int len = snprintf(candidate, sizeof(candidate), "%s/%s", fallback_dirs[i], name);
+        char resolved[PATH_MAX];
+        if (len > 0 && (size_t)len < sizeof(candidate) &&
+            shellResolveExecutableCandidate(candidate, resolved, sizeof(resolved))) {
+            free(path_value);
+            return strdup(resolved);
+        }
+    }
+#endif
+    free(path_value);
+    return NULL;
+}
 
 static void shellPagerPushVirtualTTYOverride(int fd) {
     if (gShellPagerVirtualTTYFd >= 0) {
@@ -235,16 +364,57 @@ static int shellTryRunScriptFallback(VM *vm, const ShellCommand *cmd) {
     if (!cmd || cmd->argc <= 0 || !cmd->argv || !cmd->argv[0]) {
         return -1;
     }
-    const char *path = cmd->argv[0];
-    struct stat st;
-    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
-        return -1;
+    const char *script_path = cmd->argv[0];
+#if defined(PSCAL_TARGET_IOS)
+    const char *probes[4];
+    size_t probe_count = 0;
+    probes[probe_count++] = cmd->argv[0];
+
+    char expanded[PATH_MAX];
+    char stripped[PATH_MAX];
+    char stripped_expanded[PATH_MAX];
+
+    if (cmd->argv[0][0] == '/' &&
+        pathTruncateExpand(cmd->argv[0], expanded, sizeof(expanded)) &&
+        strcmp(expanded, cmd->argv[0]) != 0) {
+        probes[probe_count++] = expanded;
     }
-    if (access(path, R_OK) != 0) {
+    if (cmd->argv[0][0] == '/' &&
+        pathTruncateStrip(cmd->argv[0], stripped, sizeof(stripped)) &&
+        strcmp(stripped, cmd->argv[0]) != 0) {
+        probes[probe_count++] = stripped;
+        if (pathTruncateExpand(stripped, stripped_expanded, sizeof(stripped_expanded)) &&
+            strcmp(stripped_expanded, stripped) != 0) {
+            probes[probe_count++] = stripped_expanded;
+        }
+    }
+#endif
+
+    bool readable = false;
+#if defined(PSCAL_TARGET_IOS)
+    for (size_t i = 0; i < probe_count; ++i) {
+        struct stat st;
+        if (stat(probes[i], &st) != 0 || !S_ISREG(st.st_mode)) {
+            continue;
+        }
+        if (access(probes[i], R_OK) != 0) {
+            continue;
+        }
+        script_path = probes[i];
+        readable = true;
+        break;
+    }
+#else
+    struct stat st;
+    if (stat(script_path, &st) == 0 && S_ISREG(st.st_mode) && access(script_path, R_OK) == 0) {
+        readable = true;
+    }
+#endif
+    if (!readable) {
         return -1;
     }
 
-    char *source = shellLoadFile(path);
+    char *source = shellLoadFile(script_path);
     if (!source) {
         return -1;
     }
@@ -284,9 +454,9 @@ static int shellTryRunScriptFallback(VM *vm, const ShellCommand *cmd) {
     const char *frontend_path = shellRuntimeGetArg0();
     opts.frontend_path = frontend_path ? frontend_path : "exsh";
 
-    shellRuntimeSetArg0(path);
+    shellRuntimeSetArg0(cmd->argv[0]);
     bool exit_requested = false;
-    int status = shellRunSource(source, path, &opts, &exit_requested);
+    int status = shellRunSource(source, cmd->argv[0], &opts, &exit_requested);
     free(source);
     shellRuntimeSetArg0(frontend_path);
 
@@ -302,12 +472,9 @@ static int shellTryRunScriptFallback(VM *vm, const ShellCommand *cmd) {
         gShellPositionalOwned = saved_owned;
     }
 
-    if (exit_requested) {
-        shellRuntimeRequestExit();
-        if (vm) {
-            vm->exit_requested = true;
-        }
-    }
+    /* External-style script execution should not request shell exit when the
+     * script itself calls `exit`. Treat it as command termination only. */
+    (void)exit_requested;
 
     shellUpdateStatus(status);
     return status;
@@ -963,7 +1130,15 @@ static int shellSpawnProcess(VM *vm,
             }
 
 #if defined(PSCAL_TARGET_IOS)
-            int shebang_status = shellMaybeExecShebangTool(cmd->argv[0], cmd->argv);
+            const char *shebang_path = cmd->argv[0];
+            char *resolved = shellFindExecutableOnPath(cmd->argv[0]);
+            if (resolved) {
+                shebang_path = resolved;
+            }
+            int shebang_status = shellMaybeExecShebangTool(shebang_path, cmd->argv);
+            if (resolved) {
+                free(resolved);
+            }
             if (shebang_status >= 0) {
                 _exit(shebang_status);
             }
@@ -3334,7 +3509,15 @@ static int shellRunBuiltinInProcess(VM *vm,
                 shellShebangThreadCtxFree(bg_ctx);
             }
         }
-        int shebang_status = shellMaybeExecShebangTool(cmd->argv[0], cmd->argv);
+        const char *shebang_path = cmd->argv[0];
+        char *resolved = shellFindExecutableOnPath(cmd->argv[0]);
+        if (resolved) {
+            shebang_path = resolved;
+        }
+        int shebang_status = shellMaybeExecShebangTool(shebang_path, cmd->argv);
+        if (resolved) {
+            free(resolved);
+        }
         gShellRuntime.pipeline = saved_pipeline;
         if (shebang_status >= 0) {
             shellUpdateStatus(shebang_status);
@@ -3428,6 +3611,32 @@ static int shellRunBuiltinInProcess(VM *vm,
                     }
                     free(argv_copy);
                 }
+            }
+#endif
+        }
+        if (!builtin_ran) {
+#if defined(PSCAL_TARGET_IOS)
+            /* Try to interpret scripts in-process (no fork/exec on iOS). */
+            char *resolved = NULL;
+            const char *orig0 = cmd->argv ? cmd->argv[0] : NULL;
+            const char *temp0 = orig0;
+            if (orig0 && strchr(orig0, '/') == NULL) {
+                resolved = shellFindExecutableOnPath(orig0);
+                if (resolved) {
+                    temp0 = resolved;
+                }
+            }
+            int fb_status = -1;
+            if (temp0) {
+                const char *saved0 = cmd->argv[0];
+                cmd->argv[0] = (char *)temp0;
+                fb_status = shellTryRunScriptFallback(vm ? vm : gShellCurrentVm, cmd);
+                cmd->argv[0] = saved0;
+            }
+            if (resolved) free(resolved);
+            if (fb_status >= 0) {
+                shellUpdateStatus(fb_status);
+                builtin_ran = true;
             }
 #endif
         }
@@ -4093,6 +4302,21 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
 
     const char *failed_assignment = NULL;
     bool invalid_assignment = false;
+    /* Allow VAR=val words attached to local/declare/typeset to bind into the
+     * current function's local scope instead of the environment. */
+    bool previous_local_scope_flag = gShellRuntime.local_scope_active;
+    bool localizes_assignments = false;
+    if (cmd->argc > 0 && cmd->argv && cmd->argv[0]) {
+        const char *canon = shellBuiltinCanonicalName(cmd->argv[0]);
+        if (canon && (strcmp(canon, "local") == 0 ||
+                      strcmp(canon, "declare") == 0 ||
+                      strcmp(canon, "typeset") == 0)) {
+            if (shellLocalScopeDepth() > 0) {
+                localizes_assignments = true;
+                gShellRuntime.local_scope_active = true;
+            }
+        }
+    }
     if (cmd->assignment_count > 0) {
         if (!shellApplyAssignmentsTemporary(cmd, &assignment_backups, &assignment_backup_count,
                                             &failed_assignment, &invalid_assignment)) {
@@ -4111,9 +4335,15 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
             }
             shellFreeCommand(cmd);
             shellScalarCacheInvalidate();
+            if (localizes_assignments) {
+                gShellRuntime.local_scope_active = previous_local_scope_flag;
+            }
             return makeVoid();
         }
         assignments_applied = true;
+    }
+    if (localizes_assignments) {
+        gShellRuntime.local_scope_active = previous_local_scope_flag;
     }
 
     int stdin_fd = -1;

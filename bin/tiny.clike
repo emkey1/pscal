@@ -30,7 +30,20 @@ str resolveRoot() {
   str root = getenv("PSCALI_WORKSPACE_ROOT");
   if (root == "") root = getenv("PSCAL_WORKSPACE_ROOT");
   if (root != "") return root;
-  return dirname(dirname(paramstr(0)));
+  str script = paramstr(0);
+  if (script == "") script = ".";
+  root = dirname(dirname(script));
+  if (root == "" || root == "/") root = ".";
+  return root;
+}
+
+// Derive default output path: replace trailing .tiny with .pbc, else append .pbc
+str defaultOutPath(str src) {
+  int len = length(src);
+  if (len >= 5 && copy(src, len - 4, 5) == ".tiny") {
+    return copy(src, 1, len - 5) + ".pbc";
+  }
+  return src + ".pbc";
 }
 
 // --------- Opcode loader ---------
@@ -55,6 +68,7 @@ void loadOpcodes(str root) {
     i = j + 1;
     int p = 1; while (p <= llen && copy(line, p, 1) <= " ") p = p + 1;
     str trimmed = copy(line, p, llen - p + 1);
+    if (length(trimmed) >= 2 && copy(trimmed, 1, 2) == "//") continue; // skip comments
     if (pos("typedef enum", trimmed) == 1) { inEnum = 1; continue; }
     if (!inEnum) continue;
     if (trimmed == "}") { break; }
@@ -306,60 +320,68 @@ int vmVersion(str root){
   return 0;
 }
 
-// --------- Serialization into a byte string ---------
-str appendByte(str s, int b){ return s + tochar(b & 255); }
-str append32(str s, int v){
-  s = appendByte(s, v);
-  s = appendByte(s, (v >> 8));
-  s = appendByte(s, (v >> 16));
-  s = appendByte(s, (v >> 24));
-  return s;
+// --------- Serialization into a byte stream (binary-safe) ---------
+void msAppendByte(mstream ms, int b){ mstreamappendbyte(ms, b & 255); }
+void msAppend32(mstream ms, int v){
+  msAppendByte(ms, v);
+  msAppendByte(ms, (v >> 8));
+  msAppendByte(ms, (v >> 16));
+  msAppendByte(ms, (v >> 24));
 }
-str append64(str s, long long v){
+void msAppend64(mstream ms, long long v){
   int lo = (int)(v & 4294967295);
   int hi = (int)((v >> 32) & 4294967295);
-  s = append32(s, lo);
-  s = append32(s, hi);
-  return s;
+  msAppend32(ms, lo);
+  msAppend32(ms, hi);
 }
 
 void writePbc(str outPath, int version){
-  str out = "";
-  int magic = 1347634098; // 'PSB2'
-  out = append32(out, magic);
-  out = append32(out, version);
-  out = append64(out, 0); // source_hash
-  out = append64(out, 0); // combined_hash
+  mstream ms = mstreamcreate();
+  int magic = 1347633714; // 0x50534232 ('PSB2'), written little-endian
+  msAppend32(ms, magic);
+  msAppend32(ms, version);
+  msAppend64(ms, 0); // source_hash
+  msAppend64(ms, 0); // combined_hash
   str pathLit = "tiny";
-  out = append32(out, -length(pathLit));
-  out = out + pathLit;
-  out = append32(out, codeLen);
-  out = append32(out, constCount);
-  for(int i=0;i<codeLen;i=i+1) out = appendByte(out, code[i]);
-  for(int i=0;i<codeLen;i=i+1) out = append32(out, 0); // lines
+  msAppend32(ms, -length(pathLit));
+  for (int i = 1; i <= length(pathLit); i = i + 1) msAppendByte(ms, ord(pathLit[i]));
+  msAppend32(ms, codeLen);
+  msAppend32(ms, constCount);
+  for(int i=0;i<codeLen;i=i+1) msAppendByte(ms, code[i]);
+  for(int i=0;i<codeLen;i=i+1) msAppend32(ms, 0); // lines
   for(int i=0;i<constCount;i=i+1){
-    out = append32(out, constType[i]);
+    msAppend32(ms, constType[i]);
     if (constType[i]==TYPE_INTEGER) {
       long long v = atoi(constVal[i]);
-      out = append64(out, v);
+      msAppend64(ms, v);
     } else {
       str s = constVal[i];
-      if (s == "") { out = append32(out, -1); }
-      else { out = append32(out, length(s)); out = out + s; }
+      if (s == "") { msAppend32(ms, -1); }
+      else {
+        int len = length(s);
+        msAppend32(ms, len);
+        for (int j = 1; j <= len; j = j + 1) msAppendByte(ms, ord(s[j]));
+      }
     }
   }
-  mstream ms = mstreamfromstring(out);
+  // Footers expected by pscalvm loader (mirror python tiny):
+  // builtin lowercase mapping count, stored_proc_count (negative signals empty),
+  // constant symbol table count, type table count.
+  msAppend32(ms, 0);   // builtin lowercase mapping count
+  msAppend32(ms, -1);  // stored_proc_count = -(count+1); empty => -1
+  msAppend32(ms, 0);   // const symbol table count
+  msAppend32(ms, 0);   // type table count
   mstreamsavetofile(&ms, outPath);
   mstreamfree(&ms);
 }
 
 // --------- Main ---------
 int main(){
-  if (paramcount() < 2) { printf("Usage: clike bin/tiny <source.tiny> <out.pbc>\n"); return 1; }
+  if (paramcount() < 1) { printf("Usage: clike bin/tiny <source.tiny> [out.pbc]\n"); return 1; }
   str srcPath = paramstr(1);
-  str outPath = paramstr(2);
+  str outPath;
+  if (paramcount() >= 2) outPath = paramstr(2); else outPath = defaultOutPath(srcPath);
   str root = resolveRoot();
-  printf("tiny: script=%s root=%s\n", paramstr(0), root);
   if (!fileexists(srcPath)) { printf("tiny: source %s not found\n", srcPath); return 1; }
   loadOpcodes(root);
   int version = vmVersion(root);

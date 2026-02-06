@@ -54,13 +54,10 @@ static bool pathVirtualizationActive(void) {
         return false;
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (vprocCurrent) {
-        if (vprocCurrent() != NULL) {
-            return true;
-        }
-        /* Only honor explicit truncation outside vproc to avoid HOME fallback surprises. */
-        return pathVirtualizationExplicit();
-    }
+    VProc *vp = vprocCurrent();
+    if (vp != NULL) return true;
+    /* Only honor explicit truncation outside vproc to avoid HOME fallback surprises. */
+    return pathVirtualizationExplicit();
 #endif
     return true;
 }

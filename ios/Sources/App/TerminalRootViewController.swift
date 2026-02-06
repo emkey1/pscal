@@ -20,14 +20,20 @@ final class TerminalWindow: UIWindow {
         for i in 0...9 {
             let input = "\(i)"
             let title = (i == 0) ? "Select Tab 10" : "Select Tab \(i)"
-            let select = UIKeyCommand(input: input,
-                                      modifierFlags: [.command, .alternate],
-                                      action: #selector(handleSelectTabCommand(_:)))
-            select.discoverabilityTitle = title
+            let selectCmd = UIKeyCommand(input: input,
+                                         modifierFlags: [.command],
+                                         action: #selector(handleSelectTabCommand(_:)))
+            selectCmd.discoverabilityTitle = title
+            let selectAlt = UIKeyCommand(input: input,
+                                         modifierFlags: [.command, .alternate],
+                                         action: #selector(handleSelectTabCommand(_:)))
+            selectAlt.discoverabilityTitle = title
             if #available(iOS 15.0, *) {
-                select.wantsPriorityOverSystemBehavior = true
+                selectCmd.wantsPriorityOverSystemBehavior = true
+                selectAlt.wantsPriorityOverSystemBehavior = true
             }
-            commands.append(select)
+            commands.append(selectCmd)
+            commands.append(selectAlt)
         }
         return commands
     }()
@@ -60,8 +66,9 @@ final class TerminalWindow: UIWindow {
                 continue
             }
             let input = key.charactersIgnoringModifiers.lowercased()
-            let hasOption = modifiers.contains(.alternate)
-            if hasOption, let number = Int(input) {
+            let extraMods = modifiers.subtracting([.command])
+            if (extraMods == [] || extraMods == [.alternate]),
+               let number = Int(input) {
                 TerminalTabManager.shared.selectTab(number: number)
                 return true
             }

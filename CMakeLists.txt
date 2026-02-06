@@ -973,7 +973,7 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/vproc_test_app.c
 )
 
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_PLATFORM_IOS OR APPLE)
     list(APPEND PSCAL_CORE_SOURCES ${SMALLCLUE_SOURCES})
 endif()
 
@@ -1310,6 +1310,9 @@ function(pscal_apply_common_compilation_settings target_name)
     endif()
     if(PSCAL_HAS_LIBCURL AND CURL_INCLUDE_DIRS)
         target_include_directories(${target_name} PRIVATE ${CURL_INCLUDE_DIRS})
+    endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        target_compile_options(${target_name} PRIVATE -Wno-nullability-completeness)
     endif()
 endfunction()
 
@@ -2120,7 +2123,7 @@ if(PSCAL_PLATFORM_IOS AND SMALLCLUE_WITH_EXSH)
     target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_EXSH)
 endif()
 
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_PLATFORM_IOS OR APPLE)
     add_executable(smallclue
         src/smallclue/src/main.c
     )

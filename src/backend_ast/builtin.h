@@ -321,6 +321,7 @@ Value vmBuiltinMstreamsavetofile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreamfree(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreambuffer(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreamFromString(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinMstreamAppendByte(struct VM_s* vm, int arg_count, Value* args);
 
 /* VM-native math functions */
 Value vmBuiltinSqrt(struct VM_s* vm, int arg_count, Value* args);

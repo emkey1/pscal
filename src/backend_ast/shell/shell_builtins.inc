@@ -7041,6 +7041,7 @@ static bool shellCommandExecutableExists(const char *path) {
     if (!path || !*path) {
         return false;
     }
+    bool runnable = false;
     struct stat st;
     if (stat(path, &st) != 0) {
         return false;
@@ -7048,7 +7049,69 @@ static bool shellCommandExecutableExists(const char *path) {
     if (!S_ISREG(st.st_mode)) {
         return false;
     }
-    return access(path, X_OK) == 0;
+    runnable = (access(path, X_OK) == 0);
+#if defined(PSCAL_TARGET_IOS)
+    if (!runnable && (st.st_mode & 0111) != 0) {
+        runnable = true;
+    }
+    if (!runnable && access(path, R_OK) == 0) {
+        int fd = open(path, O_RDONLY);
+        if (fd >= 0) {
+            char header[2];
+            ssize_t n = read(fd, header, sizeof(header));
+            close(fd);
+            if (n == 2 && header[0] == '#' && header[1] == '!') {
+                runnable = true;
+            }
+        }
+    }
+#endif
+    return runnable;
+}
+
+static bool shellCommandResolveExecutablePath(const char *path, char *resolved, size_t resolved_size) {
+    if (!resolved || resolved_size == 0 || !path || !*path) {
+        return false;
+    }
+    if (shellCommandExecutableExists(path)) {
+#if defined(PSCAL_TARGET_IOS)
+        if (pathTruncateStrip(path, resolved, resolved_size)) {
+            return true;
+        }
+#endif
+        int copied = snprintf(resolved, resolved_size, "%s", path);
+        return copied >= 0 && (size_t)copied < resolved_size;
+    }
+
+#if defined(PSCAL_TARGET_IOS)
+    /* When PATH contains host-side container paths, also probe their
+     * app-root-visible equivalent ("/..."). */
+    char stripped[PATH_MAX];
+    if (pathTruncateStrip(path, stripped, sizeof(stripped)) &&
+        strcmp(stripped, path) != 0 &&
+        shellCommandExecutableExists(stripped)) {
+        int copied = snprintf(resolved, resolved_size, "%s", stripped);
+        return copied >= 0 && (size_t)copied < resolved_size;
+    }
+#endif
+    return false;
+}
+
+static bool shellCommandResultHasFilePath(const ShellCommandResult *results,
+                                          size_t count,
+                                          const char *path) {
+    if (!results || !path) {
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (results[i].kind != SHELL_COMMAND_RESULT_FILE || !results[i].detail) {
+            continue;
+        }
+        if (strcmp(results[i].detail, path) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool shellCommandEnumerateExecutables(const char *name,
@@ -7060,20 +7123,31 @@ static bool shellCommandEnumerateExecutables(const char *name,
         return true;
     }
     if (strchr(name, '/')) {
-        if (shellCommandExecutableExists(name)) {
-            if (!shellCommandAppendResult(results, count, SHELL_COMMAND_RESULT_FILE, name)) {
+        char resolved[PATH_MAX];
+        if (shellCommandResolveExecutablePath(name, resolved, sizeof(resolved))) {
+            if (!shellCommandAppendResult(results, count, SHELL_COMMAND_RESULT_FILE, resolved)) {
                 return false;
             }
         }
         return true;
     }
 
-    const char *env_value = path_env ? path_env : shellSafeGetenv("PATH");
+    char *path_value = NULL;
+    const char *env_value = path_env;
+    if (!env_value) {
+        path_value = shellLookupParameterValue("PATH", strlen("PATH"));
+        if (path_value && *path_value) {
+            env_value = path_value;
+        } else {
+            env_value = shellSafeGetenv("PATH");
+        }
+    }
     if (!env_value) {
         env_value = "";
     }
     char *copy = strdup(env_value);
     if (!copy) {
+        free(path_value);
         return false;
     }
 
@@ -7107,8 +7181,10 @@ static bool shellCommandEnumerateExecutables(const char *name,
         pos += name_len;
         candidate[pos] = '\0';
 
-        if (shellCommandExecutableExists(candidate)) {
-            if (!shellCommandAppendResult(results, count, SHELL_COMMAND_RESULT_FILE, candidate)) {
+        char resolved[PATH_MAX];
+        if (shellCommandResolveExecutablePath(candidate, resolved, sizeof(resolved))) {
+            if (!shellCommandResultHasFilePath(*results, *count, resolved) &&
+                !shellCommandAppendResult(results, count, SHELL_COMMAND_RESULT_FILE, resolved)) {
                 ok = false;
                 free(candidate);
                 break;
@@ -7128,7 +7204,29 @@ static bool shellCommandEnumerateExecutables(const char *name,
         }
     }
 
-        free(copy);
+#if defined(PSCAL_TARGET_IOS)
+    /* Keep fallback probing in app-root namespace, not device-root paths. */
+    if (find_all || *count == 0) {
+        const char *fallback_dirs[] = { "/bin", "/Documents/bin" };
+        for (size_t i = 0; i < sizeof(fallback_dirs) / sizeof(fallback_dirs[0]); ++i) {
+            char candidate[PATH_MAX];
+            int n = snprintf(candidate, sizeof(candidate), "%s/%s", fallback_dirs[i], name);
+            char resolved[PATH_MAX];
+            if (n > 0 && n < (int)sizeof(candidate) &&
+                shellCommandResolveExecutablePath(candidate, resolved, sizeof(resolved))) {
+                if (!shellCommandResultHasFilePath(*results, *count, resolved) &&
+                    !shellCommandAppendResult(results, count, SHELL_COMMAND_RESULT_FILE, resolved)) {
+                    free(copy);
+                    free(path_value);
+                    return false;
+                }
+            }
+        }
+    }
+#endif
+
+    free(copy);
+    free(path_value);
     return ok;
 }
 
@@ -8740,10 +8838,75 @@ Value vmBuiltinShellTrap(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellLocal(VM *vm, int arg_count, Value *args) {
-    (void)arg_count;
-    (void)args;
-    gShellRuntime.local_scope_active = true;
-    shellUpdateStatus(0);
+    /*
+     * "local" is primarily used inside shell functions to declare variables
+     * with function scope. Our previous stub only flipped the
+     * local_scope_active flag, which meant invocations like
+     *   local dir=$1
+     * failed to bind the requested name/value pair. That broke helper
+     * functions in ~/.exshrc (e.g. path_prepend) because $dir was always
+     * empty and PATH was never updated.
+     */
+
+    if (shellLocalScopeDepth() == 0) {
+        runtimeError(vm, "local: can only be used in functions");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+
+    /* No arguments: just enable local scope for the current function frame. */
+    if (arg_count == 0) {
+        gShellRuntime.local_scope_active = true;
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
+
+    bool ok = true;
+    for (int i = 0; i < arg_count && ok; ++i) {
+        Value v = args[i];
+        if (v.type != TYPE_STRING || !v.s_val) {
+            runtimeError(vm, "local: arguments must be strings");
+            ok = false;
+            break;
+        }
+        const char *text = v.s_val;
+        const char *eq = strchr(text, '=');
+        size_t name_len = eq ? (size_t)(eq - text) : strlen(text);
+        if (name_len == 0) {
+            runtimeError(vm, "local: invalid identifier '%s'", text);
+            ok = false;
+            break;
+        }
+
+        char *name = (char *)malloc(name_len + 1);
+        if (!name) {
+            runtimeError(vm, "local: out of memory");
+            ok = false;
+            break;
+        }
+        memcpy(name, text, name_len);
+        name[name_len] = '\0';
+
+        const char *value = eq ? (eq + 1) : "";
+        if (!shellIsValidEnvName(name)) {
+            runtimeError(vm, "local: invalid identifier '%s'", name);
+            free(name);
+            ok = false;
+            break;
+        }
+
+        if (!shellLocalScopeSetOnCurrentFrame(name, value, false)) {
+            runtimeError(vm, "local: unable to set '%s'", name);
+            free(name);
+            ok = false;
+            break;
+        }
+
+        free(name);
+    }
+
+    gShellRuntime.local_scope_active = false;
+    shellUpdateStatus(ok ? 0 : 1);
     return makeVoid();
 }
 

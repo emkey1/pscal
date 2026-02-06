@@ -2817,6 +2817,18 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         return true;
     }
     int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
+    bool include_assignments_as_args = false;
+    if (canonical) {
+        if (strcmp(canonical, "local") == 0 ||
+            strcmp(canonical, "declare") == 0 ||
+            strcmp(canonical, "typeset") == 0) {
+            include_assignments_as_args = true;
+        }
+    }
+    int extra_assign_args = (include_assignments_as_args && cmd->assignment_count > 0)
+                                ? (int)cmd->assignment_count
+                                : 0;
+    int total_args = arg_count + extra_assign_args;
     Value *args = NULL;
     int previous_line = gShellCurrentCommandLine;
     int previous_column = gShellCurrentCommandColumn;
@@ -2878,8 +2890,8 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     }
 
     if (!handled) {
-        if (arg_count > 0) {
-            args = calloc((size_t)arg_count, sizeof(Value));
+        if (total_args > 0) {
+            args = calloc((size_t)total_args, sizeof(Value));
             if (!args) {
                 runtimeError(vm, "shell builtin '%s': out of memory", name);
                 shellUpdateStatus(1);
@@ -2891,11 +2903,18 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
                 shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
                 return true;
             }
-            for (int i = 0; i < arg_count; ++i) {
-                args[i] = makeString(cmd->argv[i + 1]);
+            int arg_index = 0;
+            for (; arg_index < arg_count; ++arg_index) {
+                args[arg_index] = makeString(cmd->argv[arg_index + 1]);
+            }
+            if (extra_assign_args > 0) {
+                for (size_t j = 0; j < cmd->assignment_count; ++j, ++arg_index) {
+                    const char *text = cmd->assignments[j].text ? cmd->assignments[j].text : "";
+                    args[arg_index] = makeString(text);
+                }
             }
         }
-        handler(vm, arg_count, args);
+        handler(vm, total_args, args);
     }
     gShellCurrentBuiltinBackground = previous_background;
     shellRuntimeSetCurrentCommandName(previous_name);
@@ -2903,7 +2922,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     shellRestoreExecRedirections(redir_backups, redir_backup_count);
     shellFreeExecRedirBackups(redir_backups, redir_backup_count);
     if (args) {
-        for (int i = 0; i < arg_count; ++i) {
+        for (int i = 0; i < total_args; ++i) {
             freeValue(&args[i]);
         }
         free(args);

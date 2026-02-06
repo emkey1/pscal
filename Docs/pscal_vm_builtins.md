@@ -98,6 +98,7 @@ VM. For instructions on adding your own routines, see
 | MStreamSaveToFile | (ms: MStream, file: String) | Boolean | Persist a memory stream to disk. |
 | MStreamFree | (ms: MStream) | void | Release a memory stream instance. |
 | MStreamBuffer | (ms: MStream) | String | Return stream contents as a string. |
+| MStreamAppendByte | (ms: MStream, byte: Integer) | void | Append a single byte to the stream (capacity grows as needed). Available in Pascal, CLike, and Rea frontends. |
 
 ## Threading and Synchronization
 

@@ -1241,6 +1241,16 @@ final class PscalRuntimeBootstrap: ObservableObject {
             refreshActiveGeometry(forceRuntimeUpdate: true)
             scheduleRender()
         }
+        requestTerminalInputFocus()
+    }
+
+    private func requestTerminalInputFocus() {
+        let focusRequest = {
+            NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
+        }
+        DispatchQueue.main.async(execute: focusRequest)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: focusRequest)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: focusRequest)
     }
 
     func refreshEditorDisplay() {

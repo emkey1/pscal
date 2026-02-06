@@ -12,6 +12,7 @@
 #include "backend_ast/builtin.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
+#include "common/path_virtualization.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -217,9 +218,9 @@ static int shellRunExshShebang(const char *path, char *const *argv) {
 
     free(source);
 
-    if (exit_requested) {
-        shellRuntimeRequestExit();
-    }
+    /* Shebang scripts run as command bodies, not as sourced shell state.
+     * Keep an internal `exit` scoped to the script invocation. */
+    (void)exit_requested;
     return status;
 }
 

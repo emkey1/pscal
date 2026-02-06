@@ -1349,6 +1349,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"mstreamloadfromfile", vmBuiltinMstreamloadfromfile},
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
     {"mstreambuffer", vmBuiltinMstreambuffer},
+    {"mstreamappendbyte", vmBuiltinMstreamAppendByte},
     {"newobj", vmBuiltinNewObj},
     {"new", vmBuiltinNew},
     {"normalcolors", vmBuiltinNormalcolors},
@@ -7230,6 +7231,41 @@ Value vmBuiltinMstreamFromString(VM* vm, int arg_count, Value* args) {
     }
 
     return makeMStream(ms);
+}
+
+Value vmBuiltinMstreamAppendByte(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "MStreamAppendByte expects (mstream, byte).");
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_MEMORYSTREAM || args[0].mstream == NULL) {
+        runtimeError(vm, "MStreamAppendByte: first argument must be a valid mstream.");
+        return makeVoid();
+    }
+    int byte = 0;
+    if (!IS_INTLIKE(args[1])) {
+        runtimeError(vm, "MStreamAppendByte: second argument must be an integer.");
+        return makeVoid();
+    }
+    byte = AS_INTEGER(args[1]) & 0xFF;
+
+    MStream* ms = args[0].mstream;
+    /* Ensure capacity */
+    if (ms->capacity < ms->size + 2) { /* +1 for new byte, +1 for terminator */
+        int newcap = (ms->capacity > 0) ? ms->capacity * 2 : 64;
+        if (newcap < ms->size + 2) newcap = ms->size + 2;
+        unsigned char* newbuf = realloc(ms->buffer, (size_t)newcap);
+        if (!newbuf) {
+            runtimeError(vm, "MStreamAppendByte: out of memory.");
+            return makeVoid();
+        }
+        ms->buffer = newbuf;
+        ms->capacity = newcap;
+    }
+    ms->buffer[ms->size] = (unsigned char)byte;
+    ms->size += 1;
+    ms->buffer[ms->size] = '\0'; /* maintain convenience NUL */
+    return makeVoid();
 }
 
 Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {

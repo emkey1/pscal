@@ -138,6 +138,7 @@ int mstreamfree();
 int mstreamloadfromfile();
 int mstreamsavetofile();
 int mstreambuffer();
+int mstreamappendbyte();
 int new();
 int normalcolors();
 int normvideo();

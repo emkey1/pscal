@@ -292,6 +292,7 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("mstreamfree"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("mstreambuffer"), TYPE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("mstreamfromstring"), TYPE_MEMORYSTREAM, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreamappendbyte"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("fileexists"), TYPE_BOOLEAN, 0, 0, 0);
     registerFunctionSignature(strdup("filesize"), TYPE_INT64, 0, 0, 0);
     registerFunctionSignature(strdup("hasextbuiltin"), TYPE_INT32, 0, 0, 0);

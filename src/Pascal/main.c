@@ -43,6 +43,7 @@
 #include "compiler/compiler.h"
 #include "core/cache.h"
 #include "symbol/symbol.h"
+#include "common/path_virtualization.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,6 +233,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
 
     /* Register built-in functions and procedures. */
     registerAllBuiltins();
+    registerBuiltinFunction("mstreamappendbyte", AST_FUNCTION_DECL, NULL);
 
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");

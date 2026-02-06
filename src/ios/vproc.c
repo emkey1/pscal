@@ -7340,16 +7340,28 @@ static void vprocEnsurePathTruncationDefault(void) {
         pthread_mutex_unlock(&gPathTruncateMu);
         return;
     }
-    const char *prefix = getenv("PATH_TRUNCATE");
-    if (!prefix || prefix[0] == '\0') {
-        prefix = getenv("PSCALI_CONTAINER_ROOT");
+    const char *raw_prefix = getenv("PATH_TRUNCATE");
+    if (!raw_prefix || raw_prefix[0] == '\0') {
+        raw_prefix = getenv("PSCALI_CONTAINER_ROOT");
     }
-    if (!prefix || prefix[0] != '/') {
-        prefix = getenv("HOME");
+    if (!raw_prefix || raw_prefix[0] != '/') {
+        raw_prefix = getenv("HOME");
     }
-    if (!prefix || prefix[0] != '/') {
+    if (!raw_prefix || raw_prefix[0] != '/') {
         pthread_mutex_unlock(&gPathTruncateMu);
         return;
+    }
+    char prefbuf[PATH_MAX];
+    const char *prefix = raw_prefix;
+    /* On iOS, most runtime assets live under <container>/Documents. When PATH
+     * truncation is anchored at the container root, /bin expands to
+     * <container>/bin which does not exist. Prefer the Documents root so /bin
+     * maps to <container>/Documents/bin where exsh assets are staged. */
+    if (getenv("PSCALI_CONTAINER_ROOT") && strncmp(raw_prefix, getenv("PSCALI_CONTAINER_ROOT"), strlen(getenv("PSCALI_CONTAINER_ROOT"))) == 0) {
+        size_t n = snprintf(prefbuf, sizeof(prefbuf), "%s/Documents", raw_prefix);
+        if (n > 0 && n < sizeof(prefbuf)) {
+            prefix = prefbuf;
+        }
     }
     pathTruncateApplyEnvironment(prefix);
     pthread_mutex_unlock(&gPathTruncateMu);
@@ -7360,7 +7372,16 @@ void vprocApplyPathTruncation(const char *prefix) {
     gPathTruncateInit = true;
     if (prefix && prefix[0] == '/') {
         unsetenv("PSCALI_PATH_TRUNCATE_DISABLED");
-        pathTruncateApplyEnvironment(prefix);
+        char prefbuf[PATH_MAX];
+        const char *use_prefix = prefix;
+        if (getenv("PSCALI_CONTAINER_ROOT") &&
+            strncmp(prefix, getenv("PSCALI_CONTAINER_ROOT"), strlen(getenv("PSCALI_CONTAINER_ROOT"))) == 0) {
+            size_t n = snprintf(prefbuf, sizeof(prefbuf), "%s/Documents", prefix);
+            if (n > 0 && n < sizeof(prefbuf)) {
+                use_prefix = prefbuf;
+            }
+        }
+        pathTruncateApplyEnvironment(use_prefix);
     } else {
         setenv("PSCALI_PATH_TRUNCATE_DISABLED", "1", 1);
         pathTruncateApplyEnvironment(NULL);

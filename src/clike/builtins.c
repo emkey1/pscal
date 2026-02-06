@@ -51,6 +51,7 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("mstreamfree", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreambuffer", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamfromstring", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mstreamappendbyte", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("fileexists", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("filesize", AST_FUNCTION_DECL, NULL);
 
