@@ -118,13 +118,7 @@ final class TerminalKeyInputView: UITextView {
     private var keyboardObservers: [NSObjectProtocol] = []
     private let hardwareKeyboardHeightEpsilon: CGFloat = 80.0
     private var cachedKeyCommands: [UIKeyCommand]?
-    private var consumedKeySignatures: Set<KeySignature> = []
     private var suppressNextPlainDotInsert: Bool = false
-
-    private struct KeySignature: Hashable {
-        let keyCodeRaw: Int
-        let modifiersRaw: Int
-    }
 
     private func isHardwareKeyboard(_ notification: Notification) -> Bool {
         guard let userInfo = notification.userInfo,
@@ -136,27 +130,18 @@ final class TerminalKeyInputView: UITextView {
         return frameInWindow.height < hardwareKeyboardHeightEpsilon
     }
     
-    private struct RepeatCommand {
-        let command: UIKeyCommand
-        let output: String
-    }
-
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
-        self.repeatKeyCommands = []
         super.init(frame: frame, textContainer: textContainer)
         configureAccessoryBar()
-        repeatKeyCommands = buildRepeatCommands()
         installKeyboardObservers()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         self.accessoryBar = UIInputView(frame: .zero, inputViewStyle: .keyboard)
-        self.repeatKeyCommands = []
         super.init(coder: coder)
         configureAccessoryBar()
-        repeatKeyCommands = buildRepeatCommands()
         installKeyboardObservers()
     }
 
@@ -172,13 +157,11 @@ final class TerminalKeyInputView: UITextView {
 
     override var inputAccessoryView: UIView? {
         get {
-            (softKeyboardVisible && !hardwareKeyboardConnected) ? accessoryBar : nil
+            (isFirstResponder && softKeyboardVisible && !hardwareKeyboardConnected) ? accessoryBar : nil
         }
         set { /* ignore external setters */ }
     }
 
-    private var repeatKeyCommands: [RepeatCommand]
-    private lazy var controlKeyCommands: [UIKeyCommand] = buildControlCommands()
 
     private func configureAccessoryBar() {
         accessoryBar.allowsSelfSizing = true
@@ -242,31 +225,6 @@ final class TerminalKeyInputView: UITextView {
         ])
     }
 
-    private func buildRepeatCommands() -> [RepeatCommand] {
-        var commands: [RepeatCommand] = []
-        func makeCommand(input: String, output: String, modifiers: UIKeyModifierFlags = []) {
-            let command = UIKeyCommand(input: input,
-                                       modifierFlags: modifiers,
-                                       action: #selector(handleRepeatCommand(_:)))
-            if #available(iOS 15.0, *) {
-                command.wantsPriorityOverSystemBehavior = true
-            }
-            commands.append(RepeatCommand(command: command, output: output))
-        }
-
-        makeCommand(input: "h", output: "h")
-        makeCommand(input: "j", output: "j")
-        makeCommand(input: "k", output: "k")
-        makeCommand(input: "l", output: "l")
-        makeCommand(input: UIKeyCommand.inputUpArrow, output: "\u{1B}[A")
-        makeCommand(input: UIKeyCommand.inputDownArrow, output: "\u{1B}[B")
-        makeCommand(input: UIKeyCommand.inputLeftArrow, output: "\u{1B}[D")
-        makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
-        makeCommand(input: "\t", output: "\t")
-        makeCommand(input: "\r", output: "\r")
-        return commands
-    }
-
     override var canBecomeFirstResponder: Bool {
         inputEnabled && super.canBecomeFirstResponder
     }
@@ -292,7 +250,7 @@ final class TerminalKeyInputView: UITextView {
         if let cache = cachedKeyCommands {
             return cache
         }
-        var commands = repeatKeyCommands.map { $0.command }
+        var commands: [UIKeyCommand] = []
         let increase1 = UIKeyCommand(input: "+", modifierFlags: [.command], action: #selector(handleIncreaseFont))
         let increase2 = UIKeyCommand(input: "=", modifierFlags: [.command], action: #selector(handleIncreaseFont))
         let decrease = UIKeyCommand(input: "-", modifierFlags: [.command], action: #selector(handleDecreaseFont))
@@ -302,13 +260,6 @@ final class TerminalKeyInputView: UITextView {
             decrease.wantsPriorityOverSystemBehavior = true
         }
         commands.append(contentsOf: [increase1, increase2, decrease])
-        let escape = UIKeyCommand(input: UIKeyCommand.inputEscape,
-                                  modifierFlags: [],
-                                  action: #selector(handleEscapeKey))
-        if #available(iOS 15.0, *) {
-            escape.wantsPriorityOverSystemBehavior = true
-        }
-        commands.append(escape)
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
@@ -343,7 +294,6 @@ final class TerminalKeyInputView: UITextView {
             }
             commands.append(closeTab)
         }
-        commands.append(contentsOf: controlKeyCommands)
         cachedKeyCommands = commands
         return commands
     }
@@ -358,6 +308,13 @@ final class TerminalKeyInputView: UITextView {
         // autocorrect "..." to a single ellipsis codepoint.
         if normalizedText.contains("\u{2026}") {
             normalizedText = normalizedText.replacingOccurrences(of: "\u{2026}", with: ".")
+        }
+        if let translated = translatedUIKitInputToken(normalizedText) {
+            onInput?(translated)
+            return
+        }
+        if normalizedText.hasPrefix("UIKeyInput") {
+            return
         }
 
         if normalizedText == "." {
@@ -444,22 +401,22 @@ final class TerminalKeyInputView: UITextView {
                                             object: nil,
                                             userInfo: ["command": event.modifierFlags.contains(.command)])
         }
-
-        var unhandled: [UIPress] = []
+        // Keep UIKit out of hardware key dispatch to avoid key-event crashes
+        // observed after pager/editor transitions. We route unknown keys through
+        // insertText so normal text input still works.
         for press in presses {
             if handle(press: press) {
-                if let signature = keySignature(for: press) {
-                    consumedKeySignatures.insert(signature)
-                }
                 continue
             }
-            if let signature = keySignature(for: press) {
-                consumedKeySignatures.remove(signature)
+            guard let key = press.key else { continue }
+            if key.keyCode == .keyboardDeleteOrBackspace {
+                deleteBackward()
+                continue
             }
-            unhandled.append(press)
-        }
-        if !unhandled.isEmpty {
-            super.pressesBegan(Set(unhandled), with: event)
+            let chars = key.characters
+            if !chars.isEmpty {
+                insertText(chars)
+            }
         }
     }
 
@@ -469,64 +426,21 @@ final class TerminalKeyInputView: UITextView {
                                             object: nil,
                                             userInfo: ["command": event.modifierFlags.contains(.command)])
         }
-        var unhandled: [UIPress] = []
-        for press in presses {
-            if handle(press: press) {
-                continue
-            }
-            unhandled.append(press)
-        }
-        if !unhandled.isEmpty {
-            super.pressesChanged(Set(unhandled), with: event)
-        }
+        // Key-down is sufficient for terminal input.
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                         object: nil,
                                         userInfo: ["command": false])
-        var unhandled: [UIPress] = []
-        for press in presses {
-            guard let signature = keySignature(for: press) else {
-                unhandled.append(press)
-                continue
-            }
-            let consumed = consumedKeySignatures.remove(signature) != nil
-            if !consumed {
-                unhandled.append(press)
-            }
-        }
-        if !unhandled.isEmpty {
-            super.pressesEnded(Set(unhandled), with: event)
-        }
+        // Swallow key-up events to avoid UIKit key replay paths.
     }
 
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                         object: nil,
                                         userInfo: ["command": false])
-        var unhandled: [UIPress] = []
-        for press in presses {
-            guard let signature = keySignature(for: press) else {
-                unhandled.append(press)
-                continue
-            }
-            let consumed = consumedKeySignatures.remove(signature) != nil
-            if !consumed {
-                unhandled.append(press)
-            }
-        }
-        if !unhandled.isEmpty {
-            super.pressesCancelled(Set(unhandled), with: event)
-        }
-    }
-
-    private func keySignature(for press: UIPress) -> KeySignature? {
-        guard let key = press.key else { return nil }
-        return KeySignature(
-            keyCodeRaw: Int(key.keyCode.rawValue),
-            modifiersRaw: key.modifierFlags.rawValue
-        )
+        // Swallow cancelled key events for the same reason as key-up events.
     }
 
     private func arrowSequence(_ direction: String) -> String {
@@ -534,62 +448,20 @@ final class TerminalKeyInputView: UITextView {
         return prefix + direction
     }
 
-    @objc private func handleRepeatCommand(_ command: UIKeyCommand) {
-        if let input = command.input {
-            switch input {
-            case UIKeyCommand.inputUpArrow:
-                if applicationCursorEnabled {
-                    onInput?("k")
-                } else {
-                    onInput?(arrowSequence("A"))
-                }
-                return
-            case UIKeyCommand.inputDownArrow:
-                if applicationCursorEnabled {
-                    onInput?("j")
-                } else {
-                    onInput?(arrowSequence("B"))
-                }
-                return
-            case UIKeyCommand.inputLeftArrow:
-                if applicationCursorEnabled {
-                    onInput?("h")
-                } else {
-                    onInput?(arrowSequence("D"))
-                }
-                return
-            case UIKeyCommand.inputRightArrow:
-                if applicationCursorEnabled {
-                    onInput?("l")
-                } else {
-                    onInput?(arrowSequence("C"))
-                }
-                return
-            case "\r":
-                onInput?("\r")
-                return
-            default:
-                break
-            }
-        }
-        if let match = repeatKeyCommands.first(where: { $0.command === command }) {
-            onInput?(match.output)
-            return
-        }
-        guard let input = command.input else { return }
+    private func translatedUIKitInputToken(_ input: String) -> String? {
         switch input {
-        case UIKeyCommand.inputUpArrow:
-            onInput?(arrowSequence("A"))
-        case UIKeyCommand.inputDownArrow:
-            onInput?(arrowSequence("B"))
-        case UIKeyCommand.inputLeftArrow:
-            onInput?(arrowSequence("D"))
-        case UIKeyCommand.inputRightArrow:
-            onInput?(arrowSequence("C"))
-        case "\r":
-            onInput?("\r")
+        case UIKeyCommand.inputUpArrow, "UIKeyInputUpArrow", "UIKeyInputUp":
+            return applicationCursorEnabled ? "k" : arrowSequence("A")
+        case UIKeyCommand.inputDownArrow, "UIKeyInputDownArrow", "UIKeyInputDown":
+            return applicationCursorEnabled ? "j" : arrowSequence("B")
+        case UIKeyCommand.inputLeftArrow, "UIKeyInputLeftArrow", "UIKeyInputLeft":
+            return applicationCursorEnabled ? "h" : arrowSequence("D")
+        case UIKeyCommand.inputRightArrow, "UIKeyInputRightArrow", "UIKeyInputRight":
+            return applicationCursorEnabled ? "l" : arrowSequence("C")
+        case UIKeyCommand.inputEscape, "UIKeyInputEscape":
+            return "\u{1B}"
         default:
-            onInput?(input)
+            return nil
         }
     }
 
@@ -624,9 +496,12 @@ final class TerminalKeyInputView: UITextView {
             }
         }
 
-        if key.keyCode == .keyboardTab, key.modifierFlags.contains(.shift) {
-            // Preserve Shift+Tab behavior; let plain Tab fall through to keyCommands for repeat.
-            onInput?("\u{1B}[Z")
+        if key.keyCode == .keyboardTab {
+            if key.modifierFlags.contains(.shift) {
+                onInput?("\u{1B}[Z")
+            } else {
+                onInput?("\t")
+            }
             return true
         }
 
@@ -649,6 +524,38 @@ final class TerminalKeyInputView: UITextView {
         }
 
         switch key.keyCode {
+        case .keyboardUpArrow:
+            if applicationCursorEnabled {
+                onInput?("k")
+            } else {
+                onInput?(arrowSequence("A"))
+            }
+            return true
+        case .keyboardDownArrow:
+            if applicationCursorEnabled {
+                onInput?("j")
+            } else {
+                onInput?(arrowSequence("B"))
+            }
+            return true
+        case .keyboardLeftArrow:
+            if applicationCursorEnabled {
+                onInput?("h")
+            } else {
+                onInput?(arrowSequence("D"))
+            }
+            return true
+        case .keyboardRightArrow:
+            if applicationCursorEnabled {
+                onInput?("l")
+            } else {
+                onInput?(arrowSequence("C"))
+            }
+            return true
+        case .keyboardReturnOrEnter:
+            onInput?("\r"); return true
+        case .keyboardDeleteOrBackspace:
+            deleteBackward(); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:
@@ -656,25 +563,20 @@ final class TerminalKeyInputView: UITextView {
         default:
             break
         }
-        // Let keyCommands handle other keys (hjkl/arrows/tab/etc) so repeat works.
-        return false
-    }
 
-    @objc private func handleEscapeKey() {
-        onInput?("\u{1B}")
-    }
-
-    private func buildControlCommands() -> [UIKeyCommand] {
-        let inputs = "abcdefghijklmnopqrstuvwxyz".map { String($0) }
-        return inputs.map { input in
-            let command = UIKeyCommand(input: input,
-                                       modifierFlags: [.control],
-                                       action: #selector(handleControlCommand(_:)))
-            if #available(iOS 15.0, *) {
-                command.wantsPriorityOverSystemBehavior = true
+        // Consume plain text-producing hardware key presses directly so we do
+        // not depend on UIKit's text-input replay path after pager/editor mode
+        // transitions.
+        if key.modifierFlags.intersection([.command, .control]).isEmpty {
+            let text = key.characters.replacingOccurrences(of: "\n", with: "\r")
+            if !text.isEmpty, !text.hasPrefix("UIKeyInput") {
+                onInput?(text)
+                return true
             }
-            return command
         }
+
+        // Let keyCommands handle remaining command-key shortcuts.
+        return false
     }
 
     private func installKeyboardObservers() {
@@ -831,24 +733,6 @@ final class TerminalKeyInputView: UITextView {
     @objc private func handleDecreaseFont() {
         let current = TerminalFontSettings.shared.pointSize
         TerminalFontSettings.shared.updatePointSize(current - 1.0)
-    }
-
-    @objc private func handleControlCommand(_ command: UIKeyCommand) {
-        guard let input = command.input,
-              let scalar = input.lowercased().unicodeScalars.first else { return }
-        let value = scalar.value
-        if scalar == "c" {
-            triggerInterrupt()
-            return
-        }
-        if scalar == "z" {
-            triggerSuspend()
-            return
-        }
-        if value >= 0x40, value <= 0x7F,
-           let ctrlScalar = UnicodeScalar(value & 0x1F) {
-            onInput?(String(ctrlScalar))
-        }
     }
 
     private func triggerInterrupt() {

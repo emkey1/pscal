@@ -378,13 +378,18 @@ final class RuntimeAssetInstaller {
                     copied = true
                 }
 
-                                // Always rewrite wrapper/source to ensure correctness
+                // Use bundled tiny assets when present; only fall back to embedded
+                // script copies if the bundle does not include them.
                 try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
                 let tinyWrapper = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
                 let tinySource = workspaceBin.appendingPathComponent("tiny.clike", isDirectory: false)
                 let tinyBytecode = workspaceBin.appendingPathComponent("tiny.pbc", isDirectory: false)
-                try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
-                try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
+                if !fileManager.fileExists(atPath: tinyWrapper.path) {
+                    try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
+                }
+                if !fileManager.fileExists(atPath: tinySource.path) {
+                    try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
+                }
                 // If bundled bytecode present, copy it too so we avoid runtime clike compile.
                 let bundledTinyPbc = bundledBin.appendingPathComponent("tiny.pbc")
                 if fileManager.fileExists(atPath: bundledTinyPbc.path) {
@@ -442,9 +447,19 @@ final class RuntimeAssetInstaller {
                     NSLog("PSCAL iOS: copying bundled version.h from %@", bundledCore.path)
                     try fileManager.copyItem(at: bundledCore.appendingPathComponent("version.h"),
                                              to: workspaceCore.appendingPathComponent("version.h"))
+                    let bundledTypes = bundledCore.appendingPathComponent("types.h")
+                    if fileManager.fileExists(atPath: bundledTypes.path) {
+                        NSLog("PSCAL iOS: copying bundled types.h from %@", bundledCore.path)
+                        try fileManager.copyItem(at: bundledTypes,
+                                                 to: workspaceCore.appendingPathComponent("types.h"))
+                    } else {
+                        NSLog("PSCAL iOS: bundled types.h missing; writing embedded header")
+                        try embeddedTypesHeader.write(to: workspaceCore.appendingPathComponent("types.h"), atomically: true, encoding: .utf8)
+                    }
                 } else {
-                    NSLog("PSCAL iOS: bundled version.h missing; writing embedded header")
+                    NSLog("PSCAL iOS: bundled core headers missing; writing embedded headers")
                     try embeddedVersionHeader.write(to: workspaceCore.appendingPathComponent("version.h"), atomically: true, encoding: .utf8)
+                    try embeddedTypesHeader.write(to: workspaceCore.appendingPathComponent("types.h"), atomically: true, encoding: .utf8)
                 }
 
                 try writeWorkspaceSrcVersionMarker()
@@ -499,6 +514,12 @@ final class RuntimeAssetInstaller {
         if !fileManager.isExecutableFile(atPath: tiny.path) {
             return true
         }
+        let tinySource = binDir.appendingPathComponent("tiny.clike")
+        guard let tinySourceText = try? String(contentsOf: tinySource, encoding: .utf8),
+              tinySourceText.contains("1347633714") else {
+            // Force refresh when tiny source is missing/stale (legacy bad magic).
+            return true
+        }
         guard let data = try? Data(contentsOf: RuntimePaths.workspaceBinVersionMarker),
               let recorded = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -511,7 +532,10 @@ final class RuntimeAssetInstaller {
     private func needsWorkspaceSrcRefresh() -> Bool {
         let compiler = RuntimePaths.workspaceSrcCompilerDirectory.appendingPathComponent("bytecode.h")
         let core = RuntimePaths.workspaceSrcCoreDirectory.appendingPathComponent("version.h")
-        if !fileManager.fileExists(atPath: compiler.path) || !fileManager.fileExists(atPath: core.path) {
+        let coreTypes = RuntimePaths.workspaceSrcCoreDirectory.appendingPathComponent("types.h")
+        if !fileManager.fileExists(atPath: compiler.path) ||
+            !fileManager.fileExists(atPath: core.path) ||
+            !fileManager.fileExists(atPath: coreTypes.path) {
             return true
         }
         guard let data = try? Data(contentsOf: RuntimePaths.workspaceSrcVersionMarker),
@@ -737,18 +761,13 @@ final class RuntimeAssetInstaller {
             do {
                 try newContents.write(to: destination, atomically: true, encoding: .utf8)
             } catch {
-                NSLog("PSCAL iOS: failed to write .exshrc: %@", error.localizedDescription)
+                NSLog("PSCAL iOS: failed to write %@: %@", destination.lastPathComponent, error.localizedDescription)
             }
             return
         }
-        // For .exshrc, always refresh from the bundled template so fixes (PATH, hangs)
-        // propagate even when a stale file exists. Users can customize via .exshrc.local.
+        // Preserve user-managed ~/.exshrc across launches. If users remove it entirely,
+        // the missing-file path above will seed a fresh copy from etc/skel.
         if isExshrc {
-            do {
-                try newContents.write(to: destination, atomically: true, encoding: .utf8)
-            } catch {
-                NSLog("PSCAL iOS: failed to update .exshrc: %@", error.localizedDescription)
-            }
             return
         }
         // For other skel entries, only overwrite when contents differ.
@@ -1348,7 +1367,7 @@ str append64(str s, long long v){
 
 void writePbc(str outPath, int version){
   str out = "";
-  int magic = 1347634098; // 'PSB2'
+  int magic = 1347633714; // 0x50534232 ('PSB2')
   out = append32(out, magic);
   out = append32(out, version);
   out = append64(out, 0); // source_hash
@@ -1418,6 +1437,19 @@ typedef enum { RETURN, CONSTANT, CONSTANT16, CONST_0, CONST_1, CONST_TRUE, CONST
 #ifndef PSCAL_VERSION_H
 #define PSCAL_VERSION_H
 #define PSCAL_VM_VERSION 9
+#endif
+"""
+
+    private let embeddedTypesHeader: String = """
+#ifndef TYPES_H
+#define TYPES_H
+typedef enum {
+    TYPE_UNKNOWN = 0,
+    TYPE_VOID,
+    TYPE_INT32,
+    TYPE_DOUBLE,
+    TYPE_STRING
+} VarType;
 #endif
 """
 }

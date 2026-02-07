@@ -205,7 +205,7 @@ static void shellRestoreStandardFds(ShellStdFdBackup *backup, bool dbg) {
         if (!backup->saved_valid[i] || backup->saved_fds[i] < 0) {
             continue;
         }
-        if (dup2(backup->saved_fds[i], targets[i]) == 0) {
+        if (dup2(backup->saved_fds[i], targets[i]) >= 0) {
             shellResetStandardStream(targets[i]);
         } else if (dbg) {
             fprintf(stderr,
@@ -3312,9 +3312,16 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     VProc *prev_vproc = vprocCurrent();
     struct termios stdin_termios;
     bool stdin_termios_valid = false;
-    shellSaveSignalState(&sig_backup);
-    shellSaveStandardFds(&fd_backup);
-    if (dbg) {
+    bool pipeline_inline_stage =
+        gShellRuntime.pipeline.active &&
+        gShellRuntime.pipeline.in_process &&
+        !gShellBackgroundWorkerActive;
+    bool manage_process_state = !pipeline_inline_stage;
+    if (manage_process_state) {
+        shellSaveSignalState(&sig_backup);
+        shellSaveStandardFds(&fd_backup);
+    }
+    if (dbg && manage_process_state) {
         int stdin_host = STDIN_FILENO;
         VProc *vp = vprocCurrent();
         if (vp) {
@@ -3341,7 +3348,7 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     if (active_session && active_session != prev_session) {
         vprocSessionStdioActivate(active_session);
     }
-    if (shellToolTcgetattr(STDIN_FILENO, &stdin_termios)) {
+    if (manage_process_state && shellToolTcgetattr(STDIN_FILENO, &stdin_termios)) {
         stdin_termios_valid = true;
     }
     int status = 0;
@@ -3367,41 +3374,45 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     } else {
         vprocDeactivate();
     }
-    shellRestoreStandardFds(&fd_backup, dbg);
-    if (stdin_termios_valid) {
-        shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
-    }
-    shellCloseVprocStreams();
-    if (dbg) {
-        int stdin_host = STDIN_FILENO;
-        VProc *vp = vprocCurrent();
-        if (vp) {
-            int translated = vprocTranslateFd(vp, STDIN_FILENO);
-            if (translated >= 0) {
-                stdin_host = translated;
-            }
+    if (manage_process_state) {
+        shellRestoreStandardFds(&fd_backup, dbg);
+        if (stdin_termios_valid) {
+            shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
         }
-        fprintf(stderr,
-                "[tool-inline] stdio restore stdin=%d host=%d tty=%d vproc=%p session=%p\n",
-                STDIN_FILENO,
-                stdin_host,
-                pscalRuntimeStdinHasRealTTY() ? 1 : 0,
-                (void *)vprocCurrent(),
-                (void *)vprocSessionStdioCurrent());
-    }
-    shellRestoreSignalState(&sig_backup);
-    shellRuntimeEnsureStandardFds();
-    shellEnsureJobControl();
-    shellJobControlRestoreForeground();
-    if (dbg) {
-        int shell_pid = vprocGetShellSelfPid();
-        int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
-        int fg = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-        fprintf(stderr,
-                "[tool-inline] restore complete shell=%d sid=%d fg=%d\n",
-                shell_pid,
-                sid,
-                fg);
+        shellCloseVprocStreams();
+        if (dbg) {
+            int stdin_host = STDIN_FILENO;
+            VProc *vp = vprocCurrent();
+            if (vp) {
+                int translated = vprocTranslateFd(vp, STDIN_FILENO);
+                if (translated >= 0) {
+                    stdin_host = translated;
+                }
+            }
+            fprintf(stderr,
+                    "[tool-inline] stdio restore stdin=%d host=%d tty=%d vproc=%p session=%p\n",
+                    STDIN_FILENO,
+                    stdin_host,
+                    pscalRuntimeStdinHasRealTTY() ? 1 : 0,
+                    (void *)vprocCurrent(),
+                    (void *)vprocSessionStdioCurrent());
+        }
+        shellRestoreSignalState(&sig_backup);
+        shellRuntimeEnsureStandardFds();
+        shellEnsureJobControl();
+        shellJobControlRestoreForeground();
+        if (dbg) {
+            int shell_pid = vprocGetShellSelfPid();
+            int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
+            int fg = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
+            fprintf(stderr,
+                    "[tool-inline] restore complete shell=%d sid=%d fg=%d\n",
+                    shell_pid,
+                    sid,
+                    fg);
+        }
+    } else if (dbg) {
+        fprintf(stderr, "[tool-inline] pipeline-stage: skipped process stdio/signal restore\n");
     }
     return status;
 }
@@ -5565,6 +5576,27 @@ Value vmBuiltinShellRead(VM *vm, int arg_count, Value *args) {
     bool parsing_options = true;
     bool ok = true;
     bool raw_mode = false;
+
+    /* On iOS builds, shell builtins are globally registered and can shadow the
+     * core VM "read" builtin. Non-shell frontends (e.g. tiny/clike bytecode)
+     * pass VAR/file arguments as pointers, so route those calls to vmBuiltinRead. */
+    if (arg_count > 0) {
+        bool legacy_vm_read_call = true;
+        for (int i = 0; i < arg_count; ++i) {
+            Value val = args[i];
+            if (val.type == TYPE_POINTER && val.ptr_val) {
+                continue;
+            }
+            if (val.type == TYPE_FILE) {
+                continue;
+            }
+            legacy_vm_read_call = false;
+            break;
+        }
+        if (legacy_vm_read_call) {
+            return vmBuiltinRead(vm, arg_count, args);
+        }
+    }
 
     for (int i = 0; i < arg_count && ok; ++i) {
         Value val = args[i];

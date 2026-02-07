@@ -2015,6 +2015,7 @@ static int vprocInprocPipeClose(struct pscal_fd *fd) {
     }
     VprocInprocPipe *pipe = end->pipe;
     pthread_mutex_lock(&pipe->mu);
+    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
     if (end->is_reader) {
         pipe->read_closed = true;
         if (pipe->readers > 0) {
@@ -2025,6 +2026,20 @@ static int vprocInprocPipeClose(struct pscal_fd *fd) {
         if (pipe->writers > 0) {
             pipe->writers--;
         }
+    }
+    if (dbg) {
+        fprintf(stderr,
+                "[pipe-close] pipe=%p end=%s readers=%d writers=%d count=%zu read_closed=%d write_closed=%d active=%d wait_r=%d wait_w=%d\n",
+                (void *)pipe,
+                end->is_reader ? "r" : "w",
+                pipe->readers,
+                pipe->writers,
+                pipe->count,
+                (int)pipe->read_closed,
+                (int)pipe->write_closed,
+                pipe->active_ops,
+                pipe->wait_readers,
+                pipe->wait_writers);
     }
     bool destroy = vprocInprocPipeShouldDestroy(pipe);
     pthread_cond_broadcast(&pipe->cond_read);
@@ -4664,9 +4679,10 @@ void vprocLocationDeviceSetEnabled(bool enabled) {
         pthread_cond_broadcast(&gLocationDevice.cond);
         pscal_fd_poll_wakeup(NULL, POLLIN);
     }
-    readers = gLocationDevice.readers;
     pthread_mutex_unlock(&gLocationDevice.mu);
-    vprocLocationNotifyObservers(readers);
+    if (changed) {
+        vprocLocationNotifyObservers(readers);
+    }
 }
 
 ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {

@@ -551,8 +551,10 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
                 isEditorMode: Bool,
                 editorSnapshot: EditorSnapshot?) {
         if !Thread.isMainThread {
+            let immutableInput = (text.copy() as? NSAttributedString) ??
+                NSAttributedString(attributedString: text)
             DispatchQueue.main.async {
-                self.update(text: text,
+                self.update(text: immutableInput,
                             cursor: cursor,
                             backgroundColor: backgroundColor,
                             isEditorMode: isEditorMode,
@@ -576,10 +578,12 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
             selectionOverlay.clearSelection()
 
             let displayText = remapFontsIfNeeded(in: text)
+            let immutableDisplayText = (displayText.copy() as? NSAttributedString) ??
+                NSAttributedString(attributedString: displayText)
 
             if window == nil || bounds.width < 1 || bounds.height < 1 {
                 pendingUpdate = (
-                    text,
+                    immutableDisplayText,
                     cursor,
                     backgroundColor,
                     isEditorMode,
@@ -591,7 +595,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
             let previousOffset = terminalView.contentOffset
             let shouldAutoScroll = autoScrollEnabled
 
-            terminalView.attributedText = displayText
+            terminalView.attributedText = immutableDisplayText
             terminalView.cursorInfo = cursor
             terminalView.backgroundColor = backgroundColor
 
@@ -602,7 +606,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
                                    cursorOffset: cursorOffset)
                 }
             } else if shouldAutoScroll {
-                scrollToBottom(textView: terminalView, text: displayText)
+                scrollToBottom(textView: terminalView, text: immutableDisplayText)
             }
 
             if !shouldAutoScroll {
@@ -622,7 +626,9 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         terminalView.backgroundColor = backgroundColor
         terminalView.textColor = TerminalFontSettings.shared.foregroundColor
         terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
-        terminalView.attributedText = snapshot.attributedText
+        let immutableSnapshotText = (snapshot.attributedText.copy() as? NSAttributedString) ??
+            NSAttributedString(attributedString: snapshot.attributedText)
+        terminalView.attributedText = immutableSnapshotText
 
         selectionOverlay.clearSelection()
 
@@ -643,7 +649,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
             if offset != lastEditorCursorOffset {
                 if window == nil || bounds.width < 1 || bounds.height < 1 {
                     pendingUpdate = (
-                        snapshot.attributedText,
+                        immutableSnapshotText,
                         resolvedCursor,
                         backgroundColor,
                         true,
@@ -971,9 +977,35 @@ final class TerminalDisplayTextView: UITextView {
     private var blinkAnimationAdded = false
     private var pendingCursorUpdate = false
     private var lastAppliedCursorOffset: Int?
+    private var legacyTextStorage: NSTextStorage?
+    private var legacyLayoutManager: NSLayoutManager?
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
-        super.init(frame: frame, textContainer: textContainer)
+        var effectiveContainer = textContainer
+        var legacyStorage: NSTextStorage?
+        var legacyLayout: NSLayoutManager?
+        if effectiveContainer == nil {
+            let storage = NSTextStorage()
+            let layoutManager = NSLayoutManager()
+            let container = NSTextContainer(size: .zero)
+            container.widthTracksTextView = true
+            container.heightTracksTextView = false
+            container.lineFragmentPadding = 0
+            storage.addLayoutManager(layoutManager)
+            layoutManager.addTextContainer(container)
+            effectiveContainer = container
+            legacyStorage = storage
+            legacyLayout = layoutManager
+        }
+        super.init(frame: frame, textContainer: effectiveContainer)
+        legacyTextStorage = legacyStorage
+        legacyLayoutManager = legacyLayout
+
+        if #available(iOS 16.0, *) {
+            // Force TextKit 1 for terminal rendering stability under heavy output.
+            // Accessing layoutManager triggers fallback when TextKit 2 is active.
+            _ = layoutManager
+        }
 
         layer.addSublayer(cursorLayer)
 

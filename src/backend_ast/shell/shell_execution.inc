@@ -112,24 +112,42 @@ static char *shellFindExecutableOnPath(const char *name) {
     }
     char *path_value = shellLookupParameterValue("PATH", strlen("PATH"));
     const char *path = (path_value && *path_value) ? path_value : getenv("PATH");
-    char *paths = path ? strdup(path) : NULL;
     char candidate[PATH_MAX];
-    if (paths) {
-        char *saveptr = NULL;
-        char *dir = strtok_r(paths, ":", &saveptr);
-        while (dir) {
+    if (path) {
+        const char *cursor = path;
+        while (*cursor) {
+            const char *next = strchr(cursor, ':');
+            size_t dir_len = next ? (size_t)(next - cursor) : strlen(cursor);
+            const char *dir = cursor;
+            char dir_buf[PATH_MAX];
+            if (dir_len == 0) {
+                dir = ".";
+                dir_len = 1;
+            } else {
+                if (dir_len >= sizeof(dir_buf)) {
+                    if (!next) {
+                        break;
+                    }
+                    cursor = next + 1;
+                    continue;
+                }
+                memcpy(dir_buf, cursor, dir_len);
+                dir_buf[dir_len] = '\0';
+                dir = dir_buf;
+            }
             int len = snprintf(candidate, sizeof(candidate), "%s/%s", dir, name);
             char resolved[PATH_MAX];
             if (len > 0 && (size_t)len < sizeof(candidate) &&
                 shellResolveExecutableCandidate(candidate, resolved, sizeof(resolved))) {
                 char *out = strdup(resolved);
-                free(paths);
                 free(path_value);
                 return out;
             }
-            dir = strtok_r(NULL, ":", &saveptr);
+            if (!next) {
+                break;
+            }
+            cursor = next + 1;
         }
-        free(paths);
     }
 #if defined(PSCAL_TARGET_IOS)
     /* Keep fallback probing in app-root namespace instead of device-root paths. */
@@ -2275,11 +2293,11 @@ static void shellResetPipeline(void) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
             if (ctx->pipes[i][0] >= 0) {
-                close(ctx->pipes[i][0]);
+                vprocHostClose(ctx->pipes[i][0]);
                 ctx->pipes[i][0] = -1;
             }
             if (ctx->pipes[i][1] >= 0) {
-                close(ctx->pipes[i][1]);
+                vprocHostClose(ctx->pipes[i][1]);
                 ctx->pipes[i][1] = -1;
             }
         }
@@ -2351,11 +2369,11 @@ static void shellAbortPipeline(void) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
             if (ctx->pipes[i][0] >= 0) {
-                close(ctx->pipes[i][0]);
+                vprocHostClose(ctx->pipes[i][0]);
                 ctx->pipes[i][0] = -1;
             }
             if (ctx->pipes[i][1] >= 0) {
-                close(ctx->pipes[i][1]);
+                vprocHostClose(ctx->pipes[i][1]);
                 ctx->pipes[i][1] = -1;
             }
         }
@@ -2414,8 +2432,21 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
     }
     if (stages > 1) {
 #if defined(PSCAL_TARGET_IOS)
-        /* iOS: host pipes are non-functional for less/pager; stay on PSCAL pipes by default. */
+        /* iOS default: use in-proc PSCAL pipes. Host pipes can be forced with
+         * `PSCALI_PIPE_PSCAL=0` for diagnostics. */
         bool use_pscal_pipes = true;
+        const char *pipe_mode = getenv("PSCALI_PIPE_PSCAL");
+        if (pipe_mode && *pipe_mode) {
+            char ch = pipe_mode[0];
+            if (ch == '0' || ch == 'n' || ch == 'N' || ch == 'f' || ch == 'F') {
+                use_pscal_pipes = false;
+            }
+        }
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr, "[pipe] iOS mode=%s stages=%zu\n",
+                    use_pscal_pipes ? "pscal" : "host",
+                    stages);
+        }
         ctx->pscal_pipe_read = NULL;
         ctx->pscal_pipe_write = NULL;
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
@@ -2426,9 +2457,11 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
         for (size_t i = 0; i < stages - 1; ++i) {
             ctx->pipes[i][0] = -1;
             ctx->pipes[i][1] = -1;
-            if (vprocHostPipe(ctx->pipes[i]) != 0) {
-                shellResetPipeline();
-                return false;
+            if (!use_pscal_pipes) {
+                if (vprocHostPipe(ctx->pipes[i]) != 0) {
+                    shellResetPipeline();
+                    return false;
+                }
             }
         }
         if (use_pscal_pipes) {
@@ -2534,31 +2567,33 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
 
             shellRuntimeProcessPendingSignals();
 
-            if (stopped_job && job_control) {
-                ShellJob *job = NULL;
-                if (tail_cmd) {
-                    job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
-                }
+	            if (stopped_job && job_control) {
+	                ShellJob *job = NULL;
+	                if (tail_cmd) {
+	                    job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+	                }
                 if (job) {
                     shellJobMarkStopped(job, final_status);
                 }
 #if defined(PSCAL_TARGET_IOS)
-                shellPrintJobSuspended(job, tail_cmd);
+	                shellPrintJobSuspended(job, tail_cmd);
 #endif
-                ctx->last_status = final_status;
-                shellResetPipeline();
-                shellUpdateStatus(final_status);
-                return final_status;
-            }
+	                ctx->last_status = final_status;
+	                shellCloseVprocStreams();
+	                shellResetPipeline();
+	                shellUpdateStatus(final_status);
+	                return final_status;
+	            }
 
-            if (ctx->negated) {
-                final_status = (final_status == 0) ? 1 : 0;
-            }
-            ctx->last_status = final_status;
-            shellResetPipeline();
-            shellUpdateStatus(final_status);
-            return final_status;
-        }
+	            if (ctx->negated) {
+	                final_status = (final_status == 0) ? 1 : 0;
+	            }
+	            ctx->last_status = final_status;
+	            shellCloseVprocStreams();
+	            shellResetPipeline();
+	            shellUpdateStatus(final_status);
+	            return final_status;
+	        }
 
         if (ctx->background) {
             /* Register the synthetic in-process job so fg/bg/jobs work. */
@@ -2620,15 +2655,16 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             shellEnsureJobControl();
             shellJobControlRestoreForeground();
         }
-        if (ctx->negated) {
-            final_status = (final_status == 0) ? 1 : 0;
-        }
-        ctx->last_status = final_status;
-        shellResetPipeline();
-        shellUpdateStatus(final_status);
-        shellRuntimeProcessPendingSignals();
-        return final_status;
-    }
+	        if (ctx->negated) {
+	            final_status = (final_status == 0) ? 1 : 0;
+	        }
+	        ctx->last_status = final_status;
+	        shellCloseVprocStreams();
+	        shellResetPipeline();
+	        shellUpdateStatus(final_status);
+	        shellRuntimeProcessPendingSignals();
+	        return final_status;
+	    }
 #endif
 
     if (!ctx->background) {
@@ -2867,6 +2903,9 @@ static bool shellEnsureExecRedirBackup(int target_fd,
 }
 
 static void shellResetStandardStream(int fd) {
+    /* If stdio fds were remapped (dup2/redirection), drop cached FILE* wrappers
+     * so the next access reopens against the current descriptor mapping. */
+    shellInvalidateVprocStreamForFd(fd);
     if (fd == STDIN_FILENO) {
         clearerr(stdin);
     } else if (fd == STDOUT_FILENO) {
@@ -3453,13 +3492,15 @@ static int shellRunBuiltinInProcess(VM *vm,
 #if defined(PSCAL_TARGET_IOS)
     if (!builtin_ran) {
         /* Try tool-runner execution for shebang-wrapped scripts even in
-         * pipeline mode. This mirrors the exec path but stays in-process.
-         * Save and clear pipeline state so nested shebang execution does
-         * not stomp the outer pipeline bookkeeping. */
+         * pipeline mode. This mirrors the exec path but stays in-process. */
         bool was_background = gShellRuntime.pipeline.background;
-        ShellPipelineContext saved_pipeline = gShellRuntime.pipeline;
-        memset(&gShellRuntime.pipeline, 0, sizeof(gShellRuntime.pipeline));
-        if (was_background && saved_pipeline.stage_count == 1 && getenv("PSCALI_PIPE_DEBUG")) {
+        bool isolate_shebang_runtime =
+            gShellRuntime.pipeline.active &&
+            gShellRuntime.pipeline.in_process &&
+            !gShellBackgroundWorkerActive;
+        ShellRuntimeState *shebang_ctx = NULL;
+        ShellRuntimeState *prev_ctx = NULL;
+        if (was_background && gShellRuntime.pipeline.stage_count == 1 && getenv("PSCALI_PIPE_DEBUG")) {
             /* Background shebang: run in a detached thread so the shell prompt
              * can return immediately when in-process execution is required. */
             fprintf(stderr, "[shebang-bg] cloning argv for '%s' (argc=%zu)\n",
@@ -3500,7 +3541,6 @@ static int shellRunBuiltinInProcess(VM *vm,
                     pthread_attr_destroy(&attr);
                     fprintf(stderr, "[shebang-bg] detached thread launched\n");
                     shellUpdateStatus(0);
-                    gShellRuntime.pipeline = saved_pipeline;
                     shellResetPipeline();
                     return 0;
                 }
@@ -3514,11 +3554,20 @@ static int shellRunBuiltinInProcess(VM *vm,
         if (resolved) {
             shebang_path = resolved;
         }
+        if (isolate_shebang_runtime) {
+            shebang_ctx = shellRuntimeCreateContext();
+            if (shebang_ctx) {
+                prev_ctx = shellRuntimeActivateContext(shebang_ctx);
+            }
+        }
         int shebang_status = shellMaybeExecShebangTool(shebang_path, cmd->argv);
+        if (shebang_ctx) {
+            shellRuntimeActivateContext(prev_ctx);
+            shellRuntimeDestroyContext(shebang_ctx);
+        }
         if (resolved) {
             free(resolved);
         }
-        gShellRuntime.pipeline = saved_pipeline;
         if (shebang_status >= 0) {
             shellUpdateStatus(shebang_status);
             builtin_ran = true;
@@ -3681,7 +3730,8 @@ cleanup:
 #endif
     shellFreeExecRedirBackups(backups, backup_count);
 #if defined(PSCAL_TARGET_IOS)
-    /* Close cached vproc streams so redirected pipeline fds get released. */
+    /* Per-thread stream caches can hold buffered pipeline output; always close
+     * them at stage end so data is flushed before the thread exits. */
     shellCloseVprocStreams();
     gShellSkipHostStdio = prev_skip_host;
 #endif
@@ -3703,8 +3753,18 @@ static int shellPipelineRunStage(VM *vm,
     int status = 0;
     bool apply_exec_redirs = cmd && cmd->redir_count > 0;
     bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
+    bool adopt_failed = false;
 
     bool pipeline_in_process = ctx && ctx->in_process;
+    if (pipe_dbg) {
+        fprintf(stderr,
+                "[pipe-stage] begin stage=%zu cmd=%s head=%d tail=%d in_proc=%d\n",
+                stage_pos,
+                (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
+                (int)pipeline_head,
+                (int)pipeline_tail,
+                (int)pipeline_in_process);
+    }
 //    fprintf(stderr,
 //            "[pipe] stage=%zu head=%d tail=%d in_process=%d stdin_fd=%d stdout_fd=%d stderr_fd=%d\n",
  //           stage_pos, (int)pipeline_head, (int)pipeline_tail,
@@ -3726,10 +3786,12 @@ static int shellPipelineRunStage(VM *vm,
                 if (dup_fd >= 0) {
                     stdin_fd = dup_fd;
                     vprocHostClose(fd);
-                    ctx->pipes[stage_pos - 1][0] = -1;
                 } else {
-                    stdin_fd = fd; /* fallback */
+                    /* Fallback: transfer ownership of the original endpoint to
+                     * this stage to avoid later double-close from shared state. */
+                    stdin_fd = fd;
                 }
+                ctx->pipes[stage_pos - 1][0] = -1;
             }
         }
     }
@@ -3747,10 +3809,12 @@ static int shellPipelineRunStage(VM *vm,
                 if (dup_fd >= 0) {
                     stdout_fd = dup_fd;
                     vprocHostClose(fd);
-                    ctx->pipes[stage_pos][1] = -1;
                 } else {
-                    stdout_fd = fd; /* fallback */
+                    /* Fallback: transfer ownership of the original endpoint to
+                     * this stage to avoid later double-close from shared state. */
+                    stdout_fd = fd;
                 }
+                ctx->pipes[stage_pos][1] = -1;
             }
         }
     }
@@ -3769,7 +3833,8 @@ static int shellPipelineRunStage(VM *vm,
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    /* For in-process pipelines, always inherit PSCAL stdio; host pipes break pagers on iOS. */
+    /* iOS: in-process pipelines are stable when stage vprocs inherit the
+     * session PSCAL stdio context. */
     bool inherit_pscal_stdio = true;
     VProc *vp = shellCreateVProcForStage(stdin_fd,
                                          stdout_fd,
@@ -3825,18 +3890,36 @@ static int shellPipelineRunStage(VM *vm,
 
     if (stdin_pscal) {
         int arc = vprocAdoptPscalFd(vp, STDIN_FILENO, stdin_pscal);
-   //     fprintf(stderr, "[pipe] stage=%zu adopt stdin pscal=%p rc=%d errno=%d\n",
-    //            stage_pos, (void *)stdin_pscal, arc, errno);
+        if (arc != 0) {
+            adopt_failed = true;
+            if (pipe_dbg) {
+                fprintf(stderr,
+                        "[pipe-stage] adopt stdin failed stage=%zu pscal=%p errno=%d (%s)\n",
+                        stage_pos, (void *)stdin_pscal, errno, strerror(errno));
+            }
+        }
     }
     if (stdout_pscal) {
         int arc = vprocAdoptPscalFd(vp, STDOUT_FILENO, stdout_pscal);
-//        fprintf(stderr, "[pipe] stage=%zu adopt stdout pscal=%p rc=%d errno=%d\n",
- //               stage_pos, (void *)stdout_pscal, arc, errno);
+        if (arc != 0) {
+            adopt_failed = true;
+            if (pipe_dbg) {
+                fprintf(stderr,
+                        "[pipe-stage] adopt stdout failed stage=%zu pscal=%p errno=%d (%s)\n",
+                        stage_pos, (void *)stdout_pscal, errno, strerror(errno));
+            }
+        }
     }
     if (stderr_pscal && stderr_pscal != stdout_pscal) {
         int arc = vprocAdoptPscalFd(vp, STDERR_FILENO, stderr_pscal);
-//        fprintf(stderr, "[pipe] stage=%zu adopt stderr pscal=%p rc=%d errno=%d\n",
- //               stage_pos, (void *)stderr_pscal, arc, errno);
+        if (arc != 0) {
+            adopt_failed = true;
+            if (pipe_dbg) {
+                fprintf(stderr,
+                        "[pipe-stage] adopt stderr failed stage=%zu pscal=%p errno=%d (%s)\n",
+                        stage_pos, (void *)stderr_pscal, errno, strerror(errno));
+            }
+        }
     }
 
     if (pipeline_in_process) {
@@ -3856,7 +3939,12 @@ static int shellPipelineRunStage(VM *vm,
     }
 #endif
 
-    status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, stdout_fd, stderr_fd, apply_exec_redirs);
+    if (adopt_failed) {
+        runtimeError(vm, "pipeline: failed to attach in-process stdio");
+        status = 1;
+    } else {
+        status = shellRunBuiltinInProcess(vm, cmd, stdin_fd, stdout_fd, stderr_fd, apply_exec_redirs);
+    }
 
     bool stderr_shared_with_stdout =
         (stderr_pscal && stdout_pscal && stderr_pscal == stdout_pscal);
@@ -3889,21 +3977,6 @@ static int shellPipelineRunStage(VM *vm,
     if (stderr_shared_with_stdout) {
         stderr_pscal = NULL;
     }
-#if defined(PSCAL_TARGET_IOS)
-    /* For host-pipe pipelines, drop the per-stage pipe fds once the stage has
-     * finished executing so downstream readers can observe EOF promptly. */
-    if (pipeline_in_process && ctx && ctx->pipes && stage_pos < ctx->stage_count) {
-        size_t idx = stage_pos;
-        if (idx < ctx->stage_count - 1 && ctx->pipes[idx][1] >= 0) {
-            vprocHostClose(ctx->pipes[idx][1]);
-            ctx->pipes[idx][1] = -1;
-        }
-        if (idx > 0 && ctx->pipes[idx - 1][0] >= 0) {
-            vprocHostClose(ctx->pipes[idx - 1][0]);
-            ctx->pipes[idx - 1][0] = -1;
-        }
-    }
-#endif
 #endif
 #if defined(PSCAL_TARGET_IOS)
     if (ctx->pids && stage_pos < ctx->stage_count) {
@@ -3920,6 +3993,13 @@ static int shellPipelineRunStage(VM *vm,
         ctx->launched = stage_pos + 1;
     }
 #endif
+    if (pipe_dbg) {
+        fprintf(stderr,
+                "[pipe-stage] end stage=%zu cmd=%s status=%d\n",
+                stage_pos,
+                (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
+                status);
+    }
     return status;
 }
 
@@ -3953,36 +4033,18 @@ static void *shellPipelineStageThreadMain(void *arg) {
                                        tctx->pipeline_head,
                                        tctx->pipeline_tail);
     vprocSetPipelineStage(false);
+    if (getenv("PSCALI_PIPE_DEBUG")) {
+        fprintf(stderr,
+                "[pipe-thread] stage=%zu cmd=%s status=%d tail=%d bg=%d\n",
+                tctx->stage_pos,
+                (tctx->cmd && tctx->cmd->argv && tctx->cmd->argv[0]) ? tctx->cmd->argv[0] : "<nil>",
+                status,
+                (int)tctx->pipeline_tail,
+                (int)(tctx->ctx ? tctx->ctx->background : false));
+    }
     if (tctx->ctx && tctx->ctx->stage_status && tctx->stage_pos < tctx->ctx->stage_count) {
         tctx->ctx->stage_status[tctx->stage_pos] = status;
     }
-#if defined(PSCAL_TARGET_IOS)
-    /* Belt‑and‑suspenders: drop any pipe endpoints this stage may still hold
-     * in the shared table so downstream readers see EOF promptly. */
-    if (tctx->ctx && tctx->ctx->pipes && tctx->stage_pos < tctx->ctx->stage_count) {
-        size_t idx = tctx->stage_pos;
-        if (idx < tctx->ctx->stage_count - 1 && tctx->ctx->pipes[idx][1] >= 0) {
-            vprocHostClose(tctx->ctx->pipes[idx][1]);
-            tctx->ctx->pipes[idx][1] = -1;
-        }
-        if (idx > 0 && tctx->ctx->pipes[idx - 1][0] >= 0) {
-            vprocHostClose(tctx->ctx->pipes[idx - 1][0]);
-            tctx->ctx->pipes[idx - 1][0] = -1;
-        }
-    }
-    if (tctx->ctx && tctx->ctx->pscal_pipe_write && tctx->stage_pos < tctx->ctx->stage_count - 1) {
-        if (tctx->ctx->pscal_pipe_write[tctx->stage_pos]) {
-            pscal_fd_close(tctx->ctx->pscal_pipe_write[tctx->stage_pos]);
-            tctx->ctx->pscal_pipe_write[tctx->stage_pos] = NULL;
-        }
-    }
-    if (tctx->ctx && tctx->ctx->pscal_pipe_read && tctx->stage_pos > 0) {
-        if (tctx->ctx->pscal_pipe_read[tctx->stage_pos - 1]) {
-            pscal_fd_close(tctx->ctx->pscal_pipe_read[tctx->stage_pos - 1]);
-            tctx->ctx->pscal_pipe_read[tctx->stage_pos - 1] = NULL;
-        }
-    }
-#endif
 #if defined(PSCAL_TARGET_IOS)
     if (swapped_stdio) {
         vprocSessionStdioActivate(prev_session_stdio);
@@ -4090,8 +4152,14 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 
     for (size_t i = 0; i < stage_pos; ++i) {
         if (ctx->thread_started && ctx->thread_started[i]) {
+            if (getenv("PSCALI_PIPE_DEBUG")) {
+                fprintf(stderr, "[pipe-join] waiting stage=%zu\n", i);
+            }
             pthread_join(ctx->threads[i], NULL);
             ctx->thread_started[i] = false;
+            if (getenv("PSCALI_PIPE_DEBUG")) {
+                fprintf(stderr, "[pipe-join] joined stage=%zu\n", i);
+            }
         }
     }
 
@@ -4471,18 +4539,11 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                     shellScalarCacheInvalidate();
                     return makeVoid();
                 }
-                if (ctx->in_process_worker) {
-                    shellFinishPipeline(cmd);
-                    shellRuntimeProcessPendingSignals();
-                } else {
-                    int status = ctx->last_status;
-                    if (ctx->negated) {
-                        status = (status == 0) ? 1 : 0;
-                        shellUpdateStatus(status);
-                    }
-                    ctx->last_status = status;
-                    shellResetPipeline();
-                }
+                /* Foreground in-process pipelines may have non-tail stages
+                 * running on worker threads. Always finish via shellFinishPipeline
+                 * so those stages are waited/joined before teardown. */
+                shellFinishPipeline(cmd);
+                shellRuntimeProcessPendingSignals();
             }
             shellFreeCommand(cmd);
             shellScalarCacheInvalidate();

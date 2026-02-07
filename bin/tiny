@@ -1,5 +1,7 @@
 #!/bin/exsh
-# Tiny compiler wrapper for iOS: one-arg = compile to default .pbc then run; two-arg = compile only.
+# Tiny compiler wrapper for iOS.
+# Default behavior: compile only.
+# Use --run to compile and immediately execute with pscalvm.
 # Resolve workspace root first.
 if [ -n "$PSCALI_WORKSPACE_ROOT" ]; then
   ROOT="$PSCALI_WORKSPACE_ROOT"
@@ -28,17 +30,32 @@ else
   run_vm() { pscalvm "$@"; }
 fi
 
-if [ "$#" -eq 0 ]; then
-  echo "Usage: tiny <source.tiny> [out.pbc]" 1>&2
+usage() {
+  echo "Usage: tiny [--run] <source.tiny> [out.pbc]" 1>&2
+}
+
+RUN_AFTER_COMPILE=0
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    --run) RUN_AFTER_COMPILE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+  esac
+fi
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  usage
   exit 1
 fi
 
-if [ "$#" -eq 1 ]; then
-  SRC="$1"
-  # Normalize source to an absolute path so tiny.clike/pscalvm agree.
-  if ABS_SRC=$(realpath "$SRC" 2>/dev/null); then
-    SRC="$ABS_SRC"
-  fi
+SRC="$1"
+# Normalize source to an absolute path so tiny.clike/pscalvm agree.
+if ABS_SRC=$(realpath "$SRC" 2>/dev/null); then
+  SRC="$ABS_SRC"
+fi
+
+if [ "$#" -ge 2 ]; then
+  OUT="$2"
+else
   # Default output: current working directory, not the source directory.
   base_name="$(basename "$SRC")"
   case "$base_name" in
@@ -46,23 +63,20 @@ if [ "$#" -eq 1 ]; then
     *) OUT_BASENAME="${base_name}.pbc" ;;
   esac
   OUT="$PWD/$OUT_BASENAME"
-  run_clike "$BASE/tiny.clike" "$SRC" "$OUT" || exit $?
-  if [ ! -f "$OUT" ]; then
-    echo "tiny: expected bytecode at $OUT but it was not created" 1>&2
-    exit 1
-  fi
-  run_vm "$OUT"
-  exit $?
 fi
 
-# >=2 args: compile only; prefer bytecode for speed
-SRC="$1"
-if ABS_SRC=$(realpath "$SRC" 2>/dev/null); then
-  SRC="$ABS_SRC"
-fi
-shift
+# Compile only; prefer bytecode frontend for speed when available.
 if [ -f "$BASE/tiny.pbc" ]; then
-  run_vm "$BASE/tiny.pbc" "$SRC" "$@"
+  run_vm "$BASE/tiny.pbc" "$SRC" "$OUT" || exit $?
 else
-  run_clike "$BASE/tiny.clike" "$SRC" "$@"
+  run_clike "$BASE/tiny.clike" "$SRC" "$OUT" || exit $?
+fi
+
+if [ ! -f "$OUT" ]; then
+  echo "tiny: expected bytecode at $OUT but it was not created" 1>&2
+  exit 1
+fi
+
+if [ "$RUN_AFTER_COMPILE" -eq 1 ]; then
+  run_vm "$OUT"
 fi

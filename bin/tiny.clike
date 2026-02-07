@@ -50,6 +50,7 @@ str defaultOutPath(str src) {
 const int MAX_OPS = 512;
 str opNames[MAX_OPS];
 int opCount = 0;
+int inlineCacheSlotSize = 8;
 
 void loadOpcodes(str root) {
   str header = root + "/src/compiler/bytecode.h";
@@ -69,6 +70,14 @@ void loadOpcodes(str root) {
     int p = 1; while (p <= llen && copy(line, p, 1) <= " ") p = p + 1;
     str trimmed = copy(line, p, llen - p + 1);
     if (length(trimmed) >= 2 && copy(trimmed, 1, 2) == "//") continue; // skip comments
+    if (pos("#define GLOBAL_INLINE_CACHE_SLOT_SIZE", trimmed) == 1) {
+      int k = length("#define GLOBAL_INLINE_CACHE_SLOT_SIZE") + 1;
+      while (k <= length(trimmed) && copy(trimmed, k, 1) == " ") k = k + 1;
+      int start = k;
+      while (k <= length(trimmed) && copy(trimmed, k, 1) >= "0" && copy(trimmed, k, 1) <= "9") k = k + 1;
+      if (k > start) inlineCacheSlotSize = atoi(copy(trimmed, start, k - start));
+      continue;
+    }
     if (pos("typedef enum", trimmed) == 1) { inEnum = 1; continue; }
     if (!inEnum) continue;
     if (trimmed == "}") { break; }
@@ -89,9 +98,80 @@ int opcode(str name) {
 }
 
 // --------- Constants table ---------
-const int TYPE_INTEGER = 2;
-const int TYPE_STRING = 4;
-const int INLINE_CACHE_SLOT_SIZE = 8;
+int TYPE_INTEGER = 0;
+int TYPE_STRING = 0;
+
+void loadTypeTags(str root) {
+  str header = root + "/src/core/types.h";
+  if (!fileexists(header)) {
+    // iOS workspace refresh can temporarily miss this header; use
+    // canonical defaults (TYPE_INT32=2, TYPE_STRING=4) as fallback.
+    TYPE_INTEGER = 2;
+    TYPE_STRING = 4;
+    printf("tiny: warning: types.h missing at %s (using fallback tags)\n", header);
+    return;
+  }
+
+  str buf = readFile(header);
+  int inEnum = 0;
+  int idx = 0;
+  int i = 1;
+  int len = length(buf);
+  TYPE_INTEGER = 0;
+  TYPE_STRING = 0;
+
+  while (i <= len) {
+    int j = i;
+    while (j <= len && copy(buf, j, 1) != "\n") j = j + 1;
+    int llen = j - i;
+    str line = copy(buf, i, llen);
+    i = j + 1;
+
+    int p = 1;
+    while (p <= llen && copy(line, p, 1) <= " ") p = p + 1;
+    str trimmed = copy(line, p, llen - p + 1);
+    if (length(trimmed) >= 2 && copy(trimmed, 1, 2) == "//") continue;
+
+    if (pos("typedef enum", trimmed) == 1) {
+      inEnum = 1;
+      idx = 0;
+      continue;
+    }
+    if (!inEnum) continue;
+    if (pos("} VarType", trimmed) == 1) break;
+
+    int comma = pos(",", trimmed);
+    if (comma == 0) continue;
+    str entry = copy(trimmed, 1, comma - 1);
+    int eq = pos("=", entry);
+    if (eq > 0) {
+      str rhs = copy(entry, eq + 1, length(entry) - eq);
+      int rp = 1;
+      while (rp <= length(rhs) && copy(rhs, rp, 1) == " ") rp = rp + 1;
+      idx = atoi(copy(rhs, rp, length(rhs) - rp + 1));
+      entry = copy(entry, 1, eq - 1);
+    }
+
+    int ep = 1;
+    while (ep <= length(entry) && copy(entry, ep, 1) == " ") ep = ep + 1;
+    entry = copy(entry, ep, length(entry) - ep + 1);
+    int ek = length(entry);
+    while (ek > 0 && copy(entry, ek, 1) <= " ") {
+      entry = copy(entry, 1, ek - 1);
+      ek = ek - 1;
+    }
+
+    if (entry == "TYPE_INT32" || entry == "TYPE_INTEGER") TYPE_INTEGER = idx;
+    if (entry == "TYPE_STRING") TYPE_STRING = idx;
+    idx = idx + 1;
+  }
+
+  if (TYPE_INTEGER == 0 || TYPE_STRING == 0) {
+    TYPE_INTEGER = 2;
+    TYPE_STRING = 4;
+    printf("tiny: warning: failed to resolve TYPE_INT32/TYPE_STRING from %s (using fallback tags)\n", header);
+  }
+}
 
 const int MAX_CONST = 2048;
 int constType[MAX_CONST];
@@ -119,7 +199,7 @@ int code[MAX_CODE];
 int codeLen = 0;
 void emit(int b) { code[codeLen] = b & 255; codeLen = codeLen + 1; }
 void emitShort(int v) { emit((v >> 8) & 255); emit(v & 255); }
-void emitICS() { for (int i = 0; i < INLINE_CACHE_SLOT_SIZE; i = i + 1) emit(0); }
+void emitICS() { for (int i = 0; i < inlineCacheSlotSize; i = i + 1) emit(0); }
 
 // --------- Tokenizer / Parser ---------
 const int MAX_TOK = 4096;
@@ -322,17 +402,21 @@ int vmVersion(str root){
 
 // --------- Serialization into a byte stream (binary-safe) ---------
 void msAppendByte(mstream ms, int b){ mstreamappendbyte(ms, b & 255); }
+void msAppendLE(mstream ms, long long v, int bytes){
+  long long cur = v;
+  for (int i = 0; i < bytes; i = i + 1) {
+    int b = (int)(cur % 256);
+    if (b < 0) b = b + 256;
+    msAppendByte(ms, b);
+    if (cur >= 0) cur = cur / 256;
+    else cur = (cur - 255) / 256;
+  }
+}
 void msAppend32(mstream ms, int v){
-  msAppendByte(ms, v);
-  msAppendByte(ms, (v >> 8));
-  msAppendByte(ms, (v >> 16));
-  msAppendByte(ms, (v >> 24));
+  msAppendLE(ms, (long long)v, 4);
 }
 void msAppend64(mstream ms, long long v){
-  int lo = (int)(v & 4294967295);
-  int hi = (int)((v >> 32) & 4294967295);
-  msAppend32(ms, lo);
-  msAppend32(ms, hi);
+  msAppendLE(ms, v, 8);
 }
 
 void writePbc(str outPath, int version){
@@ -384,6 +468,7 @@ int main(){
   str root = resolveRoot();
   if (!fileexists(srcPath)) { printf("tiny: source %s not found\n", srcPath); return 1; }
   loadOpcodes(root);
+  loadTypeTags(root);
   int version = vmVersion(root);
   str source = readFile(srcPath);
   // reset per compilation

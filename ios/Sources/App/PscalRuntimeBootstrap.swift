@@ -519,8 +519,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         
         self.terminalBuffer.onMouseModeChange = { [weak self] mode, encoding in
-            self?.mouseMode = mode
-            self?.mouseEncoding = encoding
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.mouseMode = mode
+                self.mouseEncoding = encoding
+            }
         }
         
         withRuntimeContext {
@@ -558,7 +561,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             tabInitLog("runtime=\(runtimeId) reuse hterm controller=\(controller.instanceId)")
             return controller
         }
-        let controller = HtermTerminalController()
+        let controller = HtermTerminalController.makeOnMainThread()
         tabInitLog("runtime=\(runtimeId) create hterm controller=\(controller.instanceId)")
         htermController = controller
         outputDrainQueue.sync { [weak self] in
@@ -1168,22 +1171,32 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     // --- RENDER SCHEDULING (THROTTLED) ---
     private func scheduleRender(preserveBackground: Bool = false) {
+        if Thread.isMainThread {
+            scheduleRenderOnMain(preserveBackground: preserveBackground)
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.scheduleRenderOnMain(preserveBackground: preserveBackground)
+        }
+    }
+
+    private func scheduleRenderOnMain(preserveBackground: Bool) {
         if isEditorModeActive() {
             refreshEditorDisplay()
             return
         }
-        if htermReadyFlag {
+        if htermReady {
             return
         }
-        
+
         // If a render is already pending, do nothing (coalesce updates)
         if renderQueued {
             return
         }
-        
+
         let now = Date().timeIntervalSince1970
         let timeSinceLast = now - lastRenderTime
-        
+
         // If we are under the throttle limit, delay the render.
         // This ensures massive I/O bursts (like pasting) don't lock the UI thread.
         if timeSinceLast < minRenderInterval {
@@ -1200,12 +1213,19 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
     }
-    
+
     private func performRender(preserveBackground: Bool) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.performRender(preserveBackground: preserveBackground)
+            }
+            return
+        }
+
         // Reset flags
         renderQueued = false
         lastRenderTime = Date().timeIntervalSince1970
-        
+
         // Actual expensive rendering logic
         let allowScrollback = !self.isEditorModeActive()
         let snapshot = self.terminalBuffer.snapshot(includeScrollback: allowScrollback)
@@ -1462,7 +1482,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         } else {
             cursorInfo = nil
         }
-        return (result, cursorInfo)
+        let immutable = (result.copy() as? NSAttributedString) ??
+            NSAttributedString(attributedString: result)
+        return (immutable, cursorInfo)
     }
 }
 
@@ -1581,6 +1603,8 @@ final class EditorTerminalBridge {
     private let inputCondition = NSCondition()
     private var pendingInput: [UInt8] = []
     private var altScreenState: ScreenState?
+    private static let maxColumns = 512
+    private static let maxRows = 256
 
     var isActive: Bool {
         stateQueue.sync { state.active }
@@ -1627,8 +1651,8 @@ final class EditorTerminalBridge {
     func resize(columns: Int, rows: Int) {
         stateQueue.sync(flags: .barrier) {
             guard state.active else { return }
-            let newRows = max(1, rows)
-            let newCols = max(1, columns)
+            let newRows = max(1, min(rows, Self.maxRows))
+            let newCols = max(1, min(columns, Self.maxColumns))
             let blankRow = Array(repeating: Character(" "), count: newCols)
             let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: newCols)
             var newGrid = Array(repeating: blankRow, count: newRows)
@@ -1663,8 +1687,8 @@ final class EditorTerminalBridge {
     }
 
     private func rebuildState(columns: Int, rows: Int) {
-        state.columns = max(1, columns)
-        state.rows = max(1, rows)
+        state.columns = max(1, min(columns, Self.maxColumns))
+        state.rows = max(1, min(rows, Self.maxRows))
         let blankRow = Array(repeating: Character(" "), count: state.columns)
         let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
         state.grid = Array(repeating: blankRow, count: state.rows)
@@ -1941,29 +1965,51 @@ final class EditorTerminalBridge {
         var plainBuilder = String()
         plainBuilder.reserveCapacity(currentState.rows * currentState.columns + max(currentState.rows - 1, 0))
         let attributed = NSMutableAttributedString()
-        let newlineAttrs: [NSAttributedString.Key: Any] = [.font: baseFont,
-                                                           .foregroundColor: fgDefault,
-                                                           .backgroundColor: bgDefault]
+        let newlineAttrs: [NSAttributedString.Key: Any] = [
+            .font: baseFont,
+            .foregroundColor: fgDefault,
+            .backgroundColor: bgDefault
+        ]
+
+        var runText = String()
+        runText.reserveCapacity(max(64, currentState.columns))
+        var runAttributes: CellAttributes?
+
+        func flushRun() {
+            guard !runText.isEmpty, let runAttributes else { return }
+            let resolved = palette.resolve(attr: runAttributes, defaultFG: fgDefault, defaultBG: bgDefault)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: runAttributes.bold ? boldFont : baseFont,
+                .foregroundColor: resolved.fg,
+                .backgroundColor: resolved.bg,
+                .underlineStyle: runAttributes.underline ? NSUnderlineStyle.single.rawValue : 0
+            ]
+            attributed.append(NSAttributedString(string: runText, attributes: attrs))
+            runText.removeAll(keepingCapacity: true)
+        }
 
         for r in 0..<currentState.rows {
             for c in 0..<currentState.columns {
                 let ch = currentState.grid[r][c]
                 let attr = currentState.attrs[r][c]
-                plainBuilder.append(ch)
-                let resolved = palette.resolve(attr: attr, defaultFG: fgDefault, defaultBG: bgDefault)
-                let attrs: [NSAttributedString.Key: Any] = [
-                    .font: attr.bold ? boldFont : baseFont,
-                    .foregroundColor: resolved.fg,
-                    .backgroundColor: resolved.bg,
-                    .underlineStyle: attr.underline ? NSUnderlineStyle.single.rawValue : 0
-                ]
-                attributed.append(NSAttributedString(string: String(ch), attributes: attrs))
+                let displayCharacter: Character = ch.unicodeScalars.allSatisfy({ $0.value >= 0x20 }) ? ch : " "
+                plainBuilder.append(displayCharacter)
+
+                if runAttributes == nil {
+                    runAttributes = attr
+                } else if runAttributes != attr {
+                    flushRun()
+                    runAttributes = attr
+                }
+                runText.append(displayCharacter)
             }
             if r < currentState.rows - 1 {
+                flushRun()
                 plainBuilder.append("\n")
                 attributed.append(NSAttributedString(string: "\n", attributes: newlineAttrs))
             }
         }
+        flushRun()
         let joined = plainBuilder
         let cursor: TerminalCursorInfo?
         if currentState.active && currentState.cursorVisible && !lines.isEmpty {
@@ -1993,8 +2039,10 @@ final class EditorTerminalBridge {
         } else {
             cursor = nil
         }
+        let immutable = (attributed.copy() as? NSAttributedString) ??
+            NSAttributedString(attributedString: attributed)
         return EditorSnapshot(text: joined,
-                              attributedText: attributed,
+                              attributedText: immutable,
                               cursor: cursor)
     }
 
@@ -2444,7 +2492,11 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func handleReaderCountChanged(_ count: Int) {
-        readerCount = max(0, count)
+        let normalized = max(0, count)
+        if readerCount == normalized {
+            return
+        }
+        readerCount = normalized
         scheduleSync()
     }
 

@@ -160,8 +160,10 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
 
     private static let terminalScheme = "pscal-terminal"
     private static let schemeHandler = TerminalResourceSchemeHandler()
+    private static let sharedProcessPool = WKProcessPool()
     let webView: WKWebView
     private let userContentController: WKUserContentController
+    private var scriptMessageBridges: [WeakScriptMessageHandler] = []
     var onInput: ((String) -> Void)?
     var onResize: ((Int, Int) -> Void)?
     var onFocusRequested: (() -> Void)?
@@ -204,9 +206,9 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         self.instanceId = Self.nextInstanceId
         let controller = WKUserContentController()
         let config = WKWebViewConfiguration()
-        // Use an isolated process pool per terminal so a busy tab (e.g. watch)
-        // cannot starve web content processes for newly opened tabs.
-        config.processPool = WKProcessPool()
+        // Keep one process pool for all terminal tabs to avoid high-memory
+        // churn when users open/close tabs rapidly under load.
+        config.processPool = Self.sharedProcessPool
         config.setURLSchemeHandler(Self.schemeHandler, forURLScheme: Self.terminalScheme)
         config.userContentController = controller
         let debugValue = Self.debugEnabled ? "true" : "false"
@@ -227,7 +229,11 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         self.userContentController = controller
         super.init()
         logTabInit("controller init thread=\(Thread.isMainThread ? "main" : "bg")")
-        HandlerName.allCases.forEach { controller.add(WeakScriptMessageHandler(handler: self), name: $0.rawValue) }
+        let bridges = HandlerName.allCases.map { _ in WeakScriptMessageHandler(handler: self) }
+        scriptMessageBridges = bridges
+        for (index, name) in HandlerName.allCases.enumerated() {
+            controller.add(bridges[index], name: name.rawValue)
+        }
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
@@ -240,7 +246,15 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     }
 
     deinit {
-        HandlerName.allCases.forEach { userContentController.removeScriptMessageHandler(forName: $0.rawValue) }
+        let controller = userContentController
+        let names = HandlerName.allCases.map(\.rawValue)
+        if Thread.isMainThread {
+            names.forEach { controller.removeScriptMessageHandler(forName: $0) }
+        } else {
+            DispatchQueue.main.async {
+                names.forEach { controller.removeScriptMessageHandler(forName: $0) }
+            }
+        }
     }
 
     @MainActor

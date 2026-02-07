@@ -269,9 +269,20 @@ static void shellCloseVprocStreams(void) {
     shellCloseVprocStream(&gShellVprocStderr);
     shellCloseVprocStream(&gShellVprocStdin);
 }
+
+static void shellInvalidateVprocStreamForFd(int fd) {
+    if (fd == STDOUT_FILENO) {
+        shellCloseVprocStream(&gShellVprocStdout);
+    } else if (fd == STDERR_FILENO) {
+        shellCloseVprocStream(&gShellVprocStderr);
+    } else if (fd == STDIN_FILENO) {
+        shellCloseVprocStream(&gShellVprocStdin);
+    }
+}
 #else
 static void shellFlushVprocStreams(void) {}
 static void __attribute__((unused)) shellCloseVprocStreams(void) {}
+static void __attribute__((unused)) shellInvalidateVprocStreamForFd(int fd) { (void)fd; }
 #endif
 
 static void shellFlushStandardStreams(void) {
