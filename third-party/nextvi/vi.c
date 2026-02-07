@@ -57,6 +57,30 @@ static int vi_tsm;			/* type of the status message */
 static int vi_joinmode = 1;		/* 1: insert extra space for pad 0: raw line join */
 static int vi_nlword;			/* new line mode for eEwWbB */
 
+#if defined(PSCAL_TARGET_IOS)
+extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
+
+static void viRepeatDebugLog(const char *fmt, ...)
+{
+	va_list ap;
+	char buf[512];
+	int n;
+	if (&pscalRuntimeDebugLog == NULL)
+		return;
+	va_start(ap, fmt);
+	n = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (n <= 0)
+		return;
+	pscalRuntimeDebugLog(buf);
+}
+#else
+static void viRepeatDebugLog(const char *fmt, ...)
+{
+	(void)fmt;
+}
+#endif
+
 void nextvi_reset_state(void)
 {
 	/* Avoid double-free across repeated invocations; just reset pointers. */
@@ -514,22 +538,22 @@ static int vi_motionln(int *row, int cmd, int cnt)
 	case 'M':
 		*row = MIN(xtop + xrows / 2, lbuf_len(xb) - 1);
 		break;
-	default:
-		if (c == cmd) {
-			*row = MIN(*row + cnt - 1, lbuf_len(xb) - 1);
-			break;
+		default:
+			if (c == cmd) {
+				*row = MIN(*row + cnt - 1, lbuf_len(xb) - 1);
+				break;
+			}
+			if (c == '%' && vi_arg) {
+				if (cnt > 100)
+					return -1;
+				*row = lbuf_len(xb) * cnt / 100;
+				break;
+			}
+			/* Not a vertical motion: push it back so vi_motion()
+			 * can handle it (e.g., horizontal arrows mapped to h/l). */
+			term_dec()
+			return 0;
 		}
-		if (c == '%' && vi_arg) {
-			if (cnt > 100)
-				return -1;
-			*row = lbuf_len(xb) * cnt / 100;
-			break;
-		}
-		/* Not a vertical motion: push it back so vi_motion()
-		 * can handle it (e.g., horizontal arrows mapped to h/l). */
-		term_back(c);
-		return 0;
-	}
 	if (*row < 0)
 		*row = 0;
 	return c;
@@ -1311,9 +1335,100 @@ static int vc_replace(void)
 
 static char rep_cmd[sizeof(icmd)];	/* the last command */
 static int rep_len;
+static int rep_skip_capture;
+
+static int rep_find_byte(const char *buf, int len, unsigned char byte)
+{
+	int i;
+	for (i = 0; i < len; i++) {
+		if ((unsigned char)buf[i] == byte)
+			return i;
+	}
+	return -1;
+}
+
+static int rep_is_insert_command(int cmd)
+{
+	return strchr("AIORacio", cmd) != NULL;
+}
+
+static int rep_is_linewise_operator_command(int cmd)
+{
+	return strchr("dcy<>!", cmd) != NULL;
+}
+
+static void rep_canonicalize_insert_command(int cmd)
+{
+	int i;
+	int out = 1;
+	int esc_idx = -1;
+
+	if (rep_len <= 0) {
+		rep_cmd[0] = cmd;
+		rep_cmd[1] = TK_ESC;
+		rep_len = 2;
+		return;
+	}
+
+	/* Keep the explicit command byte stable even if the recorder buffer drifts. */
+	rep_cmd[0] = cmd;
+	if (rep_len > 1)
+		esc_idx = rep_find_byte(rep_cmd + 1, rep_len - 1, (unsigned char)TK_ESC);
+	if (esc_idx >= 0)
+		esc_idx += 1;
+
+	for (i = 1; i < rep_len; i++) {
+		if (esc_idx >= 0 && i >= esc_idx)
+			break;
+		if ((unsigned char)rep_cmd[i] == '\n' ||
+				(unsigned char)rep_cmd[i] == '\r' ||
+				(unsigned char)rep_cmd[i] == 0)
+			break;
+		if (out >= (int)sizeof(rep_cmd) - 1)
+			break;
+		rep_cmd[out++] = rep_cmd[i];
+	}
+
+	/* iOS occasionally loses the terminal ESC and leaves CR/LF as trailer. */
+	if (esc_idx < 0 && out > 1 &&
+			(rep_cmd[out - 1] == '\n' || rep_cmd[out - 1] == '\r')) {
+		rep_cmd[out - 1] = TK_ESC;
+		rep_len = out;
+		return;
+	}
+
+	rep_cmd[out++] = TK_ESC;
+	rep_len = out;
+}
+
+static void rep_canonicalize_command(int cmd)
+{
+	if (rep_is_insert_command(cmd)) {
+		rep_canonicalize_insert_command(cmd);
+		return;
+	}
+
+	/* dd/cc/yy/<< />> /!! are linewise operations; trim any accidental tail. */
+	if (rep_is_linewise_operator_command(cmd)) {
+		int i = 0;
+		if (rep_len > 1 && rep_cmd[0] == '"')
+			i = 2; /* Optional register prefix: "a */
+		while (i < rep_len && isdigit((unsigned char)rep_cmd[i]))
+			i++;
+		if (i + 1 < rep_len && rep_cmd[i] == cmd && rep_cmd[i + 1] == cmd)
+			rep_len = i + 2;
+	}
+}
 
 static void vc_repeat(void)
 {
+	if (rep_len <= 0)
+		return;
+	viRepeatDebugLog("[nextvi-repeat] dot replay rep_len=%d arg=%d first=%d last=%d",
+			rep_len, MAX(1, vi_arg),
+			rep_len > 0 ? (unsigned char)rep_cmd[0] : -1,
+			rep_len > 0 ? (unsigned char)rep_cmd[rep_len - 1] : -1);
+	rep_skip_capture += MAX(1, vi_arg);
 	for (int i = 0; i < MAX(1, vi_arg); i++)
 		term_push(rep_cmd, rep_len);
 }
@@ -1353,11 +1468,16 @@ void vi(int init)
 	char *ln, *cs;
 	int mv, n, k, c;
 	xgrec++;
-	if (init) {
-		xtop = MAX(0, xrow - xrows / 2);
-		vi_col = vi_off2col(xb, xrow, xoff);
-		vi_drawagain(xtop);
-		vi_drawmsg();
+		if (init) {
+			static int marker_logged = 0;
+			if (!marker_logged) {
+				viRepeatDebugLog("[nextvi-marker] vi.c active repeat_patch_rev=2026-02-06c");
+				marker_logged = 1;
+			}
+			xtop = MAX(0, xrow - xrows / 2);
+			vi_col = vi_off2col(xb, xrow, xoff);
+			vi_drawagain(xtop);
+			vi_drawmsg();
 		term_pos(xrow - xtop, led_pos(lbuf_get(xb, xrow), vi_col));
 	}
 	while (!xquit) {
@@ -1405,6 +1525,11 @@ void vi(int init)
 			term_dec()
 			re_motion:
 			c = term_read();
+			int rep_from_dot = 0;
+			if (rep_skip_capture > 0) {
+				rep_skip_capture--;
+				rep_from_dot = 1;
+			}
 			switch (c) {
 			case TK_CTL('b'):
 				vi_scrollbackward(MAX(1, vi_arg) * (xrows - 1));
@@ -1851,16 +1976,25 @@ void vi(int init)
 				default:
 					continue;
 				}
-				if (strchr("!<>AIJKOPRacdiopry", c)) {
-					size_t rlen;
-					rep:
-					rlen = icmd_pos;
-					if (rlen > sizeof(rep_cmd))
-						rlen = sizeof(rep_cmd);
-					memcpy(rep_cmd, icmd, rlen);
-					rep_len = (int)rlen;
-				}
-			}
+					if (strchr("!<>AIJKOPRacdiopry", c)) {
+						size_t rlen;
+						rep:
+						if (!rep_from_dot) {
+							rlen = icmd_pos;
+							if (rlen > sizeof(rep_cmd))
+								rlen = sizeof(rep_cmd);
+							memcpy(rep_cmd, icmd, rlen);
+							rep_len = (int)rlen;
+							rep_canonicalize_command(c);
+							viRepeatDebugLog(
+									"[nextvi-repeat] capture cmd=%d vi_insmov=%d rep_len=%d esc_idx=%d first=%d last=%d",
+									c, vi_insmov, rep_len,
+									rep_find_byte(rep_cmd, rep_len, (unsigned char)TK_ESC),
+									rep_len > 0 ? (unsigned char)rep_cmd[0] : -1,
+									rep_len > 0 ? (unsigned char)rep_cmd[rep_len - 1] : -1);
+						}
+						}
+					}
 		if (xrow < 0 || xrow >= lbuf_len(xb))
 			xrow = lbuf_len(xb) ? lbuf_len(xb) - 1 : 0;
 		if (xtop > xrow)

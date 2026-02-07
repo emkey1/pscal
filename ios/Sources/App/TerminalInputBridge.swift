@@ -39,6 +39,10 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.smartQuotesType = .no
         view.smartInsertDeleteType = .no
         view.smartDashesType = .no
+        view.keyboardType = .asciiCapable
+        if #available(iOS 17.0, *) {
+            view.inlinePredictionType = .no
+        }
         view.keyboardAppearance = .dark
         view.onInput = onInput
         view.onPaste = onPaste
@@ -114,6 +118,13 @@ final class TerminalKeyInputView: UITextView {
     private var keyboardObservers: [NSObjectProtocol] = []
     private let hardwareKeyboardHeightEpsilon: CGFloat = 80.0
     private var cachedKeyCommands: [UIKeyCommand]?
+    private var consumedKeySignatures: Set<KeySignature> = []
+    private var suppressNextPlainDotInsert: Bool = false
+
+    private struct KeySignature: Hashable {
+        let keyCodeRaw: Int
+        let modifiersRaw: Int
+    }
 
     private func isHardwareKeyboard(_ notification: Notification) -> Bool {
         guard let userInfo = notification.userInfo,
@@ -342,7 +353,21 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override func insertText(_ text: String) {
-        if controlLatch, let scalar = text.unicodeScalars.first {
+        var normalizedText = text
+        // Keep modal editor command input stable on iOS keyboards that can
+        // autocorrect "..." to a single ellipsis codepoint.
+        if normalizedText.contains("\u{2026}") {
+            normalizedText = normalizedText.replacingOccurrences(of: "\u{2026}", with: ".")
+        }
+
+        if normalizedText == "." {
+            if suppressNextPlainDotInsert {
+                suppressNextPlainDotInsert = false
+                return
+            }
+        }
+
+        if controlLatch, let scalar = normalizedText.unicodeScalars.first {
             controlLatch = false
             let value = scalar.value
             if scalar == "c" {
@@ -359,7 +384,7 @@ final class TerminalKeyInputView: UITextView {
                 return
             }
         }
-        let normalized = text.replacingOccurrences(of: "\n", with: "\r")
+        let normalized = normalizedText.replacingOccurrences(of: "\n", with: "\r")
         onInput?(normalized)
     }
 
@@ -423,7 +448,13 @@ final class TerminalKeyInputView: UITextView {
         var unhandled: [UIPress] = []
         for press in presses {
             if handle(press: press) {
+                if let signature = keySignature(for: press) {
+                    consumedKeySignatures.insert(signature)
+                }
                 continue
+            }
+            if let signature = keySignature(for: press) {
+                consumedKeySignatures.remove(signature)
             }
             unhandled.append(press)
         }
@@ -454,16 +485,48 @@ final class TerminalKeyInputView: UITextView {
         NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                         object: nil,
                                         userInfo: ["command": false])
-        /* Terminals only need key-down events; swallowing key-up avoids a UIKit
-         * crash observed when exiting pagers like less. */
-        return
+        var unhandled: [UIPress] = []
+        for press in presses {
+            guard let signature = keySignature(for: press) else {
+                unhandled.append(press)
+                continue
+            }
+            let consumed = consumedKeySignatures.remove(signature) != nil
+            if !consumed {
+                unhandled.append(press)
+            }
+        }
+        if !unhandled.isEmpty {
+            super.pressesEnded(Set(unhandled), with: event)
+        }
     }
 
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         NotificationCenter.default.post(name: .terminalModifierStateChanged,
                                         object: nil,
                                         userInfo: ["command": false])
-        // Swallow to keep UIKit out of the loop for hardware keys.
+        var unhandled: [UIPress] = []
+        for press in presses {
+            guard let signature = keySignature(for: press) else {
+                unhandled.append(press)
+                continue
+            }
+            let consumed = consumedKeySignatures.remove(signature) != nil
+            if !consumed {
+                unhandled.append(press)
+            }
+        }
+        if !unhandled.isEmpty {
+            super.pressesCancelled(Set(unhandled), with: event)
+        }
+    }
+
+    private func keySignature(for press: UIPress) -> KeySignature? {
+        guard let key = press.key else { return nil }
+        return KeySignature(
+            keyCodeRaw: Int(key.keyCode.rawValue),
+            modifiersRaw: key.modifierFlags.rawValue
+        )
     }
 
     private func arrowSequence(_ direction: String) -> String {
@@ -532,6 +595,20 @@ final class TerminalKeyInputView: UITextView {
 
     private func handle(press: UIPress) -> Bool {
         guard let key = press.key else { return false }
+
+        // Route plain '.' directly from key press events so nextvi repeat ('.')
+        // does not depend on UITextInput session state.
+        if (key.characters == "." || key.characters == "\u{2026}"),
+           key.modifierFlags.intersection([.control, .alternate, .command, .alphaShift, .shift]).isEmpty {
+            if press.phase == .began {
+                suppressNextPlainDotInsert = true
+                onInput?(".")
+                DispatchQueue.main.async { [weak self] in
+                    self?.suppressNextPlainDotInsert = false
+                }
+            }
+            return true
+        }
 
         if key.modifierFlags.contains(.command) {
             let chars = key.charactersIgnoringModifiers

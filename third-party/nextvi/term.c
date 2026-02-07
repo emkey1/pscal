@@ -734,14 +734,24 @@ int term_read(void)
 			if (texec == '&')
 				return 0;
 		}
-		int n = pscalTerminalRead(ibuf, 1, 1000);
-		if (n <= 0) {
+		/* In iOS bridge mode, timeout-driven zero reads are interpreted by
+		 * nextvi as TK_INT and can corrupt command-repeat flow (e.g. '.' after
+		 * 'dd'). Block until input or shutdown to match desktop behavior. */
+		while (ibuf_pos >= ibuf_cnt) {
+			int n = pscalTerminalRead(ibuf, 1, 0);
+			if (n > 0) {
+				ibuf_cnt = (unsigned int)n;
+				ibuf_pos = 0;
+				break;
+			}
+			/* n == 0 means timeout/no data: retry instead of emitting TK_INT. */
+			if (n == 0)
+				continue;
+			/* n < 0 means terminal/editor shutdown. */
 			if (texec)
 				xquit = texec == '&' ? -1 : 1;
 			return 0;
 		}
-		ibuf_cnt = (unsigned int)n;
-		ibuf_pos = 0;
 	}
 	if (icmd_pos < sizeof(icmd))
 		icmd[icmd_pos++] = ibuf[ibuf_pos];

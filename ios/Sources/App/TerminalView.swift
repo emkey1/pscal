@@ -252,7 +252,7 @@ struct TerminalContentView: View {
                         editorRenderToken: editorTokenState,
                         font: currentFont,
                         fontPointSize: fontSettings.pointSize,
-                        editorSnapshot: runtime.editorBridge.snapshot(),
+                        editorSnapshot: runtime.editorSnapshot,
                         onPaste: handlePaste,
                         onInput: runtime.send,
                         mouseMode: runtime.mouseMode,

@@ -225,6 +225,9 @@ func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
     guard let message = message else { return }
     let msg = String(cString: message)
     appendRuntimeDebugLog(msg)
+    if msg.hasPrefix("[nextvi-") {
+        NSLog("%@", msg)
+    }
     /* Mirror to the Xcode console only when explicitly requested via
      * PSCALI_RUNTIME_STDERR; editor debug tracing should remain in the
      * runtime log file by default to avoid noisy console spam. */
@@ -287,6 +290,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     @Published private(set) var cursorInfo: TerminalCursorInfo?
     @Published private(set) var terminalBackgroundColor: UIColor = UIColor.systemBackground
     @Published private(set) var editorRenderToken: UInt64 = 0
+    @Published private(set) var editorSnapshot: EditorSnapshot = .empty
     
     // Instance-owned Bridge for editor mode
     let editorBridge = EditorTerminalBridge()
@@ -316,7 +320,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var activeGeometry: TerminalGeometryMetrics
     private var activeGeometrySource: GeometrySource = .main
     private var editorModeActive: Bool = false
+    private let editorRefreshQueue = DispatchQueue(label: "com.pscal.runtime.editor.refresh")
     private var editorRefreshPending: Bool = false
+    private var lastEditorRefreshTime: TimeInterval = 0
     private var appearanceObserver: NSObjectProtocol?
     private var mirrorDebugToTerminal: Bool = false
     private var waitingForRestart: Bool = false
@@ -1238,6 +1244,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
             refreshEditorDisplay()
         } else {
+            DispatchQueue.main.async {
+                self.editorSnapshot = .empty
+            }
             refreshActiveGeometry(forceRuntimeUpdate: true)
             scheduleRender()
         }
@@ -1254,21 +1263,38 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func refreshEditorDisplay() {
-        guard editorBridge.isActive else { return }
-        let shouldSchedule: Bool = stateQueue.sync {
+        guard isEditorModeActive() else { return }
+
+        let now = Date().timeIntervalSince1970
+        // Keep editor refresh gating off the broader runtime state queue so
+        // heavy terminal activity cannot stall key processing in nextvi.
+        let schedule: (shouldSchedule: Bool, delay: TimeInterval) = editorRefreshQueue.sync {
             if editorRefreshPending {
-                return false
+                return (false, 0)
             }
             editorRefreshPending = true
-            return true
+            let elapsed = now - lastEditorRefreshTime
+            let minInterval = 1.0 / 60.0
+            let delay = elapsed >= minInterval ? 0 : (minInterval - elapsed)
+            return (true, delay)
         }
-        guard shouldSchedule else { return }
-        DispatchQueue.main.async {
+
+        guard schedule.shouldSchedule else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + schedule.delay) {
+            if !self.isEditorModeActive() {
+                self.editorRefreshQueue.sync {
+                    self.editorRefreshPending = false
+                }
+                return
+            }
+
             self.terminalBackgroundColor = TerminalFontSettings.shared.backgroundColor
+            self.editorSnapshot = self.editorBridge.snapshot()
             self.editorRenderToken &+= 1
             EditorWindowManager.shared.refreshWindow()
-            self.stateQueue.sync {
+            self.editorRefreshQueue.sync {
                 self.editorRefreshPending = false
+                self.lastEditorRefreshTime = Date().timeIntervalSince1970
             }
         }
     }
@@ -1450,6 +1476,12 @@ struct EditorSnapshot {
     let text: String
     let attributedText: NSAttributedString
     let cursor: TerminalCursorInfo?
+
+    static let empty = EditorSnapshot(
+        text: "",
+        attributedText: NSAttributedString(string: ""),
+        cursor: nil
+    )
 }
 
 struct CellAttributes: Equatable {
@@ -1985,11 +2017,11 @@ final class EditorTerminalBridge {
         guard maxLength > 0 else { return 0 }
         inputCondition.lock()
         defer { inputCondition.unlock() }
-        let timeoutSeconds = Double(max(timeoutMs, 0)) / 10.0
+        let timeoutSeconds = Double(max(timeoutMs, 0)) / 1000.0
         let deadline = timeoutMs > 0 ? Date().addingTimeInterval(timeoutSeconds) : nil
         while pendingInput.isEmpty {
             if !isActive {
-                return 0
+                return -1
             }
             if let deadline {
                 if !inputCondition.wait(until: deadline) {

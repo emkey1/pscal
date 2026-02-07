@@ -624,7 +624,6 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         terminalView.cursorColor = TerminalFontSettings.shared.foregroundColor
         terminalView.attributedText = snapshot.attributedText
 
-        lastEditorCursorOffset = nil
         selectionOverlay.clearSelection()
 
         var resolvedCursor: TerminalCursorInfo?
@@ -655,6 +654,7 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
 
                 scrollToCursor(textView: terminalView,
                                cursorOffset: offset,
+                               cursorRow: resolvedCursor?.row,
                                preferBottomInset: preferredInset)
                 lastEditorCursorOffset = offset
             }
@@ -727,14 +727,54 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
     private func scrollToCursor(
         textView: UITextView,
         cursorOffset: Int,
+        cursorRow: Int? = nil,
         preferBottomInset: CGFloat = 0
     ) {
-        textView.layoutIfNeeded()
-
         let length = textView.attributedText.length
+        guard length > 0 else { return }
+
         let safeOffset = max(0, min(cursorOffset, length))
-        let range = NSRange(location: safeOffset, length: 0)
-        textView.scrollRangeToVisible(range)
+
+        let adjustedTop = textView.adjustedContentInset.top
+        let adjustedBottom = textView.adjustedContentInset.bottom
+        let viewportHeight = max(1, textView.bounds.height - adjustedTop - adjustedBottom)
+        let visibleTop = textView.contentOffset.y + adjustedTop
+        let visibleBottom = visibleTop + viewportHeight
+
+        let inset = max(0, preferBottomInset)
+        let targetTop: CGFloat
+        let targetBottom: CGFloat
+        if let cursorRow {
+            let rowHeight = max(1, TerminalFontMetrics.lineHeight)
+            let rowY = CGFloat(max(0, cursorRow)) * rowHeight + textView.textContainerInset.top
+            targetTop = rowY
+            targetBottom = rowY + rowHeight + inset
+        } else {
+            let range = NSRange(location: safeOffset, length: 0)
+            textView.scrollRangeToVisible(range)
+            return
+        }
+
+        var nextOffsetY = textView.contentOffset.y
+        if targetTop < visibleTop {
+            nextOffsetY = targetTop - adjustedTop
+        } else if targetBottom > visibleBottom {
+            nextOffsetY = targetBottom - viewportHeight - adjustedTop
+        } else {
+            return
+        }
+
+        let maxOffsetY = max(
+            -adjustedTop,
+            textView.contentSize.height - textView.bounds.height + adjustedBottom
+        )
+        nextOffsetY = min(max(nextOffsetY, -adjustedTop), maxOffsetY)
+        if abs(nextOffsetY - textView.contentOffset.y) > 0.5 {
+            textView.setContentOffset(
+                CGPoint(x: textView.contentOffset.x, y: nextOffsetY),
+                animated: false
+            )
+        }
     }
 
     private func remapFontsIfNeeded(in text: NSAttributedString) -> NSAttributedString {
@@ -914,20 +954,6 @@ final class TerminalDisplayTextView: UITextView {
 
     var pasteHandler: ((String) -> Void)?
 
-#if DEBUG
-    private var didLogLayoutManagerAccess = false
-
-    override var layoutManager: NSLayoutManager {
-        let manager = super.layoutManager
-        if !didLogLayoutManagerAccess {
-            didLogLayoutManagerAccess = true
-            let stack = Thread.callStackSymbols.joined(separator: "\n")
-            NSLog("[TerminalDisplayTextView] layoutManager accessed; TextKit1 compatibility enabled.\n%@", stack)
-        }
-        return manager
-    }
-#endif
-
     var cursorColor: UIColor = .systemOrange {
         didSet {
             tintColor = cursorColor
@@ -944,6 +970,7 @@ final class TerminalDisplayTextView: UITextView {
 
     private var blinkAnimationAdded = false
     private var pendingCursorUpdate = false
+    private var lastAppliedCursorOffset: Int?
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -998,10 +1025,26 @@ final class TerminalDisplayTextView: UITextView {
     override func copy(_ sender: Any?) { }
 
     func applyCursor(offset: Int?) {
-        cursorTextOffset = offset
-        let target = offset ?? 0
-        let clamped = max(0, min(target, attributedText.length))
-        selectedRange = NSRange(location: clamped, length: 0)
+        let clampedOffset = offset.map { max(0, min($0, attributedText.length)) }
+        if cursorTextOffset != clampedOffset {
+            cursorTextOffset = clampedOffset
+        }
+
+        guard let clampedOffset else {
+            lastAppliedCursorOffset = nil
+            return
+        }
+
+        guard clampedOffset != lastAppliedCursorOffset else {
+            return
+        }
+        lastAppliedCursorOffset = clampedOffset
+
+        // Selection updates are expensive in TextKit and this view is not editable.
+        // Only mirror cursor into selection when actively focused.
+        if isFirstResponder {
+            selectedRange = NSRange(location: clampedOffset, length: 0)
+        }
     }
 
     private func pruneGestures() {
@@ -1095,7 +1138,7 @@ private struct EditorFloatingRendererContent: View {
     var body: some View {
         let token = runtime.editorRenderToken
         _ = token
-        let snapshot = runtime.editorBridge.snapshot()
+        let snapshot = runtime.editorSnapshot
 
         return TerminalRendererView(
             text: snapshot.attributedText,
