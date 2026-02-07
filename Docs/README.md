@@ -28,6 +28,8 @@ Start here to explore the available guides and references in this directory.
 
 ## Tiny compiler
 - [tools/tiny](../tools/tiny): educational Python-based compiler front end.
+- [clike_tiny_compiler.md](clike_tiny_compiler.md): Tiny compiler implemented in CLike (`bin/tiny.clike`) and wrapper usage (`bin/tiny`).
+- [tiny_language_expansion_tutorial.md](tiny_language_expansion_tutorial.md): practical guide for adding new Tiny language features to `bin/tiny.clike`.
 
 ## Virtual machine
 - [pscal_vm_overview.md](pscal_vm_overview.md): stack-based VM architecture and opcode reference.
@@ -42,4 +44,3 @@ Start here to explore the available guides and references in this directory.
 
 ## Object model
 - [object_layout.md](object_layout.md): runtime memory layout of objects.
-
