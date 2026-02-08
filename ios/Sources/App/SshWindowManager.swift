@@ -52,6 +52,7 @@ final class TerminalTabManager: ObservableObject {
     private var pgidToTab: [Int: UInt64] = [:]
     private var appearanceSettingsByProfileID: [String: TerminalTabAppearanceSettings] = [:]
     private var startupCommandAppliedSessions: Set<UInt64> = []
+    private var promptReadySessions: Set<UInt64> = []
     private var selectedAppearanceObserver: AnyCancellable?
     private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
         // Avoid tab switching; just reassert focus on the selected tab a few times.
@@ -254,9 +255,10 @@ final class TerminalTabManager: ObservableObject {
                       appearanceSettings: appearance,
                       kind: .ssh(session))
         tabs.append(tab)
-        if let newTabIndex = tabs.indices.last {
-            applyStartupCommandIfNeeded(forTabAtIndex: newTabIndex)
-        }
+        // SSH sessions do not emit the exsh prompt-ready callback, so keep
+        // startup-command behavior as immediate best-effort for ssh tabs.
+        promptReadySessions.insert(sessionId)
+        applyStartupCommandIfReady(forSessionId: sessionId)
         selectedId = sessionId
         logMultiTab("open ssh tab id=\(sessionId) title=\(title)")
         tabInitLog("openSshSession created id=\(sessionId) title=\(title)")
@@ -268,6 +270,7 @@ final class TerminalTabManager: ObservableObject {
         tabInitLog("sessionExit id=\(sessionId) status=\(status) thread=\(Thread.isMainThread ? "main" : "bg")")
         guard let index = tabs.firstIndex(where: { $0.id == sessionId }) else { return }
         startupCommandAppliedSessions.remove(sessionId)
+        promptReadySessions.remove(sessionId)
         switch tabs[index].kind {
         case .shell:
             return
@@ -286,6 +289,7 @@ final class TerminalTabManager: ObservableObject {
         let removedId = tabs[index].id
         if let sessionId = tabs[index].sessionId {
             startupCommandAppliedSessions.remove(sessionId)
+            promptReadySessions.remove(sessionId)
         }
         tabs.remove(at: index)
         if selectedId == removedId {
@@ -360,7 +364,13 @@ final class TerminalTabManager: ObservableObject {
     func registerShellSession(tabId: UInt64, sessionId: UInt64) {
         guard sessionId != 0, let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         tabs[idx].sessionId = sessionId
-        applyStartupCommandIfNeeded(forTabAtIndex: idx)
+        applyStartupCommandIfReady(forSessionId: sessionId)
+    }
+
+    func handlePromptReady(sessionId: UInt64) {
+        guard sessionId != 0 else { return }
+        promptReadySessions.insert(sessionId)
+        applyStartupCommandIfReady(forSessionId: sessionId)
     }
 
     fileprivate func updateTitle(forSessionId sessionId: UInt64, rawTitle: String) -> Bool {
@@ -454,14 +464,15 @@ final class TerminalTabManager: ObservableObject {
         return true
     }
 
-    private func applyStartupCommandIfNeeded(forTabAtIndex index: Int) {
-        guard tabs.indices.contains(index) else { return }
-        guard let sessionId = tabs[index].sessionId, sessionId != 0 else { return }
+    private func applyStartupCommandIfReady(forSessionId sessionId: UInt64) {
+        guard sessionId != 0 else { return }
+        guard promptReadySessions.contains(sessionId) else { return }
+        guard let index = tabs.firstIndex(where: { $0.sessionId == sessionId }) else { return }
         guard !startupCommandAppliedSessions.contains(sessionId) else { return }
         let command = tabs[index].startupCommand
         guard !command.isEmpty else { return }
         startupCommandAppliedSessions.insert(sessionId)
-        let payload = command.hasSuffix("\n") ? command : command + "\n"
+        let payload = command.hasSuffix("\r") ? command : command + "\r"
         switch tabs[index].kind {
         case .shell(let runtime):
             runtime.send(payload)
@@ -746,6 +757,14 @@ func pscalRuntimeSetTabStartupCommandForSession(_ sessionId: UInt64, _ commandPt
         return 0
     }
     return -EINVAL
+}
+
+@_cdecl("pscalRuntimePromptReadyForSession")
+func pscalRuntimePromptReadyForSession(_ sessionId: UInt64) -> Int32 {
+    Task { @MainActor in
+        TerminalTabManager.shared.handlePromptReady(sessionId: sessionId)
+    }
+    return 0
 }
 
 @_cdecl("pscalRuntimeSshSessionExited")

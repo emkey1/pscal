@@ -41,6 +41,24 @@ struct TerminalSettingsView: View {
                         .foregroundColor(Color(appearanceSettings.foregroundColor))
                 }
 
+                Section(header: Text("Font Size")) {
+                    Slider(
+                        value: Binding(
+                            get: { Double(appearanceSettings.pointSize) },
+                            set: { appearanceSettings.updatePointSize(CGFloat($0)) }
+                        ),
+                        in: Double(appearanceSettings.minimumPointSize)...Double(appearanceSettings.maximumPointSize),
+                        step: 1
+                    )
+
+                    HStack {
+                        Text("Current")
+                        Spacer()
+                        Text("\(Int(appearanceSettings.pointSize)) pt")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
+
                 Section(header: Text("Tab Name")) {
                     TextField(
                         "Tab name",
@@ -77,24 +95,6 @@ struct TerminalSettingsView: View {
                     Text("Runs once each time this tab profile launches. Leave empty to disable.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
-                }
-
-                Section(header: Text("Font Size")) {
-                    Slider(
-                        value: Binding(
-                            get: { Double(appearanceSettings.pointSize) },
-                            set: { appearanceSettings.updatePointSize(CGFloat($0)) }
-                        ),
-                        in: Double(appearanceSettings.minimumPointSize)...Double(appearanceSettings.maximumPointSize),
-                        step: 1
-                    )
-
-                    HStack {
-                        Text("Current")
-                        Spacer()
-                        Text("\(Int(appearanceSettings.pointSize)) pt")
-                            .font(.system(.body, design: .monospaced))
-                    }
                 }
 
                 Section(header: Text("Colors")) {

@@ -83,6 +83,7 @@ static _Thread_local bool gInteractiveLineDrawn = false;
 #if defined(PSCAL_TARGET_IOS)
 static _Thread_local VProc *gShellSelfVproc = NULL;
 static _Thread_local bool gShellSelfVprocActivated = false;
+static void shellNotifyPromptReady(void);
 static void shellDebugLog(const char *message) {
     if (!message || message[0] == '\0') {
         return;
@@ -2953,6 +2954,9 @@ static char *readInteractiveLine(const char *prompt,
                           cursor,
                           &displayed_length,
                           &displayed_prompt_lines);
+#if defined(PSCAL_TARGET_IOS)
+    shellNotifyPromptReady();
+#endif
 
     bool done = false;
     bool eof_requested = false;
@@ -4169,6 +4173,7 @@ typedef struct {
 
 extern void pscalRuntimeShellSessionExited(uint64_t session_id, int status) __attribute__((weak));
 extern void pscalRuntimeKernelSessionExited(uint64_t session_id, int status) __attribute__((weak));
+extern int32_t pscalRuntimePromptReadyForSession(uint64_t session_id) __attribute__((weak));
 extern void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) __attribute__((weak));
 extern ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t session_id) __attribute__((weak));
 extern void PSCALRuntimeRegisterSessionContext(uint64_t session_id) __attribute__((weak));
@@ -4184,6 +4189,17 @@ static void shellSessionNotifyExit(uint64_t session_id, int status) {
     if (pscalRuntimeKernelSessionExited) {
         pscalRuntimeKernelSessionExited(session_id, status);
     }
+}
+
+static void shellNotifyPromptReady(void) {
+    if (!pscalRuntimePromptReadyForSession) {
+        return;
+    }
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (!session_stdio || session_stdio->session_id == 0) {
+        return;
+    }
+    (void)pscalRuntimePromptReadyForSession(session_stdio->session_id);
 }
 
 static char **shellCopyArgv(int argc, char **argv) {

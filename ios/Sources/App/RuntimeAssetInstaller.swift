@@ -81,6 +81,7 @@ final class RuntimeAssetInstaller {
     static let shared = RuntimeAssetInstaller()
 
     private let fileManager = FileManager.default
+    private let workspaceInstallLock = NSLock()
     private var cachedToolRunnerPath: String?
     private var skelHomeInstalled: Bool = false
     private let skelInstallLock = NSLock()
@@ -131,6 +132,9 @@ final class RuntimeAssetInstaller {
     }
 
     func prepareWorkspace() {
+        workspaceInstallLock.lock()
+        defer { workspaceInstallLock.unlock() }
+
         guard let bundleRoot = Bundle.main.resourceURL else {
             NSLog("PSCAL iOS: missing bundle resource root; cannot configure runtime paths.")
             return
