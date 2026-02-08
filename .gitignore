@@ -22,3 +22,4 @@ tmp/
 .xcode-deriv/
 .swp
 ios/PSCAL.xcodeproj/xcshareddata/xcdebugger/*
+foo.pbc
