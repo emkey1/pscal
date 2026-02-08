@@ -211,6 +211,7 @@ Value vmBuiltinShellMapfile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTrue(struct VM_s* vm, int arg_count, Value* args);
 #if defined(PSCAL_TAB_TITLE_SUPPORT)
 Value vmBuiltinShellTabName(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellTabStartupCommand(struct VM_s* vm, int arg_count, Value* args);
 #endif
 #ifdef PSCAL_TARGET_IOS
 Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);

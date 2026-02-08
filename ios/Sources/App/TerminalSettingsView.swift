@@ -7,11 +7,13 @@ struct TerminalSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     private let tabId: UInt64
     @State private var tabNameDraft: String
+    @State private var startupCommandDraft: String
 
     init(appearanceSettings: TerminalTabAppearanceSettings, tabId: UInt64) {
         _appearanceSettings = ObservedObject(wrappedValue: appearanceSettings)
         self.tabId = tabId
         _tabNameDraft = State(initialValue: TerminalTabManager.shared.tabTitle(tabId: tabId) ?? "")
+        _startupCommandDraft = State(initialValue: TerminalTabManager.shared.startupCommand(tabId: tabId) ?? "")
     }
 
     var body: some View {
@@ -54,6 +56,25 @@ struct TerminalSettingsView: View {
                     .autocorrectionDisabled(true)
 
                     Text("Used for this tab profile and restored on next launch.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
+                Section(header: Text("Startup Command")) {
+                    TextField(
+                        "Run on tab startup",
+                        text: Binding(
+                            get: { startupCommandDraft },
+                            set: { newValue in
+                                _ = tabManager.updateStartupCommand(tabId: tabId, rawCommand: newValue)
+                                startupCommandDraft = tabManager.startupCommand(tabId: tabId) ?? newValue
+                            }
+                        )
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+
+                    Text("Runs once each time this tab profile launches. Leave empty to disable.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }

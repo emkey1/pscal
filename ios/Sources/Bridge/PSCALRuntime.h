@@ -79,6 +79,8 @@ void PSCALRuntimeConfigureAsanReportPath(const char *path);
 void PSCALRuntimeUpdateWindowSize(int columns, int rows);
 /// Requests the UI to update the current tab title (iOS only).
 int PSCALRuntimeSetTabTitle(const char *title);
+/// Requests the UI to update the current tab startup command (iOS only).
+int PSCALRuntimeSetTabStartupCommand(const char *command);
 
 void pscalRuntimeDebugLog(const char *message);
 void PSCALRuntimeLogLine(const char *message);

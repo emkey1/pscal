@@ -86,6 +86,7 @@ extern "C" {
     ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx);
     void shellRuntimeDestroyContext(ShellRuntimeState *ctx);
     int32_t pscalRuntimeSetTabTitleForSession(uint64_t session_id, const char *title);
+    int32_t pscalRuntimeSetTabStartupCommandForSession(uint64_t session_id, const char *command);
     void pscalRuntimeBindSessionToBootstrap(void *runtime_context, uint64_t session_id);
     void pscalRuntimeBindSessionToBootstrapHandle(void *bootstrap_handle, uint64_t session_id);
 }
@@ -1769,6 +1770,14 @@ int PSCALRuntimeSetTabTitle(const char *title) {
         return -1;
     }
     return (int)pscalRuntimeSetTabTitleForSession(session_id, title);
+}
+
+int PSCALRuntimeSetTabStartupCommand(const char *command) {
+    uint64_t session_id = PSCALRuntimeCurrentSessionId();
+    if (session_id == 0 || !command) {
+        return -1;
+    }
+    return (int)pscalRuntimeSetTabStartupCommandForSession(session_id, command);
 }
 
 void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int rows) {

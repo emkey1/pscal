@@ -158,6 +158,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
 #if defined(PSCAL_TAB_TITLE_SUPPORT)
     {"tabname", "tabname", -1},
     {"tname", "tabname", -1},
+    {"tscommand", "tscommand", -1},
+    {"tabscommand", "tscommand", -1},
 #endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},

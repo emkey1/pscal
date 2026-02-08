@@ -20,6 +20,12 @@ int PSCALRuntimeSetTabTitle(const char *title) {
 }
 
 __attribute__((weak))
+int PSCALRuntimeSetTabStartupCommand(const char *command) {
+    (void)command;
+    return -1;
+}
+
+__attribute__((weak))
 void PSCALRuntimeOnProcessGroupEmpty(int pgid) {
     (void)pgid;
 }

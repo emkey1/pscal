@@ -34,6 +34,7 @@ static const char *shellResolvePathForIOS(const char *input, char *buffer, size_
 #endif
 #if defined(PSCAL_TAB_TITLE_SUPPORT)
 extern int PSCALRuntimeSetTabTitle(const char *title);
+extern int PSCALRuntimeSetTabStartupCommand(const char *command);
 #endif
 #include <pthread.h>
 #include <sys/ioctl.h>
@@ -3169,6 +3170,29 @@ Value vmBuiltinShellTabName(VM *vm, int arg_count, Value *args) {
 #else
     (void)args;
     runtimeError(vm, "tabname: tab naming is only available on iOS/iPadOS builds");
+    shellUpdateStatus(1);
+#endif
+    return makeVoid();
+}
+
+Value vmBuiltinShellTabStartupCommand(VM *vm, int arg_count, Value *args) {
+    if (arg_count != 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
+        runtimeError(vm, "tscommand: expected a single command string");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
+    const char *command = args[0].s_val;
+    int rc = PSCALRuntimeSetTabStartupCommand(command);
+    if (rc != 0) {
+        runtimeError(vm, "tscommand: unable to update tab startup command");
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
+    shellUpdateStatus(0);
+#else
+    (void)args;
+    runtimeError(vm, "tscommand: tab startup commands are only available on iOS/iPadOS builds");
     shellUpdateStatus(1);
 #endif
     return makeVoid();
