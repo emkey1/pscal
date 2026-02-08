@@ -89,7 +89,12 @@ static const Value* resolveStringPointer(const Value* value) {
     const Value* current = value;
     int depth = 0;
     while (current && current->type == TYPE_POINTER &&
-           current->base_type_node != STRING_CHAR_PTR_SENTINEL) {
+           current->base_type_node != STRING_CHAR_PTR_SENTINEL &&
+           current->base_type_node != SERIALIZED_CHAR_PTR_SENTINEL &&
+           current->base_type_node != STRING_LENGTH_SENTINEL &&
+           current->base_type_node != BYTE_ARRAY_PTR_SENTINEL &&
+           current->base_type_node != SHELL_FUNCTION_PTR_SENTINEL &&
+           current->base_type_node != OPAQUE_POINTER_SENTINEL) {
         if (!current->ptr_val) {
             return NULL;
         }
@@ -105,11 +110,14 @@ static int valueIsStringLike(const Value* value) {
     if (!value) return 0;
     if (value->type == TYPE_STRING) return 1;
     if (value->type == TYPE_POINTER) {
-        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+            value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) return 1;
         const Value* resolved = resolveStringPointer(value);
         if (!resolved) return 0;
         if (resolved->type == TYPE_STRING) return 1;
-        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (resolved->type == TYPE_POINTER &&
+            (resolved->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             resolved->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL)) {
             return 1;
         }
     }
@@ -120,7 +128,8 @@ static const char* valueToCStringLike(const Value* value) {
     if (!value) return NULL;
     if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
     if (value->type == TYPE_POINTER) {
-        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+            value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
             return (const char*)value->ptr_val;
         }
         const Value* resolved = resolveStringPointer(value);
@@ -128,7 +137,9 @@ static const char* valueToCStringLike(const Value* value) {
         if (resolved->type == TYPE_STRING) {
             return resolved->s_val ? resolved->s_val : "";
         }
-        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (resolved->type == TYPE_POINTER &&
+            (resolved->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             resolved->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL)) {
             return (const char*)resolved->ptr_val;
         }
     }
@@ -137,7 +148,9 @@ static const char* valueToCStringLike(const Value* value) {
 
 static int valueIsNullCharPointer(const Value* value) {
     return value && value->type == TYPE_POINTER &&
-           value->base_type_node == STRING_CHAR_PTR_SENTINEL && value->ptr_val == NULL;
+           (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+            value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) &&
+           value->ptr_val == NULL;
 }
 
 static void registerSocketInfo(int fd, int family, int socktype) {

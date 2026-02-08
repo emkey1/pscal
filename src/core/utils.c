@@ -13,6 +13,7 @@
 #include "types.h"
 #include "backend_ast/builtin.h"
 #include "common/runtime_tty.h"
+#include "vm/string_sentinels.h"
 #include <sys/ioctl.h> // Make sure this is included
 #include <unistd.h>    // For STDOUT_FILENO
 #include <sys/stat.h>  // For stat
@@ -1580,9 +1581,13 @@ void freeValue(Value *v) {
                 Value* owned = (Value*)v->ptr_val;
                 freeValue(owned);
                 free(owned);
+            } else if (v->ptr_val && v->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
+                free((char*)v->ptr_val);
             }
             v->ptr_val = NULL;
             if (v->base_type_node == OWNED_POINTER_SENTINEL) {
+                v->base_type_node = NULL;
+            } else if (v->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
                 v->base_type_node = NULL;
             }
             break;
@@ -2785,6 +2790,19 @@ Value makeCopyOfValue(const Value *src) {
         case TYPE_CLOSURE:
             if (v.closure.env) {
                 retainClosureEnv(v.closure.env);
+            }
+            break;
+        case TYPE_POINTER:
+            if (src->ptr_val && src->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
+                const char *text = (const char *)src->ptr_val;
+                size_t len = strlen(text);
+                char *dup = (char *)malloc(len + 1u);
+                if (!dup) {
+                    fprintf(stderr, "Memory allocation failed in makeCopyOfValue (serialized char pointer)\n");
+                    EXIT_FAILURE_HANDLER();
+                }
+                memcpy(dup, text, len + 1u);
+                v.ptr_val = (Value *)dup;
             }
             break;
         default:

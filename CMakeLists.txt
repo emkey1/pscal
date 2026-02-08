@@ -1540,8 +1540,13 @@ if(PSCAL_BUILD_STATIC_LIBS)
 endif()
 
 if(BUILD_PSCALD)
-    set(DISASSEMBLER_SOURCES src/disassembler/main.c)
-    set(ASSEMBLER_SOURCES src/disassembler/assembler_main.c)
+    set(DISASSEMBLER_SOURCES
+        src/disassembler/main.c
+        src/disassembler/opcode_meta.c)
+    set(ASSEMBLER_SOURCES
+        src/disassembler/assembler_main.c
+        src/tools/ast_json_loader.c
+        src/disassembler/opcode_meta.c)
     if(NOT PSCAL_PLATFORM_IOS)
         add_pscal_executable(pscald ${DISASSEMBLER_SOURCES})
         add_pscal_executable(pscalasm ${ASSEMBLER_SOURCES})

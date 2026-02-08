@@ -272,7 +272,12 @@ static const Value* resolveStringPointerBuiltin(const Value* value) {
     const Value* current = value;
     int depth = 0;
     while (current && current->type == TYPE_POINTER &&
-           current->base_type_node != STRING_CHAR_PTR_SENTINEL) {
+           current->base_type_node != STRING_CHAR_PTR_SENTINEL &&
+           current->base_type_node != SERIALIZED_CHAR_PTR_SENTINEL &&
+           current->base_type_node != STRING_LENGTH_SENTINEL &&
+           current->base_type_node != BYTE_ARRAY_PTR_SENTINEL &&
+           current->base_type_node != SHELL_FUNCTION_PTR_SENTINEL &&
+           current->base_type_node != OPAQUE_POINTER_SENTINEL) {
         if (!current->ptr_val) {
             return NULL;
         }
@@ -288,11 +293,14 @@ static int builtinValueIsStringLike(const Value* value) {
     if (!value) return 0;
     if (value->type == TYPE_STRING) return 1;
     if (value->type == TYPE_POINTER) {
-        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+            value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) return 1;
         const Value* resolved = resolveStringPointerBuiltin(value);
         if (!resolved) return 0;
         if (resolved->type == TYPE_STRING) return 1;
-        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (resolved->type == TYPE_POINTER &&
+            (resolved->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             resolved->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL)) {
             return 1;
         }
     }
@@ -303,7 +311,8 @@ static const char* builtinValueToCString(const Value* value) {
     if (!value) return NULL;
     if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
     if (value->type == TYPE_POINTER) {
-        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+            value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
             return (const char*)value->ptr_val;
         }
         const Value* resolved = resolveStringPointerBuiltin(value);
@@ -311,7 +320,9 @@ static const char* builtinValueToCString(const Value* value) {
         if (resolved->type == TYPE_STRING) {
             return resolved->s_val ? resolved->s_val : "";
         }
-        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (resolved->type == TYPE_POINTER &&
+            (resolved->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             resolved->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL)) {
             return (const char*)resolved->ptr_val;
         }
     }
@@ -5807,6 +5818,7 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
     }
 
     if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
         args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
@@ -5814,6 +5826,7 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
         bufferValue = (Value*)args[1].ptr_val;
         if (bufferValue && bufferValue->type == TYPE_POINTER &&
             (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
              bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;
@@ -6025,6 +6038,7 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
     }
 
     if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
         args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
@@ -6032,6 +6046,7 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
         bufferValue = (Value*)args[1].ptr_val;
         if (bufferValue && bufferValue->type == TYPE_POINTER &&
             (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
              bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;

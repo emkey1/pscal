@@ -6432,7 +6432,8 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (pointer_to_lvalue.base_type_node == STRING_CHAR_PTR_SENTINEL) {
+                if (pointer_to_lvalue.base_type_node == STRING_CHAR_PTR_SENTINEL ||
+                    pointer_to_lvalue.base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
                     char* char_target_addr = (char*)pointer_to_lvalue.ptr_val;
                     if (char_target_addr == NULL) {
                         runtimeError(vm, "VM Error: Attempting to assign to a NULL character address.");
@@ -6504,6 +6505,12 @@ comparison_error_label:
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
                     }
+                } else if (pointer_to_lvalue.base_type_node == SHELL_FUNCTION_PTR_SENTINEL ||
+                           pointer_to_lvalue.base_type_node == OPAQUE_POINTER_SENTINEL) {
+                    runtimeError(vm, "VM Error: Cannot assign through opaque/function pointer constants.");
+                    freeValue(&value_to_set);
+                    freeValue(&pointer_to_lvalue);
+                    return INTERPRET_RUNTIME_ERROR;
                 } else {
                     // This is the start of your existing logic for other types
                     Value* target_lvalue_ptr = (Value*)pointer_to_lvalue.ptr_val;
@@ -6668,7 +6675,8 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                if (pointer_val.base_type_node == STRING_CHAR_PTR_SENTINEL) {
+                if (pointer_val.base_type_node == STRING_CHAR_PTR_SENTINEL ||
+                    pointer_val.base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
                     // Special case: pointer into a string's character buffer.
                     char* char_target_addr = (char*)pointer_val.ptr_val;
                     if (char_target_addr == NULL) {
@@ -6690,6 +6698,11 @@ comparison_error_label:
                     Value* str_val = (Value*)pointer_val.ptr_val;
                     size_t len = (str_val && str_val->s_val) ? strlen(str_val->s_val) : 0;
                     push(vm, makeInt((long long)len));
+                } else if (pointer_val.base_type_node == SHELL_FUNCTION_PTR_SENTINEL ||
+                           pointer_val.base_type_node == OPAQUE_POINTER_SENTINEL) {
+                    runtimeError(vm, "VM Error: Cannot dereference opaque/function pointer constants.");
+                    freeValue(&pointer_val);
+                    return INTERPRET_RUNTIME_ERROR;
                 } else {
                     Value* target_lvalue_ptr = (Value*)pointer_val.ptr_val;
                     if (target_lvalue_ptr == NULL) {
