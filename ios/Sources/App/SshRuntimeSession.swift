@@ -115,6 +115,9 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach ssh session=\(self.sessionId)")
             self.htermAttached = true
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(self.sessionId)
+            }
         }
     }
 
@@ -125,6 +128,9 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach ssh session=\(self.sessionId)")
             self.htermAttached = false
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(0)
+            }
         }
     }
 
@@ -174,6 +180,7 @@ final class SshRuntimeSession: ObservableObject {
             }
         }
         lastStartErrno = 0
+        applyPendingWinsize()
         closeIfValid(readFd)
         closeIfValid(writeFd)
         return true
@@ -202,13 +209,18 @@ final class SshRuntimeSession: ObservableObject {
     func updateTerminalSize(columns: Int, rows: Int) {
         let clampedColumns = max(10, columns)
         let clampedRows = max(4, rows)
+        sshResizeLog("[ssh-resize] session update id=\(sessionId) req=\(columns)x\(rows) clamped=\(clampedColumns)x\(clampedRows)")
         pendingColumns = clampedColumns
         pendingRows = clampedRows
         if terminalBuffer.resize(columns: clampedColumns, rows: clampedRows) {
             scheduleRender()
         }
+        DispatchQueue.main.async { [weak self] in
+            sshResizeLog("[ssh-resize] session force-grid id=\(self?.sessionId ?? 0) cols=\(clampedColumns) rows=\(clampedRows)")
+            self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
+        }
         withRuntimeContext {
-            _ = PSCALRuntimeSetSessionWinsize(sessionId, Int32(clampedColumns), Int32(clampedRows))
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(clampedColumns), Int32(clampedRows))
         }
     }
 
@@ -297,6 +309,16 @@ final class SshRuntimeSession: ObservableObject {
                     PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
                 }
             }
+        }
+    }
+
+    private func applyPendingWinsize() {
+        let cols = pendingColumns
+        let rows = pendingRows
+        guard cols > 0, rows > 0 else { return }
+        sshResizeLog("[ssh-resize] session apply-pending id=\(sessionId) cols=\(cols) rows=\(rows)")
+        withRuntimeContext {
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(cols), Int32(rows))
         }
     }
 

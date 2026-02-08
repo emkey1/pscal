@@ -36,6 +36,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <stdbool.h>
 
 /* Initialize symbol tables needed for bytecode loading and disassembly. */
 static void initSymbolSystem(void) {
@@ -65,7 +67,76 @@ static void initSymbolSystem(void) {
 #endif
 }
 
-static const char *PSCALD_USAGE = "Usage: pscald <bytecode_file>\n";
+static const char *PSCALD_USAGE =
+    "Usage: pscald [--asm] <bytecode_file>\n"
+    "       pscald --help\n";
+
+static int pscaldDumpAsmBlock(const char *path) {
+    FILE *in = fopen(path, "rb");
+    if (!in) {
+        fprintf(stderr, "pscald: failed to open '%s' for asm export: %s\n", path, strerror(errno));
+        return 0;
+    }
+
+    uint8_t *bytes = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+    uint8_t buffer[4096];
+
+    for (;;) {
+        size_t n = fread(buffer, 1, sizeof(buffer), in);
+        if (n > 0) {
+            if (count + n > capacity) {
+                size_t new_capacity = capacity ? capacity : 8192u;
+                while (new_capacity < count + n) {
+                    new_capacity *= 2u;
+                }
+                uint8_t *new_bytes = (uint8_t *)realloc(bytes, new_capacity);
+                if (!new_bytes) {
+                    fprintf(stderr, "pscald: out of memory while exporting asm block.\n");
+                    free(bytes);
+                    fclose(in);
+                    return 0;
+                }
+                bytes = new_bytes;
+                capacity = new_capacity;
+            }
+            memcpy(bytes + count, buffer, n);
+            count += n;
+        }
+
+        if (n < sizeof(buffer)) {
+            if (ferror(in)) {
+                fprintf(stderr, "pscald: read error exporting '%s': %s\n", path, strerror(errno));
+                free(bytes);
+                fclose(in);
+                return 0;
+            }
+            break;
+        }
+    }
+
+    fclose(in);
+
+    fprintf(stderr, "== PSCALASM BEGIN v1 ==\n");
+    fprintf(stderr, "bytes: %zu\n", count);
+    fprintf(stderr, "hex:\n");
+    for (size_t i = 0; i < count; ++i) {
+        if (i % 16 == 0) {
+            fprintf(stderr, "  ");
+        }
+        fprintf(stderr, "%02x", bytes[i]);
+        if ((i % 16) == 15 || i + 1 == count) {
+            fprintf(stderr, "\n");
+        } else {
+            fprintf(stderr, " ");
+        }
+    }
+    fprintf(stderr, "== PSCALASM END ==\n");
+
+    free(bytes);
+    return 1;
+}
 
 int pscald_main(int argc, char* argv[]) {
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
@@ -80,12 +151,26 @@ int pscald_main(int argc, char* argv[]) {
         PSCALD_RETURN(EXIT_SUCCESS);
     }
 
-    if (argc != 2) {
+    bool emit_asm_block = false;
+    const char *path = NULL;
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--asm") == 0 || strcmp(argv[i], "-a") == 0) {
+            emit_asm_block = true;
+            continue;
+        }
+        if (!path) {
+            path = argv[i];
+            continue;
+        }
         fprintf(stderr, "%s", PSCALD_USAGE);
         PSCALD_RETURN(EXIT_FAILURE);
     }
 
-    const char* path = argv[1];
+    if (!path) {
+        fprintf(stderr, "%s", PSCALD_USAGE);
+        PSCALD_RETURN(EXIT_FAILURE);
+    }
+
     initSymbolSystem();
     registerAllBuiltins();
 
@@ -98,6 +183,14 @@ int pscald_main(int argc, char* argv[]) {
 
     const char* disasm_name = bytecodeDisplayNameForPath(path);
     disassembleBytecodeChunk(&chunk, disasm_name ? disasm_name : path, procedure_table);
+
+    if (emit_asm_block && !pscaldDumpAsmBlock(path)) {
+        freeBytecodeChunk(&chunk);
+        if (globalSymbols) freeHashTable(globalSymbols);
+        if (constGlobalSymbols) freeHashTable(constGlobalSymbols);
+        if (procedure_table) freeHashTable(procedure_table);
+        PSCALD_RETURN(EXIT_FAILURE);
+    }
 
     freeBytecodeChunk(&chunk);
     if (globalSymbols) freeHashTable(globalSymbols);

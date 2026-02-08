@@ -118,6 +118,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "pscaljson2bc", vmBuiltinShellPscalJson2bc);
 #ifdef BUILD_PSCALD
     registerShellBuiltin(category, command_group, "pscald", vmBuiltinShellPscald);
+    registerShellBuiltin(category, command_group, "pscalasm", vmBuiltinShellPscalasm);
 #endif
     registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);

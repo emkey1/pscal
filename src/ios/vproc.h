@@ -216,6 +216,9 @@ void vprocSetShellSelfPid(int pid);
 int vprocGetShellSelfPid(void);
 void vprocSetShellSelfTid(pthread_t tid);
 bool vprocIsShellSelfThread(void);
+/* Resolve account names from container passwd/group databases on iOS. */
+int vprocLookupPasswdName(uid_t uid, char *buffer, size_t buffer_len);
+int vprocLookupGroupName(gid_t gid, char *buffer, size_t buffer_len);
 /* Optional: identify a per-session "kernel" vproc that acts as adoptive parent. */
 void vprocSetKernelPid(int pid);
 int vprocGetKernelPid(void);

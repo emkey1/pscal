@@ -1011,8 +1011,20 @@ static int tty_ioctl(struct pscal_fd *fd, int cmd, void *arg) {
 
 void tty_set_winsize(struct tty *tty, struct winsize_ winsize) {
     tty->winsize = winsize;
-    if (tty->fg_group != 0) {
-        pscalTtySendGroupSignal((int)tty->fg_group, SIGWINCH_);
+    pid_t_ target_group = tty->fg_group;
+    if (target_group == 0 && tty->session > 0) {
+        int fg = pscalTtyGetForegroundPgid((int)tty->session);
+        if (fg > 0) {
+            target_group = (pid_t_)fg;
+            tty->fg_group = target_group;
+        } else {
+            /* Fallback to the session leader's group if foreground metadata
+             * is not populated yet. */
+            target_group = tty->session;
+        }
+    }
+    if (target_group != 0) {
+        pscalTtySendGroupSignal((int)target_group, SIGWINCH_);
     }
 }
 

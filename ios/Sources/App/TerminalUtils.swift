@@ -51,4 +51,9 @@ private let sshDebugEnabled: Bool = {
 func sshDebugLog(_ message: String) {
     guard sshDebugEnabled else { return }
     terminalViewLog(message)
+    NSLog("%@", message)
+}
+
+func sshResizeLog(_ message: String) {
+    sshDebugLog(message)
 }

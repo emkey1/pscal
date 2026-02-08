@@ -4,8 +4,19 @@ import UIKit
 struct ShellTerminalView: View {
     @ObservedObject var session: ShellRuntimeSession
     let isActive: Bool
-    @ObservedObject private var fontSettings = TerminalFontSettings.shared
+    @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     @State private var focusAnchor: Int = 0
+    @State private var showingSettings = false
+
+    init(
+        session: ShellRuntimeSession,
+        isActive: Bool,
+        appearanceSettings: TerminalTabAppearanceSettings
+    ) {
+        self.session = session
+        self.isActive = isActive
+        _fontSettings = ObservedObject(wrappedValue: appearanceSettings)
+    }
 
     var body: some View {
         if TerminalDebugFlags.printChanges {
@@ -13,15 +24,32 @@ struct ShellTerminalView: View {
             traceViewChanges("ShellTerminalView body")
         }
         return GeometryReader { proxy in
-            ShellTerminalContentView(
-                availableSize: proxy.size,
-                fontSettings: fontSettings,
-                session: session,
-                focusAnchor: $focusAnchor,
-                isActive: isActive
-            )
-            .id(session.sessionId)
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            ZStack(alignment: .bottomTrailing) {
+                ShellTerminalContentView(
+                    availableSize: proxy.size,
+                    fontSettings: fontSettings,
+                    session: session,
+                    focusAnchor: $focusAnchor,
+                    isActive: isActive
+                )
+                .id(session.sessionId)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "textformat.size")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(.bottom, 16)
+                .padding(.trailing, 10)
+                .accessibilityLabel("Adjust Font Size")
+            }
+        }
+        .sheet(isPresented: $showingSettings) {
+            TerminalSettingsView(appearanceSettings: fontSettings)
         }
         .background(Color(fontSettings.backgroundColor))
         .onChange(of: isActive) { active in
@@ -38,7 +66,7 @@ private struct ShellTerminalContentView: View {
     }
 
     let availableSize: CGSize
-    @ObservedObject var fontSettings: TerminalFontSettings
+    @ObservedObject var fontSettings: TerminalTabAppearanceSettings
     @ObservedObject var session: ShellRuntimeSession
     @Binding var focusAnchor: Int
     let isActive: Bool

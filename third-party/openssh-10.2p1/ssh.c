@@ -1577,15 +1577,16 @@ main(int ac, char **av)
 	    (muxclient_command && muxclient_command != SSHMUX_COMMAND_PROXY) ||
 	    options.session_type == SESSION_TYPE_NONE)
 		tty_flag = 0;
+	int stdin_is_tty = isatty(fileno(stdin));
+
 	/* Do not allocate a tty if stdin is not a tty. */
-	if ((!isatty(fileno(stdin)) || options.stdin_null) &&
+	if ((!stdin_is_tty || options.stdin_null) &&
 	    options.request_tty != REQUEST_TTY_FORCE) {
 		if (tty_flag)
 			logit("Pseudo-terminal will not be allocated because "
 			    "stdin is not a terminal.");
 		tty_flag = 0;
 	}
-
 	/* Set up strings used to percent_expand() arguments */
 	cinfo = xcalloc(1, sizeof(*cinfo));
 	if (gethostname(thishost, sizeof(thishost)) == -1)

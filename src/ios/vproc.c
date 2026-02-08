@@ -187,6 +187,11 @@ static const char *pscalEtcPath(const char *leaf, char *buf, size_t buf_len) {
     return NULL;
 }
 
+static bool pscalContainerUserDbAvailable(const char *leaf) {
+    char path[PATH_MAX];
+    return pscalEtcPath(leaf, path, sizeof(path)) != NULL;
+}
+
 static void pscalLoadPasswd(void) {
     char path[PATH_MAX];
     const char *passwd_path = pscalEtcPath("passwd", path, sizeof(path));
@@ -380,6 +385,8 @@ __attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name) {
 struct passwd *getpwuid(uid_t uid) {
     struct passwd *pw = pscalGetpwuid(uid);
     if (pw) return pw;
+    /* If container passwd exists, do not consult host account DB. */
+    if (pscalContainerUserDbAvailable("passwd")) return NULL;
     if (pscalRuntimeHostGetpwuid) return pscalRuntimeHostGetpwuid(uid);
     return NULL;
 }
@@ -387,6 +394,7 @@ struct passwd *getpwuid(uid_t uid) {
 struct passwd *getpwnam(const char *name) {
     struct passwd *pw = pscalGetpwnam(name);
     if (pw) return pw;
+    if (pscalContainerUserDbAvailable("passwd")) return NULL;
     if (pscalRuntimeHostGetpwnam) return pscalRuntimeHostGetpwnam(name);
     return NULL;
 }
@@ -394,6 +402,8 @@ struct passwd *getpwnam(const char *name) {
 struct group *getgrgid(gid_t gid) {
     struct group *gr = pscalGetgrgid(gid);
     if (gr) return gr;
+    /* If container group exists, do not consult host account DB. */
+    if (pscalContainerUserDbAvailable("group")) return NULL;
     if (pscalRuntimeHostGetgrgid) return pscalRuntimeHostGetgrgid(gid);
     return NULL;
 }
@@ -401,8 +411,71 @@ struct group *getgrgid(gid_t gid) {
 struct group *getgrnam(const char *name) {
     struct group *gr = pscalGetgrnam(name);
     if (gr) return gr;
+    if (pscalContainerUserDbAvailable("group")) return NULL;
     if (pscalRuntimeHostGetgrnam) return pscalRuntimeHostGetgrnam(name);
     return NULL;
+}
+
+int vprocLookupPasswdName(uid_t uid, char *buffer, size_t buffer_len) {
+    if (!buffer || buffer_len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    buffer[0] = '\0';
+
+    struct passwd *pw = pscalGetpwuid(uid);
+    if (!pw) {
+        /* Keep container passwd authoritative when it exists. */
+        if (pscalContainerUserDbAvailable("passwd")) {
+            errno = ENOENT;
+            return -1;
+        }
+        if (pscalRuntimeHostGetpwuid) {
+            pw = pscalRuntimeHostGetpwuid(uid);
+        }
+    }
+    if (!pw || !pw->pw_name || pw->pw_name[0] == '\0') {
+        errno = ENOENT;
+        return -1;
+    }
+    size_t name_len = strlen(pw->pw_name);
+    if (name_len >= buffer_len) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(buffer, pw->pw_name, name_len + 1);
+    return 0;
+}
+
+int vprocLookupGroupName(gid_t gid, char *buffer, size_t buffer_len) {
+    if (!buffer || buffer_len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    buffer[0] = '\0';
+
+    struct group *gr = pscalGetgrgid(gid);
+    if (!gr) {
+        /* Keep container group authoritative when it exists. */
+        if (pscalContainerUserDbAvailable("group")) {
+            errno = ENOENT;
+            return -1;
+        }
+        if (pscalRuntimeHostGetgrgid) {
+            gr = pscalRuntimeHostGetgrgid(gid);
+        }
+    }
+    if (!gr || !gr->gr_name || gr->gr_name[0] == '\0') {
+        errno = ENOENT;
+        return -1;
+    }
+    size_t name_len = strlen(gr->gr_name);
+    if (name_len >= buffer_len) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(buffer, gr->gr_name, name_len + 1);
+    return 0;
 }
 #endif /* PSCAL_TARGET_IOS */
 
@@ -3130,6 +3203,9 @@ static bool vprocSessionFdMatchesHost(int fd, int host_fd) {
 
 static bool vprocIoDebugEnabled(void) {
     const char *env = getenv("PSCALI_IO_DEBUG");
+    if (!env || env[0] == '\0' || strcmp(env, "0") == 0) {
+        env = getenv("PSCALI_SSH_DEBUG");
+    }
     if (!env || env[0] == '\0') {
         return false;
     }
@@ -3277,6 +3353,10 @@ static void vprocSessionPtyUnregister(uint64_t session_id) {
 int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     if (session_id == 0 || cols <= 0 || rows <= 0) {
         errno = EINVAL;
+        vprocIoTrace("[vproc-io] winsize session=%llu invalid cols=%d rows=%d",
+                     (unsigned long long)session_id,
+                     cols,
+                     rows);
         return -1;
     }
     struct pscal_fd *pty_slave = NULL;
@@ -3297,6 +3377,10 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
             pscal_fd_close(pty_slave);
         }
         errno = ESRCH;
+        vprocIoTrace("[vproc-io] winsize session=%llu missing-pty cols=%d rows=%d",
+                     (unsigned long long)session_id,
+                     cols,
+                     rows);
         return -1;
     }
     struct winsize_ ws;
@@ -3304,8 +3388,44 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     ws.row = (word_t)rows;
     ws.xpixel = 0;
     ws.ypixel = 0;
+    int tty_sid_before = (int)pty_slave->tty->session;
+    int tty_fg_before = (int)pty_slave->tty->fg_group;
+    int map_fg_before = (tty_sid_before > 0) ? pscalTtyGetForegroundPgid(tty_sid_before) : -1;
+    vprocDebugLogf("[ssh-resize] winsize set session=%llu cols=%d rows=%d tty=%p sid=%d fg=%d map_fg=%d",
+                   (unsigned long long)session_id,
+                   cols,
+                   rows,
+                   (void *)pty_slave->tty,
+                   tty_sid_before,
+                   tty_fg_before,
+                   map_fg_before);
+    vprocIoTrace("[vproc-io] winsize session=%llu before tty=%p sid=%d fg=%d map_fg=%d cols=%d rows=%d",
+                 (unsigned long long)session_id,
+                 (void *)pty_slave->tty,
+                 tty_sid_before,
+                 tty_fg_before,
+                 map_fg_before,
+                 cols,
+                 rows);
     tty_set_winsize(pty_slave->tty, ws);
+    int tty_sid_after = (int)pty_slave->tty->session;
+    int tty_fg_after = (int)pty_slave->tty->fg_group;
+    int map_fg_after = (tty_sid_after > 0) ? pscalTtyGetForegroundPgid(tty_sid_after) : -1;
     pscal_fd_close(pty_slave);
+    vprocDebugLogf("[ssh-resize] winsize done session=%llu cols=%d rows=%d sid=%d fg=%d map_fg=%d",
+                   (unsigned long long)session_id,
+                   cols,
+                   rows,
+                   tty_sid_after,
+                   tty_fg_after,
+                   map_fg_after);
+    vprocIoTrace("[vproc-io] winsize session=%llu applied cols=%d rows=%d tty_sid=%d tty_fg=%d map_fg=%d",
+                 (unsigned long long)session_id,
+                 cols,
+                 rows,
+                 tty_sid_after,
+                 tty_fg_after,
+                 map_fg_after);
     return 0;
 }
 
@@ -8498,8 +8618,17 @@ int pscalTtySendGroupSignal(int pgid, int sig) {
     if (pgid <= 0) {
         return _ESRCH;
     }
+    if (sig == SIGWINCH_) {
+        vprocDebugLogf("[ssh-resize] send-group-signal pgid=%d sig=SIGWINCH", pgid);
+    }
     if (vprocKillShim(-pgid, sig) < 0) {
+        if (sig == SIGWINCH_) {
+            vprocDebugLogf("[ssh-resize] send-group-signal failed pgid=%d sig=SIGWINCH errno=%d", pgid, errno);
+        }
         return _ESRCH;
+    }
+    if (sig == SIGWINCH_) {
+        vprocDebugLogf("[ssh-resize] send-group-signal ok pgid=%d sig=SIGWINCH", pgid);
     }
     return 0;
 }
@@ -8509,6 +8638,13 @@ void pscalTtySetForegroundPgid(int sid, int fg_pgid) {
         return;
     }
     (void)vprocSetForegroundPgidInternal(sid, fg_pgid, false);
+}
+
+int pscalTtyGetForegroundPgid(int sid) {
+    if (sid <= 0) {
+        return -1;
+    }
+    return vprocGetForegroundPgid(sid);
 }
 
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows) {
@@ -10289,7 +10425,17 @@ int vprocSigactionShim(int sig, const struct sigaction *act, struct sigaction *o
     if (!vp) {
         return vprocHostSigactionRaw(sig, act, oldact);
     }
-    return vprocSigaction(vprocPid(vp), sig, act, oldact);
+    int rc = vprocSigaction(vprocPid(vp), sig, act, oldact);
+#if defined(PSCAL_TARGET_IOS)
+    /* Resize notifications from the runtime use pthread_kill(SIGWINCH) on the
+     * host thread. Mirror SIGWINCH handlers into host sigaction so those
+     * notifications can wake OpenSSH clientloop even when signal handling is
+     * virtualized through vproc. */
+    if (rc == 0 && act && sig == SIGWINCH) {
+        (void)vprocHostSigactionRaw(sig, act, NULL);
+    }
+#endif
+    return rc;
 }
 
 int vprocSigprocmaskShim(int how, const sigset_t *set, sigset_t *oldset) {

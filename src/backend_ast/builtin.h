@@ -231,6 +231,7 @@ Value vmBuiltinShellResize(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEditorDump(struct VM_s* vm, int arg_count, Value* args);
 #ifdef BUILD_PSCALD
 Value vmBuiltinShellPscald(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPscalasm(struct VM_s* vm, int arg_count, Value* args);
 #endif
 #endif
 Value vmHostShellLastStatus(struct VM_s* vm);

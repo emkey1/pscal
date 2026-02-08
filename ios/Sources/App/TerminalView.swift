@@ -10,13 +10,19 @@ struct TerminalView: View {
     let isActive: Bool
     let runtime: PscalRuntimeBootstrap
 
-    @ObservedObject private var fontSettings = TerminalFontSettings.shared
+    @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     @State private var showingSettings = false
 
-    init(showsOverlay: Bool = true, isActive: Bool = true, runtime: PscalRuntimeBootstrap) {
+    init(
+        showsOverlay: Bool = true,
+        isActive: Bool = true,
+        runtime: PscalRuntimeBootstrap,
+        appearanceSettings: TerminalTabAppearanceSettings
+    ) {
         self.showsOverlay = showsOverlay
         self.isActive = isActive
         self.runtime = runtime
+        _fontSettings = ObservedObject(wrappedValue: appearanceSettings)
     }
 
     var body: some View {
@@ -43,7 +49,7 @@ struct TerminalView: View {
             }
         }
         .sheet(isPresented: $showingSettings) {
-            TerminalSettingsView()
+            TerminalSettingsView(appearanceSettings: fontSettings)
         }
         .onChange(of: isActive) { active in
             if active {
@@ -123,7 +129,7 @@ struct TerminalContentView: View {
 
     let availableSize: CGSize
 
-    @ObservedObject private var fontSettings: TerminalFontSettings
+    @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     let runtime: PscalRuntimeBootstrap
     private let isActive: Bool
 
@@ -139,7 +145,7 @@ struct TerminalContentView: View {
 
     init(
         availableSize: CGSize,
-        fontSettings: TerminalFontSettings,
+        fontSettings: TerminalTabAppearanceSettings,
         isActive: Bool,
         runtime: PscalRuntimeBootstrap
     ) {

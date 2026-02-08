@@ -157,6 +157,10 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var lastFocus: Bool?
     private var applicationCursor = false
     private var scrollToBottomPending = false
+    private var resizeRequestGeneration: UInt64 = 0
+    private var pendingForcedGridSize: (columns: Int, rows: Int)?
+    private var resizeSessionId: UInt64 = 0
+    private var pendingRuntimeResize: (columns: Int, rows: Int, source: String)?
 
     private static let terminalScheme = "pscal-terminal"
     private static let schemeHandler = TerminalResourceSchemeHandler()
@@ -356,6 +360,27 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         }
     }
 
+    func forceGridSize(columns: Int, rows: Int) {
+        let clampedColumns = max(1, columns)
+        let clampedRows = max(1, rows)
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] force-grid req=\(columns)x\(rows) clamped=\(clampedColumns)x\(clampedRows) loaded=\(isLoaded)")
+        pendingForcedGridSize = (clampedColumns, clampedRows)
+        guard isLoaded else { return }
+        applyForcedGridSize(columns: clampedColumns, rows: clampedRows)
+    }
+
+    func setResizeSessionId(_ sessionId: UInt64) {
+        let previous = resizeSessionId
+        resizeSessionId = sessionId
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] bind-session previous=\(previous) session=\(sessionId)")
+        guard sessionId != 0 else { return }
+        if let pending = pendingRuntimeResize {
+            pendingRuntimeResize = nil
+            sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay source=\(pending.source) session=\(sessionId) cols=\(pending.columns) rows=\(pending.rows)")
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(pending.columns), Int32(pending.rows))
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case HandlerName.load.rawValue:
@@ -383,6 +408,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             }
             flushOutput()
             requestResize()
+            applyPendingForcedGridSizeIfNeeded()
         case HandlerName.log.rawValue:
             if let message = message.body as? String {
                 NSLog("Hterm[%d] log: %@", instanceId, message)
@@ -392,7 +418,9 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
                 onInput?(input)
             }
         case HandlerName.resize.rawValue:
-            requestResize()
+            if !applyResizeMessage(message.body) {
+                requestResize()
+            }
         case HandlerName.propUpdate.rawValue:
             if let payload = message.body as? [Any], payload.count == 2,
                let name = payload[0] as? String {
@@ -471,15 +499,70 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         URL(string: "\(Self.terminalScheme)://terminal/term.html")
     }
 
-    private func requestResize() {
-        webView.evaluateJavaScript("exports.getSize()") { [weak self] result, error in
-            if let error = error {
-                NSLog("Hterm resize error: %@", error.localizedDescription)
-            }
+    private func requestResize(after delay: TimeInterval = 0) {
+        resizeRequestGeneration &+= 1
+        let generation = resizeRequestGeneration
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] request-resize gen=\(generation) delay=\(String(format: "%.3f", delay)) loaded=\(isLoaded)")
+        let evaluate: () -> Void = { [weak self] in
             guard let self = self else { return }
-            guard let array = result as? [NSNumber], array.count == 2 else { return }
-            self.onResize?(array[0].intValue, array[1].intValue)
+            self.webView.evaluateJavaScript("exports.getSize()") { [weak self] result, error in
+                guard let self = self else { return }
+                if let error = error {
+                    NSLog("Hterm resize error: %@", error.localizedDescription)
+                    sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] request-resize error=\(error.localizedDescription)")
+                }
+                guard generation == self.resizeRequestGeneration else { return }
+                guard let array = result as? [NSNumber], array.count == 2 else { return }
+                sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] request-resize result=\(array[0].intValue)x\(array[1].intValue) gen=\(generation)")
+                self.forwardResizeToRuntime(columns: array[0].intValue, rows: array[1].intValue, source: "request")
+                self.onResize?(array[0].intValue, array[1].intValue)
+            }
         }
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: evaluate)
+        } else {
+            evaluate()
+        }
+    }
+
+    private func applyResizeMessage(_ body: Any) -> Bool {
+        func parsePair(_ columns: Int, _ rows: Int) -> Bool {
+            guard columns > 0, rows > 0 else { return false }
+            sshResizeLog("[ssh-resize] hterm[\(instanceId)] native-resize=\(columns)x\(rows)")
+            forwardResizeToRuntime(columns: columns, rows: rows, source: "native")
+            onResize?(columns, rows)
+            return true
+        }
+        if let payload = body as? [String: Any] {
+            if let cols = payload["columns"] as? NSNumber,
+               let rows = payload["rows"] as? NSNumber {
+                return parsePair(cols.intValue, rows.intValue)
+            }
+            if let cols = payload["columns"] as? Int,
+               let rows = payload["rows"] as? Int {
+                return parsePair(cols, rows)
+            }
+            return false
+        }
+        if let payload = body as? [NSNumber], payload.count >= 2 {
+            return parsePair(payload[0].intValue, payload[1].intValue)
+        }
+        if let payload = body as? [Int], payload.count >= 2 {
+            return parsePair(payload[0], payload[1])
+        }
+        return false
+    }
+
+    private func forwardResizeToRuntime(columns: Int, rows: Int, source: String) {
+        let sessionId = resizeSessionId
+        guard sessionId != 0 else {
+            pendingRuntimeResize = (columns, rows, source)
+            sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-defer source=\(source) session=0 cols=\(columns) rows=\(rows)")
+            return
+        }
+        pendingRuntimeResize = nil
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-forward source=\(source) session=\(sessionId) cols=\(columns) rows=\(rows)")
+        PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(columns), Int32(rows))
     }
 
     func updateHostSize(_ size: CGSize, reason: String) {
@@ -597,7 +680,28 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             if let error = error {
                 NSLog("Hterm style error: %@", error.localizedDescription)
             }
-            self?.requestResize()
+            self?.requestResize(after: 0.06)
+            self?.applyPendingForcedGridSizeIfNeeded()
+        }
+    }
+
+    private func applyPendingForcedGridSizeIfNeeded() {
+        guard isLoaded, let pending = pendingForcedGridSize else {
+            return
+        }
+        applyForcedGridSize(columns: pending.columns, rows: pending.rows)
+    }
+
+    private func applyForcedGridSize(columns: Int, rows: Int) {
+        guard columns > 0, rows > 0 else { return }
+        let script = "exports.setGridSize(\(columns), \(rows))"
+        webView.evaluateJavaScript(script) { _, error in
+            if let error = error {
+                NSLog("Hterm force size error: %@", error.localizedDescription)
+                sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid error=\(error.localizedDescription) cols=\(columns) rows=\(rows)")
+            } else {
+                sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid applied=\(columns)x\(rows)")
+            }
         }
     }
 

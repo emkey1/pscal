@@ -4191,6 +4191,7 @@ extern int dascal_main(int argc, char *argv[]);
 #endif
 #ifdef BUILD_PSCALD
 extern int pscald_main(int argc, char *argv[]);
+extern int pscalasm_main(int argc, char *argv[]);
 #endif
 
 Value vmBuiltinShellPascal(VM *vm, int arg_count, Value *args) {
@@ -4226,6 +4227,10 @@ Value vmBuiltinShellExshTool(VM *vm, int arg_count, Value *args) {
 #ifdef BUILD_PSCALD
 Value vmBuiltinShellPscald(VM *vm, int arg_count, Value *args) {
     return shellRunToolBuiltin(vm, "pscald", pscald_main, FRONTEND_KIND_PASCAL, arg_count, args);
+}
+
+Value vmBuiltinShellPscalasm(VM *vm, int arg_count, Value *args) {
+    return shellRunToolBuiltin(vm, "pscalasm", pscalasm_main, FRONTEND_KIND_PASCAL, arg_count, args);
 }
 #endif
 

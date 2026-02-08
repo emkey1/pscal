@@ -264,6 +264,13 @@
 			files = (
 			);
 			inputPaths = (
+				"$(PROJECT_DIR)/Tools/pscal_tool_runner.deflate",
+				"$(PROJECT_DIR)/../build/ios-device/bin/pscal_tool_runner.app/pscal_tool_runner",
+				"$(PROJECT_DIR)/../build/ios-device/bin/pscal_tool_runner",
+				"$(PROJECT_DIR)/../build/ios-simulator/bin/pscal_tool_runner.app/pscal_tool_runner",
+				"$(PROJECT_DIR)/../build/ios-simulator/bin/pscal_tool_runner",
+				"$(PROJECT_DIR)/../build/ios-maccatalyst-arm64/bin/pscal_tool_runner",
+				"$(PROJECT_DIR)/../build/ios-maccatalyst/bin/pscal_tool_runner",
 			);
 			name = "Embed Tool Runner";
 			outputPaths = (
@@ -272,7 +279,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\n\ncase \"${PLATFORM_NAME:-}\" in\n    iphoneos*)\n        platform_dir=\"ios-device\"\n        ;;\n    *)\n        platform_dir=\"ios-simulator\"\n        ;;\nesac\n\nfallback_deflate=\"${PROJECT_DIR}/Tools/pscal_tool_runner.deflate\"\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\n/bin/mkdir -p \"${bundle_root}\"\nraw_dest=\"${bundle_root}/pscal_tool_runner\"\ncompressed_dest=\"${bundle_root}/pscal_tool_runner.deflate\"\nlicense_dest=\"${bundle_root}/Docs/Licenses\"\n\n# Do not bundle the raw runner executable (App Store rejects extra binaries).\n/bin/rm -f \"${raw_dest}\"\n\n# Bundle license texts for the in-app viewer.\n/bin/mkdir -p \"${license_dest}\"\n/bin/cp -f \"${PROJECT_DIR}/../LICENSE\" \"${license_dest}/pscal_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssl-3.6.0/LICENSE.txt\" \"${license_dest}/openssl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/curl-8.17.0/COPYING\" \"${license_dest}/curl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/SDL/LICENSE.txt\" \"${license_dest}/sdl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/nextvi/LICENSE\" \"${license_dest}/nextvi_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssh-10.2p1/LICENCE\" \"${license_dest}/openssh_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../src/third_party/yyjson/LICENSE\" \"${license_dest}/yyjson_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/hterm/LICENSE\" \"${license_dest}/hterm_LICENSE.txt\" || true\n\nif [ -f \"${fallback_deflate}\" ]; then\n    /bin/cp -f \"${fallback_deflate}\" \"${compressed_dest}\"\nelse\n    echo \"[pscal_tool_runner] warning: missing runner payload (no fallback deflate).\" 1>&2\nfi\n";
+			shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\n/bin/mkdir -p \"${bundle_root}\"\nraw_dest=\"${bundle_root}/pscal_tool_runner\"\ncompressed_dest=\"${bundle_root}/pscal_tool_runner.deflate\"\nlicense_dest=\"${bundle_root}/Docs/Licenses\"\nfallback_deflate=\"${PROJECT_DIR}/Tools/pscal_tool_runner.deflate\"\n\nrunner_src=\"\"\ncase \"${PLATFORM_NAME:-}\" in\n    iphoneos*)\n        for candidate in \"${PROJECT_DIR}/../build/ios-device/bin/pscal_tool_runner.app/pscal_tool_runner\" \"${PROJECT_DIR}/../build/ios-device/bin/pscal_tool_runner\"; do\n            if [ -f \"${candidate}\" ]; then\n                runner_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\n    iphonesimulator*)\n        for candidate in \"${PROJECT_DIR}/../build/ios-simulator/bin/pscal_tool_runner.app/pscal_tool_runner\" \"${PROJECT_DIR}/../build/ios-simulator/bin/pscal_tool_runner\"; do\n            if [ -f \"${candidate}\" ]; then\n                runner_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\n    *)\n        for candidate in \"${PROJECT_DIR}/../build/ios-maccatalyst-arm64/bin/pscal_tool_runner\" \"${PROJECT_DIR}/../build/ios-maccatalyst/bin/pscal_tool_runner\"; do\n            if [ -f \"${candidate}\" ]; then\n                runner_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\nesac\n\n# Do not bundle the raw runner executable (App Store rejects extra binaries).\n/bin/rm -f \"${raw_dest}\"\n\nif [ -n \"${runner_src}\" ]; then\n    /usr/bin/ruby -rzlib -e 'src, dst = ARGV; data = File.binread(src); File.binwrite(dst, Zlib::Deflate.deflate(data, Zlib::BEST_COMPRESSION))' \"${runner_src}\" \"${compressed_dest}\"\n    echo \"[pscal_tool_runner] compressed ${runner_src} -> ${compressed_dest}\"\nelif [ -f \"${fallback_deflate}\" ]; then\n    /bin/cp -f \"${fallback_deflate}\" \"${compressed_dest}\"\n    echo \"[pscal_tool_runner] warning: using fallback payload ${fallback_deflate}\" 1>&2\nelse\n    echo \"[pscal_tool_runner] error: missing tool runner binary and fallback payload.\" 1>&2\n    exit 1\nfi\n\n# Bundle license texts for the in-app viewer.\n/bin/mkdir -p \"${license_dest}\"\n/bin/cp -f \"${PROJECT_DIR}/../LICENSE\" \"${license_dest}/pscal_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssl-3.6.0/LICENSE.txt\" \"${license_dest}/openssl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/curl-8.17.0/COPYING\" \"${license_dest}/curl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/SDL/LICENSE.txt\" \"${license_dest}/sdl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/nextvi/LICENSE\" \"${license_dest}/nextvi_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssh-10.2p1/LICENCE\" \"${license_dest}/openssh_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../src/third_party/yyjson/LICENSE\" \"${license_dest}/yyjson_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/hterm/LICENSE\" \"${license_dest}/hterm_LICENSE.txt\" || true\n";
 		};
 		5DFF9BA02EC3E8CC004DFE5B /* Fix Tool Runner Permissions */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -441,9 +448,10 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-					"-lpscal_json2bc_static",
-					"-lpscal_pscald_static",
-					"-lz",
+						"-lpscal_json2bc_static",
+						"-lpscal_pscald_static",
+						"-lpscal_pscalasm_static",
+						"-lz",
 					"-lsqlite3",
 					"-framework",
 					ImageIO,
@@ -486,9 +494,10 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-					"-lpscal_json2bc_static",
-					"-lpscal_pscald_static",
-					"-lz",
+						"-lpscal_json2bc_static",
+						"-lpscal_pscald_static",
+						"-lpscal_pscalasm_static",
+						"-lz",
 					"-lsqlite3",
 					"-framework",
 					ImageIO,
@@ -531,9 +540,10 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-					"-lpscal_json2bc_static",
-					"-lpscal_pscald_static",
-					"-lz",
+						"-lpscal_json2bc_static",
+						"-lpscal_pscald_static",
+						"-lpscal_pscalasm_static",
+						"-lz",
 					"-lsqlite3",
 					"-lcurl",
 					"-lssl",
@@ -666,9 +676,10 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-					"-lpscal_json2bc_static",
-					"-lpscal_pscald_static",
-					"-lz",
+						"-lpscal_json2bc_static",
+						"-lpscal_pscald_static",
+						"-lpscal_pscalasm_static",
+						"-lz",
 					"-lsqlite3",
 					"-framework",
 					ImageIO,
@@ -711,9 +722,10 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-					"-lpscal_json2bc_static",
-					"-lpscal_pscald_static",
-					"-lz",
+						"-lpscal_json2bc_static",
+						"-lpscal_pscald_static",
+						"-lpscal_pscalasm_static",
+						"-lz",
 					"-lsqlite3",
 					"-framework",
 					ImageIO,
@@ -754,9 +766,10 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-					"-lpscal_json2bc_static",
-					"-lpscal_pscald_static",
-					"-lz",
+						"-lpscal_json2bc_static",
+						"-lpscal_pscald_static",
+						"-lpscal_pscalasm_static",
+						"-lz",
 					"-lsqlite3",
 					"-lcurl",
 					"-lssl",

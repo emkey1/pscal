@@ -24,6 +24,12 @@ void PSCALRuntimeOnProcessGroupEmpty(int pgid) {
     (void)pgid;
 }
 
+__attribute__((weak))
+void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) {
+    (void)session_id;
+    (void)tid;
+}
+
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 __attribute__((weak))
 int pscalRuntimeCurrentForegroundPgid(void) {
@@ -42,11 +48,6 @@ void pscalRuntimeShellSessionExited(uint64_t session_id, int status) {
 void pscalRuntimeKernelSessionExited(uint64_t session_id, int status) {
     (void)session_id;
     (void)status;
-}
-
-void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) {
-    (void)session_id;
-    (void)tid;
 }
 
 ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t session_id) {

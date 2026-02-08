@@ -1,8 +1,13 @@
 import SwiftUI
 
 struct TerminalSettingsView: View {
+    @ObservedObject private var appearanceSettings: TerminalTabAppearanceSettings
     @ObservedObject private var settings = TerminalFontSettings.shared
     @Environment(\.dismiss) private var dismiss
+
+    init(appearanceSettings: TerminalTabAppearanceSettings) {
+        _appearanceSettings = ObservedObject(wrappedValue: appearanceSettings)
+    }
 
     var body: some View {
         content
@@ -15,34 +20,34 @@ struct TerminalSettingsView: View {
                 Section(header: Text("Font")) {
                     Picker("Font",
                            selection: Binding(
-                            get: { settings.selectedFontID },
-                            set: { settings.updateFontSelection($0) }
+                            get: { appearanceSettings.selectedFontID },
+                            set: { appearanceSettings.updateFontSelection($0) }
                            )) {
-                        ForEach(settings.fontOptions) { option in
+                        ForEach(appearanceSettings.fontOptions) { option in
                             Text(option.displayName).tag(option.id)
                         }
                     }
 
-                    let previewFont = settings.font(forPointSize: 16)
+                    let previewFont = appearanceSettings.font(forPointSize: 16)
                     Text("Sample AaBb123")
                         .font(Font(previewFont))
-                        .foregroundColor(Color(settings.foregroundColor))
+                        .foregroundColor(Color(appearanceSettings.foregroundColor))
                 }
 
                 Section(header: Text("Font Size")) {
                     Slider(
                         value: Binding(
-                            get: { Double(settings.pointSize) },
-                            set: { settings.updatePointSize(CGFloat($0)) }
+                            get: { Double(appearanceSettings.pointSize) },
+                            set: { appearanceSettings.updatePointSize(CGFloat($0)) }
                         ),
-                        in: Double(settings.minimumPointSize)...Double(settings.maximumPointSize),
+                        in: Double(appearanceSettings.minimumPointSize)...Double(appearanceSettings.maximumPointSize),
                         step: 1
                     )
 
                     HStack {
                         Text("Current")
                         Spacer()
-                        Text("\(Int(settings.pointSize)) pt")
+                        Text("\(Int(appearanceSettings.pointSize)) pt")
                             .font(.system(.body, design: .monospaced))
                     }
                 }
@@ -51,16 +56,16 @@ struct TerminalSettingsView: View {
                     ColorPicker(
                         "Background",
                         selection: Binding(
-                            get: { Color(settings.backgroundColor) },
-                            set: { settings.updateBackgroundColor(UIColor(swiftUIColor: $0)) }
+                            get: { Color(appearanceSettings.backgroundColor) },
+                            set: { appearanceSettings.updateBackgroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
 
                     ColorPicker(
                         "Foreground",
                         selection: Binding(
-                            get: { Color(settings.foregroundColor) },
-                            set: { settings.updateForegroundColor(UIColor(swiftUIColor: $0)) }
+                            get: { Color(appearanceSettings.foregroundColor) },
+                            set: { appearanceSettings.updateForegroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
                 }

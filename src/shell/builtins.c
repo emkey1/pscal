@@ -113,6 +113,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"pscaljson2bc", "pscaljson2bc", -1},
 #ifdef BUILD_PSCALD
     {"pscald", "pscald", -1},
+    {"pscalasm", "pscalasm", -1},
 #endif
 #ifdef BUILD_DASCAL
     {"dascal", "dascal", -1},

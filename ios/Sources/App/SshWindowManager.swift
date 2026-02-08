@@ -2,6 +2,7 @@ import SwiftUI
 import Foundation
 import UIKit
 import Darwin
+import Combine
 
 @MainActor
 final class TerminalTabManager: ObservableObject {
@@ -23,6 +24,8 @@ final class TerminalTabManager: ObservableObject {
         let id: UInt64
         var title: String
         var sessionId: UInt64?
+        let appearanceProfileID: String
+        let appearanceSettings: TerminalTabAppearanceSettings
         let kind: Kind
     }
 
@@ -39,11 +42,13 @@ final class TerminalTabManager: ObservableObject {
             if oldValue != selectedId {
                 logMultiTab("selected tab id=\(selectedId)")
                 tabInitLog("selected tab id=\(selectedId) tabs=\(tabs.count)")
+                bindSelectedAppearanceSettings()
             }
         }
     }
-    private var nextShellOrdinal: Int = 1
     private var pgidToTab: [Int: UInt64] = [:]
+    private var appearanceSettingsByProfileID: [String: TerminalTabAppearanceSettings] = [:]
+    private var selectedAppearanceObserver: AnyCancellable?
     private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
         // Avoid tab switching; just reassert focus on the selected tab a few times.
         let base: TimeInterval = 0.50
@@ -58,14 +63,19 @@ final class TerminalTabManager: ObservableObject {
 
     private init() {
         let runtime = PscalRuntimeBootstrap.shared
+        let rootProfileID = "shell.1"
+        let rootAppearance = TerminalTabAppearanceSettings(profileID: rootProfileID)
         let shellTab = Tab(id: shellId,
                           title: TerminalTabManager.sanitizeTitle("Shell"),
                           sessionId: nil,
+                          appearanceProfileID: rootProfileID,
+                          appearanceSettings: rootAppearance,
                           kind: .shell(runtime))
         tabs = [shellTab]
         selectedId = shellId
-        nextShellOrdinal = 2
+        appearanceSettingsByProfileID[rootProfileID] = rootAppearance
         runtime.assignTabId(shellId)
+        bindSelectedAppearanceSettings()
         logMultiTab("init shell tab id=\(shellId) runtime=\(runtime.runtimeId)")
         tabInitLog("manager init shellTab=\(shellId) runtime=\(runtime.runtimeId) thread=\(Thread.isMainThread ? "main" : "bg")")
     }
@@ -83,13 +93,17 @@ final class TerminalTabManager: ObservableObject {
         tabInitLog("openShellTab request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
         let previousId = selectedId
         let newId = PSCALRuntimeNextSessionId()
-        if nextShellOrdinal < 1 {
-            nextShellOrdinal = 1
-        }
-        let title = TerminalTabManager.sanitizeTitle("Shell \(nextShellOrdinal)")
-        nextShellOrdinal += 1
+        let shellSlot = nextAvailableShellProfileSlot()
+        let title = TerminalTabManager.sanitizeTitle("Shell \(shellSlot)")
+        let profileID = "shell.\(shellSlot)"
+        let appearance = appearanceSettings(forProfileID: profileID)
         let runtime = PscalRuntimeBootstrap()
-        let tab = Tab(id: newId, title: title, sessionId: nil, kind: .shell(runtime))
+        let tab = Tab(id: newId,
+                      title: title,
+                      sessionId: nil,
+                      appearanceProfileID: profileID,
+                      appearanceSettings: appearance,
+                      kind: .shell(runtime))
         tabs.append(tab)
         selectedId = newId
         runtime.assignTabId(newId)
@@ -215,7 +229,14 @@ final class TerminalTabManager: ObservableObject {
             return -(err == 0 ? EIO : err)
         }
         let title = TerminalTabManager.sanitizeTitle(sshTitle(argv: argv))
-        let tab = Tab(id: sessionId, title: title, sessionId: sessionId, kind: .ssh(session))
+        let profileID = "ssh.1"
+        let appearance = appearanceSettings(forProfileID: profileID)
+        let tab = Tab(id: sessionId,
+                      title: title,
+                      sessionId: sessionId,
+                      appearanceProfileID: profileID,
+                      appearanceSettings: appearance,
+                      kind: .ssh(session))
         tabs.append(tab)
         selectedId = sessionId
         logMultiTab("open ssh tab id=\(sessionId) title=\(title)")
@@ -263,6 +284,10 @@ final class TerminalTabManager: ObservableObject {
 
     var selectedTab: Tab {
         tabs.first(where: { $0.id == selectedId }) ?? tabs[0]
+    }
+
+    var selectedAppearanceSettings: TerminalTabAppearanceSettings {
+        selectedTab.appearanceSettings
     }
 
     func selectTab(number: Int) {
@@ -339,6 +364,54 @@ final class TerminalTabManager: ObservableObject {
         return String(trimmed.prefix(15))
     }
 
+    private func appearanceSettings(forProfileID profileID: String) -> TerminalTabAppearanceSettings {
+        if let existing = appearanceSettingsByProfileID[profileID] {
+            return existing
+        }
+        let created = TerminalTabAppearanceSettings(profileID: profileID)
+        appearanceSettingsByProfileID[profileID] = created
+        return created
+    }
+
+    private func nextAvailableShellProfileSlot() -> Int {
+        var usedSlots = Set<Int>()
+        for tab in tabs {
+            if let slot = shellProfileSlot(from: tab.appearanceProfileID) {
+                usedSlots.insert(slot)
+            }
+        }
+        var slot = 2
+        while usedSlots.contains(slot) {
+            slot += 1
+        }
+        return slot
+    }
+
+    private func shellProfileSlot(from profileID: String) -> Int? {
+        guard profileID.hasPrefix("shell.") else { return nil }
+        let suffix = profileID.dropFirst("shell.".count)
+        guard let value = Int(suffix), value > 0 else { return nil }
+        return value
+    }
+
+    private func bindSelectedAppearanceSettings() {
+        let settings = selectedTab.appearanceSettings
+        selectedAppearanceObserver = Publishers.CombineLatest4(
+            settings.$pointSize,
+            settings.$selectedFontID,
+            settings.$backgroundColor,
+            settings.$foregroundColor
+        )
+        .sink { pointSize, fontID, background, foreground in
+            TerminalFontSettings.shared.applyTransientAppearance(
+                pointSize: pointSize,
+                fontIdentifier: fontID,
+                backgroundColor: background,
+                foregroundColor: foreground
+            )
+        }
+    }
+
     private func logMultiTab(_ message: String) {
         guard Self.multiTabDebugEnabled else { return }
         runtimeDebugLog("[MultiTab] \(message)")
@@ -370,11 +443,18 @@ struct TerminalTabsRootView: View {
     private func tabContent(for tab: TerminalTabManager.Tab, isSelected: Bool) -> some View {
         switch tab.kind {
         case .shell(let runtime):
-            TerminalView(showsOverlay: true, isActive: isSelected, runtime: runtime)
+            TerminalView(showsOverlay: true,
+                         isActive: isSelected,
+                         runtime: runtime,
+                         appearanceSettings: tab.appearanceSettings)
         case .shellSession(let session):
-            ShellTerminalView(session: session, isActive: isSelected)
+            ShellTerminalView(session: session,
+                              isActive: isSelected,
+                              appearanceSettings: tab.appearanceSettings)
         case .ssh(let session):
-            SshTerminalView(session: session, isActive: isSelected)
+            SshTerminalView(session: session,
+                            isActive: isSelected,
+                            appearanceSettings: tab.appearanceSettings)
         }
     }
 }

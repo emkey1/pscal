@@ -115,6 +115,9 @@ final class ShellRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach shell session=\(self.sessionId)")
             self.htermAttached = true
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(self.sessionId)
+            }
         }
     }
 
@@ -125,6 +128,9 @@ final class ShellRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach shell session=\(self.sessionId)")
             self.htermAttached = false
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(0)
+            }
         }
     }
 
@@ -204,6 +210,9 @@ final class ShellRuntimeSession: ObservableObject {
         pendingRows = clampedRows
         if terminalBuffer.resize(columns: clampedColumns, rows: clampedRows) {
             scheduleRender()
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
         }
         withRuntimeContext {
             PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(clampedColumns), Int32(clampedRows))

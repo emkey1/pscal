@@ -233,6 +233,45 @@ final class TerminalFontSettings: ObservableObject {
         notifyChange()
     }
 
+    func applyTransientAppearance(
+        pointSize: CGFloat,
+        fontIdentifier: String,
+        backgroundColor: UIColor,
+        foregroundColor: UIColor
+    ) {
+        let clampedSize = clamp(pointSize)
+        let resolvedFontID: String = {
+            if fontOptions.contains(where: { $0.id == fontIdentifier }) {
+                return fontIdentifier
+            }
+            return fontOptions.first?.id ?? "system"
+        }()
+        let normalizedBackground = TerminalFontSettings.normalize(backgroundColor)
+        let normalizedForeground = TerminalFontSettings.normalize(foregroundColor)
+
+        var changed = false
+        if self.pointSize != clampedSize {
+            self.pointSize = clampedSize
+            changed = true
+        }
+        if self.selectedFontID != resolvedFontID {
+            self.selectedFontID = resolvedFontID
+            changed = true
+        }
+        if self.backgroundColor != normalizedBackground {
+            self.backgroundColor = normalizedBackground
+            changed = true
+        }
+        if self.foregroundColor != normalizedForeground {
+            self.foregroundColor = normalizedForeground
+            changed = true
+        }
+
+        if changed {
+            notifyChange()
+        }
+    }
+
     func updateInitialTabCount(_ count: Int) {
         let clamped = TerminalFontSettings.clampInitialTabCount(count)
         guard clamped != initialTabCount else { return }
@@ -477,5 +516,190 @@ final class TerminalFontSettings: ObservableObject {
         UserDefaults.standard.set(enabled, forKey: editorWindowKey)
         NotificationCenter.default.post(name: TerminalFontSettings.preferencesDidChangeNotification,
                                         object: nil)
+    }
+}
+
+@MainActor
+final class TerminalTabAppearanceSettings: ObservableObject {
+    private static let minPointSizeValue: CGFloat = 2.0
+    private static let maxPointSizeValue: CGFloat = 28.0
+
+    let profileID: String
+    let minimumPointSize: CGFloat = TerminalTabAppearanceSettings.minPointSizeValue
+    let maximumPointSize: CGFloat = TerminalTabAppearanceSettings.maxPointSizeValue
+    let fontOptions: [TerminalFontSettings.FontOption]
+
+    @Published var pointSize: CGFloat
+    @Published private(set) var selectedFontID: String
+    @Published var backgroundColor: UIColor
+    @Published var foregroundColor: UIColor
+
+    private let pointSizeKey: String
+    private let fontNameKey: String
+    private let backgroundKey: String
+    private let foregroundKey: String
+
+    init(profileID: String, defaults: TerminalFontSettings = .shared) {
+        self.profileID = profileID
+        self.fontOptions = defaults.fontOptions
+
+        let suffix = Self.sanitizedProfileID(profileID)
+        self.pointSizeKey = "com.pscal.terminal.tabAppearance.\(suffix).fontPointSize"
+        self.fontNameKey = "com.pscal.terminal.tabAppearance.\(suffix).fontName"
+        self.backgroundKey = "com.pscal.terminal.tabAppearance.\(suffix).backgroundColor"
+        self.foregroundKey = "com.pscal.terminal.tabAppearance.\(suffix).foregroundColor"
+
+        let storedSize = UserDefaults.standard.double(forKey: pointSizeKey)
+        if storedSize > 0 {
+            self.pointSize = Self.clampSize(CGFloat(storedSize))
+        } else {
+            self.pointSize = Self.clampSize(defaults.pointSize)
+        }
+
+        if let storedFontID = UserDefaults.standard.string(forKey: fontNameKey),
+           fontOptions.contains(where: { $0.id == storedFontID }) {
+            self.selectedFontID = storedFontID
+        } else if fontOptions.contains(where: { $0.id == defaults.selectedFontID }) {
+            self.selectedFontID = defaults.selectedFontID
+        } else {
+            self.selectedFontID = fontOptions.first?.id ?? "system"
+        }
+
+        self.backgroundColor = Self.loadColor(key: backgroundKey, fallback: defaults.backgroundColor)
+        self.foregroundColor = Self.loadColor(key: foregroundKey, fallback: defaults.foregroundColor)
+    }
+
+    func clamp(_ size: CGFloat) -> CGFloat {
+        Self.clampSize(size)
+    }
+
+    var currentFont: UIFont {
+        font(forPointSize: pointSize)
+    }
+
+    func font(forPointSize size: CGFloat) -> UIFont {
+        let selectedOption = fontOptions.first(where: { $0.id == selectedFontID }) ?? fontOptions.first
+        if let name = selectedOption?.postScriptName,
+           !name.hasPrefix("."),
+           let custom = UIFont(name: name, size: size) {
+            return custom
+        }
+        return UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+
+    func font(
+        forPointSize size: CGFloat,
+        weight: UIFont.Weight,
+        italic: Bool = false
+    ) -> UIFont {
+        let base = font(forPointSize: size)
+        var traits = base.fontDescriptor.symbolicTraits
+
+        let wantsBold = weight == .bold
+        let hasBold = traits.contains(.traitBold)
+        let hasItalic = traits.contains(.traitItalic)
+
+        if wantsBold != hasBold {
+            if wantsBold {
+                traits.insert(.traitBold)
+            } else {
+                traits.remove(.traitBold)
+            }
+        }
+        if italic != hasItalic {
+            if italic {
+                traits.insert(.traitItalic)
+            } else {
+                traits.remove(.traitItalic)
+            }
+        }
+
+        if traits != base.fontDescriptor.symbolicTraits,
+           let descriptor = base.fontDescriptor.withSymbolicTraits(traits) {
+            return UIFont(descriptor: descriptor, size: size)
+        }
+        return base
+    }
+
+    func updatePointSize(_ newSize: CGFloat) {
+        let clamped = clamp(newSize)
+        guard clamped != pointSize else { return }
+        pointSize = clamped
+        UserDefaults.standard.set(Double(clamped), forKey: pointSizeKey)
+        notifyChange()
+    }
+
+    func updateFontSelection(_ identifier: String) {
+        guard identifier != selectedFontID,
+              fontOptions.contains(where: { $0.id == identifier }) else {
+            return
+        }
+        selectedFontID = identifier
+        UserDefaults.standard.set(identifier, forKey: fontNameKey)
+        notifyChange()
+    }
+
+    func updateBackgroundColor(_ color: UIColor) {
+        let normalized = Self.normalize(color)
+        guard normalized != backgroundColor else { return }
+        backgroundColor = normalized
+        Self.store(color: normalized, key: backgroundKey)
+        notifyChange()
+    }
+
+    func updateForegroundColor(_ color: UIColor) {
+        let normalized = Self.normalize(color)
+        guard normalized != foregroundColor else { return }
+        foregroundColor = normalized
+        Self.store(color: normalized, key: foregroundKey)
+        notifyChange()
+    }
+
+    private static func clampSize(_ size: CGFloat) -> CGFloat {
+        min(max(size, minPointSizeValue), maxPointSizeValue)
+    }
+
+    private static func sanitizedProfileID(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        return String(scalars)
+    }
+
+    private static func store(color: UIColor, key: String) {
+        if let data = try? NSKeyedArchiver.archivedData(
+            withRootObject: color,
+            requiringSecureCoding: false
+        ) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private static func loadColor(key: String, fallback: UIColor) -> UIColor {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let color = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClass: UIColor.self,
+                from: data
+              ) else {
+            return normalize(fallback)
+        }
+        return normalize(color)
+    }
+
+    private static func normalize(_ color: UIColor) -> UIColor {
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        if color.getRed(&r, green: &g, blue: &b, alpha: &a) {
+            return UIColor(red: r, green: g, blue: b, alpha: a)
+        }
+        return color
+    }
+
+    private func notifyChange() {
+        NotificationCenter.default.post(
+            name: TerminalFontSettings.appearanceDidChangeNotification,
+            object: nil
+        )
     }
 }

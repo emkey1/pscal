@@ -259,14 +259,14 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
 
     @objc
     private func handleIncreaseFont() {
-        let current = TerminalFontSettings.shared.pointSize
-        TerminalFontSettings.shared.updatePointSize(current + 1.0)
+        let settings = TerminalTabManager.shared.selectedAppearanceSettings
+        settings.updatePointSize(settings.pointSize + 1.0)
     }
 
     @objc
     private func handleDecreaseFont() {
-        let current = TerminalFontSettings.shared.pointSize
-        TerminalFontSettings.shared.updatePointSize(current - 1.0)
+        let settings = TerminalTabManager.shared.selectedAppearanceSettings
+        settings.updatePointSize(settings.pointSize - 1.0)
     }
 
     private func updateCommandIndicator(from event: UIPressesEvent) {

@@ -4,8 +4,19 @@ import UIKit
 struct SshTerminalView: View {
     @ObservedObject var session: SshRuntimeSession
     let isActive: Bool
-    @ObservedObject private var fontSettings = TerminalFontSettings.shared
+    @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     @State private var focusAnchor: Int = 0
+    @State private var showingSettings = false
+
+    init(
+        session: SshRuntimeSession,
+        isActive: Bool,
+        appearanceSettings: TerminalTabAppearanceSettings
+    ) {
+        self.session = session
+        self.isActive = isActive
+        _fontSettings = ObservedObject(wrappedValue: appearanceSettings)
+    }
 
     var body: some View {
         if TerminalDebugFlags.printChanges {
@@ -13,15 +24,32 @@ struct SshTerminalView: View {
             traceViewChanges("SshTerminalView body")
         }
         return GeometryReader { proxy in
-            SshTerminalContentView(
-                availableSize: proxy.size,
-                fontSettings: fontSettings,
-                session: session,
-                focusAnchor: $focusAnchor,
-                isActive: isActive
-            )
-            .id(session.sessionId)
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            ZStack(alignment: .bottomTrailing) {
+                SshTerminalContentView(
+                    availableSize: proxy.size,
+                    fontSettings: fontSettings,
+                    session: session,
+                    focusAnchor: $focusAnchor,
+                    isActive: isActive
+                )
+                .id(session.sessionId)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "textformat.size")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(.bottom, 16)
+                .padding(.trailing, 10)
+                .accessibilityLabel("Adjust Font Size")
+            }
+        }
+        .sheet(isPresented: $showingSettings) {
+            TerminalSettingsView(appearanceSettings: fontSettings)
         }
         .background(Color(fontSettings.backgroundColor))
         .onChange(of: isActive) { active in
@@ -38,7 +66,7 @@ private struct SshTerminalContentView: View {
     }
 
     let availableSize: CGSize
-    @ObservedObject var fontSettings: TerminalFontSettings
+    @ObservedObject var fontSettings: TerminalTabAppearanceSettings
     @ObservedObject var session: SshRuntimeSession
     @Binding var focusAnchor: Int
     let isActive: Bool
@@ -111,6 +139,7 @@ private struct SshTerminalContentView: View {
             updateTerminalGeometry()
         }
         .onChange(of: fontSettings.pointSize) { _ in
+            sshResizeLog("[ssh-resize] view font change session=\(session.sessionId) pt=\(fontSettings.pointSize)")
             hasMeasuredGeometry = false
             updateTerminalGeometry()
         }
@@ -131,6 +160,7 @@ private struct SshTerminalContentView: View {
 
     private func updateTerminalGeometry() {
         guard isActive else {
+            sshResizeLog("[ssh-resize] view geometry skipped session=\(session.sessionId) inactive")
             return
         }
         let font = fontSettings.currentFont
@@ -142,6 +172,7 @@ private struct SshTerminalContentView: View {
         )
         let columns = max(10, grid.columns)
         let rows = max(4, grid.rows)
+        sshResizeLog("[ssh-resize] view geometry session=\(session.sessionId) size=\(Int(usableSize.width))x\(Int(usableSize.height)) font=\(font.pointSize) grid=\(columns)x\(rows)")
         applyTerminalSize(columns: columns, rows: rows)
     }
 
@@ -154,8 +185,12 @@ private struct SshTerminalContentView: View {
             hasMeasuredGeometry = true
         }
         let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(columns: columns, rows: rows)
-        guard lastReportedMetrics != metrics else { return }
+        guard lastReportedMetrics != metrics else {
+            sshResizeLog("[ssh-resize] view apply skipped session=\(session.sessionId) unchanged=\(metrics.columns)x\(metrics.rows)")
+            return
+        }
         lastReportedMetrics = metrics
+        sshResizeLog("[ssh-resize] view apply session=\(session.sessionId) cols=\(metrics.columns) rows=\(metrics.rows)")
         session.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }

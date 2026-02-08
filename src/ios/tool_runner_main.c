@@ -19,6 +19,7 @@ extern int dascal_main(int argc, char **argv);
 #endif
 #ifdef BUILD_PSCALD
 extern int pscald_main(int argc, char **argv);
+extern int pscalasm_main(int argc, char **argv);
 #endif
 
 typedef int (*ToolEntryFn)(int argc, char **argv);
@@ -40,6 +41,7 @@ static const ToolDescriptor kToolDescriptors[] = {
 #endif
 #ifdef BUILD_PSCALD
     {"pscald", pscald_main, FRONTEND_KIND_PASCAL},
+    {"pscalasm", pscalasm_main, FRONTEND_KIND_PASCAL},
 #endif
 #ifdef PSCAL_TARGET_IOS
     {"ssh", pscal_openssh_ssh_main, FRONTEND_KIND_PASCAL},

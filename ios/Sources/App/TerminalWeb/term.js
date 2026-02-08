@@ -140,8 +140,47 @@ term.io.sendString = term.io.onVTKeyStroke = (data) => {
 };
 
 // hterm size updates native size
-term.io.onTerminalResize = () => native.resize();
-exports.getSize = () => [term.screenSize.width, term.screenSize.height];
+function currentTerminalSize() {
+    const cols = (term.screenSize && Number.isFinite(term.screenSize.width)) ? term.screenSize.width : 0;
+    const rows = (term.screenSize && Number.isFinite(term.screenSize.height)) ? term.screenSize.height : 0;
+    return [cols, rows];
+}
+function notifyTerminalResize() {
+    const size = currentTerminalSize();
+    native.resize({columns: size[0], rows: size[1]});
+}
+function forceTerminalReflow() {
+    if (!term.scrollPort_) {
+        notifyTerminalResize();
+        return;
+    }
+    term.scrollPort_.syncCharacterSize();
+    term.scrollPort_.resize();
+    notifyTerminalResize();
+}
+term.io.onTerminalResize = (columns, rows) => {
+    const cols = Number(columns);
+    const rws = Number(rows);
+    if (Number.isFinite(cols) && Number.isFinite(rws) && cols > 0 && rws > 0) {
+        native.resize({columns: cols, rows: rws});
+        return;
+    }
+    notifyTerminalResize();
+};
+exports.getSize = () => currentTerminalSize();
+exports.setGridSize = (columns, rows) => {
+    const cols = Number(columns);
+    const rws = Number(rows);
+    if (!Number.isFinite(cols) || !Number.isFinite(rws)) {
+        return;
+    }
+    const nextCols = Math.max(1, Math.floor(cols));
+    const nextRows = Math.max(1, Math.floor(rws));
+    term.realizeSize_(nextCols, nextRows);
+    syncProp('applicationCursor', term.keyboard.applicationCursor);
+    syncScroll();
+    native.resize({columns: nextCols, rows: nextRows});
+};
 
 // selection, copying
 term.scrollPort_.screen_.contentEditable = false;
@@ -234,6 +273,11 @@ exports.updateStyle = ({foregroundColor, backgroundColor, fontFamily, fontSize, 
     term.getPrefs().set('color-palette-overrides', colorPaletteOverrides);
     term.getPrefs().set('cursor-blink', blinkCursor);
     term.getPrefs().set('cursor-shape', cursorShape);
+    forceTerminalReflow();
+    requestAnimationFrame(() => {
+        forceTerminalReflow();
+        setTimeout(() => forceTerminalReflow(), 24);
+    });
     if (debugEnabled) {
         debugLog('updateStyle fg=' + foregroundColor + ' bg=' + backgroundColor);
     }

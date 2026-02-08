@@ -235,6 +235,20 @@ func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
     PscalRuntimeBootstrap.shared.forwardDebugLogToTerminalIfEnabled(msg)
 }
 
+@_cdecl("pscalRuntimeBindSessionToBootstrap")
+func pscalRuntimeBindSessionToBootstrap(_ runtimeContext: UnsafeMutableRawPointer?, _ sessionId: UInt64) {
+    guard let runtimeContext, sessionId != 0 else { return }
+    guard let bootstrap = PscalRuntimeBootstrap.lookupBootstrap(for: runtimeContext) else { return }
+    bootstrap.bindSessionFromRuntime(sessionId)
+}
+
+@_cdecl("pscalRuntimeBindSessionToBootstrapHandle")
+func pscalRuntimeBindSessionToBootstrapHandle(_ bootstrapHandle: UnsafeMutableRawPointer?, _ sessionId: UInt64) {
+    guard let bootstrapHandle, sessionId != 0 else { return }
+    let bootstrap = Unmanaged<PscalRuntimeBootstrap>.fromOpaque(bootstrapHandle).takeUnretainedValue()
+    bootstrap.bindSessionFromRuntime(sessionId)
+}
+
 // MARK: - Runtime Bootstrap
 
 final class PscalRuntimeBootstrap: ObservableObject {
@@ -257,6 +271,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
     private static var instanceRegistry = [UnsafeRawPointer: WeakBootstrap]()
     private static let registryLock = NSLock()
+
+    fileprivate static func lookupBootstrap(for runtimeContext: UnsafeMutableRawPointer) -> PscalRuntimeBootstrap? {
+        let key = UnsafeRawPointer(runtimeContext)
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        return instanceRegistry[key]?.value
+    }
     
     static var current: PscalRuntimeBootstrap? {
         // Attempt to find the specific instance associated with the active C thread context
@@ -366,6 +387,25 @@ final class PscalRuntimeBootstrap: ObservableObject {
         PSCALRuntimeSetCurrentRuntimeContext(runtimeContext)
         defer { PSCALRuntimeSetCurrentRuntimeContext(previous) }
         return body()
+    }
+
+    fileprivate func bindSessionFromRuntime(_ sessionId: UInt64) {
+        guard sessionId != 0 else { return }
+        let (previous, tabId) = stateQueue.sync { () -> (UInt64, UInt64) in
+            let previous = self.sessionId
+            self.sessionId = sessionId
+            return (previous, self.tabId)
+        }
+        if previous == sessionId {
+            return
+        }
+        sshResizeLog("[ssh-resize] runtime bind session runtime=\(runtimeId) previous=\(previous) session=\(sessionId)")
+        DispatchQueue.main.async {
+            self.htermController?.setResizeSessionId(sessionId)
+            if tabId != 0 {
+                TerminalTabManager.shared.registerShellSession(tabId: tabId, sessionId: sessionId)
+            }
+        }
     }
 
     private func withState<T>(_ body: () -> T) -> T {
@@ -690,6 +730,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                     let sessionId = PSCALRuntimeCurrentSessionId()
                     if sessionId != 0 {
                         self.stateQueue.async { self.sessionId = sessionId }
+                        DispatchQueue.main.async {
+                            self.htermController?.setResizeSessionId(sessionId)
+                        }
                         DispatchQueue.main.async {
                             TerminalTabManager.shared.registerShellSession(tabId: self.tabId,
                                                                            sessionId: sessionId)
@@ -1065,6 +1108,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
             self.htermReadyFlag = controller.isLoaded
             self.flushPendingHtermOutputIfReady()
+            let boundSessionId = self.stateQueue.sync { self.sessionId }
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(boundSessionId)
+            }
         }
         DispatchQueue.main.async {
             self.htermReady = controller?.isLoaded ?? false
@@ -1084,6 +1131,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
             if self.htermReadyFlag {
                 self.htermReadyFlag = false
                 self.scheduleRender()
+            }
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(0)
             }
         }
         DispatchQueue.main.async {

@@ -1575,6 +1575,12 @@ client_loop(struct ssh *ssh, int have_pty, int escape_char_arg,
 	if (ssh_signal(SIGTERM, SIG_IGN) != SIG_IGN)
 		ssh_signal(SIGTERM, signal_handler);
 	ssh_signal(SIGWINCH, window_change_handler);
+#if defined(PSCAL_TARGET_IOS)
+	sigset_t _winch_unblock;
+	sigemptyset(&_winch_unblock);
+	sigaddset(&_winch_unblock, SIGWINCH);
+	(void)pthread_sigmask(SIG_UNBLOCK, &_winch_unblock, NULL);
+#endif
 #ifdef SIGINFO
 	ssh_signal(SIGINFO, siginfo_handler);
 #endif

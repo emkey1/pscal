@@ -36,6 +36,7 @@ Start here to explore the available guides and references in this directory.
 - [pscal_vm_builtins.md](pscal_vm_builtins.md): catalog of built-in functions provided by the VM.
 - [extended_builtins.md](extended_builtins.md): how to add custom built-in routines.
 - [standalone_vm_frontends.md](standalone_vm_frontends.md): writing external frontends that emit Pscal bytecode.
+- [pscalasm.md](pscalasm.md): rebuild `.pbc` files from `pscald --asm` output blocks.
 
 ## Networking and security
 - [http_security.md](http_security.md): TLS, pinning, and proxy configuration for the HTTP APIs.

@@ -234,6 +234,7 @@ extern int dascal_main(int argc, char **argv);
 #endif
 #ifdef BUILD_PSCALD
 extern int pscald_main(int argc, char **argv);
+extern int pscalasm_main(int argc, char **argv);
 #endif
 
 static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
@@ -252,6 +253,7 @@ static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
 #endif
 #ifdef BUILD_PSCALD
         {"pscald", pscald_main},
+        {"pscalasm", pscalasm_main},
 #endif
     };
     const char *name = tool_name && *tool_name ? tool_name : (argc > 0 && argv && argv[0] ? argv[0] : NULL);
@@ -281,6 +283,7 @@ static const char *shellResolveToolName(const char *interpreter) {
     if (strcasecmp(base, "pscaljson2bc") == 0) return "pscaljson2bc";
     if (strcasecmp(base, "dascal") == 0) return "dascal";
     if (strcasecmp(base, "pscald") == 0) return "pscald";
+    if (strcasecmp(base, "pscalasm") == 0) return "pscalasm";
     if (strcasecmp(base, "sh") == 0) return "exsh";
     if (strcasecmp(base, "exsh") == 0) return "exsh";
     return NULL;

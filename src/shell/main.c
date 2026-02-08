@@ -18,6 +18,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <pwd.h>
 #if defined(PSCAL_TARGET_IOS)
 #include <dlfcn.h>
 #endif
@@ -1037,6 +1038,10 @@ static bool promptBufferAppendWorkingDir(char **buffer,
     return promptBufferAppendString(buffer, length, capacity, segment);
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static int shellLookupUserNameFromContainerPasswd(uid_t uid, char *out, size_t out_len);
+#endif
+
 static char *shellFormatPrompt(const char *input) {
     if (!input) {
         return NULL;
@@ -1149,9 +1154,31 @@ static char *shellFormatPrompt(const char *input) {
                 }
                 break;
             case 'u': {
-                const char *user = getenv("USER");
+                const char *user = NULL;
+#if defined(PSCAL_TARGET_IOS)
+                char user_buf[128];
+                if (shellLookupUserNameFromContainerPasswd(getuid(), user_buf, sizeof(user_buf)) == 0 &&
+                    user_buf[0] != '\0') {
+                    user = user_buf;
+                } else if (vprocLookupPasswdName(getuid(), user_buf, sizeof(user_buf)) == 0 &&
+                    user_buf[0] != '\0') {
+                    user = user_buf;
+                }
+#endif
+                if (!user || !*user) {
+                    struct passwd *pw = getpwuid(getuid());
+                    if (pw && pw->pw_name && *pw->pw_name) {
+                        user = pw->pw_name;
+                    }
+                }
+                if (!user || !*user) {
+                    user = getenv("USER");
+                }
                 if (!user || !*user) {
                     user = getenv("USERNAME");
+                }
+                if (!user || !*user) {
+                    user = getenv("LOGNAME");
                 }
                 if (user && *user) {
                     if (!promptBufferAppendString(&buffer, &length, &capacity, user)) {
@@ -1270,6 +1297,117 @@ static char *shellResolveInteractivePrompt(void) {
         return formatted;
     }
     return strdup(env_prompt);
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static const char *shellResolveEtcFilePath(const char *leaf, char *buf, size_t buf_len) {
+    if (!leaf || !buf || buf_len == 0) {
+        return NULL;
+    }
+    const char *direct = getenv("PSCALI_ETC_ROOT");
+    if (direct && direct[0] == '/' &&
+        snprintf(buf, buf_len, "%s/%s", direct, leaf) < (int)buf_len &&
+        access(buf, R_OK) == 0) {
+        return buf;
+    }
+
+    const char *container = getenv("PSCALI_CONTAINER_ROOT");
+    const char *home = getenv("HOME");
+    const char *roots[][3] = {
+        { container, "Documents/etc", leaf },
+        { container, "etc", leaf },
+        { home, "Documents/etc", leaf },
+        { home, "etc", leaf },
+    };
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        const char *base = roots[i][0];
+        const char *sub = roots[i][1];
+        if (!base || base[0] != '/') {
+            continue;
+        }
+        if (snprintf(buf, buf_len, "%s/%s/%s", base, sub, leaf) >= (int)buf_len) {
+            continue;
+        }
+        if (access(buf, R_OK) == 0) {
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+static int shellLookupUserNameFromContainerPasswd(uid_t uid, char *out, size_t out_len) {
+    if (!out || out_len == 0) {
+        return -1;
+    }
+    out[0] = '\0';
+
+    char path[PATH_MAX];
+    const char *passwd_path = shellResolveEtcFilePath("passwd", path, sizeof(path));
+    if (!passwd_path) {
+        return -1;
+    }
+    FILE *fp = fopen(passwd_path, "r");
+    if (!fp) {
+        return -1;
+    }
+
+    int found = -1;
+    char *line = NULL;
+    size_t cap = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
+        char *saveptr = NULL;
+        char *tok_name = strtok_r(line, ":\n", &saveptr);
+        (void)strtok_r(NULL, ":\n", &saveptr); /* passwd */
+        char *tok_uid = strtok_r(NULL, ":\n", &saveptr);
+        if (!tok_name || !tok_uid) {
+            continue;
+        }
+        uid_t row_uid = (uid_t)strtoul(tok_uid, NULL, 10);
+        if (row_uid != uid) {
+            continue;
+        }
+        size_t name_len = strlen(tok_name);
+        if (name_len < out_len) {
+            memcpy(out, tok_name, name_len + 1);
+            found = 0;
+            break;
+        }
+    }
+
+    free(line);
+    fclose(fp);
+    return found;
+}
+#endif
+
+static void shellSyncIdentityEnvFromPasswd(void) {
+    uid_t uid = getuid();
+    const char *name = NULL;
+#if defined(PSCAL_TARGET_IOS)
+    char name_buf[128];
+    if (shellLookupUserNameFromContainerPasswd(uid, name_buf, sizeof(name_buf)) == 0 &&
+        name_buf[0] != '\0') {
+        name = name_buf;
+    } else if (vprocLookupPasswdName(uid, name_buf, sizeof(name_buf)) == 0 &&
+        name_buf[0] != '\0') {
+        name = name_buf;
+    }
+#endif
+    if (!name || !*name) {
+        struct passwd *pw = getpwuid(uid);
+        if (pw && pw->pw_name && *pw->pw_name) {
+            name = pw->pw_name;
+        }
+    }
+    if (!name || !*name) {
+        return;
+    }
+    setenv("USER", name, 1);
+    setenv("LOGNAME", name, 1);
+    setenv("USERNAME", name, 1);
 }
 
 static size_t shellPromptLineBreakCount(const char *prompt) {
@@ -3924,6 +4062,7 @@ int exsh_main(int argc, char **argv) {
         EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
+    shellSyncIdentityEnvFromPasswd();
     setenv("EXSH_LAST_STATUS", "0", 1);
     shellRuntimeInitSignals();
 

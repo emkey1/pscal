@@ -16,6 +16,7 @@ bool pscalTtyIsControlling(struct tty *tty);
 void pscalTtySetControlling(struct tty *tty);
 void pscalTtyClearControlling(struct tty *tty);
 void pscalTtySetForegroundPgid(int sid, int fg_pgid);
+int pscalTtyGetForegroundPgid(int sid);
 int pscalTtySendGroupSignal(int pgid, int sig);
 
 #ifdef __cplusplus
