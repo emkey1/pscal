@@ -4,6 +4,7 @@ import UIKit
 struct ShellTerminalView: View {
     @ObservedObject var session: ShellRuntimeSession
     let isActive: Bool
+    let tabId: UInt64
     @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     @State private var focusAnchor: Int = 0
     @State private var showingSettings = false
@@ -11,10 +12,12 @@ struct ShellTerminalView: View {
     init(
         session: ShellRuntimeSession,
         isActive: Bool,
+        tabId: UInt64,
         appearanceSettings: TerminalTabAppearanceSettings
     ) {
         self.session = session
         self.isActive = isActive
+        self.tabId = tabId
         _fontSettings = ObservedObject(wrappedValue: appearanceSettings)
     }
 
@@ -49,7 +52,7 @@ struct ShellTerminalView: View {
             }
         }
         .sheet(isPresented: $showingSettings) {
-            TerminalSettingsView(appearanceSettings: fontSettings)
+            TerminalSettingsView(appearanceSettings: fontSettings, tabId: tabId)
         }
         .background(Color(fontSettings.backgroundColor))
         .onChange(of: isActive) { active in

@@ -2,11 +2,16 @@ import SwiftUI
 
 struct TerminalSettingsView: View {
     @ObservedObject private var appearanceSettings: TerminalTabAppearanceSettings
+    @ObservedObject private var tabManager = TerminalTabManager.shared
     @ObservedObject private var settings = TerminalFontSettings.shared
     @Environment(\.dismiss) private var dismiss
+    private let tabId: UInt64
+    @State private var tabNameDraft: String
 
-    init(appearanceSettings: TerminalTabAppearanceSettings) {
+    init(appearanceSettings: TerminalTabAppearanceSettings, tabId: UInt64) {
         _appearanceSettings = ObservedObject(wrappedValue: appearanceSettings)
+        self.tabId = tabId
+        _tabNameDraft = State(initialValue: TerminalTabManager.shared.tabTitle(tabId: tabId) ?? "")
     }
 
     var body: some View {
@@ -32,6 +37,25 @@ struct TerminalSettingsView: View {
                     Text("Sample AaBb123")
                         .font(Font(previewFont))
                         .foregroundColor(Color(appearanceSettings.foregroundColor))
+                }
+
+                Section(header: Text("Tab Name")) {
+                    TextField(
+                        "Tab name",
+                        text: Binding(
+                            get: { tabNameDraft },
+                            set: { newValue in
+                                _ = tabManager.updateTabTitle(tabId: tabId, rawTitle: newValue)
+                                tabNameDraft = tabManager.tabTitle(tabId: tabId) ?? newValue
+                            }
+                        )
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+
+                    Text("Used for this tab profile and restored on next launch.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
 
                 Section(header: Text("Font Size")) {
