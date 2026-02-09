@@ -370,7 +370,7 @@ final class TerminalFontSettings: ObservableObject {
     }
 
     static func clampInitialTabCount(_ value: Int) -> Int {
-        return min(max(value, 1), 3)
+        return min(max(value, 1), 5)
     }
 
     // MARK: Font option discovery

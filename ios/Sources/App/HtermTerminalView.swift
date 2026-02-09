@@ -960,7 +960,10 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             isTerminalLoaded = loaded
             updateInputEnabled()
         }
-        let shouldInstall = isTerminalLoaded && isDisplayVisible()
+        // Keep the web view attached whenever the tab is visible.
+        // Waiting for "loaded" before attaching can deadlock startup if WebKit
+        // defers the load pipeline until the view is in the hierarchy.
+        let shouldInstall = isDisplayVisible()
         if shouldInstall {
             controller.bindDisplayContainer(self)
             installTerminalViewIfNeeded()

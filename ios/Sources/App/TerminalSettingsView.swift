@@ -180,6 +180,8 @@ struct TerminalSettingsView: View {
                         Text("One").tag(1)
                         Text("Two").tag(2)
                         Text("Three").tag(3)
+                        Text("Four").tag(4)
+                        Text("Five").tag(5)
                     }
                     .pickerStyle(.segmented)
 

@@ -2530,11 +2530,22 @@ static void vprocNotifyPidSigchldLocked(int target_pid, VProcSigchldEvent evt);
 static void vprocNotifyParentSigchldLocked(const VProcTaskEntry *child, VProcSigchldEvent evt);
 static struct sigaction vprocGetSigactionLocked(VProcTaskEntry *entry, int sig);
 static int vprocDefaultParentPid(void) {
+    VProc *active = vprocCurrent();
+    if (active) {
+        int active_pid = vprocPid(active);
+        if (active_pid > 0) {
+            return active_pid;
+        }
+    }
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid > 0) {
+        return shell_pid;
+    }
     int kernel = vprocGetKernelPid();
     if (kernel > 0) {
         return kernel;
     }
-    return (int)vprocGetPidShim();
+    return 0;
 }
 
 static int vprocAdoptiveParentPidLocked(const VProcTaskEntry *entry) {
@@ -6244,11 +6255,11 @@ void vprocSetParent(int pid, int parent_pid) {
     bool dbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
     int kernel_pid = vprocGetKernelPid();
     pthread_mutex_lock(&gVProcTasks.mu);
-    if (kernel_pid > 0 && parent_pid > 0 && parent_pid != kernel_pid && pid != kernel_pid) {
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-        if (!parent_entry) {
-            parent_pid = kernel_pid;
-        }
+    /* Keep explicit parent assignments intact. The parent task can be
+     * registered slightly later than the child; forcing kernel_pid here
+     * collapses lineage and makes children appear attached to the kernel. */
+    if (kernel_pid > 0 && parent_pid <= 0 && pid != kernel_pid) {
+        parent_pid = kernel_pid;
     }
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
@@ -7084,7 +7095,7 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
     scope->vp = vp;
     scope->pid = pid;
 
-    int owner_pid = (int)vprocGetPidShim();
+    int owner_pid = scope->prev ? vprocPid(scope->prev) : vprocGetShellSelfPid();
     int kernel_pid = vprocGetKernelPid();
     int parent_pid = owner_pid;
     if (parent_pid <= 0 || parent_pid == pid) {
