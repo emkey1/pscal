@@ -960,10 +960,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             isTerminalLoaded = loaded
             updateInputEnabled()
         }
-        // Keep the web view attached whenever the tab is visible.
-        // Waiting for "loaded" before attaching can deadlock startup if WebKit
-        // defers the load pipeline until the view is in the hierarchy.
-        let shouldInstall = isDisplayVisible()
+        let shouldInstall = isTerminalLoaded && isDisplayVisible()
         if shouldInstall {
             controller.bindDisplayContainer(self)
             installTerminalViewIfNeeded()
@@ -1156,14 +1153,6 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
 
     func updateApplicationCursor(_ enabled: Bool) {
         keyInputView.applicationCursorEnabled = enabled
-        // Ensure our native key handler stays first responder when modes change so
-        // arrow/HJKL repeat mapping still runs in full-screen apps like nextvi.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            if self.isActiveForInput {
-                _ = self.keyInputView.becomeFirstResponder()
-            }
-        }
     }
 
     func updateAttachHandlers(onAttach: (() -> Void)?, onDetach: (() -> Void)?) {
