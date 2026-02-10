@@ -8109,7 +8109,15 @@ void vprocRegisterInterposeBypassThread(pthread_t tid) {
         return;
     }
     if (gVProcInterposeBypassRegistry.count >= gVProcInterposeBypassRegistry.capacity) {
-        size_t new_capacity = gVProcInterposeBypassRegistry.capacity ? gVProcInterposeBypassRegistry.capacity * 2 : 8;
+        size_t new_capacity = 0;
+        if (!vprocComputeGrowthCapacity(gVProcInterposeBypassRegistry.capacity,
+                                        gVProcInterposeBypassRegistry.count + 1,
+                                        8,
+                                        sizeof(*gVProcInterposeBypassRegistry.items),
+                                        &new_capacity)) {
+            pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
+            return;
+        }
         pthread_t *items = realloc(gVProcInterposeBypassRegistry.items, new_capacity * sizeof(*items));
         if (!items) {
             pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
