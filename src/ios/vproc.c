@@ -6753,11 +6753,6 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     int adopt_parent = vprocAdoptiveParentPidLocked(entry);
     vprocReparentChildrenLocked(pid, adopt_parent);
 
-    entry = vprocTaskFindLocked(pid);
-    if (!entry) {
-        return;
-    }
-
     if (sid > 0) {
         bool drop_session = true;
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
