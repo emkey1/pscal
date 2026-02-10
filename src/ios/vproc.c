@@ -5108,9 +5108,8 @@ int vprocReservePid(void) {
     entry->pgid = pid;
     entry->fg_pgid = pid;
     if (parent_pid > 0 && parent_pid != pid) {
-        VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
-        if (parent) {
-            vprocAddChildLocked(parent, pid);
+        if (parent_entry && parent_entry->pid == parent_pid) {
+            vprocAddChildLocked(parent_entry, pid);
         }
     }
     if (gVProcTasks.items && gVProcTasks.count > 0) {
@@ -5252,7 +5251,10 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
     entry->parent_pid = parent_pid;
     if (entry->parent_pid > 0 && entry->parent_pid != pid) {
-        VProcTaskEntry *parent = vprocTaskFindLocked(entry->parent_pid);
+        VProcTaskEntry *parent = (VProcTaskEntry *)parent_entry;
+        if (!parent || parent->pid != entry->parent_pid) {
+            parent = vprocTaskFindLocked(entry->parent_pid);
+        }
         if (parent) {
             vprocAddChildLocked(parent, pid);
         }
