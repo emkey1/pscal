@@ -111,6 +111,7 @@ typedef struct {
 
 static PscalPasswdEntry *gPscalPasswd = NULL;
 static size_t gPscalPasswdCount = 0;
+static size_t gPscalPasswdCapacity = 0;
 static bool gPscalPasswdLoaded = false;
 static char gPscalPasswdPath[PATH_MAX] = {0};
 static dev_t gPscalPasswdDev = 0;
@@ -120,6 +121,7 @@ static off_t gPscalPasswdSize = 0;
 
 static PscalGroupEntry *gPscalGroup = NULL;
 static size_t gPscalGroupCount = 0;
+static size_t gPscalGroupCapacity = 0;
 static bool gPscalGroupLoaded = false;
 static char gPscalGroupPath[PATH_MAX] = {0};
 static dev_t gPscalGroupDev = 0;
@@ -139,6 +141,7 @@ static void pscalFreePasswd(void) {
     free(gPscalPasswd);
     gPscalPasswd = NULL;
     gPscalPasswdCount = 0;
+    gPscalPasswdCapacity = 0;
 }
 
 static void pscalFreeGroup(void) {
@@ -151,6 +154,53 @@ static void pscalFreeGroup(void) {
     free(gPscalGroup);
     gPscalGroup = NULL;
     gPscalGroupCount = 0;
+    gPscalGroupCapacity = 0;
+}
+
+static bool pscalEnsurePasswdCapacity(size_t needed) {
+    if (needed <= gPscalPasswdCapacity) {
+        return true;
+    }
+    size_t new_cap = gPscalPasswdCapacity ? gPscalPasswdCapacity : 16;
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2) {
+            return false;
+        }
+        new_cap *= 2;
+    }
+    if (new_cap > SIZE_MAX / sizeof(PscalPasswdEntry)) {
+        return false;
+    }
+    PscalPasswdEntry *resized = realloc(gPscalPasswd, new_cap * sizeof(PscalPasswdEntry));
+    if (!resized) {
+        return false;
+    }
+    gPscalPasswd = resized;
+    gPscalPasswdCapacity = new_cap;
+    return true;
+}
+
+static bool pscalEnsureGroupCapacity(size_t needed) {
+    if (needed <= gPscalGroupCapacity) {
+        return true;
+    }
+    size_t new_cap = gPscalGroupCapacity ? gPscalGroupCapacity : 16;
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2) {
+            return false;
+        }
+        new_cap *= 2;
+    }
+    if (new_cap > SIZE_MAX / sizeof(PscalGroupEntry)) {
+        return false;
+    }
+    PscalGroupEntry *resized = realloc(gPscalGroup, new_cap * sizeof(PscalGroupEntry));
+    if (!resized) {
+        return false;
+    }
+    gPscalGroup = resized;
+    gPscalGroupCapacity = new_cap;
+    return true;
 }
 
 static const char *pscalEtcPath(const char *leaf, char *buf, size_t buf_len) {
@@ -232,15 +282,9 @@ static void pscalLoadPasswd(void) {
         if (!tok_name || !tok_passwd || !tok_uid || !tok_gid) {
             continue;
         }
-        if (gPscalPasswdCount >= (SIZE_MAX / sizeof(PscalPasswdEntry))) {
+        if (!pscalEnsurePasswdCapacity(gPscalPasswdCount + 1)) {
             break;
         }
-        size_t new_count = gPscalPasswdCount + 1;
-        PscalPasswdEntry *resized = realloc(gPscalPasswd, new_count * sizeof(PscalPasswdEntry));
-        if (!resized) {
-            break;
-        }
-        gPscalPasswd = resized;
         PscalPasswdEntry *entry = &gPscalPasswd[gPscalPasswdCount++];
         memset(entry, 0, sizeof(*entry));
         entry->name   = strdup(tok_name);
@@ -300,15 +344,9 @@ static void pscalLoadGroup(void) {
         if (!tok_name || !tok_passwd || !tok_gid) {
             continue;
         }
-        if (gPscalGroupCount >= (SIZE_MAX / sizeof(PscalGroupEntry))) {
+        if (!pscalEnsureGroupCapacity(gPscalGroupCount + 1)) {
             break;
         }
-        size_t new_count = gPscalGroupCount + 1;
-        PscalGroupEntry *resized = realloc(gPscalGroup, new_count * sizeof(PscalGroupEntry));
-        if (!resized) {
-            break;
-        }
-        gPscalGroup = resized;
         PscalGroupEntry *entry = &gPscalGroup[gPscalGroupCount++];
         memset(entry, 0, sizeof(*entry));
         entry->name   = strdup(tok_name);
