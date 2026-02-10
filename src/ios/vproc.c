@@ -3032,17 +3032,29 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
     }
 }
 
-static int vprocForegroundPgidLocked(int sid) {
-    if (sid <= 0) return -1;
-    vprocTaskTableRepairLocked();
+static VProcTaskEntry *vprocSessionLeaderBySidLocked(int sid) {
+    if (sid <= 0) {
+        return NULL;
+    }
+    VProcTaskEntry *leader = vprocTaskFindLocked(sid);
+    if (leader && leader->pid > 0 && leader->sid == sid && leader->session_leader) {
+        return leader;
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (!entry || entry->pid <= 0) {
+            continue;
+        }
         if (entry->sid == sid && entry->session_leader) {
-            return entry->fg_pgid;
+            return entry;
         }
     }
-    return -1;
+    return NULL;
+}
+
+static int vprocForegroundPgidLocked(int sid) {
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
+    return leader ? leader->fg_pgid : -1;
 }
 
 static bool vprocShouldStopForBackgroundTty(VProc *vp, int sig) {
@@ -6600,15 +6612,7 @@ static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty) {
     int rc = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
-    VProcTaskEntry *leader = NULL;
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->sid == sid && entry->session_leader) {
-            leader = entry;
-            break;
-        }
-    }
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
     if (!leader) {
         leader = vprocTaskEnsureSlotLocked(sid);
         if (leader) {
@@ -6642,13 +6646,9 @@ int vprocGetForegroundPgid(int sid) {
     int fg = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->sid == sid && entry->session_leader) {
-            fg = entry->fg_pgid;
-            break;
-        }
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
+    if (leader) {
+        fg = leader->fg_pgid;
     }
     if (fg < 0) errno = ESRCH;
     pthread_mutex_unlock(&gVProcTasks.mu);
