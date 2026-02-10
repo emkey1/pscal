@@ -7706,17 +7706,29 @@ int vprocTcsetpgrpShim(int fd, pid_t pgid) {
 
     int rc = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *leader = NULL;
+    vprocTaskTableRepairLocked();
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
     bool group_ok = false;
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->sid != sid) continue;
-        if (entry->session_leader) {
-            leader = entry;
-        }
-        if (entry->pgid == (int)pgid) {
+    if (leader && leader->sid == sid && leader->pgid == (int)pgid) {
+        group_ok = true;
+    }
+    if (!group_ok) {
+        VProcTaskEntry *pgid_entry = vprocTaskFindLocked((int)pgid);
+        if (pgid_entry && pgid_entry->pid > 0 &&
+            pgid_entry->sid == sid &&
+            pgid_entry->pgid == (int)pgid) {
             group_ok = true;
+        }
+    }
+    if (!group_ok) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (!entry || entry->pid <= 0) continue;
+            if (entry->sid != sid) continue;
+            if (entry->pgid == (int)pgid) {
+                group_ok = true;
+                break;
+            }
         }
     }
     if (!leader) {
