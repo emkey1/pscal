@@ -3681,11 +3681,12 @@ static void *vprocSessionInputThread(void *arg) {
     VProcSessionInput *input = session ? session->input : NULL;
     int fd = session ? session->stdin_host_fd : -1;
     struct pscal_fd *pscal_fd = session ? session->stdin_pscal_fd : NULL;
+    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     if (pscal_fd && (!pscal_fd->ops || !pscal_fd->ops->read)) {
         pscal_fd = NULL;
     }
     unsigned char ch = 0;
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (tool_dbg) {
         vprocDebugLogf(
                 "[session-input] reader start host_fd=%d pscal_fd=%p shell=%d kernel=%d\n",
                 fd,
@@ -3699,7 +3700,7 @@ static void *vprocSessionInputThread(void *arg) {
             bool stop_requested = input->stop_requested;
             pthread_mutex_unlock(&input->mu);
             if (stop_requested) {
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     vprocDebugLogf( "[session-input] reader stop fd=%d\n", fd);
                 }
                 break;
@@ -3713,7 +3714,7 @@ static void *vprocSessionInputThread(void *arg) {
                     usleep(1000);
                     continue;
                 }
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     int saved_errno = errno;
                     vprocDebugLogf(
                             "[session-input] reader eof host_fd=%d r=%zd errno=%d\n",
@@ -3744,7 +3745,7 @@ static void *vprocSessionInputThread(void *arg) {
                 if (r < 0) {
                     vprocSetCompatErrno((int)r);
                 }
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     int saved_errno = errno;
                     vprocDebugLogf(
                             "[session-input] reader eof pscal_fd=%p r=%zd errno=%d\n",
@@ -3868,6 +3869,7 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
         return NULL;
     }
     pthread_mutex_lock(&gSessionInputInitMu);
+    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     if (!session->input) {
         session->input = (VProcSessionInput *)calloc(1, sizeof(VProcSessionInput));
         if (session->input) {
@@ -3911,14 +3913,14 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
                 input->reader_fd = session->stdin_host_fd;
                 input->stop_requested = false;
                 pthread_mutex_unlock(&input->mu);
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     vprocDebugLogf(
                             "[session-input] reader spawned host_fd=%d pscal_fd=%p\n",
                             session->stdin_host_fd,
                             (void *)session->stdin_pscal_fd);
                 }
             } else {
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     vprocDebugLogf(
                             "[session-input] reader spawn failed rc=%d\n",
                             create_rc);
@@ -3936,7 +3938,8 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
         return 0;
     }
     VProcSessionInput *input = session->input;
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (tool_dbg) {
         pthread_mutex_lock(&input->mu);
         vprocDebugLogf(
                 "[session-read] start len=%zu eof=%d reader=%d fd=%d stdin=%d\n",
@@ -3963,7 +3966,7 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
         return -1;
     }
     if (input->len == 0 && input->eof) {
-        if (getenv("PSCALI_TOOL_DEBUG")) {
+        if (tool_dbg) {
             vprocDebugLogf( "[session-read] eof\n");
         }
         pthread_mutex_unlock(&input->mu);
@@ -3993,8 +3996,9 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         errno = EBADF;
         return -1;
     }
+    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     if (session->stdin_host_fd >= 0) {
-        if (getenv("PSCALI_TOOL_DEBUG")) {
+        if (tool_dbg) {
             vprocDebugLogf(
                     "[session-read] direct stdin=%d nonblock=%d\n",
                     session->stdin_host_fd,
@@ -4010,7 +4014,7 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         errno = EBADF;
         return -1;
     }
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (tool_dbg) {
         vprocDebugLogf("[session-read] buffered nonblock=%d\n", (int)nonblocking);
     }
     return vprocSessionReadInput(session, buf, count, nonblocking);
@@ -4023,7 +4027,8 @@ VProcSessionInput *vprocSessionInputEnsureShim(void) {
     }
     int shell_pid = vprocGetShellSelfPid();
     int kernel_pid = vprocGetKernelPid();
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    if (tool_dbg) {
         vprocDebugLogf(
                 "[session-input] ensure shell=%d kernel=%d stdin_host=%d input=%p\n",
                 shell_pid,
@@ -4048,6 +4053,7 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     if (!input) {
         return false;
     }
+    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     pthread_mutex_lock(&input->mu);
     size_t needed = input->len + len;
     if (needed > input->cap) {
@@ -4066,7 +4072,7 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     memcpy(input->buf + input->len, data, len);
     input->len += len;
     pthread_cond_broadcast(&input->cv);
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (tool_dbg) {
         vprocDebugLogf(
                 "[session-input] injected len=%zu total=%zu cap=%zu\n",
                 len,
@@ -4196,7 +4202,7 @@ static int vprocAllocSlot(VProc *vp) {
     for (int i = 0; i < (int)vp->capacity; ++i) {
         int idx = (vp->next_fd + i) % (int)vp->capacity;
         if (vp->entries[idx].kind == VPROC_FD_NONE) {
-            vp->next_fd = idx + 1;
+            vp->next_fd = (idx + 1) % (int)vp->capacity;
             return idx;
         }
     }
@@ -4213,7 +4219,7 @@ static int vprocAllocSlot(VProc *vp) {
     int idx = (int)vp->capacity;
     vp->entries = resized;
     vp->capacity = new_cap;
-    vp->next_fd = idx + 1;
+    vp->next_fd = (idx + 1) % (int)vp->capacity;
     return idx;
 }
 
