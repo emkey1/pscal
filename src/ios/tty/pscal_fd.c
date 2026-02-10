@@ -3,6 +3,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -45,6 +47,7 @@ int pscal_fd_close(struct pscal_fd *fd) {
 }
 
 static int gPollWakePipe[2] = {-1, -1};
+static bool gPollWakeNoSigpipe = false;
 static pthread_once_t gPollWakeOnce = PTHREAD_ONCE_INIT;
 
 static void pscalPollInit(void) {
@@ -62,6 +65,11 @@ static void pscalPollInit(void) {
         if (fd_flags >= 0) {
             fcntl(gPollWakePipe[i], F_SETFD, fd_flags | FD_CLOEXEC);
         }
+#ifdef F_SETNOSIGPIPE
+        if (i == 1 && fcntl(gPollWakePipe[i], F_SETNOSIGPIPE, 1) == 0) {
+            gPollWakeNoSigpipe = true;
+        }
+#endif
     }
 }
 
@@ -87,5 +95,29 @@ void pscal_fd_poll_wakeup(struct pscal_fd *fd, int UNUSED(events)) {
     if (gPollWakePipe[1] < 0) {
         return;
     }
+#if defined(F_SETNOSIGPIPE)
+    if (gPollWakeNoSigpipe) {
+        (void)vprocHostWrite(gPollWakePipe[1], "", 1);
+        return;
+    }
+#endif
+#if defined(SIGPIPE)
+    struct sigaction old_action;
+    if (sigaction(SIGPIPE, NULL, &old_action) == 0) {
+        bool restore = (old_action.sa_handler != SIG_IGN);
+        if (restore) {
+            struct sigaction ignore_action;
+            memset(&ignore_action, 0, sizeof(ignore_action));
+            sigemptyset(&ignore_action.sa_mask);
+            ignore_action.sa_handler = SIG_IGN;
+            (void)sigaction(SIGPIPE, &ignore_action, NULL);
+        }
+        (void)vprocHostWrite(gPollWakePipe[1], "", 1);
+        if (restore) {
+            (void)sigaction(SIGPIPE, &old_action, NULL);
+        }
+        return;
+    }
+#endif
     (void)vprocHostWrite(gPollWakePipe[1], "", 1);
 }

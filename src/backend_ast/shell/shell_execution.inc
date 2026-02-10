@@ -2562,24 +2562,23 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 shellJobControlSetForeground(job_pgid);
             }
 
+            /* In-process stages already run to completion before we reach this
+             * point (tail runs inline, earlier stages are joined). Their vproc
+             * tasks may already be discarded, so waiting here is racy and can
+             * lose the tail-stage status. Use recorded stage statuses instead. */
             for (size_t i = 0; i < ctx->launched; ++i) {
-                pid_t pid = ctx->pids[i];
-                if (pid <= 0) {
-                    continue;
+                int stage_status = 0;
+                if (ctx->stage_status && i < ctx->stage_count) {
+                    stage_status = ctx->stage_status[i];
                 }
-            ShellWaitResult wait_res;
-            int err = shellWaitPidDetailed(pid, job_control, &wait_res);
-            if (err != 0) {
-                continue;
+                final_status = stage_status;
+                if (stage_status == 128 + SIGTSTP) {
+                    stopped_job = true;
+                }
+                if (ctx->pids && i < ctx->stage_count) {
+                    ctx->pids[i] = -1;
+                }
             }
-            if (wait_res.stopped) {
-                stopped_job = true;
-                final_status = wait_res.status_mapped;
-            } else {
-                final_status = wait_res.status_mapped;
-                ctx->pids[i] = -1;
-            }
-        }
 
             if (job_control) {
                 shellJobControlRestoreForeground();

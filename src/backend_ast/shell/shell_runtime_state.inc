@@ -287,6 +287,19 @@ static void __attribute__((unused)) shellInvalidateVprocStreamForFd(int fd) { (v
 
 static void shellFlushStandardStreams(void) {
     shellFlushVprocStreams();
+#if defined(PSCAL_TARGET_IOS)
+    /* When stdio is virtualised through vproc (e.g. in-process pipeline
+     * stages), flushing libc stdout/stderr can hit stale host pipe endpoints
+     * and raise SIGPIPE. The vproc stream flush above is sufficient. */
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int out_host = vprocTranslateFd(vp, STDOUT_FILENO);
+        int err_host = vprocTranslateFd(vp, STDERR_FILENO);
+        if (out_host < 0 || err_host < 0) {
+            return;
+        }
+    }
+#endif
     fflush(stdout);
     fflush(stderr);
 }
