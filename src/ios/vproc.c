@@ -5315,8 +5315,29 @@ int vprocReservePid(void) {
     if (gNextSyntheticPid == 0) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
-    int pid = __sync_fetch_and_add(&gNextSyntheticPid, 1);
     pthread_mutex_lock(&gVProcTasks.mu);
+    int shell_pid = vprocGetShellSelfPid();
+    int kernel_pid = vprocGetKernelPid();
+    int pid = -1;
+    for (size_t attempts = 0; attempts < gVProcTasks.capacity + 1024; ++attempts) {
+        int candidate = __sync_fetch_and_add(&gNextSyntheticPid, 1);
+        if (candidate <= 0) {
+            continue;
+        }
+        if (candidate == shell_pid || candidate == kernel_pid) {
+            continue;
+        }
+        if (vprocTaskFindLocked(candidate)) {
+            continue;
+        }
+        pid = candidate;
+        break;
+    }
+    if (pid <= 0) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = EMFILE;
+        return -1;
+    }
     VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
     if (!entry) {
         pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5586,11 +5607,37 @@ VProc *vprocCreate(const VProcOptions *opts) {
         vprocMaybeAdvancePidCounter(local.pid_hint);
         vp->pid = local.pid_hint;
     } else {
-        vp->pid = __sync_fetch_and_add(&gNextSyntheticPid, 1);
+        vp->pid = -1;
     }
 
     /* Ensure a task slot exists for synthetic pid bookkeeping. */
     pthread_mutex_lock(&gVProcTasks.mu);
+    if (vp->pid <= 0) {
+        int shell_pid = vprocGetShellSelfPid();
+        int kernel_pid = vprocGetKernelPid();
+        for (size_t attempts = 0; attempts < gVProcTasks.capacity + 1024; ++attempts) {
+            int candidate = __sync_fetch_and_add(&gNextSyntheticPid, 1);
+            if (candidate <= 0) {
+                continue;
+            }
+            if (candidate == shell_pid || candidate == kernel_pid) {
+                continue;
+            }
+            if (vprocTaskFindLocked(candidate)) {
+                continue;
+            }
+            vp->pid = candidate;
+            break;
+        }
+        if (vp->pid <= 0) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            errno = EMFILE;
+            pthread_mutex_destroy(&vp->mu);
+            free(vp->entries);
+            free(vp);
+            return NULL;
+        }
+    }
     VProcTaskEntry *slot = vprocTaskEnsureSlotLocked(vp->pid);
     if (!slot) {
         pthread_mutex_unlock(&gVProcTasks.mu);
