@@ -683,6 +683,7 @@ static void assert_kill_zero_targets_current_pgid(void) {
     vprocActivate(vp);
 
     int status = 0;
+    assert(vprocKillShim(0, 0) == 0);
     assert(vprocKillShim(0, SIGTSTP) == 0);
     vprocDeactivate();
     assert(vprocWaitPidShim(-pgid, &status, WUNTRACED) == pid);

@@ -6829,6 +6829,19 @@ static bool vprocHasWaitCandidateLocked(pid_t pid,
                                         int waiter_pid,
                                         int waiter_pgid,
                                         int kernel_pid) {
+    if (pid > 0) {
+        VProcTaskEntry *entry = vprocTaskFindLocked((int)pid);
+        if (!entry || entry->pid <= 0) {
+            return false;
+        }
+        bool parent_match = (entry->parent_pid == waiter_pid);
+        if (!parent_match && kernel_pid > 0 &&
+            entry->parent_pid == kernel_pid &&
+            entry->sid == waiter_pid) {
+            parent_match = true;
+        }
+        return parent_match;
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
@@ -6912,43 +6925,54 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
         VProcTaskEntry *ready = NULL;
         bool has_candidate = false;
 
-        for (size_t i = 0; i < gVProcTasks.count; ++i) {
-            VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) continue;
-            bool parent_match = (entry->parent_pid == waiter_pid);
-            if (!parent_match && kernel_pid > 0 &&
-                entry->parent_pid == kernel_pid &&
-                entry->sid == waiter_pid) {
-                parent_match = true;
+        if (pid > 0) {
+            VProcTaskEntry *entry = vprocTaskFindLocked((int)pid);
+            if (entry && entry->pid > 0) {
+                bool parent_match = (entry->parent_pid == waiter_pid);
+                if (!parent_match && kernel_pid > 0 &&
+                    entry->parent_pid == kernel_pid &&
+                    entry->sid == waiter_pid) {
+                    parent_match = true;
+                }
+                if (parent_match) {
+                    has_candidate = true;
+                    if (entry->exited ||
+                        (allow_stop && entry->stopped && entry->stop_signo > 0) ||
+                        (allow_cont && entry->continued)) {
+                        ready = entry;
+                    }
+                }
             }
-            if (!parent_match) continue;
+        } else {
+            for (size_t i = 0; i < gVProcTasks.count; ++i) {
+                VProcTaskEntry *entry = &gVProcTasks.items[i];
+                if (!entry || entry->pid <= 0) continue;
+                bool parent_match = (entry->parent_pid == waiter_pid);
+                if (!parent_match && kernel_pid > 0 &&
+                    entry->parent_pid == kernel_pid &&
+                    entry->sid == waiter_pid) {
+                    parent_match = true;
+                }
+                if (!parent_match) continue;
 
-            bool match = false;
-            if (pid > 0 && entry->pid == pid) {
-                match = true;
-            } else if (pid == -1) {
-                match = true;
-            } else if (pid == 0) {
-                match = (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
-            } else if (pid < -1) {
-                match = (entry->pgid == -pid);
-            }
+                bool match = false;
+                if (pid == -1) {
+                    match = true;
+                } else if (pid == 0) {
+                    match = (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
+                } else if (pid < -1) {
+                    match = (entry->pgid == -pid);
+                }
 
-            if (!match) continue;
-            has_candidate = true;
+                if (!match) continue;
+                has_candidate = true;
 
-            bool state_change = false;
-            if (entry->exited) {
-                state_change = true;
-            } else if (allow_stop && entry->stopped && entry->stop_signo > 0) {
-                state_change = true;
-            } else if (allow_cont && entry->continued) {
-                state_change = true;
-            }
-
-            if (state_change) {
-                ready = entry;
-                break;
+                if (entry->exited ||
+                    (allow_stop && entry->stopped && entry->stop_signo > 0) ||
+                    (allow_cont && entry->continued)) {
+                    ready = entry;
+                    break;
+                }
             }
         }
 
@@ -7053,6 +7077,27 @@ int vprocKillShim(pid_t pid, int sig) {
     bool broadcast_all = (pid == -1);
     int target = target_group ? -pid : pid;
     bool dbg = vprocKillDebugEnabled();
+    if (sig < 0 || sig >= 32) {
+        if (dbg) {
+            vprocDebugLogf( "[vproc-kill] invalid signal=%d\n", sig);
+        }
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (pid == 0) {
+        int caller = vprocGetPidShim();
+        if (caller <= 0) {
+            caller = vprocGetShellSelfPid();
+        }
+        int caller_pgid = (caller > 0) ? vprocGetPgid(caller) : -1;
+        if (caller_pgid <= 0) {
+            return vprocHostKillRaw(pid, sig);
+        }
+        target_group = true;
+        target = caller_pgid;
+    }
+
     if (sig == 0) {
         /* Probe for existence: succeed if we find a matching entry. */
         pthread_mutex_lock(&gVProcTasks.mu);
@@ -7081,29 +7126,9 @@ int vprocKillShim(pid_t pid, int sig) {
         return -1;
     }
 
-    if (sig < 0 || sig >= 32) {
-        if (dbg) {
-            vprocDebugLogf( "[vproc-kill] invalid signal=%d\n", sig);
-        }
-        errno = EINVAL;
-        return -1;
-    }
-
-    if (pid == 0) {
-        int caller = vprocGetPidShim();
-        if (caller <= 0) {
-            caller = vprocGetShellSelfPid();
-        }
-        int caller_pgid = (caller > 0) ? vprocGetPgid(caller) : -1;
-        if (caller_pgid <= 0) {
-            return vprocHostKillRaw(pid, sig);
-        }
-        target_group = true;
-        target = caller_pgid;
-    }
-
     int rc = 0;
     pthread_t self = pthread_self();
+    int self_pid = broadcast_all ? (int)vprocGetPidShim() : -1;
     pthread_t *cancel_list = NULL;
     size_t cancel_count = 0;
     size_t cancel_capacity = 0;
@@ -7118,15 +7143,14 @@ int vprocKillShim(pid_t pid, int sig) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
         if (entry->zombie || entry->exited) continue;
-        if (entry->exited && entry->zombie) continue;
         if (dbg) {
             vprocDebugLogf( "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
                     entry->pid, entry->pgid, entry->sid, entry->exited, entry->zombie);
         }
-        
+
         if (broadcast_all) {
             // Don't kill self in broadcast
-            if (entry->pid == vprocGetPidShim()) continue;
+            if (self_pid > 0 && entry->pid == self_pid) continue;
         } else if (target_group) {
             if (entry->pgid != target) continue;
         } else {
