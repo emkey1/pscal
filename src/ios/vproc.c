@@ -2430,6 +2430,39 @@ static VProcTaskEntry *gVProcTasksItemsStable = NULL;
 static size_t gVProcTasksCapacityStable = 0;
 static size_t gVProcTaskFindHint = 0;
 static size_t gVProcTaskFreeHint = 0;
+#define VPROC_TASK_LOOKUP_CACHE_SIZE 2048u
+_Static_assert((VPROC_TASK_LOOKUP_CACHE_SIZE & (VPROC_TASK_LOOKUP_CACHE_SIZE - 1u)) == 0,
+               "VPROC_TASK_LOOKUP_CACHE_SIZE must be a power of two");
+typedef struct {
+    int pid;
+    uint32_t idx;
+} VProcTaskLookupCacheEntry;
+static VProcTaskLookupCacheEntry gVProcTaskLookupCache[VPROC_TASK_LOOKUP_CACHE_SIZE];
+
+static inline size_t vprocTaskLookupSlotForPid(int pid) {
+    uint32_t hash = (uint32_t)pid * 2654435761u;
+    return (size_t)(hash & (VPROC_TASK_LOOKUP_CACHE_SIZE - 1u));
+}
+
+static inline void vprocTaskLookupRememberLocked(int pid, size_t idx) {
+    if (pid <= 0 || idx > UINT32_MAX) {
+        return;
+    }
+    VProcTaskLookupCacheEntry *cache = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    cache->pid = pid;
+    cache->idx = (uint32_t)idx;
+}
+
+static inline void vprocTaskLookupForgetLocked(int pid) {
+    if (pid <= 0) {
+        return;
+    }
+    VProcTaskLookupCacheEntry *cache = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    if (cache->pid == pid) {
+        cache->pid = 0;
+        cache->idx = 0;
+    }
+}
 
 /* -- Helper Functions -- */
 
@@ -4999,6 +5032,12 @@ int vprocReservePid(void) {
             vprocAddChildLocked(parent, pid);
         }
     }
+    if (gVProcTasks.items && gVProcTasks.count > 0) {
+        ptrdiff_t idx = entry - gVProcTasks.items;
+        if (idx >= 0 && (size_t)idx < gVProcTasks.count) {
+            vprocTaskLookupRememberLocked(pid, (size_t)idx);
+        }
+    }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return pid;
 }
@@ -5030,8 +5069,15 @@ static void vprocTaskTableRepairLocked(void) {
         gVProcTasks.items = NULL;
         gVProcTasks.count = 0;
         gVProcTasks.capacity = 0;
+        gVProcTaskFindHint = 0;
+        gVProcTaskFreeHint = 0;
+        memset(gVProcTaskLookupCache, 0, sizeof(gVProcTaskLookupCache));
     } else if (gVProcTasks.count > gVProcTasks.capacity) {
         gVProcTasks.count = gVProcTasks.capacity;
+    } else if (gVProcTasks.count == 0) {
+        gVProcTaskFindHint = 0;
+        gVProcTaskFreeHint = 0;
+        memset(gVProcTaskLookupCache, 0, sizeof(gVProcTaskLookupCache));
     }
 }
 
@@ -5046,9 +5092,20 @@ static VProcTaskEntry *vprocTaskFindLocked(int pid) {
             return hint;
         }
     }
+    VProcTaskLookupCacheEntry *cache = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    if (cache->pid == pid) {
+        size_t idx = (size_t)cache->idx;
+        if (idx < gVProcTasks.count && gVProcTasks.items[idx].pid == pid) {
+            gVProcTaskFindHint = idx;
+            return &gVProcTasks.items[idx];
+        }
+        cache->pid = 0;
+        cache->idx = 0;
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         if (gVProcTasks.items[i].pid == pid) {
             gVProcTaskFindHint = i;
+            vprocTaskLookupRememberLocked(pid, i);
             return &gVProcTasks.items[i];
         }
     }
@@ -5108,6 +5165,12 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         VProcTaskEntry *parent = vprocTaskFindLocked(entry->parent_pid);
         if (parent) {
             vprocAddChildLocked(parent, pid);
+        }
+    }
+    if (gVProcTasks.items && gVProcTasks.count > 0) {
+        ptrdiff_t idx = entry - gVProcTasks.items;
+        if (idx >= 0 && (size_t)idx < gVProcTasks.count) {
+            vprocTaskLookupRememberLocked(pid, (size_t)idx);
         }
     }
     return entry;
@@ -6637,6 +6700,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
         free(entry->label);
         entry->label = NULL;
     }
+    vprocTaskLookupForgetLocked(pid);
     memset(entry->comm, 0, sizeof(entry->comm));
     entry->pid = 0;
     entry->tid = 0;
