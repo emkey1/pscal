@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sched.h>
+#include <sys/select.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -1452,6 +1453,7 @@ static void assert_signal_handler_invoked(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
     int pid = vprocPid(vp);
+    vprocRegisterThread(vp, pthread_self());
     struct sigaction sa = {0};
     sa.sa_handler = test_handler;
     sa.sa_flags = 0;
@@ -1474,6 +1476,7 @@ static void assert_siginfo_handler_invoked(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
     int pid = vprocPid(vp);
+    vprocRegisterThread(vp, pthread_self());
     struct sigaction sa = {0};
     sa.sa_sigaction = test_siginfo_handler;
     sa.sa_flags = SA_SIGINFO;
@@ -1485,6 +1488,36 @@ static void assert_siginfo_handler_invoked(void) {
     int status = 0;
     (void)vprocWaitPidShim(pid, &status, 0);
     vprocDestroy(vp);
+}
+
+typedef struct {
+    volatile int completed;
+} vproc_self_cancel_ctx;
+
+static void *vproc_self_cancel_thread(void *arg) {
+    vproc_self_cancel_ctx *ctx = (vproc_self_cancel_ctx *)arg;
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    vprocRegisterThread(vp, pthread_self());
+    int pid = vprocPid(vp);
+    assert(vprocKillShim(pid, SIGTERM) == 0);
+    /* If self-cancel regresses, this call will cancel the thread immediately. */
+    pthread_testcancel();
+    vprocDeactivate();
+    vprocDestroy(vp);
+    ctx->completed = 1;
+    return NULL;
+}
+
+static void assert_kill_does_not_self_cancel(void) {
+    vproc_self_cancel_ctx ctx = {0};
+    pthread_t tid;
+    assert(pthread_create(&tid, NULL, vproc_self_cancel_thread, &ctx) == 0);
+    void *ret = NULL;
+    assert(pthread_join(tid, &ret) == 0);
+    assert(ret != PTHREAD_CANCELED);
+    assert(ctx.completed == 1);
 }
 
 static void assert_background_tty_signals(void) {
@@ -1679,8 +1712,6 @@ static void assert_passthrough_when_inactive(void) {
 
 static void assert_gps_alias_reads_location_payload(void) {
     const char *payload = "gps-payload";
-    /* Seed the virtual location device. */
-    assert(vprocLocationDeviceWrite(payload, strlen(payload)) == (ssize_t)strlen(payload));
 
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -1689,6 +1720,7 @@ static void assert_gps_alias_reads_location_payload(void) {
 
     int fd = vprocOpenShim("/dev/gps", O_RDONLY);
     assert(fd >= 0);
+    assert(vprocLocationDeviceWrite(payload, strlen(payload)) == (ssize_t)strlen(payload));
     char buf[32] = {0};
     ssize_t r = vprocReadShim(fd, buf, sizeof(buf));
     assert(r == (ssize_t)strlen(payload));
@@ -1779,6 +1811,60 @@ static void assert_location_poll_wakes_on_payload(void) {
     vprocDestroy(vp);
 }
 
+static void assert_select_sparse_fdset_works(void) {
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    int read_fd = vprocAdoptHostFd(vp, host_pipe[0]);
+    assert(read_fd >= 0);
+    assert(read_fd < FD_SETSIZE);
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(read_fd, &rfds);
+    struct timeval tv = {0, 0};
+    assert(vprocSelectShim(1024, &rfds, NULL, NULL, &tv) == 0);
+
+    const char byte = 'x';
+    assert(vprocHostWrite(host_pipe[1], &byte, 1) == 1);
+
+    FD_ZERO(&rfds);
+    FD_SET(read_fd, &rfds);
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    assert(vprocSelectShim(1024, &rfds, NULL, NULL, &tv) == 1);
+    assert(FD_ISSET(read_fd, &rfds) != 0);
+
+    char got = 0;
+    assert(vprocReadShim(read_fd, &got, 1) == 1);
+    assert(got == byte);
+
+    assert(vprocCloseShim(read_fd) == 0);
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_select_empty_set_honors_timeout(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    struct timeval tv = {0, 0};
+    assert(vprocSelectShim(512, &rfds, NULL, NULL, &tv) == 0);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 static void assert_location_disable_unblocks_and_errors(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -1860,6 +1946,7 @@ static void assert_ptmx_open_registers_session(void) {
     struct pscal_fd *slave = NULL;
     int pty_num = -1;
     assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
     assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
 
     uint64_t session_id = 1234;
@@ -2241,6 +2328,8 @@ int main(void) {
     assert_signal_handler_invoked();
     fprintf(stderr, "TEST siginfo_handler_invoked\n");
     assert_siginfo_handler_invoked();
+    fprintf(stderr, "TEST kill_does_not_self_cancel\n");
+    assert_kill_does_not_self_cancel();
     fprintf(stderr, "TEST sigkill_not_blockable\n");
     assert_sigkill_not_blockable();
     fprintf(stderr, "TEST sigstop_not_ignorable_or_blockable\n");
@@ -2273,6 +2362,10 @@ int main(void) {
     assert_location_read_returns_full_line_and_eof();
     fprintf(stderr, "TEST location_poll_wakes_on_payload\n");
     assert_location_poll_wakes_on_payload();
+    fprintf(stderr, "TEST select_sparse_fdset_works\n");
+    assert_select_sparse_fdset_works();
+    fprintf(stderr, "TEST select_empty_set_honors_timeout\n");
+    assert_select_empty_set_honors_timeout();
     fprintf(stderr, "TEST location_disable_unblocks_and_errors\n");
     assert_location_disable_unblocks_and_errors();
     fprintf(stderr, "TEST location_reader_observer_fires\n");

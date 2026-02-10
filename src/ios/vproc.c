@@ -1869,6 +1869,10 @@ static VProcLocationDevice gLocationDevice = {
 };
 static bool vprocLocationDebugEnabled(void);
 static void vprocLocationDebugf(const char *fmt, ...);
+static bool vprocToolDebugEnabled(void);
+static bool vprocVprocDebugEnabled(void);
+static bool vprocPipeDebugEnabled(void);
+static bool vprocKillDebugEnabled(void);
 
 typedef struct {
     uint64_t last_seq;
@@ -2089,7 +2093,7 @@ static int vprocInprocPipeClose(struct pscal_fd *fd) {
     }
     VprocInprocPipe *pipe = end->pipe;
     pthread_mutex_lock(&pipe->mu);
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
+    bool dbg = vprocPipeDebugEnabled();
     if (end->is_reader) {
         pipe->read_closed = true;
         if (pipe->readers > 0) {
@@ -2252,6 +2256,10 @@ static bool vprocPathIsLegacyGpsDevice(const char *path);
 static int vprocLocationDeviceOpen(VProc *vp, int flags);
 static int vprocLocationDeviceOpenHost(int flags);
 static inline bool vprocShimHasVirtualContext(void);
+static bool vprocToolDebugEnabled(void);
+static bool vprocVprocDebugEnabled(void);
+static bool vprocPipeDebugEnabled(void);
+static bool vprocKillDebugEnabled(void);
 
 static int vprocNextPidSeed(void) {
 #if defined(PSCAL_TARGET_IOS)
@@ -3222,15 +3230,53 @@ static bool vprocSessionFdMatchesHost(int fd, int host_fd) {
     return fd_st.st_dev == host_st.st_dev && fd_st.st_ino == host_st.st_ino;
 }
 
+static bool vprocToolDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_TOOL_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static bool vprocVprocDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_VPROC_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static bool vprocPipeDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_PIPE_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static bool vprocKillDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_KILL_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
 static bool vprocIoDebugEnabled(void) {
+    static int cached = -1;
+    if (cached >= 0) {
+        return cached == 1;
+    }
     const char *env = getenv("PSCALI_IO_DEBUG");
     if (!env || env[0] == '\0' || strcmp(env, "0") == 0) {
         env = getenv("PSCALI_SSH_DEBUG");
     }
     if (!env || env[0] == '\0') {
+        cached = 0;
         return false;
     }
-    return strcmp(env, "0") != 0;
+    cached = (strcmp(env, "0") != 0) ? 1 : 0;
+    return cached == 1;
 }
 
 static void vprocDebugLogf(const char *format, ...) {
@@ -3681,7 +3727,7 @@ static void *vprocSessionInputThread(void *arg) {
     VProcSessionInput *input = session ? session->input : NULL;
     int fd = session ? session->stdin_host_fd : -1;
     struct pscal_fd *pscal_fd = session ? session->stdin_pscal_fd : NULL;
-    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    const bool tool_dbg = vprocToolDebugEnabled();
     if (pscal_fd && (!pscal_fd->ops || !pscal_fd->ops->read)) {
         pscal_fd = NULL;
     }
@@ -3869,7 +3915,7 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
         return NULL;
     }
     pthread_mutex_lock(&gSessionInputInitMu);
-    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    const bool tool_dbg = vprocToolDebugEnabled();
     if (!session->input) {
         session->input = (VProcSessionInput *)calloc(1, sizeof(VProcSessionInput));
         if (session->input) {
@@ -3938,7 +3984,7 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
         return 0;
     }
     VProcSessionInput *input = session->input;
-    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    const bool tool_dbg = vprocToolDebugEnabled();
     if (tool_dbg) {
         pthread_mutex_lock(&input->mu);
         vprocDebugLogf(
@@ -3996,7 +4042,7 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         errno = EBADF;
         return -1;
     }
-    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    const bool tool_dbg = vprocToolDebugEnabled();
     if (session->stdin_host_fd >= 0) {
         if (tool_dbg) {
             vprocDebugLogf(
@@ -4027,7 +4073,7 @@ VProcSessionInput *vprocSessionInputEnsureShim(void) {
     }
     int shell_pid = vprocGetShellSelfPid();
     int kernel_pid = vprocGetKernelPid();
-    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    const bool tool_dbg = vprocToolDebugEnabled();
     if (tool_dbg) {
         vprocDebugLogf(
                 "[session-input] ensure shell=%d kernel=%d stdin_host=%d input=%p\n",
@@ -4053,7 +4099,7 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     if (!input) {
         return false;
     }
-    const bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    const bool tool_dbg = vprocToolDebugEnabled();
     pthread_mutex_lock(&input->mu);
     size_t needed = input->len + len;
     if (needed > input->cap) {
@@ -4699,6 +4745,8 @@ static int vprocLocationDeviceOpen(VProc *vp, int flags) {
     loc_fd->userdata = reader;
     pthread_mutex_lock(&gLocationDevice.mu);
     vprocLocationEnsureCond();
+    /* New readers should only observe writes that occur after open(). */
+    reader->last_seq = gLocationDevice.seq;
     gLocationDevice.readers++;
     int readers = gLocationDevice.readers;
     pthread_mutex_unlock(&gLocationDevice.mu);
@@ -4970,7 +5018,7 @@ static void vprocMaybeAdvancePidCounter(int pid_hint) {
 
 static void vprocTaskTableRepairLocked(void) {
     if (gVProcTasks.items != gVProcTasksItemsStable) {
-        if (getenv("PSCALI_VPROC_DEBUG")) {
+        if (vprocVprocDebugEnabled()) {
             vprocDebugLogf( "[vproc] task table pointer mismatch; repairing\n");
         }
         gVProcTasks.items = gVProcTasksItemsStable;
@@ -5063,7 +5111,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (gNextSyntheticPid == 0) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
-    bool vproc_dbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    bool vproc_dbg = vprocVprocDebugEnabled();
     VProc *active = vprocCurrent();
 #if defined(PSCAL_TARGET_IOS)
     VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
@@ -5076,7 +5124,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
         local.stdout_fd == -1 &&
         local.stderr_fd == -1) {
         inherit_pscal_stdio = true;
-        if (getenv("PSCALI_VPROC_DEBUG")) {
+        if (vprocVprocDebugEnabled()) {
             vprocDebugLogf( "[vproc] inherit pscal stdio from session\n");
         }
     } else if (vproc_dbg && session_stdio) {
@@ -5288,7 +5336,7 @@ int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
     pthread_mutex_lock(&vp->mu);
     if ((size_t)target_fd >= vp->capacity) {
         pthread_mutex_unlock(&vp->mu);
-        if (getenv("PSCALI_PIPE_DEBUG")) {
+        if (vprocPipeDebugEnabled()) {
             vprocDebugLogf("[vproc] adopt pscal fd=%d failed: capacity %zu\n", target_fd, vp->capacity);
         }
         errno = EBADF;
@@ -5306,7 +5354,7 @@ int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
         vp->stderr_host_fd = -1;
     }
     pthread_mutex_unlock(&vp->mu);
-    if (getenv("PSCALI_VPROC_DEBUG")) {
+    if (vprocVprocDebugEnabled()) {
         fprintf(stderr, "[vproc] adopt pscal fd=%d ptr=%p rc=0\n",
                 target_fd, (void *)pscal_fd);
     }
@@ -6012,7 +6060,7 @@ int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) {
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpen(vp, flags);
     }
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
+    bool dbg = vprocPipeDebugEnabled();
     int host_fd = vprocHostOpenVirtualized(path, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
@@ -6070,7 +6118,7 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         errno = EINVAL;
         return -1;
     }
-    bool vdbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    bool vdbg = vprocVprocDebugEnabled();
     char thread_name[16];
     bool rename_thread = false;
     pthread_mutex_lock(&gVProcTasks.mu);
@@ -6122,7 +6170,7 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         errno = EINVAL;
         return -1;
     }
-    bool vdbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    bool vdbg = vprocVprocDebugEnabled();
     char thread_name[16];
     bool rename_thread = false;
     pthread_mutex_lock(&gVProcTasks.mu);
@@ -6302,7 +6350,7 @@ void vprocMarkGroupExit(int pid, int status) {
 }
 
 void vprocSetParent(int pid, int parent_pid) {
-    bool dbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    bool dbg = vprocVprocDebugEnabled();
     int kernel_pid = vprocGetKernelPid();
     pthread_mutex_lock(&gVProcTasks.mu);
     /* Keep explicit parent assignments intact. The parent task can be
@@ -6749,7 +6797,7 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
     bool allow_cont = (options & WCONTINUED) != 0;
     bool nohang = (options & WNOHANG) != 0;
     bool nowait = (options & WNOWAIT) != 0;
-    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    bool dbg = vprocKillDebugEnabled();
     int waiter_pid = vprocWaiterPid();
     int waiter_pgid = -1;
     int kernel_pid = vprocGetKernelPid();
@@ -6915,7 +6963,7 @@ int vprocKillShim(pid_t pid, int sig) {
     bool target_group = (pid <= 0);
     bool broadcast_all = (pid == -1);
     int target = target_group ? -pid : pid;
-    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    bool dbg = vprocKillDebugEnabled();
     if (sig == 0) {
         /* Probe for existence: succeed if we find a matching entry. */
         pthread_mutex_lock(&gVProcTasks.mu);
@@ -6966,6 +7014,7 @@ int vprocKillShim(pid_t pid, int sig) {
     }
 
     int rc = 0;
+    pthread_t self = pthread_self();
     pthread_t *cancel_list = NULL;
     size_t cancel_count = 0;
     size_t cancel_capacity = 0;
@@ -7028,9 +7077,14 @@ int vprocKillShim(pid_t pid, int sig) {
         vprocApplySignalLocked(entry, sig);
 
         if (entry->exited) {
-            vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, entry->tid);
+            if (entry->tid && !pthread_equal(entry->tid, self)) {
+                vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, entry->tid);
+            }
             for (size_t t = 0; t < entry->thread_count; ++t) {
-                vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, entry->threads[t]);
+                pthread_t tid = entry->threads[t];
+                if (tid && !pthread_equal(tid, self)) {
+                    vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, tid);
+                }
             }
         }
     }
@@ -8258,7 +8312,7 @@ void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid) {
     if (!stdio_ctx || !vprocSessionStdioNeedsRefresh(stdio_ctx)) {
         return;
     }
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (vprocToolDebugEnabled()) {
         vprocDebugLogf(
                 "[session-stdio] refresh stdin=%d stdout=%d stderr=%d\n",
                 stdio_ctx->stdin_host_fd,
@@ -8949,7 +9003,7 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
         return -1;
     }
     bool controlling_stdin = (vp && vp->stdin_host_fd >= 0 && fd == STDIN_FILENO && host == vp->stdin_host_fd);
-    if (getenv("PSCALI_TOOL_DEBUG") && fd == STDIN_FILENO) {
+    if (vprocToolDebugEnabled() && fd == STDIN_FILENO) {
         vprocDebugLogf(
                 "[vproc-read] stdin host=%d stdin_host=%d controlling=%d from_session=%d\n",
                 host,
@@ -8980,7 +9034,7 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
         if (pscal_fd) {
             if (gVprocPipelineStage && gVprocPipelineWriteLogCount < 32) {
                 gVprocPipelineWriteLogCount++;
-                if (getenv("PSCALI_VPROC_DEBUG")) {
+                if (vprocVprocDebugEnabled()) {
                     fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
                             fd, (void *)pscal_fd, count);
                 }
@@ -9108,7 +9162,7 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     if (write_fd < 0) {
         return -1;
     }
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (vprocToolDebugEnabled()) {
         vprocDebugLogf( "[vwrite] fd=%d -> host=%d write_fd=%d count=%zu\n", fd, host, write_fd, count);
     }
     ssize_t res = vprocHostWrite(write_fd, buf, count);
@@ -10282,6 +10336,7 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     }
 
     int ready_count = 0;
+    int pscal_ready_initial = 0;
     bool has_pscal = false;
     int host_count = 0;
     for (nfds_t i = 0; i < nfds; ++i) {
@@ -10300,6 +10355,7 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
             if (ready) {
                 fds[i].revents = ready;
                 ready_count++;
+                pscal_ready_initial++;
             }
             continue;
         }
@@ -10374,7 +10430,10 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     }
 
     if (has_pscal && (recheck_pscal || ready_count == 0)) {
-        int host_ready_count = ready_count;
+        int host_ready_count = ready_count - pscal_ready_initial;
+        if (host_ready_count < 0) {
+            host_ready_count = 0;
+        }
         int pscal_ready = 0;
         for (nfds_t i = 0; i < nfds; ++i) {
             if (!pscal_fds[i]) {
@@ -10416,9 +10475,36 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         return vprocHostSelectRaw(nfds, readfds, writefds, exceptfds, timeout);
     }
 
+    int count = 0;
+    for (int fd = 0; fd < nfds; ++fd) {
+        short events = 0;
+        if (readfds && FD_ISSET(fd, readfds)) events |= POLLIN;
+        if (writefds && FD_ISSET(fd, writefds)) events |= POLLOUT;
+        if (exceptfds && FD_ISSET(fd, exceptfds)) events |= POLLPRI;
+        if (events != 0) {
+            count++;
+        }
+    }
+
+    int timeout_ms = -1;
+    if (timeout) {
+        timeout_ms = (int)(timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
+    }
+
+    if (count == 0) {
+        int res = vprocHostPollRaw(NULL, 0, timeout_ms);
+        if (res < 0) {
+            return -1;
+        }
+        if (readfds) FD_ZERO(readfds);
+        if (writefds) FD_ZERO(writefds);
+        if (exceptfds) FD_ZERO(exceptfds);
+        return 0;
+    }
+
     struct pollfd pfds_stack[VPROC_SELECT_STACK_FDS];
     int fd_map_stack[VPROC_SELECT_STACK_FDS];
-    bool use_stack = nfds <= VPROC_SELECT_STACK_FDS;
+    bool use_stack = count <= VPROC_SELECT_STACK_FDS;
     bool use_heap = false;
     struct pollfd *pfds = NULL;
     int *fd_map = NULL;
@@ -10428,8 +10514,8 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         pfds = pfds_stack;
         fd_map = fd_map_stack;
     } else {
-        pfds = calloc((size_t)nfds, sizeof(*pfds));
-        fd_map = calloc((size_t)nfds, sizeof(*fd_map));
+        pfds = calloc((size_t)count, sizeof(*pfds));
+        fd_map = calloc((size_t)count, sizeof(*fd_map));
         if (!pfds || !fd_map) {
             free(pfds);
             free(fd_map);
@@ -10439,7 +10525,7 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         use_heap = true;
     }
 
-    int count = 0;
+    int cursor = 0;
     for (int fd = 0; fd < nfds; ++fd) {
         short events = 0;
         if (readfds && FD_ISSET(fd, readfds)) events |= POLLIN;
@@ -10448,16 +10534,11 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         if (events == 0) {
             continue;
         }
-        pfds[count].fd = fd;
-        pfds[count].events = events;
-        pfds[count].revents = 0;
-        fd_map[count] = fd;
-        count++;
-    }
-
-    int timeout_ms = -1;
-    if (timeout) {
-        timeout_ms = (int)(timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
+        pfds[cursor].fd = fd;
+        pfds[cursor].events = events;
+        pfds[cursor].revents = 0;
+        fd_map[cursor] = fd;
+        cursor++;
     }
     int res = vprocPollShim(pfds, (nfds_t)count, timeout_ms);
     if (res < 0) {
@@ -10710,7 +10791,7 @@ int vprocOpenShim(const char *path, int flags, ...) {
         /* Apply path virtualization even when vproc is inactive. */
         return vprocHostOpenVirtualized(path, flags, mode);
     }
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
+    bool dbg = vprocPipeDebugEnabled();
     int host_fd = vprocHostOpenVirtualized(path, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
@@ -10722,7 +10803,7 @@ int vprocOpenShim(const char *path, int flags, ...) {
     }
 #endif
     if (host_fd < 0) {
-        if (getenv("PSCALI_TOOL_DEBUG")) {
+        if (vprocToolDebugEnabled()) {
             vprocDebugLogf( "[vproc-open] path=%s flags=%d errno=%d\n", path, flags, errno);
         }
         return -1;
