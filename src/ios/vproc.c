@@ -5094,9 +5094,6 @@ int vprocReservePid(void) {
     if (parent_pid > 0 && parent_pid != pid) {
         parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
         if (!parent_entry || parent_entry->pid != parent_pid) {
-            parent_entry = vprocTaskFindLocked(parent_pid);
-        }
-        if (!parent_entry || parent_entry->pid != parent_pid) {
             parent_pid = 0;
             parent_entry = NULL;
         }
@@ -5255,10 +5252,7 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     entry->parent_pid = parent_pid;
     if (entry->parent_pid > 0 && entry->parent_pid != pid) {
         VProcTaskEntry *parent = (VProcTaskEntry *)parent_entry;
-        if (!parent || parent->pid != entry->parent_pid) {
-            parent = vprocTaskFindLocked(entry->parent_pid);
-        }
-        if (parent) {
+        if (parent && parent->pid == entry->parent_pid) {
             vprocAddChildLocked(parent, pid);
         }
     }
