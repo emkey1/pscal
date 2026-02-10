@@ -6548,16 +6548,16 @@ void vprocSetParent(int pid, int parent_pid) {
     if (kernel_pid > 0 && parent_pid <= 0 && pid != kernel_pid) {
         parent_pid = kernel_pid;
     }
-    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
-    if (entry) {
-        if (dbg) {
+    if (dbg) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+        if (entry) {
             vprocDebugLogf( "[vproc-parent] pid=%d old=%d new=%d\n",
                     pid, entry->parent_pid, parent_pid);
+        } else {
+            vprocDebugLogf( "[vproc-parent] pid=%d not found; new=%d\n", pid, parent_pid);
         }
-    vprocUpdateParentLocked(pid, parent_pid);
-    } else if (dbg) {
-        vprocDebugLogf( "[vproc-parent] pid=%d not found; new=%d\n", pid, parent_pid);
     }
+    vprocUpdateParentLocked(pid, parent_pid);
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
 
