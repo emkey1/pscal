@@ -4545,10 +4545,12 @@ static int vprocWaiterPid(void) {
 
 static bool vprocEnsureFdCapacityLocked(VProc *vp, size_t needed) {
     if (!vp || needed == 0) {
+        errno = EINVAL;
         return false;
     }
     size_t max_fd_capacity = (size_t)INT_MAX + 1u;
     if (needed > max_fd_capacity) {
+        errno = EMFILE;
         return false;
     }
     if (needed <= vp->capacity) {
@@ -4560,16 +4562,19 @@ static bool vprocEnsureFdCapacityLocked(VProc *vp, size_t needed) {
                                     VPROC_INITIAL_CAPACITY,
                                     sizeof(VProcFdEntry),
                                     &new_cap)) {
+        errno = EMFILE;
         return false;
     }
     if (new_cap > max_fd_capacity) {
         new_cap = max_fd_capacity;
     }
     if (new_cap < needed) {
+        errno = EMFILE;
         return false;
     }
     VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
     if (!resized) {
+        errno = ENOMEM;
         return false;
     }
     for (size_t i = vp->capacity; i < new_cap; ++i) {
