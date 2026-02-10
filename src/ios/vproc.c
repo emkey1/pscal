@@ -6877,6 +6877,10 @@ static bool vprocHasKillTargetLocked(pid_t pid) {
     bool broadcast_all = (pid == -1);
     bool target_group = (pid <= 0);
     int target = target_group ? -pid : pid;
+    if (!broadcast_all && !target_group) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(target);
+        return entry && entry->pid > 0;
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
@@ -7100,24 +7104,9 @@ int vprocKillShim(pid_t pid, int sig) {
 
     if (sig == 0) {
         /* Probe for existence: succeed if we find a matching entry. */
+        pid_t probe_pid = broadcast_all ? -1 : (target_group ? (pid_t)(-target) : (pid_t)target);
         pthread_mutex_lock(&gVProcTasks.mu);
-        bool found = false;
-        for (size_t i = 0; i < gVProcTasks.count; ++i) {
-            VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) continue;
-            if (broadcast_all) {
-                found = true;
-                break;
-            } else if (target_group) {
-                if (entry->pgid == target) {
-                    found = true;
-                    break;
-                }
-            } else if (entry->pid == target) {
-                found = true;
-                break;
-            }
-        }
+        bool found = vprocHasKillTargetLocked(probe_pid);
         pthread_mutex_unlock(&gVProcTasks.mu);
         if (found) {
             return 0;
