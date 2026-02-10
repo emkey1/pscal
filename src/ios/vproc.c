@@ -6220,6 +6220,21 @@ int vprocPid(VProc *vp) {
     return vp ? vp->pid : -1;
 }
 
+static bool vprocTaskEntryHasThreadLocked(const VProcTaskEntry *entry, pthread_t tid) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->tid && pthread_equal(entry->tid, tid)) {
+        return true;
+    }
+    for (size_t i = 0; i < entry->thread_count; ++i) {
+        if (entry->threads[i] && pthread_equal(entry->threads[i], tid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int vprocRegisterTidHint(int pid, pthread_t tid) {
     if (pid <= 0) {
         errno = EINVAL;
@@ -6240,13 +6255,7 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         return -1;
     }
     entry->tid = tid;
-    bool duplicate = false;
-    for (size_t i = 0; i < entry->thread_count; ++i) {
-        if (pthread_equal(entry->threads[i], tid)) {
-            duplicate = true;
-            break;
-        }
-    }
+    bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
     if (!duplicate) {
         if (entry->thread_count >= entry->thread_capacity) {
             size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
@@ -6293,13 +6302,7 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         return -1;
     }
     entry->tid = tid;
-    bool duplicate = false;
-    for (size_t i = 0; i < entry->thread_count; ++i) {
-        if (pthread_equal(entry->threads[i], tid)) {
-            duplicate = true;
-            break;
-        }
-    }
+    bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
     if (!duplicate) {
         if (entry->thread_count >= entry->thread_capacity) {
             size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
@@ -7822,23 +7825,20 @@ int vprocGetShellSelfPid(void) {
 int vprocThreadIsRegistered(pthread_t tid) {
     bool registered = false;
     pthread_mutex_lock(&gVProcTasks.mu);
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (entry->pid <= 0) {
-            continue;
+    if (pthread_equal(tid, pthread_self())) {
+        VProc *current = vprocCurrent();
+        if (current) {
+            VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(current));
+            registered = vprocTaskEntryHasThreadLocked(entry, tid);
         }
-        if (entry->tid && pthread_equal(entry->tid, tid)) {
-            registered = true;
-            break;
-        }
-        for (size_t t = 0; t < entry->thread_count; ++t) {
-            if (entry->threads[t] && pthread_equal(entry->threads[t], tid)) {
+    }
+    if (!registered) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (vprocTaskEntryHasThreadLocked(entry, tid)) {
                 registered = true;
                 break;
             }
-        }
-        if (registered) {
-            break;
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -7850,23 +7850,20 @@ int vprocThreadIsRegisteredNonblocking(pthread_t tid) {
     if (pthread_mutex_trylock(&gVProcTasks.mu) != 0) {
         return 0;
     }
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (entry->pid <= 0) {
-            continue;
+    if (pthread_equal(tid, pthread_self())) {
+        VProc *current = vprocCurrent();
+        if (current) {
+            VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(current));
+            registered = vprocTaskEntryHasThreadLocked(entry, tid);
         }
-        if (entry->tid && pthread_equal(entry->tid, tid)) {
-            registered = true;
-            break;
-        }
-        for (size_t t = 0; t < entry->thread_count; ++t) {
-            if (entry->threads[t] && pthread_equal(entry->threads[t], tid)) {
+    }
+    if (!registered) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (vprocTaskEntryHasThreadLocked(entry, tid)) {
                 registered = true;
                 break;
             }
-        }
-        if (registered) {
-            break;
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
