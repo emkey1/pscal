@@ -4233,6 +4233,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 
     /* Run single-stage background tails on a worker thread so the shell prompt returns. */
     bool async_tail = ctx->background && pipeline_tail && ctx->stage_count == 1;
+    pid_t async_bg_pgid = -1;
     if (!pipeline_tail || async_tail) {
         if (async_tail && ctx->pids && stage_pos < ctx->stage_count) {
             if (ctx->pids[stage_pos] <= 0) {
@@ -4248,7 +4249,7 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                 ctx->pgid = ctx->pids[stage_pos];
             }
             if (ctx->pids[stage_pos] > 0) {
-                pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[stage_pos];
+                async_bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[stage_pos];
                 int shell_pid = vprocGetShellSelfPid();
                 if (shell_pid > 0 && ctx->pids[stage_pos] != shell_pid) {
                     int shell_sid = vprocGetSid(shell_pid);
@@ -4257,18 +4258,8 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
                     }
                     (void)vprocSetParent((int)ctx->pids[stage_pos], shell_pid);
                 }
-                if (bg_pgid > 0) {
-                    (void)vprocSetPgid((int)ctx->pids[stage_pos], (int)bg_pgid);
-                }
-                pid_t bg_pids[1] = { ctx->pids[stage_pos] };
-                ShellJob *job = shellRegisterJob(bg_pgid, bg_pids, 1, cmd);
-                if (job) {
-                    shellJobMarkRunning(job);
-                    job->last_status = 0;
-                    gShellRuntime.last_bg_pid = bg_pgid;
-#if defined(PSCAL_TARGET_IOS)
-                    shellPrintJobStarted(job, bg_pgid);
-#endif
+                if (async_bg_pgid > 0) {
+                    (void)vprocSetPgid((int)ctx->pids[stage_pos], (int)async_bg_pgid);
                 }
             }
         }
@@ -4343,6 +4334,19 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             ctx->thread_started[stage_pos] = true;
         }
         if (async_tail) {
+            if (ctx->pids && stage_pos < ctx->stage_count && ctx->pids[stage_pos] > 0) {
+                pid_t bg_pgid = (async_bg_pgid > 0) ? async_bg_pgid : ctx->pids[stage_pos];
+                pid_t bg_pids[1] = { ctx->pids[stage_pos] };
+                ShellJob *job = shellRegisterJob(bg_pgid, bg_pids, 1, cmd);
+                if (job) {
+                    shellJobMarkRunning(job);
+                    job->last_status = 0;
+                }
+                gShellRuntime.last_bg_pid = bg_pgid;
+#if defined(PSCAL_TARGET_IOS)
+                shellPrintJobStarted(job, bg_pgid);
+#endif
+            }
             /* Background single-stage workers run detached from shared pipeline state. */
             shellResetPipeline();
             shellUpdateStatus(0);
