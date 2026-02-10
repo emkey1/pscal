@@ -672,6 +672,9 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
     if (canonical) {
         size_t canon_size;
         while ((canon_size = tty_canon_size(tty)) == (size_t)-1) {
+            if (tty->hung_up) {
+                goto hangup;
+            }
             err = _EIO;
             if (pty_is_half_closed_master(tty)) {
                 goto error;
@@ -709,6 +712,9 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
         }
 
         while (tty->bufsize < min) {
+            if (tty->hung_up) {
+                goto hangup;
+            }
             err = _EIO;
             if (pty_is_half_closed_master(tty)) {
                 goto error;
@@ -728,6 +734,10 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
         }
     }
 
+    if (tty->hung_up && tty->bufsize == 0) {
+        goto hangup;
+    }
+
     if (bufsize > tty->bufsize) {
         bufsize = tty->bufsize;
     }
@@ -740,6 +750,9 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
 out:
     unlock(&tty->lock);
     return (ssize_t)bufsize + bufsize_extra;
+hangup:
+    unlock(&tty->lock);
+    return 0;
 error:
     unlock(&tty->lock);
     return err;

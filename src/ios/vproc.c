@@ -2542,6 +2542,15 @@ static int vprocDefaultParentPid(void) {
     if (shell_pid > 0) {
         return shell_pid;
     }
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    /* Test helper threads often create synthetic tasks without first
+     * initialising shell/kernel synthetic ids. Fall back to host pid so
+     * waitpid parent matching remains deterministic across threads. */
+    int host_pid = (int)vprocHostGetpidRaw();
+    if (host_pid > 0) {
+        return host_pid;
+    }
+#endif
     int kernel = vprocGetKernelPid();
     if (kernel > 0) {
         return kernel;
@@ -4901,22 +4910,18 @@ int vprocReservePid(void) {
         if (parent_pid > 0 && parent_pid != pid) {
             (void)vprocTaskEnsureSlotLocked(parent_pid);
         }
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
         vprocClearEntryLocked(entry);
-        entry = vprocTaskFindLocked(pid);
-        parent_entry = vprocTaskFindLocked(parent_pid);
-        if (entry) {
-            vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
-            entry->parent_pid = parent_pid;
-            /* Reserve creates a brand-new process group; do not inherit the shell's
-             * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
-            entry->pgid = pid;
-            entry->fg_pgid = pid;
-            if (parent_pid > 0 && parent_pid != pid) {
-                VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
-                if (parent) {
-                    vprocAddChildLocked(parent, pid);
-                }
+        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+        vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
+        entry->parent_pid = parent_pid;
+        /* Reserve creates a brand-new process group; do not inherit the shell's
+         * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
+        entry->pgid = pid;
+        entry->fg_pgid = pid;
+        if (parent_pid > 0 && parent_pid != pid) {
+            VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
+            if (parent) {
+                vprocAddChildLocked(parent, pid);
             }
         }
     }
@@ -4992,10 +4997,20 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         parent_entry = vprocTaskFindLocked(parent_pid);
     }
     if (gVProcTasks.count >= gVProcTasks.capacity) {
-        errno = EMFILE;
-        return NULL;
+        /* Reuse cleared slots before rejecting new synthetic tasks. */
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            if (gVProcTasks.items[i].pid <= 0) {
+                entry = &gVProcTasks.items[i];
+                break;
+            }
+        }
+        if (!entry) {
+            errno = EMFILE;
+            return NULL;
+        }
+    } else {
+        entry = &gVProcTasks.items[gVProcTasks.count++];
     }
-    entry = &gVProcTasks.items[gVProcTasks.count++];
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
     entry->parent_pid = parent_pid;
     if (entry->parent_pid > 0 && entry->parent_pid != pid) {
@@ -5093,22 +5108,18 @@ VProc *vprocCreate(const VProcOptions *opts) {
         if (parent_pid > 0 && parent_pid != vp->pid) {
             (void)vprocTaskEnsureSlotLocked(parent_pid);
         }
-        /* Clearing can reallocate gVProcTasks.items; reacquire fresh pointers
-         * afterwards to avoid stale references. */
+        /* Reinitialize the slot in place for this pid. */
         vprocClearEntryLocked(slot);
-        slot = vprocTaskFindLocked(vp->pid);
-        if (slot) {
-            VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-            vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
-            vprocUpdateParentLocked(vp->pid, parent_pid);
-            if (local.job_id > 0) {
-                slot->job_id = local.job_id;
-            }
-            /* Synthetic vprocs that override stdio (common for pipeline stages) should
-             * never be stopped by terminal job-control signals. */
-            if (local.stdin_fd >= 0 || local.stdout_fd >= 0 || local.stderr_fd >= 0) {
-                slot->stop_unsupported = true;
-            }
+        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+        vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
+        vprocUpdateParentLocked(vp->pid, parent_pid);
+        if (local.job_id > 0) {
+            slot->job_id = local.job_id;
+        }
+        /* Synthetic vprocs that override stdio (common for pipeline stages) should
+         * never be stopped by terminal job-control signals. */
+        if (local.stdin_fd >= 0 || local.stdout_fd >= 0 || local.stderr_fd >= 0) {
+            slot->stop_unsupported = true;
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5475,6 +5486,7 @@ static void *vprocThreadTrampoline(void *arg) {
     if (vp) {
         /* Threads share the owning vproc; do not mark the process as exited on
          * thread teardown. */
+        vprocUnregisterThread(vp, pthread_self());
         vprocDeactivate();
     }
 
@@ -5520,7 +5532,12 @@ int vprocPthreadCreateShim(pthread_t *thread,
             ctx->detach = true;
         }
     }
-    return vprocHostPthreadCreateRaw(thread, attr, vprocThreadTrampoline, ctx);
+    int rc = vprocHostPthreadCreateRaw(thread, attr, vprocThreadTrampoline, ctx);
+    if (rc != 0) {
+        free(ctx);
+        errno = rc;
+    }
+    return rc;
 }
 
 int vprocTranslateFd(VProc *vp, int fd) {
@@ -6572,6 +6589,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->child_capacity = 0;
     entry->child_count = 0;
     entry->start_mono_ns = 0;
+
 }
 
 size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
@@ -7118,7 +7136,7 @@ static void *vprocSimExecThread(void *arg) {
         status = ctx->entry(ctx->argc, ctx->argv);
     }
     if (ctx && ctx->vp) {
-        vprocMarkExit(ctx->vp, W_EXITCODE(status & 0xff, 0));
+        vprocMarkExit(ctx->vp, status);
         vprocDestroy(ctx->vp);
     }
     if (ctx) {
@@ -7355,7 +7373,7 @@ void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code) {
     int pid = scope->pid > 0 ? scope->pid : vprocPid(vp);
 
     vprocDeactivate();
-    vprocMarkExit(vp, W_EXITCODE(exit_code & 0xff, 0));
+    vprocMarkExit(vp, exit_code);
     vprocDiscard(pid);
     vprocDestroy(vp);
 
