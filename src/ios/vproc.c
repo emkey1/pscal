@@ -5672,6 +5672,7 @@ void vprocTerminateSession(int sid) {
     size_t cancel_cap = 0;
     size_t target_count = 0;
     size_t *target_indices = NULL;
+    bool clear_direct = false;
 
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
@@ -5683,6 +5684,9 @@ void vprocTerminateSession(int sid) {
     }
     if (target_count > 0) {
         target_indices = (size_t *)calloc(target_count, sizeof(size_t));
+        if (!target_indices) {
+            clear_direct = true;
+        }
     }
     size_t target_index = 0;
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
@@ -5713,12 +5717,20 @@ void vprocTerminateSession(int sid) {
             target_indices[target_index++] = i;
         }
     }
-    for (size_t i = 0; i < target_index; ++i) {
-        size_t idx = target_indices[i];
-        if (idx >= gVProcTasks.count) continue;
-        VProcTaskEntry *entry = &gVProcTasks.items[idx];
-        if (entry->pid <= 0 || entry->sid != sid) continue;
-        vprocClearEntryLocked(entry);
+    if (clear_direct) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (entry->pid <= 0 || entry->sid != sid) continue;
+            vprocClearEntryLocked(entry);
+        }
+    } else {
+        for (size_t i = 0; i < target_index; ++i) {
+            size_t idx = target_indices[i];
+            if (idx >= gVProcTasks.count) continue;
+            VProcTaskEntry *entry = &gVProcTasks.items[idx];
+            if (entry->pid <= 0 || entry->sid != sid) continue;
+            vprocClearEntryLocked(entry);
+        }
     }
     pthread_cond_broadcast(&gVProcTasks.cv);
     pthread_mutex_unlock(&gVProcTasks.mu);
