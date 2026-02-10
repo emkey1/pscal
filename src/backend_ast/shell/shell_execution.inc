@@ -4231,6 +4231,16 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         int rc = pthread_create(thread_slot, &attr, shellPipelineStageThreadMain, tctx);
         pthread_attr_destroy(&attr);
         if (rc != 0) {
+            if (tctx->cmd) {
+                shellFreeCommand(tctx->cmd);
+                free(tctx->cmd);
+                tctx->cmd = NULL;
+            }
+            if (tctx->owns_ctx_snapshot) {
+                shellFreeClonedPipelineContext(tctx->ctx);
+                tctx->ctx = NULL;
+            }
+            free(tctx);
             runtimeError(vm, "pipeline: failed to create stage thread");
             shellUpdateStatus(1);
             shellAbortPipeline();
