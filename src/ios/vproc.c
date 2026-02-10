@@ -6555,6 +6555,9 @@ void vprocMarkGroupExit(int pid, int status) {
 }
 
 void vprocSetParent(int pid, int parent_pid) {
+    if (pid <= 0) {
+        return;
+    }
     bool dbg = vprocVprocDebugEnabled();
     pthread_mutex_lock(&gVProcTasks.mu);
     /* Keep explicit parent assignments intact. The parent task can be
