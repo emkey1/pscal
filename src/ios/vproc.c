@@ -2402,6 +2402,26 @@ static void vprocClearThreadState(void) {
     }
 }
 
+/* Fast validation for the common case where vp is the current thread's vproc. */
+static bool vprocRegistryContainsValidated(VProc *vp) {
+    if (!vp) {
+        return false;
+    }
+    if (gVProcTlsReady && vp == gVProcCurrent) {
+        unsigned long long version = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
+        if (gVProcRegistrySeenVersion == version) {
+            return true;
+        }
+        if (!vprocRegistryContains(vp)) {
+            vprocClearThreadState();
+            return false;
+        }
+        gVProcRegistrySeenVersion = version;
+        return true;
+    }
+    return vprocRegistryContains(vp);
+}
+
 static VProc *vprocForThread(void);
 
 typedef struct {
@@ -5560,15 +5580,8 @@ void vprocDestroy(VProc *vp) {
 
 void vprocActivate(VProc *vp) {
     gVProcTlsReady = 1;
-    if (gVProcCurrent) {
-        unsigned long long version = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
-        if (gVProcRegistrySeenVersion != version) {
-            if (!vprocRegistryContains(gVProcCurrent)) {
-                vprocClearThreadState();
-            } else {
-                gVProcRegistrySeenVersion = version;
-            }
-        }
+    if (gVProcCurrent && !vprocRegistryContainsValidated(gVProcCurrent)) {
+        /* vprocRegistryContainsValidated already cleared thread-local state. */
     }
     if (gVProcStackDepth < (sizeof(gVProcStack) / sizeof(gVProcStack[0]))) {
         gVProcStack[gVProcStackDepth++] = gVProcCurrent;
@@ -5774,7 +5787,7 @@ int vprocTranslateFd(VProc *vp, int fd) {
         errno = EBADF;
         return -1;
     }
-    if (!vprocRegistryContains(vp)) {
+    if (!vprocRegistryContainsValidated(vp)) {
         errno = EBADF;
         return -1;
     }
@@ -8842,13 +8855,8 @@ static VProc *vprocForThread(void) {
     if (!vp) {
         return NULL;
     }
-    unsigned long long version = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
-    if (gVProcRegistrySeenVersion != version) {
-        if (!vprocRegistryContains(vp)) {
-            vprocClearThreadState();
-            return NULL;
-        }
-        gVProcRegistrySeenVersion = version;
+    if (!vprocRegistryContainsValidated(vp)) {
+        return NULL;
     }
     return vp;
 }
@@ -9479,7 +9487,7 @@ static bool vprocHasFd(VProc *vp, int fd) {
     if (!vp || fd < 0) {
         return false;
     }
-    if (!vprocRegistryContains(vp)) {
+    if (!vprocRegistryContainsValidated(vp)) {
         return false;
     }
     bool has = false;
