@@ -5174,6 +5174,26 @@ static void vprocTaskTableRepairLocked(void) {
     }
 }
 
+static size_t vprocFindFreeTaskSlotLocked(void) {
+    if (gVProcTasks.count == 0) {
+        return SIZE_MAX;
+    }
+    size_t start = (gVProcTaskFreeHint < gVProcTasks.count) ? gVProcTaskFreeHint : 0;
+    for (size_t idx = start; idx < gVProcTasks.count; ++idx) {
+        if (gVProcTasks.items[idx].pid <= 0) {
+            gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
+            return idx;
+        }
+    }
+    for (size_t idx = 0; idx < start; ++idx) {
+        if (gVProcTasks.items[idx].pid <= 0) {
+            gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
+            return idx;
+        }
+    }
+    return SIZE_MAX;
+}
+
 static VProcTaskEntry *vprocTaskFindLocked(int pid) {
     if (pid <= 0) {
         return NULL;
@@ -5244,29 +5264,14 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         gVProcTasksItemsStable = gVProcTasks.items;
         gVProcTasksCapacityStable = gVProcTasks.capacity;
     }
-    if (gVProcTasks.count >= gVProcTasks.capacity) {
-        /* Reuse cleared slots before rejecting new synthetic tasks. */
-        size_t start = (gVProcTaskFreeHint < gVProcTasks.count) ? gVProcTaskFreeHint : 0;
-        for (size_t idx = start; idx < gVProcTasks.count; ++idx) {
-            if (gVProcTasks.items[idx].pid <= 0) {
-                entry = &gVProcTasks.items[idx];
-                gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
-                break;
-            }
-        }
-        for (size_t idx = 0; !entry && idx < start; ++idx) {
-            if (gVProcTasks.items[idx].pid <= 0) {
-                entry = &gVProcTasks.items[idx];
-                gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
-                break;
-            }
-        }
-        if (!entry) {
-            errno = EMFILE;
-            return NULL;
-        }
-    } else {
+    size_t free_idx = vprocFindFreeTaskSlotLocked();
+    if (free_idx != SIZE_MAX) {
+        entry = &gVProcTasks.items[free_idx];
+    } else if (gVProcTasks.count < gVProcTasks.capacity) {
         entry = &gVProcTasks.items[gVProcTasks.count++];
+    } else {
+        errno = EMFILE;
+        return NULL;
     }
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
     entry->parent_pid = parent_pid;
