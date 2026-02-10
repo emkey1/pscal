@@ -5036,6 +5036,9 @@ static void vprocTaskTableRepairLocked(void) {
 }
 
 static VProcTaskEntry *vprocTaskFindLocked(int pid) {
+    if (pid <= 0) {
+        return NULL;
+    }
     vprocTaskTableRepairLocked();
     if (gVProcTasks.count > 0 && gVProcTaskFindHint < gVProcTasks.count) {
         VProcTaskEntry *hint = &gVProcTasks.items[gVProcTaskFindHint];
@@ -5061,10 +5064,11 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
     int parent_pid = vprocDefaultParentPid();
-    if (parent_pid > 0 && parent_pid != pid) {
-        (void)vprocTaskEnsureSlotLocked(parent_pid);
-    }
     const VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+    if (!parent_entry && parent_pid > 0 && parent_pid != pid) {
+        (void)vprocTaskEnsureSlotLocked(parent_pid);
+        parent_entry = vprocTaskFindLocked(parent_pid);
+    }
     /* Preallocate generously and avoid realloc to keep table pointer stable. */
     if (gVProcTasks.capacity == 0) {
         gVProcTasks.capacity = 4096;
