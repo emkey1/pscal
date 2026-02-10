@@ -3885,6 +3885,26 @@ static void vprocDispatchControlSignalToForeground(int shell_pid, int sig) {
 #endif
 }
 
+static bool vprocEnsureSessionInputCapacityLocked(VProcSessionInput *input, size_t needed) {
+    if (!input || needed == 0) {
+        return false;
+    }
+    if (needed <= input->cap) {
+        return true;
+    }
+    size_t new_cap = 0;
+    if (!vprocComputeGrowthCapacity(input->cap, needed, 256, sizeof(unsigned char), &new_cap)) {
+        return false;
+    }
+    unsigned char *resized = (unsigned char *)realloc(input->buf, new_cap);
+    if (!resized) {
+        return false;
+    }
+    input->buf = resized;
+    input->cap = new_cap;
+    return true;
+}
+
 static void *vprocSessionInputThread(void *arg) {
     VProcSessionInputCtx *ctx = (VProcSessionInputCtx *)arg;
     if (!ctx || !ctx->session) {
@@ -4004,15 +4024,8 @@ static void *vprocSessionInputThread(void *arg) {
             continue;
         }
         pthread_mutex_lock(&input->mu);
-        if (input->len + 1 > input->cap) {
-            size_t new_cap = input->cap ? input->cap * 2 : 256;
-            unsigned char *resized = (unsigned char *)realloc(input->buf, new_cap);
-            if (resized) {
-                input->buf = resized;
-                input->cap = new_cap;
-            }
-        }
-        if (input->len < input->cap) {
+        size_t needed = input->len + 1;
+        if (needed > input->len && vprocEnsureSessionInputCapacityLocked(input, needed)) {
             input->buf[input->len++] = ch;
             pthread_cond_signal(&input->cv);
         }
@@ -4279,19 +4292,14 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     }
     const bool tool_dbg = vprocToolDebugEnabled();
     pthread_mutex_lock(&input->mu);
+    if (len > SIZE_MAX - input->len) {
+        pthread_mutex_unlock(&input->mu);
+        return false;
+    }
     size_t needed = input->len + len;
-    if (needed > input->cap) {
-        size_t new_cap = input->cap ? input->cap : 256;
-        while (new_cap < needed) {
-            new_cap *= 2;
-        }
-        unsigned char *resized = (unsigned char *)realloc(input->buf, new_cap);
-        if (!resized) {
-            pthread_mutex_unlock(&input->mu);
-            return false;
-        }
-        input->buf = resized;
-        input->cap = new_cap;
+    if (!vprocEnsureSessionInputCapacityLocked(input, needed)) {
+        pthread_mutex_unlock(&input->mu);
+        return false;
     }
     memcpy(input->buf + input->len, data, len);
     input->len += len;
@@ -4419,6 +4427,35 @@ static int vprocWaiterPid(void) {
     return (int)vprocHostGetpidRaw();
 }
 
+static bool vprocEnsureFdCapacityLocked(VProc *vp, size_t needed) {
+    if (!vp || needed == 0) {
+        return false;
+    }
+    if (needed <= vp->capacity) {
+        return true;
+    }
+    size_t new_cap = 0;
+    if (!vprocComputeGrowthCapacity(vp->capacity,
+                                    needed,
+                                    VPROC_INITIAL_CAPACITY,
+                                    sizeof(VProcFdEntry),
+                                    &new_cap)) {
+        return false;
+    }
+    VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
+    if (!resized) {
+        return false;
+    }
+    for (size_t i = vp->capacity; i < new_cap; ++i) {
+        resized[i].host_fd = -1;
+        resized[i].pscal_fd = NULL;
+        resized[i].kind = VPROC_FD_NONE;
+    }
+    vp->entries = resized;
+    vp->capacity = new_cap;
+    return true;
+}
+
 // NOTE: Caller must hold vp->mu
 static int vprocAllocSlot(VProc *vp) {
     if (!vp) {
@@ -4447,19 +4484,11 @@ static int vprocAllocSlot(VProc *vp) {
             return idx;
         }
     }
-    size_t new_cap = vp->capacity ? vp->capacity * 2 : VPROC_INITIAL_CAPACITY;
-    VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
-    if (!resized) {
+    size_t old_cap = vp->capacity;
+    if (!vprocEnsureFdCapacityLocked(vp, old_cap + 1)) {
         return -1;
     }
-    for (size_t i = vp->capacity; i < new_cap; ++i) {
-        resized[i].host_fd = -1;
-        resized[i].pscal_fd = NULL;
-        resized[i].kind = VPROC_FD_NONE;
-    }
-    int idx = (int)vp->capacity;
-    vp->entries = resized;
-    vp->capacity = new_cap;
+    int idx = (int)old_cap;
     vp->next_fd = (idx + 1) % (int)vp->capacity;
     return idx;
 }
@@ -6100,24 +6129,11 @@ int vprocDup2(VProc *vp, int fd, int target) {
     if (pscal_fd) {
         pthread_mutex_lock(&vp->mu);
         if ((size_t)target >= vp->capacity) {
-            size_t new_cap = vp->capacity;
-            if (new_cap == 0) new_cap = VPROC_INITIAL_CAPACITY;
-            while ((size_t)target >= new_cap) {
-                new_cap *= 2;
-            }
-            VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
-            if (!resized) {
+            if (!vprocEnsureFdCapacityLocked(vp, (size_t)target + 1)) {
                 pthread_mutex_unlock(&vp->mu);
                 pscal_fd_close(pscal_fd);
                 return -1;
             }
-            for (size_t i = vp->capacity; i < new_cap; ++i) {
-                resized[i].host_fd = -1;
-                resized[i].pscal_fd = NULL;
-                resized[i].kind = VPROC_FD_NONE;
-            }
-            vp->entries = resized;
-            vp->capacity = new_cap;
         }
         if (vp->entries[target].kind == VPROC_FD_PSCAL && vp->entries[target].pscal_fd) {
             pscal_fd_close(vp->entries[target].pscal_fd);
@@ -6140,23 +6156,10 @@ int vprocDup2(VProc *vp, int fd, int target) {
     
     pthread_mutex_lock(&vp->mu);
     if ((size_t)target >= vp->capacity) {
-        size_t new_cap = vp->capacity;
-        if (new_cap == 0) new_cap = VPROC_INITIAL_CAPACITY;
-        while ((size_t)target >= new_cap) {
-            new_cap *= 2;
-        }
-        VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
-        if (!resized) {
+        if (!vprocEnsureFdCapacityLocked(vp, (size_t)target + 1)) {
             pthread_mutex_unlock(&vp->mu);
             return -1;
         }
-        for (size_t i = vp->capacity; i < new_cap; ++i) {
-            resized[i].host_fd = -1;
-            resized[i].pscal_fd = NULL;
-            resized[i].kind = VPROC_FD_NONE;
-        }
-        vp->entries = resized;
-        vp->capacity = new_cap;
     }
     if (vp->entries[target].kind == VPROC_FD_PSCAL && vp->entries[target].pscal_fd) {
         pscal_fd_close(vp->entries[target].pscal_fd);
@@ -6212,22 +6215,10 @@ int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src) {
     }
     pthread_mutex_lock(&vp->mu);
     if ((size_t)target_fd >= vp->capacity) {
-        size_t new_cap = vp->capacity ? vp->capacity : VPROC_INITIAL_CAPACITY;
-        while ((size_t)target_fd >= new_cap) {
-            new_cap *= 2;
-        }
-        VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
-        if (!resized) {
+        if (!vprocEnsureFdCapacityLocked(vp, (size_t)target_fd + 1)) {
             pthread_mutex_unlock(&vp->mu);
             return -1;
         }
-        for (size_t i = vp->capacity; i < new_cap; ++i) {
-            resized[i].host_fd = -1;
-            resized[i].pscal_fd = NULL;
-            resized[i].kind = VPROC_FD_NONE;
-        }
-        vp->entries = resized;
-        vp->capacity = new_cap;
     }
     if (vp->entries[target_fd].kind == VPROC_FD_PSCAL && vp->entries[target_fd].pscal_fd) {
         pscal_fd_close(vp->entries[target_fd].pscal_fd);
