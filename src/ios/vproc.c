@@ -2908,10 +2908,21 @@ static bool vprocAddChildLocked(VProcTaskEntry *parent, int child_pid) {
             return true;
         }
     }
-    if (parent->child_count >= parent->child_capacity) {
-        size_t new_cap = parent->child_capacity ? parent->child_capacity * 2 : 4;
+    if (parent->child_count + 1 > parent->child_capacity) {
+        size_t new_cap = parent->child_capacity ? parent->child_capacity : 4;
+        while (new_cap < parent->child_count + 1) {
+            if (new_cap > SIZE_MAX / 2) {
+                return false;
+            }
+            new_cap *= 2;
+        }
+        if (new_cap > SIZE_MAX / sizeof(int)) {
+            return false;
+        }
         int *resized = realloc(parent->children, new_cap * sizeof(int));
-        if (!resized) return false;
+        if (!resized) {
+            return false;
+        }
         parent->children = resized;
         parent->child_capacity = new_cap;
     }
