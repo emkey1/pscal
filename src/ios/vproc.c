@@ -6353,6 +6353,32 @@ static bool vprocTaskEntryHasThreadLocked(const VProcTaskEntry *entry, pthread_t
     return false;
 }
 
+static bool vprocEnsureThreadCapacityLocked(VProcTaskEntry *entry, size_t needed) {
+    if (!entry) {
+        return false;
+    }
+    if (needed <= entry->thread_capacity) {
+        return true;
+    }
+    size_t new_cap = entry->thread_capacity ? entry->thread_capacity : 4;
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2) {
+            return false;
+        }
+        new_cap *= 2;
+    }
+    if (new_cap > SIZE_MAX / sizeof(pthread_t)) {
+        return false;
+    }
+    pthread_t *resized = realloc(entry->threads, new_cap * sizeof(pthread_t));
+    if (!resized) {
+        return false;
+    }
+    entry->threads = resized;
+    entry->thread_capacity = new_cap;
+    return true;
+}
+
 int vprocRegisterTidHint(int pid, pthread_t tid) {
     if (pid <= 0) {
         errno = EINVAL;
@@ -6374,16 +6400,10 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
     }
     bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
     if (!duplicate) {
-        if (entry->thread_count >= entry->thread_capacity) {
-            size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
-            pthread_t *resized = realloc(entry->threads, new_cap * sizeof(pthread_t));
-            if (!resized) {
-                pthread_mutex_unlock(&gVProcTasks.mu);
-                errno = ENOMEM;
-                return -1;
-            }
-            entry->threads = resized;
-            entry->thread_capacity = new_cap;
+        if (!vprocEnsureThreadCapacityLocked(entry, entry->thread_count + 1)) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            errno = ENOMEM;
+            return -1;
         }
         entry->threads[entry->thread_count++] = tid;
     }
@@ -6421,16 +6441,10 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
     }
     bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
     if (!duplicate) {
-        if (entry->thread_count >= entry->thread_capacity) {
-            size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
-            pthread_t *resized = realloc(entry->threads, new_cap * sizeof(pthread_t));
-            if (!resized) {
-                pthread_mutex_unlock(&gVProcTasks.mu);
-                errno = ENOMEM;
-                return -1;
-            }
-            entry->threads = resized;
-            entry->thread_capacity = new_cap;
+        if (!vprocEnsureThreadCapacityLocked(entry, entry->thread_count + 1)) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            errno = ENOMEM;
+            return -1;
         }
         entry->threads[entry->thread_count++] = tid;
     }
