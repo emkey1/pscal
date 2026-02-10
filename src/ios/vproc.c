@@ -4284,7 +4284,9 @@ static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
     child_entry->parent_pid = new_parent_pid;
     if (new_parent_pid > 0) {
         if (new_parent_entry) {
-            vprocAddChildLocked(new_parent_entry, child_pid);
+            if (!vprocAddChildLocked(new_parent_entry, child_pid)) {
+                child_entry->parent_pid = 0;
+            }
         }
     }
 }
@@ -5114,7 +5116,9 @@ int vprocReservePid(void) {
     entry->pgid = pid;
     entry->fg_pgid = pid;
     if (parent_entry && parent_pid > 0) {
-        vprocAddChildLocked(parent_entry, pid);
+        if (!vprocAddChildLocked(parent_entry, pid)) {
+            entry->parent_pid = 0;
+        }
     }
     if (gVProcTasks.items && gVProcTasks.count > 0) {
         ptrdiff_t idx = entry - gVProcTasks.items;
@@ -5262,7 +5266,9 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     if (entry->parent_pid > 0) {
         VProcTaskEntry *parent = (VProcTaskEntry *)parent_entry;
         if (parent && parent->pid == entry->parent_pid) {
-            vprocAddChildLocked(parent, pid);
+            if (!vprocAddChildLocked(parent, pid)) {
+                entry->parent_pid = 0;
+            }
         }
     }
     if (gVProcTasks.items && gVProcTasks.count > 0) {
@@ -5382,7 +5388,9 @@ VProc *vprocCreate(const VProcOptions *opts) {
     vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
     slot->parent_pid = parent_pid;
     if (parent_entry && parent_pid > 0) {
-        vprocAddChildLocked(parent_entry, vp->pid);
+        if (!vprocAddChildLocked(parent_entry, vp->pid)) {
+            slot->parent_pid = 0;
+        }
     }
     if (local.job_id > 0) {
         slot->job_id = local.job_id;
