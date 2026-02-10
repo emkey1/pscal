@@ -10918,7 +10918,7 @@ static short vprocPollMapReady(int pscal_events, short requested) {
     return (short)(ready & mask);
 }
 
-#define VPROC_POLL_STACK_FDS 64
+#define VPROC_POLL_STACK_FDS 128
 int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
