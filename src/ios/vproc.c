@@ -3129,12 +3129,12 @@ static VProcTaskEntry *vprocSessionLeaderBySidLocked(int sid) {
         return NULL;
     }
     VProcTaskEntry *leader = vprocTaskFindLocked(sid);
-    if (leader && leader->pid > 0 && leader->sid == sid && leader->session_leader) {
+    if (leader && leader->sid == sid && leader->session_leader) {
         return leader;
     }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) {
+        if (entry->pid <= 0) {
             continue;
         }
         if (entry->sid == sid && entry->session_leader) {
@@ -6887,7 +6887,7 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
     vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) {
+        if (entry->pid <= 0) {
             continue;
         }
         uint64_t now = vprocNowMonoNs();
@@ -8311,7 +8311,7 @@ int vprocEnsureKernelPid(void) {
         pthread_mutex_lock(&gVProcTasks.mu);
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) {
+            if (entry->pid <= 0) {
                 continue;
             }
             if (entry->pid == pid) {
