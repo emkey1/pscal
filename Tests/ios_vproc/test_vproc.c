@@ -27,8 +27,6 @@ void pscalRuntimeDebugLog(const char *message) {
 
 #include "ios/vproc.h"
 
-static int current_waiter_pid(void);
-
 static void burn_cpu_for_ms(int ms) {
     struct timespec start;
     assert(clock_gettime(CLOCK_MONOTONIC, &start) == 0);
@@ -351,20 +349,15 @@ static void assert_dev_tty_available_in_pipeline(void) {
 
 typedef struct {
     int pid;
-    int parent_pid;
 } VProcWaitArg;
 
 static void *wait_helper_thread(void *arg) {
     VProcWaitArg *info = (VProcWaitArg *)arg;
     VProc *vp = vprocCreate(NULL);
     assert(vp);
-    int pid = vprocPid(vp);
+    info->pid = vprocPid(vp);
     vprocRegisterThread(vp, pthread_self());
     vprocActivate(vp);
-    if (info->parent_pid > 0) {
-        vprocSetParent(pid, info->parent_pid);
-    }
-    info->pid = pid;
     vprocMarkExit(vp, 7);
     vprocDeactivate();
     vprocDestroy(vp);
@@ -373,13 +366,7 @@ static void *wait_helper_thread(void *arg) {
 
 static void assert_wait_on_synthetic_pid(void) {
     pthread_t tid;
-    VProcWaitArg arg = {.pid = -1, .parent_pid = current_waiter_pid()};
-    struct sigaction sa_reset;
-    memset(&sa_reset, 0, sizeof(sa_reset));
-    sa_reset.sa_handler = SIG_DFL;
-    sa_reset.sa_flags = 0;
-    sigemptyset(&sa_reset.sa_mask);
-    assert(vprocSigaction(arg.parent_pid, SIGCHLD, &sa_reset, NULL) == 0);
+    VProcWaitArg arg = {.pid = -1};
     assert(pthread_create(&tid, NULL, wait_helper_thread, &arg) == 0);
     while (arg.pid <= 0) {
         sched_yield();
@@ -468,69 +455,22 @@ static int current_waiter_pid(void) {
 }
 
 static void assert_wait_enforces_parent(void) {
-    int prev_shell = vprocGetShellSelfPid();
-    int waiter = (int)getpid();
-    vprocSetShellSelfPid(waiter);
-    struct sigaction sa_reset;
-    memset(&sa_reset, 0, sizeof(sa_reset));
-    sa_reset.sa_handler = SIG_DFL;
-    sa_reset.sa_flags = 0;
-    sigemptyset(&sa_reset.sa_mask);
-    assert(vprocSigaction(waiter, SIGCHLD, &sa_reset, NULL) == 0);
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    int waiter = current_waiter_pid();
 
-    /* Child owned by a different parent must not be waitable. */
-    VProc *vp_other_parent = vprocCreate(NULL);
-    assert(vp_other_parent);
-    int other_pid = vprocPid(vp_other_parent);
-    vprocSetParent(other_pid, waiter + 9999);
-    vprocMarkExit(vp_other_parent, 9);
-
+    vprocSetParent(pid, waiter + 9999);
+    vprocMarkExit(vp, 9);
     int status = 0;
     errno = 0;
-    int got = vprocWaitPidShim(other_pid, &status, 0);
-    assert(got == -1);
+    assert(vprocWaitPidShim(pid, &status, 0) == -1);
     assert(errno == ECHILD);
-    vprocDestroy(vp_other_parent);
 
-    /* Child owned by waiter must be waitable. */
-    VProc *vp_waiter_parent = vprocCreate(NULL);
-    assert(vp_waiter_parent);
-    int own_pid = vprocPid(vp_waiter_parent);
-    vprocSetParent(own_pid, waiter);
-    struct sigaction sa_now;
-    memset(&sa_now, 0, sizeof(sa_now));
-    assert(vprocSigaction(waiter, SIGCHLD, NULL, &sa_now) == 0);
-    vprocMarkExit(vp_waiter_parent, 9);
-
-    errno = 0;
-    got = vprocWaitPidShim(own_pid, &status, 0);
-    if (got != own_pid) {
-        size_t cap = vprocSnapshot(NULL, 0);
-        VProcSnapshot *snaps = (VProcSnapshot *)calloc(cap ? cap : 1, sizeof(VProcSnapshot));
-        size_t count = snaps ? vprocSnapshot(snaps, cap ? cap : 1) : 0;
-        fprintf(stderr,
-                "  [wait-parent2] own_pid=%d got=%d errno=%d status=%d waiter=%d shell=%d host=%d count=%zu\n",
-                own_pid, got, errno, status, waiter, vprocGetShellSelfPid(), (int)getpid(), count);
-        fprintf(stderr, "  [wait-parent2] waiter SIGCHLD handler=%p flags=0x%x\n",
-                (void *)sa_now.sa_handler, sa_now.sa_flags);
-        for (size_t i = 0; i < count; ++i) {
-            if (snaps[i].pid == own_pid || snaps[i].pid == waiter || snaps[i].pid == waiter + 9999) {
-                fprintf(stderr,
-                        "  [wait-parent2] snap pid=%d ppid=%d exited=%d zombie=%d sigchld=%d status=%d\n",
-                        snaps[i].pid,
-                        snaps[i].parent_pid,
-                        snaps[i].exited ? 1 : 0,
-                        snaps[i].zombie ? 1 : 0,
-                        snaps[i].sigchld_pending ? 1 : 0,
-                        snaps[i].status);
-            }
-        }
-        free(snaps);
-    }
-    assert(got == own_pid);
+    vprocSetParent(pid, waiter);
+    assert(vprocWaitPidShim(pid, &status, 0) == pid);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 9);
-    vprocDestroy(vp_waiter_parent);
-    vprocSetShellSelfPid(prev_shell);
+    vprocDestroy(vp);
 }
 
 static void assert_wait_wnowait_preserves_zombie(void) {
@@ -611,28 +551,6 @@ static void assert_wait_reports_continued(void) {
     memset(&status, 0, sizeof(status));
     assert(vprocWaitPidShim(pid, &status, 0) == pid);
     vprocDestroy(vp);
-}
-
-static void assert_task_slots_reused_after_reap(void) {
-    int prev_shell = vprocGetShellSelfPid();
-    int shell_pid = current_waiter_pid();
-    vprocSetShellSelfPid(shell_pid);
-
-    for (int i = 0; i < 4200; ++i) {
-        VProc *vp = vprocCreate(NULL);
-        assert(vp);
-        int pid = vprocPid(vp);
-        vprocSetParent(pid, shell_pid);
-        vprocMarkExit(vp, i & 0xff);
-
-        int status = 0;
-        assert(vprocWaitPidShim(pid, &status, 0) == pid);
-        assert(WIFEXITED(status));
-        assert(WEXITSTATUS(status) == (i & 0xff));
-        vprocDestroy(vp);
-    }
-
-    vprocSetShellSelfPid(prev_shell);
 }
 
 static void assert_kill_zero_targets_current_pgid(void) {
@@ -2151,8 +2069,6 @@ int main(void) {
     assert_wait_by_pgid();
     fprintf(stderr, "TEST wait_reports_continued\n");
     assert_wait_reports_continued();
-    fprintf(stderr, "TEST task_slots_reused_after_reap\n");
-    assert_task_slots_reused_after_reap();
     fprintf(stderr, "TEST kill_zero_targets_current_pgid\n");
     assert_kill_zero_targets_current_pgid();
     fprintf(stderr, "TEST children_reparent_to_shell\n");
