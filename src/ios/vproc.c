@@ -3046,6 +3046,8 @@ static VProcTaskEntry *vprocSessionLeaderBySidLocked(int sid) {
             continue;
         }
         if (entry->sid == sid && entry->session_leader) {
+            gVProcTaskFindHint = i;
+            vprocTaskLookupRememberLocked(entry->pid, i);
             return entry;
         }
     }
@@ -5083,13 +5085,11 @@ static void vprocTaskTableRepairLocked(void) {
         gVProcTasks.capacity = 0;
         gVProcTaskFindHint = 0;
         gVProcTaskFreeHint = 0;
-        memset(gVProcTaskLookupCache, 0, sizeof(gVProcTaskLookupCache));
     } else if (gVProcTasks.count > gVProcTasks.capacity) {
         gVProcTasks.count = gVProcTasks.capacity;
     } else if (gVProcTasks.count == 0) {
         gVProcTaskFindHint = 0;
         gVProcTaskFreeHint = 0;
-        memset(gVProcTaskLookupCache, 0, sizeof(gVProcTaskLookupCache));
     }
 }
 
