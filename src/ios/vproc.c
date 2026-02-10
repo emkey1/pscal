@@ -6551,13 +6551,15 @@ void vprocMarkGroupExit(int pid, int status) {
 
 void vprocSetParent(int pid, int parent_pid) {
     bool dbg = vprocVprocDebugEnabled();
-    int kernel_pid = vprocGetKernelPid();
     pthread_mutex_lock(&gVProcTasks.mu);
     /* Keep explicit parent assignments intact. The parent task can be
      * registered slightly later than the child; forcing kernel_pid here
      * collapses lineage and makes children appear attached to the kernel. */
-    if (kernel_pid > 0 && parent_pid <= 0 && pid != kernel_pid) {
-        parent_pid = kernel_pid;
+    if (parent_pid <= 0) {
+        int kernel_pid = vprocGetKernelPid();
+        if (kernel_pid > 0 && pid != kernel_pid) {
+            parent_pid = kernel_pid;
+        }
     }
     if (dbg) {
         VProcTaskEntry *entry = vprocTaskFindLocked(pid);
