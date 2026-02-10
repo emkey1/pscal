@@ -1680,10 +1680,12 @@ static void vprocPtyTrace(const char *format, ...);
 static __thread VProc *gVProcCurrent = NULL;
 static __thread VProc *gVProcStack[16] = {0};
 static __thread size_t gVProcStackDepth = 0;
+static __thread unsigned long long gVProcRegistrySeenVersion = 0;
 static VProc **gVProcRegistry = NULL;
 static size_t gVProcRegistryCount = 0;
 static size_t gVProcRegistryCapacity = 0;
 static pthread_mutex_t gVProcRegistryMu = PTHREAD_MUTEX_INITIALIZER;
+static unsigned long long gVProcRegistryVersion = 1;
 static int gNextSyntheticPid = 0;
 static _Thread_local int gShellSelfPid = 0;
 static int gShellSelfPidGlobal = 0;
@@ -2295,6 +2297,7 @@ static void vprocRegistryAdd(VProc *vp) {
         gVProcRegistryCapacity = new_cap;
     }
     gVProcRegistry[gVProcRegistryCount++] = vp;
+    __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&gVProcRegistryMu);
 }
 
@@ -2307,6 +2310,7 @@ static void vprocRegistryRemove(VProc *vp) {
         if (gVProcRegistry[i] == vp) {
             gVProcRegistry[i] = gVProcRegistry[gVProcRegistryCount - 1];
             gVProcRegistryCount--;
+            __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
             break;
         }
     }
@@ -2332,6 +2336,7 @@ static bool vprocRegistryContains(const VProc *vp) {
 static void vprocClearThreadState(void) {
     gVProcCurrent = NULL;
     gVProcStackDepth = 0;
+    gVProcRegistrySeenVersion = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
     for (size_t i = 0; i < sizeof(gVProcStack) / sizeof(gVProcStack[0]); ++i) {
         gVProcStack[i] = NULL;
     }
@@ -5513,13 +5518,21 @@ void vprocDestroy(VProc *vp) {
 
 void vprocActivate(VProc *vp) {
     gVProcTlsReady = 1;
-    if (gVProcCurrent && !vprocRegistryContains(gVProcCurrent)) {
-        vprocClearThreadState();
+    if (gVProcCurrent) {
+        unsigned long long version = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
+        if (gVProcRegistrySeenVersion != version) {
+            if (!vprocRegistryContains(gVProcCurrent)) {
+                vprocClearThreadState();
+            } else {
+                gVProcRegistrySeenVersion = version;
+            }
+        }
     }
     if (gVProcStackDepth < (sizeof(gVProcStack) / sizeof(gVProcStack[0]))) {
         gVProcStack[gVProcStackDepth++] = gVProcCurrent;
     }
     gVProcCurrent = vp;
+    gVProcRegistrySeenVersion = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
     gVProcInterposeReady = 1;
 }
 
@@ -6215,6 +6228,7 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
     bool vdbg = vprocVprocDebugEnabled();
     char thread_name[16];
     bool rename_thread = false;
+    size_t thread_count = 0;
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
     if (!entry) {
@@ -6248,13 +6262,14 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         entry->threads[entry->thread_count++] = tid;
     }
     rename_thread = vprocPrepareThreadNameLocked(entry, thread_name, sizeof(thread_name));
+    thread_count = entry->thread_count;
     pthread_mutex_unlock(&gVProcTasks.mu);
     if (rename_thread) {
         vprocApplyThreadName(thread_name);
     }
     if (vdbg) {
         vprocDebugLogf( "[vproc] register tid hint pid=%d tid=%p thread_count=%zu\n",
-                pid, (void *)tid, entry->thread_count);
+                pid, (void *)tid, thread_count);
     }
     return pid;
 }
@@ -8753,9 +8768,13 @@ static VProc *vprocForThread(void) {
     if (!vp) {
         return NULL;
     }
-    if (!vprocRegistryContains(vp)) {
-        vprocClearThreadState();
-        return NULL;
+    unsigned long long version = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
+    if (gVProcRegistrySeenVersion != version) {
+        if (!vprocRegistryContains(vp)) {
+            vprocClearThreadState();
+            return NULL;
+        }
+        gVProcRegistrySeenVersion = version;
     }
     return vp;
 }
