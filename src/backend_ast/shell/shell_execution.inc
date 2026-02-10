@@ -4089,6 +4089,7 @@ static void *shellPipelineStageThreadMain(void *arg) {
     ShellRuntimeState *prev_shell_ctx = NULL;
     VM *bg_vm = NULL;
     VM *prev_vm = NULL;
+    bool worker_ctx_ready = true;
     static pthread_once_t bg_builtin_once = PTHREAD_ONCE_INIT;
     pthread_once(&bg_builtin_once, registerExtendedBuiltins);
     bg_shell_ctx = shellRuntimeCreateContext();
@@ -4105,7 +4106,10 @@ static void *shellPipelineStageThreadMain(void *arg) {
             prev_shell_ctx = NULL;
             free(bg_shell_ctx);
             bg_shell_ctx = NULL;
+            worker_ctx_ready = false;
         }
+    } else {
+        worker_ctx_ready = false;
     }
 
     PSCALRuntimeContext *prev_runtime_ctx = NULL;
@@ -4124,14 +4128,27 @@ static void *shellPipelineStageThreadMain(void *arg) {
         swapped_stdio = true;
     }
 #endif
-    vprocSetPipelineStage(true);
-    int status = shellPipelineRunStage(stage_vm,
+    int status = 1;
+#if defined(PSCAL_TARGET_IOS)
+    if (!worker_ctx_ready) {
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr,
+                    "[pipe-thread] stage=%zu cmd=%s: unable to allocate isolated worker context\n",
+                    tctx->stage_pos,
+                    (tctx->cmd && tctx->cmd->argv && tctx->cmd->argv[0]) ? tctx->cmd->argv[0] : "<nil>");
+        }
+    } else
+#endif
+    {
+        vprocSetPipelineStage(true);
+        status = shellPipelineRunStage(stage_vm,
                                        tctx->ctx,
                                        tctx->cmd,
                                        tctx->stage_pos,
                                        tctx->pipeline_head,
                                        tctx->pipeline_tail);
-    vprocSetPipelineStage(false);
+        vprocSetPipelineStage(false);
+    }
     if (getenv("PSCALI_PIPE_DEBUG")) {
         fprintf(stderr,
                 "[pipe-thread] stage=%zu cmd=%s status=%d tail=%d bg=%d\n",
