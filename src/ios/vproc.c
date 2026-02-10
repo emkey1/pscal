@@ -5594,7 +5594,8 @@ void vprocActivate(VProc *vp) {
     if (gVProcCurrent && !vprocRegistryContainsValidated(gVProcCurrent)) {
         /* vprocRegistryContainsValidated already cleared thread-local state. */
     }
-    if (gVProcStackDepth < (sizeof(gVProcStack) / sizeof(gVProcStack[0]))) {
+    if (gVProcCurrent &&
+        gVProcStackDepth < (sizeof(gVProcStack) / sizeof(gVProcStack[0]))) {
         gVProcStack[gVProcStackDepth++] = gVProcCurrent;
     }
     gVProcCurrent = vp;
