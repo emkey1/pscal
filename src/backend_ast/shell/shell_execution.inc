@@ -3706,7 +3706,7 @@ static int shellRunBuiltinInProcess(VM *vm,
             }
             int fb_status = -1;
             if (temp0) {
-                const char *saved0 = cmd->argv[0];
+                char *saved0 = cmd->argv[0];
                 cmd->argv[0] = (char *)temp0;
                 fb_status = shellTryRunScriptFallback(vm ? vm : gShellCurrentVm, cmd);
                 cmd->argv[0] = saved0;

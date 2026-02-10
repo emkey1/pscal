@@ -10413,7 +10413,6 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
             }
         }
         sent = true;
-        int status = 0;
         if (!terminate) {
             ShellWaitResult wait_res;
             int err = shellWaitPidDetailed(pid, true, &wait_res);
