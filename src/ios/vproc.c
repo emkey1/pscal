@@ -10919,6 +10919,99 @@ static short vprocPollMapReady(int pscal_events, short requested) {
 }
 
 #define VPROC_POLL_STACK_FDS 128
+#define VPROC_SELECT_STACK_FDS 128
+
+typedef struct {
+    struct pscal_fd **pscal_fds;
+    int *host_index;
+    struct pollfd *host_fds;
+    size_t capacity;
+} VProcPollScratch;
+
+typedef struct {
+    struct pollfd *pfds;
+    int *fd_map;
+    size_t capacity;
+} VProcSelectScratch;
+
+static __thread VProcPollScratch gVProcPollScratch = {0};
+static __thread VProcSelectScratch gVProcSelectScratch = {0};
+
+static bool vprocPollScratchEnsure(size_t needed) {
+    if (needed <= gVProcPollScratch.capacity) {
+        return true;
+    }
+    size_t new_cap = gVProcPollScratch.capacity ? gVProcPollScratch.capacity : (VPROC_POLL_STACK_FDS * 2u);
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2u) {
+            errno = ENOMEM;
+            return false;
+        }
+        new_cap *= 2u;
+    }
+    if (new_cap > SIZE_MAX / sizeof(*gVProcPollScratch.pscal_fds) ||
+        (new_cap + 1u) > SIZE_MAX / sizeof(*gVProcPollScratch.host_index) ||
+        (new_cap + 1u) > SIZE_MAX / sizeof(*gVProcPollScratch.host_fds)) {
+        errno = ENOMEM;
+        return false;
+    }
+
+    struct pscal_fd **pscal_fds = calloc(new_cap, sizeof(*pscal_fds));
+    int *host_index = calloc(new_cap + 1u, sizeof(*host_index));
+    struct pollfd *host_fds = calloc(new_cap + 1u, sizeof(*host_fds));
+    if (!pscal_fds || !host_index || !host_fds) {
+        free(pscal_fds);
+        free(host_index);
+        free(host_fds);
+        errno = ENOMEM;
+        return false;
+    }
+
+    free(gVProcPollScratch.pscal_fds);
+    free(gVProcPollScratch.host_index);
+    free(gVProcPollScratch.host_fds);
+    gVProcPollScratch.pscal_fds = pscal_fds;
+    gVProcPollScratch.host_index = host_index;
+    gVProcPollScratch.host_fds = host_fds;
+    gVProcPollScratch.capacity = new_cap;
+    return true;
+}
+
+static bool vprocSelectScratchEnsure(size_t needed) {
+    if (needed <= gVProcSelectScratch.capacity) {
+        return true;
+    }
+    size_t new_cap = gVProcSelectScratch.capacity ? gVProcSelectScratch.capacity : (VPROC_SELECT_STACK_FDS * 2u);
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2u) {
+            errno = ENOMEM;
+            return false;
+        }
+        new_cap *= 2u;
+    }
+    if (new_cap > SIZE_MAX / sizeof(*gVProcSelectScratch.pfds) ||
+        new_cap > SIZE_MAX / sizeof(*gVProcSelectScratch.fd_map)) {
+        errno = ENOMEM;
+        return false;
+    }
+
+    struct pollfd *pfds = calloc(new_cap, sizeof(*pfds));
+    int *fd_map = calloc(new_cap, sizeof(*fd_map));
+    if (!pfds || !fd_map) {
+        free(pfds);
+        free(fd_map);
+        errno = ENOMEM;
+        return false;
+    }
+
+    free(gVProcSelectScratch.pfds);
+    free(gVProcSelectScratch.fd_map);
+    gVProcSelectScratch.pfds = pfds;
+    gVProcSelectScratch.fd_map = fd_map;
+    gVProcSelectScratch.capacity = new_cap;
+    return true;
+}
+
 int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
@@ -10937,7 +11030,6 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     int host_index_stack[VPROC_POLL_STACK_FDS + 1];
     struct pollfd host_fds_stack[VPROC_POLL_STACK_FDS + 1];
     bool use_stack = nfds <= VPROC_POLL_STACK_FDS;
-    bool use_heap = false;
 
     struct pscal_fd **pscal_fds = NULL;
     int *host_index = NULL;
@@ -10950,29 +11042,13 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         host_index = host_index_stack;
         host_fds = host_fds_stack;
     } else {
-        size_t nfds_size = (size_t)nfds;
-        if (nfds_size > (SIZE_MAX / sizeof(*pscal_fds)) ||
-            nfds_size > (SIZE_MAX - 1)) {
-            errno = ENOMEM;
+        if (!vprocPollScratchEnsure((size_t)nfds)) {
             return -1;
         }
-        size_t nfds_plus_one = nfds_size + 1;
-        if (nfds_plus_one > (SIZE_MAX / sizeof(*host_index)) ||
-            nfds_plus_one > (SIZE_MAX / sizeof(*host_fds))) {
-            errno = ENOMEM;
-            return -1;
-        }
-        pscal_fds = calloc(nfds, sizeof(*pscal_fds));
-        host_index = calloc(nfds + 1, sizeof(*host_index));
-        host_fds = calloc(nfds + 1, sizeof(*host_fds));
-        if (!pscal_fds || !host_index || !host_fds) {
-            free(pscal_fds);
-            free(host_index);
-            free(host_fds);
-            errno = ENOMEM;
-            return -1;
-        }
-        use_heap = true;
+        pscal_fds = gVProcPollScratch.pscal_fds;
+        host_index = gVProcPollScratch.host_index;
+        host_fds = gVProcPollScratch.host_fds;
+        memset(pscal_fds, 0, ((size_t)nfds) * sizeof(*pscal_fds));
     }
 
     int ready_count = 0;
@@ -11042,11 +11118,6 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
                         pscal_fd_close(pscal_fds[i]);
                     }
                 }
-                if (use_heap) {
-                    free(pscal_fds);
-                    free(host_index);
-                    free(host_fds);
-                }
                 return -1;
             }
             if (wake_fd >= 0 && (host_fds[host_count - 1].revents & POLLIN)) {
@@ -11096,15 +11167,9 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
             pscal_fd_close(pscal_fds[i]);
         }
     }
-    if (use_heap) {
-        free(pscal_fds);
-        free(host_index);
-        free(host_fds);
-    }
     return ready_count;
 }
 
-#define VPROC_SELECT_STACK_FDS 128
 int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
@@ -11157,7 +11222,6 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
     struct pollfd pfds_stack[VPROC_SELECT_STACK_FDS];
     int fd_map_stack[VPROC_SELECT_STACK_FDS];
     bool use_stack = count <= VPROC_SELECT_STACK_FDS;
-    bool use_heap = false;
     struct pollfd *pfds = NULL;
     int *fd_map = NULL;
     if (use_stack) {
@@ -11166,21 +11230,11 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         pfds = pfds_stack;
         fd_map = fd_map_stack;
     } else {
-        size_t count_size = (size_t)count;
-        if (count_size > (SIZE_MAX / sizeof(*pfds)) ||
-            count_size > (SIZE_MAX / sizeof(*fd_map))) {
-            errno = ENOMEM;
+        if (!vprocSelectScratchEnsure((size_t)count)) {
             return -1;
         }
-        pfds = calloc((size_t)count, sizeof(*pfds));
-        fd_map = calloc((size_t)count, sizeof(*fd_map));
-        if (!pfds || !fd_map) {
-            free(pfds);
-            free(fd_map);
-            errno = ENOMEM;
-            return -1;
-        }
-        use_heap = true;
+        pfds = gVProcSelectScratch.pfds;
+        fd_map = gVProcSelectScratch.fd_map;
     }
 
     int cursor = 0;
@@ -11200,10 +11254,6 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
     }
     int res = vprocPollShim(pfds, (nfds_t)count, timeout_ms);
     if (res < 0) {
-        if (use_heap) {
-            free(pfds);
-            free(fd_map);
-        }
         return -1;
     }
 
@@ -11236,10 +11286,6 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         }
     }
 
-    if (use_heap) {
-        free(pfds);
-        free(fd_map);
-    }
     return ready;
 }
 
