@@ -5211,8 +5211,7 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     }
     const VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
     if (!parent_entry && parent_pid > 0 && parent_pid != pid) {
-        (void)vprocTaskEnsureSlotLocked(parent_pid);
-        parent_entry = vprocTaskFindLocked(parent_pid);
+        parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
     }
     /* Preallocate generously and avoid realloc to keep table pointer stable. */
     if (gVProcTasks.capacity == 0) {
