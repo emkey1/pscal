@@ -4199,10 +4199,26 @@ static int vprocAllocSlot(VProc *vp) {
     if (!vp) {
         return -1;
     }
-    for (int i = 0; i < (int)vp->capacity; ++i) {
-        int idx = (vp->next_fd + i) % (int)vp->capacity;
+    int capacity = (int)vp->capacity;
+    if (capacity <= 0) {
+        return -1;
+    }
+    int start = vp->next_fd;
+    if (start < 0 || start >= capacity) {
+        start %= capacity;
+        if (start < 0) {
+            start += capacity;
+        }
+    }
+    for (int idx = start; idx < capacity; ++idx) {
         if (vp->entries[idx].kind == VPROC_FD_NONE) {
-            vp->next_fd = (idx + 1) % (int)vp->capacity;
+            vp->next_fd = (idx + 1) % capacity;
+            return idx;
+        }
+    }
+    for (int idx = 0; idx < start; ++idx) {
+        if (vp->entries[idx].kind == VPROC_FD_NONE) {
+            vp->next_fd = (idx + 1) % capacity;
             return idx;
         }
     }
