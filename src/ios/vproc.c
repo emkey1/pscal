@@ -7824,13 +7824,17 @@ int vprocGetShellSelfPid(void) {
 
 int vprocThreadIsRegistered(pthread_t tid) {
     bool registered = false;
-    pthread_mutex_lock(&gVProcTasks.mu);
+    int self_pid_hint = -1;
     if (pthread_equal(tid, pthread_self())) {
         VProc *current = vprocCurrent();
         if (current) {
-            VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(current));
-            registered = vprocTaskEntryHasThreadLocked(entry, tid);
+            self_pid_hint = vprocPid(current);
         }
+    }
+    pthread_mutex_lock(&gVProcTasks.mu);
+    if (self_pid_hint > 0) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(self_pid_hint);
+        registered = vprocTaskEntryHasThreadLocked(entry, tid);
     }
     if (!registered) {
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
@@ -7847,15 +7851,19 @@ int vprocThreadIsRegistered(pthread_t tid) {
 
 int vprocThreadIsRegisteredNonblocking(pthread_t tid) {
     bool registered = false;
-    if (pthread_mutex_trylock(&gVProcTasks.mu) != 0) {
-        return 0;
-    }
+    int self_pid_hint = -1;
     if (pthread_equal(tid, pthread_self())) {
         VProc *current = vprocCurrent();
         if (current) {
-            VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(current));
-            registered = vprocTaskEntryHasThreadLocked(entry, tid);
+            self_pid_hint = vprocPid(current);
         }
+    }
+    if (pthread_mutex_trylock(&gVProcTasks.mu) != 0) {
+        return 0;
+    }
+    if (self_pid_hint > 0) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(self_pid_hint);
+        registered = vprocTaskEntryHasThreadLocked(entry, tid);
     }
     if (!registered) {
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
