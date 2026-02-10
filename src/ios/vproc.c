@@ -6843,6 +6843,56 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
     return count;
 }
 
+static inline bool vprocWaitParentMatchesLocked(const VProcTaskEntry *entry,
+                                                int waiter_pid,
+                                                int kernel_pid) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->parent_pid == waiter_pid) {
+        return true;
+    }
+    return kernel_pid > 0 &&
+           entry->parent_pid == kernel_pid &&
+           entry->sid == waiter_pid;
+}
+
+static inline bool vprocWaitPidMatchesLocked(const VProcTaskEntry *entry,
+                                             pid_t pid,
+                                             int waiter_pgid) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (pid > 0) {
+        return entry->pid == pid;
+    }
+    if (pid == -1) {
+        return true;
+    }
+    if (pid == 0) {
+        return (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
+    }
+    return entry->pgid == -pid;
+}
+
+static inline bool vprocWaitStateChangeMatchesLocked(const VProcTaskEntry *entry,
+                                                     bool allow_stop,
+                                                     bool allow_cont) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->exited) {
+        return true;
+    }
+    if (allow_stop && entry->stopped && entry->stop_signo > 0) {
+        return true;
+    }
+    if (allow_cont && entry->continued) {
+        return true;
+    }
+    return false;
+}
+
 static bool vprocHasWaitCandidateLocked(pid_t pid,
                                         int waiter_pid,
                                         int waiter_pgid,
@@ -6852,36 +6902,14 @@ static bool vprocHasWaitCandidateLocked(pid_t pid,
         if (!entry || entry->pid <= 0) {
             return false;
         }
-        bool parent_match = (entry->parent_pid == waiter_pid);
-        if (!parent_match && kernel_pid > 0 &&
-            entry->parent_pid == kernel_pid &&
-            entry->sid == waiter_pid) {
-            parent_match = true;
-        }
-        return parent_match;
+        return vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid);
     }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        bool parent_match = (entry->parent_pid == waiter_pid);
-        if (!parent_match && kernel_pid > 0 &&
-            entry->parent_pid == kernel_pid &&
-            entry->sid == waiter_pid) {
-            parent_match = true;
+        if (!vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid)) {
+            continue;
         }
-        if (!parent_match) continue;
-
-        bool match = false;
-        if (pid > 0 && entry->pid == pid) {
-            match = true;
-        } else if (pid == -1) {
-            match = true;
-        } else if (pid == 0) {
-            match = (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
-        } else if (pid < -1) {
-            match = (entry->pgid == -pid);
-        }
-        if (match) {
+        if (vprocWaitPidMatchesLocked(entry, pid, waiter_pgid)) {
             return true;
         }
     }
@@ -6955,49 +6983,20 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
 
         if (pid > 0) {
             VProcTaskEntry *entry = vprocTaskFindLocked((int)pid);
-            if (entry && entry->pid > 0) {
-                bool parent_match = (entry->parent_pid == waiter_pid);
-                if (!parent_match && kernel_pid > 0 &&
-                    entry->parent_pid == kernel_pid &&
-                    entry->sid == waiter_pid) {
-                    parent_match = true;
-                }
-                if (parent_match) {
-                    has_candidate = true;
-                    if (entry->exited ||
-                        (allow_stop && entry->stopped && entry->stop_signo > 0) ||
-                        (allow_cont && entry->continued)) {
-                        ready = entry;
-                    }
+            if (entry && vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid)) {
+                has_candidate = true;
+                if (vprocWaitStateChangeMatchesLocked(entry, allow_stop, allow_cont)) {
+                    ready = entry;
                 }
             }
         } else {
             for (size_t i = 0; i < gVProcTasks.count; ++i) {
                 VProcTaskEntry *entry = &gVProcTasks.items[i];
-                if (!entry || entry->pid <= 0) continue;
-                bool parent_match = (entry->parent_pid == waiter_pid);
-                if (!parent_match && kernel_pid > 0 &&
-                    entry->parent_pid == kernel_pid &&
-                    entry->sid == waiter_pid) {
-                    parent_match = true;
-                }
-                if (!parent_match) continue;
-
-                bool match = false;
-                if (pid == -1) {
-                    match = true;
-                } else if (pid == 0) {
-                    match = (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
-                } else if (pid < -1) {
-                    match = (entry->pgid == -pid);
-                }
-
-                if (!match) continue;
+                if (!vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid)) continue;
+                if (!vprocWaitPidMatchesLocked(entry, pid, waiter_pgid)) continue;
                 has_candidate = true;
 
-                if (entry->exited ||
-                    (allow_stop && entry->stopped && entry->stop_signo > 0) ||
-                    (allow_cont && entry->continued)) {
+                if (vprocWaitStateChangeMatchesLocked(entry, allow_stop, allow_cont)) {
                     ready = entry;
                     break;
                 }
