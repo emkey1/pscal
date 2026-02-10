@@ -1883,6 +1883,29 @@ static void assert_select_rejects_oversize_fdset(void) {
     vprocDestroy(vp);
 }
 
+static void assert_select_rejects_invalid_timeval(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+
+    struct timeval bad_neg = {.tv_sec = -1, .tv_usec = 0};
+    errno = 0;
+    assert(vprocSelectShim(0, &rfds, NULL, NULL, &bad_neg) == -1);
+    assert(errno == EINVAL);
+
+    struct timeval bad_usec = {.tv_sec = 0, .tv_usec = 1000000};
+    errno = 0;
+    assert(vprocSelectShim(0, &rfds, NULL, NULL, &bad_usec) == -1);
+    assert(errno == EINVAL);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 static void assert_location_disable_unblocks_and_errors(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -2457,6 +2480,8 @@ int main(void) {
     assert_select_empty_set_honors_timeout();
     fprintf(stderr, "TEST select_rejects_oversize_fdset\n");
     assert_select_rejects_oversize_fdset();
+    fprintf(stderr, "TEST select_rejects_invalid_timeval\n");
+    assert_select_rejects_invalid_timeval();
     fprintf(stderr, "TEST location_disable_unblocks_and_errors\n");
     assert_location_disable_unblocks_and_errors();
     fprintf(stderr, "TEST location_reader_observer_fires\n");

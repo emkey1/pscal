@@ -11040,6 +11040,10 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         errno = EINVAL;
         return -1;
     }
+    if (timeout && (timeout->tv_sec < 0 || timeout->tv_usec < 0 || timeout->tv_usec >= 1000000)) {
+        errno = EINVAL;
+        return -1;
+    }
 
     int count = 0;
     for (int fd = 0; fd < nfds; ++fd) {
@@ -11055,9 +11059,7 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
     int timeout_ms = -1;
     if (timeout) {
         int64_t total_ms = (int64_t)timeout->tv_sec * 1000 + (int64_t)(timeout->tv_usec / 1000);
-        if (total_ms < 0) {
-            total_ms = 0;
-        } else if (total_ms > INT_MAX) {
+        if (total_ms > INT_MAX) {
             total_ms = INT_MAX;
         }
         timeout_ms = (int)total_ms;
