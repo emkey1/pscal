@@ -5368,14 +5368,24 @@ VProc *vprocCreate(const VProcOptions *opts) {
         return NULL;
     }
     int parent_pid = vprocDefaultParentPid();
+    if (parent_pid == vp->pid) {
+        parent_pid = 0;
+    }
+    VProcTaskEntry *parent_entry = NULL;
     if (parent_pid > 0 && parent_pid != vp->pid) {
-        (void)vprocTaskEnsureSlotLocked(parent_pid);
+        parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
+        if (!parent_entry || parent_entry->pid != parent_pid) {
+            parent_pid = 0;
+            parent_entry = NULL;
+        }
     }
     /* Reinitialize the slot in place for this pid. */
     vprocClearEntryLocked(slot);
-    VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
     vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
-    vprocUpdateParentLocked(vp->pid, parent_pid);
+    slot->parent_pid = parent_pid;
+    if (parent_entry && parent_pid > 0) {
+        vprocAddChildLocked(parent_entry, vp->pid);
+    }
     if (local.job_id > 0) {
         slot->job_id = local.job_id;
     }
