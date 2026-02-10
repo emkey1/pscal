@@ -10716,6 +10716,10 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     if (!fds || nfds == 0) {
         return vprocHostPollRaw(fds, nfds, timeout);
     }
+    if (nfds > (nfds_t)(INT_MAX - 1)) {
+        errno = EINVAL;
+        return -1;
+    }
 
     struct pscal_fd *pscal_fds_stack[VPROC_POLL_STACK_FDS];
     int host_index_stack[VPROC_POLL_STACK_FDS + 1];
