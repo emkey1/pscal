@@ -4272,9 +4272,16 @@ static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
             vprocRemoveChildLocked(old_parent_entry, child_pid);
         }
     }
+    VProcTaskEntry *new_parent_entry = NULL;
+    if (new_parent_pid > 0) {
+        new_parent_entry = vprocTaskEnsureSlotLocked(new_parent_pid);
+        if (!new_parent_entry || new_parent_entry->pid != new_parent_pid) {
+            new_parent_pid = 0;
+            new_parent_entry = NULL;
+        }
+    }
     child_entry->parent_pid = new_parent_pid;
     if (new_parent_pid > 0) {
-        VProcTaskEntry *new_parent_entry = vprocTaskEnsureSlotLocked(new_parent_pid);
         if (new_parent_entry) {
             vprocAddChildLocked(new_parent_entry, child_pid);
         }
