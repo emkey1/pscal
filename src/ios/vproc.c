@@ -2900,7 +2900,14 @@ static void vprocInitEntryDefaultsLocked(VProcTaskEntry *entry, int pid, const V
 }
 
 static bool vprocAddChildLocked(VProcTaskEntry *parent, int child_pid) {
-    if (!parent || child_pid <= 0) return false;
+    if (!parent || parent->pid <= 0 || child_pid <= 0 || parent->pid == child_pid) {
+        return false;
+    }
+    for (size_t i = 0; i < parent->child_count; ++i) {
+        if (parent->children[i] == child_pid) {
+            return true;
+        }
+    }
     if (parent->child_count >= parent->child_capacity) {
         size_t new_cap = parent->child_capacity ? parent->child_capacity * 2 : 4;
         int *resized = realloc(parent->children, new_cap * sizeof(int));
