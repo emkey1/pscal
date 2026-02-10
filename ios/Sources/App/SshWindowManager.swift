@@ -100,15 +100,19 @@ final class TerminalTabManager: ObservableObject {
         }
     }
 
-    func openShellTab() -> Int32 {
+    func openShellTab(restoreProfileDefaults: Bool = true) -> Int32 {
         tabInitLog("openShellTab request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
         let previousId = selectedId
         let newId = PSCALRuntimeNextSessionId()
         let shellSlot = nextAvailableShellProfileSlot()
         let defaultTitle = TerminalTabManager.sanitizeTitle("Shell \(shellSlot)")
         let profileID = "shell.\(shellSlot)"
-        let title = Self.persistedTabTitle(forProfileID: profileID, fallback: defaultTitle)
-        let startupCommand = Self.persistedStartupCommand(forProfileID: profileID)
+        let title = restoreProfileDefaults
+            ? Self.persistedTabTitle(forProfileID: profileID, fallback: defaultTitle)
+            : defaultTitle
+        let startupCommand = restoreProfileDefaults
+            ? Self.persistedStartupCommand(forProfileID: profileID)
+            : ""
         let appearance = appearanceSettings(forProfileID: profileID)
         let runtime = PscalRuntimeBootstrap()
         let tab = Tab(id: newId,
@@ -122,7 +126,7 @@ final class TerminalTabManager: ObservableObject {
         selectedId = newId
         runtime.assignTabId(newId)
         logMultiTab("open shell tab id=\(newId) runtime=\(runtime.runtimeId)")
-        tabInitLog("openShellTab created id=\(newId) runtime=\(runtime.runtimeId) title=\(title)")
+        tabInitLog("openShellTab created id=\(newId) runtime=\(runtime.runtimeId) title=\(title) restore=\(restoreProfileDefaults ? 1 : 0)")
         tabInitLog("openShellTab selectedId=\(selectedId) tabs=\(tabs.count)")
         scheduleFocusDance(primary: newId, secondary: previousId)
         return 0
@@ -403,6 +407,15 @@ final class TerminalTabManager: ObservableObject {
         return applyStartupCommand(rawCommand, toTabAtIndex: idx, persist: true)
     }
 
+    @discardableResult
+    func copyFirstTabColors(tabId: UInt64) -> Bool {
+        guard let targetIdx = tabs.firstIndex(where: { $0.id == tabId }) else { return false }
+        guard let sourceAppearance = firstTabAppearanceSettings() else { return false }
+        tabs[targetIdx].appearanceSettings.updateBackgroundColor(sourceAppearance.backgroundColor)
+        tabs[targetIdx].appearanceSettings.updateForegroundColor(sourceAppearance.foregroundColor)
+        return true
+    }
+
     fileprivate static func sanitizeTitle(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -420,8 +433,27 @@ final class TerminalTabManager: ObservableObject {
             return existing
         }
         let created = TerminalTabAppearanceSettings(profileID: profileID)
+        seedAppearanceColorsFromFirstTabIfNeeded(profileID: profileID, appearance: created)
         appearanceSettingsByProfileID[profileID] = created
         return created
+    }
+
+    private func firstTabAppearanceSettings() -> TerminalTabAppearanceSettings? {
+        if let root = tabs.first(where: { $0.id == shellId }) {
+            return root.appearanceSettings
+        }
+        return tabs.first?.appearanceSettings
+    }
+
+    private func seedAppearanceColorsFromFirstTabIfNeeded(profileID: String,
+                                                          appearance: TerminalTabAppearanceSettings) {
+        guard let sourceAppearance = firstTabAppearanceSettings() else { return }
+        if !TerminalTabAppearanceSettings.hasStoredBackgroundColor(forProfileID: profileID) {
+            appearance.updateBackgroundColor(sourceAppearance.backgroundColor)
+        }
+        if !TerminalTabAppearanceSettings.hasStoredForegroundColor(forProfileID: profileID) {
+            appearance.updateForegroundColor(sourceAppearance.foregroundColor)
+        }
     }
 
     private func nextAvailableShellProfileSlot() -> Int {

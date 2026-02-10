@@ -665,6 +665,26 @@ final class TerminalTabAppearanceSettings: ObservableObject {
         return String(scalars)
     }
 
+    static func hasStoredBackgroundColor(forProfileID profileID: String) -> Bool {
+        let key = backgroundColorKey(forProfileID: profileID)
+        return UserDefaults.standard.data(forKey: key) != nil
+    }
+
+    static func hasStoredForegroundColor(forProfileID profileID: String) -> Bool {
+        let key = foregroundColorKey(forProfileID: profileID)
+        return UserDefaults.standard.data(forKey: key) != nil
+    }
+
+    private static func backgroundColorKey(forProfileID profileID: String) -> String {
+        let suffix = sanitizedProfileID(profileID)
+        return "com.pscal.terminal.tabAppearance.\(suffix).backgroundColor"
+    }
+
+    private static func foregroundColorKey(forProfileID profileID: String) -> String {
+        let suffix = sanitizedProfileID(profileID)
+        return "com.pscal.terminal.tabAppearance.\(suffix).foregroundColor"
+    }
+
     private static func store(color: UIColor, key: String) {
         if let data = try? NSKeyedArchiver.archivedData(
             withRootObject: color,

@@ -9,7 +9,6 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
-#include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -57,26 +56,6 @@ static pscal_ios_virtual_tty g_pscal_ios_virtual_ttys[8];
 
 static int pscal_ios_translate_fd(int fd);
 static int pscal_ios_register_virtual_tty(void);
-
-typedef struct {
-    bool active;
-    bool in_child;
-    sigjmp_buf parent_env;
-    VProc *child_vp;
-    int child_pid;
-} pscal_ios_fork_state;
-
-static __thread pscal_ios_fork_state g_pscal_ios_fork_state;
-
-typedef struct {
-    VProc *vp;
-    int (*entry)(int, char **);
-    int argc;
-    char **argv;
-    VProcSessionStdio *session_stdio;
-    int shell_self_pid;
-    int kernel_pid;
-} pscal_ios_exec_ctx;
 
 static bool pscal_ios_debug_enabled(void) {
     const char *tool_debug = getenv("PSCALI_TOOL_DEBUG");
@@ -128,108 +107,6 @@ static int pscal_ios_askpass_main(int argc, char **argv) {
     }
     fputs(buf, stdout);
     fflush(stdout);
-    return 0;
-}
-
-static char **pscal_ios_dup_argv(char *const argv[], int *out_argc) {
-    int argc = 0;
-    if (argv) {
-        while (argv[argc]) {
-            argc++;
-        }
-    }
-    char **copy = (char **)calloc((size_t)argc + 1, sizeof(char *));
-    if (!copy) {
-        return NULL;
-    }
-    for (int i = 0; i < argc; ++i) {
-        const char *src = argv[i] ? argv[i] : "";
-        copy[i] = strdup(src);
-        if (!copy[i]) {
-            for (int j = 0; j < i; ++j) {
-                free(copy[j]);
-            }
-            free(copy);
-            return NULL;
-        }
-    }
-    copy[argc] = NULL;
-    if (out_argc) {
-        *out_argc = argc;
-    }
-    return copy;
-}
-
-static void pscal_ios_free_argv(char **argv, int argc) {
-    if (!argv) {
-        return;
-    }
-    for (int i = 0; i < argc; ++i) {
-        free(argv[i]);
-    }
-    free(argv);
-}
-
-static void *pscal_ios_exec_thread(void *arg) {
-    pscal_ios_exec_ctx *ctx = (pscal_ios_exec_ctx *)arg;
-    int status = 127;
-    if (ctx) {
-        vprocSetShellSelfPid(ctx->shell_self_pid);
-        vprocSetKernelPid(ctx->kernel_pid);
-        if (ctx->session_stdio) {
-            vprocSessionStdioActivate(ctx->session_stdio);
-        }
-    }
-    if (ctx && ctx->vp && ctx->entry) {
-        vprocActivate(ctx->vp);
-        vprocRegisterThread(ctx->vp, pthread_self());
-        status = ctx->entry(ctx->argc, ctx->argv);
-        vprocMarkExit(ctx->vp, W_EXITCODE(status & 0xff, 0));
-        vprocDeactivate();
-        vprocDestroy(ctx->vp);
-    }
-    if (ctx && ctx->session_stdio) {
-        vprocSessionStdioActivate(NULL);
-    }
-    if (ctx) {
-        pscal_ios_free_argv(ctx->argv, ctx->argc);
-        free(ctx);
-    }
-    return (void *)(intptr_t)status;
-}
-
-static int pscal_ios_spawn_child(VProc *vp, int (*entry)(int, char **),
-                                 char *const argv[]) {
-    int argc = 0;
-    char **argv_copy = pscal_ios_dup_argv(argv, &argc);
-    if (!argv_copy) {
-        errno = ENOMEM;
-        return -1;
-    }
-    pscal_ios_exec_ctx *ctx = (pscal_ios_exec_ctx *)calloc(1, sizeof(pscal_ios_exec_ctx));
-    if (!ctx) {
-        pscal_ios_free_argv(argv_copy, argc);
-        errno = ENOMEM;
-        return -1;
-    }
-    ctx->vp = vp;
-    ctx->entry = entry;
-    ctx->argc = argc;
-    ctx->argv = argv_copy;
-    ctx->session_stdio = vprocSessionStdioCurrent();
-    ctx->shell_self_pid = vprocGetShellSelfPid();
-    ctx->kernel_pid = vprocGetKernelPid();
-    pthread_t tid;
-    int err = pthread_create(&tid, NULL, pscal_ios_exec_thread, ctx);
-    if (err != 0) {
-        pscal_ios_free_argv(argv_copy, argc);
-        free(ctx);
-        errno = err;
-        pscal_ios_debug_log("[ssh-fork] spawn thread failed err=%d", err);
-        return -1;
-    }
-    pthread_detach(tid);
-    pscal_ios_debug_log("[ssh-fork] spawn thread ok");
     return 0;
 }
 
@@ -1101,44 +978,12 @@ int pscal_ios_symlink(const char *target, const char *linkpath) {
 }
 
 pid_t pscal_ios_fork(void) {
-    pscal_ios_fork_state *state = &g_pscal_ios_fork_state;
-    pscal_ios_debug_log("[ssh-fork] fork enter active=%d in_child=%d",
-                        state->active ? 1 : 0,
-                        state->in_child ? 1 : 0);
-    if (state->active) {
-        errno = EAGAIN;
-        return -1;
-    }
-    volatile int jump_rc = sigsetjmp(state->parent_env, 1);
-    if (jump_rc != 0) {
-        state = &g_pscal_ios_fork_state;
-        state->active = false;
-        state->in_child = false;
-        state->child_vp = NULL;
-        int pid = state->child_pid;
-        state->child_pid = 0;
-        pscal_ios_debug_log("[ssh-fork] fork parent resume pid=%d", pid);
-        return (pid_t)pid;
-    }
-
-    VProcCommandScope scope;
-    if (!vprocCommandScopeBegin(&scope, "fork", true, true)) {
-        errno = ENOSYS;
-        pscal_ios_debug_log("[ssh-fork] vprocCommandScopeBegin failed");
-        return -1;
-    }
-
-    state->active = true;
-    state->in_child = true;
-    state->child_vp = scope.vp;
-    state->child_pid = scope.pid;
-    pscal_ios_debug_log("[ssh-fork] fork child pid=%d", scope.pid);
-    return 0;
+    return vprocSimulatedFork("fork", true);
 }
 
 int pscal_ios_execv(const char *path, char *const argv[]) {
     const char *base = pscal_ios_basename(path);
-    int (*entry)(int, char **) = NULL;
+    VProcExecEntryFn entry = NULL;
     pscal_ios_debug_log("[ssh-fork] exec path=%s base=%s",
                         path ? path : "<null>",
                         base ? base : "<null>");
@@ -1155,43 +1000,12 @@ int pscal_ios_execv(const char *path, char *const argv[]) {
             entry = pscal_ios_askpass_main;
         }
     }
-    pscal_ios_fork_state *state = &g_pscal_ios_fork_state;
-    pscal_ios_debug_log("[ssh-fork] exec entry=%p active=%d in_child=%d child_vp=%p child_pid=%d",
-                        (void *)entry,
-                        state->active ? 1 : 0,
-                        state->in_child ? 1 : 0,
-                        (void *)state->child_vp,
-                        state->child_pid);
-    if (!state->active || !state->in_child || !state->child_vp) {
-        errno = ENOSYS;
-        pscal_ios_debug_log("[ssh-fork] exec invalid fork state");
-        return -1;
-    }
     if (!entry) {
-        state->active = false;
-        state->in_child = false;
-        state->child_vp = NULL;
-        state->child_pid = 0;
         errno = ENOENT;
         pscal_ios_debug_log("[ssh-fork] exec no entry for %s", base ? base : "<null>");
         return -1;
     }
-    if (pscal_ios_spawn_child(state->child_vp, entry, argv) != 0) {
-        if (errno == 0) {
-            errno = EIO;
-        }
-        pscal_ios_debug_log("[ssh-fork] exec spawn failed errno=%d", errno);
-        state->active = false;
-        state->in_child = false;
-        state->child_vp = NULL;
-        state->child_pid = 0;
-        return -1;
-    }
-    pscal_ios_debug_log("[ssh-fork] exec spawn ok, jumping to parent");
-    vprocUnregisterThread(state->child_vp, pthread_self());
-    vprocDeactivate();
-    siglongjmp(state->parent_env, 1);
-    return -1;
+    return vprocSimulatedExec(entry, argv);
 }
 
 int pscal_ios_execvp(const char *file, char *const argv[]) {

@@ -1456,6 +1456,7 @@ typedef struct {
     size_t stage_pos;
     bool pipeline_head;
     bool pipeline_tail;
+    bool owns_ctx_snapshot;
     VProcSessionStdio *session_stdio;
 #if defined(PSCAL_TARGET_IOS)
     PSCALRuntimeContext *runtime_ctx;
@@ -4003,12 +4004,73 @@ static int shellPipelineRunStage(VM *vm,
     return status;
 }
 
+static ShellPipelineContext *shellCloneSingleStagePipelineContext(const ShellPipelineContext *src) {
+    ShellPipelineContext *clone = (ShellPipelineContext *)calloc(1, sizeof(ShellPipelineContext));
+    if (!clone) {
+        return NULL;
+    }
+    clone->active = true;
+    clone->stage_count = 1;
+    clone->negated = src ? src->negated : false;
+    clone->background = src ? src->background : true;
+    clone->last_status = src ? src->last_status : 0;
+    clone->pgid = src ? src->pgid : -1;
+#if defined(PSCAL_TARGET_IOS)
+    clone->in_process = src ? src->in_process : true;
+    clone->in_process_worker = false;
+    clone->session_stdio = src ? src->session_stdio : NULL;
+#endif
+    clone->pids = (pid_t *)calloc(1, sizeof(pid_t));
+    if (!clone->pids) {
+        free(clone);
+        return NULL;
+    }
+    if (src && src->pids) {
+        clone->pids[0] = src->pids[0];
+    }
+    return clone;
+}
+
+static void shellFreeClonedPipelineContext(ShellPipelineContext *ctx) {
+    if (!ctx) {
+        return;
+    }
+    free(ctx->pids);
+    free(ctx);
+}
+
 static void *shellPipelineStageThreadMain(void *arg) {
     ShellPipelineStageThreadCtx *tctx = (ShellPipelineStageThreadCtx *)arg;
     if (!tctx) {
         return NULL;
     }
 #if defined(PSCAL_TARGET_IOS)
+    VM *stage_vm = tctx->vm;
+    ShellRuntimeState *bg_shell_ctx = NULL;
+    ShellRuntimeState *prev_shell_ctx = NULL;
+    VM *bg_vm = NULL;
+    VM *prev_vm = NULL;
+    if (tctx->owns_ctx_snapshot) {
+        static pthread_once_t bg_builtin_once = PTHREAD_ONCE_INIT;
+        pthread_once(&bg_builtin_once, registerExtendedBuiltins);
+        bg_shell_ctx = shellRuntimeCreateContext();
+        if (bg_shell_ctx) {
+            prev_shell_ctx = shellRuntimeActivateContext(bg_shell_ctx);
+            bg_vm = (VM *)calloc(1, sizeof(VM));
+            if (bg_vm) {
+                initVM(bg_vm);
+                bg_vm->frontendContext = bg_shell_ctx;
+                prev_vm = shellSwapCurrentVm(bg_vm);
+                stage_vm = bg_vm;
+            } else {
+                shellRuntimeActivateContext(prev_shell_ctx);
+                prev_shell_ctx = NULL;
+                free(bg_shell_ctx);
+                bg_shell_ctx = NULL;
+            }
+        }
+    }
+
     PSCALRuntimeContext *prev_runtime_ctx = NULL;
     bool swapped_runtime = false;
     if (PSCALRuntimeGetCurrentRuntimeContext) {
@@ -4026,7 +4088,7 @@ static void *shellPipelineStageThreadMain(void *arg) {
     }
 #endif
     vprocSetPipelineStage(true);
-    int status = shellPipelineRunStage(tctx->vm,
+    int status = shellPipelineRunStage(stage_vm,
                                        tctx->ctx,
                                        tctx->cmd,
                                        tctx->stage_pos,
@@ -4042,10 +4104,22 @@ static void *shellPipelineStageThreadMain(void *arg) {
                 (int)tctx->pipeline_tail,
                 (int)(tctx->ctx ? tctx->ctx->background : false));
     }
-    if (tctx->ctx && tctx->ctx->stage_status && tctx->stage_pos < tctx->ctx->stage_count) {
-        tctx->ctx->stage_status[tctx->stage_pos] = status;
-    }
 #if defined(PSCAL_TARGET_IOS)
+    if (tctx->owns_ctx_snapshot) {
+        if (bg_vm || prev_vm) {
+            shellRestoreCurrentVm(prev_vm);
+        }
+        if (prev_shell_ctx) {
+            shellRuntimeActivateContext(prev_shell_ctx);
+        }
+        if (bg_vm) {
+            freeVM(bg_vm);
+            free(bg_vm);
+        }
+        if (bg_shell_ctx) {
+            free(bg_shell_ctx);
+        }
+    }
     if (swapped_stdio) {
         vprocSessionStdioActivate(prev_session_stdio);
     }
@@ -4053,15 +4127,20 @@ static void *shellPipelineStageThreadMain(void *arg) {
         PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
     }
 #endif
-    /* Let background tail stages complete asynchronously and clean up the pipeline. */
-    if (tctx->pipeline_tail && tctx->ctx && tctx->ctx->background) {
-        tctx->ctx->last_status = status;
-        shellFinishPipeline(tctx->cmd);
-        shellRuntimeProcessPendingSignals();
-    }
+    /*
+     * Do not mutate shared pipeline bookkeeping from worker threads.
+     * Background in-process stages can outlive the foreground command loop and
+     * race with later pipeline reuse/reset, which risks touching stale pointers.
+     * Foreground pipeline completion/teardown is still handled on the caller
+     * path where stage joins are explicit.
+     */
     if (tctx->cmd) {
         shellFreeCommand(tctx->cmd);
         free(tctx->cmd);
+    }
+    if (tctx->owns_ctx_snapshot) {
+        shellFreeClonedPipelineContext(tctx->ctx);
+        tctx->ctx = NULL;
     }
     free(tctx);
     return NULL;
@@ -4098,8 +4177,8 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         return false;
     }
 
-    /* Run tail stages on a worker thread when backgrounded so the shell prompt returns. */
-    bool async_tail = ctx->background && pipeline_tail;
+    /* Run single-stage background tails on a worker thread so the shell prompt returns. */
+    bool async_tail = ctx->background && pipeline_tail && ctx->stage_count == 1;
     if (!pipeline_tail || async_tail) {
         ShellPipelineStageThreadCtx *tctx =
             (ShellPipelineStageThreadCtx *)calloc(1, sizeof(ShellPipelineStageThreadCtx));
@@ -4119,17 +4198,37 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
         tctx->stage_pos = stage_pos;
         tctx->pipeline_head = pipeline_head;
         tctx->pipeline_tail = pipeline_tail;
+        tctx->owns_ctx_snapshot = false;
 #if defined(PSCAL_TARGET_IOS)
         tctx->session_stdio = ctx->session_stdio;
         tctx->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
             ? PSCALRuntimeGetCurrentRuntimeContext()
             : NULL;
 #endif
+        if (async_tail) {
+            ShellPipelineContext *ctx_clone = shellCloneSingleStagePipelineContext(ctx);
+            if (!ctx_clone) {
+                shellFreeCommand(cloned);
+                free(cloned);
+                free(tctx);
+                runtimeError(vm, "pipeline: unable to snapshot background stage");
+                shellUpdateStatus(1);
+                shellAbortPipeline();
+                return false;
+            }
+            tctx->ctx = ctx_clone;
+            tctx->owns_ctx_snapshot = true;
+        }
 
+        pthread_t stage_thread = 0;
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
-        int rc = pthread_create(&ctx->threads[stage_pos], &attr, shellPipelineStageThreadMain, tctx);
+        if (async_tail) {
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        }
+        pthread_t *thread_slot = async_tail ? &stage_thread : &ctx->threads[stage_pos];
+        int rc = pthread_create(thread_slot, &attr, shellPipelineStageThreadMain, tctx);
         pthread_attr_destroy(&attr);
         if (rc != 0) {
             runtimeError(vm, "pipeline: failed to create stage thread");
@@ -4137,7 +4236,14 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             shellAbortPipeline();
             return false;
         }
-        ctx->thread_started[stage_pos] = true;
+        if (!async_tail) {
+            ctx->thread_started[stage_pos] = true;
+        }
+        if (async_tail) {
+            /* Background single-stage workers run detached from shared pipeline state. */
+            shellResetPipeline();
+            shellUpdateStatus(0);
+        }
         return true;
     }
 

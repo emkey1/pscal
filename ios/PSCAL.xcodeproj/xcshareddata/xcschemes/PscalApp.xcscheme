@@ -73,7 +73,7 @@
          <EnvironmentVariable
             key = "PSCALI_TERM_DEBUG"
             value = "1"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "PSCALI_IO_DEBUG"
@@ -108,7 +108,7 @@
          <EnvironmentVariable
             key = "PSCALI_PAGER_DEBUG"
             value = "1"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "PSCALI_REDIR_DEBUG"
@@ -148,7 +148,7 @@
          <EnvironmentVariable
             key = "PSCALI_PIPE_PSCAL"
             value = "1"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "PSCALI_SSH_DEBUG"

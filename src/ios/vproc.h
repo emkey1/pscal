@@ -340,6 +340,8 @@ typedef struct {
     int pid;
 } VProcCommandScope;
 
+typedef int (*VProcExecEntryFn)(int argc, char **argv);
+
 /* Utility for iOS-hosted tools (smallclue applets, in-process exec, etc):
  * optionally create and activate a child vproc to represent the invoked command,
  * then tear it down while marking it exited. */
@@ -348,6 +350,9 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
                             bool force_new_vproc,
                             bool inherit_parent_pgid);
 void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code);
+/* Simulated fork/exec helper for single-process iOS runtime. */
+pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid);
+int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]);
 
 /* Signal API shims: allow vproc_shim.h to virtualize signal dispositions when
  * a vproc is active on the current thread. */
@@ -638,6 +643,7 @@ typedef struct {
     VProc *vp;
     int pid;
 } VProcCommandScope;
+typedef int (*VProcExecEntryFn)(int argc, char **argv);
 static inline bool vprocCommandScopeBegin(VProcCommandScope *scope,
                                          const char *label,
                                          bool force_new_vproc,
@@ -651,6 +657,18 @@ static inline bool vprocCommandScopeBegin(VProcCommandScope *scope,
 static inline void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code) {
     (void)scope;
     (void)exit_code;
+}
+static inline pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid) {
+    (void)label;
+    (void)inherit_parent_pgid;
+    errno = ENOSYS;
+    return (pid_t)-1;
+}
+static inline int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
+    (void)entry;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
 }
 static inline int vprocSetSigchldBlocked(int pid, bool block) { (void)pid; (void)block; return 0; }
 static inline void vprocClearSigchldPending(int pid) { (void)pid; }

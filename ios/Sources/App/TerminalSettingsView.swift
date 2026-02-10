@@ -113,6 +113,10 @@ struct TerminalSettingsView: View {
                             set: { appearanceSettings.updateForegroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
+
+                    Button("Copy First Tab Values") {
+                        _ = tabManager.copyFirstTabColors(tabId: tabId)
+                    }
                 }
 
                 Section(header: Text("Filesystem Paths")) {

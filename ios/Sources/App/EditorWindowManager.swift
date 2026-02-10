@@ -245,7 +245,7 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Open additional tabs (beyond the existing first tab).
         for _ in 2...desired {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                _ = manager.openShellTab()
+                _ = manager.openShellTab(restoreProfileDefaults: true)
             }
         }
     }
