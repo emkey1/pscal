@@ -4,7 +4,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -102,20 +101,24 @@ void pscal_fd_poll_wakeup(struct pscal_fd *fd, int UNUSED(events)) {
     }
 #endif
 #if defined(SIGPIPE)
-    struct sigaction old_action;
-    if (sigaction(SIGPIPE, NULL, &old_action) == 0) {
-        bool restore = (old_action.sa_handler != SIG_IGN);
-        if (restore) {
-            struct sigaction ignore_action;
-            memset(&ignore_action, 0, sizeof(ignore_action));
-            sigemptyset(&ignore_action.sa_mask);
-            ignore_action.sa_handler = SIG_IGN;
-            (void)sigaction(SIGPIPE, &ignore_action, NULL);
+    sigset_t block;
+    sigset_t previous;
+    sigemptyset(&block);
+    sigaddset(&block, SIGPIPE);
+    if (pthread_sigmask(SIG_BLOCK, &block, &previous) == 0) {
+        ssize_t wake_rc = vprocHostWrite(gPollWakePipe[1], "", 1);
+        if (wake_rc < 0 && errno == EPIPE) {
+            sigset_t pending;
+            if (sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE)) {
+                int consumed = 0;
+                while (sigwait(&block, &consumed) == 0) {
+                    if (consumed == SIGPIPE) {
+                        break;
+                    }
+                }
+            }
         }
-        (void)vprocHostWrite(gPollWakePipe[1], "", 1);
-        if (restore) {
-            (void)sigaction(SIGPIPE, &old_action, NULL);
-        }
+        (void)pthread_sigmask(SIG_SETMASK, &previous, NULL);
         return;
     }
 #endif
