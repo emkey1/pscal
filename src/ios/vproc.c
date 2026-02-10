@@ -7815,12 +7815,15 @@ int vprocInterposeBypassActive(void) {
 }
 
 static void vprocEnsurePathTruncationDefault(void) {
+    if (__atomic_load_n(&gPathTruncateInit, __ATOMIC_ACQUIRE)) {
+        return;
+    }
     pthread_mutex_lock(&gPathTruncateMu);
     if (gPathTruncateInit) {
         pthread_mutex_unlock(&gPathTruncateMu);
         return;
     }
-    gPathTruncateInit = true;
+    __atomic_store_n(&gPathTruncateInit, true, __ATOMIC_RELEASE);
     const char *disabled = getenv("PSCALI_PATH_TRUNCATE_DISABLED");
     if (disabled && disabled[0] != '\0') {
         pthread_mutex_unlock(&gPathTruncateMu);
@@ -7860,7 +7863,7 @@ static void vprocEnsurePathTruncationDefault(void) {
 
 void vprocApplyPathTruncation(const char *prefix) {
     pthread_mutex_lock(&gPathTruncateMu);
-    gPathTruncateInit = true;
+    __atomic_store_n(&gPathTruncateInit, true, __ATOMIC_RELEASE);
     if (prefix && prefix[0] == '/') {
         unsetenv("PSCALI_PATH_TRUNCATE_DISABLED");
         const char *container_root = getenv("PSCALI_CONTAINER_ROOT");
