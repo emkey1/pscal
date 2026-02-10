@@ -7582,6 +7582,9 @@ static char **vprocSimDupArgv(char *const argv[], int *out_argc) {
     int argc = 0;
     if (argv) {
         while (argv[argc]) {
+            if (argc == INT_MAX) {
+                return NULL;
+            }
             argc++;
         }
     }
