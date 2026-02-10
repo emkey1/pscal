@@ -5087,21 +5087,26 @@ int vprocReservePid(void) {
         return -1;
     }
     int parent_pid = vprocDefaultParentPid();
+    VProcTaskEntry *parent_entry = NULL;
     if (parent_pid > 0 && parent_pid != pid) {
-        (void)vprocTaskEnsureSlotLocked(parent_pid);
+        parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
+        if (!parent_entry || parent_entry->pid != parent_pid) {
+            parent_entry = vprocTaskFindLocked(parent_pid);
+        }
+        if (!parent_entry || parent_entry->pid != parent_pid) {
+            parent_pid = 0;
+            parent_entry = NULL;
+        }
     }
     vprocClearEntryLocked(entry);
-    VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
     entry->parent_pid = parent_pid;
     /* Reserve creates a brand-new process group; do not inherit the shell's
      * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
     entry->pgid = pid;
     entry->fg_pgid = pid;
-    if (parent_pid > 0 && parent_pid != pid) {
-        if (parent_entry && parent_entry->pid == parent_pid) {
-            vprocAddChildLocked(parent_entry, pid);
-        }
+    if (parent_entry && parent_pid > 0 && parent_pid != pid) {
+        vprocAddChildLocked(parent_entry, pid);
     }
     if (gVProcTasks.items && gVProcTasks.count > 0) {
         ptrdiff_t idx = entry - gVProcTasks.items;
