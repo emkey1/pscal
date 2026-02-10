@@ -6254,8 +6254,8 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         }
         return -1;
     }
-    entry->tid = tid;
     bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
+    entry->tid = tid;
     if (!duplicate) {
         if (entry->thread_count >= entry->thread_capacity) {
             size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
@@ -6301,8 +6301,8 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         }
         return -1;
     }
-    entry->tid = tid;
     bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
+    entry->tid = tid;
     if (!duplicate) {
         if (entry->thread_count >= entry->thread_capacity) {
             size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
