@@ -6373,7 +6373,6 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         return -1;
     }
     bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
-    entry->tid = tid;
     if (!duplicate) {
         if (entry->thread_count >= entry->thread_capacity) {
             size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
@@ -6388,6 +6387,7 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         }
         entry->threads[entry->thread_count++] = tid;
     }
+    entry->tid = tid;
     rename_thread = vprocPrepareThreadNameLocked(entry, thread_name, sizeof(thread_name));
     thread_count = entry->thread_count;
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -6420,7 +6420,6 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         return -1;
     }
     bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
-    entry->tid = tid;
     if (!duplicate) {
         if (entry->thread_count >= entry->thread_capacity) {
             size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
@@ -6435,6 +6434,7 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         }
         entry->threads[entry->thread_count++] = tid;
     }
+    entry->tid = tid;
     rename_thread = vprocPrepareThreadNameLocked(entry, thread_name, sizeof(thread_name));
     if (vdbg) {
         vprocDebugLogf( "[vproc] register thread pid=%d tid=%p thread_count=%zu\n",
