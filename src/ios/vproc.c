@@ -1746,6 +1746,31 @@ static const char *kLocationDevicePath = "/dev/location";
 static const char *kLegacyGpsDevicePath = "/dev/gps";
 static const char *kLegacyGpsDevicePath2 = "/dev/ttyGPS";
 
+static bool vprocComputeGrowthCapacity(size_t current,
+                                       size_t min_needed,
+                                       size_t initial,
+                                       size_t elem_size,
+                                       size_t *out_cap) {
+    if (!out_cap || elem_size == 0 || min_needed == 0) {
+        return false;
+    }
+    size_t cap = current ? current : initial;
+    if (cap < initial) {
+        cap = initial;
+    }
+    while (cap < min_needed) {
+        if (cap > SIZE_MAX / 2) {
+            return false;
+        }
+        cap *= 2;
+    }
+    if (cap > SIZE_MAX / elem_size) {
+        return false;
+    }
+    *out_cap = cap;
+    return true;
+}
+
 static void vprocResourceEnsureCapacity(VProc *vp, size_t needed) {
     if (!vp) {
         return;
@@ -1753,9 +1778,13 @@ static void vprocResourceEnsureCapacity(VProc *vp, size_t needed) {
     if (vp->resource_capacity >= needed) {
         return;
     }
-    size_t new_cap = vp->resource_capacity ? vp->resource_capacity * 2 : 8;
-    while (new_cap < needed) {
-        new_cap *= 2;
+    size_t new_cap = 0;
+    if (!vprocComputeGrowthCapacity(vp->resource_capacity,
+                                    needed,
+                                    8,
+                                    sizeof(VProcResourceEntry),
+                                    &new_cap)) {
+        return;
     }
     VProcResourceEntry *resized = realloc(vp->resources, new_cap * sizeof(VProcResourceEntry));
     if (!resized) {
@@ -2287,7 +2316,14 @@ static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
         return existing;
     }
     if (gVProcSessionPtys.count >= gVProcSessionPtys.capacity) {
-        size_t new_cap = gVProcSessionPtys.capacity ? gVProcSessionPtys.capacity * 2 : 4;
+        size_t new_cap = 0;
+        if (!vprocComputeGrowthCapacity(gVProcSessionPtys.capacity,
+                                        gVProcSessionPtys.count + 1,
+                                        4,
+                                        sizeof(VProcSessionPtyEntry),
+                                        &new_cap)) {
+            return NULL;
+        }
         VProcSessionPtyEntry *resized = realloc(gVProcSessionPtys.items, new_cap * sizeof(VProcSessionPtyEntry));
         if (!resized) {
             return NULL;
@@ -2338,7 +2374,15 @@ static void vprocRegistryAdd(VProc *vp) {
         }
     }
     if (gVProcRegistryCount >= gVProcRegistryCapacity) {
-        size_t new_cap = gVProcRegistryCapacity ? gVProcRegistryCapacity * 2 : 16;
+        size_t new_cap = 0;
+        if (!vprocComputeGrowthCapacity(gVProcRegistryCapacity,
+                                        gVProcRegistryCount + 1,
+                                        16,
+                                        sizeof(VProc *),
+                                        &new_cap)) {
+            pthread_mutex_unlock(&gVProcRegistryMu);
+            return;
+        }
         VProc **resized = (VProc **)realloc(gVProcRegistry, new_cap * sizeof(VProc *));
         if (!resized) {
             pthread_mutex_unlock(&gVProcRegistryMu);
@@ -7221,7 +7265,14 @@ static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity
         }
     }
     if (*count >= *capacity) {
-        size_t new_cap = (*capacity == 0) ? 8 : (*capacity * 2);
+        size_t new_cap = 0;
+        if (!vprocComputeGrowthCapacity(*capacity,
+                                        *count + 1,
+                                        8,
+                                        sizeof(pthread_t),
+                                        &new_cap)) {
+            return;
+        }
         pthread_t *resized = (pthread_t *)realloc(*list, new_cap * sizeof(pthread_t));
         if (!resized) {
             return;
