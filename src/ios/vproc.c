@@ -2428,6 +2428,8 @@ static VProcTaskTable gVProcTasks = {
 };
 static VProcTaskEntry *gVProcTasksItemsStable = NULL;
 static size_t gVProcTasksCapacityStable = 0;
+static size_t gVProcTaskFindHint = 0;
+static size_t gVProcTaskFreeHint = 0;
 
 /* -- Helper Functions -- */
 
@@ -5035,8 +5037,15 @@ static void vprocTaskTableRepairLocked(void) {
 
 static VProcTaskEntry *vprocTaskFindLocked(int pid) {
     vprocTaskTableRepairLocked();
+    if (gVProcTasks.count > 0 && gVProcTaskFindHint < gVProcTasks.count) {
+        VProcTaskEntry *hint = &gVProcTasks.items[gVProcTaskFindHint];
+        if (hint->pid == pid) {
+            return hint;
+        }
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         if (gVProcTasks.items[i].pid == pid) {
+            gVProcTaskFindHint = i;
             return &gVProcTasks.items[i];
         }
     }
@@ -5071,8 +5080,14 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     if (gVProcTasks.count >= gVProcTasks.capacity) {
         /* Reuse cleared slots before rejecting new synthetic tasks. */
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
-            if (gVProcTasks.items[i].pid <= 0) {
-                entry = &gVProcTasks.items[i];
+            size_t idx = gVProcTasks.count > 0
+                    ? (gVProcTaskFreeHint + i) % gVProcTasks.count
+                    : 0;
+            if (gVProcTasks.items[idx].pid <= 0) {
+                entry = &gVProcTasks.items[idx];
+                gVProcTaskFreeHint = (gVProcTasks.count > 0)
+                        ? ((idx + 1) % gVProcTasks.count)
+                        : 0;
                 break;
             }
         }
@@ -6666,6 +6681,12 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->child_capacity = 0;
     entry->child_count = 0;
     entry->start_mono_ns = 0;
+    if (gVProcTasks.items && gVProcTasks.count > 0) {
+        ptrdiff_t idx = entry - gVProcTasks.items;
+        if (idx >= 0 && (size_t)idx < gVProcTasks.count) {
+            gVProcTaskFreeHint = (size_t)idx;
+        }
+    }
 
 }
 
@@ -7801,9 +7822,13 @@ static void vprocEnsurePathTruncationDefault(void) {
         pthread_mutex_unlock(&gPathTruncateMu);
         return;
     }
+    const char *container_root = getenv("PSCALI_CONTAINER_ROOT");
+    size_t container_root_len = (container_root && container_root[0] != '\0')
+            ? strlen(container_root)
+            : 0;
     const char *raw_prefix = getenv("PATH_TRUNCATE");
     if (!raw_prefix || raw_prefix[0] == '\0') {
-        raw_prefix = getenv("PSCALI_CONTAINER_ROOT");
+        raw_prefix = container_root;
     }
     if (!raw_prefix || raw_prefix[0] != '/') {
         raw_prefix = getenv("HOME");
@@ -7818,7 +7843,8 @@ static void vprocEnsurePathTruncationDefault(void) {
      * truncation is anchored at the container root, /bin expands to
      * <container>/bin which does not exist. Prefer the Documents root so /bin
      * maps to <container>/Documents/bin where exsh assets are staged. */
-    if (getenv("PSCALI_CONTAINER_ROOT") && strncmp(raw_prefix, getenv("PSCALI_CONTAINER_ROOT"), strlen(getenv("PSCALI_CONTAINER_ROOT"))) == 0) {
+    if (container_root_len > 0 &&
+        strncmp(raw_prefix, container_root, container_root_len) == 0) {
         size_t n = snprintf(prefbuf, sizeof(prefbuf), "%s/Documents", raw_prefix);
         if (n > 0 && n < sizeof(prefbuf)) {
             prefix = prefbuf;
@@ -7833,10 +7859,14 @@ void vprocApplyPathTruncation(const char *prefix) {
     gPathTruncateInit = true;
     if (prefix && prefix[0] == '/') {
         unsetenv("PSCALI_PATH_TRUNCATE_DISABLED");
+        const char *container_root = getenv("PSCALI_CONTAINER_ROOT");
+        size_t container_root_len = (container_root && container_root[0] != '\0')
+                ? strlen(container_root)
+                : 0;
         char prefbuf[PATH_MAX];
         const char *use_prefix = prefix;
-        if (getenv("PSCALI_CONTAINER_ROOT") &&
-            strncmp(prefix, getenv("PSCALI_CONTAINER_ROOT"), strlen(getenv("PSCALI_CONTAINER_ROOT"))) == 0) {
+        if (container_root_len > 0 &&
+            strncmp(prefix, container_root, container_root_len) == 0) {
             size_t n = snprintf(prefbuf, sizeof(prefbuf), "%s/Documents", prefix);
             if (n > 0 && n < sizeof(prefbuf)) {
                 use_prefix = prefbuf;
