@@ -635,6 +635,36 @@ static void assert_task_slots_reused_after_reap(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+static void assert_reserve_pid_reports_capacity(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = current_waiter_pid();
+    vprocSetShellSelfPid(shell_pid);
+
+    const int attempts = 5000;
+    int *reserved = (int *)calloc((size_t)attempts, sizeof(int));
+    assert(reserved);
+
+    int reserved_count = 0;
+    bool saw_capacity_error = false;
+    for (int i = 0; i < attempts; ++i) {
+        errno = 0;
+        int pid = vprocReservePid();
+        if (pid < 0) {
+            assert(errno == EMFILE);
+            saw_capacity_error = true;
+            break;
+        }
+        reserved[reserved_count++] = pid;
+    }
+    assert(saw_capacity_error);
+
+    for (int i = 0; i < reserved_count; ++i) {
+        vprocDiscard(reserved[i]);
+    }
+    free(reserved);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 static void assert_kill_zero_targets_current_pgid(void) {
     int previous_shell = vprocGetShellSelfPid();
     int parent = current_waiter_pid();
@@ -2153,6 +2183,8 @@ int main(void) {
     assert_wait_reports_continued();
     fprintf(stderr, "TEST task_slots_reused_after_reap\n");
     assert_task_slots_reused_after_reap();
+    fprintf(stderr, "TEST reserve_pid_reports_capacity\n");
+    assert_reserve_pid_reports_capacity();
     fprintf(stderr, "TEST kill_zero_targets_current_pgid\n");
     assert_kill_zero_targets_current_pgid();
     fprintf(stderr, "TEST children_reparent_to_shell\n");
