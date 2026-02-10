@@ -6625,7 +6625,7 @@ int vprocSetPgid(int pid, int pgid) {
         /* Ensure pgid belongs to same session if it already exists. */
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *peer = &gVProcTasks.items[i];
-            if (!peer || peer->pid <= 0 || peer->pgid != pgid) continue;
+            if (peer->pid <= 0 || peer->pgid != pgid) continue;
             if (peer->sid != entry->sid) {
                 errno = EPERM;
                 rc = -1;
