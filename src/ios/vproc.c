@@ -232,7 +232,11 @@ static void pscalLoadPasswd(void) {
         if (!tok_name || !tok_passwd || !tok_uid || !tok_gid) {
             continue;
         }
-        PscalPasswdEntry *resized = realloc(gPscalPasswd, (gPscalPasswdCount + 1) * sizeof(PscalPasswdEntry));
+        if (gPscalPasswdCount >= (SIZE_MAX / sizeof(PscalPasswdEntry))) {
+            break;
+        }
+        size_t new_count = gPscalPasswdCount + 1;
+        PscalPasswdEntry *resized = realloc(gPscalPasswd, new_count * sizeof(PscalPasswdEntry));
         if (!resized) {
             break;
         }
@@ -296,7 +300,11 @@ static void pscalLoadGroup(void) {
         if (!tok_name || !tok_passwd || !tok_gid) {
             continue;
         }
-        PscalGroupEntry *resized = realloc(gPscalGroup, (gPscalGroupCount + 1) * sizeof(PscalGroupEntry));
+        if (gPscalGroupCount >= (SIZE_MAX / sizeof(PscalGroupEntry))) {
+            break;
+        }
+        size_t new_count = gPscalGroupCount + 1;
+        PscalGroupEntry *resized = realloc(gPscalGroup, new_count * sizeof(PscalGroupEntry));
         if (!resized) {
             break;
         }
@@ -7517,6 +7525,10 @@ static char **vprocSimDupArgv(char *const argv[], int *out_argc) {
             argc++;
         }
     }
+    size_t argc_size = (size_t)argc;
+    if (argc_size > (SIZE_MAX / sizeof(char *)) - 1) {
+        return NULL;
+    }
     char **copy = (char **)calloc((size_t)argc + 1, sizeof(char *));
     if (!copy) {
         return NULL;
@@ -10722,6 +10734,18 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         host_index = host_index_stack;
         host_fds = host_fds_stack;
     } else {
+        size_t nfds_size = (size_t)nfds;
+        if (nfds_size > (SIZE_MAX / sizeof(*pscal_fds)) ||
+            nfds_size > (SIZE_MAX - 1)) {
+            errno = ENOMEM;
+            return -1;
+        }
+        size_t nfds_plus_one = nfds_size + 1;
+        if (nfds_plus_one > (SIZE_MAX / sizeof(*host_index)) ||
+            nfds_plus_one > (SIZE_MAX / sizeof(*host_fds))) {
+            errno = ENOMEM;
+            return -1;
+        }
         pscal_fds = calloc(nfds, sizeof(*pscal_fds));
         host_index = calloc(nfds + 1, sizeof(*host_index));
         host_fds = calloc(nfds + 1, sizeof(*host_fds));
@@ -10888,7 +10912,13 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
 
     int timeout_ms = -1;
     if (timeout) {
-        timeout_ms = (int)(timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
+        int64_t total_ms = (int64_t)timeout->tv_sec * 1000 + (int64_t)(timeout->tv_usec / 1000);
+        if (total_ms < 0) {
+            total_ms = 0;
+        } else if (total_ms > INT_MAX) {
+            total_ms = INT_MAX;
+        }
+        timeout_ms = (int)total_ms;
     }
 
     if (count == 0) {
@@ -10914,6 +10944,12 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         pfds = pfds_stack;
         fd_map = fd_map_stack;
     } else {
+        size_t count_size = (size_t)count;
+        if (count_size > (SIZE_MAX / sizeof(*pfds)) ||
+            count_size > (SIZE_MAX / sizeof(*fd_map))) {
+            errno = ENOMEM;
+            return -1;
+        }
         pfds = calloc((size_t)count, sizeof(*pfds));
         fd_map = calloc((size_t)count, sizeof(*fd_map));
         if (!pfds || !fd_map) {
