@@ -6881,6 +6881,12 @@ static bool vprocHasKillTargetLocked(pid_t pid) {
         VProcTaskEntry *entry = vprocTaskFindLocked(target);
         return entry && entry->pid > 0;
     }
+    if (target_group) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(target);
+        if (entry && entry->pid > 0 && entry->pgid == target) {
+            return true;
+        }
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
         if (!entry || entry->pid <= 0) continue;
@@ -7064,6 +7070,64 @@ static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity
     (*list)[(*count)++] = tid;
 }
 
+static bool vprocKillDeliverEntryLocked(VProcTaskEntry *entry,
+                                        pid_t requested_pid,
+                                        int sig,
+                                        bool dbg,
+                                        pthread_t self,
+                                        pthread_t **cancel_list,
+                                        size_t *cancel_count,
+                                        size_t *cancel_capacity) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->zombie || entry->exited) {
+        return false;
+    }
+    if (dbg) {
+        vprocDebugLogf( "[vproc-kill] pid=%d sig=%d entry_pid=%d tid=%p\n",
+                (int)requested_pid, sig, entry->pid, (void *)entry->tid);
+    }
+
+    bool shell_thread = gShellSelfTidValid && pthread_equal(entry->tid, gShellSelfTid);
+
+    if (shell_thread && (sig == SIGINT || sig == SIGTSTP)) {
+#if defined(PSCAL_TARGET_IOS)
+        if (sig == SIGINT && pscalRuntimeRequestSigint) {
+            pscalRuntimeRequestSigint();
+        }
+#endif
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    if (vprocSignalBlockedLocked(entry, sig)) {
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
+    if (action == VPROC_SIG_HANDLER && !vprocEntryIsCurrentThreadLocked(entry)) {
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    vprocApplySignalLocked(entry, sig);
+
+    if (entry->exited) {
+        if (entry->tid && !pthread_equal(entry->tid, self)) {
+            vprocCancelListAdd(cancel_list, cancel_count, cancel_capacity, entry->tid);
+        }
+        for (size_t t = 0; t < entry->thread_count; ++t) {
+            pthread_t tid = entry->threads[t];
+            if (tid && !pthread_equal(tid, self)) {
+                vprocCancelListAdd(cancel_list, cancel_count, cancel_capacity, tid);
+            }
+        }
+    }
+    return true;
+}
+
 int vprocKillShim(pid_t pid, int sig) {
     if (!vprocShimHasVirtualContext()) {
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
@@ -7128,65 +7192,32 @@ int vprocKillShim(pid_t pid, int sig) {
     }
     bool delivered = false;
     
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->zombie || entry->exited) continue;
-        if (dbg) {
-            vprocDebugLogf( "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
-                    entry->pid, entry->pgid, entry->sid, entry->exited, entry->zombie);
+    if (!broadcast_all && !target_group) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(target);
+        if (entry && vprocKillDeliverEntryLocked(entry, pid, sig, dbg, self,
+                                                 &cancel_list, &cancel_count, &cancel_capacity)) {
+            delivered = true;
         }
-
-        if (broadcast_all) {
-            // Don't kill self in broadcast
-            if (self_pid > 0 && entry->pid == self_pid) continue;
-        } else if (target_group) {
-            if (entry->pgid != target) continue;
-        } else {
-            if (entry->pid != target) continue;
-        }
-        
-        delivered = true;
-
-        if (dbg) {
-            vprocDebugLogf( "[vproc-kill] pid=%d sig=%d target=%d entry_pid=%d tid=%p\n",
-                    (int)pid, sig, target, entry->pid, (void *)entry->tid);
-        }
-
-        bool shell_thread = gShellSelfTidValid && pthread_equal(entry->tid, gShellSelfTid);
-
-        if (shell_thread && (sig == SIGINT || sig == SIGTSTP)) {
-#if defined(PSCAL_TARGET_IOS)
-            if (sig == SIGINT && pscalRuntimeRequestSigint) {
-                pscalRuntimeRequestSigint();
+    } else {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (!entry || entry->pid <= 0) continue;
+            if (entry->zombie || entry->exited) continue;
+            if (dbg) {
+                vprocDebugLogf( "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
+                        entry->pid, entry->pgid, entry->sid, entry->exited, entry->zombie);
             }
-#endif
-            vprocQueuePendingSignalLocked(entry, sig);
-            continue;
-        }
 
-        if (vprocSignalBlockedLocked(entry, sig)) {
-            vprocQueuePendingSignalLocked(entry, sig);
-            continue;
-        }
-
-        VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
-        if (action == VPROC_SIG_HANDLER && !vprocEntryIsCurrentThreadLocked(entry)) {
-            vprocQueuePendingSignalLocked(entry, sig);
-            continue;
-        }
-
-        vprocApplySignalLocked(entry, sig);
-
-        if (entry->exited) {
-            if (entry->tid && !pthread_equal(entry->tid, self)) {
-                vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, entry->tid);
+            if (broadcast_all) {
+                // Don't kill self in broadcast
+                if (self_pid > 0 && entry->pid == self_pid) continue;
+            } else if (target_group) {
+                if (entry->pgid != target) continue;
             }
-            for (size_t t = 0; t < entry->thread_count; ++t) {
-                pthread_t tid = entry->threads[t];
-                if (tid && !pthread_equal(tid, self)) {
-                    vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, tid);
-                }
+
+            if (vprocKillDeliverEntryLocked(entry, pid, sig, dbg, self,
+                                            &cancel_list, &cancel_count, &cancel_capacity)) {
+                delivered = true;
             }
         }
     }
