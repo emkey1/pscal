@@ -4547,6 +4547,10 @@ static bool vprocEnsureFdCapacityLocked(VProc *vp, size_t needed) {
     if (!vp || needed == 0) {
         return false;
     }
+    size_t max_fd_capacity = (size_t)INT_MAX + 1u;
+    if (needed > max_fd_capacity) {
+        return false;
+    }
     if (needed <= vp->capacity) {
         return true;
     }
@@ -4556,6 +4560,12 @@ static bool vprocEnsureFdCapacityLocked(VProc *vp, size_t needed) {
                                     VPROC_INITIAL_CAPACITY,
                                     sizeof(VProcFdEntry),
                                     &new_cap)) {
+        return false;
+    }
+    if (new_cap > max_fd_capacity) {
+        new_cap = max_fd_capacity;
+    }
+    if (new_cap < needed) {
         return false;
     }
     VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
