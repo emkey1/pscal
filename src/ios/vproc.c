@@ -4587,6 +4587,10 @@ static int vprocAllocSlot(VProc *vp) {
     if (!vp) {
         return -1;
     }
+    if (vp->capacity > (size_t)INT_MAX) {
+        errno = EMFILE;
+        return -1;
+    }
     int capacity = (int)vp->capacity;
     if (capacity <= 0) {
         return -1;
@@ -5898,9 +5902,13 @@ void vprocTerminateSession(int sid) {
         target_count++;
     }
     if (target_count > 0) {
-        target_indices = (size_t *)calloc(target_count, sizeof(size_t));
-        if (!target_indices) {
+        if (target_count > SIZE_MAX / sizeof(size_t)) {
             clear_direct = true;
+        } else {
+            target_indices = (size_t *)calloc(target_count, sizeof(size_t));
+            if (!target_indices) {
+                clear_direct = true;
+            }
         }
     }
     size_t target_index = 0;
