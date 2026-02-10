@@ -5217,6 +5217,10 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     if (!parent_entry && parent_pid > 0 && parent_pid != pid) {
         parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
     }
+    if (parent_pid > 0 && (!parent_entry || parent_entry->pid != parent_pid)) {
+        parent_pid = 0;
+        parent_entry = NULL;
+    }
     /* Preallocate generously and avoid realloc to keep table pointer stable. */
     if (gVProcTasks.capacity == 0) {
         gVProcTasks.capacity = 4096;
