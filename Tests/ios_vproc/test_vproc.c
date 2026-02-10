@@ -2084,6 +2084,31 @@ static void assert_reserved_pid_not_self_parented(void) {
     vprocDiscard(pid);
 }
 
+static void assert_pid_hint_not_self_parented(void) {
+    int prev_shell = vprocGetShellSelfPid();
+
+    int forced_pid = vprocReservePid();
+    assert(forced_pid > 0);
+    vprocDiscard(forced_pid);
+
+    vprocSetShellSelfPid(forced_pid);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = forced_pid;
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    assert(vprocPid(vp) == forced_pid);
+
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    size_t count = vprocSnapshot(snaps, cap ? cap : 1);
+    assert(snapshot_find_parent(snaps, count, forced_pid) != forced_pid);
+    free(snaps);
+
+    vprocDestroy(vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 static void assert_reparenting_uses_session_leader_sid(void) {
     int prev_shell = vprocGetShellSelfPid();
     int prev_kernel = vprocGetKernelPid();
@@ -2387,6 +2412,8 @@ int main(void) {
     assert_self_parent_is_rejected();
     fprintf(stderr, "TEST reserved_pid_not_self_parented\n");
     assert_reserved_pid_not_self_parented();
+    fprintf(stderr, "TEST pid_hint_not_self_parented\n");
+    assert_pid_hint_not_self_parented();
     fprintf(stderr, "TEST reparenting_uses_sid\n");
     assert_reparenting_uses_session_leader_sid();
     fprintf(stderr, "TEST terminate_session_discards_entries\n");
