@@ -2557,7 +2557,7 @@ static void vprocMaybeNotifyPgidEmptyLocked(int pgid) {
     }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) {
+        if (entry->pid <= 0) {
             continue;
         }
         if (entry->pgid == pgid && !entry->exited) {
@@ -6555,7 +6555,7 @@ void vprocMarkGroupExit(int pid, int status) {
         int pgid = entry->pgid;
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *peer = &gVProcTasks.items[i];
-            if (!peer || peer->pid <= 0) continue;
+            if (peer->pid <= 0) continue;
             if (peer->pgid != pgid) continue;
             vprocMaybeStampRusageLocked(peer);
             peer->group_exit = true;
@@ -6810,7 +6810,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
         bool drop_session = true;
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *peer = &gVProcTasks.items[i];
-            if (!peer || peer->pid <= 0) {
+            if (peer->pid <= 0) {
                 continue;
             }
             if (peer->pid == pid) {
