@@ -5671,7 +5671,7 @@ void vprocTerminateSession(int sid) {
     size_t cancel_count = 0;
     size_t cancel_cap = 0;
     size_t target_count = 0;
-    int *target_pids = NULL;
+    size_t *target_indices = NULL;
 
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
@@ -5682,7 +5682,7 @@ void vprocTerminateSession(int sid) {
         target_count++;
     }
     if (target_count > 0) {
-        target_pids = (int *)calloc(target_count, sizeof(int));
+        target_indices = (size_t *)calloc(target_count, sizeof(size_t));
     }
     size_t target_index = 0;
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
@@ -5709,15 +5709,16 @@ void vprocTerminateSession(int sid) {
                 vprocCancelListAdd(&cancel, &cancel_count, &cancel_cap, tid);
             }
         }
-        if (target_pids && target_index < target_count) {
-            target_pids[target_index++] = entry->pid;
+        if (target_indices && target_index < target_count) {
+            target_indices[target_index++] = i;
         }
     }
     for (size_t i = 0; i < target_index; ++i) {
-        VProcTaskEntry *entry = vprocTaskFindLocked(target_pids[i]);
-        if (entry) {
-            vprocClearEntryLocked(entry);
-        }
+        size_t idx = target_indices[i];
+        if (idx >= gVProcTasks.count) continue;
+        VProcTaskEntry *entry = &gVProcTasks.items[idx];
+        if (entry->pid <= 0 || entry->sid != sid) continue;
+        vprocClearEntryLocked(entry);
     }
     pthread_cond_broadcast(&gVProcTasks.cv);
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5726,7 +5727,7 @@ void vprocTerminateSession(int sid) {
         pthread_cancel(cancel[i]);
     }
     free(cancel);
-    free(target_pids);
+    free(target_indices);
 }
 
 static void *vprocThreadTrampoline(void *arg) {
