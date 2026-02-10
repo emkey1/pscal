@@ -4258,6 +4258,10 @@ static void vprocRemoveChildLocked(VProcTaskEntry *parent, int child_pid) {
 
 static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
     if (child_pid <= 0) return;
+    if (new_parent_pid == child_pid) {
+        /* Reject self-parenting to avoid cycles in parent/child bookkeeping. */
+        new_parent_pid = 0;
+    }
     VProcTaskEntry *child_entry = vprocTaskFindLocked(child_pid);
     if (!child_entry) return;
     int old_parent = child_entry->parent_pid;

@@ -2044,6 +2044,33 @@ static int snapshot_find_parent(const VProcSnapshot *snaps, size_t count, int pi
     return -1;
 }
 
+static void assert_self_parent_is_rejected(void) {
+    VProc *parent = vprocCreate(NULL);
+    VProc *child = vprocCreate(NULL);
+    assert(parent && child);
+
+    int parent_pid = vprocPid(parent);
+    int child_pid = vprocPid(child);
+    vprocSetParent(child_pid, parent_pid);
+
+    size_t cap = vprocSnapshot(NULL, 0);
+    VProcSnapshot *snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    size_t count = vprocSnapshot(snaps, cap ? cap : 1);
+    assert(snapshot_find_parent(snaps, count, child_pid) == parent_pid);
+    free(snaps);
+
+    /* vproc must never allow a process to parent itself (cycle). */
+    vprocSetParent(child_pid, child_pid);
+    cap = vprocSnapshot(NULL, 0);
+    snaps = calloc(cap ? cap : 1, sizeof(VProcSnapshot));
+    count = vprocSnapshot(snaps, cap ? cap : 1);
+    assert(snapshot_find_parent(snaps, count, child_pid) != child_pid);
+    free(snaps);
+
+    vprocDestroy(child);
+    vprocDestroy(parent);
+}
+
 static void assert_reparenting_uses_session_leader_sid(void) {
     int prev_shell = vprocGetShellSelfPid();
     int prev_kernel = vprocGetKernelPid();
@@ -2343,6 +2370,8 @@ int main(void) {
     assert_job_id_present_in_snapshot();
     fprintf(stderr, "TEST vproc_activation_stack\n");
     assert_vproc_activation_stack_restores_previous();
+    fprintf(stderr, "TEST self_parent_is_rejected\n");
+    assert_self_parent_is_rejected();
     fprintf(stderr, "TEST reparenting_uses_sid\n");
     assert_reparenting_uses_session_leader_sid();
     fprintf(stderr, "TEST terminate_session_discards_entries\n");
