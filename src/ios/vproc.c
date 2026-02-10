@@ -7092,7 +7092,10 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
         if (ready) {
             int status = 0;
             int waited_pid = ready->pid;
-            VProcTaskEntry *waiter_entry = vprocTaskFindLocked(waiter_pid);
+            VProcTaskEntry *waiter_entry = NULL;
+            if (waiter_pid > 0) {
+                waiter_entry = vprocTaskFindLocked(waiter_pid);
+            }
 
             if (ready->exited) {
                 if (ready->group_exit) {
