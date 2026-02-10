@@ -5670,7 +5670,7 @@ void vprocTerminateSession(int sid) {
     vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (entry->pid <= 0) continue;
         if (entry->sid != sid) continue;
         target_count++;
     }
@@ -5680,7 +5680,7 @@ void vprocTerminateSession(int sid) {
     size_t target_index = 0;
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (entry->pid <= 0) continue;
         if (entry->sid != sid) continue;
 
         vprocMaybeStampRusageLocked(entry);
@@ -7032,7 +7032,7 @@ static bool vprocHasKillTargetLocked(pid_t pid) {
     }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (entry->pid <= 0) continue;
         if (broadcast_all) {
             return true;
         }
@@ -7318,7 +7318,7 @@ int vprocKillShim(pid_t pid, int sig) {
     } else {
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) continue;
+            if (entry->pid <= 0) continue;
             if (entry->zombie || entry->exited) continue;
             if (dbg) {
                 vprocDebugLogf( "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
@@ -7862,7 +7862,7 @@ int vprocTcsetpgrpShim(int fd, pid_t pgid) {
     }
     if (!group_ok) {
         VProcTaskEntry *pgid_entry = vprocTaskFindLocked((int)pgid);
-        if (pgid_entry && pgid_entry->pid > 0 &&
+        if (pgid_entry &&
             pgid_entry->sid == sid &&
             pgid_entry->pgid == (int)pgid) {
             group_ok = true;
@@ -7871,7 +7871,7 @@ int vprocTcsetpgrpShim(int fd, pid_t pgid) {
     if (!group_ok) {
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) continue;
+            if (entry->pid <= 0) continue;
             if (entry->sid != sid) continue;
             if (entry->pgid == (int)pgid) {
                 group_ok = true;
