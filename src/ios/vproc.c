@@ -1684,6 +1684,7 @@ static __thread unsigned long long gVProcRegistrySeenVersion = 0;
 static VProc **gVProcRegistry = NULL;
 static size_t gVProcRegistryCount = 0;
 static size_t gVProcRegistryCapacity = 0;
+static VProc *gVProcRegistryHint = NULL;
 static pthread_mutex_t gVProcRegistryMu = PTHREAD_MUTEX_INITIALIZER;
 static unsigned long long gVProcRegistryVersion = 1;
 static int gNextSyntheticPid = 0;
@@ -2297,6 +2298,7 @@ static void vprocRegistryAdd(VProc *vp) {
         gVProcRegistryCapacity = new_cap;
     }
     gVProcRegistry[gVProcRegistryCount++] = vp;
+    gVProcRegistryHint = vp;
     __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&gVProcRegistryMu);
 }
@@ -2310,6 +2312,9 @@ static void vprocRegistryRemove(VProc *vp) {
         if (gVProcRegistry[i] == vp) {
             gVProcRegistry[i] = gVProcRegistry[gVProcRegistryCount - 1];
             gVProcRegistryCount--;
+            if (gVProcRegistryHint == vp) {
+                gVProcRegistryHint = (gVProcRegistryCount > 0) ? gVProcRegistry[0] : NULL;
+            }
             __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
             break;
         }
@@ -2323,10 +2328,15 @@ static bool vprocRegistryContains(const VProc *vp) {
     }
     bool found = false;
     pthread_mutex_lock(&gVProcRegistryMu);
-    for (size_t i = 0; i < gVProcRegistryCount; ++i) {
-        if (gVProcRegistry[i] == vp) {
-            found = true;
-            break;
+    if (gVProcRegistryHint == vp) {
+        found = true;
+    } else {
+        for (size_t i = 0; i < gVProcRegistryCount; ++i) {
+            if (gVProcRegistry[i] == vp) {
+                found = true;
+                gVProcRegistryHint = gVProcRegistry[i];
+                break;
+            }
         }
     }
     pthread_mutex_unlock(&gVProcRegistryMu);
