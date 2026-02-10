@@ -4247,12 +4247,13 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
 
 static void vprocRemoveChildLocked(VProcTaskEntry *parent, int child_pid) {
     if (!parent || !parent->children || parent->child_count == 0) return;
-    for (size_t i = 0; i < parent->child_count; ++i) {
+    for (size_t i = 0; i < parent->child_count;) {
         if (parent->children[i] == child_pid) {
             parent->children[i] = parent->children[parent->child_count - 1];
             parent->child_count--;
-            break;
+            continue;
         }
+        ++i;
     }
 }
 
