@@ -4461,18 +4461,15 @@ static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
     }
     VProcTaskEntry *new_parent_entry = NULL;
     if (new_parent_pid > 0) {
-        new_parent_entry = vprocTaskEnsureSlotLocked(new_parent_pid);
-        if (!new_parent_entry || new_parent_entry->pid != new_parent_pid) {
-            new_parent_pid = 0;
-            new_parent_entry = NULL;
-        }
+        /* Host-side parents may not have synthetic task entries; preserve the
+         * numeric parent for wait semantics and only track child links for
+         * parents that exist in the task table. */
+        new_parent_entry = vprocTaskFindLocked(new_parent_pid);
     }
     child_entry->parent_pid = new_parent_pid;
-    if (new_parent_pid > 0) {
-        if (new_parent_entry) {
-            if (!vprocAddChildLocked(new_parent_entry, child_pid)) {
-                child_entry->parent_pid = 0;
-            }
+    if (new_parent_entry) {
+        if (!vprocAddChildLocked(new_parent_entry, child_pid)) {
+            child_entry->parent_pid = 0;
         }
     }
 }
@@ -5349,11 +5346,7 @@ int vprocReservePid(void) {
     }
     VProcTaskEntry *parent_entry = NULL;
     if (parent_pid > 0) {
-        parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
-        if (!parent_entry || parent_entry->pid != parent_pid) {
-            parent_pid = 0;
-            parent_entry = NULL;
-        }
+        parent_entry = vprocTaskFindLocked(parent_pid);
     }
     vprocClearEntryLocked(entry);
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
@@ -5486,13 +5479,6 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         parent_pid = 0;
     }
     const VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-    if (!parent_entry && parent_pid > 0) {
-        parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
-    }
-    if (parent_pid > 0 && (!parent_entry || parent_entry->pid != parent_pid)) {
-        parent_pid = 0;
-        parent_entry = NULL;
-    }
     /* Preallocate generously and avoid realloc to keep table pointer stable. */
     if (gVProcTasks.capacity == 0) {
         gVProcTasks.capacity = 4096;
@@ -5655,11 +5641,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
     }
     VProcTaskEntry *parent_entry = NULL;
     if (parent_pid > 0) {
-        parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
-        if (!parent_entry || parent_entry->pid != parent_pid) {
-            parent_pid = 0;
-            parent_entry = NULL;
-        }
+        parent_entry = vprocTaskFindLocked(parent_pid);
     }
     /* Reinitialize the slot in place for this pid. */
     vprocClearEntryLocked(slot);
