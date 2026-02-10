@@ -4289,22 +4289,12 @@ static void vprocReparentChildrenLocked(int parent_pid, int new_parent_pid) {
         }
         return;
     }
-    size_t count = entry->child_count;
-    int *children = (int *)calloc(count, sizeof(int));
-    if (!children) {
-        return;
-    }
-    memcpy(children, entry->children, count * sizeof(int));
-    for (size_t i = 0; i < count; ++i) {
-        int child_pid = children[i];
+    while (entry->child_count > 0) {
+        int child_pid = entry->children[entry->child_count - 1];
+        entry->child_count--;
         if (child_pid > 0) {
             vprocUpdateParentLocked(child_pid, new_parent_pid);
         }
-    }
-    free(children);
-    entry = vprocTaskFindLocked(parent_pid);
-    if (entry) {
-        entry->child_count = 0;
     }
 }
 
