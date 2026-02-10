@@ -360,7 +360,7 @@ int rea_main(int argc, char **argv) {
         if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0) {
             printf("%s", REA_USAGE);
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
-        } else if (strcmp(argv[argi], "-v") == 0) {
+        } else if (strcmp(argv[argi], "-v") == 0 || strcmp(argv[argi], "--version") == 0) {
             printf("Rea Compiler Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));

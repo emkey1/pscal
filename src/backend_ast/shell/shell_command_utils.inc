@@ -311,10 +311,18 @@ static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
     if (!ctx || ctx->fd < 0) {
         return;
     }
+    int flags = fcntl(ctx->fd, F_GETFL);
+    if (flags >= 0) {
+        (void)fcntl(ctx->fd, F_SETFL, flags | O_NONBLOCK);
+    }
     char buffer[256];
+    int idle_spins = 0;
+    bool saw_data = false;
     while (true) {
-        ssize_t n = read(ctx->fd, buffer, sizeof(buffer));
+        ssize_t n = vprocHostRead(ctx->fd, buffer, sizeof(buffer));
         if (n > 0) {
+            saw_data = true;
+            idle_spins = 0;
             if (!shellBufferEnsure(&ctx->buffer, &ctx->length, &ctx->capacity, (size_t)n)) {
                 ctx->error = ENOMEM;
                 free(ctx->buffer);
@@ -330,6 +338,16 @@ static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
             break;
         } else if (errno == EINTR) {
             continue;
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            /* Command substitution output is complete once execution returns.
+             * Avoid blocking forever on leaked write-end descriptors. */
+            int max_spins = saw_data ? 4 : 20;
+            if (idle_spins < max_spins) {
+                ++idle_spins;
+                usleep(1000);
+                continue;
+            }
+            break;
         } else {
             ctx->error = errno ? errno : EIO;
             free(ctx->buffer);
@@ -339,7 +357,7 @@ static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
             break;
         }
     }
-    close(ctx->fd);
+    vprocHostClose(ctx->fd);
     ctx->fd = -1;
 }
 
@@ -367,7 +385,15 @@ static char *shellRunCommandSubstitution(const char *command) {
 
     int pipes[2] = {-1, -1};
     int saved_stdout = -1;
+    int mapped_stdout_fd = -1;
+    int saved_mapped_stdout = -1;
     bool stdout_redirected = false;
+    bool mapped_stdout_redirected = false;
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *prev_session_stdio = NULL;
+    VProcSessionStdio *cmdsub_session_stdio = NULL;
+    bool cmdsub_session_activated = false;
+#endif
 
     ShellRunOptions opts;
     ShellSymbolTableScope table_scope;
@@ -399,39 +425,112 @@ static char *shellRunCommandSubstitution(const char *command) {
         gShellRuntime.scalar_cache_misses++;
     }
 
-    if (pipe(pipes) != 0) {
+    if (vprocHostPipe(pipes) != 0) {
         result = strdup("");
         result_length = 0;
         goto substitution_finish;
     }
 
-    saved_stdout = dup(STDOUT_FILENO);
+    saved_stdout = vprocHostDup(STDOUT_FILENO);
     if (saved_stdout < 0) {
-        close(pipes[0]);
-        close(pipes[1]);
+        vprocHostClose(pipes[0]);
+        vprocHostClose(pipes[1]);
         pipes[0] = pipes[1] = -1;
         result = strdup("");
         result_length = 0;
         goto substitution_finish;
     }
 
-    if (dup2(pipes[1], STDOUT_FILENO) < 0) {
+#if defined(PSCAL_TARGET_IOS)
+    VProc *active_vp = vprocCurrent();
+    prev_session_stdio = vprocSessionStdioCurrent();
+    if (active_vp) {
+        int translated = vprocTranslateFd(active_vp, STDOUT_FILENO);
+        if (translated >= 0 && translated != STDOUT_FILENO) {
+            mapped_stdout_fd = translated;
+            saved_mapped_stdout = vprocHostDup(mapped_stdout_fd);
+            if (saved_mapped_stdout < 0) {
+                vprocHostClose(pipes[0]);
+                vprocHostClose(pipes[1]);
+                pipes[0] = pipes[1] = -1;
+                vprocHostClose(saved_stdout);
+                saved_stdout = -1;
+                result = strdup("");
+                result_length = 0;
+                goto substitution_finish;
+            }
+        }
+    }
+#endif
+
+    if (vprocHostDup2(pipes[1], STDOUT_FILENO) < 0) {
         int err = errno;
-        close(pipes[0]);
-        close(pipes[1]);
+        vprocHostClose(pipes[0]);
+        vprocHostClose(pipes[1]);
         pipes[0] = pipes[1] = -1;
-        close(saved_stdout);
+        vprocHostClose(saved_stdout);
         saved_stdout = -1;
+        if (saved_mapped_stdout >= 0) {
+            vprocHostClose(saved_mapped_stdout);
+            saved_mapped_stdout = -1;
+        }
         fprintf(stderr, "exsh: command substitution: failed to redirect stdout: %s\n", strerror(err));
         result = strdup("");
         result_length = 0;
         goto substitution_finish;
     }
     stdout_redirected = true;
-    close(pipes[1]);
+
+#if defined(PSCAL_TARGET_IOS)
+    if (mapped_stdout_fd >= 0) {
+        if (vprocHostDup2(pipes[1], mapped_stdout_fd) < 0) {
+            int err = errno;
+            vprocHostDup2(saved_stdout, STDOUT_FILENO);
+            vprocHostClose(saved_stdout);
+            saved_stdout = -1;
+            vprocHostClose(pipes[0]);
+            vprocHostClose(pipes[1]);
+            pipes[0] = pipes[1] = -1;
+            if (saved_mapped_stdout >= 0) {
+                vprocHostClose(saved_mapped_stdout);
+                saved_mapped_stdout = -1;
+            }
+            fprintf(stderr, "exsh: command substitution: failed to redirect mapped stdout: %s\n", strerror(err));
+            result = strdup("");
+            result_length = 0;
+            goto substitution_finish;
+        }
+        mapped_stdout_redirected = true;
+    }
+#endif
+    vprocHostClose(pipes[1]);
     pipes[1] = -1;
 
     reader.fd = pipes[0];
+
+#if defined(PSCAL_TARGET_IOS)
+    cmdsub_session_stdio = vprocSessionStdioCreate();
+    if (cmdsub_session_stdio) {
+        int session_kernel_pid = prev_session_stdio ? prev_session_stdio->kernel_pid : vprocGetKernelPid();
+        int session_stdin = (prev_session_stdio && prev_session_stdio->stdin_host_fd >= 0)
+            ? prev_session_stdio->stdin_host_fd
+            : STDIN_FILENO;
+        int session_stderr = (prev_session_stdio && prev_session_stdio->stderr_host_fd >= 0)
+            ? prev_session_stdio->stderr_host_fd
+            : STDERR_FILENO;
+        vprocSessionStdioInitWithFds(cmdsub_session_stdio,
+                                     session_stdin,
+                                     STDOUT_FILENO,
+                                     session_stderr,
+                                     session_kernel_pid);
+        if (prev_session_stdio) {
+            cmdsub_session_stdio->shell_pid = prev_session_stdio->shell_pid;
+            cmdsub_session_stdio->session_id = prev_session_stdio->session_id;
+        }
+        vprocSessionStdioActivate(cmdsub_session_stdio);
+        cmdsub_session_activated = true;
+    }
+#endif
 
     memset(&opts, 0, sizeof(opts));
     opts.no_cache = 1;
@@ -479,12 +578,20 @@ static char *shellRunCommandSubstitution(const char *command) {
 
     shellFlushStandardStreams();
 
+    if (mapped_stdout_redirected && saved_mapped_stdout >= 0) {
+        vprocHostDup2(saved_mapped_stdout, mapped_stdout_fd);
+        mapped_stdout_redirected = false;
+    }
+    if (saved_mapped_stdout >= 0) {
+        vprocHostClose(saved_mapped_stdout);
+        saved_mapped_stdout = -1;
+    }
     if (stdout_redirected) {
-        dup2(saved_stdout, STDOUT_FILENO);
+        vprocHostDup2(saved_stdout, STDOUT_FILENO);
         stdout_redirected = false;
     }
     if (saved_stdout >= 0) {
-        close(saved_stdout);
+        vprocHostClose(saved_stdout);
         saved_stdout = -1;
     }
 
@@ -492,11 +599,11 @@ static char *shellRunCommandSubstitution(const char *command) {
     shellCommandSubstitutionDrain(&reader);
 
     if (reader.fd >= 0) {
-        close(reader.fd);
+        vprocHostClose(reader.fd);
         reader.fd = -1;
     }
     if (pipes[0] >= 0) {
-        close(pipes[0]);
+        vprocHostClose(pipes[0]);
         pipes[0] = -1;
     }
 
@@ -528,6 +635,16 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
 substitution_finish:
+#if defined(PSCAL_TARGET_IOS)
+    if (cmdsub_session_activated) {
+        vprocSessionStdioActivate(prev_session_stdio);
+        cmdsub_session_activated = false;
+    }
+    if (cmdsub_session_stdio) {
+        vprocSessionStdioDestroy(cmdsub_session_stdio);
+        cmdsub_session_stdio = NULL;
+    }
+#endif
     if (reader.error && !exit_requested) {
         shellUpdateStatus(reader.error);
     }

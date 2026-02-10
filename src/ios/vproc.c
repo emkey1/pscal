@@ -4468,6 +4468,15 @@ static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
     }
     child_entry->parent_pid = new_parent_pid;
     if (new_parent_entry) {
+        /* Some host-backed synthetic tasks are created before their shell
+         * parent entry exists; once we have a concrete parent, adopt its
+         * session id so job/session filtering stays consistent. */
+        if (!child_entry->session_leader &&
+            child_entry->sid == child_entry->pid &&
+            new_parent_entry->sid > 0 &&
+            new_parent_entry->sid != child_entry->pid) {
+            child_entry->sid = new_parent_entry->sid;
+        }
         if (!vprocAddChildLocked(new_parent_entry, child_pid)) {
             child_entry->parent_pid = 0;
         }
@@ -8169,6 +8178,11 @@ void vprocSetShellSelfPid(int pid) {
     }
     if (pid > 0) {
         gVProcInterposeReady = 1;
+        /* Ensure the shell pid always has a task entry so later synthetic
+         * children can inherit session metadata (sid/pgid) deterministically. */
+        pthread_mutex_lock(&gVProcTasks.mu);
+        (void)vprocTaskEnsureSlotLocked(pid);
+        pthread_mutex_unlock(&gVProcTasks.mu);
     }
 }
 

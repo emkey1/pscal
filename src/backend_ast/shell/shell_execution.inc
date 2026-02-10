@@ -349,6 +349,12 @@ static VProc *shellCreateVProcForStage(int stdin_host,
     opts.winsize_cols = cols;
     opts.winsize_rows = rows;
     opts.pid_hint = pid_hint;
+    if (pid_hint > 0) {
+        int existing_job_id = vprocGetJobId(pid_hint);
+        if (existing_job_id > 0) {
+            opts.job_id = existing_job_id;
+        }
+    }
     VProc *vp = vprocCreate(&opts);
     if (!vp) {
         if (pscal_stdin) pscal_fd_close(pscal_stdin);
@@ -1367,6 +1373,9 @@ static void shellPrintJobStarted(const ShellJob *job, pid_t pid) {
     if (pid <= 0) {
         return;
     }
+    if (!shellRuntimeIsInteractive()) {
+        return;
+    }
     size_t job_id = job ? job->id : 0;
     if (job_id == 0) {
         job_id = (size_t)vprocGetJobId((int)pid);
@@ -2260,7 +2269,7 @@ static void shellResetPipeline(void) {
     ctx->in_process = false;
     ctx->in_process_worker = false;
     ctx->session_stdio = NULL;
-    if (ctx->pscal_pipe_read || ctx->pscal_pipe_write) {
+    if (ctx->pscal_pipe_read || ctx->pscal_pipe_write || ctx->pscal_pipe_write_hold) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
             if (ctx->pscal_pipe_read && ctx->pscal_pipe_read[i]) {
@@ -2271,11 +2280,17 @@ static void shellResetPipeline(void) {
                 pscal_fd_close(ctx->pscal_pipe_write[i]);
                 ctx->pscal_pipe_write[i] = NULL;
             }
+            if (ctx->pscal_pipe_write_hold && ctx->pscal_pipe_write_hold[i]) {
+                pscal_fd_close(ctx->pscal_pipe_write_hold[i]);
+                ctx->pscal_pipe_write_hold[i] = NULL;
+            }
         }
         free(ctx->pscal_pipe_read);
         free(ctx->pscal_pipe_write);
+        free(ctx->pscal_pipe_write_hold);
         ctx->pscal_pipe_read = NULL;
         ctx->pscal_pipe_write = NULL;
+        ctx->pscal_pipe_write_hold = NULL;
     }
     if (ctx->threads) {
         free(ctx->threads);
@@ -2340,7 +2355,7 @@ static void shellAbortPipeline(void) {
     shellPipelineSessionCloseSpool(ctx);
 #endif
 #if defined(PSCAL_TARGET_IOS)
-    if (ctx->pscal_pipe_read || ctx->pscal_pipe_write) {
+    if (ctx->pscal_pipe_read || ctx->pscal_pipe_write || ctx->pscal_pipe_write_hold) {
         size_t pipe_count = (ctx->stage_count > 0) ? (ctx->stage_count - 1) : 0;
         for (size_t i = 0; i < pipe_count; ++i) {
             if (ctx->pscal_pipe_read && ctx->pscal_pipe_read[i]) {
@@ -2351,11 +2366,17 @@ static void shellAbortPipeline(void) {
                 pscal_fd_close(ctx->pscal_pipe_write[i]);
                 ctx->pscal_pipe_write[i] = NULL;
             }
+            if (ctx->pscal_pipe_write_hold && ctx->pscal_pipe_write_hold[i]) {
+                pscal_fd_close(ctx->pscal_pipe_write_hold[i]);
+                ctx->pscal_pipe_write_hold[i] = NULL;
+            }
         }
         free(ctx->pscal_pipe_read);
         free(ctx->pscal_pipe_write);
+        free(ctx->pscal_pipe_write_hold);
         ctx->pscal_pipe_read = NULL;
         ctx->pscal_pipe_write = NULL;
+        ctx->pscal_pipe_write_hold = NULL;
     }
     if (ctx->thread_started && ctx->threads) {
         for (size_t i = 0; i < ctx->stage_count; ++i) {
@@ -2450,6 +2471,7 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
         }
         ctx->pscal_pipe_read = NULL;
         ctx->pscal_pipe_write = NULL;
+        ctx->pscal_pipe_write_hold = NULL;
         ctx->pipes = calloc(stages - 1, sizeof(int[2]));
         if (!ctx->pipes) {
             shellResetPipeline();
@@ -2468,13 +2490,19 @@ static bool shellEnsurePipeline(size_t stages, bool negated) {
         if (use_pscal_pipes) {
             ctx->pscal_pipe_read = (struct pscal_fd **)calloc(stages - 1, sizeof(struct pscal_fd *));
             ctx->pscal_pipe_write = (struct pscal_fd **)calloc(stages - 1, sizeof(struct pscal_fd *));
-            if (!ctx->pscal_pipe_read || !ctx->pscal_pipe_write) {
+            ctx->pscal_pipe_write_hold = (struct pscal_fd **)calloc(stages - 1, sizeof(struct pscal_fd *));
+            if (!ctx->pscal_pipe_read || !ctx->pscal_pipe_write || !ctx->pscal_pipe_write_hold) {
                 shellResetPipeline();
                 return false;
             }
             for (size_t i = 0; i < stages - 1; ++i) {
                 if (vprocCreateInprocPipe(&ctx->pscal_pipe_read[i], &ctx->pscal_pipe_write[i]) != 0 ||
                     !ctx->pscal_pipe_read[i] || !ctx->pscal_pipe_write[i]) {
+                    shellResetPipeline();
+                    return false;
+                }
+                ctx->pscal_pipe_write_hold[i] = pscal_fd_retain(ctx->pscal_pipe_write[i]);
+                if (!ctx->pscal_pipe_write_hold[i]) {
                     shellResetPipeline();
                     return false;
                 }
@@ -3836,13 +3864,17 @@ static int shellPipelineRunStage(VM *vm,
 #if defined(PSCAL_TARGET_IOS)
     /* iOS: in-process pipelines are stable when stage vprocs inherit the
      * session PSCAL stdio context. */
+    int pid_hint = -1;
+    if (ctx && ctx->pids && stage_pos < ctx->stage_count && ctx->pids[stage_pos] > 0) {
+        pid_hint = (int)ctx->pids[stage_pos];
+    }
     bool inherit_pscal_stdio = true;
     VProc *vp = shellCreateVProcForStage(stdin_fd,
                                          stdout_fd,
                                          stderr_fd,
                                          pscalRuntimeDetectWindowCols(),
                                          pscalRuntimeDetectWindowRows(),
-                                         -1,
+                                         pid_hint,
                                          inherit_pscal_stdio);
     if (!vp) {
         runtimeError(vm, "pipeline: failed to allocate vproc");
@@ -3909,6 +3941,13 @@ static int shellPipelineRunStage(VM *vm,
                         "[pipe-stage] adopt stdout failed stage=%zu pscal=%p errno=%d (%s)\n",
                         stage_pos, (void *)stdout_pscal, errno, strerror(errno));
             }
+        }
+    }
+    if (!pipeline_tail && ctx && ctx->pscal_pipe_write_hold &&
+        stage_pos < (ctx->stage_count > 0 ? ctx->stage_count - 1 : 0)) {
+        if (ctx->pscal_pipe_write_hold[stage_pos]) {
+            pscal_fd_close(ctx->pscal_pipe_write_hold[stage_pos]);
+            ctx->pscal_pipe_write_hold[stage_pos] = NULL;
         }
     }
     if (stderr_pscal && stderr_pscal != stdout_pscal) {
@@ -4050,24 +4089,22 @@ static void *shellPipelineStageThreadMain(void *arg) {
     ShellRuntimeState *prev_shell_ctx = NULL;
     VM *bg_vm = NULL;
     VM *prev_vm = NULL;
-    if (tctx->owns_ctx_snapshot) {
-        static pthread_once_t bg_builtin_once = PTHREAD_ONCE_INIT;
-        pthread_once(&bg_builtin_once, registerExtendedBuiltins);
-        bg_shell_ctx = shellRuntimeCreateContext();
-        if (bg_shell_ctx) {
-            prev_shell_ctx = shellRuntimeActivateContext(bg_shell_ctx);
-            bg_vm = (VM *)calloc(1, sizeof(VM));
-            if (bg_vm) {
-                initVM(bg_vm);
-                bg_vm->frontendContext = bg_shell_ctx;
-                prev_vm = shellSwapCurrentVm(bg_vm);
-                stage_vm = bg_vm;
-            } else {
-                shellRuntimeActivateContext(prev_shell_ctx);
-                prev_shell_ctx = NULL;
-                free(bg_shell_ctx);
-                bg_shell_ctx = NULL;
-            }
+    static pthread_once_t bg_builtin_once = PTHREAD_ONCE_INIT;
+    pthread_once(&bg_builtin_once, registerExtendedBuiltins);
+    bg_shell_ctx = shellRuntimeCreateContext();
+    if (bg_shell_ctx) {
+        prev_shell_ctx = shellRuntimeActivateContext(bg_shell_ctx);
+        bg_vm = (VM *)calloc(1, sizeof(VM));
+        if (bg_vm) {
+            initVM(bg_vm);
+            bg_vm->frontendContext = bg_shell_ctx;
+            prev_vm = shellSwapCurrentVm(bg_vm);
+            stage_vm = bg_vm;
+        } else {
+            shellRuntimeActivateContext(prev_shell_ctx);
+            prev_shell_ctx = NULL;
+            free(bg_shell_ctx);
+            bg_shell_ctx = NULL;
         }
     }
 
@@ -4105,7 +4142,7 @@ static void *shellPipelineStageThreadMain(void *arg) {
                 (int)(tctx->ctx ? tctx->ctx->background : false));
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (tctx->owns_ctx_snapshot) {
+    if (bg_vm || prev_vm || bg_shell_ctx || prev_shell_ctx) {
         if (bg_vm || prev_vm) {
             shellRestoreCurrentVm(prev_vm);
         }
@@ -4180,6 +4217,45 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
     /* Run single-stage background tails on a worker thread so the shell prompt returns. */
     bool async_tail = ctx->background && pipeline_tail && ctx->stage_count == 1;
     if (!pipeline_tail || async_tail) {
+        if (async_tail && ctx->pids && stage_pos < ctx->stage_count) {
+            if (ctx->pids[stage_pos] <= 0) {
+                int pid_hint = vprocReservePid();
+                if (pid_hint > 0) {
+                    ctx->pids[stage_pos] = (pid_t)pid_hint;
+                }
+            }
+            if (ctx->pids[stage_pos] > 0 && ctx->launched < (stage_pos + 1)) {
+                ctx->launched = stage_pos + 1;
+            }
+            if (ctx->pgid <= 0 && ctx->pids[stage_pos] > 0) {
+                ctx->pgid = ctx->pids[stage_pos];
+            }
+            if (ctx->pids[stage_pos] > 0) {
+                pid_t bg_pgid = (ctx->pgid > 0) ? ctx->pgid : ctx->pids[stage_pos];
+                int shell_pid = vprocGetShellSelfPid();
+                if (shell_pid > 0 && ctx->pids[stage_pos] != shell_pid) {
+                    int shell_sid = vprocGetSid(shell_pid);
+                    if (shell_sid > 0) {
+                        (void)vprocSetSid((int)ctx->pids[stage_pos], shell_sid);
+                    }
+                    (void)vprocSetParent((int)ctx->pids[stage_pos], shell_pid);
+                }
+                if (bg_pgid > 0) {
+                    (void)vprocSetPgid((int)ctx->pids[stage_pos], (int)bg_pgid);
+                }
+                pid_t bg_pids[1] = { ctx->pids[stage_pos] };
+                ShellJob *job = shellRegisterJob(bg_pgid, bg_pids, 1, cmd);
+                if (job) {
+                    shellJobMarkRunning(job);
+                    job->last_status = 0;
+                    gShellRuntime.last_bg_pid = bg_pgid;
+#if defined(PSCAL_TARGET_IOS)
+                    shellPrintJobStarted(job, bg_pgid);
+#endif
+                }
+            }
+        }
+
         ShellPipelineStageThreadCtx *tctx =
             (ShellPipelineStageThreadCtx *)calloc(1, sizeof(ShellPipelineStageThreadCtx));
         ShellCommand *cloned = shellCloneCommandForBackground(cmd);
@@ -4295,7 +4371,6 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
             }
         }
     }
-
     return true;
 }
 #endif /* PSCAL_TARGET_IOS */

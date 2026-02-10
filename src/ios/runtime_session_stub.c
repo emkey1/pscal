@@ -36,6 +36,12 @@ void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) {
     (void)tid;
 }
 
+__attribute__((weak))
+int32_t pscalRuntimePromptReadyForSession(uint64_t session_id) {
+    (void)session_id;
+    return -1;
+}
+
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 __attribute__((weak))
 int pscalRuntimeCurrentForegroundPgid(void) {

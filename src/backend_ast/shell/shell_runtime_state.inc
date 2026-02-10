@@ -437,6 +437,7 @@ typedef struct {
     int *stage_status;
     struct pscal_fd **pscal_pipe_read;
     struct pscal_fd **pscal_pipe_write;
+    struct pscal_fd **pscal_pipe_write_hold;
 #endif
 } ShellPipelineContext;
 

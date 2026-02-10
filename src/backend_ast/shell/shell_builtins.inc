@@ -9750,21 +9750,8 @@ static void shellHelpPrintOverview(void) {
 
 static void shellHelpPrintCatalog(void) {
     size_t topic_count = sizeof(kShellHelpTopics) / sizeof(kShellHelpTopics[0]);
-    size_t width = strlen("Builtin");
+    size_t width = 10;
     char display[64];
-
-    for (size_t i = 0; i < topic_count; ++i) {
-        const ShellHelpTopic *topic = &kShellHelpTopics[i];
-        const char *name = topic->name;
-        if (topic->alias_count > 0 && topic->aliases) {
-            snprintf(display, sizeof(display), "%s (%s)", name, topic->aliases[0]);
-            name = display;
-        }
-        size_t len = strlen(name);
-        if (len > width) {
-            width = len;
-        }
-    }
 
     printf("exsh builtins. Type 'help <function>' for detailed usage.\n\n");
     printf("%-*s  %s\n", (int)width, "Builtin", "Summary");
