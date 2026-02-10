@@ -15,6 +15,7 @@ final class TerminalTabManager: ObservableObject {
     }()
     private static let tabTitleDefaultsPrefix = "com.pscal.terminal.tabAppearance."
     private static let tabStartupCommandDefaultsPrefix = "com.pscal.terminal.tabAppearance."
+    private static let tabTitleResetOnStartDefaultsPrefix = "com.pscal.terminal.tabAppearance."
 
     struct Tab: Identifiable {
         enum Kind {
@@ -70,9 +71,10 @@ final class TerminalTabManager: ObservableObject {
         let runtime = PscalRuntimeBootstrap.shared
         let rootProfileID = "shell.1"
         let rootAppearance = TerminalTabAppearanceSettings(profileID: rootProfileID)
-        let rootTitle = Self.persistedTabTitle(
+        let rootTitle = Self.startupTabTitle(
             forProfileID: rootProfileID,
-            fallback: TerminalTabManager.sanitizeTitle("Shell")
+            fallback: TerminalTabManager.sanitizeTitle("Shell"),
+            restoreProfileDefaults: true
         )
         let rootStartupCommand = Self.persistedStartupCommand(forProfileID: rootProfileID)
         let shellTab = Tab(id: shellId,
@@ -107,9 +109,11 @@ final class TerminalTabManager: ObservableObject {
         let shellSlot = nextAvailableShellProfileSlot()
         let defaultTitle = TerminalTabManager.sanitizeTitle("Shell \(shellSlot)")
         let profileID = "shell.\(shellSlot)"
-        let title = restoreProfileDefaults
-            ? Self.persistedTabTitle(forProfileID: profileID, fallback: defaultTitle)
-            : defaultTitle
+        let title = Self.startupTabTitle(
+            forProfileID: profileID,
+            fallback: defaultTitle,
+            restoreProfileDefaults: restoreProfileDefaults
+        )
         let startupCommand = restoreProfileDefaults
             ? Self.persistedStartupCommand(forProfileID: profileID)
             : ""
@@ -248,7 +252,11 @@ final class TerminalTabManager: ObservableObject {
         }
         let defaultTitle = TerminalTabManager.sanitizeTitle(sshTitle(argv: argv))
         let profileID = "ssh.1"
-        let title = Self.persistedTabTitle(forProfileID: profileID, fallback: defaultTitle)
+        let title = Self.startupTabTitle(
+            forProfileID: profileID,
+            fallback: defaultTitle,
+            restoreProfileDefaults: true
+        )
         let startupCommand = Self.persistedStartupCommand(forProfileID: profileID)
         let appearance = appearanceSettings(forProfileID: profileID)
         let tab = Tab(id: sessionId,
@@ -524,6 +532,18 @@ final class TerminalTabManager: ObservableObject {
         return sanitized.isEmpty ? fallback : sanitized
     }
 
+    private static func startupTabTitle(forProfileID profileID: String,
+                                        fallback: String,
+                                        restoreProfileDefaults: Bool) -> String {
+        guard restoreProfileDefaults else {
+            return fallback
+        }
+        guard persistedResetTabTitleOnAppStart(forProfileID: profileID) else {
+            return fallback
+        }
+        return persistedTabTitle(forProfileID: profileID, fallback: fallback)
+    }
+
     private static func persistTabTitle(_ title: String, forProfileID profileID: String) {
         let key = tabTitleDefaultsKey(forProfileID: profileID)
         UserDefaults.standard.set(TerminalTabManager.sanitizeTitle(title), forKey: key)
@@ -555,6 +575,20 @@ final class TerminalTabManager: ObservableObject {
         "\(tabStartupCommandDefaultsPrefix)\(sanitizeProfileID(profileID)).startupCommand"
     }
 
+    private static func persistedResetTabTitleOnAppStart(forProfileID profileID: String) -> Bool {
+        let key = tabTitleResetOnStartDefaultsKey(forProfileID: profileID)
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
+    private static func persistResetTabTitleOnAppStart(_ enabled: Bool, forProfileID profileID: String) {
+        let key = tabTitleResetOnStartDefaultsKey(forProfileID: profileID)
+        UserDefaults.standard.set(enabled, forKey: key)
+    }
+
+    private static func tabTitleResetOnStartDefaultsKey(forProfileID profileID: String) -> String {
+        "\(tabTitleResetOnStartDefaultsPrefix)\(sanitizeProfileID(profileID)).resetTitleOnStart"
+    }
+
     private static func sanitizeProfileID(_ value: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
         let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
@@ -565,12 +599,28 @@ final class TerminalTabManager: ObservableObject {
         tabs.first(where: { $0.id == tabId })?.title
     }
 
+    func resetTabNameOnAppStart(tabId: UInt64) -> Bool {
+        guard let tab = tabs.first(where: { $0.id == tabId }) else { return false }
+        return Self.persistedResetTabTitleOnAppStart(forProfileID: tab.appearanceProfileID)
+    }
+
     @discardableResult
     func updateTabTitle(tabId: UInt64, rawTitle: String, persist: Bool = true) -> Bool {
         guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else {
             return false
         }
         return applyTabTitle(rawTitle, toTabAtIndex: idx, persist: persist)
+    }
+
+    @discardableResult
+    func updateResetTabNameOnAppStart(tabId: UInt64, enabled: Bool, persist: Bool = true) -> Bool {
+        guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else {
+            return false
+        }
+        if persist {
+            Self.persistResetTabTitleOnAppStart(enabled, forProfileID: tabs[idx].appearanceProfileID)
+        }
+        return true
     }
 
     func startupCommand(tabId: UInt64) -> String? {

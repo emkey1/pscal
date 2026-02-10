@@ -7,12 +7,14 @@ struct TerminalSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     private let tabId: UInt64
     @State private var tabNameDraft: String
+    @State private var resetTabNameOnAppStart: Bool
     @State private var startupCommandDraft: String
 
     init(appearanceSettings: TerminalTabAppearanceSettings, tabId: UInt64) {
         _appearanceSettings = ObservedObject(wrappedValue: appearanceSettings)
         self.tabId = tabId
         _tabNameDraft = State(initialValue: TerminalTabManager.shared.tabTitle(tabId: tabId) ?? "")
+        _resetTabNameOnAppStart = State(initialValue: TerminalTabManager.shared.resetTabNameOnAppStart(tabId: tabId))
         _startupCommandDraft = State(initialValue: TerminalTabManager.shared.startupCommand(tabId: tabId) ?? "")
     }
 
@@ -73,7 +75,18 @@ struct TerminalSettingsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
 
-                    Text("Used for this tab profile and restored on next launch.")
+                    Toggle(
+                        "Restore on app start",
+                        isOn: Binding(
+                            get: { resetTabNameOnAppStart },
+                            set: { enabled in
+                                _ = tabManager.updateResetTabNameOnAppStart(tabId: tabId, enabled: enabled)
+                                resetTabNameOnAppStart = tabManager.resetTabNameOnAppStart(tabId: tabId)
+                            }
+                        )
+                    )
+
+                    Text("Used for this tab profile. Enable restore to apply the saved name when the app starts.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
