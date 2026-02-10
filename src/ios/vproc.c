@@ -6971,7 +6971,7 @@ static bool vprocHasWaitCandidateLocked(pid_t pid,
                                         int kernel_pid) {
     if (pid > 0) {
         VProcTaskEntry *entry = vprocTaskFindLocked((int)pid);
-        if (!entry || entry->pid <= 0) {
+        if (!entry) {
             return false;
         }
         return vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid);
@@ -6997,11 +6997,11 @@ static bool vprocHasKillTargetLocked(pid_t pid) {
     int target = target_group ? -pid : pid;
     if (!broadcast_all && !target_group) {
         VProcTaskEntry *entry = vprocTaskFindLocked(target);
-        return entry && entry->pid > 0;
+        return entry != NULL;
     }
     if (target_group) {
         VProcTaskEntry *entry = vprocTaskFindLocked(target);
-        if (entry && entry->pid > 0 && entry->pgid == target) {
+        if (entry && entry->pgid == target) {
             return true;
         }
     }
