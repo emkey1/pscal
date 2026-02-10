@@ -5232,9 +5232,6 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         }
         gVProcTasksItemsStable = gVProcTasks.items;
         gVProcTasksCapacityStable = gVProcTasks.capacity;
-        if (!parent_entry && parent_pid > 0 && parent_pid != pid) {
-            parent_entry = vprocTaskFindLocked(parent_pid);
-        }
     }
     if (gVProcTasks.count >= gVProcTasks.capacity) {
         /* Reuse cleared slots before rejecting new synthetic tasks. */
