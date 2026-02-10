@@ -1866,6 +1866,23 @@ static void assert_select_empty_set_honors_timeout(void) {
     vprocDestroy(vp);
 }
 
+static void assert_select_rejects_oversize_fdset(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocRegisterThread(vp, pthread_self());
+    vprocActivate(vp);
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    errno = 0;
+    int rc = vprocSelectShim(FD_SETSIZE + 1, &rfds, NULL, NULL, NULL);
+    assert(rc == -1);
+    assert(errno == EINVAL);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 static void assert_location_disable_unblocks_and_errors(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -2438,6 +2455,8 @@ int main(void) {
     assert_select_sparse_fdset_works();
     fprintf(stderr, "TEST select_empty_set_honors_timeout\n");
     assert_select_empty_set_honors_timeout();
+    fprintf(stderr, "TEST select_rejects_oversize_fdset\n");
+    assert_select_rejects_oversize_fdset();
     fprintf(stderr, "TEST location_disable_unblocks_and_errors\n");
     assert_location_disable_unblocks_and_errors();
     fprintf(stderr, "TEST location_reader_observer_fires\n");
