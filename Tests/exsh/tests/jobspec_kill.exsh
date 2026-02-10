@@ -32,7 +32,8 @@ maybe_skip_jobspec() {
     return 0
 }
 
-tmp_base="./.exsh-jobspec-$$"
+tmp_root="${TMPDIR:-/tmp}"
+tmp_base="${tmp_root%/}/.exsh-jobspec-$$"
 tmp_jobs_1="${tmp_base}-jobs1"
 tmp_jobs_2="${tmp_base}-jobs2"
 tmp_jobs_3="${tmp_base}-jobs3"
