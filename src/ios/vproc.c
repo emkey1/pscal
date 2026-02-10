@@ -5099,7 +5099,7 @@ int vprocReservePid(void) {
         parent_pid = 0;
     }
     VProcTaskEntry *parent_entry = NULL;
-    if (parent_pid > 0 && parent_pid != pid) {
+    if (parent_pid > 0) {
         parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
         if (!parent_entry || parent_entry->pid != parent_pid) {
             parent_pid = 0;
@@ -5113,7 +5113,7 @@ int vprocReservePid(void) {
      * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
     entry->pgid = pid;
     entry->fg_pgid = pid;
-    if (parent_entry && parent_pid > 0 && parent_pid != pid) {
+    if (parent_entry && parent_pid > 0) {
         vprocAddChildLocked(parent_entry, pid);
     }
     if (gVProcTasks.items && gVProcTasks.count > 0) {
@@ -5215,7 +5215,7 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         parent_pid = 0;
     }
     const VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-    if (!parent_entry && parent_pid > 0 && parent_pid != pid) {
+    if (!parent_entry && parent_pid > 0) {
         parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
     }
     if (parent_pid > 0 && (!parent_entry || parent_entry->pid != parent_pid)) {
@@ -5259,7 +5259,7 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     }
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
     entry->parent_pid = parent_pid;
-    if (entry->parent_pid > 0 && entry->parent_pid != pid) {
+    if (entry->parent_pid > 0) {
         VProcTaskEntry *parent = (VProcTaskEntry *)parent_entry;
         if (parent && parent->pid == entry->parent_pid) {
             vprocAddChildLocked(parent, pid);
@@ -5370,7 +5370,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
         parent_pid = 0;
     }
     VProcTaskEntry *parent_entry = NULL;
-    if (parent_pid > 0 && parent_pid != vp->pid) {
+    if (parent_pid > 0) {
         parent_entry = vprocTaskEnsureSlotLocked(parent_pid);
         if (!parent_entry || parent_entry->pid != parent_pid) {
             parent_pid = 0;
