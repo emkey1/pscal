@@ -9318,6 +9318,10 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
     }
     struct timespec deadline = {0, 0};
     if (timeout) {
+        if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000L) {
+            errno = EINVAL;
+            return -1;
+        }
         struct timespec now;
         if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
             return -1;

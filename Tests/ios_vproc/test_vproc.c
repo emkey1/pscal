@@ -1448,6 +1448,31 @@ static void assert_sigtimedwait_timeout_and_drains(void) {
     vprocDestroy(vp);
 }
 
+static void assert_sigtimedwait_rejects_invalid_timeout(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int pid = vprocPid(vp);
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    int sig = 0;
+
+    struct timespec bad_nsec = {.tv_sec = 0, .tv_nsec = 1000000000L};
+    errno = 0;
+    assert(vprocSigtimedwait(pid, &set, &bad_nsec, &sig) == -1);
+    assert(errno == EINVAL);
+
+    struct timespec bad_sec = {.tv_sec = -1, .tv_nsec = 0};
+    errno = 0;
+    assert(vprocSigtimedwait(pid, &set, &bad_sec, &sig) == -1);
+    assert(errno == EINVAL);
+
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDestroy(vp);
+}
+
 static void assert_signal_handler_invoked(void) {
     g_handler_hits = 0;
     g_handler_sig = 0;
@@ -2430,6 +2455,8 @@ int main(void) {
     assert_sigwait_receives_pending();
     fprintf(stderr, "TEST sigtimedwait_timeout_and_drains\n");
     assert_sigtimedwait_timeout_and_drains();
+    fprintf(stderr, "TEST sigtimedwait_rejects_invalid_timeout\n");
+    assert_sigtimedwait_rejects_invalid_timeout();
     fprintf(stderr, "TEST signal_handler_invoked\n");
     assert_signal_handler_invoked();
     fprintf(stderr, "TEST siginfo_handler_invoked\n");
