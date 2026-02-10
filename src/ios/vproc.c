@@ -2227,17 +2227,60 @@ static struct {
     .capacity = 0,
     .mu = PTHREAD_MUTEX_INITIALIZER,
 };
+static uint64_t gVProcSessionPtyHintId = 0;
+static size_t gVProcSessionPtyHintIndex = 0;
 
 static bool vprocSessionPtyEntryIsEmpty(const VProcSessionPtyEntry *entry) {
     return !entry || (!entry->pty_slave && !entry->pty_master && !entry->output_handler);
 }
 
-static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
+static VProcSessionPtyEntry *vprocSessionPtyFindLocked(uint64_t session_id, size_t *out_index) {
+    if (out_index) {
+        *out_index = 0;
+    }
+    if (session_id == 0 || !gVProcSessionPtys.items || gVProcSessionPtys.count == 0) {
+        return NULL;
+    }
+    if (gVProcSessionPtyHintId == session_id && gVProcSessionPtyHintIndex < gVProcSessionPtys.count) {
+        VProcSessionPtyEntry *hint = &gVProcSessionPtys.items[gVProcSessionPtyHintIndex];
+        if (hint->session_id == session_id) {
+            if (out_index) {
+                *out_index = gVProcSessionPtyHintIndex;
+            }
+            return hint;
+        }
+    }
     for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
         VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
         if (entry->session_id == session_id) {
+            gVProcSessionPtyHintId = session_id;
+            gVProcSessionPtyHintIndex = i;
+            if (out_index) {
+                *out_index = i;
+            }
             return entry;
         }
+    }
+    return NULL;
+}
+
+static void vprocSessionPtyRemoveAtLocked(size_t idx) {
+    if (idx >= gVProcSessionPtys.count) {
+        return;
+    }
+    size_t last = gVProcSessionPtys.count - 1;
+    if (idx != last) {
+        gVProcSessionPtys.items[idx] = gVProcSessionPtys.items[last];
+    }
+    gVProcSessionPtys.count--;
+    gVProcSessionPtyHintId = 0;
+    gVProcSessionPtyHintIndex = 0;
+}
+
+static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
+    VProcSessionPtyEntry *existing = vprocSessionPtyFindLocked(session_id, NULL);
+    if (existing) {
+        return existing;
     }
     if (gVProcSessionPtys.count >= gVProcSessionPtys.capacity) {
         size_t new_cap = gVProcSessionPtys.capacity ? gVProcSessionPtys.capacity * 2 : 4;
@@ -2248,9 +2291,12 @@ static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
         gVProcSessionPtys.items = resized;
         gVProcSessionPtys.capacity = new_cap;
     }
-    VProcSessionPtyEntry *slot = &gVProcSessionPtys.items[gVProcSessionPtys.count++];
+    size_t idx = gVProcSessionPtys.count++;
+    VProcSessionPtyEntry *slot = &gVProcSessionPtys.items[idx];
     memset(slot, 0, sizeof(*slot));
     slot->session_id = session_id;
+    gVProcSessionPtyHintId = session_id;
+    gVProcSessionPtyHintIndex = idx;
     return slot;
 }
 
@@ -3463,20 +3509,16 @@ static void vprocSessionPtyUnregister(uint64_t session_id) {
         return;
     }
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id != session_id) {
-            continue;
-        }
+    size_t idx = 0;
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, &idx);
+    if (entry) {
         if (entry->pty_slave) {
             pscal_fd_close(entry->pty_slave);
         }
         if (entry->pty_master) {
             pscal_fd_close(entry->pty_master);
         }
-        gVProcSessionPtys.items[i] = gVProcSessionPtys.items[gVProcSessionPtys.count - 1];
-        gVProcSessionPtys.count--;
-        break;
+        vprocSessionPtyRemoveAtLocked(idx);
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
@@ -3492,14 +3534,9 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     }
     struct pscal_fd *pty_slave = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id == session_id) {
-            if (entry->pty_slave) {
-                pty_slave = pscal_fd_retain(entry->pty_slave);
-            }
-            break;
-        }
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry && entry->pty_slave) {
+        pty_slave = pscal_fd_retain(entry->pty_slave);
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 
@@ -3586,18 +3623,14 @@ void vprocSessionClearOutputHandler(uint64_t session_id) {
     vprocIoTrace("[vproc-io] clear output handler session=%llu",
                  (unsigned long long)session_id);
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id != session_id) {
-            continue;
-        }
+    size_t idx = 0;
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, &idx);
+    if (entry) {
         entry->output_handler = NULL;
         entry->output_context = NULL;
         if (vprocSessionPtyEntryIsEmpty(entry)) {
-            gVProcSessionPtys.items[i] = gVProcSessionPtys.items[gVProcSessionPtys.count - 1];
-            gVProcSessionPtys.count--;
+            vprocSessionPtyRemoveAtLocked(idx);
         }
-        break;
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
@@ -3615,18 +3648,16 @@ static bool vprocSessionGetOutputHandler(uint64_t session_id,
         return false;
     }
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id == session_id) {
-            if (out_handler) {
-                *out_handler = entry->output_handler;
-            }
-            if (out_context) {
-                *out_context = entry->output_context;
-            }
-            pthread_mutex_unlock(&gVProcSessionPtys.mu);
-            return entry->output_handler != NULL;
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry) {
+        if (out_handler) {
+            *out_handler = entry->output_handler;
         }
+        if (out_context) {
+            *out_context = entry->output_context;
+        }
+        pthread_mutex_unlock(&gVProcSessionPtys.mu);
+        return entry->output_handler != NULL;
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
     return false;
@@ -3645,12 +3676,9 @@ ssize_t vprocSessionWriteToMasterMode(uint64_t session_id,
                  len);
     struct pscal_fd *master = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id == session_id && entry->pty_master) {
-            master = pscal_fd_retain(entry->pty_master);
-            break;
-        }
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry && entry->pty_master) {
+        master = pscal_fd_retain(entry->pty_master);
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
     if (!master || !master->ops || !master->ops->write) {
