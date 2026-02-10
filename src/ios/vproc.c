@@ -5181,7 +5181,15 @@ static VProcTaskEntry *vprocTaskFindLocked(int pid) {
         cache->pid = 0;
         cache->idx = 0;
     }
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+    size_t start = (gVProcTaskFindHint < gVProcTasks.count) ? gVProcTaskFindHint : 0;
+    for (size_t i = start; i < gVProcTasks.count; ++i) {
+        if (gVProcTasks.items[i].pid == pid) {
+            gVProcTaskFindHint = i;
+            vprocTaskLookupRememberLocked(pid, i);
+            return &gVProcTasks.items[i];
+        }
+    }
+    for (size_t i = 0; i < start; ++i) {
         if (gVProcTasks.items[i].pid == pid) {
             gVProcTaskFindHint = i;
             vprocTaskLookupRememberLocked(pid, i);
@@ -5219,15 +5227,18 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
     }
     if (gVProcTasks.count >= gVProcTasks.capacity) {
         /* Reuse cleared slots before rejecting new synthetic tasks. */
-        for (size_t i = 0; i < gVProcTasks.count; ++i) {
-            size_t idx = gVProcTasks.count > 0
-                    ? (gVProcTaskFreeHint + i) % gVProcTasks.count
-                    : 0;
+        size_t start = (gVProcTaskFreeHint < gVProcTasks.count) ? gVProcTaskFreeHint : 0;
+        for (size_t idx = start; idx < gVProcTasks.count; ++idx) {
             if (gVProcTasks.items[idx].pid <= 0) {
                 entry = &gVProcTasks.items[idx];
-                gVProcTaskFreeHint = (gVProcTasks.count > 0)
-                        ? ((idx + 1) % gVProcTasks.count)
-                        : 0;
+                gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
+                break;
+            }
+        }
+        for (size_t idx = 0; !entry && idx < start; ++idx) {
+            if (gVProcTasks.items[idx].pid <= 0) {
+                entry = &gVProcTasks.items[idx];
+                gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
                 break;
             }
         }
