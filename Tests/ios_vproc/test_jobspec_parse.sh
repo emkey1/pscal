@@ -47,7 +47,9 @@ jobs
   echo "${j1}" | grep -q "\\[1\\]" || fail "jobs list missing [1] in first snapshot"
   echo "${j1}" | grep -q "\\[2\\]" || fail "jobs list missing [2] in first snapshot"
   j2=$(jobs_block "${output}" "--J2--" "--K2--")
-  echo "${j2}" | grep -q "\\[1\\]" && fail "jobs list still contains [1] after kill %1"
+  if echo "${j2}" | grep -q "\\[1\\]"; then
+    fail "jobs list still contains [1] after kill %1"
+  fi
   echo "${j2}" | grep -q "\\[2\\]" || fail "jobs list missing surviving [2] after kill %1"
 }
 
@@ -80,7 +82,9 @@ kill %3 || true
   j2=$(jobs_block "${output}" "--J2--" "--Kall--")
   echo "${j2}" | grep -q "\\[1\\]" || fail "after kill %2 missing [1]"
   echo "${j2}" | grep -q "\\[3\\]" || fail "after kill %2 missing [3]"
-  echo "${j2}" | grep -q "\\[2\\]" && fail "after kill %2 still contains [2]"
+  if echo "${j2}" | grep -q "\\[2\\]"; then
+    fail "after kill %2 still contains [2]"
+  fi
 }
 
 case_double_bracket_basic() {
