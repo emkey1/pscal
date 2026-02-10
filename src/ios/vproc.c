@@ -4275,9 +4275,6 @@ static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
     child_entry->parent_pid = new_parent_pid;
     if (new_parent_pid > 0) {
         VProcTaskEntry *new_parent_entry = vprocTaskEnsureSlotLocked(new_parent_pid);
-        child_entry = vprocTaskFindLocked(child_pid);
-        if (!child_entry) return;
-        child_entry->parent_pid = new_parent_pid;
         if (new_parent_entry) {
             vprocAddChildLocked(new_parent_entry, child_pid);
         }
