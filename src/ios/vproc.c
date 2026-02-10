@@ -6516,11 +6516,6 @@ void vprocMarkExit(VProc *vp, int status) {
         entry->zombie = true;
         int adopt_parent = vprocAdoptiveParentPidLocked(entry);
         vprocReparentChildrenLocked(vp->pid, adopt_parent);
-        entry = vprocTaskFindLocked(vp->pid);
-        if (!entry) {
-            pthread_mutex_unlock(&gVProcTasks.mu);
-            return;
-        }
 
         bool discard_zombie = false;
         VProcTaskEntry *parent_entry = vprocTaskFindLocked(entry->parent_pid);
