@@ -285,13 +285,26 @@ static void pscalLoadPasswd(void) {
         if (!pscalEnsurePasswdCapacity(gPscalPasswdCount + 1)) {
             break;
         }
-        PscalPasswdEntry *entry = &gPscalPasswd[gPscalPasswdCount++];
+        char *name = strdup(tok_name);
+        char *passwd = strdup(tok_passwd);
+        char *gecos = tok_gecos ? strdup(tok_gecos) : strdup("");
+        char *dir = tok_dir ? strdup(tok_dir) : strdup("/");
+        char *shell = tok_shell ? strdup(tok_shell) : strdup("/bin/sh");
+        if (!name || !passwd || !gecos || !dir || !shell) {
+            free(name);
+            free(passwd);
+            free(gecos);
+            free(dir);
+            free(shell);
+            break;
+        }
+        PscalPasswdEntry *entry = &gPscalPasswd[gPscalPasswdCount];
         memset(entry, 0, sizeof(*entry));
-        entry->name   = strdup(tok_name);
-        entry->passwd = strdup(tok_passwd);
-        entry->gecos  = tok_gecos ? strdup(tok_gecos) : strdup("");
-        entry->dir    = tok_dir ? strdup(tok_dir) : strdup("/");
-        entry->shell  = tok_shell ? strdup(tok_shell) : strdup("/bin/sh");
+        entry->name = name;
+        entry->passwd = passwd;
+        entry->gecos = gecos;
+        entry->dir = dir;
+        entry->shell = shell;
         entry->pw.pw_name   = entry->name;
         entry->pw.pw_passwd = entry->passwd;
         entry->pw.pw_uid    = (uid_t)strtoul(tok_uid, NULL, 10);
@@ -299,6 +312,7 @@ static void pscalLoadPasswd(void) {
         entry->pw.pw_gecos  = entry->gecos;
         entry->pw.pw_dir    = entry->dir;
         entry->pw.pw_shell  = entry->shell;
+        gPscalPasswdCount++;
     }
     free(line);
     fclose(fp);
@@ -347,14 +361,22 @@ static void pscalLoadGroup(void) {
         if (!pscalEnsureGroupCapacity(gPscalGroupCount + 1)) {
             break;
         }
-        PscalGroupEntry *entry = &gPscalGroup[gPscalGroupCount++];
+        char *name = strdup(tok_name);
+        char *passwd = strdup(tok_passwd);
+        if (!name || !passwd) {
+            free(name);
+            free(passwd);
+            break;
+        }
+        PscalGroupEntry *entry = &gPscalGroup[gPscalGroupCount];
         memset(entry, 0, sizeof(*entry));
-        entry->name   = strdup(tok_name);
-        entry->passwd = strdup(tok_passwd);
+        entry->name = name;
+        entry->passwd = passwd;
         entry->gr.gr_name   = entry->name;
         entry->gr.gr_passwd = entry->passwd;
         entry->gr.gr_gid    = (gid_t)strtoul(tok_gid, NULL, 10);
         entry->gr.gr_mem    = NULL;
+        gPscalGroupCount++;
     }
     free(line);
     fclose(fp);
