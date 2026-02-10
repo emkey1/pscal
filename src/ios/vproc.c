@@ -6566,6 +6566,10 @@ int vprocSetPgid(int pid, int pgid) {
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
+        if (entry->pgid == pgid) {
+            rc = 0;
+            goto out;
+        }
         /* Session leaders cannot change process groups. */
         if (entry->session_leader && entry->pid == entry->sid && entry->pgid != pgid) {
             errno = EPERM;
