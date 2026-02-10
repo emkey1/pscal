@@ -4905,24 +4905,26 @@ int vprocReservePid(void) {
     int pid = __sync_fetch_and_add(&gNextSyntheticPid, 1);
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
-    if (entry) {
-        int parent_pid = vprocDefaultParentPid();
-        if (parent_pid > 0 && parent_pid != pid) {
-            (void)vprocTaskEnsureSlotLocked(parent_pid);
-        }
-        vprocClearEntryLocked(entry);
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-        vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
-        entry->parent_pid = parent_pid;
-        /* Reserve creates a brand-new process group; do not inherit the shell's
-         * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
-        entry->pgid = pid;
-        entry->fg_pgid = pid;
-        if (parent_pid > 0 && parent_pid != pid) {
-            VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
-            if (parent) {
-                vprocAddChildLocked(parent, pid);
-            }
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return -1;
+    }
+    int parent_pid = vprocDefaultParentPid();
+    if (parent_pid > 0 && parent_pid != pid) {
+        (void)vprocTaskEnsureSlotLocked(parent_pid);
+    }
+    vprocClearEntryLocked(entry);
+    VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+    vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
+    entry->parent_pid = parent_pid;
+    /* Reserve creates a brand-new process group; do not inherit the shell's
+     * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
+    entry->pgid = pid;
+    entry->fg_pgid = pid;
+    if (parent_pid > 0 && parent_pid != pid) {
+        VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
+        if (parent) {
+            vprocAddChildLocked(parent, pid);
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5103,24 +5105,32 @@ VProc *vprocCreate(const VProcOptions *opts) {
     /* Ensure a task slot exists for synthetic pid bookkeeping. */
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *slot = vprocTaskEnsureSlotLocked(vp->pid);
-    if (slot) {
-        int parent_pid = vprocDefaultParentPid();
-        if (parent_pid > 0 && parent_pid != vp->pid) {
-            (void)vprocTaskEnsureSlotLocked(parent_pid);
+    if (!slot) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        if (errno == 0) {
+            errno = EMFILE;
         }
-        /* Reinitialize the slot in place for this pid. */
-        vprocClearEntryLocked(slot);
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-        vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
-        vprocUpdateParentLocked(vp->pid, parent_pid);
-        if (local.job_id > 0) {
-            slot->job_id = local.job_id;
-        }
-        /* Synthetic vprocs that override stdio (common for pipeline stages) should
-         * never be stopped by terminal job-control signals. */
-        if (local.stdin_fd >= 0 || local.stdout_fd >= 0 || local.stderr_fd >= 0) {
-            slot->stop_unsupported = true;
-        }
+        pthread_mutex_destroy(&vp->mu);
+        free(vp->entries);
+        free(vp);
+        return NULL;
+    }
+    int parent_pid = vprocDefaultParentPid();
+    if (parent_pid > 0 && parent_pid != vp->pid) {
+        (void)vprocTaskEnsureSlotLocked(parent_pid);
+    }
+    /* Reinitialize the slot in place for this pid. */
+    vprocClearEntryLocked(slot);
+    VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
+    vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
+    vprocUpdateParentLocked(vp->pid, parent_pid);
+    if (local.job_id > 0) {
+        slot->job_id = local.job_id;
+    }
+    /* Synthetic vprocs that override stdio (common for pipeline stages) should
+     * never be stopped by terminal job-control signals. */
+    if (local.stdin_fd >= 0 || local.stdout_fd >= 0 || local.stderr_fd >= 0) {
+        slot->stop_unsupported = true;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 
@@ -6574,9 +6584,6 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->blocked_signals = 0;
     entry->pending_signals = 0;
     entry->ignored_signals = 0;
-    for (int i = 0; i < 32; ++i) {
-        entry->pending_counts[i] = 0;
-    }
     for (int i = 0; i < 32; ++i) {
         entry->pending_counts[i] = 0;
     }
