@@ -129,15 +129,29 @@ static ino_t gPscalGroupIno = 0;
 static time_t gPscalGroupMtime = 0;
 static off_t gPscalGroupSize = 0;
 
+static void pscalFreePasswdEntries(PscalPasswdEntry *entries, size_t count) {
+    if (!entries) return;
+    for (size_t i = 0; i < count; ++i) {
+        free(entries[i].name);
+        free(entries[i].passwd);
+        free(entries[i].gecos);
+        free(entries[i].dir);
+        free(entries[i].shell);
+    }
+}
+
+static void pscalFreeGroupEntries(PscalGroupEntry *entries, size_t count) {
+    if (!entries) return;
+    for (size_t i = 0; i < count; ++i) {
+        free(entries[i].name);
+        free(entries[i].passwd);
+        free(entries[i].members_gids);
+    }
+}
+
 static void pscalFreePasswd(void) {
     if (!gPscalPasswd) return;
-    for (size_t i = 0; i < gPscalPasswdCount; ++i) {
-        free(gPscalPasswd[i].name);
-        free(gPscalPasswd[i].passwd);
-        free(gPscalPasswd[i].gecos);
-        free(gPscalPasswd[i].dir);
-        free(gPscalPasswd[i].shell);
-    }
+    pscalFreePasswdEntries(gPscalPasswd, gPscalPasswdCount);
     free(gPscalPasswd);
     gPscalPasswd = NULL;
     gPscalPasswdCount = 0;
@@ -146,22 +160,23 @@ static void pscalFreePasswd(void) {
 
 static void pscalFreeGroup(void) {
     if (!gPscalGroup) return;
-    for (size_t i = 0; i < gPscalGroupCount; ++i) {
-        free(gPscalGroup[i].name);
-        free(gPscalGroup[i].passwd);
-        free(gPscalGroup[i].members_gids);
-    }
+    pscalFreeGroupEntries(gPscalGroup, gPscalGroupCount);
     free(gPscalGroup);
     gPscalGroup = NULL;
     gPscalGroupCount = 0;
     gPscalGroupCapacity = 0;
 }
 
-static bool pscalEnsurePasswdCapacity(size_t needed) {
-    if (needed <= gPscalPasswdCapacity) {
+static bool pscalEnsurePasswdArrayCapacity(PscalPasswdEntry **entries,
+                                           size_t *capacity,
+                                           size_t needed) {
+    if (!entries || !capacity) {
+        return false;
+    }
+    if (needed <= *capacity) {
         return true;
     }
-    size_t new_cap = gPscalPasswdCapacity ? gPscalPasswdCapacity : 16;
+    size_t new_cap = *capacity ? *capacity : 16;
     while (new_cap < needed) {
         if (new_cap > SIZE_MAX / 2) {
             return false;
@@ -171,20 +186,25 @@ static bool pscalEnsurePasswdCapacity(size_t needed) {
     if (new_cap > SIZE_MAX / sizeof(PscalPasswdEntry)) {
         return false;
     }
-    PscalPasswdEntry *resized = realloc(gPscalPasswd, new_cap * sizeof(PscalPasswdEntry));
+    PscalPasswdEntry *resized = realloc(*entries, new_cap * sizeof(PscalPasswdEntry));
     if (!resized) {
         return false;
     }
-    gPscalPasswd = resized;
-    gPscalPasswdCapacity = new_cap;
+    *entries = resized;
+    *capacity = new_cap;
     return true;
 }
 
-static bool pscalEnsureGroupCapacity(size_t needed) {
-    if (needed <= gPscalGroupCapacity) {
+static bool pscalEnsureGroupArrayCapacity(PscalGroupEntry **entries,
+                                          size_t *capacity,
+                                          size_t needed) {
+    if (!entries || !capacity) {
+        return false;
+    }
+    if (needed <= *capacity) {
         return true;
     }
-    size_t new_cap = gPscalGroupCapacity ? gPscalGroupCapacity : 16;
+    size_t new_cap = *capacity ? *capacity : 16;
     while (new_cap < needed) {
         if (new_cap > SIZE_MAX / 2) {
             return false;
@@ -194,12 +214,12 @@ static bool pscalEnsureGroupCapacity(size_t needed) {
     if (new_cap > SIZE_MAX / sizeof(PscalGroupEntry)) {
         return false;
     }
-    PscalGroupEntry *resized = realloc(gPscalGroup, new_cap * sizeof(PscalGroupEntry));
+    PscalGroupEntry *resized = realloc(*entries, new_cap * sizeof(PscalGroupEntry));
     if (!resized) {
         return false;
     }
-    gPscalGroup = resized;
-    gPscalGroupCapacity = new_cap;
+    *entries = resized;
+    *capacity = new_cap;
     return true;
 }
 
@@ -259,12 +279,14 @@ static void pscalLoadPasswd(void) {
     if (!needs_reload) {
         return;
     }
-    gPscalPasswdLoaded = true;
-    pscalFreePasswd();
     FILE *fp = fopen(passwd_path, "r");
     if (!fp) {
         return;
     }
+    PscalPasswdEntry *new_entries = NULL;
+    size_t new_count = 0;
+    size_t new_capacity = 0;
+    bool load_ok = true;
     char *line = NULL;
     size_t cap = 0;
     while (getline(&line, &cap, fp) != -1) {
@@ -282,7 +304,8 @@ static void pscalLoadPasswd(void) {
         if (!tok_name || !tok_passwd || !tok_uid || !tok_gid) {
             continue;
         }
-        if (!pscalEnsurePasswdCapacity(gPscalPasswdCount + 1)) {
+        if (!pscalEnsurePasswdArrayCapacity(&new_entries, &new_capacity, new_count + 1)) {
+            load_ok = false;
             break;
         }
         char *name = strdup(tok_name);
@@ -296,9 +319,10 @@ static void pscalLoadPasswd(void) {
             free(gecos);
             free(dir);
             free(shell);
+            load_ok = false;
             break;
         }
-        PscalPasswdEntry *entry = &gPscalPasswd[gPscalPasswdCount];
+        PscalPasswdEntry *entry = &new_entries[new_count];
         memset(entry, 0, sizeof(*entry));
         entry->name = name;
         entry->passwd = passwd;
@@ -312,10 +336,20 @@ static void pscalLoadPasswd(void) {
         entry->pw.pw_gecos  = entry->gecos;
         entry->pw.pw_dir    = entry->dir;
         entry->pw.pw_shell  = entry->shell;
-        gPscalPasswdCount++;
+        new_count++;
     }
     free(line);
     fclose(fp);
+    if (!load_ok) {
+        pscalFreePasswdEntries(new_entries, new_count);
+        free(new_entries);
+        return;
+    }
+    pscalFreePasswd();
+    gPscalPasswd = new_entries;
+    gPscalPasswdCount = new_count;
+    gPscalPasswdCapacity = new_capacity;
+    gPscalPasswdLoaded = true;
     strlcpy(gPscalPasswdPath, passwd_path, sizeof(gPscalPasswdPath));
     gPscalPasswdDev = st.st_dev;
     gPscalPasswdIno = st.st_ino;
@@ -339,12 +373,14 @@ static void pscalLoadGroup(void) {
     if (!needs_reload) {
         return;
     }
-    gPscalGroupLoaded = true;
-    pscalFreeGroup();
     FILE *fp = fopen(group_path, "r");
     if (!fp) {
         return;
     }
+    PscalGroupEntry *new_entries = NULL;
+    size_t new_count = 0;
+    size_t new_capacity = 0;
+    bool load_ok = true;
     char *line = NULL;
     size_t cap = 0;
     while (getline(&line, &cap, fp) != -1) {
@@ -358,7 +394,8 @@ static void pscalLoadGroup(void) {
         if (!tok_name || !tok_passwd || !tok_gid) {
             continue;
         }
-        if (!pscalEnsureGroupCapacity(gPscalGroupCount + 1)) {
+        if (!pscalEnsureGroupArrayCapacity(&new_entries, &new_capacity, new_count + 1)) {
+            load_ok = false;
             break;
         }
         char *name = strdup(tok_name);
@@ -366,9 +403,10 @@ static void pscalLoadGroup(void) {
         if (!name || !passwd) {
             free(name);
             free(passwd);
+            load_ok = false;
             break;
         }
-        PscalGroupEntry *entry = &gPscalGroup[gPscalGroupCount];
+        PscalGroupEntry *entry = &new_entries[new_count];
         memset(entry, 0, sizeof(*entry));
         entry->name = name;
         entry->passwd = passwd;
@@ -376,10 +414,20 @@ static void pscalLoadGroup(void) {
         entry->gr.gr_passwd = entry->passwd;
         entry->gr.gr_gid    = (gid_t)strtoul(tok_gid, NULL, 10);
         entry->gr.gr_mem    = NULL;
-        gPscalGroupCount++;
+        new_count++;
     }
     free(line);
     fclose(fp);
+    if (!load_ok) {
+        pscalFreeGroupEntries(new_entries, new_count);
+        free(new_entries);
+        return;
+    }
+    pscalFreeGroup();
+    gPscalGroup = new_entries;
+    gPscalGroupCount = new_count;
+    gPscalGroupCapacity = new_capacity;
+    gPscalGroupLoaded = true;
     strlcpy(gPscalGroupPath, group_path, sizeof(gPscalGroupPath));
     gPscalGroupDev = st.st_dev;
     gPscalGroupIno = st.st_ino;
