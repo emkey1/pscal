@@ -2209,8 +2209,6 @@ int vprocCreateInprocPipe(struct pscal_fd **out_read, struct pscal_fd **out_writ
     wfd->userdata = write_end;
     *out_read = rfd;
     *out_write = wfd;
-    fprintf(stderr, "[pipe-create] pipe=%p rfd=%p wfd=%p cap=%zu\n",
-            (void *)pipe, (void *)rfd, (void *)wfd, pipe->cap);
     return 0;
 }
 
