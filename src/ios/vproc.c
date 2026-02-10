@@ -11023,6 +11023,10 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
     if (nfds <= 0) {
         return vprocHostSelectRaw(nfds, readfds, writefds, exceptfds, timeout);
     }
+    if ((readfds || writefds || exceptfds) && nfds > FD_SETSIZE) {
+        errno = EINVAL;
+        return -1;
+    }
 
     int count = 0;
     for (int fd = 0; fd < nfds; ++fd) {
