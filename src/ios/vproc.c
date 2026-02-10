@@ -9254,7 +9254,9 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     if (vp) {
         struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
         if (pscal_fd) {
-            if (gVprocPipelineStage && gVprocPipelineReadLogCount < 32) {
+            if (gVprocPipelineStage &&
+                vprocVprocDebugEnabled() &&
+                gVprocPipelineReadLogCount < 32) {
                 gVprocPipelineReadLogCount++;
                 fprintf(stderr, "[vproc-read] fd=%d using pscal=%p count=%zu\n",
                         fd, (void *)pscal_fd, count);
@@ -9301,12 +9303,12 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     if (vp) {
         struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
         if (pscal_fd) {
-            if (gVprocPipelineStage && gVprocPipelineWriteLogCount < 32) {
+            if (gVprocPipelineStage &&
+                vprocVprocDebugEnabled() &&
+                gVprocPipelineWriteLogCount < 32) {
                 gVprocPipelineWriteLogCount++;
-                if (vprocVprocDebugEnabled()) {
-                    fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
-                            fd, (void *)pscal_fd, count);
-                }
+                fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
+                        fd, (void *)pscal_fd, count);
             }
             ssize_t res = pscal_fd->ops->write(pscal_fd, buf, count);
             pscal_fd_close(pscal_fd);
