@@ -2678,11 +2678,15 @@ static size_t gVProcTaskFreeHint = 0;
 #define VPROC_TASK_LOOKUP_CACHE_SIZE 2048u
 _Static_assert((VPROC_TASK_LOOKUP_CACHE_SIZE & (VPROC_TASK_LOOKUP_CACHE_SIZE - 1u)) == 0,
                "VPROC_TASK_LOOKUP_CACHE_SIZE must be a power of two");
+#define VPROC_TASK_LOOKUP_CACHE_WAYS 2u
 typedef struct {
     int pid;
     uint32_t idx;
 } VProcTaskLookupCacheEntry;
-static VProcTaskLookupCacheEntry gVProcTaskLookupCache[VPROC_TASK_LOOKUP_CACHE_SIZE];
+typedef struct {
+    VProcTaskLookupCacheEntry way[VPROC_TASK_LOOKUP_CACHE_WAYS];
+} VProcTaskLookupCacheSet;
+static VProcTaskLookupCacheSet gVProcTaskLookupCache[VPROC_TASK_LOOKUP_CACHE_SIZE];
 
 static inline size_t vprocTaskLookupSlotForPid(int pid) {
     uint32_t hash = (uint32_t)pid * 2654435761u;
@@ -2693,19 +2697,37 @@ static inline void vprocTaskLookupRememberLocked(int pid, size_t idx) {
     if (pid <= 0 || idx > UINT32_MAX) {
         return;
     }
-    VProcTaskLookupCacheEntry *cache = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
-    cache->pid = pid;
-    cache->idx = (uint32_t)idx;
+    VProcTaskLookupCacheSet *set = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    VProcTaskLookupCacheEntry *way0 = &set->way[0];
+    VProcTaskLookupCacheEntry *way1 = &set->way[1];
+    if (way0->pid == pid) {
+        way0->idx = (uint32_t)idx;
+        return;
+    }
+    if (way1->pid == pid) {
+        way1->idx = (uint32_t)idx;
+        VProcTaskLookupCacheEntry tmp = *way0;
+        *way0 = *way1;
+        *way1 = tmp;
+        return;
+    }
+    /* MRU insert into way0 and age the previous entry into way1. */
+    *way1 = *way0;
+    way0->pid = pid;
+    way0->idx = (uint32_t)idx;
 }
 
 static inline void vprocTaskLookupForgetLocked(int pid) {
     if (pid <= 0) {
         return;
     }
-    VProcTaskLookupCacheEntry *cache = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
-    if (cache->pid == pid) {
-        cache->pid = 0;
-        cache->idx = 0;
+    VProcTaskLookupCacheSet *set = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    for (size_t way = 0; way < VPROC_TASK_LOOKUP_CACHE_WAYS; ++way) {
+        VProcTaskLookupCacheEntry *cache = &set->way[way];
+        if (cache->pid == pid) {
+            cache->pid = 0;
+            cache->idx = 0;
+        }
     }
 }
 
@@ -5447,11 +5469,20 @@ static VProcTaskEntry *vprocTaskFindLocked(int pid) {
             return hint;
         }
     }
-    VProcTaskLookupCacheEntry *cache = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
-    if (cache->pid == pid) {
+    VProcTaskLookupCacheSet *set = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    for (size_t way = 0; way < VPROC_TASK_LOOKUP_CACHE_WAYS; ++way) {
+        VProcTaskLookupCacheEntry *cache = &set->way[way];
+        if (cache->pid != pid) {
+            continue;
+        }
         size_t idx = (size_t)cache->idx;
         if (idx < gVProcTasks.count && gVProcTasks.items[idx].pid == pid) {
             gVProcTaskFindHint = idx;
+            if (way > 0) {
+                VProcTaskLookupCacheEntry tmp = set->way[0];
+                set->way[0] = set->way[way];
+                set->way[way] = tmp;
+            }
             return &gVProcTasks.items[idx];
         }
         cache->pid = 0;
