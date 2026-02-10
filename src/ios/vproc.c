@@ -1699,6 +1699,9 @@ typedef struct {
     pthread_t *items;
     size_t count;
     size_t capacity;
+    bool hint_valid;
+    pthread_t hint_tid;
+    size_t hint_index;
     pthread_mutex_t mu;
 } VProcInterposeBypassRegistry;
 
@@ -1706,6 +1709,9 @@ static VProcInterposeBypassRegistry gVProcInterposeBypassRegistry = {
     .items = NULL,
     .count = 0,
     .capacity = 0,
+    .hint_valid = false,
+    .hint_tid = 0,
+    .hint_index = 0,
     .mu = PTHREAD_MUTEX_INITIALIZER,
 };
 static pthread_mutex_t gPathTruncateMu = PTHREAD_MUTEX_INITIALIZER;
@@ -7915,26 +7921,49 @@ int vprocThreadIsRegisteredNonblocking(pthread_t tid) {
     return registered ? 1 : 0;
 }
 
+static bool vprocInterposeBypassFindIndexLocked(pthread_t tid, size_t *out_index) {
+    if (out_index) {
+        *out_index = 0;
+    }
+    if (gVProcInterposeBypassRegistry.hint_valid &&
+        gVProcInterposeBypassRegistry.hint_index < gVProcInterposeBypassRegistry.count &&
+        pthread_equal(gVProcInterposeBypassRegistry.hint_tid, tid)) {
+        size_t idx = gVProcInterposeBypassRegistry.hint_index;
+        if (pthread_equal(gVProcInterposeBypassRegistry.items[idx], tid)) {
+            if (out_index) {
+                *out_index = idx;
+            }
+            return true;
+        }
+    }
+    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
+        if (!pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
+            continue;
+        }
+        gVProcInterposeBypassRegistry.hint_valid = true;
+        gVProcInterposeBypassRegistry.hint_tid = tid;
+        gVProcInterposeBypassRegistry.hint_index = i;
+        if (out_index) {
+            *out_index = i;
+        }
+        return true;
+    }
+    return false;
+}
+
 int vprocThreadIsInterposeBypassed(pthread_t tid) {
     bool bypassed = false;
     pthread_mutex_lock(&gVProcInterposeBypassRegistry.mu);
-    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
-        if (pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
-            bypassed = true;
-            break;
-        }
-    }
+    bypassed = vprocInterposeBypassFindIndexLocked(tid, NULL);
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
     return bypassed ? 1 : 0;
 }
 
 void vprocRegisterInterposeBypassThread(pthread_t tid) {
     pthread_mutex_lock(&gVProcInterposeBypassRegistry.mu);
-    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
-        if (pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
-            pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
-            return;
-        }
+    if (vprocInterposeBypassFindIndexLocked(tid, NULL)) {
+        pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
+        return;
     }
     if (gVProcInterposeBypassRegistry.count >= gVProcInterposeBypassRegistry.capacity) {
         size_t new_capacity = gVProcInterposeBypassRegistry.capacity ? gVProcInterposeBypassRegistry.capacity * 2 : 8;
@@ -7946,19 +7975,24 @@ void vprocRegisterInterposeBypassThread(pthread_t tid) {
         gVProcInterposeBypassRegistry.items = items;
         gVProcInterposeBypassRegistry.capacity = new_capacity;
     }
-    gVProcInterposeBypassRegistry.items[gVProcInterposeBypassRegistry.count++] = tid;
+    size_t idx = gVProcInterposeBypassRegistry.count++;
+    gVProcInterposeBypassRegistry.items[idx] = tid;
+    gVProcInterposeBypassRegistry.hint_valid = true;
+    gVProcInterposeBypassRegistry.hint_tid = tid;
+    gVProcInterposeBypassRegistry.hint_index = idx;
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
 }
 
 void vprocUnregisterInterposeBypassThread(pthread_t tid) {
     pthread_mutex_lock(&gVProcInterposeBypassRegistry.mu);
-    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
-        if (pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
-            size_t last = gVProcInterposeBypassRegistry.count - 1;
-            gVProcInterposeBypassRegistry.items[i] = gVProcInterposeBypassRegistry.items[last];
-            gVProcInterposeBypassRegistry.count--;
-            break;
-        }
+    size_t idx = 0;
+    if (vprocInterposeBypassFindIndexLocked(tid, &idx)) {
+        size_t last = gVProcInterposeBypassRegistry.count - 1;
+        gVProcInterposeBypassRegistry.items[idx] = gVProcInterposeBypassRegistry.items[last];
+        gVProcInterposeBypassRegistry.count--;
+        gVProcInterposeBypassRegistry.hint_valid = false;
+        gVProcInterposeBypassRegistry.hint_tid = 0;
+        gVProcInterposeBypassRegistry.hint_index = 0;
     }
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
 }
