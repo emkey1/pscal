@@ -9538,13 +9538,13 @@ static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
 int vprocIsattyShim(int fd) {
     VProc *vp = vprocForThread();
     if (vp) {
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+        struct pscal_fd *pscal_fd = NULL;
+        int host_fd = vprocResolveFdForShim(vp, fd, 0, &pscal_fd);
         if (pscal_fd) {
             int res = (pscal_fd->tty != NULL) ? 1 : 0;
             pscal_fd_close(pscal_fd);
             return res;
         }
-        int host_fd = vprocTranslateFd(vp, fd);
         if (host_fd >= 0) {
             return vprocHostIsatty(host_fd);
         }
