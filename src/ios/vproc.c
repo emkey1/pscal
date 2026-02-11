@@ -9448,19 +9448,45 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
     }
 }
 
-static int shimTranslate(int fd, int allow_real) {
-    VProc *vp = vprocForThread();
+static int vprocResolveFdForShim(VProc *vp, int fd, int allow_real, struct pscal_fd **out_pscal) {
+    if (out_pscal) {
+        *out_pscal = NULL;
+    }
     if (!vp) {
         return allow_real ? fd : -1;
     }
-    int host = vprocTranslateFd(vp, fd);
+
+    int host = -1;
+    if (fd >= 0) {
+        pthread_mutex_lock(&vp->mu);
+        if ((size_t)fd < vp->capacity) {
+            VProcFdEntry entry = vp->entries[fd];
+            if (entry.kind == VPROC_FD_PSCAL && entry.pscal_fd) {
+                if (out_pscal) {
+                    *out_pscal = pscal_fd_retain(entry.pscal_fd);
+                }
+            } else if (entry.kind == VPROC_FD_HOST) {
+                host = entry.host_fd;
+            }
+        }
+        pthread_mutex_unlock(&vp->mu);
+    }
+
     if (host < 0 && allow_real && fd >= 0) {
         struct stat st;
         if (vprocHostFstatRaw(fd, &st) == 0) {
             return fd;
         }
     }
+    if (host < 0 && (!out_pscal || !*out_pscal)) {
+        errno = EBADF;
+    }
     return host;
+}
+
+static int shimTranslate(int fd, int allow_real) {
+    VProc *vp = vprocForThread();
+    return vprocResolveFdForShim(vp, fd, allow_real, NULL);
 }
 
 static int vprocSetCompatErrno(int err) {
@@ -9604,25 +9630,23 @@ static int gVprocPipelineWriteLogCount = 0;
 ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
-    if (vp) {
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
-        if (pscal_fd) {
-            if (gVprocPipelineStage &&
-                vprocVprocDebugEnabled() &&
-                gVprocPipelineReadLogCount < 32) {
-                gVprocPipelineReadLogCount++;
-                fprintf(stderr, "[vproc-read] fd=%d using pscal=%p count=%zu\n",
-                        fd, (void *)pscal_fd, count);
-            }
-            ssize_t res = pscal_fd->ops->read(pscal_fd, buf, count);
-            pscal_fd_close(pscal_fd);
-            if (res < 0) {
-                return vprocSetCompatErrno((int)res);
-            }
-            return res;
+    struct pscal_fd *pscal_fd = NULL;
+    int host = vprocResolveFdForShim(vp, fd, 1, &pscal_fd);
+    if (pscal_fd) {
+        if (gVprocPipelineStage &&
+            vprocVprocDebugEnabled() &&
+            gVprocPipelineReadLogCount < 32) {
+            gVprocPipelineReadLogCount++;
+            fprintf(stderr, "[vproc-read] fd=%d using pscal=%p count=%zu\n",
+                    fd, (void *)pscal_fd, count);
         }
+        ssize_t res = pscal_fd->ops->read(pscal_fd, buf, count);
+        pscal_fd_close(pscal_fd);
+        if (res < 0) {
+            return vprocSetCompatErrno((int)res);
+        }
+        return res;
     }
-    int host = shimTranslate(fd, 1);
     if (host < 0) {
         return -1;
     }
@@ -9653,31 +9677,28 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
 ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
-    if (vp) {
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
-        if (pscal_fd) {
-            if (gVprocPipelineStage &&
-                vprocVprocDebugEnabled() &&
-                gVprocPipelineWriteLogCount < 32) {
-                gVprocPipelineWriteLogCount++;
-                fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
-                        fd, (void *)pscal_fd, count);
-            }
-            ssize_t res = pscal_fd->ops->write(pscal_fd, buf, count);
-            pscal_fd_close(pscal_fd);
-            if (res < 0) {
-                return vprocSetCompatErrno((int)res);
-            }
-            return res;
+    struct pscal_fd *pscal_fd = NULL;
+    int host = vprocResolveFdForShim(vp, fd, 1, &pscal_fd);
+    if (pscal_fd) {
+        if (gVprocPipelineStage &&
+            vprocVprocDebugEnabled() &&
+            gVprocPipelineWriteLogCount < 32) {
+            gVprocPipelineWriteLogCount++;
+            fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
+                    fd, (void *)pscal_fd, count);
         }
+        ssize_t res = pscal_fd->ops->write(pscal_fd, buf, count);
+        pscal_fd_close(pscal_fd);
+        if (res < 0) {
+            return vprocSetCompatErrno((int)res);
+        }
+        return res;
     }
-    int host = -1;
 #if defined(PSCAL_TARGET_IOS)
     VProcSessionStdio *session = vprocSessionStdioCurrent();
     bool is_stdout = false;
     bool is_stderr = false;
     vprocSessionResolveOutputFd(session, fd, &is_stdout, &is_stderr);
-    host = shimTranslate(fd, 1);
     int session_host_fd = -1;
     if (is_stdout || is_stderr) {
         session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
