@@ -11051,6 +11051,26 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         memset(pscal_fds, 0, ((size_t)nfds) * sizeof(*pscal_fds));
     }
 
+    pthread_mutex_lock(&vp->mu);
+    for (nfds_t i = 0; i < nfds; ++i) {
+        host_index[i] = -1;
+        if (fds[i].fd < 0) {
+            continue;
+        }
+        if ((size_t)fds[i].fd >= vp->capacity) {
+            continue;
+        }
+        VProcFdEntry entry = vp->entries[fds[i].fd];
+        if (entry.kind == VPROC_FD_PSCAL && entry.pscal_fd) {
+            pscal_fds[i] = pscal_fd_retain(entry.pscal_fd);
+            continue;
+        }
+        if (entry.kind == VPROC_FD_HOST && entry.host_fd >= 0) {
+            host_index[i] = entry.host_fd;
+        }
+    }
+    pthread_mutex_unlock(&vp->mu);
+
     int ready_count = 0;
     int pscal_ready_initial = 0;
     bool has_pscal = false;
@@ -11060,10 +11080,9 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         if (fds[i].fd < 0) {
             continue;
         }
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fds[i].fd);
+        struct pscal_fd *pscal_fd = pscal_fds[i];
         if (pscal_fd) {
             has_pscal = true;
-            pscal_fds[i] = pscal_fd;
             int pscal_events = pscal_fd->ops && pscal_fd->ops->poll
                 ? pscal_fd->ops->poll(pscal_fd)
                 : POLL_ERR;
@@ -11076,7 +11095,7 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
             continue;
         }
 
-        int host_fd = vprocTranslateFd(vp, fds[i].fd);
+        int host_fd = host_index[i];
         if (host_fd < 0) {
             struct stat st;
             if (vprocHostFstatRaw(fds[i].fd, &st) == 0) {
