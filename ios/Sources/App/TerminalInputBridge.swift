@@ -144,7 +144,11 @@ final class TerminalKeyInputView: UITextView {
         keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
-    private var controlLatch: Bool = false
+    private var controlLatch: Bool = false {
+        didSet {
+            updateCtrlButtonAppearance()
+        }
+    }
     private weak var ctrlButton: UIButton?
 
     // MARK: - FIXED ACCESSORY BAR
@@ -194,6 +198,7 @@ final class TerminalKeyInputView: UITextView {
         let esc = makeButton("\u{238B}", action: #selector(handleEsc))
         let ctrl = makeButton("^", action: #selector(handleCtrlToggle))
         ctrlButton = ctrl
+        updateCtrlButtonAppearance()
         let up = makeButton("↑", action: #selector(handleUp))
         let down = makeButton("↓", action: #selector(handleDown))
         let left = makeButton("←", action: #selector(handleLeft))
@@ -261,6 +266,7 @@ final class TerminalKeyInputView: UITextView {
     }
 
     override func resignFirstResponder() -> Bool {
+        controlLatch = false
         let resigned = super.resignFirstResponder()
         if resigned {
             onFocusChange?(false)
@@ -327,18 +333,9 @@ final class TerminalKeyInputView: UITextView {
     override func insertText(_ text: String) {
         if controlLatch, let scalar = text.unicodeScalars.first {
             controlLatch = false
-            let value = scalar.value
-            if scalar == "c" {
-                triggerInterrupt()
-                return
-            }
-            if scalar == "z" {
-                triggerSuspend()
-                return
-            }
-            if value >= 0x40, value <= 0x7F,
-               let ctrlScalar = UnicodeScalar(value & 0x1F) {
-                onInput?(String(ctrlScalar))
+            if let control = controlCharacter(for: scalar) {
+                maybeTriggerControlSignal(scalar: scalar)
+                onInput?(control)
                 return
             }
         }
@@ -505,19 +502,15 @@ final class TerminalKeyInputView: UITextView {
         }
 
         if key.modifierFlags.contains(.control),
-           let scalar = key.charactersIgnoringModifiers.lowercased().unicodeScalars.first {
-            let value = scalar.value
-            if scalar == "c" {
-                triggerInterrupt()
+           let scalar = key.charactersIgnoringModifiers.unicodeScalars.first {
+            if let control = controlCharacter(for: scalar) {
+                maybeTriggerControlSignal(scalar: scalar)
+                onInput?(control)
                 return true
             }
-            if scalar == "z" {
-                triggerSuspend()
-                return true
-            }
-            if value >= 0x40, value <= 0x7F,
-               let ctrlScalar = UnicodeScalar(value & 0x1F) {
-                onInput?(String(ctrlScalar))
+            if signalScalarForRawControlCode(scalar) != nil {
+                maybeTriggerControlSignal(scalar: scalar)
+                onInput?(String(scalar))
                 return true
             }
         }
@@ -640,11 +633,6 @@ final class TerminalKeyInputView: UITextView {
 
     @objc private func handleCtrlToggle(_ sender: UIButton) {
         controlLatch.toggle()
-        var config = sender.configuration ?? UIButton.Configuration.filled()
-        config.baseBackgroundColor = controlLatch
-        ? UIColor.systemBlue.withAlphaComponent(0.8)
-        : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
-        sender.configuration = config
     }
 
     @objc private func handleUp() {
@@ -709,18 +697,38 @@ final class TerminalKeyInputView: UITextView {
     @objc private func handleControlCommand(_ command: UIKeyCommand) {
         guard let input = command.input,
               let scalar = input.lowercased().unicodeScalars.first else { return }
+        if let control = controlCharacter(for: scalar) {
+            maybeTriggerControlSignal(scalar: scalar)
+            onInput?(control)
+        }
+    }
+
+    private func controlCharacter(for scalar: UnicodeScalar) -> String? {
         let value = scalar.value
-        if scalar == "c" {
+        guard value >= 0x40, value <= 0x7F,
+              let ctrlScalar = UnicodeScalar(value & 0x1F) else {
+            return nil
+        }
+        return String(ctrlScalar)
+    }
+
+    private func signalScalarForRawControlCode(_ scalar: UnicodeScalar) -> UnicodeScalar? {
+        let value = scalar.value
+        guard value >= 0x01 && value <= 0x1A else {
+            return nil
+        }
+        return UnicodeScalar(value + 0x60)
+    }
+
+    private func maybeTriggerControlSignal(scalar: UnicodeScalar) {
+        let lowered = UnicodeScalar(UInt32(tolower(Int32(scalar.value)))) ?? scalar
+        switch lowered {
+        case "c":
             triggerInterrupt()
-            return
-        }
-        if scalar == "z" {
+        case "z":
             triggerSuspend()
-            return
-        }
-        if value >= 0x40, value <= 0x7F,
-           let ctrlScalar = UnicodeScalar(value & 0x1F) {
-            onInput?(String(ctrlScalar))
+        default:
+            break
         }
     }
 
@@ -738,5 +746,14 @@ final class TerminalKeyInputView: UITextView {
         } else {
             pscalRuntimeRequestSigtstp()
         }
+    }
+
+    private func updateCtrlButtonAppearance() {
+        guard let button = ctrlButton else { return }
+        var config = button.configuration ?? UIButton.Configuration.filled()
+        config.baseBackgroundColor = controlLatch
+            ? UIColor.systemBlue.withAlphaComponent(0.8)
+            : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
+        button.configuration = config
     }
 }

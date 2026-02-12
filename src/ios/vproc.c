@@ -3970,12 +3970,20 @@ void vprocSessionSetOutputPaused(uint64_t session_id, bool paused) {
     free(pending_copy);
 }
 
-static bool vprocSessionDispatchOutput(uint64_t session_id,
-                                       const unsigned char *data,
-                                       size_t len) {
+typedef enum {
+    VPROC_OUTPUT_DISPATCH_DROPPED = 0,
+    VPROC_OUTPUT_DISPATCH_HANDLED,
+    VPROC_OUTPUT_DISPATCH_QUEUED,
+    VPROC_OUTPUT_DISPATCH_THROTTLED
+} VProcOutputDispatchResult;
+
+static VProcOutputDispatchResult vprocSessionDispatchOutput(uint64_t session_id,
+                                                            const unsigned char *data,
+                                                            size_t len) {
     VProcSessionOutputHandler handler = NULL;
     void *context = NULL;
     bool queued = false;
+    bool throttled = false;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
     if (entry) {
@@ -3984,6 +3992,9 @@ static bool vprocSessionDispatchOutput(uint64_t session_id,
             context = entry->output_context;
         } else {
             queued = vprocSessionQueueOutputLocked(entry, data, len);
+            if (queued && entry->output_paused && entry->output_backlog_saturated) {
+                throttled = true;
+            }
         }
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
@@ -3993,9 +4004,15 @@ static bool vprocSessionDispatchOutput(uint64_t session_id,
                      len,
                      (void *)handler);
         handler(session_id, data, len, context);
-        return true;
+        return VPROC_OUTPUT_DISPATCH_HANDLED;
     }
-    return queued;
+    if (throttled) {
+        return VPROC_OUTPUT_DISPATCH_THROTTLED;
+    }
+    if (queued) {
+        return VPROC_OUTPUT_DISPATCH_QUEUED;
+    }
+    return VPROC_OUTPUT_DISPATCH_DROPPED;
 }
 
 static bool vprocSessionOutputShouldThrottle(uint64_t session_id) {
@@ -4363,12 +4380,15 @@ static void *vprocSessionPtyOutputThread(void *arg) {
     /* Larger chunking reduces per-callback overhead for high-volume PTY output. */
     char buf[8192];
     unsigned int retry_sleep_us = 1000;
+    bool backlog_throttled = false;
     while (session->pty_active) {
-        /* Detached tabs that have already saturated backlog should back off to
-         * reduce lock contention and let the writer naturally throttle. */
-        if (vprocSessionOutputShouldThrottle(session->session_id)) {
-            usleep(VPROC_SESSION_OUTPUT_THROTTLE_US);
-            continue;
+        if (backlog_throttled) {
+            /* Stay in backoff until handler resumes or backlog is drained. */
+            if (vprocSessionOutputShouldThrottle(session->session_id)) {
+                usleep(VPROC_SESSION_OUTPUT_THROTTLE_US);
+                continue;
+            }
+            backlog_throttled = false;
         }
         ssize_t r = master->ops->read(master, buf, sizeof(buf));
         if (r == 0) {
@@ -4390,7 +4410,15 @@ static void *vprocSessionPtyOutputThread(void *arg) {
             break;
         }
         retry_sleep_us = 1000;
-        if (vprocSessionDispatchOutput(session->session_id, (const unsigned char *)buf, (size_t)r)) {
+        VProcOutputDispatchResult dispatch =
+                vprocSessionDispatchOutput(session->session_id, (const unsigned char *)buf, (size_t)r);
+        if (dispatch == VPROC_OUTPUT_DISPATCH_HANDLED ||
+            dispatch == VPROC_OUTPUT_DISPATCH_QUEUED) {
+            continue;
+        }
+        if (dispatch == VPROC_OUTPUT_DISPATCH_THROTTLED) {
+            backlog_throttled = true;
+            usleep(VPROC_SESSION_OUTPUT_THROTTLE_US);
             continue;
         }
         vprocIoTrace("[vproc-io] output drop session=%llu len=%zd (no handler)",

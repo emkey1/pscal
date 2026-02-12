@@ -206,6 +206,43 @@ struct TerminalSettingsView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+
+                Section {
+                    VStack(spacing: 10) {
+                        HStack(spacing: 6) {
+                            Text("Subscribe to the PSCAL")
+                            if let url = URL(string: "https://discord.gg/YWQVExN363") {
+                                Link(destination: url) {
+                                    HStack(spacing: 4) {
+                                        Text("Discord").underline()
+                                        Image(systemName: "arrow.up.right.square")
+                                    }
+                                    .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                        .font(.callout.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+
+                        if let github = URL(string: "https://github.com/emkey1/smallclue") {
+                            HStack(spacing: 4) {
+                                Text("Please submit bugs and suggestions on")
+                                Link(destination: github) {
+                                    HStack(spacing: 4) {
+                                        Text("GitHub").underline()
+                                        Image(systemName: "arrow.up.right.square")
+                                    }
+                                    .foregroundColor(.blue)
+                                }
+                            }
+                            .font(.callout)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                }
             }
             .navigationTitle("Terminal Settings")
             .toolbar {
@@ -213,46 +250,6 @@ struct TerminalSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 6) {
-                Divider()
-                VStack(spacing: 6) {
-                    HStack(spacing: 6) {
-                        Text("Subscribe to the PSCAL")
-                        if let url = URL(string: "https://discord.gg/YWQVExN363") {
-                            Link(destination: url) {
-                                HStack(spacing: 4) {
-                                    Text("Discord").underline()
-                                    Image(systemName: "arrow.up.right.square")
-                                }
-                                .foregroundColor(.blue)
-                            }
-                        }
-                    }
-                    .font(.callout.weight(.semibold))
-                    .multilineTextAlignment(.center)
-
-                    if let github = URL(string: "https://github.com/emkey1/smallclue") {
-                        HStack(spacing: 4) {
-                            Text("Please submit bugs and suggestions on")
-                            Link(destination: github) {
-                                HStack(spacing: 4) {
-                                    Text("GitHub").underline()
-                                    Image(systemName: "arrow.up.right.square")
-                                }
-                                .foregroundColor(.blue)
-                            }
-                        }
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                    }
-                }
-                .foregroundColor(.primary)
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal)
-            .background(.ultraThinMaterial)
         }
         .applyDetents()
     }

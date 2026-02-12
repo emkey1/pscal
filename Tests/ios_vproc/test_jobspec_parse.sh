@@ -87,6 +87,24 @@ kill %3 || true
   fi
 }
 
+case_fg_waits_for_background_tool() {
+  local outfile="${TMP_ROOT}/fg_tool_${$}.out"
+  local body="
+set -e
+set -m
+rm -f '${outfile}'
+exsh -c 'sleep 1; echo done > \"${outfile}\"' &
+fg
+test -f '${outfile}'
+cat '${outfile}'
+rm -f '${outfile}'
+"
+  local output
+  output=$("${BIN}" -c "${body}") || fail "case_fg_waits_for_background_tool: exsh status $?"
+  echo "${output}"
+  echo "${output}" | grep -q "done" || fail "fg returned before background tool completed"
+}
+
 case_double_bracket_basic() {
   local output
   output=$("${BIN}" -c 'set -e; if [[ foo == foo ]]; then echo OK; else echo BAD; exit 1; fi') || fail "[[ ]] basic test failed"
@@ -103,6 +121,7 @@ main() {
   case_double_bracket_basic
   case_kill_percent_one
   case_kill_middle_preserves_ids
+  case_fg_waits_for_background_tool
   echo "All jobspec tests passed."
 }
 

@@ -3334,24 +3334,24 @@ void pscalRuntimeRequestSigint(void) {
 #if defined(PSCAL_TARGET_IOS)
     bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
     bool from_vproc = (vprocCurrent() != NULL);
-    int shell_pid = vprocGetShellSelfPid();
-    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
-    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-    if (fg_pgid <= 0 && shell_pid > 0) {
-        fg_pgid = vprocGetPgid(shell_pid);
-    }
-    int shell_pgid = (shell_pid > 0) ? vprocGetPgid(shell_pid) : -1;
+    int shell_pid = -1;
+    int shell_pgid = -1;
+    int sid = -1;
+    int fg_pgid = -1;
+    (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
+    bool deliver_vm_interrupt = true;
     if (!from_vproc && shell_pid > 0 && fg_pgid > 0 && shell_pgid > 0 && fg_pgid != shell_pgid) {
-        int rc = vprocKillShim(-fg_pgid, SIGINT);
-        if (dbg) {
-            fprintf(stderr,
-                    "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d kill_rc=%d errno=%d\n",
-                    shell_pid, shell_pgid, sid, fg_pgid, rc, errno);
-        }
-    } else if (dbg && shell_pid > 0) {
+        /* Foreground belongs to a non-shell job (e.g. ssh). Let the INTR byte
+         * on the PTY drive behavior instead of broadcasting a shell interrupt. */
+        deliver_vm_interrupt = false;
+    }
+    if (dbg && shell_pid > 0) {
         fprintf(stderr,
-                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d\n",
-                shell_pid, shell_pgid, sid, fg_pgid);
+                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d deliver_vm=%d from_vproc=%d\n",
+                shell_pid, shell_pgid, sid, fg_pgid, deliver_vm_interrupt ? 1 : 0, from_vproc ? 1 : 0);
+    }
+    if (!deliver_vm_interrupt) {
+        return;
     }
 #endif
     g_vm_sigint_seen = 1;
@@ -3369,17 +3369,16 @@ void pscalRuntimeRequestSigint(void) {
 void pscalRuntimeRequestSigtstp(void) {
 #if defined(PSCAL_TARGET_IOS)
     bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
-    int shell_pid = vprocGetShellSelfPid();
+    int shell_pid = -1;
+    int shell_pgid = -1;
+    int sid = -1;
+    int fg_pgid = -1;
+    (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
     if (shell_pid <= 0) {
         if (dbg) {
             fprintf(stderr, "[sigtstp] no shell pid\n");
         }
         return;
-    }
-    int sid = vprocGetSid(shell_pid);
-    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-    if (fg_pgid <= 0) {
-        fg_pgid = vprocGetPgid(shell_pid);
     }
     if (fg_pgid <= 0) {
         if (dbg) {
@@ -3387,7 +3386,6 @@ void pscalRuntimeRequestSigtstp(void) {
         }
         return;
     }
-    int shell_pgid = vprocGetPgid(shell_pid);
     if (shell_pgid > 0 && fg_pgid == shell_pgid) {
         if (dbg) {
             fprintf(stderr, "[sigtstp] fg pgid matches shell pgid=%d sid=%d\n", shell_pgid, sid);
@@ -3409,16 +3407,9 @@ void pscalRuntimeRequestSigtstp(void) {
 
 int pscalRuntimeCurrentForegroundPgid(void) {
 #if defined(PSCAL_TARGET_IOS)
-    int shell_pid = vprocGetShellSelfPid();
-    if (shell_pid > 0) {
-        int sid = vprocGetSid(shell_pid);
-        int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-        if (fg_pgid <= 0) {
-            fg_pgid = vprocGetPgid(shell_pid);
-        }
-        if (fg_pgid > 0) {
-            return fg_pgid;
-        }
+    int fg_pgid = -1;
+    if (vprocGetShellJobControlState(NULL, NULL, NULL, &fg_pgid) && fg_pgid > 0) {
+        return fg_pgid;
     }
 #endif
     return -1;
