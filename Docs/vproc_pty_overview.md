@@ -23,6 +23,15 @@ This note summarizes how the virtual process (vproc) and pseudo-tty (vpty) layer
 - Signal delivery is cooperative: pending signals are queued and drained on syscall boundaries (`vprocDeliverPendingSignalsForCurrent` in read/write/dup/open, etc.). Default actions mark the vproc as exited/zombie and, when the current thread is the target, cause `pthread_exit`.
 - `tcsetpgrp`/`tcgetpgrp` operate on the session pty to mirror Unix terminal semantics for foreground/background jobs.
 
+### VM suspend path on iOS (`Ctrl-Z`)
+- iOS cannot suspend the host app process, so local suspend is handled logically.
+- `Ctrl-Z` requests flow through `pscalRuntimeRequestSigtstp()` (`src/backend_ast/builtin.c`):
+  - If a non-shell foreground process group exists, vproc sends `SIGTSTP` to that foreground pgid.
+  - If the shell is foreground (local builtin/VM work), runtime sets a VM-visible suspend request flag instead of stopping the host process.
+- VM and blocking builtin loops consume that flag via `pscalRuntimeConsumeSigtstp()` (`src/vm/vm.c`, `src/backend_ast/builtin.c`) and normalize status to `128 + SIGTSTP` (148) so shell job-control logic can treat it as a cooperative stop.
+- For tool-runner threads, shell builtins also forward pending runtime `SIGTSTP` to worker threads (`src/backend_ast/shell/shell_builtins.inc`).
+- In vproc kill delivery, shell-thread `SIGTSTP` now requests runtime suspend callbacks (`pscalRuntimeRequestSigtstp`) analogously to `SIGINT`, preventing shell-thread deadlocks and dropped local suspend requests.
+
 ## PTY lifecycle
 - **Creation**: `/dev/ptmx` open creates a new master/slave pair via `pscalPtyOpenMaster`, registers both `pscal_fd` objects in the session pty table, and returns a vproc fd for the master. Slave is exposed as `/dev/pts/N` and inherits permissions from the master or ioctl calls.
 - **I/O**: `read`/`write` on vproc fds tied to a pty delegate to the `pscal_fd_ops` in `pscal_tty.c`, which manage line discipline, canonical mode, and winsize. Host threads pumping output (`vprocSessionWriteToMaster`) run outside the vproc shims to avoid deadlock.
@@ -44,5 +53,13 @@ This note summarizes how the virtual process (vproc) and pseudo-tty (vpty) layer
 - Inspect vproc task state via `vprocSnapshot` or the `gVProcTasks` table to ensure pgid/sid/fg_pgid are set when debugging job control.
 - For PTY issues, confirm `/dev/ptmx` and `/dev/pts/*` open paths hit `pscalPtyOpenMaster/Slave` and that the session pty entry in `gVProcSessionPtys` is populated.
 - For `/dev/location`, a stub FIFO is created (including legacy `/dev/gps` aliases) under the sandbox so `stat`/`ls` succeed even outside a vproc. Each reader blocks until a new payload arrives; partial reads drain a single payload; poll wakes on new data or disable. Reader count changes are observable via `vprocLocationDeviceRegisterReaderObserver`, which the iOS host uses to pause CoreLocation when no readers are present.
+
+## Regression coverage for VM suspend plumbing
+- `Tests/ios_vproc/test_vproc.c`
+  - `assert_sigint_runtime_callback_reenters_without_deadlock`
+  - `assert_sigtstp_runtime_callback_reenters_without_deadlock`
+  - These verify runtime callback re-entry from vproc signal delivery does not deadlock for shell-thread `SIGINT`/`SIGTSTP`.
+- `Tests/exsh/tests/watch_top_vproc.exsh` and `Tests/exsh/tests/watch_top_foreground_vproc.exsh`
+  - These cover watch/top synthetic vproc behavior and foreground label stability after job-control/signal-path changes.
 
 This overview should give enough context to reason about how applets, front-end interpreters, nextvi, and other tools interact with the virtual process/pty layers on iOS/Catalyst, and where to look when job control or device handling behaves unexpectedly. 

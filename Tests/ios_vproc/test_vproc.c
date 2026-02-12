@@ -31,6 +31,9 @@ void pscalRuntimeDebugLog(const char *message) {
 static volatile int gRuntimeSigintReenterEnabled = 0;
 static volatile int gRuntimeSigintCallbackCount = 0;
 static volatile int gRuntimeSigintShellPid = -1;
+static volatile int gRuntimeSigtstpReenterEnabled = 0;
+static volatile int gRuntimeSigtstpCallbackCount = 0;
+static volatile int gRuntimeSigtstpShellPid = -1;
 
 void pscalRuntimeRequestSigint(void) {
     gRuntimeSigintCallbackCount++;
@@ -38,6 +41,17 @@ void pscalRuntimeRequestSigint(void) {
         return;
     }
     int pid = (int)gRuntimeSigintShellPid;
+    if (pid > 0) {
+        (void)vprocGetSid(pid);
+    }
+}
+
+void pscalRuntimeRequestSigtstp(void) {
+    gRuntimeSigtstpCallbackCount++;
+    if (!gRuntimeSigtstpReenterEnabled) {
+        return;
+    }
+    int pid = (int)gRuntimeSigtstpShellPid;
     if (pid > 0) {
         (void)vprocGetSid(pid);
     }
@@ -2676,6 +2690,28 @@ static void assert_sigint_runtime_callback_reenters_without_deadlock(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+static void assert_sigtstp_runtime_callback_reenters_without_deadlock(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    gRuntimeSigtstpShellPid = shell_pid;
+    gRuntimeSigtstpCallbackCount = 0;
+    gRuntimeSigtstpReenterEnabled = 1;
+    assert(vprocKillShim(shell_pid, SIGTSTP) == 0);
+    gRuntimeSigtstpReenterEnabled = 0;
+
+    assert(gRuntimeSigtstpCallbackCount > 0);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 int main(void) {
     /* Default truncation path for tests to keep path virtualization in /tmp. */
     setenv("PATH_TRUNCATE", "/tmp", 1);
@@ -2841,6 +2877,8 @@ int main(void) {
     assert_session_input_inject_read_queue();
     fprintf(stderr, "TEST sigint_runtime_callback_reenters_without_deadlock\n");
     assert_sigint_runtime_callback_reenters_without_deadlock();
+    fprintf(stderr, "TEST sigtstp_runtime_callback_reenters_without_deadlock\n");
+    assert_sigtstp_runtime_callback_reenters_without_deadlock();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;

@@ -62,10 +62,15 @@ static void vprocResourceRemove(VProc *vp, int host_fd);
 
 #if defined(PSCAL_TARGET_IOS)
 __attribute__((weak)) void pscalRuntimeRequestSigint(void);
+__attribute__((weak)) void pscalRuntimeRequestSigtstp(void);
 __attribute__((weak)) void pscalRuntimeDebugLog(const char *message);
 __attribute__((weak)) PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
 __attribute__((weak)) void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
 __attribute__((weak)) int pscalRuntimeCurrentForegroundPgid(void);
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+void __attribute__((weak)) pscalRuntimeRequestSigtstp(void) {
+}
+#endif
 #endif
 
 #if defined(__APPLE__)
@@ -7713,7 +7718,8 @@ static bool vprocKillDeliverEntryLocked(VProcTaskEntry *entry,
                                         pthread_t **cancel_list,
                                         size_t *cancel_count,
                                         size_t *cancel_capacity,
-                                        bool *request_runtime_sigint) {
+                                        bool *request_runtime_sigint,
+                                        bool *request_runtime_sigtstp) {
     if (!entry || entry->pid <= 0) {
         return false;
     }
@@ -7727,10 +7733,22 @@ static bool vprocKillDeliverEntryLocked(VProcTaskEntry *entry,
 
     bool shell_thread = gShellSelfTidValid && pthread_equal(entry->tid, gShellSelfTid);
 
+    if (sig == SIGTSTP && entry->stop_unsupported) {
+#if defined(PSCAL_TARGET_IOS)
+        if (request_runtime_sigtstp) {
+            *request_runtime_sigtstp = true;
+        }
+#endif
+        return true;
+    }
+
     if (shell_thread && (sig == SIGINT || sig == SIGTSTP)) {
 #if defined(PSCAL_TARGET_IOS)
         if (sig == SIGINT && request_runtime_sigint) {
             *request_runtime_sigint = true;
+        }
+        if (sig == SIGTSTP && request_runtime_sigtstp) {
+            *request_runtime_sigtstp = true;
         }
 #endif
         vprocQueuePendingSignalLocked(entry, sig);
@@ -7804,6 +7822,7 @@ int vprocKillShim(pid_t pid, int sig) {
     size_t cancel_count = 0;
     size_t cancel_capacity = 0;
     bool request_runtime_sigint = false;
+    bool request_runtime_sigtstp = false;
     pthread_mutex_lock(&gVProcTasks.mu);
     if (pid == 0) {
         int caller_pgid = vprocTaskPgidByPidLocked(caller_for_zero);
@@ -7835,7 +7854,8 @@ int vprocKillShim(pid_t pid, int sig) {
         VProcTaskEntry *entry = vprocTaskFindLocked(target);
         if (entry && vprocKillDeliverEntryLocked(entry, pid, sig, dbg, self,
                                                  &cancel_list, &cancel_count, &cancel_capacity,
-                                                 &request_runtime_sigint)) {
+                                                 &request_runtime_sigint,
+                                                 &request_runtime_sigtstp)) {
             delivered = true;
         }
     } else {
@@ -7857,7 +7877,8 @@ int vprocKillShim(pid_t pid, int sig) {
 
             if (vprocKillDeliverEntryLocked(entry, pid, sig, dbg, self,
                                             &cancel_list, &cancel_count, &cancel_capacity,
-                                            &request_runtime_sigint)) {
+                                            &request_runtime_sigint,
+                                            &request_runtime_sigtstp)) {
                 delivered = true;
             }
         }
@@ -7873,6 +7894,9 @@ int vprocKillShim(pid_t pid, int sig) {
 
     if (request_runtime_sigint && pscalRuntimeRequestSigint) {
         pscalRuntimeRequestSigint();
+    }
+    if (request_runtime_sigtstp && pscalRuntimeRequestSigtstp) {
+        pscalRuntimeRequestSigtstp();
     }
 
     if (delivered) return rc;

@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <time.h>
+#include <signal.h>
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
@@ -35,6 +36,7 @@
 #endif
 
 static bool vmHandleGlobalInterrupt(VM* vm);
+static bool vmConsumeSuspendRequest(VM* vm);
 
 #if defined(__GNUC__) || defined(__clang__)
 #define VM_USE_COMPUTED_GOTO 1
@@ -1719,6 +1721,21 @@ static bool vmConsumeInterruptRequest(VM* vm) {
         return true;
     }
     return false;
+}
+
+static bool vmConsumeSuspendRequest(VM* vm) {
+    if (!pscalRuntimeConsumeSigtstp()) {
+        return false;
+    }
+    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+    VM* target = root ? root : vm;
+    if (target) {
+        target->abort_requested = false;
+        target->exit_requested = true;
+        target->current_builtin_name = "signal";
+    }
+    shellRuntimeSetLastStatus(128 + SIGTSTP);
+    return true;
 }
 
 static bool vmHandleGlobalInterrupt(VM* vm) {
@@ -4894,6 +4911,9 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             continue;
         }
 #endif
+        if (vmConsumeSuspendRequest(vm)) {
+            /* Marked as a cooperative stop request; unwind below via exit_requested. */
+        }
         if (vmConsumeInterruptRequest(vm)) {
             /* VM abort flag is set; let the normal exit/abort handling run. */
         }

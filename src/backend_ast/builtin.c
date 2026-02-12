@@ -2919,6 +2919,7 @@ static volatile sig_atomic_t g_vm_sigint_seen = 0;
 static int g_vm_sigint_pipe[2] = {-1, -1};
 static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
 static atomic_bool g_vm_interrupt_broadcast = false;
+static atomic_bool g_vm_suspend_requested = false;
 static void vmDrainSigintFd(int fd, bool is_host);
 
 static void vmEnableRawMode(void); // Forward declaration
@@ -3374,31 +3375,31 @@ void pscalRuntimeRequestSigtstp(void) {
     int sid = -1;
     int fg_pgid = -1;
     (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
+    bool request_vm_suspend = true;
     if (shell_pid <= 0) {
         if (dbg) {
             fprintf(stderr, "[sigtstp] no shell pid\n");
         }
-        return;
-    }
-    if (fg_pgid <= 0) {
+    } else if (fg_pgid <= 0) {
         if (dbg) {
             fprintf(stderr, "[sigtstp] no fg pgid shell=%d sid=%d\n", shell_pid, sid);
         }
-        return;
-    }
-    if (shell_pgid > 0 && fg_pgid == shell_pgid) {
+    } else if (shell_pgid > 0 && fg_pgid != shell_pgid) {
         if (dbg) {
-            fprintf(stderr, "[sigtstp] fg pgid matches shell pgid=%d sid=%d\n", shell_pgid, sid);
+            fprintf(stderr, "[sigtstp] shell=%d shell_pgid=%d sid=%d fg=%d\n",
+                    shell_pid, shell_pgid, sid, fg_pgid);
         }
-        return;
+        int rc = vprocKillShim(-fg_pgid, SIGTSTP);
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, errno);
+        }
+        request_vm_suspend = false;
+    } else if (dbg) {
+        fprintf(stderr, "[sigtstp] local suspend shell_pgid=%d fg=%d sid=%d\n",
+                shell_pgid, fg_pgid, sid);
     }
-    if (dbg) {
-        fprintf(stderr, "[sigtstp] shell=%d shell_pgid=%d sid=%d fg=%d\n",
-                shell_pid, shell_pgid, sid, fg_pgid);
-    }
-    int rc = vprocKillShim(-fg_pgid, SIGTSTP);
-    if (dbg) {
-        fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, errno);
+    if (request_vm_suspend) {
+        atomic_store(&g_vm_suspend_requested, true);
     }
 #else
     raise(SIGTSTP);
@@ -3417,6 +3418,10 @@ int pscalRuntimeCurrentForegroundPgid(void) {
 
 bool pscalRuntimeSigintPending(void) {
     return g_vm_sigint_seen != 0;
+}
+
+bool pscalRuntimeSigtstpPending(void) {
+    return atomic_load(&g_vm_suspend_requested);
 }
 
 bool pscalRuntimeInterruptFlag(void) {
@@ -3443,6 +3448,10 @@ bool pscalRuntimeConsumeSigint(void) {
         );
     }
     return seen;
+}
+
+bool pscalRuntimeConsumeSigtstp(void) {
+    return atomic_exchange(&g_vm_suspend_requested, false);
 }
 
 void vmInitTerminalState(void) {
@@ -3696,6 +3705,15 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 buffer[0] = '\0';
                 return false;
             }
+            if (pscalRuntimeConsumeSigtstp()) {
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                buffer[0] = '\0';
+                return false;
+            }
             if (vm && (vm->abort_requested || vm->exit_requested)) {
                 buffer[0] = '\0';
                 return false;
@@ -3754,6 +3772,15 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                         vm->abort_requested = true;
                         vm->exit_requested = true;
                     }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (ch == 0x1a) { // Ctrl-Z
+                    if (vm) {
+                        vm->abort_requested = false;
+                        vm->exit_requested = true;
+                    }
+                    shellRuntimeSetLastStatus(128 + SIGTSTP);
                     buffer[0] = '\0';
                     return false;
                 }
@@ -7479,6 +7506,14 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
                 }
+                break;
+            }
+            if (pscalRuntimeConsumeSigtstp()) {
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
                 break;
             }
             if (vm && (vm->abort_requested || vm->exit_requested)) {

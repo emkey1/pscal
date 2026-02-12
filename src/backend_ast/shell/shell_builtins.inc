@@ -50,6 +50,7 @@ extern int PSCALRuntimeSetTabStartupCommand(const char *command);
 #include "clike/state.h"
 #include "rea/state.h"
 extern bool pscalRuntimeConsumeSigint(void);
+extern bool pscalRuntimeConsumeSigtstp(void);
 extern char **environ;
 extern void pscalShowGwinMessage(const char *message);
 extern void pscalEditorDump(void);
@@ -3766,6 +3767,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
         sigemptyset(&pending);
         if (pscalRuntimeConsumeSigint()) {
             pthread_kill(context.worker_thread, SIGINT);
+        }
+        if (pscalRuntimeConsumeSigtstp()) {
+            pthread_kill(context.worker_thread, SIGTSTP);
         }
         if (sigpending(&pending) == 0 && sigismember(&pending, SIGINT)) {
             pthread_kill(context.worker_thread, SIGINT);
