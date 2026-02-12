@@ -2378,6 +2378,8 @@ static struct {
 };
 static uint64_t gVProcSessionPtyHintId = 0;
 static size_t gVProcSessionPtyHintIndex = 0;
+static _Thread_local uint64_t gVProcSessionPtyTlsHintId = 0;
+static _Thread_local size_t gVProcSessionPtyTlsHintIndex = 0;
 
 static bool vprocSessionPtyEntryIsEmpty(const VProcSessionPtyEntry *entry) {
     return !entry || (!entry->pty_slave &&
@@ -2492,6 +2494,15 @@ static VProcSessionPtyEntry *vprocSessionPtyFindLocked(uint64_t session_id, size
     if (session_id == 0 || !gVProcSessionPtys.items || gVProcSessionPtys.count == 0) {
         return NULL;
     }
+    if (gVProcSessionPtyTlsHintId == session_id && gVProcSessionPtyTlsHintIndex < gVProcSessionPtys.count) {
+        VProcSessionPtyEntry *hint = &gVProcSessionPtys.items[gVProcSessionPtyTlsHintIndex];
+        if (hint->session_id == session_id) {
+            if (out_index) {
+                *out_index = gVProcSessionPtyTlsHintIndex;
+            }
+            return hint;
+        }
+    }
     if (gVProcSessionPtyHintId == session_id && gVProcSessionPtyHintIndex < gVProcSessionPtys.count) {
         VProcSessionPtyEntry *hint = &gVProcSessionPtys.items[gVProcSessionPtyHintIndex];
         if (hint->session_id == session_id) {
@@ -2506,6 +2517,8 @@ static VProcSessionPtyEntry *vprocSessionPtyFindLocked(uint64_t session_id, size
         if (entry->session_id == session_id) {
             gVProcSessionPtyHintId = session_id;
             gVProcSessionPtyHintIndex = i;
+            gVProcSessionPtyTlsHintId = session_id;
+            gVProcSessionPtyTlsHintIndex = i;
             if (out_index) {
                 *out_index = i;
             }
@@ -2527,6 +2540,8 @@ static void vprocSessionPtyRemoveAtLocked(size_t idx) {
     gVProcSessionPtys.count--;
     gVProcSessionPtyHintId = 0;
     gVProcSessionPtyHintIndex = 0;
+    gVProcSessionPtyTlsHintId = 0;
+    gVProcSessionPtyTlsHintIndex = 0;
 }
 
 static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
@@ -2556,6 +2571,8 @@ static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
     slot->session_id = session_id;
     gVProcSessionPtyHintId = session_id;
     gVProcSessionPtyHintIndex = idx;
+    gVProcSessionPtyTlsHintId = session_id;
+    gVProcSessionPtyTlsHintIndex = idx;
     return slot;
 }
 
