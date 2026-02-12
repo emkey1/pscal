@@ -4344,7 +4344,7 @@ static void *vprocSessionPtyOutputThread(void *arg) {
     pthread_setname_np("vproc-pty-out");
     vprocPtyTrace("[PTY] output thread start");
     /* Larger chunking reduces per-callback overhead for high-volume PTY output. */
-    char buf[4096];
+    char buf[8192];
     unsigned int retry_sleep_us = 1000;
     while (session->pty_active) {
         /* Detached tabs that have already saturated backlog should back off to
