@@ -161,7 +161,7 @@ final class SshRuntimeSession: ObservableObject {
         handlerContext = Unmanaged.passRetained(self).toOpaque()
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
-            PSCALRuntimeSetSessionOutputPaused(sessionId, 0)
+            PSCALRuntimeSetSessionOutputPaused(sessionId, htermAttached ? 0 : 1)
         }
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
