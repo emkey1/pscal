@@ -2361,7 +2361,8 @@ typedef struct {
 } VProcSessionPtyEntry;
 
 enum {
-    VPROC_SESSION_OUTPUT_BACKLOG_MAX = 2 * 1024 * 1024
+    VPROC_SESSION_OUTPUT_BACKLOG_MAX = 2 * 1024 * 1024,
+    VPROC_SESSION_OUTPUT_THROTTLE_US = 20000
 };
 
 static struct {
@@ -3980,6 +3981,17 @@ static bool vprocSessionDispatchOutput(uint64_t session_id,
     return queued;
 }
 
+static bool vprocSessionOutputShouldThrottle(uint64_t session_id) {
+    bool throttle = false;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry && entry->output_paused && entry->output_backlog_saturated) {
+        throttle = true;
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    return throttle;
+}
+
 static ssize_t vprocSessionWritePtyMaster(struct pscal_fd *master,
                                           const void *buf,
                                           size_t len,
@@ -4335,6 +4347,12 @@ static void *vprocSessionPtyOutputThread(void *arg) {
     char buf[4096];
     unsigned int retry_sleep_us = 1000;
     while (session->pty_active) {
+        /* Detached tabs that have already saturated backlog should back off to
+         * reduce lock contention and let the writer naturally throttle. */
+        if (vprocSessionOutputShouldThrottle(session->session_id)) {
+            usleep(VPROC_SESSION_OUTPUT_THROTTLE_US);
+            continue;
+        }
         ssize_t r = master->ops->read(master, buf, sizeof(buf));
         if (r == 0) {
             vprocPtyTrace("[PTY] output thread EOF");
