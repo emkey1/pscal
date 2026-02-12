@@ -515,6 +515,13 @@ void PSCALRuntimeUnregisterSessionOutputHandler(uint64_t session_id) {
     vprocSessionClearOutputHandler(session_id);
 }
 
+void PSCALRuntimeSetSessionOutputPaused(uint64_t session_id, int paused) {
+    if (session_id == 0) {
+        return;
+    }
+    vprocSessionSetOutputPaused(session_id, paused != 0);
+}
+
 extern "C" ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t session_id) {
     PSCALRuntimeContext *ctx = PSCALRuntimeContextForSession(session_id);
     if (!ctx) {

@@ -119,6 +119,9 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach ssh session=\(self.sessionId)")
             self.htermAttached = true
+            self.withRuntimeContext {
+                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 0)
+            }
             self.flushDetachedOutputIfNeeded()
             DispatchQueue.main.async {
                 controller.setResizeSessionId(self.sessionId)
@@ -133,6 +136,9 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach ssh session=\(self.sessionId)")
             self.htermAttached = false
+            self.withRuntimeContext {
+                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 1)
+            }
             DispatchQueue.main.async {
                 controller.setResizeSessionId(0)
             }
@@ -155,6 +161,7 @@ final class SshRuntimeSession: ObservableObject {
         handlerContext = Unmanaged.passRetained(self).toOpaque()
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
+            PSCALRuntimeSetSessionOutputPaused(sessionId, 0)
         }
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"

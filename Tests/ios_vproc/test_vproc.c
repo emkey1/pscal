@@ -28,6 +28,21 @@ void pscalRuntimeDebugLog(const char *message) {
 
 #include "ios/vproc.h"
 
+static volatile int gRuntimeSigintReenterEnabled = 0;
+static volatile int gRuntimeSigintCallbackCount = 0;
+static volatile int gRuntimeSigintShellPid = -1;
+
+void pscalRuntimeRequestSigint(void) {
+    gRuntimeSigintCallbackCount++;
+    if (!gRuntimeSigintReenterEnabled) {
+        return;
+    }
+    int pid = (int)gRuntimeSigintShellPid;
+    if (pid > 0) {
+        (void)vprocGetSid(pid);
+    }
+}
+
 static int current_waiter_pid(void);
 
 static void burn_cpu_for_ms(int ms) {
@@ -489,6 +504,10 @@ static void assert_wait_enforces_parent(void) {
     int status = 0;
     errno = 0;
     int got = vprocWaitPidShim(other_pid, &status, 0);
+    assert(got == -1);
+    assert(errno == ECHILD);
+    errno = 0;
+    got = vprocWaitPidShim(other_pid, &status, WNOHANG);
     assert(got == -1);
     assert(errno == ECHILD);
     vprocDestroy(vp_other_parent);
@@ -2038,6 +2057,277 @@ static void assert_ptmx_open_registers_session(void) {
     vprocSessionStdioDestroy(session);
 }
 
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    unsigned char buf[64];
+    size_t len;
+} session_output_capture;
+
+static void session_output_capture_handler(uint64_t session_id,
+                                           const unsigned char *data,
+                                           size_t len,
+                                           void *context) {
+    (void)session_id;
+    session_output_capture *capture = (session_output_capture *)context;
+    if (!capture || !data || len == 0) {
+        return;
+    }
+    pthread_mutex_lock(&capture->mu);
+    size_t room = sizeof(capture->buf) - capture->len;
+    if (room > 0) {
+        size_t n = len < room ? len : room;
+        memcpy(capture->buf + capture->len, data, n);
+        capture->len += n;
+    }
+    pthread_cond_broadcast(&capture->cv);
+    pthread_mutex_unlock(&capture->mu);
+}
+
+static bool session_output_capture_wait_len(session_output_capture *capture, size_t needed, int timeout_ms) {
+    if (!capture) {
+        return false;
+    }
+    pthread_mutex_lock(&capture->mu);
+    int remaining = timeout_ms;
+    while (capture->len < needed && remaining > 0) {
+        struct timespec now;
+        assert(clock_gettime(CLOCK_REALTIME, &now) == 0);
+        int slice_ms = remaining > 10 ? 10 : remaining;
+        struct timespec deadline = now;
+        deadline.tv_nsec += (long)slice_ms * 1000L * 1000L;
+        if (deadline.tv_nsec >= 1000000000L) {
+            deadline.tv_sec += 1;
+            deadline.tv_nsec -= 1000000000L;
+        }
+        (void)pthread_cond_timedwait(&capture->cv, &capture->mu, &deadline);
+        remaining -= slice_ms;
+    }
+    bool ok = (capture->len >= needed);
+    pthread_mutex_unlock(&capture->mu);
+    return ok;
+}
+
+static bool buffer_contains_token(const unsigned char *buf, size_t len, const char *token, size_t token_len) {
+    if (!buf || !token || token_len == 0 || len < token_len) {
+        return false;
+    }
+    for (size_t i = 0; i + token_len <= len; ++i) {
+        if (memcmp(buf + i, token, token_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void assert_session_output_handler_delayed_attach_receives_pending_output(void) {
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+
+    uint64_t session_id = 4321;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+
+    const char *msg = "late";
+    assert(slave->ops && slave->ops->write);
+    assert(slave->ops->write(slave, msg, 4) == 4);
+
+    /* Attach handler after write to exercise delayed dispatch retry path. */
+    usleep(50000);
+
+    session_output_capture capture;
+    memset(&capture, 0, sizeof(capture));
+    pthread_mutex_init(&capture.mu, NULL);
+    pthread_cond_init(&capture.cv, NULL);
+    vprocSessionSetOutputHandler(session_id, session_output_capture_handler, &capture);
+
+    assert(session_output_capture_wait_len(&capture, 4, 1000));
+    pthread_mutex_lock(&capture.mu);
+    assert(memcmp(capture.buf, msg, 4) == 0);
+    pthread_mutex_unlock(&capture.mu);
+
+    vprocSessionClearOutputHandler(session_id);
+    pthread_cond_destroy(&capture.cv);
+    pthread_mutex_destroy(&capture.mu);
+    vprocSessionStdioDestroy(session);
+}
+
+static void assert_session_output_handler_burst_tabs(void) {
+    enum { kSessions = 5 };
+    VProcSessionStdio *sessions[kSessions];
+    session_output_capture captures[kSessions];
+    uint64_t session_ids[kSessions];
+    char messages[kSessions][8];
+    memset(sessions, 0, sizeof(sessions));
+    memset(captures, 0, sizeof(captures));
+    memset(session_ids, 0, sizeof(session_ids));
+    memset(messages, 0, sizeof(messages));
+
+    for (int i = 0; i < kSessions; ++i) {
+        struct pscal_fd *master = NULL;
+        struct pscal_fd *slave = NULL;
+        int pty_num = -1;
+        assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+        assert(pscalPtyUnlock(master) == 0);
+        assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+
+        uint64_t session_id = 6000 + (uint64_t)i;
+        VProcSessionStdio *session = vprocSessionStdioCreate();
+        assert(session);
+        assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+        vprocSessionStdioActivate(session);
+
+        assert(pthread_mutex_init(&captures[i].mu, NULL) == 0);
+        assert(pthread_cond_init(&captures[i].cv, NULL) == 0);
+        sessions[i] = session;
+        session_ids[i] = session_id;
+
+        snprintf(messages[i], sizeof(messages[i]), "TB%d", i);
+        assert(slave->ops && slave->ops->write);
+        assert(slave->ops->write(slave, messages[i], strlen(messages[i])) == (ssize_t)strlen(messages[i]));
+    }
+
+    /* Simulate burst startup where output appears before each tab's handler attaches. */
+    usleep(70000);
+
+    for (int i = 0; i < kSessions; ++i) {
+        vprocSessionSetOutputHandler(session_ids[i], session_output_capture_handler, &captures[i]);
+    }
+
+    for (int i = 0; i < kSessions; ++i) {
+        size_t msg_len = strlen(messages[i]);
+        assert(session_output_capture_wait_len(&captures[i], msg_len, 1200));
+        pthread_mutex_lock(&captures[i].mu);
+        assert(buffer_contains_token(captures[i].buf, captures[i].len, messages[i], msg_len));
+        pthread_mutex_unlock(&captures[i].mu);
+    }
+
+    for (int i = 0; i < kSessions; ++i) {
+        vprocSessionClearOutputHandler(session_ids[i]);
+        pthread_cond_destroy(&captures[i].cv);
+        pthread_mutex_destroy(&captures[i].mu);
+        vprocSessionStdioDestroy(sessions[i]);
+    }
+}
+
+static void assert_session_output_pause_resume_flushes_backlog(void) {
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+
+    uint64_t session_id = 7654;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+
+    session_output_capture capture;
+    memset(&capture, 0, sizeof(capture));
+    pthread_mutex_init(&capture.mu, NULL);
+    pthread_cond_init(&capture.cv, NULL);
+    vprocSessionSetOutputHandler(session_id, session_output_capture_handler, &capture);
+    vprocSessionSetOutputPaused(session_id, true);
+
+    const char *msg = "pause";
+    assert(slave->ops && slave->ops->write);
+    assert(slave->ops->write(slave, msg, 5) == 5);
+    usleep(50000);
+    pthread_mutex_lock(&capture.mu);
+    assert(capture.len == 0);
+    pthread_mutex_unlock(&capture.mu);
+
+    vprocSessionSetOutputPaused(session_id, false);
+    assert(session_output_capture_wait_len(&capture, 5, 1000));
+    pthread_mutex_lock(&capture.mu);
+    assert(memcmp(capture.buf, msg, 5) == 0);
+    pthread_mutex_unlock(&capture.mu);
+
+    vprocSessionClearOutputHandler(session_id);
+    pthread_cond_destroy(&capture.cv);
+    pthread_mutex_destroy(&capture.mu);
+    vprocSessionStdioDestroy(session);
+}
+
+static void assert_session_write_to_master_nonblocking_respects_capacity(void) {
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+
+    uint64_t session_id = 2468;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+
+    char big[16384];
+    memset(big, 'x', sizeof(big));
+
+    ssize_t first = vprocSessionWriteToMasterMode(session_id, big, sizeof(big), false);
+    assert(first > 0);
+    assert((size_t)first < sizeof(big));
+
+    errno = 0;
+    ssize_t second = vprocSessionWriteToMasterMode(session_id, big, sizeof(big), false);
+    assert(second == -1);
+    assert(errno == EAGAIN);
+
+    vprocSessionStdioDestroy(session);
+}
+
+static void assert_session_input_inject_read_queue(void) {
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+        session->stdin_host_fd = -1;
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+        session->stdout_host_fd = -1;
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+        session->stderr_host_fd = -1;
+    }
+
+    vprocSessionStdioActivate(session);
+
+    const char payload1[] = "abcdef";
+    const char payload2[] = "ghij";
+    assert(vprocSessionInjectInputShim(payload1, sizeof(payload1) - 1));
+    assert(vprocSessionInjectInputShim(payload2, sizeof(payload2) - 1));
+
+    char buf[16] = {0};
+    assert(vprocSessionReadInputShimMode(buf, 3, true) == 3);
+    assert(memcmp(buf, "abc", 3) == 0);
+    memset(buf, 0, sizeof(buf));
+    assert(vprocSessionReadInputShimMode(buf, 4, true) == 4);
+    assert(memcmp(buf, "defg", 4) == 0);
+    memset(buf, 0, sizeof(buf));
+    assert(vprocSessionReadInputShimMode(buf, 3, true) == 3);
+    assert(memcmp(buf, "hij", 3) == 0);
+
+    memset(buf, 0, sizeof(buf));
+    errno = 0;
+    assert(vprocSessionReadInputShimMode(buf, 1, true) == -1);
+    assert(errno == EAGAIN);
+
+    vprocSessionStdioDestroy(session);
+}
+
 static void assert_job_id_and_label_round_trip(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -2364,6 +2654,28 @@ static void assert_pthread_inherits_session_ids(void) {
     vprocSetKernelPid(prev_kernel);
 }
 
+static void assert_sigint_runtime_callback_reenters_without_deadlock(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    gRuntimeSigintShellPid = shell_pid;
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigintReenterEnabled = 1;
+    assert(vprocKillShim(shell_pid, SIGINT) == 0);
+    gRuntimeSigintReenterEnabled = 0;
+
+    assert(gRuntimeSigintCallbackCount > 0);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 int main(void) {
     /* Default truncation path for tests to keep path virtualization in /tmp. */
     setenv("PATH_TRUNCATE", "/tmp", 1);
@@ -2517,6 +2829,18 @@ int main(void) {
     assert_device_stat_bypasses_truncation();
     fprintf(stderr, "TEST ptmx_open_registers_session\n");
     assert_ptmx_open_registers_session();
+    fprintf(stderr, "TEST session_output_handler_delayed_attach_receives_pending_output\n");
+    assert_session_output_handler_delayed_attach_receives_pending_output();
+    fprintf(stderr, "TEST session_output_handler_burst_tabs\n");
+    assert_session_output_handler_burst_tabs();
+    fprintf(stderr, "TEST session_output_pause_resume_flushes_backlog\n");
+    assert_session_output_pause_resume_flushes_backlog();
+    fprintf(stderr, "TEST session_write_to_master_nonblocking_respects_capacity\n");
+    assert_session_write_to_master_nonblocking_respects_capacity();
+    fprintf(stderr, "TEST session_input_inject_read_queue\n");
+    assert_session_input_inject_read_queue();
+    fprintf(stderr, "TEST sigint_runtime_callback_reenters_without_deadlock\n");
+    assert_sigint_runtime_callback_reenters_without_deadlock();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;

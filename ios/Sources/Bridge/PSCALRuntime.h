@@ -149,6 +149,8 @@ void PSCALRuntimeRegisterSessionOutputHandler(uint64_t session_id,
                                               void *context);
 /// Unregisters a per-session output handler.
 void PSCALRuntimeUnregisterSessionOutputHandler(uint64_t session_id);
+/// Pauses/resumes per-session output delivery (with bounded backlog replay on resume).
+void PSCALRuntimeSetSessionOutputPaused(uint64_t session_id, int paused);
 
 /// Updates the virtual terminal size for a session-backed PTY.
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows);

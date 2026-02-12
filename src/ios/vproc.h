@@ -152,6 +152,10 @@ int vprocSetPgid(int pid, int pgid);
 int vprocSetSid(int pid, int sid);
 int vprocGetPgid(int pid);
 int vprocGetSid(int pid);
+bool vprocGetShellJobControlState(int *shell_pid_out,
+                                  int *shell_pgid_out,
+                                  int *sid_out,
+                                  int *fg_pgid_out);
 void vprocSetStopUnsupported(int pid, bool stop_unsupported);
 void vprocSetPipelineStage(bool active);
 int vprocSetForegroundPgid(int sid, int fg_pgid);
@@ -234,6 +238,7 @@ typedef struct VProcSessionInput {
     pthread_mutex_t mu;
     pthread_cond_t cv;
     unsigned char *buf;
+    size_t off;
     size_t len;
     size_t cap;
     int reader_fd;
@@ -307,6 +312,7 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
                                   VProcSessionOutputHandler handler,
                                   void *context);
 void vprocSessionClearOutputHandler(uint64_t session_id);
+void vprocSessionSetOutputPaused(uint64_t session_id, bool paused);
 /* Write input data directly to a session PTY master. */
 ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len);
 ssize_t vprocSessionWriteToMasterMode(uint64_t session_id, const void *buf, size_t len, bool blocking);
@@ -473,6 +479,16 @@ static inline int vprocSetPgid(int pid, int pgid) { (void)pid; (void)pgid; retur
 static inline int vprocSetSid(int pid, int sid) { (void)pid; (void)sid; return 0; }
 static inline int vprocGetPgid(int pid) { (void)pid; return -1; }
 static inline int vprocGetSid(int pid) { (void)pid; return -1; }
+static inline bool vprocGetShellJobControlState(int *shell_pid_out,
+                                                 int *shell_pgid_out,
+                                                 int *sid_out,
+                                                 int *fg_pgid_out) {
+    if (shell_pid_out) *shell_pid_out = -1;
+    if (shell_pgid_out) *shell_pgid_out = -1;
+    if (sid_out) *sid_out = -1;
+    if (fg_pgid_out) *fg_pgid_out = -1;
+    return false;
+}
 static inline int vprocSetForegroundPgid(int sid, int fg) { (void)sid; (void)fg; return 0; }
 static inline int vprocGetForegroundPgid(int sid) { (void)sid; return -1; }
 static inline void vprocMarkGroupExit(int pid, int status) { (void)pid; (void)status; }

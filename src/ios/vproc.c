@@ -2353,7 +2353,16 @@ typedef struct {
     struct pscal_fd *pty_master;
     VProcSessionOutputHandler output_handler;
     void *output_context;
+    unsigned char *pending_output;
+    size_t pending_output_len;
+    size_t pending_output_cap;
+    bool output_paused;
+    bool output_backlog_saturated;
 } VProcSessionPtyEntry;
+
+enum {
+    VPROC_SESSION_OUTPUT_BACKLOG_MAX = 2 * 1024 * 1024
+};
 
 static struct {
     VProcSessionPtyEntry *items;
@@ -2370,7 +2379,109 @@ static uint64_t gVProcSessionPtyHintId = 0;
 static size_t gVProcSessionPtyHintIndex = 0;
 
 static bool vprocSessionPtyEntryIsEmpty(const VProcSessionPtyEntry *entry) {
-    return !entry || (!entry->pty_slave && !entry->pty_master && !entry->output_handler);
+    return !entry || (!entry->pty_slave &&
+                      !entry->pty_master &&
+                      !entry->output_handler &&
+                      entry->pending_output_len == 0 &&
+                      !entry->output_paused);
+}
+
+static void vprocSessionPtyEntryClearPendingLocked(VProcSessionPtyEntry *entry) {
+    if (!entry) {
+        return;
+    }
+    free(entry->pending_output);
+    entry->pending_output = NULL;
+    entry->pending_output_len = 0;
+    entry->pending_output_cap = 0;
+    entry->output_backlog_saturated = false;
+}
+
+static bool vprocSessionEnsurePendingCapacityLocked(VProcSessionPtyEntry *entry, size_t needed) {
+    if (!entry) {
+        return false;
+    }
+    if (needed > VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+        needed = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+    }
+    if (entry->pending_output_cap >= needed) {
+        return true;
+    }
+    size_t cap = entry->pending_output_cap > 0 ? entry->pending_output_cap : 4096;
+    while (cap < needed) {
+        size_t next = cap << 1;
+        if (next <= cap) {
+            cap = needed;
+            break;
+        }
+        cap = next;
+        if (cap >= VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+            cap = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+            break;
+        }
+    }
+    unsigned char *resized = (unsigned char *)realloc(entry->pending_output, cap);
+    if (!resized) {
+        return false;
+    }
+    entry->pending_output = resized;
+    entry->pending_output_cap = cap;
+    return true;
+}
+
+static bool vprocSessionQueueOutputLocked(VProcSessionPtyEntry *entry,
+                                          const unsigned char *data,
+                                          size_t len) {
+    if (!entry || !data || len == 0) {
+        return true;
+    }
+    /* Once detached backlog is saturated, keep only the freshest chunk. */
+    if (entry->output_backlog_saturated) {
+        if (len >= VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+            if (!vprocSessionEnsurePendingCapacityLocked(entry, VPROC_SESSION_OUTPUT_BACKLOG_MAX)) {
+                return false;
+            }
+            const unsigned char *tail = data + (len - VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+            memcpy(entry->pending_output, tail, VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+            entry->pending_output_len = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+            return true;
+        }
+        if (!vprocSessionEnsurePendingCapacityLocked(entry, len)) {
+            return false;
+        }
+        memcpy(entry->pending_output, data, len);
+        entry->pending_output_len = len;
+        return true;
+    }
+    if (len >= VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+        if (!vprocSessionEnsurePendingCapacityLocked(entry, VPROC_SESSION_OUTPUT_BACKLOG_MAX)) {
+            return false;
+        }
+        const unsigned char *tail = data + (len - VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+        memcpy(entry->pending_output, tail, VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+        entry->pending_output_len = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+        entry->output_backlog_saturated = true;
+        return true;
+    }
+
+    size_t total = entry->pending_output_len + len;
+    if (total > VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+        if (!vprocSessionEnsurePendingCapacityLocked(entry, len)) {
+            return false;
+        }
+        memcpy(entry->pending_output, data, len);
+        entry->pending_output_len = len;
+        entry->output_backlog_saturated = true;
+        return true;
+    }
+
+    size_t needed = entry->pending_output_len + len;
+    if (!vprocSessionEnsurePendingCapacityLocked(entry, needed)) {
+        return false;
+    }
+    memcpy(entry->pending_output + entry->pending_output_len, data, len);
+    entry->pending_output_len += len;
+    return true;
 }
 
 static VProcSessionPtyEntry *vprocSessionPtyFindLocked(uint64_t session_id, size_t *out_index) {
@@ -2407,6 +2518,7 @@ static void vprocSessionPtyRemoveAtLocked(size_t idx) {
     if (idx >= gVProcSessionPtys.count) {
         return;
     }
+    vprocSessionPtyEntryClearPendingLocked(&gVProcSessionPtys.items[idx]);
     size_t last = gVProcSessionPtys.count - 1;
     if (idx != last) {
         gVProcSessionPtys.items[idx] = gVProcSessionPtys.items[last];
@@ -3764,13 +3876,28 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
                  (unsigned long long)session_id,
                  (void *)handler,
                  context);
+    unsigned char *pending_copy = NULL;
+    size_t pending_len = 0;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
     if (entry) {
         entry->output_handler = handler;
         entry->output_context = context;
+        if (handler && !entry->output_paused && entry->pending_output_len > 0) {
+            pending_copy = (unsigned char *)malloc(entry->pending_output_len);
+            if (pending_copy) {
+                memcpy(pending_copy, entry->pending_output, entry->pending_output_len);
+                pending_len = entry->pending_output_len;
+                entry->pending_output_len = 0;
+                entry->output_backlog_saturated = false;
+            }
+        }
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    if (handler && pending_copy && pending_len > 0) {
+        handler(session_id, pending_copy, pending_len, context);
+    }
+    free(pending_copy);
 }
 
 void vprocSessionClearOutputHandler(uint64_t session_id) {
@@ -3785,6 +3912,8 @@ void vprocSessionClearOutputHandler(uint64_t session_id) {
     if (entry) {
         entry->output_handler = NULL;
         entry->output_context = NULL;
+        entry->output_paused = false;
+        vprocSessionPtyEntryClearPendingLocked(entry);
         if (vprocSessionPtyEntryIsEmpty(entry)) {
             vprocSessionPtyRemoveAtLocked(idx);
         }
@@ -3792,32 +3921,35 @@ void vprocSessionClearOutputHandler(uint64_t session_id) {
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
 
-static bool vprocSessionGetOutputHandler(uint64_t session_id,
-                                         VProcSessionOutputHandler *out_handler,
-                                         void **out_context) {
-    if (out_handler) {
-        *out_handler = NULL;
-    }
-    if (out_context) {
-        *out_context = NULL;
-    }
+void vprocSessionSetOutputPaused(uint64_t session_id, bool paused) {
     if (session_id == 0) {
-        return false;
+        return;
     }
+    unsigned char *pending_copy = NULL;
+    size_t pending_len = 0;
+    VProcSessionOutputHandler handler = NULL;
+    void *context = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
     if (entry) {
-        if (out_handler) {
-            *out_handler = entry->output_handler;
+        entry->output_paused = paused;
+        if (!paused && entry->output_handler && entry->pending_output_len > 0) {
+            pending_copy = (unsigned char *)malloc(entry->pending_output_len);
+            if (pending_copy) {
+                memcpy(pending_copy, entry->pending_output, entry->pending_output_len);
+                pending_len = entry->pending_output_len;
+                handler = entry->output_handler;
+                context = entry->output_context;
+                entry->pending_output_len = 0;
+                entry->output_backlog_saturated = false;
+            }
         }
-        if (out_context) {
-            *out_context = entry->output_context;
-        }
-        pthread_mutex_unlock(&gVProcSessionPtys.mu);
-        return entry->output_handler != NULL;
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
-    return false;
+    if (handler && pending_copy && pending_len > 0) {
+        handler(session_id, pending_copy, pending_len, context);
+    }
+    free(pending_copy);
 }
 
 static bool vprocSessionDispatchOutput(uint64_t session_id,
@@ -3825,7 +3957,19 @@ static bool vprocSessionDispatchOutput(uint64_t session_id,
                                        size_t len) {
     VProcSessionOutputHandler handler = NULL;
     void *context = NULL;
-    if (vprocSessionGetOutputHandler(session_id, &handler, &context) && handler) {
+    bool queued = false;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
+    if (entry) {
+        if (entry->output_handler && !entry->output_paused) {
+            handler = entry->output_handler;
+            context = entry->output_context;
+        } else {
+            queued = vprocSessionQueueOutputLocked(entry, data, len);
+        }
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    if (handler) {
         vprocIoTrace("[vproc-io] output session=%llu len=%zu handler=%p",
                      (unsigned long long)session_id,
                      len,
@@ -3833,7 +3977,7 @@ static bool vprocSessionDispatchOutput(uint64_t session_id,
         handler(session_id, data, len, context);
         return true;
     }
-    return false;
+    return queued;
 }
 
 static ssize_t vprocSessionWritePtyMaster(struct pscal_fd *master,
@@ -4212,17 +4356,6 @@ static void *vprocSessionPtyOutputThread(void *arg) {
         }
         retry_sleep_us = 1000;
         if (vprocSessionDispatchOutput(session->session_id, (const unsigned char *)buf, (size_t)r)) {
-            continue;
-        }
-        bool delivered = false;
-        for (int attempt = 0; attempt < 25 && session->pty_active; ++attempt) {
-            usleep(10000);
-            if (vprocSessionDispatchOutput(session->session_id, (const unsigned char *)buf, (size_t)r)) {
-                delivered = true;
-                break;
-            }
-        }
-        if (delivered) {
             continue;
         }
         vprocIoTrace("[vproc-io] output drop session=%llu len=%zd (no handler)",
