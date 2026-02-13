@@ -34,6 +34,19 @@ static volatile int gRuntimeSigintShellPid = -1;
 static volatile int gRuntimeSigtstpReenterEnabled = 0;
 static volatile int gRuntimeSigtstpCallbackCount = 0;
 static volatile int gRuntimeSigtstpShellPid = -1;
+static volatile int gRuntimeSigtstpTargetPgid = -1;
+static volatile sig_atomic_t gHostSigintTrapCount = 0;
+static volatile sig_atomic_t gHostSigtstpTrapCount = 0;
+
+static void hostSigintTrapHandler(int signo) {
+    (void)signo;
+    gHostSigintTrapCount++;
+}
+
+static void hostSigtstpTrapHandler(int signo) {
+    (void)signo;
+    gHostSigtstpTrapCount++;
+}
 
 void pscalRuntimeRequestSigint(void) {
     gRuntimeSigintCallbackCount++;
@@ -49,6 +62,15 @@ void pscalRuntimeRequestSigint(void) {
 void pscalRuntimeRequestSigtstp(void) {
     gRuntimeSigtstpCallbackCount++;
     if (!gRuntimeSigtstpReenterEnabled) {
+        return;
+    }
+    if (gRuntimeSigtstpCallbackCount > 8) {
+        gRuntimeSigtstpReenterEnabled = 0;
+        return;
+    }
+    int target_pgid = (int)gRuntimeSigtstpTargetPgid;
+    if (target_pgid > 0) {
+        (void)vprocKillShim(-target_pgid, SIGTSTP);
         return;
     }
     int pid = (int)gRuntimeSigtstpShellPid;
@@ -837,6 +859,42 @@ static void assert_sigchld_unblock_drains_pending_signal(void) {
     vprocDestroy(child);
 }
 
+static void assert_sigchld_aggregation_preserves_multi_child_reap(void) {
+    int shell_pid = current_waiter_pid();
+    vprocSetShellSelfPid(shell_pid);
+
+    VProc *child_a = vprocCreate(NULL);
+    VProc *child_b = vprocCreate(NULL);
+    assert(child_a && child_b);
+    int pid_a = vprocPid(child_a);
+    int pid_b = vprocPid(child_b);
+    vprocSetParent(pid_a, shell_pid);
+    vprocSetParent(pid_b, shell_pid);
+
+    assert(vprocSetSigchldBlocked(shell_pid, true) == 0);
+    vprocMarkExit(child_a, 11);
+    vprocMarkExit(child_b, 22);
+    assert(vprocSigchldPending(shell_pid));
+
+    assert(vprocSetSigchldBlocked(shell_pid, false) == 0);
+    assert(vprocSigchldPending(shell_pid));
+
+    int status_a = 0;
+    int status_b = 0;
+    assert(vprocWaitPidShim(pid_a, &status_a, 0) == pid_a);
+    assert(vprocWaitPidShim(pid_b, &status_b, 0) == pid_b);
+    assert(WIFEXITED(status_a));
+    assert(WEXITSTATUS(status_a) == 11);
+    assert(WIFEXITED(status_b));
+    assert(WEXITSTATUS(status_b) == 22);
+
+    vprocClearSigchldPending(shell_pid);
+    assert(!vprocSigchldPending(shell_pid));
+
+    vprocDestroy(child_a);
+    vprocDestroy(child_b);
+}
+
 static void assert_group_exit_code_used(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -1005,6 +1063,72 @@ static void assert_background_stop_foreground_cont(void) {
     (void)vprocWaitPidShim(vprocPid(bg), &status, 0);
     vprocDestroy(fg);
     vprocDestroy(bg);
+}
+
+static void assert_foreground_handoff_resumes_stopped_group(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    assert(vprocKillShim(worker_pid, SIGTSTP) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, WUNTRACED) == worker_pid);
+    assert(WIFSTOPPED(status));
+    assert(WSTOPSIG(status) == SIGTSTP);
+
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    int continued_status = 0;
+    int continued_waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        int rc = vprocWaitPidShim(worker_pid, &continued_status, WCONTINUED | WNOHANG);
+        if (rc == worker_pid) {
+            continued_waited = 1;
+            break;
+        }
+        assert(rc == 0);
+        usleep(5000);
+    }
+    assert(continued_waited);
+    assert(WIFCONTINUED(continued_status));
+
+    vprocMarkExit(worker_vp, 0);
+    status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
 }
 
 static void assert_child_inherits_sid_and_pgid(void) {
@@ -1207,6 +1331,37 @@ static void assert_stop_and_continue_round_trip(void) {
     assert(WEXITSTATUS(status) == 5);
     /* Job id should be cleared once the task fully exits. */
     assert(vprocGetJobId(pid) == 0);
+
+    vprocDestroy(vp);
+}
+
+static void assert_stop_and_continue_with_stdio_overrides(void) {
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.stdin_fd = host_pipe[0];
+    opts.stdout_fd = host_pipe[1];
+    opts.stderr_fd = host_pipe[1];
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    int pid = vprocPid(vp);
+    assert(pid > 0);
+
+    /* vprocCreate duplicates stdio endpoints, so close the setup fds. */
+    vprocHostClose(host_pipe[0]);
+    vprocHostClose(host_pipe[1]);
+
+    assert(vprocKillShim(pid, SIGTSTP) == 0);
+    int status = 0;
+    assert(vprocWaitPidShim(pid, &status, WUNTRACED) == pid);
+    assert(WIFSTOPPED(status));
+
+    assert(vprocKillShim(pid, SIGCONT) == 0);
+    vprocMarkExit(vp, 0);
+    status = 0;
+    assert(vprocWaitPidShim(pid, &status, 0) == pid);
+    assert(WIFEXITED(status));
 
     vprocDestroy(vp);
 }
@@ -1767,6 +1922,44 @@ static void assert_passthrough_when_inactive(void) {
     assert(strcmp(buf, "pass") == 0);
     close(fd);
     unlink(tmpl);
+}
+
+static void assert_virtual_control_signals_do_not_hit_host_process(void) {
+#if defined(PSCAL_TARGET_IOS)
+    struct sigaction old_sigint;
+    struct sigaction old_sigtstp;
+    struct sigaction trap;
+    memset(&trap, 0, sizeof(trap));
+    sigemptyset(&trap.sa_mask);
+
+    trap.sa_handler = hostSigintTrapHandler;
+    assert(sigaction(SIGINT, &trap, &old_sigint) == 0);
+    trap.sa_handler = hostSigtstpTrapHandler;
+    assert(sigaction(SIGTSTP, &trap, &old_sigtstp) == 0);
+
+    /* Run this regression before any test seeds shell identity; we need
+     * no virtual context so old code would fall back to host kill(). */
+    int prev_shell = vprocGetShellSelfPid();
+    assert(prev_shell <= 0);
+
+    gHostSigintTrapCount = 0;
+    gHostSigtstpTrapCount = 0;
+
+    errno = 0;
+    int rc_int = vprocKillShim(0, SIGINT);
+    int int_errno = errno;
+    errno = 0;
+    int rc_tstp = vprocKillShim(0, SIGTSTP);
+    int tstp_errno = errno;
+
+    assert((rc_int == 0) || (rc_int == -1 && int_errno == ESRCH));
+    assert((rc_tstp == 0) || (rc_tstp == -1 && tstp_errno == ESRCH));
+    assert(gHostSigintTrapCount == 0);
+    assert(gHostSigtstpTrapCount == 0);
+
+    assert(sigaction(SIGINT, &old_sigint, NULL) == 0);
+    assert(sigaction(SIGTSTP, &old_sigtstp, NULL) == 0);
+#endif
 }
 
 static void assert_gps_alias_reads_location_payload(void) {
@@ -2342,6 +2535,1062 @@ static void assert_session_input_inject_read_queue(void) {
     vprocSessionStdioDestroy(session);
 }
 
+static bool session_input_wait_len(VProcSessionInput *input, size_t needed, int timeout_ms) {
+    if (!input) {
+        return false;
+    }
+    int waited_ms = 0;
+    while (waited_ms <= timeout_ms) {
+        pthread_mutex_lock(&input->mu);
+        size_t len = input->len;
+        pthread_mutex_unlock(&input->mu);
+        if (len >= needed) {
+            return true;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    return false;
+}
+
+static bool session_input_wait_interrupt(VProcSessionInput *input, int timeout_ms) {
+    if (!input) {
+        return false;
+    }
+    int waited_ms = 0;
+    while (waited_ms <= timeout_ms) {
+        pthread_mutex_lock(&input->mu);
+        bool pending = input->interrupt_pending;
+        pthread_mutex_unlock(&input->mu);
+        if (pending) {
+            return true;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    return false;
+}
+
+static void session_input_clear_interrupt(VProcSessionInput *input) {
+    if (!input) {
+        return;
+    }
+    pthread_mutex_lock(&input->mu);
+    input->interrupt_pending = false;
+    pthread_mutex_unlock(&input->mu);
+}
+
+static VProcSessionStdio *session_create_with_host_stdin(int stdin_host_fd) {
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+    }
+    session->stdin_host_fd = stdin_host_fd;
+    session->stdout_host_fd = -1;
+    session->stderr_host_fd = -1;
+    return session;
+}
+
+static void assert_session_control_chars_route_to_shell_input_when_shell_foreground(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+    }
+    session->stdin_host_fd = host_pipe[0];
+    session->stdout_host_fd = -1;
+    session->stderr_host_fd = -1;
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+    vprocSetShellPromptReadActive(shell_pid, true);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+    unsigned char controls[2] = { 3, 26 };
+    assert(vprocHostWrite(host_pipe[1], controls, sizeof(controls)) == (ssize_t)sizeof(controls));
+    assert(session_input_wait_len(input, 2, 500));
+
+    pthread_mutex_lock(&input->mu);
+    assert(!input->interrupt_pending);
+    assert(input->len >= 2);
+    assert(input->buf[input->off] == 3);
+    assert(input->buf[input->off + 1] == 26);
+    pthread_mutex_unlock(&input->mu);
+
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+    vprocSetShellPromptReadActive(shell_pid, false);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+    }
+    session->stdin_host_fd = host_pipe[0];
+    session->stdout_host_fd = -1;
+    session->stderr_host_fd = -1;
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+    int other_shell_pid = vprocReservePid();
+    assert(other_shell_pid > 0);
+    VProcOptions other_shell_opts = vprocDefaultOptions();
+    other_shell_opts.pid_hint = other_shell_pid;
+    VProc *other_shell_vp = vprocCreate(&other_shell_opts);
+    assert(other_shell_vp);
+    assert(vprocPid(other_shell_vp) == other_shell_pid);
+    assert(vprocSetSid(other_shell_pid, other_shell_pid) == 0);
+    assert(vprocSetPgid(other_shell_pid, other_shell_pid) == 0);
+    vprocSetShellPromptReadActive(other_shell_pid, true);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+    unsigned char ctrl_c = 3;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_c, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+
+    pthread_mutex_lock(&input->mu);
+    assert(input->len == 0);
+    pthread_mutex_unlock(&input->mu);
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGINT);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    vprocSetShellPromptReadActive(other_shell_pid, false);
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(other_shell_vp);
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_ctrl_z_stops_foreground_job_when_not_shell_foreground(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+    }
+    session->stdin_host_fd = host_pipe[0];
+    session->stdout_host_fd = -1;
+    session->stderr_host_fd = -1;
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+    int other_shell_pid = vprocReservePid();
+    assert(other_shell_pid > 0);
+    VProcOptions other_shell_opts = vprocDefaultOptions();
+    other_shell_opts.pid_hint = other_shell_pid;
+    VProc *other_shell_vp = vprocCreate(&other_shell_opts);
+    assert(other_shell_vp);
+    assert(vprocPid(other_shell_vp) == other_shell_pid);
+    assert(vprocSetSid(other_shell_pid, other_shell_pid) == 0);
+    assert(vprocSetPgid(other_shell_pid, other_shell_pid) == 0);
+    vprocSetShellPromptReadActive(other_shell_pid, true);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+    unsigned char ctrl_z = 26;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_z, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+
+    pthread_mutex_lock(&input->mu);
+    assert(input->len == 0);
+    pthread_mutex_unlock(&input->mu);
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSTOPPED(status));
+    assert(WSTOPSIG(status) == SIGTSTP);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocKillShim(worker_pid, SIGCONT) == 0);
+    vprocMarkExit(worker_vp, 0);
+    status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+
+    vprocSetShellPromptReadActive(other_shell_pid, false);
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(other_shell_vp);
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+
+static void assert_session_ctrl_z_then_ctrl_c_stop_unsupported_foreground_job(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+    vprocSetCommandLabel(worker_pid, "watch");
+    vprocSetStopUnsupported(worker_pid, true);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+    }
+    session->stdin_host_fd = host_pipe[0];
+    session->stdout_host_fd = -1;
+    session->stderr_host_fd = -1;
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+
+    unsigned char ctrl_z = 26;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_z, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+    session_input_clear_interrupt(input);
+
+    int status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    sigset_t pending;
+    sigemptyset(&pending);
+    assert(vprocSigpending(worker_pid, &pending) == 0);
+    assert(sigismember(&pending, SIGTSTP) == 1);
+
+    unsigned char ctrl_c = 3;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_c, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+
+    int waited = 0;
+    status = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGINT);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_ctrl_c_dispatches_to_frontend_like_foreground_group(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int pascal_pid = vprocReservePid();
+    int rea_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(pascal_pid > 0);
+    assert(rea_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions pascal_opts = vprocDefaultOptions();
+    pascal_opts.pid_hint = pascal_pid;
+    VProc *pascal_vp = vprocCreate(&pascal_opts);
+    assert(pascal_vp);
+    assert(vprocPid(pascal_vp) == pascal_pid);
+
+    VProcOptions rea_opts = vprocDefaultOptions();
+    rea_opts.pid_hint = rea_pid;
+    VProc *rea_vp = vprocCreate(&rea_opts);
+    assert(rea_vp);
+    assert(vprocPid(rea_vp) == rea_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+
+    vprocSetParent(pascal_pid, shell_pid);
+    assert(vprocSetSid(pascal_pid, shell_pid) == 0);
+    assert(vprocSetPgid(pascal_pid, pascal_pid) == 0);
+    vprocSetCommandLabel(pascal_pid, "pascal");
+
+    vprocSetParent(rea_pid, shell_pid);
+    assert(vprocSetSid(rea_pid, shell_pid) == 0);
+    assert(vprocSetPgid(rea_pid, pascal_pid) == 0);
+    vprocSetCommandLabel(rea_pid, "rea");
+
+    assert(vprocSetForegroundPgid(shell_pid, pascal_pid) == 0);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+    }
+    session->stdin_host_fd = host_pipe[0];
+    session->stdout_host_fd = -1;
+    session->stderr_host_fd = -1;
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+
+    unsigned char ctrl_c = 3;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_c, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+
+    int pascal_status = 0;
+    int rea_status = 0;
+    int pascal_waited = 0;
+    int rea_waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        if (!pascal_waited) {
+            int rc = vprocWaitPidShim(pascal_pid, &pascal_status, WNOHANG);
+            if (rc == pascal_pid) {
+                pascal_waited = 1;
+            } else {
+                assert(rc == 0);
+            }
+        }
+        if (!rea_waited) {
+            int rc = vprocWaitPidShim(rea_pid, &rea_status, WNOHANG);
+            if (rc == rea_pid) {
+                rea_waited = 1;
+            } else {
+                assert(rc == 0);
+            }
+        }
+        if (pascal_waited && rea_waited) {
+            break;
+        }
+        usleep(5000);
+    }
+    assert(pascal_waited);
+    assert(rea_waited);
+    assert(WIFSIGNALED(pascal_status));
+    assert(WTERMSIG(pascal_status) == SIGINT);
+    assert(WIFSIGNALED(rea_status));
+    assert(WTERMSIG(rea_status) == SIGINT);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(rea_vp);
+    vprocDestroy(pascal_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_ctrl_z_dispatches_to_frontend_like_foreground_group(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int pascal_pid = vprocReservePid();
+    int rea_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(pascal_pid > 0);
+    assert(rea_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions pascal_opts = vprocDefaultOptions();
+    pascal_opts.pid_hint = pascal_pid;
+    VProc *pascal_vp = vprocCreate(&pascal_opts);
+    assert(pascal_vp);
+    assert(vprocPid(pascal_vp) == pascal_pid);
+
+    VProcOptions rea_opts = vprocDefaultOptions();
+    rea_opts.pid_hint = rea_pid;
+    VProc *rea_vp = vprocCreate(&rea_opts);
+    assert(rea_vp);
+    assert(vprocPid(rea_vp) == rea_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+
+    vprocSetParent(pascal_pid, shell_pid);
+    assert(vprocSetSid(pascal_pid, shell_pid) == 0);
+    assert(vprocSetPgid(pascal_pid, pascal_pid) == 0);
+    vprocSetCommandLabel(pascal_pid, "pascal");
+
+    vprocSetParent(rea_pid, shell_pid);
+    assert(vprocSetSid(rea_pid, shell_pid) == 0);
+    assert(vprocSetPgid(rea_pid, pascal_pid) == 0);
+    vprocSetCommandLabel(rea_pid, "rea");
+
+    assert(vprocSetForegroundPgid(shell_pid, pascal_pid) == 0);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+
+    unsigned char ctrl_z = 26;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_z, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+
+    int pascal_status = 0;
+    int rea_status = 0;
+    int pascal_waited = 0;
+    int rea_waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        if (!pascal_waited) {
+            int rc = vprocWaitPidShim(pascal_pid, &pascal_status, WUNTRACED | WNOHANG);
+            if (rc == pascal_pid) {
+                pascal_waited = 1;
+            } else {
+                assert(rc == 0);
+            }
+        }
+        if (!rea_waited) {
+            int rc = vprocWaitPidShim(rea_pid, &rea_status, WUNTRACED | WNOHANG);
+            if (rc == rea_pid) {
+                rea_waited = 1;
+            } else {
+                assert(rc == 0);
+            }
+        }
+        if (pascal_waited && rea_waited) {
+            break;
+        }
+        usleep(5000);
+    }
+    assert(pascal_waited);
+    assert(rea_waited);
+    assert(WIFSTOPPED(pascal_status));
+    assert(WSTOPSIG(pascal_status) == SIGTSTP);
+    assert(WIFSTOPPED(rea_status));
+    assert(WSTOPSIG(rea_status) == SIGTSTP);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocKillShim(pascal_pid, SIGCONT) == 0);
+    assert(vprocKillShim(rea_pid, SIGCONT) == 0);
+    vprocMarkExit(pascal_vp, 0);
+    vprocMarkExit(rea_vp, 0);
+    pascal_status = 0;
+    rea_status = 0;
+    assert(vprocWaitPidShim(pascal_pid, &pascal_status, 0) == pascal_pid);
+    assert(vprocWaitPidShim(rea_pid, &rea_status, 0) == rea_pid);
+    assert(WIFEXITED(pascal_status));
+    assert(WEXITSTATUS(pascal_status) == 0);
+    assert(WIFEXITED(rea_status));
+    assert(WEXITSTATUS(rea_status) == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(rea_vp);
+    vprocDestroy(pascal_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_ctrl_z_then_ctrl_c_stop_unsupported_frontend_group(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int pascal_pid = vprocReservePid();
+    int rea_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(pascal_pid > 0);
+    assert(rea_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions pascal_opts = vprocDefaultOptions();
+    pascal_opts.pid_hint = pascal_pid;
+    VProc *pascal_vp = vprocCreate(&pascal_opts);
+    assert(pascal_vp);
+    assert(vprocPid(pascal_vp) == pascal_pid);
+
+    VProcOptions rea_opts = vprocDefaultOptions();
+    rea_opts.pid_hint = rea_pid;
+    VProc *rea_vp = vprocCreate(&rea_opts);
+    assert(rea_vp);
+    assert(vprocPid(rea_vp) == rea_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+
+    vprocSetParent(pascal_pid, shell_pid);
+    assert(vprocSetSid(pascal_pid, shell_pid) == 0);
+    assert(vprocSetPgid(pascal_pid, pascal_pid) == 0);
+    vprocSetCommandLabel(pascal_pid, "pascal");
+    vprocSetStopUnsupported(pascal_pid, true);
+
+    vprocSetParent(rea_pid, shell_pid);
+    assert(vprocSetSid(rea_pid, shell_pid) == 0);
+    assert(vprocSetPgid(rea_pid, pascal_pid) == 0);
+    vprocSetCommandLabel(rea_pid, "rea");
+    vprocSetStopUnsupported(rea_pid, true);
+
+    assert(vprocSetForegroundPgid(shell_pid, pascal_pid) == 0);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+
+    unsigned char ctrl_z = 26;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_z, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+    session_input_clear_interrupt(input);
+
+    int status = 0;
+    assert(vprocWaitPidShim(pascal_pid, &status, WUNTRACED | WNOHANG) == 0);
+    assert(vprocWaitPidShim(rea_pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    sigset_t pending;
+    sigemptyset(&pending);
+    assert(vprocSigpending(pascal_pid, &pending) == 0);
+    assert(sigismember(&pending, SIGTSTP) == 1);
+    sigemptyset(&pending);
+    assert(vprocSigpending(rea_pid, &pending) == 0);
+    assert(sigismember(&pending, SIGTSTP) == 1);
+
+    unsigned char ctrl_c = 3;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_c, 1) == 1);
+    assert(session_input_wait_interrupt(input, 500));
+
+    int pascal_status = 0;
+    int rea_status = 0;
+    int pascal_waited = 0;
+    int rea_waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        if (!pascal_waited) {
+            int rc = vprocWaitPidShim(pascal_pid, &pascal_status, WNOHANG);
+            if (rc == pascal_pid) {
+                pascal_waited = 1;
+            } else {
+                assert(rc == 0);
+            }
+        }
+        if (!rea_waited) {
+            int rc = vprocWaitPidShim(rea_pid, &rea_status, WNOHANG);
+            if (rc == rea_pid) {
+                rea_waited = 1;
+            } else {
+                assert(rc == 0);
+            }
+        }
+        if (pascal_waited && rea_waited) {
+            break;
+        }
+        usleep(5000);
+    }
+    assert(pascal_waited);
+    assert(rea_waited);
+    assert(WIFSIGNALED(pascal_status));
+    assert(WTERMSIG(pascal_status) == SIGINT);
+    assert(WIFSIGNALED(rea_status));
+    assert(WTERMSIG(rea_status) == SIGINT);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(rea_vp);
+    vprocDestroy(pascal_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_ctrl_c_does_not_bleed_between_sessions(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_a_pid = vprocReservePid();
+    int worker_a_pid = vprocReservePid();
+    int shell_b_pid = vprocReservePid();
+    int worker_b_pid = vprocReservePid();
+    assert(shell_a_pid > 0);
+    assert(worker_a_pid > 0);
+    assert(shell_b_pid > 0);
+    assert(worker_b_pid > 0);
+
+    VProcOptions shell_a_opts = vprocDefaultOptions();
+    shell_a_opts.pid_hint = shell_a_pid;
+    VProc *shell_a_vp = vprocCreate(&shell_a_opts);
+    assert(shell_a_vp);
+    assert(vprocPid(shell_a_vp) == shell_a_pid);
+
+    VProcOptions worker_a_opts = vprocDefaultOptions();
+    worker_a_opts.pid_hint = worker_a_pid;
+    VProc *worker_a_vp = vprocCreate(&worker_a_opts);
+    assert(worker_a_vp);
+    assert(vprocPid(worker_a_vp) == worker_a_pid);
+
+    VProcOptions shell_b_opts = vprocDefaultOptions();
+    shell_b_opts.pid_hint = shell_b_pid;
+    VProc *shell_b_vp = vprocCreate(&shell_b_opts);
+    assert(shell_b_vp);
+    assert(vprocPid(shell_b_vp) == shell_b_pid);
+
+    VProcOptions worker_b_opts = vprocDefaultOptions();
+    worker_b_opts.pid_hint = worker_b_pid;
+    VProc *worker_b_vp = vprocCreate(&worker_b_opts);
+    assert(worker_b_vp);
+    assert(vprocPid(worker_b_vp) == worker_b_pid);
+
+    vprocSetShellSelfTid(pthread_self());
+
+    vprocSetShellSelfPid(shell_a_pid);
+    assert(vprocRegisterTidHint(shell_a_pid, pthread_self()) == shell_a_pid);
+    vprocRegisterThread(shell_a_vp, pthread_self());
+    assert(vprocSetSid(shell_a_pid, shell_a_pid) == 0);
+    assert(vprocSetPgid(shell_a_pid, shell_a_pid) == 0);
+    vprocSetParent(worker_a_pid, shell_a_pid);
+    assert(vprocSetSid(worker_a_pid, shell_a_pid) == 0);
+    assert(vprocSetPgid(worker_a_pid, worker_a_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_a_pid, worker_a_pid) == 0);
+
+    vprocSetShellSelfPid(shell_b_pid);
+    assert(vprocRegisterTidHint(shell_b_pid, pthread_self()) == shell_b_pid);
+    vprocRegisterThread(shell_b_vp, pthread_self());
+    assert(vprocSetSid(shell_b_pid, shell_b_pid) == 0);
+    assert(vprocSetPgid(shell_b_pid, shell_b_pid) == 0);
+    vprocSetParent(worker_b_pid, shell_b_pid);
+    assert(vprocSetSid(worker_b_pid, shell_b_pid) == 0);
+    assert(vprocSetPgid(worker_b_pid, worker_b_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_b_pid, worker_b_pid) == 0);
+
+    int host_pipe_a[2];
+    int host_pipe_b[2];
+    assert(vprocHostPipe(host_pipe_a) == 0);
+    assert(vprocHostPipe(host_pipe_b) == 0);
+
+    VProcSessionStdio *session_a = session_create_with_host_stdin(host_pipe_a[0]);
+    VProcSessionStdio *session_b = session_create_with_host_stdin(host_pipe_b[0]);
+
+    vprocSessionStdioActivate(session_a);
+    vprocSetShellSelfPid(shell_a_pid);
+    VProcSessionInput *input_a = vprocSessionInputEnsureShim();
+    assert(input_a);
+
+    vprocSessionStdioActivate(session_b);
+    vprocSetShellSelfPid(shell_b_pid);
+    VProcSessionInput *input_b = vprocSessionInputEnsureShim();
+    assert(input_b);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+
+    unsigned char ctrl_c = 3;
+    assert(vprocHostWrite(host_pipe_a[1], &ctrl_c, 1) == 1);
+    assert(session_input_wait_interrupt(input_a, 500));
+
+    int status_a = 0;
+    int waited_a = 0;
+    vprocSetShellSelfPid(shell_a_pid);
+    for (int i = 0; i < 100; ++i) {
+        waited_a = vprocWaitPidShim(worker_a_pid, &status_a, WNOHANG);
+        if (waited_a == worker_a_pid) {
+            break;
+        }
+        assert(waited_a == 0);
+        usleep(5000);
+    }
+    assert(waited_a == worker_a_pid);
+    assert(WIFSIGNALED(status_a));
+    assert(WTERMSIG(status_a) == SIGINT);
+
+    int status_b = 0;
+    vprocSetShellSelfPid(shell_b_pid);
+    for (int i = 0; i < 20; ++i) {
+        int rc = vprocWaitPidShim(worker_b_pid, &status_b, WUNTRACED | WNOHANG);
+        assert(rc == 0);
+        usleep(5000);
+    }
+
+    vprocMarkExit(worker_b_vp, 0);
+    assert(vprocWaitPidShim(worker_b_pid, &status_b, 0) == worker_b_pid);
+    assert(WIFEXITED(status_b));
+    assert(WEXITSTATUS(status_b) == 0);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocHostClose(host_pipe_a[1]) == 0);
+    assert(vprocHostClose(host_pipe_b[1]) == 0);
+    vprocSessionStdioDestroy(session_b);
+    vprocSessionStdioDestroy(session_a);
+    vprocDestroy(worker_b_vp);
+    vprocDestroy(shell_b_vp);
+    vprocDestroy(worker_a_vp);
+    vprocDestroy(shell_a_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_ctrl_z_does_not_bleed_between_sessions(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_a_pid = vprocReservePid();
+    int worker_a_pid = vprocReservePid();
+    int shell_b_pid = vprocReservePid();
+    int worker_b_pid = vprocReservePid();
+    assert(shell_a_pid > 0);
+    assert(worker_a_pid > 0);
+    assert(shell_b_pid > 0);
+    assert(worker_b_pid > 0);
+
+    VProcOptions shell_a_opts = vprocDefaultOptions();
+    shell_a_opts.pid_hint = shell_a_pid;
+    VProc *shell_a_vp = vprocCreate(&shell_a_opts);
+    assert(shell_a_vp);
+    assert(vprocPid(shell_a_vp) == shell_a_pid);
+
+    VProcOptions worker_a_opts = vprocDefaultOptions();
+    worker_a_opts.pid_hint = worker_a_pid;
+    VProc *worker_a_vp = vprocCreate(&worker_a_opts);
+    assert(worker_a_vp);
+    assert(vprocPid(worker_a_vp) == worker_a_pid);
+
+    VProcOptions shell_b_opts = vprocDefaultOptions();
+    shell_b_opts.pid_hint = shell_b_pid;
+    VProc *shell_b_vp = vprocCreate(&shell_b_opts);
+    assert(shell_b_vp);
+    assert(vprocPid(shell_b_vp) == shell_b_pid);
+
+    VProcOptions worker_b_opts = vprocDefaultOptions();
+    worker_b_opts.pid_hint = worker_b_pid;
+    VProc *worker_b_vp = vprocCreate(&worker_b_opts);
+    assert(worker_b_vp);
+    assert(vprocPid(worker_b_vp) == worker_b_pid);
+
+    vprocSetShellSelfTid(pthread_self());
+
+    vprocSetShellSelfPid(shell_a_pid);
+    assert(vprocRegisterTidHint(shell_a_pid, pthread_self()) == shell_a_pid);
+    vprocRegisterThread(shell_a_vp, pthread_self());
+    assert(vprocSetSid(shell_a_pid, shell_a_pid) == 0);
+    assert(vprocSetPgid(shell_a_pid, shell_a_pid) == 0);
+    vprocSetParent(worker_a_pid, shell_a_pid);
+    assert(vprocSetSid(worker_a_pid, shell_a_pid) == 0);
+    assert(vprocSetPgid(worker_a_pid, worker_a_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_a_pid, worker_a_pid) == 0);
+
+    vprocSetShellSelfPid(shell_b_pid);
+    assert(vprocRegisterTidHint(shell_b_pid, pthread_self()) == shell_b_pid);
+    vprocRegisterThread(shell_b_vp, pthread_self());
+    assert(vprocSetSid(shell_b_pid, shell_b_pid) == 0);
+    assert(vprocSetPgid(shell_b_pid, shell_b_pid) == 0);
+    vprocSetParent(worker_b_pid, shell_b_pid);
+    assert(vprocSetSid(worker_b_pid, shell_b_pid) == 0);
+    assert(vprocSetPgid(worker_b_pid, worker_b_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_b_pid, worker_b_pid) == 0);
+
+    int host_pipe_a[2];
+    int host_pipe_b[2];
+    assert(vprocHostPipe(host_pipe_a) == 0);
+    assert(vprocHostPipe(host_pipe_b) == 0);
+
+    VProcSessionStdio *session_a = session_create_with_host_stdin(host_pipe_a[0]);
+    VProcSessionStdio *session_b = session_create_with_host_stdin(host_pipe_b[0]);
+
+    vprocSessionStdioActivate(session_a);
+    vprocSetShellSelfPid(shell_a_pid);
+    VProcSessionInput *input_a = vprocSessionInputEnsureShim();
+    assert(input_a);
+
+    vprocSessionStdioActivate(session_b);
+    vprocSetShellSelfPid(shell_b_pid);
+    VProcSessionInput *input_b = vprocSessionInputEnsureShim();
+    assert(input_b);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigtstpCallbackCount = 0;
+
+    unsigned char ctrl_z = 26;
+    assert(vprocHostWrite(host_pipe_a[1], &ctrl_z, 1) == 1);
+    assert(session_input_wait_interrupt(input_a, 500));
+
+    int status_a = 0;
+    int waited_a = 0;
+    vprocSetShellSelfPid(shell_a_pid);
+    for (int i = 0; i < 100; ++i) {
+        waited_a = vprocWaitPidShim(worker_a_pid, &status_a, WUNTRACED | WNOHANG);
+        if (waited_a == worker_a_pid) {
+            break;
+        }
+        assert(waited_a == 0);
+        usleep(5000);
+    }
+    assert(waited_a == worker_a_pid);
+    assert(WIFSTOPPED(status_a));
+    assert(WSTOPSIG(status_a) == SIGTSTP);
+
+    int status_b = 0;
+    vprocSetShellSelfPid(shell_b_pid);
+    for (int i = 0; i < 20; ++i) {
+        int rc = vprocWaitPidShim(worker_b_pid, &status_b, WUNTRACED | WNOHANG);
+        assert(rc == 0);
+        usleep(5000);
+    }
+
+    vprocSetShellSelfPid(shell_a_pid);
+    assert(vprocKillShim(worker_a_pid, SIGCONT) == 0);
+    vprocMarkExit(worker_a_vp, 0);
+    status_a = 0;
+    assert(vprocWaitPidShim(worker_a_pid, &status_a, 0) == worker_a_pid);
+    assert(WIFEXITED(status_a));
+    assert(WEXITSTATUS(status_a) == 0);
+
+    vprocSetShellSelfPid(shell_b_pid);
+    vprocMarkExit(worker_b_vp, 0);
+    assert(vprocWaitPidShim(worker_b_pid, &status_b, 0) == worker_b_pid);
+    assert(WIFEXITED(status_b));
+    assert(WEXITSTATUS(status_b) == 0);
+    assert(gRuntimeSigintCallbackCount == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocHostClose(host_pipe_a[1]) == 0);
+    assert(vprocHostClose(host_pipe_b[1]) == 0);
+    vprocSessionStdioDestroy(session_b);
+    vprocSessionStdioDestroy(session_a);
+    vprocDestroy(worker_b_vp);
+    vprocDestroy(shell_b_vp);
+    vprocDestroy(worker_a_vp);
+    vprocDestroy(shell_a_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 static void assert_job_id_and_label_round_trip(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -2668,6 +3917,381 @@ static void assert_pthread_inherits_session_ids(void) {
     vprocSetKernelPid(prev_kernel);
 }
 
+static void assert_runtime_request_ctrl_c_dispatches_to_foreground_job(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigintCallbackCount = 0;
+    assert(vprocRequestControlSignal(SIGINT));
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGINT);
+    assert(gRuntimeSigintCallbackCount == 0);
+
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_z_stops_foreground_job(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigtstpCallbackCount = 0;
+    assert(vprocRequestControlSignal(SIGTSTP));
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSTOPPED(status));
+    assert(WSTOPSIG(status) == SIGTSTP);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocKillShim(worker_pid, SIGCONT) == 0);
+    vprocMarkExit(worker_vp, 0);
+    status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_c_dispatches_with_explicit_shell_pid(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+
+    vprocSetShellSelfPid(0);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigintCallbackCount = 0;
+    assert(vprocRequestControlSignalForShell(shell_pid, SIGINT));
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGINT);
+    assert(gRuntimeSigintCallbackCount == 0);
+
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_z_stops_with_explicit_shell_pid(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+
+    vprocSetShellSelfPid(0);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigtstpCallbackCount = 0;
+    assert(vprocRequestControlSignalForShell(shell_pid, SIGTSTP));
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSTOPPED(status));
+    assert(WSTOPSIG(status) == SIGTSTP);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocKillShim(worker_pid, SIGCONT) == 0);
+    vprocMarkExit(worker_vp, 0);
+    status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    uint64_t session_id = 9501;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigintCallbackCount = 0;
+    assert(vprocRequestControlSignalForSession(session_id, SIGINT));
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGINT);
+    assert(gRuntimeSigintCallbackCount == 0);
+
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_z_stops_with_explicit_session_id(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    uint64_t session_id = 9502;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigtstpCallbackCount = 0;
+    assert(vprocRequestControlSignalForSession(session_id, SIGTSTP));
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 100; ++i) {
+        waited = vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG);
+        if (waited == worker_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == worker_pid);
+    assert(WIFSTOPPED(status));
+    assert(WSTOPSIG(status) == SIGTSTP);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    assert(vprocKillShim(worker_pid, SIGCONT) == 0);
+    vprocMarkExit(worker_vp, 0);
+    status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 static void assert_sigint_runtime_callback_reenters_without_deadlock(void) {
     int prev_shell = vprocGetShellSelfPid();
     int shell_pid = vprocReservePid();
@@ -2708,13 +4332,286 @@ static void assert_sigtstp_runtime_callback_reenters_without_deadlock(void) {
     assert(vprocKillShim(shell_pid, SIGTSTP) == 0);
     gRuntimeSigtstpReenterEnabled = 0;
 
-    assert(gRuntimeSigtstpCallbackCount > 0);
+    /* SIGTSTP delivery is now fully virtualized in vproc for shell-owned
+     * control flow; no out-of-band runtime callback should be needed. */
+    assert(gRuntimeSigtstpCallbackCount == 0);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_sigtstp_runtime_callback_foreground_reentry_is_single_shot(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int fg_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(fg_pid > 0);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetStopUnsupported(shell_pid, true);
+
+    assert(vprocSetSid(fg_pid, shell_pid) == 0);
+    assert(vprocSetPgid(fg_pid, fg_pid) == 0);
+    vprocSetStopUnsupported(fg_pid, true);
+    assert(vprocSetForegroundPgid(shell_pid, fg_pid) == 0);
+
+    gRuntimeSigtstpShellPid = shell_pid;
+    gRuntimeSigtstpTargetPgid = fg_pid;
+    gRuntimeSigtstpCallbackCount = 0;
+    gRuntimeSigtstpReenterEnabled = 1;
+
+    assert(vprocKillShim(shell_pid, SIGTSTP) == 0);
+
+    gRuntimeSigtstpReenterEnabled = 0;
+    gRuntimeSigtstpTargetPgid = -1;
+    assert(gRuntimeSigtstpCallbackCount == 0);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_sigtstp_non_shell_same_tid_does_not_request_runtime_suspend(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = worker_pid;
+    VProc *worker = vprocCreate(&opts);
+    assert(worker);
+    assert(vprocPid(worker) == worker_pid);
+    vprocRegisterThread(worker, pthread_self());
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigtstpCallbackCount = 0;
+    gRuntimeSigtstpReenterEnabled = 0;
+    assert(vprocKillShim(worker_pid, SIGTSTP) == 0);
+    assert(gRuntimeSigtstpCallbackCount == 0);
+
+    int status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, WUNTRACED) == worker_pid);
+    assert(WIFSTOPPED(status));
+    assert(vprocKillShim(worker_pid, SIGCONT) == 0);
+    vprocMarkExit(worker, 0);
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+    vprocDestroy(worker);
+
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_command_scope_from_shell_is_stoppable(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    VProcCommandScope scope;
+    assert(vprocCommandScopeBegin(&scope, "scope-stop-test", false, true));
+    int child_pid = scope.pid;
+    assert(child_pid > 0);
+    assert(child_pid != shell_pid);
+    assert(vprocSetForegroundPgid(shell_pid, child_pid) == 0);
+
+    assert(vprocKillShim(child_pid, SIGTSTP) == 0);
+    vprocDeactivate(); /* scope child -> shell parent */
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 20; ++i) {
+        waited = vprocWaitPidShim(child_pid, &status, WUNTRACED | WNOHANG);
+        if (waited == child_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == child_pid);
+    assert(WIFSTOPPED(status));
+
+    assert(vprocKillShim(child_pid, SIGCONT) == 0);
+    vprocActivate(scope.vp);
+    vprocCommandScopeEnd(&scope, 0);
+
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_command_scope_end_preserves_stop_status(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    VProcCommandScope scope;
+    assert(vprocCommandScopeBegin(&scope, "scope-end-stop", false, true));
+    int child_pid = scope.pid;
+    assert(child_pid > 0);
+    assert(child_pid != shell_pid);
+    assert(vprocSetForegroundPgid(shell_pid, child_pid) == 0);
+
+    /* Mirror watch-style scoped applets that temporarily disable direct stops. */
+    vprocSetStopUnsupported(child_pid, true);
+    vprocCommandScopeEnd(&scope, 128 + SIGTSTP);
+
+    int status = 0;
+    int waited = 0;
+    for (int i = 0; i < 20; ++i) {
+        waited = vprocWaitPidShim(child_pid, &status, WUNTRACED | WNOHANG);
+        if (waited == child_pid) {
+            break;
+        }
+        assert(waited == 0);
+        usleep(5000);
+    }
+    assert(waited == child_pid);
+    assert(WIFSTOPPED(status));
+    assert(WSTOPSIG(status) == SIGTSTP);
+
+    assert(vprocKillShim(child_pid, SIGKILL) == 0);
+    status = 0;
+    assert(vprocWaitPidShim(child_pid, &status, 0) == child_pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGKILL);
+
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_stop_unsupported_sigtstp_queues_pending_signal(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = worker_pid;
+    VProc *worker = vprocCreate(&opts);
+    assert(worker);
+    assert(vprocPid(worker) == worker_pid);
+    vprocRegisterThread(worker, pthread_self());
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    vprocSetStopUnsupported(worker_pid, true);
+    assert(vprocKillShim(worker_pid, SIGTSTP) == 0);
+
+    int status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    sigset_t pending;
+    sigemptyset(&pending);
+    assert(vprocSigpending(worker_pid, &pending) == 0);
+    assert(sigismember(&pending, SIGTSTP) == 1);
+
+    sigset_t waitset;
+    sigemptyset(&waitset);
+    sigaddset(&waitset, SIGTSTP);
+    int signo = 0;
+    assert(vprocSigwait(worker_pid, &waitset, &signo) == 0);
+    assert(signo == SIGTSTP);
+
+    sigemptyset(&pending);
+    assert(vprocSigpending(worker_pid, &pending) == 0);
+    assert(sigismember(&pending, SIGTSTP) == 0);
+
+    vprocMarkExit(worker, 0);
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    vprocDestroy(worker);
+
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = worker_pid;
+    VProc *worker = vprocCreate(&opts);
+    assert(worker);
+    assert(vprocPid(worker) == worker_pid);
+    vprocRegisterThread(worker, pthread_self());
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    gRuntimeSigintCallbackCount = 0;
+    gRuntimeSigintReenterEnabled = 0;
+    assert(vprocKillShim(worker_pid, SIGINT) == 0);
+    assert(gRuntimeSigintCallbackCount == 0);
+
+    int status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGINT);
+    vprocDestroy(worker);
+
     vprocSetShellSelfPid(prev_shell);
 }
 
 int main(void) {
     /* Default truncation path for tests to keep path virtualization in /tmp. */
     setenv("PATH_TRUNCATE", "/tmp", 1);
+    fprintf(stderr, "TEST virtual_control_signals_do_not_hit_host_process\n");
+    assert_virtual_control_signals_do_not_hit_host_process();
     fprintf(stderr, "TEST pipe_round_trip\n");
     assert_pipe_round_trip();
     fprintf(stderr, "TEST pipe_cross_vproc\n");
@@ -2761,6 +4658,8 @@ int main(void) {
     assert_sigchld_pending_api();
     fprintf(stderr, "TEST sigchld_unblock_drains_pending_signal\n");
     assert_sigchld_unblock_drains_pending_signal();
+    fprintf(stderr, "TEST sigchld_aggregation_preserves_multi_child_reap\n");
+    assert_sigchld_aggregation_preserves_multi_child_reap();
     fprintf(stderr, "TEST child_inherits_sid_and_pgid\n");
     assert_child_inherits_sid_and_pgid();
     fprintf(stderr, "TEST child_inherits_signal_state\n");
@@ -2777,12 +4676,16 @@ int main(void) {
     assert_blocked_stop_delivered_on_unblock();
     fprintf(stderr, "TEST background_stop_foreground_cont\n");
     assert_background_stop_foreground_cont();
+    fprintf(stderr, "TEST foreground_handoff_resumes_stopped_group\n");
+    assert_foreground_handoff_resumes_stopped_group();
     fprintf(stderr, "TEST wait_nohang_transitions\n");
     assert_wait_nohang_transitions();
     fprintf(stderr, "TEST snapshot_lists_active_tasks\n");
     assert_snapshot_lists_active_tasks();
     fprintf(stderr, "TEST stop_and_continue_round_trip\n");
     assert_stop_and_continue_round_trip();
+    fprintf(stderr, "TEST stop_and_continue_with_stdio_overrides\n");
+    assert_stop_and_continue_with_stdio_overrides();
     fprintf(stderr, "TEST job_ids_stable_across_exits\n");
     assert_job_ids_stable_across_exits();
     fprintf(stderr, "TEST sigchld_ignored_by_default\n");
@@ -2875,10 +4778,52 @@ int main(void) {
     assert_session_write_to_master_nonblocking_respects_capacity();
     fprintf(stderr, "TEST session_input_inject_read_queue\n");
     assert_session_input_inject_read_queue();
+    fprintf(stderr, "TEST session_control_chars_route_to_shell_input_when_shell_foreground\n");
+    assert_session_control_chars_route_to_shell_input_when_shell_foreground();
+    fprintf(stderr, "TEST session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground\n");
+    assert_session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground();
+    fprintf(stderr, "TEST session_ctrl_z_stops_foreground_job_when_not_shell_foreground\n");
+    assert_session_ctrl_z_stops_foreground_job_when_not_shell_foreground();
+    fprintf(stderr, "TEST session_ctrl_z_then_ctrl_c_stop_unsupported_foreground_job\n");
+    assert_session_ctrl_z_then_ctrl_c_stop_unsupported_foreground_job();
+    fprintf(stderr, "TEST session_ctrl_c_dispatches_to_frontend_like_foreground_group\n");
+    assert_session_ctrl_c_dispatches_to_frontend_like_foreground_group();
+    fprintf(stderr, "TEST session_ctrl_z_dispatches_to_frontend_like_foreground_group\n");
+    assert_session_ctrl_z_dispatches_to_frontend_like_foreground_group();
+    fprintf(stderr, "TEST session_ctrl_z_then_ctrl_c_stop_unsupported_frontend_group\n");
+    assert_session_ctrl_z_then_ctrl_c_stop_unsupported_frontend_group();
+    fprintf(stderr, "TEST session_ctrl_c_does_not_bleed_between_sessions\n");
+    assert_session_ctrl_c_does_not_bleed_between_sessions();
+    fprintf(stderr, "TEST session_ctrl_z_does_not_bleed_between_sessions\n");
+    assert_session_ctrl_z_does_not_bleed_between_sessions();
+    fprintf(stderr, "TEST runtime_request_ctrl_c_dispatches_to_foreground_job\n");
+    assert_runtime_request_ctrl_c_dispatches_to_foreground_job();
+    fprintf(stderr, "TEST runtime_request_ctrl_z_stops_foreground_job\n");
+    assert_runtime_request_ctrl_z_stops_foreground_job();
+    fprintf(stderr, "TEST runtime_request_ctrl_c_dispatches_with_explicit_shell_pid\n");
+    assert_runtime_request_ctrl_c_dispatches_with_explicit_shell_pid();
+    fprintf(stderr, "TEST runtime_request_ctrl_z_stops_with_explicit_shell_pid\n");
+    assert_runtime_request_ctrl_z_stops_with_explicit_shell_pid();
+    fprintf(stderr, "TEST runtime_request_ctrl_c_dispatches_with_explicit_session_id\n");
+    assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id();
+    fprintf(stderr, "TEST runtime_request_ctrl_z_stops_with_explicit_session_id\n");
+    assert_runtime_request_ctrl_z_stops_with_explicit_session_id();
     fprintf(stderr, "TEST sigint_runtime_callback_reenters_without_deadlock\n");
     assert_sigint_runtime_callback_reenters_without_deadlock();
     fprintf(stderr, "TEST sigtstp_runtime_callback_reenters_without_deadlock\n");
     assert_sigtstp_runtime_callback_reenters_without_deadlock();
+    fprintf(stderr, "TEST sigtstp_runtime_callback_foreground_reentry_is_single_shot\n");
+    assert_sigtstp_runtime_callback_foreground_reentry_is_single_shot();
+    fprintf(stderr, "TEST sigtstp_non_shell_same_tid_does_not_request_runtime_suspend\n");
+    assert_sigtstp_non_shell_same_tid_does_not_request_runtime_suspend();
+    fprintf(stderr, "TEST command_scope_from_shell_is_stoppable\n");
+    assert_command_scope_from_shell_is_stoppable();
+    fprintf(stderr, "TEST command_scope_end_preserves_stop_status\n");
+    assert_command_scope_end_preserves_stop_status();
+    fprintf(stderr, "TEST stop_unsupported_sigtstp_queues_pending_signal\n");
+    assert_stop_unsupported_sigtstp_queues_pending_signal();
+    fprintf(stderr, "TEST sigint_non_shell_same_tid_does_not_request_runtime_interrupt\n");
+    assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;

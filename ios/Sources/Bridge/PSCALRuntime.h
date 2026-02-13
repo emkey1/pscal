@@ -100,9 +100,12 @@ void pscalRuntimeResetSessionLog(void);
 /// version from the bundle. Caller must free(); returns NULL on failure.
 char *pscalRuntimeCopyMarketingVersion(void);
 
-/// Delivers a signal to the active runtime thread (no-op if inactive).
-/// Useful on iOS when job-control signals need to be injected manually.
+/// Injects a runtime control signal (virtualized on iOS). No-op if inactive.
+/// SIGINT/SIGTSTP/SIGTERM are handled through vproc/runtime control paths.
 void PSCALRuntimeSendSignal(int signo);
+/// Injects a control signal targeted at a specific session id.
+/// Returns non-zero when the signal was dispatched to a virtual foreground target.
+int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo);
 
 /// Configures the PATH_TRUNCATE environment variable used by the shell to
 /// present sandboxed paths as a shorter root (e.g. "/").

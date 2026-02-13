@@ -38,15 +38,102 @@ final class TerminalWindow: UIWindow {
         return commands
     }()
 
+    private lazy var controlKeyCommands: [UIKeyCommand] = {
+        let interrupt = UIKeyCommand(input: "c",
+                                     modifierFlags: [.control],
+                                     action: #selector(handleInterruptKeyCommand))
+        interrupt.discoverabilityTitle = "Interrupt"
+        let suspend = UIKeyCommand(input: "z",
+                                   modifierFlags: [.control],
+                                   action: #selector(handleSuspendKeyCommand))
+        suspend.discoverabilityTitle = "Suspend"
+        if #available(iOS 15.0, *) {
+            interrupt.wantsPriorityOverSystemBehavior = true
+            suspend.wantsPriorityOverSystemBehavior = true
+        }
+        return [interrupt, suspend]
+    }()
+
     override var keyCommands: [UIKeyCommand]? {
-        commandKeyCommands
+        commandKeyCommands + controlKeyCommands
     }
 
     override func sendEvent(_ event: UIEvent) {
-        if let pressesEvent = event as? UIPressesEvent, handleCommandKey(pressesEvent) {
-            return
+        if let pressesEvent = event as? UIPressesEvent {
+            if !terminalInputHasFirstResponder(), handleTerminalControlKey(pressesEvent) {
+                return
+            }
+            if handleCommandKey(pressesEvent) {
+                return
+            }
         }
         super.sendEvent(event)
+    }
+
+    private func handleTerminalControlKey(_ event: UIPressesEvent) -> Bool {
+        let presses = event.allPresses
+        guard !presses.isEmpty else {
+            return false
+        }
+        for press in presses {
+            if press.phase != .began {
+                continue
+            }
+            guard let key = press.key else { continue }
+
+            let rawScalars = key.charactersIgnoringModifiers.unicodeScalars
+            let scalar = rawScalars.first
+            let rawCharsScalars = key.characters.unicodeScalars
+            let rawCharsScalar = rawCharsScalars.first
+            let loweredValue = scalar.map { UInt32(tolower(Int32($0.value))) }
+            let loweredCharsValue = rawCharsScalar.map { UInt32(tolower(Int32($0.value))) }
+            let hasControl = key.modifierFlags.contains(.control)
+
+            let isInterruptKey = key.keyCode == .keyboardC
+            let isSuspendKey = key.keyCode == .keyboardZ
+            let isInterrupt = (scalar?.value == 0x03) ||
+                (rawCharsScalar?.value == 0x03) ||
+                (hasControl && (loweredValue == 0x63 || loweredCharsValue == 0x63 || isInterruptKey))
+            let isSuspend = (scalar?.value == 0x1A) ||
+                (rawCharsScalar?.value == 0x1A) ||
+                (hasControl && (loweredValue == 0x7A || loweredCharsValue == 0x7A || isSuspendKey))
+            if isInterrupt {
+                TerminalTabManager.shared.sendInterruptToSelected()
+                return true
+            }
+            if isSuspend {
+                TerminalTabManager.shared.sendSuspendToSelected()
+                return true
+            }
+        }
+        return false
+    }
+
+    private func terminalInputHasFirstResponder() -> Bool {
+        return firstResponder(in: self) is TerminalKeyInputView
+    }
+
+    private func firstResponder(in view: UIView?) -> UIView? {
+        guard let view else {
+            return nil
+        }
+        if view.isFirstResponder {
+            return view
+        }
+        for subview in view.subviews {
+            if let responder = firstResponder(in: subview) {
+                return responder
+            }
+        }
+        return nil
+    }
+
+    @objc private func handleInterruptKeyCommand() {
+        TerminalTabManager.shared.sendInterruptToSelected()
+    }
+
+    @objc private func handleSuspendKeyCommand() {
+        TerminalTabManager.shared.sendSuspendToSelected()
     }
 
     private func handleCommandKey(_ event: UIPressesEvent) -> Bool {

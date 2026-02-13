@@ -80,6 +80,21 @@ static _Thread_local volatile sig_atomic_t gInteractiveHasOldSigint = 0;
 static _Thread_local struct sigaction gInteractiveOldSigtstpAction;
 static _Thread_local volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 static _Thread_local bool gInteractiveLineDrawn = false;
+
+static void shellSetPromptReadActive(bool active) {
+#if defined(PSCAL_TARGET_IOS)
+    int pid = vprocGetPidShim();
+    if (pid <= 0) {
+        pid = vprocGetShellSelfPid();
+    }
+    if (pid > 0) {
+        vprocSetShellPromptReadActive(pid, active);
+    }
+#else
+    (void)active;
+#endif
+}
+
 #if defined(PSCAL_TARGET_IOS)
 static _Thread_local VProc *gShellSelfVproc = NULL;
 static _Thread_local bool gShellSelfVprocActivated = false;
@@ -625,6 +640,12 @@ static void interactiveSigintHandler(int signo) {
     interactiveRestoreSigintHandler();
     interactiveRestoreSigtstpHandler();
     interactiveRestoreTerminal();
+#if defined(PSCAL_TARGET_IOS)
+    if (signo == SIGINT) {
+        pscalRuntimeRequestSigint();
+        return;
+    }
+#endif
     raise(signo);
 }
 
@@ -2874,7 +2895,11 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         raw_termios = original_termios;
+#if defined(PSCAL_TARGET_IOS)
+        raw_termios.c_lflag &= ~(ICANON | ECHO | ISIG);
+#else
         raw_termios.c_lflag &= ~(ICANON | ECHO);
+#endif
         raw_termios.c_cc[VMIN] = 1;
         raw_termios.c_cc[VTIME] = 0;
         gInteractiveOriginalTermios = original_termios;
@@ -2961,6 +2986,7 @@ static char *readInteractiveLine(const char *prompt,
     bool done = false;
     bool eof_requested = false;
 
+    shellSetPromptReadActive(true);
     while (!done) {
         unsigned char ch = 0;
         ssize_t read_count = shellReadFd(STDIN_FILENO, &ch, 1);
@@ -3018,8 +3044,8 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             shellWriteStdoutStr("^C\n");
 #if defined(PSCAL_TARGET_IOS)
-            raise(SIGINT);
-            shellRuntimeProcessPendingSignals();
+            /* Never raise host SIGINT on iOS; it can hit app threads. */
+            shellRuntimeSetLastStatus(128 + SIGINT);
 #endif
             length = 0;
             cursor = 0;
@@ -3034,14 +3060,13 @@ static char *readInteractiveLine(const char *prompt,
 
         if (ch == 26) { /* Ctrl-Z */
 #if defined(PSCAL_TARGET_IOS)
-            /* On iOS, deliver SIGTSTP to the running builtin/VM and reset the prompt. */
+            /* At the prompt, treat Ctrl-Z as a logical shell event only.
+             * Foreground job suspend while commands run is handled by the
+             * session input reader via vproc job-control dispatch. */
             alt_dot_active = false;
             alt_dot_offset = 0;
             shellWriteStdoutStr("^Z\n");
-            raise(SIGTSTP);
-#if defined(PSCAL_TARGET_IOS)
-            shellRuntimeProcessPendingSignals();
-#endif
+            shellRuntimeSetLastStatus(128 + SIGTSTP);
             length = 0;
             cursor = 0;
             buffer[0] = '\0';
@@ -3741,6 +3766,7 @@ static char *readInteractiveLine(const char *prompt,
         history_index = 0;
         interactiveUpdateScratch(&scratch, buffer, length);
     }
+    shellSetPromptReadActive(false);
 
     if (installed_sigint_handler) {
         interactiveRestoreSigintHandler();
@@ -3896,7 +3922,29 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         }
         shellRuntimeRecordHistory(line);
         bool exit_requested = false;
+#if defined(PSCAL_TARGET_IOS)
+        struct termios runtime_original_termios;
+        bool runtime_isig_disabled = false;
+        if (tty && pscalRuntimeStdinHasRealTTY() &&
+            shellTcgetattr(STDIN_FILENO, &runtime_original_termios) == 0) {
+            struct termios runtime_termios = runtime_original_termios;
+            /* Keep command execution input byte-oriented so Ctrl-C/Z are
+             * observed immediately by the session input reader rather than
+             * line-buffered until newline in canonical mode. */
+            runtime_termios.c_lflag &= ~(ICANON | ECHO | ISIG);
+            runtime_termios.c_cc[VMIN] = 1;
+            runtime_termios.c_cc[VTIME] = 0;
+            if (shellTcsetattr(STDIN_FILENO, TCSANOW, &runtime_termios) == 0) {
+                runtime_isig_disabled = true;
+            }
+        }
+#endif
         last_status = shellRunSource(expanded_tilde, "<stdin>", &exec_opts, &exit_requested);
+#if defined(PSCAL_TARGET_IOS)
+        if (runtime_isig_disabled) {
+            (void)shellTcsetattr(STDIN_FILENO, TCSANOW, &runtime_original_termios);
+        }
+#endif
         free(expanded_tilde);
         free(line);
         if (exit_requested) {

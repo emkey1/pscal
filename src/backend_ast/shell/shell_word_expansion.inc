@@ -1771,7 +1771,7 @@ static void shellUpdateStatus(int status) {
  * async-signal-safe manner and reconcile them once we're back in the main
  * interpreter loop so the runtime can unwind cleanly before honouring traps.
  */
-static void shellHandlePendingSignal(int signo) {
+static void shellHandleSignalCommon(int signo, bool from_status) {
     if (signo <= 0 || signo >= NSIG) {
         return;
     }
@@ -1790,7 +1790,7 @@ static void shellHandlePendingSignal(int signo) {
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
         bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled && shellJobControlSupportsStops();
         bool dispatched = false;
-        if (signo == SIGINT || stop_request) {
+        if (!from_status && (signo == SIGINT || stop_request)) {
             dispatched = shellJobControlDispatchForegroundSignal(signo);
         }
         if (gShellCurrentVm && !stop_request) {
@@ -1810,10 +1810,11 @@ static void shellHandlePendingSignal(int signo) {
 
         bool propagate_default =
             (gShellExitOnSignalFlag && (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) &&
-             !gShellRuntime.trap_enabled && !command_trap && !dispatched);
+             !gShellRuntime.trap_enabled && !command_trap && !dispatched && !from_status);
 #if defined(PSCAL_TARGET_IOS)
-        if (signo == SIGTSTP) {
-            /* Never let SIGTSTP stop the host app; handle it logically instead. */
+        if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
+            /* iOS job control is virtualized through vproc; never forward
+             * default signal disposition to the host process. */
             propagate_default = false;
         }
 #endif
@@ -1857,6 +1858,14 @@ static void shellHandlePendingSignal(int signo) {
             shellLoopRequestBreakLevels((int)gShellLoopStackSize);
         }
     }
+}
+
+static void shellHandlePendingSignal(int signo) {
+    shellHandleSignalCommon(signo, false);
+}
+
+static void shellHandleStatusSignal(int signo) {
+    shellHandleSignalCommon(signo, true);
 }
 
 void shellRuntimeProcessPendingSignals(void) {

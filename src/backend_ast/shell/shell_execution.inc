@@ -1479,6 +1479,60 @@ static void shellVprocSigintHandler(int signo) {
     pscalRuntimeRequestSigint();
 }
 
+static bool shellStatusRepresentsStopSignal(int status, int *out_signal) {
+    if (out_signal) {
+        *out_signal = 0;
+    }
+    if (status < 128 || status >= 128 + NSIG) {
+        return false;
+    }
+    int sig = status - 128;
+    switch (sig) {
+#ifdef SIGTSTP
+        case SIGTSTP:
+#endif
+#ifdef SIGSTOP
+        case SIGSTOP:
+#endif
+#ifdef SIGTTIN
+        case SIGTTIN:
+#endif
+#ifdef SIGTTOU
+        case SIGTTOU:
+#endif
+            if (out_signal) {
+                *out_signal = sig;
+            }
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void shellFinalizeStageVproc(VProc *vp, int status) {
+    if (!vp) {
+        return;
+    }
+    int pid = vprocPid(vp);
+    int stop_sig = 0;
+    bool stopped = shellStatusRepresentsStopSignal(status, &stop_sig);
+
+    if (stopped && pid > 0) {
+        /* Keep stopped tasks in the vproc table, but detach this shell thread
+         * identity so later signal routing does not bleed into the shell. */
+        vprocUnregisterThread(vp, pthread_self());
+        if (stop_sig > 0) {
+            (void)vprocKillShim(pid, stop_sig);
+        }
+    } else {
+        vprocMarkExit(vp, status);
+        if (pid > 0) {
+            vprocDiscard(pid);
+        }
+    }
+    vprocDestroy(vp);
+}
+
 static void shellInProcessWorkerCleanup(void *arg) {
     ShellInProcessWorkerCtx *ctx = (ShellInProcessWorkerCtx *)arg;
     if (!ctx) {
@@ -1513,9 +1567,8 @@ static void shellInProcessWorkerCleanup(void *arg) {
     }
 
     vprocDeactivate();
-    vprocMarkExit(ctx->vp, ctx->status);
-    vprocDiscard(vprocPid(ctx->vp));
-    vprocDestroy(ctx->vp);
+    shellFinalizeStageVproc(ctx->vp, ctx->status);
+    ctx->vp = NULL;
 
     gShellBackgroundWorkerActive = ctx->prev_worker_flag;
     gShellCurrentBuiltinBackground = ctx->prev_bg_flag;
@@ -2036,9 +2089,7 @@ cleanup:
     }
     vprocDeactivate();
     if (vp) {
-        vprocMarkExit(vp, bg_status);
-        vprocDiscard(vprocPid(vp));
-        vprocDestroy(vp);
+        shellFinalizeStageVproc(vp, bg_status);
         ctx->vp = NULL;
     }
 #else
@@ -2568,14 +2619,16 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
              * lose the tail-stage status. Use recorded stage statuses instead. */
             for (size_t i = 0; i < ctx->launched; ++i) {
                 int stage_status = 0;
+                bool stage_stopped = false;
                 if (ctx->stage_status && i < ctx->stage_count) {
                     stage_status = ctx->stage_status[i];
                 }
                 final_status = stage_status;
-                if (stage_status == 128 + SIGTSTP) {
+                stage_stopped = shellStatusRepresentsStopSignal(stage_status, NULL);
+                if (stage_stopped) {
                     stopped_job = true;
                 }
-                if (ctx->pids && i < ctx->stage_count) {
+                if (ctx->pids && i < ctx->stage_count && !stage_stopped) {
                     ctx->pids[i] = -1;
                 }
             }
@@ -2585,43 +2638,44 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             }
 
             if (!ctx->background && final_status >= 128 && final_status < 128 + NSIG) {
-                shellHandlePendingSignal(final_status - 128);
+                shellHandleStatusSignal(final_status - 128);
             }
 
-            /* In-process stages don't get WIFSTOPPED; treat 148 (128+SIGTSTP) as a stop. */
-            if (job_control && !stopped_job && final_status == 128 + SIGTSTP) {
-                stopped_job = true;
+            /* In-process stages return mapped statuses; detect stop-like values
+             * so we keep jobs resumable instead of collapsing them to exits. */
+            if (job_control && !stopped_job) {
+                stopped_job = shellStatusRepresentsStopSignal(final_status, NULL);
             }
 
             shellRuntimeProcessPendingSignals();
 
-	            if (stopped_job && job_control) {
-	                ShellJob *job = NULL;
-	                if (tail_cmd) {
-	                    job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
-	                }
+            if (stopped_job && job_control) {
+                ShellJob *job = NULL;
+                if (tail_cmd) {
+                    job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+                }
                 if (job) {
                     shellJobMarkStopped(job, final_status);
                 }
 #if defined(PSCAL_TARGET_IOS)
-	                shellPrintJobSuspended(job, tail_cmd);
+                shellPrintJobSuspended(job, tail_cmd);
 #endif
-	                ctx->last_status = final_status;
-	                shellCloseVprocStreams();
-	                shellResetPipeline();
-	                shellUpdateStatus(final_status);
-	                return final_status;
-	            }
+                ctx->last_status = final_status;
+                shellCloseVprocStreams();
+                shellResetPipeline();
+                shellUpdateStatus(final_status);
+                return final_status;
+            }
 
-	            if (ctx->negated) {
-	                final_status = (final_status == 0) ? 1 : 0;
-	            }
-	            ctx->last_status = final_status;
-	            shellCloseVprocStreams();
-	            shellResetPipeline();
-	            shellUpdateStatus(final_status);
-	            return final_status;
-	        }
+            if (ctx->negated) {
+                final_status = (final_status == 0) ? 1 : 0;
+            }
+            ctx->last_status = final_status;
+            shellCloseVprocStreams();
+            shellResetPipeline();
+            shellUpdateStatus(final_status);
+            return final_status;
+        }
 
         if (ctx->background) {
             /* Register the synthetic in-process job so fg/bg/jobs work. */
@@ -2679,20 +2733,47 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 shellShebangThreadCtxFree(bg_ctx);
             }
         }
+        bool job_control = false;
         if (!ctx->background) {
             shellEnsureJobControl();
-            shellJobControlRestoreForeground();
+            job_control = gShellRuntime.job_control_enabled && job_pgid > 0;
+            if (job_control) {
+                shellJobControlRestoreForeground();
+            }
+            if (final_status >= 128 && final_status < 128 + NSIG) {
+                shellHandleStatusSignal(final_status - 128);
+            }
         }
-	        if (ctx->negated) {
-	            final_status = (final_status == 0) ? 1 : 0;
-	        }
-	        ctx->last_status = final_status;
-	        shellCloseVprocStreams();
-	        shellResetPipeline();
-	        shellUpdateStatus(final_status);
-	        shellRuntimeProcessPendingSignals();
-	        return final_status;
-	    }
+        shellRuntimeProcessPendingSignals();
+
+        if (!ctx->background && job_control &&
+            shellStatusRepresentsStopSignal(final_status, NULL)) {
+            ShellJob *job = NULL;
+            if (tail_cmd) {
+                job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
+            }
+            if (job) {
+                shellJobMarkStopped(job, final_status);
+            }
+#if defined(PSCAL_TARGET_IOS)
+            shellPrintJobSuspended(job, tail_cmd);
+#endif
+            ctx->last_status = final_status;
+            shellCloseVprocStreams();
+            shellResetPipeline();
+            shellUpdateStatus(final_status);
+            return final_status;
+        }
+
+        if (ctx->negated) {
+            final_status = (final_status == 0) ? 1 : 0;
+        }
+        ctx->last_status = final_status;
+        shellCloseVprocStreams();
+        shellResetPipeline();
+        shellUpdateStatus(final_status);
+        return final_status;
+    }
 #endif
 
     if (!ctx->background) {
@@ -2738,7 +2819,7 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
         }
 
         if (!ctx->background && final_status >= 128 && final_status < 128 + NSIG) {
-            shellHandlePendingSignal(final_status - 128);
+            shellHandleStatusSignal(final_status - 128);
         }
 
         shellRuntimeProcessPendingSignals();
@@ -3668,6 +3749,14 @@ static int shellRunBuiltinInProcess(VM *vm,
                                                              label[0] ? label : (cmd->argv && cmd->argv[0] ? cmd->argv[0] : "task"),
                                                              true,
                                                              inherit_pgid);
+                        if (scoped && vproc_scope.pid > 0) {
+                            /* In-process scoped applets run on host worker threads.
+                             * Use cooperative stop handling so Ctrl-Z produces a
+                             * stoppable shell job status instead of parking the
+                             * worker thread in a way the shell join path cannot
+                             * safely resume inline. */
+                            vprocSetStopUnsupported(vproc_scope.pid, true);
+                        }
 #endif
                         sc_status = smallclueDispatchApplet(applet, argc, argv_copy);
 #if defined(PSCAL_TARGET_IOS)
@@ -3907,15 +3996,13 @@ static int shellPipelineRunStage(VM *vm,
         }
     }
 #if defined(PSCAL_TARGET_IOS)
-    /* Keep pipeline stages in the foreground when possible, but always disable
-     * stop semantics so SIGTTIN/TTOU do not park inline stages. */
+    /* Keep foreground stage groups aligned with job control state. */
     if (!ctx->background && !cmd->background && shellRuntimeIsInteractive()) {
         shellEnsureJobControl();
         if (gShellRuntime.job_control_enabled && ctx->pgid > 0) {
             shellJobControlSetForeground(ctx->pgid);
         }
     }
-    vprocSetStopUnsupported(vprocPid(vp), true);
 #endif
     vprocRegisterThread(vp, pthread_self());
     vprocActivate(vp);
@@ -4022,10 +4109,8 @@ static int shellPipelineRunStage(VM *vm,
         ctx->pids[stage_pos] = vprocPid(vp);
         ctx->launched = stage_pos + 1;
     }
-    vprocMarkExit(vp, status);
     vprocDeactivate();
-    vprocDiscard(vprocPid(vp));
-    vprocDestroy(vp);
+    shellFinalizeStageVproc(vp, status);
 #else
     if (ctx->pids && stage_pos < ctx->stage_count) {
         ctx->pids[stage_pos] = 0;
@@ -4891,7 +4976,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 shellJobControlRestoreForeground();
             }
             if (!cmd->background && status >= 128 && status < 128 + NSIG) {
-                shellHandlePendingSignal(status - 128);
+                shellHandleStatusSignal(status - 128);
             }
             shellRuntimeProcessPendingSignals();
             if (stopped && job_control) {

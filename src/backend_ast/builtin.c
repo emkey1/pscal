@@ -3340,18 +3340,28 @@ void pscalRuntimeRequestSigint(void) {
     int sid = -1;
     int fg_pgid = -1;
     (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
-    bool deliver_vm_interrupt = true;
+    bool delivered_to_foreground = false;
     if (!from_vproc && shell_pid > 0 && fg_pgid > 0 && shell_pgid > 0 && fg_pgid != shell_pgid) {
-        /* Foreground belongs to a non-shell job (e.g. ssh). Let the INTR byte
-         * on the PTY drive behavior instead of broadcasting a shell interrupt. */
-        deliver_vm_interrupt = false;
+        /* Foreground belongs to a non-shell job (e.g. ssh). Route Ctrl-C as a
+         * virtual process-group signal instead of broadcasting a shell/VM-wide
+         * interrupt request. */
+        errno = 0;
+        int rc = vprocKillShim(-fg_pgid, SIGINT);
+        int kill_errno = errno;
+        if (rc == 0) {
+            delivered_to_foreground = true;
+        }
+        if (dbg) {
+            fprintf(stderr, "[sigint] routed-to-fg shell=%d shell_pgid=%d sid=%d fg=%d rc=%d errno=%d\n",
+                    shell_pid, shell_pgid, sid, fg_pgid, rc, kill_errno);
+        }
     }
     if (dbg && shell_pid > 0) {
         fprintf(stderr,
-                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d deliver_vm=%d from_vproc=%d\n",
-                shell_pid, shell_pgid, sid, fg_pgid, deliver_vm_interrupt ? 1 : 0, from_vproc ? 1 : 0);
+                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d delivered_fg=%d from_vproc=%d\n",
+                shell_pid, shell_pgid, sid, fg_pgid, delivered_to_foreground ? 1 : 0, from_vproc ? 1 : 0);
     }
-    if (!deliver_vm_interrupt) {
+    if (delivered_to_foreground) {
         return;
     }
 #endif
@@ -3375,7 +3385,7 @@ void pscalRuntimeRequestSigtstp(void) {
     int sid = -1;
     int fg_pgid = -1;
     (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
-    bool request_vm_suspend = true;
+    bool delivered = false;
     if (shell_pid <= 0) {
         if (dbg) {
             fprintf(stderr, "[sigtstp] no shell pid\n");
@@ -3389,16 +3399,36 @@ void pscalRuntimeRequestSigtstp(void) {
             fprintf(stderr, "[sigtstp] shell=%d shell_pgid=%d sid=%d fg=%d\n",
                     shell_pid, shell_pgid, sid, fg_pgid);
         }
+        errno = 0;
         int rc = vprocKillShim(-fg_pgid, SIGTSTP);
-        if (dbg) {
-            fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, errno);
+        int kill_errno = errno;
+        if (rc == 0) {
+            delivered = true;
         }
-        request_vm_suspend = false;
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, kill_errno);
+        }
     } else if (dbg) {
         fprintf(stderr, "[sigtstp] local suspend shell_pgid=%d fg=%d sid=%d\n",
                 shell_pgid, fg_pgid, sid);
     }
-    if (request_vm_suspend) {
+
+    /* When the shell owns the foreground, still try virtual SIGTSTP delivery
+     * first so foreground vprocs can enter a stopped state instead of forcing
+     * a VM-wide suspend request. */
+    if (!delivered && shell_pgid > 0) {
+        errno = 0;
+        int rc = vprocKillShim(-shell_pgid, SIGTSTP);
+        int kill_errno = errno;
+        if (rc == 0) {
+            delivered = true;
+        }
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] shell-pgid rc=%d errno=%d\n", rc, kill_errno);
+        }
+    }
+
+    if (!delivered) {
         atomic_store(&g_vm_suspend_requested, true);
     }
 #else

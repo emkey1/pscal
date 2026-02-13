@@ -38,6 +38,41 @@
 static bool vmHandleGlobalInterrupt(VM* vm);
 static bool vmConsumeSuspendRequest(VM* vm);
 
+#if defined(PSCAL_TARGET_IOS)
+static bool vmRuntimeSignalAppliesToCurrentVproc(VM* vm) {
+    int fg_pgid = -1;
+    if (!vprocGetShellJobControlState(NULL, NULL, NULL, &fg_pgid)) {
+        return true;
+    }
+    if (fg_pgid <= 0) {
+        return true;
+    }
+
+    int pid = (int)vprocGetPidShim();
+    if (pid <= 0) {
+        pid = vprocGetShellSelfPid();
+    }
+    if (pid <= 0) {
+        return true;
+    }
+
+    int pgid = vprocGetPgid(pid);
+    if (pgid <= 0) {
+        return true;
+    }
+
+    if (pgid == fg_pgid) {
+        return true;
+    }
+
+    /* Always honor explicit VM-local abort/exit flags. */
+    if (vm && (vm->abort_requested || vm->exit_requested)) {
+        return true;
+    }
+    return false;
+}
+#endif
+
 #if defined(__GNUC__) || defined(__clang__)
 #define VM_USE_COMPUTED_GOTO 1
 #else
@@ -1709,10 +1744,15 @@ static void vmMarkAbortRequested(VM* vm) {
 
 static bool vmConsumeInterruptRequest(VM* vm) {
     VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+#if defined(PSCAL_TARGET_IOS)
+    bool allow_runtime_signal = vmRuntimeSignalAppliesToCurrentVproc(root ? root : vm);
+#else
+    bool allow_runtime_signal = true;
+#endif
     if (vmHandleGlobalInterrupt(root)) {
         return true;
     }
-    if (pscalRuntimeConsumeSigint()) {
+    if (allow_runtime_signal && pscalRuntimeConsumeSigint()) {
         vmMarkAbortRequested(root ? root : vm);
         (void)vmHandleGlobalInterrupt(root);
         return true;
@@ -1724,10 +1764,15 @@ static bool vmConsumeInterruptRequest(VM* vm) {
 }
 
 static bool vmConsumeSuspendRequest(VM* vm) {
-    if (!pscalRuntimeConsumeSigtstp()) {
+    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+#if defined(PSCAL_TARGET_IOS)
+    bool allow_runtime_signal = vmRuntimeSignalAppliesToCurrentVproc(root ? root : vm);
+#else
+    bool allow_runtime_signal = true;
+#endif
+    if (!allow_runtime_signal || !pscalRuntimeConsumeSigtstp()) {
         return false;
     }
-    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
     VM* target = root ? root : vm;
     if (target) {
         target->abort_requested = false;
@@ -1739,7 +1784,12 @@ static bool vmConsumeSuspendRequest(VM* vm) {
 }
 
 static bool vmHandleGlobalInterrupt(VM* vm) {
-    bool pending = pscalRuntimeInterruptFlag() || pscalRuntimeSigintPending();
+#if defined(PSCAL_TARGET_IOS)
+    bool allow_runtime_signal = vmRuntimeSignalAppliesToCurrentVproc(vm);
+#else
+    bool allow_runtime_signal = true;
+#endif
+    bool pending = allow_runtime_signal && (pscalRuntimeInterruptFlag() || pscalRuntimeSigintPending());
     if (!pending && vm) {
         pending = vm->abort_requested || vm->exit_requested;
     }
@@ -1776,7 +1826,9 @@ static bool vmHandleGlobalInterrupt(VM* vm) {
         }
         vmThreadJobQueueWake(root->jobQueue);
     }
-    pscalRuntimeClearInterruptFlag();
+    if (allow_runtime_signal) {
+        pscalRuntimeClearInterruptFlag();
+    }
     return true;
 }
 

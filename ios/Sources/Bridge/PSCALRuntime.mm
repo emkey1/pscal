@@ -1858,15 +1858,97 @@ char *pscalRuntimeCopyMarketingVersion(void) {
     }
 }
 
+int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo) {
+    if (session_id == 0) {
+        return 0;
+    }
+    int sig = 0;
+    switch (signo) {
+        case SIGINT:
+            sig = SIGINT;
+            break;
+        case SIGTSTP:
+            sig = SIGTSTP;
+            break;
+        case SIGTERM:
+            sig = SIGINT;
+            break;
+        default:
+            return 0;
+    }
+
+    if (vprocRequestControlSignalForSession(session_id, sig)) {
+        return 1;
+    }
+
+    int shell_pid_hint = 0;
+    PSCALRuntimeContext *ctx = PSCALRuntimeContextForSession(session_id);
+    if (ctx) {
+        PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
+        pthread_mutex_lock(&s_runtime_mutex);
+        shell_pid_hint = (s_runtime_stdio) ? s_runtime_stdio->shell_pid : 0;
+        pthread_mutex_unlock(&s_runtime_mutex);
+        PSCALRuntimeSetCurrentContext(prev_ctx);
+    }
+    if (shell_pid_hint > 0 && vprocRequestControlSignalForShell(shell_pid_hint, sig)) {
+        return 1;
+    }
+    return 0;
+}
+
 void PSCALRuntimeSendSignal(int signo) {
     pthread_mutex_lock(&s_runtime_mutex);
     bool active = s_runtime_active;
+    uint64_t session_id = s_runtime_session_id;
+    int shell_pid_hint = (s_runtime_stdio) ? s_runtime_stdio->shell_pid : 0;
     pthread_t target = s_runtime_thread_id;
     pthread_mutex_unlock(&s_runtime_mutex);
-    if (!active || target == 0) {
+    if (!active && session_id == 0 && shell_pid_hint <= 0) {
         return;
     }
-    pthread_kill(target, signo);
+    auto requestSignal = [&](int sig) -> bool {
+        if (shell_pid_hint > 0 && vprocRequestControlSignalForShell(shell_pid_hint, sig)) {
+            return true;
+        }
+        return vprocRequestControlSignal(sig);
+    };
+    switch (signo) {
+        case SIGINT:
+            if (session_id != 0) {
+                (void)PSCALRuntimeSendSignalForSession(session_id, SIGINT);
+                return;
+            }
+            if (!requestSignal(SIGINT)) {
+                pscalRuntimeRequestSigint();
+            }
+            return;
+        case SIGTSTP:
+            if (session_id != 0) {
+                (void)PSCALRuntimeSendSignalForSession(session_id, SIGTSTP);
+                return;
+            }
+            if (!requestSignal(SIGTSTP)) {
+                pscalRuntimeRequestSigtstp();
+            }
+            return;
+        case SIGTERM:
+            /* Runtime restarts should request a virtual interrupt instead of
+             * delivering host SIGTERM/SIGINT into the app process. */
+            if (session_id != 0 && PSCALRuntimeSendSignalForSession(session_id, SIGINT)) {
+                return;
+            }
+            if (!requestSignal(SIGINT)) {
+                pscalRuntimeRequestSigint();
+            }
+            return;
+        case SIGWINCH:
+            if (target != 0) {
+                (void)pthread_kill(target, SIGWINCH);
+            }
+            return;
+        default:
+            return;
+    }
 }
 
 void PSCALRuntimeApplyPathTruncation(const char *path) {

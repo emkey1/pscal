@@ -94,8 +94,12 @@ private struct SshTerminalContentView: View {
                 isActive: isActive,
                 onInput: handleInput,
                 onPaste: handlePaste,
-                onInterrupt: { session.send("\u{03}") },
-                onSuspend: { session.send("\u{1A}") },
+                onInterrupt: {
+                    session.send("\u{03}")
+                },
+                onSuspend: {
+                    session.send("\u{1A}")
+                },
                 onResize: { cols, rows in
                     tabInitLog("SshTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
                     applyTerminalSize(columns: cols, rows: rows)

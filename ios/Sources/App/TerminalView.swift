@@ -188,10 +188,10 @@ struct TerminalContentView: View {
                         onInput: handleInput,
                         onPaste: handlePaste,
                         onInterrupt: {
-                            pscalRuntimeRequestSigint()
+                            runtime.sendInterrupt()
                         },
                         onSuspend: {
-                            pscalRuntimeRequestSigtstp()
+                            runtime.sendSuspend()
                         },
                         onResize: { cols, rows in
                             applyTerminalSize(columns: cols, rows: rows, source: "webview")
@@ -447,8 +447,7 @@ struct TerminalContentView: View {
     private func kickPromptIfNeeded() {
         guard promptKickRemaining > 0 else { return }
         promptKickRemaining -= 1
-        runtime.send(" ")
-        runtime.send("\u{7F}")
+        requestInputFocus()
     }
 
     private func schedulePromptKicks(reset: Bool = false) {

@@ -1,11 +1,6 @@
 import SwiftUI
 import UIKit
 
-@_silgen_name("pscalRuntimeRequestSigint")
-func pscalRuntimeRequestSigint()
-@_silgen_name("pscalRuntimeRequestSigtstp")
-func pscalRuntimeRequestSigtstp()
-
 extension Notification.Name {
     static let terminalModifierStateChanged = Notification.Name("terminalModifierStateChanged")
     static let terminalInputFocusRequested = Notification.Name("terminalInputFocusRequested")
@@ -334,8 +329,18 @@ final class TerminalKeyInputView: UITextView {
         if controlLatch, let scalar = text.unicodeScalars.first {
             controlLatch = false
             if let control = controlCharacter(for: scalar) {
-                maybeTriggerControlSignal(scalar: scalar)
-                onInput?(control)
+                let handled = maybeTriggerControlSignal(scalar: scalar)
+                if !handled {
+                    onInput?(control)
+                }
+                return
+            }
+        }
+        if text.unicodeScalars.count == 1,
+           let scalar = text.unicodeScalars.first,
+           signalScalarForRawControlCode(scalar) != nil {
+            let handled = maybeTriggerControlSignal(scalar: scalar)
+            if handled {
                 return
             }
         }
@@ -504,13 +509,17 @@ final class TerminalKeyInputView: UITextView {
         if key.modifierFlags.contains(.control),
            let scalar = key.charactersIgnoringModifiers.unicodeScalars.first {
             if let control = controlCharacter(for: scalar) {
-                maybeTriggerControlSignal(scalar: scalar)
-                onInput?(control)
+                let handled = maybeTriggerControlSignal(scalar: scalar)
+                if !handled {
+                    onInput?(control)
+                }
                 return true
             }
             if signalScalarForRawControlCode(scalar) != nil {
-                maybeTriggerControlSignal(scalar: scalar)
-                onInput?(String(scalar))
+                let handled = maybeTriggerControlSignal(scalar: scalar)
+                if !handled {
+                    onInput?(String(scalar))
+                }
                 return true
             }
         }
@@ -568,8 +577,6 @@ final class TerminalKeyInputView: UITextView {
                 self.hardwareKeyboardConnected = false
                 if self.isFirstResponder {
                     self.reloadInputViews()
-                    self.onInput?(" ")
-                    self.onInput?("\u{7F}")
                 }
             }
         }
@@ -596,8 +603,6 @@ final class TerminalKeyInputView: UITextView {
                 self.softKeyboardVisible = false
                 if self.isFirstResponder {
                     self.reloadInputViews()
-                    self.onInput?(" ")
-                    self.onInput?("\u{7F}")
                 }
             }
         }
@@ -698,8 +703,10 @@ final class TerminalKeyInputView: UITextView {
         guard let input = command.input,
               let scalar = input.lowercased().unicodeScalars.first else { return }
         if let control = controlCharacter(for: scalar) {
-            maybeTriggerControlSignal(scalar: scalar)
-            onInput?(control)
+            let handled = maybeTriggerControlSignal(scalar: scalar)
+            if !handled {
+                onInput?(control)
+            }
         }
     }
 
@@ -720,32 +727,33 @@ final class TerminalKeyInputView: UITextView {
         return UnicodeScalar(value + 0x60)
     }
 
-    private func maybeTriggerControlSignal(scalar: UnicodeScalar) {
-        let lowered = UnicodeScalar(UInt32(tolower(Int32(scalar.value)))) ?? scalar
+    private func maybeTriggerControlSignal(scalar: UnicodeScalar) -> Bool {
+        let normalized = signalScalarForRawControlCode(scalar) ?? scalar
+        let lowered = UnicodeScalar(UInt32(tolower(Int32(normalized.value)))) ?? normalized
         switch lowered {
         case "c":
-            triggerInterrupt()
+            return triggerInterrupt()
         case "z":
-            triggerSuspend()
+            return triggerSuspend()
         default:
-            break
+            return false
         }
     }
 
-    private func triggerInterrupt() {
-        if let onInterrupt {
-            onInterrupt()
-        } else {
-            pscalRuntimeRequestSigint()
+    private func triggerInterrupt() -> Bool {
+        guard let onInterrupt else {
+            return false
         }
+        onInterrupt()
+        return true
     }
 
-    private func triggerSuspend() {
-        if let onSuspend {
-            onSuspend()
-        } else {
-            pscalRuntimeRequestSigtstp()
+    private func triggerSuspend() -> Bool {
+        guard let onSuspend else {
+            return false
         }
+        onSuspend()
+        return true
     }
 
     private func updateCtrlButtonAppearance() {

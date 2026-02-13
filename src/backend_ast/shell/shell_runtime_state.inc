@@ -4499,9 +4499,15 @@ static int shellJobControlSendSignal(pid_t target, int signo, bool process_group
     pid_t send_target = process_group ? -target : target;
     int rc = vprocKillShim(send_target, signo);
     if (rc != 0 && errno == ESRCH) {
-        /* Fall back to a host kill when the vproc table has no entry (common in
-         * non-tty test runs where processes may spawn outside the shim). */
-        rc = kill(send_target, signo);
+        bool virtual_only =
+            (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP ||
+             signo == SIGTERM || signo == SIGCONT || signo == SIGSTOP ||
+             signo == SIGTTIN || signo == SIGTTOU);
+        if (!virtual_only) {
+            /* Non-control signals may still target host-backed children in some
+             * test environments; preserve that compatibility path. */
+            rc = kill(send_target, signo);
+        }
     }
     return rc;
 #else

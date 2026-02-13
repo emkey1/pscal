@@ -200,6 +200,24 @@ final class ShellRuntimeSession: ObservableObject {
         sendData(text.data(using: .utf8) ?? Data())
     }
 
+    func sendInterrupt() {
+        let delivered = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
+        }
+        if !delivered {
+            send("\u{03}")
+        }
+    }
+
+    func sendSuspend() {
+        let delivered = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGTSTP) != 0
+        }
+        if !delivered {
+            send("\u{1A}")
+        }
+    }
+
     func sendPasted(_ text: String) {
         guard !text.isEmpty else { return }
         let wrapped: String

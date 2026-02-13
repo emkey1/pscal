@@ -156,7 +156,15 @@ bool vprocGetShellJobControlState(int *shell_pid_out,
                                   int *shell_pgid_out,
                                   int *sid_out,
                                   int *fg_pgid_out);
+/* Request Ctrl-C/Ctrl-Z style control-signal routing to the foreground job. */
+bool vprocRequestControlSignal(int sig);
+/* Request control-signal routing using an explicit shell pid hint. */
+bool vprocRequestControlSignalForShell(int shell_pid, int sig);
+/* Request control-signal routing using a session-id scoped PTY foreground group. */
+bool vprocRequestControlSignalForSession(uint64_t session_id, int sig);
 void vprocSetStopUnsupported(int pid, bool stop_unsupported);
+void vprocSetShellPromptReadActive(int pid, bool active);
+bool vprocShellPromptReadActive(int pid);
 void vprocSetPipelineStage(bool active);
 int vprocSetForegroundPgid(int sid, int fg_pgid);
 int vprocGetForegroundPgid(int sid);
@@ -350,7 +358,7 @@ typedef int (*VProcExecEntryFn)(int argc, char **argv);
 
 /* Utility for iOS-hosted tools (smallclue applets, in-process exec, etc):
  * optionally create and activate a child vproc to represent the invoked command,
- * then tear it down while marking it exited. */
+ * then tear it down while preserving stop semantics for stop-like statuses. */
 bool vprocCommandScopeBegin(VProcCommandScope *scope,
                             const char *label,
                             bool force_new_vproc,
@@ -654,6 +662,19 @@ static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid;
 static inline bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len) { (void)pid; (void)buf; (void)buf_len; return false; }
 static inline void vprocDiscard(int pid) { (void)pid; }
 static inline bool vprocSigchldPending(int pid) { (void)pid; return false; }
+static inline void vprocSetShellPromptReadActive(int pid, bool active) { (void)pid; (void)active; }
+static inline bool vprocShellPromptReadActive(int pid) { (void)pid; return false; }
+static inline bool vprocRequestControlSignal(int sig) { (void)sig; return false; }
+static inline bool vprocRequestControlSignalForShell(int shell_pid, int sig) {
+    (void)shell_pid;
+    (void)sig;
+    return false;
+}
+static inline bool vprocRequestControlSignalForSession(uint64_t session_id, int sig) {
+    (void)session_id;
+    (void)sig;
+    return false;
+}
 typedef struct {
     VProc *prev;
     VProc *vp;

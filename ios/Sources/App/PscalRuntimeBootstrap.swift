@@ -572,9 +572,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
-            // Font change can leave the prompt visually stale; nudge terminal.
-            self?.send(" ")
-            self?.send("\u{7F}")
             self?.scheduleRender()
         }
     }
@@ -753,9 +750,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                // Always send a carriage return to force prompt rendering
-                self.send(" ")
-                self.send("\u{7F}")
+                self.scheduleRender()
             }
             if self.stateQueue.sync(execute: { self.skipRcNextStart }) {
                 unsetenv("EXSH_SKIP_RC")
@@ -815,20 +810,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
             DispatchQueue.main.async { self.start() }
             return
         }
-        if data.count == 1 {
-            switch data.first {
-            case 0x03: // Ctrl-C
-                withRuntimeContext {
-                    PSCALRuntimeSendSignal(SIGINT)
-                }
-            case 0x1a: // Ctrl-Z
-                withRuntimeContext {
-                    PSCALRuntimeSendSignal(SIGTSTP)
-                }
-            default:
-                break
-            }
-        }
         if editorBridge.interceptInputIfNeeded(data: data) {
             return
         }
@@ -851,6 +832,38 @@ final class PscalRuntimeBootstrap: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    func sendInterrupt() {
+        let activeSession = withState { sessionId }
+        if activeSession != 0 {
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
+            }
+            if !delivered {
+                send("\u{03}")
+            }
+            return
+        }
+        withRuntimeContext {
+            PSCALRuntimeSendSignal(SIGINT)
+        }
+    }
+
+    func sendSuspend() {
+        let activeSession = withState { sessionId }
+        if activeSession != 0 {
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
+            }
+            if !delivered {
+                send("\u{1A}")
+            }
+            return
+        }
+        withRuntimeContext {
+            PSCALRuntimeSendSignal(SIGTSTP)
         }
     }
 

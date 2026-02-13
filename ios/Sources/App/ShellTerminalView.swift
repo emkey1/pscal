@@ -95,10 +95,10 @@ private struct ShellTerminalContentView: View {
                 onInput: handleInput,
                 onPaste: handlePaste,
                 onInterrupt: {
-                    pscalRuntimeRequestSigint()
+                    session.sendInterrupt()
                 },
                 onSuspend: {
-                    pscalRuntimeRequestSigtstp()
+                    session.sendSuspend()
                 },
                 onResize: { cols, rows in
                     tabInitLog("ShellTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")

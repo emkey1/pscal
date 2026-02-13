@@ -353,6 +353,30 @@ final class TerminalTabManager: ObservableObject {
         }
     }
 
+    func sendInterruptToSelected() {
+        tabInitLog("sendInterruptToSelected selectedId=\(selectedId)")
+        switch selectedTab.kind {
+        case .shell(let runtime):
+            runtime.sendInterrupt()
+        case .shellSession(let session):
+            session.sendInterrupt()
+        case .ssh(let session):
+            session.send("\u{03}")
+        }
+    }
+
+    func sendSuspendToSelected() {
+        tabInitLog("sendSuspendToSelected selectedId=\(selectedId)")
+        switch selectedTab.kind {
+        case .shell(let runtime):
+            runtime.sendSuspend()
+        case .shellSession(let session):
+            session.sendSuspend()
+        case .ssh(let session):
+            session.send("\u{1A}")
+        }
+    }
+
     private func sshTitle(argv: [String]) -> String {
         guard argv.count > 1 else { return "SSH" }
         var skipNext = false
