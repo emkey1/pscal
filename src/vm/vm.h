@@ -180,6 +180,7 @@ typedef struct VM_s {
 
     bool exit_requested;      // Indicates a builtin requested early exit from the current frame
     bool abort_requested;     // Raised when a builtin requests an immediate interpreter abort
+    bool suspend_unwind_requested; // Keep unwinding frames for cooperative Ctrl-Z requests
     const char* current_builtin_name; // Tracks the name of the builtin currently executing (for diagnostics)
 
     // Threading support

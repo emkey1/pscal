@@ -23,6 +23,10 @@ MARKER_DIR = REPO_ROOT / ".tmp_tests" / "exsh_interactive"
 
 ANSI_CSI_RE = re.compile(r"\x1B\[[0-9;?]*[ -/]*[@-~]")
 ANSI_OSC_RE = re.compile(r"\x1B\][^\x07]*(?:\x07|\x1b\\)")
+LPS_WATCH_RE = re.compile(
+    r"^\s*(\d+)\s+\d+\s+\w+\s+[0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?\s+watch -n 1 date\s*$",
+    re.MULTILINE,
+)
 
 
 @dataclass
@@ -172,10 +176,30 @@ def _shell_path(path: Path) -> str:
         return path.as_posix()
 
 
+def _send_until_marker(shell: PtyShell, command: str, marker: Path, attempts: int, timeout: float) -> bool:
+    for _ in range(max(1, attempts)):
+        shell.send_line(command)
+        if shell.wait_for_path(marker, timeout=timeout):
+            return True
+        shell._pump(0.15)
+    return marker.exists()
+
+
 def _wait_for_prompt(shell: PtyShell) -> tuple[bool, str]:
     if shell.wait_for_substring("PROMPT> ", timeout=2.0):
         return True, "prompt ready"
     return False, "interactive prompt did not appear"
+
+
+def _prompt_count(shell: PtyShell) -> int:
+    return shell.output.count("PROMPT> ")
+
+
+def _latest_watch_pid(text: str) -> Optional[int]:
+    matches = list(LPS_WATCH_RE.finditer(text))
+    if not matches:
+        return None
+    return int(matches[-1].group(1))
 
 
 def scenario_ctrl_c_interrupts_sleep(shell: PtyShell) -> tuple[bool, str]:
@@ -210,6 +234,110 @@ def scenario_ctrl_z_stops_sleep(shell: PtyShell) -> tuple[bool, str]:
         return False, "Ctrl-Z did not return control to shell for jobs query"
     _unlink_if_exists(marker)
     return True, "sleep stopped and visible in jobs output"
+
+
+def scenario_ctrl_z_stops_local_vproc_and_restores_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker_stop = _new_marker_path("ctrlz-watch-stop")
+    marker_bg = _new_marker_path("ctrlz-watch-bg")
+    marker_fg = _new_marker_path("ctrlz-watch-fg")
+    pid_before_path = _new_marker_path("ctrlz-watch-pid-before")
+    pid_after_path = _new_marker_path("ctrlz-watch-pid-after")
+    _unlink_if_exists(marker_stop)
+    _unlink_if_exists(marker_bg)
+    _unlink_if_exists(marker_fg)
+    _unlink_if_exists(pid_before_path)
+    _unlink_if_exists(pid_after_path)
+    prompt_before = _prompt_count(shell)
+    shell.send_line("watch -n 1 date")
+    shell._pump(0.90)
+    shell.send(b"\x1a")
+    shell._pump(1.30)
+    if _prompt_count(shell) <= prompt_before:
+        return False, "Ctrl-Z did not return shell prompt after suspending foreground vproc"
+    shell.send_line(
+        "jobs | grep Stopped | grep 'watch -n' | grep date >/dev/null"
+        " && lps | grep 'watch -n' >/dev/null"
+        f" && touch {_shell_path(marker_stop)}"
+    )
+    if not shell.wait_for_path(marker_stop, timeout=3.0):
+        return False, "Suspended local vproc was not queryable from shell after Ctrl-Z"
+    shell.send_line(
+        f"lps | grep 'watch -n 1 date' > {_shell_path(pid_before_path)}"
+    )
+    if not shell.wait_for_path(pid_before_path, timeout=3.0):
+        return False, "Unable to capture lps output for stopped watch"
+    stopped_pid_before = _latest_watch_pid(pid_before_path.read_text(errors="replace"))
+    if stopped_pid_before is None:
+        return False, "Unable to capture stopped watch pid after first Ctrl-Z"
+
+    prompt_after_stop = _prompt_count(shell)
+    shell.send_line(
+        "bg %1 >/dev/null 2>&1"
+        " && jobs | grep Running | grep 'watch -n' | grep date >/dev/null"
+        f" && touch {_shell_path(marker_bg)}"
+    )
+    if not shell.wait_for_path(marker_bg, timeout=3.0):
+        return False, "bg did not resume suspended local vproc as Running"
+    if _prompt_count(shell) <= prompt_after_stop:
+        return False, "Shell prompt did not remain responsive after bg"
+
+    shell.send_line("fg %1")
+    shell._pump(0.90)
+    shell.send(b"\x1a")
+    shell._pump(1.10)
+    shell.send_line(
+        "jobs | grep Stopped | grep 'watch -n' | grep date >/dev/null"
+        f" && touch {_shell_path(marker_fg)}"
+    )
+    if not shell.wait_for_path(marker_fg, timeout=3.0):
+        return False, "watch was not stopped again after fg -> Ctrl-Z"
+
+    shell.send_line(
+        f"lps | grep 'watch -n 1 date' > {_shell_path(pid_after_path)}"
+    )
+    if not shell.wait_for_path(pid_after_path, timeout=3.0):
+        return False, "Unable to capture lps output after fg -> Ctrl-Z"
+    stopped_pid_after = _latest_watch_pid(pid_after_path.read_text(errors="replace"))
+    if stopped_pid_after is None:
+        return False, "Unable to capture stopped watch pid after fg -> Ctrl-Z"
+    if stopped_pid_after != stopped_pid_before:
+        return False, "fg restarted watch instead of resuming existing stopped task"
+
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.2)
+
+    _unlink_if_exists(marker_stop)
+    _unlink_if_exists(marker_bg)
+    _unlink_if_exists(marker_fg)
+    _unlink_if_exists(pid_before_path)
+    _unlink_if_exists(pid_after_path)
+    return True, "Ctrl-Z/bg/fg flow works for shell-launched local vproc"
+
+
+def scenario_ctrl_z_stops_clike_frontend_and_restores_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker_stop = _new_marker_path("ctrlz-clike-stop")
+    _unlink_if_exists(marker_stop)
+    prompt_before = _prompt_count(shell)
+    shell.send_line("PSCALI_WORDS_PATH=etc/words clike Examples/clike/base/hangman5")
+    shell._pump(1.00)
+    shell.send(b"\x1a")
+    shell._pump(1.20)
+    if _prompt_count(shell) <= prompt_before:
+        return False, "Ctrl-Z did not return shell prompt after suspending clike frontend"
+    check_cmd = (
+        "lps | grep 'hangman5' >/dev/null"
+        f" && touch {_shell_path(marker_stop)}"
+    )
+    if not _send_until_marker(shell, check_cmd, marker_stop, attempts=3, timeout=4.0):
+        return False, "Suspended clike frontend was not queryable from shell after Ctrl-Z"
+    _unlink_if_exists(marker_stop)
+    return True, "Ctrl-Z stops clike frontend and restores shell prompt"
 
 
 def scenario_ctrl_c_interrupts_watch(shell: PtyShell) -> tuple[bool, str]:
@@ -259,6 +387,16 @@ SCENARIOS: List[Scenario] = [
         test_id="interactive_ctrl_z_sleep",
         name="Ctrl-Z stops foreground sleep and reports in jobs",
         run=scenario_ctrl_z_stops_sleep,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_z_local_vproc_prompt",
+        name="Ctrl-Z stops local vproc and restores shell prompt",
+        run=scenario_ctrl_z_stops_local_vproc_and_restores_prompt,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_z_clike_frontend_prompt",
+        name="Ctrl-Z stops clike frontend and restores shell prompt",
+        run=scenario_ctrl_z_stops_clike_frontend_and_restores_prompt,
     ),
     Scenario(
         test_id="interactive_ctrl_c_watch",

@@ -1881,18 +1881,9 @@ int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo) {
         return 1;
     }
 
-    int shell_pid_hint = 0;
-    PSCALRuntimeContext *ctx = PSCALRuntimeContextForSession(session_id);
-    if (ctx) {
-        PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
-        pthread_mutex_lock(&s_runtime_mutex);
-        shell_pid_hint = (s_runtime_stdio) ? s_runtime_stdio->shell_pid : 0;
-        pthread_mutex_unlock(&s_runtime_mutex);
-        PSCALRuntimeSetCurrentContext(prev_ctx);
-    }
-    if (shell_pid_hint > 0 && vprocRequestControlSignalForShell(shell_pid_hint, sig)) {
-        return 1;
-    }
+    /* Do not fall back to shell-scoped virtual dispatch here. If a
+     * session-targeted control request cannot be delivered, callers can choose
+     * literal control-byte fallback (required for remote/ssh semantics). */
     return 0;
 }
 
@@ -1912,10 +1903,22 @@ void PSCALRuntimeSendSignal(int signo) {
         }
         return vprocRequestControlSignal(sig);
     };
+    auto softSignalingDisabled = [&]() -> bool {
+        const char *flag = getenv("PSCALI_DISABLE_SOFT_SIGNALING");
+        return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+    };
     switch (signo) {
         case SIGINT:
             if (session_id != 0) {
-                (void)PSCALRuntimeSendSignalForSession(session_id, SIGINT);
+                if (PSCALRuntimeSendSignalForSession(session_id, SIGINT)) {
+                    return;
+                }
+                if (softSignalingDisabled()) {
+                    return;
+                }
+                if (!requestSignal(SIGINT)) {
+                    pscalRuntimeRequestSigint();
+                }
                 return;
             }
             if (!requestSignal(SIGINT)) {
@@ -1924,7 +1927,15 @@ void PSCALRuntimeSendSignal(int signo) {
             return;
         case SIGTSTP:
             if (session_id != 0) {
-                (void)PSCALRuntimeSendSignalForSession(session_id, SIGTSTP);
+                if (PSCALRuntimeSendSignalForSession(session_id, SIGTSTP)) {
+                    return;
+                }
+                if (softSignalingDisabled()) {
+                    return;
+                }
+                if (!requestSignal(SIGTSTP)) {
+                    pscalRuntimeRequestSigtstp();
+                }
                 return;
             }
             if (!requestSignal(SIGTSTP)) {

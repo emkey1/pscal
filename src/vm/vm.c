@@ -71,6 +71,44 @@ static bool vmRuntimeSignalAppliesToCurrentVproc(VM* vm) {
     }
     return false;
 }
+
+static bool vmShouldUseCooperativeSuspendForCurrentVproc(void) {
+    if (vprocIsShellSelfThread()) {
+        return true;
+    }
+    int pid = (int)vprocGetPidShim();
+    int shell_pid = vprocGetShellSelfPid();
+    if (pid <= 0) {
+        pid = shell_pid;
+    }
+    if (pid <= 0) {
+        return true;
+    }
+    if (shell_pid > 0 && pid == shell_pid) {
+        return true;
+    }
+    return vprocGetStopUnsupported(pid);
+}
+
+static bool vmRequestHardSuspendCurrentVproc(void) {
+    int pid = (int)vprocGetPidShim();
+    int shell_pid = vprocGetShellSelfPid();
+    if (pid <= 0) {
+        pid = shell_pid;
+    }
+    int pgid = (pid > 0) ? vprocGetPgid(pid) : -1;
+
+    if (vprocRequestControlSignal(SIGTSTP)) {
+        return true;
+    }
+    if (pgid > 0 && vprocKillShim(-pgid, SIGTSTP) == 0) {
+        return true;
+    }
+    if (pid > 0 && vprocKillShim(pid, SIGTSTP) == 0) {
+        return true;
+    }
+    return false;
+}
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -1332,6 +1370,7 @@ static void* threadStart(void* arg) {
             workerVm->current_builtin_name = NULL;
             workerVm->abort_requested = false;
             workerVm->exit_requested = false;
+            workerVm->suspend_unwind_requested = false;
         }
 
         switch (job->kind) {
@@ -1736,9 +1775,11 @@ static void vmMarkAbortRequested(VM* vm) {
     }
     vm->abort_requested = true;
     vm->exit_requested = true;
+    vm->suspend_unwind_requested = false;
     if (vm->threadOwner) {
         vm->threadOwner->abort_requested = true;
         vm->threadOwner->exit_requested = true;
+        vm->threadOwner->suspend_unwind_requested = false;
     }
 }
 
@@ -1773,10 +1814,18 @@ static bool vmConsumeSuspendRequest(VM* vm) {
     if (!allow_runtime_signal || !pscalRuntimeConsumeSigtstp()) {
         return false;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (!vmShouldUseCooperativeSuspendForCurrentVproc() &&
+        vmRequestHardSuspendCurrentVproc()) {
+        (void)vprocWaitIfStopped(vprocCurrent());
+        return false;
+    }
+#endif
     VM* target = root ? root : vm;
     if (target) {
         target->abort_requested = false;
         target->exit_requested = true;
+        target->suspend_unwind_requested = true;
         target->current_builtin_name = "signal";
     }
     shellRuntimeSetLastStatus(128 + SIGTSTP);
@@ -1801,6 +1850,7 @@ static bool vmHandleGlobalInterrupt(VM* vm) {
     if (root) {
         root->abort_requested = true;
         root->exit_requested = true;
+        root->suspend_unwind_requested = false;
         atomic_store(&root->shuttingDownWorkers, true);
         if (root->jobQueue) {
             pthread_mutex_lock(&root->jobQueue->mutex);
@@ -1818,6 +1868,7 @@ static bool vmHandleGlobalInterrupt(VM* vm) {
             if (thread->vm) {
                 thread->vm->abort_requested = true;
                 thread->vm->exit_requested = true;
+                thread->vm->suspend_unwind_requested = false;
             }
             vmThreadWakeStateWaiters(thread);
             pthread_mutex_lock(&thread->resultMutex);
@@ -4019,6 +4070,7 @@ void vmResetExecutionState(VM* vm) {
 
     vm->exit_requested = false;
     vm->abort_requested = false;
+    vm->suspend_unwind_requested = false;
     vm->current_builtin_name = NULL;
     vm->trace_executed = 0;
 
@@ -4095,6 +4147,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 
     vm->exit_requested = false;
     vm->abort_requested = false;
+    vm->suspend_unwind_requested = false;
     vm->current_builtin_name = NULL;
 
     vm->threadCount = 1; // main thread occupies index 0
@@ -4691,6 +4744,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     vm->ip = vm->chunk->code + entry;
     vm->lastInstruction = vm->ip;
     vm->abort_requested = false;
+    vm->suspend_unwind_requested = false;
     vm->shellIndexing = frontendIsShell();
 
     vm->vmGlobalSymbols = globals;    // Store globals table (ensure this is the intended one)
@@ -4976,16 +5030,20 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
             if (shellRuntimeShouldDeferExit(vm)) {
                 continue;
             }
+            bool suspend_unwind = vm->suspend_unwind_requested && !vm->abort_requested;
             bool halted = false;
             InterpretResult res = returnFromCall(vm, &halted);
-            vm->exit_requested = false;
-            vm->abort_requested = false;
             if (res != INTERPRET_OK) {
                 return res;
             }
             if (halted) {
+                vm->exit_requested = false;
+                vm->abort_requested = false;
+                vm->suspend_unwind_requested = false;
                 return INTERPRET_OK;
             }
+            vm->exit_requested = suspend_unwind;
+            vm->abort_requested = false;
             continue;
         }
         vm->lastInstruction = vm->ip;
@@ -7804,11 +7862,16 @@ comparison_error_label:
                 }
 
                 if (vm->exit_requested) {
-                    vm->exit_requested = false;
+                    bool suspend_unwind = vm->suspend_unwind_requested && !vm->abort_requested;
                     bool halted = false;
                     InterpretResult res = returnFromCall(vm, &halted);
                     if (res != INTERPRET_OK) return res;
-                    if (halted) return INTERPRET_OK;
+                    if (halted) {
+                        vm->exit_requested = false;
+                        vm->suspend_unwind_requested = false;
+                        return INTERPRET_OK;
+                    }
+                    vm->exit_requested = suspend_unwind;
                 }
                 break;
             }
@@ -7904,11 +7967,16 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 if (vm->exit_requested) {
-                    vm->exit_requested = false;
+                    bool suspend_unwind = vm->suspend_unwind_requested && !vm->abort_requested;
                     bool halted = false;
                     InterpretResult res = returnFromCall(vm, &halted);
                     if (res != INTERPRET_OK) return res;
-                    if (halted) return INTERPRET_OK;
+                    if (halted) {
+                        vm->exit_requested = false;
+                        vm->suspend_unwind_requested = false;
+                        return INTERPRET_OK;
+                    }
+                    vm->exit_requested = suspend_unwind;
                 }
                 break;
             }

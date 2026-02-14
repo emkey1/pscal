@@ -836,7 +836,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func sendInterrupt() {
-        let activeSession = withState { sessionId }
+        let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
             let delivered = withRuntimeContext {
                 PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
@@ -852,7 +852,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
 
     func sendSuspend() {
-        let activeSession = withState { sessionId }
+        let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
             let delivered = withRuntimeContext {
                 PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
@@ -865,6 +865,22 @@ final class PscalRuntimeBootstrap: ObservableObject {
         withRuntimeContext {
             PSCALRuntimeSendSignal(SIGTSTP)
         }
+    }
+
+    private func resolveActiveSessionId() -> UInt64 {
+        let cached = withState { sessionId }
+        if cached != 0 {
+            return cached
+        }
+        let runtimeSession = withRuntimeContext {
+            PSCALRuntimeCurrentSessionId()
+        }
+        if runtimeSession != 0 {
+            stateQueue.async {
+                self.sessionId = runtimeSession
+            }
+        }
+        return runtimeSession
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {

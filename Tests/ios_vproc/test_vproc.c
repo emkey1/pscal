@@ -4292,6 +4292,212 @@ static void assert_runtime_request_ctrl_z_stops_with_explicit_session_id(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+static void assert_runtime_request_ctrl_signals_defer_for_remote_foreground_session(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int remote_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(remote_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+
+    VProcOptions remote_opts = vprocDefaultOptions();
+    remote_opts.pid_hint = remote_pid;
+    VProc *remote_vp = vprocCreate(&remote_opts);
+    assert(remote_vp);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(remote_pid, shell_pid);
+    assert(vprocSetSid(remote_pid, shell_pid) == 0);
+    assert(vprocSetPgid(remote_pid, remote_pid) == 0);
+    vprocSetCommandLabel(remote_pid, "ssh example.com");
+    assert(vprocSetForegroundPgid(shell_pid, remote_pid) == 0);
+
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    uint64_t session_id = 9503;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocSetForegroundPgid(shell_pid, remote_pid) == 0);
+
+    assert(!vprocRequestControlSignalForSession(session_id, SIGINT));
+    assert(!vprocRequestControlSignalForSession(session_id, SIGTSTP));
+
+    int status = 0;
+    assert(vprocWaitPidShim(remote_pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    vprocMarkExit(remote_vp, 0);
+    assert(vprocWaitPidShim(remote_pid, &status, 0) == remote_pid);
+    assert(WIFEXITED(status));
+
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(remote_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_signals_defer_when_session_passthrough(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    uint64_t session_id = 9505;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    session->control_bytes_passthrough = true;
+    vprocSessionSetControlBytePassthrough(session_id, true);
+    assert(vprocSessionGetControlBytePassthrough(session_id));
+
+    assert(!vprocRequestControlSignalForSession(session_id, SIGINT));
+    assert(!vprocRequestControlSignalForSession(session_id, SIGTSTP));
+
+    int status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    vprocSessionSetControlBytePassthrough(session_id, false);
+    vprocMarkExit(worker_vp, 0);
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+    assert(WIFEXITED(status));
+
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_runtime_request_ctrl_signals_defer_when_soft_disabled_env(void) {
+    char *saved_flag = NULL;
+    const char *current_flag = getenv("PSCALI_DISABLE_SOFT_SIGNALING");
+    if (current_flag) {
+        saved_flag = strdup(current_flag);
+    }
+    setenv("PSCALI_DISABLE_SOFT_SIGNALING", "1", 1);
+
+    int prev_shell = vprocGetShellSelfPid();
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocRegisterTidHint(shell_pid, pthread_self()) == shell_pid);
+    vprocRegisterThread(shell_vp, pthread_self());
+    vprocActivate(shell_vp);
+
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    vprocSetParent(worker_pid, shell_pid);
+    assert(vprocSetSid(worker_pid, shell_pid) == 0);
+    assert(vprocSetPgid(worker_pid, worker_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    struct pscal_fd *master = NULL;
+    struct pscal_fd *slave = NULL;
+    int pty_num = -1;
+    assert(pscalPtyOpenMaster(O_RDWR, &master, &pty_num) == 0);
+    assert(pscalPtyUnlock(master) == 0);
+    assert(pscalPtyOpenSlave(pty_num, O_RDWR, &slave) == 0);
+    uint64_t session_id = 9504;
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+    assert(vprocSessionStdioInitWithPty(session, slave, master, session_id, 0) == 0);
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+    vprocSetShellSelfTid(pthread_self());
+    assert(vprocSetForegroundPgid(shell_pid, worker_pid) == 0);
+
+    assert(!vprocRequestControlSignalForSession(session_id, SIGINT));
+    assert(!vprocRequestControlSignalForSession(session_id, SIGTSTP));
+
+    int status = 0;
+    assert(vprocWaitPidShim(worker_pid, &status, WUNTRACED | WNOHANG) == 0);
+
+    vprocMarkExit(worker_vp, 0);
+    assert(vprocWaitPidShim(worker_pid, &status, 0) == worker_pid);
+    assert(WIFEXITED(status));
+
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(worker_vp);
+    vprocDeactivate();
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+
+    if (saved_flag) {
+        setenv("PSCALI_DISABLE_SOFT_SIGNALING", saved_flag, 1);
+        free(saved_flag);
+    } else {
+        unsetenv("PSCALI_DISABLE_SOFT_SIGNALING");
+    }
+}
+
 static void assert_sigint_runtime_callback_reenters_without_deadlock(void) {
     int prev_shell = vprocGetShellSelfPid();
     int shell_pid = vprocReservePid();
@@ -4808,6 +5014,12 @@ int main(void) {
     assert_runtime_request_ctrl_c_dispatches_with_explicit_session_id();
     fprintf(stderr, "TEST runtime_request_ctrl_z_stops_with_explicit_session_id\n");
     assert_runtime_request_ctrl_z_stops_with_explicit_session_id();
+    fprintf(stderr, "TEST runtime_request_ctrl_signals_defer_for_remote_foreground_session\n");
+    assert_runtime_request_ctrl_signals_defer_for_remote_foreground_session();
+    fprintf(stderr, "TEST runtime_request_ctrl_signals_defer_when_session_passthrough\n");
+    assert_runtime_request_ctrl_signals_defer_when_session_passthrough();
+    fprintf(stderr, "TEST runtime_request_ctrl_signals_defer_when_soft_disabled_env\n");
+    assert_runtime_request_ctrl_signals_defer_when_soft_disabled_env();
     fprintf(stderr, "TEST sigint_runtime_callback_reenters_without_deadlock\n");
     assert_sigint_runtime_callback_reenters_without_deadlock();
     fprintf(stderr, "TEST sigtstp_runtime_callback_reenters_without_deadlock\n");

@@ -162,7 +162,10 @@ bool vprocRequestControlSignal(int sig);
 bool vprocRequestControlSignalForShell(int shell_pid, int sig);
 /* Request control-signal routing using a session-id scoped PTY foreground group. */
 bool vprocRequestControlSignalForSession(uint64_t session_id, int sig);
+void vprocSessionSetControlBytePassthrough(uint64_t session_id, bool enabled);
+bool vprocSessionGetControlBytePassthrough(uint64_t session_id);
 void vprocSetStopUnsupported(int pid, bool stop_unsupported);
+bool vprocGetStopUnsupported(int pid);
 void vprocSetShellPromptReadActive(int pid, bool active);
 bool vprocShellPromptReadActive(int pid);
 void vprocSetPipelineStage(bool active);
@@ -272,6 +275,7 @@ typedef struct VProcSessionStdio {
     struct pscal_fd *pty_slave;
     pthread_t pty_out_thread;
     bool pty_active;
+    bool control_bytes_passthrough;
     uint64_t session_id;
 } VProcSessionStdio;
 
@@ -673,6 +677,14 @@ static inline bool vprocRequestControlSignalForShell(int shell_pid, int sig) {
 static inline bool vprocRequestControlSignalForSession(uint64_t session_id, int sig) {
     (void)session_id;
     (void)sig;
+    return false;
+}
+static inline void vprocSessionSetControlBytePassthrough(uint64_t session_id, bool enabled) {
+    (void)session_id;
+    (void)enabled;
+}
+static inline bool vprocSessionGetControlBytePassthrough(uint64_t session_id) {
+    (void)session_id;
     return false;
 }
 typedef struct {

@@ -3589,6 +3589,15 @@ static void vmPrepareCanonicalInput(void) {
             term.c_lflag |= (ICANON | ECHO);
             changed = true;
         }
+#if defined(PSCAL_TARGET_IOS)
+        /* Keep control keys byte-oriented for virtual signal handling.
+         * With ISIG enabled, the tty layer can consume VSUSP/VINTR before
+         * vmReadLineInterruptible sees ^Z/^C bytes. */
+        if (term.c_lflag & ISIG) {
+            term.c_lflag &= ~ISIG;
+            changed = true;
+        }
+#endif
         if ((term.c_iflag & ICRNL) == 0) {
             term.c_iflag |= ICRNL;
             changed = true;
@@ -3633,6 +3642,65 @@ static void vmPrepareCanonicalInput(void) {
 }
 
 static bool vmBufferIsPureDsr(const char *buf, size_t len);
+
+#if defined(PSCAL_TARGET_IOS)
+static bool vmShouldUseCooperativeSuspend(void) {
+    if (vprocIsShellSelfThread()) {
+        return true;
+    }
+    int pid = vprocGetPidShim();
+    int shell_pid = vprocGetShellSelfPid();
+    if (pid <= 0) {
+        pid = shell_pid;
+    }
+    if (pid <= 0) {
+        return true;
+    }
+    if (shell_pid > 0 && pid == shell_pid) {
+        return true;
+    }
+    return vprocGetStopUnsupported(pid);
+}
+
+static bool vmRequestHardSuspendCurrentVproc(void) {
+    int pid = vprocGetPidShim();
+    int shell_pid = vprocGetShellSelfPid();
+    if (pid <= 0) {
+        pid = shell_pid;
+    }
+    int pgid = (pid > 0) ? vprocGetPgid(pid) : -1;
+
+    if (vprocRequestControlSignal(SIGTSTP)) {
+        return true;
+    }
+    if (pgid > 0 && vprocKillShim(-pgid, SIGTSTP) == 0) {
+        return true;
+    }
+    if (pid > 0 && vprocKillShim(pid, SIGTSTP) == 0) {
+        return true;
+    }
+    return false;
+}
+
+static bool vmHandleCtrlZReadRequest(VM *vm, char *buffer) {
+    if (!vmShouldUseCooperativeSuspend()) {
+        if (vmRequestHardSuspendCurrentVproc()) {
+            (void)vprocWaitIfStopped(vprocCurrent());
+            return true;
+        }
+    }
+    if (vm) {
+        vm->abort_requested = false;
+        vm->exit_requested = true;
+        vm->suspend_unwind_requested = true;
+    }
+    shellRuntimeSetLastStatus(128 + SIGTSTP);
+    if (buffer) {
+        buffer[0] = '\0';
+    }
+    return false;
+}
+#endif
 
 static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t buffer_sz) {
     if (!stream || !buffer || buffer_sz == 0) {
@@ -3725,7 +3793,14 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         }
 #endif
         bool saw_newline = false;
+        bool pending_caret_control = false;
         while (len < buffer_sz - 1) {
+#if defined(PSCAL_TARGET_IOS)
+            /* If a frontend thread was hard-stopped while blocked in select/poll,
+             * convert that stop into a cooperative pending signal so ReadLn can
+             * unwind back to the shell prompt. */
+            (void)vprocWaitIfStopped(vprocCurrent());
+#endif
             if (g_vm_sigint_seen) {
                 g_vm_sigint_seen = 0;
                 if (vm) {
@@ -3736,14 +3811,61 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 return false;
             }
             if (pscalRuntimeConsumeSigtstp()) {
+#if defined(PSCAL_TARGET_IOS)
+                if (!vmShouldUseCooperativeSuspend() && vmRequestHardSuspendCurrentVproc()) {
+                    (void)vprocWaitIfStopped(vprocCurrent());
+                    continue;
+                }
+#endif
                 if (vm) {
                     vm->abort_requested = false;
                     vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
                 }
                 shellRuntimeSetLastStatus(128 + SIGTSTP);
                 buffer[0] = '\0';
                 return false;
             }
+#if defined(PSCAL_TARGET_IOS)
+            {
+                int cur_pid = vprocGetPidShim();
+                if (cur_pid <= 0) {
+                    cur_pid = vprocGetShellSelfPid();
+                }
+                if (cur_pid > 0) {
+                    sigset_t pending;
+                    sigemptyset(&pending);
+                    if (vprocSigpending(cur_pid, &pending) == 0 &&
+                        (sigismember(&pending, SIGINT) || sigismember(&pending, SIGTSTP))) {
+                        sigset_t watchset;
+                        sigemptyset(&watchset);
+                        sigaddset(&watchset, SIGINT);
+                        sigaddset(&watchset, SIGTSTP);
+                        int signo = 0;
+                        if (vprocSigwait(cur_pid, &watchset, &signo) == 0) {
+#if defined(PSCAL_TARGET_IOS)
+                            if (signo == SIGTSTP &&
+                                !vmShouldUseCooperativeSuspend() &&
+                                vmRequestHardSuspendCurrentVproc()) {
+                                (void)vprocWaitIfStopped(vprocCurrent());
+                                continue;
+                            }
+#endif
+                            if (vm) {
+                                vm->abort_requested = (signo == SIGINT);
+                                vm->exit_requested = true;
+                                vm->suspend_unwind_requested = (signo == SIGTSTP);
+                            }
+                            if (signo == SIGTSTP) {
+                                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                            }
+                            buffer[0] = '\0';
+                            return false;
+                        }
+                    }
+                }
+            }
+#endif
             if (vm && (vm->abort_requested || vm->exit_requested)) {
                 buffer[0] = '\0';
                 return false;
@@ -3797,6 +3919,46 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                     }
                     break;
                 }
+                if (tool_dbg && is_stdin_stream) {
+                    fprintf(stderr, "[readln] byte session ch=0x%02x len=%zu\n",
+                            (unsigned int)(unsigned char)ch, len);
+                }
+                if (pending_caret_control) {
+                    pending_caret_control = false;
+                    if (ch == 'C' || ch == 'c') {
+                        if (vm) {
+                            vm->abort_requested = true;
+                            vm->exit_requested = true;
+                        }
+                        buffer[0] = '\0';
+                        return false;
+                    }
+                    if (ch == 'Z' || ch == 'z') {
+#if defined(PSCAL_TARGET_IOS)
+                        if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                            len = 0;
+                            continue;
+                        }
+#else
+                        if (vm) {
+                            vm->abort_requested = false;
+                            vm->exit_requested = true;
+                            vm->suspend_unwind_requested = true;
+                        }
+                        shellRuntimeSetLastStatus(128 + SIGTSTP);
+                        buffer[0] = '\0';
+#endif
+                        return false;
+                    }
+                    buffer[len++] = '^';
+                    if (len >= buffer_sz - 1) {
+                        break;
+                    }
+                }
+                if (ch == '^') {
+                    pending_caret_control = true;
+                    continue;
+                }
                 if (ch == 0x03) { // Ctrl-C
                     if (vm) {
                         vm->abort_requested = true;
@@ -3806,12 +3968,20 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                     return false;
                 }
                 if (ch == 0x1a) { // Ctrl-Z
+#if defined(PSCAL_TARGET_IOS)
+                    if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                        len = 0;
+                        continue;
+                    }
+#else
                     if (vm) {
                         vm->abort_requested = false;
                         vm->exit_requested = true;
+                        vm->suspend_unwind_requested = true;
                     }
                     shellRuntimeSetLastStatus(128 + SIGTSTP);
                     buffer[0] = '\0';
+#endif
                     return false;
                 }
                 if (ch == '\r') {
@@ -3932,12 +4102,69 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #endif
                 break;
             }
+            if (tool_dbg && is_stdin_stream) {
+                fprintf(stderr, "[readln] byte direct ch=0x%02x len=%zu\n",
+                        (unsigned int)(unsigned char)ch, len);
+            }
+            if (pending_caret_control) {
+                pending_caret_control = false;
+                if (ch == 'C' || ch == 'c') {
+                    if (vm) {
+                        vm->abort_requested = true;
+                        vm->exit_requested = true;
+                    }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (ch == 'Z' || ch == 'z') {
+#if defined(PSCAL_TARGET_IOS)
+                    if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                        len = 0;
+                        continue;
+                    }
+#else
+                    if (vm) {
+                        vm->abort_requested = false;
+                        vm->exit_requested = true;
+                        vm->suspend_unwind_requested = true;
+                    }
+                    shellRuntimeSetLastStatus(128 + SIGTSTP);
+                    buffer[0] = '\0';
+#endif
+                    return false;
+                }
+                buffer[len++] = '^';
+                if (len >= buffer_sz - 1) {
+                    break;
+                }
+            }
+            if (ch == '^') {
+                pending_caret_control = true;
+                continue;
+            }
             if (ch == 0x03) { // Ctrl-C
                 if (vm) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
                 }
                 buffer[0] = '\0';
+                return false;
+            }
+            if (ch == 0x1a) { // Ctrl-Z
+#if defined(PSCAL_TARGET_IOS)
+                if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                    len = 0;
+                    continue;
+                }
+#else
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                buffer[0] = '\0';
+#endif
                 return false;
             }
 
@@ -6383,6 +6610,14 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     char line_buffer[1024];
     if (!vmReadLineInterruptible(vm, input_stream, line_buffer, sizeof(line_buffer))) {
         io_error = feof(input_stream) ? 0 : 1;
+        if (getenv("PSCALI_TOOL_DEBUG")) {
+            fprintf(stderr,
+                    "[readln] interrupted io_error=%d abort=%d exit=%d suspend=%d\n",
+                    io_error,
+                    vm ? (int)vm->abort_requested : -1,
+                    vm ? (int)vm->exit_requested : -1,
+                    vm ? (int)vm->suspend_unwind_requested : -1);
+        }
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
         if (input_stream == stdin) vmEnableRawMode();
@@ -7539,9 +7774,16 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
                 break;
             }
             if (pscalRuntimeConsumeSigtstp()) {
+#if defined(PSCAL_TARGET_IOS)
+                if (!vmShouldUseCooperativeSuspend() && vmRequestHardSuspendCurrentVproc()) {
+                    (void)vprocWaitIfStopped(vprocCurrent());
+                    continue;
+                }
+#endif
                 if (vm) {
                     vm->abort_requested = false;
                     vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
                 }
                 shellRuntimeSetLastStatus(128 + SIGTSTP);
                 break;

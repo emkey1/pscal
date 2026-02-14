@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,6 +44,10 @@ static pthread_mutex_t gTtySessionMu = PTHREAD_MUTEX_INITIALIZER;
 static TtySessionEntry *gTtySessions = NULL;
 static size_t gTtySessionCount = 0;
 static size_t gTtySessionCap = 0;
+
+static bool ttyDebugEnabled(void) {
+    return getenv("PSCALI_TTY_DEBUG") != NULL || getenv("PSCALI_TOOL_DEBUG") != NULL;
+}
 
 static bool tty_session_has_controlling(pid_t_ sid);
 
@@ -406,6 +411,12 @@ static bool tty_send_input_signal(struct tty *tty, char ch, sigset_t_ *queue) {
         return false;
     }
     if (!(tty->termios.lflags & ISIG_)) {
+        if (ttyDebugEnabled() && (unsigned char)ch == tty->termios.cc[VSUSP_]) {
+            fprintf(stderr,
+                    "[tty-sig] VSUSP byte seen but ISIG disabled fg=%d sid=%d\n",
+                    (int)tty->fg_group,
+                    (int)tty->session);
+        }
         return false;
     }
     unsigned char *cc = tty->termios.cc;
@@ -427,6 +438,20 @@ static bool tty_send_input_signal(struct tty *tty, char ch, sigset_t_ *queue) {
             tty->bufsize = 0;
         }
         sigset_add(queue, sig);
+        if (ttyDebugEnabled()) {
+            fprintf(stderr,
+                    "[tty-sig] queue sig=%d fg=%d sid=%d ch=0x%02x\n",
+                    sig,
+                    (int)tty->fg_group,
+                    (int)tty->session,
+                    (unsigned int)(unsigned char)ch);
+        }
+    } else if (ttyDebugEnabled()) {
+        fprintf(stderr,
+                "[tty-sig] drop sig=%d fg=0 sid=%d ch=0x%02x\n",
+                sig,
+                (int)tty->session,
+                (unsigned int)(unsigned char)ch);
     }
     return true;
 }

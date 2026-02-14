@@ -1388,18 +1388,66 @@ static void shellPrintJobStarted(const ShellJob *job, pid_t pid) {
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
-static bool shellShouldRunSmallclueInWorker(const ShellCommand *cmd) {
+static bool shellCommandIsFrontendToolName(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    return strcasecmp(name, "pascal") == 0 ||
+           strcasecmp(name, "dascal") == 0 ||
+           strcasecmp(name, "clike") == 0 ||
+           strcasecmp(name, "rea") == 0 ||
+           strcasecmp(name, "pscalvm") == 0 ||
+           strcasecmp(name, "pscaljson2bc") == 0 ||
+           strcasecmp(name, "pscald") == 0 ||
+           strcasecmp(name, "pscalasm") == 0;
+}
+
+static bool shellCommandResolvesToShebang(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    char resolved[PATH_MAX];
+    const char *path = name;
+    char *resolved_path = NULL;
+    if (strchr(name, '/') == NULL) {
+        resolved_path = shellFindExecutableOnPath(name);
+        if (resolved_path && *resolved_path) {
+            path = resolved_path;
+        }
+    }
+    bool shebang = false;
+    if (shellResolveExecutableCandidate(path, resolved, sizeof(resolved))) {
+        shebang = shellPathHasShebang(resolved);
+    } else {
+        shebang = shellPathHasShebang(path);
+    }
+    free(resolved_path);
+    return shebang;
+}
+
+static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
     if (!cmd || !cmd->argv || !cmd->argv[0]) {
         return false;
     }
     if (cmd->background) {
         return false;
     }
-    shellEnsureJobControl();
-    if (!gShellRuntime.job_control_enabled) {
+    const char *name = cmd->argv[0];
+    if (smallclueFindApplet(name) != NULL) {
+        return true;
+    }
+    if (shellCommandIsFrontendToolName(name)) {
+        return true;
+    }
+    /* Keep shell builtins (fg/bg/jobs/cd/etc.) on the shell thread; they
+     * manipulate shell-global state and must not run inside stage workers. */
+    if (shellBuiltinCanonicalName(name) != NULL) {
         return false;
     }
-    return smallclueFindApplet(cmd->argv[0]) != NULL;
+    if (shellCommandResolvesToShebang(name)) {
+        return true;
+    }
+    return false;
 }
 #endif
 
@@ -1521,6 +1569,10 @@ static void shellFinalizeStageVproc(VProc *vp, int status) {
         /* Keep stopped tasks in the vproc table, but detach this shell thread
          * identity so later signal routing does not bleed into the shell. */
         vprocUnregisterThread(vp, pthread_self());
+        /* Cooperative in-process stages may keep stop_unsupported enabled while
+         * running. Re-enable hard-stop semantics only for teardown so a
+         * resumable stopped task is published to jobs/wait consumers. */
+        vprocSetStopUnsupported(pid, false);
         if (stop_sig > 0) {
             (void)vprocKillShim(pid, stop_sig);
         }
@@ -2608,27 +2660,27 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
             shellEnsureJobControl();
             bool job_control = gShellRuntime.job_control_enabled && job_pgid > 0;
             bool stopped_job = false;
+            bool saw_state = false;
 
             if (job_control) {
                 shellJobControlSetForeground(job_pgid);
             }
 
-            /* In-process stages already run to completion before we reach this
-             * point (tail runs inline, earlier stages are joined). Their vproc
-             * tasks may already be discarded, so waiting here is racy and can
-             * lose the tail-stage status. Use recorded stage statuses instead. */
             for (size_t i = 0; i < ctx->launched; ++i) {
-                int stage_status = 0;
-                bool stage_stopped = false;
-                if (ctx->stage_status && i < ctx->stage_count) {
-                    stage_status = ctx->stage_status[i];
+                pid_t pid = (ctx->pids && i < ctx->stage_count) ? ctx->pids[i] : -1;
+                if (pid <= 0) {
+                    continue;
                 }
-                final_status = stage_status;
-                stage_stopped = shellStatusRepresentsStopSignal(stage_status, NULL);
-                if (stage_stopped) {
+                ShellWaitResult wait_res;
+                int err = shellWaitPidDetailed(pid, true, &wait_res);
+                if (err != 0) {
+                    continue;
+                }
+                saw_state = true;
+                final_status = wait_res.status_mapped;
+                if (wait_res.stopped) {
                     stopped_job = true;
-                }
-                if (ctx->pids && i < ctx->stage_count && !stage_stopped) {
+                } else if (ctx->pids && i < ctx->stage_count) {
                     ctx->pids[i] = -1;
                 }
             }
@@ -2637,19 +2689,9 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 shellJobControlRestoreForeground();
             }
 
-            if (!ctx->background && final_status >= 128 && final_status < 128 + NSIG) {
-                shellHandleStatusSignal(final_status - 128);
-            }
-
-            /* In-process stages return mapped statuses; detect stop-like values
-             * so we keep jobs resumable instead of collapsing them to exits. */
-            if (job_control && !stopped_job) {
-                stopped_job = shellStatusRepresentsStopSignal(final_status, NULL);
-            }
-
             shellRuntimeProcessPendingSignals();
 
-            if (stopped_job && job_control) {
+            if (stopped_job) {
                 ShellJob *job = NULL;
                 if (tail_cmd) {
                     job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
@@ -2667,6 +2709,12 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
                 return final_status;
             }
 
+            if (!ctx->background && final_status >= 128 && final_status < 128 + NSIG) {
+                shellHandleStatusSignal(final_status - 128);
+            }
+            if (!saw_state) {
+                final_status = shellRuntimeLastStatus();
+            }
             if (ctx->negated) {
                 final_status = (final_status == 0) ? 1 : 0;
             }
@@ -2824,7 +2872,7 @@ static int shellFinishPipeline(const ShellCommand *tail_cmd) {
 
         shellRuntimeProcessPendingSignals();
 
-            if (stopped_job && job_control) {
+            if (stopped_job) {
                 ShellJob *job = NULL;
                 if (tail_cmd) {
                     job = shellRegisterJob(job_pgid, ctx->pids, ctx->launched, tail_cmd);
@@ -2937,6 +2985,12 @@ static bool shellEnsureExecRedirBackup(int target_fd,
     int source_fd = target_fd;
 #endif
     if (source_fd < 0) {
+        /* Session stdio can transiently report unknown host fds during tab
+         * bootstrap; fall back to the actual target descriptor snapshot. */
+        source_fd = target_fd;
+    }
+    if (source_fd < 0) {
+        errno = EBADF;
         return false;
     }
 #ifdef F_DUPFD_CLOEXEC
@@ -3744,18 +3798,50 @@ static int shellRunBuiltinInProcess(VM *vm,
                         char label[96] = {0};
                         shellVprocFormatLabel(cmd, label, sizeof(label));
                         VProcCommandScope vproc_scope;
+                        memset(&vproc_scope, 0, sizeof(vproc_scope));
+                        int saved_fg_pgid = -1;
+                        int session_sid = -1;
                         bool inherit_pgid = false;
-                        bool scoped = vprocCommandScopeBegin(&vproc_scope,
-                                                             label[0] ? label : (cmd->argv && cmd->argv[0] ? cmd->argv[0] : "task"),
-                                                             true,
-                                                             inherit_pgid);
+                        bool run_scoped = vprocIsShellSelfThread();
+                        if (run_scoped) {
+                            /* Worker-stage applets already have an owning vproc.
+                             * Never wrap them in an extra shell-scoped vproc,
+                             * otherwise Ctrl-Z is forced into cooperative mode
+                             * and the stage becomes non-resumable (tid=0). */
+                            VProc *active_vp = vprocCurrent();
+                            int active_pid = active_vp ? vprocPid(active_vp) : -1;
+                            int shell_pid = vprocGetShellSelfPid();
+                            if (active_pid > 0 && shell_pid > 0 && active_pid != shell_pid) {
+                                run_scoped = false;
+                            }
+                        }
+                        bool scoped = false;
+                        if (run_scoped) {
+                            scoped = vprocCommandScopeBegin(&vproc_scope,
+                                                            label[0] ? label : (cmd->argv && cmd->argv[0] ? cmd->argv[0] : "task"),
+                                                            true,
+                                                            inherit_pgid);
+                        }
                         if (scoped && vproc_scope.pid > 0) {
-                            /* In-process scoped applets run on host worker threads.
-                             * Use cooperative stop handling so Ctrl-Z produces a
-                             * stoppable shell job status instead of parking the
-                             * worker thread in a way the shell join path cannot
-                             * safely resume inline. */
+                            /* Scoped applets run on the shell thread. Keep Ctrl-Z
+                             * cooperative so we unwind back to the prompt instead of
+                             * parking the shell worker. */
                             vprocSetStopUnsupported(vproc_scope.pid, true);
+                            int shell_pid = vprocGetShellSelfPid();
+                            int scope_pgid = vprocGetPgid(vproc_scope.pid);
+                            if (scope_pgid <= 0) {
+                                scope_pgid = vproc_scope.pid;
+                            }
+                            if (shell_pid > 0) {
+                                session_sid = vprocGetSid(shell_pid);
+                            }
+                            if (session_sid > 0 && scope_pgid > 0) {
+                                saved_fg_pgid = vprocGetForegroundPgid(session_sid);
+                                if (saved_fg_pgid <= 0) {
+                                    saved_fg_pgid = vprocGetPgid(shell_pid);
+                                }
+                                (void)vprocSetForegroundPgid(session_sid, scope_pgid);
+                            }
                         }
 #endif
                         sc_status = smallclueDispatchApplet(applet, argc, argv_copy);
@@ -3767,6 +3853,9 @@ static int shellRunBuiltinInProcess(VM *vm,
                         }
                         if (scoped) {
                             vprocCommandScopeEnd(&vproc_scope, sc_status);
+                        }
+                        if (session_sid > 0 && saved_fg_pgid > 0) {
+                            (void)vprocSetForegroundPgid(session_sid, saved_fg_pgid);
                         }
 #endif
                         shellUpdateStatus(sc_status);
@@ -4317,7 +4406,139 @@ static bool shellPipelineExecuteStageInProcess(VM *vm,
 
     /* Run single-stage background tails on a worker thread so the shell prompt returns. */
     bool async_tail = ctx->background && pipeline_tail && ctx->stage_count == 1;
+    bool foreground_worker_tail = (!ctx->background &&
+                                   pipeline_tail &&
+                                   ctx->stage_count == 1 &&
+                                   shellShouldRunCommandInForegroundWorker(cmd));
     pid_t async_bg_pgid = -1;
+
+    if (foreground_worker_tail) {
+        ShellCommand *cloned = shellCloneCommandForBackground(cmd);
+        if (!cloned) {
+            runtimeError(vm, "pipeline: unable to launch foreground worker stage");
+            shellUpdateStatus(1);
+            shellAbortPipeline();
+            return false;
+        }
+
+        int pid_hint = -1;
+        if (ctx->pids && stage_pos < ctx->stage_count && ctx->pids[stage_pos] > 0) {
+            pid_hint = (int)ctx->pids[stage_pos];
+        }
+        if (pid_hint <= 0) {
+            pid_hint = vprocReservePid();
+        }
+
+        VProc *vp = shellCreateVProcForStage(-1,
+                                             -1,
+                                             -1,
+                                             pscalRuntimeDetectWindowCols(),
+                                             pscalRuntimeDetectWindowRows(),
+                                             pid_hint,
+                                             true);
+        if (!vp) {
+            shellFreeCommand(cloned);
+            free(cloned);
+            runtimeError(vm, "pipeline: failed to allocate foreground stage vproc");
+            shellUpdateStatus(1);
+            shellAbortPipeline();
+            return false;
+        }
+
+        pid_t stage_pid = vprocPid(vp);
+        if (ctx->pids && stage_pos < ctx->stage_count && stage_pid > 0) {
+            ctx->pids[stage_pos] = stage_pid;
+            if (ctx->launched < (stage_pos + 1)) {
+                ctx->launched = stage_pos + 1;
+            }
+        }
+        if (ctx->pgid <= 0 && stage_pid > 0) {
+            ctx->pgid = stage_pid;
+        }
+
+        int shell_pid = vprocGetShellSelfPid();
+        if (shell_pid > 0 && stage_pid > 0) {
+            (void)vprocSetParent((int)stage_pid, shell_pid);
+            int shell_sid = vprocGetSid(shell_pid);
+            if (shell_sid > 0) {
+                (void)vprocSetSid((int)stage_pid, shell_sid);
+            }
+        }
+        pid_t job_pgid = (ctx->pgid > 0) ? ctx->pgid : stage_pid;
+        if (job_pgid > 0 && stage_pid > 0) {
+            (void)vprocSetPgid((int)stage_pid, (int)job_pgid);
+            ctx->pgid = job_pgid;
+        }
+        if (cmd && cmd->argv && cmd->argc > 0 && stage_pid > 0) {
+            char label[96] = {0};
+            shellVprocFormatLabel(cmd, label, sizeof(label));
+            if (!label[0] && cmd->argv[0]) {
+                strncpy(label, cmd->argv[0], sizeof(label) - 1);
+                label[sizeof(label) - 1] = '\0';
+            }
+            if (label[0]) {
+                vprocSetCommandLabel((int)stage_pid, label);
+            }
+        }
+
+        ShellInProcessWorkerCtx *worker = (ShellInProcessWorkerCtx *)calloc(1, sizeof(ShellInProcessWorkerCtx));
+        if (!worker) {
+            shellFinalizeStageVproc(vp, 1);
+            shellFreeCommand(cloned);
+            free(cloned);
+            runtimeError(vm, "pipeline: unable to allocate worker context");
+            shellUpdateStatus(1);
+            shellAbortPipeline();
+            return false;
+        }
+        worker->vm = vm;
+        worker->cmd = cloned;
+        worker->vp = vp;
+        worker->session_stdio = ctx->session_stdio;
+        worker->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
+            ? PSCALRuntimeGetCurrentRuntimeContext()
+            : NULL;
+        worker->stdin_fd = -1;
+        worker->stdout_fd = -1;
+        worker->stderr_fd = -1;
+        worker->stdin_is_vproc = false;
+        worker->stdout_is_vproc = false;
+        worker->stderr_is_vproc = false;
+        worker->apply_exec_redirs = (cmd && cmd->redir_count > 0);
+        worker->shell_pid = shell_pid;
+        worker->kernel_pid = vprocGetKernelPid();
+
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, SHELL_TOOL_THREAD_STACK_SZ);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        pthread_t stage_thread = 0;
+        int rc = pthread_create(&stage_thread, &attr, shellInProcessWorkerMain, worker);
+        pthread_attr_destroy(&attr);
+        if (rc != 0) {
+            shellFinalizeStageVproc(vp, 1);
+            shellFreeCommand(cloned);
+            free(cloned);
+            free(worker);
+            runtimeError(vm, "pipeline: failed to create foreground worker thread");
+            shellUpdateStatus(1);
+            shellAbortPipeline();
+            return false;
+        }
+        if (getenv("PSCALI_PIPE_DEBUG")) {
+            fprintf(stderr,
+                    "[pipe-worker] fg-stage thread launched stage=%zu pid=%d pgid=%d\n",
+                    stage_pos,
+                    (int)stage_pid,
+                    (int)ctx->pgid);
+        }
+        if (ctx->thread_started && stage_pos < ctx->stage_count) {
+            ctx->thread_started[stage_pos] = false;
+        }
+        ctx->in_process_worker = true;
+        return true;
+    }
+
     if (!pipeline_tail || async_tail) {
         if (async_tail && ctx->pids && stage_pos < ctx->stage_count) {
             if (ctx->pids[stage_pos] <= 0) {
@@ -4545,12 +4766,25 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     shellPatchCombinedRedirectTokens(cmd);
     ShellPipelineContext *ctx = &gShellRuntime.pipeline;
 #if defined(PSCAL_TARGET_IOS)
-    bool prefer_worker = shellShouldRunSmallclueInWorker(cmd);
+    bool prefer_worker = shellShouldRunCommandInForegroundWorker(cmd);
     bool force_pipeline_builtin = false;
     if (cmd->argc > 0 && !shellCommandIsExecBuiltin(cmd)) {
         const char *cmd_name = (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : NULL;
         if (shellIsRuntimeBuiltin(cmd_name) || smallclueFindApplet(cmd_name) != NULL) {
             force_pipeline_builtin = true;
+            /*
+             * Job-control builtins must execute in the shell context so fg/bg/wait
+             * can manage and wait on the shell's real job table directly.
+             */
+            const char *canonical = shellBuiltinCanonicalName(cmd_name);
+            if (canonical &&
+                (strcmp(canonical, "fg") == 0 ||
+                 strcmp(canonical, "bg") == 0 ||
+                 strcmp(canonical, "jobs") == 0 ||
+                 strcmp(canonical, "wait") == 0 ||
+                 strcmp(canonical, "disown") == 0)) {
+                force_pipeline_builtin = false;
+            }
         }
     }
 #endif

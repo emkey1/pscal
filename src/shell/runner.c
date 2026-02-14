@@ -24,6 +24,7 @@
 #if defined(PSCAL_TARGET_IOS)
 #include <spawn.h>
 #include <sys/wait.h>
+#include "ios/vproc.h"
 extern char **environ;
 #endif
 
@@ -237,6 +238,16 @@ extern int pscald_main(int argc, char **argv);
 extern int pscalasm_main(int argc, char **argv);
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+static bool shellRunnerIsStopStatus(int status) {
+    if (status < 128 || status >= 128 + NSIG) {
+        return false;
+    }
+    int sig = status - 128;
+    return sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU;
+}
+#endif
+
 static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
     /* On iOS we cannot reliably spawn; dispatch tool entrypoints directly. */
     struct {
@@ -262,7 +273,39 @@ static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
     }
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
         if (strcasecmp(name, table[i].name) == 0) {
-            return table[i].entry(argc, argv);
+#if defined(PSCAL_TARGET_IOS)
+            VProc *active_vp = vprocCurrent();
+            int stage_pid_for_stop = active_vp ? vprocPid(active_vp) : -1;
+            int shell_pid_for_stop = vprocGetShellSelfPid();
+            bool cooperative_stop_scope = false;
+            if (stage_pid_for_stop > 0 &&
+                stage_pid_for_stop != shell_pid_for_stop &&
+                vprocIsShellSelfThread()) {
+                /* Shebang frontends execute inline on the stage thread.
+                 * Keep SIGTSTP cooperative so Ctrl-Z can unwind to shell. */
+                vprocSetStopUnsupported(stage_pid_for_stop, true);
+                cooperative_stop_scope = true;
+                /*
+                 * Frontend VMs report cooperative Ctrl-Z through shell runtime
+                 * status. Reset the marker so stale values never leak into a
+                 * fresh invocation.
+                 */
+                shellRuntimeSetLastStatus(0);
+            }
+#endif
+            int status = table[i].entry(argc, argv);
+#if defined(PSCAL_TARGET_IOS)
+            if (cooperative_stop_scope && status == EXIT_SUCCESS) {
+                int runtime_status = shellRuntimeLastStatus();
+                if (shellRunnerIsStopStatus(runtime_status)) {
+                    status = runtime_status;
+                }
+            }
+            if (cooperative_stop_scope && stage_pid_for_stop > 0) {
+                vprocSetStopUnsupported(stage_pid_for_stop, false);
+            }
+#endif
+            return status;
         }
     }
     fprintf(stderr, "%s: tool runner unavailable for '%s'\n",

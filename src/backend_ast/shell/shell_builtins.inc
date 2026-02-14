@@ -3324,6 +3324,16 @@ static void shellFrontendCleanup(void *arg) {
     }
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static bool shellToolStatusRepresentsStop(int status) {
+    if (status < 128 || status >= 128 + NSIG) {
+        return false;
+    }
+    int sig = status - 128;
+    return sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU;
+}
+#endif
+
 static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
                                          int argc,
                                          char **argv,
@@ -3342,6 +3352,21 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
         gShellRuntime.pipeline.in_process &&
         !gShellBackgroundWorkerActive;
     bool manage_process_state = !pipeline_inline_stage;
+    int shell_pid_for_stop = vprocGetShellSelfPid();
+    int stage_pid_for_stop = prev_vproc ? vprocPid(prev_vproc) : -1;
+    bool cooperative_stop_scope = false;
+    if (prev_vproc &&
+        stage_pid_for_stop > 0 &&
+        stage_pid_for_stop != shell_pid_for_stop &&
+        vprocIsShellSelfThread() &&
+        (pipeline_inline_stage || target_kind != FRONTEND_KIND_SHELL)) {
+        /* Inline frontends share the shell worker thread. Hard SIGTSTP would
+         * park that thread and prevent prompt return, so force cooperative
+         * stop handling for the duration of this call. */
+        vprocSetStopUnsupported(stage_pid_for_stop, true);
+        cooperative_stop_scope = true;
+        shellRuntimeSetLastStatus(0);
+    }
     if (manage_process_state) {
         shellSaveSignalState(&sig_backup);
         shellSaveStandardFds(&fd_backup);
@@ -3385,6 +3410,12 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     pthread_cleanup_push(shellFrontendCleanup, &cleanup_ctx);
     status = entry(argc, argv);
     pthread_cleanup_pop(1); /* always run cleanup, even on pthread_exit */
+    if (cooperative_stop_scope && status == EXIT_SUCCESS) {
+        int runtime_status = shellRuntimeLastStatus();
+        if (shellToolStatusRepresentsStop(runtime_status)) {
+            status = runtime_status;
+        }
+    }
     if (out_frontend_reset) {
         *out_frontend_reset = frontend_reset;
     }
@@ -3438,6 +3469,9 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
         }
     } else if (dbg) {
         fprintf(stderr, "[tool-inline] pipeline-stage: skipped process stdio/signal restore\n");
+    }
+    if (cooperative_stop_scope && stage_pid_for_stop > 0) {
+        vprocSetStopUnsupported(stage_pid_for_stop, false);
     }
     return status;
 }
@@ -4656,6 +4690,14 @@ Value vmBuiltinShellSource(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     const char *path = args[0].s_val;
+    const char *base = strrchr(path, '/');
+    base = base ? (base + 1) : path;
+    if (base && strcmp(base, ".exshrc.local") == 0 && access(path, F_OK) != 0) {
+        /* ~/.exshrc.local is an optional per-device overlay; missing file should
+         * not spam startup sessions that source it unconditionally. */
+        shellUpdateStatus(0);
+        return makeVoid();
+    }
     char *source = shellLoadFile(path);
     if (!source) {
         runtimeError(vm, "source: unable to read '%s'", path);
@@ -10675,6 +10717,67 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
+static bool shellJobIsVirtualStoppedWithoutThread(const ShellJob *job) {
+    if (!job || !job->pids || job->pid_count == 0) {
+        return false;
+    }
+    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    size_t snap_cap = vprocSnapshot(NULL, 0);
+    if (snap_cap == 0) {
+        return false;
+    }
+    VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
+    if (!snaps) {
+        return false;
+    }
+    size_t snap_count = vprocSnapshot(snaps, snap_cap);
+    pthread_t zero_tid;
+    memset(&zero_tid, 0, sizeof(zero_tid));
+    bool has_live_thread = false;
+    bool has_snapshot_without_thread = false;
+    bool has_untracked_pid = false;
+
+    for (size_t j = 0; j < job->pid_count; ++j) {
+        pid_t pid = job->pids[j];
+        if (pid <= 0) {
+            continue;
+        }
+        bool found = false;
+        for (size_t i = 0; i < snap_count; ++i) {
+            if (snaps[i].pid != (int)pid) {
+                continue;
+            }
+            found = true;
+            if (dbg) {
+                fprintf(stderr,
+                        "[jobs-ios] fg/bg probe pid=%d tid=%p exited=%d stopped=%d continued=%d\n",
+                        (int)pid,
+                        (void *)snaps[i].tid,
+                        (int)snaps[i].exited,
+                        (int)snaps[i].stopped,
+                        (int)snaps[i].continued);
+            }
+            if (!snaps[i].exited) {
+                if (memcmp(&snaps[i].tid, &zero_tid, sizeof(zero_tid)) != 0) {
+                    has_live_thread = true;
+                } else {
+                    has_snapshot_without_thread = true;
+                }
+            }
+            break;
+        }
+        if (!found) {
+            if (dbg) {
+                fprintf(stderr, "[jobs-ios] fg/bg probe pid=%d missing from snapshot\n", (int)pid);
+            }
+            has_untracked_pid = true;
+        }
+    }
+
+    free(snaps);
+    return !has_live_thread && has_snapshot_without_thread && !has_untracked_pid;
+}
+
 Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
     shellCollectJobs();
     shellEnsureJobControl();
@@ -10684,13 +10787,29 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
+    if (shellJobIsVirtualStoppedWithoutThread(job)) {
+        const char *name = (job->command && job->command[0]) ? job->command : "job";
+        shellFdPrintf(STDERR_FILENO,
+                      "exsh: fg: cannot resume '%s' (VM restore for stopped local vprocs not available yet)\n",
+                      name);
+        shellJobMarkStopped(job, job->last_status ? job->last_status : (128 + SIGTSTP));
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
     bool job_control = gShellRuntime.job_control_enabled && job->pgid > 0;
     if (job_control) {
         shellJobControlSetForeground(job->pgid);
     }
     /* Prefer group continue; fallback to per-pid to cover synthetic tasks. */
-    shellJobContinue(job, true);
+    if (!shellJobContinue(job, true)) {
+        if (job_control) {
+            shellJobControlRestoreForeground();
+        }
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
     if (job_control) {
+        shellFdPrintf(STDOUT_FILENO, "\033[2J\033[H");
         if (job->command && job->command[0]) {
             shellFdPrintf(STDOUT_FILENO, "[%zu]  + continued  %s\n", job->id, job->command);
         } else {
@@ -10699,6 +10818,8 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
     }
     shellJobMarkRunning(job);
     int final_status = job->last_status;
+    bool waited_any = false;
+    bool saw_echild = false;
     for (size_t i = 0; i < job->pid_count; ++i) {
         pid_t pid = job->pids[i];
         if (pid <= 0) {
@@ -10707,8 +10828,12 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
         ShellWaitResult wait_res;
         int err = shellWaitPidDetailed(pid, true, &wait_res);
         if (err != 0) {
+            if (err == ECHILD) {
+                saw_echild = true;
+            }
             continue;
         }
+        waited_any = true;
         if (wait_res.stopped) {
             shellJobMarkStopped(job, wait_res.status_mapped);
             if (job_control) {
@@ -10722,6 +10847,11 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
     }
     if (job_control) {
         shellJobControlRestoreForeground();
+    }
+    if (!waited_any && saw_echild) {
+        /* Keep job state intact when virtual parentage has not converged yet. */
+        shellUpdateStatus(1);
+        return makeVoid();
     }
     shellRemoveJobAt(index);
     shellUpdateStatus(final_status);
@@ -10737,6 +10867,15 @@ Value vmBuiltinShellBg(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
+    if (shellJobIsVirtualStoppedWithoutThread(job)) {
+        const char *name = (job->command && job->command[0]) ? job->command : "job";
+        shellFdPrintf(STDERR_FILENO,
+                      "exsh: bg: cannot resume '%s' (VM restore for stopped local vprocs not available yet)\n",
+                      name);
+        shellJobMarkStopped(job, job->last_status ? job->last_status : (128 + SIGTSTP));
+        shellUpdateStatus(1);
+        return makeVoid();
+    }
     shellJobContinue(job, true);
     shellUpdateStatus(0);
     return makeVoid();

@@ -1879,6 +1879,7 @@ static VProcSessionStdio gSessionStdioDefault = {
     .pty_slave = NULL,
     .pty_out_thread = 0,
     .pty_active = false,
+    .control_bytes_passthrough = false,
     .session_id = 0,
 };
 static pthread_once_t gSessionStdioDefaultOnce = PTHREAD_ONCE_INIT;
@@ -2378,6 +2379,7 @@ typedef struct {
     int shell_pid;
     struct pscal_fd *pty_slave;
     struct pscal_fd *pty_master;
+    bool control_bytes_passthrough;
     VProcSessionOutputHandler output_handler;
     void *output_context;
     unsigned char *pending_output;
@@ -2613,6 +2615,37 @@ static void vprocSessionPtySetShellPid(uint64_t session_id, int shell_pid) {
         entry->shell_pid = shell_pid;
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
+}
+
+static bool vprocSessionControlBytePassthroughLocked(uint64_t session_id) {
+    if (session_id == 0) {
+        return false;
+    }
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    return entry ? entry->control_bytes_passthrough : false;
+}
+
+void vprocSessionSetControlBytePassthrough(uint64_t session_id, bool enabled) {
+    if (session_id == 0) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
+    if (entry) {
+        entry->control_bytes_passthrough = enabled;
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+}
+
+bool vprocSessionGetControlBytePassthrough(uint64_t session_id) {
+    if (session_id == 0) {
+        return false;
+    }
+    bool enabled = false;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    enabled = vprocSessionControlBytePassthroughLocked(session_id);
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    return enabled;
 }
 
 static bool vprocPathIsLocationDevice(const char *path);
@@ -2948,6 +2981,110 @@ static bool vprocEntryIsKernel(const VProcTaskEntry *entry) {
         return true;
     }
     return entry->comm[0] != '\0' && strcmp(entry->comm, "kernel") == 0;
+}
+
+static bool vprocSoftSignalingDisabledByEnv(void) {
+    const char *flag = getenv("PSCALI_DISABLE_SOFT_SIGNALING");
+    if (!flag || !*flag) {
+        return false;
+    }
+    return strcmp(flag, "0") != 0;
+}
+
+static bool vprocCommandLooksRemoteClient(const char *label) {
+    if (!label || !*label) {
+        return false;
+    }
+    const char *start = label;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    const char *end = start;
+    while (*end && !isspace((unsigned char)*end)) {
+        end++;
+    }
+    const char *base = start;
+    for (const char *p = start; p < end; ++p) {
+        if (*p == '/') {
+            base = p + 1;
+        }
+    }
+    size_t len = (size_t)(end - base);
+    if (len == 3 &&
+        tolower((unsigned char)base[0]) == 's' &&
+        tolower((unsigned char)base[1]) == 's' &&
+        tolower((unsigned char)base[2]) == 'h') {
+        return true;
+    }
+    if (len == 3 &&
+        tolower((unsigned char)base[0]) == 's' &&
+        tolower((unsigned char)base[1]) == 'c' &&
+        tolower((unsigned char)base[2]) == 'p') {
+        return true;
+    }
+    if (len == 4 &&
+        tolower((unsigned char)base[0]) == 's' &&
+        tolower((unsigned char)base[1]) == 'f' &&
+        tolower((unsigned char)base[2]) == 't' &&
+        tolower((unsigned char)base[3]) == 'p') {
+        return true;
+    }
+    return false;
+}
+
+static bool vprocEntryPrefersControlBytePassthrough(const VProcTaskEntry *entry) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->comm[0] && vprocCommandLooksRemoteClient(entry->comm)) {
+        return true;
+    }
+    if (entry->label && entry->label[0] && vprocCommandLooksRemoteClient(entry->label)) {
+        return true;
+    }
+    return false;
+}
+
+static bool vprocForegroundGroupPrefersControlBytes(int sid, int fg_pgid, int shell_pid) {
+    if (fg_pgid <= 0) {
+        return false;
+    }
+    bool passthrough = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (entry->pid <= 0 || entry->zombie || entry->exited) {
+            continue;
+        }
+        if (sid > 0 && entry->sid != sid) {
+            continue;
+        }
+        if (entry->pgid != fg_pgid) {
+            continue;
+        }
+        if (shell_pid > 0 && entry->pid == shell_pid) {
+            continue;
+        }
+        if (vprocEntryPrefersControlBytePassthrough(entry)) {
+            passthrough = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return passthrough;
+}
+
+static bool vprocSessionPrefersControlBytePassthrough(VProcSessionStdio *session) {
+    if (!session) {
+        return false;
+    }
+    if (session->control_bytes_passthrough) {
+        return true;
+    }
+    if (session->session_id == 0) {
+        return false;
+    }
+    return vprocSessionGetControlBytePassthrough(session->session_id);
 }
 
 static bool vprocPrepareThreadNameLocked(const VProcTaskEntry *entry, char *name, size_t name_len) {
@@ -3565,14 +3702,39 @@ bool vprocWaitIfStopped(VProc *vp) {
         return false;
     }
     bool waited = false;
+    pthread_t self = pthread_self();
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry && entry->stopped && !entry->exited &&
+        entry->tid && pthread_equal(entry->tid, self)) {
+        /*
+         * Only the shell thread needs cooperative conversion to avoid locking
+         * the prompt. Worker threads should remain truly stopped so bg/fg can
+         * resume them later.
+         */
+        if (vprocIsShellSelfThread()) {
+            int stop_sig = entry->stop_signo;
+            if (stop_sig <= 0 || stop_sig >= 32) {
+                stop_sig = SIGTSTP;
+            }
+            entry->pending_signals |= vprocSigMask(stop_sig);
+            entry->stopped = false;
+            entry->continued = true;
+            entry->stop_signo = 0;
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
+    }
     if (entry && entry->stop_unsupported && entry->stopped) {
-        /* Clear any lingering stop so readers never block on job-control signals. */
+        /* Convert hard-stop state into a cooperative pending signal so
+         * in-process loops can unwind to shell instead of parking forever. */
+        int stop_sig = entry->stop_signo;
+        if (stop_sig <= 0 || stop_sig >= 32) {
+            stop_sig = SIGTSTP;
+        }
+        entry->pending_signals |= vprocSigMask(stop_sig);
         entry->stopped = false;
         entry->continued = true;
         entry->stop_signo = 0;
-        entry->pending_signals &= ~vprocSigMask(SIGTSTP);
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     if (entry && entry->stop_unsupported) {
@@ -3601,6 +3763,12 @@ static bool vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
         if (action == VPROC_SIG_IGNORE || vprocSignalIgnoredLocked(entry, sig)) {
             entry->pending_signals &= ~mask;
             entry->pending_counts[sig] = 0;
+            continue;
+        }
+        if (action == VPROC_SIG_STOP && entry->stop_unsupported) {
+            /* Cooperative-stop workers consume SIGTSTP via explicit polling
+             * paths (vprocSigpending/vprocSigwait or runtime request checks).
+             * Do not transform this into a hard stop here. */
             continue;
         }
         vprocApplySignalLocked(entry, sig);
@@ -3859,6 +4027,7 @@ static void vprocSessionPtyRegister(uint64_t session_id,
     }
     entry->pty_slave = pscal_fd_retain(pty_slave);
     entry->pty_master = pscal_fd_retain(pty_master);
+    entry->control_bytes_passthrough = false;
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
 
@@ -3876,6 +4045,7 @@ static void vprocSessionPtyUnregister(uint64_t session_id) {
         if (entry->pty_master) {
             pscal_fd_close(entry->pty_master);
         }
+        entry->control_bytes_passthrough = false;
         vprocSessionPtyRemoveAtLocked(idx);
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
@@ -4210,6 +4380,9 @@ ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t l
 static bool vprocDispatchControlSignalToForeground(int shell_pid,
                                                    int sig,
                                                    bool allow_runtime_fallback) {
+    if (vprocSoftSignalingDisabledByEnv()) {
+        return false;
+    }
     if (shell_pid <= 0) {
         return false;
     }
@@ -4224,13 +4397,27 @@ static bool vprocDispatchControlSignalToForeground(int shell_pid,
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
-    int override_fg = (pscalRuntimeCurrentForegroundPgid) ? pscalRuntimeCurrentForegroundPgid() : -1;
-    if (override_fg > 0) {
-        target_fgid = override_fg;
-    } else if (target_fgid <= 0) {
-        target_fgid = shell_pgid;
+    if (target_fgid <= 0) {
+        int override_fg = (pscalRuntimeCurrentForegroundPgid)
+                ? pscalRuntimeCurrentForegroundPgid()
+                : -1;
+        if (override_fg > 0) {
+            target_fgid = override_fg;
+        } else {
+            target_fgid = shell_pgid;
+        }
     }
     if (target_fgid > 0) {
+        int sid = -1;
+        pthread_mutex_lock(&gVProcTasks.mu);
+        VProcTaskEntry *shell_entry = vprocTaskFindLocked(shell_pid);
+        if (shell_entry) {
+            sid = shell_entry->sid;
+        }
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        if (vprocForegroundGroupPrefersControlBytes(sid, target_fgid, shell_pid)) {
+            return false;
+        }
         if (vprocToolDebugEnabled()) {
             fprintf(stderr,
                     "[session-input-ctrl] fg-dispatch sig=%d shell=%d shell_pgid=%d target_fgid=%d\n",
@@ -4431,7 +4618,9 @@ static void *vprocSessionInputThread(void *arg) {
             }
         }
         retry_sleep_us = 1000;
-        if (ch == 3 || ch == 26) {
+        if ((ch == 3 || ch == 26) &&
+            !vprocSessionPrefersControlBytePassthrough(session) &&
+            !vprocSoftSignalingDisabledByEnv()) {
             int shell_pid = -1;
             int shell_pgid = -1;
             int sid = -1;
@@ -4453,6 +4642,19 @@ static void *vprocSessionInputThread(void *arg) {
                 /* When the shell owns the foreground, treat Ctrl-C/Z as shell
                  * input control bytes (prompt/editor behavior) instead of
                  * forcing vproc signal dispatch. */
+                pthread_mutex_lock(&input->mu);
+                if (vprocEnsureSessionInputWritableLocked(input, 1)) {
+                    input->buf[input->off + input->len] = ch;
+                    input->len++;
+                }
+                pthread_cond_broadcast(&input->cv);
+                pthread_mutex_unlock(&input->mu);
+                continue;
+            }
+            bool remote_passthrough = (fg_pgid > 0 &&
+                                       !shell_foreground &&
+                                       vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid));
+            if (remote_passthrough && input) {
                 pthread_mutex_lock(&input->mu);
                 if (vprocEnsureSessionInputWritableLocked(input, 1)) {
                     input->buf[input->off + input->len] = ch;
@@ -7059,8 +7261,10 @@ void vprocUnregisterThread(VProc *vp, pthread_t tid) {
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(vp->pid);
     if (entry) {
+        bool cleared_primary = false;
         if (entry->tid && pthread_equal(entry->tid, tid)) {
             entry->tid = 0;
+            cleared_primary = true;
         }
         for (size_t i = 0; i < entry->thread_count; ++i) {
             if (entry->threads[i] && pthread_equal(entry->threads[i], tid)) {
@@ -7068,6 +7272,11 @@ void vprocUnregisterThread(VProc *vp, pthread_t tid) {
                 entry->thread_count--;
                 break;
             }
+        }
+        if (cleared_primary && entry->thread_count > 0) {
+            /* Keep tid anchored to a live registered thread so snapshots/jobs
+             * do not misclassify resumable stopped tasks as threadless. */
+            entry->tid = entry->threads[entry->thread_count - 1];
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -7284,6 +7493,11 @@ void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
     if (entry) {
         entry->stop_unsupported = stop_unsupported;
         if (stop_unsupported && entry->stopped) {
+            int stop_sig = entry->stop_signo;
+            if (stop_sig <= 0 || stop_sig >= 32) {
+                stop_sig = SIGTSTP;
+            }
+            entry->pending_signals |= vprocSigMask(stop_sig);
             entry->stopped = false;
             entry->continued = true;
             entry->stop_signo = 0;
@@ -7291,6 +7505,20 @@ void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+bool vprocGetStopUnsupported(int pid) {
+    if (pid <= 0) {
+        return false;
+    }
+    bool stop_unsupported = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        stop_unsupported = entry->stop_unsupported;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return stop_unsupported;
 }
 
 void vprocSetShellPromptReadActive(int pid, bool active) {
@@ -7993,6 +8221,11 @@ static bool vprocKillDeliverEntryLocked(VProcTaskEntry *entry,
         /* Cooperative in-process frontends run on this same thread. Queue the
          * signal so their polling paths (sigpending/sigwait/runtime checks)
          * can observe Ctrl-C/Z without tearing down the thread immediately. */
+#if defined(PSCAL_TARGET_IOS)
+        if (sig == SIGINT && request_runtime_sigint) {
+            *request_runtime_sigint = true;
+        }
+#endif
         vprocQueuePendingSignalLocked(entry, sig);
         return true;
     }
@@ -9204,6 +9437,9 @@ static bool vprocKernelQueueControlSignal(int shell_pid, int sig, bool allow_run
 static bool vprocRequestControlSignalForShellInternal(int shell_pid,
                                                       int sig,
                                                       bool allow_runtime_fallback) {
+    if (vprocSoftSignalingDisabledByEnv()) {
+        return false;
+    }
     if (sig != SIGINT && sig != SIGTSTP) {
         return false;
     }
@@ -9234,14 +9470,19 @@ static bool vprocRequestControlSignalForSessionInternal(uint64_t session_id,
     if (session_id == 0 || (sig != SIGINT && sig != SIGTSTP)) {
         return false;
     }
+    if (vprocSoftSignalingDisabledByEnv()) {
+        return false;
+    }
 
     int shell_pid = 0;
     int sid = -1;
     int fg_pgid = -1;
+    bool session_passthrough = false;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     VProcSessionPtyEntry *session_entry = vprocSessionPtyFindLocked(session_id, NULL);
     if (session_entry) {
         shell_pid = session_entry->shell_pid;
+        session_passthrough = session_entry->control_bytes_passthrough;
     }
     if (session_entry && session_entry->pty_slave && session_entry->pty_slave->tty) {
         struct tty *tty = session_entry->pty_slave->tty;
@@ -9252,11 +9493,19 @@ static bool vprocRequestControlSignalForSessionInternal(uint64_t session_id,
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 
+    if (session_passthrough) {
+        return false;
+    }
+
     if (sid > 0) {
         int mapped_fg = vprocGetForegroundPgid(sid);
         if (mapped_fg > 0) {
             fg_pgid = mapped_fg;
         }
+    }
+
+    if (vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid)) {
+        return false;
     }
 
     if (shell_pid <= 0 && sid > 0) {
@@ -9510,6 +9759,7 @@ void vprocSessionStdioInitWithFds(VProcSessionStdio *stdio_ctx,
     stdio_ctx->pty_slave = NULL;
     stdio_ctx->pty_out_thread = 0;
     stdio_ctx->pty_active = false;
+    stdio_ctx->control_bytes_passthrough = false;
     stdio_ctx->session_id = 0;
 }
 
@@ -9536,6 +9786,7 @@ int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
     stdio_ctx->stdout_pscal_fd = pscal_fd_retain(pty_slave);
     stdio_ctx->stderr_pscal_fd = pscal_fd_retain(pty_slave);
     stdio_ctx->pty_active = true;
+    stdio_ctx->control_bytes_passthrough = false;
     vprocIoTrace("[vproc-io] stdio init session=%llu master=%p slave=%p",
                  (unsigned long long)session_id,
                  (void *)pty_master,
@@ -9587,6 +9838,7 @@ VProcSessionStdio *vprocSessionStdioCreate(void) {
     session->pty_slave = NULL;
     session->pty_out_thread = 0;
     session->pty_active = false;
+    session->control_bytes_passthrough = false;
     session->session_id = 0;
     return session;
 }
@@ -10440,11 +10692,14 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
         return -1;
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (controlling_stdin && !gVprocPipelineStage) {
+    if (controlling_stdin) {
         VProcSessionStdio *session = vprocSessionStdioCurrent();
         if (session &&
             session->stdin_host_fd >= 0 &&
             vprocSessionFdMatchesHost(host, session->stdin_host_fd)) {
+            /* In-process pipeline stages can still be foreground interactive
+             * tools/frontends. Route controlling stdin through the shared
+             * session buffer so virtual Ctrl-C/Z handling remains consistent. */
             if (vprocToolDebugEnabled()) {
                 fprintf(stderr,
                         "[vproc-read] route session stdin host=%d session_stdin=%d\n",
