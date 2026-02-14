@@ -930,6 +930,7 @@ static int getCursorPosition(int *row, int *col);
 static _Thread_local unsigned char gReadKeyBuf[64];
 static _Thread_local int gReadKeyBufStart = 0;
 static _Thread_local int gReadKeyBufCount = 0;
+static _Thread_local bool gReadKeyPendingCaretControl = false;
 
 static bool readKeyBufHasData(void) {
     return gReadKeyBufCount > 0;
@@ -3365,6 +3366,7 @@ void pscalRuntimeRequestSigint(void) {
         return;
     }
 #endif
+    vmEnsureSigintPipe();
     g_vm_sigint_seen = 1;
     atomic_store(&g_vm_interrupt_broadcast, true);
     if (g_vm_sigint_pipe[1] >= 0) {
@@ -3447,7 +3449,17 @@ int pscalRuntimeCurrentForegroundPgid(void) {
 }
 
 bool pscalRuntimeSigintPending(void) {
-    return g_vm_sigint_seen != 0;
+    if (g_vm_sigint_seen != 0) {
+        return true;
+    }
+    vmEnsureSigintPipe();
+    if (g_vm_sigint_pipe[0] >= 0) {
+        int pending = 0;
+        if (ioctl(g_vm_sigint_pipe[0], FIONREAD, &pending) == 0 && pending > 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool pscalRuntimeSigtstpPending(void) {
@@ -3463,19 +3475,22 @@ void pscalRuntimeClearInterruptFlag(void) {
 }
 
 bool pscalRuntimeConsumeSigint(void) {
-    if (!g_vm_sigint_seen && g_vm_sigint_pipe[0] < 0) {
-        return false;
-    }
+    vmEnsureSigintPipe();
     bool seen = g_vm_sigint_seen != 0;
     g_vm_sigint_seen = 0;
     if (g_vm_sigint_pipe[0] >= 0) {
-        vmDrainSigintFd(g_vm_sigint_pipe[0],
+        char token = 0;
+        ssize_t n = -1;
+        do {
 #if defined(PSCAL_TARGET_IOS)
-                        true
+            n = vprocHostRead(g_vm_sigint_pipe[0], &token, 1);
 #else
-                        false
+            n = read(g_vm_sigint_pipe[0], &token, 1);
 #endif
-        );
+        } while (n < 0 && errno == EINTR);
+        if (n == 1) {
+            seen = true;
+        }
     }
     return seen;
 }
@@ -3869,8 +3884,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
              * unwind back to the shell prompt. */
             vmWaitIfStoppedWithCheckpoint();
 #endif
-            if (g_vm_sigint_seen) {
-                g_vm_sigint_seen = 0;
+            if (pscalRuntimeConsumeSigint()) {
                 if (vm) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
@@ -4592,17 +4606,109 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
     }
 
     int c = 0;
-#ifdef SDL
-    if (sdlIsGraphicsActive()) {
-        c = sdlFetchReadKeyChar();
-        if (c < 0) {
+    for (;;) {
+        if (pscalRuntimeConsumeSigint()) {
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = true;
+                vm->suspend_unwind_requested = false;
+            }
+            shellRuntimeSetLastStatus(130);
             c = 0;
+            break;
         }
-    } else
+#if defined(PSCAL_TARGET_IOS)
+        if (pscalRuntimeConsumeSigtstp()) {
+            char scratch[1] = {'\0'};
+            if (vmHandleCtrlZReadRequest(vm, scratch)) {
+                continue;
+            }
+            c = 0;
+            break;
+        }
 #endif
-    {
-        vmEnableRawMode();
-        c = readKeyFetchConsoleByte();
+#ifdef SDL
+        if (sdlIsGraphicsActive()) {
+            c = sdlFetchReadKeyChar();
+            if (c < 0) {
+                c = 0;
+            }
+        } else
+#endif
+        {
+            vmEnableRawMode();
+            c = readKeyFetchConsoleByte();
+        }
+
+        if (gReadKeyPendingCaretControl) {
+            gReadKeyPendingCaretControl = false;
+            if (c == 'C' || c == 'c') {
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = false;
+                }
+                shellRuntimeSetLastStatus(130);
+                c = 0;
+                break;
+            }
+#if defined(PSCAL_TARGET_IOS)
+            if (c == 'Z' || c == 'z') {
+                char scratch[1] = {'\0'};
+                if (vmHandleCtrlZReadRequest(vm, scratch)) {
+                    continue;
+                }
+                c = 0;
+                break;
+            }
+#else
+            if (c == 'Z' || c == 'z') {
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                c = 0;
+                break;
+            }
+#endif
+        }
+
+        if (c == '^') {
+            gReadKeyPendingCaretControl = true;
+            break;
+        }
+        if (c == 0x03) { // Ctrl-C
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = true;
+                vm->suspend_unwind_requested = false;
+            }
+            shellRuntimeSetLastStatus(130);
+            c = 0;
+            break;
+        }
+        if (c == 0x1a) { // Ctrl-Z
+#if defined(PSCAL_TARGET_IOS)
+            char scratch[1] = {'\0'};
+            if (vmHandleCtrlZReadRequest(vm, scratch)) {
+                continue;
+            }
+            c = 0;
+            break;
+#else
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = true;
+                vm->suspend_unwind_requested = true;
+            }
+            shellRuntimeSetLastStatus(128 + SIGTSTP);
+            c = 0;
+            break;
+#endif
+        }
+        break;
     }
 
     if (arg_count == 1) {

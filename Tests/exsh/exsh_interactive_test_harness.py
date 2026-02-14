@@ -459,6 +459,25 @@ def scenario_ctrl_c_interrupts_watch_top(shell: PtyShell) -> tuple[bool, str]:
     return True, "watch -n 3 top interrupted by Ctrl-C"
 
 
+def scenario_ctrl_c_interrupts_pascal_readkey_frontend(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker = _new_marker_path("ctrlc-pascal-readkey")
+    _unlink_if_exists(marker)
+    shell.send_line("Examples/pascal/base/DiceGame")
+    shell._pump(1.00)
+    shell.send(b"\x03")
+    shell._pump(0.40)
+    shell.send_line(f"touch {_shell_path(marker)}")
+    if not shell.wait_for_path(marker, timeout=2.5):
+        return False, "Ctrl-C did not return control to shell for DiceGame"
+    if "VM execution Failed" in shell.tail():
+        return False, "DiceGame Ctrl-C triggered VM runtime failure"
+    _unlink_if_exists(marker)
+    return True, "DiceGame interrupted by Ctrl-C without VM failure"
+
+
 def scenario_ctrl_z_stops_shebang_frontend_and_restores_prompt(shell: PtyShell) -> tuple[bool, str]:
     ok, reason = _wait_for_prompt(shell)
     if not ok:
@@ -613,6 +632,11 @@ SCENARIOS: List[Scenario] = [
         test_id="interactive_ctrl_c_watch_top",
         name="Ctrl-C interrupts foreground watch -n 3 top",
         run=scenario_ctrl_c_interrupts_watch_top,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_c_pascal_readkey_frontend",
+        name="Ctrl-C interrupts Pascal ReadKey frontend (DiceGame)",
+        run=scenario_ctrl_c_interrupts_pascal_readkey_frontend,
     ),
     Scenario(
         test_id="interactive_ctrl_z_watch_top",
