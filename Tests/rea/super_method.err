@@ -13,7 +13,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Procedure base.speak (at 0014) ---
 0014    | CONST_1
 0015    | CONSTANT            4 'base'
-0017    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0017    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0023    | RETURN
 0024    2 JUMP                7 (to 0034)
 

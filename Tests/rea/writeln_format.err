@@ -7,7 +7,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0007    1 CONST_1
 0008    | CONSTANT            4 '3.141590'
 0010    | FORMAT_VALUE     width:0 prec:2
-0013    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0013    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0019    0 HALT
 == End Disassembly: rea/writeln_format.rea ==
 
