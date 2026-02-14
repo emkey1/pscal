@@ -3350,6 +3350,7 @@ typedef struct ShellToolSuspendCheckpoint {
     int worker_param_count;
     char **worker_param_values;
     bool worker_param_owned;
+    int released_globals_lock_count;
     bool swapped;
     struct ShellToolSuspendCheckpoint *previous;
 } ShellToolSuspendCheckpoint;
@@ -3407,6 +3408,10 @@ void shellToolSuspendCheckpointBeforeWait(void) {
     ctx->worker_param_count = gParamCount;
     ctx->worker_param_values = gParamValues;
     ctx->worker_param_owned = gParamValuesOwned;
+    ctx->released_globals_lock_count = 0;
+    while (pthread_mutex_unlock(&globals_mutex) == 0) {
+        ctx->released_globals_lock_count++;
+    }
 
     if (ctx->shell_state) {
         pascalPopGlobalState(ctx->shell_state);
@@ -3462,6 +3467,10 @@ void shellToolSuspendCheckpointAfterWait(void) {
     gParamCount = ctx->worker_param_count;
     gParamValues = ctx->worker_param_values;
     gParamValuesOwned = ctx->worker_param_owned;
+    for (int i = 0; i < ctx->released_globals_lock_count; ++i) {
+        pthread_mutex_lock(&globals_mutex);
+    }
+    ctx->released_globals_lock_count = 0;
     ctx->swapped = false;
     if (getenv("PSCALI_TOOL_DEBUG")) {
         fprintf(stderr,
@@ -3498,11 +3507,10 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     if (prev_vproc &&
         stage_pid_for_stop > 0 &&
         stage_pid_for_stop != shell_pid_for_stop &&
-        vprocIsShellSelfThread() &&
         (pipeline_inline_stage || target_kind != FRONTEND_KIND_SHELL)) {
-        /* Inline frontends share the shell worker thread. Hard SIGTSTP would
-         * park that thread and prevent prompt return, so force cooperative
-         * stop handling for the duration of this call. */
+        /* Frontend stages run inside synthetic vprocs; keep SIGTSTP
+         * cooperative so Ctrl-Z can unwind to shell instead of parking the
+         * stage thread in a hard-stop wait. */
         vprocSetStopUnsupported(stage_pid_for_stop, true);
         cooperative_stop_scope = true;
         shellRuntimeSetLastStatus(0);
@@ -3632,6 +3640,9 @@ typedef struct {
     VProcSessionStdio *session_stdio;
     VProc *session_vproc;
     PSCALRuntimeContext *runtime_ctx;
+#if defined(PSCAL_TARGET_IOS)
+    ShellToolSuspendCheckpoint *suspend_checkpoint;
+#endif
     int stdout_fd;
     int stderr_fd;
     int status;
@@ -3664,6 +3675,11 @@ static void *shellToolThreadMain(void *arg) {
     };
     pthread_cleanup_push(shellFrontendCleanup, &cleanup_ctx);
     bool dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
+    int worker_pid = -1;
+#if defined(PSCAL_TARGET_IOS)
+    ShellToolSuspendCheckpoint *previous_checkpoint = gShellToolSuspendCheckpoint;
+    bool installed_suspend_hooks = false;
+#endif
     PSCALRuntimeContext *prev_runtime_ctx = NULL;
     if (PSCALRuntimeGetCurrentRuntimeContext) {
         prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
@@ -3685,7 +3701,23 @@ static void *shellToolThreadMain(void *arg) {
         vprocRegisterThread(ctx->session_vproc, pthread_self());
         vprocActivate(ctx->session_vproc);
         vproc_active = true;
+        worker_pid = vprocPid(ctx->session_vproc);
+        if (worker_pid > 0 && ctx->frontend_kind != FRONTEND_KIND_SHELL) {
+            /* Frontend tools run on a dedicated worker thread. Keep hard-stop
+             * semantics enabled so Ctrl-Z parks the worker in-place and fg/bg
+             * can resume the same execution context. */
+            vprocSetStopUnsupported(worker_pid, false);
+            vprocSetCooperativeStopWait(worker_pid, false);
+        }
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (ctx->suspend_checkpoint) {
+        gShellToolSuspendCheckpoint = ctx->suspend_checkpoint;
+        vmSetSuspendWaitHooks(shellToolSuspendCheckpointBeforeWait, shellToolSuspendCheckpointAfterWait);
+        vprocSetStopWaitHooks(shellToolSuspendCheckpointBeforeWait, shellToolSuspendCheckpointAfterWait);
+        installed_suspend_hooks = true;
+    }
+#endif
     if (dbg) {
         fprintf(stderr, "[tool-thread] worker start argc=%d entry=%p vproc=%p\n",
                 ctx->argc, (void *)ctx->entry, (void *)ctx->session_vproc);
@@ -3708,12 +3740,6 @@ static void *shellToolThreadMain(void *arg) {
     /* SA_RESTART is purposely omitted so we interrupt blocking calls */
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, &old_sa);
-    struct sigaction sa_tstp, old_sa_tstp;
-    memset(&sa_tstp, 0, sizeof(sa_tstp));
-    sa_tstp.sa_handler = shellThreadSigintHandler;
-    sigemptyset(&sa_tstp.sa_mask);
-    sa_tstp.sa_flags = 0;
-    sigaction(SIGTSTP, &sa_tstp, &old_sa_tstp);
 
     FrontendKind previous_kind = frontendPushKind(ctx->frontend_kind);
     ShellRuntimeState *thread_ctx = NULL;
@@ -3742,11 +3768,7 @@ static void *shellToolThreadMain(void *arg) {
         ctx->status = ctx->entry(ctx->argc, ctx->argv);
     } else {
         /* Interrupted */
-        if (gShellThreadLastSignal == SIGTSTP) {
-            ctx->status = 128 + SIGTSTP;
-        } else {
-            ctx->status = 130;
-        }
+        ctx->status = 130;
     }
 
     if (ctx->use_shell_context) {
@@ -3767,7 +3789,6 @@ static void *shellToolThreadMain(void *arg) {
 
     /* Restore signal handler */
     sigaction(SIGINT, &old_sa, NULL);
-    sigaction(SIGTSTP, &old_sa_tstp, NULL);
     if (ctx->session_stdio) {
         vprocSessionStdioActivate(prev_stdio);
     }
@@ -3777,6 +3798,18 @@ static void *shellToolThreadMain(void *arg) {
     if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
         PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (installed_suspend_hooks) {
+        gShellToolSuspendCheckpoint = previous_checkpoint;
+        if (previous_checkpoint) {
+            vmSetSuspendWaitHooks(shellToolSuspendCheckpointBeforeWait, shellToolSuspendCheckpointAfterWait);
+            vprocSetStopWaitHooks(shellToolSuspendCheckpointBeforeWait, shellToolSuspendCheckpointAfterWait);
+        } else {
+            vmSetSuspendWaitHooks(NULL, NULL);
+            vprocSetStopWaitHooks(NULL, NULL);
+        }
+    }
+#endif
     if (dbg) {
         fprintf(stderr, "[tool-thread] worker done status=%d\n", ctx->status);
     }
@@ -3847,6 +3880,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
         context->runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
             ? PSCALRuntimeGetCurrentRuntimeContext()
             : NULL;
+#if defined(PSCAL_TARGET_IOS)
+        context->suspend_checkpoint = gShellToolSuspendCheckpoint;
+#endif
         context->stdout_fd = dup(STDOUT_FILENO);
         context->stderr_fd = dup(STDERR_FILENO);
         if (getenv("PSCALI_VPROC_DEBUG")) {
@@ -3886,6 +3922,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
     context.runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext
         ? PSCALRuntimeGetCurrentRuntimeContext()
         : NULL;
+#if defined(PSCAL_TARGET_IOS)
+    context.suspend_checkpoint = gShellToolSuspendCheckpoint;
+#endif
     /* Foreground runs keep the caller's stdio; use -1 to skip dup2. */
     context.stdout_fd = -1;
     context.stderr_fd = -1;
@@ -3955,7 +3994,7 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
             pthread_kill(context.worker_thread, SIGINT);
         }
         if (pscalRuntimeConsumeSigtstp()) {
-            pthread_kill(context.worker_thread, SIGTSTP);
+            (void)vprocRequestControlSignal(SIGTSTP);
         }
         if (sigpending(&pending) == 0 && sigismember(&pending, SIGINT)) {
             pthread_kill(context.worker_thread, SIGINT);

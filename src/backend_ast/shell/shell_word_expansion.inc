@@ -3248,6 +3248,7 @@ static bool shellJobContinue(ShellJob *job, bool prefer_group) {
 }
 
 static int shellCollectJobs(void) {
+    bool prompt_dbg = false;
 #if defined(PSCAL_TARGET_IOS)
     int shell_pid = 0;
     int current_sid = 0;
@@ -3259,7 +3260,7 @@ static int shellCollectJobs(void) {
      * carry a non-zero vproc job id, otherwise core session entities (kernel,
      * shell, pumps, etc.) pollute the job table and break job-spec semantics. */
     bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
-    bool prompt_dbg = getenv("PSCALI_PROMPT_DEBUG") != NULL;
+    prompt_dbg = getenv("PSCALI_PROMPT_DEBUG") != NULL;
     if (prompt_dbg) {
         fprintf(stderr, "[jobs] collect begin count=%zu\n", gShellJobCount);
     }

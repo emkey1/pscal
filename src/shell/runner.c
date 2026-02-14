@@ -281,8 +281,8 @@ static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
             if (stage_pid_for_stop > 0 &&
                 stage_pid_for_stop != shell_pid_for_stop &&
                 vprocIsShellSelfThread()) {
-                /* Shebang frontends execute inline on the stage thread.
-                 * Keep SIGTSTP cooperative so Ctrl-Z can unwind to shell. */
+                /* Shebang frontends executing inline on the shell thread must
+                 * keep SIGTSTP cooperative so Ctrl-Z unwinds to the prompt. */
                 vprocSetStopUnsupported(stage_pid_for_stop, true);
                 cooperative_stop_scope = true;
                 /*

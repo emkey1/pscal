@@ -202,6 +202,17 @@ def _latest_watch_pid(text: str) -> Optional[int]:
     return int(matches[-1].group(1))
 
 
+def _latest_pid_for_command(text: str, command_substring: str) -> Optional[int]:
+    latest: Optional[int] = None
+    for line in text.splitlines():
+        if command_substring not in line:
+            continue
+        match = re.match(r"^\s*(\d+)\s+", line)
+        if match:
+            latest = int(match.group(1))
+    return latest
+
+
 def scenario_ctrl_c_interrupts_sleep(shell: PtyShell) -> tuple[bool, str]:
     ok, reason = _wait_for_prompt(shell)
     if not ok:
@@ -340,6 +351,80 @@ def scenario_ctrl_z_stops_clike_frontend_and_restores_prompt(shell: PtyShell) ->
     return True, "Ctrl-Z stops clike frontend and restores shell prompt"
 
 
+def scenario_ctrl_z_fg_resumes_clike_frontend(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    marker_stop_first = _new_marker_path("ctrlz-clike-fg-stop1")
+    marker_stop_second = _new_marker_path("ctrlz-clike-fg-stop2")
+    pid_before_path = _new_marker_path("ctrlz-clike-fg-pid-before")
+    pid_after_path = _new_marker_path("ctrlz-clike-fg-pid-after")
+    _unlink_if_exists(marker_stop_first)
+    _unlink_if_exists(marker_stop_second)
+    _unlink_if_exists(pid_before_path)
+    _unlink_if_exists(pid_after_path)
+
+    prompt_before = _prompt_count(shell)
+    shell.send_line("PSCALI_WORDS_PATH=etc/words clike Examples/clike/base/hangman5")
+    shell._pump(1.00)
+    shell.send(b"\x1a")
+    shell._pump(1.20)
+    if _prompt_count(shell) <= prompt_before:
+        return False, "Ctrl-Z did not return prompt for clike before fg"
+
+    shell.send_line(
+        "jobs | grep Stopped | grep 'hangman5' >/dev/null"
+        f" && touch {_shell_path(marker_stop_first)}"
+    )
+    if not shell.wait_for_path(marker_stop_first, timeout=3.0):
+        return False, "Initial clike stop was not visible in jobs output"
+
+    shell.send_line(f"lps > {_shell_path(pid_before_path)}")
+    if not shell.wait_for_path(pid_before_path, timeout=3.0):
+        return False, "Unable to capture clike pid before fg"
+    pid_before = _latest_pid_for_command(
+        pid_before_path.read_text(errors="replace"),
+        "clike Examples/clike/base/hangman5",
+    )
+    if pid_before is None:
+        return False, "Unable to parse clike pid before fg"
+
+    shell.send_line("fg %1")
+    shell._pump(1.00)
+    if "cannot resume" in shell.tail():
+        return False, "fg reported clike frontend as non-resumable"
+    shell.send(b"a")
+    shell._pump(0.30)
+    shell.send(b"\x1a")
+    shell._pump(1.20)
+
+    shell.send_line(
+        "jobs | grep Stopped | grep 'hangman5' >/dev/null"
+        f" && touch {_shell_path(marker_stop_second)}"
+    )
+    if not shell.wait_for_path(marker_stop_second, timeout=3.0):
+        return False, "clike frontend was not stopped after fg -> Ctrl-Z"
+
+    shell.send_line(f"lps > {_shell_path(pid_after_path)}")
+    if not shell.wait_for_path(pid_after_path, timeout=3.0):
+        return False, "Unable to capture clike pid after fg -> Ctrl-Z"
+    pid_after = _latest_pid_for_command(
+        pid_after_path.read_text(errors="replace"),
+        "clike Examples/clike/base/hangman5",
+    )
+    if pid_after is None:
+        return False, "Unable to parse clike pid after fg -> Ctrl-Z"
+    if pid_after != pid_before:
+        return False, "fg restarted clike frontend instead of resuming same task"
+
+    _unlink_if_exists(marker_stop_first)
+    _unlink_if_exists(marker_stop_second)
+    _unlink_if_exists(pid_before_path)
+    _unlink_if_exists(pid_after_path)
+    return True, "Ctrl-Z/fg resumes clike frontend and preserves pid"
+
+
 def scenario_ctrl_c_interrupts_watch(shell: PtyShell) -> tuple[bool, str]:
     ok, reason = _wait_for_prompt(shell)
     if not ok:
@@ -355,6 +440,122 @@ def scenario_ctrl_c_interrupts_watch(shell: PtyShell) -> tuple[bool, str]:
         return False, "Ctrl-C did not return control to shell during watch"
     _unlink_if_exists(marker)
     return True, "watch interrupted by Ctrl-C"
+
+
+def scenario_ctrl_c_interrupts_watch_top(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker = _new_marker_path("ctrlc-watch-top")
+    _unlink_if_exists(marker)
+    shell.send_line("watch -n 3 top")
+    shell._pump(1.00)
+    shell.send(b"\x03")
+    shell._pump(0.35)
+    shell.send_line(f"touch {_shell_path(marker)}")
+    if not shell.wait_for_path(marker, timeout=2.2):
+        return False, "Ctrl-C did not return control to shell during watch -n 3 top"
+    _unlink_if_exists(marker)
+    return True, "watch -n 3 top interrupted by Ctrl-C"
+
+
+def scenario_ctrl_z_stops_shebang_frontend_and_restores_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker_stop = _new_marker_path("ctrlz-shebang-stop")
+    _unlink_if_exists(marker_stop)
+    prompt_before = _prompt_count(shell)
+    shell.send_line("Examples/pascal/base/hangman5")
+    shell._pump(1.00)
+    shell.send(b"\x1a")
+    shell._pump(1.20)
+    if _prompt_count(shell) <= prompt_before:
+        return False, "Ctrl-Z did not return shell prompt after suspending shebang frontend"
+    check_cmd = (
+        "jobs | grep Stopped | grep 'Examples/pascal/base/hangman5' >/dev/null"
+        f" && touch {_shell_path(marker_stop)}"
+    )
+    if not _send_until_marker(shell, check_cmd, marker_stop, attempts=3, timeout=4.0):
+        return False, "Suspended shebang frontend was not queryable from shell after Ctrl-Z"
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.2)
+    _unlink_if_exists(marker_stop)
+    return True, "Ctrl-Z stops shebang frontend and restores shell prompt"
+
+
+def scenario_ctrl_z_fg_resumes_shebang_frontend(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    marker_stop_first = _new_marker_path("ctrlz-shebang-fg-stop1")
+    pid_before_path = _new_marker_path("ctrlz-shebang-fg-pid-before")
+    _unlink_if_exists(marker_stop_first)
+    _unlink_if_exists(pid_before_path)
+
+    prompt_before = _prompt_count(shell)
+    shell.send_line("Examples/pascal/base/hangman5")
+    shell._pump(1.00)
+    shell.send(b"\x1a")
+    shell._pump(1.20)
+    if _prompt_count(shell) <= prompt_before:
+        return False, "Ctrl-Z did not return prompt for shebang frontend before fg"
+
+    shell.send_line(
+        "jobs | grep Stopped | grep 'Examples/pascal/base/hangman5' >/dev/null"
+        f" && touch {_shell_path(marker_stop_first)}"
+    )
+    if not shell.wait_for_path(marker_stop_first, timeout=3.0):
+        return False, "Initial shebang frontend stop was not visible in jobs output"
+
+    shell.send_line(f"lps > {_shell_path(pid_before_path)}")
+    if not shell.wait_for_path(pid_before_path, timeout=3.0):
+        return False, "Unable to capture shebang frontend pid before fg"
+    pid_before = _latest_pid_for_command(
+        pid_before_path.read_text(errors="replace"),
+        "Examples/pascal/base/hangman5",
+    )
+    if pid_before is None:
+        return False, "Unable to parse shebang frontend pid before fg"
+
+    shell.send_line("fg %1")
+    shell._pump(1.00)
+    if "cannot resume" in shell.tail():
+        return False, "fg reported shebang frontend as non-resumable"
+    shell.send(b"\x03")
+    shell._pump(0.60)
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.20)
+
+    _unlink_if_exists(marker_stop_first)
+    _unlink_if_exists(pid_before_path)
+    return True, f"Ctrl-Z/fg resumed shebang frontend task pid {pid_before}"
+
+
+def scenario_ctrl_z_stops_watch_top_and_restores_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker_stop = _new_marker_path("ctrlz-watch-top-stop")
+    _unlink_if_exists(marker_stop)
+    prompt_before = _prompt_count(shell)
+    shell.send_line("watch -n 3 top")
+    shell._pump(1.00)
+    shell.send(b"\x1a")
+    shell._pump(1.30)
+    if _prompt_count(shell) <= prompt_before:
+        return False, "Ctrl-Z did not return shell prompt for watch -n 3 top"
+    shell.send_line(
+        "jobs | grep Stopped | grep 'watch -n 3 top' >/dev/null"
+        f" && touch {_shell_path(marker_stop)}"
+    )
+    if not shell.wait_for_path(marker_stop, timeout=3.0):
+        return False, "watch -n 3 top was not marked Stopped after Ctrl-Z"
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.2)
+    _unlink_if_exists(marker_stop)
+    return True, "Ctrl-Z stops watch -n 3 top and restores shell prompt"
 
 
 def scenario_ctrl_c_at_prompt_keeps_shell_alive(shell: PtyShell) -> tuple[bool, str]:
@@ -399,9 +600,34 @@ SCENARIOS: List[Scenario] = [
         run=scenario_ctrl_z_stops_clike_frontend_and_restores_prompt,
     ),
     Scenario(
+        test_id="interactive_ctrl_z_clike_frontend_fg",
+        name="Ctrl-Z/fg resumes clike frontend task",
+        run=scenario_ctrl_z_fg_resumes_clike_frontend,
+    ),
+    Scenario(
         test_id="interactive_ctrl_c_watch",
         name="Ctrl-C interrupts foreground watch",
         run=scenario_ctrl_c_interrupts_watch,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_c_watch_top",
+        name="Ctrl-C interrupts foreground watch -n 3 top",
+        run=scenario_ctrl_c_interrupts_watch_top,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_z_watch_top",
+        name="Ctrl-Z stops foreground watch -n 3 top",
+        run=scenario_ctrl_z_stops_watch_top_and_restores_prompt,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_z_shebang_frontend_prompt",
+        name="Ctrl-Z stops shebang frontend and restores shell prompt",
+        run=scenario_ctrl_z_stops_shebang_frontend_and_restores_prompt,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_z_shebang_frontend_fg",
+        name="Ctrl-Z/fg resumes shebang frontend task",
+        run=scenario_ctrl_z_fg_resumes_shebang_frontend,
     ),
 ]
 

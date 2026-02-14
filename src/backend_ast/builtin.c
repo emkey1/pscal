@@ -3671,13 +3671,36 @@ static bool vmShouldUseCooperativeSuspend(void) {
     return vprocGetStopUnsupported(pid);
 }
 
+static int vmSuspendReleaseGlobalsMutex(void) {
+    int released = 0;
+    /*
+     * Frontend threads can be suspended while inside builtins that hold the
+     * recursive globals mutex. Release any ownership before parking so the
+     * shell thread can keep running while the frontend is stopped.
+     */
+    while (pthread_mutex_unlock(&globals_mutex) == 0) {
+        released++;
+    }
+    return released;
+}
+
+static void vmSuspendReacquireGlobalsMutex(int count) {
+    for (int i = 0; i < count; ++i) {
+        pthread_mutex_lock(&globals_mutex);
+    }
+}
+
 static void vmWaitIfStoppedWithCheckpoint(void) {
+    int released_globals_locks = vmSuspendReleaseGlobalsMutex();
     if (gVmSuspendBeforeWaitHook) {
         gVmSuspendBeforeWaitHook();
     }
     (void)vprocWaitIfStopped(vprocCurrent());
     if (gVmSuspendAfterWaitHook) {
         gVmSuspendAfterWaitHook();
+    }
+    if (released_globals_locks > 0) {
+        vmSuspendReacquireGlobalsMutex(released_globals_locks);
     }
 }
 
@@ -3760,6 +3783,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
     }
 #else
     bool is_stdin_stream = (stream == stdin);
+    bool tool_dbg = false;
 #endif
     if (fd < 0) {
         return false;

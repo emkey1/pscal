@@ -165,6 +165,7 @@ bool vprocRequestControlSignalForSession(uint64_t session_id, int sig);
 void vprocSessionSetControlBytePassthrough(uint64_t session_id, bool enabled);
 bool vprocSessionGetControlBytePassthrough(uint64_t session_id);
 void vprocSetStopUnsupported(int pid, bool stop_unsupported);
+void vprocSetCooperativeStopWait(int pid, bool enabled);
 bool vprocGetStopUnsupported(int pid);
 void vprocSetShellPromptReadActive(int pid, bool active);
 bool vprocShellPromptReadActive(int pid);
@@ -668,6 +669,7 @@ static inline void vprocDiscard(int pid) { (void)pid; }
 static inline bool vprocSigchldPending(int pid) { (void)pid; return false; }
 static inline void vprocSetShellPromptReadActive(int pid, bool active) { (void)pid; (void)active; }
 static inline bool vprocShellPromptReadActive(int pid) { (void)pid; return false; }
+static inline void vprocSetCooperativeStopWait(int pid, bool enabled) { (void)pid; (void)enabled; }
 static inline bool vprocRequestControlSignal(int sig) { (void)sig; return false; }
 static inline bool vprocRequestControlSignalForShell(int shell_pid, int sig) {
     (void)shell_pid;

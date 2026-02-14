@@ -1415,37 +1415,57 @@ static bool shellCommandResolvesToShebang(const char *name) {
             path = resolved_path;
         }
     }
-    bool shebang = false;
-    if (shellResolveExecutableCandidate(path, resolved, sizeof(resolved))) {
-        shebang = shellPathHasShebang(resolved);
-    } else {
-        shebang = shellPathHasShebang(path);
+    /* Probe the command path directly first; some iOS path rewrites produce
+     * display paths that are not suitable for open(2), so we keep the
+     * original candidate in the decision. */
+    bool shebang = shellPathHasShebang(path);
+    if (!shebang && shellResolveExecutableCandidate(path, resolved, sizeof(resolved))) {
+        shebang = shellPathHasShebang(resolved) || shellPathHasShebang(path);
     }
     free(resolved_path);
     return shebang;
 }
 
 static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
+    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
     if (!cmd || !cmd->argv || !cmd->argv[0]) {
         return false;
     }
     if (cmd->background) {
+        if (dbg) {
+            fprintf(stderr, "[pipe-worker] prefer=0 reason=background cmd=%s\n", cmd->argv[0]);
+        }
         return false;
     }
     const char *name = cmd->argv[0];
     if (smallclueFindApplet(name) != NULL) {
+        if (dbg) {
+            fprintf(stderr, "[pipe-worker] prefer=1 reason=smallclue cmd=%s\n", name);
+        }
         return true;
     }
     if (shellCommandIsFrontendToolName(name)) {
+        if (dbg) {
+            fprintf(stderr, "[pipe-worker] prefer=1 reason=frontend-tool cmd=%s\n", name);
+        }
         return true;
     }
     /* Keep shell builtins (fg/bg/jobs/cd/etc.) on the shell thread; they
      * manipulate shell-global state and must not run inside stage workers. */
-    if (shellBuiltinCanonicalName(name) != NULL) {
+    if (shellIsBuiltinName(name)) {
+        if (dbg) {
+            fprintf(stderr, "[pipe-worker] prefer=0 reason=builtin cmd=%s\n", name);
+        }
         return false;
     }
     if (shellCommandResolvesToShebang(name)) {
+        if (dbg) {
+            fprintf(stderr, "[pipe-worker] prefer=1 reason=shebang cmd=%s\n", name);
+        }
         return true;
+    }
+    if (dbg) {
+        fprintf(stderr, "[pipe-worker] prefer=0 reason=default cmd=%s\n", name);
     }
     return false;
 }

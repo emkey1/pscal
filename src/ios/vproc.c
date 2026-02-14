@@ -2795,6 +2795,7 @@ typedef struct {
     int stop_signo;
     bool zombie;
     bool stop_unsupported;
+    bool cooperative_stop_wait;
     bool sigchld_delivery_queued;
     bool shell_prompt_read_active;
     int job_id;
@@ -3594,6 +3595,27 @@ static void vprocQueuePendingSignalLocked(VProcTaskEntry *entry, int sig) {
     }
 }
 
+static bool vprocConsumePendingSignalLocked(VProcTaskEntry *entry, int sig) {
+    if (!entry || !vprocSigIndexValid(sig)) {
+        return false;
+    }
+    uint32_t mask = vprocSigMask(sig);
+    if (mask == 0) {
+        return false;
+    }
+    if (!(entry->pending_signals & mask) && entry->pending_counts[sig] <= 0) {
+        return false;
+    }
+    if (entry->pending_counts[sig] > 0) {
+        entry->pending_counts[sig]--;
+    }
+    if (entry->pending_counts[sig] <= 0) {
+        entry->pending_signals &= ~mask;
+        entry->pending_counts[sig] = 0;
+    }
+    return true;
+}
+
 static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
     VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
 
@@ -3714,6 +3736,33 @@ bool vprocWaitIfStopped(VProc *vp) {
     pthread_t self = pthread_self();
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry &&
+        entry->stop_unsupported &&
+        entry->cooperative_stop_wait &&
+        !entry->stopped &&
+        !entry->exited) {
+        int stop_sig = 0;
+        const int stop_sigs[] = { SIGTSTP, SIGSTOP, SIGTTIN, SIGTTOU };
+        for (size_t i = 0; i < sizeof(stop_sigs) / sizeof(stop_sigs[0]); ++i) {
+            int candidate = stop_sigs[i];
+            if (!vprocConsumePendingSignalLocked(entry, candidate)) {
+                continue;
+            }
+            stop_sig = candidate;
+            break;
+        }
+        if (stop_sig > 0) {
+            entry->stopped = true;
+            entry->continued = false;
+            entry->exited = false;
+            entry->stop_signo = stop_sig;
+            entry->exit_signal = 0;
+            entry->status = 128 + stop_sig;
+            entry->zombie = false;
+            vprocNotifyParentSigchldLocked(entry, VPROC_SIGCHLD_EVENT_STOP);
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
+    }
     if (entry && entry->stopped && !entry->exited &&
         entry->tid && pthread_equal(entry->tid, self)) {
         /*
@@ -3733,7 +3782,7 @@ bool vprocWaitIfStopped(VProc *vp) {
             pthread_cond_broadcast(&gVProcTasks.cv);
         }
     }
-    if (entry && entry->stop_unsupported && entry->stopped) {
+    if (entry && entry->stop_unsupported && !entry->cooperative_stop_wait && entry->stopped) {
         /* Convert hard-stop state into a cooperative pending signal so
          * in-process loops can unwind to shell instead of parking forever. */
         int stop_sig = entry->stop_signo;
@@ -3746,7 +3795,7 @@ bool vprocWaitIfStopped(VProc *vp) {
         entry->stop_signo = 0;
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
-    if (entry && entry->stop_unsupported) {
+    if (entry && entry->stop_unsupported && !entry->cooperative_stop_wait) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         return false;
     }
@@ -7512,7 +7561,7 @@ void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
         entry->stop_unsupported = stop_unsupported;
-        if (stop_unsupported && entry->stopped) {
+        if (stop_unsupported && !entry->cooperative_stop_wait && entry->stopped) {
             int stop_sig = entry->stop_signo;
             if (stop_sig <= 0 || stop_sig >= 32) {
                 stop_sig = SIGTSTP;
@@ -7523,6 +7572,18 @@ void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
             entry->stop_signo = 0;
         }
         pthread_cond_broadcast(&gVProcTasks.cv);
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+void vprocSetCooperativeStopWait(int pid, bool enabled) {
+    if (pid <= 0) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        entry->cooperative_stop_wait = enabled;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
