@@ -3670,13 +3670,19 @@ static bool vmRequestHardSuspendCurrentVproc(void) {
     }
     int pgid = (pid > 0) ? vprocGetPgid(pid) : -1;
 
-    if (vprocRequestControlSignal(SIGTSTP)) {
+    /*
+     * For non-shell foreground workers, group-directed delivery can be
+     * downgraded to a cooperative pending signal on the current thread.
+     * Prefer direct pid delivery first so Ctrl-Z results in a real stoppage
+     * that fg/bg can later resume.
+     */
+    if (pid > 0 && vprocKillShim(pid, SIGTSTP) == 0) {
         return true;
     }
     if (pgid > 0 && vprocKillShim(-pgid, SIGTSTP) == 0) {
         return true;
     }
-    if (pid > 0 && vprocKillShim(pid, SIGTSTP) == 0) {
+    if (vprocRequestControlSignal(SIGTSTP)) {
         return true;
     }
     return false;
