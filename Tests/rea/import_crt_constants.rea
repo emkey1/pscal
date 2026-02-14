@@ -1,0 +1,5 @@
+#import "crt";
+
+writeln(Black);
+writeln(LightGreen);
+writeln(White);
