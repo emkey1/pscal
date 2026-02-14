@@ -3644,6 +3644,15 @@ static void vmPrepareCanonicalInput(void) {
 static bool vmBufferIsPureDsr(const char *buf, size_t len);
 
 #if defined(PSCAL_TARGET_IOS)
+typedef void (*VmSuspendWaitHookFn)(void);
+static __thread VmSuspendWaitHookFn gVmSuspendBeforeWaitHook = NULL;
+static __thread VmSuspendWaitHookFn gVmSuspendAfterWaitHook = NULL;
+
+void vmSetSuspendWaitHooks(VmSuspendWaitHookFn before_hook, VmSuspendWaitHookFn after_hook) {
+    gVmSuspendBeforeWaitHook = before_hook;
+    gVmSuspendAfterWaitHook = after_hook;
+}
+
 static bool vmShouldUseCooperativeSuspend(void) {
     if (vprocIsShellSelfThread()) {
         return true;
@@ -3660,6 +3669,16 @@ static bool vmShouldUseCooperativeSuspend(void) {
         return true;
     }
     return vprocGetStopUnsupported(pid);
+}
+
+static void vmWaitIfStoppedWithCheckpoint(void) {
+    if (gVmSuspendBeforeWaitHook) {
+        gVmSuspendBeforeWaitHook();
+    }
+    (void)vprocWaitIfStopped(vprocCurrent());
+    if (gVmSuspendAfterWaitHook) {
+        gVmSuspendAfterWaitHook();
+    }
 }
 
 static bool vmRequestHardSuspendCurrentVproc(void) {
@@ -3689,9 +3708,28 @@ static bool vmRequestHardSuspendCurrentVproc(void) {
 }
 
 static bool vmHandleCtrlZReadRequest(VM *vm, char *buffer) {
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        int pid_dbg = vprocGetPidShim();
+        int shell_pid_dbg = vprocGetShellSelfPid();
+        bool self_thread_dbg = vprocIsShellSelfThread();
+        bool stop_unsupported_dbg = (pid_dbg > 0) ? vprocGetStopUnsupported(pid_dbg) : false;
+        fprintf(stderr,
+                "[ctrlz] pid=%d shell=%d self_thread=%d stop_unsupported=%d coop=%d\n",
+                pid_dbg,
+                shell_pid_dbg,
+                (int)self_thread_dbg,
+                (int)stop_unsupported_dbg,
+                (int)vmShouldUseCooperativeSuspend());
+    }
     if (!vmShouldUseCooperativeSuspend()) {
         if (vmRequestHardSuspendCurrentVproc()) {
-            (void)vprocWaitIfStopped(vprocCurrent());
+            if (getenv("PSCALI_TOOL_DEBUG")) {
+                fprintf(stderr, "[ctrlz] hard-stop wait begin\n");
+            }
+            vmWaitIfStoppedWithCheckpoint();
+            if (getenv("PSCALI_TOOL_DEBUG")) {
+                fprintf(stderr, "[ctrlz] hard-stop wait end\n");
+            }
             return true;
         }
     }
@@ -3805,7 +3843,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             /* If a frontend thread was hard-stopped while blocked in select/poll,
              * convert that stop into a cooperative pending signal so ReadLn can
              * unwind back to the shell prompt. */
-            (void)vprocWaitIfStopped(vprocCurrent());
+            vmWaitIfStoppedWithCheckpoint();
 #endif
             if (g_vm_sigint_seen) {
                 g_vm_sigint_seen = 0;
@@ -3819,7 +3857,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             if (pscalRuntimeConsumeSigtstp()) {
 #if defined(PSCAL_TARGET_IOS)
                 if (!vmShouldUseCooperativeSuspend() && vmRequestHardSuspendCurrentVproc()) {
-                    (void)vprocWaitIfStopped(vprocCurrent());
+                    vmWaitIfStoppedWithCheckpoint();
                     continue;
                 }
 #endif
@@ -3853,7 +3891,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                             if (signo == SIGTSTP &&
                                 !vmShouldUseCooperativeSuspend() &&
                                 vmRequestHardSuspendCurrentVproc()) {
-                                (void)vprocWaitIfStopped(vprocCurrent());
+                                vmWaitIfStoppedWithCheckpoint();
                                 continue;
                             }
 #endif
@@ -7782,7 +7820,7 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
             if (pscalRuntimeConsumeSigtstp()) {
 #if defined(PSCAL_TARGET_IOS)
                 if (!vmShouldUseCooperativeSuspend() && vmRequestHardSuspendCurrentVproc()) {
-                    (void)vprocWaitIfStopped(vprocCurrent());
+                    vmWaitIfStoppedWithCheckpoint();
                     continue;
                 }
 #endif

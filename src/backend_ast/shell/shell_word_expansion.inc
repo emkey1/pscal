@@ -3259,6 +3259,10 @@ static int shellCollectJobs(void) {
      * carry a non-zero vproc job id, otherwise core session entities (kernel,
      * shell, pumps, etc.) pollute the job table and break job-spec semantics. */
     bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    bool prompt_dbg = getenv("PSCALI_PROMPT_DEBUG") != NULL;
+    if (prompt_dbg) {
+        fprintf(stderr, "[jobs] collect begin count=%zu\n", gShellJobCount);
+    }
     shell_pid = vprocGetShellSelfPid();
     current_sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : 0;
     size_t snap_cap = vprocSnapshot(NULL, 0);
@@ -3266,6 +3270,9 @@ static int shellCollectJobs(void) {
             VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
             if (snaps) {
                 size_t snap_count = vprocSnapshot(snaps, snap_cap);
+                if (prompt_dbg) {
+                    fprintf(stderr, "[jobs] snapshot count=%zu\n", snap_count);
+                }
                 if (dbg) {
                     fprintf(stderr, "[jobs-ios] snapshot count=%zu\n", snap_count);
                 }
@@ -3338,6 +3345,16 @@ static int shellCollectJobs(void) {
     for (size_t i = 0; i < gShellJobCount;) {
         ShellJob *job = &gShellJobs[i];
         bool job_active = false;
+        if (prompt_dbg) {
+            fprintf(stderr,
+                    "[jobs] scan job[%zu] id=%zu pgid=%d stopped=%d running=%d pid_count=%zu\n",
+                    i,
+                    job->id,
+                    (int)job->pgid,
+                    (int)job->stopped,
+                    (int)job->running,
+                    job->pid_count);
+        }
 
 #if defined(PSCAL_TARGET_IOS)
         if (current_sid > 0 && job && job->pgid > 0) {
@@ -3368,8 +3385,15 @@ static int shellCollectJobs(void) {
             if (pid <= 0) {
                 continue;
             }
+            if (prompt_dbg) {
+                fprintf(stderr, "[jobs] waitpid pid=%d opts=WNOHANG|WUNTRACED|WCONTINUED\n", (int)pid);
+            }
             int status = 0;
             pid_t res = vprocWaitPidShim(pid, &status, WNOHANG | WUNTRACED | WCONTINUED);
+            if (prompt_dbg) {
+                fprintf(stderr, "[jobs] waitpid pid=%d -> res=%d errno=%d status=%d\n",
+                        (int)pid, (int)res, errno, status);
+            }
             if (res == 0) {
                 job_active = true;
                 continue;
@@ -3438,6 +3462,9 @@ static int shellCollectJobs(void) {
     }
     if (gShellJobCount == 0) {
         shellResetJobIds();
+    }
+    if (prompt_dbg) {
+        fprintf(stderr, "[jobs] collect end reaped=%d count=%zu\n", reaped, gShellJobCount);
     }
 #if defined(PSCAL_TARGET_IOS)
     if (dbg) {

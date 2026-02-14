@@ -19,6 +19,7 @@ ios/PSCAL.xcodeproj/project.xcworkspace/xcuserdata/
 ios/PSCAL.xcodeproj/xcuserdata/mke.xcuserdatad/
 ios/DerivedData/
 tmp/
+.tmp_tests/
 .xcode-deriv/
 .swp
 ios/PSCAL.xcodeproj/xcshareddata/xcdebugger/*

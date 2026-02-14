@@ -681,6 +681,11 @@ int shellRunSource(const char *source,
     if (!source || !options) {
         return EXIT_FAILURE;
     }
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] enter path=%s source='%s'\n",
+                path ? path : "(null)",
+                source ? source : "(null)");
+    }
 
 #if defined(SIGPIPE)
     static bool sigpipe_ignored = false;
@@ -711,6 +716,9 @@ int shellRunSource(const char *source,
     const char *defines[1];
     int define_count = 0;
     char *pre_src = preprocessConditionals(source, defines, define_count);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] preprocessed\n");
+    }
 
     if (options->exit_on_signal) {
         shellRuntimeSetExitOnSignal(true);
@@ -738,7 +746,13 @@ int shellRunSource(const char *source,
     } else {
         current_procedure_table = procedure_table;
     }
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] symbols-ready\n");
+    }
     registerAllBuiltins();
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] builtins-registered\n");
+    }
 
     int exit_code = EXIT_FAILURE;
     ShellProgram *program = NULL;
@@ -762,8 +776,16 @@ int shellRunSource(const char *source,
     const char *parse_src = rewrite_src ? rewrite_src : (pre_src ? pre_src : source);
 
     ShellParser parser;
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] parsing\n");
+    }
     program = shellParseString(parse_src, &parser);
     shellParserFree(&parser);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] parsed had_error=%d program=%p\n",
+                (int)parser.had_error,
+                (void *)program);
+    }
     if (rewrite_src) {
         free(rewrite_src);
         rewrite_src = NULL;
@@ -781,7 +803,15 @@ int shellRunSource(const char *source,
 
     shellInitSemanticContext(&sem_ctx);
     sem_ctx_initialized = true;
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] semantic-analyze\n");
+    }
     ShellSemanticResult sem_result = shellAnalyzeProgram(&sem_ctx, program);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] semantic-done err=%d warn=%d\n",
+                sem_result.error_count,
+                sem_result.warning_count);
+    }
     if (sem_result.warning_count > 0 && !options->suppress_warnings) {
         fprintf(stderr, "Semantic analysis produced %d warning(s).\n", sem_result.warning_count);
     }
@@ -792,6 +822,9 @@ int shellRunSource(const char *source,
 
     initBytecodeChunk(&chunk);
     chunk_initialized = true;
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] chunk-init\n");
+    }
     bool used_cache = false;
     if (!options->no_cache && path && path[0]) {
         used_cache = loadBytecodeFromCache(path, kShellCompilerId, options->frontend_path, NULL, 0, &chunk);
@@ -801,6 +834,9 @@ int shellRunSource(const char *source,
         ShellOptConfig opt_config = { false };
         shellRunOptimizations(program, &opt_config);
         shellCompile(program, &chunk);
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[shell-run] compile-done\n");
+        }
         if (!options->no_cache && path && path[0]) {
             saveBytecodeToCache(path, kShellCompilerId, &chunk);
         }
@@ -841,6 +877,9 @@ int shellRunSource(const char *source,
         goto cleanup;
     }
     initVM(vm);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] vm-init\n");
+    }
     vm_initialized = true;
     vm_shell_ctx = shellRuntimeCreateContext();
     if (!vm_shell_ctx) {
@@ -861,6 +900,9 @@ int shellRunSource(const char *source,
     vm_context_swapped = true;
 
     InterpretResult result = interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] interpret-done result=%d\n", (int)result);
+    }
     if (result == INTERPRET_RUNTIME_ERROR) {
         runtimeDebugLog("[shell] interpretBytecode -> runtime error; dumping VM stack");
         vmDumpStackInfoDetailed(vm, "shell runtime error");

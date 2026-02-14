@@ -3334,6 +3334,146 @@ static bool shellToolStatusRepresentsStop(int status) {
 }
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+typedef void (*VmSuspendWaitHookFn)(void);
+extern void vmSetSuspendWaitHooks(VmSuspendWaitHookFn before_hook, VmSuspendWaitHookFn after_hook);
+extern void vprocSetStopWaitHooks(void (*before_hook)(void), void (*after_hook)(void));
+void shellToolSuspendCheckpointBeforeWait(void);
+void shellToolSuspendCheckpointAfterWait(void);
+
+typedef struct ShellToolSuspendCheckpoint {
+    PascalGlobalState *shell_state;
+    int *shell_param_count;
+    char ***shell_param_values;
+    bool *shell_param_owned;
+    PascalGlobalState worker_state;
+    int worker_param_count;
+    char **worker_param_values;
+    bool worker_param_owned;
+    bool swapped;
+    struct ShellToolSuspendCheckpoint *previous;
+} ShellToolSuspendCheckpoint;
+
+static __thread ShellToolSuspendCheckpoint *gShellToolSuspendCheckpoint = NULL;
+
+static void shellToolSuspendCheckpointInstall(ShellToolSuspendCheckpoint *ctx,
+                                              PascalGlobalState *shell_state,
+                                              int *shell_param_count,
+                                              char ***shell_param_values,
+                                              bool *shell_param_owned) {
+    if (!ctx) {
+        return;
+    }
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->shell_state = shell_state;
+    ctx->shell_param_count = shell_param_count;
+    ctx->shell_param_values = shell_param_values;
+    ctx->shell_param_owned = shell_param_owned;
+    ctx->previous = gShellToolSuspendCheckpoint;
+    gShellToolSuspendCheckpoint = ctx;
+    vmSetSuspendWaitHooks(shellToolSuspendCheckpointBeforeWait, shellToolSuspendCheckpointAfterWait);
+    vprocSetStopWaitHooks(shellToolSuspendCheckpointBeforeWait, shellToolSuspendCheckpointAfterWait);
+}
+
+static void shellToolSuspendCheckpointClear(ShellToolSuspendCheckpoint *ctx) {
+    if (!ctx) {
+        return;
+    }
+    if (gShellToolSuspendCheckpoint == ctx) {
+        gShellToolSuspendCheckpoint = ctx->previous;
+    }
+    if (!gShellToolSuspendCheckpoint) {
+        vmSetSuspendWaitHooks(NULL, NULL);
+        vprocSetStopWaitHooks(NULL, NULL);
+    }
+}
+
+void shellToolSuspendCheckpointBeforeWait(void) {
+    ShellToolSuspendCheckpoint *ctx = gShellToolSuspendCheckpoint;
+    if (!ctx || ctx->swapped) {
+        return;
+    }
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr,
+                "[tool-checkpoint] before-wait shell_state=%p shell_params=%d/%p owned=%d pid=%d\n",
+                (void *)ctx->shell_state,
+                ctx->shell_param_count ? *ctx->shell_param_count : -1,
+                (void *)(ctx->shell_param_values ? *ctx->shell_param_values : NULL),
+                (int)(ctx->shell_param_owned ? *ctx->shell_param_owned : false),
+                vprocGetPidShim());
+    }
+
+    pascalPushGlobalState(&ctx->worker_state);
+    ctx->worker_param_count = gParamCount;
+    ctx->worker_param_values = gParamValues;
+    ctx->worker_param_owned = gParamValuesOwned;
+
+    if (ctx->shell_state) {
+        pascalPopGlobalState(ctx->shell_state);
+    }
+    if (ctx->shell_param_count) {
+        gParamCount = *ctx->shell_param_count;
+    }
+    if (ctx->shell_param_values) {
+        gParamValues = *ctx->shell_param_values;
+    }
+    if (ctx->shell_param_owned) {
+        gParamValuesOwned = *ctx->shell_param_owned;
+    }
+    ctx->swapped = true;
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr,
+                "[tool-checkpoint] before-wait swapped worker_params=%d/%p owned=%d pid=%d\n",
+                ctx->worker_param_count,
+                (void *)ctx->worker_param_values,
+                (int)ctx->worker_param_owned,
+                vprocGetPidShim());
+    }
+}
+
+void shellToolSuspendCheckpointAfterWait(void) {
+    ShellToolSuspendCheckpoint *ctx = gShellToolSuspendCheckpoint;
+    if (!ctx || !ctx->swapped) {
+        return;
+    }
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr,
+                "[tool-checkpoint] after-wait restoring worker_params=%d/%p owned=%d pid=%d\n",
+                ctx->worker_param_count,
+                (void *)ctx->worker_param_values,
+                (int)ctx->worker_param_owned,
+                vprocGetPidShim());
+    }
+
+    if (ctx->shell_state) {
+        pascalPushGlobalState(ctx->shell_state);
+    }
+    if (ctx->shell_param_count) {
+        *ctx->shell_param_count = gParamCount;
+    }
+    if (ctx->shell_param_values) {
+        *ctx->shell_param_values = gParamValues;
+    }
+    if (ctx->shell_param_owned) {
+        *ctx->shell_param_owned = gParamValuesOwned;
+    }
+
+    pascalPopGlobalState(&ctx->worker_state);
+    gParamCount = ctx->worker_param_count;
+    gParamValues = ctx->worker_param_values;
+    gParamValuesOwned = ctx->worker_param_owned;
+    ctx->swapped = false;
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        fprintf(stderr,
+                "[tool-checkpoint] after-wait restored shell_params=%d/%p owned=%d pid=%d\n",
+                ctx->shell_param_count ? *ctx->shell_param_count : -1,
+                (void *)(ctx->shell_param_values ? *ctx->shell_param_values : NULL),
+                (int)(ctx->shell_param_owned ? *ctx->shell_param_owned : false),
+                vprocGetPidShim());
+    }
+}
+#endif
+
 static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
                                          int argc,
                                          char **argv,
@@ -3755,6 +3895,8 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
                 (void *)context.session_stdio,
                 (void *)context.session_vproc);
     }
+    struct termios stdin_termios;
+    bool stdin_termios_valid = shellToolTcgetattr(STDIN_FILENO, &stdin_termios);
 
     /* Block SIGINT and SIGURG on Main */
     sigset_t new_mask, old_mask;
@@ -3771,13 +3913,20 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
     if (create_rc != 0) {
         pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
         if (!use_shell_context) {
-            return entry(argc, argv);
+            int status = entry(argc, argv);
+            if (stdin_termios_valid) {
+                shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
+            }
+            return status;
         }
         ShellRuntimeState *ctx = shellRuntimeCreateContext();
         ShellRuntimeState *prev = shellRuntimeActivateContext(ctx);
         int status = entry(argc, argv);
         shellRuntimeActivateContext(prev);
         shellRuntimeDestroyContext(ctx);
+        if (stdin_termios_valid) {
+            shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
+        }
         return status;
     }
 
@@ -3787,6 +3936,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
         /* If waiter fails, just join worker directly (SIGINT won't work properly but we can't do much) */
         pthread_join(context.worker_thread, NULL);
         pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+        if (stdin_termios_valid) {
+            shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
+        }
         return context.status;
     }
 
@@ -3817,6 +3969,9 @@ static int shellRunToolInThread(ShellToolEntryFn entry,
 
     pthread_join(waiter_thread, NULL);
     pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+    if (stdin_termios_valid) {
+        shellToolTcsetattr(STDIN_FILENO, TCSAFLUSH, &stdin_termios);
+    }
     if (out_frontend_reset) {
         *out_frontend_reset = context.frontend_reset_done;
     }
@@ -3922,9 +4077,17 @@ static Value shellRunToolBuiltin(VM *vm,
     PascalGlobalState pascal_state;
     pascalPushGlobalState(&pascal_state);
 
-    const int saved_param_count = gParamCount;
+    int saved_param_count = gParamCount;
     char **saved_param_values = gParamValues;
     bool saved_param_owned = gParamValuesOwned;
+#if defined(PSCAL_TARGET_IOS)
+    ShellToolSuspendCheckpoint suspend_checkpoint;
+    shellToolSuspendCheckpointInstall(&suspend_checkpoint,
+                                      &pascal_state,
+                                      &saved_param_count,
+                                      &saved_param_values,
+                                      &saved_param_owned);
+#endif
 
     const int argc = arg_count + 1;
     // Add one extra slot so argv[argc] stays NULL like a real C argv vector.
@@ -3967,12 +4130,6 @@ static Value shellRunToolBuiltin(VM *vm,
             bool needs_shell_ctx = (target_kind == FRONTEND_KIND_SHELL);
             bool background = shellRuntimeCurrentBuiltinBackground();
 #if defined(PSCAL_TARGET_IOS)
-            /* When running inside the background worker thread, always execute
-             * inline so the worker's redirections (stdout/stderr to files) are
-             * honored. */
-            if (gShellBackgroundWorkerActive) {
-                background = true;
-            }
             if (getenv("PSCALI_PIPE_DEBUG")) {
                 fprintf(stderr, "[tool-dispatch] name=%s bg=%d worker=%d argc=%d\n",
                     tool_name ? tool_name : "<null>", (int)background, (int)gShellBackgroundWorkerActive, argc);
@@ -3996,12 +4153,14 @@ static Value shellRunToolBuiltin(VM *vm,
                     shellInvalidateFrontendState(target_kind);
                 }
             } else {
-                /* Run non-shell frontends inline on iOS to avoid repeated
-                 * cross-thread state swaps that can leave symbol tables in an
-                 * inconsistent state. */
+                /* Foreground non-shell frontends run on a dedicated worker so
+                 * Ctrl-Z can stop/resume the frontend vproc (fg/bg) without
+                 * parking the shell execution thread. */
                 bool frontend_reset = false;
-                status = shellRunToolInlineWithRestore(entry, argc, argv, tool_dbg, target_kind, &frontend_reset);
-                (void)frontend_reset; /* always true for inline */
+                status = shellRunToolInThread(entry, argc, argv, target_kind, needs_shell_ctx, false, &frontend_reset);
+                if (!frontend_reset) {
+                    shellInvalidateFrontendState(target_kind);
+                }
             }
             /* For shell frontend, always reset in the caller because the shell
              * runtime structures are persistent. */
@@ -4043,6 +4202,9 @@ static Value shellRunToolBuiltin(VM *vm,
     }
     free(argv);
 
+#if defined(PSCAL_TARGET_IOS)
+    shellToolSuspendCheckpointClear(&suspend_checkpoint);
+#endif
     gParamCount = saved_param_count;
     gParamValues = saved_param_values;
     gParamValuesOwned = saved_param_owned;
@@ -11141,14 +11303,26 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
             return makeVoid();
         }
     }
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[lps] begin tree=%d\n", (int)tree);
+    }
     shellCollectJobs();
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[lps] jobs-collected count=%zu\n", gShellJobCount);
+    }
 
     size_t snapshot_cap = vprocSnapshot(NULL, 0);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[lps] snapshot-cap=%zu\n", snapshot_cap);
+    }
     VProcSnapshot *snapshots = NULL;
     if (snapshot_cap > 0) {
         snapshots = (VProcSnapshot *)calloc(snapshot_cap, sizeof(VProcSnapshot));
     }
     size_t snapshot_count = snapshots ? vprocSnapshot(snapshots, snapshot_cap) : 0;
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[lps] snapshot-count=%zu\n", snapshot_count);
+    }
 
     size_t seen_cap = snapshot_count + gShellJobCount * 2 + 4;
     pid_t *seen = (pid_t *)calloc(seen_cap ? seen_cap : 1, sizeof(pid_t));

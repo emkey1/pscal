@@ -2855,6 +2855,14 @@ static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty);
 static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid);
 static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
 static __thread bool gVprocPipelineStage = false;
+typedef void (*VprocStopWaitHookFn)(void);
+static __thread VprocStopWaitHookFn gVprocStopWaitBeforeHook = NULL;
+static __thread VprocStopWaitHookFn gVprocStopWaitAfterHook = NULL;
+
+void vprocSetStopWaitHooks(void (*before_hook)(void), void (*after_hook)(void)) {
+    gVprocStopWaitBeforeHook = before_hook;
+    gVprocStopWaitAfterHook = after_hook;
+}
 
 __attribute__((weak)) void PSCALRuntimeOnProcessGroupEmpty(int pgid);
 
@@ -3045,7 +3053,8 @@ static bool vprocEntryPrefersControlBytePassthrough(const VProcTaskEntry *entry)
     return false;
 }
 
-static bool vprocForegroundGroupPrefersControlBytes(int sid, int fg_pgid, int shell_pid) {
+static bool vprocForegroundGroupPrefersControlBytes(int sid, int fg_pgid, int shell_pid, int sig) {
+    (void)sig;
     if (fg_pgid <= 0) {
         return false;
     }
@@ -3741,6 +3750,13 @@ bool vprocWaitIfStopped(VProc *vp) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         return false;
     }
+    bool should_wait = (entry && entry->stopped && !entry->exited);
+    if (should_wait && gVprocStopWaitBeforeHook) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        gVprocStopWaitBeforeHook();
+        pthread_mutex_lock(&gVProcTasks.mu);
+        entry = vprocTaskFindLocked(pid);
+    }
     while (entry && entry->stopped && !entry->exited) {
         waited = true;
         pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
@@ -3749,6 +3765,9 @@ bool vprocWaitIfStopped(VProc *vp) {
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (waited && gVprocStopWaitAfterHook) {
+        gVprocStopWaitAfterHook();
+    }
     return waited;
 }
 
@@ -4415,7 +4434,7 @@ static bool vprocDispatchControlSignalToForeground(int shell_pid,
             sid = shell_entry->sid;
         }
         pthread_mutex_unlock(&gVProcTasks.mu);
-        if (vprocForegroundGroupPrefersControlBytes(sid, target_fgid, shell_pid)) {
+        if (vprocForegroundGroupPrefersControlBytes(sid, target_fgid, shell_pid, sig)) {
             return false;
         }
         if (vprocToolDebugEnabled()) {
@@ -4651,9 +4670,10 @@ static void *vprocSessionInputThread(void *arg) {
                 pthread_mutex_unlock(&input->mu);
                 continue;
             }
+            int sig = (ch == 3) ? SIGINT : SIGTSTP;
             bool remote_passthrough = (fg_pgid > 0 &&
                                        !shell_foreground &&
-                                       vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid));
+                                       vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid, sig));
             if (remote_passthrough && input) {
                 pthread_mutex_lock(&input->mu);
                 if (vprocEnsureSessionInputWritableLocked(input, 1)) {
@@ -4664,7 +4684,6 @@ static void *vprocSessionInputThread(void *arg) {
                 pthread_mutex_unlock(&input->mu);
                 continue;
             }
-            int sig = (ch == 3) ? SIGINT : SIGTSTP;
             int shell_hint = ctx->shell_pid;
             if (shell_hint <= 0 && session && session->shell_pid > 0) {
                 shell_hint = session->shell_pid;
@@ -4913,6 +4932,7 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
     if (input->interrupt_pending) {
         input->interrupt_pending = false;
         pthread_mutex_unlock(&input->mu);
+        (void)vprocWaitIfStopped(vprocCurrent());
         errno = EINTR;
         return -1;
     }
@@ -9504,7 +9524,7 @@ static bool vprocRequestControlSignalForSessionInternal(uint64_t session_id,
         }
     }
 
-    if (vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid)) {
+    if (vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid, sig)) {
         return false;
     }
 

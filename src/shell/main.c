@@ -3007,6 +3007,10 @@ static char *readInteractiveLine(const char *prompt,
             break;
         }
 
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-read] ch=%d\\n", (int)ch);
+        }
+
         if (ch == '\r' || ch == '\n') {
             shellWriteStdoutChar('\n');
             done = true;
@@ -3767,12 +3771,21 @@ static char *readInteractiveLine(const char *prompt,
         interactiveUpdateScratch(&scratch, buffer, length);
     }
     shellSetPromptReadActive(false);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[prompt-read] loop-exit done=%d eof=%d len=%zu\n", (int)done, (int)eof_requested, length);
+    }
 
     if (installed_sigint_handler) {
         interactiveRestoreSigintHandler();
     }
     interactiveRestoreSigtstpHandler();
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[prompt-read] restoring-termios\n");
+    }
     interactiveRestoreTerminal();
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[prompt-read] restored-termios\n");
+    }
     free(scratch);
     free(kill_buffer);
 
@@ -3869,6 +3882,9 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         } else {
             read = (ssize_t)strlen(line);
         }
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-loop] line-read bytes=%zd text='%s'\n", read, line ? line : "(null)");
+        }
         free(prompt_storage);
         bool only_whitespace = true;
         for (ssize_t i = 0; i < read; ++i) {
@@ -3904,6 +3920,9 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         }
         free(line);
         line = expanded_line;
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-loop] post-history line='%s'\n", line ? line : "(null)");
+        }
 
         char *rewritten_line = interactiveRewriteCombinedRedirects(line);
         if (!rewritten_line) {
@@ -3919,6 +3938,9 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             fprintf(stderr, "exsh: failed to expand home directory\n");
             free(line);
             continue;
+        }
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-loop] running line='%s'\n", expanded_tilde);
         }
         shellRuntimeRecordHistory(line);
         bool exit_requested = false;
