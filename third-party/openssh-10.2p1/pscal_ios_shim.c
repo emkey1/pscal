@@ -280,6 +280,123 @@ static bool pscal_ios_virtual_tty_exists(int fd) {
     return pscal_ios_virtual_tty_snapshot(fd, NULL);
 }
 
+static bool pscal_ios_stream_uses_session_write(FILE *stream) {
+    return stream == stdout || stream == stderr;
+}
+
+static int pscal_ios_vfprintf(FILE *stream, const char *format, va_list ap) {
+    if (!stream || !format) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (!pscal_ios_stream_uses_session_write(stream)) {
+        return vfprintf(stream, format, ap);
+    }
+
+    va_list measure_ap;
+    va_copy(measure_ap, ap);
+    int required = vsnprintf(NULL, 0, format, measure_ap);
+    va_end(measure_ap);
+    if (required < 0) {
+        return -1;
+    }
+
+    size_t len = (size_t)required;
+    char stack_buf[512];
+    char *dyn_buf = NULL;
+    char *buf = stack_buf;
+    if (len + 1 > sizeof(stack_buf)) {
+        dyn_buf = (char *)malloc(len + 1);
+        if (!dyn_buf) {
+            errno = ENOMEM;
+            return -1;
+        }
+        buf = dyn_buf;
+    }
+
+    va_list write_ap;
+    va_copy(write_ap, ap);
+    int rendered = vsnprintf(buf, len + 1, format, write_ap);
+    va_end(write_ap);
+    if (rendered < 0) {
+        free(dyn_buf);
+        return -1;
+    }
+
+    int out_fd = fileno(stream);
+    if (out_fd < 0) {
+        free(dyn_buf);
+        errno = EBADF;
+        return -1;
+    }
+
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = pscal_ios_write(out_fd, buf + off, len - off);
+        if (n <= 0) {
+            free(dyn_buf);
+            return -1;
+        }
+        off += (size_t)n;
+    }
+
+    free(dyn_buf);
+    return rendered;
+}
+
+int pscal_ios_fprintf(FILE *stream, const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    int rc = pscal_ios_vfprintf(stream, format, ap);
+    va_end(ap);
+    return rc;
+}
+
+int pscal_ios_printf(const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    int rc = pscal_ios_vfprintf(stdout, format, ap);
+    va_end(ap);
+    return rc;
+}
+
+int pscal_ios_fputs(const char *s, FILE *stream) {
+    if (!stream || !s) {
+        errno = EINVAL;
+        return EOF;
+    }
+    if (!pscal_ios_stream_uses_session_write(stream)) {
+        return fputs(s, stream);
+    }
+    int out_fd = fileno(stream);
+    if (out_fd < 0) {
+        errno = EBADF;
+        return EOF;
+    }
+    size_t len = strlen(s);
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = pscal_ios_write(out_fd, s + off, len - off);
+        if (n <= 0) {
+            return EOF;
+        }
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+int pscal_ios_puts(const char *s) {
+    const char *text = s ? s : "(null)";
+    int rc = pscal_ios_fputs(text, stdout);
+    if (rc == EOF) {
+        return EOF;
+    }
+    if (pscal_ios_write(STDOUT_FILENO, "\n", 1) != 1) {
+        return EOF;
+    }
+    return 1;
+}
+
 static int pscal_ios_translate_fd(int fd) {
     VProc *vp = vprocCurrent();
     if (!vp) {
@@ -818,7 +935,25 @@ int pscal_ios_tcsetattr(int fd, int optional_actions,
 int pscal_ios_isatty(int fd) {
     VProc *vp = vprocCurrent();
     if (vp) {
-        return vprocIsattyShim(fd);
+        int rc = vprocIsattyShim(fd);
+        if (rc == 1) {
+            return 1;
+        }
+        if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+            if (pscal_ios_session_stdio_matches(fd)) {
+                return 1;
+            }
+            if (fd == STDIN_FILENO && pscalRuntimeStdinIsInteractive()) {
+                return 1;
+            }
+            if (fd == STDOUT_FILENO && pscalRuntimeStdoutIsInteractive()) {
+                return 1;
+            }
+            if (fd == STDERR_FILENO && pscalRuntimeStderrIsInteractive()) {
+                return 1;
+            }
+        }
+        return rc;
     }
     pscal_ios_ensure_std_virtual_tty(fd);
     if (pscal_ios_virtual_tty_exists(fd)) {

@@ -26,6 +26,10 @@ int pscal_ios_open(const char *path, int oflag, ...);
 int pscal_ios_openat(int fd, const char *path, int oflag, ...);
 ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte);
 ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte);
+int pscal_ios_fprintf(FILE *stream, const char *format, ...);
+int pscal_ios_printf(const char *format, ...);
+int pscal_ios_fputs(const char *s, FILE *stream);
+int pscal_ios_puts(const char *s);
 int pscal_ios_close(int fd);
 int pscal_ios_dup(int fd);
 int pscal_ios_dup2(int fd, int target);
@@ -70,6 +74,10 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define open(...) pscal_ios_open(__VA_ARGS__)
 # define openat(...) pscal_ios_openat(__VA_ARGS__)
 # define write(...) pscal_ios_write(__VA_ARGS__)
+# define fprintf(...) pscal_ios_fprintf(__VA_ARGS__)
+# define printf(...) pscal_ios_printf(__VA_ARGS__)
+# define fputs(...) pscal_ios_fputs(__VA_ARGS__)
+# define puts(...) pscal_ios_puts(__VA_ARGS__)
 # define close(...) pscal_ios_close(__VA_ARGS__)
 # define pipe(...) vprocPipeShim(__VA_ARGS__)
 # define socket(...) vprocSocketShim(__VA_ARGS__)

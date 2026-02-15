@@ -49,6 +49,7 @@ typedef void EditLine;
 #include <crt_externs.h>
 #ifdef PSCAL_TARGET_IOS
 #include <mach-o/dyld.h>
+#include "common/runtime_tty.h"
 #endif
 #include <unistd.h>
 
@@ -122,6 +123,73 @@ int sftp_glob(struct sftp_conn *, const char *, int,
     int (*)(const char *, int), glob_t *); /* proto for sftp-glob.c */
 
 extern char *__progname;
+
+#ifdef PSCAL_TARGET_IOS
+static const char *
+pscal_sftp_basename(const char *path)
+{
+	const char *slash;
+
+	if (path == NULL)
+		return NULL;
+	slash = strrchr(path, '/');
+	return slash != NULL ? slash + 1 : path;
+}
+
+static int
+pscal_sftp_transport_uses_tool_runner(const char *program)
+{
+	const char *base = pscal_sftp_basename(program);
+
+	return base != NULL && strcmp(base, "pscal_tool_runner") == 0;
+}
+
+static int
+pscal_sftp_stdin_is_interactive(void)
+{
+	if (isatty(STDIN_FILENO))
+		return 1;
+	if (pscalRuntimeStdinIsInteractive())
+		return 1;
+	return 0;
+}
+
+static int
+pscal_sftp_readline(char *buf, size_t buflen)
+{
+	size_t off = 0;
+
+	if (buf == NULL || buflen == 0)
+		return -1;
+	while (off + 1 < buflen) {
+		char ch = '\0';
+		ssize_t n = read(STDIN_FILENO, &ch, 1);
+		if (n == 1) {
+			buf[off++] = ch;
+			if (ch == '\n')
+				break;
+			continue;
+		}
+		if (n == 0) {
+			if (off == 0)
+				return -1;
+			break;
+		}
+		if (errno == EINTR)
+			continue;
+		return -1;
+	}
+	buf[off] = '\0';
+	if (off + 1 == buflen) {
+		char ch = '\0';
+		while (read(STDIN_FILENO, &ch, 1) == 1) {
+			if (ch == '\n')
+				break;
+		}
+	}
+	return 0;
+}
+#endif
 
 /* Separators for interactive commands */
 #define WHITESPACE " \t\r\n"
@@ -2232,7 +2300,13 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 	extern char *__progname;
 	struct complete_ctx complete_ctx;
 
+#if defined(PSCAL_TARGET_IOS)
+	/* On iOS, libedit and stdio FILE* reads may bypass virtualised vproc
+	 * stdio. Keep line input on read(2) so the shimmed fd path is used. */
+	if (0) {
+#else
 	if (!batchmode && isatty(STDIN_FILENO)) {
+#endif
 		if ((el = el_init(__progname, stdin, stdout, stderr)) == NULL)
 			fatal("Couldn't initialise editline");
 		if ((hl = history_init()) == NULL)
@@ -2303,7 +2377,20 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(infile, NULL, _IOLBF, 0);
 
+#if defined(PSCAL_TARGET_IOS)
+	interactive = !batchmode && pscal_sftp_stdin_is_interactive();
+	if (getenv("PSCALI_SSH_DEBUG") != NULL) {
+		fprintf(stderr,
+		    "[sftp-ios] interactive=%d batch=%d isatty(stdin)=%d runtime_stdin=%d infile_is_stdin=%d\n",
+		    interactive,
+		    batchmode,
+		    isatty(STDIN_FILENO),
+		    pscalRuntimeStdinIsInteractive() ? 1 : 0,
+		    infile == stdin ? 1 : 0);
+	}
+#else
 	interactive = !batchmode && isatty(STDIN_FILENO);
+#endif
 	err = 0;
 	for (;;) {
 		struct sigaction sa;
@@ -2321,6 +2408,17 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 				printf("sftp> ");
 				fflush(stdout);
 			}
+#if defined(PSCAL_TARGET_IOS)
+			if (infile == stdin) {
+				if (pscal_sftp_readline(cmd, sizeof(cmd)) != 0) {
+					if (interactive)
+						printf("\n");
+					if (interrupted)
+						continue;
+					break;
+				}
+			} else
+#endif
 			if (fgets(cmd, sizeof(cmd), infile) == NULL) {
 				if (interactive)
 					printf("\n");
@@ -2381,6 +2479,10 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	int c_in, c_out;
 #ifdef USE_PIPES
 	int pin[2], pout[2];
+#if defined(PSCAL_TARGET_IOS)
+	volatile int pin_parent[2] = {-1, -1};
+	volatile int pout_parent[2] = {-1, -1};
+#endif
 
 	if ((pipe(pin) == -1) || (pipe(pout) == -1))
 		fatal("pipe: %s", strerror(errno));
@@ -2388,27 +2490,80 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	*out = pout[1];
 	c_in = pout[0];
 	c_out = pin[1];
+#if defined(PSCAL_TARGET_IOS)
+	pin_parent[0] = pin[0];
+	pin_parent[1] = pin[1];
+	pout_parent[0] = pout[0];
+	pout_parent[1] = pout[1];
+#endif
 #else /* USE_PIPES */
 	int inout[2];
+#if defined(PSCAL_TARGET_IOS)
+	volatile int inout_parent[2] = {-1, -1};
+#endif
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, inout) == -1)
 		fatal("socketpair: %s", strerror(errno));
-	*in = *out = inout[0];
-	c_in = c_out = inout[1];
+	/* Match scp's working iOS orientation: parent keeps endpoint[1],
+	 * child dup2()s endpoint[0] as stdio. */
+	c_in = c_out = inout[0];
+	*in = *out = inout[1];
+#if defined(PSCAL_TARGET_IOS)
+	inout_parent[0] = inout[0];
+	inout_parent[1] = inout[1];
+#endif
 #endif /* USE_PIPES */
 
-	if ((sshpid = fork()) == -1)
+	if ((sshpid = fork()) == -1) {
+#ifdef USE_PIPES
+#if defined(PSCAL_TARGET_IOS)
+		if (pin_parent[0] >= 0) close(pin_parent[0]);
+		if (pin_parent[1] >= 0) close(pin_parent[1]);
+		if (pout_parent[0] >= 0) close(pout_parent[0]);
+		if (pout_parent[1] >= 0) close(pout_parent[1]);
+#else
+		close(pin[0]);
+		close(pin[1]);
+		close(pout[0]);
+		close(pout[1]);
+#endif
+#else
+#if defined(PSCAL_TARGET_IOS)
+		if (inout_parent[0] >= 0) close(inout_parent[0]);
+		if (inout_parent[1] >= 0) close(inout_parent[1]);
+#else
+		close(inout[0]);
+		close(inout[1]);
+#endif
+#endif
 		fatal("fork: %s", strerror(errno));
-	else if (sshpid == 0) {
+	} else if (sshpid == 0) {
 		if ((dup2(c_in, STDIN_FILENO) == -1) ||
 		    (dup2(c_out, STDOUT_FILENO) == -1)) {
 			fprintf(stderr, "dup2: %s\n", strerror(errno));
 			_exit(1);
 		}
-		close(*in);
-		close(*out);
-		close(c_in);
-		close(c_out);
+#ifdef USE_PIPES
+#if defined(PSCAL_TARGET_IOS)
+		close(pin_parent[1]);
+		close(pout_parent[0]);
+		close(pin_parent[0]);
+		close(pout_parent[1]);
+#else
+		close(pin[1]);
+		close(pout[0]);
+		close(pin[0]);
+		close(pout[1]);
+#endif
+#else
+#if defined(PSCAL_TARGET_IOS)
+		close(inout_parent[1]);
+		close(inout_parent[0]);
+#else
+		close(inout[1]);
+		close(inout[0]);
+#endif
+#endif
 
 		/*
 		 * The underlying ssh is in the same process group, so we must
@@ -2431,8 +2586,25 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	ssh_signal(SIGTTIN, suspchild);
 	ssh_signal(SIGTTOU, suspchild);
 	ssh_signal(SIGCHLD, sigchld_handler);
+#ifdef USE_PIPES
+#if defined(PSCAL_TARGET_IOS)
+	close(pout_parent[0]);
+	close(pin_parent[1]);
+	*in = pin_parent[0];
+	*out = pout_parent[1];
+#else
 	close(c_in);
 	close(c_out);
+#endif
+#else
+#if defined(PSCAL_TARGET_IOS)
+	close(inout_parent[0]);
+	*in = *out = inout_parent[1];
+#else
+	close(c_in);
+	close(c_out);
+#endif
+#endif
 }
 
 static void
@@ -2509,7 +2681,8 @@ main(int argc, char **argv)
 	args.list = NULL;
 	addargs(&args, "%s", ssh_program);
 #ifdef PSCAL_TARGET_IOS
-	addargs(&args, "ssh");
+	if (pscal_sftp_transport_uses_tool_runner(ssh_program))
+		addargs(&args, "ssh");
 #endif
 	addargs(&args, "-oForwardX11 no");
 	addargs(&args, "-oPermitLocalCommand no");
@@ -2743,10 +2916,18 @@ main(int argc, char **argv)
 	if (batchmode)
 		fclose(infile);
 
-	while (waitpid(sshpid, NULL, 0) == -1 && sshpid > 1)
-		if (errno != EINTR)
-			fatal("Couldn't wait for ssh process: %s",
-			    strerror(errno));
+	while (waitpid(sshpid, NULL, 0) == -1 && sshpid > 1) {
+		if (errno == EINTR)
+			continue;
+#ifdef PSCAL_TARGET_IOS
+		if (errno == ECHILD) {
+			sshpid = -1;
+			break;
+		}
+#endif
+		fatal("Couldn't wait for ssh process: %s",
+		    strerror(errno));
+	}
 
 #ifdef PSCAL_TARGET_IOS
 	pscal_openssh_pop_exit_context(&ctx);
