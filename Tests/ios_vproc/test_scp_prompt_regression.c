@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -239,6 +240,45 @@ static void read_exact_from_stdin_shim(char *out, size_t len) {
     }
 }
 
+typedef struct {
+    pthread_mutex_t mu;
+    bool started;
+    bool done;
+    int poll_fd;
+    int poll_rc;
+    short revents;
+    ssize_t read_rc;
+    char ch;
+} poll_read_ctx;
+
+static void *poll_then_read_thread(void *arg) {
+    poll_read_ctx *ctx = (poll_read_ctx *)arg;
+    pthread_mutex_lock(&ctx->mu);
+    ctx->started = true;
+    pthread_mutex_unlock(&ctx->mu);
+
+    struct pollfd pfd;
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = (ctx->poll_fd >= 0) ? ctx->poll_fd : STDIN_FILENO;
+    pfd.events = POLLIN;
+
+    int poll_rc = vprocPollShim(&pfd, 1, 1200);
+    ssize_t read_rc = -1;
+    char ch = '\0';
+    if (poll_rc > 0 && (pfd.revents & POLLIN)) {
+        read_rc = vprocReadShim(pfd.fd, &ch, 1);
+    }
+
+    pthread_mutex_lock(&ctx->mu);
+    ctx->poll_rc = poll_rc;
+    ctx->revents = pfd.revents;
+    ctx->read_rc = read_rc;
+    ctx->ch = ch;
+    ctx->done = true;
+    pthread_mutex_unlock(&ctx->mu);
+    return NULL;
+}
+
 int main(void) {
     fprintf(stderr, "TEST scp_prompt_first_char_does_not_terminate\n");
 
@@ -258,7 +298,7 @@ int main(void) {
         session->stderr_host_fd = -1;
     }
 
-    struct pscal_fd *stdin_fd = create_interactive_input_fd(1, 1);
+    struct pscal_fd *stdin_fd = create_interactive_input_fd(1, -1);
     session->stdin_pscal_fd = stdin_fd;
     session->stdout_pscal_fd = pscal_fd_retain(stdin_fd);
     session->stderr_pscal_fd = pscal_fd_retain(stdin_fd);
@@ -282,6 +322,10 @@ int main(void) {
     vprocSetParent(vprocPid(child_vp), shell_pid);
     assert(vprocSetSid(vprocPid(child_vp), shell_pid) == 0);
     assert(vprocSetPgid(vprocPid(child_vp), vprocPid(child_vp)) == 0);
+    assert(vprocAdoptPscalStdio(child_vp,
+                                session->stdin_pscal_fd,
+                                session->stdout_pscal_fd,
+                                session->stderr_pscal_fd) == 0);
 
     scp_like_prompt_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
@@ -324,6 +368,100 @@ int main(void) {
     read_exact_from_stdin_shim(probe_out, sizeof(probe));
     vprocDeactivate();
     assert(memcmp(probe_out, probe, sizeof(probe)) == 0);
+
+    /* Regression guard: tools like ssh gate stdin via poll/ppoll before read.
+     * When stdin reads are session-buffered, poll must still report readiness. */
+    poll_read_ctx poll_ctx;
+    memset(&poll_ctx, 0, sizeof(poll_ctx));
+    assert(pthread_mutex_init(&poll_ctx.mu, NULL) == 0);
+    poll_ctx.poll_fd = STDIN_FILENO;
+
+    pthread_t poll_thread = 0;
+    assert(vprocSpawnThread(child_vp, poll_then_read_thread, &poll_ctx, &poll_thread) == 0);
+    int waited_ms = 0;
+    while (waited_ms <= 500) {
+        pthread_mutex_lock(&poll_ctx.mu);
+        bool started = poll_ctx.started;
+        pthread_mutex_unlock(&poll_ctx.mu);
+        if (started) {
+            break;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    assert(waited_ms <= 500);
+
+    static const unsigned char poll_probe[] = {'Q'};
+    interactive_input_push(stdin_fd, poll_probe, sizeof(poll_probe));
+
+    waited_ms = 0;
+    while (waited_ms <= 2000) {
+        pthread_mutex_lock(&poll_ctx.mu);
+        bool done = poll_ctx.done;
+        pthread_mutex_unlock(&poll_ctx.mu);
+        if (done) {
+            break;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    assert(waited_ms <= 2000);
+    pthread_join(poll_thread, NULL);
+    pthread_mutex_lock(&poll_ctx.mu);
+    assert(poll_ctx.poll_rc > 0);
+    assert((poll_ctx.revents & POLLIN) != 0);
+    assert(poll_ctx.read_rc == 1);
+    assert(poll_ctx.ch == 'Q');
+    pthread_mutex_unlock(&poll_ctx.mu);
+    pthread_mutex_destroy(&poll_ctx.mu);
+
+    /* Additional guard: ssh may poll a dup() of stdin, not fd 0 directly. */
+    int dup_stdin = vprocDup(child_vp, STDIN_FILENO);
+    assert(dup_stdin >= 0);
+    poll_read_ctx dup_poll_ctx;
+    memset(&dup_poll_ctx, 0, sizeof(dup_poll_ctx));
+    assert(pthread_mutex_init(&dup_poll_ctx.mu, NULL) == 0);
+    dup_poll_ctx.poll_fd = dup_stdin;
+
+    pthread_t dup_poll_thread = 0;
+    assert(vprocSpawnThread(child_vp, poll_then_read_thread, &dup_poll_ctx, &dup_poll_thread) == 0);
+    waited_ms = 0;
+    while (waited_ms <= 500) {
+        pthread_mutex_lock(&dup_poll_ctx.mu);
+        bool started = dup_poll_ctx.started;
+        pthread_mutex_unlock(&dup_poll_ctx.mu);
+        if (started) {
+            break;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    assert(waited_ms <= 500);
+
+    static const unsigned char dup_poll_probe[] = {'R'};
+    interactive_input_push(stdin_fd, dup_poll_probe, sizeof(dup_poll_probe));
+
+    waited_ms = 0;
+    while (waited_ms <= 2000) {
+        pthread_mutex_lock(&dup_poll_ctx.mu);
+        bool done = dup_poll_ctx.done;
+        pthread_mutex_unlock(&dup_poll_ctx.mu);
+        if (done) {
+            break;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    assert(waited_ms <= 2000);
+    pthread_join(dup_poll_thread, NULL);
+    pthread_mutex_lock(&dup_poll_ctx.mu);
+    assert(dup_poll_ctx.poll_rc > 0);
+    assert((dup_poll_ctx.revents & POLLIN) != 0);
+    assert(dup_poll_ctx.read_rc == 1);
+    assert(dup_poll_ctx.ch == 'R');
+    pthread_mutex_unlock(&dup_poll_ctx.mu);
+    pthread_mutex_destroy(&dup_poll_ctx.mu);
+    assert(vprocClose(child_vp, dup_stdin) == 0);
 
     pthread_mutex_destroy(&ctx.mu);
     vprocDestroy(child_vp);

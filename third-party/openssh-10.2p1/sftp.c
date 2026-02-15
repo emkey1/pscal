@@ -155,7 +155,17 @@ pscal_sftp_stdin_is_interactive(void)
 }
 
 static int
-pscal_sftp_readline(char *buf, size_t buflen)
+pscal_sftp_stdin_echo_enabled(void)
+{
+	struct termios tio;
+
+	if (tcgetattr(STDIN_FILENO, &tio) != 0)
+		return 0;
+	return (tio.c_lflag & ECHO) != 0;
+}
+
+static int
+pscal_sftp_readline(char *buf, size_t buflen, int manual_echo)
 {
 	size_t off = 0;
 
@@ -165,7 +175,23 @@ pscal_sftp_readline(char *buf, size_t buflen)
 		char ch = '\0';
 		ssize_t n = read(STDIN_FILENO, &ch, 1);
 		if (n == 1) {
+			if (manual_echo && (ch == '\b' || ch == 0x7f)) {
+				if (off > 0 && buf[off - 1] != '\n') {
+					off--;
+					(void)write(STDOUT_FILENO, "\b \b", 3);
+				}
+				continue;
+			}
+			if (ch == '\r')
+				ch = '\n';
 			buf[off++] = ch;
+			if (manual_echo) {
+				if (ch == '\n') {
+					(void)write(STDOUT_FILENO, "\n", 1);
+				} else {
+					(void)write(STDOUT_FILENO, &ch, 1);
+				}
+			}
 			if (ch == '\n')
 				break;
 			continue;
@@ -183,7 +209,15 @@ pscal_sftp_readline(char *buf, size_t buflen)
 	if (off + 1 == buflen) {
 		char ch = '\0';
 		while (read(STDIN_FILENO, &ch, 1) == 1) {
-			if (ch == '\n')
+			if (manual_echo) {
+				char out = ch == '\r' ? '\n' : ch;
+				if (out == '\n') {
+					(void)write(STDOUT_FILENO, "\n", 1);
+				} else if (out != '\b' && out != 0x7f) {
+					(void)write(STDOUT_FILENO, &out, 1);
+				}
+			}
+			if (ch == '\n' || ch == '\r')
 				break;
 		}
 	}
@@ -2293,6 +2327,9 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 	char *dir = NULL, *startdir = NULL;
 	char cmd[2048];
 	int err, interactive;
+#if defined(PSCAL_TARGET_IOS)
+	int manual_echo = 0;
+#endif
 	EditLine *el = NULL;
 #ifdef USE_LIBEDIT
 	History *hl = NULL;
@@ -2379,14 +2416,17 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 
 #if defined(PSCAL_TARGET_IOS)
 	interactive = !batchmode && pscal_sftp_stdin_is_interactive();
+	if (interactive && infile == stdin && !pscal_sftp_stdin_echo_enabled())
+		manual_echo = 1;
 	if (getenv("PSCALI_SSH_DEBUG") != NULL) {
 		fprintf(stderr,
-		    "[sftp-ios] interactive=%d batch=%d isatty(stdin)=%d runtime_stdin=%d infile_is_stdin=%d\n",
+		    "[sftp-ios] interactive=%d batch=%d isatty(stdin)=%d runtime_stdin=%d infile_is_stdin=%d manual_echo=%d\n",
 		    interactive,
 		    batchmode,
 		    isatty(STDIN_FILENO),
 		    pscalRuntimeStdinIsInteractive() ? 1 : 0,
-		    infile == stdin ? 1 : 0);
+		    infile == stdin ? 1 : 0,
+		    manual_echo);
 	}
 #else
 	interactive = !batchmode && isatty(STDIN_FILENO);
@@ -2410,7 +2450,7 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 			}
 #if defined(PSCAL_TARGET_IOS)
 			if (infile == stdin) {
-				if (pscal_sftp_readline(cmd, sizeof(cmd)) != 0) {
+				if (pscal_sftp_readline(cmd, sizeof(cmd), manual_echo) != 0) {
 					if (interactive)
 						printf("\n");
 					if (interrupted)

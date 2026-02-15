@@ -4647,6 +4647,7 @@ static void *vprocSessionInputThread(void *arg) {
                         pthread_cond_broadcast(&input->cv);
                     }
                     pthread_mutex_unlock(&input->mu);
+                    pscal_fd_poll_wakeup(NULL, POLLIN);
                 }
                 break;
             }
@@ -4659,6 +4660,18 @@ static void *vprocSessionInputThread(void *arg) {
                     /* PTY slave reads may return 0 transiently when no byte is
                      * ready (e.g. VMIN=0). Treat that as "would block" instead
                      * of EOF so nested ssh/scp password reads do not exit early. */
+                    usleep(retry_sleep_us);
+                    if (retry_sleep_us < 16000) {
+                        retry_sleep_us <<= 1;
+                    }
+                    continue;
+                }
+                if (r == _EIO && session && session->pty_active &&
+                    (pscal_fd == session->stdin_pscal_fd ||
+                     pscal_fd == session->pty_slave)) {
+                    /* Some PTY-backed readers surface transient EIO between
+                     * keystrokes; keep waiting so prompt loops don't terminate
+                     * after the first typed character. */
                     usleep(retry_sleep_us);
                     if (retry_sleep_us < 16000) {
                         retry_sleep_us <<= 1;
@@ -4693,6 +4706,7 @@ static void *vprocSessionInputThread(void *arg) {
                         pthread_cond_broadcast(&input->cv);
                     }
                     pthread_mutex_unlock(&input->mu);
+                    pscal_fd_poll_wakeup(NULL, POLLIN);
                 }
                 break;
             }
@@ -4729,6 +4743,7 @@ static void *vprocSessionInputThread(void *arg) {
                 }
                 pthread_cond_broadcast(&input->cv);
                 pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
                 continue;
             }
             int sig = (ch == 3) ? SIGINT : SIGTSTP;
@@ -4743,6 +4758,7 @@ static void *vprocSessionInputThread(void *arg) {
                 }
                 pthread_cond_broadcast(&input->cv);
                 pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
                 continue;
             }
             int shell_hint = ctx->shell_pid;
@@ -4782,12 +4798,14 @@ static void *vprocSessionInputThread(void *arg) {
                 }
                 pthread_cond_broadcast(&input->cv);
                 pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
             }
             if (input) {
                 pthread_mutex_lock(&input->mu);
                 input->interrupt_pending = true;
                 pthread_cond_broadcast(&input->cv);
                 pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
             }
             continue;
         }
@@ -4801,6 +4819,7 @@ static void *vprocSessionInputThread(void *arg) {
             pthread_cond_signal(&input->cv);
         }
         pthread_mutex_unlock(&input->mu);
+        pscal_fd_poll_wakeup(NULL, POLLIN);
     }
     if (input) {
         pthread_mutex_lock(&input->mu);
@@ -4812,6 +4831,7 @@ static void *vprocSessionInputThread(void *arg) {
             pthread_cond_broadcast(&input->cv);
         }
         pthread_mutex_unlock(&input->mu);
+        pscal_fd_poll_wakeup(NULL, POLLIN);
     }
     if (session) {
         vprocSessionStdioActivate(NULL);
@@ -5100,6 +5120,7 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
                 input->cap);
     }
     pthread_mutex_unlock(&input->mu);
+    pscal_fd_poll_wakeup(NULL, POLLIN);
     return true;
 }
 
@@ -10967,17 +10988,16 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     struct pscal_fd *pscal_fd = NULL;
     int host = vprocResolveFdForShim(vp, fd, 1, &pscal_fd);
     if (pscal_fd) {
-        if (fd == STDIN_FILENO && !gVprocPipelineStage) {
+        if (!gVprocPipelineStage) {
             VProcSessionStdio *session = vprocSessionStdioCurrent();
             if (session &&
                 !vprocSessionStdioIsDefault(session) &&
                 (session->stdin_pscal_fd == pscal_fd ||
                  session->pty_slave == pscal_fd)) {
-                /* When stdin is backed by a session PTY/pscal fd, a background
-                 * session-input reader thread may already be draining the same
-                 * stream. Route foreground stdin reads through the shared
-                 * session queue to avoid competing consumers that can drop
-                 * alternating keystrokes after nested tools (scp/ssh) exit. */
+                /* Foreground tools may poll/read a dup() of stdin instead of
+                 * fd 0 directly (OpenSSH does this). A background session-input
+                 * reader thread already drains this PTY stream, so route reads
+                 * via the shared session queue to avoid competing consumers. */
                 pscal_fd_close(pscal_fd);
                 return vprocSessionReadInputShimMode(buf, count, false);
             }
@@ -12423,6 +12443,58 @@ static bool vprocSelectScratchEnsure(size_t needed) {
     return true;
 }
 
+static short vprocSessionInputPollEvents(VProcSessionStdio *session,
+                                         int logical_fd,
+                                         struct pscal_fd *pscal_fd,
+                                         short requested_events) {
+    if (!session || !pscal_fd || gVprocPipelineStage) {
+        return 0;
+    }
+    (void)logical_fd;
+    if (vprocSessionStdioIsDefault(session)) {
+        return 0;
+    }
+    if (!(session->stdin_pscal_fd == pscal_fd || session->pty_slave == pscal_fd)) {
+        return 0;
+    }
+
+    int read_mask = POLLIN;
+#ifdef POLLPRI
+    read_mask |= POLLPRI;
+#endif
+#ifdef POLLRDNORM
+    read_mask |= POLLRDNORM;
+#endif
+#ifdef POLLRDBAND
+    read_mask |= POLLRDBAND;
+#endif
+    if ((requested_events & read_mask) == 0) {
+        return 0;
+    }
+
+    VProcSessionInput *input = vprocSessionInputEnsure(session,
+                                                       vprocGetShellSelfPid(),
+                                                       vprocGetKernelPid());
+    if (!input) {
+        return 0;
+    }
+
+    short ready = 0;
+    pthread_mutex_lock(&input->mu);
+    bool has_data = input->len > 0;
+    bool is_eof = input->eof;
+    bool has_interrupt = input->interrupt_pending;
+    pthread_mutex_unlock(&input->mu);
+
+    if (has_data || has_interrupt || is_eof) {
+        ready |= (short)(requested_events & read_mask);
+    }
+    if (is_eof) {
+        ready |= POLLHUP;
+    }
+    return ready;
+}
+
 int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
@@ -12483,9 +12555,9 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     pthread_mutex_unlock(&vp->mu);
 
     int ready_count = 0;
-    int pscal_ready_initial = 0;
     bool has_pscal = false;
     int host_count = 0;
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
     for (nfds_t i = 0; i < nfds; ++i) {
         fds[i].revents = 0;
         if (fds[i].fd < 0) {
@@ -12498,10 +12570,13 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
                 ? pscal_fd->ops->poll(pscal_fd)
                 : POLL_ERR;
             short ready = vprocPollMapReady(pscal_events, fds[i].events);
+            ready |= vprocSessionInputPollEvents(session_stdio,
+                                                 fds[i].fd,
+                                                 pscal_fd,
+                                                 fds[i].events);
             if (ready) {
                 fds[i].revents = ready;
                 ready_count++;
-                pscal_ready_initial++;
             }
             continue;
         }
@@ -12524,72 +12599,118 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         host_count++;
     }
 
-    int host_ready = 0;
-    bool recheck_pscal = false;
-    if (host_count > 0 || has_pscal) {
-        int poll_timeout = (ready_count > 0) ? 0 : timeout;
+    if (ready_count == 0 && (host_count > 0 || has_pscal)) {
+        const int host_count_static = host_count;
         int wake_fd = -1;
+        bool wake_enabled = false;
         if (has_pscal) {
             wake_fd = pscalPollWakeFd();
-            if (wake_fd >= 0) {
-                host_fds[host_count].fd = wake_fd;
-                host_fds[host_count].events = POLLIN;
-                host_fds[host_count].revents = 0;
-                host_index[host_count] = -1;
-                host_count++;
-            }
+            wake_enabled = (wake_fd >= 0);
         }
 
-        if (host_count > 0) {
-            host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_count, poll_timeout);
-            if (host_ready < 0 && ready_count == 0) {
+        uint64_t deadline_ns = 0;
+        if (timeout > 0) {
+            deadline_ns = vprocNowMonoNs() + ((uint64_t)timeout * 1000000ull);
+        }
+        int wait_timeout = timeout;
+
+        for (;;) {
+            int host_poll_count = host_count_static;
+            bool wake_triggered = false;
+
+            for (int j = 0; j < host_count_static; ++j) {
+                host_fds[j].revents = 0;
+            }
+            if (wake_enabled) {
+                host_fds[host_poll_count].fd = wake_fd;
+                host_fds[host_poll_count].events = POLLIN;
+                host_fds[host_poll_count].revents = 0;
+                host_index[host_poll_count] = -1;
+                host_poll_count++;
+            }
+
+            int host_ready = 0;
+            if (host_poll_count > 0) {
+                host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_poll_count, wait_timeout);
+                if (host_ready < 0) {
+                    if (errno == EINTR) {
+                        if (wait_timeout == 0) {
+                            break;
+                        }
+                        goto vproc_poll_update_timeout;
+                    }
+                    for (nfds_t i = 0; i < nfds; ++i) {
+                        if (pscal_fds[i]) {
+                            pscal_fd_close(pscal_fds[i]);
+                        }
+                    }
+                    return -1;
+                }
+            } else if (wait_timeout > 0) {
+                usleep((useconds_t)wait_timeout * 1000u);
+            } else if (wait_timeout < 0) {
+                usleep(1000u);
+            }
+
+            int host_ready_count = 0;
+            for (int j = 0; j < host_count_static; ++j) {
+                int orig = host_index[j];
+                if (orig < 0) {
+                    continue;
+                }
+                if (host_fds[j].revents) {
+                    fds[orig].revents = host_fds[j].revents;
+                    host_ready_count++;
+                }
+            }
+            if (wake_enabled && host_fds[host_poll_count - 1].revents & POLLIN) {
+                pscalPollDrain();
+                wake_triggered = true;
+            }
+
+            int pscal_ready = 0;
+            if (has_pscal && (wake_triggered || host_ready_count == 0)) {
                 for (nfds_t i = 0; i < nfds; ++i) {
-                    if (pscal_fds[i]) {
-                        pscal_fd_close(pscal_fds[i]);
+                    if (!pscal_fds[i]) {
+                        continue;
+                    }
+                    int pscal_events = pscal_fds[i]->ops && pscal_fds[i]->ops->poll
+                        ? pscal_fds[i]->ops->poll(pscal_fds[i])
+                        : POLL_ERR;
+                    short ready = vprocPollMapReady(pscal_events, fds[i].events);
+                    ready |= vprocSessionInputPollEvents(session_stdio,
+                                                         fds[i].fd,
+                                                         pscal_fds[i],
+                                                         fds[i].events);
+                    fds[i].revents = ready;
+                    if (ready) {
+                        pscal_ready++;
                     }
                 }
-                return -1;
             }
-            if (wake_fd >= 0 && (host_fds[host_count - 1].revents & POLLIN)) {
-                pscalPollDrain();
-                recheck_pscal = true;
-            }
-        }
-    }
 
-    if (host_ready > 0) {
-        for (int j = 0; j < host_count; ++j) {
-            int orig = host_index[j];
-            if (orig < 0) {
+            ready_count = host_ready_count + pscal_ready;
+            if (ready_count > 0 || wait_timeout == 0) {
+                break;
+            }
+
+vproc_poll_update_timeout:
+            if (wait_timeout < 0) {
                 continue;
             }
-            if (host_fds[j].revents) {
-                fds[orig].revents = host_fds[j].revents;
-                ready_count++;
+            if (deadline_ns == 0) {
+                break;
+            }
+            uint64_t now_ns = vprocNowMonoNs();
+            if (now_ns >= deadline_ns) {
+                break;
+            }
+            uint64_t remain_ns = deadline_ns - now_ns;
+            wait_timeout = (int)((remain_ns + 999999ull) / 1000000ull);
+            if (wait_timeout <= 0) {
+                break;
             }
         }
-    }
-
-    if (has_pscal && (recheck_pscal || ready_count == 0)) {
-        int host_ready_count = ready_count - pscal_ready_initial;
-        if (host_ready_count < 0) {
-            host_ready_count = 0;
-        }
-        int pscal_ready = 0;
-        for (nfds_t i = 0; i < nfds; ++i) {
-            if (!pscal_fds[i]) {
-                continue;
-            }
-            int pscal_events = pscal_fds[i]->ops && pscal_fds[i]->ops->poll
-                ? pscal_fds[i]->ops->poll(pscal_fds[i])
-                : POLL_ERR;
-            short ready = vprocPollMapReady(pscal_events, fds[i].events);
-            fds[i].revents = ready;
-            if (ready) {
-                pscal_ready++;
-            }
-        }
-        ready_count = host_ready_count + pscal_ready;
     }
 
     for (nfds_t i = 0; i < nfds; ++i) {
