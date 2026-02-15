@@ -53,6 +53,7 @@ typedef struct {
 
 static pthread_mutex_t g_pscal_ios_tty_lock = PTHREAD_MUTEX_INITIALIZER;
 static pscal_ios_virtual_tty g_pscal_ios_virtual_ttys[8];
+__thread sigjmp_buf pscal_ios_fork_jmpbuf;
 
 static int pscal_ios_translate_fd(int fd);
 static int pscal_ios_register_virtual_tty(void);
@@ -977,8 +978,11 @@ int pscal_ios_symlink(const char *target, const char *linkpath) {
     return symlink(target_path, link_target);
 }
 
-pid_t pscal_ios_fork(void) {
-    return vprocSimulatedFork("fork", true);
+pid_t pscal_ios_fork_dispatch(int jump_rc) {
+    if (jump_rc != 0) {
+        return vprocSimulatedForkParentResume();
+    }
+    return vprocSimulatedForkWithEnv("fork", true, &pscal_ios_fork_jmpbuf);
 }
 
 int pscal_ios_execv(const char *path, char *const argv[]) {

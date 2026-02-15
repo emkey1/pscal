@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
+#include <setjmp.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -371,6 +372,10 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
 void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code);
 /* Simulated fork/exec helper for single-process iOS runtime. */
 pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid);
+pid_t vprocSimulatedForkWithEnv(const char *label,
+                                bool inherit_parent_pgid,
+                                sigjmp_buf *parent_env);
+pid_t vprocSimulatedForkParentResume(void);
 int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]);
 
 /* Signal API shims: allow vproc_shim.h to virtualize signal dispositions when
@@ -712,6 +717,19 @@ static inline void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code)
 static inline pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid) {
     (void)label;
     (void)inherit_parent_pgid;
+    errno = ENOSYS;
+    return (pid_t)-1;
+}
+static inline pid_t vprocSimulatedForkWithEnv(const char *label,
+                                              bool inherit_parent_pgid,
+                                              sigjmp_buf *parent_env) {
+    (void)label;
+    (void)inherit_parent_pgid;
+    (void)parent_env;
+    errno = ENOSYS;
+    return (pid_t)-1;
+}
+static inline pid_t vprocSimulatedForkParentResume(void) {
     errno = ENOSYS;
     return (pid_t)-1;
 }

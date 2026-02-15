@@ -121,80 +121,6 @@ struct complete_ctx {
 int sftp_glob(struct sftp_conn *, const char *, int,
     int (*)(const char *, int), glob_t *); /* proto for sftp-glob.c */
 
-#ifdef PSCAL_TARGET_IOS
-static char *
-pscal_own_executable_path(void)
-{
-	uint32_t size = PATH_MAX;
-	char *buf = xmalloc(size);
-	if (_NSGetExecutablePath(buf, &size) != 0) {
-		buf = xreallocarray(buf, 1, size);
-		if (_NSGetExecutablePath(buf, &size) != 0) {
-			free(buf);
-			return NULL;
-		}
-	}
-	char resolved[PATH_MAX];
-	if (realpath(buf, resolved) != NULL) {
-		free(buf);
-		return xstrdup(resolved);
-	}
-	/* Fall back to the unresolved path if realpath fails. */
-	return buf;
-}
-
-static char *
-pscal_tool_runner_path(void)
-{
-	const char *env = getenv("PSCALI_TOOL_RUNNER_PATH");
-	if (env != NULL && *env != '\0' && access(env, X_OK) == 0)
-		return xstrdup(env);
-
-	const char *workspace = getenv("PSCALI_WORKSPACE_ROOT");
-	if (workspace != NULL && *workspace != '\0') {
-		char *candidate;
-		if (xasprintf(&candidate, "%s/pscal_tool_runner", workspace) != -1) {
-			if (access(candidate, X_OK) == 0)
-				return candidate;
-			free(candidate);
-		}
-	}
-
-	char *self = pscal_own_executable_path();
-	if (self != NULL) {
-		char *dir = xstrdup(self);
-		free(self);
-		if (dir != NULL) {
-			char *slash = strrchr(dir, '/');
-			if (slash != NULL) {
-				*(slash + 1) = '\0';
-				char *candidate;
-				if (xasprintf(&candidate, "%spscal_tool_runner", dir) != -1) {
-					if (access(candidate, X_OK) == 0) {
-						free(dir);
-						return candidate;
-					}
-					free(candidate);
-				}
-			}
-			free(dir);
-		}
-	}
-
-	const char *home = getenv("HOME");
-	if (home == NULL || *home == '\0')
-		return NULL;
-	char *p;
-	if (xasprintf(&p, "%s/pscal_tool_runner", home) == -1)
-		return NULL;
-	if (access(p, X_OK) == 0)
-		return p;
-	free(p);
-	return NULL;
-}
-
-#endif
-
 extern char *__progname;
 
 /* Separators for interactive commands */
@@ -2453,10 +2379,6 @@ static void
 connect_to_server(char *path, char **args, int *in, int *out)
 {
 	int c_in, c_out;
-#ifdef PSCAL_TARGET_IOS
-	posix_spawn_file_actions_t actions;
-	pid_t child = -1;
-#endif
 #ifdef USE_PIPES
 	int pin[2], pout[2];
 
@@ -2475,54 +2397,6 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	c_in = c_out = inout[1];
 #endif /* USE_PIPES */
 
-#ifdef PSCAL_TARGET_IOS
-	if (posix_spawn_file_actions_init(&actions) != 0)
-		fatal("posix_spawn_file_actions_init failed");
-#ifdef USE_PIPES
-	posix_spawn_file_actions_adddup2(&actions, c_in, STDIN_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDOUT_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDERR_FILENO);
-	posix_spawn_file_actions_addclose(&actions, *in);
-	posix_spawn_file_actions_addclose(&actions, *out);
-	posix_spawn_file_actions_addclose(&actions, c_in);
-	posix_spawn_file_actions_addclose(&actions, c_out);
-#else
-	posix_spawn_file_actions_adddup2(&actions, c_in, STDIN_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDOUT_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDERR_FILENO);
-	posix_spawn_file_actions_addclose(&actions, *in);
-	posix_spawn_file_actions_addclose(&actions, c_in);
-#endif
-	posix_spawnattr_t attr;
-	sigset_t emptyset, sigdef;
-	posix_spawnattr_init(&attr);
-	sigemptyset(&emptyset);
-	posix_spawnattr_setsigmask(&attr, &emptyset);
-	sigemptyset(&sigdef);
-	posix_spawnattr_setsigdefault(&attr, &sigdef);
-	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
-	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
-
-	if (access(path, X_OK) != 0) {
-		fprintf(stderr, "sftp: transport '%s' not executable: %s\n",
-		    path, strerror(errno));
-		posix_spawn_file_actions_destroy(&actions);
-		posix_spawnattr_destroy(&attr);
-		fatal("sftp: unable to launch ssh transport");
-	}
-
-	if (posix_spawn(&child, path, &actions, &attr, args, environ) != 0) {
-		int spawn_err = errno;
-		posix_spawn_file_actions_destroy(&actions);
-		posix_spawnattr_destroy(&attr);
-		fprintf(stderr, "sftp: posix_spawn failed for '%s' (%s)\n",
-		    path, strerror(spawn_err));
-		fatal("sftp: unable to launch ssh transport");
-	}
-	posix_spawn_file_actions_destroy(&actions);
-	posix_spawnattr_destroy(&attr);
-	sshpid = child;
-#else
 	if ((sshpid = fork()) == -1)
 		fatal("fork: %s", strerror(errno));
 	else if (sshpid == 0) {
@@ -2548,8 +2422,7 @@ connect_to_server(char *path, char **args, int *in, int *out)
 		execvp(path, args);
 		fprintf(stderr, "exec: %s: %s\n", path, strerror(errno));
 		_exit(1);
-	}
-#endif
+		}
 
 	ssh_signal(SIGTERM, killchild);
 	ssh_signal(SIGINT, killchild);

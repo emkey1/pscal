@@ -137,7 +137,7 @@ pscalSshDebugEnabled(void)
 static void
 pscalSshDebugLog(const char *fmt, ...)
 {
-	if (!pscalSshDebugEnabled())
+	if (!pscalSshDebugEnabled() || fmt == NULL)
 		return;
 
 	char buf[512];

@@ -403,10 +403,6 @@ do_log(LogLevel level, int force, const char *suffix, const char *fmt,
 	}
 	strnvis(fmtbuf, msgbuf, sizeof(fmtbuf),
 	    log_on_stderr ? LOG_STDERR_VIS : LOG_SYSLOG_VIS);
-#ifdef PSCAL_TARGET_IOS
-	pscalRuntimeDebugLog(fmtbuf);
-	fprintf(stderr, "%s\n", fmtbuf);
-#endif
 	if (log_handler != NULL) {
 		/* Avoid recursion */
 		tmp_handler = log_handler;

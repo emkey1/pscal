@@ -7374,7 +7374,22 @@ int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthre
     }
 #endif
     pthread_t thread;
-    int rc = vprocHostPthreadCreateRaw(&thread, NULL, vprocThreadTrampoline, ctx);
+    pthread_attr_t attr;
+    pthread_attr_t *attrp = NULL;
+    bool attr_ready = false;
+    if (pthread_attr_init(&attr) == 0) {
+        attr_ready = true;
+        attrp = &attr;
+        size_t stack_size = 8u * 1024u * 1024u;
+        if (stack_size < (size_t)PTHREAD_STACK_MIN) {
+            stack_size = (size_t)PTHREAD_STACK_MIN;
+        }
+        (void)pthread_attr_setstacksize(&attr, stack_size);
+    }
+    int rc = vprocHostPthreadCreateRaw(&thread, attrp, vprocThreadTrampoline, ctx);
+    if (attr_ready) {
+        pthread_attr_destroy(&attr);
+    }
     if (rc != 0) {
         free(ctx);
         errno = rc;
@@ -8492,7 +8507,7 @@ static inline bool vprocShimHasVirtualContext(void) {
 typedef struct {
     bool active;
     bool in_child;
-    sigjmp_buf parent_env;
+    sigjmp_buf *parent_env;
     VProc *child_vp;
     int child_pid;
 } VProcSimForkState;
@@ -8505,6 +8520,17 @@ typedef struct {
 } VProcSimExecCtx;
 
 static __thread VProcSimForkState gVProcSimForkState;
+
+static void vprocSimForkResetState(VProcSimForkState *state) {
+    if (!state) {
+        return;
+    }
+    state->active = false;
+    state->in_child = false;
+    state->parent_env = NULL;
+    state->child_vp = NULL;
+    state->child_pid = 0;
+}
 
 static bool vprocSimForkDebugEnabled(void) {
     const char *tool_debug = getenv("PSCALI_TOOL_DEBUG");
@@ -8653,6 +8679,12 @@ pid_t vprocGetPpidShim(void) {
 }
 
 pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid) {
+    return vprocSimulatedForkWithEnv(label, inherit_parent_pgid, NULL);
+}
+
+pid_t vprocSimulatedForkWithEnv(const char *label,
+                                bool inherit_parent_pgid,
+                                sigjmp_buf *parent_env) {
     VProcSimForkState *state = &gVProcSimForkState;
     const char *fork_label = (label && *label) ? label : "fork";
     vprocSimForkLog("[vproc-fork] fork enter active=%d in_child=%d",
@@ -8662,16 +8694,10 @@ pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid) {
         errno = EAGAIN;
         return -1;
     }
-    volatile int jump_rc = sigsetjmp(state->parent_env, 1);
-    if (jump_rc != 0) {
-        state = &gVProcSimForkState;
-        state->active = false;
-        state->in_child = false;
-        state->child_vp = NULL;
-        int pid = state->child_pid;
-        state->child_pid = 0;
-        vprocSimForkLog("[vproc-fork] fork parent resume pid=%d", pid);
-        return (pid_t)pid;
+    if (!parent_env) {
+        errno = EINVAL;
+        vprocSimForkLog("[vproc-fork] missing caller env");
+        return -1;
     }
 
     VProcCommandScope scope;
@@ -8683,10 +8709,23 @@ pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid) {
 
     state->active = true;
     state->in_child = true;
+    state->parent_env = parent_env;
     state->child_vp = scope.vp;
     state->child_pid = scope.pid;
     vprocSimForkLog("[vproc-fork] fork child pid=%d", scope.pid);
     return 0;
+}
+
+pid_t vprocSimulatedForkParentResume(void) {
+    VProcSimForkState *state = &gVProcSimForkState;
+    if (!state->active || state->child_pid <= 0) {
+        errno = ENOSYS;
+        return (pid_t)-1;
+    }
+    int pid = state->child_pid;
+    vprocSimForkLog("[vproc-fork] fork parent resume pid=%d", pid);
+    vprocSimForkResetState(state);
+    return (pid_t)pid;
 }
 
 int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
@@ -8697,16 +8736,14 @@ int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
                     state->in_child ? 1 : 0,
                     (void *)state->child_vp,
                     state->child_pid);
-    if (!state->active || !state->in_child || !state->child_vp) {
+    if (!state->active || !state->in_child || !state->child_vp ||
+        !state->parent_env) {
         errno = ENOSYS;
         vprocSimForkLog("[vproc-fork] exec invalid fork state");
         return -1;
     }
     if (!entry) {
-        state->active = false;
-        state->in_child = false;
-        state->child_vp = NULL;
-        state->child_pid = 0;
+        vprocSimForkResetState(state);
         errno = ENOENT;
         vprocSimForkLog("[vproc-fork] exec missing entry");
         return -1;
@@ -8716,16 +8753,13 @@ int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
             errno = EIO;
         }
         vprocSimForkLog("[vproc-fork] exec spawn failed errno=%d", errno);
-        state->active = false;
-        state->in_child = false;
-        state->child_vp = NULL;
-        state->child_pid = 0;
+        vprocSimForkResetState(state);
         return -1;
     }
     vprocSimForkLog("[vproc-fork] exec spawn ok, jumping to parent");
     vprocUnregisterThread(state->child_vp, pthread_self());
     vprocDeactivate();
-    siglongjmp(state->parent_env, 1);
+    siglongjmp(*state->parent_env, 1);
     return -1;
 }
 

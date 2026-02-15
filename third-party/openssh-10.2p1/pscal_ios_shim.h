@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <termios.h>
 #include <pthread.h>
+#include <setjmp.h>
 #include "ios/tty/pscal_fd.h"
 #include "ios/vproc.h"
 
@@ -47,7 +48,8 @@ int pscal_ios_rename(const char *oldpath, const char *newpath);
 int pscal_ios_link(const char *target, const char *linkpath);
 int pscal_ios_symlink(const char *target, const char *linkpath);
 
-pid_t pscal_ios_fork(void);
+extern __thread sigjmp_buf pscal_ios_fork_jmpbuf;
+pid_t pscal_ios_fork_dispatch(int jump_rc);
 int pscal_ios_execv(const char *path, char *const argv[]);
 int pscal_ios_execvp(const char *file, char *const argv[]);
 int pscal_ios_execl(const char *path, const char *arg, ...);
@@ -55,7 +57,7 @@ int pscal_ios_execle(const char *path, const char *arg, ...);
 int pscal_ios_execlp(const char *file, const char *arg, ...);
 
 #ifndef PSCAL_IOS_SHIM_IMPLEMENTATION
-# define fork() pscal_ios_fork()
+# define fork() pscal_ios_fork_dispatch(sigsetjmp(pscal_ios_fork_jmpbuf, 1))
 # define execv(...) pscal_ios_execv(__VA_ARGS__)
 # define execvp(...) pscal_ios_execvp(__VA_ARGS__)
 # define execl(...) pscal_ios_execl(__VA_ARGS__)
