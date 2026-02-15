@@ -14,7 +14,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs1 (at 0035) ---
 0035    5 CONST_1
 0036    | CONSTANT           10 'R1'
-0038    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0038    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0044    6 CONST_TRUE
 0045    | SET_LOCAL           0 (slot)
 0047    3 GET_LOCAL           0 (slot)
@@ -24,7 +24,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs0 (at 0053) ---
 0053   11 CONST_1
 0054    | CONSTANT           13 'R0'
-0056    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0056    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0062   12 CONST_FALSE
 0063    | SET_LOCAL           0 (slot)
 0065    9 GET_LOCAL           0 (slot)
@@ -38,11 +38,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0081    | JUMP_IF_FALSE      12 (to 0096)
 0084    | CONST_1
 0085    | CONSTANT           18 'A triggered'
-0087    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0087    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0093    | JUMP                9 (to 0105)
 0096    | CONST_1
 0097    | CONSTANT           19 'A skipped'
-0099    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0099    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0105   19 CONST_TRUE
 0106    | JUMP_IF_FALSE       4 (to 0113)
 0109    | CONST_TRUE
@@ -52,11 +52,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0118    | JUMP_IF_FALSE      12 (to 0133)
 0121    | CONST_1
 0122    | CONSTANT           22 'B taken'
-0124    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0124    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0130    | JUMP                9 (to 0142)
 0133    | CONST_1
 0134    | CONSTANT           23 'B skipped'
-0136    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0136    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0142   21 CONST_FALSE
 0143    | JUMP_IF_FALSE       8 (to 0154)
 0146    | CALL_USER_PROC      16 'rhs1' @0035 (0 args)
@@ -108,7 +108,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0322    | CONSTANT           37 ' '
 0324    | GET_GLOBAL          8 'r4' cache=0x0
 0334    | CALL_BUILTIN        36 'ord' (1 args)
-0338    | CALL_BUILTIN_PROC   176 'write' (11 args)
+0338    | CALL_BUILTIN_PROC   177 'write' (11 args)
 0344    1 HALT
 == End Disassembly: Pascal/ShortCircuitTest ==
 
