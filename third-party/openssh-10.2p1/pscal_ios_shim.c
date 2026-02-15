@@ -689,6 +689,79 @@ int pscal_ios_dup2(int fd, int target) {
     return vprocRestoreHostFd(vp, target, fd);
 }
 
+int pscal_ios_fcntl(int fd, int cmd, ...) {
+    va_list ap;
+    void *ptr_arg = NULL;
+    long int_arg = 0;
+    bool has_arg = true;
+    bool ptr_variant = false;
+    switch (cmd) {
+        case F_GETFD:
+        case F_GETFL:
+#ifdef F_GETOWN
+        case F_GETOWN:
+#endif
+#ifdef F_GETSIG
+        case F_GETSIG:
+#endif
+            has_arg = false;
+            break;
+        case F_GETLK:
+        case F_SETLK:
+        case F_SETLKW:
+            ptr_variant = true;
+            break;
+        default:
+            break;
+    }
+    va_start(ap, cmd);
+    if (has_arg) {
+        if (ptr_variant) {
+            ptr_arg = va_arg(ap, void *);
+        } else {
+            int_arg = va_arg(ap, long);
+        }
+    }
+    va_end(ap);
+
+    int target_fd = fd;
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int translated = vprocTranslateFd(vp, fd);
+        if (translated >= 0) {
+            target_fd = translated;
+        }
+    } else {
+        target_fd = pscal_ios_translate_fd(fd);
+    }
+
+    if (!has_arg) {
+        return fcntl(target_fd, cmd);
+    }
+    if (ptr_variant) {
+        return fcntl(target_fd, cmd, ptr_arg);
+    }
+    return fcntl(target_fd, cmd, int_arg);
+}
+
+void pscal_ios_closefrom(int lowfd) {
+    if (lowfd < 0) {
+        lowfd = 0;
+    }
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        /* Never close process-global FDs inside the PSCAL app runtime. */
+        return;
+    }
+    long maxfd = sysconf(_SC_OPEN_MAX);
+    if (maxfd <= 0 || maxfd > 32768) {
+        maxfd = 32768;
+    }
+    for (int fd = lowfd; fd < (int)maxfd; ++fd) {
+        (void)vprocClose(vp, fd);
+    }
+}
+
 int pscal_ios_tcgetattr(int fd, struct termios *termios_p) {
     VProc *vp = vprocCurrent();
     if (vp) {

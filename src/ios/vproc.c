@@ -4653,6 +4653,18 @@ static void *vprocSessionInputThread(void *arg) {
         } else {
             r = pscal_fd->ops->read(pscal_fd, &ch, 1);
             if (r <= 0) {
+                if (r == 0 && session && session->pty_active &&
+                    (pscal_fd == session->stdin_pscal_fd ||
+                     pscal_fd == session->pty_slave)) {
+                    /* PTY slave reads may return 0 transiently when no byte is
+                     * ready (e.g. VMIN=0). Treat that as "would block" instead
+                     * of EOF so nested ssh/scp password reads do not exit early. */
+                    usleep(retry_sleep_us);
+                    if (retry_sleep_us < 16000) {
+                        retry_sleep_us <<= 1;
+                    }
+                    continue;
+                }
                 if (r == _EINTR || r == _EAGAIN) {
                     if (r == _EAGAIN) {
                         usleep(retry_sleep_us);
@@ -8519,6 +8531,13 @@ typedef struct {
     char **argv;
 } VProcSimExecCtx;
 
+typedef struct {
+    VProcFdKind kind;
+    int source_host_fd;
+    int cloned_host_fd;
+    struct pscal_fd *pscal_fd;
+} VProcForkFdCloneEntry;
+
 static __thread VProcSimForkState gVProcSimForkState;
 
 static void vprocSimForkResetState(VProcSimForkState *state) {
@@ -8606,6 +8625,173 @@ static void vprocSimFreeArgv(char **argv, int argc) {
         free(argv[i]);
     }
     free(argv);
+}
+
+static void vprocSimForkFdCloneCleanup(VProcForkFdCloneEntry *entries,
+                                       size_t count,
+                                       bool close_host_fds) {
+    if (!entries) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (entries[i].pscal_fd) {
+            pscal_fd_close(entries[i].pscal_fd);
+            entries[i].pscal_fd = NULL;
+        }
+        if (close_host_fds && entries[i].cloned_host_fd >= 0) {
+            vprocHostCloseRaw(entries[i].cloned_host_fd);
+            entries[i].cloned_host_fd = -1;
+        }
+    }
+    free(entries);
+}
+
+static void vprocCloseAllFdsLocked(VProc *vp) {
+    if (!vp || !vp->entries) {
+        return;
+    }
+    for (size_t i = 0; i < vp->capacity; ++i) {
+        if (vp->entries[i].kind == VPROC_FD_PSCAL && vp->entries[i].pscal_fd) {
+            pscal_fd_close(vp->entries[i].pscal_fd);
+        } else if (vp->entries[i].kind == VPROC_FD_HOST &&
+                   vp->entries[i].host_fd >= 0) {
+            vprocHostCloseRaw(vp->entries[i].host_fd);
+        }
+        vp->entries[i].host_fd = -1;
+        vp->entries[i].pscal_fd = NULL;
+        vp->entries[i].kind = VPROC_FD_NONE;
+    }
+    vprocResourceCloseAllLocked(vp);
+    vp->stdin_host_fd = -1;
+    vp->stdout_host_fd = -1;
+    vp->stderr_host_fd = -1;
+    vp->stdin_from_session = false;
+}
+
+static bool vprocSimForkCloneFdTable(VProc *child, VProc *parent) {
+    if (!child || !parent) {
+        errno = EINVAL;
+        return false;
+    }
+
+    size_t parent_cap = 0;
+    int parent_next_fd = 3;
+    bool parent_stdin_from_session = false;
+    VProcForkFdCloneEntry *clone_entries = NULL;
+
+    pthread_mutex_lock(&parent->mu);
+    parent_cap = parent->capacity;
+    parent_next_fd = parent->next_fd;
+    parent_stdin_from_session = parent->stdin_from_session;
+    if (parent_cap > 0) {
+        clone_entries =
+                (VProcForkFdCloneEntry *)calloc(parent_cap, sizeof(VProcForkFdCloneEntry));
+        if (!clone_entries) {
+            pthread_mutex_unlock(&parent->mu);
+            errno = ENOMEM;
+            return false;
+        }
+        for (size_t i = 0; i < parent_cap; ++i) {
+            VProcFdEntry src = parent->entries[i];
+            clone_entries[i].kind = src.kind;
+            clone_entries[i].source_host_fd = -1;
+            clone_entries[i].cloned_host_fd = -1;
+            clone_entries[i].pscal_fd = NULL;
+            if (src.kind == VPROC_FD_HOST && src.host_fd >= 0) {
+                clone_entries[i].source_host_fd = src.host_fd;
+            } else if (src.kind == VPROC_FD_PSCAL && src.pscal_fd) {
+                clone_entries[i].pscal_fd = pscal_fd_retain(src.pscal_fd);
+                if (!clone_entries[i].pscal_fd) {
+                    pthread_mutex_unlock(&parent->mu);
+                    vprocSimForkFdCloneCleanup(clone_entries, parent_cap, false);
+                    errno = ENOMEM;
+                    return false;
+                }
+            } else {
+                clone_entries[i].kind = VPROC_FD_NONE;
+            }
+        }
+    }
+    pthread_mutex_unlock(&parent->mu);
+
+    for (size_t i = 0; i < parent_cap; ++i) {
+        if (clone_entries[i].kind != VPROC_FD_HOST ||
+            clone_entries[i].source_host_fd < 0) {
+            continue;
+        }
+        int duped = vprocCloneFd(clone_entries[i].source_host_fd);
+        if (duped < 0) {
+            vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+            return false;
+        }
+        clone_entries[i].cloned_host_fd = duped;
+        if (getenv("PSCALI_TOOL_DEBUG") != NULL && i < 8) {
+            fprintf(stderr,
+                    "[vproc-fork-clone] fd=%zu src=%d dup=%d\n",
+                    i,
+                    clone_entries[i].source_host_fd,
+                    duped);
+        }
+    }
+
+    pthread_mutex_lock(&child->mu);
+    vprocCloseAllFdsLocked(child);
+    if (parent_cap > child->capacity &&
+        !vprocEnsureFdCapacityLocked(child, parent_cap)) {
+        pthread_mutex_unlock(&child->mu);
+        vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+        return false;
+    }
+    for (size_t i = 0; i < child->capacity; ++i) {
+        child->entries[i].host_fd = -1;
+        child->entries[i].pscal_fd = NULL;
+        child->entries[i].kind = VPROC_FD_NONE;
+    }
+    for (size_t i = 0; i < parent_cap; ++i) {
+        if (clone_entries[i].kind == VPROC_FD_HOST &&
+            clone_entries[i].cloned_host_fd >= 0) {
+            child->entries[i].host_fd = clone_entries[i].cloned_host_fd;
+            child->entries[i].pscal_fd = NULL;
+            child->entries[i].kind = VPROC_FD_HOST;
+            vprocResourceTrackLocked(child,
+                                     clone_entries[i].cloned_host_fd,
+                                     VPROC_RESOURCE_GENERIC);
+            clone_entries[i].cloned_host_fd = -1;
+        } else if (clone_entries[i].kind == VPROC_FD_PSCAL &&
+                   clone_entries[i].pscal_fd) {
+            child->entries[i].host_fd = -1;
+            child->entries[i].pscal_fd = clone_entries[i].pscal_fd;
+            child->entries[i].kind = VPROC_FD_PSCAL;
+            clone_entries[i].pscal_fd = NULL;
+        }
+    }
+    child->next_fd = (parent_next_fd >= 0 && (size_t)parent_next_fd < child->capacity)
+                             ? parent_next_fd
+                             : 3;
+    child->stdin_fd = STDIN_FILENO;
+    child->stdout_fd = STDOUT_FILENO;
+    child->stderr_fd = STDERR_FILENO;
+    child->stdin_host_fd =
+            (child->capacity > (size_t)STDIN_FILENO &&
+             child->entries[STDIN_FILENO].kind == VPROC_FD_HOST)
+                    ? child->entries[STDIN_FILENO].host_fd
+                    : -1;
+    child->stdout_host_fd =
+            (child->capacity > (size_t)STDOUT_FILENO &&
+             child->entries[STDOUT_FILENO].kind == VPROC_FD_HOST)
+                    ? child->entries[STDOUT_FILENO].host_fd
+                    : -1;
+    child->stderr_host_fd =
+            (child->capacity > (size_t)STDERR_FILENO &&
+             child->entries[STDERR_FILENO].kind == VPROC_FD_HOST)
+                    ? child->entries[STDERR_FILENO].host_fd
+                    : -1;
+    child->stdin_from_session =
+            parent_stdin_from_session && (child->stdin_host_fd >= 0);
+    pthread_mutex_unlock(&child->mu);
+
+    vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+    return true;
 }
 
 static void *vprocSimExecThread(void *arg) {
@@ -8705,6 +8891,15 @@ pid_t vprocSimulatedForkWithEnv(const char *label,
         errno = ENOSYS;
         vprocSimForkLog("[vproc-fork] vprocCommandScopeBegin failed");
         return -1;
+    }
+    if (scope.prev && scope.vp) {
+        if (!vprocSimForkCloneFdTable(scope.vp, scope.prev)) {
+            int saved_errno = (errno != 0) ? errno : EIO;
+            vprocCommandScopeEnd(&scope, 127);
+            errno = saved_errno;
+            vprocSimForkLog("[vproc-fork] fd clone failed errno=%d", saved_errno);
+            return -1;
+        }
     }
 
     state->active = true;
@@ -10772,6 +10967,21 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     struct pscal_fd *pscal_fd = NULL;
     int host = vprocResolveFdForShim(vp, fd, 1, &pscal_fd);
     if (pscal_fd) {
+        if (fd == STDIN_FILENO && !gVprocPipelineStage) {
+            VProcSessionStdio *session = vprocSessionStdioCurrent();
+            if (session &&
+                !vprocSessionStdioIsDefault(session) &&
+                (session->stdin_pscal_fd == pscal_fd ||
+                 session->pty_slave == pscal_fd)) {
+                /* When stdin is backed by a session PTY/pscal fd, a background
+                 * session-input reader thread may already be draining the same
+                 * stream. Route foreground stdin reads through the shared
+                 * session queue to avoid competing consumers that can drop
+                 * alternating keystrokes after nested tools (scp/ssh) exit. */
+                pscal_fd_close(pscal_fd);
+                return vprocSessionReadInputShimMode(buf, count, false);
+            }
+        }
         if (gVprocPipelineStage &&
             vprocVprocDebugEnabled() &&
             gVprocPipelineReadLogCount < 32) {
@@ -11109,8 +11319,34 @@ int vprocSocketpairShim(int domain, int type, int protocol, int sv[2]) {
     int rc = vprocHostSocketpair(domain, type, protocol, sv);
     VProc *vp = vprocForThread();
     if (rc == 0 && vp) {
-        vprocResourceTrack(vp, sv[0], VPROC_RESOURCE_PIPE);
-        vprocResourceTrack(vp, sv[1], VPROC_RESOURCE_PIPE);
+        int host0 = sv[0];
+        int host1 = sv[1];
+        int vfd0 = vprocAdoptHostFd(vp, host0);
+        if (vfd0 < 0) {
+            int saved_errno = errno;
+            (void)vprocHostClose(host0);
+            (void)vprocHostClose(host1);
+            errno = saved_errno;
+            return -1;
+        }
+        int vfd1 = vprocAdoptHostFd(vp, host1);
+        if (vfd1 < 0) {
+            int saved_errno = errno;
+            (void)vprocClose(vp, vfd0);
+            (void)vprocHostClose(host1);
+            errno = saved_errno;
+            return -1;
+        }
+        if (getenv("PSCALI_TOOL_DEBUG") != NULL) {
+            fprintf(stderr,
+                    "[vproc-sockpair] host0=%d host1=%d vfd0=%d vfd1=%d\n",
+                    host0,
+                    host1,
+                    vfd0,
+                    vfd1);
+        }
+        sv[0] = vfd0;
+        sv[1] = vfd1;
     }
     return rc;
 }

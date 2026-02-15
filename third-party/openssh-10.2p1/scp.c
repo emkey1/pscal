@@ -317,6 +317,14 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 #else
 	int sv[2];
 #endif
+#if defined(PSCAL_TARGET_IOS)
+#ifdef USE_PIPES
+	volatile int pin_parent[2] = {-1, -1};
+	volatile int pout_parent[2] = {-1, -1};
+#else
+	volatile int sv_parent[2] = {-1, -1};
+#endif
+#endif
 #if !defined(PSCAL_TARGET_IOS)
 	posix_spawn_file_actions_t actions;
 	pid_t child = -1;
@@ -333,10 +341,20 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 #ifdef USE_PIPES
 	if (pipe(pin) == -1 || pipe(pout) == -1)
 		fatal("pipe: %s", strerror(errno));
+#if defined(PSCAL_TARGET_IOS)
+	pin_parent[0] = pin[0];
+	pin_parent[1] = pin[1];
+	pout_parent[0] = pout[0];
+	pout_parent[1] = pout[1];
+#endif
 #else
 	/* Create a socket pair for communicating with ssh. */
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == -1)
 		fatal("socketpair: %s", strerror(errno));
+#if defined(PSCAL_TARGET_IOS)
+	sv_parent[0] = sv[0];
+	sv_parent[1] = sv[1];
+#endif
 #endif
 
 	ssh_signal(SIGTSTP, suspchild);
@@ -361,13 +379,13 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 #if defined(PSCAL_TARGET_IOS)
 	if ((*pid = fork()) == -1) {
 #ifdef USE_PIPES
-		close(pin[0]);
-		close(pin[1]);
-		close(pout[0]);
-		close(pout[1]);
+		close(pin_parent[0]);
+		close(pin_parent[1]);
+		close(pout_parent[0]);
+		close(pout_parent[1]);
 #else
-		close(sv[0]);
-		close(sv[1]);
+		close(sv_parent[0]);
+		close(sv_parent[1]);
 #endif
 		fprintf(stderr, "scp: fork failed for transport '%s' (%s)\n",
 		    program, strerror(errno));
@@ -450,14 +468,78 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 
 	/* Parent.  Close the other side, and return the local side. */
 #ifdef USE_PIPES
-	close(pin[0]);
-	close(pout[1]);
-	*fdout = pin[1];
-	*fdin = pout[0];
+	int parent_close_a = pin_parent[0];
+	int parent_close_b = pout_parent[1];
+	int parent_close_a_host_pre = -1;
+#if defined(PSCAL_TARGET_IOS)
+	{
+		VProc *pre_vp = vprocCurrent();
+		if (pre_vp != NULL)
+			parent_close_a_host_pre = vprocTranslateFd(pre_vp, parent_close_a);
+	}
+#endif
+	close(parent_close_a);
+	close(pout_parent[1]);
+	*fdout = pin_parent[1];
+	*fdin = pout_parent[0];
 #else
-	close(sv[0]);
-	*fdin = sv[1];
-	*fdout = sv[1];
+	int parent_close_a = sv_parent[0];
+	int parent_close_a_host_pre = -1;
+#if defined(PSCAL_TARGET_IOS)
+	{
+		VProc *pre_vp = vprocCurrent();
+		if (pre_vp != NULL)
+			parent_close_a_host_pre = vprocTranslateFd(pre_vp, parent_close_a);
+	}
+#endif
+	close(parent_close_a);
+	*fdin = sv_parent[1];
+	*fdout = sv_parent[1];
+#endif
+#if defined(PSCAL_TARGET_IOS)
+	if (getenv("PSCALI_TOOL_DEBUG") != NULL) {
+		int fdout_flags = fcntl(*fdout, F_GETFD);
+		int fdin_flags = fcntl(*fdin, F_GETFD);
+		int fdin_host = -1;
+		int fdout_host = -1;
+		int close_a_host_post = -1;
+		VProc *dbg_vp = vprocCurrent();
+		int fdin_host_errno = 0;
+		int fdout_host_errno = 0;
+		int close_a_host_errno = 0;
+		if (dbg_vp != NULL) {
+			fdin_host = vprocTranslateFd(dbg_vp, *fdin);
+			fdin_host_errno = errno;
+			fdout_host = vprocTranslateFd(dbg_vp, *fdout);
+			fdout_host_errno = errno;
+			close_a_host_post = vprocTranslateFd(dbg_vp, parent_close_a);
+			close_a_host_errno = errno;
+		}
+		fprintf(stderr,
+		    "[scp-do_cmd] close_a=%d "
+#ifdef USE_PIPES
+		    "close_b=%d "
+#endif
+		    "fdin=%d fdout=%d fdin_ok=%d fdout_ok=%d "
+		    "close_a_host_pre=%d close_a_host_post=%d close_a_host_errno=%d "
+		    "fdin_host=%d fdout_host=%d "
+		    "fdin_host_errno=%d fdout_host_errno=%d errno=%d\n",
+		    parent_close_a,
+#ifdef USE_PIPES
+		    parent_close_b,
+#endif
+		    *fdin, *fdout,
+		    (fdin_flags >= 0) ? 1 : 0,
+		    (fdout_flags >= 0) ? 1 : 0,
+		    parent_close_a_host_pre,
+		    close_a_host_post,
+		    close_a_host_errno,
+		    fdin_host,
+		    fdout_host,
+		    fdin_host_errno,
+		    fdout_host_errno,
+		    errno);
+	}
 #endif
 	ssh_signal(SIGTERM, killchild);
 	ssh_signal(SIGINT, killchild);

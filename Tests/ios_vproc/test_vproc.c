@@ -10,6 +10,7 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <setjmp.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <signal.h>
@@ -133,6 +134,140 @@ static void assert_pipe_round_trip(void) {
     assert(strcmp(buf, "data") == 0);
     assert(vprocCloseShim(p[0]) == 0);
     assert(vprocCloseShim(p[1]) == 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static int gForkExecInheritedWriteFd = -1;
+static int gForkExecSocketpairChildPeerFd = -1;
+static int gForkExecSocketpairChildCloseFd = -1;
+
+static int vprocForkExecWriteEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    if (gForkExecInheritedWriteFd < 0) {
+        return 111;
+    }
+    const char marker = 'K';
+    ssize_t wrote = vprocWriteShim(gForkExecInheritedWriteFd, &marker, 1);
+    return (wrote == 1) ? 0 : 110;
+}
+
+static int vprocForkExecSocketpairEntry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    if (gForkExecSocketpairChildPeerFd < 0 || gForkExecSocketpairChildCloseFd < 0) {
+        return 221;
+    }
+    if (vprocDup2Shim(gForkExecSocketpairChildPeerFd, STDIN_FILENO) != STDIN_FILENO) {
+        return 222;
+    }
+    if (vprocDup2Shim(gForkExecSocketpairChildPeerFd, STDOUT_FILENO) != STDOUT_FILENO) {
+        return 223;
+    }
+    if (vprocCloseShim(gForkExecSocketpairChildCloseFd) != 0) {
+        return 224;
+    }
+    if (vprocCloseShim(gForkExecSocketpairChildPeerFd) != 0) {
+        return 225;
+    }
+
+    unsigned char ch = 0;
+    if (vprocReadShim(STDIN_FILENO, &ch, 1) != 1) {
+        return 226;
+    }
+    if (vprocWriteShim(STDOUT_FILENO, &ch, 1) != 1) {
+        return 227;
+    }
+    return 0;
+}
+
+static void assert_simulated_fork_exec_inherits_nonstdio_fds(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    int p[2];
+    assert(vprocPipeShim(p) == 0);
+    gForkExecInheritedWriteFd = p[1];
+
+    sigjmp_buf env;
+    pid_t child_pid = -1;
+    int jump_rc = sigsetjmp(env, 0);
+    if (jump_rc == 0) {
+        child_pid = vprocSimulatedForkWithEnv("fork-fd-inherit", true, &env);
+        assert(child_pid >= 0);
+        if (child_pid == 0) {
+            char *argv[] = {"vproc-fork-fd-inherit", NULL};
+            int rc = vprocSimulatedExec(vprocForkExecWriteEntry, argv);
+            (void)rc;
+            assert(!"vprocSimulatedExec should not return in child");
+        }
+        assert(!"simulated fork child path should longjmp to parent");
+    }
+
+    child_pid = vprocSimulatedForkParentResume();
+    assert(child_pid > 0);
+
+    assert(vprocCloseShim(p[1]) == 0);
+    char marker = '\0';
+    assert(vprocReadShim(p[0], &marker, 1) == 1);
+    assert(marker == 'K');
+
+    int status = 0;
+    assert(vprocWaitPidShim(child_pid, &status, 0) == child_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(vprocCloseShim(p[0]) == 0);
+
+    gForkExecInheritedWriteFd = -1;
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_simulated_fork_exec_socketpair_parent_fd_survives(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+
+    int sv[2] = {-1, -1};
+    assert(vprocSocketpairShim(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    gForkExecSocketpairChildPeerFd = sv[0];
+    gForkExecSocketpairChildCloseFd = sv[1];
+
+    sigjmp_buf env;
+    pid_t child_pid = -1;
+    int jump_rc = sigsetjmp(env, 0);
+    if (jump_rc == 0) {
+        child_pid = vprocSimulatedForkWithEnv("fork-sockpair", true, &env);
+        assert(child_pid >= 0);
+        if (child_pid == 0) {
+            char *argv[] = {"vproc-fork-sockpair", NULL};
+            int rc = vprocSimulatedExec(vprocForkExecSocketpairEntry, argv);
+            (void)rc;
+            assert(!"vprocSimulatedExec should not return in child");
+        }
+        assert(!"simulated fork child path should longjmp to parent");
+    }
+
+    child_pid = vprocSimulatedForkParentResume();
+    assert(child_pid > 0);
+    assert(vprocCloseShim(sv[0]) == 0);
+
+    unsigned char tx = 'Q';
+    assert(vprocWriteShim(sv[1], &tx, 1) == 1);
+    unsigned char rx = 0;
+    assert(vprocReadShim(sv[1], &rx, 1) == 1);
+    assert(rx == tx);
+
+    int status = 0;
+    assert(vprocWaitPidShim(child_pid, &status, 0) == child_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(vprocCloseShim(sv[1]) == 0);
+
+    gForkExecSocketpairChildPeerFd = -1;
+    gForkExecSocketpairChildCloseFd = -1;
     vprocDeactivate();
     vprocDestroy(vp);
 }
@@ -2580,6 +2715,529 @@ static void session_input_clear_interrupt(VProcSessionInput *input) {
     pthread_mutex_unlock(&input->mu);
 }
 
+static void session_input_stop_reader(VProcSessionInput *input) {
+    if (!input) {
+        return;
+    }
+    pthread_mutex_lock(&input->mu);
+    input->stop_requested = true;
+    pthread_cond_broadcast(&input->cv);
+    while (input->reader_active) {
+        pthread_cond_wait(&input->cv, &input->mu);
+    }
+    pthread_mutex_unlock(&input->mu);
+}
+
+typedef struct {
+    pthread_mutex_t mu;
+    const unsigned char *payload;
+    size_t payload_len;
+    size_t payload_off;
+    int leading_zero_reads;
+} transient_input_state;
+
+static ssize_t transient_input_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
+    transient_input_state *state = (transient_input_state *)fd->userdata;
+    if (!state || !buf || bufsize == 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&state->mu);
+    if (state->leading_zero_reads > 0) {
+        state->leading_zero_reads--;
+        pthread_mutex_unlock(&state->mu);
+        return 0;
+    }
+    if (state->payload_off < state->payload_len) {
+        ((unsigned char *)buf)[0] = state->payload[state->payload_off++];
+        pthread_mutex_unlock(&state->mu);
+        return 1;
+    }
+    pthread_mutex_unlock(&state->mu);
+    return _EAGAIN;
+}
+
+static ssize_t transient_input_write(struct pscal_fd *fd, const void *buf, size_t bufsize) {
+    (void)fd;
+    (void)buf;
+    (void)bufsize;
+    return _EIO;
+}
+
+static int transient_input_poll(struct pscal_fd *fd) {
+    (void)fd;
+    return 0;
+}
+
+static ssize_t transient_input_ioctl_size(int cmd) {
+    (void)cmd;
+    return 0;
+}
+
+static int transient_input_ioctl(struct pscal_fd *fd, int cmd, void *arg) {
+    (void)fd;
+    (void)cmd;
+    (void)arg;
+    return _ENOTTY;
+}
+
+static int transient_input_close(struct pscal_fd *fd) {
+    transient_input_state *state = (transient_input_state *)fd->userdata;
+    if (state) {
+        pthread_mutex_destroy(&state->mu);
+        free(state);
+        fd->userdata = NULL;
+    }
+    return 0;
+}
+
+static const struct pscal_fd_ops gTransientInputOps = {
+    .read = transient_input_read,
+    .write = transient_input_write,
+    .poll = transient_input_poll,
+    .ioctl_size = transient_input_ioctl_size,
+    .ioctl = transient_input_ioctl,
+    .close = transient_input_close,
+};
+
+static struct pscal_fd *create_transient_input_fd(const unsigned char *payload,
+                                                  size_t payload_len,
+                                                  int leading_zero_reads) {
+    transient_input_state *state =
+            (transient_input_state *)calloc(1, sizeof(transient_input_state));
+    assert(state);
+    assert(pthread_mutex_init(&state->mu, NULL) == 0);
+    state->payload = payload;
+    state->payload_len = payload_len;
+    state->payload_off = 0;
+    state->leading_zero_reads = leading_zero_reads;
+
+    struct pscal_fd *fd = pscal_fd_create(&gTransientInputOps);
+    assert(fd);
+    fd->userdata = state;
+    return fd;
+}
+
+typedef struct {
+    pthread_mutex_t mu;
+    unsigned char buf[128];
+    size_t off;
+    size_t len;
+    int leading_zero_reads;
+    int transient_eio_after_bytes;
+    bool eio_emitted;
+    size_t bytes_delivered;
+} interactive_input_state;
+
+static ssize_t interactive_input_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
+    interactive_input_state *state = (interactive_input_state *)fd->userdata;
+    if (!state || !buf || bufsize == 0) {
+        return _EINVAL;
+    }
+    pthread_mutex_lock(&state->mu);
+    if (state->leading_zero_reads > 0) {
+        state->leading_zero_reads--;
+        pthread_mutex_unlock(&state->mu);
+        return 0;
+    }
+    if (!state->eio_emitted &&
+        state->transient_eio_after_bytes >= 0 &&
+        state->bytes_delivered >= (size_t)state->transient_eio_after_bytes) {
+        state->eio_emitted = true;
+        pthread_mutex_unlock(&state->mu);
+        return _EIO;
+    }
+    if (state->len == 0) {
+        pthread_mutex_unlock(&state->mu);
+        return _EAGAIN;
+    }
+    ((unsigned char *)buf)[0] = state->buf[state->off];
+    state->off++;
+    state->len--;
+    if (state->len == 0) {
+        state->off = 0;
+    }
+    state->bytes_delivered++;
+    pthread_mutex_unlock(&state->mu);
+    return 1;
+}
+
+static ssize_t interactive_input_write(struct pscal_fd *fd, const void *buf, size_t bufsize) {
+    (void)fd;
+    (void)buf;
+    (void)bufsize;
+    return _EIO;
+}
+
+static int interactive_input_poll(struct pscal_fd *fd) {
+    (void)fd;
+    return 0;
+}
+
+static ssize_t interactive_input_ioctl_size(int cmd) {
+    (void)cmd;
+    return 0;
+}
+
+static int interactive_input_ioctl(struct pscal_fd *fd, int cmd, void *arg) {
+    (void)fd;
+    (void)cmd;
+    (void)arg;
+    return _ENOTTY;
+}
+
+static int interactive_input_close(struct pscal_fd *fd) {
+    interactive_input_state *state = (interactive_input_state *)fd->userdata;
+    if (state) {
+        pthread_mutex_destroy(&state->mu);
+        free(state);
+        fd->userdata = NULL;
+    }
+    return 0;
+}
+
+static const struct pscal_fd_ops gInteractiveInputOps = {
+    .read = interactive_input_read,
+    .write = interactive_input_write,
+    .poll = interactive_input_poll,
+    .ioctl_size = interactive_input_ioctl_size,
+    .ioctl = interactive_input_ioctl,
+    .close = interactive_input_close,
+};
+
+static struct pscal_fd *create_interactive_input_fd(int leading_zero_reads,
+                                                    int transient_eio_after_bytes) {
+    interactive_input_state *state =
+            (interactive_input_state *)calloc(1, sizeof(interactive_input_state));
+    assert(state);
+    assert(pthread_mutex_init(&state->mu, NULL) == 0);
+    state->off = 0;
+    state->len = 0;
+    state->leading_zero_reads = leading_zero_reads;
+    state->transient_eio_after_bytes = transient_eio_after_bytes;
+    state->eio_emitted = false;
+    state->bytes_delivered = 0;
+
+    struct pscal_fd *fd = pscal_fd_create(&gInteractiveInputOps);
+    assert(fd);
+    fd->userdata = state;
+    return fd;
+}
+
+static void interactive_input_push(struct pscal_fd *fd, const unsigned char *data, size_t data_len) {
+    interactive_input_state *state = fd ? (interactive_input_state *)fd->userdata : NULL;
+    assert(state);
+    assert(data || data_len == 0);
+    pthread_mutex_lock(&state->mu);
+    if (state->off > 0 && state->len > 0) {
+        memmove(state->buf, state->buf + state->off, state->len);
+        state->off = 0;
+    } else if (state->len == 0) {
+        state->off = 0;
+    }
+    assert(data_len <= sizeof(state->buf) - state->len);
+    if (data_len > 0) {
+        memcpy(state->buf + state->len, data, data_len);
+        state->len += data_len;
+    }
+    pthread_mutex_unlock(&state->mu);
+}
+
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    bool started;
+    bool done;
+    int rc;
+    char pass[64];
+} scp_like_prompt_ctx;
+
+static void *scp_like_prompt_thread(void *arg) {
+    scp_like_prompt_ctx *ctx = (scp_like_prompt_ctx *)arg;
+    pthread_mutex_lock(&ctx->mu);
+    ctx->started = true;
+    pthread_cond_broadcast(&ctx->cv);
+    pthread_mutex_unlock(&ctx->mu);
+
+    int rc = -1;
+    char out[sizeof(ctx->pass)];
+    size_t len = 0;
+    memset(out, 0, sizeof(out));
+    while (len + 1 < sizeof(out)) {
+        char ch = '\0';
+        ssize_t rd = vprocSessionReadInputShim(&ch, 1);
+        if (rd <= 0) {
+            rc = -1;
+            break;
+        }
+        if (ch == '\n' || ch == '\r') {
+            out[len] = '\0';
+            rc = 0;
+            break;
+        }
+        out[len++] = ch;
+    }
+    pthread_mutex_lock(&ctx->mu);
+    if (rc == 0) {
+        memcpy(ctx->pass, out, sizeof(ctx->pass));
+    } else {
+        ctx->pass[0] = '\0';
+    }
+    ctx->rc = rc;
+    ctx->done = true;
+    pthread_cond_broadcast(&ctx->cv);
+    pthread_mutex_unlock(&ctx->mu);
+    return NULL;
+}
+
+static bool scp_like_prompt_wait_started(scp_like_prompt_ctx *ctx, int timeout_ms) {
+    int waited_ms = 0;
+    while (waited_ms <= timeout_ms) {
+        pthread_mutex_lock(&ctx->mu);
+        bool started = ctx->started;
+        pthread_mutex_unlock(&ctx->mu);
+        if (started) {
+            return true;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    return false;
+}
+
+static bool scp_like_prompt_wait_done(scp_like_prompt_ctx *ctx, int timeout_ms) {
+    int waited_ms = 0;
+    while (waited_ms <= timeout_ms) {
+        pthread_mutex_lock(&ctx->mu);
+        bool done = ctx->done;
+        pthread_mutex_unlock(&ctx->mu);
+        if (done) {
+            return true;
+        }
+        usleep(5000);
+        waited_ms += 5;
+    }
+    return false;
+}
+
+static bool scp_like_prompt_is_done(scp_like_prompt_ctx *ctx) {
+    pthread_mutex_lock(&ctx->mu);
+    bool done = ctx->done;
+    pthread_mutex_unlock(&ctx->mu);
+    return done;
+}
+
+static void assert_session_input_reader_ignores_transient_pty_zero_read(void) {
+    static const unsigned char payload[] = {'p', 'w'};
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+        session->stdin_host_fd = -1;
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+        session->stdout_host_fd = -1;
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+        session->stderr_host_fd = -1;
+    }
+
+    struct pscal_fd *stdin_fd = create_transient_input_fd(payload, sizeof(payload), 1);
+    session->stdin_pscal_fd = stdin_fd;
+    session->pty_slave = stdin_fd;
+    session->pty_active = true;
+
+    vprocSessionStdioActivate(session);
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    assert(session_input_wait_len(input, sizeof(payload), 1000));
+
+    unsigned char buf[4] = {0};
+    assert(vprocSessionReadInputShimMode(buf, sizeof(payload), true) == (ssize_t)sizeof(payload));
+    assert(memcmp(buf, payload, sizeof(payload)) == 0);
+
+    memset(buf, 0, sizeof(buf));
+    errno = 0;
+    assert(vprocSessionReadInputShimMode(buf, 1, true) == -1);
+    assert(errno == EAGAIN);
+
+    pthread_mutex_lock(&input->mu);
+    assert(!input->eof);
+    pthread_mutex_unlock(&input->mu);
+
+    session_input_stop_reader(input);
+    vprocSessionStdioDestroy(session);
+}
+
+static void assert_scp_like_prompt_survives_first_character_input(void) {
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+        session->stdin_host_fd = -1;
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+        session->stdout_host_fd = -1;
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+        session->stderr_host_fd = -1;
+    }
+
+    struct pscal_fd *stdin_fd = create_interactive_input_fd(1, -1);
+    session->stdin_pscal_fd = stdin_fd;
+    session->stdout_pscal_fd = pscal_fd_retain(stdin_fd);
+    session->stderr_pscal_fd = pscal_fd_retain(stdin_fd);
+    session->pty_slave = stdin_fd;
+    session->pty_active = true;
+
+    vprocSessionStdioActivate(session);
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    int shell_pid = vprocPid(shell_vp);
+    vprocSetShellSelfPid(shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    VProcOptions child_opts = vprocDefaultOptions();
+    VProc *child_vp = vprocCreate(&child_opts);
+    assert(child_vp);
+    vprocSetParent(vprocPid(child_vp), shell_pid);
+    assert(vprocSetSid(vprocPid(child_vp), shell_pid) == 0);
+    assert(vprocSetPgid(vprocPid(child_vp), vprocPid(child_vp)) == 0);
+
+    scp_like_prompt_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    assert(pthread_mutex_init(&ctx.mu, NULL) == 0);
+    assert(pthread_cond_init(&ctx.cv, NULL) == 0);
+    ctx.started = false;
+    ctx.done = false;
+    ctx.rc = -1;
+
+    pthread_t prompt_thread = 0;
+    assert(vprocSpawnThread(child_vp, scp_like_prompt_thread, &ctx, &prompt_thread) == 0);
+
+    /* Ensure prompt loop is running and still alive before any typed input. */
+    assert(scp_like_prompt_wait_started(&ctx, 500));
+    usleep(50000);
+    assert(!scp_like_prompt_is_done(&ctx));
+
+    /* First keypress must not terminate prompt handling. */
+    static const unsigned char first[] = {'s'};
+    interactive_input_push(stdin_fd, first, sizeof(first));
+    usleep(50000);
+    assert(!scp_like_prompt_is_done(&ctx));
+
+    static const unsigned char rest[] = {'e', 'c', 'r', 'e', 't', '\n'};
+    interactive_input_push(stdin_fd, rest, sizeof(rest));
+    assert(scp_like_prompt_wait_done(&ctx, 1500));
+
+    pthread_join(prompt_thread, NULL);
+    pthread_mutex_lock(&ctx.mu);
+    assert(ctx.rc == 0);
+    assert(strcmp(ctx.pass, "secret") == 0);
+    pthread_mutex_unlock(&ctx.mu);
+
+    pthread_cond_destroy(&ctx.cv);
+    pthread_mutex_destroy(&ctx.mu);
+    vprocDestroy(child_vp);
+    vprocDestroy(shell_vp);
+    session_input_stop_reader(input);
+    vprocSessionStdioDestroy(session);
+}
+
+static void assert_scp_like_prompt_survives_transient_eio_after_first_character(void) {
+    VProcSessionStdio *session = vprocSessionStdioCreate();
+    assert(session);
+
+    if (session->stdin_host_fd >= 0) {
+        assert(vprocHostClose(session->stdin_host_fd) == 0);
+        session->stdin_host_fd = -1;
+    }
+    if (session->stdout_host_fd >= 0) {
+        assert(vprocHostClose(session->stdout_host_fd) == 0);
+        session->stdout_host_fd = -1;
+    }
+    if (session->stderr_host_fd >= 0) {
+        assert(vprocHostClose(session->stderr_host_fd) == 0);
+        session->stderr_host_fd = -1;
+    }
+
+    struct pscal_fd *stdin_fd = create_interactive_input_fd(1, 1);
+    session->stdin_pscal_fd = stdin_fd;
+    session->stdout_pscal_fd = pscal_fd_retain(stdin_fd);
+    session->stderr_pscal_fd = pscal_fd_retain(stdin_fd);
+    session->pty_slave = stdin_fd;
+    session->pty_active = true;
+
+    vprocSessionStdioActivate(session);
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    int shell_pid = vprocPid(shell_vp);
+    vprocSetShellSelfPid(shell_pid);
+    assert(vprocSetSid(shell_pid, shell_pid) == 0);
+    assert(vprocSetPgid(shell_pid, shell_pid) == 0);
+    assert(vprocSetForegroundPgid(shell_pid, shell_pid) == 0);
+
+    VProcOptions child_opts = vprocDefaultOptions();
+    VProc *child_vp = vprocCreate(&child_opts);
+    assert(child_vp);
+    vprocSetParent(vprocPid(child_vp), shell_pid);
+    assert(vprocSetSid(vprocPid(child_vp), shell_pid) == 0);
+    assert(vprocSetPgid(vprocPid(child_vp), vprocPid(child_vp)) == 0);
+
+    scp_like_prompt_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    assert(pthread_mutex_init(&ctx.mu, NULL) == 0);
+    assert(pthread_cond_init(&ctx.cv, NULL) == 0);
+    ctx.started = false;
+    ctx.done = false;
+    ctx.rc = -1;
+
+    pthread_t prompt_thread = 0;
+    assert(vprocSpawnThread(child_vp, scp_like_prompt_thread, &ctx, &prompt_thread) == 0);
+
+    assert(scp_like_prompt_wait_started(&ctx, 500));
+    usleep(50000);
+    assert(!scp_like_prompt_is_done(&ctx));
+
+    static const unsigned char first[] = {'s'};
+    interactive_input_push(stdin_fd, first, sizeof(first));
+    usleep(50000);
+    assert(!scp_like_prompt_is_done(&ctx));
+
+    static const unsigned char rest[] = {'e', 'c', 'r', 'e', 't', '\n'};
+    interactive_input_push(stdin_fd, rest, sizeof(rest));
+    assert(scp_like_prompt_wait_done(&ctx, 1500));
+
+    pthread_join(prompt_thread, NULL);
+    pthread_mutex_lock(&ctx.mu);
+    assert(ctx.rc == 0);
+    assert(strcmp(ctx.pass, "secret") == 0);
+    pthread_mutex_unlock(&ctx.mu);
+
+    pthread_cond_destroy(&ctx.cv);
+    pthread_mutex_destroy(&ctx.mu);
+    vprocDestroy(child_vp);
+    vprocDestroy(shell_vp);
+    session_input_stop_reader(input);
+    vprocSessionStdioDestroy(session);
+}
+
 static VProcSessionStdio *session_create_with_host_stdin(int stdin_host_fd) {
     VProcSessionStdio *session = vprocSessionStdioCreate();
     assert(session);
@@ -4820,6 +5478,10 @@ int main(void) {
     assert_virtual_control_signals_do_not_hit_host_process();
     fprintf(stderr, "TEST pipe_round_trip\n");
     assert_pipe_round_trip();
+    fprintf(stderr, "TEST simulated_fork_exec_inherits_nonstdio_fds\n");
+    assert_simulated_fork_exec_inherits_nonstdio_fds();
+    fprintf(stderr, "TEST simulated_fork_exec_socketpair_parent_fd_survives\n");
+    assert_simulated_fork_exec_socketpair_parent_fd_survives();
     fprintf(stderr, "TEST pipe_cross_vproc\n");
     assert_pipe_cross_vproc();
     fprintf(stderr, "TEST socket_closed_on_destroy\n");
@@ -4984,6 +5646,12 @@ int main(void) {
     assert_session_write_to_master_nonblocking_respects_capacity();
     fprintf(stderr, "TEST session_input_inject_read_queue\n");
     assert_session_input_inject_read_queue();
+    fprintf(stderr, "TEST session_input_reader_ignores_transient_pty_zero_read\n");
+    assert_session_input_reader_ignores_transient_pty_zero_read();
+    fprintf(stderr, "TEST scp_like_prompt_survives_first_character_input\n");
+    assert_scp_like_prompt_survives_first_character_input();
+    fprintf(stderr, "TEST scp_like_prompt_survives_transient_eio_after_first_character\n");
+    assert_scp_like_prompt_survives_transient_eio_after_first_character();
     fprintf(stderr, "TEST session_control_chars_route_to_shell_input_when_shell_foreground\n");
     assert_session_control_chars_route_to_shell_input_when_shell_foreground();
     fprintf(stderr, "TEST session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground\n");
