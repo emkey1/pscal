@@ -1855,6 +1855,7 @@ struct VProc {
     bool stdin_from_session;
     VProcWinsize winsize;
     int pid;
+    char cwd[PATH_MAX];
     VProcResourceEntry *resources;
     size_t resource_count;
     size_t resource_capacity;
@@ -1865,6 +1866,11 @@ static bool vprocSessionStdioMatchFd(int session_fd, int std_fd);
 static int vprocHostIsatty(int fd);
 static int vprocSetCompatErrno(int err);
 static void vprocPtyTrace(const char *format, ...);
+static int vprocForegroundPgidLocked(int sid);
+bool vprocGetShellJobControlState(int *shell_pid_out,
+                                  int *shell_pgid_out,
+                                  int *sid_out,
+                                  int *fg_pgid_out);
 
 static __thread VProc *gVProcCurrent = NULL;
 static __thread VProc *gVProcStack[16] = {0};
@@ -2843,6 +2849,7 @@ static bool vprocRegistryContainsValidated(VProc *vp) {
 }
 
 static VProc *vprocForThread(void);
+static VProc *vprocResolveShellVprocForPathOps(void);
 
 typedef struct {
     int pid;
@@ -3163,6 +3170,77 @@ static bool vprocSessionPrefersControlBytePassthrough(VProcSessionStdio *session
         return false;
     }
     return vprocSessionGetControlBytePassthrough(session->session_id);
+}
+
+static bool vprocGetSessionJobControlState(VProcSessionStdio *session,
+                                           int *shell_pid_out,
+                                           int *shell_pgid_out,
+                                           int *sid_out,
+                                           int *fg_pgid_out) {
+    int shell_pid = -1;
+    int shell_pgid = -1;
+    int sid = -1;
+    int fg_pgid = -1;
+
+    if (!session || vprocSessionStdioIsDefault(session)) {
+        return vprocGetShellJobControlState(shell_pid_out,
+                                            shell_pgid_out,
+                                            sid_out,
+                                            fg_pgid_out);
+    }
+
+    if (session->shell_pid > 0) {
+        shell_pid = session->shell_pid;
+    }
+    if (session->session_id != 0) {
+        pthread_mutex_lock(&gVProcSessionPtys.mu);
+        VProcSessionPtyEntry *session_entry = vprocSessionPtyFindLocked(session->session_id, NULL);
+        if (session_entry) {
+            if (shell_pid <= 0 && session_entry->shell_pid > 0) {
+                shell_pid = session_entry->shell_pid;
+            }
+            if (session_entry->pty_slave && session_entry->pty_slave->tty) {
+                struct tty *tty = session_entry->pty_slave->tty;
+                lock(&tty->lock);
+                sid = (int)tty->session;
+                fg_pgid = (int)tty->fg_group;
+                unlock(&tty->lock);
+            }
+        }
+        pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    }
+
+    if (shell_pid > 0) {
+        pthread_mutex_lock(&gVProcTasks.mu);
+        VProcTaskEntry *shell_entry = vprocTaskFindLocked(shell_pid);
+        if (shell_entry) {
+            shell_pgid = shell_entry->pgid;
+            if (sid <= 0) {
+                sid = shell_entry->sid;
+            }
+        }
+        if (sid > 0 && fg_pgid <= 0) {
+            fg_pgid = vprocForegroundPgidLocked(sid);
+        }
+        pthread_mutex_unlock(&gVProcTasks.mu);
+    }
+
+    if (fg_pgid <= 0) {
+        fg_pgid = shell_pgid;
+    }
+    if (shell_pid_out) {
+        *shell_pid_out = shell_pid;
+    }
+    if (shell_pgid_out) {
+        *shell_pgid_out = shell_pgid;
+    }
+    if (sid_out) {
+        *sid_out = sid;
+    }
+    if (fg_pgid_out) {
+        *fg_pgid_out = fg_pgid;
+    }
+    return shell_pid > 0;
 }
 
 static bool vprocPrepareThreadNameLocked(const VProcTaskEntry *entry, char *name, size_t name_len) {
@@ -3928,7 +4006,6 @@ typedef struct {
 
 static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, int shell_pid, int kernel_pid);
 static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size_t count, bool nonblocking);
-static bool vprocKernelQueueControlSignal(int shell_pid, int sig, bool allow_runtime_fallback);
 static bool vprocRequestControlSignalForSessionInternal(uint64_t session_id,
                                                         int sig,
                                                         bool allow_runtime_fallback);
@@ -4791,7 +4868,11 @@ static void *vprocSessionInputThread(void *arg) {
             int shell_pgid = -1;
             int sid = -1;
             int fg_pgid = -1;
-            (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
+            (void)vprocGetSessionJobControlState(session,
+                                                 &shell_pid,
+                                                 &shell_pgid,
+                                                 &sid,
+                                                 &fg_pgid);
             bool shell_foreground = (shell_pgid > 0 && fg_pgid > 0 && fg_pgid == shell_pgid);
             bool shell_prompt_read_active = vprocShellPromptReadActive(shell_pid);
             if (tool_dbg) {
@@ -4839,26 +4920,21 @@ static void *vprocSessionInputThread(void *arg) {
                 ctx->shell_pid = shell_hint;
             }
             bool dispatched = false;
-            bool queued = false;
             if (session && session->session_id != 0) {
-                dispatched = vprocRequestControlSignalForSessionInternal(session->session_id, sig, false);
-            }
-            if (!dispatched && session && session->session_id != 0) {
-                queued = vprocKernelQueueControlSignal(shell_hint, sig, false);
+                dispatched = vprocRequestControlSignalForSessionInternal(session->session_id, sig, true);
             }
             if (tool_dbg) {
                 fprintf(stderr,
-                        "[session-input-ctrl] dispatch sig=%d session=%llu shell=%d queued=%d dispatched=%d\n",
+                        "[session-input-ctrl] dispatch sig=%d session=%llu shell=%d dispatched=%d\n",
                         sig,
                         (unsigned long long)(session ? session->session_id : 0),
                         shell_hint,
-                        (int)queued,
                         (int)dispatched);
             }
-            if (!dispatched && !queued) {
-                dispatched = vprocDispatchControlSignalToForeground(shell_hint, sig, false);
+            if (!dispatched) {
+                dispatched = vprocDispatchControlSignalToForeground(shell_hint, sig, true);
             }
-            if (!dispatched && !queued && input) {
+            if (!dispatched && input) {
                 /* Keep control bytes observable even if virtual dispatch cannot
                  * resolve a foreground target. This preserves SSH passthrough
                  * and avoids dropping ^C/^Z for frontends while session/job
@@ -5672,15 +5748,196 @@ static bool vprocPathIsSystemPath(const char *path) {
     return false;
 }
 
+static bool vprocNormalizeAbsolutePath(const char *input, char *out, size_t out_size) {
+    if (!input || !out || out_size < 2 || input[0] != '/') {
+        errno = EINVAL;
+        return false;
+    }
+
+    size_t anchors[PATH_MAX / 2];
+    size_t depth = 0;
+    size_t length = 1;
+    out[0] = '/';
+    out[1] = '\0';
+
+    const char *cursor = input;
+    while (*cursor == '/') {
+        cursor++;
+    }
+    while (*cursor != '\0') {
+        const char *segment_start = cursor;
+        while (*cursor != '\0' && *cursor != '/') {
+            cursor++;
+        }
+        size_t segment_len = (size_t)(cursor - segment_start);
+        while (*cursor == '/') {
+            cursor++;
+        }
+        if (segment_len == 0) {
+            continue;
+        }
+        if (segment_len == 1 && segment_start[0] == '.') {
+            continue;
+        }
+        if (segment_len == 2 && segment_start[0] == '.' && segment_start[1] == '.') {
+            if (depth > 0) {
+                depth--;
+                length = anchors[depth];
+                out[length] = '\0';
+            }
+            continue;
+        }
+        if (depth >= sizeof(anchors) / sizeof(anchors[0])) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        if (length > 1) {
+            if (length + 1 >= out_size) {
+                errno = ENAMETOOLONG;
+                return false;
+            }
+            out[length++] = '/';
+        }
+        size_t segment_start_pos = length;
+        if (length + segment_len >= out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        memcpy(out + length, segment_start, segment_len);
+        length += segment_len;
+        out[length] = '\0';
+
+        size_t anchor = (segment_start_pos > 1) ? (segment_start_pos - 1) : 1;
+        anchors[depth++] = anchor;
+    }
+    return true;
+}
+
+static void vprocCurrentVirtualCwd(VProc *vp, char *out, size_t out_size) {
+    if (!out || out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (!vp) {
+        snprintf(out, out_size, "/");
+        return;
+    }
+    pthread_mutex_lock(&vp->mu);
+    const char *cwd = (vp->cwd[0] == '/') ? vp->cwd : "/";
+    snprintf(out, out_size, "%s", cwd);
+    pthread_mutex_unlock(&vp->mu);
+}
+
+static void vprocSetVirtualCwd(VProc *vp, const char *cwd) {
+    if (!vp) {
+        return;
+    }
+    const char *safe = (cwd && cwd[0] == '/') ? cwd : "/";
+    pthread_mutex_lock(&vp->mu);
+    snprintf(vp->cwd, sizeof(vp->cwd), "%s", safe);
+    pthread_mutex_unlock(&vp->mu);
+}
+
+static bool vprocResolveVirtualPath(VProc *vp, const char *path, char *out, size_t out_size) {
+    if (!path || !out || out_size < 2) {
+        errno = EINVAL;
+        return false;
+    }
+    if (path[0] == '/') {
+        const char *source = path;
+        char stripped[PATH_MAX];
+        /*
+         * Callers may pass already-expanded container paths. Convert them back
+         * to virtual form first so we don't re-expand and fail lookups.
+         */
+        if (pathTruncateEnabled() && pathTruncateStrip(path, stripped, sizeof(stripped))) {
+            source = stripped;
+        }
+        return vprocNormalizeAbsolutePath(source, out, out_size);
+    }
+    if (!vp) {
+        errno = ENOENT;
+        return false;
+    }
+    char cwd[PATH_MAX];
+    vprocCurrentVirtualCwd(vp, cwd, sizeof(cwd));
+    char joined[PATH_MAX];
+    int written = snprintf(joined, sizeof(joined), "%s/%s", cwd, path);
+    if (written < 0 || (size_t)written >= sizeof(joined)) {
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    return vprocNormalizeAbsolutePath(joined, out, out_size);
+}
+
+static void vprocInitializeVirtualCwd(VProc *vp, VProc *active) {
+    if (!vp) {
+        return;
+    }
+    char initial[PATH_MAX];
+    initial[0] = '\0';
+    if (active) {
+        vprocCurrentVirtualCwd(active, initial, sizeof(initial));
+    }
+    if (initial[0] == '\0') {
+        if (vprocHostGetcwdRaw(initial, sizeof(initial)) == NULL) {
+            snprintf(initial, sizeof(initial), "/");
+        } else if (pathTruncateEnabled()) {
+            char stripped[PATH_MAX];
+            if (pathTruncateStrip(initial, stripped, sizeof(stripped))) {
+                snprintf(initial, sizeof(initial), "%s", stripped);
+            }
+        }
+    }
+    char normalized[PATH_MAX];
+    if (!vprocNormalizeAbsolutePath(initial, normalized, sizeof(normalized))) {
+        snprintf(normalized, sizeof(normalized), "/");
+    }
+    vprocSetVirtualCwd(vp, normalized);
+}
+
 static const char *vprocPathExpandForShim(const char *path, char *buf, size_t buf_size) {
     if (!path) {
         return NULL;
     }
-    if (vprocPathIsSystemPath(path)) {
-        return path;
+    const char *virtual_path = path;
+    char virtual_buf[PATH_MAX];
+    if (path[0] == '/') {
+        if (vprocNormalizeAbsolutePath(path, virtual_buf, sizeof(virtual_buf))) {
+            virtual_path = virtual_buf;
+        }
+    } else {
+        VProc *vp = vprocForThread();
+        if (!vp) {
+            vp = vprocResolveShellVprocForPathOps();
+        }
+        if (vp && vprocResolveVirtualPath(vp, path, virtual_buf, sizeof(virtual_buf))) {
+            virtual_path = virtual_buf;
+        }
     }
-    if (pathTruncateEnabled() && pathTruncateExpand(path, buf, buf_size)) {
+    if (vprocPathIsSystemPath(virtual_path)) {
+        if (virtual_path != path) {
+            if (buf && buf_size > 0) {
+                int written = snprintf(buf, buf_size, "%s", virtual_path);
+                if (written > 0 && (size_t)written < buf_size) {
+                    return buf;
+                }
+            }
+            return path;
+        }
+        return virtual_path;
+    }
+    if (pathTruncateEnabled() && pathTruncateExpand(virtual_path, buf, buf_size)) {
         return buf;
+    }
+    if (virtual_path != path) {
+        if (buf && buf_size > 0) {
+            int written = snprintf(buf, buf_size, "%s", virtual_path);
+            if (written > 0 && (size_t)written < buf_size) {
+                return buf;
+            }
+        }
+        return path;
     }
     return path;
 }
@@ -6351,6 +6608,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
         vp->entries[i].pscal_fd = NULL;
         vp->entries[i].kind = VPROC_FD_NONE;
     }
+    vprocInitializeVirtualCwd(vp, active);
     vp->next_fd = 3;
     vp->winsize.cols = (local.winsize_cols > 0) ? local.winsize_cols : 80;
     vp->winsize.rows = (local.winsize_rows > 0) ? local.winsize_rows : 24;
@@ -6759,6 +7017,37 @@ void vprocTerminateSession(int sid) {
     }
     free(cancel);
     free(target_indices);
+}
+
+bool vprocTerminateSessionById(uint64_t session_id) {
+    if (session_id == 0) {
+        return false;
+    }
+
+    int sid = -1;
+    int shell_pid = 0;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry) {
+        shell_pid = entry->shell_pid;
+        if (entry->pty_slave && entry->pty_slave->tty) {
+            struct tty *tty = entry->pty_slave->tty;
+            lock(&tty->lock);
+            sid = (int)tty->session;
+            unlock(&tty->lock);
+        }
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+
+    if (sid <= 0 && shell_pid > 0) {
+        sid = vprocGetSid(shell_pid);
+    }
+    if (sid <= 0) {
+        return false;
+    }
+
+    vprocTerminateSession(sid);
+    return true;
 }
 
 static void *vprocThreadTrampoline(void *arg) {
@@ -7261,18 +7550,21 @@ int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) {
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpen(vp, flags);
     }
+    char expanded[PATH_MAX];
+    const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
+    const char *effective = target ? target : path;
     bool dbg = vprocPipeDebugEnabled();
-    int host_fd = vprocHostOpenVirtualized(path, flags, mode);
+    int host_fd = vprocHostOpenVirtualized(effective, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
-        if (dbg) vprocDebugLogf( "[vproc-open] virtualized ENOENT for %s, fallback raw\n", path);
+        if (dbg) vprocDebugLogf( "[vproc-open] virtualized ENOENT for %s, fallback raw\n", effective);
         /* Fallback to raw open so pipelines can read plain files even when
          * virtualization rejects the path. This mirrors shell expectations
          * for cat/head pipelines on iOS. */
-        host_fd = vprocHostOpenRawInternal(path, flags, (mode_t)mode, (flags & O_CREAT) != 0);
+        host_fd = vprocHostOpenRawInternal(effective, flags, (mode_t)mode, (flags & O_CREAT) != 0);
     }
     if (dbg && host_fd >= 0) {
-        vprocDebugLogf( "[vproc-open] opened %s -> fd=%d flags=0x%x\n", path, host_fd, flags);
+        vprocDebugLogf( "[vproc-open] opened %s -> fd=%d flags=0x%x\n", effective, host_fd, flags);
     }
 #endif
     if (host_fd < 0) {
@@ -9381,6 +9673,30 @@ out_tcset:
     return rc;
 }
 
+static int vprocSessionShellPidHint(VProcSessionStdio *session) {
+    if (!session || vprocSessionStdioIsDefault(session)) {
+        return 0;
+    }
+    if (session->shell_pid > 0) {
+        return session->shell_pid;
+    }
+    if (session->session_id == 0) {
+        return 0;
+    }
+
+    int shell_pid = 0;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session->session_id, NULL);
+    if (entry && entry->shell_pid > 0) {
+        shell_pid = entry->shell_pid;
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    if (shell_pid > 0) {
+        session->shell_pid = shell_pid;
+    }
+    return shell_pid;
+}
+
 void vprocSetShellSelfPid(int pid) {
     gShellSelfPid = pid;
     VProcSessionStdio *session = vprocSessionStdioCurrent();
@@ -9403,12 +9719,14 @@ void vprocSetShellSelfPid(int pid) {
 }
 
 int vprocGetShellSelfPid(void) {
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    int session_shell_pid = vprocSessionShellPidHint(session);
+    if (session_shell_pid > 0) {
+        gShellSelfPid = session_shell_pid;
+        return session_shell_pid;
+    }
     if (gShellSelfPid > 0) {
         return gShellSelfPid;
-    }
-    VProcSessionStdio *session = vprocSessionStdioCurrent();
-    if (session && !vprocSessionStdioIsDefault(session) && session->shell_pid > 0) {
-        return session->shell_pid;
     }
     return gShellSelfPidGlobal;
 }
@@ -9833,19 +10151,6 @@ static bool vprocKernelQueueEventInternal(const VProcKernelControlEvent *event, 
     return queued;
 }
 
-static bool vprocKernelQueueControlSignal(int shell_pid, int sig, bool allow_runtime_fallback) {
-    if (shell_pid <= 0 || (sig != SIGINT && sig != SIGTSTP)) {
-        return false;
-    }
-    VProcKernelControlEvent event;
-    memset(&event, 0, sizeof(event));
-    event.type = VPROC_KERNEL_EVENT_CONTROL_SIGNAL;
-    event.shell_pid = shell_pid;
-    event.sig = sig;
-    event.allow_runtime_fallback = allow_runtime_fallback;
-    return vprocKernelQueueEventInternal(&event, true);
-}
-
 static bool vprocRequestControlSignalForShellInternal(int shell_pid,
                                                       int sig,
                                                       bool allow_runtime_fallback) {
@@ -9860,9 +10165,6 @@ static bool vprocRequestControlSignalForShellInternal(int shell_pid,
         int sid = -1;
         int fg_pgid = -1;
         (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
-    }
-    if (vprocKernelQueueControlSignal(shell_pid, sig, allow_runtime_fallback)) {
-        return true;
     }
     return vprocDispatchControlSignalToForeground(shell_pid, sig, allow_runtime_fallback);
 }
@@ -10135,8 +10437,9 @@ void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx) {
     }
     if (!gSessionStdioTls || vprocSessionStdioIsDefault(gSessionStdioTls)) {
         gShellSelfPid = 0;
-    } else if (gSessionStdioTls->shell_pid > 0) {
-        gShellSelfPid = gSessionStdioTls->shell_pid;
+    } else {
+        int shell_pid = vprocSessionShellPidHint(gSessionStdioTls);
+        gShellSelfPid = (shell_pid > 0) ? shell_pid : 0;
     }
 }
 
@@ -10670,6 +10973,89 @@ static VProc *vprocForThread(void) {
         return NULL;
     }
     return vp;
+}
+
+static VProc *vprocFindByPid(int pid) {
+    if (pid <= 0) {
+        return NULL;
+    }
+    VProc *match = NULL;
+    pthread_mutex_lock(&gVProcRegistryMu);
+    if (gVProcRegistryHint && gVProcRegistryHint->pid == pid) {
+        match = gVProcRegistryHint;
+    } else {
+        for (size_t i = 0; i < gVProcRegistryCount; ++i) {
+            VProc *entry = gVProcRegistry[i];
+            if (entry && entry->pid == pid) {
+                match = entry;
+                gVProcRegistryHint = entry;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&gVProcRegistryMu);
+    return match;
+}
+
+static int vprocFindPrimaryPidForThread(pthread_t tid) {
+    int pid = 0;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (!entry || entry->pid <= 0) {
+            continue;
+        }
+        if (entry->tid && pthread_equal(entry->tid, tid)) {
+            pid = entry->pid;
+            break;
+        }
+    }
+    if (pid <= 0) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (!entry || entry->pid <= 0) {
+                continue;
+            }
+            if (vprocTaskEntryHasThreadLocked(entry, tid)) {
+                pid = entry->pid;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return pid;
+}
+
+static VProc *vprocResolveShellVprocForPathOps(void) {
+    /*
+     * Prefer session-scoped shell identity over thread hints. Worker threads
+     * can be reused across tabs/sessions and may retain stale pid hints, while
+     * gSessionStdioTls reflects the active tab/session binding.
+     */
+    int shell_pid = vprocSessionShellPidHint(gSessionStdioTls);
+    if (shell_pid > 0) {
+        VProc *session_vp = vprocFindByPid(shell_pid);
+        if (session_vp) {
+            return session_vp;
+        }
+    }
+    int thread_pid = vprocFindPrimaryPidForThread(pthread_self());
+    if (thread_pid > 0) {
+        VProc *thread_vp = vprocFindByPid(thread_pid);
+        if (thread_vp) {
+            return thread_vp;
+        }
+    }
+    if (shell_pid <= 0) {
+        shell_pid = gShellSelfPid;
+    }
+    if (shell_pid <= 0) {
+        shell_pid = gShellSelfPidGlobal;
+    }
+    if (shell_pid <= 0) {
+        return NULL;
+    }
+    return vprocFindByPid(shell_pid);
 }
 
 static void vprocDeliverPendingSignalsForCurrent(void) {
@@ -11547,20 +11933,26 @@ static int vprocStatShimInternal(const char *path, struct stat *st, bool follow)
         errno = EINVAL;
         return -1;
     }
-    if (!vprocForThread()) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
         return follow ? vprocHostStatRaw(path, st) : vprocHostLstatRaw(path, st);
     }
-    if (vprocPathIsSystemPath(path)) {
-        return follow ? vprocHostStatRaw(path, st) : vprocHostLstatRaw(path, st);
+    char virtual_path_buf[PATH_MAX];
+    if (!vprocResolveVirtualPath(vp, path, virtual_path_buf, sizeof(virtual_path_buf))) {
+        return -1;
     }
-    if (vprocPathIsDevPtsRoot(path)) {
+    const char *virtual_path = virtual_path_buf;
+    if (vprocPathIsSystemPath(virtual_path)) {
+        return follow ? vprocHostStatRaw(virtual_path, st) : vprocHostLstatRaw(virtual_path, st);
+    }
+    if (vprocPathIsDevPtsRoot(virtual_path)) {
         return vprocStatDevptsRoot(st);
     }
     int pty_num = -1;
-    if (vprocPathParsePtySlave(path, &pty_num)) {
+    if (vprocPathParsePtySlave(virtual_path, &pty_num)) {
         return vprocStatPtySlave(pty_num, st);
     }
-    if (vprocPathIsDevTty(path)) {
+    if (vprocPathIsDevTty(virtual_path)) {
         return vprocStatFillChar(st,
                                  0666,
                                  makedev(TTY_ALTERNATE_MAJOR, DEV_TTY_MINOR),
@@ -11568,7 +11960,7 @@ static int vprocStatShimInternal(const char *path, struct stat *st, bool follow)
                                  0,
                                  0);
     }
-    if (vprocPathIsDevConsole(path)) {
+    if (vprocPathIsDevConsole(virtual_path)) {
         return vprocStatFillChar(st,
                                  0666,
                                  makedev(TTY_ALTERNATE_MAJOR, DEV_CONSOLE_MINOR),
@@ -11576,7 +11968,7 @@ static int vprocStatShimInternal(const char *path, struct stat *st, bool follow)
                                  0,
                                  0);
     }
-    if (vprocPathIsPtyMaster(path)) {
+    if (vprocPathIsPtyMaster(virtual_path)) {
         return vprocStatFillChar(st,
                                  0666,
                                  makedev(TTY_ALTERNATE_MAJOR, DEV_PTMX_MINOR),
@@ -11585,7 +11977,7 @@ static int vprocStatShimInternal(const char *path, struct stat *st, bool follow)
                                  0);
     }
     int tty_num = -1;
-    if (vprocPathParseConsoleTty(path, &tty_num)) {
+    if (vprocPathParseConsoleTty(virtual_path, &tty_num)) {
         if (tty_num >= 1 && tty_num <= 7) {
             return vprocStatFillChar(st,
                                      0666,
@@ -11597,7 +11989,8 @@ static int vprocStatShimInternal(const char *path, struct stat *st, bool follow)
         errno = ENOENT;
         return -1;
     }
-    return follow ? vprocHostStatVirtualized(path, st) : vprocHostLstatVirtualized(path, st);
+    return follow ? vprocHostStatVirtualized(virtual_path, st)
+                  : vprocHostLstatVirtualized(virtual_path, st);
 }
 
 int vprocStatShim(const char *path, struct stat *st) {
@@ -11608,33 +12001,102 @@ int vprocLstatShim(const char *path, struct stat *st) {
     return vprocStatShimInternal(path, st, false);
 }
 
-int vprocChdirShim(const char *path) {
-    VProc *vp = vprocForThread();
-    if (!vp) {
-        return vprocHostChdirRaw(path);
+static VProc *vprocResolvePathOpsVproc(bool prefer_shell) {
+    VProc *vp = NULL;
+    if (prefer_shell) {
+        vp = vprocResolveShellVprocForPathOps();
+        if (!vp) {
+            vp = vprocForThread();
+        }
+        return vp;
     }
-    char expanded[PATH_MAX];
-    const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
-    return vprocHostChdirRaw(target ? target : path);
+    vp = vprocForThread();
+    if (!vp) {
+        vp = vprocResolveShellVprocForPathOps();
+    }
+    return vp;
 }
 
-char *vprocGetcwdShim(char *buffer, size_t size) {
-    VProc *vp = vprocForThread();
-    char *res = vprocHostGetcwdRaw(buffer, size);
-    if (!vp || !res || !pathTruncateEnabled()) {
-        return res;
+static int vprocChdirForVproc(VProc *vp, const char *path) {
+    char virtual_path[PATH_MAX];
+    if (!vprocResolveVirtualPath(vp, path, virtual_path, sizeof(virtual_path))) {
+        return -1;
     }
-    char stripped[PATH_MAX];
-    if (!pathTruncateStrip(res, stripped, sizeof(stripped))) {
-        return res;
+    char expanded[PATH_MAX];
+    const char *target = vprocPathExpandForShim(virtual_path, expanded, sizeof(expanded));
+    if (!target) {
+        errno = ENOENT;
+        return -1;
     }
-    size_t len = strlen(stripped);
-    if (buffer && size > 0 && len + 1 > size) {
+    struct stat st;
+    if (vprocHostStatRaw(target, &st) != 0) {
+        return -1;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        errno = ENOTDIR;
+        return -1;
+    }
+    vprocSetVirtualCwd(vp, virtual_path);
+    return 0;
+}
+
+static char *vprocGetcwdForVproc(VProc *vp, char *buffer, size_t size) {
+    char cwd[PATH_MAX];
+    vprocCurrentVirtualCwd(vp, cwd, sizeof(cwd));
+    size_t len = strlen(cwd);
+    bool allocated = false;
+    if (!buffer) {
+        if (size == 0) {
+            size = len + 1;
+        }
+        buffer = (char *)malloc(size);
+        if (!buffer) {
+            errno = ENOMEM;
+            return NULL;
+        }
+        allocated = true;
+    }
+    if (size == 0 || len + 1 > size) {
+        if (allocated) {
+            free(buffer);
+        }
         errno = ERANGE;
         return NULL;
     }
-    memcpy(res, stripped, len + 1);
-    return res;
+    memcpy(buffer, cwd, len + 1);
+    return buffer;
+}
+
+int vprocChdirShim(const char *path) {
+    VProc *vp = vprocResolvePathOpsVproc(false);
+    if (!vp) {
+        return vprocHostChdirRaw(path);
+    }
+    return vprocChdirForVproc(vp, path);
+}
+
+char *vprocGetcwdShim(char *buffer, size_t size) {
+    VProc *vp = vprocResolvePathOpsVproc(false);
+    if (!vp) {
+        return vprocHostGetcwdRaw(buffer, size);
+    }
+    return vprocGetcwdForVproc(vp, buffer, size);
+}
+
+int vprocShellChdirShim(const char *path) {
+    VProc *vp = vprocResolvePathOpsVproc(true);
+    if (!vp) {
+        return vprocHostChdirRaw(path);
+    }
+    return vprocChdirForVproc(vp, path);
+}
+
+char *vprocShellGetcwdShim(char *buffer, size_t size) {
+    VProc *vp = vprocResolvePathOpsVproc(true);
+    if (!vp) {
+        return vprocHostGetcwdRaw(buffer, size);
+    }
+    return vprocGetcwdForVproc(vp, buffer, size);
 }
 
 int vprocAccessShim(const char *path, int mode) {
@@ -13123,24 +13585,27 @@ int vprocOpenShim(const char *path, int flags, ...) {
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpen(vp, flags);
     }
+    char expanded[PATH_MAX];
+    const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
+    const char *effective = target ? target : path;
     if (!vp) {
         /* Apply path virtualization even when vproc is inactive. */
-        return vprocHostOpenVirtualized(path, flags, mode);
+        return vprocHostOpenVirtualized(effective, flags, mode);
     }
     bool dbg = vprocPipeDebugEnabled();
-    int host_fd = vprocHostOpenVirtualized(path, flags, mode);
+    int host_fd = vprocHostOpenVirtualized(effective, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
-        if (dbg) vprocDebugLogf( "[vproc-open] (shim) virtualized ENOENT for %s, fallback raw\n", path);
-        host_fd = vprocHostOpenRawInternal(path, flags, (mode_t)mode, (flags & O_CREAT) != 0);
+        if (dbg) vprocDebugLogf( "[vproc-open] (shim) virtualized ENOENT for %s, fallback raw\n", effective);
+        host_fd = vprocHostOpenRawInternal(effective, flags, (mode_t)mode, (flags & O_CREAT) != 0);
     }
     if (dbg && host_fd >= 0) {
-        vprocDebugLogf( "[vproc-open] (shim) opened %s -> host_fd=%d flags=0x%x\n", path, host_fd, flags);
+        vprocDebugLogf( "[vproc-open] (shim) opened %s -> host_fd=%d flags=0x%x\n", effective, host_fd, flags);
     }
 #endif
     if (host_fd < 0) {
         if (vprocToolDebugEnabled()) {
-            vprocDebugLogf( "[vproc-open] path=%s flags=%d errno=%d\n", path, flags, errno);
+            vprocDebugLogf( "[vproc-open] path=%s flags=%d errno=%d\n", effective, flags, errno);
         }
         return -1;
     }

@@ -5,6 +5,7 @@
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
+#include "ios/vproc.h"
 extern void pscalRuntimeDebugLog(const char *message);
 #endif
 
@@ -26,8 +27,8 @@ extern void pscalRuntimeDebugLog(const char *message);
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
-#define SHELL_GETCWD(buf, len) pscalPathVirtualized_getcwd((buf), (len))
-#define SHELL_CHDIR(path) pscalPathVirtualized_chdir((path))
+#define SHELL_GETCWD(buf, len) vprocShellGetcwdShim((buf), (len))
+#define SHELL_CHDIR(path) vprocShellChdirShim((path))
 #else
 #define SHELL_GETCWD(buf, len) getcwd((buf), (len))
 #define SHELL_CHDIR(path) chdir((path))
@@ -3345,7 +3346,7 @@ static bool shellDirectoryStackEnsureInitialised(VM *vm, const char *builtin) {
     }
     char cwd[PATH_MAX];
     const char *initial_path = NULL;
-    if (getcwd(cwd, sizeof(cwd))) {
+    if (SHELL_GETCWD(cwd, sizeof(cwd))) {
         initial_path = cwd;
     }
     if (!initial_path || *initial_path == '\0') {

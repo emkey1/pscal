@@ -199,6 +199,8 @@ int vprocStatShim(const char *path, struct stat *st);
 int vprocLstatShim(const char *path, struct stat *st);
 int vprocChdirShim(const char *path);
 char *vprocGetcwdShim(char *buffer, size_t size);
+int vprocShellChdirShim(const char *path);
+char *vprocShellGetcwdShim(char *buffer, size_t size);
 int vprocAccessShim(const char *path, int mode);
 int vprocChmodShim(const char *path, mode_t mode);
 int vprocChownShim(const char *path, uid_t uid, gid_t gid);
@@ -337,6 +339,8 @@ bool vprocSessionInjectInputShim(const void *data, size_t len);
 
 /* Terminate and discard all vprocs in the given session (sid). */
 void vprocTerminateSession(int sid);
+/* Terminate and discard all vprocs associated with a runtime session id. */
+bool vprocTerminateSessionById(uint64_t session_id);
 /* Minimal signal queries/suspension helpers. */
 int vprocSigpending(int pid, sigset_t *set);
 int vprocSigsuspend(int pid, const sigset_t *mask);
@@ -530,6 +534,8 @@ static inline int vprocStatShim(const char *path, struct stat *st) { return stat
 static inline int vprocLstatShim(const char *path, struct stat *st) { return lstat(path, st); }
 static inline int vprocChdirShim(const char *path) { return chdir(path); }
 static inline char *vprocGetcwdShim(char *buffer, size_t size) { return getcwd(buffer, size); }
+static inline int vprocShellChdirShim(const char *path) { return chdir(path); }
+static inline char *vprocShellGetcwdShim(char *buffer, size_t size) { return getcwd(buffer, size); }
 static inline int vprocAccessShim(const char *path, int mode) { return access(path, mode); }
 static inline int vprocChmodShim(const char *path, mode_t mode) { return chmod(path, mode); }
 static inline int vprocChownShim(const char *path, uid_t uid, gid_t gid) { return chown(path, uid, gid); }
@@ -671,6 +677,10 @@ static inline int vprocGetJobId(int pid) { (void)pid; return 0; }
 static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid; (void)label; }
 static inline bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len) { (void)pid; (void)buf; (void)buf_len; return false; }
 static inline void vprocDiscard(int pid) { (void)pid; }
+static inline bool vprocTerminateSessionById(uint64_t session_id) {
+    (void)session_id;
+    return false;
+}
 static inline bool vprocSigchldPending(int pid) { (void)pid; return false; }
 static inline void vprocSetShellPromptReadActive(int pid, bool active) { (void)pid; (void)active; }
 static inline bool vprocShellPromptReadActive(int pid) { (void)pid; return false; }

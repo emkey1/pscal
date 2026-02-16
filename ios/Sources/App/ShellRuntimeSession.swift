@@ -205,7 +205,9 @@ final class ShellRuntimeSession: ObservableObject {
             PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
         }
         if !delivered {
-            send("\u{03}")
+            withRuntimeContext {
+                PSCALRuntimeSendSignal(SIGINT)
+            }
         }
     }
 
@@ -214,7 +216,9 @@ final class ShellRuntimeSession: ObservableObject {
             PSCALRuntimeSendSignalForSession(sessionId, SIGTSTP) != 0
         }
         if !delivered {
-            send("\u{1A}")
+            withRuntimeContext {
+                PSCALRuntimeSendSignal(SIGTSTP)
+            }
         }
     }
 
@@ -230,7 +234,24 @@ final class ShellRuntimeSession: ObservableObject {
     }
 
     func requestClose() {
-        send("\u{04}")
+        let interrupted = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
+        }
+        if !interrupted {
+            withRuntimeContext {
+                PSCALRuntimeSendSignal(SIGINT)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
+            guard self.exitStatus == nil else { return }
+            self.send("\u{04}")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [self] in
+            guard self.exitStatus == nil else { return }
+            self.withRuntimeContext {
+                _ = PSCALRuntimeSendSignalForSession(self.sessionId, SIGTERM)
+            }
+        }
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {

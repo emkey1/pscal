@@ -842,7 +842,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
             }
             if !delivered {
-                send("\u{03}")
+                withRuntimeContext {
+                    PSCALRuntimeSendSignal(SIGINT)
+                }
             }
             return
         }
@@ -858,7 +860,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
             }
             if !delivered {
-                send("\u{1A}")
+                withRuntimeContext {
+                    PSCALRuntimeSendSignal(SIGTSTP)
+                }
             }
             return
         }
@@ -955,7 +959,41 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     func requestClose() {
         withState { closeOnExit = true }
-        send("\u{04}")
+        let activeSession = resolveActiveSessionId()
+        let scheduleFallbackClose = { [weak self] in
+            guard let self else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
+                guard self.exitStatus == nil else { return }
+                self.send("\u{04}")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [self] in
+                guard self.exitStatus == nil else { return }
+                self.withRuntimeContext {
+                    if activeSession != 0 {
+                        _ = PSCALRuntimeSendSignalForSession(activeSession, SIGTERM)
+                    } else {
+                        PSCALRuntimeSendSignal(SIGTERM)
+                    }
+                }
+            }
+        }
+        if activeSession != 0 {
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
+            }
+            if !delivered {
+                withRuntimeContext {
+                    PSCALRuntimeSendSignal(SIGINT)
+                }
+            }
+            scheduleFallbackClose()
+            return
+        } else {
+            withRuntimeContext {
+                PSCALRuntimeSendSignal(SIGINT)
+            }
+        }
+        scheduleFallbackClose()
     }
 
     func assignTabId(_ id: UInt64) {

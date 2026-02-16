@@ -10,6 +10,7 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <setjmp.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -2043,6 +2044,111 @@ static void assert_path_truncate_maps_to_sandbox(void) {
     unlink(host_path);
     unlink(host_at_path);
     rmdir(root);
+}
+
+static void assert_proc_vm_files_present_and_stable(void) {
+    char templ[] = "/tmp/vproc-procvm-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    /* Pre-create a stale by-address VM directory and ensure refreshes do not
+     * delete it (directory churn can invalidate CWD in other sessions). */
+    assert(pscalPathVirtualized_mkdir("/proc/vm", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/proc/vm/by-address", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/proc/vm/by-address/deadbeef", 0700) == 0 || errno == EEXIST);
+
+    char first[1024] = {0};
+    char second[1024] = {0};
+    for (int pass = 0; pass < 2; ++pass) {
+        int fd = pscalPathVirtualized_open("/proc/vm/summary", O_RDONLY, 0);
+        assert(fd >= 0);
+        char *target = (pass == 0) ? first : second;
+        ssize_t n = read(fd, target, sizeof(first) - 1);
+        assert(n >= 0);
+        target[n] = '\0';
+        close(fd);
+    }
+    assert(strstr(first, "vm_count ") != NULL);
+    assert(strstr(second, "vm_count ") != NULL);
+
+    int list_fd = pscalPathVirtualized_open("/proc/vm/list", O_RDONLY, 0);
+    assert(list_fd >= 0);
+    char list_buf[1024] = {0};
+    ssize_t list_n = read(list_fd, list_buf, sizeof(list_buf) - 1);
+    assert(list_n >= 0);
+    list_buf[list_n] = '\0';
+    close(list_fd);
+    assert(strstr(list_buf, "idx vm_addr owner_addr") != NULL);
+
+    struct stat st;
+    assert(pscalPathVirtualized_stat("/proc/vm/by-address", &st) == 0);
+    assert(S_ISDIR(st.st_mode));
+    assert(pscalPathVirtualized_stat("/proc/vm/by-address/deadbeef", &st) == 0);
+    assert(S_ISDIR(st.st_mode));
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_vproc_cwd_isolated_between_vprocs(void) {
+    char templ[] = "/tmp/vproc-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    VProc *vp_a = vprocCreate(NULL);
+    VProc *vp_b = vprocCreate(NULL);
+    assert(vp_a);
+    assert(vp_b);
+
+    vprocActivate(vp_a);
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+    char cwd_a[PATH_MAX];
+    assert(vprocGetcwdShim(cwd_a, sizeof(cwd_a)) != NULL);
+    assert(strcmp(cwd_a, "/tmp/cwd-a") == 0);
+    int fd_a = vprocOpenShim("a.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(fd_a >= 0);
+    assert(vprocWriteShim(fd_a, "a", 1) == 1);
+    assert(vprocCloseShim(fd_a) == 0);
+    vprocDeactivate();
+
+    vprocActivate(vp_b);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+    char cwd_b[PATH_MAX];
+    assert(vprocGetcwdShim(cwd_b, sizeof(cwd_b)) != NULL);
+    assert(strcmp(cwd_b, "/tmp/cwd-b") == 0);
+    int fd_b = vprocOpenShim("b.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(fd_b >= 0);
+    assert(vprocWriteShim(fd_b, "b", 1) == 1);
+    assert(vprocCloseShim(fd_b) == 0);
+    vprocDeactivate();
+
+    vprocActivate(vp_a);
+    assert(vprocGetcwdShim(cwd_a, sizeof(cwd_a)) != NULL);
+    assert(strcmp(cwd_a, "/tmp/cwd-a") == 0);
+    vprocDeactivate();
+
+    struct stat st;
+    assert(pscalPathVirtualized_stat("/tmp/cwd-a/a.txt", &st) == 0);
+    assert(pscalPathVirtualized_stat("/tmp/cwd-b/b.txt", &st) == 0);
+    assert(pscalPathVirtualized_stat("/tmp/cwd-b/a.txt", &st) != 0);
+    assert(pscalPathVirtualized_stat("/tmp/cwd-a/b.txt", &st) != 0);
+
+    vprocDestroy(vp_a);
+    vprocDestroy(vp_b);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
 }
 
 static void assert_passthrough_when_inactive(void) {
@@ -4249,6 +4355,412 @@ static void assert_session_ctrl_z_does_not_bleed_between_sessions(void) {
     vprocSetShellSelfPid(prev_shell);
 }
 
+static void assert_session_cwd_does_not_bleed_between_reused_worker_contexts(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-session-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_a_pid = vprocReservePid();
+    int shell_b_pid = vprocReservePid();
+    assert(shell_a_pid > 0);
+    assert(shell_b_pid > 0);
+
+    VProcOptions shell_a_opts = vprocDefaultOptions();
+    shell_a_opts.pid_hint = shell_a_pid;
+    VProc *shell_a_vp = vprocCreate(&shell_a_opts);
+    assert(shell_a_vp);
+    assert(vprocPid(shell_a_vp) == shell_a_pid);
+
+    VProcOptions shell_b_opts = vprocDefaultOptions();
+    shell_b_opts.pid_hint = shell_b_pid;
+    VProc *shell_b_vp = vprocCreate(&shell_b_opts);
+    assert(shell_b_vp);
+    assert(vprocPid(shell_b_vp) == shell_b_pid);
+
+    int host_pipe_a[2];
+    int host_pipe_b[2];
+    assert(vprocHostPipe(host_pipe_a) == 0);
+    assert(vprocHostPipe(host_pipe_b) == 0);
+
+    VProcSessionStdio *session_a = session_create_with_host_stdin(host_pipe_a[0]);
+    VProcSessionStdio *session_b = session_create_with_host_stdin(host_pipe_b[0]);
+    session_a->session_id = 9701;
+    session_b->session_id = 9702;
+
+    /* Seed per-session shell identity and registry metadata. */
+    vprocSessionStdioActivate(session_a);
+    vprocSetShellSelfPid(shell_a_pid);
+    vprocSessionStdioActivate(session_b);
+    vprocSetShellSelfPid(shell_b_pid);
+
+    /* Simulate worker contexts that lost the per-session cached shell pid. */
+    session_a->shell_pid = 0;
+    session_b->shell_pid = 0;
+
+    /* Worker executes tab A command first. */
+    vprocSessionStdioActivate(NULL);
+    vprocSetShellSelfPid(shell_a_pid);
+    vprocSessionStdioActivate(session_a);
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    /* Reused worker then serves tab B. */
+    vprocSessionStdioActivate(NULL);
+    vprocSetShellSelfPid(shell_b_pid);
+    vprocSessionStdioActivate(session_b);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    /* Switching back to tab A must restore A's cwd and not bleed B's state. */
+    vprocSessionStdioActivate(session_a);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    assert(vprocHostClose(host_pipe_a[1]) == 0);
+    assert(vprocHostClose(host_pipe_b[1]) == 0);
+    vprocSessionStdioDestroy(session_b);
+    vprocSessionStdioDestroy(session_a);
+    vprocDestroy(shell_b_vp);
+    vprocDestroy(shell_a_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_path_virtualized_chdir_updates_session_cwd_when_interpose_bypassed(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-pathvirt-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9801;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    /*
+     * With interpose bypassed, path virtualization must still update the
+     * session's virtual cwd (not just host process cwd).
+     */
+    vprocRegisterInterposeBypassThread(pthread_self());
+    assert(pscalPathVirtualized_chdir("/tmp/cwd-b") == 0);
+    vprocUnregisterInterposeBypassThread(pthread_self());
+
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_vproc_chdir_accepts_expanded_container_path(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-expanded-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9802;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    char expanded_path[PATH_MAX];
+    snprintf(expanded_path, sizeof(expanded_path), "%s/tmp/cwd-b", root);
+    assert(vprocChdirShim(expanded_path) == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_path_virtualized_relative_ops_follow_session_cwd(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-relative-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/home", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+
+    int host_only_fd = pscalPathVirtualized_open("/home/host-only.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(host_only_fd >= 0);
+    assert(write(host_only_fd, "host", 4) == 4);
+    close(host_only_fd);
+
+    int tab_only_fd = pscalPathVirtualized_open("/tmp/cwd-a/tab-only.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(tab_only_fd >= 0);
+    assert(write(tab_only_fd, "tab", 3) == 3);
+    close(tab_only_fd);
+
+    char expanded_home[PATH_MAX];
+    snprintf(expanded_home, sizeof(expanded_home), "%s/home", root);
+    assert(chdir(expanded_home) == 0);
+
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9903;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(pscalPathVirtualized_chdir("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(pscalPathVirtualized_getcwd(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    DIR *dir = pscalPathVirtualized_opendir(".");
+    assert(dir);
+    bool saw_tab_only = false;
+    bool saw_host_only = false;
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, "tab-only.txt") == 0) {
+            saw_tab_only = true;
+        } else if (strcmp(entry->d_name, "host-only.txt") == 0) {
+            saw_host_only = true;
+        }
+    }
+    closedir(dir);
+    assert(saw_tab_only);
+    assert(!saw_host_only);
+
+    struct stat st;
+    assert(pscalPathVirtualized_stat("tab-only.txt", &st) == 0);
+    assert(pscalPathVirtualized_stat("host-only.txt", &st) != 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_session_cwd_prefers_active_session_over_stale_thread_hint(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-session-cwd-priority-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_a_pid = vprocReservePid();
+    int shell_b_pid = vprocReservePid();
+    assert(shell_a_pid > 0);
+    assert(shell_b_pid > 0);
+
+    VProcOptions shell_a_opts = vprocDefaultOptions();
+    shell_a_opts.pid_hint = shell_a_pid;
+    VProc *shell_a_vp = vprocCreate(&shell_a_opts);
+    assert(shell_a_vp);
+    assert(vprocPid(shell_a_vp) == shell_a_pid);
+
+    VProcOptions shell_b_opts = vprocDefaultOptions();
+    shell_b_opts.pid_hint = shell_b_pid;
+    VProc *shell_b_vp = vprocCreate(&shell_b_opts);
+    assert(shell_b_vp);
+    assert(vprocPid(shell_b_vp) == shell_b_pid);
+
+    int host_pipe_a[2];
+    int host_pipe_b[2];
+    assert(vprocHostPipe(host_pipe_a) == 0);
+    assert(vprocHostPipe(host_pipe_b) == 0);
+
+    VProcSessionStdio *session_a = session_create_with_host_stdin(host_pipe_a[0]);
+    VProcSessionStdio *session_b = session_create_with_host_stdin(host_pipe_b[0]);
+    session_a->session_id = 9901;
+    session_b->session_id = 9902;
+
+    /* Seed each session's shell pid and cwd. */
+    vprocSessionStdioActivate(session_a);
+    vprocSetShellSelfPid(shell_a_pid);
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    vprocSessionStdioActivate(session_b);
+    vprocSetShellSelfPid(shell_b_pid);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+
+    /* Simulate a reused worker thread carrying a stale pid hint from tab B. */
+    assert(vprocRegisterTidHint(shell_b_pid, pthread_self()) == shell_b_pid);
+
+    char cwd[PATH_MAX];
+    vprocSessionStdioActivate(session_a);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    assert(vprocHostClose(host_pipe_a[1]) == 0);
+    assert(vprocHostClose(host_pipe_b[1]) == 0);
+    vprocSessionStdioDestroy(session_b);
+    vprocSessionStdioDestroy(session_a);
+    vprocDestroy(shell_b_vp);
+    vprocDestroy(shell_a_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_shell_cwd_apis_target_shell_vproc_with_worker_active(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-shell-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-c", 0700) == 0 || errno == EEXIST);
+
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9910;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(vprocShellChdirShim("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    vprocRegisterThread(worker_vp, pthread_self());
+    vprocActivate(worker_vp);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    assert(vprocShellChdirShim("/tmp/cwd-c") == 0);
+    assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-c") == 0);
+
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+    vprocDeactivate();
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(worker_vp);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
 static void assert_job_id_and_label_round_trip(void) {
     VProc *vp = vprocCreate(NULL);
     assert(vp);
@@ -5610,6 +6122,10 @@ int main(void) {
     assert_setpgid_zero_defaults_to_pid();
     fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");
     assert_path_truncate_maps_to_sandbox();
+    fprintf(stderr, "TEST proc_vm_files_present_and_stable\n");
+    assert_proc_vm_files_present_and_stable();
+    fprintf(stderr, "TEST vproc_cwd_isolated_between_vprocs\n");
+    assert_vproc_cwd_isolated_between_vprocs();
     fprintf(stderr, "TEST write_reads_back\n");
     assert_write_reads_back();
     fprintf(stderr, "TEST passthrough_when_inactive\n");
@@ -5670,6 +6186,18 @@ int main(void) {
     assert_session_ctrl_c_does_not_bleed_between_sessions();
     fprintf(stderr, "TEST session_ctrl_z_does_not_bleed_between_sessions\n");
     assert_session_ctrl_z_does_not_bleed_between_sessions();
+    fprintf(stderr, "TEST session_cwd_does_not_bleed_between_reused_worker_contexts\n");
+    assert_session_cwd_does_not_bleed_between_reused_worker_contexts();
+    fprintf(stderr, "TEST path_virtualized_chdir_updates_session_cwd_when_interpose_bypassed\n");
+    assert_path_virtualized_chdir_updates_session_cwd_when_interpose_bypassed();
+    fprintf(stderr, "TEST vproc_chdir_accepts_expanded_container_path\n");
+    assert_vproc_chdir_accepts_expanded_container_path();
+    fprintf(stderr, "TEST path_virtualized_relative_ops_follow_session_cwd\n");
+    assert_path_virtualized_relative_ops_follow_session_cwd();
+    fprintf(stderr, "TEST session_cwd_prefers_active_session_over_stale_thread_hint\n");
+    assert_session_cwd_prefers_active_session_over_stale_thread_hint();
+    fprintf(stderr, "TEST shell_cwd_apis_target_shell_vproc_with_worker_active\n");
+    assert_shell_cwd_apis_target_shell_vproc_with_worker_active();
     fprintf(stderr, "TEST runtime_request_ctrl_c_dispatches_to_foreground_job\n");
     assert_runtime_request_ctrl_c_dispatches_to_foreground_job();
     fprintf(stderr, "TEST runtime_request_ctrl_z_stops_foreground_job\n");

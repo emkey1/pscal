@@ -17,15 +17,6 @@
 #include "common/path_truncate.h"
 #include "smallclue/smallclue.h"
 #include "ios/vproc.h"
-static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
-    if (!input) {
-        return NULL;
-    }
-    if (pathTruncateExpand(input, buffer, buffer_len)) {
-        return buffer;
-    }
-    return input;
-}
 #endif
 #if !defined(PSCAL_TAB_TITLE_SUPPORT)
 #if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
@@ -2824,16 +2815,6 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
 
-#if defined(PSCAL_TARGET_IOS)
-    char resolved_target[PATH_MAX];
-    if (path) {
-        const char *expanded = shellResolvePathForIOS(path, resolved_target, sizeof(resolved_target));
-        if (expanded) {
-            path = expanded;
-        }
-    }
-#endif
-
     char *new_cwd = NULL;
     char *old_cwd = NULL;
     if (!shellDirectoryStackChdir(vm, "cd", path, &new_cwd, &old_cwd)) {
@@ -2844,7 +2825,7 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
         shellDirectoryStackReportError(vm, "cd", "out of memory");
         shellUpdateStatus(1);
         if (old_cwd) {
-            (void)chdir(old_cwd);
+            (void)SHELL_CHDIR(old_cwd);
             shellDirectoryStackEnsureInitialised(vm, "cd");
             (void)shellDirectoryStackUpdateEnvironment(NULL, old_cwd);
         }
@@ -2855,7 +2836,7 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     if (!shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0])) {
         const char *readonly = shellReadonlyGetErrorName();
         if (old_cwd) {
-            (void)chdir(old_cwd);
+            (void)SHELL_CHDIR(old_cwd);
             if (!shellDirectoryStackAssignTopOwned(old_cwd)) {
                 free(old_cwd);
             }
@@ -2883,7 +2864,7 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
     (void)arg_count;
     (void)args;
     char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) {
+    if (!SHELL_GETCWD(cwd, sizeof(cwd))) {
         runtimeError(vm, "pwd: %s", strerror(errno));
         shellUpdateStatus(errno ? errno : 1);
         return makeVoid();
@@ -3573,10 +3554,21 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     } else {
         vprocSessionStdioActivate(NULL);
     }
+    VProc *current_vproc = vprocCurrent();
     if (prev_vproc) {
-        vprocActivate(prev_vproc);
+        if (current_vproc != prev_vproc) {
+            if (current_vproc) {
+                vprocDeactivate();
+                current_vproc = vprocCurrent();
+            }
+            if (current_vproc != prev_vproc) {
+                vprocActivate(prev_vproc);
+            }
+        }
     } else {
-        vprocDeactivate();
+        while (vprocCurrent() != NULL) {
+            vprocDeactivate();
+        }
     }
     if (manage_process_state) {
         shellRestoreStandardFds(&fd_backup, dbg);

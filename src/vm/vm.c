@@ -38,6 +38,92 @@
 static bool vmHandleGlobalInterrupt(VM* vm);
 static bool vmConsumeSuspendRequest(VM* vm);
 
+#define VM_PROC_REGISTRY_CAPACITY 1024
+
+static pthread_mutex_t gVmProcRegistryLock = PTHREAD_MUTEX_INITIALIZER;
+static VM* gVmProcRegistry[VM_PROC_REGISTRY_CAPACITY];
+static size_t gVmProcRegistryCount = 0;
+
+static size_t vmCountTableSymbols(const HashTable* table) {
+    if (!table) {
+        return 0;
+    }
+    size_t count = 0;
+    for (int i = 0; i < HASHTABLE_SIZE; ++i) {
+        for (const Symbol* sym = table->buckets[i]; sym; sym = sym->next) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static void vmProcRegister(VM* vm) {
+    if (!vm) {
+        return;
+    }
+    pthread_mutex_lock(&gVmProcRegistryLock);
+    for (size_t i = 0; i < gVmProcRegistryCount; ++i) {
+        if (gVmProcRegistry[i] == vm) {
+            pthread_mutex_unlock(&gVmProcRegistryLock);
+            return;
+        }
+    }
+    if (gVmProcRegistryCount < VM_PROC_REGISTRY_CAPACITY) {
+        gVmProcRegistry[gVmProcRegistryCount++] = vm;
+    }
+    pthread_mutex_unlock(&gVmProcRegistryLock);
+}
+
+static void vmProcUnregister(VM* vm) {
+    if (!vm) {
+        return;
+    }
+    pthread_mutex_lock(&gVmProcRegistryLock);
+    for (size_t i = 0; i < gVmProcRegistryCount; ++i) {
+        if (gVmProcRegistry[i] == vm) {
+            gVmProcRegistry[i] = gVmProcRegistry[gVmProcRegistryCount - 1];
+            gVmProcRegistry[gVmProcRegistryCount - 1] = NULL;
+            gVmProcRegistryCount--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&gVmProcRegistryLock);
+}
+
+static void vmProcFillSnapshot(const VM* vm, VMProcSnapshot* out) {
+    if (!vm || !out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->vm_address = (uintptr_t)vm;
+    out->thread_owner_address = (uintptr_t)(vm->threadOwner ? vm->threadOwner : vm);
+    out->frontend_context_address = (uintptr_t)vm->frontendContext;
+    out->chunk_address = (uintptr_t)vm->chunk;
+    out->globals_address = (uintptr_t)vm->vmGlobalSymbols;
+    out->const_globals_address = (uintptr_t)vm->vmConstGlobalSymbols;
+    out->procedures_address = (uintptr_t)vm->procedureTable;
+    out->mutex_owner_address = (uintptr_t)(vm->mutexOwner ? vm->mutexOwner : vm);
+    out->thread_id = vm->threadId;
+    out->thread_count = vm->threadCount;
+    out->worker_count = vm->workerCount;
+    out->available_workers = vm->availableWorkers;
+    out->mutex_count = vm->mutexCount;
+    out->frame_count = vm->frameCount;
+    out->trace_head_instructions = vm->trace_head_instructions;
+    out->trace_executed = vm->trace_executed;
+    out->chunk_bytecode_count = vm->chunk ? vm->chunk->count : 0;
+    out->stack_depth = (vm->stackTop > vm->stack) ? (size_t)(vm->stackTop - vm->stack) : 0;
+    out->global_symbol_count = vmCountTableSymbols(vm->vmGlobalSymbols);
+    out->const_symbol_count = vmCountTableSymbols(vm->vmConstGlobalSymbols);
+    out->procedure_symbol_count = vmCountTableSymbols(vm->procedureTable);
+    out->is_root_vm = (vm->threadOwner == NULL || vm->threadOwner == vm);
+    out->has_job_queue = (vm->jobQueue != NULL);
+    out->shell_indexing = vm->shellIndexing;
+    out->exit_requested = vm->exit_requested;
+    out->abort_requested = vm->abort_requested;
+    out->suspend_unwind_requested = vm->suspend_unwind_requested;
+}
+
 #if defined(PSCAL_TARGET_IOS)
 static bool vmRuntimeSignalAppliesToCurrentVproc(VM* vm) {
     int fg_pgid = -1;
@@ -2197,6 +2283,100 @@ size_t vmSnapshotWorkerUsage(VM* vm, ThreadMetrics* outMetrics, size_t capacity)
     return count;
 }
 
+size_t vmSnapshotProcState(VMProcSnapshot* out, size_t capacity) {
+    if (!out || capacity == 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&gVmProcRegistryLock);
+    size_t count = 0;
+    size_t limit = gVmProcRegistryCount;
+    if (limit > capacity) {
+        limit = capacity;
+    }
+    for (size_t i = 0; i < limit; ++i) {
+        VM* vm = gVmProcRegistry[i];
+        if (!vm) {
+            continue;
+        }
+        vmProcFillSnapshot(vm, &out[count++]);
+    }
+    pthread_mutex_unlock(&gVmProcRegistryLock);
+    return count;
+}
+
+size_t vmSnapshotProcWorkers(uintptr_t vm_address,
+                             VMProcWorkerSnapshot* out,
+                             size_t capacity) {
+    if (!out || capacity == 0 || vm_address == 0) {
+        return 0;
+    }
+
+    pthread_mutex_lock(&gVmProcRegistryLock);
+    VM* vm = NULL;
+    for (size_t i = 0; i < gVmProcRegistryCount; ++i) {
+        if ((uintptr_t)gVmProcRegistry[i] == vm_address) {
+            vm = gVmProcRegistry[i];
+            break;
+        }
+    }
+    if (!vm) {
+        pthread_mutex_unlock(&gVmProcRegistryLock);
+        return 0;
+    }
+
+    VM* root = vm->threadOwner ? vm->threadOwner : vm;
+    size_t count = 0;
+    for (int i = 1; i < VM_MAX_THREADS && count < capacity; ++i) {
+        Thread* thread = &root->threads[i];
+        bool include = thread->inPool || thread->active || thread->vm != NULL;
+        if (!include) {
+            continue;
+        }
+
+        VMProcWorkerSnapshot snapshot;
+        memset(&snapshot, 0, sizeof(snapshot));
+        snapshot.slot_id = i;
+        snapshot.vm_address = (uintptr_t)thread->vm;
+
+        bool locked = (pthread_mutex_trylock(&thread->stateMutex) == 0);
+        snapshot.in_pool = thread->inPool;
+        snapshot.active = thread->active;
+        snapshot.idle = thread->idle;
+        snapshot.owns_vm = thread->ownsVm;
+        snapshot.pool_worker = thread->poolWorker;
+        snapshot.awaiting_reuse = thread->awaitingReuse;
+        snapshot.ready_for_reuse = thread->readyForReuse;
+        snapshot.status_ready = thread->statusReady;
+        snapshot.result_ready = thread->resultReady;
+        snapshot.paused = atomic_load(&thread->paused);
+        snapshot.cancel_requested = atomic_load(&thread->cancelRequested);
+        snapshot.kill_requested = atomic_load(&thread->killRequested);
+        snapshot.pool_generation = thread->poolGeneration;
+        snapshot.queued_at = thread->queuedAt;
+        snapshot.started_at = thread->startedAt;
+        snapshot.finished_at = thread->finishedAt;
+        snapshot.metrics = thread->metrics;
+        if (thread->active && snapshot.metrics.start.valid) {
+            ThreadMetricsSample currentSample = snapshot.metrics.start;
+            vmThreadMetricsCapture(&currentSample);
+            snapshot.metrics.end = currentSample;
+        }
+        if (thread->name[0]) {
+            strncpy(snapshot.name, thread->name, sizeof(snapshot.name) - 1);
+            snapshot.name[sizeof(snapshot.name) - 1] = '\0';
+        } else {
+            snprintf(snapshot.name, sizeof(snapshot.name), "worker-%d", i);
+        }
+        if (locked) {
+            pthread_mutex_unlock(&thread->stateMutex);
+        }
+        out[count++] = snapshot;
+    }
+
+    pthread_mutex_unlock(&gVmProcRegistryLock);
+    return count;
+}
+
 // --- Mutex Helpers ---
 static int createMutex(VM* vm, bool recursive) {
     VM* owner = vm->mutexOwner ? vm->mutexOwner : vm;
@@ -4200,10 +4380,13 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     // Default: tracing disabled
     vm->trace_head_instructions = 0;
     vm->trace_executed = 0;
+
+    vmProcRegister(vm);
 }
 
 void freeVM(VM* vm) {
     if (!vm) return;
+    vmProcUnregister(vm);
     // The VM holds references to global symbol tables that are owned and
     // managed by the caller (e.g. vm_main.c). Freeing them here would lead to
     // double-free errors when the caller performs its own cleanup. Simply

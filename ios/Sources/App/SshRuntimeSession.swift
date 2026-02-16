@@ -215,7 +215,17 @@ final class SshRuntimeSession: ObservableObject {
     }
 
     func requestClose() {
-        send("\u{04}")
+        let interrupted = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
+        }
+        if !interrupted {
+            send("\u{04}")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, self.exitStatus == nil else { return }
+            self.send("\u{04}")
+        }
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {

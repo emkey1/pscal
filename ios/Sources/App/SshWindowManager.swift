@@ -166,8 +166,6 @@ final class TerminalTabManager: ObservableObject {
             return
         }
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        let removedId = removeTab(at: index)
-        tabInitLog("closeSelectedTab removed id=\(removedId) tabs=\(tabs.count)")
         switch tab.kind {
         case .shell(let runtime):
             if runtime.exitStatus == nil {
@@ -185,6 +183,8 @@ final class TerminalTabManager: ObservableObject {
                 session.requestClose()
             }
         }
+        let removedId = removeTab(at: index)
+        tabInitLog("closeSelectedTab removed id=\(removedId) tabs=\(tabs.count)")
     }
 
     @discardableResult

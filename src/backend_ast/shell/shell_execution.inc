@@ -2247,6 +2247,18 @@ static void *shellInProcessWorkerMain(void *arg) {
 
     vprocRegisterThread(ctx->vp, pthread_self());
     vprocActivate(ctx->vp);
+#if defined(PSCAL_TARGET_IOS)
+    /*
+     * Keep worker path resolution aligned with the parent shell session.
+     * This prevents reused worker threads from carrying stale cwd between tabs.
+     */
+    {
+        char shell_cwd[PATH_MAX];
+        if (vprocShellGetcwdShim(shell_cwd, sizeof(shell_cwd)) != NULL) {
+            (void)vprocChdirShim(shell_cwd);
+        }
+    }
+#endif
 
     ctx->status = shellRunBuiltinInProcess(ctx->vm,
                                            ctx->cmd,

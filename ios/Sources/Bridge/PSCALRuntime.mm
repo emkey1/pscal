@@ -1863,6 +1863,7 @@ int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo) {
         return 0;
     }
     int sig = 0;
+    bool terminate_session = false;
     switch (signo) {
         case SIGINT:
             sig = SIGINT;
@@ -1871,10 +1872,14 @@ int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo) {
             sig = SIGTSTP;
             break;
         case SIGTERM:
-            sig = SIGINT;
+            terminate_session = true;
             break;
         default:
             return 0;
+    }
+
+    if (terminate_session) {
+        return vprocTerminateSessionById(session_id) ? 1 : 0;
     }
 
     if (vprocRequestControlSignalForSession(session_id, sig)) {

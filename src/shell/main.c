@@ -46,6 +46,9 @@ void shellHistoryLoadFromFile(void);
 #include "common/runtime_tty.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_truncate.h"
+#define PATH_VIRTUALIZATION_NO_MACROS 1
+#include "common/path_virtualization.h"
+#undef PATH_VIRTUALIZATION_NO_MACROS
 #include "ios/vproc.h"
 #include "ios/tty/pscal_pty.h"
 #if defined(__has_include)
@@ -318,10 +321,25 @@ static void shellEnsureSelfVprocActive(void) {
     if (!gShellSelfVproc) {
         return;
     }
-    if (vprocCurrent() == NULL) {
-        vprocActivate(gShellSelfVproc);
-        gShellSelfVprocActivated = true;
+    int self_pid = vprocPid(gShellSelfVproc);
+    if (self_pid > 0) {
+        vprocSetShellSelfPid(self_pid);
+        vprocSetShellSelfTid(pthread_self());
     }
+    VProc *current = vprocCurrent();
+    if (current == gShellSelfVproc) {
+        return;
+    }
+    size_t unwind_steps = 0;
+    while (current && current != gShellSelfVproc && unwind_steps < 64) {
+        vprocDeactivate();
+        unwind_steps++;
+        current = vprocCurrent();
+    }
+    if (current != gShellSelfVproc) {
+        vprocActivate(gShellSelfVproc);
+    }
+    gShellSelfVprocActivated = true;
 }
 #endif
 
@@ -1003,7 +1021,11 @@ static bool promptBufferAppendWorkingDir(char **buffer,
                                          size_t *capacity,
                                          bool basename_only) {
     char cwd[PATH_MAX];
+#if defined(PSCAL_TARGET_IOS)
+    if (!pscalPathVirtualized_getcwd(cwd, sizeof(cwd))) {
+#else
     if (!getcwd(cwd, sizeof(cwd))) {
+#endif
         return true;
     }
     char display[PATH_MAX + 2];
