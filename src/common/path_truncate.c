@@ -25,10 +25,14 @@
 #include <net/if_dl.h>
 #endif
 #if defined(__APPLE__)
+#include <TargetConditionals.h>
 #include <sys/sysctl.h>
 #include <sys/utsname.h>
 #include <sys/mount.h>
 #include <mach-o/dyld.h>
+#if !TARGET_OS_IPHONE
+#include <libproc.h>
+#endif
 #endif
 #include <time.h>
 #include <pthread.h>
@@ -42,10 +46,25 @@ static _Thread_local int g_pathTruncateResolving = 0;
 static pthread_mutex_t g_pathTruncateMutex = PTHREAD_MUTEX_INITIALIZER;
 static time_t g_procBootTime = 0;
 static char g_procBootId[37] = {0};
+static uint64_t g_procRefreshLastFullMs = 0;
+static uint64_t g_procRefreshLastNetMs = 0;
+static uint64_t g_procRefreshLastDeviceMs = 0;
+static uint64_t g_procRefreshLastVmMs = 0;
+static uint64_t g_procRefreshLastPruneMs = 0;
+static uint64_t g_procRefreshLastDevicePruneMs = 0;
+static bool g_procBaseSeeded = false;
 
 static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
 static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
 static void pathTruncateEnsureDir(const char *path);
+
+static uint64_t pathTruncateMonotonicMs(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
+    return ((uint64_t)ts.tv_sec * 1000ull) + ((uint64_t)ts.tv_nsec / 1000000ull);
+}
 
 static void write_text_file(const char *path, const char *contents) {
     if (!path || !contents) {
@@ -209,6 +228,89 @@ static void pathTruncatePruneNumericDirectoryChildren(const char *dir_path,
             continue;
         }
         unlink(child);
+    }
+    closedir(dir);
+}
+
+static void pathTruncateRemoveTree(const char *path) {
+    if (!path || path[0] == '\0') {
+        return;
+    }
+    struct stat st;
+    if (lstat(path, &st) != 0) {
+        return;
+    }
+    if (S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) {
+        DIR *dir = opendir(path);
+        if (dir) {
+            struct dirent *entry = NULL;
+            while ((entry = readdir(dir)) != NULL) {
+                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                    continue;
+                }
+                char child[PATH_MAX];
+                if (snprintf(child, sizeof(child), "%s/%s", path, entry->d_name) <= 0) {
+                    continue;
+                }
+                pathTruncateRemoveTree(child);
+            }
+            closedir(dir);
+        }
+        rmdir(path);
+        return;
+    }
+    unlink(path);
+}
+
+static bool pathTruncatePidInList(const int *pids, size_t count, int pid) {
+    if (!pids || count == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (pids[i] == pid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void pathTruncatePruneNumericDirectoryChildrenByPidList(const char *dir_path,
+                                                               const int *keep_pids,
+                                                               size_t keep_count,
+                                                               size_t max_remove) {
+    if (!dir_path || dir_path[0] == '\0') {
+        return;
+    }
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        return;
+    }
+    size_t removed = 0;
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (max_remove > 0 && removed >= max_remove) {
+            break;
+        }
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        long pid_long = -1;
+        if (!pathTruncateParseNumericName(entry->d_name, &pid_long)) {
+            continue;
+        }
+        if (pid_long <= 0 || pid_long > INT32_MAX) {
+            continue;
+        }
+        int pid = (int)pid_long;
+        if (pathTruncatePidInList(keep_pids, keep_count, pid)) {
+            continue;
+        }
+        char child[PATH_MAX];
+        if (snprintf(child, sizeof(child), "%s/%s", dir_path, entry->d_name) <= 0) {
+            continue;
+        }
+        pathTruncateRemoveTree(child);
+        removed++;
     }
     closedir(dir);
 }
@@ -804,6 +906,382 @@ static void pathTruncateWriteProcNetPacket(const char *path) {
     write_text_file(path, "sk               RefCnt Type Proto  Iface R Rmem   User   Inode\n");
 }
 
+static void pathTruncateWriteProcNetProtocols(const char *path) {
+    if (!path) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    fprintf(f,
+            "protocol  size sockets  memory press maxhdr  slab module     cl co di ac io in de sh ss gs se re sp bi br ha uh gp em\n");
+    fprintf(f,
+            "TCP       1352      0       0   no     0      0 kernel      yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes\n");
+    fprintf(f,
+            "UDP       1152      0       0   no     0      0 kernel      yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes\n");
+    fprintf(f,
+            "RAW       1024      0       0   no     0      0 kernel      yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes\n");
+    fprintf(f,
+            "UNIX      1088      0       0   no     0      0 kernel      yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes\n");
+    fclose(f);
+}
+
+static void pathTruncateWriteProcNetWireless(const char *path) {
+    if (!path) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    fprintf(f, "Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n");
+    fprintf(f, " face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n");
+
+    struct ifaddrs *ifaddr = NULL;
+    bool wrote_any = false;
+    if (getifaddrs(&ifaddr) == 0 && ifaddr) {
+        for (struct ifaddrs *ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_name || ifa->ifa_name[0] == '\0') {
+                continue;
+            }
+            const char *ifname = strcmp(ifa->ifa_name, "lo0") == 0 ? "lo" : ifa->ifa_name;
+            fprintf(f,
+                    "%6s: 0000   0.    0.    0.        0      0      0      0      0        0\n",
+                    ifname);
+            wrote_any = true;
+        }
+        freeifaddrs(ifaddr);
+    }
+    if (!wrote_any) {
+        fprintf(f, "%6s: 0000   0.    0.    0.        0      0      0      0      0        0\n", "lo");
+    }
+    fclose(f);
+}
+
+static void pathTruncateWriteProcNetSoftnetStat(const char *path, int ncpu) {
+    if (!path) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    if (ncpu <= 0) {
+        ncpu = 1;
+    }
+    for (int i = 0; i < ncpu; ++i) {
+        fprintf(f, "00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000\n");
+    }
+    fclose(f);
+}
+
+static void pathTruncateWriteProcNetDevMcast(const char *path) {
+    if (!path) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    struct ifaddrs *ifaddr = NULL;
+    bool wrote_any = false;
+    if (getifaddrs(&ifaddr) == 0 && ifaddr) {
+        for (struct ifaddrs *ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_name || ifa->ifa_name[0] == '\0') {
+                continue;
+            }
+            unsigned ifindex = if_nametoindex(ifa->ifa_name);
+            if (ifindex == 0) {
+                continue;
+            }
+            const char *ifname = strcmp(ifa->ifa_name, "lo0") == 0 ? "lo" : ifa->ifa_name;
+            /* all-nodes IPv6 multicast group ff02::1 */
+            fprintf(f, "%4u %-15s %5u %5u %s\n",
+                    ifindex,
+                    ifname,
+                    1u,
+                    0u,
+                    "333300000001");
+            wrote_any = true;
+        }
+        freeifaddrs(ifaddr);
+    }
+    if (!wrote_any) {
+        fprintf(f, "%4u %-15s %5u %5u %s\n", 1u, "lo", 1u, 0u, "333300000001");
+    }
+    fclose(f);
+}
+
+static void pathTruncateWriteProcNetIgmp(const char *path) {
+    if (!path) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    fprintf(f, "Idx\tDevice    : Count Querier\tGroup    Users Timer\tReporter\n");
+    struct ifaddrs *ifaddr = NULL;
+    bool wrote_any = false;
+    if (getifaddrs(&ifaddr) == 0 && ifaddr) {
+        for (struct ifaddrs *ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_name || ifa->ifa_name[0] == '\0') {
+                continue;
+            }
+            unsigned ifindex = if_nametoindex(ifa->ifa_name);
+            if (ifindex == 0) {
+                continue;
+            }
+            const char *ifname = strcmp(ifa->ifa_name, "lo0") == 0 ? "lo" : ifa->ifa_name;
+            fprintf(f, "%u\t%-10s: %5u %-8s\n", ifindex, ifname, 1u, "V3");
+            /* 224.0.0.1 in hex in little-endian proc formatting. */
+            fprintf(f, "\t\t\t\t010000E0 %5u 0:00000000\t\t0\n", 1u);
+            wrote_any = true;
+        }
+        freeifaddrs(ifaddr);
+    }
+    if (!wrote_any) {
+        fprintf(f, "%u\t%-10s: %5u %-8s\n", 1u, "lo", 1u, "V3");
+        fprintf(f, "\t\t\t\t010000E0 %5u 0:00000000\t\t0\n", 1u);
+    }
+    fclose(f);
+}
+
+static void pathTruncateWriteProcNetIgmp6(const char *path) {
+    if (!path) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    struct ifaddrs *ifaddr = NULL;
+    bool wrote_any = false;
+    if (getifaddrs(&ifaddr) == 0 && ifaddr) {
+        for (struct ifaddrs *ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_name || ifa->ifa_name[0] == '\0') {
+                continue;
+            }
+            unsigned ifindex = if_nametoindex(ifa->ifa_name);
+            if (ifindex == 0) {
+                continue;
+            }
+            const char *ifname = strcmp(ifa->ifa_name, "lo0") == 0 ? "lo" : ifa->ifa_name;
+            fprintf(f, "%u %-8s %s %5u %08x %u\n",
+                    ifindex,
+                    ifname,
+                    "ff020000000000000000000000000001",
+                    1u,
+                    0x00000004u,
+                    0u);
+            wrote_any = true;
+        }
+        freeifaddrs(ifaddr);
+    }
+    if (!wrote_any) {
+        fprintf(f, "%u %-8s %s %5u %08x %u\n",
+                1u,
+                "lo",
+                "ff020000000000000000000000000001",
+                1u,
+                0x00000004u,
+                0u);
+    }
+    fclose(f);
+}
+
+static void pathTruncateWriteProcNetIpv6Route(const char *path) {
+    if (!path) {
+        return;
+    }
+    /* Minimal synthetic default/loopback-like route rows. */
+    write_text_file(path,
+                    "00000000000000000000000000000000 00 "
+                    "00000000000000000000000000000000 00 "
+                    "00000000000000000000000000000000 "
+                    "00000000 00000000 00000000 00000001 lo\n"
+                    "00000000000000000000000000000001 80 "
+                    "00000000000000000000000000000000 00 "
+                    "00000000000000000000000000000000 "
+                    "00000000 00000000 00000000 00000001 lo\n");
+}
+
+static void pathTruncateWriteProcNetRt6Stats(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path, "0001 0001 0001 0001 0000 0000 0000\n");
+}
+
+static void pathTruncateWriteProcNetFibTrie(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "Main:\n"
+                    "  +-- 0.0.0.0/0 3 0 5\n"
+                    "     +-- 127.0.0.0/8 2 0 2\n"
+                    "        |-- 127.0.0.0\n"
+                    "           /8 host LOCAL\n"
+                    "        |-- 127.0.0.1\n"
+                    "           /32 host LOCAL\n"
+                    "Local:\n"
+                    "  +-- 127.0.0.0/8 2 0 2\n"
+                    "     |-- 127.0.0.1\n"
+                    "        /32 host LOCAL\n");
+}
+
+static void pathTruncateWriteProcNetFibTrieStat(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "Basic info: size 1 depth 2 leaves 2 prefixes 2\n"
+                    "Counters: gets 0 backtracks 0 semantic_match_passed 0 semantic_match_miss 0\n");
+}
+
+static void pathTruncateWriteProcNetNetlink(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "sk               Eth Pid        Groups   Rmem     Wmem     Dump  Locks    Drops    Inode\n"
+                    "0000000000000000 0   0          00000000 0        0        0     0        0        0\n");
+}
+
+static void pathTruncateWriteProcNetPtype(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "Type Device      Function\n"
+                    "0800 lo          ip_rcv\n"
+                    "86dd lo          ipv6_rcv\n");
+}
+
+static void pathTruncateWriteProcNetPsched(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path, "000003e8 00000040 000f4240 3b9aca00\n");
+}
+
+static void pathTruncateWriteProcNetXfrmStat(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "XfrmInError              0\n"
+                    "XfrmInBufferError        0\n"
+                    "XfrmInHdrError           0\n"
+                    "XfrmInNoStates           0\n"
+                    "XfrmOutError             0\n");
+}
+
+static void pathTruncateWriteProcNetStatTable(const char *path, const char *header, const char *row) {
+    if (!path || !header || !row) {
+        return;
+    }
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return;
+    }
+    fprintf(f, "%s\n", header);
+    fprintf(f, "%s\n", row);
+    fclose(f);
+}
+
+static void pathTruncateWriteProcBuddyinfo(const char *path, int ncpu) {
+    (void)ncpu;
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "Node 0, zone      DMA      1      1      1      1      1      1      1      1      1      1      1\n"
+                    "Node 0, zone   Normal    128     64     32     16      8      4      2      1      1      1      1\n");
+}
+
+static void pathTruncateWriteProcZoneinfo(const char *path, uint64_t mem_total_kb) {
+    if (!path) {
+        return;
+    }
+    unsigned long long managed = (unsigned long long)(mem_total_kb / 4ull);
+    unsigned long long present = (unsigned long long)(mem_total_kb / 4ull);
+    char buf[2048];
+    snprintf(buf,
+             sizeof(buf),
+             "Node 0, zone      DMA\n"
+             "  pages free     16\n"
+             "        min      4\n"
+             "        low      8\n"
+             "        high     12\n"
+             "        managed  64\n"
+             "Node 0, zone   Normal\n"
+             "  pages free     %llu\n"
+             "        min      %llu\n"
+             "        low      %llu\n"
+             "        high     %llu\n"
+             "        present  %llu\n"
+             "        managed  %llu\n",
+             managed / 8ull,
+             managed / 64ull,
+             managed / 48ull,
+             managed / 32ull,
+             present,
+             managed);
+    write_text_file(path, buf);
+}
+
+static void pathTruncateWriteProcPagetypeinfo(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "Page block order: 9\n"
+                    "Pages per block:  512\n"
+                    "\n"
+                    "Free pages count per migrate type at order       0      1      2      3      4      5\n"
+                    "Node    0, zone   Normal, type    Unmovable    16      8      4      2      1      0\n"
+                    "Node    0, zone   Normal, type      Movable    32     16      8      4      2      1\n");
+}
+
+static void pathTruncateWriteProcSlabinfo(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "slabinfo - version: 2.1\n"
+                    "# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab>\n"
+                    "kmalloc-64               64         64        64           64              1\n"
+                    "kmalloc-128              32         32       128           32              1\n");
+}
+
+static void pathTruncateWriteProcPartitions(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "major minor  #blocks  name\n"
+                    "\n"
+                    "   1        0   1048576 vda\n");
+}
+
+static void pathTruncateWriteProcLocks(const char *path) {
+    if (!path) {
+        return;
+    }
+    write_text_file(path,
+                    "1: POSIX  ADVISORY  WRITE 1 00:00:0 0 EOF\n");
+}
+
+static void pathTruncateWriteProcSysvipcTable(const char *path, const char *header) {
+    if (!path || !header) {
+        return;
+    }
+    write_text_file(path, header);
+}
+
 static void pathTruncateWriteProcNetUnix(const char *path, const char *prefix) {
     if (!path) {
         return;
@@ -925,6 +1403,205 @@ static size_t pathTruncateSnapshotProcVmWorkers(uintptr_t vm_address,
         return 0;
     }
     return workers_fn(vm_address, out, capacity);
+}
+
+typedef struct {
+    int pid;
+    pthread_t tid;
+    int parent_pid;
+    int pgid;
+    int sid;
+    bool exited;
+    bool stopped;
+    bool continued;
+    bool zombie;
+    int exit_signal;
+    int status;
+    int stop_signo;
+    bool sigchld_pending;
+    int rusage_utime;
+    int rusage_stime;
+    int fg_pgid;
+    int job_id;
+    char comm[16];
+    char command[64];
+} PathTruncateVProcSnapshot;
+
+typedef struct {
+    int pid;
+    int ppid;
+    char name[64];
+} PathTruncateDeviceProcSnapshot;
+
+static size_t pathTruncateSnapshotVProcState(PathTruncateVProcSnapshot *out, size_t capacity) {
+    typedef size_t (*SnapshotFn)(PathTruncateVProcSnapshot *, size_t);
+    static SnapshotFn snapshot_fn = NULL;
+    static bool resolved = false;
+    if (!resolved) {
+        resolved = true;
+        snapshot_fn = (SnapshotFn)dlsym(RTLD_DEFAULT, "vprocSnapshot");
+    }
+    if (!snapshot_fn) {
+        return 0;
+    }
+    return snapshot_fn(out, capacity);
+}
+
+static int pathTruncateCurrentVProcPid(void) {
+    typedef pid_t (*GetPidFn)(void);
+    static GetPidFn getpid_fn = NULL;
+    static bool resolved = false;
+    if (!resolved) {
+        resolved = true;
+        getpid_fn = (GetPidFn)dlsym(RTLD_DEFAULT, "vprocGetPidShim");
+    }
+    if (!getpid_fn) {
+        return -1;
+    }
+    pid_t pid = getpid_fn();
+    if (pid <= 0) {
+        return -1;
+    }
+    return (int)pid;
+}
+
+static size_t pathTruncateSnapshotDeviceProcesses(PathTruncateDeviceProcSnapshot *out,
+                                                  size_t capacity) {
+    if (!out || capacity == 0) {
+        return 0;
+    }
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    int bytes = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+    if (bytes <= 0) {
+        return 0;
+    }
+    size_t pid_count = (size_t)bytes / sizeof(int);
+    int *pid_list = (int *)calloc(pid_count, sizeof(int));
+    if (!pid_list) {
+        return 0;
+    }
+    bytes = proc_listpids(PROC_ALL_PIDS, 0, pid_list, (int)(pid_count * sizeof(int)));
+    if (bytes <= 0) {
+        free(pid_list);
+        return 0;
+    }
+    pid_count = (size_t)bytes / sizeof(int);
+
+    size_t out_count = 0;
+    for (size_t i = 0; i < pid_count && out_count < capacity; ++i) {
+        int pid = pid_list[i];
+        if (pid <= 0) {
+            continue;
+        }
+        struct proc_bsdinfo bsdinfo;
+        int info_bytes = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsdinfo, (int)sizeof(bsdinfo));
+        if (info_bytes <= 0) {
+            continue;
+        }
+        PathTruncateDeviceProcSnapshot *entry = &out[out_count++];
+        entry->pid = pid;
+        entry->ppid = (int)bsdinfo.pbi_ppid;
+        entry->name[0] = '\0';
+        int name_len = proc_name(pid, entry->name, (uint32_t)sizeof(entry->name));
+        if (name_len <= 0 || entry->name[0] == '\0') {
+            snprintf(entry->name, sizeof(entry->name), "pid-%d", pid);
+        }
+    }
+    free(pid_list);
+    return out_count;
+#else
+    (void)out;
+    (void)capacity;
+    return 0;
+#endif
+}
+
+static void pathTruncateWriteProcDevicePidEntry(const char *device_dir,
+                                                pid_t pid,
+                                                pid_t ppid,
+                                                const char *name,
+                                                uint64_t mem_total_kb,
+                                                double uptime_secs) {
+    if (!device_dir || !name || pid <= 0) {
+        return;
+    }
+    char pid_dir[PATH_MAX];
+    if (snprintf(pid_dir, sizeof(pid_dir), "%s/%d", device_dir, (int)pid) <= 0) {
+        return;
+    }
+    pathTruncateEnsureDir(pid_dir);
+
+    char pathbuf[PATH_MAX];
+    if (snprintf(pathbuf, sizeof(pathbuf), "%s/comm", pid_dir) > 0) {
+        char line[128];
+        snprintf(line, sizeof(line), "%s\n", name);
+        write_text_file(pathbuf, line);
+    }
+    if (snprintf(pathbuf, sizeof(pathbuf), "%s/cmdline", pid_dir) > 0) {
+        char cmdline[128];
+        size_t n = (size_t)snprintf(cmdline, sizeof(cmdline), "%s", name);
+        if (n + 1 < sizeof(cmdline)) {
+            cmdline[n] = '\0';
+            pathTruncateWriteBinaryFile(pathbuf, cmdline, n + 1);
+        } else {
+            write_text_file(pathbuf, name);
+        }
+    }
+    if (snprintf(pathbuf, sizeof(pathbuf), "%s/status", pid_dir) > 0) {
+        FILE *f = fopen(pathbuf, "w");
+        if (f) {
+            uid_t uid = getuid();
+            gid_t gid = getgid();
+            fprintf(f, "Name:\t%s\n", name);
+            fprintf(f, "State:\tR (running)\n");
+            fprintf(f, "Tgid:\t%d\n", (int)pid);
+            fprintf(f, "Pid:\t%d\n", (int)pid);
+            fprintf(f, "PPid:\t%d\n", (int)ppid);
+            fprintf(f, "Uid:\t%u\t%u\t%u\t%u\n", (unsigned)uid, (unsigned)uid, (unsigned)uid, (unsigned)uid);
+            fprintf(f, "Gid:\t%u\t%u\t%u\t%u\n", (unsigned)gid, (unsigned)gid, (unsigned)gid, (unsigned)gid);
+            fprintf(f, "Threads:\t1\n");
+            fprintf(f, "VmSize:\t%llu kB\n", (unsigned long long)(mem_total_kb / 8ull));
+            fprintf(f, "VmRSS:\t%llu kB\n", (unsigned long long)(mem_total_kb / 16ull));
+            fclose(f);
+        }
+    }
+    if (snprintf(pathbuf, sizeof(pathbuf), "%s/stat", pid_dir) > 0) {
+        FILE *f = fopen(pathbuf, "w");
+        if (f) {
+            long hz = sysconf(_SC_CLK_TCK);
+            if (hz <= 0) {
+                hz = 100;
+            }
+            unsigned long long start_ticks = (unsigned long long)(uptime_secs * (double)hz * 0.1);
+            unsigned long long utime = (unsigned long long)(uptime_secs * (double)hz * 0.01);
+            unsigned long long stime = (unsigned long long)(uptime_secs * (double)hz * 0.005);
+            unsigned long long vsize = (unsigned long long)(mem_total_kb * 1024ull / 8ull);
+            long rss = (long)(mem_total_kb / 16ull);
+            fprintf(f,
+                    "%d (%s) R %d %d %d 0 -1 4194304 0 0 0 0 %llu %llu 0 0 20 0 1 0 %llu %llu %ld 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+                    (int)pid,
+                    name,
+                    (int)ppid,
+                    (int)pid,
+                    (int)pid,
+                    utime,
+                    stime,
+                    start_ticks,
+                    vsize,
+                    rss);
+            fclose(f);
+        }
+    }
+    if (snprintf(pathbuf, sizeof(pathbuf), "%s/io", pid_dir) > 0) {
+        write_text_file(pathbuf,
+                        "rchar: 0\n"
+                        "wchar: 0\n"
+                        "syscr: 0\n"
+                        "syscw: 0\n"
+                        "read_bytes: 0\n"
+                        "write_bytes: 0\n"
+                        "cancelled_write_bytes: 0\n");
+    }
 }
 
 static void pathTruncateWriteProcVm(const char *procdir) {
@@ -1189,6 +1866,17 @@ static void pathTruncateResolveExePath(const char *prefix, char *out, size_t out
     pathTruncateProcStripContainerPrefix(prefix, host_path, out, out_size);
 }
 
+static void pathTruncateEnsureProcPidDir(const char *procdir, int pid) {
+    if (!procdir || pid <= 0) {
+        return;
+    }
+    char pid_dir[PATH_MAX];
+    if (snprintf(pid_dir, sizeof(pid_dir), "%s/%d", procdir, pid) <= 0) {
+        return;
+    }
+    pathTruncateEnsureDir(pid_dir);
+}
+
 static void pathTruncateWriteProcPidEntries(const char *procdir,
                                             const char *prefix,
                                             pid_t pid,
@@ -1205,13 +1893,6 @@ static void pathTruncateWriteProcPidEntries(const char *procdir,
         return;
     }
     pathTruncateEnsureDir(pid_dir);
-
-    char self_path[PATH_MAX];
-    if (snprintf(self_path, sizeof(self_path), "%s/self", procdir) > 0) {
-        char pid_link[32];
-        snprintf(pid_link, sizeof(pid_link), "%d", (int)pid);
-        pathTruncateEnsureSymlink(self_path, pid_link);
-    }
 
     char comm_path[PATH_MAX];
     if (snprintf(comm_path, sizeof(comm_path), "%s/comm", pid_dir) > 0) {
@@ -1324,6 +2005,75 @@ static void pathTruncateWriteProcPidEntries(const char *procdir,
     if (snprintf(wchan_path, sizeof(wchan_path), "%s/wchan", pid_dir) > 0) {
         write_text_file(wchan_path, "0\n");
     }
+    char sched_path[PATH_MAX];
+    if (snprintf(sched_path, sizeof(sched_path), "%s/sched", pid_dir) > 0) {
+        FILE *f = fopen(sched_path, "w");
+        if (f) {
+            fprintf(f, "%s (%d, #threads: 1)\n", proc_name, (int)pid);
+            fprintf(f, "se.exec_start                                : 0.000000\n");
+            fprintf(f, "se.vruntime                                  : 0.000000\n");
+            fprintf(f, "se.sum_exec_runtime                          : 0.000000\n");
+            fprintf(f, "nr_switches                                  : 0\n");
+            fprintf(f, "nr_voluntary_switches                        : 0\n");
+            fprintf(f, "nr_involuntary_switches                      : 0\n");
+            fclose(f);
+        }
+    }
+    char schedstat_path[PATH_MAX];
+    if (snprintf(schedstat_path, sizeof(schedstat_path), "%s/schedstat", pid_dir) > 0) {
+        write_text_file(schedstat_path, "0 0 0\n");
+    }
+    char stack_path[PATH_MAX];
+    if (snprintf(stack_path, sizeof(stack_path), "%s/stack", pid_dir) > 0) {
+        write_text_file(stack_path, "[<0>] userspace\n");
+    }
+    char cpuset_path[PATH_MAX];
+    if (snprintf(cpuset_path, sizeof(cpuset_path), "%s/cpuset", pid_dir) > 0) {
+        write_text_file(cpuset_path, "/\n");
+    }
+    char oom_score_path[PATH_MAX];
+    if (snprintf(oom_score_path, sizeof(oom_score_path), "%s/oom_score", pid_dir) > 0) {
+        write_text_file(oom_score_path, "0\n");
+    }
+    char oom_adj_path[PATH_MAX];
+    if (snprintf(oom_adj_path, sizeof(oom_adj_path), "%s/oom_score_adj", pid_dir) > 0) {
+        write_text_file(oom_adj_path, "0\n");
+    }
+    char personality_path[PATH_MAX];
+    if (snprintf(personality_path, sizeof(personality_path), "%s/personality", pid_dir) > 0) {
+        write_text_file(personality_path, "00000000\n");
+    }
+    char loginuid_path[PATH_MAX];
+    if (snprintf(loginuid_path, sizeof(loginuid_path), "%s/loginuid", pid_dir) > 0) {
+        write_text_file(loginuid_path, "4294967295\n");
+    }
+    char sessionid_path[PATH_MAX];
+    if (snprintf(sessionid_path, sizeof(sessionid_path), "%s/sessionid", pid_dir) > 0) {
+        write_text_file(sessionid_path, "0\n");
+    }
+    char attr_dir[PATH_MAX];
+    if (snprintf(attr_dir, sizeof(attr_dir), "%s/attr", pid_dir) > 0) {
+        pathTruncateEnsureDir(attr_dir);
+        char pathbuf[PATH_MAX];
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/current", attr_dir) > 0) {
+            write_text_file(pathbuf, "unconfined\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/prev", attr_dir) > 0) {
+            write_text_file(pathbuf, "unconfined\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/exec", attr_dir) > 0) {
+            write_text_file(pathbuf, "unconfined\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/fscreate", attr_dir) > 0) {
+            write_text_file(pathbuf, "unconfined\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/keycreate", attr_dir) > 0) {
+            write_text_file(pathbuf, "unconfined\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/sockcreate", attr_dir) > 0) {
+            write_text_file(pathbuf, "unconfined\n");
+        }
+    }
     char mounts_path[PATH_MAX];
     if (snprintf(mounts_path, sizeof(mounts_path), "%s/mounts", pid_dir) > 0) {
         pathTruncateEnsureSymlink(mounts_path, "../mounts");
@@ -1339,9 +2089,129 @@ static void pathTruncateWriteProcPidEntries(const char *procdir,
     char task_dir[PATH_MAX];
     if (snprintf(task_dir, sizeof(task_dir), "%s/task", pid_dir) > 0) {
         pathTruncateEnsureDir(task_dir);
-        char task_self[PATH_MAX];
-        if (snprintf(task_self, sizeof(task_self), "%s/%d", task_dir, (int)pid) > 0) {
-            pathTruncateEnsureSymlink(task_self, "..");
+        char task_tid_dir[PATH_MAX];
+        if (snprintf(task_tid_dir, sizeof(task_tid_dir), "%s/%d", task_dir, (int)pid) > 0) {
+            struct stat task_st;
+            if (lstat(task_tid_dir, &task_st) == 0 && S_ISLNK(task_st.st_mode)) {
+                unlink(task_tid_dir);
+            }
+            pathTruncateEnsureDir(task_tid_dir);
+
+            char pathbuf[PATH_MAX];
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/comm", task_tid_dir) > 0) {
+                char line[128];
+                snprintf(line, sizeof(line), "%s\n", proc_name);
+                write_text_file(pathbuf, line);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/status", task_tid_dir) > 0) {
+                FILE *f = fopen(pathbuf, "w");
+                if (f) {
+                    uid_t uid = getuid();
+                    gid_t gid = getgid();
+                    fprintf(f, "Name:\t%s\n", proc_name);
+                    fprintf(f, "State:\tR (running)\n");
+                    fprintf(f, "Tgid:\t%d\n", (int)pid);
+                    fprintf(f, "Pid:\t%d\n", (int)pid);
+                    fprintf(f, "PPid:\t%d\n", (int)ppid);
+                    fprintf(f, "Uid:\t%u\t%u\t%u\t%u\n",
+                            (unsigned)uid, (unsigned)uid, (unsigned)uid, (unsigned)uid);
+                    fprintf(f, "Gid:\t%u\t%u\t%u\t%u\n",
+                            (unsigned)gid, (unsigned)gid, (unsigned)gid, (unsigned)gid);
+                    fprintf(f, "Threads:\t1\n");
+                    fclose(f);
+                }
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/stat", task_tid_dir) > 0) {
+                FILE *f = fopen(pathbuf, "w");
+                if (f) {
+                    long hz = sysconf(_SC_CLK_TCK);
+                    if (hz <= 0) {
+                        hz = 100;
+                    }
+                    unsigned long long start_ticks = (unsigned long long)(uptime_secs * (double)hz * 0.1);
+                    unsigned long long utime = (unsigned long long)(uptime_secs * (double)hz * 0.02);
+                    unsigned long long stime = (unsigned long long)(uptime_secs * (double)hz * 0.01);
+                    fprintf(f,
+                            "%d (%s) R %d %d %d 0 -1 4194304 0 0 0 0 %llu %llu 0 0 20 0 1 0 %llu 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+                            (int)pid,
+                            proc_name,
+                            (int)ppid,
+                            (int)pid,
+                            (int)pid,
+                            utime,
+                            stime,
+                            start_ticks);
+                    fclose(f);
+                }
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/sched", task_tid_dir) > 0) {
+                FILE *f = fopen(pathbuf, "w");
+                if (f) {
+                    fprintf(f, "%s (%d, #threads: 1)\n", proc_name, (int)pid);
+                    fprintf(f, "se.exec_start                                : 0.000000\n");
+                    fprintf(f, "se.vruntime                                  : 0.000000\n");
+                    fprintf(f, "se.sum_exec_runtime                          : 0.000000\n");
+                    fprintf(f, "nr_switches                                  : 0\n");
+                    fprintf(f, "nr_voluntary_switches                        : 0\n");
+                    fprintf(f, "nr_involuntary_switches                      : 0\n");
+                    fclose(f);
+                }
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/schedstat", task_tid_dir) > 0) {
+                write_text_file(pathbuf, "0 0 0\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/stack", task_tid_dir) > 0) {
+                write_text_file(pathbuf, "[<0>] userspace\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/wchan", task_tid_dir) > 0) {
+                write_text_file(pathbuf, "0\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/cgroup", task_tid_dir) > 0) {
+                write_text_file(pathbuf, "0::/\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/io", task_tid_dir) > 0) {
+                write_text_file(pathbuf,
+                                "rchar: 0\n"
+                                "wchar: 0\n"
+                                "syscr: 0\n"
+                                "syscw: 0\n"
+                                "read_bytes: 0\n"
+                                "write_bytes: 0\n"
+                                "cancelled_write_bytes: 0\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/cpuset", task_tid_dir) > 0) {
+                write_text_file(pathbuf, "/\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/personality", task_tid_dir) > 0) {
+                write_text_file(pathbuf, "00000000\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/children", task_tid_dir) > 0) {
+                write_text_file(pathbuf, "\n");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/cwd", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../cwd");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/exe", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../exe");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/root", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../root");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/fd", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../fd");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/fdinfo", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../fdinfo");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/mounts", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../mounts");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/mountinfo", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../mountinfo");
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/net", task_tid_dir) > 0) {
+                pathTruncateEnsureSymlink(pathbuf, "../../net");
+            }
         }
     }
 
@@ -1361,6 +2231,10 @@ static void pathTruncateWriteProcPidEntries(const char *procdir,
         char exe_virtual[PATH_MAX];
         pathTruncateResolveExePath(prefix, exe_virtual, sizeof(exe_virtual));
         pathTruncateEnsureSymlink(exe_path, exe_virtual[0] ? exe_virtual : "/bin/exsh");
+    }
+    char root_path[PATH_MAX];
+    if (snprintf(root_path, sizeof(root_path), "%s/root", pid_dir) > 0) {
+        pathTruncateEnsureSymlink(root_path, "/");
     }
 
     char fd_dir[PATH_MAX];
@@ -1448,11 +2322,49 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     if (request_path && !pathTruncateIsProcRequestPath(request_path)) {
         return;
     }
-    bool refresh_pid_entries = true;
-    if (request_path &&
+    bool request_net = request_path &&
         (pathTruncateProcPrefixMatch(request_path, "/proc/net") ||
-         pathTruncateProcPrefixMatch(request_path, "/private/proc/net"))) {
+         pathTruncateProcPrefixMatch(request_path, "/private/proc/net"));
+    bool request_device = request_path &&
+        (pathTruncateProcPrefixMatch(request_path, "/proc/device") ||
+         pathTruncateProcPrefixMatch(request_path, "/private/proc/device"));
+    bool request_vm = request_path &&
+        (pathTruncateProcPrefixMatch(request_path, "/proc/vm") ||
+         pathTruncateProcPrefixMatch(request_path, "/private/proc/vm"));
+    bool request_proc_root = request_path &&
+        (strcmp(request_path, "/proc") == 0 ||
+         strcmp(request_path, "/proc/") == 0 ||
+         strcmp(request_path, "/private/proc") == 0 ||
+         strcmp(request_path, "/private/proc/") == 0);
+
+    uint64_t now_ms = pathTruncateMonotonicMs();
+    uint64_t *bucket = &g_procRefreshLastFullMs;
+    uint64_t min_interval_ms = 250;
+    if (request_net) {
+        bucket = &g_procRefreshLastNetMs;
+        min_interval_ms = 200;
+    } else if (request_device) {
+        bucket = &g_procRefreshLastDeviceMs;
+        min_interval_ms = 300;
+    } else if (request_vm) {
+        bucket = &g_procRefreshLastVmMs;
+        min_interval_ms = 200;
+    }
+    if (now_ms != 0 && *bucket != 0 && now_ms > *bucket &&
+        (now_ms - *bucket) < min_interval_ms) {
+        return;
+    }
+    if (now_ms != 0) {
+        *bucket = now_ms;
+    }
+
+    bool refresh_pid_entries = true;
+    if (request_net) {
         refresh_pid_entries = false;
+    }
+    bool refresh_device_entries = refresh_pid_entries;
+    if (!request_device) {
+        refresh_device_entries = false;
     }
 
     char procdir[PATH_MAX];
@@ -1460,6 +2372,13 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         return;
     }
     pathTruncateEnsureDir(procdir);
+
+    char cpuinfo_sentinel[PATH_MAX];
+    bool has_cpuinfo = false;
+    if (snprintf(cpuinfo_sentinel, sizeof(cpuinfo_sentinel), "%s/cpuinfo", procdir) > 0) {
+        has_cpuinfo = (access(cpuinfo_sentinel, F_OK) == 0);
+    }
+    bool seed_needed = !g_procBaseSeeded || !has_cpuinfo;
 
     struct timespec mono = {0};
     double uptime_secs = 0.0;
@@ -1472,9 +2391,41 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     if (g_procBootTime == 0 || g_procBootTime > now) {
         g_procBootTime = now;
     }
-    pid_t self_pid = getpid();
-    if (self_pid <= 0) {
-        self_pid = 1;
+    pid_t host_pid = getpid();
+    if (host_pid <= 0) {
+        host_pid = 1;
+    }
+
+    if (request_proc_root && !seed_needed) {
+        int current_vproc_pid = pathTruncateCurrentVProcPid();
+        PathTruncateVProcSnapshot vproc_snapshots[512];
+        size_t vproc_snapshot_count = pathTruncateSnapshotVProcState(
+            vproc_snapshots,
+            sizeof(vproc_snapshots) / sizeof(vproc_snapshots[0]));
+        bool wrote_any = false;
+        for (size_t i = 0; i < vproc_snapshot_count; ++i) {
+            if (vproc_snapshots[i].pid <= 0) {
+                continue;
+            }
+            pathTruncateEnsureProcPidDir(procdir, vproc_snapshots[i].pid);
+            wrote_any = true;
+        }
+        if (!wrote_any && current_vproc_pid > 0) {
+            pathTruncateEnsureProcPidDir(procdir, current_vproc_pid);
+            wrote_any = true;
+        }
+        if (!wrote_any) {
+            pathTruncateEnsureProcPidDir(procdir, (int)host_pid);
+            current_vproc_pid = (int)host_pid;
+        }
+        char self_path[PATH_MAX];
+        if (snprintf(self_path, sizeof(self_path), "%s/self", procdir) > 0) {
+            char pid_link[32];
+            int self_link_pid = current_vproc_pid > 0 ? current_vproc_pid : (int)host_pid;
+            snprintf(pid_link, sizeof(pid_link), "%d", self_link_pid);
+            pathTruncateEnsureSymlink(self_path, pid_link);
+        }
+        return;
     }
 
     int ncpu = 1;
@@ -1501,6 +2452,22 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     if (mem_total_kb == 0) {
         mem_total_kb = 1024ull * 1024ull;
     }
+
+    int current_vproc_pid = pathTruncateCurrentVProcPid();
+    PathTruncateVProcSnapshot vproc_snapshots[512];
+    size_t vproc_snapshot_count = 0;
+    if (refresh_pid_entries) {
+        vproc_snapshot_count = pathTruncateSnapshotVProcState(
+            vproc_snapshots,
+            sizeof(vproc_snapshots) / sizeof(vproc_snapshots[0]));
+        if (vproc_snapshot_count == 0 && current_vproc_pid == (int)host_pid) {
+            current_vproc_pid = -1;
+        }
+        if (current_vproc_pid <= 0 && vproc_snapshot_count > 0 && vproc_snapshots[0].pid > 0) {
+            current_vproc_pid = vproc_snapshots[0].pid;
+        }
+    }
+    int proc_display_pid = current_vproc_pid > 0 ? current_vproc_pid : (int)host_pid;
 
     char cpuinfo_path[PATH_MAX];
     if (snprintf(cpuinfo_path, sizeof(cpuinfo_path), "%s/cpuinfo", procdir) > 0) {
@@ -1590,8 +2557,57 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     char loadavg_path[PATH_MAX];
     if (snprintf(loadavg_path, sizeof(loadavg_path), "%s/loadavg", procdir) > 0) {
         char buf[128];
-        snprintf(buf, sizeof(buf), "0.00 0.00 0.00 1/1 %d\n", (int)self_pid);
+        snprintf(buf, sizeof(buf), "0.00 0.00 0.00 1/1 %d\n", proc_display_pid);
         write_text_file(loadavg_path, buf);
+    }
+
+    char interrupts_path[PATH_MAX];
+    if (snprintf(interrupts_path, sizeof(interrupts_path), "%s/interrupts", procdir) > 0) {
+        FILE *f = fopen(interrupts_path, "w");
+        if (f) {
+            fprintf(f, "            ");
+            for (int i = 0; i < ncpu; ++i) {
+                fprintf(f, "CPU%-8d", i);
+            }
+            fprintf(f, "\n");
+            fprintf(f, "  0:");
+            for (int i = 0; i < ncpu; ++i) {
+                fprintf(f, " %10u", 0u);
+            }
+            fprintf(f, "  PSCAL-virt-timer\n");
+            fprintf(f, "  1:");
+            for (int i = 0; i < ncpu; ++i) {
+                fprintf(f, " %10u", 0u);
+            }
+            fprintf(f, "  PSCAL-virt-io\n");
+            fclose(f);
+        }
+    }
+
+    char softirqs_path[PATH_MAX];
+    if (snprintf(softirqs_path, sizeof(softirqs_path), "%s/softirqs", procdir) > 0) {
+        FILE *f = fopen(softirqs_path, "w");
+        if (f) {
+            fprintf(f, "                    ");
+            for (int i = 0; i < ncpu; ++i) {
+                fprintf(f, "CPU%-8d", i);
+            }
+            fprintf(f, "\n");
+            const char *rows[] = { "HI", "TIMER", "NET_TX", "NET_RX", "BLOCK", "IRQ_POLL", "TASKLET", "SCHED", "HRTIMER", "RCU" };
+            for (size_t r = 0; r < sizeof(rows) / sizeof(rows[0]); ++r) {
+                fprintf(f, "%-10s:", rows[r]);
+                for (int i = 0; i < ncpu; ++i) {
+                    fprintf(f, " %10u", 0u);
+                }
+                fprintf(f, "\n");
+            }
+            fclose(f);
+        }
+    }
+
+    char modules_path[PATH_MAX];
+    if (snprintf(modules_path, sizeof(modules_path), "%s/modules", procdir) > 0) {
+        write_text_file(modules_path, "vproc 16384 0 - Live 0x0000000000000000\n");
     }
 
     char vmstat_path[PATH_MAX];
@@ -1599,10 +2615,34 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         write_text_file(vmstat_path,
                         "pgpgin 0\npgpgout 0\npswpin 0\npswpout 0\npgfault 0\npgmajfault 0\n");
     }
+    char buddyinfo_path[PATH_MAX];
+    if (snprintf(buddyinfo_path, sizeof(buddyinfo_path), "%s/buddyinfo", procdir) > 0) {
+        pathTruncateWriteProcBuddyinfo(buddyinfo_path, ncpu);
+    }
+    char zoneinfo_path[PATH_MAX];
+    if (snprintf(zoneinfo_path, sizeof(zoneinfo_path), "%s/zoneinfo", procdir) > 0) {
+        pathTruncateWriteProcZoneinfo(zoneinfo_path, mem_total_kb);
+    }
+    char pagetypeinfo_path[PATH_MAX];
+    if (snprintf(pagetypeinfo_path, sizeof(pagetypeinfo_path), "%s/pagetypeinfo", procdir) > 0) {
+        pathTruncateWriteProcPagetypeinfo(pagetypeinfo_path);
+    }
+    char slabinfo_path[PATH_MAX];
+    if (snprintf(slabinfo_path, sizeof(slabinfo_path), "%s/slabinfo", procdir) > 0) {
+        pathTruncateWriteProcSlabinfo(slabinfo_path);
+    }
 
     char diskstats_path[PATH_MAX];
     if (snprintf(diskstats_path, sizeof(diskstats_path), "%s/diskstats", procdir) > 0) {
         write_text_file(diskstats_path, "   1       0 vda 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n");
+    }
+    char partitions_path[PATH_MAX];
+    if (snprintf(partitions_path, sizeof(partitions_path), "%s/partitions", procdir) > 0) {
+        pathTruncateWriteProcPartitions(partitions_path);
+    }
+    char locks_path[PATH_MAX];
+    if (snprintf(locks_path, sizeof(locks_path), "%s/locks", procdir) > 0) {
+        pathTruncateWriteProcLocks(locks_path);
     }
 
     char swaps_path[PATH_MAX];
@@ -1646,10 +2686,7 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     char sys_kernel_dir[PATH_MAX];
     if (snprintf(sys_kernel_dir, sizeof(sys_kernel_dir), "%s/sys/kernel", procdir) > 0) {
         pathTruncateEnsureDir(sys_kernel_dir);
-        char hostbuf[256] = "pscal";
-        if (gethostname(hostbuf, sizeof(hostbuf) - 1) != 0 || hostbuf[0] == '\0') {
-            snprintf(hostbuf, sizeof(hostbuf), "pscal");
-        }
+        const char *hostbuf = "pscal";
         char pathbuf[PATH_MAX];
         if (snprintf(pathbuf, sizeof(pathbuf), "%s/hostname", sys_kernel_dir) > 0) {
             write_text_file(pathbuf, hostbuf);
@@ -1668,6 +2705,18 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         if (snprintf(pathbuf, sizeof(pathbuf), "%s/pid_max", sys_kernel_dir) > 0) {
             write_text_file(pathbuf, "4194304\n");
         }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/threads-max", sys_kernel_dir) > 0) {
+            write_text_file(pathbuf, "65535\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/sched_child_runs_first", sys_kernel_dir) > 0) {
+            write_text_file(pathbuf, "0\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/panic", sys_kernel_dir) > 0) {
+            write_text_file(pathbuf, "0\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/core_pattern", sys_kernel_dir) > 0) {
+            write_text_file(pathbuf, "core\n");
+        }
         char random_dir[PATH_MAX];
         if (snprintf(random_dir, sizeof(random_dir), "%s/random", sys_kernel_dir) > 0) {
             pathTruncateEnsureDir(random_dir);
@@ -1676,13 +2725,126 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
                 snprintf(boot_line, sizeof(boot_line), "%s\n", g_procBootId);
                 write_text_file(pathbuf, boot_line);
             }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/uuid", random_dir) > 0) {
+                char uuid_line[64];
+                snprintf(uuid_line, sizeof(uuid_line), "%s\n", g_procBootId);
+                write_text_file(pathbuf, uuid_line);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/entropy_avail", random_dir) > 0) {
+                write_text_file(pathbuf, "256\n");
+            }
+        }
+    }
+
+    char sys_vm_dir[PATH_MAX];
+    if (snprintf(sys_vm_dir, sizeof(sys_vm_dir), "%s/sys/vm", procdir) > 0) {
+        pathTruncateEnsureDir(sys_vm_dir);
+        char pathbuf[PATH_MAX];
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/swappiness", sys_vm_dir) > 0) {
+            write_text_file(pathbuf, "60\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/overcommit_memory", sys_vm_dir) > 0) {
+            write_text_file(pathbuf, "0\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/overcommit_ratio", sys_vm_dir) > 0) {
+            write_text_file(pathbuf, "50\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/max_map_count", sys_vm_dir) > 0) {
+            write_text_file(pathbuf, "65530\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/dirty_background_ratio", sys_vm_dir) > 0) {
+            write_text_file(pathbuf, "10\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/dirty_ratio", sys_vm_dir) > 0) {
+            write_text_file(pathbuf, "20\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/min_free_kbytes", sys_vm_dir) > 0) {
+            char min_free[64];
+            unsigned long long min_kb = mem_total_kb / 200ull;
+            if (min_kb < 1024ull) {
+                min_kb = 1024ull;
+            }
+            snprintf(min_free, sizeof(min_free), "%llu\n", min_kb);
+            write_text_file(pathbuf, min_free);
+        }
+    }
+
+    char sys_fs_dir[PATH_MAX];
+    if (snprintf(sys_fs_dir, sizeof(sys_fs_dir), "%s/sys/fs", procdir) > 0) {
+        pathTruncateEnsureDir(sys_fs_dir);
+        char pathbuf[PATH_MAX];
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/file-max", sys_fs_dir) > 0) {
+            write_text_file(pathbuf, "1048576\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/inode-nr", sys_fs_dir) > 0) {
+            write_text_file(pathbuf, "16384\t0\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/inode-state", sys_fs_dir) > 0) {
+            write_text_file(pathbuf, "16384\t0\t0\t0\t0\t0\t0\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/aio-max-nr", sys_fs_dir) > 0) {
+            write_text_file(pathbuf, "65536\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/aio-nr", sys_fs_dir) > 0) {
+            write_text_file(pathbuf, "0\n");
+        }
+    }
+
+    char sys_net_core_dir[PATH_MAX];
+    if (snprintf(sys_net_core_dir, sizeof(sys_net_core_dir), "%s/sys/net/core", procdir) > 0) {
+        pathTruncateEnsureDir(sys_net_core_dir);
+        char pathbuf[PATH_MAX];
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/somaxconn", sys_net_core_dir) > 0) {
+            write_text_file(pathbuf, "4096\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/rmem_default", sys_net_core_dir) > 0) {
+            write_text_file(pathbuf, "212992\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/wmem_default", sys_net_core_dir) > 0) {
+            write_text_file(pathbuf, "212992\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/rmem_max", sys_net_core_dir) > 0) {
+            write_text_file(pathbuf, "212992\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/wmem_max", sys_net_core_dir) > 0) {
+            write_text_file(pathbuf, "212992\n");
+        }
+    }
+
+    char sys_net_ipv4_dir[PATH_MAX];
+    if (snprintf(sys_net_ipv4_dir, sizeof(sys_net_ipv4_dir), "%s/sys/net/ipv4", procdir) > 0) {
+        pathTruncateEnsureDir(sys_net_ipv4_dir);
+        char pathbuf[PATH_MAX];
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/ip_forward", sys_net_ipv4_dir) > 0) {
+            write_text_file(pathbuf, "0\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/tcp_syncookies", sys_net_ipv4_dir) > 0) {
+            write_text_file(pathbuf, "1\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/tcp_fin_timeout", sys_net_ipv4_dir) > 0) {
+            write_text_file(pathbuf, "60\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/tcp_keepalive_time", sys_net_ipv4_dir) > 0) {
+            write_text_file(pathbuf, "7200\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/ip_local_port_range", sys_net_ipv4_dir) > 0) {
+            write_text_file(pathbuf, "32768\t60999\n");
+        }
+    }
+
+    char sys_net_ipv6_all_dir[PATH_MAX];
+    if (snprintf(sys_net_ipv6_all_dir, sizeof(sys_net_ipv6_all_dir), "%s/sys/net/ipv6/conf/all", procdir) > 0) {
+        pathTruncateEnsureDir(sys_net_ipv6_all_dir);
+        char pathbuf[PATH_MAX];
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/forwarding", sys_net_ipv6_all_dir) > 0) {
+            write_text_file(pathbuf, "0\n");
         }
     }
 
     char thread_self_path[PATH_MAX];
     if (snprintf(thread_self_path, sizeof(thread_self_path), "%s/thread-self", procdir) > 0) {
         char target[64];
-        snprintf(target, sizeof(target), "%d/task/%d", (int)self_pid, (int)self_pid);
+        snprintf(target, sizeof(target), "%d/task/%d", proc_display_pid, proc_display_pid);
         pathTruncateEnsureSymlink(thread_self_path, target);
     }
 
@@ -1710,61 +2872,134 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     char net_dir[PATH_MAX];
     if (snprintf(net_dir, sizeof(net_dir), "%s/net", procdir) > 0) {
         pathTruncateEnsureDir(net_dir);
-        char pathbuf[PATH_MAX];
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/dev", net_dir) > 0) {
-            pathTruncateWriteProcNetDev(pathbuf);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/arp", net_dir) > 0) {
-            pathTruncateWriteProcNetArp(pathbuf);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/if_inet6", net_dir) > 0) {
-            pathTruncateWriteProcNetIfInet6(pathbuf);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/route", net_dir) > 0) {
-            pathTruncateWriteProcNetRoute(pathbuf);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/raw", net_dir) > 0) {
-            pathTruncateWriteProcNetInet(pathbuf, SOCK_RAW, false);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/raw6", net_dir) > 0) {
-            pathTruncateWriteProcNetInet(pathbuf, SOCK_RAW, true);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/tcp", net_dir) > 0) {
-            pathTruncateWriteProcNetInet(pathbuf, SOCK_STREAM, false);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/udp", net_dir) > 0) {
-            pathTruncateWriteProcNetInet(pathbuf, SOCK_DGRAM, false);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/tcp6", net_dir) > 0) {
-            pathTruncateWriteProcNetInet(pathbuf, SOCK_STREAM, true);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/udp6", net_dir) > 0) {
-            pathTruncateWriteProcNetInet(pathbuf, SOCK_DGRAM, true);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/unix", net_dir) > 0) {
-            pathTruncateWriteProcNetUnix(pathbuf, prefix);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/packet", net_dir) > 0) {
-            pathTruncateWriteProcNetPacket(pathbuf);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/sockstat", net_dir) > 0) {
-            pathTruncateWriteProcNetSockstat(pathbuf, false);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/sockstat6", net_dir) > 0) {
-            pathTruncateWriteProcNetSockstat(pathbuf, true);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/snmp", net_dir) > 0) {
-            pathTruncateWriteProcNetSnmp(pathbuf);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/snmp6", net_dir) > 0) {
-            pathTruncateWriteProcNetSnmp6(pathbuf);
-        }
-        if (snprintf(pathbuf, sizeof(pathbuf), "%s/netstat", net_dir) > 0) {
-            pathTruncateWriteProcNetNetstat(pathbuf);
+        if (request_net) {
+            char pathbuf[PATH_MAX];
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/dev", net_dir) > 0) {
+                pathTruncateWriteProcNetDev(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/arp", net_dir) > 0) {
+                pathTruncateWriteProcNetArp(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/if_inet6", net_dir) > 0) {
+                pathTruncateWriteProcNetIfInet6(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/route", net_dir) > 0) {
+                pathTruncateWriteProcNetRoute(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/raw", net_dir) > 0) {
+                pathTruncateWriteProcNetInet(pathbuf, SOCK_RAW, false);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/raw6", net_dir) > 0) {
+                pathTruncateWriteProcNetInet(pathbuf, SOCK_RAW, true);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/tcp", net_dir) > 0) {
+                pathTruncateWriteProcNetInet(pathbuf, SOCK_STREAM, false);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/udp", net_dir) > 0) {
+                pathTruncateWriteProcNetInet(pathbuf, SOCK_DGRAM, false);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/tcp6", net_dir) > 0) {
+                pathTruncateWriteProcNetInet(pathbuf, SOCK_STREAM, true);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/udp6", net_dir) > 0) {
+                pathTruncateWriteProcNetInet(pathbuf, SOCK_DGRAM, true);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/unix", net_dir) > 0) {
+                pathTruncateWriteProcNetUnix(pathbuf, prefix);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/packet", net_dir) > 0) {
+                pathTruncateWriteProcNetPacket(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/sockstat", net_dir) > 0) {
+                pathTruncateWriteProcNetSockstat(pathbuf, false);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/sockstat6", net_dir) > 0) {
+                pathTruncateWriteProcNetSockstat(pathbuf, true);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/snmp", net_dir) > 0) {
+                pathTruncateWriteProcNetSnmp(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/snmp6", net_dir) > 0) {
+                pathTruncateWriteProcNetSnmp6(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/netstat", net_dir) > 0) {
+                pathTruncateWriteProcNetNetstat(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/protocols", net_dir) > 0) {
+                pathTruncateWriteProcNetProtocols(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/wireless", net_dir) > 0) {
+                pathTruncateWriteProcNetWireless(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/softnet_stat", net_dir) > 0) {
+                pathTruncateWriteProcNetSoftnetStat(pathbuf, ncpu);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/dev_mcast", net_dir) > 0) {
+                pathTruncateWriteProcNetDevMcast(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/igmp", net_dir) > 0) {
+                pathTruncateWriteProcNetIgmp(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/igmp6", net_dir) > 0) {
+                pathTruncateWriteProcNetIgmp6(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/ipv6_route", net_dir) > 0) {
+                pathTruncateWriteProcNetIpv6Route(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/rt6_stats", net_dir) > 0) {
+                pathTruncateWriteProcNetRt6Stats(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/fib_trie", net_dir) > 0) {
+                pathTruncateWriteProcNetFibTrie(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/fib_triestat", net_dir) > 0) {
+                pathTruncateWriteProcNetFibTrieStat(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/netlink", net_dir) > 0) {
+                pathTruncateWriteProcNetNetlink(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/ptype", net_dir) > 0) {
+                pathTruncateWriteProcNetPtype(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/psched", net_dir) > 0) {
+                pathTruncateWriteProcNetPsched(pathbuf);
+            }
+            if (snprintf(pathbuf, sizeof(pathbuf), "%s/xfrm_stat", net_dir) > 0) {
+                pathTruncateWriteProcNetXfrmStat(pathbuf);
+            }
+            char stat_dir[PATH_MAX];
+            if (snprintf(stat_dir, sizeof(stat_dir), "%s/stat", net_dir) > 0) {
+                pathTruncateEnsureDir(stat_dir);
+                if (snprintf(pathbuf, sizeof(pathbuf), "%s/rt_cache", stat_dir) > 0) {
+                    pathTruncateWriteProcNetStatTable(
+                        pathbuf,
+                        "entries in_hit in_slow_tot in_slow_mc in_no_route in_brd in_martian_dst in_martian_src out_hit out_slow_tot out_slow_mc gc_total gc_ignored gc_goal_miss gc_dst_overflow in_hlist_search out_hlist_search",
+                        "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0");
+                }
+                if (snprintf(pathbuf, sizeof(pathbuf), "%s/arp_cache", stat_dir) > 0) {
+                    pathTruncateWriteProcNetStatTable(
+                        pathbuf,
+                        "entries allocs destroys hash_grows lookups hits res_failed rcv_probes_mcast rcv_probes_ucast periodic_gc_runs forced_gc_runs unresolved_discards",
+                        "0 0 0 0 0 0 0 0 0 0 0 0");
+                }
+                if (snprintf(pathbuf, sizeof(pathbuf), "%s/ndisc_cache", stat_dir) > 0) {
+                    pathTruncateWriteProcNetStatTable(
+                        pathbuf,
+                        "entries allocs destroys hash_grows lookups hits res_failed rcv_probes_mcast rcv_probes_ucast periodic_gc_runs forced_gc_runs unresolved_discards",
+                        "0 0 0 0 0 0 0 0 0 0 0");
+                }
+            }
         }
     }
 
-    pathTruncateWriteProcVm(procdir);
+    if (request_vm) {
+        pathTruncateWriteProcVm(procdir);
+    } else {
+        char vm_dir[PATH_MAX];
+        if (snprintf(vm_dir, sizeof(vm_dir), "%s/vm", procdir) > 0) {
+            pathTruncateEnsureDir(vm_dir);
+        }
+    }
 
     char pressure_dir[PATH_MAX];
     if (snprintf(pressure_dir, sizeof(pressure_dir), "%s/pressure", procdir) > 0) {
@@ -1782,19 +3017,181 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         }
     }
 
-    if (refresh_pid_entries) {
-        pid_t ppid = getppid();
-        if (ppid < 0) {
-            ppid = 0;
+    char sysvipc_dir[PATH_MAX];
+    if (snprintf(sysvipc_dir, sizeof(sysvipc_dir), "%s/sysvipc", procdir) > 0) {
+        pathTruncateEnsureDir(sysvipc_dir);
+        char pathbuf[PATH_MAX];
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/msg", sysvipc_dir) > 0) {
+            pathTruncateWriteProcSysvipcTable(pathbuf,
+                                              "       key      msqid perms      cbytes       qnum lspid lrpid   uid   gid  cuid  cgid      stime      rtime      ctime\n");
         }
-        pathTruncateWriteProcPidEntries(procdir,
-                                        prefix,
-                                        self_pid,
-                                        ppid,
-                                        "exsh",
-                                        mem_total_kb,
-                                        uptime_secs);
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/sem", sysvipc_dir) > 0) {
+            pathTruncateWriteProcSysvipcTable(pathbuf,
+                                              "       key      semid perms      nsems   uid   gid  cuid  cgid      otime      ctime\n");
+        }
+        if (snprintf(pathbuf, sizeof(pathbuf), "%s/shm", sysvipc_dir) > 0) {
+            pathTruncateWriteProcSysvipcTable(pathbuf,
+                                              "       key      shmid perms      size  cpid  lpid nattch   uid   gid  cuid  cgid      atime      dtime      ctime\n");
+        }
     }
+
+    if (refresh_pid_entries) {
+        pid_t host_ppid = getppid();
+        if (host_ppid < 0) {
+            host_ppid = 0;
+        }
+
+        char device_dir[PATH_MAX];
+        if (snprintf(device_dir, sizeof(device_dir), "%s/device", procdir) > 0) {
+            pathTruncateEnsureDir(device_dir);
+            if (refresh_device_entries) {
+                PathTruncateDeviceProcSnapshot device_snapshots[256];
+                size_t device_count = pathTruncateSnapshotDeviceProcesses(
+                    device_snapshots,
+                    sizeof(device_snapshots) / sizeof(device_snapshots[0]));
+                bool host_present = false;
+                for (size_t i = 0; i < device_count; ++i) {
+                    if (device_snapshots[i].pid == (int)host_pid) {
+                        host_present = true;
+                        break;
+                    }
+                }
+                if (!host_present && device_count < (sizeof(device_snapshots) / sizeof(device_snapshots[0]))) {
+                    PathTruncateDeviceProcSnapshot *entry = &device_snapshots[device_count++];
+                    entry->pid = (int)host_pid;
+                    entry->ppid = (int)host_ppid;
+                    snprintf(entry->name, sizeof(entry->name), "%s", "pscal-host");
+                }
+                int device_keep_pids[256];
+                size_t device_keep_count = 0;
+                for (size_t i = 0; i < device_count; ++i) {
+                    const PathTruncateDeviceProcSnapshot *snapshot = &device_snapshots[i];
+                    if (snapshot->pid <= 0) {
+                        continue;
+                    }
+                    pathTruncateWriteProcDevicePidEntry(device_dir,
+                                                        (pid_t)snapshot->pid,
+                                                        (pid_t)snapshot->ppid,
+                                                        snapshot->name[0] ? snapshot->name : "proc",
+                                                        mem_total_kb,
+                                                        uptime_secs);
+                    if (device_keep_count < (sizeof(device_keep_pids) / sizeof(device_keep_pids[0]))) {
+                        device_keep_pids[device_keep_count++] = snapshot->pid;
+                    }
+                }
+                bool allow_device_prune = true;
+                if (now_ms != 0 && g_procRefreshLastDevicePruneMs != 0 && now_ms > g_procRefreshLastDevicePruneMs) {
+                    allow_device_prune = (now_ms - g_procRefreshLastDevicePruneMs) >= 2000;
+                }
+                if (allow_device_prune) {
+                    pathTruncatePruneNumericDirectoryChildrenByPidList(device_dir,
+                                                                       device_keep_pids,
+                                                                       device_keep_count,
+                                                                       64);
+                    g_procRefreshLastDevicePruneMs = now_ms;
+                }
+            }
+            char device_self_path[PATH_MAX];
+            if (snprintf(device_self_path, sizeof(device_self_path), "%s/self", device_dir) > 0) {
+                char pid_link[32];
+                snprintf(pid_link, sizeof(pid_link), "%d", (int)host_pid);
+                pathTruncateEnsureSymlink(device_self_path, pid_link);
+            }
+        }
+
+        bool wrote_vproc = false;
+        bool host_pid_is_vproc = false;
+        for (size_t i = 0; i < vproc_snapshot_count; ++i) {
+            const PathTruncateVProcSnapshot *snapshot = &vproc_snapshots[i];
+            if (snapshot->pid <= 0) {
+                continue;
+            }
+            if (snapshot->pid == (int)host_pid) {
+                host_pid_is_vproc = true;
+            }
+            const char *name = snapshot->command[0] ? snapshot->command :
+                               (snapshot->comm[0] ? snapshot->comm : "vproc");
+            int parent_pid = snapshot->parent_pid;
+            if (parent_pid < 0) {
+                parent_pid = 0;
+            }
+            pathTruncateWriteProcPidEntries(procdir,
+                                            prefix,
+                                            (pid_t)snapshot->pid,
+                                            (pid_t)parent_pid,
+                                            name,
+                                            mem_total_kb,
+                                            uptime_secs);
+            wrote_vproc = true;
+        }
+
+        if (!wrote_vproc && current_vproc_pid > 0) {
+            pathTruncateWriteProcPidEntries(procdir,
+                                            prefix,
+                                            (pid_t)current_vproc_pid,
+                                            0,
+                                            "vproc",
+                                            mem_total_kb,
+                                            uptime_secs);
+            wrote_vproc = true;
+            if (current_vproc_pid == (int)host_pid) {
+                host_pid_is_vproc = true;
+            }
+        }
+        if (!wrote_vproc) {
+            pathTruncateWriteProcPidEntries(procdir,
+                                            prefix,
+                                            host_pid,
+                                            host_ppid,
+                                            "proc",
+                                            mem_total_kb,
+                                            uptime_secs);
+            wrote_vproc = true;
+            host_pid_is_vproc = true;
+        }
+
+        char self_path[PATH_MAX];
+        if (snprintf(self_path, sizeof(self_path), "%s/self", procdir) > 0) {
+            char pid_link[32];
+            int self_link_pid = wrote_vproc ? proc_display_pid : (int)host_pid;
+            snprintf(pid_link, sizeof(pid_link), "%d", self_link_pid);
+            pathTruncateEnsureSymlink(self_path, pid_link);
+        }
+
+        int vproc_keep_pids[512];
+        size_t vproc_keep_count = 0;
+        if (wrote_vproc) {
+            for (size_t i = 0; i < vproc_snapshot_count; ++i) {
+                if (vproc_snapshots[i].pid > 0 &&
+                    vproc_keep_count < (sizeof(vproc_keep_pids) / sizeof(vproc_keep_pids[0]))) {
+                    vproc_keep_pids[vproc_keep_count++] = vproc_snapshots[i].pid;
+                }
+            }
+            if (vproc_snapshot_count == 0 && current_vproc_pid > 0 &&
+                vproc_keep_count < (sizeof(vproc_keep_pids) / sizeof(vproc_keep_pids[0]))) {
+                vproc_keep_pids[vproc_keep_count++] = current_vproc_pid;
+            }
+        }
+        bool allow_vproc_prune = true;
+        if (now_ms != 0 && g_procRefreshLastPruneMs != 0 && now_ms > g_procRefreshLastPruneMs) {
+            allow_vproc_prune = (now_ms - g_procRefreshLastPruneMs) >= 2000;
+        }
+        if (allow_vproc_prune) {
+            pathTruncatePruneNumericDirectoryChildrenByPidList(procdir,
+                                                               vproc_keep_pids,
+                                                               vproc_keep_count,
+                                                               64);
+            g_procRefreshLastPruneMs = now_ms;
+        }
+
+        if (!host_pid_is_vproc) {
+            char legacy_host_dir[PATH_MAX];
+            if (snprintf(legacy_host_dir, sizeof(legacy_host_dir), "%s/%d", procdir, (int)host_pid) > 0) {
+                pathTruncateRemoveTree(legacy_host_dir);
+            }
+        }
+    }
+    g_procBaseSeeded = true;
 }
 
 static void pathTruncateResetCaches(void) {
@@ -1802,6 +3199,13 @@ static void pathTruncateResetCaches(void) {
     g_pathTruncatePrimaryLen = 0;
     g_pathTruncateAlias[0] = '\0';
     g_pathTruncateAliasLen = 0;
+    g_procRefreshLastFullMs = 0;
+    g_procRefreshLastNetMs = 0;
+    g_procRefreshLastDeviceMs = 0;
+    g_procRefreshLastVmMs = 0;
+    g_procRefreshLastPruneMs = 0;
+    g_procRefreshLastDevicePruneMs = 0;
+    g_procBaseSeeded = false;
 }
 
 static void pathTruncateEnsureDir(const char *path) {

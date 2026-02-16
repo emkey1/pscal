@@ -2429,22 +2429,6 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     const char *glob_base = word;
     size_t glob_base_len = word_len;
     bool had_trailing_slash = (word_len > 0 && word[word_len - 1] == '/');
-#if defined(PSCAL_TARGET_IOS)
-    bool glob_used_virtual = false;
-    if (pathTruncateEnabled() && word_len > 0 && word[0] == '/') {
-        char word_copy[PATH_MAX];
-        if (word_len < sizeof(word_copy)) {
-            memcpy(word_copy, word, word_len);
-            word_copy[word_len] = '\0';
-            char expanded[PATH_MAX];
-            if (pathTruncateExpand(word_copy, expanded, sizeof(expanded))) {
-                glob_base = expanded;
-                glob_base_len = strlen(expanded);
-                glob_used_virtual = true;
-            }
-        }
-    }
-#endif
     while (glob_base_len > 1 && glob_base[glob_base_len - 1] == '/') {
         glob_base_len--;
     }
@@ -2556,31 +2540,17 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     glob_t results;
     memset(&results, 0, sizeof(results));
     int glob_flags = GLOB_TILDE | GLOB_MARK;
-    int glob_status = glob(pattern, glob_flags, NULL, &results);
+    int glob_status =
+#if defined(PSCAL_TARGET_IOS)
+        pscalPathVirtualized_glob(pattern, glob_flags, NULL, &results);
+#else
+        glob(pattern, glob_flags, NULL, &results);
+#endif
     free(pattern);
     if (glob_status != 0 || results.gl_pathc == 0) {
         globfree(&results);
         return false;
     }
-
-#if defined(PSCAL_TARGET_IOS)
-    if (glob_used_virtual) {
-        for (size_t i = 0; i < results.gl_pathc; ++i) {
-            const char *match = results.gl_pathv[i];
-            if (!match) {
-                continue;
-            }
-            char stripped[PATH_MAX];
-            if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
-                char *copy = strdup(stripped);
-                if (copy) {
-                    free(results.gl_pathv[i]);
-                    results.gl_pathv[i] = copy;
-                }
-            }
-        }
-    }
-#endif
 
     /* command_is_cd is computed above when finding the command token. */
     if (command_is_cd) {
@@ -2636,17 +2606,12 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    /* If PATH_TRUNCATE is active, double-check directory matches so we keep the trailing slash. */
+    /* Double-check directory matches so we keep the trailing slash. */
 #if defined(PSCAL_TARGET_IOS)
-    if (glob_used_virtual && results.gl_pathv[0] && replacement_len > 0) {
+    if (results.gl_pathv[0] && replacement_len > 0) {
         const char *visible = results.gl_pathv[0];
-        char expanded[PATH_MAX];
-        const char *real_path = visible;
-        if (pathTruncateExpand(visible, expanded, sizeof(expanded))) {
-            real_path = expanded;
-        }
         struct stat st;
-        if (real_path && stat(real_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (pscalPathVirtualized_stat(visible, &st) == 0 && S_ISDIR(st.st_mode)) {
             if (visible[replacement_len - 1] != '/') {
                 append_slash = true;
             }

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <glob.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sched.h>
@@ -2046,6 +2047,19 @@ static void assert_path_truncate_maps_to_sandbox(void) {
     rmdir(root);
 }
 
+static ssize_t read_virtual_file(const char *path, char *buffer, size_t buffer_size) {
+    assert(path);
+    assert(buffer);
+    assert(buffer_size > 1);
+    int fd = pscalPathVirtualized_open(path, O_RDONLY, 0);
+    assert(fd >= 0);
+    ssize_t n = read(fd, buffer, buffer_size - 1);
+    assert(n >= 0);
+    buffer[n] = '\0';
+    close(fd);
+    return n;
+}
+
 static void assert_proc_vm_files_present_and_stable(void) {
     char templ[] = "/tmp/vproc-procvm-XXXXXX";
     char *root = mkdtemp(templ);
@@ -2088,6 +2102,388 @@ static void assert_proc_vm_files_present_and_stable(void) {
     assert(pscalPathVirtualized_stat("/proc/vm/by-address/deadbeef", &st) == 0);
     assert(S_ISDIR(st.st_mode));
 
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_core_and_net_entries_present(void) {
+    char templ[] = "/tmp/vproc-procnet-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/interrupts", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "CPU0") != NULL);
+    assert(strstr(buf, "PSCAL-virt-timer") != NULL);
+
+    assert(read_virtual_file("/proc/softirqs", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "TIMER") != NULL);
+    assert(strstr(buf, "RCU") != NULL);
+
+    assert(read_virtual_file("/proc/modules", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "vproc") != NULL);
+
+    assert(read_virtual_file("/proc/net/protocols", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "TCP") != NULL);
+    assert(strstr(buf, "UNIX") != NULL);
+
+    assert(read_virtual_file("/proc/net/wireless", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Inter-|") != NULL);
+
+    assert(read_virtual_file("/proc/net/softnet_stat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "00000000") != NULL);
+
+    assert(read_virtual_file("/proc/net/dev_mcast", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "333300000001") != NULL);
+
+    assert(read_virtual_file("/proc/net/igmp", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Group") != NULL);
+    assert(strstr(buf, "010000E0") != NULL);
+
+    assert(read_virtual_file("/proc/net/igmp6", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "ff020000000000000000000000000001") != NULL);
+
+    assert(read_virtual_file("/proc/net/ipv6_route", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "00000000000000000000000000000000") != NULL);
+
+    assert(read_virtual_file("/proc/net/rt6_stats", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0001") != NULL);
+
+    assert(read_virtual_file("/proc/net/fib_trie", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Main:") != NULL);
+
+    assert(read_virtual_file("/proc/net/fib_triestat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Basic info:") != NULL);
+
+    assert(read_virtual_file("/proc/net/netlink", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Pid") != NULL);
+
+    assert(read_virtual_file("/proc/net/ptype", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Type") != NULL);
+    assert(strstr(buf, "0800") != NULL);
+
+    assert(read_virtual_file("/proc/net/psched", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "000003e8") != NULL);
+
+    assert(read_virtual_file("/proc/net/xfrm_stat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "XfrmInError") != NULL);
+
+    assert(read_virtual_file("/proc/net/stat/rt_cache", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "entries") != NULL);
+
+    assert(read_virtual_file("/proc/net/stat/arp_cache", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "allocs") != NULL);
+
+    assert(read_virtual_file("/proc/net/stat/ndisc_cache", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "lookups") != NULL);
+
+    char target[PATH_MAX];
+    ssize_t link_n = pscalPathVirtualized_readlink("/proc/self/root", target, sizeof(target) - 1);
+    assert(link_n > 0);
+    target[link_n] = '\0';
+    assert(strcmp(target, "/") == 0);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_sys_entries_present(void) {
+    char templ[] = "/tmp/vproc-procsys-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/sys/kernel/hostname", buf, sizeof(buf)) > 0);
+    assert(read_virtual_file("/proc/sys/kernel/pid_max", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "4194304") != NULL);
+    assert(read_virtual_file("/proc/sys/kernel/threads-max", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "65535") != NULL);
+    assert(read_virtual_file("/proc/sys/kernel/random/boot_id", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "-") != NULL);
+    assert(read_virtual_file("/proc/sys/kernel/random/uuid", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "-") != NULL);
+
+    assert(read_virtual_file("/proc/sys/vm/swappiness", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "60") != NULL);
+    assert(read_virtual_file("/proc/sys/vm/overcommit_memory", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+    assert(read_virtual_file("/proc/sys/vm/max_map_count", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "65530") != NULL);
+    assert(read_virtual_file("/proc/sys/vm/min_free_kbytes", buf, sizeof(buf)) > 0);
+
+    assert(read_virtual_file("/proc/sys/fs/file-max", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "1048576") != NULL);
+    assert(read_virtual_file("/proc/sys/fs/inode-nr", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "16384") != NULL);
+
+    assert(read_virtual_file("/proc/sys/net/core/somaxconn", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "4096") != NULL);
+    assert(read_virtual_file("/proc/sys/net/ipv4/ip_forward", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+    assert(read_virtual_file("/proc/sys/net/ipv4/ip_local_port_range", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "32768") != NULL);
+    assert(read_virtual_file("/proc/sys/net/ipv6/conf/all/forwarding", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_misc_entries_present(void) {
+    char templ[] = "/tmp/vproc-procmisc-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/partitions", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "#blocks") != NULL);
+    assert(strstr(buf, "vda") != NULL);
+
+    assert(read_virtual_file("/proc/locks", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "POSIX") != NULL);
+
+    assert(read_virtual_file("/proc/pressure/cpu", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "some avg10=") != NULL);
+    assert(strstr(buf, "full avg10=") != NULL);
+
+    assert(read_virtual_file("/proc/pressure/memory", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "some avg10=") != NULL);
+
+    assert(read_virtual_file("/proc/pressure/io", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "some avg10=") != NULL);
+
+    assert(read_virtual_file("/proc/sysvipc/msg", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "msqid") != NULL);
+
+    assert(read_virtual_file("/proc/sysvipc/sem", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "semid") != NULL);
+
+    assert(read_virtual_file("/proc/sysvipc/shm", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "shmid") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_self_entries_present(void) {
+    char templ[] = "/tmp/vproc-procself-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/self/status", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Name:\t") != NULL);
+    assert(strstr(buf, "Pid:\t") != NULL);
+
+    assert(read_virtual_file("/proc/self/limits", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Max open files") != NULL);
+
+    assert(read_virtual_file("/proc/self/io", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "read_bytes:") != NULL);
+
+    assert(read_virtual_file("/proc/self/cgroup", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0::/") != NULL);
+
+    assert(read_virtual_file("/proc/self/sched", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "#threads: 1") != NULL);
+
+    assert(read_virtual_file("/proc/self/schedstat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0 0 0") != NULL);
+
+    assert(read_virtual_file("/proc/self/stack", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "userspace") != NULL);
+
+    assert(read_virtual_file("/proc/self/oom_score", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    assert(read_virtual_file("/proc/self/oom_score_adj", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    assert(read_virtual_file("/proc/self/personality", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "00000000") != NULL);
+
+    assert(read_virtual_file("/proc/self/loginuid", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "4294967295") != NULL);
+
+    assert(read_virtual_file("/proc/self/cpuset", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "/") != NULL);
+
+    assert(read_virtual_file("/proc/self/attr/current", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "unconfined") != NULL);
+
+    assert(read_virtual_file("/proc/self/wchan", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_task_entries_present(void) {
+    char templ[] = "/tmp/vproc-proctask-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char self_link[64] = {0};
+    ssize_t self_n = pscalPathVirtualized_readlink("/proc/self", self_link, sizeof(self_link) - 1);
+    assert(self_n > 0);
+    self_link[self_n] = '\0';
+
+    char thread_self[128] = {0};
+    ssize_t thread_n = pscalPathVirtualized_readlink("/proc/thread-self", thread_self, sizeof(thread_self) - 1);
+    assert(thread_n > 0);
+    thread_self[thread_n] = '\0';
+    assert(strstr(thread_self, "/task/") != NULL);
+    assert(strstr(thread_self, self_link) == thread_self);
+
+    char pathbuf[PATH_MAX];
+    char buf[4096];
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/comm", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(buf[0] != '\0');
+    assert(buf[0] != '\n');
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/status", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Name:\t") != NULL);
+    assert(strstr(buf, "Threads:\t1") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/stat", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strchr(buf, '(') != NULL);
+    assert(strchr(buf, ')') != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/sched", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "#threads: 1") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/schedstat", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0 0 0") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/io", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "read_bytes:") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/cgroup", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0::/") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/wchan", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/cwd", self_link);
+    char target[PATH_MAX];
+    ssize_t link_n = pscalPathVirtualized_readlink(pathbuf, target, sizeof(target) - 1);
+    assert(link_n > 0);
+    target[link_n] = '\0';
+    assert(strstr(target, "../../") == target);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_device_entries_present(void) {
+    char templ[] = "/tmp/vproc-procdevice-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char self_target[64] = {0};
+    ssize_t n = pscalPathVirtualized_readlink("/proc/device/self", self_target, sizeof(self_target) - 1);
+    assert(n > 0);
+    self_target[n] = '\0';
+
+    int host_pid = getpid();
+    char expected[32];
+    snprintf(expected, sizeof(expected), "%d", host_pid);
+    assert(strcmp(self_target, expected) == 0);
+
+    char status_path[PATH_MAX];
+    snprintf(status_path, sizeof(status_path), "/proc/device/%s/status", self_target);
+    char buf[4096];
+    assert(read_virtual_file(status_path, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Name:\t") != NULL);
+    assert(strstr(buf, "Pid:\t") != NULL);
+
+    snprintf(status_path, sizeof(status_path), "/proc/device/%s/io", self_target);
+    assert(read_virtual_file(status_path, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "read_bytes:") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_path_virtualized_glob_matches_dynamic_proc_entries(void) {
+    char templ[] = "/tmp/vproc-procglob-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    assert(vprocChdirShim("/proc/net") == 0);
+
+    glob_t relative_results;
+    memset(&relative_results, 0, sizeof(relative_results));
+    int rc = pscalPathVirtualized_glob("net*", 0, NULL, &relative_results);
+    assert(rc == 0);
+    bool found_relative = false;
+    for (size_t i = 0; i < relative_results.gl_pathc; ++i) {
+        if (relative_results.gl_pathv[i] &&
+            strcmp(relative_results.gl_pathv[i], "netstat") == 0) {
+            found_relative = true;
+            break;
+        }
+    }
+    assert(found_relative);
+    globfree(&relative_results);
+
+    glob_t absolute_results;
+    memset(&absolute_results, 0, sizeof(absolute_results));
+    rc = pscalPathVirtualized_glob("/proc/net/net*", 0, NULL, &absolute_results);
+    assert(rc == 0);
+    bool found_absolute = false;
+    for (size_t i = 0; i < absolute_results.gl_pathc; ++i) {
+        if (absolute_results.gl_pathv[i] &&
+            strcmp(absolute_results.gl_pathv[i], "/proc/net/netstat") == 0) {
+            found_absolute = true;
+            break;
+        }
+    }
+    assert(found_absolute);
+    globfree(&absolute_results);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
     unsetenv("PATH_TRUNCATE");
     char cleanup_cmd[PATH_MAX + 16];
     snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
@@ -6124,6 +6520,20 @@ int main(void) {
     assert_path_truncate_maps_to_sandbox();
     fprintf(stderr, "TEST proc_vm_files_present_and_stable\n");
     assert_proc_vm_files_present_and_stable();
+    fprintf(stderr, "TEST proc_core_and_net_entries_present\n");
+    assert_proc_core_and_net_entries_present();
+    fprintf(stderr, "TEST proc_sys_entries_present\n");
+    assert_proc_sys_entries_present();
+    fprintf(stderr, "TEST proc_misc_entries_present\n");
+    assert_proc_misc_entries_present();
+    fprintf(stderr, "TEST proc_self_entries_present\n");
+    assert_proc_self_entries_present();
+    fprintf(stderr, "TEST proc_task_entries_present\n");
+    assert_proc_task_entries_present();
+    fprintf(stderr, "TEST proc_device_entries_present\n");
+    assert_proc_device_entries_present();
+    fprintf(stderr, "TEST path_virtualized_glob_matches_dynamic_proc_entries\n");
+    assert_path_virtualized_glob_matches_dynamic_proc_entries();
     fprintf(stderr, "TEST vproc_cwd_isolated_between_vprocs\n");
     assert_vproc_cwd_isolated_between_vprocs();
     fprintf(stderr, "TEST write_reads_back\n");

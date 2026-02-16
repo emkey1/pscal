@@ -23,6 +23,7 @@ extern void pscalRuntimeDebugLog(const char *message);
 #if defined(PSCAL_TARGET_IOS)
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdarg.h>
@@ -236,6 +237,17 @@ static const char *pathVirtualizedResolveAgainstVirtualCwd(const char *path,
     return resolved;
 }
 
+static void pathVirtualizedTrimTrailingSlash(char *path) {
+    if (!path) {
+        return;
+    }
+    size_t len = strlen(path);
+    while (len > 1 && path[len - 1] == '/') {
+        path[len - 1] = '\0';
+        len--;
+    }
+}
+
 int pscalPathVirtualized_chdir(const char *path) {
     if (pathVirtualizedIsVprocDevicePath(path)) {
         return vprocChdirShim(path);
@@ -389,6 +401,69 @@ DIR *pscalPathVirtualized_opendir(const char *name) {
     const char *target = pathVirtualizedPrepare(name, expanded);
     LOG_EXPANSION("opendir", name, target);
     return opendir(target ? target : name);
+}
+
+int pscalPathVirtualized_glob(const char *pattern,
+                              int flags,
+                              int (*errfunc)(const char *, int),
+                              glob_t *pglob) {
+    if (!pathVirtualizationActive()) {
+        return glob(pattern, flags, errfunc, pglob);
+    }
+
+    char resolved_pattern[PATH_MAX];
+    bool relative_pattern = (pattern && pattern[0] != '/');
+    const char *resolved_input =
+        pathVirtualizedResolveAgainstVirtualCwd(pattern, resolved_pattern, sizeof(resolved_pattern));
+
+    char expanded_pattern[PATH_MAX];
+    const char *target = pathVirtualizedExpand(resolved_input, expanded_pattern, sizeof(expanded_pattern));
+    int result = glob(target ? target : pattern, flags, errfunc, pglob);
+    if (result != 0 || !pglob || !pglob->gl_pathv) {
+        return result;
+    }
+
+    char cwd[PATH_MAX] = {0};
+    size_t cwd_len = 0;
+    bool have_cwd = false;
+    if (relative_pattern && vprocGetcwdShim(cwd, sizeof(cwd)) && cwd[0] == '/') {
+        pathVirtualizedTrimTrailingSlash(cwd);
+        cwd_len = strlen(cwd);
+        have_cwd = cwd_len > 0;
+    }
+
+    for (size_t i = 0; i < pglob->gl_pathc; ++i) {
+        const char *match = pglob->gl_pathv[i];
+        if (!match) {
+            continue;
+        }
+        char stripped[PATH_MAX];
+        if (!pathTruncateStrip(match, stripped, sizeof(stripped))) {
+            continue;
+        }
+
+        const char *final_path = stripped;
+        if (have_cwd && stripped[0] == '/') {
+            if (cwd_len == 1 && cwd[0] == '/') {
+                final_path = stripped + 1;
+            } else if (strncmp(stripped, cwd, cwd_len) == 0 && stripped[cwd_len] == '/') {
+                final_path = stripped + cwd_len + 1;
+            } else if (strcmp(stripped, cwd) == 0) {
+                final_path = ".";
+            }
+            if (!final_path || final_path[0] == '\0') {
+                final_path = ".";
+            }
+        }
+
+        char *copy = strdup(final_path);
+        if (!copy) {
+            continue;
+        }
+        free(pglob->gl_pathv[i]);
+        pglob->gl_pathv[i] = copy;
+    }
+    return result;
 }
 
 int pscalPathVirtualized_symlink(const char *target, const char *linkpath) {

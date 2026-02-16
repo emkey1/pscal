@@ -1397,37 +1397,13 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                     }
                     if (shellWordShouldGlob(word_flags, field_value)) {
                         glob_t glob_result;
-                        const char *glob_pattern = field_value;
+                        int glob_status =
 #if defined(PSCAL_TARGET_IOS)
-                        char expanded_pattern[PATH_MAX];
-                        bool glob_used_virtual = false;
-                        if (field_value[0] == '/' &&
-                            pathTruncateEnabled() &&
-                            pathTruncateExpand(field_value, expanded_pattern, sizeof(expanded_pattern))) {
-                            glob_pattern = expanded_pattern;
-                            glob_used_virtual = true;
-                        }
+                            pscalPathVirtualized_glob(field_value, 0, NULL, &glob_result);
+#else
+                            glob(field_value, 0, NULL, &glob_result);
 #endif
-                        int glob_status = glob(glob_pattern, 0, NULL, &glob_result);
                         if (glob_status == 0) {
-#if defined(PSCAL_TARGET_IOS)
-                            if (glob_used_virtual) {
-                                for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
-                                    char *match = glob_result.gl_pathv[g];
-                                    if (!match) {
-                                        continue;
-                                    }
-                                    char stripped[PATH_MAX];
-                                    if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
-                                        char *copy = strdup(stripped);
-                                        if (copy) {
-                                            free(glob_result.gl_pathv[g]);
-                                            glob_result.gl_pathv[g] = copy;
-                                        }
-                                    }
-                                }
-                            }
-#endif
                             bool glob_ok = true;
                             for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
                                 char *dup = strdup(glob_result.gl_pathv[g]);
