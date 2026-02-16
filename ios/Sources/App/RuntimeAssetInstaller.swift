@@ -356,65 +356,61 @@ final class RuntimeAssetInstaller {
     private func installWorkspaceBinIfNeeded(bundleRoot: URL) {
         let bundledBin = bundleRoot.appendingPathComponent("bin", isDirectory: true)
         let workspaceBin = RuntimePaths.workspaceBinDirectory
-        if needsWorkspaceBinRefresh() {
-            do {
-                // Clean slate
-                if fileManager.fileExists(atPath: workspaceBin.path) || isSymbolicLink(at: workspaceBin) {
-                    NSLog("PSCAL iOS: removing stale bin at %@", workspaceBin.path)
-                    try fileManager.removeItem(at: workspaceBin)
-                }
-                try ensureDocumentsDirectoryExists()
-                migrateLegacyBinIfNeeded()
+        do {
+            let refreshNeeded = needsWorkspaceBinRefresh()
+            try ensureDocumentsDirectoryExists()
+            migrateLegacyBinIfNeeded()
+            try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
 
-                var copied = false
-                if fileManager.fileExists(atPath: bundledBin.path) {
-                    NSLog("PSCAL iOS: copying bundled bin contents from %@", bundledBin.path)
-                    try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
-                    let items = try fileManager.contentsOfDirectory(atPath: bundledBin.path)
-                    for item in items {
-                        let src = bundledBin.appendingPathComponent(item)
-                        let dst = workspaceBin.appendingPathComponent(item)
-                        if fileManager.fileExists(atPath: dst.path) || isSymbolicLink(at: dst) {
-                            try fileManager.removeItem(at: dst)
-                        }
-                        try fileManager.copyItem(at: src, to: dst)
-                    }
-                    copied = true
-                }
-
-                // Use bundled tiny assets when present; only fall back to embedded
-                // script copies if the bundle does not include them.
-                try fileManager.createDirectory(at: workspaceBin, withIntermediateDirectories: true)
-                let tinyWrapper = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
-                let tinySource = workspaceBin.appendingPathComponent("tiny.clike", isDirectory: false)
-                let tinyBytecode = workspaceBin.appendingPathComponent("tiny.pbc", isDirectory: false)
-                if !fileManager.fileExists(atPath: tinyWrapper.path) {
-                    try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
-                }
-                if !fileManager.fileExists(atPath: tinySource.path) {
-                    try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
-                }
-                // If bundled bytecode present, copy it too so we avoid runtime clike compile.
-                let bundledTinyPbc = bundledBin.appendingPathComponent("tiny.pbc")
-                if fileManager.fileExists(atPath: bundledTinyPbc.path) {
-                    do {
-                        try fileManager.copyItem(at: bundledTinyPbc, to: tinyBytecode)
-                        NSLog("PSCAL iOS: copied bundled tiny.pbc")
-                    } catch {
-                        NSLog("PSCAL iOS: failed to copy tiny.pbc: %@", error.localizedDescription)
-                    }
-                }
-
-                if fileManager.fileExists(atPath: tinyWrapper.path) {
-                    try markExecutable(at: tinyWrapper)
-                } else {
-                    NSLog("PSCAL iOS: tiny wrapper not found after install at %@", tinyWrapper.path)
-                }
-                try writeWorkspaceBinVersionMarker()
-                NSLog("PSCAL iOS: installed bin assets to %@", workspaceBin.path)
-            } catch {
-                NSLog("PSCAL iOS: failed to install bin assets: %@", error.localizedDescription)
+            var copiedCount = 0
+            var bundledIsDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: bundledBin.path, isDirectory: &bundledIsDirectory),
+               bundledIsDirectory.boolValue {
+                copiedCount += try copyMissingItemsWithCount(from: bundledBin, to: workspaceBin)
+            } else {
+                NSLog("PSCAL iOS: bundle missing bin directory; preserving existing workspace bin at %@", workspaceBin.path)
             }
+
+            // Use bundled tiny assets when present; only fall back to embedded
+            // script copies if they are missing from both bundle and workspace.
+            let tinyWrapper = workspaceBin.appendingPathComponent("tiny", isDirectory: false)
+            let tinySource = workspaceBin.appendingPathComponent("tiny.clike", isDirectory: false)
+            let tinyBytecode = workspaceBin.appendingPathComponent("tiny.pbc", isDirectory: false)
+            if !fileManager.fileExists(atPath: tinyWrapper.path) {
+                try embeddedTinyWrapper.write(to: tinyWrapper, atomically: true, encoding: .utf8)
+                copiedCount += 1
+            }
+            if !fileManager.fileExists(atPath: tinySource.path) {
+                try embeddedTinySource.write(to: tinySource, atomically: true, encoding: .utf8)
+                copiedCount += 1
+            }
+
+            // If bundled bytecode is present, copy it only when missing.
+            let bundledTinyPbc = bundledBin.appendingPathComponent("tiny.pbc")
+            if fileManager.fileExists(atPath: bundledTinyPbc.path),
+               !fileManager.fileExists(atPath: tinyBytecode.path) {
+                do {
+                    try fileManager.copyItem(at: bundledTinyPbc, to: tinyBytecode)
+                    copiedCount += 1
+                    NSLog("PSCAL iOS: copied missing tiny.pbc")
+                } catch {
+                    NSLog("PSCAL iOS: failed to copy tiny.pbc: %@", error.localizedDescription)
+                }
+            }
+
+            if fileManager.fileExists(atPath: tinyWrapper.path) {
+                try markExecutable(at: tinyWrapper)
+            } else {
+                NSLog("PSCAL iOS: tiny wrapper not found after install at %@", tinyWrapper.path)
+            }
+            try writeWorkspaceBinVersionMarker()
+            if copiedCount > 0 || refreshNeeded {
+                NSLog("PSCAL iOS: ensured bin assets at %@ (installed %d missing file(s))",
+                      workspaceBin.path,
+                      copiedCount)
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to install bin assets: %@", error.localizedDescription)
         }
     }
 
@@ -519,9 +515,7 @@ final class RuntimeAssetInstaller {
             return true
         }
         let tinySource = binDir.appendingPathComponent("tiny.clike")
-        guard let tinySourceText = try? String(contentsOf: tinySource, encoding: .utf8),
-              tinySourceText.contains("1347633714") else {
-            // Force refresh when tiny source is missing/stale (legacy bad magic).
+        guard fileManager.fileExists(atPath: tinySource.path) else {
             return true
         }
         guard let data = try? Data(contentsOf: RuntimePaths.workspaceBinVersionMarker),
@@ -609,6 +603,34 @@ final class RuntimeAssetInstaller {
                 try fileManager.copyItem(at: sourceURL, to: destinationURL)
             }
         }
+    }
+
+    private func copyMissingItemsWithCount(from source: URL, to destination: URL) throws -> Int {
+        var copiedCount = 0
+        let entries = try fileManager.contentsOfDirectory(atPath: source.path)
+        for entry in entries where entry != ".DS_Store" {
+            let sourceURL = source.appendingPathComponent(entry)
+            let destinationURL = destination.appendingPathComponent(entry)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: sourceURL.path, isDirectory: &isDirectory) else {
+                continue
+            }
+            if isDirectory.boolValue {
+                var destinationIsDirectory: ObjCBool = false
+                let destinationExists = fileManager.fileExists(atPath: destinationURL.path, isDirectory: &destinationIsDirectory)
+                if !destinationExists {
+                    try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+                } else if !destinationIsDirectory.boolValue {
+                    // Preserve existing non-directory entries.
+                    continue
+                }
+                copiedCount += try copyMissingItemsWithCount(from: sourceURL, to: destinationURL)
+            } else if !fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.copyItem(at: sourceURL, to: destinationURL)
+                copiedCount += 1
+            }
+        }
+        return copiedCount
     }
 
     private func needsWorkspaceEtcRefresh() -> Bool {
