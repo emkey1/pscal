@@ -3,6 +3,73 @@ import WebKit
 import UIKit
 import Foundation
 
+private final class TerminalResourceSchemeHandler: NSObject, WKURLSchemeHandler {
+    private struct Resource {
+        let data: Data
+        let mimeType: String
+    }
+
+    private let cacheQueue = DispatchQueue(label: "com.pscal.hterm.scheme-cache")
+    private var cache: [String: Resource] = [:]
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        guard let url = urlSchemeTask.request.url else {
+            urlSchemeTask.didFailWithError(NSError(domain: NSURLErrorDomain,
+                                                   code: NSURLErrorBadURL,
+                                                   userInfo: nil))
+            return
+        }
+        let name = url.lastPathComponent.isEmpty ? "term.html" : url.lastPathComponent
+        guard let resource = loadResource(named: name) else {
+            let error = NSError(domain: NSURLErrorDomain,
+                                code: NSURLErrorFileDoesNotExist,
+                                userInfo: [NSLocalizedDescriptionKey: "Missing terminal resource \(name)"])
+            urlSchemeTask.didFailWithError(error)
+            return
+        }
+        let response = URLResponse(url: url,
+                                   mimeType: resource.mimeType,
+                                   expectedContentLength: resource.data.count,
+                                   textEncodingName: "utf-8")
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(resource.data)
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
+        // Nothing to clean up.
+    }
+
+    private func loadResource(named name: String) -> Resource? {
+        let normalized = name.isEmpty ? "term.html" : name
+        if let cached = cacheQueue.sync(execute: { cache[normalized] }) {
+            return cached
+        }
+
+        let mimeType: String
+        switch normalized {
+        case "term.html":
+            mimeType = "text/html"
+        case "term.css":
+            mimeType = "text/css"
+        case "term.js", "hterm_all.js":
+            mimeType = "application/javascript"
+        default:
+            return nil
+        }
+
+        guard let url = Bundle.main.url(forResource: normalized, withExtension: nil, subdirectory: "TerminalWeb"),
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        let resource = Resource(data: data, mimeType: mimeType)
+        cacheQueue.async { [resource] in
+            self.cache[normalized] = resource
+        }
+        return resource
+    }
+}
+
 private final class HtermWebView: WKWebView {
     var onPaste: ((String) -> Void)?
     var onCopy: (() -> Void)?
@@ -90,9 +157,17 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var lastFocus: Bool?
     private var applicationCursor = false
     private var scrollToBottomPending = false
+    private var resizeRequestGeneration: UInt64 = 0
+    private var pendingForcedGridSize: (columns: Int, rows: Int)?
+    private var resizeSessionId: UInt64 = 0
+    private var pendingRuntimeResize: (columns: Int, rows: Int, source: String)?
 
+    private static let terminalScheme = "pscal-terminal"
+    private static let schemeHandler = TerminalResourceSchemeHandler()
+    private static let sharedProcessPool = WKProcessPool()
     let webView: WKWebView
     private let userContentController: WKUserContentController
+    private var scriptMessageBridges: [WeakScriptMessageHandler] = []
     var onInput: ((String) -> Void)?
     var onResize: ((Int, Int) -> Void)?
     var onFocusRequested: (() -> Void)?
@@ -135,6 +210,10 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         self.instanceId = Self.nextInstanceId
         let controller = WKUserContentController()
         let config = WKWebViewConfiguration()
+        // Keep one process pool for all terminal tabs to avoid high-memory
+        // churn when users open/close tabs rapidly under load.
+        config.processPool = Self.sharedProcessPool
+        config.setURLSchemeHandler(Self.schemeHandler, forURLScheme: Self.terminalScheme)
         config.userContentController = controller
         let debugValue = Self.debugEnabled ? "true" : "false"
         let debugScript = WKUserScript(
@@ -154,7 +233,11 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         self.userContentController = controller
         super.init()
         logTabInit("controller init thread=\(Thread.isMainThread ? "main" : "bg")")
-        HandlerName.allCases.forEach { controller.add(WeakScriptMessageHandler(handler: self), name: $0.rawValue) }
+        let bridges = HandlerName.allCases.map { _ in WeakScriptMessageHandler(handler: self) }
+        scriptMessageBridges = bridges
+        for (index, name) in HandlerName.allCases.enumerated() {
+            controller.add(bridges[index], name: name.rawValue)
+        }
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
@@ -167,7 +250,15 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     }
 
     deinit {
-        HandlerName.allCases.forEach { userContentController.removeScriptMessageHandler(forName: $0.rawValue) }
+        let controller = userContentController
+        let names = HandlerName.allCases.map(\.rawValue)
+        if Thread.isMainThread {
+            names.forEach { controller.removeScriptMessageHandler(forName: $0) }
+        } else {
+            DispatchQueue.main.async {
+                names.forEach { controller.removeScriptMessageHandler(forName: $0) }
+            }
+        }
     }
 
     @MainActor
@@ -269,6 +360,27 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         }
     }
 
+    func forceGridSize(columns: Int, rows: Int) {
+        let clampedColumns = max(1, columns)
+        let clampedRows = max(1, rows)
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] force-grid req=\(columns)x\(rows) clamped=\(clampedColumns)x\(clampedRows) loaded=\(isLoaded)")
+        pendingForcedGridSize = (clampedColumns, clampedRows)
+        guard isLoaded else { return }
+        applyForcedGridSize(columns: clampedColumns, rows: clampedRows)
+    }
+
+    func setResizeSessionId(_ sessionId: UInt64) {
+        let previous = resizeSessionId
+        resizeSessionId = sessionId
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] bind-session previous=\(previous) session=\(sessionId)")
+        guard sessionId != 0 else { return }
+        if let pending = pendingRuntimeResize {
+            pendingRuntimeResize = nil
+            sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay source=\(pending.source) session=\(sessionId) cols=\(pending.columns) rows=\(pending.rows)")
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(pending.columns), Int32(pending.rows))
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case HandlerName.load.rawValue:
@@ -296,6 +408,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             }
             flushOutput()
             requestResize()
+            applyPendingForcedGridSizeIfNeeded()
         case HandlerName.log.rawValue:
             if let message = message.body as? String {
                 NSLog("Hterm[%d] log: %@", instanceId, message)
@@ -305,7 +418,9 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
                 onInput?(input)
             }
         case HandlerName.resize.rawValue:
-            requestResize()
+            if !applyResizeMessage(message.body) {
+                requestResize()
+            }
         case HandlerName.propUpdate.rawValue:
             if let payload = message.body as? [Any], payload.count == 2,
                let name = payload[0] as? String {
@@ -377,49 +492,110 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         if Self.debugEnabled {
             NSLog("Hterm[%d]: loading terminal page %@", instanceId, url.absoluteString)
         }
-        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        webView.load(URLRequest(url: url))
     }
 
     private func terminalPageURL() -> URL? {
-        if let url = Bundle.main.url(forResource: "term", withExtension: "html", subdirectory: "TerminalWeb") {
-            return url
-        }
-        return Bundle.main.url(forResource: "term", withExtension: "html")
+        URL(string: "\(Self.terminalScheme)://terminal/term.html")
     }
 
-    private func requestResize() {
-        webView.evaluateJavaScript("exports.getSize()") { [weak self] result, error in
-            if let error = error {
-                NSLog("Hterm resize error: %@", error.localizedDescription)
-            }
+    private func requestResize(after delay: TimeInterval = 0) {
+        resizeRequestGeneration &+= 1
+        let generation = resizeRequestGeneration
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] request-resize gen=\(generation) delay=\(String(format: "%.3f", delay)) loaded=\(isLoaded)")
+        let evaluate: () -> Void = { [weak self] in
             guard let self = self else { return }
-            guard let array = result as? [NSNumber], array.count == 2 else { return }
-            self.onResize?(array[0].intValue, array[1].intValue)
+            self.webView.evaluateJavaScript("exports.getSize()") { [weak self] result, error in
+                guard let self = self else { return }
+                if let error = error {
+                    NSLog("Hterm resize error: %@", error.localizedDescription)
+                    sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] request-resize error=\(error.localizedDescription)")
+                }
+                guard generation == self.resizeRequestGeneration else { return }
+                guard let array = result as? [NSNumber], array.count == 2 else { return }
+                sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] request-resize result=\(array[0].intValue)x\(array[1].intValue) gen=\(generation)")
+                self.forwardResizeToRuntime(columns: array[0].intValue, rows: array[1].intValue, source: "request")
+                self.onResize?(array[0].intValue, array[1].intValue)
+            }
         }
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: evaluate)
+        } else {
+            evaluate()
+        }
+    }
+
+    private func applyResizeMessage(_ body: Any) -> Bool {
+        func parsePair(_ columns: Int, _ rows: Int) -> Bool {
+            guard columns > 0, rows > 0 else { return false }
+            sshResizeLog("[ssh-resize] hterm[\(instanceId)] native-resize=\(columns)x\(rows)")
+            forwardResizeToRuntime(columns: columns, rows: rows, source: "native")
+            onResize?(columns, rows)
+            return true
+        }
+        if let payload = body as? [String: Any] {
+            if let cols = payload["columns"] as? NSNumber,
+               let rows = payload["rows"] as? NSNumber {
+                return parsePair(cols.intValue, rows.intValue)
+            }
+            if let cols = payload["columns"] as? Int,
+               let rows = payload["rows"] as? Int {
+                return parsePair(cols, rows)
+            }
+            return false
+        }
+        if let payload = body as? [NSNumber], payload.count >= 2 {
+            return parsePair(payload[0].intValue, payload[1].intValue)
+        }
+        if let payload = body as? [Int], payload.count >= 2 {
+            return parsePair(payload[0], payload[1])
+        }
+        return false
+    }
+
+    private func forwardResizeToRuntime(columns: Int, rows: Int, source: String) {
+        let sessionId = resizeSessionId
+        guard sessionId != 0 else {
+            pendingRuntimeResize = (columns, rows, source)
+            sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-defer source=\(source) session=0 cols=\(columns) rows=\(rows)")
+            return
+        }
+        pendingRuntimeResize = nil
+        sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-forward source=\(source) session=\(sessionId) cols=\(columns) rows=\(rows)")
+        PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(columns), Int32(rows))
     }
 
     func updateHostSize(_ size: CGSize, reason: String) {
-        guard size.width > 0, size.height > 0 else {
-            if !didLogZeroHostSize {
-                let sizeString = NSCoder.string(for: size)
-                logTabInit("host size ignored size=\(sizeString) reason=\(reason)")
-                didLogZeroHostSize = true
-            }
-            return
+        var clampedSize = size
+        var didClamp = false
+        if clampedSize.width <= 0 {
+            clampedSize.width = 1
+            didClamp = true
+        }
+        if clampedSize.height <= 0 {
+            clampedSize.height = 1
+            didClamp = true
+        }
+        if didClamp, !didLogZeroHostSize {
+            let sizeString = NSCoder.string(for: size)
+            logTabInit("host size clamped from \(sizeString) reason=\(reason)")
+            didLogZeroHostSize = true
+        } else if didLogZeroHostSize && !didClamp {
+            didLogZeroHostSize = false
         }
         if didLogZeroHostSize {
             didLogZeroHostSize = false
         }
         let wasReady = hostSizeReady
-        let changed = size != hostSize
-        hostSize = size
+        let changed = clampedSize != hostSize
+        hostSize = clampedSize
         hostSizeReady = true
         if !wasReady || changed {
-            let sizeString = NSCoder.string(for: size)
+            let sizeString = NSCoder.string(for: clampedSize)
             logTabInit("host size ready=\(hostSizeReady) size=\(sizeString) reason=\(reason) loaded=\(isLoaded)")
         }
         if Self.debugEnabled && (!wasReady || changed) {
-            let sizeString = NSCoder.string(for: size)
+            let sizeString = NSCoder.string(for: clampedSize)
             NSLog("Hterm[%d]: host size %@ (%@)", instanceId, sizeString, reason)
         }
         if isLoaded && (!wasReady || changed) {
@@ -504,7 +680,28 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             if let error = error {
                 NSLog("Hterm style error: %@", error.localizedDescription)
             }
-            self?.requestResize()
+            self?.requestResize(after: 0.06)
+            self?.applyPendingForcedGridSizeIfNeeded()
+        }
+    }
+
+    private func applyPendingForcedGridSizeIfNeeded() {
+        guard isLoaded, let pending = pendingForcedGridSize else {
+            return
+        }
+        applyForcedGridSize(columns: pending.columns, rows: pending.rows)
+    }
+
+    private func applyForcedGridSize(columns: Int, rows: Int) {
+        guard columns > 0, rows > 0 else { return }
+        let script = "exports.setGridSize(\(columns), \(rows))"
+        webView.evaluateJavaScript(script) { _, error in
+            if let error = error {
+                NSLog("Hterm force size error: %@", error.localizedDescription)
+                sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid error=\(error.localizedDescription) cols=\(columns) rows=\(rows)")
+            } else {
+                sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid applied=\(columns)x\(rows)")
+            }
         }
     }
 
@@ -609,7 +806,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         guard !reloadPending else { return }
         reloadPending = true
         logTabInit("reload scheduled")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) { [weak self] in
             guard let self else { return }
             self.reloadPending = false
             self.loadTerminalPage()
@@ -727,6 +924,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     private let controller: HtermTerminalController
     private let scrollView: ScrollbarView
     private let keyInputView: TerminalKeyInputView
+    private var focusRetry: DispatchWorkItem?
     private var pendingFocus = false
     private var isAttached = false
     private var isActiveForInput = true
@@ -762,7 +960,10 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             isTerminalLoaded = loaded
             updateInputEnabled()
         }
-        let shouldInstall = isTerminalLoaded && isDisplayVisible()
+        // Keep the web view attached whenever the tab is visible.
+        // Waiting for "loaded" before attaching can deadlock startup if WebKit
+        // defers the load pipeline until the view is in the hierarchy.
+        let shouldInstall = isDisplayVisible()
         if shouldInstall {
             controller.bindDisplayContainer(self)
             installTerminalViewIfNeeded()
@@ -841,9 +1042,27 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             pendingFocus = true
             return
         }
-        if !keyInputView.isFirstResponder {
-            keyInputView.becomeFirstResponder()
+        if keyInputView.isFirstResponder {
+            pendingFocus = false
+            focusRetry?.cancel()
+            return
         }
+        let became = keyInputView.becomeFirstResponder()
+        if became {
+            pendingFocus = false
+            focusRetry?.cancel()
+            return
+        }
+        pendingFocus = true
+        focusRetry?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.pendingFocus {
+                self.requestFocus()
+            }
+        }
+        focusRetry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05, execute: work)
     }
 
     func syncFocusFromTerminal() {
@@ -953,9 +1172,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         updateInputEnabled()
         if loaded {
             updateDisplayAttachment()
-            if isEffectivelyVisible() {
-                controller.updateHostSize(scrollView.bounds.size, reason: "load")
-            }
+            controller.updateHostSize(scrollView.bounds.size, reason: "load")
             if pendingFocus {
                 requestFocus()
             }
@@ -983,9 +1200,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             updateDisplayAttachment()
         } else if controller.isLoaded {
             updateDisplayAttachment()
-            if isEffectivelyVisible() {
-                controller.updateHostSize(scrollView.bounds.size, reason: "active")
-            }
+            controller.updateHostSize(scrollView.bounds.size, reason: "active")
         }
         handleAttachStateChange()
         updateVisibilityForInput()
@@ -1016,9 +1231,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
                          "contentOffset=\(NSCoder.string(for: scrollView.contentOffset))")
             }
         }
-        if isEffectivelyVisible() {
-            controller.updateHostSize(scrollView.bounds.size, reason: "layout")
-        }
+        controller.updateHostSize(scrollView.bounds.size, reason: "layout")
         clampScrollOffset(reason: "layout")
         updateVisibilityForInput()
     }
@@ -1129,6 +1342,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             debugLog("Hterm[\(controller.instanceId)]: view attached " +
                      "window=\(String(describing: window)) hidden=\(isHidden) alpha=\(alpha)")
             attachHandler?()
+            if pendingFocus {
+                requestFocus()
+            }
             return
         }
         if !isAttached {
@@ -1158,7 +1374,15 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
 
     private func canReceiveInputFocus() -> Bool {
         guard isActiveForInput else { return false }
-        guard let window, window.isKeyWindow else { return false }
+        guard window != nil else { return false }
+        if !isAppActive() {
+            return false
+        }
+        if let window, window.isKeyWindow {
+            return isEffectivelyVisible()
+        }
+        /* On iPad we can attach before the window is key; allow focus to be
+         * requested and retried so the keyboard appears without an extra tap. */
         return isEffectivelyVisible()
     }
 

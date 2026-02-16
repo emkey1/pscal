@@ -61,6 +61,10 @@ pscal_openssh_reset_progress_state(void)
 {
 #ifdef PSCAL_TARGET_IOS
 	pscal_clientloop_reset_hostkeys();
+	pscal_mux_reset_state();
+	pscal_sshconnect_reset_state();
+	pscal_sshconnect2_reset_state();
+	pscal_sshtty_reset_state();
 #endif
 	interrupted = 0;
 	showprogress = 1;

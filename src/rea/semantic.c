@@ -7,6 +7,7 @@
 #include "ast/ast.h"
 #include "ast/closure_registry.h"
 #include "compiler/compiler.h"
+#include "backend_ast/builtin.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,6 +70,7 @@ typedef struct ReaModuleInfo {
 typedef struct ReaModuleBinding {
     char *alias;               /* Accessible name within current scope */
     ReaModuleInfo *module;     /* Target module */
+    bool allow_unqualified_exports;
 } ReaModuleBinding;
 
 typedef struct ReaModuleBindingList {
@@ -577,7 +579,7 @@ static ReaModuleBinding *findBindingInList(const ReaModuleBindingList *list, con
     return NULL;
 }
 
-static bool addBinding(ReaModuleBindingList *list, const char *alias, ReaModuleInfo *module, int line) {
+static bool addBinding(ReaModuleBindingList *list, const char *alias, ReaModuleInfo *module, int line, bool allow_unqualified_exports) {
     if (!list || !alias || !module) return false;
     ReaModuleBinding *existing = findBindingInList(list, alias);
     if (existing) {
@@ -586,6 +588,9 @@ static bool addBinding(ReaModuleBindingList *list, const char *alias, ReaModuleI
             pascal_semantic_error_count++;
             return false;
         }
+        if (allow_unqualified_exports) {
+            existing->allow_unqualified_exports = true;
+        }
         return true; // duplicate binding to same module; ignore
     }
     if (!ensureBindingCapacity(list, list->count + 1)) {
@@ -593,6 +598,7 @@ static bool addBinding(ReaModuleBindingList *list, const char *alias, ReaModuleI
     }
     list->items[list->count].alias = reaDupString(alias);
     list->items[list->count].module = module;
+    list->items[list->count].allow_unqualified_exports = allow_unqualified_exports;
     list->count++;
     return true;
 }
@@ -1036,9 +1042,11 @@ static void collectImportBindings(AST *decls, ReaModuleBindingList *bindings) {
     for (int i = 0; i < decls->child_count; i++) {
         AST *child = decls->children[i];
         if (!child || child->type != AST_USES_CLAUSE) continue;
+        bool sawExplicitImports = false;
         for (int j = 0; j < child->child_count; j++) {
             AST *importNode = child->children[j];
             if (!importNode || importNode->type != AST_IMPORT || !importNode->token || !importNode->token->value) continue;
+            sawExplicitImports = true;
             const char *path = importNode->token->value;
             ReaModuleInfo *mod = loadModuleRecursive(path);
             if (!mod) continue;
@@ -1048,10 +1056,23 @@ static void collectImportBindings(AST *decls, ReaModuleBindingList *bindings) {
             }
             int line = importNode->token ? importNode->token->line : 0;
             if (alias && *alias) {
-                addBinding(bindings, alias, mod, line);
+                addBinding(bindings, alias, mod, line, false);
+                if (mod->name) {
+                    addBinding(bindings, mod->name, mod, line, false);
+                }
+            } else if (mod->name) {
+                addBinding(bindings, mod->name, mod, line, true);
             }
-            if (mod->name) {
-                addBinding(bindings, mod->name, mod, line);
+        }
+        if (!sawExplicitImports && child->unit_list) {
+            for (int j = 0; j < listSize(child->unit_list); j++) {
+                const char *path = (const char *)listGet(child->unit_list, j);
+                if (!path || !*path) continue;
+                ReaModuleInfo *mod = loadModuleRecursive(path);
+                if (!mod) continue;
+                if (mod->name) {
+                    addBinding(bindings, mod->name, mod, 0, true);
+                }
             }
         }
     }
@@ -1347,6 +1368,9 @@ static int countAccessibleExports(const char *name, ReaModuleBindingList *bindin
     ReaModuleInfo **seen = NULL;
     int seenCount = 0;
     for (int i = 0; i < bindings->count; i++) {
+        if (!bindings->items[i].allow_unqualified_exports) {
+            continue;
+        }
         ReaModuleInfo *module = bindings->items[i].module;
         if (!module) continue;
         bool alreadySeen = false;
@@ -3290,7 +3314,39 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 ReaModuleInfo *firstModule = NULL;
                 ReaModuleExport *firstExport = NULL;
                 int matches = countAccessibleExports(ident, gActiveBindings, &firstModule, &firstExport);
-                if (matches > 1) {
+                if (matches == 1 && firstModule && firstExport) {
+                    if (firstExport->kind == REA_MODULE_EXPORT_CONST || firstExport->kind == REA_MODULE_EXPORT_VAR) {
+                        char *qualified = makeQualifiedName(firstModule->name, firstExport->name);
+                        if (node->token && node->token->value) {
+                            free(node->token->value);
+                            node->token->value = qualified;
+                            node->token->length = strlen(qualified);
+                        } else {
+                            free(qualified);
+                        }
+
+                        if (node->type_def) {
+                            freeAST(node->type_def);
+                            node->type_def = NULL;
+                        }
+                        AST *typeNode = firstExport->decl ? firstExport->decl->right : NULL;
+                        if (firstExport->kind == REA_MODULE_EXPORT_CONST) {
+                            node->var_type = firstExport->decl ? firstExport->decl->var_type : TYPE_UNKNOWN;
+                        } else {
+                            node->var_type = firstExport->decl ? firstExport->decl->var_type : TYPE_UNKNOWN;
+                            if (node->var_type == TYPE_UNKNOWN && typeNode) {
+                                node->var_type = typeNode->var_type;
+                            }
+                        }
+                        if (typeNode) {
+                            node->type_def = copyAST(typeNode);
+                        }
+                        if (pushedGenericFrame) popGenericFrame();
+                        return;
+                    }
+                    fprintf(stderr, "L%d: identifier '%s' is not a value export.\n",
+                            node->token->line, ident);
+                } else if (matches > 1) {
                     fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
                             node->token->line, ident);
                 } else {
@@ -3319,7 +3375,30 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                             ReaModuleInfo *firstModule = NULL;
                             ReaModuleExport *firstExport = NULL;
                             int matches = countAccessibleExports(ident, gActiveBindings, &firstModule, &firstExport);
-                            if (matches > 1) {
+                            if (matches == 1 && firstModule && firstExport &&
+                                (firstExport->kind == REA_MODULE_EXPORT_CONST || firstExport->kind == REA_MODULE_EXPORT_VAR)) {
+                                char *qualified = makeQualifiedName(firstModule->name, firstExport->name);
+                                if (node->token && node->token->value) {
+                                    free(node->token->value);
+                                    node->token->value = qualified;
+                                    node->token->length = strlen(qualified);
+                                } else {
+                                    free(qualified);
+                                }
+                                if (node->type_def) {
+                                    freeAST(node->type_def);
+                                    node->type_def = NULL;
+                                }
+                                AST *typeNode = firstExport->decl ? firstExport->decl->right : NULL;
+                                node->var_type = firstExport->decl ? firstExport->decl->var_type : TYPE_UNKNOWN;
+                                if (node->var_type == TYPE_UNKNOWN && typeNode) {
+                                    node->var_type = typeNode->var_type;
+                                }
+                                if (typeNode) {
+                                    node->type_def = copyAST(typeNode);
+                                }
+                                decl = NULL;
+                            } else if (matches > 1) {
                                 fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
                                         node->token->line, ident);
                             } else {
@@ -3443,11 +3522,64 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 return;
             }
         }
+        bool qualifiedModuleCallResolved = false;
+        if (!node->left && node->token && node->token->value) {
+            const char *dot = strchr(node->token->value, '.');
+            if (dot) {
+                size_t prefixLen = (size_t)(dot - node->token->value);
+                if (prefixLen > 0 && prefixLen < MAX_SYMBOL_LENGTH) {
+                    char prefix[MAX_SYMBOL_LENGTH];
+                    memcpy(prefix, node->token->value, prefixLen);
+                    prefix[prefixLen] = '\0';
+                    const char *member = dot + 1;
+                    ReaModuleBinding *binding = findActiveBinding(prefix);
+                    if (binding && binding->module) {
+                        ReaModuleExport *exp = findModuleExport(binding->module, member);
+                        if (!exp) {
+                            fprintf(stderr, "L%d: '%s' is not exported from module '%s'.\n",
+                                    node->token->line, member,
+                                    binding->module->name ? binding->module->name : "(unknown)");
+                            pascal_semantic_error_count++;
+                        } else if (exp->kind == REA_MODULE_EXPORT_FUNCTION || exp->kind == REA_MODULE_EXPORT_PROCEDURE) {
+                            char *qualified = makeQualifiedName(binding->module->name, exp->name);
+                            free(node->token->value);
+                            node->token->value = qualified;
+                            node->token->length = strlen(qualified);
+                            if (node->type_def) {
+                                freeAST(node->type_def);
+                                node->type_def = NULL;
+                            }
+                            if (exp->kind == REA_MODULE_EXPORT_FUNCTION && exp->decl) {
+                                node->var_type = exp->decl->var_type;
+                                node->type_def = exp->decl->right ? copyAST(exp->decl->right) : NULL;
+                            } else {
+                                node->var_type = TYPE_VOID;
+                            }
+                            qualifiedModuleCallResolved = true;
+                        } else {
+                            fprintf(stderr, "L%d: '%s' is not callable.\n",
+                                    node->token->line, node->token->value);
+                            pascal_semantic_error_count++;
+                        }
+                    }
+                }
+            }
+        }
         AST *callDecl = NULL;
         if (node->token && node->token->value) {
             callDecl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
             if (!callDecl) {
                 callDecl = findGlobalFunctionDecl(node->token->value);
+            }
+            if (!callDecl) {
+                AST *scope = node->parent;
+                while (scope && scope->type != AST_FUNCTION_DECL && scope->type != AST_PROCEDURE_DECL) {
+                    scope = scope->parent;
+                }
+                if (scope) {
+                    AST *body = (scope->type == AST_FUNCTION_DECL) ? scope->extra : scope->right;
+                    callDecl = findFunctionInSubtree(body, node->token->value);
+                }
             }
             if (callDecl && (callDecl->type == AST_FUNCTION_DECL || callDecl->type == AST_PROCEDURE_DECL)) {
                 AST *decl_scope = findEnclosingCompound(callDecl);
@@ -3499,25 +3631,49 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                 }
             }
         }
-        if (!callDecl && !node->left && node->token && node->token->value) {
+        if (!callDecl && !node->left && node->token && node->token->value &&
+            !qualifiedModuleCallResolved && node->i_val != 1) {
             char lowered[MAX_SYMBOL_LENGTH * 2];
             snprintf(lowered, sizeof(lowered), "%s", node->token->value);
             toLowerString(lowered);
             Symbol *proc_sym = lookupProcedure(lowered);
-            if (!proc_sym || !proc_sym->is_defined) {
-                ReaModuleInfo *firstModule = NULL;
-                ReaModuleExport *firstExport = NULL;
-                int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
-                if (matches > 1) {
-                    fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
+            ReaModuleInfo *firstModule = NULL;
+            ReaModuleExport *firstExport = NULL;
+            int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
+            if (matches > 1) {
+                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
+                        node->token->line, node->token->value);
+                pascal_semantic_error_count++;
+            } else if (matches == 1 && firstModule && firstExport) {
+                if (firstExport->kind == REA_MODULE_EXPORT_FUNCTION ||
+                    firstExport->kind == REA_MODULE_EXPORT_PROCEDURE) {
+                    char *qualified = makeQualifiedName(firstModule->name, firstExport->name);
+                    free(node->token->value);
+                    node->token->value = qualified;
+                    node->token->length = strlen(qualified);
+                    if (node->type_def) {
+                        freeAST(node->type_def);
+                        node->type_def = NULL;
+                    }
+                    if (firstExport->kind == REA_MODULE_EXPORT_FUNCTION && firstExport->decl) {
+                        node->var_type = firstExport->decl->var_type;
+                        node->type_def = firstExport->decl->right ? copyAST(firstExport->decl->right) : NULL;
+                    } else {
+                        node->var_type = TYPE_VOID;
+                    }
+                } else {
+                    fprintf(stderr, "L%d: '%s' is not callable.\n",
                             node->token->line, node->token->value);
-                } else if (matches > 0) {
-                    fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                            node->token->line, node->token->value);
-                }
-                if (matches > 0) {
                     pascal_semantic_error_count++;
                 }
+            } else if (!isBuiltin(node->token->value) && proc_sym && proc_sym->is_defined) {
+                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                        node->token->line, node->token->value);
+                pascal_semantic_error_count++;
+            } else if (!isBuiltin(node->token->value) && (!proc_sym || !proc_sym->is_defined)) {
+                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
+                        node->token->line, node->token->value);
+                pascal_semantic_error_count++;
             }
         }
         if (node->i_val == 1) {

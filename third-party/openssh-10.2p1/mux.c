@@ -108,6 +108,17 @@ static PSCAL_SSH_THREAD_LOCAL u_int muxserver_pid = 0;
 
 static PSCAL_SSH_THREAD_LOCAL Channel *mux_listener_channel = NULL;
 
+void
+pscal_mux_reset_state(void)
+{
+	muxserver_sock = -1;
+	muxclient_request_id = 0;
+	muxclient_command = 0;
+	muxclient_terminate = 0;
+	muxserver_pid = 0;
+	mux_listener_channel = NULL;
+}
+
 struct mux_master_state {
 	int hello_rcvd;
 };

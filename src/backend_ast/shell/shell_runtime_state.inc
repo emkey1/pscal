@@ -269,13 +269,37 @@ static void shellCloseVprocStreams(void) {
     shellCloseVprocStream(&gShellVprocStderr);
     shellCloseVprocStream(&gShellVprocStdin);
 }
+
+static void shellInvalidateVprocStreamForFd(int fd) {
+    if (fd == STDOUT_FILENO) {
+        shellCloseVprocStream(&gShellVprocStdout);
+    } else if (fd == STDERR_FILENO) {
+        shellCloseVprocStream(&gShellVprocStderr);
+    } else if (fd == STDIN_FILENO) {
+        shellCloseVprocStream(&gShellVprocStdin);
+    }
+}
 #else
 static void shellFlushVprocStreams(void) {}
 static void __attribute__((unused)) shellCloseVprocStreams(void) {}
+static void __attribute__((unused)) shellInvalidateVprocStreamForFd(int fd) { (void)fd; }
 #endif
 
 static void shellFlushStandardStreams(void) {
     shellFlushVprocStreams();
+#if defined(PSCAL_TARGET_IOS)
+    /* When stdio is virtualised through vproc (e.g. in-process pipeline
+     * stages), flushing libc stdout/stderr can hit stale host pipe endpoints
+     * and raise SIGPIPE. The vproc stream flush above is sufficient. */
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int out_host = vprocTranslateFd(vp, STDOUT_FILENO);
+        int err_host = vprocTranslateFd(vp, STDERR_FILENO);
+        if (out_host < 0 || err_host < 0) {
+            return;
+        }
+    }
+#endif
     fflush(stdout);
     fflush(stderr);
 }
@@ -379,8 +403,31 @@ typedef struct ShellJob {
     char *command;
 } ShellJob;
 
+typedef struct {
+    pid_t fg_job_id;
+    pid_t fg_pgid;
+    bool saved_stdio_valid;
+    int saved_stdio[3];
+    bool saved_termios_valid;
+    struct termios saved_termios;
+} ShellJobControlContext;
+
 typedef struct ShellLocalScopeFrame ShellLocalScopeFrame;
 typedef struct ShellLoopFrame ShellLoopFrame;
+
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    int spool_fd;
+    size_t spool_size;
+    bool spool_owned;
+    int stdin_fd;
+    int stdout_fd;
+    int stderr_fd;
+    bool stdin_owned;
+    bool stdout_owned;
+    bool stderr_owned;
+} ShellPipelineSession;
+#endif
 
 typedef struct {
     bool active;
@@ -396,10 +443,25 @@ typedef struct {
 #if defined(PSCAL_TARGET_IOS)
     bool in_process;
     bool in_process_worker;
-    int spool_fd;
-    size_t spool_size;
+    VProcSessionStdio *session_stdio;
+    ShellPipelineSession session;
+    pthread_t *threads;
+    bool *thread_started;
+    int *stage_status;
+    struct pscal_fd **pscal_pipe_read;
+    struct pscal_fd **pscal_pipe_write;
+    struct pscal_fd **pscal_pipe_write_hold;
 #endif
 } ShellPipelineContext;
+
+typedef struct {
+    bool has_job_control;
+    bool has_tcsetpgrp;
+    bool has_pgid;
+    bool has_stop_signals;
+    bool has_foreground_control;
+    bool has_killpg;
+} ShellJobControlCaps;
 
 typedef struct ShellRuntimeState {
     int last_status;
@@ -409,6 +471,7 @@ typedef struct ShellRuntimeState {
     int tty_fd;
     bool job_control_enabled;
     bool job_control_initialized;
+    ShellJobControlCaps job_control_caps;
     bool errexit_enabled;
     bool errexit_pending;
     bool errexit_defer_active;
@@ -438,6 +501,13 @@ typedef struct ShellRuntimeState {
     size_t scalar_cache_generation;
     size_t scalar_capture_peak_depth;
     ShellHistory history;
+    char *history_path;
+    size_t history_size_limit;
+    size_t history_file_size_limit;
+    bool history_persist_enabled;
+    bool history_append_mode;
+    bool history_loaded_from_file;
+    bool history_loading;
     char *arg0;
     ShellTrapEntry signal_traps[NSIG];
     ShellTrapEntry exit_trap;
@@ -450,6 +520,7 @@ typedef struct ShellRuntimeState {
     size_t last_removed_job_id;
     int last_removed_job_status;
     bool last_removed_job_valid;
+    ShellJobControlContext job_control_ctx;
     ShellArrayVariable *array_vars;
     size_t array_var_count;
     size_t array_var_capacity;
@@ -494,6 +565,8 @@ static void shellSetContext(ShellRuntimeState *ctx);
 #define gShellConditionDepth (SC()->condition_depth)
 #define gShellJobs (SC()->jobs)
 #define gShellJobCount (SC()->job_count)
+#define gShellJobControlCaps (SC()->job_control_caps)
+#define gShellJobControlCtx (SC()->job_control_ctx)
 
 static const char *kShellCommandDefaultPath =
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
@@ -1652,6 +1725,8 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .tty_fd = -1,
     .job_control_enabled = false,
     .job_control_initialized = false,
+    .job_control_caps = {false, false, false, false, false, false},
+    .job_control_ctx = {0, 0, false, {-1, -1, -1}, false, {0}},
     .errexit_enabled = false,
     .errexit_pending = false,
     .errexit_defer_active = false,
@@ -1681,6 +1756,13 @@ static ShellRuntimeState gShellRuntimeDefault = {
     .scalar_cache_generation = 0,
     .scalar_capture_peak_depth = 0,
     .history = {NULL, 0, 0},
+    .history_path = NULL,
+    .history_size_limit = 0,
+    .history_file_size_limit = 0,
+    .history_persist_enabled = false,
+    .history_append_mode = true,
+    .history_loaded_from_file = false,
+    .history_loading = false,
     .arg0 = NULL,
     .signal_traps = { {SHELL_TRAP_ACTION_DEFAULT, NULL} },
     .exit_trap = {SHELL_TRAP_ACTION_DEFAULT, NULL},
@@ -3006,6 +3088,13 @@ ShellRuntimeState *shellRuntimeCreateContext(void) {
     ctx->history.entries = NULL;
     ctx->history.count = 0;
     ctx->history.capacity = 0;
+    ctx->history_path = template_ctx->history_path ? strdup(template_ctx->history_path) : NULL;
+    ctx->history_size_limit = template_ctx->history_size_limit;
+    ctx->history_file_size_limit = template_ctx->history_file_size_limit;
+    ctx->history_persist_enabled = template_ctx->history_persist_enabled;
+    ctx->history_append_mode = template_ctx->history_append_mode;
+    ctx->history_loaded_from_file = false;
+    ctx->history_loading = false;
     if (template_ctx->history.count > 0 && template_ctx->history.entries) {
         ctx->history.entries =
             (char **)calloc(template_ctx->history.count, sizeof(char *));
@@ -3141,6 +3230,10 @@ void shellRuntimeDestroyContext(ShellRuntimeState *ctx) {
         ctx->history.entries = NULL;
         ctx->history.count = 0;
         ctx->history.capacity = 0;
+    }
+    if (ctx->history_path) {
+        free(ctx->history_path);
+        ctx->history_path = NULL;
     }
     if (ctx->arg0) {
         free(ctx->arg0);
@@ -3309,9 +3402,10 @@ static ShellReadLineResult shellReadLineFromFd(int fd,
     return SHELL_READ_LINE_OK;
 }
 
-static ShellReadLineResult shellReadLineFromStream(FILE *stream,
-                                                   char **out_line,
-                                                   size_t *out_length) {
+static ShellReadLineResult __attribute__((unused))
+shellReadLineFromStream(FILE *stream,
+                        char **out_line,
+                        size_t *out_length) {
     if (out_line) {
         *out_line = NULL;
     }
@@ -4117,21 +4211,112 @@ void shellRestoreCurrentVm(VM *vm) {
     shellSetContext(restore);
 }
 
+static void shellJobControlDetectCapabilities(void) {
+    ShellJobControlCaps caps;
+    memset(&caps, 0, sizeof(caps));
+
+    caps.has_job_control = shellRuntimeIsInteractive();
+#if defined(PSCAL_TARGET_IOS)
+    caps.has_tcsetpgrp = false;
+    caps.has_pgid = true;
+    caps.has_stop_signals = true;
+    caps.has_foreground_control = true;
+    caps.has_killpg = true;
+#else
+    caps.has_tcsetpgrp = true;
+    caps.has_pgid = true;
+    caps.has_stop_signals = true;
+    caps.has_foreground_control = true;
+    caps.has_killpg = true;
+#endif
+
+    gShellRuntime.job_control_caps = caps;
+}
+
+static inline bool shellJobControlSupportsStops(void) {
+    return gShellRuntime.job_control_caps.has_stop_signals;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#define SHELL_JC_UNUSED __attribute__((unused))
+#else
+#define SHELL_JC_UNUSED
+#endif
+
+static SHELL_JC_UNUSED void shellJobControlSaveShellIo(void) {
+    ShellJobControlContext *jc = &gShellJobControlCtx;
+    if (!jc) {
+        return;
+    }
+    if (!jc->saved_stdio_valid) {
+        for (int i = 0; i < 3; ++i) {
+            jc->saved_stdio[i] = dup(i);
+            if (jc->saved_stdio[i] >= 0) {
+                fcntl(jc->saved_stdio[i], F_SETFD, FD_CLOEXEC);
+            }
+        }
+        jc->saved_stdio_valid = true;
+    }
+    if (!jc->saved_termios_valid && gShellRuntime.tty_fd >= 0 && tcgetattr(gShellRuntime.tty_fd, &jc->saved_termios) == 0) {
+        jc->saved_termios_valid = true;
+    }
+}
+
+static SHELL_JC_UNUSED void shellJobControlRestoreShellIo(void) {
+    ShellJobControlContext *jc = &gShellJobControlCtx;
+    if (!jc) {
+        return;
+    }
+    if (jc->saved_stdio_valid) {
+        for (int i = 0; i < 3; ++i) {
+            if (jc->saved_stdio[i] >= 0) {
+                (void)dup2(jc->saved_stdio[i], i);
+            }
+        }
+    }
+    if (jc->saved_termios_valid && gShellRuntime.tty_fd >= 0) {
+        (void)tcsetattr(gShellRuntime.tty_fd, TCSADRAIN, &jc->saved_termios);
+    }
+}
+
+static int shellJobControlSendPgid(pid_t pgid, int signo);
+
+static bool shellJobControlDispatchForegroundSignal(int signo) {
+    if (!gShellRuntime.job_control_enabled || gShellJobControlCtx.fg_pgid <= 0) {
+        return false;
+    }
+    if (signo == SIGTSTP && !shellJobControlSupportsStops()) {
+        return false;
+    }
+    return shellJobControlSendPgid(gShellJobControlCtx.fg_pgid, signo) == 0;
+}
+
 static void shellInitJobControlState(void) {
     if (gShellRuntime.job_control_initialized) {
         return;
     }
 
+    shellJobControlDetectCapabilities();
     gShellRuntime.job_control_initialized = true;
     gShellRuntime.tty_fd = STDIN_FILENO;
 
+    /* In automated harness runs we sometimes need job control without a real
+     * TTY (non-interactive pipelines). Allow RUN_VPROC_TESTS/PSCALI_SHELL_VPROC
+     * to bypass TTY requirements on all platforms. */
+    bool allow_headless_jc = getenv("RUN_VPROC_TESTS") != NULL ||
+                             getenv("PSCALI_SHELL_VPROC") != NULL;
+
     if (gShellRuntime.tty_fd < 0) {
         gShellRuntime.tty_fd = -1;
-        return;
+        gShellRuntime.job_control_caps.has_job_control = allow_headless_jc;
+        gShellRuntime.job_control_caps.has_foreground_control = false;
+        if (!allow_headless_jc) return;
     }
 
-    if (!pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
+    if (!allow_headless_jc && !pscalRuntimeFdHasRealTTY(gShellRuntime.tty_fd)) {
         gShellRuntime.tty_fd = -1;
+        gShellRuntime.job_control_caps.has_job_control = false;
+        gShellRuntime.job_control_caps.has_foreground_control = false;
         return;
     }
 
@@ -4163,7 +4348,9 @@ static void shellInitJobControlState(void) {
 #else
     pid_t shell_pid = getpid();
     pid_t current_pgid = getpgrp();
-    if (current_pgid != shell_pid) {
+    if (current_pgid <= 0 && allow_headless_jc) {
+        current_pgid = shell_pid > 0 ? shell_pid : getpid();
+    } else if (current_pgid != shell_pid) {
         if (setpgid(0, 0) == 0) {
             current_pgid = shell_pid;
         } else {
@@ -4176,8 +4363,11 @@ static void shellInitJobControlState(void) {
 }
 
 static void shellEnsureJobControl(void) {
-    if (!shellRuntimeIsInteractive()) {
+    bool allow_headless_jc = getenv("RUN_VPROC_TESTS") != NULL ||
+                             getenv("PSCALI_SHELL_VPROC") != NULL;
+    if (!shellRuntimeIsInteractive() && !allow_headless_jc) {
         gShellRuntime.job_control_enabled = false;
+        gShellRuntime.job_control_caps.has_job_control = false;
         return;
     }
 
@@ -4185,6 +4375,7 @@ static void shellEnsureJobControl(void) {
 
     if (gShellRuntime.tty_fd < 0) {
         gShellRuntime.job_control_enabled = false;
+        gShellRuntime.job_control_caps.has_job_control = false;
         return;
     }
 #if defined(PSCAL_TARGET_IOS)
@@ -4206,6 +4397,8 @@ static void shellEnsureJobControl(void) {
     pid_t pgid = getpgrp();
     if (pgid <= 0) {
         gShellRuntime.job_control_enabled = false;
+        gShellRuntime.job_control_caps.has_job_control = false;
+        gShellRuntime.job_control_caps.has_foreground_control = false;
         return;
     }
 
@@ -4225,6 +4418,8 @@ static void shellEnsureJobControl(void) {
                 continue;
             }
             gShellRuntime.job_control_enabled = false;
+            gShellRuntime.job_control_caps.has_job_control = false;
+            gShellRuntime.job_control_caps.has_foreground_control = false;
             return;
         }
         if (foreground == pgid) {
@@ -4236,15 +4431,19 @@ static void shellEnsureJobControl(void) {
                 continue;
             }
             gShellRuntime.job_control_enabled = false;
+            gShellRuntime.job_control_caps.has_job_control = false;
+            gShellRuntime.job_control_caps.has_foreground_control = false;
             return;
         }
     }
 }
 
 static void shellJobControlSetForeground(pid_t pgid) {
-    if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0 || pgid <= 0) {
+    if (!gShellRuntime.job_control_enabled || !gShellRuntime.job_control_caps.has_foreground_control ||
+        gShellRuntime.tty_fd < 0 || pgid <= 0) {
         return;
     }
+    gShellJobControlCtx.fg_pgid = pgid;
 #if defined(PSCAL_TARGET_IOS)
     int shell_pid = vprocGetShellSelfPid();
     int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
@@ -4252,6 +4451,9 @@ static void shellJobControlSetForeground(pid_t pgid) {
         vprocSetForegroundPgid(sid, (int)pgid);
     }
 #endif
+    if (!gShellRuntime.job_control_caps.has_tcsetpgrp) {
+        return;
+    }
     while (tcsetpgrp(gShellRuntime.tty_fd, pgid) != 0) {
         if (errno == EINTR) {
             continue;
@@ -4261,9 +4463,11 @@ static void shellJobControlSetForeground(pid_t pgid) {
 }
 
 static void shellJobControlRestoreForeground(void) {
-    if (!gShellRuntime.job_control_enabled || gShellRuntime.tty_fd < 0) {
+    if (!gShellRuntime.job_control_enabled || !gShellRuntime.job_control_caps.has_foreground_control ||
+        gShellRuntime.tty_fd < 0) {
         return;
     }
+    gShellJobControlCtx.fg_pgid = 0;
 #if defined(PSCAL_TARGET_IOS)
     int shell_pid = vprocGetShellSelfPid();
     int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
@@ -4271,6 +4475,9 @@ static void shellJobControlRestoreForeground(void) {
         vprocSetForegroundPgid(sid, (int)gShellRuntime.shell_pgid);
     }
 #endif
+    if (!gShellRuntime.job_control_caps.has_tcsetpgrp) {
+        return;
+    }
     pid_t target = gShellRuntime.shell_pgid > 0 ? gShellRuntime.shell_pgid : getpgrp();
     if (target <= 0) {
         return;
@@ -4281,6 +4488,40 @@ static void shellJobControlRestoreForeground(void) {
         }
         break;
     }
+}
+
+static int shellJobControlSendSignal(pid_t target, int signo, bool process_group) {
+    if (target == 0 || signo < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    pid_t send_target = process_group ? -target : target;
+    int rc = vprocKillShim(send_target, signo);
+    if (rc != 0 && errno == ESRCH) {
+        bool virtual_only =
+            (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP ||
+             signo == SIGTERM || signo == SIGCONT || signo == SIGSTOP ||
+             signo == SIGTTIN || signo == SIGTTOU);
+        if (!virtual_only) {
+            /* Non-control signals may still target host-backed children in some
+             * test environments; preserve that compatibility path. */
+            rc = kill(send_target, signo);
+        }
+    }
+    return rc;
+#else
+    pid_t send_target = process_group ? -target : target;
+    return kill(send_target, signo);
+#endif
+}
+
+static int shellJobControlSendPgid(pid_t pgid, int signo) {
+    return shellJobControlSendSignal(pgid, signo, true);
+}
+
+static int shellJobControlSendPid(pid_t pid, int signo) {
+    return shellJobControlSendSignal(pid, signo, false);
 }
 
 typedef struct {

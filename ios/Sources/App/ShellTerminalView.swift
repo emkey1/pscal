@@ -4,20 +4,55 @@ import UIKit
 struct ShellTerminalView: View {
     @ObservedObject var session: ShellRuntimeSession
     let isActive: Bool
-    @ObservedObject private var fontSettings = TerminalFontSettings.shared
+    let tabId: UInt64
+    @ObservedObject private var fontSettings: TerminalTabAppearanceSettings
     @State private var focusAnchor: Int = 0
+    @State private var showingSettings = false
+
+    init(
+        session: ShellRuntimeSession,
+        isActive: Bool,
+        tabId: UInt64,
+        appearanceSettings: TerminalTabAppearanceSettings
+    ) {
+        self.session = session
+        self.isActive = isActive
+        self.tabId = tabId
+        _fontSettings = ObservedObject(wrappedValue: appearanceSettings)
+    }
 
     var body: some View {
-        GeometryReader { proxy in
-            ShellTerminalContentView(
-                availableSize: proxy.size,
-                fontSettings: fontSettings,
-                session: session,
-                focusAnchor: $focusAnchor,
-                isActive: isActive
-            )
-            .id(session.sessionId)
-            .frame(width: proxy.size.width, height: proxy.size.height)
+        if TerminalDebugFlags.printChanges {
+            let _ = Self._printChanges()
+            traceViewChanges("ShellTerminalView body")
+        }
+        return GeometryReader { proxy in
+            ZStack(alignment: .bottomTrailing) {
+                ShellTerminalContentView(
+                    availableSize: proxy.size,
+                    fontSettings: fontSettings,
+                    session: session,
+                    focusAnchor: $focusAnchor,
+                    isActive: isActive
+                )
+                .id(session.sessionId)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "textformat.size")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(.bottom, 16)
+                .padding(.trailing, 10)
+                .accessibilityLabel("Adjust Font Size")
+            }
+        }
+        .sheet(isPresented: $showingSettings) {
+            TerminalSettingsView(appearanceSettings: fontSettings, tabId: tabId)
         }
         .background(Color(fontSettings.backgroundColor))
         .onChange(of: isActive) { active in
@@ -34,14 +69,19 @@ private struct ShellTerminalContentView: View {
     }
 
     let availableSize: CGSize
-    @ObservedObject var fontSettings: TerminalFontSettings
+    @ObservedObject var fontSettings: TerminalTabAppearanceSettings
     @ObservedObject var session: ShellRuntimeSession
     @Binding var focusAnchor: Int
     let isActive: Bool
 
     @State private var hasMeasuredGeometry: Bool = false
+    @State private var lastReportedMetrics: TerminalGeometryCalculator.TerminalGeometryMetrics?
 
     var body: some View {
+        if TerminalDebugFlags.printChanges {
+            let _ = Self._printChanges()
+            traceViewChanges("ShellTerminalContentView body")
+        }
         let currentFont = fontSettings.currentFont
 
         return VStack(spacing: 0) {
@@ -54,12 +94,15 @@ private struct ShellTerminalContentView: View {
                 isActive: isActive,
                 onInput: handleInput,
                 onPaste: handlePaste,
-                onInterrupt: { session.send("\u{03}") },
-                onSuspend: { session.send("\u{1A}") },
+                onInterrupt: {
+                    session.sendInterrupt()
+                },
+                onSuspend: {
+                    session.sendSuspend()
+                },
                 onResize: { cols, rows in
                     tabInitLog("ShellTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
-                    hasMeasuredGeometry = true
-                    session.updateTerminalSize(columns: cols, rows: rows)
+                    applyTerminalSize(columns: cols, rows: rows)
                 },
                 onReady: { controller in
                     tabInitLog("ShellTerminalView ready session=\(session.sessionId) controller=\(controller.instanceId)")
@@ -134,10 +177,20 @@ private struct ShellTerminalContentView: View {
         )
         let columns = max(10, grid.columns)
         let rows = max(4, grid.rows)
-        session.updateTerminalSize(columns: columns, rows: rows)
+        applyTerminalSize(columns: columns, rows: rows)
     }
 
     private func requestInputFocus() {
         focusAnchor &+= 1
+    }
+
+    private func applyTerminalSize(columns: Int, rows: Int) {
+        if !hasMeasuredGeometry {
+            hasMeasuredGeometry = true
+        }
+        let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(columns: columns, rows: rows)
+        guard lastReportedMetrics != metrics else { return }
+        lastReportedMetrics = metrics
+        session.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }

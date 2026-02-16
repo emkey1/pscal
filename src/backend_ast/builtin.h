@@ -6,6 +6,13 @@
 #include "Pascal/globals.h"
 #include <stdbool.h>
 #include <stddef.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
+#define PSCAL_TAB_TITLE_SUPPORT 1
+#endif
 
 struct VM_s;
 struct ShellRuntimeState;
@@ -202,6 +209,10 @@ Value vmBuiltinShellWhich(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellGetopts(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellMapfile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellTrue(struct VM_s* vm, int arg_count, Value* args);
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
+Value vmBuiltinShellTabName(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellTabStartupCommand(struct VM_s* vm, int arg_count, Value* args);
+#endif
 #ifdef PSCAL_TARGET_IOS
 Value vmBuiltinShellLs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellCat(struct VM_s* vm, int arg_count, Value* args);
@@ -221,6 +232,7 @@ Value vmBuiltinShellResize(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinShellEditorDump(struct VM_s* vm, int arg_count, Value* args);
 #ifdef BUILD_PSCALD
 Value vmBuiltinShellPscald(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinShellPscalasm(struct VM_s* vm, int arg_count, Value* args);
 #endif
 #endif
 Value vmHostShellLastStatus(struct VM_s* vm);
@@ -311,6 +323,7 @@ Value vmBuiltinMstreamsavetofile(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreamfree(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreambuffer(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinMstreamFromString(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinMstreamAppendByte(struct VM_s* vm, int arg_count, Value* args);
 
 /* VM-native math functions */
 Value vmBuiltinSqrt(struct VM_s* vm, int arg_count, Value* args);
@@ -367,11 +380,14 @@ void vmInitTerminalState(void);
 // Returns true if SIGINT was requested via pscalRuntimeRequestSigint (e.g. UI)
 // and clears any pending flag/pipe.
 bool pscalRuntimeConsumeSigint(void);
+bool pscalRuntimeConsumeSigtstp(void);
 void pscalRuntimeRequestSigint(void);
 void pscalRuntimeRequestSigtstp(void);
 bool pscalRuntimeSigintPending(void);
+bool pscalRuntimeSigtstpPending(void);
 bool pscalRuntimeInterruptFlag(void);
 void pscalRuntimeClearInterruptFlag(void);
+int pscalRuntimeCurrentForegroundPgid(void);
 
 /* Pause for ten seconds and require a key press before exit when running
  * interactively. */

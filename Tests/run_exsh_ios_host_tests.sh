@@ -27,3 +27,14 @@ RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable 
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only top_tree_default
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only lps_tree_option
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only kernel_tree_root
+RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_help_grep_ios
+RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_empty_ios
+RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_clike_head_ios
+RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_rea_head_ios
+
+# Optional interactive PTY signal regressions. Enable explicitly while
+# debugging local Ctrl-C/Ctrl-Z behavior:
+#   RUN_INTERACTIVE_SIGNAL_TESTS=1 Tests/run_exsh_ios_host_tests.sh
+if [ "${RUN_INTERACTIVE_SIGNAL_TESTS:-0}" = "1" ]; then
+  RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_interactive_test_harness.py" --executable "${EXE}"
+fi

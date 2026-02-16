@@ -12,6 +12,7 @@
 #include "backend_ast/builtin.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
+#include "common/path_virtualization.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -23,6 +24,7 @@
 #if defined(PSCAL_TARGET_IOS)
 #include <spawn.h>
 #include <sys/wait.h>
+#include "ios/vproc.h"
 extern char **environ;
 #endif
 
@@ -42,8 +44,32 @@ static const char *const kShellCompilerId = "shell";
 
 #if defined(PSCAL_TARGET_IOS)
 extern void pscalRuntimeDebugLog(const char *message);
+
+/* The Swift-side logger allocates, which can trip guard allocators if some
+ * other component has previously scribbled on the heap. To keep the shell
+ * usable even when optional diagnostics are enabled (MallocScribble, guard
+ * malloc, etc.), we make runtime debug logging opt‑in on iOS.
+ *
+ * Enable by setting PSCALI_RUNTIME_DEBUG=1 in the environment. */
+static bool runtimeDebugLogEnabled(void) {
+    static bool initialized = false;
+    static bool enabled = false;
+    if (!initialized) {
+        const char *env = getenv("PSCALI_RUNTIME_DEBUG");
+        enabled = (env && *env && strcmp(env, "0") != 0);
+        initialized = true;
+    }
+    return enabled;
+}
+
 static void runtimeDebugLog(const char *message) {
-    if (&pscalRuntimeDebugLog != NULL && message) {
+    if (!message) {
+        return;
+    }
+    if (!runtimeDebugLogEnabled()) {
+        return;
+    }
+    if (&pscalRuntimeDebugLog != NULL) {
         pscalRuntimeDebugLog(message);
     }
 }
@@ -193,9 +219,9 @@ static int shellRunExshShebang(const char *path, char *const *argv) {
 
     free(source);
 
-    if (exit_requested) {
-        shellRuntimeRequestExit();
-    }
+    /* Shebang scripts run as command bodies, not as sourced shell state.
+     * Keep an internal `exit` scoped to the script invocation. */
+    (void)exit_requested;
     return status;
 }
 
@@ -209,6 +235,17 @@ extern int dascal_main(int argc, char **argv);
 #endif
 #ifdef BUILD_PSCALD
 extern int pscald_main(int argc, char **argv);
+extern int pscalasm_main(int argc, char **argv);
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+static bool shellRunnerIsStopStatus(int status) {
+    if (status < 128 || status >= 128 + NSIG) {
+        return false;
+    }
+    int sig = status - 128;
+    return sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU;
+}
 #endif
 
 static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
@@ -227,6 +264,7 @@ static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
 #endif
 #ifdef BUILD_PSCALD
         {"pscald", pscald_main},
+        {"pscalasm", pscalasm_main},
 #endif
     };
     const char *name = tool_name && *tool_name ? tool_name : (argc > 0 && argv && argv[0] ? argv[0] : NULL);
@@ -235,7 +273,39 @@ static int shellSpawnToolRunner(const char *tool_name, int argc, char **argv) {
     }
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
         if (strcasecmp(name, table[i].name) == 0) {
-            return table[i].entry(argc, argv);
+#if defined(PSCAL_TARGET_IOS)
+            VProc *active_vp = vprocCurrent();
+            int stage_pid_for_stop = active_vp ? vprocPid(active_vp) : -1;
+            int shell_pid_for_stop = vprocGetShellSelfPid();
+            bool cooperative_stop_scope = false;
+            if (stage_pid_for_stop > 0 &&
+                stage_pid_for_stop != shell_pid_for_stop &&
+                vprocIsShellSelfThread()) {
+                /* Shebang frontends executing inline on the shell thread must
+                 * keep SIGTSTP cooperative so Ctrl-Z unwinds to the prompt. */
+                vprocSetStopUnsupported(stage_pid_for_stop, true);
+                cooperative_stop_scope = true;
+                /*
+                 * Frontend VMs report cooperative Ctrl-Z through shell runtime
+                 * status. Reset the marker so stale values never leak into a
+                 * fresh invocation.
+                 */
+                shellRuntimeSetLastStatus(0);
+            }
+#endif
+            int status = table[i].entry(argc, argv);
+#if defined(PSCAL_TARGET_IOS)
+            if (cooperative_stop_scope && status == EXIT_SUCCESS) {
+                int runtime_status = shellRuntimeLastStatus();
+                if (shellRunnerIsStopStatus(runtime_status)) {
+                    status = runtime_status;
+                }
+            }
+            if (cooperative_stop_scope && stage_pid_for_stop > 0) {
+                vprocSetStopUnsupported(stage_pid_for_stop, false);
+            }
+#endif
+            return status;
         }
     }
     fprintf(stderr, "%s: tool runner unavailable for '%s'\n",
@@ -256,6 +326,7 @@ static const char *shellResolveToolName(const char *interpreter) {
     if (strcasecmp(base, "pscaljson2bc") == 0) return "pscaljson2bc";
     if (strcasecmp(base, "dascal") == 0) return "dascal";
     if (strcasecmp(base, "pscald") == 0) return "pscald";
+    if (strcasecmp(base, "pscalasm") == 0) return "pscalasm";
     if (strcasecmp(base, "sh") == 0) return "exsh";
     if (strcasecmp(base, "exsh") == 0) return "exsh";
     return NULL;
@@ -610,6 +681,11 @@ int shellRunSource(const char *source,
     if (!source || !options) {
         return EXIT_FAILURE;
     }
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] enter path=%s source='%s'\n",
+                path ? path : "(null)",
+                source ? source : "(null)");
+    }
 
 #if defined(SIGPIPE)
     static bool sigpipe_ignored = false;
@@ -640,6 +716,9 @@ int shellRunSource(const char *source,
     const char *defines[1];
     int define_count = 0;
     char *pre_src = preprocessConditionals(source, defines, define_count);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] preprocessed\n");
+    }
 
     if (options->exit_on_signal) {
         shellRuntimeSetExitOnSignal(true);
@@ -667,7 +746,13 @@ int shellRunSource(const char *source,
     } else {
         current_procedure_table = procedure_table;
     }
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] symbols-ready\n");
+    }
     registerAllBuiltins();
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] builtins-registered\n");
+    }
 
     int exit_code = EXIT_FAILURE;
     ShellProgram *program = NULL;
@@ -691,8 +776,16 @@ int shellRunSource(const char *source,
     const char *parse_src = rewrite_src ? rewrite_src : (pre_src ? pre_src : source);
 
     ShellParser parser;
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] parsing\n");
+    }
     program = shellParseString(parse_src, &parser);
     shellParserFree(&parser);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] parsed had_error=%d program=%p\n",
+                (int)parser.had_error,
+                (void *)program);
+    }
     if (rewrite_src) {
         free(rewrite_src);
         rewrite_src = NULL;
@@ -710,7 +803,15 @@ int shellRunSource(const char *source,
 
     shellInitSemanticContext(&sem_ctx);
     sem_ctx_initialized = true;
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] semantic-analyze\n");
+    }
     ShellSemanticResult sem_result = shellAnalyzeProgram(&sem_ctx, program);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] semantic-done err=%d warn=%d\n",
+                sem_result.error_count,
+                sem_result.warning_count);
+    }
     if (sem_result.warning_count > 0 && !options->suppress_warnings) {
         fprintf(stderr, "Semantic analysis produced %d warning(s).\n", sem_result.warning_count);
     }
@@ -721,6 +822,9 @@ int shellRunSource(const char *source,
 
     initBytecodeChunk(&chunk);
     chunk_initialized = true;
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] chunk-init\n");
+    }
     bool used_cache = false;
     if (!options->no_cache && path && path[0]) {
         used_cache = loadBytecodeFromCache(path, kShellCompilerId, options->frontend_path, NULL, 0, &chunk);
@@ -730,6 +834,9 @@ int shellRunSource(const char *source,
         ShellOptConfig opt_config = { false };
         shellRunOptimizations(program, &opt_config);
         shellCompile(program, &chunk);
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[shell-run] compile-done\n");
+        }
         if (!options->no_cache && path && path[0]) {
             saveBytecodeToCache(path, kShellCompilerId, &chunk);
         }
@@ -770,6 +877,9 @@ int shellRunSource(const char *source,
         goto cleanup;
     }
     initVM(vm);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] vm-init\n");
+    }
     vm_initialized = true;
     vm_shell_ctx = shellRuntimeCreateContext();
     if (!vm_shell_ctx) {
@@ -790,6 +900,9 @@ int shellRunSource(const char *source,
     vm_context_swapped = true;
 
     InterpretResult result = interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[shell-run] interpret-done result=%d\n", (int)result);
+    }
     if (result == INTERPRET_RUNTIME_ERROR) {
         runtimeDebugLog("[shell] interpretBytecode -> runtime error; dumping VM stack");
         vmDumpStackInfoDetailed(vm, "shell runtime error");

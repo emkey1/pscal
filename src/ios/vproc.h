@@ -9,11 +9,13 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <dirent.h>
 #include <poll.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
+#include <setjmp.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,6 +82,7 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity);
 
 int vprocTranslateFd(VProc *vp, int fd);
 struct pscal_fd *vprocGetPscalFd(VProc *vp, int fd);
+int vprocCreateInprocPipe(struct pscal_fd **out_read, struct pscal_fd **out_write);
 int vprocDup(VProc *vp, int fd);
 int vprocDup2(VProc *vp, int fd, int target);
 /* Sync vproc table entry to a host fd already duplicated onto target_fd. */
@@ -94,6 +97,12 @@ int vprocHostDup(int fd);
 int vprocHostOpen(const char *path, int flags, ...);
 /* Create a host pipe without routing through the shim table. */
 int vprocHostPipe(int pipefd[2]);
+/* Create a host socket without routing through the shim table. */
+int vprocHostSocket(int domain, int type, int protocol);
+/* Accept a host socket without routing through the shim table. */
+int vprocHostAccept(int fd, struct sockaddr *addr, socklen_t *addrlen);
+/* Create a host socketpair without routing through the shim table. */
+int vprocHostSocketpair(int domain, int type, int protocol, int sv[2]);
 /* Seek on a host descriptor without routing through the shim table. */
 off_t vprocHostLseek(int fd, off_t offset, int whence);
 /* Sync a host descriptor without routing through the shim table. */
@@ -110,6 +119,9 @@ int vprocIsattyShim(int fd);
 void vprocLocationDeviceSetEnabled(bool enabled);
 /* Write a payload to the virtual location device. */
 ssize_t vprocLocationDeviceWrite(const void *data, size_t len);
+typedef void (*VprocLocationReadersChangedFn)(int readers, void *context);
+/* Register an observer for reader count changes on /dev/location. */
+void vprocLocationDeviceRegisterReaderObserver(VprocLocationReadersChangedFn cb, void *context);
 /* Read from the shared session input queue (stdin) on iOS. */
 ssize_t vprocSessionReadInputShim(void *buf, size_t count);
 /* Read from the shared session input queue with nonblocking support. */
@@ -141,7 +153,24 @@ int vprocSetPgid(int pid, int pgid);
 int vprocSetSid(int pid, int sid);
 int vprocGetPgid(int pid);
 int vprocGetSid(int pid);
+bool vprocGetShellJobControlState(int *shell_pid_out,
+                                  int *shell_pgid_out,
+                                  int *sid_out,
+                                  int *fg_pgid_out);
+/* Request Ctrl-C/Ctrl-Z style control-signal routing to the foreground job. */
+bool vprocRequestControlSignal(int sig);
+/* Request control-signal routing using an explicit shell pid hint. */
+bool vprocRequestControlSignalForShell(int shell_pid, int sig);
+/* Request control-signal routing using a session-id scoped PTY foreground group. */
+bool vprocRequestControlSignalForSession(uint64_t session_id, int sig);
+void vprocSessionSetControlBytePassthrough(uint64_t session_id, bool enabled);
+bool vprocSessionGetControlBytePassthrough(uint64_t session_id);
 void vprocSetStopUnsupported(int pid, bool stop_unsupported);
+void vprocSetCooperativeStopWait(int pid, bool enabled);
+bool vprocGetStopUnsupported(int pid);
+void vprocSetShellPromptReadActive(int pid, bool active);
+bool vprocShellPromptReadActive(int pid);
+void vprocSetPipelineStage(bool active);
 int vprocSetForegroundPgid(int sid, int fg_pgid);
 int vprocGetForegroundPgid(int sid);
 int vprocNextJobIdSeed(void);
@@ -162,6 +191,9 @@ int vprocDup2Shim(int fd, int target);
 int vprocCloseShim(int fd);
 int vprocFsyncShim(int fd);
 int vprocPipeShim(int pipefd[2]);
+int vprocSocketShim(int domain, int type, int protocol);
+int vprocAcceptShim(int fd, struct sockaddr *addr, socklen_t *addrlen);
+int vprocSocketpairShim(int domain, int type, int protocol, int sv[2]);
 int vprocFstatShim(int fd, struct stat *st);
 int vprocStatShim(const char *path, struct stat *st);
 int vprocLstatShim(const char *path, struct stat *st);
@@ -201,6 +233,9 @@ void vprocSetShellSelfPid(int pid);
 int vprocGetShellSelfPid(void);
 void vprocSetShellSelfTid(pthread_t tid);
 bool vprocIsShellSelfThread(void);
+/* Resolve account names from container passwd/group databases on iOS. */
+int vprocLookupPasswdName(uid_t uid, char *buffer, size_t buffer_len);
+int vprocLookupGroupName(gid_t gid, char *buffer, size_t buffer_len);
 /* Optional: identify a per-session "kernel" vproc that acts as adoptive parent. */
 void vprocSetKernelPid(int pid);
 int vprocGetKernelPid(void);
@@ -216,6 +251,7 @@ typedef struct VProcSessionInput {
     pthread_mutex_t mu;
     pthread_cond_t cv;
     unsigned char *buf;
+    size_t off;
     size_t len;
     size_t cap;
     int reader_fd;
@@ -241,6 +277,7 @@ typedef struct VProcSessionStdio {
     struct pscal_fd *pty_slave;
     pthread_t pty_out_thread;
     bool pty_active;
+    bool control_bytes_passthrough;
     uint64_t session_id;
 } VProcSessionStdio;
 
@@ -289,6 +326,7 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
                                   VProcSessionOutputHandler handler,
                                   void *context);
 void vprocSessionClearOutputHandler(uint64_t session_id);
+void vprocSessionSetOutputPaused(uint64_t session_id, bool paused);
 /* Write input data directly to a session PTY master. */
 ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len);
 ssize_t vprocSessionWriteToMasterMode(uint64_t session_id, const void *buf, size_t len, bool blocking);
@@ -322,14 +360,23 @@ typedef struct {
     int pid;
 } VProcCommandScope;
 
+typedef int (*VProcExecEntryFn)(int argc, char **argv);
+
 /* Utility for iOS-hosted tools (smallclue applets, in-process exec, etc):
  * optionally create and activate a child vproc to represent the invoked command,
- * then tear it down while marking it exited. */
+ * then tear it down while preserving stop semantics for stop-like statuses. */
 bool vprocCommandScopeBegin(VProcCommandScope *scope,
                             const char *label,
                             bool force_new_vproc,
                             bool inherit_parent_pgid);
 void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code);
+/* Simulated fork/exec helper for single-process iOS runtime. */
+pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid);
+pid_t vprocSimulatedForkWithEnv(const char *label,
+                                bool inherit_parent_pgid,
+                                sigjmp_buf *parent_env);
+pid_t vprocSimulatedForkParentResume(void);
+int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]);
 
 /* Signal API shims: allow vproc_shim.h to virtualize signal dispositions when
  * a vproc is active on the current thread. */
@@ -425,13 +472,6 @@ static inline int vprocHostFsync(int fd) { return fsync(fd); }
 static inline int vprocHostClose(int fd) { return close(fd); }
 static inline ssize_t vprocHostRead(int fd, void *buf, size_t count) { return read(fd, buf, count); }
 static inline ssize_t vprocHostWrite(int fd, const void *buf, size_t count) { return write(fd, buf, count); }
-static inline void vprocLocationDeviceSetEnabled(bool enabled) { (void)enabled; }
-static inline ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
-    (void)data;
-    (void)len;
-    errno = ENODEV;
-    return -1;
-}
 static inline int vprocIoctlShim(int fd, unsigned long request, ...) {
     va_list ap;
     va_start(ap, request);
@@ -457,6 +497,16 @@ static inline int vprocSetPgid(int pid, int pgid) { (void)pid; (void)pgid; retur
 static inline int vprocSetSid(int pid, int sid) { (void)pid; (void)sid; return 0; }
 static inline int vprocGetPgid(int pid) { (void)pid; return -1; }
 static inline int vprocGetSid(int pid) { (void)pid; return -1; }
+static inline bool vprocGetShellJobControlState(int *shell_pid_out,
+                                                 int *shell_pgid_out,
+                                                 int *sid_out,
+                                                 int *fg_pgid_out) {
+    if (shell_pid_out) *shell_pid_out = -1;
+    if (shell_pgid_out) *shell_pgid_out = -1;
+    if (sid_out) *sid_out = -1;
+    if (fg_pgid_out) *fg_pgid_out = -1;
+    return false;
+}
 static inline int vprocSetForegroundPgid(int sid, int fg) { (void)sid; (void)fg; return 0; }
 static inline int vprocGetForegroundPgid(int sid) { (void)sid; return -1; }
 static inline void vprocMarkGroupExit(int pid, int status) { (void)pid; (void)status; }
@@ -496,6 +546,18 @@ static inline ssize_t vprocReadlinkShim(const char *path, char *buf, size_t size
 static inline char *vprocRealpathShim(const char *path, char *resolved_path) { return realpath(path, resolved_path); }
 static inline off_t vprocLseekShim(int fd, off_t offset, int whence) { return lseek(fd, offset, whence); }
 static inline int vprocIsattyShim(int fd) { return isatty(fd); }
+static inline void vprocLocationDeviceSetEnabled(bool enabled) { (void)enabled; }
+static inline ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
+    (void)data;
+    (void)len;
+    errno = ENODEV;
+    return -1;
+}
+typedef void (*VprocLocationReadersChangedFn)(int readers, void *context);
+static inline void vprocLocationDeviceRegisterReaderObserver(VprocLocationReadersChangedFn cb, void *context) {
+    (void)cb;
+    (void)context;
+}
 static inline int vprocOpenShim(const char *path, int flags, ...) {
     int mode = 0;
     if (flags & O_CREAT) {
@@ -610,11 +672,34 @@ static inline void vprocSetCommandLabel(int pid, const char *label) { (void)pid;
 static inline bool vprocGetCommandLabel(int pid, char *buf, size_t buf_len) { (void)pid; (void)buf; (void)buf_len; return false; }
 static inline void vprocDiscard(int pid) { (void)pid; }
 static inline bool vprocSigchldPending(int pid) { (void)pid; return false; }
+static inline void vprocSetShellPromptReadActive(int pid, bool active) { (void)pid; (void)active; }
+static inline bool vprocShellPromptReadActive(int pid) { (void)pid; return false; }
+static inline void vprocSetCooperativeStopWait(int pid, bool enabled) { (void)pid; (void)enabled; }
+static inline bool vprocRequestControlSignal(int sig) { (void)sig; return false; }
+static inline bool vprocRequestControlSignalForShell(int shell_pid, int sig) {
+    (void)shell_pid;
+    (void)sig;
+    return false;
+}
+static inline bool vprocRequestControlSignalForSession(uint64_t session_id, int sig) {
+    (void)session_id;
+    (void)sig;
+    return false;
+}
+static inline void vprocSessionSetControlBytePassthrough(uint64_t session_id, bool enabled) {
+    (void)session_id;
+    (void)enabled;
+}
+static inline bool vprocSessionGetControlBytePassthrough(uint64_t session_id) {
+    (void)session_id;
+    return false;
+}
 typedef struct {
     VProc *prev;
     VProc *vp;
     int pid;
 } VProcCommandScope;
+typedef int (*VProcExecEntryFn)(int argc, char **argv);
 static inline bool vprocCommandScopeBegin(VProcCommandScope *scope,
                                          const char *label,
                                          bool force_new_vproc,
@@ -628,6 +713,31 @@ static inline bool vprocCommandScopeBegin(VProcCommandScope *scope,
 static inline void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code) {
     (void)scope;
     (void)exit_code;
+}
+static inline pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid) {
+    (void)label;
+    (void)inherit_parent_pgid;
+    errno = ENOSYS;
+    return (pid_t)-1;
+}
+static inline pid_t vprocSimulatedForkWithEnv(const char *label,
+                                              bool inherit_parent_pgid,
+                                              sigjmp_buf *parent_env) {
+    (void)label;
+    (void)inherit_parent_pgid;
+    (void)parent_env;
+    errno = ENOSYS;
+    return (pid_t)-1;
+}
+static inline pid_t vprocSimulatedForkParentResume(void) {
+    errno = ENOSYS;
+    return (pid_t)-1;
+}
+static inline int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
+    (void)entry;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
 }
 static inline int vprocSetSigchldBlocked(int pid, bool block) { (void)pid; (void)block; return 0; }
 static inline void vprocClearSigchldPending(int pid) { (void)pid; }

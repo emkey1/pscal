@@ -1,0 +1,82 @@
+#!/bin/exsh
+# Tiny compiler wrapper for iOS.
+# Default behavior: compile only.
+# Use --run to compile and immediately execute with pscalvm.
+# Resolve workspace root first.
+if [ -n "$PSCALI_WORKSPACE_ROOT" ]; then
+  ROOT="$PSCALI_WORKSPACE_ROOT"
+else
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  export PSCALI_WORKSPACE_ROOT="$ROOT"
+fi
+
+BASE="$ROOT/bin"
+TOOL_RUNNER="${PSCALI_TOOL_RUNNER_PATH:-$ROOT/pscal_tool_runner}"
+# Put workspace bin first on PATH so shebangs find the staged tools.
+PATH="$BASE:$PATH"
+
+# Prefer tool runner (when present) so we use the app-bundled builtin stack; otherwise fall back to clike.
+if [ -x "$TOOL_RUNNER" ]; then
+  run_clike() { "$TOOL_RUNNER" clike "$@"; }
+elif [ -x "$BASE/clike" ]; then
+  run_clike() { "$BASE/clike" "$@"; }
+else
+  run_clike() { clike "$@"; }
+fi
+
+if [ -x "$BASE/pscalvm" ]; then
+  run_vm() { "$BASE/pscalvm" "$@"; }
+else
+  run_vm() { pscalvm "$@"; }
+fi
+
+usage() {
+  echo "Usage: tiny [--run] <source.tiny> [out.pbc]" 1>&2
+}
+
+RUN_AFTER_COMPILE=0
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    --run) RUN_AFTER_COMPILE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+  esac
+fi
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  usage
+  exit 1
+fi
+
+SRC="$1"
+# Normalize source to an absolute path so tiny.clike/pscalvm agree.
+if ABS_SRC=$(realpath "$SRC" 2>/dev/null); then
+  SRC="$ABS_SRC"
+fi
+
+if [ "$#" -ge 2 ]; then
+  OUT="$2"
+else
+  # Default output: current working directory, not the source directory.
+  base_name="$(basename "$SRC")"
+  case "$base_name" in
+    *.tiny) OUT_BASENAME="${base_name%.tiny}.pbc" ;;
+    *) OUT_BASENAME="${base_name}.pbc" ;;
+  esac
+  OUT="$PWD/$OUT_BASENAME"
+fi
+
+# Compile only; prefer bytecode frontend for speed when available.
+if [ -f "$BASE/tiny.pbc" ]; then
+  run_vm "$BASE/tiny.pbc" "$SRC" "$OUT" || exit $?
+else
+  run_clike "$BASE/tiny.clike" "$SRC" "$OUT" || exit $?
+fi
+
+if [ ! -f "$OUT" ]; then
+  echo "tiny: expected bytecode at $OUT but it was not created" 1>&2
+  exit 1
+fi
+
+if [ "$RUN_AFTER_COMPILE" -eq 1 ]; then
+  run_vm "$OUT"
+fi

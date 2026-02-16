@@ -181,6 +181,26 @@ final class TerminalBuffer {
     private var currentParameter = ""
     private var csiPrivateMode = false
     private let syncQueue = DispatchQueue(label: "com.pscal.terminal.buffer", qos: .userInitiated)
+    private var usingAlternateScreen: Bool = false
+    private struct ScreenState {
+        var grid: [[TerminalCell]]
+        var scrollback: [[TerminalCell]]
+        var cursorRow: Int
+        var cursorCol: Int
+        var savedCursor: (row: Int, col: Int)?
+        var tabStops: Set<Int>
+        var currentAttributes: TerminalAttributes
+        var originModeEnabled: Bool
+        var wrapPending: Bool
+        var insertMode: Bool
+        var autoWrapMode: Bool
+        var cursorHidden: Bool
+        var scrollRegionTop: Int
+        var scrollRegionBottom: Int
+        var columns: Int
+        var rows: Int
+    }
+    private var savedPrimaryScreen: ScreenState?
     
     private static let fontCache = TerminalFontCache()
     private static let fontCacheNotificationToken: NSObjectProtocol = {
@@ -299,6 +319,8 @@ final class TerminalBuffer {
             }
         }
     }
+
+    // No-op placeholder retained for future filtering if needed.
     
     private func drainInputBufferLocked() {
         while true {
@@ -785,6 +807,12 @@ final class TerminalBuffer {
             case 1006:
                 mouseEncoding = on ? .sgr : .normal
                 notifyMouseChange()
+            case 1049:
+                if on {
+                    enterAlternateScreen()
+                } else {
+                    exitAlternateScreen()
+                }
             default:
                 break
             }
@@ -806,6 +834,94 @@ final class TerminalBuffer {
             DispatchQueue.main.async { [weak self] in
                 self?.onMouseModeChange?(mode, enc)
             }
+        }
+
+        private func captureScreenState() -> ScreenState {
+            return ScreenState(
+                grid: grid,
+                scrollback: scrollback,
+                cursorRow: cursorRow,
+                cursorCol: cursorCol,
+                savedCursor: savedCursor,
+                tabStops: tabStops,
+                currentAttributes: currentAttributes,
+                originModeEnabled: originModeEnabled,
+                wrapPending: wrapPending,
+                insertMode: insertMode,
+                autoWrapMode: autoWrapMode,
+                cursorHidden: cursorHidden,
+                scrollRegionTop: scrollRegionTop,
+                scrollRegionBottom: scrollRegionBottom,
+                columns: columns,
+                rows: rows
+            )
+        }
+
+        private func applyScreenState(_ state: ScreenState, targetColumns: Int, targetRows: Int) {
+            grid = state.grid
+            scrollback = state.scrollback
+            cursorRow = state.cursorRow
+            cursorCol = state.cursorCol
+            savedCursor = state.savedCursor
+            tabStops = state.tabStops
+            currentAttributes = state.currentAttributes
+            originModeEnabled = state.originModeEnabled
+            wrapPending = state.wrapPending
+            insertMode = state.insertMode
+            autoWrapMode = state.autoWrapMode
+            cursorHidden = state.cursorHidden
+            scrollRegionTop = state.scrollRegionTop
+            scrollRegionBottom = state.scrollRegionBottom
+            columns = state.columns
+            rows = state.rows
+            clampScrollRegionBounds()
+            if columns != targetColumns {
+                adjustColumnCount(to: targetColumns)
+            }
+            if rows != targetRows {
+                adjustRowCount(to: targetRows)
+            }
+            clampScrollRegionBounds()
+        }
+
+        private func enterAlternateScreen() {
+            if usingAlternateScreen {
+                return
+            }
+            savedPrimaryScreen = captureScreenState()
+            usingAlternateScreen = true
+            scrollback.removeAll()
+            grid = Array(repeating: makeBlankRow(), count: rows)
+            cursorRow = 0
+            cursorCol = 0
+            savedCursor = nil
+            resetTabStops()
+            wrapPending = false
+            lastPrintedChar = nil
+            scrollRegionTop = 0
+            scrollRegionBottom = rows - 1
+        }
+
+        private func exitAlternateScreen() {
+            guard usingAlternateScreen else { return }
+            usingAlternateScreen = false
+            if let state = savedPrimaryScreen {
+                let targetColumns = columns
+                let targetRows = rows
+                applyScreenState(state, targetColumns: targetColumns, targetRows: targetRows)
+            } else {
+                // No saved state; just clear.
+                grid = Array(repeating: makeBlankRow(), count: rows)
+                scrollback.removeAll()
+                cursorRow = 0
+                cursorCol = 0
+                savedCursor = nil
+                resetTabStops()
+                wrapPending = false
+                scrollRegionTop = 0
+                scrollRegionBottom = rows - 1
+            }
+            savedPrimaryScreen = nil
         }
 
         private func handleWindowCommand() {
@@ -838,6 +954,8 @@ final class TerminalBuffer {
                 let col = cursorCol + 1
                 sendTerminalResponse("\u{001B}[\(row);\(col)R")
             default:
+                // Suppress responses for unsupported DSRs to avoid echoing noise into
+                // application output when raw mode isn't fully honored by the bridge.
                 break
             }
         }
@@ -900,13 +1018,43 @@ final class TerminalBuffer {
             }
         }
 
+        private func normalizeGridForEraseOperations() {
+            let safeRows = max(rows, 1)
+            let safeColumns = max(columns, 1)
+
+            if grid.count < safeRows {
+                let missing = safeRows - grid.count
+                for _ in 0..<missing {
+                    grid.append(makeBlankRow(width: safeColumns))
+                }
+            } else if grid.count > safeRows {
+                grid.removeLast(grid.count - safeRows)
+            }
+
+            for index in grid.indices {
+                if grid[index].count < safeColumns {
+                    grid[index].append(contentsOf: Array(repeating: blankCell(), count: safeColumns - grid[index].count))
+                } else if grid[index].count > safeColumns {
+                    grid[index].removeLast(grid[index].count - safeColumns)
+                }
+            }
+
+            if grid.isEmpty {
+                grid = Array(repeating: makeBlankRow(width: safeColumns), count: safeRows)
+            }
+
+            cursorRow = clamp(cursorRow, lower: 0, upper: max(grid.count - 1, 0))
+            cursorCol = clamp(cursorCol, lower: 0, upper: max(safeColumns - 1, 0))
+        }
+
         private func clearScreen(mode: Int) {
+            normalizeGridForEraseOperations()
             wrapPending = false
             switch mode {
             case 0:
                 clearLine(mode: 0)
-                if cursorRow + 1 < rows {
-                    for row in (cursorRow + 1)..<rows {
+                if cursorRow + 1 < grid.count {
+                    for row in (cursorRow + 1)..<grid.count {
                         grid[row] = makeBlankRow()
                     }
                 }
@@ -918,7 +1066,7 @@ final class TerminalBuffer {
                     }
                 }
             case 2, 3:
-                grid = Array(repeating: makeBlankRow(), count: rows)
+                grid = Array(repeating: makeBlankRow(), count: max(rows, 1))
                 scrollback.removeAll()
                 cursorRow = 0
                 cursorCol = 0
@@ -928,21 +1076,25 @@ final class TerminalBuffer {
         }
 
         private func clearLine(mode: Int) {
+            normalizeGridForEraseOperations()
+            guard !grid.isEmpty else { return }
+            cursorRow = clamp(cursorRow, lower: 0, upper: max(grid.count - 1, 0))
+            let lineWidth = grid[cursorRow].count
+            guard lineWidth > 0 else { return }
+            cursorCol = clamp(cursorCol, lower: 0, upper: max(lineWidth - 1, 0))
             switch mode {
             case 0:
-                if cursorCol < columns {
-                    for col in cursorCol..<columns {
+                if cursorCol < lineWidth {
+                    for col in cursorCol..<lineWidth {
                         grid[cursorRow][col] = TerminalCell.blank(attributes: currentAttributes)
                     }
                 }
             case 1:
-                if cursorCol >= 0 {
-                    for col in 0...cursorCol {
-                        grid[cursorRow][col] = TerminalCell.blank(attributes: currentAttributes)
-                    }
+                for col in 0...cursorCol {
+                    grid[cursorRow][col] = TerminalCell.blank(attributes: currentAttributes)
                 }
             case 2:
-                grid[cursorRow] = Array(repeating: TerminalCell.blank(attributes: currentAttributes), count: columns)
+                grid[cursorRow] = Array(repeating: TerminalCell.blank(attributes: currentAttributes), count: lineWidth)
             default:
                 break
             }

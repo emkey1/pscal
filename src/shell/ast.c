@@ -1,6 +1,90 @@
 #include "shell/ast.h"
 #include <stdlib.h>
 #include <string.h>
+#if defined(PSCAL_TARGET_IOS)
+#include <pthread.h>
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+typedef struct ShellWordRegistryNode {
+    ShellWord *word;
+    struct ShellWordRegistryNode *next;
+} ShellWordRegistryNode;
+
+static pthread_mutex_t gShellWordRegistryLock = PTHREAD_MUTEX_INITIALIZER;
+static ShellWordRegistryNode *gShellWordRegistryHead = NULL;
+static bool gShellWordRegistryEnabled = true;
+
+static void shellWordRegistryDisableLocked(void) {
+    ShellWordRegistryNode *node = gShellWordRegistryHead;
+    while (node) {
+        ShellWordRegistryNode *next = node->next;
+        free(node);
+        node = next;
+    }
+    gShellWordRegistryHead = NULL;
+    gShellWordRegistryEnabled = false;
+}
+
+static void shellWordRegistryRegister(ShellWord *word) {
+    if (!word) {
+        return;
+    }
+    pthread_mutex_lock(&gShellWordRegistryLock);
+    if (!gShellWordRegistryEnabled) {
+        pthread_mutex_unlock(&gShellWordRegistryLock);
+        return;
+    }
+    ShellWordRegistryNode *node = (ShellWordRegistryNode *)malloc(sizeof(ShellWordRegistryNode));
+    if (!node) {
+        shellWordRegistryDisableLocked();
+        pthread_mutex_unlock(&gShellWordRegistryLock);
+        return;
+    }
+    node->word = word;
+    node->next = gShellWordRegistryHead;
+    gShellWordRegistryHead = node;
+    pthread_mutex_unlock(&gShellWordRegistryLock);
+}
+
+static bool shellWordRegistryUnregister(ShellWord *word) {
+    if (!word) {
+        return false;
+    }
+    pthread_mutex_lock(&gShellWordRegistryLock);
+    if (!gShellWordRegistryEnabled) {
+        pthread_mutex_unlock(&gShellWordRegistryLock);
+        return true;
+    }
+    ShellWordRegistryNode *prev = NULL;
+    ShellWordRegistryNode *node = gShellWordRegistryHead;
+    while (node) {
+        if (node->word == word) {
+            if (prev) {
+                prev->next = node->next;
+            } else {
+                gShellWordRegistryHead = node->next;
+            }
+            free(node);
+            pthread_mutex_unlock(&gShellWordRegistryLock);
+            return true;
+        }
+        prev = node;
+        node = node->next;
+    }
+    pthread_mutex_unlock(&gShellWordRegistryLock);
+    return false;
+}
+#else
+static void shellWordRegistryRegister(ShellWord *word) {
+    (void)word;
+}
+
+static bool shellWordRegistryUnregister(ShellWord *word) {
+    (void)word;
+    return true;
+}
+#endif
 
 static void shellStringArrayInit(ShellStringArray *array) {
     if (!array) return;
@@ -222,6 +306,7 @@ ShellWord *shellCreateWord(const char *text, bool single_quoted, bool double_quo
     word->has_command_substitution = false;
     shellStringArrayInit(&word->expansions);
     shellCommandSubstitutionArrayInit(&word->command_substitutions);
+    shellWordRegistryRegister(word);
     return word;
 }
 
@@ -243,6 +328,12 @@ void shellWordAddCommandSubstitution(ShellWord *word, ShellCommandSubstitutionSt
 
 void shellFreeWord(ShellWord *word) {
     if (!word) return;
+    if (!shellWordRegistryUnregister(word)) {
+#if defined(PSCAL_TARGET_IOS)
+        fprintf(stderr, "shell ast: skipped invalid ShellWord free (%p)\n", (void *)word);
+#endif
+        return;
+    }
     free(word->text);
     shellStringArrayFree(&word->expansions);
     shellCommandSubstitutionArrayFree(&word->command_substitutions);

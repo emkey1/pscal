@@ -50,6 +50,10 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("mstreamsavetofile", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreamfree", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("mstreambuffer", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mstreamfromstring", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("mstreamappendbyte", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("fileexists", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("filesize", AST_FUNCTION_DECL, NULL);
 
     /* DOS/OS helpers */
     registerBuiltinFunction("exec", AST_FUNCTION_DECL, NULL);
@@ -61,6 +65,7 @@ void clikeRegisterBuiltins(void) {
     registerBuiltinFunction("getenv", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("getdate", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("gettime", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunction("socketpeeraddr", AST_FUNCTION_DECL, NULL);
 
     /* Math helpers */
     registerBuiltinFunction("arctan", AST_FUNCTION_DECL, NULL);

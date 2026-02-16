@@ -8,7 +8,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Routine rhs1 (at 0005) ---
 0005    1 CONSTANT            1 '2'
 0007    | CONSTANT            2 'R1\n'
-0009    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0009    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0015    | CONSTANT            4 '0'
 0017    | POP
 0018    | CONSTANT            5 '1'
@@ -18,7 +18,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Routine rhs0 (at 0022) ---
 0022    2 CONSTANT            1 '2'
 0024    | CONSTANT            6 'R0\n'
-0026    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0026    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0032    | CONSTANT            4 '0'
 0034    | POP
 0035    | CONSTANT            4 '0'
@@ -35,7 +35,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0054    6 JUMP_IF_FALSE      13 (to 0070)
 0057    5 CONSTANT            1 '2'
 0059    | CONSTANT            9 'A\n'
-0061    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0061    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0067    | CONSTANT            4 '0'
 0069    6 POP
 0070    | CONSTANT            5 '1'
@@ -47,7 +47,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0085    7 JUMP_IF_FALSE      13 (to 0101)
 0088    6 CONSTANT            1 '2'
 0090    | CONSTANT           11 'B\n'
-0092    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0092    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0098    | CONSTANT            4 '0'
 0100    7 POP
 0101    | CONSTANT            5 '1'
@@ -59,7 +59,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0116    8 JUMP_IF_FALSE      13 (to 0132)
 0119    7 CONSTANT            1 '2'
 0121    | CONSTANT           13 'C\n'
-0123    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0123    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0129    | CONSTANT            4 '0'
 0131    8 POP
 0132    | CONSTANT            4 '0'
@@ -71,7 +71,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0147    9 JUMP_IF_FALSE      13 (to 0163)
 0150    8 CONSTANT            1 '2'
 0152    | CONSTANT           16 'D\n'
-0154    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0154    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0160    | CONSTANT            4 '0'
 0162    9 POP
 0163    | CONSTANT            1 '2'
@@ -84,7 +84,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0177    9 CONSTANT           18 ' '
 0179    0 CONSTANT            5 '1'
 0181    9 CONSTANT           19 '\n'
-0183    | CALL_BUILTIN_PROC   176 'write' (10 args)
+0183    | CALL_BUILTIN_PROC   177 'write' (10 args)
 0189    | CONSTANT            4 '0'
 0191   10 POP
 0192    | CONSTANT            4 '0'

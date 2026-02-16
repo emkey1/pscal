@@ -28,6 +28,7 @@ struct pscal_fd {
     struct list tty_other_fds;
     struct tty *tty;
     lock_t lock;
+    void *userdata;
 };
 
 struct pscal_fd *pscal_fd_create(const struct pscal_fd_ops *ops);

@@ -50,6 +50,15 @@ static system_freeaddrinfo_fn resolve_system_freeaddrinfo(void) {
 }
 
 static const char *pscalHostsPath(void) {
+    const char *etc_root = getenv("PSCALI_ETC_ROOT");
+    if (etc_root && *etc_root) {
+        static char etc_path[PATH_MAX];
+        int w = snprintf(etc_path, sizeof(etc_path), "%s/hosts", etc_root);
+        if (w > 0 && w < (int)sizeof(etc_path)) {
+            return etc_path;
+        }
+    }
+
     const char *root = getenv("PSCALI_CONTAINER_ROOT");
     if (!root || !*root) {
         root = getenv("HOME");

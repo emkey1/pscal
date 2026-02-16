@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+echo "pipeline-empty:start"
+set +e
+true | grep doesnotexist
+status=$?
+set -e
+echo "pipeline-empty:status:$status"

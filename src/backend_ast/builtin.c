@@ -272,7 +272,12 @@ static const Value* resolveStringPointerBuiltin(const Value* value) {
     const Value* current = value;
     int depth = 0;
     while (current && current->type == TYPE_POINTER &&
-           current->base_type_node != STRING_CHAR_PTR_SENTINEL) {
+           current->base_type_node != STRING_CHAR_PTR_SENTINEL &&
+           current->base_type_node != SERIALIZED_CHAR_PTR_SENTINEL &&
+           current->base_type_node != STRING_LENGTH_SENTINEL &&
+           current->base_type_node != BYTE_ARRAY_PTR_SENTINEL &&
+           current->base_type_node != SHELL_FUNCTION_PTR_SENTINEL &&
+           current->base_type_node != OPAQUE_POINTER_SENTINEL) {
         if (!current->ptr_val) {
             return NULL;
         }
@@ -288,11 +293,14 @@ static int builtinValueIsStringLike(const Value* value) {
     if (!value) return 0;
     if (value->type == TYPE_STRING) return 1;
     if (value->type == TYPE_POINTER) {
-        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) return 1;
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+            value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) return 1;
         const Value* resolved = resolveStringPointerBuiltin(value);
         if (!resolved) return 0;
         if (resolved->type == TYPE_STRING) return 1;
-        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (resolved->type == TYPE_POINTER &&
+            (resolved->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             resolved->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL)) {
             return 1;
         }
     }
@@ -303,7 +311,8 @@ static const char* builtinValueToCString(const Value* value) {
     if (!value) return NULL;
     if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
     if (value->type == TYPE_POINTER) {
-        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+            value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
             return (const char*)value->ptr_val;
         }
         const Value* resolved = resolveStringPointerBuiltin(value);
@@ -311,7 +320,9 @@ static const char* builtinValueToCString(const Value* value) {
         if (resolved->type == TYPE_STRING) {
             return resolved->s_val ? resolved->s_val : "";
         }
-        if (resolved->type == TYPE_POINTER && resolved->base_type_node == STRING_CHAR_PTR_SENTINEL) {
+        if (resolved->type == TYPE_POINTER &&
+            (resolved->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             resolved->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL)) {
             return (const char*)resolved->ptr_val;
         }
     }
@@ -913,6 +924,151 @@ static _Thread_local unsigned int rand_seed = 1;
 // Terminal cursor helper
 static int getCursorPosition(int *row, int *col);
 
+// Small buffer to requeue bytes we peek during ReadKey (e.g., when skipping
+// DSR responses). Keeps console input lossless when we consume more than one
+// byte while deciding what to return.
+static _Thread_local unsigned char gReadKeyBuf[64];
+static _Thread_local int gReadKeyBufStart = 0;
+static _Thread_local int gReadKeyBufCount = 0;
+static _Thread_local bool gReadKeyPendingCaretControl = false;
+
+static bool readKeyBufHasData(void) {
+    return gReadKeyBufCount > 0;
+}
+
+static int readKeyBufPop(void) {
+    if (!readKeyBufHasData()) {
+        return -1;
+    }
+    int value = gReadKeyBuf[gReadKeyBufStart];
+    gReadKeyBufStart = (gReadKeyBufStart + 1) % (int)sizeof(gReadKeyBuf);
+    gReadKeyBufCount--;
+    return value;
+}
+
+static void readKeyBufPush(unsigned char byte) {
+    if (gReadKeyBufCount >= (int)sizeof(gReadKeyBuf)) {
+        return;
+    }
+    int tail = (gReadKeyBufStart + gReadKeyBufCount) % (int)sizeof(gReadKeyBuf);
+    gReadKeyBuf[tail] = byte;
+    gReadKeyBufCount++;
+}
+
+// Fetch a console byte, skipping any stray DSR responses (ESC [ row ; col R)
+// that may have been sent by the terminal for cursor queries. Ensures those
+// sequences do not satisfy ReadKey.
+static int readKeyFetchConsoleByte(void) {
+    for (;;) {
+        if (readKeyBufHasData()) {
+            return readKeyBufPop();
+        }
+        unsigned char ch = 0;
+#if defined(PSCAL_TARGET_IOS)
+        ssize_t n = vprocReadShim(STDIN_FILENO, &ch, 1);
+#else
+        ssize_t n = read(STDIN_FILENO, &ch, 1);
+#endif
+        if (n != 1) {
+            return 0;
+        }
+        if (ch != 0x1B) {
+            return (int)ch;
+        }
+
+        /* Capture the full sequence after ESC to decide if it's a DSR reply. */
+        unsigned char seq[64];
+        size_t seq_len = 0;
+        seq[seq_len++] = 0x1B;
+
+        int orig_flags = fcntl(STDIN_FILENO, F_GETFL);
+        bool toggled_nonblock = false;
+        if (orig_flags != -1 && (orig_flags & O_NONBLOCK) == 0) {
+            if (fcntl(STDIN_FILENO, F_SETFL, orig_flags | O_NONBLOCK) == 0) {
+                toggled_nonblock = true;
+            }
+        }
+
+        const int max_polls = 10;
+        int polls = 0;
+        while (seq_len < sizeof(seq)) {
+            unsigned char b = 0;
+#if defined(PSCAL_TARGET_IOS)
+            ssize_t m = vprocReadShim(STDIN_FILENO, &b, 1);
+#else
+            ssize_t m = read(STDIN_FILENO, &b, 1);
+#endif
+            if (m == 1) {
+                seq[seq_len++] = b;
+                if (b == 'R') {
+                    break; /* likely end of DSR */
+                }
+                continue;
+            }
+            if (m < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) && polls < max_polls) {
+                struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+                (void)poll(&pfd, 1, 20);
+                polls++;
+                continue;
+            }
+            break;
+        }
+
+        if (toggled_nonblock && orig_flags != -1) {
+            fcntl(STDIN_FILENO, F_SETFL, orig_flags);
+        }
+
+        /* Check if the captured sequence is ESC [ digits ; digits R */
+        bool is_dsr = false;
+        size_t r_pos = 0;
+        for (size_t i = 0; i < seq_len; ++i) {
+            if (seq[i] == 'R') {
+                r_pos = i;
+                break;
+            }
+        }
+        if (seq_len >= 4 && seq[0] == 0x1B && seq[1] == '[' && r_pos > 2) {
+            bool ok = true;
+            bool saw_digit = false;
+            bool saw_sep = false;
+            for (size_t i = 2; i < r_pos; ++i) {
+                unsigned char b = seq[i];
+                if (b >= '0' && b <= '9') {
+                    saw_digit = true;
+                    continue;
+                }
+                if (b == ';') {
+                    if (!saw_digit) { ok = false; break; }
+                    saw_sep = true;
+                    saw_digit = false;
+                    continue;
+                }
+                ok = false;
+                break;
+            }
+            if (ok && saw_digit && saw_sep) {
+                is_dsr = true;
+            }
+        }
+
+        if (is_dsr) {
+            /* Discard the DSR sequence and continue. Preserve any trailing bytes after R. */
+            if (seq_len > r_pos + 1) {
+                for (ssize_t i = (ssize_t)seq_len - 1; i > (ssize_t)r_pos; --i) {
+                    readKeyBufPush(seq[(size_t)i]);
+                }
+            }
+            continue;
+        }
+
+        /* Not a DSR; push the captured sequence back (in reverse) and return first byte. */
+        for (ssize_t i = (ssize_t)seq_len - 1; i >= 0; --i) {
+            readKeyBufPush(seq[(size_t)i]);
+        }
+        return readKeyBufPop();
+    }
+}
+
 // ---- CLike-style conversion helpers (Phase 1) ----
 static Value vmBuiltinToInt(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
@@ -1205,6 +1361,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"mstreamloadfromfile", vmBuiltinMstreamloadfromfile},
     {"mstreamsavetofile", vmBuiltinMstreamsavetofile},
     {"mstreambuffer", vmBuiltinMstreambuffer},
+    {"mstreamappendbyte", vmBuiltinMstreamAppendByte},
     {"newobj", vmBuiltinNewObj},
     {"new", vmBuiltinNew},
     {"normalcolors", vmBuiltinNormalcolors},
@@ -1317,6 +1474,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"gldepthmask", NULL},
     {"gldepthfunc", NULL},
     {"fflush", vmBuiltinFflush},
+    {"socketpeeraddr", vmBuiltinSocketPeerAddr},
     {"to be filled", NULL}
 };
 
@@ -2762,6 +2920,8 @@ static volatile sig_atomic_t g_vm_sigint_seen = 0;
 static int g_vm_sigint_pipe[2] = {-1, -1};
 static pthread_once_t g_vm_sigint_pipe_once = PTHREAD_ONCE_INIT;
 static atomic_bool g_vm_interrupt_broadcast = false;
+static atomic_bool g_vm_suspend_requested = false;
+static void vmDrainSigintFd(int fd, bool is_host);
 
 static void vmEnableRawMode(void); // Forward declaration
 static void vmSetupTermHandlers(void);
@@ -3130,31 +3290,83 @@ static void init_pipe_once(void) {
     }
 }
 
+static void vmDrainSigintFd(int fd, bool is_host) {
+    if (fd < 0) {
+        return;
+    }
+    // Force non-blocking to avoid wedging on drained host pipes.
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0 && !(flags & O_NONBLOCK)) {
+        (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    while (true) {
+        int pending = 0;
+        if (ioctl(fd, FIONREAD, &pending) != 0) {
+            pending = 0;
+        }
+        char drain[64];
+        size_t want = (pending > (int)sizeof(drain)) ? sizeof(drain)
+                                                     : (pending > 0 ? (size_t)pending : sizeof(drain));
+#if defined(PSCAL_TARGET_IOS)
+        ssize_t n = is_host ? vprocHostRead(fd, drain, want)
+                            : read(fd, drain, want);
+#else
+        (void)is_host;
+        ssize_t n = read(fd, drain, want);
+#endif
+        if (n > 0) {
+            continue;
+        }
+        if (n == 0) {
+            break; // pipe closed
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            break;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+}
+
 // Exposed for platform bridges to request an interrupt (e.g., hardware Ctrl-C on iOS)
 void pscalRuntimeRequestSigint(void) {
 #if defined(PSCAL_TARGET_IOS)
     bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
     bool from_vproc = (vprocCurrent() != NULL);
-    int shell_pid = vprocGetShellSelfPid();
-    int sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : -1;
-    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-    if (fg_pgid <= 0 && shell_pid > 0) {
-        fg_pgid = vprocGetPgid(shell_pid);
-    }
-    int shell_pgid = (shell_pid > 0) ? vprocGetPgid(shell_pid) : -1;
+    int shell_pid = -1;
+    int shell_pgid = -1;
+    int sid = -1;
+    int fg_pgid = -1;
+    (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
+    bool delivered_to_foreground = false;
     if (!from_vproc && shell_pid > 0 && fg_pgid > 0 && shell_pgid > 0 && fg_pgid != shell_pgid) {
+        /* Foreground belongs to a non-shell job (e.g. ssh). Route Ctrl-C as a
+         * virtual process-group signal instead of broadcasting a shell/VM-wide
+         * interrupt request. */
+        errno = 0;
         int rc = vprocKillShim(-fg_pgid, SIGINT);
-        if (dbg) {
-            fprintf(stderr,
-                    "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d kill_rc=%d errno=%d\n",
-                    shell_pid, shell_pgid, sid, fg_pgid, rc, errno);
+        int kill_errno = errno;
+        if (rc == 0) {
+            delivered_to_foreground = true;
         }
-    } else if (dbg && shell_pid > 0) {
+        if (dbg) {
+            fprintf(stderr, "[sigint] routed-to-fg shell=%d shell_pgid=%d sid=%d fg=%d rc=%d errno=%d\n",
+                    shell_pid, shell_pgid, sid, fg_pgid, rc, kill_errno);
+        }
+    }
+    if (dbg && shell_pid > 0) {
         fprintf(stderr,
-                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d\n",
-                shell_pid, shell_pgid, sid, fg_pgid);
+                "[sigint] shell=%d shell_pgid=%d sid=%d fg=%d delivered_fg=%d from_vproc=%d\n",
+                shell_pid, shell_pgid, sid, fg_pgid, delivered_to_foreground ? 1 : 0, from_vproc ? 1 : 0);
+    }
+    if (delivered_to_foreground) {
+        return;
     }
 #endif
+    vmEnsureSigintPipe();
     g_vm_sigint_seen = 1;
     atomic_store(&g_vm_interrupt_broadcast, true);
     if (g_vm_sigint_pipe[1] >= 0) {
@@ -3170,46 +3382,88 @@ void pscalRuntimeRequestSigint(void) {
 void pscalRuntimeRequestSigtstp(void) {
 #if defined(PSCAL_TARGET_IOS)
     bool dbg = (getenv("PSCALI_TOOL_DEBUG") != NULL) || (getenv("PSCALI_VPROC_DEBUG") != NULL);
-    int shell_pid = vprocGetShellSelfPid();
+    int shell_pid = -1;
+    int shell_pgid = -1;
+    int sid = -1;
+    int fg_pgid = -1;
+    (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
+    bool delivered = false;
     if (shell_pid <= 0) {
         if (dbg) {
             fprintf(stderr, "[sigtstp] no shell pid\n");
         }
-        return;
-    }
-    int sid = vprocGetSid(shell_pid);
-    int fg_pgid = (sid > 0) ? vprocGetForegroundPgid(sid) : -1;
-    if (fg_pgid <= 0) {
-        fg_pgid = vprocGetPgid(shell_pid);
-    }
-    if (fg_pgid <= 0) {
+    } else if (fg_pgid <= 0) {
         if (dbg) {
             fprintf(stderr, "[sigtstp] no fg pgid shell=%d sid=%d\n", shell_pid, sid);
         }
-        return;
-    }
-    int shell_pgid = vprocGetPgid(shell_pid);
-    if (shell_pgid > 0 && fg_pgid == shell_pgid) {
+    } else if (shell_pgid > 0 && fg_pgid != shell_pgid) {
         if (dbg) {
-            fprintf(stderr, "[sigtstp] fg pgid matches shell pgid=%d sid=%d\n", shell_pgid, sid);
+            fprintf(stderr, "[sigtstp] shell=%d shell_pgid=%d sid=%d fg=%d\n",
+                    shell_pid, shell_pgid, sid, fg_pgid);
         }
-        return;
+        errno = 0;
+        int rc = vprocKillShim(-fg_pgid, SIGTSTP);
+        int kill_errno = errno;
+        if (rc == 0) {
+            delivered = true;
+        }
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, kill_errno);
+        }
+    } else if (dbg) {
+        fprintf(stderr, "[sigtstp] local suspend shell_pgid=%d fg=%d sid=%d\n",
+                shell_pgid, fg_pgid, sid);
     }
-    if (dbg) {
-        fprintf(stderr, "[sigtstp] shell=%d shell_pgid=%d sid=%d fg=%d\n",
-                shell_pid, shell_pgid, sid, fg_pgid);
+
+    /* When the shell owns the foreground, still try virtual SIGTSTP delivery
+     * first so foreground vprocs can enter a stopped state instead of forcing
+     * a VM-wide suspend request. */
+    if (!delivered && shell_pgid > 0) {
+        errno = 0;
+        int rc = vprocKillShim(-shell_pgid, SIGTSTP);
+        int kill_errno = errno;
+        if (rc == 0) {
+            delivered = true;
+        }
+        if (dbg) {
+            fprintf(stderr, "[sigtstp] shell-pgid rc=%d errno=%d\n", rc, kill_errno);
+        }
     }
-    int rc = vprocKillShim(-fg_pgid, SIGTSTP);
-    if (dbg) {
-        fprintf(stderr, "[sigtstp] kill rc=%d errno=%d\n", rc, errno);
+
+    if (!delivered) {
+        atomic_store(&g_vm_suspend_requested, true);
     }
 #else
     raise(SIGTSTP);
 #endif
 }
 
+int pscalRuntimeCurrentForegroundPgid(void) {
+#if defined(PSCAL_TARGET_IOS)
+    int fg_pgid = -1;
+    if (vprocGetShellJobControlState(NULL, NULL, NULL, &fg_pgid) && fg_pgid > 0) {
+        return fg_pgid;
+    }
+#endif
+    return -1;
+}
+
 bool pscalRuntimeSigintPending(void) {
-    return g_vm_sigint_seen != 0;
+    if (g_vm_sigint_seen != 0) {
+        return true;
+    }
+    vmEnsureSigintPipe();
+    if (g_vm_sigint_pipe[0] >= 0) {
+        int pending = 0;
+        if (ioctl(g_vm_sigint_pipe[0], FIONREAD, &pending) == 0 && pending > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool pscalRuntimeSigtstpPending(void) {
+    return atomic_load(&g_vm_suspend_requested);
 }
 
 bool pscalRuntimeInterruptFlag(void) {
@@ -3221,22 +3475,28 @@ void pscalRuntimeClearInterruptFlag(void) {
 }
 
 bool pscalRuntimeConsumeSigint(void) {
-    if (!g_vm_sigint_seen && g_vm_sigint_pipe[0] < 0) {
-        return false;
-    }
+    vmEnsureSigintPipe();
     bool seen = g_vm_sigint_seen != 0;
     g_vm_sigint_seen = 0;
     if (g_vm_sigint_pipe[0] >= 0) {
-        char drain[8];
+        char token = 0;
+        ssize_t n = -1;
+        do {
 #if defined(PSCAL_TARGET_IOS)
-        while (vprocHostRead(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
-        }
+            n = vprocHostRead(g_vm_sigint_pipe[0], &token, 1);
 #else
-        while (read(g_vm_sigint_pipe[0], drain, sizeof(drain)) > 0) {
-        }
+            n = read(g_vm_sigint_pipe[0], &token, 1);
 #endif
+        } while (n < 0 && errno == EINTR);
+        if (n == 1) {
+            seen = true;
+        }
     }
     return seen;
+}
+
+bool pscalRuntimeConsumeSigtstp(void) {
+    return atomic_exchange(&g_vm_suspend_requested, false);
 }
 
 void vmInitTerminalState(void) {
@@ -3344,6 +3604,15 @@ static void vmPrepareCanonicalInput(void) {
             term.c_lflag |= (ICANON | ECHO);
             changed = true;
         }
+#if defined(PSCAL_TARGET_IOS)
+        /* Keep control keys byte-oriented for virtual signal handling.
+         * With ISIG enabled, the tty layer can consume VSUSP/VINTR before
+         * vmReadLineInterruptible sees ^Z/^C bytes. */
+        if (term.c_lflag & ISIG) {
+            term.c_lflag &= ~ISIG;
+            changed = true;
+        }
+#endif
         if ((term.c_iflag & ICRNL) == 0) {
             term.c_iflag |= ICRNL;
             changed = true;
@@ -3387,6 +3656,134 @@ static void vmPrepareCanonicalInput(void) {
     fflush(stdout);
 }
 
+static bool vmBufferIsPureDsr(const char *buf, size_t len);
+
+#if defined(PSCAL_TARGET_IOS)
+typedef void (*VmSuspendWaitHookFn)(void);
+static __thread VmSuspendWaitHookFn gVmSuspendBeforeWaitHook = NULL;
+static __thread VmSuspendWaitHookFn gVmSuspendAfterWaitHook = NULL;
+
+void vmSetSuspendWaitHooks(VmSuspendWaitHookFn before_hook, VmSuspendWaitHookFn after_hook) {
+    gVmSuspendBeforeWaitHook = before_hook;
+    gVmSuspendAfterWaitHook = after_hook;
+}
+
+static bool vmShouldUseCooperativeSuspend(void) {
+    if (vprocIsShellSelfThread()) {
+        return true;
+    }
+    int pid = vprocGetPidShim();
+    int shell_pid = vprocGetShellSelfPid();
+    if (pid <= 0) {
+        pid = shell_pid;
+    }
+    if (pid <= 0) {
+        return true;
+    }
+    if (shell_pid > 0 && pid == shell_pid) {
+        return true;
+    }
+    return vprocGetStopUnsupported(pid);
+}
+
+static int vmSuspendReleaseGlobalsMutex(void) {
+    int released = 0;
+    /*
+     * Frontend threads can be suspended while inside builtins that hold the
+     * recursive globals mutex. Release any ownership before parking so the
+     * shell thread can keep running while the frontend is stopped.
+     */
+    while (pthread_mutex_unlock(&globals_mutex) == 0) {
+        released++;
+    }
+    return released;
+}
+
+static void vmSuspendReacquireGlobalsMutex(int count) {
+    for (int i = 0; i < count; ++i) {
+        pthread_mutex_lock(&globals_mutex);
+    }
+}
+
+static void vmWaitIfStoppedWithCheckpoint(void) {
+    int released_globals_locks = vmSuspendReleaseGlobalsMutex();
+    if (gVmSuspendBeforeWaitHook) {
+        gVmSuspendBeforeWaitHook();
+    }
+    (void)vprocWaitIfStopped(vprocCurrent());
+    if (gVmSuspendAfterWaitHook) {
+        gVmSuspendAfterWaitHook();
+    }
+    if (released_globals_locks > 0) {
+        vmSuspendReacquireGlobalsMutex(released_globals_locks);
+    }
+}
+
+static bool vmRequestHardSuspendCurrentVproc(void) {
+    int pid = vprocGetPidShim();
+    int shell_pid = vprocGetShellSelfPid();
+    if (pid <= 0) {
+        pid = shell_pid;
+    }
+    int pgid = (pid > 0) ? vprocGetPgid(pid) : -1;
+
+    /*
+     * For non-shell foreground workers, group-directed delivery can be
+     * downgraded to a cooperative pending signal on the current thread.
+     * Prefer direct pid delivery first so Ctrl-Z results in a real stoppage
+     * that fg/bg can later resume.
+     */
+    if (pid > 0 && vprocKillShim(pid, SIGTSTP) == 0) {
+        return true;
+    }
+    if (pgid > 0 && vprocKillShim(-pgid, SIGTSTP) == 0) {
+        return true;
+    }
+    if (vprocRequestControlSignal(SIGTSTP)) {
+        return true;
+    }
+    return false;
+}
+
+static bool vmHandleCtrlZReadRequest(VM *vm, char *buffer) {
+    if (getenv("PSCALI_TOOL_DEBUG")) {
+        int pid_dbg = vprocGetPidShim();
+        int shell_pid_dbg = vprocGetShellSelfPid();
+        bool self_thread_dbg = vprocIsShellSelfThread();
+        bool stop_unsupported_dbg = (pid_dbg > 0) ? vprocGetStopUnsupported(pid_dbg) : false;
+        fprintf(stderr,
+                "[ctrlz] pid=%d shell=%d self_thread=%d stop_unsupported=%d coop=%d\n",
+                pid_dbg,
+                shell_pid_dbg,
+                (int)self_thread_dbg,
+                (int)stop_unsupported_dbg,
+                (int)vmShouldUseCooperativeSuspend());
+    }
+    if (!vmShouldUseCooperativeSuspend()) {
+        if (vmRequestHardSuspendCurrentVproc()) {
+            if (getenv("PSCALI_TOOL_DEBUG")) {
+                fprintf(stderr, "[ctrlz] hard-stop wait begin\n");
+            }
+            vmWaitIfStoppedWithCheckpoint();
+            if (getenv("PSCALI_TOOL_DEBUG")) {
+                fprintf(stderr, "[ctrlz] hard-stop wait end\n");
+            }
+            return true;
+        }
+    }
+    if (vm) {
+        vm->abort_requested = false;
+        vm->exit_requested = true;
+        vm->suspend_unwind_requested = true;
+    }
+    shellRuntimeSetLastStatus(128 + SIGTSTP);
+    if (buffer) {
+        buffer[0] = '\0';
+    }
+    return false;
+}
+#endif
+
 static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t buffer_sz) {
     if (!stream || !buffer || buffer_sz == 0) {
         return false;
@@ -3401,6 +3798,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
     }
 #else
     bool is_stdin_stream = (stream == stdin);
+    bool tool_dbg = false;
 #endif
     if (fd < 0) {
         return false;
@@ -3446,6 +3844,9 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #endif
     if (use_interruptible) {
 #if defined(PSCAL_TARGET_IOS)
+        vmEnsureSigintPipe();
+#endif
+#if defined(PSCAL_TARGET_IOS)
         int read_fd = fd;
         VProc *vp = vprocCurrent();
         bool read_is_host = (vp == NULL);
@@ -3475,9 +3876,15 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         }
 #endif
         bool saw_newline = false;
+        bool pending_caret_control = false;
         while (len < buffer_sz - 1) {
-            if (g_vm_sigint_seen) {
-                g_vm_sigint_seen = 0;
+#if defined(PSCAL_TARGET_IOS)
+            /* If a frontend thread was hard-stopped while blocked in select/poll,
+             * convert that stop into a cooperative pending signal so ReadLn can
+             * unwind back to the shell prompt. */
+            vmWaitIfStoppedWithCheckpoint();
+#endif
+            if (pscalRuntimeConsumeSigint()) {
                 if (vm) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
@@ -3485,26 +3892,91 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 buffer[0] = '\0';
                 return false;
             }
+            if (pscalRuntimeConsumeSigtstp()) {
+#if defined(PSCAL_TARGET_IOS)
+                if (!vmShouldUseCooperativeSuspend() && vmRequestHardSuspendCurrentVproc()) {
+                    vmWaitIfStoppedWithCheckpoint();
+                    continue;
+                }
+#endif
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                buffer[0] = '\0';
+                return false;
+            }
+#if defined(PSCAL_TARGET_IOS)
+            {
+                int cur_pid = vprocGetPidShim();
+                if (cur_pid <= 0) {
+                    cur_pid = vprocGetShellSelfPid();
+                }
+                if (cur_pid > 0) {
+                    sigset_t pending;
+                    sigemptyset(&pending);
+                    if (vprocSigpending(cur_pid, &pending) == 0 &&
+                        (sigismember(&pending, SIGINT) || sigismember(&pending, SIGTSTP))) {
+                        sigset_t watchset;
+                        sigemptyset(&watchset);
+                        sigaddset(&watchset, SIGINT);
+                        sigaddset(&watchset, SIGTSTP);
+                        int signo = 0;
+                        if (vprocSigwait(cur_pid, &watchset, &signo) == 0) {
+#if defined(PSCAL_TARGET_IOS)
+                            if (signo == SIGTSTP &&
+                                !vmShouldUseCooperativeSuspend() &&
+                                vmRequestHardSuspendCurrentVproc()) {
+                                vmWaitIfStoppedWithCheckpoint();
+                                continue;
+                            }
+#endif
+                            if (vm) {
+                                vm->abort_requested = (signo == SIGINT);
+                                vm->exit_requested = true;
+                                vm->suspend_unwind_requested = (signo == SIGTSTP);
+                            }
+                            if (signo == SIGTSTP) {
+                                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                            }
+                            buffer[0] = '\0';
+                            return false;
+                        }
+                    }
+                }
+            }
+#endif
             if (vm && (vm->abort_requested || vm->exit_requested)) {
                 buffer[0] = '\0';
                 return false;
             }
 #if defined(PSCAL_TARGET_IOS)
             if (sigint_fd >= 0 && !read_is_host) {
-                char drain[8];
-                ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
-                if (drained > 0) {
-                    if (vm) {
-                        vm->abort_requested = true;
-                        vm->exit_requested = true;
+                int pending = 0;
+                vprocIoctlShim(sigint_fd, FIONREAD, &pending);
+                if (pending > 0) {
+                    char drain[8];
+                    ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
+                    if (drained > 0) {
+                        if (vm) {
+                            vm->abort_requested = true;
+                            vm->exit_requested = true;
+                        }
+                        buffer[0] = '\0';
+                        return false;
                     }
-                    buffer[0] = '\0';
-                    return false;
-                }
-                if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                    if (tool_dbg && stream == stdin) {
-                        fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
-                                errno, strerror(errno));
+                    if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                        if (errno == EBADF) {
+                            vmEnsureSigintPipe();
+                            sigint_fd = g_vm_sigint_pipe[0];
+                            continue;
+                        }
+                        if (tool_dbg && stream == stdin) {
+                            fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
+                                    errno, strerror(errno));
+                        }
                     }
                 }
             }
@@ -3529,12 +4001,69 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                     }
                     break;
                 }
+                if (tool_dbg && is_stdin_stream) {
+                    fprintf(stderr, "[readln] byte session ch=0x%02x len=%zu\n",
+                            (unsigned int)(unsigned char)ch, len);
+                }
+                if (pending_caret_control) {
+                    pending_caret_control = false;
+                    if (ch == 'C' || ch == 'c') {
+                        if (vm) {
+                            vm->abort_requested = true;
+                            vm->exit_requested = true;
+                        }
+                        buffer[0] = '\0';
+                        return false;
+                    }
+                    if (ch == 'Z' || ch == 'z') {
+#if defined(PSCAL_TARGET_IOS)
+                        if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                            len = 0;
+                            continue;
+                        }
+#else
+                        if (vm) {
+                            vm->abort_requested = false;
+                            vm->exit_requested = true;
+                            vm->suspend_unwind_requested = true;
+                        }
+                        shellRuntimeSetLastStatus(128 + SIGTSTP);
+                        buffer[0] = '\0';
+#endif
+                        return false;
+                    }
+                    buffer[len++] = '^';
+                    if (len >= buffer_sz - 1) {
+                        break;
+                    }
+                }
+                if (ch == '^') {
+                    pending_caret_control = true;
+                    continue;
+                }
                 if (ch == 0x03) { // Ctrl-C
                     if (vm) {
                         vm->abort_requested = true;
                         vm->exit_requested = true;
                     }
                     buffer[0] = '\0';
+                    return false;
+                }
+                if (ch == 0x1a) { // Ctrl-Z
+#if defined(PSCAL_TARGET_IOS)
+                    if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                        len = 0;
+                        continue;
+                    }
+#else
+                    if (vm) {
+                        vm->abort_requested = false;
+                        vm->exit_requested = true;
+                        vm->suspend_unwind_requested = true;
+                    }
+                    shellRuntimeSetLastStatus(128 + SIGTSTP);
+                    buffer[0] = '\0';
+#endif
                     return false;
                 }
                 if (ch == '\r') {
@@ -3613,20 +4142,13 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #else
             if (sigint_fd >= 0 && FD_ISSET(sigint_fd, &rfds)) {
 #endif
-                char drain[8];
+                vmDrainSigintFd(sigint_fd,
 #if defined(PSCAL_TARGET_IOS)
-                if (sigint_host) {
-                    while (vprocHostRead(sigint_fd, drain, sizeof(drain)) > 0) {
-                    }
-                } else {
-                    while (read(sigint_fd, drain, sizeof(drain)) > 0) {
-                    }
-                }
+                                sigint_host
 #else
-                (void)sigint_host;
-                while (read(sigint_fd, drain, sizeof(drain)) > 0) {
-                }
+                                false
 #endif
+                );
                 if (vm) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
@@ -3662,6 +4184,46 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #endif
                 break;
             }
+            if (tool_dbg && is_stdin_stream) {
+                fprintf(stderr, "[readln] byte direct ch=0x%02x len=%zu\n",
+                        (unsigned int)(unsigned char)ch, len);
+            }
+            if (pending_caret_control) {
+                pending_caret_control = false;
+                if (ch == 'C' || ch == 'c') {
+                    if (vm) {
+                        vm->abort_requested = true;
+                        vm->exit_requested = true;
+                    }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (ch == 'Z' || ch == 'z') {
+#if defined(PSCAL_TARGET_IOS)
+                    if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                        len = 0;
+                        continue;
+                    }
+#else
+                    if (vm) {
+                        vm->abort_requested = false;
+                        vm->exit_requested = true;
+                        vm->suspend_unwind_requested = true;
+                    }
+                    shellRuntimeSetLastStatus(128 + SIGTSTP);
+                    buffer[0] = '\0';
+#endif
+                    return false;
+                }
+                buffer[len++] = '^';
+                if (len >= buffer_sz - 1) {
+                    break;
+                }
+            }
+            if (ch == '^') {
+                pending_caret_control = true;
+                continue;
+            }
             if (ch == 0x03) { // Ctrl-C
                 if (vm) {
                     vm->abort_requested = true;
@@ -3670,6 +4232,89 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 buffer[0] = '\0';
                 return false;
             }
+            if (ch == 0x1a) { // Ctrl-Z
+#if defined(PSCAL_TARGET_IOS)
+                if (vmHandleCtrlZReadRequest(vm, buffer)) {
+                    len = 0;
+                    continue;
+                }
+#else
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                buffer[0] = '\0';
+#endif
+                return false;
+            }
+
+            /*
+             * Some terminals (notably iOS/macCatalyst hterm) may return a
+             * lingering ANSI cursor-position report (ESC [ rows ; cols R)
+             * that was triggered earlier.  If we leave it in the canonical
+             * input buffer it shows up in prompts like "^[[25;34R" and the
+             * user must backspace it away.  Detect and swallow that sequence
+             * before it reaches user-facing buffers.
+             */
+            if (is_stdin_stream && ch == '\x1B') {
+                char seq[32];
+                seq[0] = ch;
+                size_t seq_len = 1;
+                int pending = 0;
+#if defined(PSCAL_TARGET_IOS)
+                vprocIoctlShim(read_fd, FIONREAD, &pending);
+#else
+                ioctl(read_fd, FIONREAD, &pending);
+#endif
+                if (pending > 0) {
+                    if (pending > (int)(sizeof(seq) - seq_len - 1)) {
+                        pending = (int)(sizeof(seq) - seq_len - 1);
+                    }
+                    ssize_t extra = 0;
+#if defined(PSCAL_TARGET_IOS)
+                    extra = read_is_host ? vprocHostRead(read_fd, seq + seq_len, (size_t)pending)
+                                         : vprocReadShim(read_fd, seq + seq_len, (size_t)pending);
+#else
+                    extra = read(read_fd, seq + seq_len, (size_t)pending);
+#endif
+                    if (extra > 0) {
+                        seq_len += (size_t)extra;
+                    }
+                }
+                seq[seq_len] = '\0';
+                bool looks_dsr = (seq_len >= 4 && seq[0] == '\x1B' && seq[1] == '[' && seq[seq_len - 1] == 'R');
+                bool saw_semi = false;
+                if (looks_dsr) {
+                    for (size_t k = 2; k + 1 < seq_len; k++) {
+                        char c = seq[k];
+                        if (c == ';') {
+                            if (saw_semi) { looks_dsr = false; break; }
+                            saw_semi = true;
+                            continue;
+                        }
+                        if (c < '0' || c > '9') { looks_dsr = false; break; }
+                    }
+                    if (!saw_semi) looks_dsr = false;
+                }
+                if (looks_dsr) {
+                    // Swallow the entire report and start fresh.
+                    len = 0;
+                    continue;
+                }
+                // Not a DSR; push everything we pulled back into the user buffer.
+                for (size_t k = 0; k < seq_len && len < buffer_sz - 1; k++) {
+                    buffer[len++] = seq[k];
+                }
+                continue;
+            }
+
+            if (is_stdin_stream && len > 0 && vmBufferIsPureDsr(buffer, len)) {
+                len = 0;
+                continue;
+            }
+
             if (ch == '\r') {
 #if defined(PSCAL_TARGET_IOS)
                 saw_newline = true;
@@ -3710,6 +4355,25 @@ static void vmCommitLastIoError(int value) {
     pthread_mutex_unlock(&globals_mutex);
 }
 
+static bool vmBufferIsPureDsr(const char *buf, size_t len) {
+    size_t i = 0;
+    while (i < len && (buf[i] == '\r' || buf[i] == '\n')) i++;
+    if (i >= len || buf[i] != '\x1B') return false;
+    i++;
+    if (i >= len || buf[i] != '[') return false;
+    i++;
+    size_t digits = 0;
+    while (i < len && buf[i] >= '0' && buf[i] <= '9') { digits++; i++; }
+    if (digits == 0 || i >= len || buf[i] != ';') return false;
+    i++;
+    digits = 0;
+    while (i < len && buf[i] >= '0' && buf[i] <= '9') { digits++; i++; }
+    if (digits == 0 || i >= len || buf[i] != 'R') return false;
+    i++;
+    while (i < len && (buf[i] == '\r' || buf[i] == '\n')) i++;
+    return i == len;
+}
+
 // Attempts to get the current cursor position using ANSI DSR query.
 // Returns 0 on success, -1 on failure.
 // Stores results in *row and *col.
@@ -3721,6 +4385,8 @@ static int getCursorPosition(int *row, int *col) {
     int ret_status = -1; // Default to critical failure
     int read_errno = 0; // Store errno from read() operation
     bool termiosApplied = false;
+    int stdin_flags = -1;
+    bool restore_blocking = false;
 
     // Default row/col in case of non-critical failure
     *row = 1;
@@ -3728,21 +4394,30 @@ static int getCursorPosition(int *row, int *col) {
 
     // --- Check if Input is a Terminal ---
     if (!pscalRuntimeStdinIsInteractive()) {
-        fprintf(stderr, "Warning: Cannot get cursor position (stdin is not a TTY).\n");
-        return 0; // Treat as non-critical failure, return default 1,1
+        ret_status = 0; // Non-interactive: fall back to default 1,1 silently.
+        goto cleanup;
+    }
+
+    // Some callers may have left stdin in non-blocking mode; temporarily
+    // make it blocking so VTIME/VMIN can take effect.
+    stdin_flags = fcntl(STDIN_FILENO, F_GETFL);
+    if (stdin_flags != -1 && (stdin_flags & O_NONBLOCK)) {
+        if (fcntl(STDIN_FILENO, F_SETFL, stdin_flags & ~O_NONBLOCK) == 0) {
+            restore_blocking = true;
+        }
     }
 
     // --- Save Current Terminal Settings ---
     if (vmTcgetattr(STDIN_FILENO, &oldt) < 0) {
         perror("getCursorPosition: tcgetattr failed");
-        return -1; // Critical failure
+        goto cleanup; // Critical failure
     }
 
     // --- Prepare and Set Raw Mode ---
     newt = oldt;
     newt.c_lflag &= ~(ICANON | ECHO); // Disable canonical mode and echo
-    newt.c_cc[VMIN] = 0;              // Non-blocking read
-    newt.c_cc[VTIME] = 2;             // Timeout 0.2 seconds (adjust if needed)
+    newt.c_cc[VMIN] = 0;              // Non-blocking; we'll poll below
+    newt.c_cc[VTIME] = 0;
 
     if (vmTcsetattr(STDIN_FILENO, TCSANOW, &newt) < 0) {
         int setup_errno = errno;
@@ -3750,57 +4425,74 @@ static int getCursorPosition(int *row, int *col) {
         // Attempt to restore original settings even if setting new ones failed
         vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Best effort restore
         errno = setup_errno; // Restore errno for accurate reporting
-        return -1; // Critical failure
+        goto cleanup; // Critical failure
     }
     termiosApplied = true;
 
     // --- Write DSR Query ---
-    const char *dsr_query = "\x1B[6n"; // ANSI Device Status Report for cursor position
-    if (write(STDOUT_FILENO, dsr_query, strlen(dsr_query)) == -1) {
+    static const char dsr_query[] = "\x1B[6n"; // ANSI Device Status Report for cursor position
+    if (write(STDOUT_FILENO, dsr_query, sizeof(dsr_query) - 1) == -1) {
         int write_errno = errno;
         perror("getCursorPosition: write DSR query failed");
-        vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore terminal settings
         errno = write_errno;
-        return -1; // Critical failure
+        goto cleanup; // Critical failure
     }
 
     // --- Read Response ---
     memset(buf, 0, sizeof(buf));
     i = 0;
-    while (i < (int)sizeof(buf) - 1) {
-        errno = 0; // Clear errno before read
-        ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
-        read_errno = errno; // Store errno immediately after read
-
-        if (bytes_read < 0) { // Read error
-             // Check if it was just a timeout (EAGAIN/EWOULDBLOCK) or a real error
-             if (read_errno == EAGAIN || read_errno == EWOULDBLOCK) {
-                 fprintf(stderr, "Warning: Timeout waiting for cursor position response.\n");
-             } else {
-                 perror("getCursorPosition: read failed");
-             }
-             break; // Exit loop on any read error or timeout
+    int elapsed_ms = 0;
+    const int poll_step_ms = 20;
+    const int max_wait_ms = 3000; // cap total wait to ~3s
+    struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+    while (i < (int)sizeof(buf) - 1 && elapsed_ms <= max_wait_ms) {
+        int pr = poll(&pfd, 1, poll_step_ms);
+        if (pr > 0 && (pfd.revents & POLLIN)) {
+            errno = 0;
+            ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+            read_errno = errno;
+            if (bytes_read == 1) {
+                buf[i++] = ch;
+                if (ch == 'R') {
+                    break;
+                }
+                elapsed_ms = 0; // reset timer on progress
+                continue;
+            }
+            if (bytes_read < 0 && (read_errno == EAGAIN || read_errno == EWOULDBLOCK)) {
+                continue;
+            }
+            break;
         }
-        if (bytes_read == 0) { // Should not happen with VTIME > 0 unless EOF
-             fprintf(stderr, "Warning: Read 0 bytes waiting for cursor position (EOF?).\n");
-             break;
-        }
-
-        // Store character and check for terminator 'R'
-        buf[i++] = ch;
-        if (ch == 'R') {
-            break; // End of response sequence found
+        elapsed_ms += poll_step_ms;
+    }
+    // Give a brief grace period for late-arriving bytes so they don't leak into
+    // subsequent user input (observed on iOS terminals).
+    if (i < (int)sizeof(buf) - 1 && buf[i != 0 ? i - 1 : 0] != 'R') {
+        int grace_ms = 100;
+        while (grace_ms > 0 && i < (int)sizeof(buf) - 1) {
+            int pr = poll(&pfd, 1, 10);
+            if (pr > 0 && (pfd.revents & POLLIN)) {
+                errno = 0;
+                ssize_t bytes_read = read(STDIN_FILENO, &ch, 1);
+                read_errno = errno;
+                if (bytes_read == 1) {
+                    buf[i++] = ch;
+                    if (ch == 'R') {
+                        break;
+                    }
+                    continue;
+                }
+                if (bytes_read < 0 && (read_errno == EAGAIN || read_errno == EWOULDBLOCK)) {
+                    // keep waiting within grace window
+                } else {
+                    break;
+                }
+            }
+            grace_ms -= 10;
         }
     }
     buf[i] = '\0'; // Null-terminate the buffer
-
-    // --- Restore Original Terminal Settings ---
-    if (termiosApplied) {
-        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
-            perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
-            // Continue processing, but be aware terminal might be left in raw mode
-        }
-    }
 
     // --- Parse Response ---
     // Expected format: \x1B[<row>;<col>R
@@ -3827,6 +4519,33 @@ static int getCursorPosition(int *row, int *col) {
          ret_status = 0; // Non-critical failure, return default 1,1
     }
 
+cleanup:
+    /* Flush any pending input so delayed DSR replies don't echo later. */
+    tcflush(STDIN_FILENO, TCIFLUSH);
+    /* Drain any residual DSR bytes so later reads (e.g., ReadKey) are not
+     * satisfied by a leftover ESC[ row ; col R response. */
+    {
+        int cur_flags = fcntl(STDIN_FILENO, F_GETFL);
+        if (cur_flags != -1 && (cur_flags & O_NONBLOCK) == 0) {
+            if (fcntl(STDIN_FILENO, F_SETFL, cur_flags | O_NONBLOCK) == 0) {
+                char discard[64];
+                while (read(STDIN_FILENO, discard, sizeof(discard)) > 0) {
+                }
+                fcntl(STDIN_FILENO, F_SETFL, cur_flags);
+            }
+        }
+    }
+
+    // --- Restore Original Terminal Settings ---
+    if (termiosApplied) {
+        if (vmTcsetattr(STDIN_FILENO, TCSANOW, &oldt) < 0) {
+            perror("getCursorPosition: tcsetattr (restore) failed - Terminal state may be unstable!");
+            // Continue processing, but be aware terminal might be left in raw mode
+        }
+    }
+    if (restore_blocking && stdin_flags != -1) {
+        fcntl(STDIN_FILENO, F_SETFL, stdin_flags);
+    }
     return ret_status; // 0 for success or non-critical error, -1 for critical error
 }
 
@@ -3887,26 +4606,109 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
     }
 
     int c = 0;
-#ifdef SDL
-    if (sdlIsGraphicsActive()) {
-        c = sdlFetchReadKeyChar();
-        if (c < 0) {
+    for (;;) {
+        if (pscalRuntimeConsumeSigint()) {
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = true;
+                vm->suspend_unwind_requested = false;
+            }
+            shellRuntimeSetLastStatus(130);
             c = 0;
+            break;
         }
-    } else
-#endif
-    {
-        vmEnableRawMode();
-
-        unsigned char ch_byte;
 #if defined(PSCAL_TARGET_IOS)
-        if (vprocReadShim(STDIN_FILENO, &ch_byte, 1) != 1) {
-#else
-        if (read(STDIN_FILENO, &ch_byte, 1) != 1) {
-#endif
-            ch_byte = '\0';
+        if (pscalRuntimeConsumeSigtstp()) {
+            char scratch[1] = {'\0'};
+            if (vmHandleCtrlZReadRequest(vm, scratch)) {
+                continue;
+            }
+            c = 0;
+            break;
         }
-        c = ch_byte;
+#endif
+#ifdef SDL
+        if (sdlIsGraphicsActive()) {
+            c = sdlFetchReadKeyChar();
+            if (c < 0) {
+                c = 0;
+            }
+        } else
+#endif
+        {
+            vmEnableRawMode();
+            c = readKeyFetchConsoleByte();
+        }
+
+        if (gReadKeyPendingCaretControl) {
+            gReadKeyPendingCaretControl = false;
+            if (c == 'C' || c == 'c') {
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = false;
+                }
+                shellRuntimeSetLastStatus(130);
+                c = 0;
+                break;
+            }
+#if defined(PSCAL_TARGET_IOS)
+            if (c == 'Z' || c == 'z') {
+                char scratch[1] = {'\0'};
+                if (vmHandleCtrlZReadRequest(vm, scratch)) {
+                    continue;
+                }
+                c = 0;
+                break;
+            }
+#else
+            if (c == 'Z' || c == 'z') {
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
+                c = 0;
+                break;
+            }
+#endif
+        }
+
+        if (c == '^') {
+            gReadKeyPendingCaretControl = true;
+            break;
+        }
+        if (c == 0x03) { // Ctrl-C
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = true;
+                vm->suspend_unwind_requested = false;
+            }
+            shellRuntimeSetLastStatus(130);
+            c = 0;
+            break;
+        }
+        if (c == 0x1a) { // Ctrl-Z
+#if defined(PSCAL_TARGET_IOS)
+            char scratch[1] = {'\0'};
+            if (vmHandleCtrlZReadRequest(vm, scratch)) {
+                continue;
+            }
+            c = 0;
+            break;
+#else
+            if (vm) {
+                vm->abort_requested = false;
+                vm->exit_requested = true;
+                vm->suspend_unwind_requested = true;
+            }
+            shellRuntimeSetLastStatus(128 + SIGTSTP);
+            c = 0;
+            break;
+#endif
+        }
+        break;
     }
 
     if (arg_count == 1) {
@@ -4091,15 +4893,13 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    if (pscalRuntimeStdoutIsInteractive()) {
-        bool color_was_applied = applyCurrentTextAttributes(stdout);
-        fputs("\x1B[2J\x1B[H", stdout);
-        if (color_was_applied) {
-            resetTextAttributes(stdout);
-        }
-        fprintf(stdout, "\x1B[%d;%dH", gWindowTop, gWindowLeft);
-        fflush(stdout);
+    if (!pscalRuntimeStdoutIsInteractive()) {
+        return makeVoid();
     }
+
+    /* Clear scrollback + screen, then home. Matches exsh/clear behavior. */
+    fputs("\x1B[3J\x1B[H\x1B[2J", stdout);
+    fflush(stdout);
 
     return makeVoid();
 }
@@ -4110,8 +4910,35 @@ Value vmBuiltinClreol(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "ClrEol expects no arguments.");
         return makeVoid();
     }
+    int cur_row = 1, cur_col = 1;
+    if (getCursorPosition(&cur_row, &cur_col) != 0) {
+        cur_row = 1;
+        cur_col = 1;
+    }
+    int screen_rows = 24, screen_cols = 80;
+    (void)screen_rows;
+    getTerminalSize(&screen_rows, &screen_cols);
+    int right_edge = gWindowRight > 0 ? gWindowRight : screen_cols;
+    if (right_edge < cur_col) {
+        right_edge = cur_col;
+    }
+    int span = right_edge - cur_col + 1;
     bool color_was_applied = applyCurrentTextAttributes(stdout);
+    /* Send the ANSI sequence for terminals that honor it. */
     printf("\x1B[K");
+    /* Also paint spaces within the current window for terminals that ignore K. */
+    if (span > 0) {
+        fprintf(stdout, "\x1B[%d;%dH", cur_row, cur_col);
+        char spaces[128];
+        memset(spaces, ' ', sizeof(spaces));
+        int remaining = span;
+        while (remaining > 0) {
+            int chunk = remaining > (int)sizeof(spaces) ? (int)sizeof(spaces) : remaining;
+            fwrite(spaces, 1, (size_t)chunk, stdout);
+            remaining -= chunk;
+        }
+        fprintf(stdout, "\x1B[%d;%dH", cur_row, cur_col);
+    }
     if (color_was_applied) {
         resetTextAttributes(stdout);
     }
@@ -4292,10 +5119,21 @@ Value vmBuiltinWindow(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "Window expects 4 integer arguments.");
         return makeVoid();
     }
+    int screen_rows = 24, screen_cols = 80;
+    getTerminalSize(&screen_rows, &screen_cols);
+
     gWindowLeft = (int)AS_INTEGER(args[0]);
     gWindowTop = (int)AS_INTEGER(args[1]);
     gWindowRight = (int)AS_INTEGER(args[2]);
     gWindowBottom = (int)AS_INTEGER(args[3]);
+
+    if (gWindowLeft < 1) gWindowLeft = 1;
+    if (gWindowTop < 1) gWindowTop = 1;
+    if (gWindowRight < gWindowLeft) gWindowRight = gWindowLeft;
+    if (gWindowBottom < gWindowTop) gWindowBottom = gWindowTop;
+    if (gWindowRight > screen_cols) gWindowRight = screen_cols;
+    if (gWindowBottom > screen_rows) gWindowBottom = screen_rows;
+
     printf("\x1B[%d;%dr", gWindowTop, gWindowBottom);
     printf("\x1B[%d;%dH", gWindowTop, gWindowLeft);
     fflush(stdout);
@@ -5429,6 +6267,7 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
     }
 
     if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
         args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
@@ -5436,6 +6275,7 @@ Value vmBuiltinBlockread(VM* vm, int arg_count, Value* args) {
         bufferValue = (Value*)args[1].ptr_val;
         if (bufferValue && bufferValue->type == TYPE_POINTER &&
             (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
              bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;
@@ -5647,6 +6487,7 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
     }
 
     if (args[1].base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        args[1].base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
         args[1].base_type_node == BYTE_ARRAY_PTR_SENTINEL) {
         bufferIsRawPointer = true;
         rawPointer = (unsigned char*)args[1].ptr_val;
@@ -5654,6 +6495,7 @@ Value vmBuiltinBlockwrite(VM* vm, int arg_count, Value* args) {
         bufferValue = (Value*)args[1].ptr_val;
         if (bufferValue && bufferValue->type == TYPE_POINTER &&
             (bufferValue->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+             bufferValue->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL ||
              bufferValue->base_type_node == BYTE_ARRAY_PTR_SENTINEL)) {
             bufferIsRawPointer = true;
             rawPointer = (unsigned char*)bufferValue->ptr_val;
@@ -5942,6 +6784,14 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
     char line_buffer[1024];
     if (!vmReadLineInterruptible(vm, input_stream, line_buffer, sizeof(line_buffer))) {
         io_error = feof(input_stream) ? 0 : 1;
+        if (getenv("PSCALI_TOOL_DEBUG")) {
+            fprintf(stderr,
+                    "[readln] interrupted io_error=%d abort=%d exit=%d suspend=%d\n",
+                    io_error,
+                    vm ? (int)vm->abort_requested : -1,
+                    vm ? (int)vm->exit_requested : -1,
+                    vm ? (int)vm->suspend_unwind_requested : -1);
+        }
         // ***NEW***: prevent VM cleanup from closing the stream we used
         if (first_arg_is_file_by_value) { args[0].type = TYPE_NIL; args[0].f_val = NULL; }  // ***NEW***
         if (input_stream == stdin) vmEnableRawMode();
@@ -6855,6 +7705,41 @@ Value vmBuiltinMstreamFromString(VM* vm, int arg_count, Value* args) {
     return makeMStream(ms);
 }
 
+Value vmBuiltinMstreamAppendByte(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2) {
+        runtimeError(vm, "MStreamAppendByte expects (mstream, byte).");
+        return makeVoid();
+    }
+    if (args[0].type != TYPE_MEMORYSTREAM || args[0].mstream == NULL) {
+        runtimeError(vm, "MStreamAppendByte: first argument must be a valid mstream.");
+        return makeVoid();
+    }
+    int byte = 0;
+    if (!IS_INTLIKE(args[1])) {
+        runtimeError(vm, "MStreamAppendByte: second argument must be an integer.");
+        return makeVoid();
+    }
+    byte = AS_INTEGER(args[1]) & 0xFF;
+
+    MStream* ms = args[0].mstream;
+    /* Ensure capacity */
+    if (ms->capacity < ms->size + 2) { /* +1 for new byte, +1 for terminator */
+        int newcap = (ms->capacity > 0) ? ms->capacity * 2 : 64;
+        if (newcap < ms->size + 2) newcap = ms->size + 2;
+        unsigned char* newbuf = realloc(ms->buffer, (size_t)newcap);
+        if (!newbuf) {
+            runtimeError(vm, "MStreamAppendByte: out of memory.");
+            return makeVoid();
+        }
+        ms->buffer = newbuf;
+        ms->capacity = newcap;
+    }
+    ms->buffer[ms->size] = (unsigned char)byte;
+    ms->size += 1;
+    ms->buffer[ms->size] = '\0'; /* maintain convenience NUL */
+    return makeVoid();
+}
+
 Value vmBuiltinReal(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) {
         runtimeError(vm, "Real() expects 1 argument.");
@@ -7060,6 +7945,21 @@ Value vmBuiltinDelay(VM* vm, int arg_count, Value* args) {
                     vm->abort_requested = true;
                     vm->exit_requested = true;
                 }
+                break;
+            }
+            if (pscalRuntimeConsumeSigtstp()) {
+#if defined(PSCAL_TARGET_IOS)
+                if (!vmShouldUseCooperativeSuspend() && vmRequestHardSuspendCurrentVproc()) {
+                    vmWaitIfStoppedWithCheckpoint();
+                    continue;
+                }
+#endif
+                if (vm) {
+                    vm->abort_requested = false;
+                    vm->exit_requested = true;
+                    vm->suspend_unwind_requested = true;
+                }
+                shellRuntimeSetLastStatus(128 + SIGTSTP);
                 break;
             }
             if (vm && (vm->abort_requested || vm->exit_requested)) {
@@ -8473,6 +9373,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("SocketReceive", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("SocketSend", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("SocketSetBlocking", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("SocketPeerAddr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Append", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcCos", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ArcSin", AST_FUNCTION_DECL, NULL);

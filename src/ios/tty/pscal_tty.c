@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,6 +44,10 @@ static pthread_mutex_t gTtySessionMu = PTHREAD_MUTEX_INITIALIZER;
 static TtySessionEntry *gTtySessions = NULL;
 static size_t gTtySessionCount = 0;
 static size_t gTtySessionCap = 0;
+
+static bool ttyDebugEnabled(void) {
+    return getenv("PSCALI_TTY_DEBUG") != NULL || getenv("PSCALI_TOOL_DEBUG") != NULL;
+}
 
 static bool tty_session_has_controlling(pid_t_ sid);
 
@@ -406,6 +411,12 @@ static bool tty_send_input_signal(struct tty *tty, char ch, sigset_t_ *queue) {
         return false;
     }
     if (!(tty->termios.lflags & ISIG_)) {
+        if (ttyDebugEnabled() && (unsigned char)ch == tty->termios.cc[VSUSP_]) {
+            fprintf(stderr,
+                    "[tty-sig] VSUSP byte seen but ISIG disabled fg=%d sid=%d\n",
+                    (int)tty->fg_group,
+                    (int)tty->session);
+        }
         return false;
     }
     unsigned char *cc = tty->termios.cc;
@@ -427,6 +438,20 @@ static bool tty_send_input_signal(struct tty *tty, char ch, sigset_t_ *queue) {
             tty->bufsize = 0;
         }
         sigset_add(queue, sig);
+        if (ttyDebugEnabled()) {
+            fprintf(stderr,
+                    "[tty-sig] queue sig=%d fg=%d sid=%d ch=0x%02x\n",
+                    sig,
+                    (int)tty->fg_group,
+                    (int)tty->session,
+                    (unsigned int)(unsigned char)ch);
+        }
+    } else if (ttyDebugEnabled()) {
+        fprintf(stderr,
+                "[tty-sig] drop sig=%d fg=0 sid=%d ch=0x%02x\n",
+                sig,
+                (int)tty->session,
+                (unsigned int)(unsigned char)ch);
     }
     return true;
 }
@@ -672,6 +697,9 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
     if (canonical) {
         size_t canon_size;
         while ((canon_size = tty_canon_size(tty)) == (size_t)-1) {
+            if (tty->hung_up) {
+                goto hangup;
+            }
             err = _EIO;
             if (pty_is_half_closed_master(tty)) {
                 goto error;
@@ -709,6 +737,9 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
         }
 
         while (tty->bufsize < min) {
+            if (tty->hung_up) {
+                goto hangup;
+            }
             err = _EIO;
             if (pty_is_half_closed_master(tty)) {
                 goto error;
@@ -728,6 +759,10 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
         }
     }
 
+    if (tty->hung_up && tty->bufsize == 0) {
+        goto hangup;
+    }
+
     if (bufsize > tty->bufsize) {
         bufsize = tty->bufsize;
     }
@@ -740,6 +775,9 @@ static ssize_t tty_read(struct pscal_fd *fd, void *buf, size_t bufsize) {
 out:
     unlock(&tty->lock);
     return (ssize_t)bufsize + bufsize_extra;
+hangup:
+    unlock(&tty->lock);
+    return 0;
 error:
     unlock(&tty->lock);
     return err;
@@ -1011,8 +1049,20 @@ static int tty_ioctl(struct pscal_fd *fd, int cmd, void *arg) {
 
 void tty_set_winsize(struct tty *tty, struct winsize_ winsize) {
     tty->winsize = winsize;
-    if (tty->fg_group != 0) {
-        pscalTtySendGroupSignal((int)tty->fg_group, SIGWINCH_);
+    pid_t_ target_group = tty->fg_group;
+    if (target_group == 0 && tty->session > 0) {
+        int fg = pscalTtyGetForegroundPgid((int)tty->session);
+        if (fg > 0) {
+            target_group = (pid_t_)fg;
+            tty->fg_group = target_group;
+        } else {
+            /* Fallback to the session leader's group if foreground metadata
+             * is not populated yet. */
+            target_group = tty->session;
+        }
+    }
+    if (target_group != 0) {
+        pscalTtySendGroupSignal((int)target_group, SIGWINCH_);
     }
 }
 

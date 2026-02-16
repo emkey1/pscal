@@ -2,6 +2,7 @@
 #include "shell/builtins.h"
 #include "shell/word_encoding.h"
 #include "shell/function.h"
+#include "vm/string_sentinels.h"
 #include "core/utils.h"
 #include "vm/vm.h"
 #include "Pascal/globals.h"
@@ -1507,7 +1508,7 @@ static void compileFunction(BytecodeChunk *chunk, const ShellFunction *function,
     }
     compiled->magic = SHELL_COMPILED_FUNCTION_MAGIC;
     shellCompile(function->body, &compiled->chunk);
-    Value ptr = makePointer(compiled, NULL);
+    Value ptr = makePointer(compiled, SHELL_FUNCTION_PTR_SENTINEL);
     int ptr_index = addConstantToChunk(chunk, &ptr);
     emitPushString(chunk, function->name ? function->name : "", line);
     emitPushString(chunk, function->parameter_metadata ? function->parameter_metadata : "", line);

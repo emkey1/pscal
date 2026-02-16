@@ -31,7 +31,7 @@ static VarType builtinReturnType(const char* name) {
 
     static const char *const booleanFuncs[] = {
         "bool", "tobool", "keypressed", "issoundplaying", "quitrequested",
-        "eof", "mstreamloadfromfile"
+        "eof", "mstreamloadfromfile", "fileexists"
     };
     if (builtinMatches(name, booleanFuncs, sizeof(booleanFuncs) / sizeof(booleanFuncs[0]))) {
         return TYPE_BOOLEAN;
@@ -40,7 +40,7 @@ static VarType builtinReturnType(const char* name) {
     static const char *const stringFuncs[] = {
         "inttostr", "realtostr", "formatfloat", "paramstr", "copy", "getenv", "dosgetenv",
         "findfirst", "findnext", "dosfindfirst", "dosfindnext", "mstreambuffer",
-        "dnslookup", "apireceive", "jsonget", "httpgetheader",
+        "dnslookup", "apireceive", "jsonget", "httpgetheader", "socketpeeraddr",
         "httpgetlastheaders", "httplasterror"
     };
     if (builtinMatches(name, stringFuncs, sizeof(stringFuncs) / sizeof(stringFuncs[0]))) {
@@ -48,7 +48,7 @@ static VarType builtinReturnType(const char* name) {
     }
 
     static const char *const memoryStreamFuncs[] = {
-        "apisend", "socketreceive", "mstreamcreate"
+        "apisend", "socketreceive", "mstreamcreate", "mstreamfromstring"
     };
     if (builtinMatches(name, memoryStreamFuncs, sizeof(memoryStreamFuncs) / sizeof(memoryStreamFuncs[0]))) {
         return TYPE_MEMORYSTREAM;
@@ -91,6 +91,11 @@ static VarType builtinReturnType(const char* name) {
     static const char *const int64Funcs[] = { "paramcount" };
     if (builtinMatches(name, int64Funcs, sizeof(int64Funcs) / sizeof(int64Funcs[0]))) {
         /* Return a wide integer to match the builtin implementation. */
+        return TYPE_INT64;
+    }
+
+    // FileSize returns the current size of a file as an int64.
+    if (strcasecmp(name, "filesize") == 0) {
         return TYPE_INT64;
     }
 
@@ -286,6 +291,10 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("mstreamsavetofile"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("mstreamfree"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("mstreambuffer"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreamfromstring"), TYPE_MEMORYSTREAM, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreamappendbyte"), TYPE_VOID, 0, 0, 0);
+    registerFunctionSignature(strdup("fileexists"), TYPE_BOOLEAN, 0, 0, 0);
+    registerFunctionSignature(strdup("filesize"), TYPE_INT64, 0, 0, 0);
     registerFunctionSignature(strdup("hasextbuiltin"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltincategorycount"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltincategoryname"), TYPE_STRING, 0, 0, 0);

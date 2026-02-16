@@ -38,6 +38,18 @@ static void assert_pgid_sid_setters(void) {
     vprocDestroy(vp);
 }
 
+static void assert_getsid_zero_uses_current_pid(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    int prev_shell = vprocGetShellSelfPid();
+    int pid = vprocPid(vp);
+    assert(pid > 0);
+    vprocSetShellSelfPid(pid);
+    assert(vprocGetSid(0) == pid);
+    vprocSetShellSelfPid(prev_shell);
+    vprocDestroy(vp);
+}
+
 static void assert_group_kill_marks_stopped(void) {
     VProcOptions opts = vprocDefaultOptions();
     opts.pid_hint = vprocReservePid();
@@ -168,9 +180,41 @@ static void assert_foreground_updates_multiple_times(void) {
     vprocDestroy(leader);
 }
 
+static void assert_shell_job_control_state_snapshot(void) {
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *leader = vprocCreate(&opts);
+    assert(leader);
+    int sid = vprocPid(leader);
+    int shell_pgid = sid;
+    int fg = sid + 77;
+    int prev_shell = vprocGetShellSelfPid();
+
+    assert(vprocSetSid(sid, sid) == 0);
+    assert(vprocSetForegroundPgid(sid, fg) == 0);
+    vprocSetShellSelfPid(sid);
+
+    int got_shell = -1;
+    int got_shell_pgid = -1;
+    int got_sid = -1;
+    int got_fg = -1;
+    assert(vprocGetShellJobControlState(&got_shell, &got_shell_pgid, &got_sid, &got_fg));
+    assert(got_shell == sid);
+    assert(got_shell_pgid == shell_pgid);
+    assert(got_sid == sid);
+    assert(got_fg == fg);
+
+    vprocSetShellSelfPid(prev_shell);
+    vprocMarkExit(leader, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(sid, &status, 0);
+    vprocDestroy(leader);
+}
+
 int main(void) {
     assert_pgid_sid_defaults();
     assert_pgid_sid_setters();
+    assert_getsid_zero_uses_current_pid();
     assert_group_kill_marks_stopped();
     assert_wait_on_pgid_exit();
     assert_signal_status_propagates();
@@ -178,6 +222,7 @@ int main(void) {
     assert_session_leader_cannot_change_pgid();
     assert_foreground_pgid_round_trip();
     assert_foreground_updates_multiple_times();
+    assert_shell_job_control_state_snapshot();
     printf("pgid/sid tests passed\n");
     return 0;
 }

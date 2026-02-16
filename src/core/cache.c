@@ -5,6 +5,7 @@
 #include "symbol/symbol.h"
 #include "Pascal/parser.h"
 #include "shell/function.h"
+#include "vm/string_sentinels.h"
 #include "ast/ast.h"
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -1226,19 +1227,51 @@ static bool writePointerValue(FILE* f, const Value* v) {
         return fwrite(&kind, sizeof(kind), 1, f) == 1;
     }
 
-    ShellCompiledFunction* compiled = (ShellCompiledFunction*)v->ptr_val;
-    if (!compiled || compiled->magic != SHELL_COMPILED_FUNCTION_MAGIC) {
-        return false;
+    if (v->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+        v->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
+        const char *text = (const char *)v->ptr_val;
+        if (!text) {
+            return false;
+        }
+        int len = (int)strlen(text);
+        kind = 2;
+        if (fwrite(&kind, sizeof(kind), 1, f) != 1) {
+            return false;
+        }
+        if (fwrite(&len, sizeof(len), 1, f) != 1) {
+            return false;
+        }
+        if (len > 0 && fwrite(text, 1, (size_t)len, f) != (size_t)len) {
+            return false;
+        }
+        return true;
     }
 
-    kind = 1;
+    if (v->base_type_node == SHELL_FUNCTION_PTR_SENTINEL) {
+        ShellCompiledFunction* compiled = (ShellCompiledFunction*)v->ptr_val;
+        if (!compiled || compiled->magic != SHELL_COMPILED_FUNCTION_MAGIC) {
+            return false;
+        }
+
+        kind = 1;
+        if (fwrite(&kind, sizeof(kind), 1, f) != 1) {
+            return false;
+        }
+        if (fwrite(&compiled->chunk.version, sizeof(compiled->chunk.version), 1, f) != 1) {
+            return false;
+        }
+        return writeChunkCore(f, &compiled->chunk);
+    }
+
+    kind = 3;
     if (fwrite(&kind, sizeof(kind), 1, f) != 1) {
         return false;
     }
-    if (fwrite(&compiled->chunk.version, sizeof(compiled->chunk.version), 1, f) != 1) {
+    uint64_t raw_addr = (uint64_t)(uintptr_t)v->ptr_val;
+    if (fwrite(&raw_addr, sizeof(raw_addr), 1, f) != 1) {
         return false;
     }
-    return writeChunkCore(f, &compiled->chunk);
+    return true;
 }
 
 static bool readPointerValue(FILE* f, Value* out) {
@@ -1253,6 +1286,35 @@ static bool readPointerValue(FILE* f, Value* out) {
     if (kind == 0) {
         out->ptr_val = NULL;
         out->base_type_node = NULL;
+        return true;
+    }
+    if (kind == 2) {
+        int len = 0;
+        if (fread(&len, sizeof(len), 1, f) != 1 || len < 0) {
+            return false;
+        }
+        char *text = (char *)malloc((size_t)len + 1u);
+        if (!text) {
+            return false;
+        }
+        if (len > 0 && fread(text, 1, (size_t)len, f) != (size_t)len) {
+            free(text);
+            return false;
+        }
+        text[len] = '\0';
+        out->ptr_val = (Value*)text;
+        out->base_type_node = SERIALIZED_CHAR_PTR_SENTINEL;
+        out->element_type = TYPE_UNKNOWN;
+        return true;
+    }
+    if (kind == 3) {
+        uint64_t raw_addr = 0;
+        if (fread(&raw_addr, sizeof(raw_addr), 1, f) != 1) {
+            return false;
+        }
+        out->ptr_val = (Value*)(uintptr_t)raw_addr;
+        out->base_type_node = OPAQUE_POINTER_SENTINEL;
+        out->element_type = TYPE_UNKNOWN;
         return true;
     }
     if (kind != 1) {
@@ -1280,7 +1342,7 @@ static bool readPointerValue(FILE* f, Value* out) {
     }
 
     out->ptr_val = (Value*)compiled;
-    out->base_type_node = NULL;
+    out->base_type_node = SHELL_FUNCTION_PTR_SENTINEL;
     out->element_type = TYPE_UNKNOWN;
     return true;
 }
@@ -1377,14 +1439,28 @@ static void hashValue(uint64_t* hash, const Value* v, ChunkHashContext* ctx) {
                 fnv1aUpdateUInt64(hash, 0);
                 break;
             }
-            ShellCompiledFunction* compiled = (ShellCompiledFunction*)v->ptr_val;
-            if (!compiled || compiled->magic != SHELL_COMPILED_FUNCTION_MAGIC) {
-                fnv1aUpdateUInt64(hash, (uint64_t)(uintptr_t)v->ptr_val);
+            if (v->base_type_node == STRING_CHAR_PTR_SENTINEL ||
+                v->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
+                const char *text = (const char *)v->ptr_val;
+                int len = text ? (int)strlen(text) : 0;
+                fnv1aUpdateInt(hash, len);
+                if (len > 0 && text) {
+                    fnv1aUpdate(hash, text, (size_t)len);
+                }
                 break;
             }
-            fnv1aUpdateUInt32(hash, compiled->chunk.version);
-            uint64_t nested = computeChunkHashInternal(&compiled->chunk, ctx);
-            fnv1aUpdateUInt64(hash, nested);
+            if (v->base_type_node == SHELL_FUNCTION_PTR_SENTINEL) {
+                ShellCompiledFunction* compiled = (ShellCompiledFunction*)v->ptr_val;
+                if (!compiled || compiled->magic != SHELL_COMPILED_FUNCTION_MAGIC) {
+                    fnv1aUpdateUInt64(hash, (uint64_t)(uintptr_t)v->ptr_val);
+                    break;
+                }
+                fnv1aUpdateUInt32(hash, compiled->chunk.version);
+                uint64_t nested = computeChunkHashInternal(&compiled->chunk, ctx);
+                fnv1aUpdateUInt64(hash, nested);
+                break;
+            }
+            fnv1aUpdateUInt64(hash, (uint64_t)(uintptr_t)v->ptr_val);
             break;
         }
         case TYPE_FILE:
@@ -1586,7 +1662,24 @@ static HashTable* findProcedureScope(HashTable* table,
     }
 
     Symbol* parent = findProcedureSymbolDeep(table, parent_name);
-    if (!parent || !parent->type_def || !parent->type_def->symbol_table) {
+    if (!parent) {
+        return NULL;
+    }
+
+    if (!parent->type_def) {
+        parent->type_def = newASTNode(AST_PROCEDURE_DECL, NULL);
+        if (!parent->type_def) {
+            return NULL;
+        }
+    }
+    if (!parent->type_def->symbol_table) {
+        HashTable* nested = createHashTable();
+        if (!nested) {
+            return NULL;
+        }
+        parent->type_def->symbol_table = (Symbol*)nested;
+    }
+    if (!parent->type_def->symbol_table) {
         return NULL;
     }
 

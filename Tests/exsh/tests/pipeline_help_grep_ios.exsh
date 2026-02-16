@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+echo "pipeline-help-grep:start"
+help -l | grep history
+status=$?
+echo "pipeline-help-grep:status:$status"

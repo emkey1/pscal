@@ -54,8 +54,16 @@ endif()
 
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
     find_package(OpenSSL REQUIRED)
-    set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
-    set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
+    # CMake's FindOpenSSL should provide imported targets, but some environments
+    # (notably newer Homebrew/OpenSSL combos) occasionally omit them. Fall back
+    # to raw library paths when the targets are missing so host builds keep working.
+    if(TARGET OpenSSL::SSL AND TARGET OpenSSL::Crypto)
+        set(PSCAL_OPENSSL_SSL_TARGET OpenSSL::SSL)
+        set(PSCAL_OPENSSL_CRYPTO_TARGET OpenSSL::Crypto)
+    else()
+        set(PSCAL_OPENSSL_SSL_TARGET ${OPENSSL_SSL_LIBRARY})
+        set(PSCAL_OPENSSL_CRYPTO_TARGET ${OPENSSL_CRYPTO_LIBRARY})
+    endif()
 endif()
 if(PSCAL_PLATFORM_IOS)
     add_compile_definitions(PSCAL_TARGET_IOS __progname=pscal_progname __progname_full=pscal_progname_full)
@@ -965,7 +973,7 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/vproc_test_app.c
 )
 
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_PLATFORM_IOS OR APPLE)
     list(APPEND PSCAL_CORE_SOURCES ${SMALLCLUE_SOURCES})
 endif()
 
@@ -1303,6 +1311,9 @@ function(pscal_apply_common_compilation_settings target_name)
     if(PSCAL_HAS_LIBCURL AND CURL_INCLUDE_DIRS)
         target_include_directories(${target_name} PRIVATE ${CURL_INCLUDE_DIRS})
     endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+        target_compile_options(${target_name} PRIVATE -Wno-nullability-completeness)
+    endif()
 endfunction()
 
 add_library(pscal_core_static STATIC ${PSCAL_CORE_SOURCES})
@@ -1529,14 +1540,24 @@ if(PSCAL_BUILD_STATIC_LIBS)
 endif()
 
 if(BUILD_PSCALD)
-    set(DISASSEMBLER_SOURCES src/disassembler/main.c)
+    set(DISASSEMBLER_SOURCES
+        src/disassembler/main.c
+        src/disassembler/opcode_meta.c)
+    set(ASSEMBLER_SOURCES
+        src/disassembler/assembler_main.c
+        src/tools/ast_json_loader.c
+        src/disassembler/opcode_meta.c)
     if(NOT PSCAL_PLATFORM_IOS)
         add_pscal_executable(pscald ${DISASSEMBLER_SOURCES})
+        add_pscal_executable(pscalasm ${ASSEMBLER_SOURCES})
     endif()
     if(PSCAL_BUILD_STATIC_LIBS)
         pscal_add_static_library(pscal_pscald_static
             SOURCES ${DISASSEMBLER_SOURCES})
         target_link_libraries(pscal_pscald_static PUBLIC pscal_core_static)
+        pscal_add_static_library(pscal_pscalasm_static
+            SOURCES ${ASSEMBLER_SOURCES})
+        target_link_libraries(pscal_pscalasm_static PUBLIC pscal_core_static)
     endif()
 endif()
 
@@ -1858,8 +1879,17 @@ if(NOT PSCAL_PLATFORM_IOS)
         )
         list(APPEND PSCAL_CONFIGURED_EXAMPLE_OUTPUTS "${dst}")
     endforeach()
-    add_custom_target(configured_examples ALL
+add_custom_target(configured_examples ALL
         DEPENDS ${PSCAL_CONFIGURED_EXAMPLE_OUTPUTS})
+
+# Precompile tiny (clike) to bytecode for runtime use (iOS/shell wrappers)
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/bin/tiny.pbc
+    COMMAND ${CMAKE_BINARY_DIR}/bin/clike ${CMAKE_SOURCE_DIR}/bin/tiny.clike ${CMAKE_BINARY_DIR}/bin/tiny.pbc
+    DEPENDS clike ${CMAKE_SOURCE_DIR}/bin/tiny.clike
+    COMMENT "Building tiny.pbc"
+    VERBATIM)
+add_custom_target(tiny_pbc ALL DEPENDS ${CMAKE_BINARY_DIR}/bin/tiny.pbc)
 endif()
 
 if(NOT PSCAL_PLATFORM_IOS)
@@ -1874,7 +1904,7 @@ if(NOT PSCAL_PLATFORM_IOS)
                 RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     endif()
     if(BUILD_PSCALD)
-        install(TARGETS pscald
+        install(TARGETS pscald pscalasm
                 RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     endif()
 
@@ -1931,6 +1961,18 @@ if(NOT PSCAL_PLATFORM_IOS)
     endforeach()
     install(DIRECTORY Docs/
             DESTINATION "${_pscal_runtime_root}/docs")
+    install(FILES ${CMAKE_BINARY_DIR}/bin/tiny.pbc
+            DESTINATION "${_pscal_runtime_root}/bin")
+    # Tiny compiler runtime assets for iOS/iPadOS: install script plus minimal headers it loads.
+    install(PROGRAMS bin/tiny
+            DESTINATION "${_pscal_runtime_root}/bin"
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE
+                        WORLD_READ WORLD_EXECUTE)
+    install(FILES src/compiler/bytecode.h
+            DESTINATION "${_pscal_runtime_root}/src/compiler")
+    install(FILES src/core/version.h
+            DESTINATION "${_pscal_runtime_root}/src/core")
     install(DIRECTORY Tests/libs/
             DESTINATION "${_pscal_runtime_root}/etc/tests"
             USE_SOURCE_PERMISSIONS)
@@ -2070,6 +2112,9 @@ if(TARGET exsh AND PSCAL_FORCE_IOS)
     if(TARGET pscal_pscald_static)
         target_link_libraries(exsh PRIVATE pscal_pscald_static)
     endif()
+    if(TARGET pscal_pscalasm_static)
+        target_link_libraries(exsh PRIVATE pscal_pscalasm_static)
+    endif()
     if(TARGET pscal_json2bc_static)
         target_link_libraries(exsh PRIVATE pscal_json2bc_static)
     endif()
@@ -2091,7 +2136,7 @@ if(PSCAL_PLATFORM_IOS AND SMALLCLUE_WITH_EXSH)
     target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_EXSH)
 endif()
 
-if(PSCAL_PLATFORM_IOS)
+if(PSCAL_PLATFORM_IOS OR APPLE)
     add_executable(smallclue
         src/smallclue/src/main.c
     )
@@ -2152,6 +2197,9 @@ if(PSCAL_PLATFORM_IOS)
     endif()
     if(TARGET pscal_pscald_static)
         list(APPEND _tool_runner_libs pscal_pscald_static)
+    endif()
+    if(TARGET pscal_pscalasm_static)
+        list(APPEND _tool_runner_libs pscal_pscalasm_static)
     endif()
     list(REMOVE_DUPLICATES _tool_runner_libs)
     set(_tool_runner_sdl_libs ${PSCAL_SDL_CORE_LINK_LIBS})

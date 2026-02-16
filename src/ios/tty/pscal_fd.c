@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -45,6 +46,7 @@ int pscal_fd_close(struct pscal_fd *fd) {
 }
 
 static int gPollWakePipe[2] = {-1, -1};
+static bool gPollWakeNoSigpipe = false;
 static pthread_once_t gPollWakeOnce = PTHREAD_ONCE_INIT;
 
 static void pscalPollInit(void) {
@@ -62,6 +64,11 @@ static void pscalPollInit(void) {
         if (fd_flags >= 0) {
             fcntl(gPollWakePipe[i], F_SETFD, fd_flags | FD_CLOEXEC);
         }
+#ifdef F_SETNOSIGPIPE
+        if (i == 1 && fcntl(gPollWakePipe[i], F_SETNOSIGPIPE, 1) == 0) {
+            gPollWakeNoSigpipe = true;
+        }
+#endif
     }
 }
 
@@ -87,5 +94,33 @@ void pscal_fd_poll_wakeup(struct pscal_fd *fd, int UNUSED(events)) {
     if (gPollWakePipe[1] < 0) {
         return;
     }
+#if defined(F_SETNOSIGPIPE)
+    if (gPollWakeNoSigpipe) {
+        (void)vprocHostWrite(gPollWakePipe[1], "", 1);
+        return;
+    }
+#endif
+#if defined(SIGPIPE)
+    sigset_t block;
+    sigset_t previous;
+    sigemptyset(&block);
+    sigaddset(&block, SIGPIPE);
+    if (pthread_sigmask(SIG_BLOCK, &block, &previous) == 0) {
+        ssize_t wake_rc = vprocHostWrite(gPollWakePipe[1], "", 1);
+        if (wake_rc < 0 && errno == EPIPE) {
+            sigset_t pending;
+            if (sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE)) {
+                int consumed = 0;
+                while (sigwait(&block, &consumed) == 0) {
+                    if (consumed == SIGPIPE) {
+                        break;
+                    }
+                }
+            }
+        }
+        (void)pthread_sigmask(SIG_SETMASK, &previous, NULL);
+        return;
+    }
+#endif
     (void)vprocHostWrite(gPollWakePipe[1], "", 1);
 }

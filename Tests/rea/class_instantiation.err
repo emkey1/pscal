@@ -9,7 +9,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0014    | SET_GLOBAL          3 'd' cache=0x0
 0024    3 CONST_1
 0025    | CONST_1
-0026    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0026    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0032    0 HALT
 == End Disassembly: rea/class_instantiation.rea ==
 

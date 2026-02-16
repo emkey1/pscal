@@ -194,6 +194,11 @@ read_passphrase(const char *prompt, int flags)
 	int host_fd = -1;
 	int host_errno = 0;
 	VProcSessionStdio *session = vprocSessionStdioCurrent();
+	bool has_pscal_stdin = session && session->stdin_pscal_fd &&
+	    session->stdin_pscal_fd->ops &&
+	    session->stdin_pscal_fd->ops->read;
+	bool has_session_stdin = session &&
+	    (session->stdin_host_fd >= 0 || has_pscal_stdin || session->input != NULL);
 	struct termios saved_termios;
 	bool restore_termios = false;
 	if (vp) {
@@ -201,13 +206,13 @@ read_passphrase(const char *prompt, int flags)
 		host_errno = errno;
 	}
 	bool use_session_queue = false;
-	if (session && session->stdin_host_fd >= 0) {
+	if (has_session_stdin) {
 		if (pscalRuntimeStdinIsInteractive()) {
 			use_session_queue = true;
 		} else if (host_fd >= 0) {
-			if (session->stdin_host_fd == host_fd) {
+			if (session->stdin_host_fd >= 0 && session->stdin_host_fd == host_fd) {
 				use_session_queue = true;
-			} else {
+			} else if (session->stdin_host_fd >= 0) {
 				struct stat session_st;
 				struct stat host_st;
 				if (fstat(session->stdin_host_fd, &session_st) == 0 &&
@@ -218,12 +223,19 @@ read_passphrase(const char *prompt, int flags)
 				}
 			}
 		}
+		/* PTY-backed sessions may not expose a host stdin fd; still read from
+		 * the shared session queue so nested ssh/scp prompts consume UI input. */
+		if (!use_session_queue && has_pscal_stdin) {
+			use_session_queue = true;
+		}
 	}
-	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d",
+	debug3_f("PSCAL iOS read_passphrase stdin vp=%p host=%d host_errno=%d session_in=%d pscal_in=%d use_session=%d",
 	    (void *)vp,
 	    host_fd,
 	    host_errno,
-	    session ? session->stdin_host_fd : -1);
+	    session ? session->stdin_host_fd : -1,
+	    has_pscal_stdin ? 1 : 0,
+	    use_session_queue ? 1 : 0);
 	if (getenv("PSCALI_TOOL_DEBUG")) {
 		pscal_dump_session_state("readpass-start", host_fd);
 		fprintf(stderr,
@@ -247,13 +259,58 @@ read_passphrase(const char *prompt, int flags)
 		if (prompt[plen - 1] != ' ')
 			(void)write(STDERR_FILENO, " ", 1);
 	}
+	bool prompt_written = (prompt && *prompt);
 	size_t len = 0;
 	char ch = '\0';
+	int session_idle_spins = 0;
 	while (len + 1 < sizeof(buf)) {
-		ssize_t rd = use_session_queue ?
-		    vprocSessionReadInputShim(&ch, 1) :
-		    vprocReadShim(STDIN_FILENO, &ch, 1);
+		ssize_t rd = -1;
+		if (use_session_queue) {
+			rd = vprocSessionReadInputShim(&ch, 1);
+			if (rd <= 0) {
+				int session_errno = errno;
+				/* Nested scp->ssh can race session queue setup/rotation.
+				 * Fall back to direct stdin read before failing. */
+				if (rd == 0 ||
+				    (session_errno != EINTR &&
+				     session_errno != EAGAIN &&
+				     session_errno != EWOULDBLOCK)) {
+					ssize_t fallback_rd = vprocReadShim(STDIN_FILENO, &ch, 1);
+					if (fallback_rd > 0) {
+						rd = fallback_rd;
+					} else {
+						errno = (fallback_rd < 0) ? errno : session_errno;
+					}
+				}
+			}
+		} else {
+			rd = vprocReadShim(STDIN_FILENO, &ch, 1);
+		}
 		if (rd < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+			continue;
+		}
+		if (rd == 0 && use_session_queue) {
+			/* Session queue EOF may be transient when nested tools rotate
+			 * stdin plumbing (scp -> ssh). Retry instead of submitting an
+			 * empty password immediately. */
+			if (++session_idle_spins < 5000) {
+				usleep(1000);
+				continue;
+			}
+		}
+		if (rd < 0 && use_session_queue) {
+			/* Give session-backed stdin a short grace period before
+			 * treating it as a hard failure. */
+			if (++session_idle_spins < 5000) {
+				usleep(1000);
+				continue;
+			}
+		}
+		if (rd > 0) {
+			session_idle_spins = 0;
+		}
+		if (rd == 0 && use_session_queue) {
+			usleep(1000);
 			continue;
 		}
 		if (rd <= 0) {
@@ -286,6 +343,10 @@ read_passphrase(const char *prompt, int flags)
 readpass_done:
 	if (restore_termios) {
 		(void)vprocSessionStdioApplyTermios(STDIN_FILENO, TCSANOW, &saved_termios);
+	}
+	/* Ensure remote banners begin on a new line after password entry. */
+	if (prompt_written) {
+		(void)write(STDERR_FILENO, "\n", 1);
 	}
 	return ret;
 #endif

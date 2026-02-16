@@ -186,6 +186,25 @@ get_msg_extended(struct sftp_conn *conn, struct sshbuf *m, int initial)
 		fatal_fr(r, "reserve");
 	if (atomicio6(read, conn->fd_in, p, 4, sftpio,
 	    conn->limit_kbps > 0 ? &conn->bwlimit_in : NULL) != 4) {
+#if defined(PSCAL_TARGET_IOS)
+		if (getenv("PSCALI_TOOL_DEBUG") != NULL) {
+			int fdin_flags = fcntl(conn->fd_in, F_GETFD);
+			int fdin_host = -1;
+			int fdin_host_errno = 0;
+			VProc *dbg_vp = vprocCurrent();
+			if (dbg_vp != NULL) {
+				fdin_host = vprocTranslateFd(dbg_vp, conn->fd_in);
+				fdin_host_errno = errno;
+			}
+			fprintf(stderr,
+			    "[sftp-read] fd_in=%d fd_ok=%d fd_host=%d fd_host_errno=%d errno=%d\n",
+			    conn->fd_in,
+			    (fdin_flags >= 0) ? 1 : 0,
+			    fdin_host,
+			    fdin_host_errno,
+			    errno);
+		}
+#endif
 		if (errno == EPIPE || errno == ECONNRESET)
 			fatal("Connection closed");
 		else
@@ -3007,4 +3026,3 @@ sftp_globpath_is_dir(const char *pathname)
 
 	return l > 0 && pathname[l - 1] == '/';
 }
-

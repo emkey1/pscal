@@ -38,6 +38,44 @@
 
 #include "atomicio.h"
 
+#ifdef PSCAL_TARGET_IOS
+static int
+pscal_ios_atomicio_translate_fd(int fd)
+{
+	VProc *vp = vprocCurrent();
+	if (vp == NULL)
+		return fd;
+	int host_fd = vprocTranslateFd(vp, fd);
+	if (host_fd >= 0)
+		return host_fd;
+	return fd;
+}
+
+static ssize_t
+pscal_ios_atomicio_read_cb(int fd, void *buf, size_t n)
+{
+	return pscal_ios_read(fd, buf, n);
+}
+
+static ssize_t
+pscal_ios_atomicio_write_cb(int fd, void *buf, size_t n)
+{
+	return pscal_ios_write(fd, buf, n);
+}
+
+static ssize_t
+pscal_ios_atomicio_readv_cb(int fd, const struct iovec *iov, int iovcnt)
+{
+	return readv(pscal_ios_atomicio_translate_fd(fd), iov, iovcnt);
+}
+
+static ssize_t
+pscal_ios_atomicio_writev_cb(int fd, const struct iovec *iov, int iovcnt)
+{
+	return writev(pscal_ios_atomicio_translate_fd(fd), iov, iovcnt);
+}
+#endif /* PSCAL_TARGET_IOS */
+
 /*
  * ensure all of data on socket comes through. f==read || f==vwrite
  */
@@ -49,10 +87,27 @@ atomicio6(ssize_t (*f) (int, void *, size_t), int fd, void *_s, size_t n,
 	size_t pos = 0;
 	ssize_t res;
 	struct pollfd pfd;
+	int expect_read = 0;
+
+#ifdef PSCAL_TARGET_IOS
+	ssize_t (*raw_write_fn)(int, void *, size_t) =
+	    (ssize_t (*)(int, void *, size_t))write;
+	if (f == read) {
+		f = pscal_ios_atomicio_read_cb;
+		expect_read = 1;
+	} else if (f == raw_write_fn) {
+		f = pscal_ios_atomicio_write_cb;
+		expect_read = 0;
+	} else {
+		expect_read = (f == read);
+	}
+#else
+	expect_read = (f == read);
+#endif
 
 	pfd.fd = fd;
 #ifndef BROKEN_READ_COMPARISON
-	pfd.events = f == read ? POLLIN : POLLOUT;
+	pfd.events = expect_read ? POLLIN : POLLOUT;
 #else
 	pfd.events = POLLIN|POLLOUT;
 #endif
@@ -104,6 +159,23 @@ atomiciov6(ssize_t (*f) (int, const struct iovec *, int), int fd,
 	ssize_t res;
 	struct iovec iov_array[IOV_MAX], *iov = iov_array;
 	struct pollfd pfd;
+	int expect_read = 0;
+
+#ifdef PSCAL_TARGET_IOS
+	ssize_t (*raw_writev_fn)(int, const struct iovec *, int) =
+	    (ssize_t (*)(int, const struct iovec *, int))writev;
+	if (f == readv) {
+		f = pscal_ios_atomicio_readv_cb;
+		expect_read = 1;
+	} else if (f == raw_writev_fn) {
+		f = pscal_ios_atomicio_writev_cb;
+		expect_read = 0;
+	} else {
+		expect_read = (f == readv);
+	}
+#else
+	expect_read = (f == readv);
+#endif
 
 	if (iovcnt < 0 || iovcnt > IOV_MAX) {
 		errno = EINVAL;
@@ -114,7 +186,7 @@ atomiciov6(ssize_t (*f) (int, const struct iovec *, int), int fd,
 
 	pfd.fd = fd;
 #ifndef BROKEN_READV_COMPARISON
-	pfd.events = f == readv ? POLLIN : POLLOUT;
+	pfd.events = expect_read ? POLLIN : POLLOUT;
 #else
 	pfd.events = POLLIN|POLLOUT;
 #endif

@@ -13,6 +13,7 @@ typedef void (*PSCALRuntimeSessionOutputHandler)(uint64_t session_id,
                                                  const char *utf8,
                                                  size_t length,
                                                  void *context);
+typedef void (*PSCALLocationReaderObserver)(int readers, void *context);
 
 typedef struct PSCALRuntimeContext PSCALRuntimeContext;
 typedef struct VProcSessionStdio VProcSessionStdio;
@@ -25,6 +26,8 @@ void PSCALRuntimeDestroyRuntimeContext(PSCALRuntimeContext *ctx);
 void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
 /// Returns the runtime context for the current thread (shared context if unset).
 PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
+/// Returns the active session id for the current runtime context (0 if none).
+uint64_t PSCALRuntimeCurrentSessionId(void);
 /// Returns the VProc session stdio stored in the current runtime context.
 VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void);
 /// Sets the VProc session stdio for the current runtime context.
@@ -62,6 +65,8 @@ int PSCALRuntimeLaunchExshWithStackSize(int argc, char* argv[], size_t stackSize
 void PSCALRuntimeSendInput(const char *utf8, size_t length);
 /// Writes UTF-8 input into the specified session (direct PTY mode).
 void PSCALRuntimeSendInputForSession(uint64_t session_id, const char *utf8, size_t length);
+/// Writes UTF-8 input directly to the session master PTY, bypassing the input queue.
+void PSCALRuntimeSendInputUrgent(uint64_t session_id, const char *utf8, size_t length);
 
 /// Returns non-zero while the runtime is active.
 int PSCALRuntimeIsRunning(void);
@@ -72,6 +77,10 @@ void PSCALRuntimeConfigureAsanReportPath(const char *path);
 /// Updates the PTY window size (columns/rows). Safe to call before launching;
 /// the size will be applied once exsh starts.
 void PSCALRuntimeUpdateWindowSize(int columns, int rows);
+/// Requests the UI to update the current tab title (iOS only).
+int PSCALRuntimeSetTabTitle(const char *title);
+/// Requests the UI to update the current tab startup command (iOS only).
+int PSCALRuntimeSetTabStartupCommand(const char *command);
 
 void pscalRuntimeDebugLog(const char *message);
 void PSCALRuntimeLogLine(const char *message);
@@ -91,9 +100,12 @@ void pscalRuntimeResetSessionLog(void);
 /// version from the bundle. Caller must free(); returns NULL on failure.
 char *pscalRuntimeCopyMarketingVersion(void);
 
-/// Delivers a signal to the active runtime thread (no-op if inactive).
-/// Useful on iOS when job-control signals need to be injected manually.
+/// Injects a runtime control signal (virtualized on iOS). No-op if inactive.
+/// SIGINT/SIGTSTP/SIGTERM are handled through vproc/runtime control paths.
 void PSCALRuntimeSendSignal(int signo);
+/// Injects a control signal targeted at a specific session id.
+/// Returns non-zero when the signal was dispatched to a virtual foreground target.
+int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo);
 
 /// Configures the PATH_TRUNCATE environment variable used by the shell to
 /// present sandboxed paths as a shorter root (e.g. "/").
@@ -105,6 +117,8 @@ void PSCALRuntimeSetLocationDeviceEnabled(int enabled);
 
 /// Writes a payload into the virtual /dev/location device.
 int PSCALRuntimeWriteLocationDevice(const char *utf8, size_t length);
+/// Registers an observer for /dev/location reader count changes (iOS only).
+void PSCALRuntimeRegisterLocationReaderObserver(PSCALLocationReaderObserver cb, void *context);
 
 /// Creates/destroys an isolated shell runtime context for embedding scenarios
 /// (e.g. multiple iPadOS windows). The caller owns the returned pointer.
@@ -138,6 +152,8 @@ void PSCALRuntimeRegisterSessionOutputHandler(uint64_t session_id,
                                               void *context);
 /// Unregisters a per-session output handler.
 void PSCALRuntimeUnregisterSessionOutputHandler(uint64_t session_id);
+/// Pauses/resumes per-session output delivery (with bounded backlog replay on resume).
+void PSCALRuntimeSetSessionOutputPaused(uint64_t session_id, int paused);
 
 /// Updates the virtual terminal size for a session-backed PTY.
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows);

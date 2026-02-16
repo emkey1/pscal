@@ -1,8 +1,21 @@
 import Combine
 import Foundation
 import Darwin
+#if canImport(pscal_terminal_host)
+import pscal_terminal_host
+#endif
 import CoreLocation
 import UIKit
+
+@_cdecl("PSCALRuntimeOnProcessGroupEmpty")
+func PSCALRuntimeOnProcessGroupEmpty(_ pgid: Int32) {
+    DispatchQueue.main.async {
+        TerminalTabManager.shared.closeTabForPgid(Int(pgid))
+    }
+}
+
+@_silgen_name("pscalTtyCurrentPgid")
+private func c_pscalTtyCurrentPgid() -> Int32
 
 // MARK: - C Bridge Helpers
 
@@ -24,12 +37,6 @@ private let runtimeLogMirrorsToConsole: Bool = {
     }
     return value != "0"
 }()
-
-private func editorDebugMirrorsToConsole() -> Bool {
-    guard let raw = getenv("PSCALI_DEBUG_EDITOR") else { return false }
-    let value = String(cString: raw)
-    return !value.isEmpty && value != "0"
-}
 
 private let runtimeDebugMirrorEnabled: Bool = {
     guard let value = ProcessInfo.processInfo.environment["PSCALI_DEBUG_MIRROR_TERMINAL"] else {
@@ -218,11 +225,28 @@ func pscalRuntimeDebugLogBridge(_ message: UnsafePointer<CChar>?) {
     guard let message = message else { return }
     let msg = String(cString: message)
     appendRuntimeDebugLog(msg)
-    if editorDebugMirrorsToConsole() && !runtimeLogMirrorsToConsole {
+    if msg.hasPrefix("[nextvi-") {
         NSLog("%@", msg)
     }
+    /* Mirror to the Xcode console only when explicitly requested via
+     * PSCALI_RUNTIME_STDERR; editor debug tracing should remain in the
+     * runtime log file by default to avoid noisy console spam. */
     // Debug logging is global/shared
     PscalRuntimeBootstrap.shared.forwardDebugLogToTerminalIfEnabled(msg)
+}
+
+@_cdecl("pscalRuntimeBindSessionToBootstrap")
+func pscalRuntimeBindSessionToBootstrap(_ runtimeContext: UnsafeMutableRawPointer?, _ sessionId: UInt64) {
+    guard let runtimeContext, sessionId != 0 else { return }
+    guard let bootstrap = PscalRuntimeBootstrap.lookupBootstrap(for: runtimeContext) else { return }
+    bootstrap.bindSessionFromRuntime(sessionId)
+}
+
+@_cdecl("pscalRuntimeBindSessionToBootstrapHandle")
+func pscalRuntimeBindSessionToBootstrapHandle(_ bootstrapHandle: UnsafeMutableRawPointer?, _ sessionId: UInt64) {
+    guard let bootstrapHandle, sessionId != 0 else { return }
+    let bootstrap = Unmanaged<PscalRuntimeBootstrap>.fromOpaque(bootstrapHandle).takeUnretainedValue()
+    bootstrap.bindSessionFromRuntime(sessionId)
 }
 
 // MARK: - Runtime Bootstrap
@@ -247,6 +271,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
     }
     private static var instanceRegistry = [UnsafeRawPointer: WeakBootstrap]()
     private static let registryLock = NSLock()
+
+    fileprivate static func lookupBootstrap(for runtimeContext: UnsafeMutableRawPointer) -> PscalRuntimeBootstrap? {
+        let key = UnsafeRawPointer(runtimeContext)
+        registryLock.lock()
+        defer { registryLock.unlock() }
+        return instanceRegistry[key]?.value
+    }
     
     static var current: PscalRuntimeBootstrap? {
         // Attempt to find the specific instance associated with the active C thread context
@@ -280,6 +311,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     @Published private(set) var cursorInfo: TerminalCursorInfo?
     @Published private(set) var terminalBackgroundColor: UIColor = UIColor.systemBackground
     @Published private(set) var editorRenderToken: UInt64 = 0
+    @Published private(set) var editorSnapshot: EditorSnapshot = .empty
     
     // Instance-owned Bridge for editor mode
     let editorBridge = EditorTerminalBridge()
@@ -309,7 +341,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var activeGeometry: TerminalGeometryMetrics
     private var activeGeometrySource: GeometrySource = .main
     private var editorModeActive: Bool = false
+    private let editorRefreshQueue = DispatchQueue(label: "com.pscal.runtime.editor.refresh")
     private var editorRefreshPending: Bool = false
+    private var lastEditorRefreshTime: TimeInterval = 0
     private var appearanceObserver: NSObjectProtocol?
     private var mirrorDebugToTerminal: Bool = false
     private var waitingForRestart: Bool = false
@@ -319,6 +353,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var closeOnExit: Bool = false
     private var awaitingExitConfirmation: Bool = false
     private var tabId: UInt64 = 0
+    private var sessionId: UInt64 = 0
     private var shellContext: UnsafeMutableRawPointer?
     private var runtimeContext: OpaquePointer?
     private var outputDrainTimer: DispatchSourceTimer?
@@ -336,6 +371,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
     private var htermHistoryHead: Int = 0
     private let htermHistoryMaxBytes: Int = 2 * 1024 * 1024
     private var htermHistoryNeedsReplay: Bool = true
+    private var shellPgid: Int = 0
     
     // THROTTLING VARS
     private var renderQueued = false
@@ -351,6 +387,25 @@ final class PscalRuntimeBootstrap: ObservableObject {
         PSCALRuntimeSetCurrentRuntimeContext(runtimeContext)
         defer { PSCALRuntimeSetCurrentRuntimeContext(previous) }
         return body()
+    }
+
+    fileprivate func bindSessionFromRuntime(_ sessionId: UInt64) {
+        guard sessionId != 0 else { return }
+        let (previous, tabId) = stateQueue.sync { () -> (UInt64, UInt64) in
+            let previous = self.sessionId
+            self.sessionId = sessionId
+            return (previous, self.tabId)
+        }
+        if previous == sessionId {
+            return
+        }
+        sshResizeLog("[ssh-resize] runtime bind session runtime=\(runtimeId) previous=\(previous) session=\(sessionId)")
+        DispatchQueue.main.async {
+            self.htermController?.setResizeSessionId(sessionId)
+            if tabId != 0 {
+                TerminalTabManager.shared.registerShellSession(tabId: tabId, sessionId: sessionId)
+            }
+        }
     }
 
     private func withState<T>(_ body: () -> T) -> T {
@@ -476,7 +531,12 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 if let ctx = createdRuntimeContext {
                     let previous = PSCALRuntimeGetCurrentRuntimeContext()
                     PSCALRuntimeSetCurrentRuntimeContext(ctx)
-                    PSCALRuntimeSendInput(pointer, buffer.count)
+                    let sessionId = PSCALRuntimeCurrentSessionId()
+                    if sessionId != 0 {
+                        PSCALRuntimeSendInputUrgent(sessionId, pointer, buffer.count)
+                    } else {
+                        PSCALRuntimeSendInput(pointer, buffer.count)
+                    }
                     PSCALRuntimeSetCurrentRuntimeContext(previous)
                 } else {
                     PSCALRuntimeSendInput(pointer, buffer.count)
@@ -499,8 +559,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         
         self.terminalBuffer.onMouseModeChange = { [weak self] mode, encoding in
-            self?.mouseMode = mode
-            self?.mouseEncoding = encoding
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.mouseMode = mode
+                self.mouseEncoding = encoding
+            }
         }
         
         withRuntimeContext {
@@ -509,9 +572,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
         appearanceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                                     object: nil,
                                                                     queue: .main) { [weak self] _ in
-            // Font change can leave the prompt visually stale; nudge terminal.
-            self?.send(" ")
-            self?.send("\u{7F}")
             self?.scheduleRender()
         }
     }
@@ -538,7 +598,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             tabInitLog("runtime=\(runtimeId) reuse hterm controller=\(controller.instanceId)")
             return controller
         }
-        let controller = HtermTerminalController()
+        let controller = HtermTerminalController.makeOnMainThread()
         tabInitLog("runtime=\(runtimeId) create hterm controller=\(controller.instanceId)")
         htermController = controller
         outputDrainQueue.sync { [weak self] in
@@ -663,13 +723,34 @@ final class PscalRuntimeBootstrap: ObservableObject {
                     if cols > 0 && rows > 0 {
                         PSCALRuntimeUpdateWindowSize(cols, rows)
                     }
+
+                    let sessionId = PSCALRuntimeCurrentSessionId()
+                    if sessionId != 0 {
+                        self.stateQueue.async { self.sessionId = sessionId }
+                        DispatchQueue.main.async {
+                            self.htermController?.setResizeSessionId(sessionId)
+                        }
+                        DispatchQueue.main.async {
+                            TerminalTabManager.shared.registerShellSession(tabId: self.tabId,
+                                                                           sessionId: sessionId)
+                        }
+                    }
+                    let pgid = Int(c_pscalTtyCurrentPgid())
+                    if pgid > 0 {
+                        self.stateQueue.async { self.shellPgid = pgid }
+                        DispatchQueue.main.async {
+                            TerminalTabManager.shared.registerShellPgid(pgid,
+                                                                         tabId: self.tabId)
+                        }
+                    }
+                }
+                DispatchQueue.main.async {
+                    LocationDeviceProvider.shared.runtimeBecameReady()
                 }
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                // Always send a carriage return to force prompt rendering
-                self.send(" ")
-                self.send("\u{7F}")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                self.scheduleRender()
             }
             if self.stateQueue.sync(execute: { self.skipRcNextStart }) {
                 unsetenv("EXSH_SKIP_RC")
@@ -729,20 +810,6 @@ final class PscalRuntimeBootstrap: ObservableObject {
             DispatchQueue.main.async { self.start() }
             return
         }
-        if data.count == 1 {
-            switch data.first {
-            case 0x03: // Ctrl-C
-                withRuntimeContext {
-                    PSCALRuntimeSendSignal(SIGINT)
-                }
-            case 0x1a: // Ctrl-Z
-                withRuntimeContext {
-                    PSCALRuntimeSendSignal(SIGTSTP)
-                }
-            default:
-                break
-            }
-        }
         if editorBridge.interceptInputIfNeeded(data: data) {
             return
         }
@@ -766,6 +833,54 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 }
             }
         }
+    }
+
+    func sendInterrupt() {
+        let activeSession = resolveActiveSessionId()
+        if activeSession != 0 {
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
+            }
+            if !delivered {
+                send("\u{03}")
+            }
+            return
+        }
+        withRuntimeContext {
+            PSCALRuntimeSendSignal(SIGINT)
+        }
+    }
+
+    func sendSuspend() {
+        let activeSession = resolveActiveSessionId()
+        if activeSession != 0 {
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
+            }
+            if !delivered {
+                send("\u{1A}")
+            }
+            return
+        }
+        withRuntimeContext {
+            PSCALRuntimeSendSignal(SIGTSTP)
+        }
+    }
+
+    private func resolveActiveSessionId() -> UInt64 {
+        let cached = withState { sessionId }
+        if cached != 0 {
+            return cached
+        }
+        let runtimeSession = withRuntimeContext {
+            PSCALRuntimeCurrentSessionId()
+        }
+        if runtimeSession != 0 {
+            stateQueue.async {
+                self.sessionId = runtimeSession
+            }
+        }
+        return runtimeSession
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {
@@ -828,7 +943,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             PSCALRuntimeSendSignal(SIGINT)
         }
         // Safety net: if the exit handler doesn't fire promptly, restart anyway.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.35) { [weak self] in
             guard let self = self else { return }
             let stillPending = self.stateQueue.sync { self.forceRestartPending }
             if stillPending {
@@ -847,6 +962,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
         stateQueue.async {
             self.tabId = id
         }
+    }
+
+    func currentShellPgid() -> Int {
+        return stateQueue.sync { shellPgid }
     }
 
     func currentScreenText(maxLength: Int = 8000) -> String {
@@ -914,6 +1033,13 @@ final class PscalRuntimeBootstrap: ObservableObject {
         runtimeDebugLog("[Runtime] exsh exit detected (status=\(status)); awaiting user to restart")
         let stackSymbols = Thread.callStackSymbols.joined(separator: "\n")
         RuntimeLogger.runtime.append("Call stack for exit status \(status):\n\(stackSymbols)\n")
+        let pgid = self.stateQueue.sync { self.shellPgid }
+        if pgid > 0 {
+            DispatchQueue.main.async {
+                TerminalTabManager.shared.unregisterShellPgid(pgid)
+            }
+            self.stateQueue.async { self.shellPgid = 0 }
+        }
         releaseHandlerContext()
         stopOutputDrain()
         Task { @MainActor in
@@ -1011,6 +1137,10 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
             self.htermReadyFlag = controller.isLoaded
             self.flushPendingHtermOutputIfReady()
+            let boundSessionId = self.stateQueue.sync { self.sessionId }
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(boundSessionId)
+            }
         }
         DispatchQueue.main.async {
             self.htermReady = controller?.isLoaded ?? false
@@ -1030,6 +1160,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
             if self.htermReadyFlag {
                 self.htermReadyFlag = false
                 self.scheduleRender()
+            }
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(0)
             }
         }
         DispatchQueue.main.async {
@@ -1117,28 +1250,38 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     // --- RENDER SCHEDULING (THROTTLED) ---
     private func scheduleRender(preserveBackground: Bool = false) {
+        if Thread.isMainThread {
+            scheduleRenderOnMain(preserveBackground: preserveBackground)
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.scheduleRenderOnMain(preserveBackground: preserveBackground)
+        }
+    }
+
+    private func scheduleRenderOnMain(preserveBackground: Bool) {
         if isEditorModeActive() {
             refreshEditorDisplay()
             return
         }
-        if htermReadyFlag {
+        if htermReady {
             return
         }
-        
+
         // If a render is already pending, do nothing (coalesce updates)
         if renderQueued {
             return
         }
-        
+
         let now = Date().timeIntervalSince1970
         let timeSinceLast = now - lastRenderTime
-        
+
         // If we are under the throttle limit, delay the render.
         // This ensures massive I/O bursts (like pasting) don't lock the UI thread.
         if timeSinceLast < minRenderInterval {
             renderQueued = true
             let delay = minRenderInterval - timeSinceLast
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { [weak self] in
                 self?.performRender(preserveBackground: preserveBackground)
             }
         } else {
@@ -1149,12 +1292,19 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
     }
-    
+
     private func performRender(preserveBackground: Bool) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.performRender(preserveBackground: preserveBackground)
+            }
+            return
+        }
+
         // Reset flags
         renderQueued = false
         lastRenderTime = Date().timeIntervalSince1970
-        
+
         // Actual expensive rendering logic
         let allowScrollback = !self.isEditorModeActive()
         let snapshot = self.terminalBuffer.snapshot(includeScrollback: allowScrollback)
@@ -1193,27 +1343,57 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
             refreshEditorDisplay()
         } else {
+            DispatchQueue.main.async {
+                self.editorSnapshot = .empty
+            }
             refreshActiveGeometry(forceRuntimeUpdate: true)
             scheduleRender()
         }
+        requestTerminalInputFocus()
+    }
+
+    private func requestTerminalInputFocus() {
+        let focusRequest = {
+            NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
+        }
+        DispatchQueue.main.async(execute: focusRequest)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: focusRequest)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55, execute: focusRequest)
     }
 
     func refreshEditorDisplay() {
-        guard editorBridge.isActive else { return }
-        let shouldSchedule: Bool = stateQueue.sync {
+        guard isEditorModeActive() else { return }
+
+        let now = Date().timeIntervalSince1970
+        // Keep editor refresh gating off the broader runtime state queue so
+        // heavy terminal activity cannot stall key processing in nextvi.
+        let schedule: (shouldSchedule: Bool, delay: TimeInterval) = editorRefreshQueue.sync {
             if editorRefreshPending {
-                return false
+                return (false, 0)
             }
             editorRefreshPending = true
-            return true
+            let elapsed = now - lastEditorRefreshTime
+            let minInterval = 1.0 / 60.0
+            let delay = elapsed >= minInterval ? 0 : (minInterval - elapsed)
+            return (true, delay)
         }
-        guard shouldSchedule else { return }
-        DispatchQueue.main.async {
+
+        guard schedule.shouldSchedule else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + schedule.delay) {
+            if !self.isEditorModeActive() {
+                self.editorRefreshQueue.sync {
+                    self.editorRefreshPending = false
+                }
+                return
+            }
+
             self.terminalBackgroundColor = TerminalFontSettings.shared.backgroundColor
+            self.editorSnapshot = self.editorBridge.snapshot()
             self.editorRenderToken &+= 1
             EditorWindowManager.shared.refreshWindow()
-            self.stateQueue.sync {
+            self.editorRefreshQueue.sync {
                 self.editorRefreshPending = false
+                self.lastEditorRefreshTime = Date().timeIntervalSince1970
             }
         }
     }
@@ -1381,7 +1561,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         } else {
             cursorInfo = nil
         }
-        return (result, cursorInfo)
+        let immutable = (result.copy() as? NSAttributedString) ??
+            NSAttributedString(attributedString: result)
+        return (immutable, cursorInfo)
     }
 }
 
@@ -1395,6 +1577,12 @@ struct EditorSnapshot {
     let text: String
     let attributedText: NSAttributedString
     let cursor: TerminalCursorInfo?
+
+    static let empty = EditorSnapshot(
+        text: "",
+        attributedText: NSAttributedString(string: ""),
+        cursor: nil
+    )
 }
 
 struct CellAttributes: Equatable {
@@ -1494,6 +1682,8 @@ final class EditorTerminalBridge {
     private let inputCondition = NSCondition()
     private var pendingInput: [UInt8] = []
     private var altScreenState: ScreenState?
+    private static let maxColumns = 512
+    private static let maxRows = 256
 
     var isActive: Bool {
         stateQueue.sync { state.active }
@@ -1540,8 +1730,8 @@ final class EditorTerminalBridge {
     func resize(columns: Int, rows: Int) {
         stateQueue.sync(flags: .barrier) {
             guard state.active else { return }
-            let newRows = max(1, rows)
-            let newCols = max(1, columns)
+            let newRows = max(1, min(rows, Self.maxRows))
+            let newCols = max(1, min(columns, Self.maxColumns))
             let blankRow = Array(repeating: Character(" "), count: newCols)
             let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: newCols)
             var newGrid = Array(repeating: blankRow, count: newRows)
@@ -1576,8 +1766,8 @@ final class EditorTerminalBridge {
     }
 
     private func rebuildState(columns: Int, rows: Int) {
-        state.columns = max(1, columns)
-        state.rows = max(1, rows)
+        state.columns = max(1, min(columns, Self.maxColumns))
+        state.rows = max(1, min(rows, Self.maxRows))
         let blankRow = Array(repeating: Character(" "), count: state.columns)
         let blankAttr = Array(repeating: CellAttributes.defaultAttributes, count: state.columns)
         state.grid = Array(repeating: blankRow, count: state.rows)
@@ -1854,29 +2044,51 @@ final class EditorTerminalBridge {
         var plainBuilder = String()
         plainBuilder.reserveCapacity(currentState.rows * currentState.columns + max(currentState.rows - 1, 0))
         let attributed = NSMutableAttributedString()
-        let newlineAttrs: [NSAttributedString.Key: Any] = [.font: baseFont,
-                                                           .foregroundColor: fgDefault,
-                                                           .backgroundColor: bgDefault]
+        let newlineAttrs: [NSAttributedString.Key: Any] = [
+            .font: baseFont,
+            .foregroundColor: fgDefault,
+            .backgroundColor: bgDefault
+        ]
+
+        var runText = String()
+        runText.reserveCapacity(max(64, currentState.columns))
+        var runAttributes: CellAttributes?
+
+        func flushRun() {
+            guard !runText.isEmpty, let runAttributes else { return }
+            let resolved = palette.resolve(attr: runAttributes, defaultFG: fgDefault, defaultBG: bgDefault)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: runAttributes.bold ? boldFont : baseFont,
+                .foregroundColor: resolved.fg,
+                .backgroundColor: resolved.bg,
+                .underlineStyle: runAttributes.underline ? NSUnderlineStyle.single.rawValue : 0
+            ]
+            attributed.append(NSAttributedString(string: runText, attributes: attrs))
+            runText.removeAll(keepingCapacity: true)
+        }
 
         for r in 0..<currentState.rows {
             for c in 0..<currentState.columns {
                 let ch = currentState.grid[r][c]
                 let attr = currentState.attrs[r][c]
-                plainBuilder.append(ch)
-                let resolved = palette.resolve(attr: attr, defaultFG: fgDefault, defaultBG: bgDefault)
-                let attrs: [NSAttributedString.Key: Any] = [
-                    .font: attr.bold ? boldFont : baseFont,
-                    .foregroundColor: resolved.fg,
-                    .backgroundColor: resolved.bg,
-                    .underlineStyle: attr.underline ? NSUnderlineStyle.single.rawValue : 0
-                ]
-                attributed.append(NSAttributedString(string: String(ch), attributes: attrs))
+                let displayCharacter: Character = ch.unicodeScalars.allSatisfy({ $0.value >= 0x20 }) ? ch : " "
+                plainBuilder.append(displayCharacter)
+
+                if runAttributes == nil {
+                    runAttributes = attr
+                } else if runAttributes != attr {
+                    flushRun()
+                    runAttributes = attr
+                }
+                runText.append(displayCharacter)
             }
             if r < currentState.rows - 1 {
+                flushRun()
                 plainBuilder.append("\n")
                 attributed.append(NSAttributedString(string: "\n", attributes: newlineAttrs))
             }
         }
+        flushRun()
         let joined = plainBuilder
         let cursor: TerminalCursorInfo?
         if currentState.active && currentState.cursorVisible && !lines.isEmpty {
@@ -1906,8 +2118,10 @@ final class EditorTerminalBridge {
         } else {
             cursor = nil
         }
+        let immutable = (attributed.copy() as? NSAttributedString) ??
+            NSAttributedString(attributedString: attributed)
         return EditorSnapshot(text: joined,
-                              attributedText: attributed,
+                              attributedText: immutable,
                               cursor: cursor)
     }
 
@@ -1930,11 +2144,11 @@ final class EditorTerminalBridge {
         guard maxLength > 0 else { return 0 }
         inputCondition.lock()
         defer { inputCondition.unlock() }
-        let timeoutSeconds = Double(max(timeoutMs, 0)) / 10.0
+        let timeoutSeconds = Double(max(timeoutMs, 0)) / 1000.0
         let deadline = timeoutMs > 0 ? Date().addingTimeInterval(timeoutSeconds) : nil
         while pendingInput.isEmpty {
             if !isActive {
-                return 0
+                return -1
             }
             if let deadline {
                 if !inputCondition.wait(until: deadline) {
@@ -2167,91 +2381,125 @@ func pscalElvisDump() {
 final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     static let shared = LocationDeviceProvider()
 
-    private let queue = DispatchQueue(label: "com.pscal.location.device")
+    private static let readerObserver: PSCALLocationReaderObserver = { count, ctx in
+        guard let ctx else { return }
+        let provider = Unmanaged<LocationDeviceProvider>.fromOpaque(ctx).takeUnretainedValue()
+        provider.handleReaderCountChanged(Int(count))
+    }
+
     private let locationManager: CLLocationManager
+    private let workQueue = DispatchQueue(label: "com.pscal.location", qos: .utility)
     private var started = false
     private var deviceEnabled = false
     private var locationActive = false
-    private var latestLocation: CLLocation?
-    private var sendTimer: DispatchSourceTimer?
-    private let sendInterval: TimeInterval = 1.0
-
+    private var latestCoordinate: CLLocationCoordinate2D?
+    private var readerCount: Int = 0
     private override init() {
         locationManager = CLLocationManager()
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.pausesLocationUpdatesAutomatically = false
+        DispatchQueue.main.async {
+            self.locationManager.requestAlwaysAuthorization()
+            self.locationManager.startUpdatingLocation()
+            self.locationManager.requestLocation()
+        }
+        PSCALRuntimeRegisterLocationReaderObserver(Self.readerObserver,
+                                                   Unmanaged.passUnretained(self).toOpaque())
     }
 
     func start() {
-        queue.async {
-            guard !self.started else { return }
-            self.started = true
-            self.syncDeviceStateLocked()
+        if started {
+            debugLog("start ignored (already started, enabled=\(deviceEnabled))")
+            return
         }
+        started = true
+        debugLog("start triggered (enabled=\(deviceEnabled))")
+        scheduleSync()
     }
 
     func setDeviceEnabled(_ enabled: Bool) {
-        queue.async {
-            self.deviceEnabled = enabled
-            self.syncDeviceStateLocked()
-        }
+        deviceEnabled = enabled
+        debugLog("setDeviceEnabled(\(enabled)) started=\(started)")
+        scheduleSync()
     }
 
-    private func syncDeviceStateLocked() {
-        PscalRuntimeBootstrap.shared.withRuntimeContext {
-            PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
-        }
-        if started && deviceEnabled {
-            startLocationUpdatesLocked()
-            startSendTimerLocked()
-            sendLatestLocationLocked()
-        } else {
-            stopSendTimerLocked()
-            stopLocationUpdatesLocked()
-        }
-    }
-
-    private func startLocationUpdatesLocked() {
-        guard !locationActive else { return }
-        locationActive = true
-        DispatchQueue.main.async {
-            self.requestAuthorizationIfNeeded()
-            self.locationManager.startUpdatingLocation()
-            if let initial = self.locationManager.location {
-                self.queue.async { self.latestLocation = initial }
-            }
-        }
-    }
-
-    private func stopLocationUpdatesLocked() {
-        guard locationActive else { return }
-        locationActive = false
-        DispatchQueue.main.async {
-            self.locationManager.stopUpdatingLocation()
-        }
-    }
-
-    private func startSendTimerLocked() {
-        guard sendTimer == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + sendInterval, repeating: sendInterval)
-        timer.setEventHandler { [weak self] in
+    func runtimeBecameReady() {
+        debugLog("runtimeBecameReady; syncing state")
+        scheduleSync()
+        workQueue.async { [weak self] in
             self?.sendLatestLocationLocked()
         }
-        timer.resume()
-        sendTimer = timer
     }
 
-    private func stopSendTimerLocked() {
-        sendTimer?.cancel()
-        sendTimer = nil
+    private func syncDeviceStateImpl() {
+        let forcedOff = getenv("PSCALI_LOCATION_DISABLED") != nil
+        let forcedOn = getenv("PSCALI_LOCATION_FORCE") != nil
+        let desiredEnabled = forcedOn || (!forcedOff && readerCount > 0)
+
+        if desiredEnabled != deviceEnabled {
+            deviceEnabled = desiredEnabled
+            debugLog("location desiredEnabled=\(desiredEnabled) readers=\(readerCount) forcedOn=\(forcedOn) forcedOff=\(forcedOff)")
+        }
+
+        PSCALRuntimeSetLocationDeviceEnabled(deviceEnabled ? 1 : 0)
+        if !started || !deviceEnabled {
+            stopLocationUpdates()
+            return
+        }
+        startLocationUpdates()
+        sendLatestLocationLocked()
+    }
+
+    private func startLocationUpdates() {
+        if locationActive {
+            return
+        }
+        locationActive = true
+        debugLog("starting location updates")
+        let performStart = { [weak self] in
+            guard let self else { return }
+            self.requestAuthorizationIfNeeded()
+            self.locationManager.startUpdatingLocation()
+            self.requestLocationOnce(force: true)
+            if let initial = self.locationManager.location {
+                let coord = initial.coordinate
+                self.workQueue.async { [weak self] in
+                    self?.latestCoordinate = coord
+                    self?.sendLatestLocationLocked()
+                }
+            }
+        }
+        if Thread.isMainThread {
+            performStart()
+        } else {
+            DispatchQueue.main.async(execute: performStart)
+        }
+    }
+
+    private func stopLocationUpdates() {
+        if !locationActive {
+            return
+        }
+        locationActive = false
+        debugLog("stopping location updates")
+        if Thread.isMainThread {
+            locationManager.stopUpdatingLocation()
+        } else {
+            DispatchQueue.main.async { self.locationManager.stopUpdatingLocation() }
+        }
     }
 
     private func sendLatestLocationLocked() {
-        guard deviceEnabled, let location = latestLocation else { return }
-        let payload = LocationDeviceProvider.createLocationPayload(location: location)
+        // Must be invoked on workQueue; only value types touched.
+        guard deviceEnabled, let coord = latestCoordinate else { return }
+        let payload = LocationDeviceProvider.createLocationPayload(
+            latitude: coord.latitude,
+            longitude: coord.longitude
+        )
         sendPayload(payload)
     }
 
@@ -2259,9 +2507,14 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
         guard let data = payload.data(using: .utf8), !data.isEmpty else { return }
         data.withUnsafeBytes { buffer in
             guard let base = buffer.baseAddress else { return }
-            let res = PscalRuntimeBootstrap.shared.withRuntimeContext {
-                PSCALRuntimeWriteLocationDevice(base.assumingMemoryBound(to: CChar.self),
-                                                buffer.count)
+            let res = PSCALRuntimeWriteLocationDevice(base.assumingMemoryBound(to: CChar.self),
+                                                      buffer.count)
+            if debugEnabled() {
+                if res >= 0 {
+                    debugLog(String(format: "write ok len=%zu", buffer.count))
+                } else {
+                    debugLog(String(format: "write failed len=%zu errno=%d", buffer.count, errno))
+                }
             }
             if res < 0 {
                 let err = errno
@@ -2275,32 +2528,102 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func requestAuthorizationIfNeeded() {
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
-            locationManager.requestWhenInUseAuthorization()
+            DispatchQueue.main.async {
+                self.locationManager.requestAlwaysAuthorization()
+            }
+        } else if status == .authorizedWhenInUse || status == .authorizedAlways {
+            DispatchQueue.main.async {
+                self.locationManager.startUpdatingLocation()
+            }
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        if status == .denied || status == .restricted {
-            queue.async {
-                self.stopLocationUpdatesLocked()
-            }
+        debugLog("authorization changed: \(status.rawValue)")
+        switch status {
+        case .denied, .restricted:
+            debugLog("authorization restricted/denied; stopping updates")
+            stopLocationUpdates()
+        case .authorizedAlways, .authorizedWhenInUse:
+            debugLog("authorization granted; starting updates")
+            startLocationUpdates()
+            requestLocationOnce(force: true)
+        default:
+            break
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
-        queue.async {
-            self.latestLocation = latest
+        debugLog(String(format: "didUpdateLocations lat=%.5f lon=%.5f",
+                        latest.coordinate.latitude,
+                        latest.coordinate.longitude))
+        let coord = latest.coordinate
+        workQueue.async { [weak self] in
+            self?.latestCoordinate = coord
+            self?.sendLatestLocationLocked()
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         runtimeDebugLog("Location device error: \(error.localizedDescription)")
+        debugLog("didFailWithError \(error.localizedDescription)")
+    }
+
+    private func handleReaderCountChanged(_ count: Int) {
+        let normalized = max(0, count)
+        if readerCount == normalized {
+            return
+        }
+        readerCount = normalized
+        scheduleSync()
     }
 
     private static func createLocationPayload(location: CLLocation) -> String {
-        let lat = location.coordinate.latitude
-        let lon = location.coordinate.longitude
+        return createLocationPayload(latitude: location.coordinate.latitude,
+                                     longitude: location.coordinate.longitude)
+    }
+
+    private static func createLocationPayload(latitude: CLLocationDegrees,
+                                              longitude: CLLocationDegrees) -> String {
+        let lat = latitude
+        let lon = longitude
         return String(format: "%+.6f,%+.6f\n", lat, lon)
+    }
+
+    private func debugLog(_ message: String) {
+        guard debugEnabled() else { return }
+        runtimeDebugLog("[location] \(message)")
+        NSLog("[location] %@", message)
+    }
+
+    private func debugEnabled() -> Bool {
+        guard let raw = getenv("PSCALI_LOCATION_DEBUG") else { return false }
+        let val = String(cString: raw)
+        return !val.isEmpty && val != "0"
+    }
+
+    private func scheduleSync() {
+        workQueue.async { [weak self] in
+            self?.syncDeviceStateImpl()
+        }
+    }
+
+    private var lastRequestTime: Date?
+    private func requestLocationOnce(force: Bool) {
+        let now = Date()
+        if !force, let last = lastRequestTime, now.timeIntervalSince(last) < 5 {
+            return
+        }
+        lastRequestTime = now
+        let request = { [weak self] in
+            guard let self else { return }
+            self.locationManager.requestLocation()
+        }
+        if Thread.isMainThread {
+            request()
+        } else {
+            DispatchQueue.main.async(execute: request)
+        }
     }
 }

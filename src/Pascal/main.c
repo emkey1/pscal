@@ -35,6 +35,7 @@
 #include "core/preproc.h"
 #include "core/build_info.h"
 #include "common/frontend_kind.h"
+#include "common/pascal_state.h"
 #include "globals.h"
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
@@ -42,6 +43,7 @@
 #include "compiler/compiler.h"
 #include "core/cache.h"
 #include "symbol/symbol.h"
+#include "common/path_virtualization.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -231,6 +233,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
 
     /* Register built-in functions and procedures. */
     registerAllBuiltins();
+    registerBuiltinFunction("mstreamappendbyte", AST_FUNCTION_DECL, NULL);
 
 #ifdef DEBUG
     fprintf(stderr, "Completed all built-in registrations. About to init lexer.\n");
@@ -474,6 +477,9 @@ static void flushCapturedStderrAtExit(void) {
     } while (0)
 
 int PSCAL_PASCAL_ENTRY_SYMBOL(int argc, char *argv[]) {
+    /* Reset global Pascal state so repeated in-process runs start clean. */
+    pascalInvalidateGlobalState();
+
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
     const char* initTerm = getenv("PSCAL_INIT_TERM");
     if (initTerm && *initTerm && *initTerm != '0') vmInitTerminalState();

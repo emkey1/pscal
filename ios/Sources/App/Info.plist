@@ -35,6 +35,14 @@
 	<string>Local network access is required for SSH/telnet/ping connections to LAN hosts.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used to feed /dev/location with live updates.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Location is used to feed /dev/location with live updates.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Location is used to feed /dev/location with live updates.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

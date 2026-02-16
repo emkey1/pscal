@@ -14,6 +14,29 @@ func terminalViewLog(_ message: String) {
     }
 }
 
+enum TerminalDebugFlags {
+    static let printChanges: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if let raw = env["PSCALI_PRINT_CHANGES"], raw != "0" {
+            return true
+        }
+        if ProcessInfo.processInfo.arguments.contains("--pscali-print-changes") {
+            return true
+        }
+        if UserDefaults.standard.bool(forKey: "PSCALI_PRINT_CHANGES") {
+            return true
+        }
+        return false
+    }()
+}
+
+func traceViewChanges(_ name: String) {
+    guard TerminalDebugFlags.printChanges else { return }
+    let message = "[ViewChanges] \(name)"
+    print(message)
+    terminalViewLog(message)
+}
+
 private let sshDebugEnabled: Bool = {
     let env = ProcessInfo.processInfo.environment
     if let value = env["PSCALI_SSH_DEBUG"], !value.isEmpty, value != "0" {
@@ -28,4 +51,9 @@ private let sshDebugEnabled: Bool = {
 func sshDebugLog(_ message: String) {
     guard sshDebugEnabled else { return }
     terminalViewLog(message)
+    NSLog("%@", message)
+}
+
+func sshResizeLog(_ message: String) {
+    sshDebugLog(message)
 }

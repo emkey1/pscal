@@ -122,6 +122,13 @@ def run_exsh(executable: Path, case: TestCase, extra_args: Optional[List[str]] =
     cmd.append(str(case.script))
     env = os.environ.copy()
     env.update(case.env)
+    # Ensure exsh tests exercise tool binaries built from this workspace.
+    tool_bin = str((REPO_ROOT / "build" / "bin").resolve())
+    current_path = env.get("PATH", "")
+    if current_path:
+        env["PATH"] = f"{tool_bin}:{current_path}"
+    else:
+        env["PATH"] = tool_bin
     return subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),

@@ -1,5 +1,12 @@
 #include "backend_ast/builtin.h"
 #include "ext_builtins/registry.h"
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
+#define PSCAL_MOBILE_PLATFORM 1
+#endif
 
 static void registerShellBuiltin(const char *category, const char *group,
                                  const char *name, VmBuiltinFn handler) {
@@ -99,7 +106,7 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "echo", vmBuiltinShellEcho);
     registerShellBuiltin(category, command_group, "true", vmBuiltinShellTrue);
     registerShellBuiltin(category, command_group, "false", vmBuiltinShellFalse);
-#ifdef PSCAL_TARGET_IOS
+#ifdef PSCAL_MOBILE_PLATFORM
     registerShellBuiltin(category, command_group, "pascal", vmBuiltinShellPascal);
 #ifdef BUILD_DASCAL
     registerShellBuiltin(category, command_group, "dascal", vmBuiltinShellDascal);
@@ -111,11 +118,19 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "pscaljson2bc", vmBuiltinShellPscalJson2bc);
 #ifdef BUILD_PSCALD
     registerShellBuiltin(category, command_group, "pscald", vmBuiltinShellPscald);
+    registerShellBuiltin(category, command_group, "pscalasm", vmBuiltinShellPscalasm);
 #endif
     registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
+    registerShellBuiltin(category, command_group, "ps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);
+#endif
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
+    registerShellBuiltin(category, command_group, "tabname", vmBuiltinShellTabName);
+    registerShellBuiltin(category, command_group, "tname", vmBuiltinShellTabName);
+    registerShellBuiltin(category, command_group, "tscommand", vmBuiltinShellTabStartupCommand);
+    registerShellBuiltin(category, command_group, "tabscommand", vmBuiltinShellTabStartupCommand);
 #endif
     registerShellBuiltin(category, command_group, "stdioinfo", vmBuiltinShellStdioInfo);
 }

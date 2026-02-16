@@ -40,6 +40,11 @@ PSCAL_WEAK void pscalTtySetForegroundPgid(int sid, int fg_pgid) {
     (void)fg_pgid;
 }
 
+PSCAL_WEAK int pscalTtyGetForegroundPgid(int sid) {
+    (void)sid;
+    return -1;
+}
+
 PSCAL_WEAK int pscalTtySendGroupSignal(int pgid, int sig) {
     (void)pgid;
     (void)sig;

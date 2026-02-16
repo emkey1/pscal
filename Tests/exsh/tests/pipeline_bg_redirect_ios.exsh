@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+tmp="./exsh-bg-redir.$$"
+rm -f "$tmp"
+echo "pipeline-bg-redirect:start"
+printf "hello-bg\n" > "$tmp" &
+wait
+cat "$tmp"
+rm -f "$tmp"
+echo "pipeline-bg-redirect:end"
+exit 0

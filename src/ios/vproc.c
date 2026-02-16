@@ -13,18 +13,22 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <setjmp.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include <termios.h>
 #include <limits.h>
 #include <sys/time.h>
 #include <time.h>
 #include <poll.h>
 #include <dlfcn.h>
+#include <pwd.h>
+#include <grp.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #include <sys/syscall.h>
@@ -41,6 +45,14 @@
 #include "ios/tty/pscal_tty_host.h"
 
 typedef struct PSCALRuntimeContext PSCALRuntimeContext;
+typedef enum {
+    VPROC_RESOURCE_GENERIC = 0,
+    VPROC_RESOURCE_SOCKET = 1,
+    VPROC_RESOURCE_PIPE = 2,
+} VProcResourceKind;
+
+static void vprocResourceTrack(VProc *vp, int host_fd, VProcResourceKind kind);
+static void vprocResourceRemove(VProc *vp, int host_fd);
 
 #if defined(PSCAL_TARGET_IOS)
 #define PATH_VIRTUALIZATION_NO_MACROS 1
@@ -50,9 +62,15 @@ typedef struct PSCALRuntimeContext PSCALRuntimeContext;
 
 #if defined(PSCAL_TARGET_IOS)
 __attribute__((weak)) void pscalRuntimeRequestSigint(void);
+__attribute__((weak)) void pscalRuntimeRequestSigtstp(void);
 __attribute__((weak)) void pscalRuntimeDebugLog(const char *message);
 __attribute__((weak)) PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
 __attribute__((weak)) void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
+__attribute__((weak)) int pscalRuntimeCurrentForegroundPgid(void);
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+void __attribute__((weak)) pscalRuntimeRequestSigtstp(void) {
+}
+#endif
 #endif
 
 #if defined(__APPLE__)
@@ -75,6 +93,581 @@ static const void *vprocSelfBase(void) {
     }
     return self_base;
 }
+
+/* ----------------------------------------------------------------------
+ * passwd/group overrides for iOS container
+ * ---------------------------------------------------------------------- */
+#if defined(PSCAL_TARGET_IOS)
+typedef struct {
+    struct passwd pw;
+    char *name;
+    char *passwd;
+    char *gecos;
+    char *dir;
+    char *shell;
+} PscalPasswdEntry;
+
+typedef struct {
+    struct group gr;
+    char *name;
+    char *passwd;
+    gid_t *members_gids; /* unused; placeholder */
+} PscalGroupEntry;
+
+static PscalPasswdEntry *gPscalPasswd = NULL;
+static size_t gPscalPasswdCount = 0;
+static size_t gPscalPasswdCapacity = 0;
+static bool gPscalPasswdLoaded = false;
+static char gPscalPasswdPath[PATH_MAX] = {0};
+static dev_t gPscalPasswdDev = 0;
+static ino_t gPscalPasswdIno = 0;
+static time_t gPscalPasswdMtime = 0;
+static off_t gPscalPasswdSize = 0;
+
+static PscalGroupEntry *gPscalGroup = NULL;
+static size_t gPscalGroupCount = 0;
+static size_t gPscalGroupCapacity = 0;
+static bool gPscalGroupLoaded = false;
+static char gPscalGroupPath[PATH_MAX] = {0};
+static dev_t gPscalGroupDev = 0;
+static ino_t gPscalGroupIno = 0;
+static time_t gPscalGroupMtime = 0;
+static off_t gPscalGroupSize = 0;
+
+static void pscalFreePasswdEntries(PscalPasswdEntry *entries, size_t count) {
+    if (!entries) return;
+    for (size_t i = 0; i < count; ++i) {
+        free(entries[i].name);
+        free(entries[i].passwd);
+        free(entries[i].gecos);
+        free(entries[i].dir);
+        free(entries[i].shell);
+    }
+}
+
+static void pscalFreeGroupEntries(PscalGroupEntry *entries, size_t count) {
+    if (!entries) return;
+    for (size_t i = 0; i < count; ++i) {
+        free(entries[i].name);
+        free(entries[i].passwd);
+        free(entries[i].members_gids);
+    }
+}
+
+static void pscalFreePasswd(void) {
+    if (!gPscalPasswd) return;
+    pscalFreePasswdEntries(gPscalPasswd, gPscalPasswdCount);
+    free(gPscalPasswd);
+    gPscalPasswd = NULL;
+    gPscalPasswdCount = 0;
+    gPscalPasswdCapacity = 0;
+}
+
+static void pscalFreeGroup(void) {
+    if (!gPscalGroup) return;
+    pscalFreeGroupEntries(gPscalGroup, gPscalGroupCount);
+    free(gPscalGroup);
+    gPscalGroup = NULL;
+    gPscalGroupCount = 0;
+    gPscalGroupCapacity = 0;
+}
+
+static bool pscalEnsurePasswdArrayCapacity(PscalPasswdEntry **entries,
+                                           size_t *capacity,
+                                           size_t needed) {
+    if (!entries || !capacity) {
+        return false;
+    }
+    if (needed <= *capacity) {
+        return true;
+    }
+    size_t new_cap = *capacity ? *capacity : 16;
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2) {
+            return false;
+        }
+        new_cap *= 2;
+    }
+    if (new_cap > SIZE_MAX / sizeof(PscalPasswdEntry)) {
+        return false;
+    }
+    PscalPasswdEntry *resized = realloc(*entries, new_cap * sizeof(PscalPasswdEntry));
+    if (!resized) {
+        return false;
+    }
+    *entries = resized;
+    *capacity = new_cap;
+    return true;
+}
+
+static bool pscalEnsureGroupArrayCapacity(PscalGroupEntry **entries,
+                                          size_t *capacity,
+                                          size_t needed) {
+    if (!entries || !capacity) {
+        return false;
+    }
+    if (needed <= *capacity) {
+        return true;
+    }
+    size_t new_cap = *capacity ? *capacity : 16;
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2) {
+            return false;
+        }
+        new_cap *= 2;
+    }
+    if (new_cap > SIZE_MAX / sizeof(PscalGroupEntry)) {
+        return false;
+    }
+    PscalGroupEntry *resized = realloc(*entries, new_cap * sizeof(PscalGroupEntry));
+    if (!resized) {
+        return false;
+    }
+    *entries = resized;
+    *capacity = new_cap;
+    return true;
+}
+
+static const char *pscalEtcPath(const char *leaf, char *buf, size_t buf_len) {
+    if (!leaf || !buf || buf_len == 0) {
+        return NULL;
+    }
+    const char *direct = getenv("PSCALI_ETC_ROOT");
+    if (direct && direct[0] == '/' &&
+        snprintf(buf, buf_len, "%s/%s", direct, leaf) < (int)buf_len &&
+        access(buf, R_OK) == 0) {
+        return buf;
+    }
+
+    const char *container = getenv("PSCALI_CONTAINER_ROOT");
+    const char *home = getenv("HOME");
+    const char *roots[][3] = {
+        { container, "Documents/etc", leaf },
+        { container, "etc", leaf },
+        { home,       "Documents/etc", leaf },
+        { home,       "etc", leaf },
+    };
+    for (size_t i = 0; i < sizeof(roots)/sizeof(roots[0]); ++i) {
+        const char *base = roots[i][0];
+        const char *sub = roots[i][1];
+        if (!base || base[0] != '/') {
+            continue;
+        }
+        if (snprintf(buf, buf_len, "%s/%s/%s", base, sub, leaf) >= (int)buf_len) {
+            continue;
+        }
+        if (access(buf, R_OK) == 0) {
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+static bool pscalContainerUserDbAvailable(const char *leaf) {
+    char path[PATH_MAX];
+    return pscalEtcPath(leaf, path, sizeof(path)) != NULL;
+}
+
+static void pscalLoadPasswd(void) {
+    char path[PATH_MAX];
+    const char *passwd_path = pscalEtcPath("passwd", path, sizeof(path));
+    struct stat st;
+    if (!passwd_path || stat(passwd_path, &st) != 0) {
+        return;
+    }
+    bool needs_reload = !gPscalPasswdLoaded ||
+                        strcmp(gPscalPasswdPath, passwd_path) != 0 ||
+                        st.st_mtime != gPscalPasswdMtime ||
+                        st.st_size != gPscalPasswdSize ||
+                        st.st_ino != gPscalPasswdIno ||
+                        st.st_dev != gPscalPasswdDev;
+    if (!needs_reload) {
+        return;
+    }
+    FILE *fp = fopen(passwd_path, "r");
+    if (!fp) {
+        return;
+    }
+    PscalPasswdEntry *new_entries = NULL;
+    size_t new_count = 0;
+    size_t new_capacity = 0;
+    bool load_ok = true;
+    char *line = NULL;
+    size_t cap = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
+        char *saveptr = NULL;
+        char *tok_name   = strtok_r(line, ":\n", &saveptr);
+        char *tok_passwd = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_uid    = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_gid    = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_gecos  = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_dir    = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_shell  = strtok_r(NULL, ":\n", &saveptr);
+        if (!tok_name || !tok_passwd || !tok_uid || !tok_gid) {
+            continue;
+        }
+        if (!pscalEnsurePasswdArrayCapacity(&new_entries, &new_capacity, new_count + 1)) {
+            load_ok = false;
+            break;
+        }
+        char *name = strdup(tok_name);
+        char *passwd = strdup(tok_passwd);
+        char *gecos = tok_gecos ? strdup(tok_gecos) : strdup("");
+        char *dir = tok_dir ? strdup(tok_dir) : strdup("/");
+        char *shell = tok_shell ? strdup(tok_shell) : strdup("/bin/sh");
+        if (!name || !passwd || !gecos || !dir || !shell) {
+            free(name);
+            free(passwd);
+            free(gecos);
+            free(dir);
+            free(shell);
+            load_ok = false;
+            break;
+        }
+        PscalPasswdEntry *entry = &new_entries[new_count];
+        memset(entry, 0, sizeof(*entry));
+        entry->name = name;
+        entry->passwd = passwd;
+        entry->gecos = gecos;
+        entry->dir = dir;
+        entry->shell = shell;
+        entry->pw.pw_name   = entry->name;
+        entry->pw.pw_passwd = entry->passwd;
+        entry->pw.pw_uid    = (uid_t)strtoul(tok_uid, NULL, 10);
+        entry->pw.pw_gid    = (gid_t)strtoul(tok_gid, NULL, 10);
+        entry->pw.pw_gecos  = entry->gecos;
+        entry->pw.pw_dir    = entry->dir;
+        entry->pw.pw_shell  = entry->shell;
+        new_count++;
+    }
+    free(line);
+    fclose(fp);
+    if (!load_ok) {
+        pscalFreePasswdEntries(new_entries, new_count);
+        free(new_entries);
+        return;
+    }
+    pscalFreePasswd();
+    gPscalPasswd = new_entries;
+    gPscalPasswdCount = new_count;
+    gPscalPasswdCapacity = new_capacity;
+    gPscalPasswdLoaded = true;
+    strlcpy(gPscalPasswdPath, passwd_path, sizeof(gPscalPasswdPath));
+    gPscalPasswdDev = st.st_dev;
+    gPscalPasswdIno = st.st_ino;
+    gPscalPasswdMtime = st.st_mtime;
+    gPscalPasswdSize = st.st_size;
+}
+
+static void pscalLoadGroup(void) {
+    char path[PATH_MAX];
+    const char *group_path = pscalEtcPath("group", path, sizeof(path));
+    struct stat st;
+    if (!group_path || stat(group_path, &st) != 0) {
+        return;
+    }
+    bool needs_reload = !gPscalGroupLoaded ||
+                        strcmp(gPscalGroupPath, group_path) != 0 ||
+                        st.st_mtime != gPscalGroupMtime ||
+                        st.st_size != gPscalGroupSize ||
+                        st.st_ino != gPscalGroupIno ||
+                        st.st_dev != gPscalGroupDev;
+    if (!needs_reload) {
+        return;
+    }
+    FILE *fp = fopen(group_path, "r");
+    if (!fp) {
+        return;
+    }
+    PscalGroupEntry *new_entries = NULL;
+    size_t new_count = 0;
+    size_t new_capacity = 0;
+    bool load_ok = true;
+    char *line = NULL;
+    size_t cap = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
+        char *saveptr = NULL;
+        char *tok_name   = strtok_r(line, ":\n", &saveptr);
+        char *tok_passwd = strtok_r(NULL, ":\n", &saveptr);
+        char *tok_gid    = strtok_r(NULL, ":\n", &saveptr);
+        if (!tok_name || !tok_passwd || !tok_gid) {
+            continue;
+        }
+        if (!pscalEnsureGroupArrayCapacity(&new_entries, &new_capacity, new_count + 1)) {
+            load_ok = false;
+            break;
+        }
+        char *name = strdup(tok_name);
+        char *passwd = strdup(tok_passwd);
+        if (!name || !passwd) {
+            free(name);
+            free(passwd);
+            load_ok = false;
+            break;
+        }
+        PscalGroupEntry *entry = &new_entries[new_count];
+        memset(entry, 0, sizeof(*entry));
+        entry->name = name;
+        entry->passwd = passwd;
+        entry->gr.gr_name   = entry->name;
+        entry->gr.gr_passwd = entry->passwd;
+        entry->gr.gr_gid    = (gid_t)strtoul(tok_gid, NULL, 10);
+        entry->gr.gr_mem    = NULL;
+        new_count++;
+    }
+    free(line);
+    fclose(fp);
+    if (!load_ok) {
+        pscalFreeGroupEntries(new_entries, new_count);
+        free(new_entries);
+        return;
+    }
+    pscalFreeGroup();
+    gPscalGroup = new_entries;
+    gPscalGroupCount = new_count;
+    gPscalGroupCapacity = new_capacity;
+    gPscalGroupLoaded = true;
+    strlcpy(gPscalGroupPath, group_path, sizeof(gPscalGroupPath));
+    gPscalGroupDev = st.st_dev;
+    gPscalGroupIno = st.st_ino;
+    gPscalGroupMtime = st.st_mtime;
+    gPscalGroupSize = st.st_size;
+}
+
+static struct passwd *pscalGetpwuid(uid_t uid) {
+    pscalLoadPasswd();
+    for (size_t i = 0; i < gPscalPasswdCount; ++i) {
+        if (gPscalPasswd[i].pw.pw_uid == uid) {
+            return &gPscalPasswd[i].pw;
+        }
+    }
+    return NULL;
+}
+
+static struct passwd *pscalGetpwnam(const char *name) {
+    if (!name) return NULL;
+    pscalLoadPasswd();
+    for (size_t i = 0; i < gPscalPasswdCount; ++i) {
+        if (strcmp(gPscalPasswd[i].pw.pw_name, name) == 0) {
+            return &gPscalPasswd[i].pw;
+        }
+    }
+    return NULL;
+}
+
+static struct group *pscalGetgrgid(gid_t gid) {
+    pscalLoadGroup();
+    for (size_t i = 0; i < gPscalGroupCount; ++i) {
+        if (gPscalGroup[i].gr.gr_gid == gid) {
+            return &gPscalGroup[i].gr;
+        }
+    }
+    return NULL;
+}
+
+static struct group *pscalGetgrnam(const char *name) {
+    if (!name) return NULL;
+    pscalLoadGroup();
+    for (size_t i = 0; i < gPscalGroupCount; ++i) {
+        if (strcmp(gPscalGroup[i].gr.gr_name, name) == 0) {
+            return &gPscalGroup[i].gr;
+        }
+    }
+    return NULL;
+}
+
+static bool pscalAllowHostPasswdFallbackForUid(uid_t uid) {
+    if (!pscalContainerUserDbAvailable("passwd")) {
+        return true;
+    }
+    return uid == getuid() || uid == geteuid();
+}
+
+static bool pscalAllowHostPasswdFallbackForName(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    if (!pscalContainerUserDbAvailable("passwd")) {
+        return true;
+    }
+    const char *user = getenv("USER");
+    if (user && strcmp(user, name) == 0) {
+        return true;
+    }
+    const char *logname = getenv("LOGNAME");
+    if (logname && strcmp(logname, name) == 0) {
+        return true;
+    }
+    return false;
+}
+
+static bool pscalAllowHostGroupFallbackForGid(gid_t gid) {
+    if (!pscalContainerUserDbAvailable("group")) {
+        return true;
+    }
+    return gid == getgid() || gid == getegid();
+}
+
+static bool pscalAllowHostGroupFallbackForName(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    if (!pscalContainerUserDbAvailable("group")) {
+        return true;
+    }
+    struct group *self = pscalGetgrgid(getgid());
+    if (self && self->gr_name && strcmp(self->gr_name, name) == 0) {
+        return true;
+    }
+    return false;
+}
+
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwuid(uid_t uid);
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwnam(const char *name);
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrgid(gid_t gid);
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name);
+
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwuid(uid_t uid) {
+    static _Thread_local struct passwd pw;
+    static _Thread_local char storage[16384];
+    struct passwd *result = NULL;
+    if (getpwuid_r(uid, &pw, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
+}
+__attribute__((weak)) struct passwd *pscalRuntimeHostGetpwnam(const char *name) {
+    if (!name || !*name) {
+        return NULL;
+    }
+    static _Thread_local struct passwd pw;
+    static _Thread_local char storage[16384];
+    struct passwd *result = NULL;
+    if (getpwnam_r(name, &pw, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
+}
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrgid(gid_t gid) {
+    static _Thread_local struct group gr;
+    static _Thread_local char storage[16384];
+    struct group *result = NULL;
+    if (getgrgid_r(gid, &gr, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
+}
+__attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name) {
+    if (!name || !*name) {
+        return NULL;
+    }
+    static _Thread_local struct group gr;
+    static _Thread_local char storage[16384];
+    struct group *result = NULL;
+    if (getgrnam_r(name, &gr, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
+}
+
+struct passwd *getpwuid(uid_t uid) {
+    struct passwd *pw = pscalGetpwuid(uid);
+    if (pw) return pw;
+    if (!pscalAllowHostPasswdFallbackForUid(uid)) return NULL;
+    if (pscalRuntimeHostGetpwuid) return pscalRuntimeHostGetpwuid(uid);
+    return NULL;
+}
+
+struct passwd *getpwnam(const char *name) {
+    struct passwd *pw = pscalGetpwnam(name);
+    if (pw) return pw;
+    if (!pscalAllowHostPasswdFallbackForName(name)) return NULL;
+    if (pscalRuntimeHostGetpwnam) return pscalRuntimeHostGetpwnam(name);
+    return NULL;
+}
+
+struct group *getgrgid(gid_t gid) {
+    struct group *gr = pscalGetgrgid(gid);
+    if (gr) return gr;
+    if (!pscalAllowHostGroupFallbackForGid(gid)) return NULL;
+    if (pscalRuntimeHostGetgrgid) return pscalRuntimeHostGetgrgid(gid);
+    return NULL;
+}
+
+struct group *getgrnam(const char *name) {
+    struct group *gr = pscalGetgrnam(name);
+    if (gr) return gr;
+    if (!pscalAllowHostGroupFallbackForName(name)) return NULL;
+    if (pscalRuntimeHostGetgrnam) return pscalRuntimeHostGetgrnam(name);
+    return NULL;
+}
+
+int vprocLookupPasswdName(uid_t uid, char *buffer, size_t buffer_len) {
+    if (!buffer || buffer_len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    buffer[0] = '\0';
+
+    struct passwd *pw = pscalGetpwuid(uid);
+    if (!pw) {
+        if (!pscalAllowHostPasswdFallbackForUid(uid)) {
+            errno = ENOENT;
+            return -1;
+        }
+        if (pscalRuntimeHostGetpwuid) {
+            pw = pscalRuntimeHostGetpwuid(uid);
+        }
+    }
+    if (!pw || !pw->pw_name || pw->pw_name[0] == '\0') {
+        errno = ENOENT;
+        return -1;
+    }
+    size_t name_len = strlen(pw->pw_name);
+    if (name_len >= buffer_len) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(buffer, pw->pw_name, name_len + 1);
+    return 0;
+}
+
+int vprocLookupGroupName(gid_t gid, char *buffer, size_t buffer_len) {
+    if (!buffer || buffer_len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    buffer[0] = '\0';
+
+    struct group *gr = pscalGetgrgid(gid);
+    if (!gr) {
+        if (!pscalAllowHostGroupFallbackForGid(gid)) {
+            errno = ENOENT;
+            return -1;
+        }
+        if (pscalRuntimeHostGetgrgid) {
+            gr = pscalRuntimeHostGetgrgid(gid);
+        }
+    }
+    if (!gr || !gr->gr_name || gr->gr_name[0] == '\0') {
+        errno = ENOENT;
+        return -1;
+    }
+    size_t name_len = strlen(gr->gr_name);
+    if (name_len >= buffer_len) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(buffer, gr->gr_name, name_len + 1);
+    return 0;
+}
+#endif /* PSCAL_TARGET_IOS */
 
 static void *vprocFilterSelfSymbol(void *sym) {
     if (!sym) {
@@ -332,6 +925,51 @@ static int vprocHostPipeRaw(int pipefd[2]) {
     if (fn) {
         vprocInterposeBypassEnter();
         int res = fn(pipefd);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostSocketRaw(int domain, int type, int protocol) {
+    static int (*fn)(int, int, int) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, int, int))vprocResolveSymbol("socket");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(domain, type, protocol);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostAcceptRaw(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    static int (*fn)(int, struct sockaddr *, socklen_t *) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, struct sockaddr *, socklen_t *))vprocResolveSymbol("accept");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(fd, addr, addrlen);
+        vprocInterposeBypassExit();
+        return res;
+    }
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostSocketpairRaw(int domain, int type, int protocol, int sv[2]) {
+    static int (*fn)(int, int, int, int[2]) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, int, int, int[2]))vprocResolveSymbol("socketpair");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(domain, type, protocol, sv);
         vprocInterposeBypassExit();
         return res;
     }
@@ -1198,6 +1836,11 @@ typedef struct {
     VProcFdKind kind;
 } VProcFdEntry;
 
+typedef struct {
+    int host_fd;
+    VProcResourceKind kind;
+} VProcResourceEntry;
+
 struct VProc {
     pthread_mutex_t mu;     // ADDED: Protects the FD table shared by threads
     VProcFdEntry *entries;
@@ -1212,6 +1855,9 @@ struct VProc {
     bool stdin_from_session;
     VProcWinsize winsize;
     int pid;
+    VProcResourceEntry *resources;
+    size_t resource_count;
+    size_t resource_capacity;
 };
 
 static int vprocSessionHostFdForStd(int std_fd);
@@ -1223,10 +1869,13 @@ static void vprocPtyTrace(const char *format, ...);
 static __thread VProc *gVProcCurrent = NULL;
 static __thread VProc *gVProcStack[16] = {0};
 static __thread size_t gVProcStackDepth = 0;
+static __thread unsigned long long gVProcRegistrySeenVersion = 0;
 static VProc **gVProcRegistry = NULL;
 static size_t gVProcRegistryCount = 0;
 static size_t gVProcRegistryCapacity = 0;
+static VProc *gVProcRegistryHint = NULL;
 static pthread_mutex_t gVProcRegistryMu = PTHREAD_MUTEX_INITIALIZER;
+static unsigned long long gVProcRegistryVersion = 1;
 static int gNextSyntheticPid = 0;
 static _Thread_local int gShellSelfPid = 0;
 static int gShellSelfPidGlobal = 0;
@@ -1239,6 +1888,9 @@ typedef struct {
     pthread_t *items;
     size_t count;
     size_t capacity;
+    bool hint_valid;
+    pthread_t hint_tid;
+    size_t hint_index;
     pthread_mutex_t mu;
 } VProcInterposeBypassRegistry;
 
@@ -1246,6 +1898,9 @@ static VProcInterposeBypassRegistry gVProcInterposeBypassRegistry = {
     .items = NULL,
     .count = 0,
     .capacity = 0,
+    .hint_valid = false,
+    .hint_tid = 0,
+    .hint_index = 0,
     .mu = PTHREAD_MUTEX_INITIALIZER,
 };
 static pthread_mutex_t gPathTruncateMu = PTHREAD_MUTEX_INITIALIZER;
@@ -1257,6 +1912,26 @@ static pthread_mutex_t gKernelThreadMu = PTHREAD_MUTEX_INITIALIZER;
 static bool gKernelThreadStarted = false;
 static pthread_cond_t gKernelThreadCv = PTHREAD_COND_INITIALIZER;
 static bool gKernelThreadReady = false;
+typedef enum {
+    VPROC_KERNEL_EVENT_CONTROL_SIGNAL = 0,
+    VPROC_KERNEL_EVENT_FOREGROUND_HANDOFF,
+    VPROC_KERNEL_EVENT_CONTINUE_PGID,
+    VPROC_KERNEL_EVENT_SIGCHLD_AGGREGATE
+} VProcKernelEventType;
+
+typedef struct {
+    VProcKernelEventType type;
+    int shell_pid;
+    int sig;
+    bool allow_runtime_fallback;
+    int sid;
+    int pgid;
+    int target_pid;
+} VProcKernelControlEvent;
+static VProcKernelControlEvent *gKernelControlQueue = NULL;
+static size_t gKernelControlQueueCap = 0;
+static size_t gKernelControlQueueCount = 0;
+static size_t gKernelControlQueueHead = 0;
 static pthread_t gShellSelfTid;
 static bool gShellSelfTidValid = false;
 static VProcSessionStdio gSessionStdioDefault = {
@@ -1272,29 +1947,520 @@ static VProcSessionStdio gSessionStdioDefault = {
     .pty_slave = NULL,
     .pty_out_thread = 0,
     .pty_active = false,
+    .control_bytes_passthrough = false,
     .session_id = 0,
 };
+static pthread_once_t gSessionStdioDefaultOnce = PTHREAD_ONCE_INIT;
 static _Thread_local VProcSessionStdio *gSessionStdioTls = NULL;
 static pthread_mutex_t gSessionInputInitMu = PTHREAD_MUTEX_INITIALIZER;
 static const char *kLocationDevicePath = "/dev/location";
-static const char *kLegacyGpsDevicePath = "/dev/ttyGPS";
+static const char *kLegacyGpsDevicePath = "/dev/gps";
+static const char *kLegacyGpsDevicePath2 = "/dev/ttyGPS";
+
+static bool vprocComputeGrowthCapacity(size_t current,
+                                       size_t min_needed,
+                                       size_t initial,
+                                       size_t elem_size,
+                                       size_t *out_cap) {
+    if (!out_cap || elem_size == 0 || min_needed == 0) {
+        return false;
+    }
+    size_t cap = current ? current : initial;
+    if (cap < initial) {
+        cap = initial;
+    }
+    while (cap < min_needed) {
+        if (cap > SIZE_MAX / 2) {
+            return false;
+        }
+        cap *= 2;
+    }
+    if (cap > SIZE_MAX / elem_size) {
+        return false;
+    }
+    *out_cap = cap;
+    return true;
+}
+
+static void vprocResourceEnsureCapacity(VProc *vp, size_t needed) {
+    if (!vp) {
+        return;
+    }
+    if (vp->resource_capacity >= needed) {
+        return;
+    }
+    size_t new_cap = 0;
+    if (!vprocComputeGrowthCapacity(vp->resource_capacity,
+                                    needed,
+                                    8,
+                                    sizeof(VProcResourceEntry),
+                                    &new_cap)) {
+        return;
+    }
+    VProcResourceEntry *resized = realloc(vp->resources, new_cap * sizeof(VProcResourceEntry));
+    if (!resized) {
+        return;
+    }
+    vp->resources = resized;
+    vp->resource_capacity = new_cap;
+}
+
+static void vprocResourceTrackLocked(VProc *vp, int host_fd, VProcResourceKind kind) {
+    if (!vp || host_fd < 0) {
+        return;
+    }
+    for (size_t i = 0; i < vp->resource_count; ++i) {
+        if (vp->resources[i].host_fd == host_fd) {
+            vp->resources[i].kind = kind;
+            return;
+        }
+    }
+    vprocResourceEnsureCapacity(vp, vp->resource_count + 1);
+    if (vp->resource_count < vp->resource_capacity) {
+        vp->resources[vp->resource_count].host_fd = host_fd;
+        vp->resources[vp->resource_count].kind = kind;
+        vp->resource_count++;
+    }
+}
+
+static void vprocResourceTrack(VProc *vp, int host_fd, VProcResourceKind kind) {
+    if (!vp || host_fd < 0) {
+        return;
+    }
+    pthread_mutex_lock(&vp->mu);
+    vprocResourceTrackLocked(vp, host_fd, kind);
+    pthread_mutex_unlock(&vp->mu);
+}
+
+static bool vprocResourceRemoveLocked(VProc *vp, int host_fd) {
+    if (!vp || host_fd < 0) {
+        return false;
+    }
+    for (size_t i = 0; i < vp->resource_count; ++i) {
+        if (vp->resources[i].host_fd != host_fd) {
+            continue;
+        }
+        size_t last = vp->resource_count - 1;
+        if (i != last) {
+            vp->resources[i] = vp->resources[last];
+        }
+        vp->resource_count--;
+        return true;
+    }
+    return false;
+}
+
+static void vprocResourceRemove(VProc *vp, int host_fd) {
+    if (!vp || host_fd < 0) {
+        return;
+    }
+    pthread_mutex_lock(&vp->mu);
+    (void)vprocResourceRemoveLocked(vp, host_fd);
+    pthread_mutex_unlock(&vp->mu);
+}
+
+static void vprocResourceCloseAllLocked(VProc *vp) {
+    if (!vp) {
+        return;
+    }
+    for (size_t i = 0; i < vp->resource_count; ++i) {
+        int fd = vp->resources[i].host_fd;
+        if (fd < 0) {
+            continue;
+        }
+#if defined(PSCAL_TARGET_IOS)
+        vprocHostCloseRaw(fd);
+#else
+        close(fd);
+#endif
+        vp->resources[i].host_fd = -1;
+    }
+    vp->resource_count = 0;
+}
 
 typedef struct {
     pthread_mutex_t mu;
+    pthread_cond_t cond;
     int read_fd;
     int write_fd;
+    int stub_fd;
+    int readers;
+    uint64_t seq;
+    bool cond_init;
+    char last_payload[128];
+    size_t last_len;
+    bool has_payload;
     bool enabled;
 } VProcLocationDevice;
 
-static VProcLocationDevice gLocationDevice = { PTHREAD_MUTEX_INITIALIZER, -1, -1, false };
+static VProcLocationDevice gLocationDevice = {
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_COND_INITIALIZER,
+    -1,
+    -1,
+    -1,
+    0,
+    0,
+    false,
+    {0},
+    0,
+    false,
+    true
+};
+static bool vprocLocationDebugEnabled(void);
+static void vprocLocationDebugf(const char *fmt, ...);
+static bool vprocToolDebugEnabled(void);
+static bool vprocVprocDebugEnabled(void);
+static bool vprocPipeDebugEnabled(void);
+static bool vprocKillDebugEnabled(void);
+
+typedef struct {
+    uint64_t last_seq;
+    size_t offset;
+    size_t len;
+    bool done;
+    char payload[sizeof(((VProcLocationDevice *)0)->last_payload)];
+} VProcLocationReader;
+
+/* Forward declaration; defined later. */
+static void vprocDeliverPendingSignalsForCurrent(void);
+static const struct pscal_fd_ops kVprocLocationFdOps;
+typedef void (*VprocLocationReadersChangedFn)(int readers, void *context);
+static VprocLocationReadersChangedFn gLocationReaderObserver = NULL;
+static void *gLocationReaderObserverCtx = NULL;
+static pthread_mutex_t gLocationReaderObserverMu = PTHREAD_MUTEX_INITIALIZER;
+
+static void vprocLocationNotifyObservers(int readers) {
+    VprocLocationReadersChangedFn cb = NULL;
+    void *ctx = NULL;
+    pthread_mutex_lock(&gLocationReaderObserverMu);
+    cb = gLocationReaderObserver;
+    ctx = gLocationReaderObserverCtx;
+    pthread_mutex_unlock(&gLocationReaderObserverMu);
+    if (cb) {
+        cb(readers, ctx);
+    }
+}
+
+/* -------- In-process pipe (mutex/cond-backed) -------- */
+
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cond_read;
+    pthread_cond_t cond_write;
+    unsigned char *buf;
+    size_t cap;
+    size_t head;
+    size_t tail;
+    size_t count;
+    bool read_closed;
+    bool write_closed;
+    int wait_readers;
+    int wait_writers;
+    int active_ops;
+    bool freed;
+    int readers;
+    int writers;
+} VprocInprocPipe;
+
+typedef struct {
+    VprocInprocPipe *pipe;
+    bool is_reader;
+} VprocInprocEnd;
+
+static void vprocInprocPipeFree(VprocInprocPipe *pipe) {
+    if (!pipe) {
+        return;
+    }
+    pthread_mutex_destroy(&pipe->mu);
+    pthread_cond_destroy(&pipe->cond_read);
+    pthread_cond_destroy(&pipe->cond_write);
+    free(pipe->buf);
+    free(pipe);
+}
+
+static bool vprocInprocPipeShouldDestroy(VprocInprocPipe *pipe) {
+    if (!pipe || pipe->freed) {
+        return false;
+    }
+    bool destroy = pipe->read_closed &&
+                   pipe->write_closed &&
+                   pipe->readers <= 0 &&
+                   pipe->writers <= 0 &&
+                   pipe->active_ops == 0 &&
+                   pipe->wait_readers == 0 &&
+                   pipe->wait_writers == 0;
+    if (destroy) {
+        pipe->freed = true;
+    }
+    return destroy;
+}
+
+static ssize_t vprocInprocPipeRead(struct pscal_fd *fd, void *buf, size_t bufsize) {
+    if (!fd || !buf) {
+        return _EBADF;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe || !end->is_reader) {
+        return _EBADF;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    pthread_mutex_lock(&pipe->mu);
+    pipe->active_ops++;
+    while (pipe->count == 0 && !pipe->write_closed) {
+        pipe->wait_readers++;
+        pthread_cond_wait(&pipe->cond_read, &pipe->mu);
+        pipe->wait_readers--;
+    }
+    if (pipe->count == 0 && pipe->write_closed) {
+        pipe->active_ops--;
+        bool destroy = vprocInprocPipeShouldDestroy(pipe);
+        pthread_mutex_unlock(&pipe->mu);
+        if (destroy) {
+            vprocInprocPipeFree(pipe);
+        }
+        return 0;
+    }
+    size_t to_copy = bufsize;
+    if (to_copy > pipe->count) {
+        to_copy = pipe->count;
+    }
+    for (size_t i = 0; i < to_copy; ++i) {
+        ((unsigned char *)buf)[i] = pipe->buf[pipe->head];
+        pipe->head = (pipe->head + 1) % pipe->cap;
+    }
+    pipe->count -= to_copy;
+    pipe->active_ops--;
+    bool destroy = vprocInprocPipeShouldDestroy(pipe);
+    pthread_cond_signal(&pipe->cond_write);
+    pthread_mutex_unlock(&pipe->mu);
+    if (destroy) {
+        vprocInprocPipeFree(pipe);
+    }
+    pscal_fd_poll_wakeup(fd, POLLIN);
+    return (ssize_t)to_copy;
+}
+
+static ssize_t vprocInprocPipeWrite(struct pscal_fd *fd, const void *buf, size_t bufsize) {
+    if (!fd || !buf) {
+        return _EBADF;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe || end->is_reader) {
+        return _EBADF;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    pthread_mutex_lock(&pipe->mu);
+    pipe->active_ops++;
+    if (pipe->write_closed) {
+        pipe->active_ops--;
+        pthread_mutex_unlock(&pipe->mu);
+        return _EPIPE;
+    }
+    while (pipe->count == pipe->cap && !pipe->read_closed) {
+        pipe->wait_writers++;
+        pthread_cond_wait(&pipe->cond_write, &pipe->mu);
+        pipe->wait_writers--;
+    }
+    if (pipe->read_closed) {
+        pipe->active_ops--;
+        bool destroy = vprocInprocPipeShouldDestroy(pipe);
+        pthread_mutex_unlock(&pipe->mu);
+        if (destroy) {
+            vprocInprocPipeFree(pipe);
+        }
+        return _EPIPE;
+    }
+    size_t space = pipe->cap - pipe->count;
+    size_t to_copy = bufsize;
+    if (to_copy > space) {
+        to_copy = space;
+    }
+    for (size_t i = 0; i < to_copy; ++i) {
+        pipe->buf[pipe->tail] = ((const unsigned char *)buf)[i];
+        pipe->tail = (pipe->tail + 1) % pipe->cap;
+    }
+    pipe->count += to_copy;
+    pipe->active_ops--;
+    bool destroy = vprocInprocPipeShouldDestroy(pipe);
+    pthread_cond_signal(&pipe->cond_read);
+    pthread_mutex_unlock(&pipe->mu);
+    if (destroy) {
+        vprocInprocPipeFree(pipe);
+    }
+    pscal_fd_poll_wakeup(fd, POLLOUT);
+    return (ssize_t)to_copy;
+}
+
+static int vprocInprocPipePoll(struct pscal_fd *fd) {
+    if (!fd) {
+        return 0;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe) {
+        return 0;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    int events = 0;
+    pthread_mutex_lock(&pipe->mu);
+    if (end->is_reader) {
+        if (pipe->count > 0) {
+            events |= POLLIN;
+        }
+        if (pipe->write_closed) {
+            events |= POLLHUP;
+        }
+    } else {
+        if (!pipe->read_closed && pipe->count < pipe->cap) {
+            events |= POLLOUT;
+        }
+        if (pipe->read_closed) {
+            events |= POLLERR;
+        }
+    }
+    pthread_mutex_unlock(&pipe->mu);
+    return events;
+}
+
+static int vprocInprocPipeClose(struct pscal_fd *fd) {
+    if (!fd) {
+        return _EBADF;
+    }
+    VprocInprocEnd *end = (VprocInprocEnd *)fd->userdata;
+    if (!end || !end->pipe) {
+        return _EBADF;
+    }
+    VprocInprocPipe *pipe = end->pipe;
+    pthread_mutex_lock(&pipe->mu);
+    bool dbg = vprocPipeDebugEnabled();
+    if (end->is_reader) {
+        pipe->read_closed = true;
+        if (pipe->readers > 0) {
+            pipe->readers--;
+        }
+    } else {
+        pipe->write_closed = true;
+        if (pipe->writers > 0) {
+            pipe->writers--;
+        }
+    }
+    if (dbg) {
+        fprintf(stderr,
+                "[pipe-close] pipe=%p end=%s readers=%d writers=%d count=%zu read_closed=%d write_closed=%d active=%d wait_r=%d wait_w=%d\n",
+                (void *)pipe,
+                end->is_reader ? "r" : "w",
+                pipe->readers,
+                pipe->writers,
+                pipe->count,
+                (int)pipe->read_closed,
+                (int)pipe->write_closed,
+                pipe->active_ops,
+                pipe->wait_readers,
+                pipe->wait_writers);
+    }
+    bool destroy = vprocInprocPipeShouldDestroy(pipe);
+    pthread_cond_broadcast(&pipe->cond_read);
+    pthread_cond_broadcast(&pipe->cond_write);
+    pthread_mutex_unlock(&pipe->mu);
+    pscal_fd_poll_wakeup(fd, POLLHUP);
+    free(end);
+    fd->userdata = NULL;
+    if (destroy) {
+        vprocInprocPipeFree(pipe);
+    }
+    return 0;
+}
+
+static const struct pscal_fd_ops kVprocInprocPipeReadOps = {
+    .read = vprocInprocPipeRead,
+    .write = NULL,
+    .poll = vprocInprocPipePoll,
+    .ioctl_size = NULL,
+    .ioctl = NULL,
+    .close = vprocInprocPipeClose,
+};
+
+static const struct pscal_fd_ops kVprocInprocPipeWriteOps = {
+    .read = NULL,
+    .write = vprocInprocPipeWrite,
+    .poll = vprocInprocPipePoll,
+    .ioctl_size = NULL,
+    .ioctl = NULL,
+    .close = vprocInprocPipeClose,
+};
+
+int vprocCreateInprocPipe(struct pscal_fd **out_read, struct pscal_fd **out_write) {
+    if (!out_read || !out_write) {
+        errno = EINVAL;
+        return -1;
+    }
+    *out_read = NULL;
+    *out_write = NULL;
+
+    VprocInprocPipe *pipe = (VprocInprocPipe *)calloc(1, sizeof(VprocInprocPipe));
+    if (!pipe) {
+        errno = ENOMEM;
+        return -1;
+    }
+    pipe->cap = 8192;
+    pipe->buf = (unsigned char *)calloc(pipe->cap, sizeof(unsigned char));
+    pthread_mutex_init(&pipe->mu, NULL);
+    pthread_cond_init(&pipe->cond_read, NULL);
+    pthread_cond_init(&pipe->cond_write, NULL);
+    pipe->readers = 1;
+    pipe->writers = 1;
+
+    VprocInprocEnd *read_end = (VprocInprocEnd *)calloc(1, sizeof(VprocInprocEnd));
+    VprocInprocEnd *write_end = (VprocInprocEnd *)calloc(1, sizeof(VprocInprocEnd));
+    if (!pipe->buf || !read_end || !write_end) {
+        free(read_end);
+        free(write_end);
+        vprocInprocPipeFree(pipe);
+        errno = ENOMEM;
+        return -1;
+    }
+    read_end->pipe = pipe;
+    read_end->is_reader = true;
+    write_end->pipe = pipe;
+    write_end->is_reader = false;
+
+    struct pscal_fd *rfd = pscal_fd_create(&kVprocInprocPipeReadOps);
+    struct pscal_fd *wfd = pscal_fd_create(&kVprocInprocPipeWriteOps);
+    if (!rfd || !wfd) {
+        if (rfd) pscal_fd_close(rfd);
+        if (wfd) pscal_fd_close(wfd);
+        free(read_end);
+        free(write_end);
+        vprocInprocPipeFree(pipe);
+        errno = ENOMEM;
+        return -1;
+    }
+    rfd->userdata = read_end;
+    wfd->userdata = write_end;
+    *out_read = rfd;
+    *out_write = wfd;
+    return 0;
+}
 
 typedef struct {
     uint64_t session_id;
+    int shell_pid;
     struct pscal_fd *pty_slave;
     struct pscal_fd *pty_master;
+    bool control_bytes_passthrough;
     VProcSessionOutputHandler output_handler;
     void *output_context;
+    unsigned char *pending_output;
+    size_t pending_output_len;
+    size_t pending_output_cap;
+    bool output_paused;
+    bool output_backlog_saturated;
 } VProcSessionPtyEntry;
+
+enum {
+    VPROC_SESSION_OUTPUT_BACKLOG_MAX = 2 * 1024 * 1024,
+    VPROC_SESSION_OUTPUT_THROTTLE_US = 20000
+};
 
 static struct {
     VProcSessionPtyEntry *items;
@@ -1307,20 +2473,188 @@ static struct {
     .capacity = 0,
     .mu = PTHREAD_MUTEX_INITIALIZER,
 };
+static uint64_t gVProcSessionPtyHintId = 0;
+static size_t gVProcSessionPtyHintIndex = 0;
+static _Thread_local uint64_t gVProcSessionPtyTlsHintId = 0;
+static _Thread_local size_t gVProcSessionPtyTlsHintIndex = 0;
 
 static bool vprocSessionPtyEntryIsEmpty(const VProcSessionPtyEntry *entry) {
-    return !entry || (!entry->pty_slave && !entry->pty_master && !entry->output_handler);
+    return !entry || (!entry->pty_slave &&
+                      !entry->pty_master &&
+                      !entry->output_handler &&
+                      entry->pending_output_len == 0 &&
+                      !entry->output_paused);
 }
 
-static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
+static void vprocSessionPtyEntryClearPendingLocked(VProcSessionPtyEntry *entry) {
+    if (!entry) {
+        return;
+    }
+    free(entry->pending_output);
+    entry->pending_output = NULL;
+    entry->pending_output_len = 0;
+    entry->pending_output_cap = 0;
+    entry->output_backlog_saturated = false;
+}
+
+static bool vprocSessionEnsurePendingCapacityLocked(VProcSessionPtyEntry *entry, size_t needed) {
+    if (!entry) {
+        return false;
+    }
+    if (needed > VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+        needed = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+    }
+    if (entry->pending_output_cap >= needed) {
+        return true;
+    }
+    size_t cap = entry->pending_output_cap > 0 ? entry->pending_output_cap : 4096;
+    while (cap < needed) {
+        size_t next = cap << 1;
+        if (next <= cap) {
+            cap = needed;
+            break;
+        }
+        cap = next;
+        if (cap >= VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+            cap = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+            break;
+        }
+    }
+    unsigned char *resized = (unsigned char *)realloc(entry->pending_output, cap);
+    if (!resized) {
+        return false;
+    }
+    entry->pending_output = resized;
+    entry->pending_output_cap = cap;
+    return true;
+}
+
+static bool vprocSessionQueueOutputLocked(VProcSessionPtyEntry *entry,
+                                          const unsigned char *data,
+                                          size_t len) {
+    if (!entry || !data || len == 0) {
+        return true;
+    }
+    /* Once detached backlog is saturated, keep only the freshest chunk. */
+    if (entry->output_backlog_saturated) {
+        if (len >= VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+            if (!vprocSessionEnsurePendingCapacityLocked(entry, VPROC_SESSION_OUTPUT_BACKLOG_MAX)) {
+                return false;
+            }
+            const unsigned char *tail = data + (len - VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+            memcpy(entry->pending_output, tail, VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+            entry->pending_output_len = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+            return true;
+        }
+        if (!vprocSessionEnsurePendingCapacityLocked(entry, len)) {
+            return false;
+        }
+        memcpy(entry->pending_output, data, len);
+        entry->pending_output_len = len;
+        return true;
+    }
+    if (len >= VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+        if (!vprocSessionEnsurePendingCapacityLocked(entry, VPROC_SESSION_OUTPUT_BACKLOG_MAX)) {
+            return false;
+        }
+        const unsigned char *tail = data + (len - VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+        memcpy(entry->pending_output, tail, VPROC_SESSION_OUTPUT_BACKLOG_MAX);
+        entry->pending_output_len = VPROC_SESSION_OUTPUT_BACKLOG_MAX;
+        entry->output_backlog_saturated = true;
+        return true;
+    }
+
+    size_t total = entry->pending_output_len + len;
+    if (total > VPROC_SESSION_OUTPUT_BACKLOG_MAX) {
+        if (!vprocSessionEnsurePendingCapacityLocked(entry, len)) {
+            return false;
+        }
+        memcpy(entry->pending_output, data, len);
+        entry->pending_output_len = len;
+        entry->output_backlog_saturated = true;
+        return true;
+    }
+
+    size_t needed = entry->pending_output_len + len;
+    if (!vprocSessionEnsurePendingCapacityLocked(entry, needed)) {
+        return false;
+    }
+    memcpy(entry->pending_output + entry->pending_output_len, data, len);
+    entry->pending_output_len += len;
+    return true;
+}
+
+static VProcSessionPtyEntry *vprocSessionPtyFindLocked(uint64_t session_id, size_t *out_index) {
+    if (out_index) {
+        *out_index = 0;
+    }
+    if (session_id == 0 || !gVProcSessionPtys.items || gVProcSessionPtys.count == 0) {
+        return NULL;
+    }
+    if (gVProcSessionPtyTlsHintId == session_id && gVProcSessionPtyTlsHintIndex < gVProcSessionPtys.count) {
+        VProcSessionPtyEntry *hint = &gVProcSessionPtys.items[gVProcSessionPtyTlsHintIndex];
+        if (hint->session_id == session_id) {
+            if (out_index) {
+                *out_index = gVProcSessionPtyTlsHintIndex;
+            }
+            return hint;
+        }
+    }
+    if (gVProcSessionPtyHintId == session_id && gVProcSessionPtyHintIndex < gVProcSessionPtys.count) {
+        VProcSessionPtyEntry *hint = &gVProcSessionPtys.items[gVProcSessionPtyHintIndex];
+        if (hint->session_id == session_id) {
+            if (out_index) {
+                *out_index = gVProcSessionPtyHintIndex;
+            }
+            return hint;
+        }
+    }
     for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
         VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
         if (entry->session_id == session_id) {
+            gVProcSessionPtyHintId = session_id;
+            gVProcSessionPtyHintIndex = i;
+            gVProcSessionPtyTlsHintId = session_id;
+            gVProcSessionPtyTlsHintIndex = i;
+            if (out_index) {
+                *out_index = i;
+            }
             return entry;
         }
     }
+    return NULL;
+}
+
+static void vprocSessionPtyRemoveAtLocked(size_t idx) {
+    if (idx >= gVProcSessionPtys.count) {
+        return;
+    }
+    vprocSessionPtyEntryClearPendingLocked(&gVProcSessionPtys.items[idx]);
+    size_t last = gVProcSessionPtys.count - 1;
+    if (idx != last) {
+        gVProcSessionPtys.items[idx] = gVProcSessionPtys.items[last];
+    }
+    gVProcSessionPtys.count--;
+    gVProcSessionPtyHintId = 0;
+    gVProcSessionPtyHintIndex = 0;
+    gVProcSessionPtyTlsHintId = 0;
+    gVProcSessionPtyTlsHintIndex = 0;
+}
+
+static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
+    VProcSessionPtyEntry *existing = vprocSessionPtyFindLocked(session_id, NULL);
+    if (existing) {
+        return existing;
+    }
     if (gVProcSessionPtys.count >= gVProcSessionPtys.capacity) {
-        size_t new_cap = gVProcSessionPtys.capacity ? gVProcSessionPtys.capacity * 2 : 4;
+        size_t new_cap = 0;
+        if (!vprocComputeGrowthCapacity(gVProcSessionPtys.capacity,
+                                        gVProcSessionPtys.count + 1,
+                                        4,
+                                        sizeof(VProcSessionPtyEntry),
+                                        &new_cap)) {
+            return NULL;
+        }
         VProcSessionPtyEntry *resized = realloc(gVProcSessionPtys.items, new_cap * sizeof(VProcSessionPtyEntry));
         if (!resized) {
             return NULL;
@@ -1328,10 +2662,58 @@ static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
         gVProcSessionPtys.items = resized;
         gVProcSessionPtys.capacity = new_cap;
     }
-    VProcSessionPtyEntry *slot = &gVProcSessionPtys.items[gVProcSessionPtys.count++];
+    size_t idx = gVProcSessionPtys.count++;
+    VProcSessionPtyEntry *slot = &gVProcSessionPtys.items[idx];
     memset(slot, 0, sizeof(*slot));
     slot->session_id = session_id;
+    gVProcSessionPtyHintId = session_id;
+    gVProcSessionPtyHintIndex = idx;
+    gVProcSessionPtyTlsHintId = session_id;
+    gVProcSessionPtyTlsHintIndex = idx;
     return slot;
+}
+
+static void vprocSessionPtySetShellPid(uint64_t session_id, int shell_pid) {
+    if (session_id == 0 || shell_pid <= 0) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
+    if (entry) {
+        entry->shell_pid = shell_pid;
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+}
+
+static bool vprocSessionControlBytePassthroughLocked(uint64_t session_id) {
+    if (session_id == 0) {
+        return false;
+    }
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    return entry ? entry->control_bytes_passthrough : false;
+}
+
+void vprocSessionSetControlBytePassthrough(uint64_t session_id, bool enabled) {
+    if (session_id == 0) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
+    if (entry) {
+        entry->control_bytes_passthrough = enabled;
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+}
+
+bool vprocSessionGetControlBytePassthrough(uint64_t session_id) {
+    if (session_id == 0) {
+        return false;
+    }
+    bool enabled = false;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    enabled = vprocSessionControlBytePassthroughLocked(session_id);
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    return enabled;
 }
 
 static bool vprocPathIsLocationDevice(const char *path);
@@ -1339,6 +2721,10 @@ static bool vprocPathIsLegacyGpsDevice(const char *path);
 static int vprocLocationDeviceOpen(VProc *vp, int flags);
 static int vprocLocationDeviceOpenHost(int flags);
 static inline bool vprocShimHasVirtualContext(void);
+static bool vprocToolDebugEnabled(void);
+static bool vprocVprocDebugEnabled(void);
+static bool vprocPipeDebugEnabled(void);
+static bool vprocKillDebugEnabled(void);
 
 static int vprocNextPidSeed(void) {
 #if defined(PSCAL_TARGET_IOS)
@@ -1364,7 +2750,15 @@ static void vprocRegistryAdd(VProc *vp) {
         }
     }
     if (gVProcRegistryCount >= gVProcRegistryCapacity) {
-        size_t new_cap = gVProcRegistryCapacity ? gVProcRegistryCapacity * 2 : 16;
+        size_t new_cap = 0;
+        if (!vprocComputeGrowthCapacity(gVProcRegistryCapacity,
+                                        gVProcRegistryCount + 1,
+                                        16,
+                                        sizeof(VProc *),
+                                        &new_cap)) {
+            pthread_mutex_unlock(&gVProcRegistryMu);
+            return;
+        }
         VProc **resized = (VProc **)realloc(gVProcRegistry, new_cap * sizeof(VProc *));
         if (!resized) {
             pthread_mutex_unlock(&gVProcRegistryMu);
@@ -1374,6 +2768,8 @@ static void vprocRegistryAdd(VProc *vp) {
         gVProcRegistryCapacity = new_cap;
     }
     gVProcRegistry[gVProcRegistryCount++] = vp;
+    gVProcRegistryHint = vp;
+    __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&gVProcRegistryMu);
 }
 
@@ -1386,6 +2782,10 @@ static void vprocRegistryRemove(VProc *vp) {
         if (gVProcRegistry[i] == vp) {
             gVProcRegistry[i] = gVProcRegistry[gVProcRegistryCount - 1];
             gVProcRegistryCount--;
+            if (gVProcRegistryHint == vp) {
+                gVProcRegistryHint = (gVProcRegistryCount > 0) ? gVProcRegistry[0] : NULL;
+            }
+            __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
             break;
         }
     }
@@ -1398,10 +2798,15 @@ static bool vprocRegistryContains(const VProc *vp) {
     }
     bool found = false;
     pthread_mutex_lock(&gVProcRegistryMu);
-    for (size_t i = 0; i < gVProcRegistryCount; ++i) {
-        if (gVProcRegistry[i] == vp) {
-            found = true;
-            break;
+    if (gVProcRegistryHint == vp) {
+        found = true;
+    } else {
+        for (size_t i = 0; i < gVProcRegistryCount; ++i) {
+            if (gVProcRegistry[i] == vp) {
+                found = true;
+                gVProcRegistryHint = gVProcRegistry[i];
+                break;
+            }
         }
     }
     pthread_mutex_unlock(&gVProcRegistryMu);
@@ -1411,9 +2816,30 @@ static bool vprocRegistryContains(const VProc *vp) {
 static void vprocClearThreadState(void) {
     gVProcCurrent = NULL;
     gVProcStackDepth = 0;
+    gVProcRegistrySeenVersion = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
     for (size_t i = 0; i < sizeof(gVProcStack) / sizeof(gVProcStack[0]); ++i) {
         gVProcStack[i] = NULL;
     }
+}
+
+/* Fast validation for the common case where vp is the current thread's vproc. */
+static bool vprocRegistryContainsValidated(VProc *vp) {
+    if (!vp) {
+        return false;
+    }
+    if (gVProcTlsReady && vp == gVProcCurrent) {
+        unsigned long long version = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
+        if (gVProcRegistrySeenVersion == version) {
+            return true;
+        }
+        if (!vprocRegistryContains(vp)) {
+            vprocClearThreadState();
+            return false;
+        }
+        gVProcRegistrySeenVersion = version;
+        return true;
+    }
+    return vprocRegistryContains(vp);
 }
 
 static VProc *vprocForThread(void);
@@ -1437,6 +2863,9 @@ typedef struct {
     int stop_signo;
     bool zombie;
     bool stop_unsupported;
+    bool cooperative_stop_wait;
+    bool sigchld_delivery_queued;
+    bool shell_prompt_read_active;
     int job_id;
     char *label;
     char comm[16];
@@ -1481,6 +2910,9 @@ typedef struct {
     int kernel_pid;
     bool detach;
     PSCALRuntimeContext *runtime_ctx;
+    pthread_mutex_t *worker_stop_mu;
+    pthread_cond_t *worker_stop_cv;
+    bool *worker_stopped;
 } VProcThreadStartCtx;
 
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
@@ -1488,6 +2920,20 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 static void vprocClearEntryLocked(VProcTaskEntry *entry);
 static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
 static void vprocTaskTableRepairLocked(void);
+static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty);
+static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid);
+static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
+static __thread bool gVprocPipelineStage = false;
+typedef void (*VprocStopWaitHookFn)(void);
+static __thread VprocStopWaitHookFn gVprocStopWaitBeforeHook = NULL;
+static __thread VprocStopWaitHookFn gVprocStopWaitAfterHook = NULL;
+
+void vprocSetStopWaitHooks(void (*before_hook)(void), void (*after_hook)(void)) {
+    gVprocStopWaitBeforeHook = before_hook;
+    gVprocStopWaitAfterHook = after_hook;
+}
+
+__attribute__((weak)) void PSCALRuntimeOnProcessGroupEmpty(int pgid);
 
 static VProcTaskTable gVProcTasks = {
     .items = NULL,
@@ -1498,8 +2944,83 @@ static VProcTaskTable gVProcTasks = {
 };
 static VProcTaskEntry *gVProcTasksItemsStable = NULL;
 static size_t gVProcTasksCapacityStable = 0;
+static size_t gVProcTaskFindHint = 0;
+static size_t gVProcTaskFreeHint = 0;
+#define VPROC_TASK_LOOKUP_CACHE_SIZE 2048u
+_Static_assert((VPROC_TASK_LOOKUP_CACHE_SIZE & (VPROC_TASK_LOOKUP_CACHE_SIZE - 1u)) == 0,
+               "VPROC_TASK_LOOKUP_CACHE_SIZE must be a power of two");
+#define VPROC_TASK_LOOKUP_CACHE_WAYS 2u
+typedef struct {
+    int pid;
+    uint32_t idx;
+} VProcTaskLookupCacheEntry;
+typedef struct {
+    VProcTaskLookupCacheEntry way[VPROC_TASK_LOOKUP_CACHE_WAYS];
+} VProcTaskLookupCacheSet;
+static VProcTaskLookupCacheSet gVProcTaskLookupCache[VPROC_TASK_LOOKUP_CACHE_SIZE];
+
+static inline size_t vprocTaskLookupSlotForPid(int pid) {
+    uint32_t hash = (uint32_t)pid * 2654435761u;
+    return (size_t)(hash & (VPROC_TASK_LOOKUP_CACHE_SIZE - 1u));
+}
+
+static inline void vprocTaskLookupRememberLocked(int pid, size_t idx) {
+    if (pid <= 0 || idx > UINT32_MAX) {
+        return;
+    }
+    VProcTaskLookupCacheSet *set = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    VProcTaskLookupCacheEntry *way0 = &set->way[0];
+    VProcTaskLookupCacheEntry *way1 = &set->way[1];
+    if (way0->pid == pid) {
+        way0->idx = (uint32_t)idx;
+        return;
+    }
+    if (way1->pid == pid) {
+        way1->idx = (uint32_t)idx;
+        VProcTaskLookupCacheEntry tmp = *way0;
+        *way0 = *way1;
+        *way1 = tmp;
+        return;
+    }
+    /* MRU insert into way0 and age the previous entry into way1. */
+    *way1 = *way0;
+    way0->pid = pid;
+    way0->idx = (uint32_t)idx;
+}
+
+static inline void vprocTaskLookupForgetLocked(int pid) {
+    if (pid <= 0) {
+        return;
+    }
+    VProcTaskLookupCacheSet *set = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    for (size_t way = 0; way < VPROC_TASK_LOOKUP_CACHE_WAYS; ++way) {
+        VProcTaskLookupCacheEntry *cache = &set->way[way];
+        if (cache->pid == pid) {
+            cache->pid = 0;
+            cache->idx = 0;
+        }
+    }
+}
 
 /* -- Helper Functions -- */
+
+static void vprocMaybeNotifyPgidEmptyLocked(int pgid) {
+    if (pgid <= 0) {
+        return;
+    }
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (entry->pid <= 0) {
+            continue;
+        }
+        if (entry->pgid == pgid && !entry->exited) {
+            return;
+        }
+    }
+    if (PSCALRuntimeOnProcessGroupEmpty) {
+        PSCALRuntimeOnProcessGroupEmpty(pgid);
+    }
+}
 
 static void vprocSetCommLocked(VProcTaskEntry *entry, const char *label) {
     if (!entry) return;
@@ -1537,6 +3058,111 @@ static bool vprocEntryIsKernel(const VProcTaskEntry *entry) {
         return true;
     }
     return entry->comm[0] != '\0' && strcmp(entry->comm, "kernel") == 0;
+}
+
+static bool vprocSoftSignalingDisabledByEnv(void) {
+    const char *flag = getenv("PSCALI_DISABLE_SOFT_SIGNALING");
+    if (!flag || !*flag) {
+        return false;
+    }
+    return strcmp(flag, "0") != 0;
+}
+
+static bool vprocCommandLooksRemoteClient(const char *label) {
+    if (!label || !*label) {
+        return false;
+    }
+    const char *start = label;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    const char *end = start;
+    while (*end && !isspace((unsigned char)*end)) {
+        end++;
+    }
+    const char *base = start;
+    for (const char *p = start; p < end; ++p) {
+        if (*p == '/') {
+            base = p + 1;
+        }
+    }
+    size_t len = (size_t)(end - base);
+    if (len == 3 &&
+        tolower((unsigned char)base[0]) == 's' &&
+        tolower((unsigned char)base[1]) == 's' &&
+        tolower((unsigned char)base[2]) == 'h') {
+        return true;
+    }
+    if (len == 3 &&
+        tolower((unsigned char)base[0]) == 's' &&
+        tolower((unsigned char)base[1]) == 'c' &&
+        tolower((unsigned char)base[2]) == 'p') {
+        return true;
+    }
+    if (len == 4 &&
+        tolower((unsigned char)base[0]) == 's' &&
+        tolower((unsigned char)base[1]) == 'f' &&
+        tolower((unsigned char)base[2]) == 't' &&
+        tolower((unsigned char)base[3]) == 'p') {
+        return true;
+    }
+    return false;
+}
+
+static bool vprocEntryPrefersControlBytePassthrough(const VProcTaskEntry *entry) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->comm[0] && vprocCommandLooksRemoteClient(entry->comm)) {
+        return true;
+    }
+    if (entry->label && entry->label[0] && vprocCommandLooksRemoteClient(entry->label)) {
+        return true;
+    }
+    return false;
+}
+
+static bool vprocForegroundGroupPrefersControlBytes(int sid, int fg_pgid, int shell_pid, int sig) {
+    (void)sig;
+    if (fg_pgid <= 0) {
+        return false;
+    }
+    bool passthrough = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+        VProcTaskEntry *entry = &gVProcTasks.items[i];
+        if (entry->pid <= 0 || entry->zombie || entry->exited) {
+            continue;
+        }
+        if (sid > 0 && entry->sid != sid) {
+            continue;
+        }
+        if (entry->pgid != fg_pgid) {
+            continue;
+        }
+        if (shell_pid > 0 && entry->pid == shell_pid) {
+            continue;
+        }
+        if (vprocEntryPrefersControlBytePassthrough(entry)) {
+            passthrough = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return passthrough;
+}
+
+static bool vprocSessionPrefersControlBytePassthrough(VProcSessionStdio *session) {
+    if (!session) {
+        return false;
+    }
+    if (session->control_bytes_passthrough) {
+        return true;
+    }
+    if (session->session_id == 0) {
+        return false;
+    }
+    return vprocSessionGetControlBytePassthrough(session->session_id);
 }
 
 static bool vprocPrepareThreadNameLocked(const VProcTaskEntry *entry, char *name, size_t name_len) {
@@ -1591,11 +3217,31 @@ static void vprocNotifyPidSigchldLocked(int target_pid, VProcSigchldEvent evt);
 static void vprocNotifyParentSigchldLocked(const VProcTaskEntry *child, VProcSigchldEvent evt);
 static struct sigaction vprocGetSigactionLocked(VProcTaskEntry *entry, int sig);
 static int vprocDefaultParentPid(void) {
+    VProc *active = vprocCurrent();
+    if (active) {
+        int active_pid = vprocPid(active);
+        if (active_pid > 0) {
+            return active_pid;
+        }
+    }
+    int shell_pid = vprocGetShellSelfPid();
+    if (shell_pid > 0) {
+        return shell_pid;
+    }
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    /* Test helper threads often create synthetic tasks without first
+     * initialising shell/kernel synthetic ids. Fall back to host pid so
+     * waitpid parent matching remains deterministic across threads. */
+    int host_pid = (int)vprocHostGetpidRaw();
+    if (host_pid > 0) {
+        return host_pid;
+    }
+#endif
     int kernel = vprocGetKernelPid();
     if (kernel > 0) {
         return kernel;
     }
-    return (int)vprocGetPidShim();
+    return 0;
 }
 
 static int vprocAdoptiveParentPidLocked(const VProcTaskEntry *entry) {
@@ -1770,6 +3416,8 @@ static void vprocInitEntryDefaultsLocked(VProcTaskEntry *entry, int pid, const V
     if (!entry) return;
     memset(entry, 0, sizeof(*entry));
     entry->stop_unsupported = false;
+    entry->sigchld_delivery_queued = false;
+    entry->shell_prompt_read_active = false;
     entry->pid = pid;
     entry->pgid = pid;
     entry->sid = pid;
@@ -1812,11 +3460,29 @@ static void vprocInitEntryDefaultsLocked(VProcTaskEntry *entry, int pid, const V
 }
 
 static bool vprocAddChildLocked(VProcTaskEntry *parent, int child_pid) {
-    if (!parent || child_pid <= 0) return false;
-    if (parent->child_count >= parent->child_capacity) {
-        size_t new_cap = parent->child_capacity ? parent->child_capacity * 2 : 4;
+    if (!parent || parent->pid <= 0 || child_pid <= 0 || parent->pid == child_pid) {
+        return false;
+    }
+    for (size_t i = 0; i < parent->child_count; ++i) {
+        if (parent->children[i] == child_pid) {
+            return true;
+        }
+    }
+    if (parent->child_count + 1 > parent->child_capacity) {
+        size_t new_cap = parent->child_capacity ? parent->child_capacity : 4;
+        while (new_cap < parent->child_count + 1) {
+            if (new_cap > SIZE_MAX / 2) {
+                return false;
+            }
+            new_cap *= 2;
+        }
+        if (new_cap > SIZE_MAX / sizeof(int)) {
+            return false;
+        }
         int *resized = realloc(parent->children, new_cap * sizeof(int));
-        if (!resized) return false;
+        if (!resized) {
+            return false;
+        }
         parent->children = resized;
         parent->child_capacity = new_cap;
     }
@@ -1841,6 +3507,27 @@ static bool vprocSignalIgnoredLocked(VProcTaskEntry *entry, int sig) {
     }
     uint32_t mask = vprocSigMask(sig);
     return mask != 0 && (entry->ignored_signals & mask);
+}
+
+static bool vprocSignalRequiresVirtualDispatch(int sig) {
+#if defined(PSCAL_TARGET_IOS)
+    switch (sig) {
+        case SIGINT:
+        case SIGQUIT:
+        case SIGTSTP:
+        case SIGTERM:
+        case SIGCONT:
+        case SIGSTOP:
+        case SIGTTIN:
+        case SIGTTOU:
+            return true;
+        default:
+            return false;
+    }
+#else
+    (void)sig;
+    return false;
+#endif
 }
 
 static void vprocMaybeStampRusageLocked(VProcTaskEntry *entry) {
@@ -1976,6 +3663,27 @@ static void vprocQueuePendingSignalLocked(VProcTaskEntry *entry, int sig) {
     }
 }
 
+static bool vprocConsumePendingSignalLocked(VProcTaskEntry *entry, int sig) {
+    if (!entry || !vprocSigIndexValid(sig)) {
+        return false;
+    }
+    uint32_t mask = vprocSigMask(sig);
+    if (mask == 0) {
+        return false;
+    }
+    if (!(entry->pending_signals & mask) && entry->pending_counts[sig] <= 0) {
+        return false;
+    }
+    if (entry->pending_counts[sig] > 0) {
+        entry->pending_counts[sig]--;
+    }
+    if (entry->pending_counts[sig] <= 0) {
+        entry->pending_signals &= ~mask;
+        entry->pending_counts[sig] = 0;
+    }
+    return true;
+}
+
 static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
     VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
 
@@ -1999,9 +3707,7 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
     }
     if (action == VPROC_SIG_STOP) {
         if (entry->stop_unsupported) {
-            if (sig == SIGTSTP && pscalRuntimeRequestSigint) {
-                pscalRuntimeRequestSigint();
-            }
+            vprocQueuePendingSignalLocked(entry, sig);
             return;
         }
         entry->stopped = true;
@@ -2031,17 +3737,31 @@ static void vprocApplySignalLocked(VProcTaskEntry *entry, int sig) {
     }
 }
 
-static int vprocForegroundPgidLocked(int sid) {
-    if (sid <= 0) return -1;
-    vprocTaskTableRepairLocked();
+static VProcTaskEntry *vprocSessionLeaderBySidLocked(int sid) {
+    if (sid <= 0) {
+        return NULL;
+    }
+    VProcTaskEntry *leader = vprocTaskFindLocked(sid);
+    if (leader && leader->sid == sid && leader->session_leader) {
+        return leader;
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (entry->pid <= 0) {
+            continue;
+        }
         if (entry->sid == sid && entry->session_leader) {
-            return entry->fg_pgid;
+            gVProcTaskFindHint = i;
+            vprocTaskLookupRememberLocked(entry->pid, i);
+            return entry;
         }
     }
-    return -1;
+    return NULL;
+}
+
+static int vprocForegroundPgidLocked(int sid) {
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
+    return leader ? leader->fg_pgid : -1;
 }
 
 static bool vprocShouldStopForBackgroundTty(VProc *vp, int sig) {
@@ -2051,6 +3771,11 @@ static bool vprocShouldStopForBackgroundTty(VProc *vp, int sig) {
     bool stopped = false;
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
+    if (entry && entry->stop_unsupported) {
+        /* Pipelines and synthetic tasks that disable stops should never be parked. */
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return false;
+    }
     if (entry && entry->sid > 0) {
         int fg = vprocForegroundPgidLocked(entry->sid);
         if (fg > 0 && entry->pgid != fg) {
@@ -2061,39 +3786,6 @@ static bool vprocShouldStopForBackgroundTty(VProc *vp, int sig) {
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return stopped;
-}
-
-static bool vprocIsForegroundTask(int pid) {
-    if (pid <= 0) {
-        return true;
-    }
-    bool foreground = true;
-    pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
-    if (entry && entry->sid > 0) {
-        int fg = vprocForegroundPgidLocked(entry->sid);
-        if (fg > 0 && entry->pgid != fg) {
-            foreground = false;
-        }
-    }
-    pthread_mutex_unlock(&gVProcTasks.mu);
-    return foreground;
-}
-
-static int vprocForegroundPgidForEntryLocked(const VProcTaskEntry *entry) {
-    if (!entry || entry->pid <= 0) {
-        return -1;
-    }
-    if (entry->sid > 0) {
-        int fg = vprocForegroundPgidLocked(entry->sid);
-        if (fg > 0) {
-            return fg;
-        }
-    }
-    if (entry->pgid > 0) {
-        return entry->pgid;
-    }
-    return entry->pid;
 }
 
 bool vprocWaitIfStopped(VProc *vp) {
@@ -2109,20 +3801,80 @@ bool vprocWaitIfStopped(VProc *vp) {
         return false;
     }
     bool waited = false;
+    pthread_t self = pthread_self();
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
-    if (entry && entry->stop_unsupported) {
-        pthread_mutex_unlock(&gVProcTasks.mu);
-        return false;
+    if (entry &&
+        entry->stop_unsupported &&
+        entry->cooperative_stop_wait &&
+        !entry->stopped &&
+        !entry->exited) {
+        int stop_sig = 0;
+        const int stop_sigs[] = { SIGTSTP, SIGSTOP, SIGTTIN, SIGTTOU };
+        for (size_t i = 0; i < sizeof(stop_sigs) / sizeof(stop_sigs[0]); ++i) {
+            int candidate = stop_sigs[i];
+            if (!vprocConsumePendingSignalLocked(entry, candidate)) {
+                continue;
+            }
+            stop_sig = candidate;
+            break;
+        }
+        if (stop_sig > 0) {
+            entry->stopped = true;
+            entry->continued = false;
+            entry->exited = false;
+            entry->stop_signo = stop_sig;
+            entry->exit_signal = 0;
+            entry->status = 128 + stop_sig;
+            entry->zombie = false;
+            vprocNotifyParentSigchldLocked(entry, VPROC_SIGCHLD_EVENT_STOP);
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
     }
-    while (entry && entry->stopped && !entry->exited) {
-        if (entry->stop_unsupported) {
+    if (entry && entry->stopped && !entry->exited &&
+        entry->tid && pthread_equal(entry->tid, self)) {
+        /*
+         * Only the shell thread needs cooperative conversion to avoid locking
+         * the prompt. Worker threads should remain truly stopped so bg/fg can
+         * resume them later.
+         */
+        if (vprocIsShellSelfThread()) {
+            int stop_sig = entry->stop_signo;
+            if (stop_sig <= 0 || stop_sig >= 32) {
+                stop_sig = SIGTSTP;
+            }
+            entry->pending_signals |= vprocSigMask(stop_sig);
             entry->stopped = false;
             entry->continued = true;
             entry->stop_signo = 0;
             pthread_cond_broadcast(&gVProcTasks.cv);
-            break;
         }
+    }
+    if (entry && entry->stop_unsupported && !entry->cooperative_stop_wait && entry->stopped) {
+        /* Convert hard-stop state into a cooperative pending signal so
+         * in-process loops can unwind to shell instead of parking forever. */
+        int stop_sig = entry->stop_signo;
+        if (stop_sig <= 0 || stop_sig >= 32) {
+            stop_sig = SIGTSTP;
+        }
+        entry->pending_signals |= vprocSigMask(stop_sig);
+        entry->stopped = false;
+        entry->continued = true;
+        entry->stop_signo = 0;
+        pthread_cond_broadcast(&gVProcTasks.cv);
+    }
+    if (entry && entry->stop_unsupported && !entry->cooperative_stop_wait) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return false;
+    }
+    bool should_wait = (entry && entry->stopped && !entry->exited);
+    if (should_wait && gVprocStopWaitBeforeHook) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        gVprocStopWaitBeforeHook();
+        pthread_mutex_lock(&gVProcTasks.mu);
+        entry = vprocTaskFindLocked(pid);
+    }
+    while (entry && entry->stopped && !entry->exited) {
         waited = true;
         pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
         if (entry->pid != pid) {
@@ -2130,35 +3882,15 @@ bool vprocWaitIfStopped(VProc *vp) {
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (waited && gVprocStopWaitAfterHook) {
+        gVprocStopWaitAfterHook();
+    }
     return waited;
 }
 
-static void vprocDispatchControlSignal(VProc *vp, int sig) {
-    if (!vp) {
-        return;
-    }
-    int pid = vprocPid(vp);
-    int shell_pid = vprocGetShellSelfPid();
-    if (pid <= 0 || (shell_pid > 0 && pid == shell_pid)) {
-        return;
-    }
-    int fg_pgid = -1;
-    pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
-    fg_pgid = vprocForegroundPgidForEntryLocked(entry);
-    pthread_mutex_unlock(&gVProcTasks.mu);
-    if (fg_pgid > 0) {
-        (void)vprocKillShim(-fg_pgid, sig);
-    } else {
-        (void)vprocKillShim(pid, sig);
-    }
-    if (sig == SIGTSTP) {
-        (void)vprocWaitIfStopped(vp);
-    }
-}
-
-static void vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
+static bool vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
     uint32_t pending = entry->pending_signals;
+    bool exit_current = false;
     for (int sig = 1; sig < 32; ++sig) {
         uint32_t mask = vprocSigMask(sig);
         if (!(pending & mask)) continue;
@@ -2169,10 +3901,22 @@ static void vprocDeliverPendingSignalsLocked(VProcTaskEntry *entry) {
             entry->pending_counts[sig] = 0;
             continue;
         }
+        if (action == VPROC_SIG_STOP && entry->stop_unsupported) {
+            /* Cooperative-stop workers consume SIGTSTP via explicit polling
+             * paths (vprocSigpending/vprocSigwait or runtime request checks).
+             * Do not transform this into a hard stop here. */
+            continue;
+        }
         vprocApplySignalLocked(entry, sig);
+        /* If this is the current thread and the action was a terminating
+         * default, arrange to self-terminate after we drop the lock. */
+        if (action == VPROC_SIG_KILL && vprocEntryIsCurrentThreadLocked(entry) && entry->exited) {
+            exit_current = true;
+        }
         entry->pending_signals &= ~mask;
         entry->pending_counts[sig] = 0;
     }
+    return exit_current;
 }
 
 typedef struct {
@@ -2184,6 +3928,13 @@ typedef struct {
 
 static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, int shell_pid, int kernel_pid);
 static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size_t count, bool nonblocking);
+static bool vprocKernelQueueControlSignal(int shell_pid, int sig, bool allow_runtime_fallback);
+static bool vprocRequestControlSignalForSessionInternal(uint64_t session_id,
+                                                        int sig,
+                                                        bool allow_runtime_fallback);
+static bool vprocKernelQueueForegroundHandoff(int sid, int fg_pgid);
+static bool vprocKernelQueueContinuePgid(int pgid);
+static bool vprocKernelQueueSigchldAggregate(int target_pid, bool ensure_kernel);
 
 static int vprocSessionHostFdForStd(int std_fd) {
     VProc *vp = vprocCurrent();
@@ -2251,12 +4002,53 @@ static bool vprocSessionFdMatchesHost(int fd, int host_fd) {
     return fd_st.st_dev == host_st.st_dev && fd_st.st_ino == host_st.st_ino;
 }
 
+static bool vprocToolDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_TOOL_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static bool vprocVprocDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_VPROC_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static bool vprocPipeDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_PIPE_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+static bool vprocKillDebugEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = getenv("PSCALI_KILL_DEBUG") != NULL ? 1 : 0;
+    }
+    return cached == 1;
+}
+
 static bool vprocIoDebugEnabled(void) {
+    static int cached = -1;
+    if (cached >= 0) {
+        return cached == 1;
+    }
     const char *env = getenv("PSCALI_IO_DEBUG");
+    if (!env || env[0] == '\0' || strcmp(env, "0") == 0) {
+        env = getenv("PSCALI_SSH_DEBUG");
+    }
     if (!env || env[0] == '\0') {
+        cached = 0;
         return false;
     }
-    return strcmp(env, "0") != 0;
+    cached = (strcmp(env, "0") != 0) ? 1 : 0;
+    return cached == 1;
 }
 
 static void vprocDebugLogf(const char *format, ...) {
@@ -2331,7 +4123,7 @@ static void vprocSessionResolveOutputFd(VProcSessionStdio *session, int fd, bool
     if (is_stderr) {
         *is_stderr = false;
     }
-    if (!session || vprocSessionStdioIsDefault(session) || !is_stdout || !is_stderr) {
+    if (!session || !is_stdout || !is_stderr) {
         return;
     }
     if (fd == STDOUT_FILENO) {
@@ -2371,6 +4163,7 @@ static void vprocSessionPtyRegister(uint64_t session_id,
     }
     entry->pty_slave = pscal_fd_retain(pty_slave);
     entry->pty_master = pscal_fd_retain(pty_master);
+    entry->control_bytes_passthrough = false;
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
 
@@ -2379,20 +4172,17 @@ static void vprocSessionPtyUnregister(uint64_t session_id) {
         return;
     }
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id != session_id) {
-            continue;
-        }
+    size_t idx = 0;
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, &idx);
+    if (entry) {
         if (entry->pty_slave) {
             pscal_fd_close(entry->pty_slave);
         }
         if (entry->pty_master) {
             pscal_fd_close(entry->pty_master);
         }
-        gVProcSessionPtys.items[i] = gVProcSessionPtys.items[gVProcSessionPtys.count - 1];
-        gVProcSessionPtys.count--;
-        break;
+        entry->control_bytes_passthrough = false;
+        vprocSessionPtyRemoveAtLocked(idx);
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
@@ -2400,18 +4190,17 @@ static void vprocSessionPtyUnregister(uint64_t session_id) {
 int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     if (session_id == 0 || cols <= 0 || rows <= 0) {
         errno = EINVAL;
+        vprocIoTrace("[vproc-io] winsize session=%llu invalid cols=%d rows=%d",
+                     (unsigned long long)session_id,
+                     cols,
+                     rows);
         return -1;
     }
     struct pscal_fd *pty_slave = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id == session_id) {
-            if (entry->pty_slave) {
-                pty_slave = pscal_fd_retain(entry->pty_slave);
-            }
-            break;
-        }
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry && entry->pty_slave) {
+        pty_slave = pscal_fd_retain(entry->pty_slave);
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 
@@ -2420,6 +4209,10 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
             pscal_fd_close(pty_slave);
         }
         errno = ESRCH;
+        vprocIoTrace("[vproc-io] winsize session=%llu missing-pty cols=%d rows=%d",
+                     (unsigned long long)session_id,
+                     cols,
+                     rows);
         return -1;
     }
     struct winsize_ ws;
@@ -2427,8 +4220,44 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     ws.row = (word_t)rows;
     ws.xpixel = 0;
     ws.ypixel = 0;
+    int tty_sid_before = (int)pty_slave->tty->session;
+    int tty_fg_before = (int)pty_slave->tty->fg_group;
+    int map_fg_before = (tty_sid_before > 0) ? pscalTtyGetForegroundPgid(tty_sid_before) : -1;
+    vprocDebugLogf("[ssh-resize] winsize set session=%llu cols=%d rows=%d tty=%p sid=%d fg=%d map_fg=%d",
+                   (unsigned long long)session_id,
+                   cols,
+                   rows,
+                   (void *)pty_slave->tty,
+                   tty_sid_before,
+                   tty_fg_before,
+                   map_fg_before);
+    vprocIoTrace("[vproc-io] winsize session=%llu before tty=%p sid=%d fg=%d map_fg=%d cols=%d rows=%d",
+                 (unsigned long long)session_id,
+                 (void *)pty_slave->tty,
+                 tty_sid_before,
+                 tty_fg_before,
+                 map_fg_before,
+                 cols,
+                 rows);
     tty_set_winsize(pty_slave->tty, ws);
+    int tty_sid_after = (int)pty_slave->tty->session;
+    int tty_fg_after = (int)pty_slave->tty->fg_group;
+    int map_fg_after = (tty_sid_after > 0) ? pscalTtyGetForegroundPgid(tty_sid_after) : -1;
     pscal_fd_close(pty_slave);
+    vprocDebugLogf("[ssh-resize] winsize done session=%llu cols=%d rows=%d sid=%d fg=%d map_fg=%d",
+                   (unsigned long long)session_id,
+                   cols,
+                   rows,
+                   tty_sid_after,
+                   tty_fg_after,
+                   map_fg_after);
+    vprocIoTrace("[vproc-io] winsize session=%llu applied cols=%d rows=%d tty_sid=%d tty_fg=%d map_fg=%d",
+                 (unsigned long long)session_id,
+                 cols,
+                 rows,
+                 tty_sid_after,
+                 tty_fg_after,
+                 map_fg_after);
     return 0;
 }
 
@@ -2442,13 +4271,28 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
                  (unsigned long long)session_id,
                  (void *)handler,
                  context);
+    unsigned char *pending_copy = NULL;
+    size_t pending_len = 0;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
     if (entry) {
         entry->output_handler = handler;
         entry->output_context = context;
+        if (handler && !entry->output_paused && entry->pending_output_len > 0) {
+            pending_copy = (unsigned char *)malloc(entry->pending_output_len);
+            if (pending_copy) {
+                memcpy(pending_copy, entry->pending_output, entry->pending_output_len);
+                pending_len = entry->pending_output_len;
+                entry->pending_output_len = 0;
+                entry->output_backlog_saturated = false;
+            }
+        }
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    if (handler && pending_copy && pending_len > 0) {
+        handler(session_id, pending_copy, pending_len, context);
+    }
+    free(pending_copy);
 }
 
 void vprocSessionClearOutputHandler(uint64_t session_id) {
@@ -2458,50 +4302,132 @@ void vprocSessionClearOutputHandler(uint64_t session_id) {
     vprocIoTrace("[vproc-io] clear output handler session=%llu",
                  (unsigned long long)session_id);
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id != session_id) {
-            continue;
-        }
+    size_t idx = 0;
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, &idx);
+    if (entry) {
         entry->output_handler = NULL;
         entry->output_context = NULL;
+        entry->output_paused = false;
+        vprocSessionPtyEntryClearPendingLocked(entry);
         if (vprocSessionPtyEntryIsEmpty(entry)) {
-            gVProcSessionPtys.items[i] = gVProcSessionPtys.items[gVProcSessionPtys.count - 1];
-            gVProcSessionPtys.count--;
+            vprocSessionPtyRemoveAtLocked(idx);
         }
-        break;
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
 
-static bool vprocSessionGetOutputHandler(uint64_t session_id,
-                                         VProcSessionOutputHandler *out_handler,
-                                         void **out_context) {
-    if (out_handler) {
-        *out_handler = NULL;
-    }
-    if (out_context) {
-        *out_context = NULL;
-    }
+void vprocSessionSetOutputPaused(uint64_t session_id, bool paused) {
     if (session_id == 0) {
-        return false;
+        return;
     }
+    unsigned char *pending_copy = NULL;
+    size_t pending_len = 0;
+    VProcSessionOutputHandler handler = NULL;
+    void *context = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id == session_id) {
-            if (out_handler) {
-                *out_handler = entry->output_handler;
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry) {
+        entry->output_paused = paused;
+        if (!paused && entry->output_handler && entry->pending_output_len > 0) {
+            pending_copy = (unsigned char *)malloc(entry->pending_output_len);
+            if (pending_copy) {
+                memcpy(pending_copy, entry->pending_output, entry->pending_output_len);
+                pending_len = entry->pending_output_len;
+                handler = entry->output_handler;
+                context = entry->output_context;
+                entry->pending_output_len = 0;
+                entry->output_backlog_saturated = false;
             }
-            if (out_context) {
-                *out_context = entry->output_context;
-            }
-            pthread_mutex_unlock(&gVProcSessionPtys.mu);
-            return entry->output_handler != NULL;
         }
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
-    return false;
+    if (handler && pending_copy && pending_len > 0) {
+        handler(session_id, pending_copy, pending_len, context);
+    }
+    free(pending_copy);
+}
+
+typedef enum {
+    VPROC_OUTPUT_DISPATCH_DROPPED = 0,
+    VPROC_OUTPUT_DISPATCH_HANDLED,
+    VPROC_OUTPUT_DISPATCH_QUEUED,
+    VPROC_OUTPUT_DISPATCH_THROTTLED
+} VProcOutputDispatchResult;
+
+static VProcOutputDispatchResult vprocSessionDispatchOutput(uint64_t session_id,
+                                                            const unsigned char *data,
+                                                            size_t len) {
+    VProcSessionOutputHandler handler = NULL;
+    void *context = NULL;
+    bool queued = false;
+    bool throttled = false;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
+    if (entry) {
+        if (entry->output_handler && !entry->output_paused) {
+            handler = entry->output_handler;
+            context = entry->output_context;
+        } else {
+            queued = vprocSessionQueueOutputLocked(entry, data, len);
+            if (queued && entry->output_paused && entry->output_backlog_saturated) {
+                throttled = true;
+            }
+        }
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    if (handler) {
+        vprocIoTrace("[vproc-io] output session=%llu len=%zu handler=%p",
+                     (unsigned long long)session_id,
+                     len,
+                     (void *)handler);
+        handler(session_id, data, len, context);
+        return VPROC_OUTPUT_DISPATCH_HANDLED;
+    }
+    if (throttled) {
+        return VPROC_OUTPUT_DISPATCH_THROTTLED;
+    }
+    if (queued) {
+        return VPROC_OUTPUT_DISPATCH_QUEUED;
+    }
+    return VPROC_OUTPUT_DISPATCH_DROPPED;
+}
+
+static bool vprocSessionOutputShouldThrottle(uint64_t session_id) {
+    bool throttle = false;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry && entry->output_paused && entry->output_backlog_saturated) {
+        throttle = true;
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+    return throttle;
+}
+
+static ssize_t vprocSessionWritePtyMaster(struct pscal_fd *master,
+                                          const void *buf,
+                                          size_t len,
+                                          bool blocking) {
+    if (!master || !master->tty || !master->tty->pty.other || !buf || len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct tty *slave = master->tty->pty.other;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = tty_input(slave, (const char *)buf + off, len - off, blocking);
+        if (w < 0) {
+            if (w == _EINTR) {
+                continue;
+            }
+            errno = pscalCompatErrno((int)w);
+            return off > 0 ? (ssize_t)off : -1;
+        }
+        if (w == 0) {
+            break;
+        }
+        off += (size_t)w;
+    }
+    return (ssize_t)off;
 }
 
 ssize_t vprocSessionWriteToMasterMode(uint64_t session_id,
@@ -2517,12 +4443,9 @@ ssize_t vprocSessionWriteToMasterMode(uint64_t session_id,
                  len);
     struct pscal_fd *master = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    for (size_t i = 0; i < gVProcSessionPtys.count; ++i) {
-        VProcSessionPtyEntry *entry = &gVProcSessionPtys.items[i];
-        if (entry->session_id == session_id && entry->pty_master) {
-            master = pscal_fd_retain(entry->pty_master);
-            break;
-        }
+    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (entry && entry->pty_master) {
+        master = pscal_fd_retain(entry->pty_master);
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
     if (!master || !master->ops || !master->ops->write) {
@@ -2531,6 +4454,11 @@ ssize_t vprocSessionWriteToMasterMode(uint64_t session_id,
         }
         errno = EBADF;
         return -1;
+    }
+    if (pscalPtyIsMaster(master) && master->tty && master->tty->pty.other) {
+        ssize_t written = vprocSessionWritePtyMaster(master, buf, len, blocking);
+        pscal_fd_close(master);
+        return written;
     }
     unsigned prev_flags = 0;
     bool restore_flags = false;
@@ -2585,46 +4513,131 @@ ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t l
     return vprocSessionWriteToMasterMode(session_id, buf, len, true);
 }
 
-static bool vprocShellOwnsForegroundLocked(int shell_pid, int *out_fgid) {
-    if (out_fgid) {
-        *out_fgid = -1;
+static bool vprocDispatchControlSignalToForeground(int shell_pid,
+                                                   int sig,
+                                                   bool allow_runtime_fallback) {
+    if (vprocSoftSignalingDisabledByEnv()) {
+        return false;
     }
     if (shell_pid <= 0) {
-        return true;
-    }
-    VProcTaskEntry *entry = vprocTaskFindLocked(shell_pid);
-    if (!entry) {
-        return true;
-    }
-    int shell_pgid = entry->pgid;
-    int sid = entry->sid;
-    int fg = (sid > 0) ? vprocForegroundPgidLocked(sid) : -1;
-    if (out_fgid) {
-        *out_fgid = fg;
-    }
-    if (fg <= 0 || shell_pgid <= 0) {
-        return true;
-    }
-    return fg == shell_pgid;
-}
-
-static void vprocDispatchControlSignalToForeground(int shell_pid, int sig) {
-    if (shell_pid <= 0) {
-        return;
+        return false;
     }
     int target_fgid = -1;
+    int shell_pgid = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
-    bool shell_owns_fg = vprocShellOwnsForegroundLocked(shell_pid, &target_fgid);
+    VProcTaskEntry *shell_entry = vprocTaskFindLocked(shell_pid);
+    if (shell_entry) {
+        shell_pgid = shell_entry->pgid;
+        if (shell_entry->sid > 0) {
+            target_fgid = vprocForegroundPgidLocked(shell_entry->sid);
+        }
+    }
     pthread_mutex_unlock(&gVProcTasks.mu);
-    if (shell_owns_fg || target_fgid <= 0) {
+    if (target_fgid <= 0) {
+        int override_fg = (pscalRuntimeCurrentForegroundPgid)
+                ? pscalRuntimeCurrentForegroundPgid()
+                : -1;
+        if (override_fg > 0) {
+            target_fgid = override_fg;
+        } else {
+            target_fgid = shell_pgid;
+        }
+    }
+    if (target_fgid > 0) {
+        int sid = -1;
+        pthread_mutex_lock(&gVProcTasks.mu);
+        VProcTaskEntry *shell_entry = vprocTaskFindLocked(shell_pid);
+        if (shell_entry) {
+            sid = shell_entry->sid;
+        }
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        if (vprocForegroundGroupPrefersControlBytes(sid, target_fgid, shell_pid, sig)) {
+            return false;
+        }
+        if (vprocToolDebugEnabled()) {
+            fprintf(stderr,
+                    "[session-input-ctrl] fg-dispatch sig=%d shell=%d shell_pgid=%d target_fgid=%d\n",
+                    sig,
+                    shell_pid,
+                    shell_pgid,
+                    target_fgid);
+        }
+        int rc = vprocKillShim(-target_fgid, sig);
+        if (vprocToolDebugEnabled()) {
+            fprintf(stderr,
+                    "[session-input-ctrl] fg-dispatch result sig=%d target_fgid=%d rc=%d errno=%d\n",
+                    sig,
+                    target_fgid,
+                    rc,
+                    errno);
+        }
+        if (rc == 0) {
+            return true;
+        }
 #if defined(PSCAL_TARGET_IOS)
-        if (sig == SIGINT && pscalRuntimeRequestSigint) {
+        if (sig == SIGTSTP && shell_pgid > 0 && target_fgid != shell_pgid) {
+            if (vprocKillShim(-shell_pgid, sig) == 0) {
+                return true;
+            }
+        }
+        if (allow_runtime_fallback && sig == SIGINT && pscalRuntimeRequestSigint) {
             pscalRuntimeRequestSigint();
+            return true;
+        }
+        if (allow_runtime_fallback && sig == SIGTSTP && pscalRuntimeRequestSigtstp) {
+            pscalRuntimeRequestSigtstp();
+            return true;
         }
 #endif
-        return;
+        return false;
     }
-    (void)vprocKillShim(-target_fgid, sig);
+#if defined(PSCAL_TARGET_IOS)
+    if (allow_runtime_fallback && sig == SIGINT && pscalRuntimeRequestSigint) {
+        pscalRuntimeRequestSigint();
+        return true;
+    }
+    if (allow_runtime_fallback && sig == SIGTSTP && pscalRuntimeRequestSigtstp) {
+        pscalRuntimeRequestSigtstp();
+        return true;
+    }
+#endif
+    return false;
+}
+
+static bool vprocEnsureSessionInputWritableLocked(VProcSessionInput *input, size_t append_len) {
+    if (!input || append_len == 0) {
+        return false;
+    }
+    if (input->off > input->cap || input->len > (input->cap - input->off)) {
+        return false;
+    }
+    size_t tail = input->off + input->len;
+    if (append_len <= (input->cap - tail)) {
+        return true;
+    }
+    if (input->off > 0 && append_len <= (input->cap - input->len)) {
+        if (input->len > 0) {
+            memmove(input->buf, input->buf + input->off, input->len);
+        }
+        input->off = 0;
+        return true;
+    }
+    size_t needed = input->len + append_len;
+    size_t new_cap = 0;
+    if (!vprocComputeGrowthCapacity(input->cap, needed, 256, sizeof(unsigned char), &new_cap)) {
+        return false;
+    }
+    unsigned char *resized = (unsigned char *)realloc(input->buf, new_cap);
+    if (!resized) {
+        return false;
+    }
+    if (input->len > 0 && input->off > 0) {
+        memmove(resized, resized + input->off, input->len);
+    }
+    input->buf = resized;
+    input->off = 0;
+    input->cap = new_cap;
+    return true;
 }
 
 static void *vprocSessionInputThread(void *arg) {
@@ -2647,11 +4660,17 @@ static void *vprocSessionInputThread(void *arg) {
     VProcSessionInput *input = session ? session->input : NULL;
     int fd = session ? session->stdin_host_fd : -1;
     struct pscal_fd *pscal_fd = session ? session->stdin_pscal_fd : NULL;
+    const bool tool_dbg = vprocToolDebugEnabled();
+    unsigned int retry_sleep_us = 1000;
+    if (pscal_fd) {
+        pscal_fd = pscal_fd_retain(pscal_fd);
+    }
     if (pscal_fd && (!pscal_fd->ops || !pscal_fd->ops->read)) {
+        pscal_fd_close(pscal_fd);
         pscal_fd = NULL;
     }
     unsigned char ch = 0;
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (tool_dbg) {
         vprocDebugLogf(
                 "[session-input] reader start host_fd=%d pscal_fd=%p shell=%d kernel=%d\n",
                 fd,
@@ -2665,7 +4684,7 @@ static void *vprocSessionInputThread(void *arg) {
             bool stop_requested = input->stop_requested;
             pthread_mutex_unlock(&input->mu);
             if (stop_requested) {
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     vprocDebugLogf( "[session-input] reader stop fd=%d\n", fd);
                 }
                 break;
@@ -2676,10 +4695,15 @@ static void *vprocSessionInputThread(void *arg) {
             r = vprocHostRead(fd, &ch, 1);
             if (r <= 0) {
                 if (r < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
-                    usleep(1000);
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        usleep(retry_sleep_us);
+                        if (retry_sleep_us < 16000) {
+                            retry_sleep_us <<= 1;
+                        }
+                    }
                     continue;
                 }
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     int saved_errno = errno;
                     vprocDebugLogf(
                             "[session-input] reader eof host_fd=%d r=%zd errno=%d\n",
@@ -2695,22 +4719,50 @@ static void *vprocSessionInputThread(void *arg) {
                         pthread_cond_broadcast(&input->cv);
                     }
                     pthread_mutex_unlock(&input->mu);
+                    pscal_fd_poll_wakeup(NULL, POLLIN);
                 }
                 break;
             }
         } else {
             r = pscal_fd->ops->read(pscal_fd, &ch, 1);
             if (r <= 0) {
+                if (r == 0 && session && session->pty_active &&
+                    (pscal_fd == session->stdin_pscal_fd ||
+                     pscal_fd == session->pty_slave)) {
+                    /* PTY slave reads may return 0 transiently when no byte is
+                     * ready (e.g. VMIN=0). Treat that as "would block" instead
+                     * of EOF so nested ssh/scp password reads do not exit early. */
+                    usleep(retry_sleep_us);
+                    if (retry_sleep_us < 16000) {
+                        retry_sleep_us <<= 1;
+                    }
+                    continue;
+                }
+                if (r == _EIO && session && session->pty_active &&
+                    (pscal_fd == session->stdin_pscal_fd ||
+                     pscal_fd == session->pty_slave)) {
+                    /* Some PTY-backed readers surface transient EIO between
+                     * keystrokes; keep waiting so prompt loops don't terminate
+                     * after the first typed character. */
+                    usleep(retry_sleep_us);
+                    if (retry_sleep_us < 16000) {
+                        retry_sleep_us <<= 1;
+                    }
+                    continue;
+                }
                 if (r == _EINTR || r == _EAGAIN) {
                     if (r == _EAGAIN) {
-                        usleep(1000);
+                        usleep(retry_sleep_us);
+                        if (retry_sleep_us < 16000) {
+                            retry_sleep_us <<= 1;
+                        }
                     }
                     continue;
                 }
                 if (r < 0) {
                     vprocSetCompatErrno((int)r);
                 }
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
                     int saved_errno = errno;
                     vprocDebugLogf(
                             "[session-input] reader eof pscal_fd=%p r=%zd errno=%d\n",
@@ -2726,18 +4778,106 @@ static void *vprocSessionInputThread(void *arg) {
                         pthread_cond_broadcast(&input->cv);
                     }
                     pthread_mutex_unlock(&input->mu);
+                    pscal_fd_poll_wakeup(NULL, POLLIN);
                 }
                 break;
             }
         }
-        if (ch == 3 || ch == 26) {
+        retry_sleep_us = 1000;
+        if ((ch == 3 || ch == 26) &&
+            !vprocSessionPrefersControlBytePassthrough(session) &&
+            !vprocSoftSignalingDisabledByEnv()) {
+            int shell_pid = -1;
+            int shell_pgid = -1;
+            int sid = -1;
+            int fg_pgid = -1;
+            (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
+            bool shell_foreground = (shell_pgid > 0 && fg_pgid > 0 && fg_pgid == shell_pgid);
+            bool shell_prompt_read_active = vprocShellPromptReadActive(shell_pid);
+            if (tool_dbg) {
+                fprintf(stderr,
+                        "[session-input-ctrl] ch=%d shell_pid=%d shell_pgid=%d sid=%d fg=%d prompt=%d\n",
+                        (int)ch,
+                        shell_pid,
+                        shell_pgid,
+                        sid,
+                        fg_pgid,
+                        (int)shell_prompt_read_active);
+            }
+            if (shell_foreground && shell_prompt_read_active && input) {
+                /* When the shell owns the foreground, treat Ctrl-C/Z as shell
+                 * input control bytes (prompt/editor behavior) instead of
+                 * forcing vproc signal dispatch. */
+                pthread_mutex_lock(&input->mu);
+                if (vprocEnsureSessionInputWritableLocked(input, 1)) {
+                    input->buf[input->off + input->len] = ch;
+                    input->len++;
+                }
+                pthread_cond_broadcast(&input->cv);
+                pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
+                continue;
+            }
             int sig = (ch == 3) ? SIGINT : SIGTSTP;
-            vprocDispatchControlSignalToForeground(ctx->shell_pid, sig);
+            bool remote_passthrough = (fg_pgid > 0 &&
+                                       !shell_foreground &&
+                                       vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid, sig));
+            if (remote_passthrough && input) {
+                pthread_mutex_lock(&input->mu);
+                if (vprocEnsureSessionInputWritableLocked(input, 1)) {
+                    input->buf[input->off + input->len] = ch;
+                    input->len++;
+                }
+                pthread_cond_broadcast(&input->cv);
+                pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
+                continue;
+            }
+            int shell_hint = ctx->shell_pid;
+            if (shell_hint <= 0 && session && session->shell_pid > 0) {
+                shell_hint = session->shell_pid;
+                ctx->shell_pid = shell_hint;
+            }
+            bool dispatched = false;
+            bool queued = false;
+            if (session && session->session_id != 0) {
+                dispatched = vprocRequestControlSignalForSessionInternal(session->session_id, sig, false);
+            }
+            if (!dispatched && session && session->session_id != 0) {
+                queued = vprocKernelQueueControlSignal(shell_hint, sig, false);
+            }
+            if (tool_dbg) {
+                fprintf(stderr,
+                        "[session-input-ctrl] dispatch sig=%d session=%llu shell=%d queued=%d dispatched=%d\n",
+                        sig,
+                        (unsigned long long)(session ? session->session_id : 0),
+                        shell_hint,
+                        (int)queued,
+                        (int)dispatched);
+            }
+            if (!dispatched && !queued) {
+                dispatched = vprocDispatchControlSignalToForeground(shell_hint, sig, false);
+            }
+            if (!dispatched && !queued && input) {
+                /* Keep control bytes observable even if virtual dispatch cannot
+                 * resolve a foreground target. This preserves SSH passthrough
+                 * and avoids dropping ^C/^Z for frontends while session/job
+                 * metadata is still converging. */
+                pthread_mutex_lock(&input->mu);
+                if (vprocEnsureSessionInputWritableLocked(input, 1)) {
+                    input->buf[input->off + input->len] = ch;
+                    input->len++;
+                }
+                pthread_cond_broadcast(&input->cv);
+                pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
+            }
             if (input) {
                 pthread_mutex_lock(&input->mu);
                 input->interrupt_pending = true;
                 pthread_cond_broadcast(&input->cv);
                 pthread_mutex_unlock(&input->mu);
+                pscal_fd_poll_wakeup(NULL, POLLIN);
             }
             continue;
         }
@@ -2745,19 +4885,13 @@ static void *vprocSessionInputThread(void *arg) {
             continue;
         }
         pthread_mutex_lock(&input->mu);
-        if (input->len + 1 > input->cap) {
-            size_t new_cap = input->cap ? input->cap * 2 : 256;
-            unsigned char *resized = (unsigned char *)realloc(input->buf, new_cap);
-            if (resized) {
-                input->buf = resized;
-                input->cap = new_cap;
-            }
-        }
-        if (input->len < input->cap) {
-            input->buf[input->len++] = ch;
+        if (vprocEnsureSessionInputWritableLocked(input, 1)) {
+            input->buf[input->off + input->len] = ch;
+            input->len++;
             pthread_cond_signal(&input->cv);
         }
         pthread_mutex_unlock(&input->mu);
+        pscal_fd_poll_wakeup(NULL, POLLIN);
     }
     if (input) {
         pthread_mutex_lock(&input->mu);
@@ -2769,6 +4903,11 @@ static void *vprocSessionInputThread(void *arg) {
             pthread_cond_broadcast(&input->cv);
         }
         pthread_mutex_unlock(&input->mu);
+        pscal_fd_poll_wakeup(NULL, POLLIN);
+    }
+    if (pscal_fd) {
+        pscal_fd_close(pscal_fd);
+        pscal_fd = NULL;
     }
     if (session) {
         vprocSessionStdioActivate(NULL);
@@ -2791,8 +4930,19 @@ static void *vprocSessionPtyOutputThread(void *arg) {
     vprocRegisterInterposeBypassThread(tid);
     pthread_setname_np("vproc-pty-out");
     vprocPtyTrace("[PTY] output thread start");
-    char buf[1024];
+    /* Larger chunking reduces per-callback overhead for high-volume PTY output. */
+    char buf[8192];
+    unsigned int retry_sleep_us = 1000;
+    bool backlog_throttled = false;
     while (session->pty_active) {
+        if (backlog_throttled) {
+            /* Stay in backoff until handler resumes or backlog is drained. */
+            if (vprocSessionOutputShouldThrottle(session->session_id)) {
+                usleep(VPROC_SESSION_OUTPUT_THROTTLE_US);
+                continue;
+            }
+            backlog_throttled = false;
+        }
         ssize_t r = master->ops->read(master, buf, sizeof(buf));
         if (r == 0) {
             vprocPtyTrace("[PTY] output thread EOF");
@@ -2801,7 +4951,10 @@ static void *vprocSessionPtyOutputThread(void *arg) {
         if (r < 0) {
             if (r == _EINTR || r == _EAGAIN) {
                 if (r == _EAGAIN) {
-                    usleep(1000);
+                    usleep(retry_sleep_us);
+                    if (retry_sleep_us < 16000) {
+                        retry_sleep_us <<= 1;
+                    }
                 }
                 continue;
             }
@@ -2809,14 +4962,16 @@ static void *vprocSessionPtyOutputThread(void *arg) {
             session->pty_active = false;
             break;
         }
-        VProcSessionOutputHandler handler = NULL;
-        void *context = NULL;
-        if (vprocSessionGetOutputHandler(session->session_id, &handler, &context) && handler) {
-            vprocIoTrace("[vproc-io] output session=%llu len=%zd handler=%p",
-                         (unsigned long long)session->session_id,
-                         r,
-                         (void *)handler);
-            handler(session->session_id, (const unsigned char *)buf, (size_t)r, context);
+        retry_sleep_us = 1000;
+        VProcOutputDispatchResult dispatch =
+                vprocSessionDispatchOutput(session->session_id, (const unsigned char *)buf, (size_t)r);
+        if (dispatch == VPROC_OUTPUT_DISPATCH_HANDLED ||
+            dispatch == VPROC_OUTPUT_DISPATCH_QUEUED) {
+            continue;
+        }
+        if (dispatch == VPROC_OUTPUT_DISPATCH_THROTTLED) {
+            backlog_throttled = true;
+            usleep(VPROC_SESSION_OUTPUT_THROTTLE_US);
             continue;
         }
         vprocIoTrace("[vproc-io] output drop session=%llu len=%zd (no handler)",
@@ -2834,6 +4989,7 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
         return NULL;
     }
     pthread_mutex_lock(&gSessionInputInitMu);
+    const bool tool_dbg = vprocToolDebugEnabled();
     if (!session->input) {
         session->input = (VProcSessionInput *)calloc(1, sizeof(VProcSessionInput));
         if (session->input) {
@@ -2848,6 +5004,7 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
         pthread_mutex_lock(&input->mu);
         if (!input->reader_active && input->eof) {
             input->eof = false;
+            input->off = 0;
             input->len = 0;
             input->interrupt_pending = false;
         }
@@ -2867,24 +5024,33 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
             input->reader_generation++;
             ctx->generation = input->reader_generation;
             input->stop_requested = false;
+            input->reader_active = true;
+            input->reader_fd = session->stdin_host_fd;
             pthread_mutex_unlock(&input->mu);
             pthread_t tid;
             int create_rc = vprocHostPthreadCreate(&tid, NULL, vprocSessionInputThread, ctx);
             if (create_rc == 0) {
                 pthread_detach(tid);
-                pthread_mutex_lock(&input->mu);
-                input->reader_active = true;
-                input->reader_fd = session->stdin_host_fd;
-                input->stop_requested = false;
-                pthread_mutex_unlock(&input->mu);
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                if (tool_dbg) {
+                    fprintf(stderr,
+                            "[session-input] reader spawned host_fd=%d pscal_fd=%p\n",
+                            session->stdin_host_fd,
+                            (void *)session->stdin_pscal_fd);
                     vprocDebugLogf(
                             "[session-input] reader spawned host_fd=%d pscal_fd=%p\n",
                             session->stdin_host_fd,
                             (void *)session->stdin_pscal_fd);
                 }
             } else {
-                if (getenv("PSCALI_TOOL_DEBUG")) {
+                pthread_mutex_lock(&input->mu);
+                if (input->reader_generation == ctx->generation) {
+                    input->reader_active = false;
+                    input->reader_fd = -1;
+                    input->stop_requested = false;
+                }
+                pthread_mutex_unlock(&input->mu);
+                if (tool_dbg) {
+                    fprintf(stderr, "[session-input] reader spawn failed rc=%d\n", create_rc);
                     vprocDebugLogf(
                             "[session-input] reader spawn failed rc=%d\n",
                             create_rc);
@@ -2902,10 +5068,12 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
         return 0;
     }
     VProcSessionInput *input = session->input;
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    const bool tool_dbg = vprocToolDebugEnabled();
+    if (tool_dbg) {
         pthread_mutex_lock(&input->mu);
         vprocDebugLogf(
-                "[session-read] start len=%zu eof=%d reader=%d fd=%d stdin=%d\n",
+                "[session-read] start off=%zu len=%zu eof=%d reader=%d fd=%d stdin=%d\n",
+                input->off,
                 input->len,
                 (int)input->eof,
                 (int)input->reader_active,
@@ -2925,21 +5093,23 @@ static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size
     if (input->interrupt_pending) {
         input->interrupt_pending = false;
         pthread_mutex_unlock(&input->mu);
+        (void)vprocWaitIfStopped(vprocCurrent());
         errno = EINTR;
         return -1;
     }
     if (input->len == 0 && input->eof) {
-        if (getenv("PSCALI_TOOL_DEBUG")) {
+        if (tool_dbg) {
             vprocDebugLogf( "[session-read] eof\n");
         }
         pthread_mutex_unlock(&input->mu);
         return 0;
     }
     size_t to_copy = (count < input->len) ? count : input->len;
-    memcpy(buf, input->buf, to_copy);
+    memcpy(buf, input->buf + input->off, to_copy);
+    input->off += to_copy;
     input->len -= to_copy;
-    if (input->len > 0) {
-        memmove(input->buf, input->buf + to_copy, input->len);
+    if (input->len == 0) {
+        input->off = 0;
     }
     pthread_mutex_unlock(&input->mu);
     return (ssize_t)to_copy;
@@ -2959,16 +5129,7 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         errno = EBADF;
         return -1;
     }
-    if (session->stdin_host_fd >= 0) {
-        if (getenv("PSCALI_TOOL_DEBUG")) {
-            vprocDebugLogf(
-                    "[session-read] direct stdin=%d nonblock=%d\n",
-                    session->stdin_host_fd,
-                    (int)nonblocking);
-        }
-        (void)nonblocking;
-        return vprocHostRead(session->stdin_host_fd, buf, count);
-    }
+    const bool tool_dbg = vprocToolDebugEnabled();
     VProcSessionInput *input = vprocSessionInputEnsure(session,
                                                        vprocGetShellSelfPid(),
                                                        vprocGetKernelPid());
@@ -2976,8 +5137,10 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         errno = EBADF;
         return -1;
     }
-    if (getenv("PSCALI_TOOL_DEBUG")) {
-        vprocDebugLogf("[session-read] buffered nonblock=%d\n", (int)nonblocking);
+    if (tool_dbg) {
+        vprocDebugLogf("[session-read] buffered stdin=%d nonblock=%d\n",
+                       session->stdin_host_fd,
+                       (int)nonblocking);
     }
     return vprocSessionReadInput(session, buf, count, nonblocking);
 }
@@ -2989,7 +5152,8 @@ VProcSessionInput *vprocSessionInputEnsureShim(void) {
     }
     int shell_pid = vprocGetShellSelfPid();
     int kernel_pid = vprocGetKernelPid();
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    const bool tool_dbg = vprocToolDebugEnabled();
+    if (tool_dbg) {
         vprocDebugLogf(
                 "[session-input] ensure shell=%d kernel=%d stdin_host=%d input=%p\n",
                 shell_pid,
@@ -3014,48 +5178,50 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     if (!input) {
         return false;
     }
+    const bool tool_dbg = vprocToolDebugEnabled();
     pthread_mutex_lock(&input->mu);
-    size_t needed = input->len + len;
-    if (needed > input->cap) {
-        size_t new_cap = input->cap ? input->cap : 256;
-        while (new_cap < needed) {
-            new_cap *= 2;
-        }
-        unsigned char *resized = (unsigned char *)realloc(input->buf, new_cap);
-        if (!resized) {
-            pthread_mutex_unlock(&input->mu);
-            return false;
-        }
-        input->buf = resized;
-        input->cap = new_cap;
+    if (len > SIZE_MAX - input->len) {
+        pthread_mutex_unlock(&input->mu);
+        return false;
     }
-    memcpy(input->buf + input->len, data, len);
+    if (!vprocEnsureSessionInputWritableLocked(input, len)) {
+        pthread_mutex_unlock(&input->mu);
+        return false;
+    }
+    memcpy(input->buf + input->off + input->len, data, len);
     input->len += len;
     pthread_cond_broadcast(&input->cv);
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (tool_dbg) {
         vprocDebugLogf(
-                "[session-input] injected len=%zu total=%zu cap=%zu\n",
+                "[session-input] injected len=%zu off=%zu total=%zu cap=%zu\n",
                 len,
+                input->off,
                 input->len,
                 input->cap);
     }
     pthread_mutex_unlock(&input->mu);
+    pscal_fd_poll_wakeup(NULL, POLLIN);
     return true;
 }
 
 static void vprocRemoveChildLocked(VProcTaskEntry *parent, int child_pid) {
     if (!parent || !parent->children || parent->child_count == 0) return;
-    for (size_t i = 0; i < parent->child_count; ++i) {
+    for (size_t i = 0; i < parent->child_count;) {
         if (parent->children[i] == child_pid) {
             parent->children[i] = parent->children[parent->child_count - 1];
             parent->child_count--;
-            break;
+            continue;
         }
+        ++i;
     }
 }
 
 static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
     if (child_pid <= 0) return;
+    if (new_parent_pid == child_pid) {
+        /* Reject self-parenting to avoid cycles in parent/child bookkeeping. */
+        new_parent_pid = 0;
+    }
     VProcTaskEntry *child_entry = vprocTaskFindLocked(child_pid);
     if (!child_entry) return;
     int old_parent = child_entry->parent_pid;
@@ -3066,14 +5232,26 @@ static void vprocUpdateParentLocked(int child_pid, int new_parent_pid) {
             vprocRemoveChildLocked(old_parent_entry, child_pid);
         }
     }
-    child_entry->parent_pid = new_parent_pid;
+    VProcTaskEntry *new_parent_entry = NULL;
     if (new_parent_pid > 0) {
-        VProcTaskEntry *new_parent_entry = vprocTaskEnsureSlotLocked(new_parent_pid);
-        child_entry = vprocTaskFindLocked(child_pid);
-        if (!child_entry) return;
-        child_entry->parent_pid = new_parent_pid;
-        if (new_parent_entry) {
-            vprocAddChildLocked(new_parent_entry, child_pid);
+        /* Host-side parents may not have synthetic task entries; preserve the
+         * numeric parent for wait semantics and only track child links for
+         * parents that exist in the task table. */
+        new_parent_entry = vprocTaskFindLocked(new_parent_pid);
+    }
+    child_entry->parent_pid = new_parent_pid;
+    if (new_parent_entry) {
+        /* Some host-backed synthetic tasks are created before their shell
+         * parent entry exists; once we have a concrete parent, adopt its
+         * session id so job/session filtering stays consistent. */
+        if (!child_entry->session_leader &&
+            child_entry->sid == child_entry->pid &&
+            new_parent_entry->sid > 0 &&
+            new_parent_entry->sid != child_entry->pid) {
+            child_entry->sid = new_parent_entry->sid;
+        }
+        if (!vprocAddChildLocked(new_parent_entry, child_pid)) {
+            child_entry->parent_pid = 0;
         }
     }
 }
@@ -3086,22 +5264,12 @@ static void vprocReparentChildrenLocked(int parent_pid, int new_parent_pid) {
         }
         return;
     }
-    size_t count = entry->child_count;
-    int *children = (int *)calloc(count, sizeof(int));
-    if (!children) {
-        return;
-    }
-    memcpy(children, entry->children, count * sizeof(int));
-    for (size_t i = 0; i < count; ++i) {
-        int child_pid = children[i];
+    while (entry->child_count > 0) {
+        int child_pid = entry->children[entry->child_count - 1];
+        entry->child_count--;
         if (child_pid > 0) {
             vprocUpdateParentLocked(child_pid, new_parent_pid);
         }
-    }
-    free(children);
-    entry = vprocTaskFindLocked(parent_pid);
-    if (entry) {
-        entry->child_count = 0;
     }
 }
 
@@ -3122,7 +5290,8 @@ static void vprocNotifyPidSigchldLocked(int target_pid, VProcSigchldEvent evt) {
     target_entry->sigchld_events++;
     vprocQueuePendingSignalLocked(target_entry, SIGCHLD);
     if (!target_entry->sigchld_blocked) {
-        vprocDeliverPendingSignalsLocked(target_entry);
+        target_entry->sigchld_delivery_queued = false;
+        (void)vprocDeliverPendingSignalsLocked(target_entry);
     }
 }
 
@@ -3154,32 +5323,88 @@ static int vprocWaiterPid(void) {
     return (int)vprocHostGetpidRaw();
 }
 
-// NOTE: Caller must hold vp->mu
-static int vprocAllocSlot(VProc *vp) {
-    if (!vp) {
-        return -1;
+static bool vprocEnsureFdCapacityLocked(VProc *vp, size_t needed) {
+    if (!vp || needed == 0) {
+        errno = EINVAL;
+        return false;
     }
-    for (int i = 0; i < (int)vp->capacity; ++i) {
-        int idx = (vp->next_fd + i) % (int)vp->capacity;
-        if (vp->entries[idx].kind == VPROC_FD_NONE) {
-            vp->next_fd = idx + 1;
-            return idx;
-        }
+    size_t max_fd_capacity = (size_t)INT_MAX + 1u;
+    if (needed > max_fd_capacity) {
+        errno = EMFILE;
+        return false;
     }
-    size_t new_cap = vp->capacity ? vp->capacity * 2 : VPROC_INITIAL_CAPACITY;
+    if (needed <= vp->capacity) {
+        return true;
+    }
+    size_t new_cap = 0;
+    if (!vprocComputeGrowthCapacity(vp->capacity,
+                                    needed,
+                                    VPROC_INITIAL_CAPACITY,
+                                    sizeof(VProcFdEntry),
+                                    &new_cap)) {
+        errno = EMFILE;
+        return false;
+    }
+    if (new_cap > max_fd_capacity) {
+        new_cap = max_fd_capacity;
+    }
+    if (new_cap < needed) {
+        errno = EMFILE;
+        return false;
+    }
     VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
     if (!resized) {
-        return -1;
+        errno = ENOMEM;
+        return false;
     }
     for (size_t i = vp->capacity; i < new_cap; ++i) {
         resized[i].host_fd = -1;
         resized[i].pscal_fd = NULL;
         resized[i].kind = VPROC_FD_NONE;
     }
-    int idx = (int)vp->capacity;
     vp->entries = resized;
     vp->capacity = new_cap;
-    vp->next_fd = idx + 1;
+    return true;
+}
+
+// NOTE: Caller must hold vp->mu
+static int vprocAllocSlot(VProc *vp) {
+    if (!vp) {
+        return -1;
+    }
+    if (vp->capacity > (size_t)INT_MAX) {
+        errno = EMFILE;
+        return -1;
+    }
+    int capacity = (int)vp->capacity;
+    if (capacity <= 0) {
+        return -1;
+    }
+    int start = vp->next_fd;
+    if (start < 0 || start >= capacity) {
+        start %= capacity;
+        if (start < 0) {
+            start += capacity;
+        }
+    }
+    for (int idx = start; idx < capacity; ++idx) {
+        if (vp->entries[idx].kind == VPROC_FD_NONE) {
+            vp->next_fd = (idx + 1) % capacity;
+            return idx;
+        }
+    }
+    for (int idx = 0; idx < start; ++idx) {
+        if (vp->entries[idx].kind == VPROC_FD_NONE) {
+            vp->next_fd = (idx + 1) % capacity;
+            return idx;
+        }
+    }
+    size_t old_cap = vp->capacity;
+    if (!vprocEnsureFdCapacityLocked(vp, old_cap + 1)) {
+        return -1;
+    }
+    int idx = (int)old_cap;
+    vp->next_fd = (idx + 1) % (int)vp->capacity;
     return idx;
 }
 
@@ -3196,6 +5421,7 @@ static int vprocInsertLocked(VProc *vp, int host_fd) {
     vp->entries[slot].host_fd = host_fd;
     vp->entries[slot].pscal_fd = NULL;
     vp->entries[slot].kind = VPROC_FD_HOST;
+    vprocResourceTrackLocked(vp, host_fd, VPROC_RESOURCE_GENERIC);
     return slot;
 }
 
@@ -3216,14 +5442,24 @@ static int vprocInsertPscalFd(VProc *vp, struct pscal_fd *fd) {
         errno = EBADF;
         return -1;
     }
+    /* The fd table must own its own reference so callers can freely drop
+     * theirs after insertion. */
+    struct pscal_fd *retained = pscal_fd_retain(fd);
+    if (!retained) {
+        errno = ENOMEM;
+        return -1;
+    }
     pthread_mutex_lock(&vp->mu);
     int slot = vprocAllocSlot(vp);
     if (slot >= 0) {
         vp->entries[slot].host_fd = -1;
-        vp->entries[slot].pscal_fd = fd;
+        vp->entries[slot].pscal_fd = retained;
         vp->entries[slot].kind = VPROC_FD_PSCAL;
     }
     pthread_mutex_unlock(&vp->mu);
+    if (slot < 0) {
+        pscal_fd_close(retained);
+    }
     return slot;
 }
 
@@ -3258,15 +5494,145 @@ static bool vprocPathMatches(const char *path, const char *target) {
     if (!path || !target) {
         return false;
     }
-    return strcmp(path, target) == 0;
+    if (strcmp(path, target) == 0) {
+        return true;
+    }
+    /* Allow any sandbox path that still ends with the target (e.g., /var/.../dev/location). */
+    const char *sub = strstr(path, target);
+    if (sub && strcmp(sub, target) == 0) {
+        return true;
+    }
+    /* Allow sandboxed prefixes (e.g., /private/var/.../dev/location). */
+    size_t target_len = strlen(target);
+    size_t path_len = strlen(path);
+    if (path_len >= target_len) {
+        if (strcmp(path + (path_len - target_len), target) == 0) {
+            return true;
+        }
+    }
+    if (strncmp(path, "/private", 8) == 0) {
+        const char *trimmed = path + 8;
+        if (strcmp(trimmed, target) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool vprocLocationDebugEnabled(void) {
+    const char *env = getenv("PSCALI_LOCATION_DEBUG");
+    if (env && env[0] != '\0' && strcmp(env, "0") != 0) {
+        return true;
+    }
+    return false;
+}
+
+static void vprocLocationDebugf(const char *fmt, ...) {
+    if (!fmt || !vprocLocationDebugEnabled()) {
+        return;
+    }
+    char buf[256];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    vprocDebugLogf("%s", buf);
+}
+
+static void vprocEnsurePathParent(const char *path) {
+    if (!path || path[0] != '/') {
+        return;
+    }
+    char buf[PATH_MAX];
+    strncpy(buf, path, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    size_t len = strlen(buf);
+    for (size_t i = 1; i < len; ++i) {
+        if (buf[i] == '/') {
+            buf[i] = '\0';
+            (void)mkdir(buf, 0777);
+            buf[i] = '/';
+        }
+    }
+}
+
+static void vprocLocationEnsureStubPath(const char *path, int *opened_fd) {
+    if (!path) {
+        return;
+    }
+    if (vprocLocationDebugEnabled()) {
+        vprocLocationDebugf("ensuring location stub at %s", path);
+    }
+    vprocEnsurePathParent(path);
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        if (!S_ISFIFO(st.st_mode)) {
+            if (unlink(path) != 0 && vprocLocationDebugEnabled()) {
+                vprocLocationDebugf("failed to unlink non-fifo location stub %s: %s",
+                                    path,
+                                    strerror(errno));
+            }
+        }
+    }
+    if (mkfifo(path, 0666) != 0 && errno != EEXIST) {
+        if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("failed to mkfifo location stub at %s: %s",
+                                path,
+                                strerror(errno));
+        }
+    }
+    if (opened_fd && *opened_fd < 0) {
+        int fd = vprocHostOpenRawInternal(path, O_RDWR | O_NONBLOCK, 0666, true);
+        if (fd >= 0) {
+            *opened_fd = fd;
+            if (vprocLocationDebugEnabled()) {
+                vprocLocationDebugf("opened location stub fifo fd=%d path=%s", fd, path);
+            }
+        } else if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("failed to open location stub fifo %s: %s",
+                                path,
+                                strerror(errno));
+        }
+    }
+}
+
+static void vprocLocationDeviceEnsureStub(void) {
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    const char *path = kLocationDevicePath;
+    if (pathTruncateEnabled() && pathTruncateExpand(kLocationDevicePath, expanded, sizeof(expanded))) {
+        path = expanded;
+    }
+    vprocLocationEnsureStubPath(path, &gLocationDevice.stub_fd);
+    /* Keep legacy aliases discoverable and open to avoid FIFO open blocking. */
+    const char *gps_paths[] = { kLegacyGpsDevicePath, kLegacyGpsDevicePath2 };
+    for (size_t i = 0; i < sizeof(gps_paths) / sizeof(gps_paths[0]); ++i) {
+        const char *gps = gps_paths[i];
+        const char *target = gps;
+        char expanded_gps[PATH_MAX];
+        if (pathTruncateEnabled() && pathTruncateExpand(gps, expanded_gps, sizeof(expanded_gps))) {
+            target = expanded_gps;
+        }
+        vprocLocationEnsureStubPath(target, NULL);
+    }
+#else
+    (void)kLocationDevicePath;
+#endif
 }
 
 static bool vprocPathIsLocationDevice(const char *path) {
-    return vprocPathMatches(path, kLocationDevicePath);
+    if (vprocPathMatches(path, kLocationDevicePath)) {
+        return true;
+    }
+    /* Backward compatibility: some callers still open /dev/gps. */
+    if (vprocPathMatches(path, kLegacyGpsDevicePath)) {
+        return true;
+    }
+    return vprocPathMatches(path, kLegacyGpsDevicePath2);
 }
 
 static bool vprocPathIsLegacyGpsDevice(const char *path) {
-    return vprocPathMatches(path, kLegacyGpsDevicePath);
+    return vprocPathMatches(path, kLegacyGpsDevicePath) || vprocPathMatches(path, kLegacyGpsDevicePath2);
 }
 
 static bool vprocPathIsDevTty(const char *path) {
@@ -3414,37 +5780,24 @@ static bool vprocPathParseConsoleTty(const char *path, int *out_num) {
 }
 
 static void vprocLocationDeviceCloseLocked(void) {
-    if (gLocationDevice.read_fd >= 0) {
-        vprocHostCloseRaw(gLocationDevice.read_fd);
-        gLocationDevice.read_fd = -1;
+    if (gLocationDevice.stub_fd >= 0) {
+        vprocHostCloseRaw(gLocationDevice.stub_fd);
+        gLocationDevice.stub_fd = -1;
     }
-    if (gLocationDevice.write_fd >= 0) {
-        vprocHostCloseRaw(gLocationDevice.write_fd);
-        gLocationDevice.write_fd = -1;
-    }
+    gLocationDevice.readers = 0;
+    gLocationDevice.has_payload = false;
+    gLocationDevice.last_len = 0;
 }
 
 static int vprocLocationDeviceEnsurePipeLocked(void) {
-    if (gLocationDevice.read_fd >= 0 && gLocationDevice.write_fd >= 0) {
-        return 0;
-    }
-    int fds[2];
-    if (vprocHostPipeRaw(fds) != 0) {
-        return -1;
-    }
-    for (size_t i = 0; i < 2; ++i) {
-        int flags = fcntl(fds[i], F_GETFD);
-        if (flags >= 0) {
-            fcntl(fds[i], F_SETFD, flags | FD_CLOEXEC);
-        }
-    }
-    int wflags = fcntl(fds[1], F_GETFL);
-    if (wflags >= 0) {
-        fcntl(fds[1], F_SETFL, wflags | O_NONBLOCK);
-    }
-    gLocationDevice.read_fd = fds[0];
-    gLocationDevice.write_fd = fds[1];
     return 0;
+}
+
+static void vprocLocationEnsureCond(void) {
+    if (!gLocationDevice.cond_init) {
+        pthread_cond_init(&gLocationDevice.cond, NULL);
+        gLocationDevice.cond_init = true;
+    }
 }
 
 static int vprocLocationDeviceOpenHost(int flags) {
@@ -3453,99 +5806,242 @@ static int vprocLocationDeviceOpenHost(int flags) {
         errno = EACCES;
         return -1;
     }
+    bool debug = vprocLocationDebugEnabled();
     pthread_mutex_lock(&gLocationDevice.mu);
     if (!gLocationDevice.enabled) {
         pthread_mutex_unlock(&gLocationDevice.mu);
+        if (debug) {
+            vprocLocationDebugf("open /dev/location denied (device disabled)");
+        }
         errno = ENOENT;
         return -1;
     }
-    if (vprocLocationDeviceEnsurePipeLocked() != 0) {
-        int err = errno;
-        pthread_mutex_unlock(&gLocationDevice.mu);
-        errno = err;
-        return -1;
-    }
-    int duped = vprocCloneFd(gLocationDevice.read_fd);
+    /* No direct host support in the per-open blocking model. */
     pthread_mutex_unlock(&gLocationDevice.mu);
-    if (duped < 0) {
-        return -1;
-    }
-    if (flags & O_NONBLOCK) {
-        int rflags = fcntl(duped, F_GETFL);
-        if (rflags >= 0) {
-            fcntl(duped, F_SETFL, rflags | O_NONBLOCK);
-        }
-    }
-    return duped;
+    errno = ENOTSUP;
+    return -1;
 }
 
 static int vprocLocationDeviceOpen(VProc *vp, int flags) {
-    int host_fd = vprocLocationDeviceOpenHost(flags);
-    if (host_fd < 0) {
+    (void)flags;
+    if (!vp) {
+        return vprocLocationDeviceOpenHost(flags);
+    }
+    struct pscal_fd *loc_fd = pscal_fd_create(&kVprocLocationFdOps);
+    if (!loc_fd) {
+        errno = ENOMEM;
         return -1;
     }
-    if (!vp) {
-        return host_fd;
+    VProcLocationReader *reader = (VProcLocationReader *)calloc(1, sizeof(VProcLocationReader));
+    if (!reader) {
+        pscal_fd_close(loc_fd);
+        errno = ENOMEM;
+        return -1;
     }
-    int slot = vprocInsert(vp, host_fd);
+    reader->last_seq = 0;
+    loc_fd->userdata = reader;
+    pthread_mutex_lock(&gLocationDevice.mu);
+    vprocLocationEnsureCond();
+    /* New readers should only observe writes that occur after open(). */
+    reader->last_seq = gLocationDevice.seq;
+    gLocationDevice.readers++;
+    int readers = gLocationDevice.readers;
+    pthread_mutex_unlock(&gLocationDevice.mu);
+    vprocLocationNotifyObservers(readers);
+    int slot = vprocInsertPscalFd(vp, loc_fd);
     if (slot < 0) {
-        vprocHostClose(host_fd);
+        free(reader);
+        pscal_fd_close(loc_fd);
+        pthread_mutex_lock(&gLocationDevice.mu);
+        if (gLocationDevice.readers > 0) {
+            gLocationDevice.readers--;
+        }
+        readers = gLocationDevice.readers;
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        vprocLocationNotifyObservers(readers);
+    }
+    else {
+        /* Transfer ownership to the fd table. */
+        pscal_fd_close(loc_fd);
     }
     return slot;
 }
 
-void vprocLocationDeviceSetEnabled(bool enabled) {
-    pthread_mutex_lock(&gLocationDevice.mu);
-    if (gLocationDevice.enabled == enabled) {
-        pthread_mutex_unlock(&gLocationDevice.mu);
-        return;
+static ssize_t vprocLocationPscalRead(struct pscal_fd *fd, void *buf, size_t bufsize) {
+    if (!fd || !buf || bufsize == 0) {
+        return _EINVAL;
     }
-    gLocationDevice.enabled = enabled;
-    if (!enabled) {
-        vprocLocationDeviceCloseLocked();
-    } else {
-        (void)vprocLocationDeviceEnsurePipeLocked();
+    VProcLocationReader *reader = (VProcLocationReader *)fd->userdata;
+    if (!reader) {
+        return _EBADF;
+    }
+    if (reader->done) {
+        return 0;
+    }
+    pthread_mutex_lock(&gLocationDevice.mu);
+    vprocLocationEnsureCond();
+    while (gLocationDevice.enabled && !reader->done) {
+        /* If the reader already has buffered data, serve it first. */
+        if (reader->len > reader->offset) {
+            break;
+        }
+        /* If there is a fresh payload, copy it into the reader-local buffer. */
+        if (gLocationDevice.has_payload && reader->last_seq != gLocationDevice.seq) {
+            size_t copy_len = gLocationDevice.last_len;
+            if (copy_len >= sizeof(reader->payload)) {
+                copy_len = sizeof(reader->payload) - 1;
+            }
+            memcpy(reader->payload, gLocationDevice.last_payload, copy_len);
+            reader->payload[copy_len] = '\0';
+            reader->len = copy_len;
+            reader->offset = 0;
+            reader->last_seq = gLocationDevice.seq;
+            break;
+        }
+        pthread_cond_wait(&gLocationDevice.cond, &gLocationDevice.mu);
+    }
+    if (!gLocationDevice.enabled) {
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        reader->done = true;
+        return 0;
+    }
+    /* No data available and already marked done: return EOF. */
+    if (reader->done) {
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        return 0;
+    }
+    size_t remaining = reader->len - reader->offset;
+    /* Deliver the entire payload in one read; bail if the caller's buffer is too small. */
+    if (remaining > bufsize) {
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        return _EINVAL;
+    }
+    memcpy(buf, reader->payload + reader->offset, remaining);
+    reader->offset = 0;
+    reader->len = 0;
+    reader->done = true;
+    pthread_mutex_unlock(&gLocationDevice.mu);
+    return (ssize_t)remaining;
+}
+
+static int vprocLocationPscalPoll(struct pscal_fd *fd) {
+    VProcLocationReader *reader = (VProcLocationReader *)fd->userdata;
+    if (!reader) {
+        return 0;
+    }
+    pthread_mutex_lock(&gLocationDevice.mu);
+    int events = 0;
+    if (reader->done || !gLocationDevice.enabled) {
+        events = POLLHUP;
+    } else if (reader->len > reader->offset) {
+        events = POLLIN;
+    } else if (gLocationDevice.has_payload && reader->last_seq != gLocationDevice.seq) {
+        events = POLLIN;
     }
     pthread_mutex_unlock(&gLocationDevice.mu);
+    return events;
+}
+
+static int vprocLocationPscalClose(struct pscal_fd *fd) {
+    VProcLocationReader *reader = (VProcLocationReader *)fd->userdata;
+    free(reader);
+    pthread_mutex_lock(&gLocationDevice.mu);
+    if (gLocationDevice.readers > 0) {
+        gLocationDevice.readers--;
+    }
+    int readers = gLocationDevice.readers;
+    pthread_mutex_unlock(&gLocationDevice.mu);
+    vprocLocationNotifyObservers(readers);
+    return 0;
+}
+
+static const struct pscal_fd_ops kVprocLocationFdOps = {
+    .read = vprocLocationPscalRead,
+    .write = NULL,
+    .poll = vprocLocationPscalPoll,
+    .ioctl_size = NULL,
+    .ioctl = NULL,
+    .close = vprocLocationPscalClose,
+};
+
+void vprocLocationDeviceSetEnabled(bool enabled) {
+    pthread_mutex_lock(&gLocationDevice.mu);
+    bool changed = (gLocationDevice.enabled != enabled);
+    gLocationDevice.enabled = enabled;
+    int readers = gLocationDevice.readers;
+    if (!enabled) {
+        if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("location device disabled (changed=%s)", changed ? "true" : "false");
+        }
+        vprocLocationDeviceCloseLocked();
+        pthread_cond_broadcast(&gLocationDevice.cond);
+        pscal_fd_poll_wakeup(NULL, POLLERR);
+    } else {
+        if (vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("location device enabled (changed=%s)", changed ? "true" : "false");
+        }
+        vprocLocationDeviceEnsureStub();
+        if (vprocLocationDeviceEnsurePipeLocked() != 0 && vprocLocationDebugEnabled()) {
+            vprocLocationDebugf("location pipe setup failed during enable: %s", strerror(errno));
+        }
+        pthread_cond_broadcast(&gLocationDevice.cond);
+        pscal_fd_poll_wakeup(NULL, POLLIN);
+    }
+    pthread_mutex_unlock(&gLocationDevice.mu);
+    if (changed) {
+        vprocLocationNotifyObservers(readers);
+    }
 }
 
 ssize_t vprocLocationDeviceWrite(const void *data, size_t len) {
     if (!data || len == 0) {
         return 0;
     }
+    bool debug = vprocLocationDebugEnabled();
     pthread_mutex_lock(&gLocationDevice.mu);
     if (!gLocationDevice.enabled) {
         pthread_mutex_unlock(&gLocationDevice.mu);
+        if (debug) {
+            vprocLocationDebugf("write rejected; location device disabled");
+        }
         errno = ENOENT;
         return -1;
     }
-    if (vprocLocationDeviceEnsurePipeLocked() != 0) {
-        int err = errno;
-        pthread_mutex_unlock(&gLocationDevice.mu);
-        errno = err;
-        return -1;
-    }
-    const unsigned char *bytes = (const unsigned char *)data;
-    ssize_t total = 0;
-    while ((size_t)total < len) {
-        ssize_t wrote = vprocHostWriteRaw(gLocationDevice.write_fd, bytes + total, len - (size_t)total);
-        if (wrote > 0) {
-            total += wrote;
-            continue;
+    vprocLocationEnsureCond();
+    size_t copy_len = len < sizeof(gLocationDevice.last_payload) ? len : sizeof(gLocationDevice.last_payload) - 1;
+    memcpy(gLocationDevice.last_payload, data, copy_len);
+    gLocationDevice.last_payload[copy_len] = '\0';
+    gLocationDevice.last_len = copy_len;
+    gLocationDevice.has_payload = (copy_len > 0);
+    gLocationDevice.seq++;
+    pthread_cond_broadcast(&gLocationDevice.cond);
+
+    if (gLocationDevice.stub_fd >= 0) {
+        ssize_t wrote = vprocHostWriteRaw(gLocationDevice.stub_fd, data, len);
+        if (debug && wrote < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EPIPE) {
+            vprocLocationDebugf("stub write failed: %s", strerror(errno));
         }
-        if (wrote == 0) {
-            break;
-        }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            break;
-        }
-        int err = errno;
-        pthread_mutex_unlock(&gLocationDevice.mu);
-        errno = err;
-        return -1;
     }
     pthread_mutex_unlock(&gLocationDevice.mu);
-    return total;
+    pscal_fd_poll_wakeup(NULL, POLLIN);
+    if (debug) {
+        vprocLocationDebugf("write success bytes=%zu seq=%llu", len, (unsigned long long)gLocationDevice.seq);
+    }
+    return (ssize_t)len;
+}
+
+void vprocLocationDeviceRegisterReaderObserver(VprocLocationReadersChangedFn cb, void *context) {
+    pthread_mutex_lock(&gLocationReaderObserverMu);
+    gLocationReaderObserver = cb;
+    gLocationReaderObserverCtx = context;
+    pthread_mutex_unlock(&gLocationReaderObserverMu);
+    if (cb) {
+        int readers = 0;
+        pthread_mutex_lock(&gLocationDevice.mu);
+        readers = gLocationDevice.readers;
+        pthread_mutex_unlock(&gLocationDevice.mu);
+        cb(readers, context);
+    }
 }
 
 static int vprocSelectHostFd(VProc *inherit_from, int option_fd, int stdno) {
@@ -3573,30 +6069,58 @@ int vprocReservePid(void) {
     if (gNextSyntheticPid == 0) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
-    int pid = __sync_fetch_and_add(&gNextSyntheticPid, 1);
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
-    if (entry) {
-        int parent_pid = vprocDefaultParentPid();
-        if (parent_pid > 0 && parent_pid != pid) {
-            (void)vprocTaskEnsureSlotLocked(parent_pid);
+    int shell_pid = vprocGetShellSelfPid();
+    int kernel_pid = vprocGetKernelPid();
+    int pid = -1;
+    for (size_t attempts = 0; attempts < gVProcTasks.capacity + 1024; ++attempts) {
+        int candidate = __sync_fetch_and_add(&gNextSyntheticPid, 1);
+        if (candidate <= 0) {
+            continue;
         }
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-        vprocClearEntryLocked(entry);
-        entry = vprocTaskFindLocked(pid);
-        if (entry) {
-            vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
-            entry->parent_pid = parent_pid;
-            /* Reserve creates a brand-new process group; do not inherit the shell's
-             * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
-            entry->pgid = pid;
-            entry->fg_pgid = pid;
-            if (parent_pid > 0 && parent_pid != pid) {
-                VProcTaskEntry *parent = vprocTaskFindLocked(parent_pid);
-                if (parent) {
-                    vprocAddChildLocked(parent, pid);
-                }
-            }
+        if (candidate == shell_pid || candidate == kernel_pid) {
+            continue;
+        }
+        if (vprocTaskFindLocked(candidate)) {
+            continue;
+        }
+        pid = candidate;
+        break;
+    }
+    if (pid <= 0) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = EMFILE;
+        return -1;
+    }
+    VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        return -1;
+    }
+    int parent_pid = vprocDefaultParentPid();
+    if (parent_pid == pid) {
+        parent_pid = 0;
+    }
+    VProcTaskEntry *parent_entry = NULL;
+    if (parent_pid > 0) {
+        parent_entry = vprocTaskFindLocked(parent_pid);
+    }
+    vprocClearEntryLocked(entry);
+    vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
+    entry->parent_pid = parent_pid;
+    /* Reserve creates a brand-new process group; do not inherit the shell's
+     * pgid/fg_pgid or later kill/pgid lookups will miss the pre-start task. */
+    entry->pgid = pid;
+    entry->fg_pgid = pid;
+    if (parent_entry && parent_pid > 0) {
+        if (!vprocAddChildLocked(parent_entry, pid)) {
+            entry->parent_pid = 0;
+        }
+    }
+    if (gVProcTasks.items && gVProcTasks.count > 0) {
+        ptrdiff_t idx = entry - gVProcTasks.items;
+        if (idx >= 0 && (size_t)idx < gVProcTasks.count) {
+            vprocTaskLookupRememberLocked(pid, (size_t)idx);
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -3620,7 +6144,7 @@ static void vprocMaybeAdvancePidCounter(int pid_hint) {
 
 static void vprocTaskTableRepairLocked(void) {
     if (gVProcTasks.items != gVProcTasksItemsStable) {
-        if (getenv("PSCALI_VPROC_DEBUG")) {
+        if (vprocVprocDebugEnabled()) {
             vprocDebugLogf( "[vproc] task table pointer mismatch; repairing\n");
         }
         gVProcTasks.items = gVProcTasksItemsStable;
@@ -3630,15 +6154,78 @@ static void vprocTaskTableRepairLocked(void) {
         gVProcTasks.items = NULL;
         gVProcTasks.count = 0;
         gVProcTasks.capacity = 0;
+        gVProcTaskFindHint = 0;
+        gVProcTaskFreeHint = 0;
     } else if (gVProcTasks.count > gVProcTasks.capacity) {
         gVProcTasks.count = gVProcTasks.capacity;
+    } else if (gVProcTasks.count == 0) {
+        gVProcTaskFindHint = 0;
+        gVProcTaskFreeHint = 0;
     }
 }
 
+static size_t vprocFindFreeTaskSlotLocked(void) {
+    if (gVProcTasks.count == 0) {
+        return SIZE_MAX;
+    }
+    size_t start = (gVProcTaskFreeHint < gVProcTasks.count) ? gVProcTaskFreeHint : 0;
+    for (size_t idx = start; idx < gVProcTasks.count; ++idx) {
+        if (gVProcTasks.items[idx].pid <= 0) {
+            gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
+            return idx;
+        }
+    }
+    for (size_t idx = 0; idx < start; ++idx) {
+        if (gVProcTasks.items[idx].pid <= 0) {
+            gVProcTaskFreeHint = (idx + 1 < gVProcTasks.count) ? (idx + 1) : 0;
+            return idx;
+        }
+    }
+    return SIZE_MAX;
+}
+
 static VProcTaskEntry *vprocTaskFindLocked(int pid) {
+    if (pid <= 0) {
+        return NULL;
+    }
     vprocTaskTableRepairLocked();
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
+    if (gVProcTasks.count > 0 && gVProcTaskFindHint < gVProcTasks.count) {
+        VProcTaskEntry *hint = &gVProcTasks.items[gVProcTaskFindHint];
+        if (hint->pid == pid) {
+            return hint;
+        }
+    }
+    VProcTaskLookupCacheSet *set = &gVProcTaskLookupCache[vprocTaskLookupSlotForPid(pid)];
+    for (size_t way = 0; way < VPROC_TASK_LOOKUP_CACHE_WAYS; ++way) {
+        VProcTaskLookupCacheEntry *cache = &set->way[way];
+        if (cache->pid != pid) {
+            continue;
+        }
+        size_t idx = (size_t)cache->idx;
+        if (idx < gVProcTasks.count && gVProcTasks.items[idx].pid == pid) {
+            gVProcTaskFindHint = idx;
+            if (way > 0) {
+                VProcTaskLookupCacheEntry tmp = set->way[0];
+                set->way[0] = set->way[way];
+                set->way[way] = tmp;
+            }
+            return &gVProcTasks.items[idx];
+        }
+        cache->pid = 0;
+        cache->idx = 0;
+    }
+    size_t start = (gVProcTaskFindHint < gVProcTasks.count) ? gVProcTaskFindHint : 0;
+    for (size_t i = start; i < gVProcTasks.count; ++i) {
         if (gVProcTasks.items[i].pid == pid) {
+            gVProcTaskFindHint = i;
+            vprocTaskLookupRememberLocked(pid, i);
+            return &gVProcTasks.items[i];
+        }
+    }
+    for (size_t i = 0; i < start; ++i) {
+        if (gVProcTasks.items[i].pid == pid) {
+            gVProcTaskFindHint = i;
+            vprocTaskLookupRememberLocked(pid, i);
             return &gVProcTasks.items[i];
         }
     }
@@ -3654,28 +6241,44 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
     int parent_pid = vprocDefaultParentPid();
-    if (parent_pid > 0 && parent_pid != pid) {
-        (void)vprocTaskEnsureSlotLocked(parent_pid);
+    if (parent_pid == pid) {
+        parent_pid = 0;
     }
     const VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-    if (gVProcTasks.count >= gVProcTasks.capacity) {
-        size_t new_cap = gVProcTasks.capacity ? (gVProcTasks.capacity * 2) : 8;
-        VProcTaskEntry *resized = realloc(gVProcTasks.items, new_cap * sizeof(VProcTaskEntry));
-        if (!resized) {
+    /* Preallocate generously and avoid realloc to keep table pointer stable. */
+    if (gVProcTasks.capacity == 0) {
+        gVProcTasks.capacity = 4096;
+        gVProcTasks.items = (VProcTaskEntry *)calloc(gVProcTasks.capacity, sizeof(VProcTaskEntry));
+        if (!gVProcTasks.items) {
+            gVProcTasks.capacity = 0;
             return NULL;
         }
-        gVProcTasks.items = resized;
-        gVProcTasks.capacity = new_cap;
         gVProcTasksItemsStable = gVProcTasks.items;
         gVProcTasksCapacityStable = gVProcTasks.capacity;
     }
-    entry = &gVProcTasks.items[gVProcTasks.count++];
+    size_t free_idx = vprocFindFreeTaskSlotLocked();
+    if (free_idx != SIZE_MAX) {
+        entry = &gVProcTasks.items[free_idx];
+    } else if (gVProcTasks.count < gVProcTasks.capacity) {
+        entry = &gVProcTasks.items[gVProcTasks.count++];
+    } else {
+        errno = EMFILE;
+        return NULL;
+    }
     vprocInitEntryDefaultsLocked(entry, pid, parent_entry);
     entry->parent_pid = parent_pid;
-    if (entry->parent_pid > 0 && entry->parent_pid != pid) {
-        VProcTaskEntry *parent = vprocTaskFindLocked(entry->parent_pid);
-        if (parent) {
-            vprocAddChildLocked(parent, pid);
+    if (entry->parent_pid > 0) {
+        VProcTaskEntry *parent = (VProcTaskEntry *)parent_entry;
+        if (parent && parent->pid == entry->parent_pid) {
+            if (!vprocAddChildLocked(parent, pid)) {
+                entry->parent_pid = 0;
+            }
+        }
+    }
+    if (gVProcTasks.items && gVProcTasks.count > 0) {
+        ptrdiff_t idx = entry - gVProcTasks.items;
+        if (idx >= 0 && (size_t)idx < gVProcTasks.count) {
+            vprocTaskLookupRememberLocked(pid, (size_t)idx);
         }
     }
     return entry;
@@ -3698,12 +6301,12 @@ VProc *vprocCreate(const VProcOptions *opts) {
     if (gNextSyntheticPid == 0) {
         gNextSyntheticPid = vprocNextPidSeed();
     }
-    bool vproc_dbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    bool vproc_dbg = vprocVprocDebugEnabled();
     VProc *active = vprocCurrent();
 #if defined(PSCAL_TARGET_IOS)
     VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
     bool inherit_pscal_stdio = false;
-    if (session_stdio && !vprocSessionStdioIsDefault(session_stdio) &&
+    if (session_stdio &&
         session_stdio->stdin_pscal_fd &&
         session_stdio->stdout_pscal_fd &&
         session_stdio->stderr_pscal_fd &&
@@ -3711,10 +6314,10 @@ VProc *vprocCreate(const VProcOptions *opts) {
         local.stdout_fd == -1 &&
         local.stderr_fd == -1) {
         inherit_pscal_stdio = true;
-        if (vproc_dbg) {
+        if (vprocVprocDebugEnabled()) {
             vprocDebugLogf( "[vproc] inherit pscal stdio from session\n");
         }
-    } else if (vproc_dbg && session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
+    } else if (vproc_dbg && session_stdio) {
         vprocDebugLogf(
                 "[vproc] skip pscal stdio inherit stdin=%d stdout=%d stderr=%d opts=(%d,%d,%d)\n",
                 session_stdio->stdin_pscal_fd ? 1 : 0,
@@ -3756,24 +6359,67 @@ VProc *vprocCreate(const VProcOptions *opts) {
         vprocMaybeAdvancePidCounter(local.pid_hint);
         vp->pid = local.pid_hint;
     } else {
-        vp->pid = __sync_fetch_and_add(&gNextSyntheticPid, 1);
+        vp->pid = -1;
     }
 
     /* Ensure a task slot exists for synthetic pid bookkeeping. */
     pthread_mutex_lock(&gVProcTasks.mu);
+    if (vp->pid <= 0) {
+        int shell_pid = vprocGetShellSelfPid();
+        int kernel_pid = vprocGetKernelPid();
+        for (size_t attempts = 0; attempts < gVProcTasks.capacity + 1024; ++attempts) {
+            int candidate = __sync_fetch_and_add(&gNextSyntheticPid, 1);
+            if (candidate <= 0) {
+                continue;
+            }
+            if (candidate == shell_pid || candidate == kernel_pid) {
+                continue;
+            }
+            if (vprocTaskFindLocked(candidate)) {
+                continue;
+            }
+            vp->pid = candidate;
+            break;
+        }
+        if (vp->pid <= 0) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            errno = EMFILE;
+            pthread_mutex_destroy(&vp->mu);
+            free(vp->entries);
+            free(vp);
+            return NULL;
+        }
+    }
     VProcTaskEntry *slot = vprocTaskEnsureSlotLocked(vp->pid);
-    if (slot) {
-        int parent_pid = vprocDefaultParentPid();
-        if (parent_pid > 0 && parent_pid != vp->pid) {
-            (void)vprocTaskEnsureSlotLocked(parent_pid);
+    if (!slot) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        if (errno == 0) {
+            errno = EMFILE;
         }
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-        vprocClearEntryLocked(slot);
-        vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
-        vprocUpdateParentLocked(vp->pid, parent_pid);
-        if (local.job_id > 0) {
-            slot->job_id = local.job_id;
+        pthread_mutex_destroy(&vp->mu);
+        free(vp->entries);
+        free(vp);
+        return NULL;
+    }
+    int parent_pid = vprocDefaultParentPid();
+    if (parent_pid == vp->pid) {
+        parent_pid = 0;
+    }
+    VProcTaskEntry *parent_entry = NULL;
+    if (parent_pid > 0) {
+        parent_entry = vprocTaskFindLocked(parent_pid);
+    }
+    /* Reinitialize the slot in place for this pid. */
+    vprocClearEntryLocked(slot);
+    vprocInitEntryDefaultsLocked(slot, vp->pid, parent_entry);
+    slot->parent_pid = parent_pid;
+    if (parent_entry && parent_pid > 0) {
+        if (!vprocAddChildLocked(parent_entry, vp->pid)) {
+            slot->parent_pid = 0;
         }
+    }
+    if (local.job_id > 0) {
+        slot->job_id = local.job_id;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 
@@ -3826,6 +6472,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
             vprocDebugLogf( "[vproc] create failed stdin=%d stdout=%d stderr=%d\n",
                     stdin_src, stdout_src, stderr_src);
         }
+        vprocDiscard(vp->pid);
         vprocDestroy(vp);
         return NULL;
     }
@@ -3909,6 +6556,9 @@ int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
     pthread_mutex_lock(&vp->mu);
     if ((size_t)target_fd >= vp->capacity) {
         pthread_mutex_unlock(&vp->mu);
+        if (vprocPipeDebugEnabled()) {
+            vprocDebugLogf("[vproc] adopt pscal fd=%d failed: capacity %zu\n", target_fd, vp->capacity);
+        }
         errno = EBADF;
         return -1;
     }
@@ -3924,6 +6574,10 @@ int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd) {
         vp->stderr_host_fd = -1;
     }
     pthread_mutex_unlock(&vp->mu);
+    if (vprocVprocDebugEnabled()) {
+        fprintf(stderr, "[vproc] adopt pscal fd=%d ptr=%p rc=0\n",
+                target_fd, (void *)pscal_fd);
+    }
     return 0;
 }
 
@@ -3943,21 +6597,30 @@ void vprocDestroy(VProc *vp) {
                    vp->entries[i].host_fd != vp->stdin_host_fd &&
                    vp->entries[i].host_fd != vp->stdout_host_fd &&
                    vp->entries[i].host_fd != vp->stderr_host_fd) {
-            vprocHostClose(vp->entries[i].host_fd);
+            (void)vprocResourceRemoveLocked(vp, vp->entries[i].host_fd);
+            vprocHostCloseRaw(vp->entries[i].host_fd);
         }
         vp->entries[i].host_fd = -1;
         vp->entries[i].pscal_fd = NULL;
         vp->entries[i].kind = VPROC_FD_NONE;
     }
     if (vp->stdin_host_fd >= 0) {
-        vprocHostClose(vp->stdin_host_fd);
+        (void)vprocResourceRemoveLocked(vp, vp->stdin_host_fd);
+        vprocHostCloseRaw(vp->stdin_host_fd);
     }
     if (vp->stdout_host_fd >= 0) {
-        vprocHostClose(vp->stdout_host_fd);
+        (void)vprocResourceRemoveLocked(vp, vp->stdout_host_fd);
+        vprocHostCloseRaw(vp->stdout_host_fd);
     }
     if (vp->stderr_host_fd >= 0) {
-        vprocHostClose(vp->stderr_host_fd);
+        (void)vprocResourceRemoveLocked(vp, vp->stderr_host_fd);
+        vprocHostCloseRaw(vp->stderr_host_fd);
     }
+    vprocResourceCloseAllLocked(vp);
+    free(vp->resources);
+    vp->resources = NULL;
+    vp->resource_capacity = 0;
+    vp->resource_count = 0;
     free(vp->entries);
     vp->entries = NULL;
     if (gVProcCurrent == vp) {
@@ -3976,13 +6639,15 @@ void vprocDestroy(VProc *vp) {
 
 void vprocActivate(VProc *vp) {
     gVProcTlsReady = 1;
-    if (gVProcCurrent && !vprocRegistryContains(gVProcCurrent)) {
-        vprocClearThreadState();
+    if (gVProcCurrent && !vprocRegistryContainsValidated(gVProcCurrent)) {
+        /* vprocRegistryContainsValidated already cleared thread-local state. */
     }
-    if (gVProcStackDepth < (sizeof(gVProcStack) / sizeof(gVProcStack[0]))) {
+    if (gVProcCurrent &&
+        gVProcStackDepth < (sizeof(gVProcStack) / sizeof(gVProcStack[0]))) {
         gVProcStack[gVProcStackDepth++] = gVProcCurrent;
     }
     gVProcCurrent = vp;
+    gVProcRegistrySeenVersion = __atomic_load_n(&gVProcRegistryVersion, __ATOMIC_ACQUIRE);
     gVProcInterposeReady = 1;
 }
 
@@ -4021,23 +6686,31 @@ void vprocTerminateSession(int sid) {
     size_t cancel_count = 0;
     size_t cancel_cap = 0;
     size_t target_count = 0;
-    int *target_pids = NULL;
+    size_t *target_indices = NULL;
+    bool clear_direct = false;
 
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (entry->pid <= 0) continue;
         if (entry->sid != sid) continue;
         target_count++;
     }
     if (target_count > 0) {
-        target_pids = (int *)calloc(target_count, sizeof(int));
+        if (target_count > SIZE_MAX / sizeof(size_t)) {
+            clear_direct = true;
+        } else {
+            target_indices = (size_t *)calloc(target_count, sizeof(size_t));
+            if (!target_indices) {
+                clear_direct = true;
+            }
+        }
     }
     size_t target_index = 0;
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (entry->pid <= 0) continue;
         if (entry->sid != sid) continue;
 
         vprocMaybeStampRusageLocked(entry);
@@ -4059,13 +6732,22 @@ void vprocTerminateSession(int sid) {
                 vprocCancelListAdd(&cancel, &cancel_count, &cancel_cap, tid);
             }
         }
-        if (target_pids && target_index < target_count) {
-            target_pids[target_index++] = entry->pid;
+        if (target_indices && target_index < target_count) {
+            target_indices[target_index++] = i;
         }
     }
-    for (size_t i = 0; i < target_index; ++i) {
-        VProcTaskEntry *entry = vprocTaskFindLocked(target_pids[i]);
-        if (entry) {
+    if (clear_direct) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (entry->pid <= 0 || entry->sid != sid) continue;
+            vprocClearEntryLocked(entry);
+        }
+    } else {
+        for (size_t i = 0; i < target_index; ++i) {
+            size_t idx = target_indices[i];
+            if (idx >= gVProcTasks.count) continue;
+            VProcTaskEntry *entry = &gVProcTasks.items[idx];
+            if (entry->pid <= 0 || entry->sid != sid) continue;
             vprocClearEntryLocked(entry);
         }
     }
@@ -4076,7 +6758,7 @@ void vprocTerminateSession(int sid) {
         pthread_cancel(cancel[i]);
     }
     free(cancel);
-    free(target_pids);
+    free(target_indices);
 }
 
 static void *vprocThreadTrampoline(void *arg) {
@@ -4121,10 +6803,9 @@ static void *vprocThreadTrampoline(void *arg) {
     }
 
     if (vp) {
-        // FIX: Report exit status to the task table before dying
-        // Assuming the thread return value is the exit code (intptr_t cast)
-        int exit_code = (int)(intptr_t)res;
-        vprocMarkExit(vp, W_EXITCODE(exit_code, 0));
+        /* Threads share the owning vproc; do not mark the process as exited on
+         * thread teardown. */
+        vprocUnregisterThread(vp, pthread_self());
         vprocDeactivate();
     }
 
@@ -4170,7 +6851,12 @@ int vprocPthreadCreateShim(pthread_t *thread,
             ctx->detach = true;
         }
     }
-    return vprocHostPthreadCreateRaw(thread, attr, vprocThreadTrampoline, ctx);
+    int rc = vprocHostPthreadCreateRaw(thread, attr, vprocThreadTrampoline, ctx);
+    if (rc != 0) {
+        free(ctx);
+        errno = rc;
+    }
+    return rc;
 }
 
 int vprocTranslateFd(VProc *vp, int fd) {
@@ -4178,7 +6864,7 @@ int vprocTranslateFd(VProc *vp, int fd) {
         errno = EBADF;
         return -1;
     }
-    if (!vprocRegistryContains(vp)) {
+    if (!vprocRegistryContainsValidated(vp)) {
         errno = EBADF;
         return -1;
     }
@@ -4221,10 +6907,6 @@ int vprocHostOpen(const char *path, int flags, ...) {
         va_end(ap);
     }
 #if defined(PSCAL_TARGET_IOS)
-    if (vprocPathIsLegacyGpsDevice(path)) {
-        errno = ENOENT;
-        return -1;
-    }
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpenHost(flags);
     }
@@ -4238,9 +6920,55 @@ int vprocHostOpen(const char *path, int flags, ...) {
 
 int vprocHostPipe(int pipefd[2]) {
 #if defined(PSCAL_TARGET_IOS)
-    return vprocHostPipeRaw(pipefd);
+    int rc = vprocHostPipeRaw(pipefd);
+    VProc *vp = vprocForThread();
+    if (rc == 0 && vp) {
+        vprocResourceTrack(vp, pipefd[0], VPROC_RESOURCE_PIPE);
+        vprocResourceTrack(vp, pipefd[1], VPROC_RESOURCE_PIPE);
+    }
+    return rc;
 #else
     return pipe(pipefd);
+#endif
+}
+
+int vprocHostSocket(int domain, int type, int protocol) {
+#if defined(PSCAL_TARGET_IOS)
+    int fd = vprocHostSocketRaw(domain, type, protocol);
+    VProc *vp = vprocForThread();
+    if (vp && fd >= 0) {
+        vprocResourceTrack(vp, fd, VPROC_RESOURCE_SOCKET);
+    }
+    return fd;
+#else
+    return socket(domain, type, protocol);
+#endif
+}
+
+int vprocHostAccept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+#if defined(PSCAL_TARGET_IOS)
+    int res = vprocHostAcceptRaw(fd, addr, addrlen);
+    VProc *vp = vprocForThread();
+    if (vp && res >= 0) {
+        vprocResourceTrack(vp, res, VPROC_RESOURCE_SOCKET);
+    }
+    return res;
+#else
+    return accept(fd, addr, addrlen);
+#endif
+}
+
+int vprocHostSocketpair(int domain, int type, int protocol, int sv[2]) {
+#if defined(PSCAL_TARGET_IOS)
+    int rc = vprocHostSocketpairRaw(domain, type, protocol, sv);
+    VProc *vp = vprocForThread();
+    if (rc == 0 && vp) {
+        vprocResourceTrack(vp, sv[0], VPROC_RESOURCE_PIPE);
+        vprocResourceTrack(vp, sv[1], VPROC_RESOURCE_PIPE);
+    }
+    return rc;
+#else
+    return socketpair(domain, type, protocol, sv);
 #endif
 }
 
@@ -4262,6 +6990,10 @@ int vprocHostFsync(int fd) {
 
 int vprocHostClose(int fd) {
 #if defined(PSCAL_TARGET_IOS)
+    VProc *vp = vprocForThread();
+    if (vp) {
+        vprocResourceRemove(vp, fd);
+    }
     return vprocHostCloseRaw(fd);
 #else
     return close(fd);
@@ -4299,8 +7031,10 @@ int vprocDup(VProc *vp, int fd) {
     struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
     if (pscal_fd) {
         int slot = vprocInsertPscalFd(vp, pscal_fd);
+        /* vprocInsertPscalFd now retains; drop our temporary ref. */
+        pscal_fd_close(pscal_fd);
         if (slot < 0) {
-            pscal_fd_close(pscal_fd);
+            return -1;
         }
         return slot;
     }
@@ -4325,29 +7059,17 @@ int vprocDup2(VProc *vp, int fd, int target) {
     if (pscal_fd) {
         pthread_mutex_lock(&vp->mu);
         if ((size_t)target >= vp->capacity) {
-            size_t new_cap = vp->capacity;
-            if (new_cap == 0) new_cap = VPROC_INITIAL_CAPACITY;
-            while ((size_t)target >= new_cap) {
-                new_cap *= 2;
-            }
-            VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
-            if (!resized) {
+            if (!vprocEnsureFdCapacityLocked(vp, (size_t)target + 1)) {
                 pthread_mutex_unlock(&vp->mu);
                 pscal_fd_close(pscal_fd);
                 return -1;
             }
-            for (size_t i = vp->capacity; i < new_cap; ++i) {
-                resized[i].host_fd = -1;
-                resized[i].pscal_fd = NULL;
-                resized[i].kind = VPROC_FD_NONE;
-            }
-            vp->entries = resized;
-            vp->capacity = new_cap;
         }
         if (vp->entries[target].kind == VPROC_FD_PSCAL && vp->entries[target].pscal_fd) {
             pscal_fd_close(vp->entries[target].pscal_fd);
         } else if (vp->entries[target].kind == VPROC_FD_HOST && vp->entries[target].host_fd >= 0) {
-            vprocHostClose(vp->entries[target].host_fd);
+            vprocResourceRemoveLocked(vp, vp->entries[target].host_fd);
+            vprocHostCloseRaw(vp->entries[target].host_fd);
         }
         vp->entries[target].host_fd = -1;
         vp->entries[target].pscal_fd = pscal_fd;
@@ -4364,23 +7086,10 @@ int vprocDup2(VProc *vp, int fd, int target) {
     
     pthread_mutex_lock(&vp->mu);
     if ((size_t)target >= vp->capacity) {
-        size_t new_cap = vp->capacity;
-        if (new_cap == 0) new_cap = VPROC_INITIAL_CAPACITY;
-        while ((size_t)target >= new_cap) {
-            new_cap *= 2;
-        }
-        VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
-        if (!resized) {
+        if (!vprocEnsureFdCapacityLocked(vp, (size_t)target + 1)) {
             pthread_mutex_unlock(&vp->mu);
             return -1;
         }
-        for (size_t i = vp->capacity; i < new_cap; ++i) {
-            resized[i].host_fd = -1;
-            resized[i].pscal_fd = NULL;
-            resized[i].kind = VPROC_FD_NONE;
-        }
-        vp->entries = resized;
-        vp->capacity = new_cap;
     }
     if (vp->entries[target].kind == VPROC_FD_PSCAL && vp->entries[target].pscal_fd) {
         pscal_fd_close(vp->entries[target].pscal_fd);
@@ -4391,7 +7100,8 @@ int vprocDup2(VProc *vp, int fd, int target) {
         bool preserve_controlling_stdin =
             (target == STDIN_FILENO) && (vp->entries[target].host_fd == vp->stdin_host_fd);
         if (!preserve_controlling_stdin) {
-            vprocHostClose(vp->entries[target].host_fd);
+            vprocResourceRemoveLocked(vp, vp->entries[target].host_fd);
+            vprocHostCloseRaw(vp->entries[target].host_fd);
         }
         vp->entries[target].host_fd = -1;
     }
@@ -4435,22 +7145,10 @@ int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src) {
     }
     pthread_mutex_lock(&vp->mu);
     if ((size_t)target_fd >= vp->capacity) {
-        size_t new_cap = vp->capacity ? vp->capacity : VPROC_INITIAL_CAPACITY;
-        while ((size_t)target_fd >= new_cap) {
-            new_cap *= 2;
-        }
-        VProcFdEntry *resized = realloc(vp->entries, new_cap * sizeof(VProcFdEntry));
-        if (!resized) {
+        if (!vprocEnsureFdCapacityLocked(vp, (size_t)target_fd + 1)) {
             pthread_mutex_unlock(&vp->mu);
             return -1;
         }
-        for (size_t i = vp->capacity; i < new_cap; ++i) {
-            resized[i].host_fd = -1;
-            resized[i].pscal_fd = NULL;
-            resized[i].kind = VPROC_FD_NONE;
-        }
-        vp->entries = resized;
-        vp->capacity = new_cap;
     }
     if (vp->entries[target_fd].kind == VPROC_FD_PSCAL && vp->entries[target_fd].pscal_fd) {
         pscal_fd_close(vp->entries[target_fd].pscal_fd);
@@ -4459,7 +7157,8 @@ int vprocRestoreHostFd(VProc *vp, int target_fd, int host_src) {
     }
     if (vp->entries[target_fd].kind == VPROC_FD_HOST && vp->entries[target_fd].host_fd >= 0 &&
         !(target_fd == STDIN_FILENO && vp->entries[target_fd].host_fd == vp->stdin_host_fd)) {
-        vprocHostClose(vp->entries[target_fd].host_fd);
+        vprocResourceRemoveLocked(vp, vp->entries[target_fd].host_fd);
+        vprocHostCloseRaw(vp->entries[target_fd].host_fd);
     }
     int cloned = vprocCloneFd(host_src);
     if (cloned < 0) {
@@ -4520,6 +7219,9 @@ int vprocClose(VProc *vp, int fd) {
         }
         return 0;
     }
+    if (host >= 0) {
+        vprocResourceRemove(vp, host);
+    }
     return vprocHostClose(host);
 }
 
@@ -4559,7 +7261,7 @@ int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) {
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpen(vp, flags);
     }
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
+    bool dbg = vprocPipeDebugEnabled();
     int host_fd = vprocHostOpenVirtualized(path, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
@@ -4612,14 +7314,56 @@ int vprocPid(VProc *vp) {
     return vp ? vp->pid : -1;
 }
 
+static bool vprocTaskEntryHasThreadLocked(const VProcTaskEntry *entry, pthread_t tid) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->tid && pthread_equal(entry->tid, tid)) {
+        return true;
+    }
+    for (size_t i = 0; i < entry->thread_count; ++i) {
+        if (entry->threads[i] && pthread_equal(entry->threads[i], tid)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool vprocEnsureThreadCapacityLocked(VProcTaskEntry *entry, size_t needed) {
+    if (!entry) {
+        return false;
+    }
+    if (needed <= entry->thread_capacity) {
+        return true;
+    }
+    size_t new_cap = entry->thread_capacity ? entry->thread_capacity : 4;
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2) {
+            return false;
+        }
+        new_cap *= 2;
+    }
+    if (new_cap > SIZE_MAX / sizeof(pthread_t)) {
+        return false;
+    }
+    pthread_t *resized = realloc(entry->threads, new_cap * sizeof(pthread_t));
+    if (!resized) {
+        return false;
+    }
+    entry->threads = resized;
+    entry->thread_capacity = new_cap;
+    return true;
+}
+
 int vprocRegisterTidHint(int pid, pthread_t tid) {
     if (pid <= 0) {
         errno = EINVAL;
         return -1;
     }
-    bool vdbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    bool vdbg = vprocVprocDebugEnabled();
     char thread_name[16];
     bool rename_thread = false;
+    size_t thread_count = 0;
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskEnsureSlotLocked(pid);
     if (!entry) {
@@ -4630,36 +7374,25 @@ int vprocRegisterTidHint(int pid, pthread_t tid) {
         }
         return -1;
     }
-    entry->tid = tid;
-    bool duplicate = false;
-    for (size_t i = 0; i < entry->thread_count; ++i) {
-        if (pthread_equal(entry->threads[i], tid)) {
-            duplicate = true;
-            break;
-        }
-    }
+    bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
     if (!duplicate) {
-        if (entry->thread_count >= entry->thread_capacity) {
-            size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
-            pthread_t *resized = realloc(entry->threads, new_cap * sizeof(pthread_t));
-            if (!resized) {
-                pthread_mutex_unlock(&gVProcTasks.mu);
-                errno = ENOMEM;
-                return -1;
-            }
-            entry->threads = resized;
-            entry->thread_capacity = new_cap;
+        if (!vprocEnsureThreadCapacityLocked(entry, entry->thread_count + 1)) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            errno = ENOMEM;
+            return -1;
         }
         entry->threads[entry->thread_count++] = tid;
     }
+    entry->tid = tid;
     rename_thread = vprocPrepareThreadNameLocked(entry, thread_name, sizeof(thread_name));
+    thread_count = entry->thread_count;
     pthread_mutex_unlock(&gVProcTasks.mu);
     if (rename_thread) {
         vprocApplyThreadName(thread_name);
     }
     if (vdbg) {
         vprocDebugLogf( "[vproc] register tid hint pid=%d tid=%p thread_count=%zu\n",
-                pid, (void *)tid, entry->thread_count);
+                pid, (void *)tid, thread_count);
     }
     return pid;
 }
@@ -4669,7 +7402,7 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         errno = EINVAL;
         return -1;
     }
-    bool vdbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
+    bool vdbg = vprocVprocDebugEnabled();
     char thread_name[16];
     bool rename_thread = false;
     pthread_mutex_lock(&gVProcTasks.mu);
@@ -4682,28 +7415,16 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
         }
         return -1;
     }
-    entry->tid = tid;
-    bool duplicate = false;
-    for (size_t i = 0; i < entry->thread_count; ++i) {
-        if (pthread_equal(entry->threads[i], tid)) {
-            duplicate = true;
-            break;
-        }
-    }
+    bool duplicate = vprocTaskEntryHasThreadLocked(entry, tid);
     if (!duplicate) {
-        if (entry->thread_count >= entry->thread_capacity) {
-            size_t new_cap = entry->thread_capacity ? entry->thread_capacity * 2 : 4;
-            pthread_t *resized = realloc(entry->threads, new_cap * sizeof(pthread_t));
-            if (!resized) {
-                pthread_mutex_unlock(&gVProcTasks.mu);
-                errno = ENOMEM;
-                return -1;
-            }
-            entry->threads = resized;
-            entry->thread_capacity = new_cap;
+        if (!vprocEnsureThreadCapacityLocked(entry, entry->thread_count + 1)) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            errno = ENOMEM;
+            return -1;
         }
         entry->threads[entry->thread_count++] = tid;
     }
+    entry->tid = tid;
     rename_thread = vprocPrepareThreadNameLocked(entry, thread_name, sizeof(thread_name));
     if (vdbg) {
         vprocDebugLogf( "[vproc] register thread pid=%d tid=%p thread_count=%zu\n",
@@ -4723,8 +7444,10 @@ void vprocUnregisterThread(VProc *vp, pthread_t tid) {
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(vp->pid);
     if (entry) {
+        bool cleared_primary = false;
         if (entry->tid && pthread_equal(entry->tid, tid)) {
             entry->tid = 0;
+            cleared_primary = true;
         }
         for (size_t i = 0; i < entry->thread_count; ++i) {
             if (entry->threads[i] && pthread_equal(entry->threads[i], tid)) {
@@ -4732,6 +7455,11 @@ void vprocUnregisterThread(VProc *vp, pthread_t tid) {
                 entry->thread_count--;
                 break;
             }
+        }
+        if (cleared_primary && entry->thread_count > 0) {
+            /* Keep tid anchored to a live registered thread so snapshots/jobs
+             * do not misclassify resumable stopped tasks as threadless. */
+            entry->tid = entry->threads[entry->thread_count - 1];
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -4760,7 +7488,22 @@ int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthre
     }
 #endif
     pthread_t thread;
-    int rc = vprocHostPthreadCreateRaw(&thread, NULL, vprocThreadTrampoline, ctx);
+    pthread_attr_t attr;
+    pthread_attr_t *attrp = NULL;
+    bool attr_ready = false;
+    if (pthread_attr_init(&attr) == 0) {
+        attr_ready = true;
+        attrp = &attr;
+        size_t stack_size = 8u * 1024u * 1024u;
+        if (stack_size < (size_t)PTHREAD_STACK_MIN) {
+            stack_size = (size_t)PTHREAD_STACK_MIN;
+        }
+        (void)pthread_attr_setstacksize(&attr, stack_size);
+    }
+    int rc = vprocHostPthreadCreateRaw(&thread, attrp, vprocThreadTrampoline, ctx);
+    if (attr_ready) {
+        pthread_attr_destroy(&attr);
+    }
     if (rc != 0) {
         free(ctx);
         errno = rc;
@@ -4790,11 +7533,6 @@ void vprocMarkExit(VProc *vp, int status) {
         entry->zombie = true;
         int adopt_parent = vprocAdoptiveParentPidLocked(entry);
         vprocReparentChildrenLocked(vp->pid, adopt_parent);
-        entry = vprocTaskFindLocked(vp->pid);
-        if (!entry) {
-            pthread_mutex_unlock(&gVProcTasks.mu);
-            return;
-        }
 
         bool discard_zombie = false;
         VProcTaskEntry *parent_entry = vprocTaskFindLocked(entry->parent_pid);
@@ -4821,6 +7559,7 @@ void vprocMarkExit(VProc *vp, int status) {
         } else {
             vprocNotifyParentSigchldLocked(entry, VPROC_SIGCHLD_EVENT_EXIT);
         }
+        vprocMaybeNotifyPgidEmptyLocked(entry->pgid);
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -4833,7 +7572,7 @@ void vprocMarkGroupExit(int pid, int status) {
         int pgid = entry->pgid;
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *peer = &gVProcTasks.items[i];
-            if (!peer || peer->pid <= 0) continue;
+            if (peer->pid <= 0) continue;
             if (peer->pgid != pgid) continue;
             vprocMaybeStampRusageLocked(peer);
             peer->group_exit = true;
@@ -4848,25 +7587,30 @@ void vprocMarkGroupExit(int pid, int status) {
 }
 
 void vprocSetParent(int pid, int parent_pid) {
-    bool dbg = getenv("PSCALI_VPROC_DEBUG") != NULL;
-    int kernel_pid = vprocGetKernelPid();
+    if (pid <= 0) {
+        return;
+    }
+    bool dbg = vprocVprocDebugEnabled();
     pthread_mutex_lock(&gVProcTasks.mu);
-    if (kernel_pid > 0 && parent_pid > 0 && parent_pid != kernel_pid && pid != kernel_pid) {
-        VProcTaskEntry *parent_entry = vprocTaskFindLocked(parent_pid);
-        if (!parent_entry) {
+    /* Keep explicit parent assignments intact. The parent task can be
+     * registered slightly later than the child; forcing kernel_pid here
+     * collapses lineage and makes children appear attached to the kernel. */
+    if (parent_pid <= 0) {
+        int kernel_pid = vprocGetKernelPid();
+        if (kernel_pid > 0 && pid != kernel_pid) {
             parent_pid = kernel_pid;
         }
     }
-    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
-    if (entry) {
-        if (dbg) {
+    if (dbg) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+        if (entry) {
             vprocDebugLogf( "[vproc-parent] pid=%d old=%d new=%d\n",
                     pid, entry->parent_pid, parent_pid);
+        } else {
+            vprocDebugLogf( "[vproc-parent] pid=%d not found; new=%d\n", pid, parent_pid);
         }
-    vprocUpdateParentLocked(pid, parent_pid);
-    } else if (dbg) {
-        vprocDebugLogf( "[vproc-parent] pid=%d not found; new=%d\n", pid, parent_pid);
     }
+    vprocUpdateParentLocked(pid, parent_pid);
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
 
@@ -4885,6 +7629,10 @@ int vprocSetPgid(int pid, int pgid) {
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
+        if (entry->pgid == pgid) {
+            rc = 0;
+            goto out;
+        }
         /* Session leaders cannot change process groups. */
         if (entry->session_leader && entry->pid == entry->sid && entry->pgid != pgid) {
             errno = EPERM;
@@ -4894,7 +7642,7 @@ int vprocSetPgid(int pid, int pgid) {
         /* Ensure pgid belongs to same session if it already exists. */
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *peer = &gVProcTasks.items[i];
-            if (!peer || peer->pid <= 0 || peer->pgid != pgid) continue;
+            if (peer->pid <= 0 || peer->pgid != pgid) continue;
             if (peer->sid != entry->sid) {
                 errno = EPERM;
                 rc = -1;
@@ -4942,7 +7690,12 @@ void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
         entry->stop_unsupported = stop_unsupported;
-        if (stop_unsupported && entry->stopped) {
+        if (stop_unsupported && !entry->cooperative_stop_wait && entry->stopped) {
+            int stop_sig = entry->stop_signo;
+            if (stop_sig <= 0 || stop_sig >= 32) {
+                stop_sig = SIGTSTP;
+            }
+            entry->pending_signals |= vprocSigMask(stop_sig);
             entry->stopped = false;
             entry->continued = true;
             entry->stop_signo = 0;
@@ -4950,6 +7703,62 @@ void vprocSetStopUnsupported(int pid, bool stop_unsupported) {
         pthread_cond_broadcast(&gVProcTasks.cv);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+void vprocSetCooperativeStopWait(int pid, bool enabled) {
+    if (pid <= 0) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        entry->cooperative_stop_wait = enabled;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+bool vprocGetStopUnsupported(int pid) {
+    if (pid <= 0) {
+        return false;
+    }
+    bool stop_unsupported = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        stop_unsupported = entry->stop_unsupported;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return stop_unsupported;
+}
+
+void vprocSetShellPromptReadActive(int pid, bool active) {
+    if (pid <= 0) {
+        return;
+    }
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        entry->shell_prompt_read_active = active;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+}
+
+bool vprocShellPromptReadActive(int pid) {
+    if (pid <= 0) {
+        return false;
+    }
+    bool active = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        active = entry->shell_prompt_read_active;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return active;
+}
+
+void vprocSetPipelineStage(bool active) {
+    gVprocPipelineStage = active;
 }
 
 int vprocGetPgid(int pid) {
@@ -4969,6 +7778,9 @@ int vprocGetPgid(int pid) {
 }
 
 int vprocGetSid(int pid) {
+    if (pid == 0) {
+        pid = vprocGetPidShim();
+    }
     int sid = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
@@ -4981,23 +7793,78 @@ int vprocGetSid(int pid) {
     return sid;
 }
 
-int vprocSetForegroundPgid(int sid, int fg_pgid) {
+bool vprocGetShellJobControlState(int *shell_pid_out,
+                                  int *shell_pgid_out,
+                                  int *sid_out,
+                                  int *fg_pgid_out) {
+    int shell_pid = vprocGetShellSelfPid();
+    int shell_pgid = -1;
+    int sid = -1;
+    int fg_pgid = -1;
+    if (shell_pid > 0) {
+        pthread_mutex_lock(&gVProcTasks.mu);
+        VProcTaskEntry *entry = vprocTaskFindLocked(shell_pid);
+        if (entry) {
+            shell_pgid = entry->pgid;
+            sid = entry->sid;
+        }
+        if (sid > 0) {
+            fg_pgid = vprocForegroundPgidLocked(sid);
+        }
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        if (fg_pgid <= 0) {
+            fg_pgid = shell_pgid;
+        }
+    }
+    if (shell_pid_out) {
+        *shell_pid_out = shell_pid;
+    }
+    if (shell_pgid_out) {
+        *shell_pgid_out = shell_pgid;
+    }
+    if (sid_out) {
+        *sid_out = sid;
+    }
+    if (fg_pgid_out) {
+        *fg_pgid_out = fg_pgid;
+    }
+    return shell_pid > 0;
+}
+
+static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid) {
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    /* Keep the controlling TTY's foreground group aligned with the vproc
+     * session leader so job-control signals flow to the right pgid. */
+    if (sid <= 0 || fg_pgid <= 0) {
+        return;
+    }
+    struct pscal_fd *pscal_fd = vprocSessionPscalFdForStd(STDIN_FILENO);
+    if (pscal_fd) {
+        if (pscal_fd->ops && pscal_fd->ops->ioctl) {
+            dword_t fg = (dword_t)fg_pgid;
+            (void)pscal_fd->ops->ioctl(pscal_fd, TIOCSPGRP_, &fg);
+        }
+        pscal_fd_close(pscal_fd);
+        return;
+    }
+    (void)vprocHostTcsetpgrpRaw(STDIN_FILENO, (pid_t)fg_pgid);
+#else
+    (void)sid;
+    (void)fg_pgid;
+#endif
+}
+
+static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty) {
     if (sid <= 0 || fg_pgid <= 0) {
         errno = EINVAL;
         return -1;
     }
     int rc = -1;
+    bool fg_changed = false;
+    bool should_continue_fg = false;
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
-    VProcTaskEntry *leader = NULL;
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->sid == sid && entry->session_leader) {
-            leader = entry;
-            break;
-        }
-    }
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
     if (!leader) {
         leader = vprocTaskEnsureSlotLocked(sid);
         if (leader) {
@@ -5007,13 +7874,47 @@ int vprocSetForegroundPgid(int sid, int fg_pgid) {
         }
     }
     if (leader) {
+        fg_changed = (leader->fg_pgid != fg_pgid);
         leader->fg_pgid = fg_pgid;
+        if (fg_changed) {
+            for (size_t i = 0; i < gVProcTasks.count; ++i) {
+                VProcTaskEntry *entry = &gVProcTasks.items[i];
+                if (entry->pid <= 0) {
+                    continue;
+                }
+                if (entry->sid != sid || entry->pgid != fg_pgid) {
+                    continue;
+                }
+                if (entry->stopped && !entry->stop_unsupported) {
+                    should_continue_fg = true;
+                    break;
+                }
+            }
+        }
         rc = 0;
     } else {
         errno = ESRCH;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (rc == 0) {
+        bool handoff_queued = false;
+        if (sync_tty) {
+            handoff_queued = vprocKernelQueueForegroundHandoff(sid, fg_pgid);
+            if (!handoff_queued) {
+                vprocSyncForegroundPgidToSessionTty(sid, fg_pgid);
+            }
+        }
+        if (sync_tty && should_continue_fg) {
+            if (!vprocKernelQueueContinuePgid(fg_pgid)) {
+                (void)vprocKillShim(-fg_pgid, SIGCONT);
+            }
+        }
+    }
     return rc;
+}
+
+int vprocSetForegroundPgid(int sid, int fg_pgid) {
+    return vprocSetForegroundPgidInternal(sid, fg_pgid, true);
 }
 
 int vprocGetForegroundPgid(int sid) {
@@ -5024,13 +7925,9 @@ int vprocGetForegroundPgid(int sid) {
     int fg = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
     vprocTaskTableRepairLocked();
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->sid == sid && entry->session_leader) {
-            fg = entry->fg_pgid;
-            break;
-        }
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
+    if (leader) {
+        fg = leader->fg_pgid;
     }
     if (fg < 0) errno = ESRCH;
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5053,16 +7950,11 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     int adopt_parent = vprocAdoptiveParentPidLocked(entry);
     vprocReparentChildrenLocked(pid, adopt_parent);
 
-    entry = vprocTaskFindLocked(pid);
-    if (!entry) {
-        return;
-    }
-
     if (sid > 0) {
         bool drop_session = true;
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *peer = &gVProcTasks.items[i];
-            if (!peer || peer->pid <= 0) {
+            if (peer->pid <= 0) {
                 continue;
             }
             if (peer->pid == pid) {
@@ -5082,6 +7974,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
         free(entry->label);
         entry->label = NULL;
     }
+    vprocTaskLookupForgetLocked(pid);
     memset(entry->comm, 0, sizeof(entry->comm));
     entry->pid = 0;
     entry->tid = 0;
@@ -5096,6 +7989,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->stop_signo = 0;
     entry->zombie = false;
     entry->stop_unsupported = false;
+    entry->shell_prompt_read_active = false;
     entry->job_id = 0;
     if (entry->children) {
         free(entry->children);
@@ -5110,6 +8004,7 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->fg_pgid = 0;
     entry->sigchld_events = 0;
     entry->sigchld_blocked = false;
+    entry->sigchld_delivery_queued = false;
     entry->children = NULL;
     entry->rusage_utime = 0;
     entry->rusage_stime = 0;
@@ -5118,9 +8013,6 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->blocked_signals = 0;
     entry->pending_signals = 0;
     entry->ignored_signals = 0;
-    for (int i = 0; i < 32; ++i) {
-        entry->pending_counts[i] = 0;
-    }
     for (int i = 0; i < 32; ++i) {
         entry->pending_counts[i] = 0;
     }
@@ -5133,6 +8025,13 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
     entry->child_capacity = 0;
     entry->child_count = 0;
     entry->start_mono_ns = 0;
+    if (gVProcTasks.items && gVProcTasks.count > 0) {
+        ptrdiff_t idx = entry - gVProcTasks.items;
+        if (idx >= 0 && (size_t)idx < gVProcTasks.count) {
+            gVProcTaskFreeHint = (size_t)idx;
+        }
+    }
+
 }
 
 size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
@@ -5141,7 +8040,7 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
     vprocTaskTableRepairLocked();
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) {
+        if (entry->pid <= 0) {
             continue;
         }
         uint64_t now = vprocNowMonoNs();
@@ -5202,37 +8101,88 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
     return count;
 }
 
+static inline bool vprocWaitParentMatchesLocked(const VProcTaskEntry *entry,
+                                                int waiter_pid,
+                                                int kernel_pid) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->parent_pid == waiter_pid) {
+        return true;
+    }
+    return kernel_pid > 0 &&
+           entry->parent_pid == kernel_pid &&
+           entry->sid == waiter_pid;
+}
+
+static inline bool vprocWaitPidMatchesLocked(const VProcTaskEntry *entry,
+                                             pid_t pid,
+                                             int waiter_pgid) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (pid > 0) {
+        return entry->pid == pid;
+    }
+    if (pid == -1) {
+        return true;
+    }
+    if (pid == 0) {
+        return (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
+    }
+    return entry->pgid == -pid;
+}
+
+static inline bool vprocWaitStateChangeMatchesLocked(const VProcTaskEntry *entry,
+                                                     bool allow_stop,
+                                                     bool allow_cont) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->exited) {
+        return true;
+    }
+    if (allow_stop && entry->stopped && entry->stop_signo > 0) {
+        return true;
+    }
+    if (allow_cont && entry->continued) {
+        return true;
+    }
+    return false;
+}
+
+static inline int vprocTaskPgidByPidLocked(int pid) {
+    if (pid <= 0) {
+        return -1;
+    }
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    return entry ? entry->pgid : -1;
+}
+
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
 static bool vprocHasWaitCandidateLocked(pid_t pid,
                                         int waiter_pid,
                                         int waiter_pgid,
                                         int kernel_pid) {
+    if (pid > 0) {
+        VProcTaskEntry *entry = vprocTaskFindLocked((int)pid);
+        if (!entry) {
+            return false;
+        }
+        return vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid);
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        bool parent_match = (entry->parent_pid == waiter_pid);
-        if (!parent_match && kernel_pid > 0 &&
-            entry->parent_pid == kernel_pid &&
-            entry->sid == waiter_pid) {
-            parent_match = true;
+        if (!vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid)) {
+            continue;
         }
-        if (!parent_match) continue;
-
-        bool match = false;
-        if (pid > 0 && entry->pid == pid) {
-            match = true;
-        } else if (pid == -1) {
-            match = true;
-        } else if (pid == 0) {
-            match = (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
-        } else if (pid < -1) {
-            match = (entry->pgid == -pid);
-        }
-        if (match) {
+        if (vprocWaitPidMatchesLocked(entry, pid, waiter_pgid)) {
             return true;
         }
     }
     return false;
 }
+#endif
 
 static bool vprocHasKillTargetLocked(pid_t pid) {
     if (pid == 0) {
@@ -5241,9 +8191,19 @@ static bool vprocHasKillTargetLocked(pid_t pid) {
     bool broadcast_all = (pid == -1);
     bool target_group = (pid <= 0);
     int target = target_group ? -pid : pid;
+    if (!broadcast_all && !target_group) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(target);
+        return entry != NULL;
+    }
+    if (target_group) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(target);
+        if (entry && entry->pgid == target) {
+            return true;
+        }
+    }
     for (size_t i = 0; i < gVProcTasks.count; ++i) {
         VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
+        if (entry->pid <= 0) continue;
         if (broadcast_all) {
             return true;
         }
@@ -5263,17 +8223,17 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
     bool allow_cont = (options & WCONTINUED) != 0;
     bool nohang = (options & WNOHANG) != 0;
     bool nowait = (options & WNOWAIT) != 0;
-    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    bool dbg = vprocKillDebugEnabled();
     int waiter_pid = vprocWaiterPid();
     int waiter_pgid = -1;
     int kernel_pid = vprocGetKernelPid();
-    if (pid == 0) {
-        waiter_pgid = vprocGetPgid(waiter_pid);
-    }
 
     if (!vprocShimHasVirtualContext()) {
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
         pthread_mutex_lock(&gVProcTasks.mu);
+        if (pid == 0) {
+            waiter_pgid = vprocTaskPgidByPidLocked(waiter_pid);
+        }
         bool has_candidate = vprocHasWaitCandidateLocked(pid, waiter_pid, waiter_pgid, kernel_pid);
         pthread_mutex_unlock(&gVProcTasks.mu);
         if (!has_candidate) {
@@ -5285,54 +8245,42 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
     }
 
     pthread_mutex_lock(&gVProcTasks.mu);
+    if (pid == 0) {
+        waiter_pgid = vprocTaskPgidByPidLocked(waiter_pid);
+    }
     while (true) {
         VProcTaskEntry *ready = NULL;
         bool has_candidate = false;
 
-        for (size_t i = 0; i < gVProcTasks.count; ++i) {
-            VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) continue;
-            bool parent_match = (entry->parent_pid == waiter_pid);
-            if (!parent_match && kernel_pid > 0 &&
-                entry->parent_pid == kernel_pid &&
-                entry->sid == waiter_pid) {
-                parent_match = true;
+        if (pid > 0) {
+            VProcTaskEntry *entry = vprocTaskFindLocked((int)pid);
+            if (entry && vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid)) {
+                has_candidate = true;
+                if (vprocWaitStateChangeMatchesLocked(entry, allow_stop, allow_cont)) {
+                    ready = entry;
+                }
             }
-            if (!parent_match) continue;
+        } else {
+            for (size_t i = 0; i < gVProcTasks.count; ++i) {
+                VProcTaskEntry *entry = &gVProcTasks.items[i];
+                if (!vprocWaitParentMatchesLocked(entry, waiter_pid, kernel_pid)) continue;
+                if (!vprocWaitPidMatchesLocked(entry, pid, waiter_pgid)) continue;
+                has_candidate = true;
 
-            bool match = false;
-            if (pid > 0 && entry->pid == pid) {
-                match = true;
-            } else if (pid == -1) {
-                match = true;
-            } else if (pid == 0) {
-                match = (waiter_pgid > 0) ? (entry->pgid == waiter_pgid) : true;
-            } else if (pid < -1) {
-                match = (entry->pgid == -pid);
-            }
-
-            if (!match) continue;
-            has_candidate = true;
-
-            bool state_change = false;
-            if (entry->exited) {
-                state_change = true;
-            } else if (allow_stop && entry->stopped && entry->stop_signo > 0) {
-                state_change = true;
-            } else if (allow_cont && entry->continued) {
-                state_change = true;
-            }
-
-            if (state_change) {
-                ready = entry;
-                break;
+                if (vprocWaitStateChangeMatchesLocked(entry, allow_stop, allow_cont)) {
+                    ready = entry;
+                    break;
+                }
             }
         }
 
         if (ready) {
             int status = 0;
             int waited_pid = ready->pid;
-            VProcTaskEntry *waiter_entry = vprocTaskFindLocked(waiter_pid);
+            VProcTaskEntry *waiter_entry = NULL;
+            if (waiter_pid > 0) {
+                waiter_entry = vprocTaskFindLocked(waiter_pid);
+            }
 
             if (ready->exited) {
                 if (ready->group_exit) {
@@ -5363,6 +8311,13 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
             }
             if (waiter_entry && waiter_entry->sigchld_events > 0 && !waiter_entry->sigchld_blocked) {
                 waiter_entry->sigchld_events--;
+                if (waiter_entry->sigchld_events == 0) {
+                    waiter_entry->pending_signals &= ~vprocSigMask(SIGCHLD);
+                    if (vprocSigIndexValid(SIGCHLD)) {
+                        waiter_entry->pending_counts[SIGCHLD] = 0;
+                    }
+                    waiter_entry->sigchld_delivery_queued = false;
+                }
             }
 
             if (dbg) {
@@ -5373,16 +8328,16 @@ pid_t vprocWaitPidShim(pid_t pid, int *status_out, int options) {
             return waited_pid;
         }
 
-        if (nohang) {
-            if (status_out) *status_out = 0;
-            pthread_mutex_unlock(&gVProcTasks.mu);
-            return 0;
-        }
-
         if (!has_candidate) {
             pthread_mutex_unlock(&gVProcTasks.mu);
             errno = ECHILD;
             return -1;
+        }
+
+        if (nohang) {
+            if (status_out) *status_out = 0;
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            return 0;
         }
 
         pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
@@ -5402,7 +8357,14 @@ static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity
         }
     }
     if (*count >= *capacity) {
-        size_t new_cap = (*capacity == 0) ? 8 : (*capacity * 2);
+        size_t new_cap = 0;
+        if (!vprocComputeGrowthCapacity(*capacity,
+                                        *count + 1,
+                                        8,
+                                        sizeof(pthread_t),
+                                        &new_cap)) {
+            return;
+        }
         pthread_t *resized = (pthread_t *)realloc(*list, new_cap * sizeof(pthread_t));
         if (!resized) {
             return;
@@ -5413,8 +8375,109 @@ static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity
     (*list)[(*count)++] = tid;
 }
 
+static bool vprocKillDeliverEntryLocked(VProcTaskEntry *entry,
+                                        pid_t requested_pid,
+                                        int sig,
+                                        bool dbg,
+                                        pthread_t self,
+                                        pthread_t **cancel_list,
+                                        size_t *cancel_count,
+                                        size_t *cancel_capacity,
+                                        bool *request_runtime_sigint,
+                                        bool *request_runtime_sigtstp) {
+    if (!entry || entry->pid <= 0) {
+        return false;
+    }
+    if (entry->zombie || entry->exited) {
+        return false;
+    }
+    if (dbg) {
+        vprocDebugLogf( "[vproc-kill] pid=%d sig=%d entry_pid=%d tid=%p\n",
+                (int)requested_pid, sig, entry->pid, (void *)entry->tid);
+    }
+
+    /* In-process workers often execute on the same pthread as the shell, so
+     * thread-id equality alone is not enough to classify "the shell".
+     * Restrict shell-special signal routing to the actual shell pid. */
+    int shell_pid = vprocGetShellSelfPid();
+    bool shell_thread = (shell_pid > 0 && entry->pid == shell_pid &&
+                         gShellSelfTidValid && pthread_equal(entry->tid, gShellSelfTid));
+    VProc *active_vp = vprocCurrent();
+    bool active_entry_thread = (active_vp &&
+                                vprocPid(active_vp) == entry->pid &&
+                                entry->tid &&
+                                pthread_equal(entry->tid, self));
+
+    if (sig == SIGTSTP && entry->stop_unsupported) {
+        /* Some in-process helpers cannot be parked on a host thread stop.
+         * Preserve Unix-like semantics by recording SIGTSTP as pending so the
+         * foreground worker can cooperatively surface a stopped status
+         * (128 + SIGTSTP). */
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    if (shell_thread && (sig == SIGINT || sig == SIGTSTP)) {
+#if defined(PSCAL_TARGET_IOS)
+        if (sig == SIGINT && request_runtime_sigint) {
+            *request_runtime_sigint = true;
+        }
+#endif
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    if (active_entry_thread && requested_pid < 0 && (sig == SIGINT || sig == SIGTSTP)) {
+        /* Cooperative in-process frontends run on this same thread. Queue the
+         * signal so their polling paths (sigpending/sigwait/runtime checks)
+         * can observe Ctrl-C/Z without tearing down the thread immediately. */
+#if defined(PSCAL_TARGET_IOS)
+        if (sig == SIGINT && request_runtime_sigint) {
+            *request_runtime_sigint = true;
+        }
+#endif
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    if (vprocSignalBlockedLocked(entry, sig)) {
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
+    if (action == VPROC_SIG_HANDLER && !vprocEntryIsCurrentThreadLocked(entry)) {
+        vprocQueuePendingSignalLocked(entry, sig);
+        return true;
+    }
+
+    vprocApplySignalLocked(entry, sig);
+
+    if (entry->exited) {
+        if (entry->tid && !pthread_equal(entry->tid, self)) {
+            vprocCancelListAdd(cancel_list, cancel_count, cancel_capacity, entry->tid);
+        }
+        for (size_t t = 0; t < entry->thread_count; ++t) {
+            pthread_t tid = entry->threads[t];
+            if (tid && !pthread_equal(tid, self)) {
+                vprocCancelListAdd(cancel_list, cancel_count, cancel_capacity, tid);
+            }
+        }
+    }
+    return true;
+}
+
 int vprocKillShim(pid_t pid, int sig) {
-    if (!vprocShimHasVirtualContext()) {
+    bool dbg = vprocKillDebugEnabled();
+    if (sig < 0 || sig >= 32) {
+        if (dbg) {
+            vprocDebugLogf("[vproc-kill] invalid signal=%d\n", sig);
+        }
+        errno = EINVAL;
+        return -1;
+    }
+    bool require_virtual = vprocSignalRequiresVirtualDispatch(sig);
+    if (!vprocShimHasVirtualContext() && !require_virtual) {
 #if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
         pthread_mutex_lock(&gVProcTasks.mu);
         bool has_target = vprocHasKillTargetLocked(pid);
@@ -5429,27 +8492,41 @@ int vprocKillShim(pid_t pid, int sig) {
     bool target_group = (pid <= 0);
     bool broadcast_all = (pid == -1);
     int target = target_group ? -pid : pid;
-    bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    int caller_for_zero = -1;
+
+    if (pid == 0) {
+        caller_for_zero = vprocGetPidShim();
+        if (caller_for_zero <= 0) {
+            caller_for_zero = vprocGetShellSelfPid();
+        }
+    }
+
+    int rc = 0;
+    pthread_t self = pthread_self();
+    int self_pid = broadcast_all ? (int)vprocGetPidShim() : -1;
+    pthread_t *cancel_list = NULL;
+    size_t cancel_count = 0;
+    size_t cancel_capacity = 0;
+    bool request_runtime_sigint = false;
+    bool request_runtime_sigtstp = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    if (pid == 0) {
+        int caller_pgid = vprocTaskPgidByPidLocked(caller_for_zero);
+        if (caller_pgid <= 0) {
+            pthread_mutex_unlock(&gVProcTasks.mu);
+            if (require_virtual) {
+                errno = ESRCH;
+                return -1;
+            }
+            return vprocHostKillRaw(pid, sig);
+        }
+        target_group = true;
+        target = caller_pgid;
+    }
     if (sig == 0) {
         /* Probe for existence: succeed if we find a matching entry. */
-        pthread_mutex_lock(&gVProcTasks.mu);
-        bool found = false;
-        for (size_t i = 0; i < gVProcTasks.count; ++i) {
-            VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) continue;
-            if (broadcast_all) {
-                found = true;
-                break;
-            } else if (target_group) {
-                if (entry->pgid == target) {
-                    found = true;
-                    break;
-                }
-            } else if (entry->pid == target) {
-                found = true;
-                break;
-            }
-        }
+        pid_t probe_pid = broadcast_all ? -1 : (target_group ? (pid_t)(-target) : (pid_t)target);
+        bool found = vprocHasKillTargetLocked(probe_pid);
         pthread_mutex_unlock(&gVProcTasks.mu);
         if (found) {
             return 0;
@@ -5457,82 +8534,42 @@ int vprocKillShim(pid_t pid, int sig) {
         errno = ESRCH;
         return -1;
     }
-
-    if (sig < 0 || sig >= 32) {
-        if (dbg) {
-            vprocDebugLogf( "[vproc-kill] invalid signal=%d\n", sig);
-        }
-        errno = EINVAL;
-        return -1;
-    }
-
-    if (pid == 0) {
-        int caller = vprocGetPidShim();
-        if (caller <= 0) {
-            caller = vprocGetShellSelfPid();
-        }
-        int caller_pgid = (caller > 0) ? vprocGetPgid(caller) : -1;
-        if (caller_pgid <= 0) {
-            return vprocHostKillRaw(pid, sig);
-        }
-        target_group = true;
-        target = caller_pgid;
-    }
-
-    int rc = 0;
-    pthread_t *cancel_list = NULL;
-    size_t cancel_count = 0;
-    size_t cancel_capacity = 0;
-    pthread_mutex_lock(&gVProcTasks.mu);
     if (dbg) {
         vprocDebugLogf( "[vproc-kill] target=%d group=%d broadcast=%d count=%zu\n",
                 target, (int)target_group, (int)broadcast_all, gVProcTasks.count);
     }
     bool delivered = false;
     
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->zombie || entry->exited) continue;
-        if (entry->exited && entry->zombie) continue;
-        if (dbg) {
-            vprocDebugLogf( "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
-                    entry->pid, entry->pgid, entry->sid, entry->exited, entry->zombie);
+    if (!broadcast_all && !target_group) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(target);
+        if (entry && vprocKillDeliverEntryLocked(entry, pid, sig, dbg, self,
+                                                 &cancel_list, &cancel_count, &cancel_capacity,
+                                                 &request_runtime_sigint,
+                                                 &request_runtime_sigtstp)) {
+            delivered = true;
         }
-        
-        if (broadcast_all) {
-            // Don't kill self in broadcast
-            if (entry->pid == vprocGetPidShim()) continue;
-        } else if (target_group) {
-            if (entry->pgid != target) continue;
-        } else {
-            if (entry->pid != target) continue;
-        }
-        
-        delivered = true;
+    } else {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (entry->pid <= 0) continue;
+            if (entry->zombie || entry->exited) continue;
+            if (dbg) {
+                vprocDebugLogf( "[vproc-kill] scan pid=%d pgid=%d sid=%d exited=%d zombie=%d\n",
+                        entry->pid, entry->pgid, entry->sid, entry->exited, entry->zombie);
+            }
 
-        if (dbg) {
-            vprocDebugLogf( "[vproc-kill] pid=%d sig=%d target=%d entry_pid=%d tid=%p\n",
-                    (int)pid, sig, target, entry->pid, (void *)entry->tid);
-        }
+            if (broadcast_all) {
+                // Don't kill self in broadcast
+                if (self_pid > 0 && entry->pid == self_pid) continue;
+            } else if (target_group) {
+                if (entry->pgid != target) continue;
+            }
 
-        if (vprocSignalBlockedLocked(entry, sig)) {
-            vprocQueuePendingSignalLocked(entry, sig);
-            continue;
-        }
-
-        VProcSignalAction action = vprocEffectiveSignalActionLocked(entry, sig);
-        if (action == VPROC_SIG_HANDLER && !vprocEntryIsCurrentThreadLocked(entry)) {
-            vprocQueuePendingSignalLocked(entry, sig);
-            continue;
-        }
-
-        vprocApplySignalLocked(entry, sig);
-
-        if (entry->exited) {
-            vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, entry->tid);
-            for (size_t t = 0; t < entry->thread_count; ++t) {
-                vprocCancelListAdd(&cancel_list, &cancel_count, &cancel_capacity, entry->threads[t]);
+            if (vprocKillDeliverEntryLocked(entry, pid, sig, dbg, self,
+                                            &cancel_list, &cancel_count, &cancel_capacity,
+                                            &request_runtime_sigint,
+                                            &request_runtime_sigtstp)) {
+                delivered = true;
             }
         }
     }
@@ -5544,6 +8581,13 @@ int vprocKillShim(pid_t pid, int sig) {
         pthread_cancel(cancel_list[i]);
     }
     free(cancel_list);
+
+    if (request_runtime_sigint && pscalRuntimeRequestSigint) {
+        pscalRuntimeRequestSigint();
+    }
+    if (request_runtime_sigtstp && pscalRuntimeRequestSigtstp) {
+        pscalRuntimeRequestSigtstp();
+    }
 
     if (delivered) return rc;
 
@@ -5574,6 +8618,333 @@ static inline bool vprocShimHasVirtualContext(void) {
     return vprocCurrent() != NULL || vprocGetShellSelfPid() > 0;
 }
 
+typedef struct {
+    bool active;
+    bool in_child;
+    sigjmp_buf *parent_env;
+    VProc *child_vp;
+    int child_pid;
+} VProcSimForkState;
+
+typedef struct {
+    VProc *vp;
+    VProcExecEntryFn entry;
+    int argc;
+    char **argv;
+} VProcSimExecCtx;
+
+typedef struct {
+    VProcFdKind kind;
+    int source_host_fd;
+    int cloned_host_fd;
+    struct pscal_fd *pscal_fd;
+} VProcForkFdCloneEntry;
+
+static __thread VProcSimForkState gVProcSimForkState;
+
+static void vprocSimForkResetState(VProcSimForkState *state) {
+    if (!state) {
+        return;
+    }
+    state->active = false;
+    state->in_child = false;
+    state->parent_env = NULL;
+    state->child_vp = NULL;
+    state->child_pid = 0;
+}
+
+static bool vprocSimForkDebugEnabled(void) {
+    const char *tool_debug = getenv("PSCALI_TOOL_DEBUG");
+    const char *ssh_debug = getenv("PSCALI_SSH_DEBUG");
+    if ((tool_debug && *tool_debug && strcmp(tool_debug, "0") != 0) ||
+        (ssh_debug && *ssh_debug && strcmp(ssh_debug, "0") != 0)) {
+        return true;
+    }
+    return false;
+}
+
+static void vprocSimForkLog(const char *fmt, ...) {
+    if (!vprocSimForkDebugEnabled() || !fmt) {
+        return;
+    }
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+#if defined(PSCAL_TARGET_IOS)
+    if (&pscalRuntimeDebugLog != NULL) {
+        pscalRuntimeDebugLog(buf);
+    } else {
+        fprintf(stderr, "%s\n", buf);
+    }
+#else
+    fprintf(stderr, "%s\n", buf);
+#endif
+}
+
+static char **vprocSimDupArgv(char *const argv[], int *out_argc) {
+    int argc = 0;
+    if (argv) {
+        while (argv[argc]) {
+            if (argc == INT_MAX) {
+                return NULL;
+            }
+            argc++;
+        }
+    }
+    size_t argc_size = (size_t)argc;
+    if (argc_size > (SIZE_MAX / sizeof(char *)) - 1) {
+        return NULL;
+    }
+    char **copy = (char **)calloc((size_t)argc + 1, sizeof(char *));
+    if (!copy) {
+        return NULL;
+    }
+    for (int i = 0; i < argc; ++i) {
+        const char *src = argv[i] ? argv[i] : "";
+        copy[i] = strdup(src);
+        if (!copy[i]) {
+            for (int j = 0; j < i; ++j) {
+                free(copy[j]);
+            }
+            free(copy);
+            return NULL;
+        }
+    }
+    copy[argc] = NULL;
+    if (out_argc) {
+        *out_argc = argc;
+    }
+    return copy;
+}
+
+static void vprocSimFreeArgv(char **argv, int argc) {
+    if (!argv) {
+        return;
+    }
+    for (int i = 0; i < argc; ++i) {
+        free(argv[i]);
+    }
+    free(argv);
+}
+
+static void vprocSimForkFdCloneCleanup(VProcForkFdCloneEntry *entries,
+                                       size_t count,
+                                       bool close_host_fds) {
+    if (!entries) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (entries[i].pscal_fd) {
+            pscal_fd_close(entries[i].pscal_fd);
+            entries[i].pscal_fd = NULL;
+        }
+        if (close_host_fds && entries[i].cloned_host_fd >= 0) {
+            vprocHostCloseRaw(entries[i].cloned_host_fd);
+            entries[i].cloned_host_fd = -1;
+        }
+    }
+    free(entries);
+}
+
+static void vprocCloseAllFdsLocked(VProc *vp) {
+    if (!vp || !vp->entries) {
+        return;
+    }
+    for (size_t i = 0; i < vp->capacity; ++i) {
+        if (vp->entries[i].kind == VPROC_FD_PSCAL && vp->entries[i].pscal_fd) {
+            pscal_fd_close(vp->entries[i].pscal_fd);
+        } else if (vp->entries[i].kind == VPROC_FD_HOST &&
+                   vp->entries[i].host_fd >= 0) {
+            vprocHostCloseRaw(vp->entries[i].host_fd);
+        }
+        vp->entries[i].host_fd = -1;
+        vp->entries[i].pscal_fd = NULL;
+        vp->entries[i].kind = VPROC_FD_NONE;
+    }
+    vprocResourceCloseAllLocked(vp);
+    vp->stdin_host_fd = -1;
+    vp->stdout_host_fd = -1;
+    vp->stderr_host_fd = -1;
+    vp->stdin_from_session = false;
+}
+
+static bool vprocSimForkCloneFdTable(VProc *child, VProc *parent) {
+    if (!child || !parent) {
+        errno = EINVAL;
+        return false;
+    }
+
+    size_t parent_cap = 0;
+    int parent_next_fd = 3;
+    bool parent_stdin_from_session = false;
+    VProcForkFdCloneEntry *clone_entries = NULL;
+
+    pthread_mutex_lock(&parent->mu);
+    parent_cap = parent->capacity;
+    parent_next_fd = parent->next_fd;
+    parent_stdin_from_session = parent->stdin_from_session;
+    if (parent_cap > 0) {
+        clone_entries =
+                (VProcForkFdCloneEntry *)calloc(parent_cap, sizeof(VProcForkFdCloneEntry));
+        if (!clone_entries) {
+            pthread_mutex_unlock(&parent->mu);
+            errno = ENOMEM;
+            return false;
+        }
+        for (size_t i = 0; i < parent_cap; ++i) {
+            VProcFdEntry src = parent->entries[i];
+            clone_entries[i].kind = src.kind;
+            clone_entries[i].source_host_fd = -1;
+            clone_entries[i].cloned_host_fd = -1;
+            clone_entries[i].pscal_fd = NULL;
+            if (src.kind == VPROC_FD_HOST && src.host_fd >= 0) {
+                clone_entries[i].source_host_fd = src.host_fd;
+            } else if (src.kind == VPROC_FD_PSCAL && src.pscal_fd) {
+                clone_entries[i].pscal_fd = pscal_fd_retain(src.pscal_fd);
+                if (!clone_entries[i].pscal_fd) {
+                    pthread_mutex_unlock(&parent->mu);
+                    vprocSimForkFdCloneCleanup(clone_entries, parent_cap, false);
+                    errno = ENOMEM;
+                    return false;
+                }
+            } else {
+                clone_entries[i].kind = VPROC_FD_NONE;
+            }
+        }
+    }
+    pthread_mutex_unlock(&parent->mu);
+
+    for (size_t i = 0; i < parent_cap; ++i) {
+        if (clone_entries[i].kind != VPROC_FD_HOST ||
+            clone_entries[i].source_host_fd < 0) {
+            continue;
+        }
+        int duped = vprocCloneFd(clone_entries[i].source_host_fd);
+        if (duped < 0) {
+            vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+            return false;
+        }
+        clone_entries[i].cloned_host_fd = duped;
+        if (getenv("PSCALI_TOOL_DEBUG") != NULL && i < 8) {
+            fprintf(stderr,
+                    "[vproc-fork-clone] fd=%zu src=%d dup=%d\n",
+                    i,
+                    clone_entries[i].source_host_fd,
+                    duped);
+        }
+    }
+
+    pthread_mutex_lock(&child->mu);
+    vprocCloseAllFdsLocked(child);
+    if (parent_cap > child->capacity &&
+        !vprocEnsureFdCapacityLocked(child, parent_cap)) {
+        pthread_mutex_unlock(&child->mu);
+        vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+        return false;
+    }
+    for (size_t i = 0; i < child->capacity; ++i) {
+        child->entries[i].host_fd = -1;
+        child->entries[i].pscal_fd = NULL;
+        child->entries[i].kind = VPROC_FD_NONE;
+    }
+    for (size_t i = 0; i < parent_cap; ++i) {
+        if (clone_entries[i].kind == VPROC_FD_HOST &&
+            clone_entries[i].cloned_host_fd >= 0) {
+            child->entries[i].host_fd = clone_entries[i].cloned_host_fd;
+            child->entries[i].pscal_fd = NULL;
+            child->entries[i].kind = VPROC_FD_HOST;
+            vprocResourceTrackLocked(child,
+                                     clone_entries[i].cloned_host_fd,
+                                     VPROC_RESOURCE_GENERIC);
+            clone_entries[i].cloned_host_fd = -1;
+        } else if (clone_entries[i].kind == VPROC_FD_PSCAL &&
+                   clone_entries[i].pscal_fd) {
+            child->entries[i].host_fd = -1;
+            child->entries[i].pscal_fd = clone_entries[i].pscal_fd;
+            child->entries[i].kind = VPROC_FD_PSCAL;
+            clone_entries[i].pscal_fd = NULL;
+        }
+    }
+    child->next_fd = (parent_next_fd >= 0 && (size_t)parent_next_fd < child->capacity)
+                             ? parent_next_fd
+                             : 3;
+    child->stdin_fd = STDIN_FILENO;
+    child->stdout_fd = STDOUT_FILENO;
+    child->stderr_fd = STDERR_FILENO;
+    child->stdin_host_fd =
+            (child->capacity > (size_t)STDIN_FILENO &&
+             child->entries[STDIN_FILENO].kind == VPROC_FD_HOST)
+                    ? child->entries[STDIN_FILENO].host_fd
+                    : -1;
+    child->stdout_host_fd =
+            (child->capacity > (size_t)STDOUT_FILENO &&
+             child->entries[STDOUT_FILENO].kind == VPROC_FD_HOST)
+                    ? child->entries[STDOUT_FILENO].host_fd
+                    : -1;
+    child->stderr_host_fd =
+            (child->capacity > (size_t)STDERR_FILENO &&
+             child->entries[STDERR_FILENO].kind == VPROC_FD_HOST)
+                    ? child->entries[STDERR_FILENO].host_fd
+                    : -1;
+    child->stdin_from_session =
+            parent_stdin_from_session && (child->stdin_host_fd >= 0);
+    pthread_mutex_unlock(&child->mu);
+
+    vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+    return true;
+}
+
+static void *vprocSimExecThread(void *arg) {
+    VProcSimExecCtx *ctx = (VProcSimExecCtx *)arg;
+    int status = 127;
+    if (ctx && ctx->entry) {
+        status = ctx->entry(ctx->argc, ctx->argv);
+    }
+    if (ctx && ctx->vp) {
+        vprocMarkExit(ctx->vp, status);
+        vprocDestroy(ctx->vp);
+    }
+    if (ctx) {
+        vprocSimFreeArgv(ctx->argv, ctx->argc);
+        free(ctx);
+    }
+    return (void *)(intptr_t)status;
+}
+
+static int vprocSimSpawnChild(VProc *vp, VProcExecEntryFn entry, char *const argv[]) {
+    int argc = 0;
+    char **argv_copy = vprocSimDupArgv(argv, &argc);
+    if (!argv_copy) {
+        errno = ENOMEM;
+        return -1;
+    }
+    VProcSimExecCtx *ctx = (VProcSimExecCtx *)calloc(1, sizeof(VProcSimExecCtx));
+    if (!ctx) {
+        vprocSimFreeArgv(argv_copy, argc);
+        errno = ENOMEM;
+        return -1;
+    }
+    ctx->vp = vp;
+    ctx->entry = entry;
+    ctx->argc = argc;
+    ctx->argv = argv_copy;
+
+    pthread_t tid;
+    int err = vprocSpawnThread(vp, vprocSimExecThread, ctx, &tid);
+    if (err != 0) {
+        vprocSimFreeArgv(argv_copy, argc);
+        free(ctx);
+        errno = err;
+        vprocSimForkLog("[vproc-fork] spawn thread failed err=%d", err);
+        return -1;
+    }
+    pthread_detach(tid);
+    vprocSimForkLog("[vproc-fork] spawn thread ok");
+    return 0;
+}
+
 pid_t vprocGetPpidShim(void) {
     if (!vprocShimHasVirtualContext()) {
         return vprocHostGetppidRaw();
@@ -5593,6 +8964,100 @@ pid_t vprocGetPpidShim(void) {
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return parent;
+}
+
+pid_t vprocSimulatedFork(const char *label, bool inherit_parent_pgid) {
+    return vprocSimulatedForkWithEnv(label, inherit_parent_pgid, NULL);
+}
+
+pid_t vprocSimulatedForkWithEnv(const char *label,
+                                bool inherit_parent_pgid,
+                                sigjmp_buf *parent_env) {
+    VProcSimForkState *state = &gVProcSimForkState;
+    const char *fork_label = (label && *label) ? label : "fork";
+    vprocSimForkLog("[vproc-fork] fork enter active=%d in_child=%d",
+                    state->active ? 1 : 0,
+                    state->in_child ? 1 : 0);
+    if (state->active) {
+        errno = EAGAIN;
+        return -1;
+    }
+    if (!parent_env) {
+        errno = EINVAL;
+        vprocSimForkLog("[vproc-fork] missing caller env");
+        return -1;
+    }
+
+    VProcCommandScope scope;
+    if (!vprocCommandScopeBegin(&scope, fork_label, true, inherit_parent_pgid)) {
+        errno = ENOSYS;
+        vprocSimForkLog("[vproc-fork] vprocCommandScopeBegin failed");
+        return -1;
+    }
+    if (scope.prev && scope.vp) {
+        if (!vprocSimForkCloneFdTable(scope.vp, scope.prev)) {
+            int saved_errno = (errno != 0) ? errno : EIO;
+            vprocCommandScopeEnd(&scope, 127);
+            errno = saved_errno;
+            vprocSimForkLog("[vproc-fork] fd clone failed errno=%d", saved_errno);
+            return -1;
+        }
+    }
+
+    state->active = true;
+    state->in_child = true;
+    state->parent_env = parent_env;
+    state->child_vp = scope.vp;
+    state->child_pid = scope.pid;
+    vprocSimForkLog("[vproc-fork] fork child pid=%d", scope.pid);
+    return 0;
+}
+
+pid_t vprocSimulatedForkParentResume(void) {
+    VProcSimForkState *state = &gVProcSimForkState;
+    if (!state->active || state->child_pid <= 0) {
+        errno = ENOSYS;
+        return (pid_t)-1;
+    }
+    int pid = state->child_pid;
+    vprocSimForkLog("[vproc-fork] fork parent resume pid=%d", pid);
+    vprocSimForkResetState(state);
+    return (pid_t)pid;
+}
+
+int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
+    VProcSimForkState *state = &gVProcSimForkState;
+    vprocSimForkLog("[vproc-fork] exec entry=%p active=%d in_child=%d child_vp=%p child_pid=%d",
+                    (void *)entry,
+                    state->active ? 1 : 0,
+                    state->in_child ? 1 : 0,
+                    (void *)state->child_vp,
+                    state->child_pid);
+    if (!state->active || !state->in_child || !state->child_vp ||
+        !state->parent_env) {
+        errno = ENOSYS;
+        vprocSimForkLog("[vproc-fork] exec invalid fork state");
+        return -1;
+    }
+    if (!entry) {
+        vprocSimForkResetState(state);
+        errno = ENOENT;
+        vprocSimForkLog("[vproc-fork] exec missing entry");
+        return -1;
+    }
+    if (vprocSimSpawnChild(state->child_vp, entry, argv) != 0) {
+        if (errno == 0) {
+            errno = EIO;
+        }
+        vprocSimForkLog("[vproc-fork] exec spawn failed errno=%d", errno);
+        vprocSimForkResetState(state);
+        return -1;
+    }
+    vprocSimForkLog("[vproc-fork] exec spawn ok, jumping to parent");
+    vprocUnregisterThread(state->child_vp, pthread_self());
+    vprocDeactivate();
+    siglongjmp(*state->parent_env, 1);
+    return -1;
 }
 
 bool vprocCommandScopeBegin(VProcCommandScope *scope,
@@ -5645,9 +9110,12 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
     scope->vp = vp;
     scope->pid = pid;
 
-    int owner_pid = (int)vprocGetPidShim();
+    int owner_pid = scope->prev ? vprocPid(scope->prev) : vprocGetShellSelfPid();
     int kernel_pid = vprocGetKernelPid();
-    int parent_pid = (kernel_pid > 0) ? kernel_pid : owner_pid;
+    int parent_pid = owner_pid;
+    if (parent_pid <= 0 || parent_pid == pid) {
+        parent_pid = (kernel_pid > 0) ? kernel_pid : owner_pid;
+    }
     if (parent_pid > 0 && parent_pid != pid) {
         vprocSetParent(pid, parent_pid);
     }
@@ -5667,15 +9135,6 @@ bool vprocCommandScopeBegin(VProcCommandScope *scope,
         vprocSetCommandLabel(pid, label);
     }
 
-    if (vprocIsShellSelfThread()) {
-        pthread_mutex_lock(&gVProcTasks.mu);
-        VProcTaskEntry *entry = vprocTaskFindLocked(pid);
-        if (entry) {
-            entry->stop_unsupported = true;
-        }
-        pthread_mutex_unlock(&gVProcTasks.mu);
-    }
-
     vprocActivate(vp);
     return true;
 }
@@ -5687,10 +9146,32 @@ void vprocCommandScopeEnd(VProcCommandScope *scope, int exit_code) {
 
     VProc *vp = scope->vp;
     int pid = scope->pid > 0 ? scope->pid : vprocPid(vp);
+    int stop_sig = 0;
+    bool stop_status = false;
+    if (exit_code >= 128 && exit_code < 128 + NSIG) {
+        int sig = exit_code - 128;
+        if (sig == SIGTSTP || sig == SIGSTOP || sig == SIGTTIN || sig == SIGTTOU) {
+            stop_status = true;
+            stop_sig = sig;
+        }
+    }
 
     vprocDeactivate();
-    vprocMarkExit(vp, W_EXITCODE(exit_code & 0xff, 0));
-    vprocDiscard(pid);
+    if (stop_status && pid > 0) {
+        /* Scoped applets often execute on the shell thread; detach that thread
+         * identity before preserving a synthetic stopped task entry. */
+        vprocUnregisterThread(vp, pthread_self());
+        /* Some scoped applets (notably watch) disable direct stops while
+         * running; re-enable stop handling so scope teardown can publish a
+         * stopped state to wait/jobs consumers. */
+        vprocSetStopUnsupported(pid, false);
+        if (stop_sig > 0) {
+            (void)vprocKillShim(pid, stop_sig);
+        }
+    } else {
+        vprocMarkExit(vp, exit_code);
+        vprocDiscard(pid);
+    }
     vprocDestroy(vp);
 
     scope->prev = NULL;
@@ -5790,12 +9271,29 @@ pid_t vprocTcgetpgrpShim(int fd) {
         errno = EINVAL;
         return (pid_t)-1;
     }
-    int sid = vprocGetSid(pid);
+    int sid = -1;
+    int fg = -1;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    vprocTaskTableRepairLocked();
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry) {
+        sid = entry->sid;
+        if (sid > 0) {
+            VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
+            if (leader) {
+                fg = leader->fg_pgid;
+            }
+        }
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
     if (sid <= 0) {
         errno = ENOTTY;
         return (pid_t)-1;
     }
-    int fg = vprocGetForegroundPgid(sid);
+    if (fg <= 0) {
+        errno = ESRCH;
+        return (pid_t)-1;
+    }
     return (pid_t)fg;
 }
 
@@ -5829,25 +9327,40 @@ int vprocTcsetpgrpShim(int fd, pid_t pgid) {
         errno = EINVAL;
         return -1;
     }
-    int sid = vprocGetSid(pid);
-    if (sid <= 0) {
-        errno = ENOTTY;
-        return -1;
-    }
-
+    int sid = -1;
     int rc = -1;
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *leader = NULL;
+    vprocTaskTableRepairLocked();
+    VProcTaskEntry *self_entry = vprocTaskFindLocked(pid);
+    if (self_entry) {
+        sid = self_entry->sid;
+    }
+    if (sid <= 0) {
+        errno = ENOTTY;
+        goto out_tcset;
+    }
+    VProcTaskEntry *leader = vprocSessionLeaderBySidLocked(sid);
     bool group_ok = false;
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (!entry || entry->pid <= 0) continue;
-        if (entry->sid != sid) continue;
-        if (entry->session_leader) {
-            leader = entry;
-        }
-        if (entry->pgid == (int)pgid) {
+    if (leader && leader->sid == sid && leader->pgid == (int)pgid) {
+        group_ok = true;
+    }
+    if (!group_ok) {
+        VProcTaskEntry *pgid_entry = vprocTaskFindLocked((int)pgid);
+        if (pgid_entry &&
+            pgid_entry->sid == sid &&
+            pgid_entry->pgid == (int)pgid) {
             group_ok = true;
+        }
+    }
+    if (!group_ok) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (entry->pid <= 0) continue;
+            if (entry->sid != sid) continue;
+            if (entry->pgid == (int)pgid) {
+                group_ok = true;
+                break;
+            }
         }
     }
     if (!leader) {
@@ -5862,6 +9375,9 @@ int vprocTcsetpgrpShim(int fd, pid_t pgid) {
     rc = 0;
 out_tcset:
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (rc == 0) {
+        vprocSyncForegroundPgidToSessionTty(sid, (int)pgid);
+    }
     return rc;
 }
 
@@ -5870,11 +9386,19 @@ void vprocSetShellSelfPid(int pid) {
     VProcSessionStdio *session = vprocSessionStdioCurrent();
     if (session && !vprocSessionStdioIsDefault(session)) {
         session->shell_pid = pid;
+        if (session->session_id != 0) {
+            vprocSessionPtySetShellPid(session->session_id, pid);
+        }
     } else if (pid > 0) {
         gShellSelfPidGlobal = pid;
     }
     if (pid > 0) {
         gVProcInterposeReady = 1;
+        /* Ensure the shell pid always has a task entry so later synthetic
+         * children can inherit session metadata (sid/pgid) deterministically. */
+        pthread_mutex_lock(&gVProcTasks.mu);
+        (void)vprocTaskEnsureSlotLocked(pid);
+        pthread_mutex_unlock(&gVProcTasks.mu);
     }
 }
 
@@ -5891,24 +9415,25 @@ int vprocGetShellSelfPid(void) {
 
 int vprocThreadIsRegistered(pthread_t tid) {
     bool registered = false;
+    int self_pid_hint = -1;
+    if (pthread_equal(tid, pthread_self())) {
+        VProc *current = vprocCurrent();
+        if (current) {
+            self_pid_hint = vprocPid(current);
+        }
+    }
     pthread_mutex_lock(&gVProcTasks.mu);
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (entry->pid <= 0) {
-            continue;
-        }
-        if (entry->tid && pthread_equal(entry->tid, tid)) {
-            registered = true;
-            break;
-        }
-        for (size_t t = 0; t < entry->thread_count; ++t) {
-            if (entry->threads[t] && pthread_equal(entry->threads[t], tid)) {
+    if (self_pid_hint > 0) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(self_pid_hint);
+        registered = vprocTaskEntryHasThreadLocked(entry, tid);
+    }
+    if (!registered) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (vprocTaskEntryHasThreadLocked(entry, tid)) {
                 registered = true;
                 break;
             }
-        }
-        if (registered) {
-            break;
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -5917,55 +9442,87 @@ int vprocThreadIsRegistered(pthread_t tid) {
 
 int vprocThreadIsRegisteredNonblocking(pthread_t tid) {
     bool registered = false;
+    int self_pid_hint = -1;
+    if (pthread_equal(tid, pthread_self())) {
+        VProc *current = vprocCurrent();
+        if (current) {
+            self_pid_hint = vprocPid(current);
+        }
+    }
     if (pthread_mutex_trylock(&gVProcTasks.mu) != 0) {
         return 0;
     }
-    for (size_t i = 0; i < gVProcTasks.count; ++i) {
-        VProcTaskEntry *entry = &gVProcTasks.items[i];
-        if (entry->pid <= 0) {
-            continue;
-        }
-        if (entry->tid && pthread_equal(entry->tid, tid)) {
-            registered = true;
-            break;
-        }
-        for (size_t t = 0; t < entry->thread_count; ++t) {
-            if (entry->threads[t] && pthread_equal(entry->threads[t], tid)) {
+    if (self_pid_hint > 0) {
+        VProcTaskEntry *entry = vprocTaskFindLocked(self_pid_hint);
+        registered = vprocTaskEntryHasThreadLocked(entry, tid);
+    }
+    if (!registered) {
+        for (size_t i = 0; i < gVProcTasks.count; ++i) {
+            VProcTaskEntry *entry = &gVProcTasks.items[i];
+            if (vprocTaskEntryHasThreadLocked(entry, tid)) {
                 registered = true;
                 break;
             }
-        }
-        if (registered) {
-            break;
         }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return registered ? 1 : 0;
 }
 
+static bool vprocInterposeBypassFindIndexLocked(pthread_t tid, size_t *out_index) {
+    if (out_index) {
+        *out_index = 0;
+    }
+    if (gVProcInterposeBypassRegistry.hint_valid &&
+        gVProcInterposeBypassRegistry.hint_index < gVProcInterposeBypassRegistry.count &&
+        pthread_equal(gVProcInterposeBypassRegistry.hint_tid, tid)) {
+        size_t idx = gVProcInterposeBypassRegistry.hint_index;
+        if (pthread_equal(gVProcInterposeBypassRegistry.items[idx], tid)) {
+            if (out_index) {
+                *out_index = idx;
+            }
+            return true;
+        }
+    }
+    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
+        if (!pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
+            continue;
+        }
+        gVProcInterposeBypassRegistry.hint_valid = true;
+        gVProcInterposeBypassRegistry.hint_tid = tid;
+        gVProcInterposeBypassRegistry.hint_index = i;
+        if (out_index) {
+            *out_index = i;
+        }
+        return true;
+    }
+    return false;
+}
+
 int vprocThreadIsInterposeBypassed(pthread_t tid) {
     bool bypassed = false;
     pthread_mutex_lock(&gVProcInterposeBypassRegistry.mu);
-    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
-        if (pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
-            bypassed = true;
-            break;
-        }
-    }
+    bypassed = vprocInterposeBypassFindIndexLocked(tid, NULL);
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
     return bypassed ? 1 : 0;
 }
 
 void vprocRegisterInterposeBypassThread(pthread_t tid) {
     pthread_mutex_lock(&gVProcInterposeBypassRegistry.mu);
-    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
-        if (pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
+    if (vprocInterposeBypassFindIndexLocked(tid, NULL)) {
+        pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
+        return;
+    }
+    if (gVProcInterposeBypassRegistry.count >= gVProcInterposeBypassRegistry.capacity) {
+        size_t new_capacity = 0;
+        if (!vprocComputeGrowthCapacity(gVProcInterposeBypassRegistry.capacity,
+                                        gVProcInterposeBypassRegistry.count + 1,
+                                        8,
+                                        sizeof(*gVProcInterposeBypassRegistry.items),
+                                        &new_capacity)) {
             pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
             return;
         }
-    }
-    if (gVProcInterposeBypassRegistry.count >= gVProcInterposeBypassRegistry.capacity) {
-        size_t new_capacity = gVProcInterposeBypassRegistry.capacity ? gVProcInterposeBypassRegistry.capacity * 2 : 8;
         pthread_t *items = realloc(gVProcInterposeBypassRegistry.items, new_capacity * sizeof(*items));
         if (!items) {
             pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
@@ -5974,19 +9531,24 @@ void vprocRegisterInterposeBypassThread(pthread_t tid) {
         gVProcInterposeBypassRegistry.items = items;
         gVProcInterposeBypassRegistry.capacity = new_capacity;
     }
-    gVProcInterposeBypassRegistry.items[gVProcInterposeBypassRegistry.count++] = tid;
+    size_t idx = gVProcInterposeBypassRegistry.count++;
+    gVProcInterposeBypassRegistry.items[idx] = tid;
+    gVProcInterposeBypassRegistry.hint_valid = true;
+    gVProcInterposeBypassRegistry.hint_tid = tid;
+    gVProcInterposeBypassRegistry.hint_index = idx;
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
 }
 
 void vprocUnregisterInterposeBypassThread(pthread_t tid) {
     pthread_mutex_lock(&gVProcInterposeBypassRegistry.mu);
-    for (size_t i = 0; i < gVProcInterposeBypassRegistry.count; ++i) {
-        if (pthread_equal(gVProcInterposeBypassRegistry.items[i], tid)) {
-            size_t last = gVProcInterposeBypassRegistry.count - 1;
-            gVProcInterposeBypassRegistry.items[i] = gVProcInterposeBypassRegistry.items[last];
-            gVProcInterposeBypassRegistry.count--;
-            break;
-        }
+    size_t idx = 0;
+    if (vprocInterposeBypassFindIndexLocked(tid, &idx)) {
+        size_t last = gVProcInterposeBypassRegistry.count - 1;
+        gVProcInterposeBypassRegistry.items[idx] = gVProcInterposeBypassRegistry.items[last];
+        gVProcInterposeBypassRegistry.count--;
+        gVProcInterposeBypassRegistry.hint_valid = false;
+        gVProcInterposeBypassRegistry.hint_tid = 0;
+        gVProcInterposeBypassRegistry.hint_index = 0;
     }
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
 }
@@ -6020,27 +9582,47 @@ int vprocInterposeBypassActive(void) {
 }
 
 static void vprocEnsurePathTruncationDefault(void) {
+    if (__atomic_load_n(&gPathTruncateInit, __ATOMIC_ACQUIRE)) {
+        return;
+    }
     pthread_mutex_lock(&gPathTruncateMu);
     if (gPathTruncateInit) {
         pthread_mutex_unlock(&gPathTruncateMu);
         return;
     }
-    gPathTruncateInit = true;
+    __atomic_store_n(&gPathTruncateInit, true, __ATOMIC_RELEASE);
     const char *disabled = getenv("PSCALI_PATH_TRUNCATE_DISABLED");
     if (disabled && disabled[0] != '\0') {
         pthread_mutex_unlock(&gPathTruncateMu);
         return;
     }
-    const char *prefix = getenv("PATH_TRUNCATE");
-    if (!prefix || prefix[0] == '\0') {
-        prefix = getenv("PSCALI_CONTAINER_ROOT");
+    const char *container_root = getenv("PSCALI_CONTAINER_ROOT");
+    size_t container_root_len = (container_root && container_root[0] != '\0')
+            ? strlen(container_root)
+            : 0;
+    const char *raw_prefix = getenv("PATH_TRUNCATE");
+    if (!raw_prefix || raw_prefix[0] == '\0') {
+        raw_prefix = container_root;
     }
-    if (!prefix || prefix[0] != '/') {
-        prefix = getenv("HOME");
+    if (!raw_prefix || raw_prefix[0] != '/') {
+        raw_prefix = getenv("HOME");
     }
-    if (!prefix || prefix[0] != '/') {
+    if (!raw_prefix || raw_prefix[0] != '/') {
         pthread_mutex_unlock(&gPathTruncateMu);
         return;
+    }
+    char prefbuf[PATH_MAX];
+    const char *prefix = raw_prefix;
+    /* On iOS, most runtime assets live under <container>/Documents. When PATH
+     * truncation is anchored at the container root, /bin expands to
+     * <container>/bin which does not exist. Prefer the Documents root so /bin
+     * maps to <container>/Documents/bin where exsh assets are staged. */
+    if (container_root_len > 0 &&
+        strncmp(raw_prefix, container_root, container_root_len) == 0) {
+        size_t n = snprintf(prefbuf, sizeof(prefbuf), "%s/Documents", raw_prefix);
+        if (n > 0 && n < sizeof(prefbuf)) {
+            prefix = prefbuf;
+        }
     }
     pathTruncateApplyEnvironment(prefix);
     pthread_mutex_unlock(&gPathTruncateMu);
@@ -6048,10 +9630,23 @@ static void vprocEnsurePathTruncationDefault(void) {
 
 void vprocApplyPathTruncation(const char *prefix) {
     pthread_mutex_lock(&gPathTruncateMu);
-    gPathTruncateInit = true;
+    __atomic_store_n(&gPathTruncateInit, true, __ATOMIC_RELEASE);
     if (prefix && prefix[0] == '/') {
         unsetenv("PSCALI_PATH_TRUNCATE_DISABLED");
-        pathTruncateApplyEnvironment(prefix);
+        const char *container_root = getenv("PSCALI_CONTAINER_ROOT");
+        size_t container_root_len = (container_root && container_root[0] != '\0')
+                ? strlen(container_root)
+                : 0;
+        char prefbuf[PATH_MAX];
+        const char *use_prefix = prefix;
+        if (container_root_len > 0 &&
+            strncmp(prefix, container_root, container_root_len) == 0) {
+            size_t n = snprintf(prefbuf, sizeof(prefbuf), "%s/Documents", prefix);
+            if (n > 0 && n < sizeof(prefbuf)) {
+                use_prefix = prefbuf;
+            }
+        }
+        pathTruncateApplyEnvironment(use_prefix);
     } else {
         setenv("PSCALI_PATH_TRUNCATE_DISABLED", "1", 1);
         pathTruncateApplyEnvironment(NULL);
@@ -6088,7 +9683,59 @@ static void *vprocKernelThreadMain(void *arg) {
     pthread_cond_broadcast(&gKernelThreadCv);
     pthread_mutex_unlock(&gKernelThreadMu);
     for (;;) {
-        pause();
+        VProcKernelControlEvent ev;
+        bool have_event = false;
+        pthread_mutex_lock(&gKernelThreadMu);
+        while (gKernelControlQueueCount == 0) {
+            pthread_cond_wait(&gKernelThreadCv, &gKernelThreadMu);
+        }
+        if (gKernelControlQueue && gKernelControlQueueCount > 0 &&
+            gKernelControlQueueHead < gKernelControlQueueCap) {
+            ev = gKernelControlQueue[gKernelControlQueueHead];
+            gKernelControlQueueHead = (gKernelControlQueueHead + 1) % gKernelControlQueueCap;
+            gKernelControlQueueCount--;
+            have_event = true;
+        }
+        pthread_mutex_unlock(&gKernelThreadMu);
+
+        if (!have_event) {
+            continue;
+        }
+
+        switch (ev.type) {
+            case VPROC_KERNEL_EVENT_CONTROL_SIGNAL:
+                if (ev.sig == SIGINT || ev.sig == SIGTSTP) {
+                    (void)vprocDispatchControlSignalToForeground(ev.shell_pid,
+                                                                 ev.sig,
+                                                                 ev.allow_runtime_fallback);
+                }
+                break;
+            case VPROC_KERNEL_EVENT_FOREGROUND_HANDOFF:
+                if (ev.sid > 0 && ev.pgid > 0) {
+                    vprocSyncForegroundPgidToSessionTty(ev.sid, ev.pgid);
+                }
+                break;
+            case VPROC_KERNEL_EVENT_CONTINUE_PGID:
+                if (ev.pgid > 0) {
+                    (void)vprocKillShim(-ev.pgid, SIGCONT);
+                }
+                break;
+            case VPROC_KERNEL_EVENT_SIGCHLD_AGGREGATE:
+                if (ev.target_pid > 0) {
+                    pthread_mutex_lock(&gVProcTasks.mu);
+                    VProcTaskEntry *entry = vprocTaskFindLocked(ev.target_pid);
+                    if (entry) {
+                        entry->sigchld_delivery_queued = false;
+                        if (!entry->sigchld_blocked) {
+                            (void)vprocDeliverPendingSignalsLocked(entry);
+                        }
+                    }
+                    pthread_mutex_unlock(&gVProcTasks.mu);
+                }
+                break;
+            default:
+                break;
+        }
     }
     return NULL;
 }
@@ -6141,6 +9788,193 @@ static void vprocEnsureKernelThread(int pid) {
     gKernelThread = tid;
     pthread_mutex_unlock(&gKernelThreadMu);
     vprocWaitForKernelThreadReady();
+}
+
+static bool vprocKernelQueueEventInternal(const VProcKernelControlEvent *event, bool ensure_kernel) {
+    if (!event) {
+        return false;
+    }
+    if (ensure_kernel && vprocEnsureKernelPid() <= 0) {
+        return false;
+    }
+    bool queued = false;
+    pthread_mutex_lock(&gKernelThreadMu);
+    if (gKernelThreadStarted && gKernelThreadReady) {
+        if (gKernelControlQueueCount >= gKernelControlQueueCap) {
+            size_t new_cap = 0;
+            if (vprocComputeGrowthCapacity(gKernelControlQueueCap,
+                                           gKernelControlQueueCount + 1,
+                                           16,
+                                           sizeof(VProcKernelControlEvent),
+                                           &new_cap)) {
+                VProcKernelControlEvent *resized =
+                    (VProcKernelControlEvent *)calloc(new_cap, sizeof(VProcKernelControlEvent));
+                if (resized) {
+                    for (size_t i = 0; i < gKernelControlQueueCount; ++i) {
+                        size_t src = (gKernelControlQueueHead + i) % gKernelControlQueueCap;
+                        resized[i] = gKernelControlQueue[src];
+                    }
+                    free(gKernelControlQueue);
+                    gKernelControlQueue = resized;
+                    gKernelControlQueueCap = new_cap;
+                    gKernelControlQueueHead = 0;
+                }
+            }
+        }
+        if (gKernelControlQueue && gKernelControlQueueCount < gKernelControlQueueCap) {
+            size_t tail = (gKernelControlQueueHead + gKernelControlQueueCount) % gKernelControlQueueCap;
+            gKernelControlQueue[tail] = *event;
+            gKernelControlQueueCount++;
+            queued = true;
+            pthread_cond_signal(&gKernelThreadCv);
+        }
+    }
+    pthread_mutex_unlock(&gKernelThreadMu);
+    return queued;
+}
+
+static bool vprocKernelQueueControlSignal(int shell_pid, int sig, bool allow_runtime_fallback) {
+    if (shell_pid <= 0 || (sig != SIGINT && sig != SIGTSTP)) {
+        return false;
+    }
+    VProcKernelControlEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = VPROC_KERNEL_EVENT_CONTROL_SIGNAL;
+    event.shell_pid = shell_pid;
+    event.sig = sig;
+    event.allow_runtime_fallback = allow_runtime_fallback;
+    return vprocKernelQueueEventInternal(&event, true);
+}
+
+static bool vprocRequestControlSignalForShellInternal(int shell_pid,
+                                                      int sig,
+                                                      bool allow_runtime_fallback) {
+    if (vprocSoftSignalingDisabledByEnv()) {
+        return false;
+    }
+    if (sig != SIGINT && sig != SIGTSTP) {
+        return false;
+    }
+    if (shell_pid <= 0) {
+        int shell_pgid = -1;
+        int sid = -1;
+        int fg_pgid = -1;
+        (void)vprocGetShellJobControlState(&shell_pid, &shell_pgid, &sid, &fg_pgid);
+    }
+    if (vprocKernelQueueControlSignal(shell_pid, sig, allow_runtime_fallback)) {
+        return true;
+    }
+    return vprocDispatchControlSignalToForeground(shell_pid, sig, allow_runtime_fallback);
+}
+
+bool vprocRequestControlSignalForShell(int shell_pid, int sig) {
+    return vprocRequestControlSignalForShellInternal(shell_pid, sig, false);
+}
+
+bool vprocRequestControlSignal(int sig) {
+    int shell_pid = vprocGetShellSelfPid();
+    return vprocRequestControlSignalForShellInternal(shell_pid, sig, false);
+}
+
+static bool vprocRequestControlSignalForSessionInternal(uint64_t session_id,
+                                                        int sig,
+                                                        bool allow_runtime_fallback) {
+    if (session_id == 0 || (sig != SIGINT && sig != SIGTSTP)) {
+        return false;
+    }
+    if (vprocSoftSignalingDisabledByEnv()) {
+        return false;
+    }
+
+    int shell_pid = 0;
+    int sid = -1;
+    int fg_pgid = -1;
+    bool session_passthrough = false;
+    pthread_mutex_lock(&gVProcSessionPtys.mu);
+    VProcSessionPtyEntry *session_entry = vprocSessionPtyFindLocked(session_id, NULL);
+    if (session_entry) {
+        shell_pid = session_entry->shell_pid;
+        session_passthrough = session_entry->control_bytes_passthrough;
+    }
+    if (session_entry && session_entry->pty_slave && session_entry->pty_slave->tty) {
+        struct tty *tty = session_entry->pty_slave->tty;
+        lock(&tty->lock);
+        sid = (int)tty->session;
+        fg_pgid = (int)tty->fg_group;
+        unlock(&tty->lock);
+    }
+    pthread_mutex_unlock(&gVProcSessionPtys.mu);
+
+    if (session_passthrough) {
+        return false;
+    }
+
+    if (sid > 0) {
+        int mapped_fg = vprocGetForegroundPgid(sid);
+        if (mapped_fg > 0) {
+            fg_pgid = mapped_fg;
+        }
+    }
+
+    if (vprocForegroundGroupPrefersControlBytes(sid, fg_pgid, shell_pid, sig)) {
+        return false;
+    }
+
+    if (shell_pid <= 0 && sid > 0) {
+        /* Legacy fallback: session leaders are commonly pid==sid in this VM. */
+        shell_pid = sid;
+    }
+
+    if (shell_pid > 0 &&
+        vprocRequestControlSignalForShellInternal(shell_pid, sig, allow_runtime_fallback)) {
+        return true;
+    }
+
+    if (fg_pgid > 0) {
+        if (vprocKillShim(-fg_pgid, sig) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool vprocRequestControlSignalForSession(uint64_t session_id, int sig) {
+    return vprocRequestControlSignalForSessionInternal(session_id, sig, false);
+}
+
+static bool vprocKernelQueueForegroundHandoff(int sid, int fg_pgid) {
+    if (sid <= 0 || fg_pgid <= 0) {
+        return false;
+    }
+    VProcKernelControlEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = VPROC_KERNEL_EVENT_FOREGROUND_HANDOFF;
+    event.sid = sid;
+    event.pgid = fg_pgid;
+    return vprocKernelQueueEventInternal(&event, true);
+}
+
+static bool vprocKernelQueueContinuePgid(int pgid) {
+    if (pgid <= 0) {
+        return false;
+    }
+    VProcKernelControlEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = VPROC_KERNEL_EVENT_CONTINUE_PGID;
+    event.pgid = pgid;
+    return vprocKernelQueueEventInternal(&event, true);
+}
+
+static bool vprocKernelQueueSigchldAggregate(int target_pid, bool ensure_kernel) {
+    if (target_pid <= 0) {
+        return false;
+    }
+    VProcKernelControlEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = VPROC_KERNEL_EVENT_SIGCHLD_AGGREGATE;
+    event.target_pid = target_pid;
+    return vprocKernelQueueEventInternal(&event, ensure_kernel);
 }
 
 void vprocSetKernelPid(int pid) {
@@ -6208,7 +10042,7 @@ int vprocEnsureKernelPid(void) {
         pthread_mutex_lock(&gVProcTasks.mu);
         for (size_t i = 0; i < gVProcTasks.count; ++i) {
             VProcTaskEntry *entry = &gVProcTasks.items[i];
-            if (!entry || entry->pid <= 0) {
+            if (entry->pid <= 0) {
                 continue;
             }
             if (entry->pid == pid) {
@@ -6223,8 +10057,16 @@ int vprocEnsureKernelPid(void) {
     return pid;
 }
 
+static void vprocSessionStdioInitDefaultOnce(void) {
+    vprocSessionStdioInit(&gSessionStdioDefault, vprocGetKernelPid());
+}
+
 VProcSessionStdio *vprocSessionStdioCurrent(void) {
-    return gSessionStdioTls ? gSessionStdioTls : &gSessionStdioDefault;
+    if (gSessionStdioTls) {
+        return gSessionStdioTls;
+    }
+    pthread_once(&gSessionStdioDefaultOnce, vprocSessionStdioInitDefaultOnce);
+    return &gSessionStdioDefault;
 }
 
 static int vprocSessionHostFdForStd(int std_fd);
@@ -6276,6 +10118,21 @@ void vprocSessionStdioActivate(VProcSessionStdio *stdio_ctx) {
                  gSessionStdioTls ? (void *)gSessionStdioTls->stdin_pscal_fd : NULL,
                  gSessionStdioTls ? (void *)gSessionStdioTls->stdout_pscal_fd : NULL,
                  gSessionStdioTls ? (void *)gSessionStdioTls->stderr_pscal_fd : NULL);
+    /* Ensure the session PTY is marked as the controlling terminal for this
+     * session so /dev/tty resolves for non-leader vprocs (pipeline stages). */
+    if (gSessionStdioTls && gSessionStdioTls->pty_slave && gSessionStdioTls->pty_slave->tty) {
+        struct tty *tty = gSessionStdioTls->pty_slave->tty;
+        int sid = pscalTtyCurrentSid();
+        if (sid > 0) {
+            lock(&tty->lock);
+            if (tty->session == 0) {
+                tty->session = (pid_t_)sid;
+                tty->fg_group = (pid_t_)sid;
+            }
+            unlock(&tty->lock);
+            pscalTtySetControlling(tty);
+        }
+    }
     if (!gSessionStdioTls || vprocSessionStdioIsDefault(gSessionStdioTls)) {
         gShellSelfPid = 0;
     } else if (gSessionStdioTls->shell_pid > 0) {
@@ -6314,6 +10171,7 @@ void vprocSessionStdioInitWithFds(VProcSessionStdio *stdio_ctx,
     stdio_ctx->pty_slave = NULL;
     stdio_ctx->pty_out_thread = 0;
     stdio_ctx->pty_active = false;
+    stdio_ctx->control_bytes_passthrough = false;
     stdio_ctx->session_id = 0;
 }
 
@@ -6340,6 +10198,7 @@ int vprocSessionStdioInitWithPty(VProcSessionStdio *stdio_ctx,
     stdio_ctx->stdout_pscal_fd = pscal_fd_retain(pty_slave);
     stdio_ctx->stderr_pscal_fd = pscal_fd_retain(pty_slave);
     stdio_ctx->pty_active = true;
+    stdio_ctx->control_bytes_passthrough = false;
     vprocIoTrace("[vproc-io] stdio init session=%llu master=%p slave=%p",
                  (unsigned long long)session_id,
                  (void *)pty_master,
@@ -6391,6 +10250,7 @@ VProcSessionStdio *vprocSessionStdioCreate(void) {
     session->pty_slave = NULL;
     session->pty_out_thread = 0;
     session->pty_active = false;
+    session->control_bytes_passthrough = false;
     session->session_id = 0;
     return session;
 }
@@ -6419,6 +10279,7 @@ void vprocSessionStdioDestroy(VProcSessionStdio *stdio_ctx) {
     if (input) {
         pthread_mutex_lock(&input->mu);
         input->stop_requested = true;
+        input->off = 0;
         input->len = 0;
         input->eof = true;
         input->interrupt_pending = false;
@@ -6506,7 +10367,7 @@ void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid) {
     if (!stdio_ctx || !vprocSessionStdioNeedsRefresh(stdio_ctx)) {
         return;
     }
-    if (getenv("PSCALI_TOOL_DEBUG")) {
+    if (vprocToolDebugEnabled()) {
         vprocDebugLogf(
                 "[session-stdio] refresh stdin=%d stdout=%d stderr=%d\n",
                 stdio_ctx->stdin_host_fd,
@@ -6517,6 +10378,7 @@ void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid) {
     if (input) {
         pthread_mutex_lock(&input->mu);
         input->stop_requested = true;
+        input->off = 0;
         input->len = 0;
         input->eof = false;
         input->interrupt_pending = false;
@@ -6621,12 +10483,21 @@ int vprocSetSigchldBlocked(int pid, bool block) {
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
         entry->sigchld_blocked = block;
+        if (block) {
+            entry->sigchld_delivery_queued = false;
+        }
         rc = 0;
     } else {
         errno = ESRCH;
     }
     if (rc == 0 && !block) {
-        vprocDeliverPendingSignalsLocked(entry);
+        if (!entry->sigchld_delivery_queued) {
+            if (vprocKernelQueueSigchldAggregate(pid, false)) {
+                entry->sigchld_delivery_queued = true;
+            } else {
+                vprocDeliverPendingSignalsLocked(entry);
+            }
+        }
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     return rc;
@@ -6637,6 +10508,11 @@ void vprocClearSigchldPending(int pid) {
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
         entry->sigchld_events = 0;
+        entry->pending_signals &= ~vprocSigMask(SIGCHLD);
+        if (vprocSigIndexValid(SIGCHLD)) {
+            entry->pending_counts[SIGCHLD] = 0;
+        }
+        entry->sigchld_delivery_queued = false;
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
@@ -6790,8 +10666,7 @@ static VProc *vprocForThread(void) {
     if (!vp) {
         return NULL;
     }
-    if (!vprocRegistryContains(vp)) {
-        vprocClearThreadState();
+    if (!vprocRegistryContainsValidated(vp)) {
         return NULL;
     }
     return vp;
@@ -6804,10 +10679,14 @@ static void vprocDeliverPendingSignalsForCurrent(void) {
     }
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
+    bool exit_current = false;
     if (entry) {
-        vprocDeliverPendingSignalsLocked(entry);
+        exit_current = vprocDeliverPendingSignalsLocked(entry);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
+    if (exit_current) {
+        pthread_exit(NULL);
+    }
 }
 
 int vprocSigpending(int pid, sigset_t *set) {
@@ -6949,6 +10828,10 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
     }
     struct timespec deadline = {0, 0};
     if (timeout) {
+        if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000L) {
+            errno = EINVAL;
+            return -1;
+        }
         struct timespec now;
         if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
             return -1;
@@ -7001,19 +10884,45 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
     }
 }
 
-static int shimTranslate(int fd, int allow_real) {
-    VProc *vp = vprocForThread();
+static int vprocResolveFdForShim(VProc *vp, int fd, int allow_real, struct pscal_fd **out_pscal) {
+    if (out_pscal) {
+        *out_pscal = NULL;
+    }
     if (!vp) {
         return allow_real ? fd : -1;
     }
-    int host = vprocTranslateFd(vp, fd);
+
+    int host = -1;
+    if (fd >= 0) {
+        pthread_mutex_lock(&vp->mu);
+        if ((size_t)fd < vp->capacity) {
+            VProcFdEntry entry = vp->entries[fd];
+            if (entry.kind == VPROC_FD_PSCAL && entry.pscal_fd) {
+                if (out_pscal) {
+                    *out_pscal = pscal_fd_retain(entry.pscal_fd);
+                }
+            } else if (entry.kind == VPROC_FD_HOST) {
+                host = entry.host_fd;
+            }
+        }
+        pthread_mutex_unlock(&vp->mu);
+    }
+
     if (host < 0 && allow_real && fd >= 0) {
         struct stat st;
         if (vprocHostFstatRaw(fd, &st) == 0) {
             return fd;
         }
     }
+    if (host < 0 && (!out_pscal || !*out_pscal)) {
+        errno = EBADF;
+    }
     return host;
+}
+
+static int shimTranslate(int fd, int allow_real) {
+    VProc *vp = vprocForThread();
+    return vprocResolveFdForShim(vp, fd, allow_real, NULL);
 }
 
 static int vprocSetCompatErrno(int err) {
@@ -7065,13 +10974,13 @@ static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
 int vprocIsattyShim(int fd) {
     VProc *vp = vprocForThread();
     if (vp) {
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+        struct pscal_fd *pscal_fd = NULL;
+        int host_fd = vprocResolveFdForShim(vp, fd, 0, &pscal_fd);
         if (pscal_fd) {
             int res = (pscal_fd->tty != NULL) ? 1 : 0;
             pscal_fd_close(pscal_fd);
             return res;
         }
-        int host_fd = vprocTranslateFd(vp, fd);
         if (host_fd >= 0) {
             return vprocHostIsatty(host_fd);
         }
@@ -7118,8 +11027,17 @@ int pscalTtySendGroupSignal(int pgid, int sig) {
     if (pgid <= 0) {
         return _ESRCH;
     }
+    if (sig == SIGWINCH_) {
+        vprocDebugLogf("[ssh-resize] send-group-signal pgid=%d sig=SIGWINCH", pgid);
+    }
     if (vprocKillShim(-pgid, sig) < 0) {
+        if (sig == SIGWINCH_) {
+            vprocDebugLogf("[ssh-resize] send-group-signal failed pgid=%d sig=SIGWINCH errno=%d", pgid, errno);
+        }
         return _ESRCH;
+    }
+    if (sig == SIGWINCH_) {
+        vprocDebugLogf("[ssh-resize] send-group-signal ok pgid=%d sig=SIGWINCH", pgid);
     }
     return 0;
 }
@@ -7128,33 +11046,62 @@ void pscalTtySetForegroundPgid(int sid, int fg_pgid) {
     if (sid <= 0 || fg_pgid <= 0) {
         return;
     }
-    (void)vprocSetForegroundPgid(sid, fg_pgid);
+    (void)vprocSetForegroundPgidInternal(sid, fg_pgid, false);
+}
+
+int pscalTtyGetForegroundPgid(int sid) {
+    if (sid <= 0) {
+        return -1;
+    }
+    return vprocGetForegroundPgid(sid);
 }
 
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     return vprocSetSessionWinsize(session_id, cols, rows);
 }
 
+static int gVprocPipelineReadLogCount = 0;
+static int gVprocPipelineWriteLogCount = 0;
+
 ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
-    if (vp) {
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
-        if (pscal_fd) {
-            ssize_t res = pscal_fd->ops->read(pscal_fd, buf, count);
-            pscal_fd_close(pscal_fd);
-            if (res < 0) {
-                return vprocSetCompatErrno((int)res);
+    struct pscal_fd *pscal_fd = NULL;
+    int host = vprocResolveFdForShim(vp, fd, 1, &pscal_fd);
+    if (pscal_fd) {
+        if (!gVprocPipelineStage) {
+            VProcSessionStdio *session = vprocSessionStdioCurrent();
+            if (session &&
+                !vprocSessionStdioIsDefault(session) &&
+                (session->stdin_pscal_fd == pscal_fd ||
+                 session->pty_slave == pscal_fd)) {
+                /* Foreground tools may poll/read a dup() of stdin instead of
+                 * fd 0 directly (OpenSSH does this). A background session-input
+                 * reader thread already drains this PTY stream, so route reads
+                 * via the shared session queue to avoid competing consumers. */
+                pscal_fd_close(pscal_fd);
+                return vprocSessionReadInputShimMode(buf, count, false);
             }
-            return res;
         }
+        if (gVprocPipelineStage &&
+            vprocVprocDebugEnabled() &&
+            gVprocPipelineReadLogCount < 32) {
+            gVprocPipelineReadLogCount++;
+            fprintf(stderr, "[vproc-read] fd=%d using pscal=%p count=%zu\n",
+                    fd, (void *)pscal_fd, count);
+        }
+        ssize_t res = pscal_fd->ops->read(pscal_fd, buf, count);
+        pscal_fd_close(pscal_fd);
+        if (res < 0) {
+            return vprocSetCompatErrno((int)res);
+        }
+        return res;
     }
-    int host = shimTranslate(fd, 1);
     if (host < 0) {
         return -1;
     }
     bool controlling_stdin = (vp && vp->stdin_host_fd >= 0 && fd == STDIN_FILENO && host == vp->stdin_host_fd);
-    if (getenv("PSCALI_TOOL_DEBUG") && fd == STDIN_FILENO) {
+    if (vprocToolDebugEnabled() && fd == STDIN_FILENO) {
         vprocDebugLogf(
                 "[vproc-read] stdin host=%d stdin_host=%d controlling=%d from_session=%d\n",
                 host,
@@ -7165,46 +11112,84 @@ ssize_t vprocReadShim(int fd, void *buf, size_t count) {
     if (controlling_stdin) {
         (void)vprocWaitIfStopped(vp);
     }
-    if (controlling_stdin && vprocShouldStopForBackgroundTty(vprocCurrent(), SIGTTIN)) {
+    if (controlling_stdin && !gVprocPipelineStage &&
+        vprocShouldStopForBackgroundTty(vprocCurrent(), SIGTTIN)) {
         errno = EINTR;
         return -1;
     }
-    ssize_t res;
-    /* On iOS, default to direct host reads to avoid a second reader competing
-     * with foreground programs. */
-    res = vprocHostRead(host, buf, count);
-    return res;
+#if defined(PSCAL_TARGET_IOS)
+    if (controlling_stdin) {
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (session &&
+            session->stdin_host_fd >= 0 &&
+            vprocSessionFdMatchesHost(host, session->stdin_host_fd)) {
+            /* In-process pipeline stages can still be foreground interactive
+             * tools/frontends. Route controlling stdin through the shared
+             * session buffer so virtual Ctrl-C/Z handling remains consistent. */
+            if (vprocToolDebugEnabled()) {
+                fprintf(stderr,
+                        "[vproc-read] route session stdin host=%d session_stdin=%d\n",
+                        host,
+                        session->stdin_host_fd);
+            }
+            return vprocSessionReadInputShimMode(buf, count, false);
+        }
+    }
+#endif
+    return vprocHostRead(host, buf, count);
 }
 
 ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
-    if (vp) {
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
-        if (pscal_fd) {
-            ssize_t res = pscal_fd->ops->write(pscal_fd, buf, count);
-            pscal_fd_close(pscal_fd);
-            if (res < 0) {
-                return vprocSetCompatErrno((int)res);
-            }
-            return res;
+    struct pscal_fd *pscal_fd = NULL;
+    int host = vprocResolveFdForShim(vp, fd, 1, &pscal_fd);
+    if (pscal_fd) {
+        if (gVprocPipelineStage &&
+            vprocVprocDebugEnabled() &&
+            gVprocPipelineWriteLogCount < 32) {
+            gVprocPipelineWriteLogCount++;
+            fprintf(stderr, "[vproc-write] fd=%d using pscal=%p count=%zu\n",
+                    fd, (void *)pscal_fd, count);
         }
+        ssize_t res = pscal_fd->ops->write(pscal_fd, buf, count);
+        pscal_fd_close(pscal_fd);
+        if (res < 0) {
+            return vprocSetCompatErrno((int)res);
+        }
+        return res;
     }
-    int host = -1;
 #if defined(PSCAL_TARGET_IOS)
     VProcSessionStdio *session = vprocSessionStdioCurrent();
     bool is_stdout = false;
     bool is_stderr = false;
     vprocSessionResolveOutputFd(session, fd, &is_stdout, &is_stderr);
-    host = shimTranslate(fd, 1);
-    if ((is_stdout || is_stderr) && session && !vprocSessionStdioIsDefault(session) && host >= 0) {
-        int session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
-        if (!vprocSessionFdMatchesHost(host, session_host_fd)) {
-            is_stdout = false;
-            is_stderr = false;
+    int session_host_fd = -1;
+    if (is_stdout || is_stderr) {
+        session_host_fd = is_stdout ? session->stdout_host_fd : session->stderr_host_fd;
+    }
+    bool use_session_output = false;
+    bool host_is_tty = false;
+    if (host >= 0 && is_stdout) {
+        host_is_tty = isatty(host);
+    }
+    if ((is_stdout || is_stderr) && session) {
+        bool session_has_virtual =
+            (session->stdout_pscal_fd != NULL) ||
+            (session->stderr_pscal_fd != NULL) ||
+            (session->pty_slave != NULL);
+        if (session_has_virtual) {
+            if (host < 0) {
+                use_session_output = true;
+            } else if (session_host_fd >= 0 &&
+                       vprocSessionFdMatchesHost(host, session_host_fd)) {
+                use_session_output = true;
+            } else if (host_is_tty) {
+                use_session_output = true;
+            }
         }
     }
-    if ((is_stdout || is_stderr) && session && !vprocSessionStdioIsDefault(session)) {
+    if (use_session_output && session) {
         struct pscal_fd *target =
             is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
         if (!target) {
@@ -7212,28 +11197,93 @@ ssize_t vprocWriteShim(int fd, const void *buf, size_t count) {
         }
         if (target && target->ops && target->ops->write) {
             ssize_t res = target->ops->write(target, buf, count);
-            if (res >= 0) {
-                return res;
+            if (res < 0) {
+                /* If the virtual stream rejected the write, fall back to a
+                 * concrete host fd to avoid dropping output. */
+                int fallback_host = host;
+                if (fallback_host < 0 && session_host_fd >= 0) {
+                    fallback_host = session_host_fd;
+                }
+                if (fallback_host < 0) {
+                    int tty_fd = vprocHostOpen("/dev/tty", O_WRONLY);
+                    if (tty_fd < 0) {
+                        tty_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
+                    }
+                    if (tty_fd >= 0) {
+                        fallback_host = tty_fd;
+                    }
+                }
+                if (fallback_host >= 0) {
+                    res = vprocHostWrite(fallback_host, buf, count);
+                    if (fallback_host != host && fallback_host != session_host_fd) {
+                        vprocHostClose(fallback_host);
+                    }
+                }
+            } else {
+                /* Mirror to the host side as well when it differs so Xcode still sees logs. */
+                if (host >= 0 && session_host_fd >= 0 && !vprocSessionFdMatchesHost(host, session_host_fd)) {
+                    (void)vprocHostWrite(host, buf, count);
+                }
             }
-            return vprocSetCompatErrno((int)res);
+            if (res < 0) {
+                return vprocSetCompatErrno((int)res);
+            }
+            return res;
         }
     }
 #else
     host = shimTranslate(fd, 1);
 #endif
+    /* If host resolution failed, fall back to the session stream or host fd so
+     * stdout/stderr is not dropped when stdio is virtualised. */
+    if (host < 0) {
+        if (session && (is_stdout || is_stderr)) {
+            struct pscal_fd *fallback =
+                is_stdout ? session->stdout_pscal_fd : session->stderr_pscal_fd;
+            if (!fallback) {
+                fallback = session->pty_slave;
+            }
+            if (fallback && fallback->ops && fallback->ops->write) {
+                ssize_t res = fallback->ops->write(fallback, buf, count);
+                if (res < 0) {
+                    return vprocSetCompatErrno((int)res);
+                }
+                return res;
+            }
+            if (session_host_fd >= 0) {
+                host = session_host_fd;
+            }
+        }
+    }
     if (host < 0) {
         host = shimTranslate(fd, 1);
     }
-    if (host < 0) {
+    int write_fd = host;
+    if (write_fd < 0 && session_host_fd >= 0) {
+        write_fd = session_host_fd;
+    }
+    if (write_fd < 0) {
+        int tty_fd = vprocHostOpen("/dev/tty", O_WRONLY);
+        if (tty_fd < 0) {
+            tty_fd = vprocHostOpen("/dev/tty", O_WRONLY | O_NONBLOCK);
+        }
+        write_fd = tty_fd;
+    }
+    if (write_fd < 0) {
         return -1;
     }
-    if (getenv("PSCALI_TOOL_DEBUG")) {
-        vprocDebugLogf( "[vwrite] fd=%d -> host=%d count=%zu\n", fd, host, count);
+    if (vprocToolDebugEnabled()) {
+        vprocDebugLogf( "[vwrite] fd=%d -> host=%d write_fd=%d count=%zu\n", fd, host, write_fd, count);
     }
-    return vprocHostWrite(host, buf, count);
+    ssize_t res = vprocHostWrite(write_fd, buf, count);
+    if (write_fd != host) {
+        vprocHostClose(write_fd);
+    }
+    return res;
 }
 
 int vprocDupShim(int fd) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostDup(fd);
@@ -7264,6 +11314,7 @@ int vprocDupShim(int fd) {
 }
 
 int vprocDup2Shim(int fd, int target) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostDup2(fd, target);
@@ -7288,7 +11339,7 @@ static bool vprocHasFd(VProc *vp, int fd) {
     if (!vp || fd < 0) {
         return false;
     }
-    if (!vprocRegistryContains(vp)) {
+    if (!vprocRegistryContainsValidated(vp)) {
         return false;
     }
     bool has = false;
@@ -7301,6 +11352,7 @@ static bool vprocHasFd(VProc *vp, int fd) {
 }
 
 int vprocCloseShim(int fd) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostClose(fd);
@@ -7317,6 +11369,7 @@ int vprocCloseShim(int fd) {
 }
 
 int vprocFsyncShim(int fd) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostFsyncRaw(fd);
@@ -7334,11 +11387,69 @@ int vprocFsyncShim(int fd) {
 }
 
 int vprocPipeShim(int pipefd[2]) {
+    vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
     if (!vp) {
         return vprocHostPipe(pipefd);
     }
     return vprocPipe(vp, pipefd);
+}
+
+int vprocSocketShim(int domain, int type, int protocol) {
+    vprocDeliverPendingSignalsForCurrent();
+    int fd = vprocHostSocket(domain, type, protocol);
+    VProc *vp = vprocForThread();
+    if (vp && fd >= 0) {
+        vprocResourceTrack(vp, fd, VPROC_RESOURCE_SOCKET);
+    }
+    return fd;
+}
+
+int vprocAcceptShim(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    vprocDeliverPendingSignalsForCurrent();
+    int res = vprocHostAccept(fd, addr, addrlen);
+    VProc *vp = vprocForThread();
+    if (vp && res >= 0) {
+        vprocResourceTrack(vp, res, VPROC_RESOURCE_SOCKET);
+    }
+    return res;
+}
+
+int vprocSocketpairShim(int domain, int type, int protocol, int sv[2]) {
+    vprocDeliverPendingSignalsForCurrent();
+    int rc = vprocHostSocketpair(domain, type, protocol, sv);
+    VProc *vp = vprocForThread();
+    if (rc == 0 && vp) {
+        int host0 = sv[0];
+        int host1 = sv[1];
+        int vfd0 = vprocAdoptHostFd(vp, host0);
+        if (vfd0 < 0) {
+            int saved_errno = errno;
+            (void)vprocHostClose(host0);
+            (void)vprocHostClose(host1);
+            errno = saved_errno;
+            return -1;
+        }
+        int vfd1 = vprocAdoptHostFd(vp, host1);
+        if (vfd1 < 0) {
+            int saved_errno = errno;
+            (void)vprocClose(vp, vfd0);
+            (void)vprocHostClose(host1);
+            errno = saved_errno;
+            return -1;
+        }
+        if (getenv("PSCALI_TOOL_DEBUG") != NULL) {
+            fprintf(stderr,
+                    "[vproc-sockpair] host0=%d host1=%d vfd0=%d vfd1=%d\n",
+                    host0,
+                    host1,
+                    vfd0,
+                    vfd1);
+        }
+        sv[0] = vfd0;
+        sv[1] = vfd1;
+    }
+    return rc;
 }
 
 int vprocFstatShim(int fd, struct stat *st) {
@@ -8220,12 +12331,9 @@ int vprocIoctlShim(int fd, unsigned long request, ...) {
                     res = err;
                 } else {
                     int slot = vprocInsertPscalFd(vp, peer);
-                    if (slot < 0) {
-                        pscal_fd_close(peer);
-                        res = _EMFILE;
-                    } else {
-                        res = slot;
-                    }
+                    /* fd table retains; drop our reference. */
+                    pscal_fd_close(peer);
+                    res = (slot < 0) ? _EMFILE : slot;
                 }
             }
             pscal_fd_close(pscal_fd);
@@ -8322,6 +12430,152 @@ static short vprocPollMapReady(int pscal_events, short requested) {
     return (short)(ready & mask);
 }
 
+#define VPROC_POLL_STACK_FDS 128
+#define VPROC_SELECT_STACK_FDS 128
+
+typedef struct {
+    struct pscal_fd **pscal_fds;
+    int *host_index;
+    struct pollfd *host_fds;
+    size_t capacity;
+} VProcPollScratch;
+
+typedef struct {
+    struct pollfd *pfds;
+    int *fd_map;
+    size_t capacity;
+} VProcSelectScratch;
+
+static __thread VProcPollScratch gVProcPollScratch = {0};
+static __thread VProcSelectScratch gVProcSelectScratch = {0};
+
+static bool vprocPollScratchEnsure(size_t needed) {
+    if (needed <= gVProcPollScratch.capacity) {
+        return true;
+    }
+    size_t new_cap = gVProcPollScratch.capacity ? gVProcPollScratch.capacity : (VPROC_POLL_STACK_FDS * 2u);
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2u) {
+            errno = ENOMEM;
+            return false;
+        }
+        new_cap *= 2u;
+    }
+    if (new_cap > SIZE_MAX / sizeof(*gVProcPollScratch.pscal_fds) ||
+        (new_cap + 1u) > SIZE_MAX / sizeof(*gVProcPollScratch.host_index) ||
+        (new_cap + 1u) > SIZE_MAX / sizeof(*gVProcPollScratch.host_fds)) {
+        errno = ENOMEM;
+        return false;
+    }
+
+    struct pscal_fd **pscal_fds = calloc(new_cap, sizeof(*pscal_fds));
+    int *host_index = calloc(new_cap + 1u, sizeof(*host_index));
+    struct pollfd *host_fds = calloc(new_cap + 1u, sizeof(*host_fds));
+    if (!pscal_fds || !host_index || !host_fds) {
+        free(pscal_fds);
+        free(host_index);
+        free(host_fds);
+        errno = ENOMEM;
+        return false;
+    }
+
+    free(gVProcPollScratch.pscal_fds);
+    free(gVProcPollScratch.host_index);
+    free(gVProcPollScratch.host_fds);
+    gVProcPollScratch.pscal_fds = pscal_fds;
+    gVProcPollScratch.host_index = host_index;
+    gVProcPollScratch.host_fds = host_fds;
+    gVProcPollScratch.capacity = new_cap;
+    return true;
+}
+
+static bool vprocSelectScratchEnsure(size_t needed) {
+    if (needed <= gVProcSelectScratch.capacity) {
+        return true;
+    }
+    size_t new_cap = gVProcSelectScratch.capacity ? gVProcSelectScratch.capacity : (VPROC_SELECT_STACK_FDS * 2u);
+    while (new_cap < needed) {
+        if (new_cap > SIZE_MAX / 2u) {
+            errno = ENOMEM;
+            return false;
+        }
+        new_cap *= 2u;
+    }
+    if (new_cap > SIZE_MAX / sizeof(*gVProcSelectScratch.pfds) ||
+        new_cap > SIZE_MAX / sizeof(*gVProcSelectScratch.fd_map)) {
+        errno = ENOMEM;
+        return false;
+    }
+
+    struct pollfd *pfds = calloc(new_cap, sizeof(*pfds));
+    int *fd_map = calloc(new_cap, sizeof(*fd_map));
+    if (!pfds || !fd_map) {
+        free(pfds);
+        free(fd_map);
+        errno = ENOMEM;
+        return false;
+    }
+
+    free(gVProcSelectScratch.pfds);
+    free(gVProcSelectScratch.fd_map);
+    gVProcSelectScratch.pfds = pfds;
+    gVProcSelectScratch.fd_map = fd_map;
+    gVProcSelectScratch.capacity = new_cap;
+    return true;
+}
+
+static short vprocSessionInputPollEvents(VProcSessionStdio *session,
+                                         int logical_fd,
+                                         struct pscal_fd *pscal_fd,
+                                         short requested_events) {
+    if (!session || !pscal_fd || gVprocPipelineStage) {
+        return 0;
+    }
+    (void)logical_fd;
+    if (vprocSessionStdioIsDefault(session)) {
+        return 0;
+    }
+    if (!(session->stdin_pscal_fd == pscal_fd || session->pty_slave == pscal_fd)) {
+        return 0;
+    }
+
+    int read_mask = POLLIN;
+#ifdef POLLPRI
+    read_mask |= POLLPRI;
+#endif
+#ifdef POLLRDNORM
+    read_mask |= POLLRDNORM;
+#endif
+#ifdef POLLRDBAND
+    read_mask |= POLLRDBAND;
+#endif
+    if ((requested_events & read_mask) == 0) {
+        return 0;
+    }
+
+    VProcSessionInput *input = vprocSessionInputEnsure(session,
+                                                       vprocGetShellSelfPid(),
+                                                       vprocGetKernelPid());
+    if (!input) {
+        return 0;
+    }
+
+    short ready = 0;
+    pthread_mutex_lock(&input->mu);
+    bool has_data = input->len > 0;
+    bool is_eof = input->eof;
+    bool has_interrupt = input->interrupt_pending;
+    pthread_mutex_unlock(&input->mu);
+
+    if (has_data || has_interrupt || is_eof) {
+        ready |= (short)(requested_events & read_mask);
+    }
+    if (is_eof) {
+        ready |= POLLHUP;
+    }
+    return ready;
+}
+
 int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     vprocDeliverPendingSignalsForCurrent();
     VProc *vp = vprocForThread();
@@ -8331,34 +12585,76 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
     if (!fds || nfds == 0) {
         return vprocHostPollRaw(fds, nfds, timeout);
     }
-
-    struct pscal_fd **pscal_fds = calloc(nfds, sizeof(*pscal_fds));
-    int *host_index = calloc(nfds, sizeof(*host_index));
-    struct pollfd *host_fds = calloc(nfds + 1, sizeof(*host_fds));
-    if (!pscal_fds || !host_index || !host_fds) {
-        free(pscal_fds);
-        free(host_index);
-        free(host_fds);
-        errno = ENOMEM;
+    if (nfds > (nfds_t)(INT_MAX - 1)) {
+        errno = EINVAL;
         return -1;
     }
+
+    struct pscal_fd *pscal_fds_stack[VPROC_POLL_STACK_FDS];
+    int host_index_stack[VPROC_POLL_STACK_FDS + 1];
+    struct pollfd host_fds_stack[VPROC_POLL_STACK_FDS + 1];
+    bool use_stack = nfds <= VPROC_POLL_STACK_FDS;
+
+    struct pscal_fd **pscal_fds = NULL;
+    int *host_index = NULL;
+    struct pollfd *host_fds = NULL;
+    if (use_stack) {
+        memset(pscal_fds_stack, 0, sizeof(pscal_fds_stack));
+        memset(host_index_stack, 0, sizeof(host_index_stack));
+        memset(host_fds_stack, 0, sizeof(host_fds_stack));
+        pscal_fds = pscal_fds_stack;
+        host_index = host_index_stack;
+        host_fds = host_fds_stack;
+    } else {
+        if (!vprocPollScratchEnsure((size_t)nfds)) {
+            return -1;
+        }
+        pscal_fds = gVProcPollScratch.pscal_fds;
+        host_index = gVProcPollScratch.host_index;
+        host_fds = gVProcPollScratch.host_fds;
+        memset(pscal_fds, 0, ((size_t)nfds) * sizeof(*pscal_fds));
+    }
+
+    pthread_mutex_lock(&vp->mu);
+    for (nfds_t i = 0; i < nfds; ++i) {
+        host_index[i] = -1;
+        if (fds[i].fd < 0) {
+            continue;
+        }
+        if ((size_t)fds[i].fd >= vp->capacity) {
+            continue;
+        }
+        VProcFdEntry entry = vp->entries[fds[i].fd];
+        if (entry.kind == VPROC_FD_PSCAL && entry.pscal_fd) {
+            pscal_fds[i] = pscal_fd_retain(entry.pscal_fd);
+            continue;
+        }
+        if (entry.kind == VPROC_FD_HOST && entry.host_fd >= 0) {
+            host_index[i] = entry.host_fd;
+        }
+    }
+    pthread_mutex_unlock(&vp->mu);
 
     int ready_count = 0;
     bool has_pscal = false;
     int host_count = 0;
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
     for (nfds_t i = 0; i < nfds; ++i) {
         fds[i].revents = 0;
         if (fds[i].fd < 0) {
             continue;
         }
-        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fds[i].fd);
+        struct pscal_fd *pscal_fd = pscal_fds[i];
         if (pscal_fd) {
             has_pscal = true;
-            pscal_fds[i] = pscal_fd;
             int pscal_events = pscal_fd->ops && pscal_fd->ops->poll
                 ? pscal_fd->ops->poll(pscal_fd)
                 : POLL_ERR;
             short ready = vprocPollMapReady(pscal_events, fds[i].events);
+            ready |= vprocSessionInputPollEvents(session_stdio,
+                                                 fds[i].fd,
+                                                 pscal_fd,
+                                                 fds[i].events);
             if (ready) {
                 fds[i].revents = ready;
                 ready_count++;
@@ -8366,7 +12662,7 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
             continue;
         }
 
-        int host_fd = vprocTranslateFd(vp, fds[i].fd);
+        int host_fd = host_index[i];
         if (host_fd < 0) {
             struct stat st;
             if (vprocHostFstatRaw(fds[i].fd, &st) == 0) {
@@ -8384,72 +12680,118 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         host_count++;
     }
 
-    int host_ready = 0;
-    bool recheck_pscal = false;
-    if (host_count > 0 || has_pscal) {
-        int poll_timeout = (ready_count > 0) ? 0 : timeout;
+    if (ready_count == 0 && (host_count > 0 || has_pscal)) {
+        const int host_count_static = host_count;
         int wake_fd = -1;
+        bool wake_enabled = false;
         if (has_pscal) {
             wake_fd = pscalPollWakeFd();
-            if (wake_fd >= 0) {
-                host_fds[host_count].fd = wake_fd;
-                host_fds[host_count].events = POLLIN;
-                host_fds[host_count].revents = 0;
-                host_index[host_count] = -1;
-                host_count++;
-            }
+            wake_enabled = (wake_fd >= 0);
         }
 
-        if (host_count > 0) {
-            host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_count, poll_timeout);
-            if (host_ready < 0 && ready_count == 0) {
+        uint64_t deadline_ns = 0;
+        if (timeout > 0) {
+            deadline_ns = vprocNowMonoNs() + ((uint64_t)timeout * 1000000ull);
+        }
+        int wait_timeout = timeout;
+
+        for (;;) {
+            int host_poll_count = host_count_static;
+            bool wake_triggered = false;
+
+            for (int j = 0; j < host_count_static; ++j) {
+                host_fds[j].revents = 0;
+            }
+            if (wake_enabled) {
+                host_fds[host_poll_count].fd = wake_fd;
+                host_fds[host_poll_count].events = POLLIN;
+                host_fds[host_poll_count].revents = 0;
+                host_index[host_poll_count] = -1;
+                host_poll_count++;
+            }
+
+            int host_ready = 0;
+            if (host_poll_count > 0) {
+                host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_poll_count, wait_timeout);
+                if (host_ready < 0) {
+                    if (errno == EINTR) {
+                        if (wait_timeout == 0) {
+                            break;
+                        }
+                        goto vproc_poll_update_timeout;
+                    }
+                    for (nfds_t i = 0; i < nfds; ++i) {
+                        if (pscal_fds[i]) {
+                            pscal_fd_close(pscal_fds[i]);
+                        }
+                    }
+                    return -1;
+                }
+            } else if (wait_timeout > 0) {
+                usleep((useconds_t)wait_timeout * 1000u);
+            } else if (wait_timeout < 0) {
+                usleep(1000u);
+            }
+
+            int host_ready_count = 0;
+            for (int j = 0; j < host_count_static; ++j) {
+                int orig = host_index[j];
+                if (orig < 0) {
+                    continue;
+                }
+                if (host_fds[j].revents) {
+                    fds[orig].revents = host_fds[j].revents;
+                    host_ready_count++;
+                }
+            }
+            if (wake_enabled && host_fds[host_poll_count - 1].revents & POLLIN) {
+                pscalPollDrain();
+                wake_triggered = true;
+            }
+
+            int pscal_ready = 0;
+            if (has_pscal && (wake_triggered || host_ready_count == 0)) {
                 for (nfds_t i = 0; i < nfds; ++i) {
-                    if (pscal_fds[i]) {
-                        pscal_fd_close(pscal_fds[i]);
+                    if (!pscal_fds[i]) {
+                        continue;
+                    }
+                    int pscal_events = pscal_fds[i]->ops && pscal_fds[i]->ops->poll
+                        ? pscal_fds[i]->ops->poll(pscal_fds[i])
+                        : POLL_ERR;
+                    short ready = vprocPollMapReady(pscal_events, fds[i].events);
+                    ready |= vprocSessionInputPollEvents(session_stdio,
+                                                         fds[i].fd,
+                                                         pscal_fds[i],
+                                                         fds[i].events);
+                    fds[i].revents = ready;
+                    if (ready) {
+                        pscal_ready++;
                     }
                 }
-                free(pscal_fds);
-                free(host_index);
-                free(host_fds);
-                return -1;
             }
-            if (wake_fd >= 0 && (host_fds[host_count - 1].revents & POLLIN)) {
-                pscalPollDrain();
-                recheck_pscal = true;
-            }
-        }
-    }
 
-    if (host_ready > 0) {
-        for (int j = 0; j < host_count; ++j) {
-            int orig = host_index[j];
-            if (orig < 0) {
+            ready_count = host_ready_count + pscal_ready;
+            if (ready_count > 0 || wait_timeout == 0) {
+                break;
+            }
+
+vproc_poll_update_timeout:
+            if (wait_timeout < 0) {
                 continue;
             }
-            if (host_fds[j].revents) {
-                fds[orig].revents = host_fds[j].revents;
-                ready_count++;
+            if (deadline_ns == 0) {
+                break;
+            }
+            uint64_t now_ns = vprocNowMonoNs();
+            if (now_ns >= deadline_ns) {
+                break;
+            }
+            uint64_t remain_ns = deadline_ns - now_ns;
+            wait_timeout = (int)((remain_ns + 999999ull) / 1000000ull);
+            if (wait_timeout <= 0) {
+                break;
             }
         }
-    }
-
-    if (has_pscal && (recheck_pscal || ready_count == 0)) {
-        int host_ready_count = ready_count;
-        int pscal_ready = 0;
-        for (nfds_t i = 0; i < nfds; ++i) {
-            if (!pscal_fds[i]) {
-                continue;
-            }
-            int pscal_events = pscal_fds[i]->ops && pscal_fds[i]->ops->poll
-                ? pscal_fds[i]->ops->poll(pscal_fds[i])
-                : POLL_ERR;
-            short ready = vprocPollMapReady(pscal_events, fds[i].events);
-            fds[i].revents = ready;
-            if (ready) {
-                pscal_ready++;
-            }
-        }
-        ready_count = host_ready_count + pscal_ready;
     }
 
     for (nfds_t i = 0; i < nfds; ++i) {
@@ -8457,9 +12799,6 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
             pscal_fd_close(pscal_fds[i]);
         }
     }
-    free(pscal_fds);
-    free(host_index);
-    free(host_fds);
     return ready_count;
 }
 
@@ -8472,13 +12811,12 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
     if (nfds <= 0) {
         return vprocHostSelectRaw(nfds, readfds, writefds, exceptfds, timeout);
     }
-
-    struct pollfd *pfds = calloc((size_t)nfds, sizeof(*pfds));
-    int *fd_map = calloc((size_t)nfds, sizeof(*fd_map));
-    if (!pfds || !fd_map) {
-        free(pfds);
-        free(fd_map);
-        errno = ENOMEM;
+    if ((readfds || writefds || exceptfds) && nfds > FD_SETSIZE) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (timeout && (timeout->tv_sec < 0 || timeout->tv_usec < 0 || timeout->tv_usec >= 1000000)) {
+        errno = EINVAL;
         return -1;
     }
 
@@ -8488,24 +12826,66 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         if (readfds && FD_ISSET(fd, readfds)) events |= POLLIN;
         if (writefds && FD_ISSET(fd, writefds)) events |= POLLOUT;
         if (exceptfds && FD_ISSET(fd, exceptfds)) events |= POLLPRI;
-        if (events == 0) {
-            continue;
+        if (events != 0) {
+            count++;
         }
-        pfds[count].fd = fd;
-        pfds[count].events = events;
-        pfds[count].revents = 0;
-        fd_map[count] = fd;
-        count++;
     }
 
     int timeout_ms = -1;
     if (timeout) {
-        timeout_ms = (int)(timeout->tv_sec * 1000 + timeout->tv_usec / 1000);
+        int64_t total_ms = (int64_t)timeout->tv_sec * 1000 + (int64_t)(timeout->tv_usec / 1000);
+        if (total_ms > INT_MAX) {
+            total_ms = INT_MAX;
+        }
+        timeout_ms = (int)total_ms;
+    }
+
+    if (count == 0) {
+        int res = vprocHostPollRaw(NULL, 0, timeout_ms);
+        if (res < 0) {
+            return -1;
+        }
+        if (readfds) FD_ZERO(readfds);
+        if (writefds) FD_ZERO(writefds);
+        if (exceptfds) FD_ZERO(exceptfds);
+        return 0;
+    }
+
+    struct pollfd pfds_stack[VPROC_SELECT_STACK_FDS];
+    int fd_map_stack[VPROC_SELECT_STACK_FDS];
+    bool use_stack = count <= VPROC_SELECT_STACK_FDS;
+    struct pollfd *pfds = NULL;
+    int *fd_map = NULL;
+    if (use_stack) {
+        memset(pfds_stack, 0, sizeof(pfds_stack));
+        memset(fd_map_stack, 0, sizeof(fd_map_stack));
+        pfds = pfds_stack;
+        fd_map = fd_map_stack;
+    } else {
+        if (!vprocSelectScratchEnsure((size_t)count)) {
+            return -1;
+        }
+        pfds = gVProcSelectScratch.pfds;
+        fd_map = gVProcSelectScratch.fd_map;
+    }
+
+    int cursor = 0;
+    for (int fd = 0; fd < nfds; ++fd) {
+        short events = 0;
+        if (readfds && FD_ISSET(fd, readfds)) events |= POLLIN;
+        if (writefds && FD_ISSET(fd, writefds)) events |= POLLOUT;
+        if (exceptfds && FD_ISSET(fd, exceptfds)) events |= POLLPRI;
+        if (events == 0) {
+            continue;
+        }
+        pfds[cursor].fd = fd;
+        pfds[cursor].events = events;
+        pfds[cursor].revents = 0;
+        fd_map[cursor] = fd;
+        cursor++;
     }
     int res = vprocPollShim(pfds, (nfds_t)count, timeout_ms);
     if (res < 0) {
-        free(pfds);
-        free(fd_map);
         return -1;
     }
 
@@ -8538,12 +12918,11 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
         }
     }
 
-    free(pfds);
-    free(fd_map);
     return ready;
 }
 
 int vprocOpenShim(const char *path, int flags, ...) {
+    vprocDeliverPendingSignalsForCurrent();
     int mode = 0;
     if (flags & O_CREAT) {
         va_list ap;
@@ -8569,7 +12948,42 @@ int vprocOpenShim(const char *path, int flags, ...) {
     if (vprocPathIsDevTty(path)) {
         struct pscal_fd *tty_fd = NULL;
         int err = pscalTtyOpenControlling(flags, &tty_fd);
+        VProcSessionStdio *session = vprocSessionStdioCurrent();
+        if (err == _ENXIO || err == _ENOTTY) {
+            /* If this vproc never claimed a controlling TTY, bind the session
+             * PTY as the controlling terminal for the current sid and retry. */
+            int sid = vprocGetsidShim(0);
+            if (session && session->pty_slave && session->pty_slave->tty && sid > 0) {
+                struct tty *tty = session->pty_slave->tty;
+                lock(&tty->lock);
+                if (tty->session == 0 || tty->session == (pid_t_)sid) {
+                    if (tty->session == 0) {
+                        tty->session = (pid_t_)sid;
+                        int fg = vprocGetForegroundPgid(sid);
+                        tty->fg_group = (fg > 0) ? (pid_t_)fg : (pid_t_)sid;
+                    }
+                    unlock(&tty->lock);
+                    pscalTtySetControlling(tty);
+                    err = pscalTtyOpenControlling(flags, &tty_fd);
+                } else {
+                    unlock(&tty->lock);
+                }
+            }
+        }
         if (err < 0) {
+            /* Fall back to the session PTY if present so /dev/tty resolves for
+             * pipeline stages that otherwise lack a controlling terminal. */
+            if (session && session->pty_slave) {
+                struct pscal_fd *retained = pscal_fd_retain(session->pty_slave);
+                if (retained) {
+                    int slot = vprocInsertPscalFd(vp, retained);
+                    /* Table retains; release caller ref. */
+                    pscal_fd_close(retained);
+                    if (slot >= 0) {
+                        return slot;
+                    }
+                }
+            }
             return vprocSetCompatErrno(err);
         }
         if (!vp) {
@@ -8578,8 +12992,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
             return -1;
         }
         int slot = vprocInsertPscalFd(vp, tty_fd);
+        /* fd table retains; drop caller ref regardless of outcome. */
+        pscal_fd_close(tty_fd);
         if (slot < 0) {
-            pscal_fd_close(tty_fd);
             return -1;
         }
         return slot;
@@ -8596,8 +13011,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
             return -1;
         }
         int slot = vprocInsertPscalFd(vp, tty_fd);
+        /* fd table retains; release caller ref. */
+        pscal_fd_close(tty_fd);
         if (slot < 0) {
-            pscal_fd_close(tty_fd);
             return -1;
         }
         return slot;
@@ -8616,8 +13032,9 @@ int vprocOpenShim(const char *path, int flags, ...) {
                 return -1;
             }
             int slot = vprocInsertPscalFd(vp, tty_fd);
+            /* fd table retains; release caller ref. */
+            pscal_fd_close(tty_fd);
             if (slot < 0) {
-                pscal_fd_close(tty_fd);
                 return -1;
             }
             return slot;
@@ -8648,11 +13065,39 @@ int vprocOpenShim(const char *path, int flags, ...) {
             errno = ENOTSUP;
             return -1;
         }
+        VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+        uint64_t session_id = (session_stdio && !vprocSessionStdioIsDefault(session_stdio))
+                ? session_stdio->session_id
+                : 0;
+        struct pscal_fd *session_slave = NULL;
+        if (session_id != 0) {
+            int slave_flags = O_RDWR;
+            if (flags & O_NONBLOCK) {
+                slave_flags |= O_NONBLOCK;
+            }
+            int slave_err = pscalPtyOpenSlave(pty_num, slave_flags, &session_slave);
+            if (slave_err < 0) {
+                session_slave = NULL;
+            }
+        }
         int slot = vprocInsertPscalFd(vp, pty);
         if (slot < 0) {
+            if (session_slave) {
+                pscal_fd_close(session_slave);
+            }
+            /* drop caller ref */
             pscal_fd_close(pty);
             return -1;
         }
+        if (session_id != 0 && session_slave) {
+            /* register retains both ends */
+            vprocSessionPtyRegister(session_id, session_slave, pty);
+        }
+        if (session_slave) {
+            pscal_fd_close(session_slave);
+        }
+        /* fd table (and session registry) retain; drop caller ref last */
+        pscal_fd_close(pty);
         return slot;
     }
     int pty_num = -1;
@@ -8668,15 +13113,12 @@ int vprocOpenShim(const char *path, int flags, ...) {
             return -1;
         }
         int slot = vprocInsertPscalFd(vp, pty);
+        /* fd table retains; release caller ref. */
+        pscal_fd_close(pty);
         if (slot < 0) {
-            pscal_fd_close(pty);
             return -1;
         }
         return slot;
-    }
-    if (vprocPathIsLegacyGpsDevice(path)) {
-        errno = ENOENT;
-        return -1;
     }
     if (vprocPathIsLocationDevice(path)) {
         return vprocLocationDeviceOpen(vp, flags);
@@ -8685,7 +13127,7 @@ int vprocOpenShim(const char *path, int flags, ...) {
         /* Apply path virtualization even when vproc is inactive. */
         return vprocHostOpenVirtualized(path, flags, mode);
     }
-    bool dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
+    bool dbg = vprocPipeDebugEnabled();
     int host_fd = vprocHostOpenVirtualized(path, flags, mode);
 #if defined(PSCAL_TARGET_IOS)
     if (host_fd < 0 && errno == ENOENT) {
@@ -8697,7 +13139,7 @@ int vprocOpenShim(const char *path, int flags, ...) {
     }
 #endif
     if (host_fd < 0) {
-        if (getenv("PSCALI_TOOL_DEBUG")) {
+        if (vprocToolDebugEnabled()) {
             vprocDebugLogf( "[vproc-open] path=%s flags=%d errno=%d\n", path, flags, errno);
         }
         return -1;
@@ -8714,7 +13156,17 @@ int vprocSigactionShim(int sig, const struct sigaction *act, struct sigaction *o
     if (!vp) {
         return vprocHostSigactionRaw(sig, act, oldact);
     }
-    return vprocSigaction(vprocPid(vp), sig, act, oldact);
+    int rc = vprocSigaction(vprocPid(vp), sig, act, oldact);
+#if defined(PSCAL_TARGET_IOS)
+    /* Resize notifications from the runtime use pthread_kill(SIGWINCH) on the
+     * host thread. Mirror SIGWINCH handlers into host sigaction so those
+     * notifications can wake OpenSSH clientloop even when signal handling is
+     * virtualized through vproc. */
+    if (rc == 0 && act && sig == SIGWINCH) {
+        (void)vprocHostSigactionRaw(sig, act, NULL);
+    }
+#endif
+    return rc;
 }
 
 int vprocSigprocmaskShim(int how, const sigset_t *set, sigset_t *oldset) {

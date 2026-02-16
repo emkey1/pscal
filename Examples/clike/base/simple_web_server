@@ -8,6 +8,7 @@
 //   localhost. Serving is minimal and for demo/testing.
 
 int Port = 5555;
+str BindAddr = "127.0.0.1"; // Default binding.  Localhost only.  Change to 0.0.0.0 for all ports.  Dangerous!!!
 str RootDir;
 str IndexPath;
 str Body;
@@ -32,20 +33,10 @@ int LogAppend = 1;
 void logInit() {
   str path = getenv("PSCALI_BG_STDOUT");
   if (path != "") {
-    str mode = "w";
-    str appendFlag = getenv("PSCALI_BG_STDOUT_APPEND");
-    if (appendFlag == "1") {
-      mode = "a";
-      LogAppend = 1;
-    } else {
-      LogAppend = 0;
-    }
-    LogFile = fopen(path, mode);
-    if (!LogFile) {
-      /* If the target cannot be opened, swallow output instead of spamming the terminal. */
-      LogFile = fopen("/dev/null", "w");
-    }
-    LogEnabled = 1;
+    /* When stdout is redirected by the shell, rely on that redirection rather
+     * than managing a separate logfile here. */
+    LogEnabled = 0;
+    return;
   }
 }
 
@@ -54,6 +45,13 @@ int GAccepted = 0;
 int GEnqueued = 0;
 int GDropped = 0;
 int GServed = 0;
+
+// Helper that invokes the VM builtin and provides a safe fallback.
+str remoteAddr(int s) {
+  str r = socketpeeraddr(s);
+  if (r == "") r = "(unknown)";
+  return r;
+}
 
 // Helpers
 str ensureDirCandidate(str candidate) {
@@ -70,7 +68,10 @@ str ensureDirCandidate(str candidate) {
 }
 
 str resolveTempDir() {
-  str candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
+  /* Prefer a stable, writable docroot on all platforms; iOS/iPadOS will land here. */
+  str candidate = ensureDirCandidate("/var/htdocs");
+  if (candidate != "") return candidate;
+  candidate = ensureDirCandidate(getenv("PSCALI_TEMP_DIR"));
   if (candidate != "") return candidate;
 
   str workspace = fsNormalizePath(getenv("PSCALI_WORKSPACE_ROOT"));
@@ -96,6 +97,40 @@ str resolveTempDir() {
   candidate = ensureDirCandidate(".");
   if (candidate != "") return candidate;
   return "/tmp";
+}
+
+int hasIndex(str dir) {
+  if (dir == "") return 0;
+  str idx = dir + "/index.html";
+  return fileexists(idx);
+}
+
+// Resolve a docroot for iOS/iPadOS: prefer app workspace /var/htdocs, then host /var/htdocs, then temp.
+str resolveDocRoot() {
+  // Override hook if explicitly provided.
+  str override = fsNormalizePath(getenv("PSCALI_DOC_ROOT"));
+  if (override != "") {
+    str c = ensureDirCandidate(override);
+    if (c != "") return c;
+  }
+
+  // App sandbox: ${PSCALI_WORKSPACE_ROOT}/var/htdocs
+  str workspace = fsNormalizePath(getenv("PSCALI_WORKSPACE_ROOT"));
+  if (workspace == "") workspace = fsNormalizePath(getenv("PSCAL_WORKSPACE_ROOT"));
+  if (workspace != "") {
+    str c = ensureDirCandidate(fsPathJoin(workspace, "var/htdocs"));
+    if (c != "") return c;
+  }
+
+  // Legacy host path
+  str c = ensureDirCandidate("/var/htdocs");
+  if (c != "") return c;
+
+  // Temp-based fallback
+  int pid = getpid();
+  str pidStr = inttostr(pid);
+  str base = ensureTrailingSlash(resolveTempDir());
+  return ensureTrailingSlash(base) + "htdocs." + pidStr;
 }
 
 str ensureTrailingSlash(str path) {
@@ -258,6 +293,16 @@ void serveConn(int c) {
   // Read request
   mstream req = socketreceive(c, 2048);
   str reqText = mstreambuffer(req);
+  // Peer address from builtin; fall back to placeholder if unavailable.
+  str remote = remoteAddr(c);
+  if (LogEnabled) {
+    fprintf(LogFile, "request: from=%s raw_len=%d
+", remote, length(reqText));
+    fflush(LogFile);
+  } else {
+    printf("request: from=%s raw_len=%d
+", remote, length(reqText));
+  }
   // Parse request line robustly: take first line then split by spaces
   int ln = pos(reqText, "\r\n");
   if (ln == 0) ln = pos(reqText, "\n");
@@ -286,33 +331,16 @@ void serveConn(int c) {
   // For logging: show what we served (listing, index, or resolved relative path)
   str logDetail = "";
   if (path == "/") {
-    // Prefer index.html if present; otherwise return listing
-    if (fileexists(IndexPath)) {
-      str rel = "index.html";
-      str fullPath = IndexPath;
-      mstream ms = mstreamcreate();
-      int ok = mstreamloadfromfile(&ms, fullPath);
-      if (ok) {
-        respBody = mstreambuffer(ms);
-        code = 200;
-        ctype = "text/html";
-        logDetail = "index.html";
-        mstreamfree(&ms);
-      } else {
-        // Fallback to listing if read failed for any reason
-        mstreamfree(&ms);
-        str listing = "<html><body><h1>Index of /</h1><ul>";
-        str name = findfirst(RootDir);
-        while (name != "") {
-          listing = listing + "<li><a href='/" + name + "'>" + name + "</a></li>";
-          name = findnext();
-        }
-        listing = listing + "</ul></body></html>";
-        respBody = listing;
-        code = 200;
-        ctype = "text/html";
-        logDetail = "(listing)";
-      }
+    // Try to serve index.html directly; fall back to listing if read fails.
+    str fullPath = IndexPath;
+    mstream ms = mstreamcreate();
+    int ok = mstreamloadfromfile(&ms, fullPath);
+    if (ok) {
+      respBody = mstreambuffer(ms);
+      code = 200;
+      ctype = "text/html";
+      logDetail = "index.html";
+      mstreamfree(&ms);
     } else {
       // Directory listing of RootDir
       str listing = "<html><body><h1>Index of /</h1><ul>";
@@ -326,27 +354,20 @@ void serveConn(int c) {
       code = 200;
       ctype = "text/html";
       logDetail = "(listing)";
+      mstreamfree(&ms);
     }
   } else if (path == "/index.html") {
-    // If a real index.html exists on disk, serve it; otherwise use the default Body
-    if (fileexists(IndexPath)) {
-      mstream ms = mstreamcreate();
-      int ok = mstreamloadfromfile(&ms, IndexPath);
-      if (ok) {
-        respBody = mstreambuffer(ms);
-        code = 200;
-        ctype = "text/html";
-        logDetail = "index.html";
-        mstreamfree(&ms);
-      } else {
-        // Fallback to in-memory Body if disk read failed unexpectedly
-        mstreamfree(&ms);
-        respBody = Body;
-        code = 200;
-        ctype = "text/html";
-        logDetail = "index.html (fallback)";
-      }
+    // Attempt to serve on-disk index.html; fall back to default Body.
+    mstream ms = mstreamcreate();
+    int ok = mstreamloadfromfile(&ms, IndexPath);
+    if (ok) {
+      respBody = mstreambuffer(ms);
+      code = 200;
+      ctype = "text/html";
+      logDetail = "index.html";
+      mstreamfree(&ms);
     } else {
+      mstreamfree(&ms);
       respBody = Body;
       code = 200;
       ctype = "text/html";
@@ -357,25 +378,24 @@ void serveConn(int c) {
     str rel = (copy(path, 1, 1) == "/") ? copy(path, 2, length(path) - 1) : path;
     rel = normalizePath(rel);
     str fullPath = RootDir + "/" + rel;
-    if (fileexists(fullPath)) {
-      mstream ms = mstreamcreate();
-      int ok = mstreamloadfromfile(&ms, fullPath);
-      if (ok) {
-        respBody = mstreambuffer(ms);
-        code = 200;
-        ctype = contentType(rel);
-        mstreamfree(&ms);
-        logDetail = rel;
-      } else {
-        // Read failed even though file exists; return 500
-        mstreamfree(&ms);
-        respBody = "<html><body>Internal Server Error</body></html>";
-        code = 500;
-        ctype = "text/html";
-        logDetail = rel;
-      }
+    if (LogEnabled) {
+      fprintf(LogFile, "resolve: rel=%s full=%s exists=%d
+", rel, fullPath, fileexists(fullPath));
+      fflush(LogFile);
     } else {
-      // Not found; do not attempt to load to avoid VM runtimeError
+      printf("resolve: rel=%s full=%s exists=%d
+", rel, fullPath, fileexists(fullPath));
+    }
+    mstream ms = mstreamcreate();
+    int ok = mstreamloadfromfile(&ms, fullPath);
+    if (ok) {
+      respBody = mstreambuffer(ms);
+      code = 200;
+      ctype = contentType(rel);
+      mstreamfree(&ms);
+      logDetail = rel;
+    } else {
+      mstreamfree(&ms);
       respBody = "<html><body>Not Found</body></html>";
       code = 404;
       ctype = "text/html";
@@ -393,12 +413,12 @@ void serveConn(int c) {
   lock(qmu); depth = qCount; served = GServed; enq = GEnqueued; drop = GDropped; unlock(qmu);
   str ts = timestamp();
   if (LogEnabled) {
-    fprintf(LogFile, "%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
-            ts, method, path, code, logDetail, depth, served, enq, drop);
+    fprintf(LogFile, "%s [%s] %s %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
+            ts, remote, method, path, code, logDetail, depth, served, enq, drop);
     fflush(LogFile);
   } else {
-    printf("%s [%s] %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
-           ts, method, path, code, logDetail, depth, served, enq, drop);
+    printf("%s [%s] %s %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
+           ts, remote, method, path, code, logDetail, depth, served, enq, drop);
   }
   socketclose(c);
 }
@@ -543,6 +563,16 @@ int fsPathExists(str path) {
   return 0;
 }
 
+int dirIsEmpty(str path) {
+  if (!isDirectory(path)) return 1;
+  str name = findfirst(path);
+  while (name != "") {
+    if (name != "." && name != "..") return 0;
+    name = findnext();
+  }
+  return 1;
+}
+
 str resolveAssetRoot() {
   str candidate = ConfiguredAssetRoot;
   str placeholder = "@PSCAL_INSTALL_ROOT_RESOLVED@";
@@ -609,17 +639,48 @@ str fsDefaultInstallRoot() {
 }
 
 void initFiles() {
-  int pid = getpid();
-  str pidStr = inttostr(pid);
-  str base = ensureTrailingSlash(resolveTempDir());
-  RootDir = base + "htdocs." + pidStr;
-  mkdir(RootDir);
+  /* Prefer sandbox-aware docroot; fall back to legacy /var/htdocs or temp. */
+  str root = resolveDocRoot();
+  RootDir = root;
+  int preexisting = isDirectory(RootDir);
   IndexPath = RootDir + "/index.html";
   Body = "<html><body>Hello from the CLike web server</body></html>";
+  if (LogEnabled) {
+    fprintf(LogFile, "initFiles: RootDir=%s preexisting=%d indexExists=%d
+",
+            RootDir, preexisting, fileexists(IndexPath));
+    fflush(LogFile);
+  } else {
+    printf("initFiles: RootDir=%s preexisting=%d indexExists=%d
+",
+           RootDir, preexisting, fileexists(IndexPath));
+  }
+
+  // If the directory already exists (populated or not), avoid copying bundle assets.
+  // This prevents iOS/iPadOS runs from failing when RuntimeAssetInstaller or a prior
+  // launch has already materialized /var/htdocs.
+  if (preexisting) {
+    if (LogEnabled) {
+      fprintf(LogFile, "Docroot %s already exists; skipping asset copy.\n", RootDir);
+      fflush(LogFile);
+    }
+    // Do not attempt any writes when the docroot already exists; on iOS this
+    // location may be read-only for the process even though the files are present.
+    return;
+  }
+
+  mkdir(RootDir);
   str source = resolveAssetRoot();
+  // Avoid copying from the same directory or overwriting populated roots.
+  if (source == RootDir) {
+    if (LogEnabled) { fprintf(LogFile, "Asset root is already the docroot; skip copy.\n"); fflush(LogFile); }
+    source = "";
+  }
   int copied = 0;
-  if (strlen(source) > 0 && isDirectory(source)) {
+  int sample_exists = fileexists(IndexPath);
+  if (!sample_exists && strlen(source) > 0 && isDirectory(source)) {
     copied = copyDirectory(source, RootDir);
+    sample_exists = fileexists(IndexPath);
   }
   if (strlen(source) > 0) {
     if (LogEnabled) { fprintf(LogFile, "Asset root: %s\n", source); fflush(LogFile); }
@@ -638,8 +699,13 @@ void initFiles() {
     if (LogEnabled) { fprintf(LogFile, "Using inline default index page.\n"); fflush(LogFile); }
     else { printf("Using inline default index page.\n"); }
   } else {
-    if (LogEnabled) { fprintf(LogFile, "Copied sample site into %s\n", RootDir); fflush(LogFile); }
-    else { printf("Copied sample site into %s\n", RootDir); }
+    if (copied) {
+      if (LogEnabled) { fprintf(LogFile, "Copied sample site into %s\n", RootDir); fflush(LogFile); }
+      else { printf("Copied sample site into %s\n", RootDir); }
+    } else if (LogEnabled) {
+      fprintf(LogFile, "Sample site already present in %s; skipping copy.\n", RootDir);
+      fflush(LogFile);
+    }
   }
 }
 
@@ -693,11 +759,11 @@ int main() {
     }
   }
   if (LogEnabled) {
-    fprintf(LogFile, "Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+    fprintf(LogFile, "Serving %s on http://%s.0.0.1:%d\n", IndexPath, BindAddr, Port);
     fprintf(LogFile, "Root: %s\n", RootDir);
     fflush(LogFile);
   } else {
-    printf("Serving %s on http://127.0.0.1:%d\n", IndexPath, Port);
+    printf("Serving %s on http://%s:%d\n", IndexPath, BindAddr, Port);
     printf("Root: %s\n", RootDir);
   }
 
@@ -709,7 +775,7 @@ int main() {
   }
   // Bind and listen; current API binds all interfaces (INADDR_ANY)
   // Bind explicitly to localhost by default
-  int bindrc = socketbindaddr(srv, "127.0.0.1", Port);
+  int bindrc = socketbindaddr(srv, BindAddr, Port);
   if (bindrc != 0) {
     if (LogEnabled) { fprintf(LogFile, "socketbind failed: %d\n", socketlasterror()); fflush(LogFile); }
     else { printf("socketbind failed: %d\n", socketlasterror()); }

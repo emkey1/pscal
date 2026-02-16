@@ -21,13 +21,13 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0039   13 CONST_1
 0040    | CONSTANT            9 'value='
 0042    | GET_LOCAL           0 (slot)
-0044    | CALL_BUILTIN_PROC   176 'write' (3 args)
+0044    | CALL_BUILTIN_PROC   177 'write' (3 args)
 0050   11 RETURN
 0051   20 CONST_1
 0052    | CONSTANT           11 'double='
 0054    | PUSH_IMM_I8         5
 0056    | CALL_USER_PROC      13 'doubleit' @0026 (1 args)
-0060    | CALL_BUILTIN_PROC   176 'write' (3 args)
+0060    | CALL_BUILTIN_PROC   177 'write' (3 args)
 0066   21 PUSH_IMM_I8         3
 0068    | GET_GLOBAL_ADDRESS    3 'data'
 0070    | GET_ELEMENT_ADDRESS_CONST          0 (flat offset)

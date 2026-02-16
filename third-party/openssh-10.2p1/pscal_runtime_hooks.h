@@ -30,6 +30,11 @@ void pscal_openssh_set_global_exit_handler(sigjmp_buf *env,
     volatile sig_atomic_t *code_out);
 const char *pscal_openssh_hostkey_path(const char *default_path);
 const char *pscal_openssh_hostkey_dir(void);
+void pscal_clientloop_reset_hostkeys(void);
+void pscal_mux_reset_state(void);
+void pscal_sshconnect_reset_state(void);
+void pscal_sshconnect2_reset_state(void);
+void pscal_sshtty_reset_state(void);
 void cleanup_exit(int code);
 
 #ifdef PSCAL_TARGET_IOS

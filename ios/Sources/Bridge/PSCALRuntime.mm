@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
@@ -84,6 +85,10 @@ extern "C" {
     ShellRuntimeState *shellRuntimeCreateContext(void);
     ShellRuntimeState *shellRuntimeActivateContext(ShellRuntimeState *ctx);
     void shellRuntimeDestroyContext(ShellRuntimeState *ctx);
+    int32_t pscalRuntimeSetTabTitleForSession(uint64_t session_id, const char *title);
+    int32_t pscalRuntimeSetTabStartupCommandForSession(uint64_t session_id, const char *command);
+    void pscalRuntimeBindSessionToBootstrap(void *runtime_context, uint64_t session_id);
+    void pscalRuntimeBindSessionToBootstrapHandle(void *bootstrap_handle, uint64_t session_id);
 }
 
 static const size_t kOutputBacklogLimit = 512 * 1024;
@@ -230,6 +235,17 @@ static PSCALRuntimeContext *PSCALRuntimeSetCurrentContext(PSCALRuntimeContext *c
     return prev;
 }
 
+static void PSCALRuntimeBindContextOrLog(PSCALRuntimeContext *ctx, const char *thread_name) {
+    if (!ctx) {
+        static std::atomic<int> logged{0};
+        if (logged.exchange(1, std::memory_order_relaxed) == 0) {
+            PSCALRuntimeDebugLogf("PSCALRuntime: missing context bind on thread %s; using shared context (may stall other tabs)", thread_name ? thread_name : "unknown");
+        }
+        return;
+    }
+    PSCALRuntimeSetCurrentContext(ctx);
+}
+
 // TODO: Replace shared-context macros with explicit context plumbing for multi-session support.
 #define s_output_handler (PSCALRuntimeCurrentContext()->output_handler)
 #define s_exit_handler (PSCALRuntimeCurrentContext()->exit_handler)
@@ -350,6 +366,14 @@ void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) {
 
 PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) {
     return PSCALRuntimeCurrentContext();
+}
+
+uint64_t PSCALRuntimeCurrentSessionId(void) {
+    uint64_t session_id = 0;
+    pthread_mutex_lock(&s_runtime_mutex);
+    session_id = s_runtime_session_id;
+    pthread_mutex_unlock(&s_runtime_mutex);
+    return session_id;
 }
 
 VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
@@ -491,6 +515,13 @@ void PSCALRuntimeUnregisterSessionOutputHandler(uint64_t session_id) {
     vprocSessionClearOutputHandler(session_id);
 }
 
+void PSCALRuntimeSetSessionOutputPaused(uint64_t session_id, int paused) {
+    if (session_id == 0) {
+        return;
+    }
+    vprocSessionSetOutputPaused(session_id, paused != 0);
+}
+
 extern "C" ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t session_id) {
     PSCALRuntimeContext *ctx = PSCALRuntimeContextForSession(session_id);
     if (!ctx) {
@@ -507,9 +538,17 @@ extern "C" ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t sessio
 extern "C" void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) {
     PSCALRuntimeContext *ctx = PSCALRuntimeContextForSession(session_id);
     if (!ctx) {
+        if (PSCALRuntimeIODebugEnabled()) {
+            PSCALRuntimeDebugLogf("[runtime-io] register shell thread skipped session=%llu (no ctx)\n",
+                                  (unsigned long long)session_id);
+        }
         return;
     }
     PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
+    pscalRuntimeBindSessionToBootstrap((void *)ctx, session_id);
+    if (s_handler_context) {
+        pscalRuntimeBindSessionToBootstrapHandle(s_handler_context, session_id);
+    }
     int pending_cols = 0;
     int pending_rows = 0;
     bool should_winch = false;
@@ -538,8 +577,16 @@ extern "C" void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t t
             should_winch = false;
         }
     }
+    if (PSCALRuntimeIODebugEnabled()) {
+        PSCALRuntimeDebugLogf("[runtime-io] register shell thread session=%llu tid=%llu pending=%dx%d winch=%d\n",
+                              (unsigned long long)session_id,
+                              (unsigned long long)(uintptr_t)tid,
+                              pending_cols,
+                              pending_rows,
+                              (int)should_winch);
+    }
     if (should_winch) {
-        pthread_kill(tid, SIGWINCH);
+        (void)pthread_kill(tid, SIGWINCH);
     }
     PSCALRuntimeSetCurrentContext(prev_ctx);
 }
@@ -769,6 +816,9 @@ static bool PSCALRuntimeOutputLoggingEnabled(void) {
 
 static bool PSCALRuntimeIODebugEnabled(void) {
     const char *env = getenv("PSCALI_IO_DEBUG");
+    if (!env || env[0] == '\0' || strcmp(env, "0") == 0) {
+        env = getenv("PSCALI_SSH_DEBUG");
+    }
     return env && *env && strcmp(env, "0") != 0;
 }
 
@@ -854,6 +904,11 @@ static void PSCALRuntimeDirectOutputHandler(uint64_t session_id,
     PSCALRuntimeContext *prev_ctx = NULL;
     if (session_ctx) {
         prev_ctx = PSCALRuntimeSetCurrentContext(session_ctx);
+    } else {
+        // No context registered for this session; avoid shared-ring fallback to
+        // prevent cross-session backpressure. Dispatch directly to handlers.
+        PSCALRuntimeDispatchOutput((const char *)buffer, length);
+        return;
     }
     static std::atomic<int> logged{0};
     if (PSCALRuntimeOutputLoggingEnabled() && logged.exchange(1) == 0) {
@@ -1070,7 +1125,8 @@ static void PSCALRuntimeClearInputQueueLocked(void) {
 
 static void *PSCALRuntimeInputWriterThread(void *arg) {
     PSCALRuntimeContext *ctx = (PSCALRuntimeContext *)arg;
-    PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
+    PSCALRuntimeContext *prev_ctx = PSCALRuntimeCurrentContext();
+    PSCALRuntimeBindContextOrLog(ctx, "pscal-input-writer");
     pthread_setname_np("pscal-input-writer");
     while (true) {
         pthread_mutex_lock(&s_input_queue_mu);
@@ -1291,7 +1347,8 @@ static void PSCALRuntimeWaitForReadable(int fd) {
 
 static void *PSCALRuntimeOutputPump(void *arg) {
     PSCALRuntimeContext *ctx = (PSCALRuntimeContext *)arg;
-    PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
+    PSCALRuntimeContext *prev_ctx = PSCALRuntimeCurrentContext();
+    PSCALRuntimeBindContextOrLog(ctx, "pscal-output-pump");
     vprocRegisterInterposeBypassThread(pthread_self());
     const int fd = s_master_fd;
     char buffer[4096];
@@ -1436,6 +1493,10 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
     s_runtime_thread = pthread_self();
     s_runtime_thread_id = 0;
     pthread_mutex_unlock(&s_runtime_mutex);
+    pscalRuntimeBindSessionToBootstrap((void *)PSCALRuntimeCurrentContext(), session_id);
+    if (s_handler_context) {
+        pscalRuntimeBindSessionToBootstrapHandle(s_handler_context, session_id);
+    }
     PSCALRuntimeRegisterSessionContext(session_id);
     PSCALRuntimeRegisterSessionOutputHandler(session_id, PSCALRuntimeDirectOutputHandler, NULL);
     int master_fd = -1;
@@ -1561,7 +1622,8 @@ typedef struct {
 
 static void *PSCALRuntimeThreadMain(void *arg) {
     PSCALRuntimeThreadContext *context = (PSCALRuntimeThreadContext *)arg;
-    PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(context->ctx);
+    PSCALRuntimeContext *prev_ctx = PSCALRuntimeCurrentContext();
+    PSCALRuntimeBindContextOrLog(context->ctx, "pscal-runtime");
     jmp_buf exit_env;
 #if TARGET_OS_IPHONE
     s_exit_jump_buffer = &exit_env;
@@ -1647,6 +1709,19 @@ void PSCALRuntimeSendInputForSession(uint64_t session_id, const char *utf8, size
     PSCALRuntimeEnqueueInput(PSCALRuntimeInputKindSession, session_id, -1, utf8, length);
 }
 
+void PSCALRuntimeSendInputUrgent(uint64_t session_id, const char *utf8, size_t length) {
+    if (!utf8 || length == 0 || session_id == 0) {
+        return;
+    }
+    ssize_t wrote = PSCALRuntimeWriteMasterNonBlocking(session_id, utf8, length);
+    if (wrote < 0 && PSCALRuntimeIODebugEnabled()) {
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] urgent input write failed session=%llu errno=%d\n",
+            (unsigned long long)session_id,
+            errno);
+    }
+}
+
 int PSCALRuntimeIsRunning(void) {
     pthread_mutex_lock(&s_runtime_mutex);
     const bool active = s_runtime_active;
@@ -1692,8 +1767,24 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
     }
 
     if (active && runtime_thread) {
-        pthread_kill(runtime_thread, SIGWINCH);
+        (void)pthread_kill(runtime_thread, SIGWINCH);
     }
+}
+
+int PSCALRuntimeSetTabTitle(const char *title) {
+    uint64_t session_id = PSCALRuntimeCurrentSessionId();
+    if (session_id == 0 || !title) {
+        return -1;
+    }
+    return (int)pscalRuntimeSetTabTitleForSession(session_id, title);
+}
+
+int PSCALRuntimeSetTabStartupCommand(const char *command) {
+    uint64_t session_id = PSCALRuntimeCurrentSessionId();
+    if (session_id == 0 || !command) {
+        return -1;
+    }
+    return (int)pscalRuntimeSetTabStartupCommandForSession(session_id, command);
 }
 
 void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int rows) {
@@ -1702,6 +1793,12 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
     }
     PSCALRuntimeContext *ctx = PSCALRuntimeContextForSession(session_id);
     if (!ctx) {
+        if (PSCALRuntimeIODebugEnabled()) {
+            PSCALRuntimeDebugLogf("[runtime-io] winsize session=%llu %dx%d (no ctx)\n",
+                                  (unsigned long long)session_id,
+                                  columns,
+                                  rows);
+        }
         (void)PSCALRuntimeSetSessionWinsize(session_id, columns, rows);
         return;
     }
@@ -1714,7 +1811,15 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
         if (s_runtime_thread_id) {
             pthread_t target = s_runtime_thread_id;
             pthread_mutex_unlock(&s_runtime_mutex);
-            pthread_kill(target, SIGWINCH);
+            if (PSCALRuntimeIODebugEnabled()) {
+                PSCALRuntimeDebugLogf("[runtime-io] winsize session=%llu %dx%d rc=%d signal tid=%llu\n",
+                                      (unsigned long long)session_id,
+                                      columns,
+                                      rows,
+                                      rc,
+                                      (unsigned long long)(uintptr_t)target);
+            }
+            (void)pthread_kill(target, SIGWINCH);
             PSCALRuntimeSetCurrentContext(prev_ctx);
             return;
         }
@@ -1723,6 +1828,15 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
         s_pending_session_columns = columns;
         s_pending_session_rows = rows;
         s_pending_session_winch = true;
+    }
+    if (PSCALRuntimeIODebugEnabled()) {
+        PSCALRuntimeDebugLogf("[runtime-io] winsize session=%llu %dx%d rc=%d tid=%llu pending_winch=%d\n",
+                              (unsigned long long)session_id,
+                              columns,
+                              rows,
+                              rc,
+                              (unsigned long long)(uintptr_t)s_runtime_thread_id,
+                              (int)s_pending_session_winch);
     }
     pthread_mutex_unlock(&s_runtime_mutex);
     PSCALRuntimeSetCurrentContext(prev_ctx);
@@ -1744,15 +1858,108 @@ char *pscalRuntimeCopyMarketingVersion(void) {
     }
 }
 
+int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo) {
+    if (session_id == 0) {
+        return 0;
+    }
+    int sig = 0;
+    switch (signo) {
+        case SIGINT:
+            sig = SIGINT;
+            break;
+        case SIGTSTP:
+            sig = SIGTSTP;
+            break;
+        case SIGTERM:
+            sig = SIGINT;
+            break;
+        default:
+            return 0;
+    }
+
+    if (vprocRequestControlSignalForSession(session_id, sig)) {
+        return 1;
+    }
+
+    /* Do not fall back to shell-scoped virtual dispatch here. If a
+     * session-targeted control request cannot be delivered, callers can choose
+     * literal control-byte fallback (required for remote/ssh semantics). */
+    return 0;
+}
+
 void PSCALRuntimeSendSignal(int signo) {
     pthread_mutex_lock(&s_runtime_mutex);
     bool active = s_runtime_active;
+    uint64_t session_id = s_runtime_session_id;
+    int shell_pid_hint = (s_runtime_stdio) ? s_runtime_stdio->shell_pid : 0;
     pthread_t target = s_runtime_thread_id;
     pthread_mutex_unlock(&s_runtime_mutex);
-    if (!active || target == 0) {
+    if (!active && session_id == 0 && shell_pid_hint <= 0) {
         return;
     }
-    pthread_kill(target, signo);
+    auto requestSignal = [&](int sig) -> bool {
+        if (shell_pid_hint > 0 && vprocRequestControlSignalForShell(shell_pid_hint, sig)) {
+            return true;
+        }
+        return vprocRequestControlSignal(sig);
+    };
+    auto softSignalingDisabled = [&]() -> bool {
+        const char *flag = getenv("PSCALI_DISABLE_SOFT_SIGNALING");
+        return flag && flag[0] != '\0' && strcmp(flag, "0") != 0;
+    };
+    switch (signo) {
+        case SIGINT:
+            if (session_id != 0) {
+                if (PSCALRuntimeSendSignalForSession(session_id, SIGINT)) {
+                    return;
+                }
+                if (softSignalingDisabled()) {
+                    return;
+                }
+                if (!requestSignal(SIGINT)) {
+                    pscalRuntimeRequestSigint();
+                }
+                return;
+            }
+            if (!requestSignal(SIGINT)) {
+                pscalRuntimeRequestSigint();
+            }
+            return;
+        case SIGTSTP:
+            if (session_id != 0) {
+                if (PSCALRuntimeSendSignalForSession(session_id, SIGTSTP)) {
+                    return;
+                }
+                if (softSignalingDisabled()) {
+                    return;
+                }
+                if (!requestSignal(SIGTSTP)) {
+                    pscalRuntimeRequestSigtstp();
+                }
+                return;
+            }
+            if (!requestSignal(SIGTSTP)) {
+                pscalRuntimeRequestSigtstp();
+            }
+            return;
+        case SIGTERM:
+            /* Runtime restarts should request a virtual interrupt instead of
+             * delivering host SIGTERM/SIGINT into the app process. */
+            if (session_id != 0 && PSCALRuntimeSendSignalForSession(session_id, SIGINT)) {
+                return;
+            }
+            if (!requestSignal(SIGINT)) {
+                pscalRuntimeRequestSigint();
+            }
+            return;
+        case SIGWINCH:
+            if (target != 0) {
+                (void)pthread_kill(target, SIGWINCH);
+            }
+            return;
+        default:
+            return;
+    }
 }
 
 void PSCALRuntimeApplyPathTruncation(const char *path) {
@@ -1769,6 +1976,10 @@ int PSCALRuntimeWriteLocationDevice(const char *utf8, size_t length) {
     }
     ssize_t res = vprocLocationDeviceWrite(utf8, length);
     return res < 0 ? -1 : (int)res;
+}
+
+void PSCALRuntimeRegisterLocationReaderObserver(PSCALLocationReaderObserver cb, void *context) {
+    vprocLocationDeviceRegisterReaderObserver(cb, context);
 }
 
 void *PSCALRuntimeCreateShellContext(void) {

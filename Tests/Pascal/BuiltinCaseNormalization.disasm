@@ -12,15 +12,15 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0020    6 CONST_1
 0021    | GET_GLOBAL          3 's' cache=0x0
 0031    | CALL_BUILTIN         8 'length' (1 args)
-0035    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0035    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0041    7 CONST_1
 0042    | GET_GLOBAL          3 's' cache=0x0
 0052    | CALL_BUILTIN         8 'length' (1 args)
-0056    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0056    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0062    8 CONST_1
 0063    | GET_GLOBAL          3 's' cache=0x0
 0073    | CALL_BUILTIN         8 'length' (1 args)
-0077    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0077    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0083    1 HALT
 == End Disassembly: Pascal/BuiltinCaseNormalization ==
 

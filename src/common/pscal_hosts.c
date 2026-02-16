@@ -76,8 +76,12 @@ static bool buildHostsPath(const char *root, char *out, size_t out_size) {
 static const char *pscalHostsPath(void) {
 #if defined(PSCAL_TARGET_IOS)
     static char path[PATH_MAX];
-    const char *candidates[5] = {0};
+    const char *candidates[7] = {0};
     size_t count = 0;
+    const char *etc_root = getenv("PSCALI_ETC_ROOT");
+    if (etc_root && *etc_root) {
+        candidates[count++] = etc_root;
+    }
     const char *env_root = getenv("PSCALI_CONTAINER_ROOT");
     if (env_root && *env_root) {
         candidates[count++] = env_root;
@@ -103,6 +107,11 @@ static const char *pscalHostsPath(void) {
                 candidates[count++] = tmp2;
             }
         }
+    }
+    // Last resort: workspace root + /etc
+    const char *ws = getenv("PSCALI_WORKSPACE_ROOT");
+    if (ws && *ws) {
+        candidates[count++] = ws;
     }
     for (size_t i = 0; i < count; ++i) {
         if (buildHostsPath(candidates[i], path, sizeof(path))) {

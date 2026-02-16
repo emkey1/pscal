@@ -1,5 +1,247 @@
-# Default exsh configuration
-# Custom prompt with colorised cwd and indicator glyph
-export PS1="\e[38;5;39mexsh\e[0m \e[1;35m\W\e[0m ⚡ "
+# ~/.exshrc - default interactive configuration for exsh
+#
+# This startup file is sourced by interactive exsh sessions.  It provides
+# sensible defaults while remaining easy to extend.  Copy it to your home
+# directory and adjust any sections that need to be customised.
 
-# Add additional aliases or environment tweaks below
+# Shortcut to get to home dir, make terminal size correct (when resize exists).
+cd
+if command -v resize >/dev/null 2>&1; then
+    resize >/dev/null 2>&1
+fi
+
+# ---------------------------------------------------------------------------
+# PATH management helpers
+# ---------------------------------------------------------------------------
+# Prepend a directory to PATH if it exists and is not already present.  The
+# function intentionally ignores missing directories so it can be called with
+# common locations on every startup.
+path_prepend() {
+    if [ $# -eq 0 ]; then
+        return 1
+    fi
+
+    local dir=$1
+    if [ -d "$dir" ]; then
+        case ":$PATH:" in
+            *":$dir:") ;;
+            *) PATH="$dir:$PATH" ;;
+        esac
+    fi
+}
+
+# Expose user-level executables first when available.
+path_prepend "$HOME/.local/bin"
+path_prepend "$HOME/bin"
+# iOS/iPadOS app bundle bin (mirrored into Documents/bin at launch)
+path_prepend "$HOME/bin"
+docroot="$(cd "$HOME/.." 2>/dev/null && pwd)"
+if [ -n "$docroot" ]; then
+    path_prepend "$docroot/bin"
+fi
+if [ -n "${PSCALI_CONTAINER_ROOT:-}" ]; then
+    path_prepend "${PSCALI_CONTAINER_ROOT}/Documents/bin"
+fi
+# Fallback to system bin if present in sandbox
+path_prepend "/bin"
+export PATH
+
+# ---------------------------------------------------------------------------
+# Environment defaults
+# ---------------------------------------------------------------------------
+# Pick a sensible editor for tools that honour $EDITOR.  Users who prefer a
+# different editor can override it before starting exsh or inside ~/.exshrc.local.
+if [ -z "${EDITOR:-}" ]; then
+    export EDITOR=vi
+fi
+
+# Edit to your preference
+#USER="user"  # Uncomment and change, or edit /etc/passwd for UID 501 to change
+HOST="iDevice"
+
+# Provide coloured prompts when attached to a terminal.  The prompt tokens are
+# the same as Bash's \u, \h, \W, \t, etc.  Non-interactive sessions keep the
+# minimal "exsh$" prompt so scripts are unaffected.
+if [ -t 1 ]; then
+    export PS1="\[\033[1;36m\][\t]\[\033[0m\] \[\033[1;32m\]$USER@$HOST \[\033[1;34m\]\W\[\033[0m\] ⚡ "
+else
+    export PS1="exsh$ "
+fi
+
+# Persist interactive history like Bash. Set HISTFILE/HISTSIZE/HISTFILESIZE
+# to control the file path and the number of entries kept in memory/on disk.
+if [ -z "${HISTFILE:-}" ]; then
+    export HISTFILE="$HOME/.exsh_history"
+fi
+if [ -z "${HISTSIZE:-}" ]; then
+    export HISTSIZE=1000
+fi
+if [ -z "${HISTFILESIZE:-}" ]; then
+    export HISTFILESIZE=2000
+fi
+export HISTAPPEND=1
+
+# Keep the terminal safe for pagers that consult $LESS.
+#if [ -z "${LESS:-}" ]; then
+#    export LESS=FRX
+#fi
+
+# ---------------------------------------------------------------------------
+# Handy aliases
+# ---------------------------------------------------------------------------
+# Quality-of-life aliases modelled after common Unix shells. Some
+# environments expose a slimmed-down `ls` (e.g. the iPad smallclue bundle),
+# so probe for the fancy flags before enabling them so `ls` keeps working.
+if [ -n "${PSCALI_CONTAINER_ROOT:-}" ]; then
+    alias ls='builtin ls'
+    alias ll='ls -al'
+    alias la='ls -a'
+    alias l='ls -l'
+else
+    _exshrc_ls_supports() {
+        if builtin ls "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        command ls "$@" >/dev/null 2>&1
+    }
+
+    if _exshrc_ls_supports --color=auto; then
+        alias ls='builtin ls --color=auto'
+    else
+        alias ls='builtin ls'
+    fi
+
+    if _exshrc_ls_supports -alF; then
+        alias ll='ls -alF'
+    else
+        alias ll='ls -al'
+    fi
+
+    if _exshrc_ls_supports -A; then
+        alias la='ls -A'
+    else
+        alias la='ls -a'
+    fi
+
+    if _exshrc_ls_supports -CF; then
+        alias l='ls -CF'
+    else
+        alias l='ls -l'
+    fi
+
+    unset -f _exshrc_ls_supports
+fi
+
+alias grep='grep --color=auto'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias reload='. ~/.exshrc'
+alias hist='history'
+
+alias reset='stty reset'
+
+alias man='smallclue-elp'
+alias host='nslookup'
+
+# ---------------------------------------------------------------------------
+# Thread pool tuning & metrics
+# ---------------------------------------------------------------------------
+# Clamp the shared worker pool by exporting PSCALSHELL_THREAD_POOL_SIZE before
+# launching exsh. The VM honours integers between 1 and its compile-time cap.
+#
+# Example:
+#   export PSCALSHELL_THREAD_POOL_SIZE=8
+#
+# The helpers below make it easy to inspect `ThreadStats` output while working
+# interactively. Set PSCALSHELL_THREAD_METRICS=1 to print a snapshot at login.
+threadpool_report() {
+    # Minimal fallback that avoids external dependencies on iOS.
+    # Prints raw worker JSON if pretty-print tooling (python3) is absent.
+    if command -v python3 >/dev/null 2>&1; then
+        builtin ThreadStatsJson | python3 - <<'PY'
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    sys.stderr.write(f"threadstats: failed to parse JSON: {e}\n")
+    sys.exit(1)
+print("id\tgen\tname\tactive\tready\tstatus")
+for t in data:
+    print(f"{t.get('id')}\t{t.get('pool_generation', 0)}\t{t.get('name','')}"
+          f"\t{bool(t.get('active'))}\t{bool(t.get('ready_for_reuse'))}\t{bool(t.get('status_success'))}")
+PY
+    else
+        echo "threadpool_report: python3 not available; showing raw JSON"
+        builtin ThreadStatsJson
+    fi
+}
+
+alias threadpool='threadpool_report'
+alias ps-threads='builtin ps-threads'
+
+if [ "${PSCALSHELL_THREAD_METRICS:-0}" != "0" ]; then
+    echo "[exsh] worker pool snapshot"
+    threadpool_report
+fi
+
+# ---------------------------------------------------------------------------
+# Convenience functions
+# ---------------------------------------------------------------------------
+# Create a directory (and parents) before changing into it.
+mkcd() {
+    if [ $# -eq 0 ]; then
+        echo "mkcd: missing directory name" >&2
+        return 1
+    fi
+
+    local target=$1
+    mkdir -p "$target" && cd "$target"
+}
+
+# Wrapper around the PSCAL builtin bridge that prints a short usage hint when
+# called without arguments.  When a builtin succeeds its exit status is exposed
+# through PSCALSHELL_LAST_STATUS, mirroring standard command behaviour.
+psbuiltin() {
+    if [ $# -eq 0 ]; then
+        echo "usage: psbuiltin <BuiltinName> [args...]" >&2
+        return 1
+    fi
+
+    builtin "$@"
+    return ${PSCALSHELL_LAST_STATUS:-0}
+}
+
+# Summarise the most recent PSCAL/VM exit status in human-readable form.
+psstatus() {
+    echo "PSCALSHELL_LAST_STATUS=${PSCALSHELL_LAST_STATUS:-0}"
+}
+
+# Quickly dump the available shell and VM builtins when the standalone exsh
+# binary is on PATH.  This is helpful when exploring the VM catalogue.
+if [ -n "${PATH:-}" ]; then
+    _exshrc_old_ifs=$IFS
+    IFS=:
+    for _exshrc_dir in $PATH; do
+        [ -n "$_exshrc_dir" ] || _exshrc_dir=.
+        if [ -x "$_exshrc_dir/exsh" ]; then
+            alias dump-builtins='exsh --dump-ext-builtins'
+            break
+        fi
+    done
+    IFS=$_exshrc_old_ifs
+    unset _exshrc_dir _exshrc_old_ifs
+fi
+
+# Allow per-machine customisations without modifying this file.  If present,
+# ~/.exshrc.local is sourced at the end so users can extend or override any of
+# the defaults above.
+if [ -r "$HOME/.exshrc.local" ]; then
+    . "$HOME/.exshrc.local"
+fi
+
+# alias ssh='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+# Enable saving history
+export HISTFILE="$HOME/.ex_history"
+export HISTSIZE=1000
+export HISTFILESIZE=2000

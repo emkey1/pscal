@@ -58,6 +58,10 @@ final class ShellRuntimeSession: ObservableObject {
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
     private let minRenderInterval: TimeInterval = 0.03
+    private var detachedOutputChunks: [Data] = []
+    private var detachedOutputHead: Int = 0
+    private var detachedOutputBytes: Int = 0
+    private let detachedOutputMaxBytes: Int = 2 * 1024 * 1024
     private var started = false
     private var didExit = false
     private var pendingColumns: Int
@@ -115,6 +119,13 @@ final class ShellRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach shell session=\(self.sessionId)")
             self.htermAttached = true
+            self.withRuntimeContext {
+                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 0)
+            }
+            self.flushDetachedOutputIfNeeded()
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(self.sessionId)
+            }
         }
     }
 
@@ -125,6 +136,12 @@ final class ShellRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach shell session=\(self.sessionId)")
             self.htermAttached = false
+            self.withRuntimeContext {
+                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 1)
+            }
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(0)
+            }
         }
     }
 
@@ -143,6 +160,7 @@ final class ShellRuntimeSession: ObservableObject {
         handlerContext = Unmanaged.passRetained(self).toOpaque()
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
+            PSCALRuntimeSetSessionOutputPaused(sessionId, htermAttached ? 0 : 1)
         }
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
@@ -182,6 +200,24 @@ final class ShellRuntimeSession: ObservableObject {
         sendData(text.data(using: .utf8) ?? Data())
     }
 
+    func sendInterrupt() {
+        let delivered = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
+        }
+        if !delivered {
+            send("\u{03}")
+        }
+    }
+
+    func sendSuspend() {
+        let delivered = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGTSTP) != 0
+        }
+        if !delivered {
+            send("\u{1A}")
+        }
+    }
+
     func sendPasted(_ text: String) {
         guard !text.isEmpty else { return }
         let wrapped: String
@@ -204,6 +240,9 @@ final class ShellRuntimeSession: ObservableObject {
         pendingRows = clampedRows
         if terminalBuffer.resize(columns: clampedColumns, rows: clampedRows) {
             scheduleRender()
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
         }
         withRuntimeContext {
             PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(clampedColumns), Int32(clampedRows))
@@ -258,7 +297,7 @@ final class ShellRuntimeSession: ObservableObject {
         if timeSinceLast < minRenderInterval {
             renderQueued = true
             let delay = minRenderInterval - timeSinceLast
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { [weak self] in
                 self?.performRender()
             }
         } else {
@@ -312,9 +351,60 @@ final class ShellRuntimeSession: ObservableObject {
         let data = Data(bytes: buffer, count: length)
         outputQueue.async { [weak self] in
             guard let self else { return }
-            self.htermController.enqueueOutput(data)
-            self.terminalBuffer.append(data: data)
+            if self.htermAttached {
+                self.flushDetachedOutputIfNeeded()
+                self.htermController.enqueueOutput(data)
+                self.terminalBuffer.append(data: data)
+            } else {
+                self.queueDetachedOutput(data)
+            }
         }
+    }
+
+    private func queueDetachedOutput(_ data: Data) {
+        guard !data.isEmpty else { return }
+        guard detachedOutputMaxBytes > 0 else { return }
+        if data.count >= detachedOutputMaxBytes {
+            let tail = data.suffix(detachedOutputMaxBytes)
+            detachedOutputChunks = [Data(tail)]
+            detachedOutputHead = 0
+            detachedOutputBytes = tail.count
+            return
+        }
+
+        detachedOutputChunks.append(data)
+        detachedOutputBytes += data.count
+        while detachedOutputBytes > detachedOutputMaxBytes && detachedOutputHead < detachedOutputChunks.count {
+            detachedOutputBytes -= detachedOutputChunks[detachedOutputHead].count
+            detachedOutputHead += 1
+        }
+        if detachedOutputHead > 64 && detachedOutputHead > detachedOutputChunks.count / 2 {
+            detachedOutputChunks.removeFirst(detachedOutputHead)
+            detachedOutputHead = 0
+        }
+    }
+
+    private func flushDetachedOutputIfNeeded() {
+        guard htermAttached else { return }
+        guard detachedOutputHead < detachedOutputChunks.count else {
+            detachedOutputChunks.removeAll(keepingCapacity: true)
+            detachedOutputHead = 0
+            detachedOutputBytes = 0
+            return
+        }
+
+        let slice = detachedOutputChunks[detachedOutputHead...]
+        var merged = Data()
+        merged.reserveCapacity(detachedOutputBytes)
+        for chunk in slice {
+            merged.append(chunk)
+        }
+        detachedOutputChunks.removeAll(keepingCapacity: true)
+        detachedOutputHead = 0
+        detachedOutputBytes = 0
+        guard !merged.isEmpty else { return }
+        htermController.enqueueOutput(merged)
+        terminalBuffer.append(data: merged)
     }
 
     private func launchShellSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {

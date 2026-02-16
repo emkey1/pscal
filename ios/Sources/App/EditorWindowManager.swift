@@ -178,6 +178,12 @@ class PscalAppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        _ = launchOptions
+        return true
+    }
+
+    func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         let config = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
@@ -203,6 +209,7 @@ class PscalAppDelegate: NSObject, UIApplicationDelegate {
 @objc(MainSceneDelegate)
 class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
+    private static var didPrimeTabs = false
 
     func scene(_ scene: UIScene,
                willConnectTo session: UISceneSession,
@@ -220,11 +227,27 @@ class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
 
         EditorWindowManager.shared.mainSceneDidConnect(session: windowScene.session)
+        primeInitialTabsIfNeeded()
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
         EditorWindowManager.shared.mainSceneDidDisconnect(session: scene.session)
         window = nil
+    }
+
+    private func primeInitialTabsIfNeeded() {
+        guard !Self.didPrimeTabs else { return }
+        Self.didPrimeTabs = true
+        let manager = TerminalTabManager.shared
+        let desired = TerminalFontSettings.clampInitialTabCount(TerminalFontSettings.shared.initialTabCount)
+        guard desired > 1 else { return }
+
+        // Open additional tabs (beyond the existing first tab).
+        for _ in 2...desired {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                _ = manager.openShellTab(restoreProfileDefaults: true)
+            }
+        }
     }
 }
 

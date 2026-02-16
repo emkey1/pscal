@@ -18,9 +18,14 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <pwd.h>
 #if defined(PSCAL_TARGET_IOS)
 #include <dlfcn.h>
 #endif
+
+void shellHistoryConfigurePersistenceFromEnv(void);
+void shellHistoryLoadFromFile(void);
+
 #include "shell/parser.h"
 #include "shell/semantics.h"
 #include "shell/codegen.h"
@@ -75,9 +80,25 @@ static _Thread_local volatile sig_atomic_t gInteractiveHasOldSigint = 0;
 static _Thread_local struct sigaction gInteractiveOldSigtstpAction;
 static _Thread_local volatile sig_atomic_t gInteractiveHasOldSigtstp = 0;
 static _Thread_local bool gInteractiveLineDrawn = false;
+
+static void shellSetPromptReadActive(bool active) {
+#if defined(PSCAL_TARGET_IOS)
+    int pid = vprocGetPidShim();
+    if (pid <= 0) {
+        pid = vprocGetShellSelfPid();
+    }
+    if (pid > 0) {
+        vprocSetShellPromptReadActive(pid, active);
+    }
+#else
+    (void)active;
+#endif
+}
+
 #if defined(PSCAL_TARGET_IOS)
 static _Thread_local VProc *gShellSelfVproc = NULL;
 static _Thread_local bool gShellSelfVprocActivated = false;
+static void shellNotifyPromptReady(void);
 static void shellDebugLog(const char *message) {
     if (!message || message[0] == '\0') {
         return;
@@ -272,7 +293,13 @@ static void shellTeardownSelfVproc(int status) {
         vprocDeactivate();
         gShellSelfVprocActivated = false;
     }
+    int shell_pid = vprocPid(gShellSelfVproc);
     vprocMarkExit(gShellSelfVproc, status);
+    if (shell_pid > 0) {
+        /* The interactive shell has no external waiter; retire its synthetic
+         * task entry eagerly so stale parent/sid state does not linger. */
+        vprocDiscard(shell_pid);
+    }
     vprocDestroy(gShellSelfVproc);
     gShellSelfVproc = NULL;
     if (session_stdio) {
@@ -619,6 +646,12 @@ static void interactiveSigintHandler(int signo) {
     interactiveRestoreSigintHandler();
     interactiveRestoreSigtstpHandler();
     interactiveRestoreTerminal();
+#if defined(PSCAL_TARGET_IOS)
+    if (signo == SIGINT) {
+        pscalRuntimeRequestSigint();
+        return;
+    }
+#endif
     raise(signo);
 }
 
@@ -1033,6 +1066,10 @@ static bool promptBufferAppendWorkingDir(char **buffer,
     return promptBufferAppendString(buffer, length, capacity, segment);
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static int shellLookupUserNameFromContainerPasswd(uid_t uid, char *out, size_t out_len);
+#endif
+
 static char *shellFormatPrompt(const char *input) {
     if (!input) {
         return NULL;
@@ -1145,9 +1182,31 @@ static char *shellFormatPrompt(const char *input) {
                 }
                 break;
             case 'u': {
-                const char *user = getenv("USER");
+                const char *user = NULL;
+#if defined(PSCAL_TARGET_IOS)
+                char user_buf[128];
+                if (shellLookupUserNameFromContainerPasswd(getuid(), user_buf, sizeof(user_buf)) == 0 &&
+                    user_buf[0] != '\0') {
+                    user = user_buf;
+                } else if (vprocLookupPasswdName(getuid(), user_buf, sizeof(user_buf)) == 0 &&
+                    user_buf[0] != '\0') {
+                    user = user_buf;
+                }
+#endif
+                if (!user || !*user) {
+                    struct passwd *pw = getpwuid(getuid());
+                    if (pw && pw->pw_name && *pw->pw_name) {
+                        user = pw->pw_name;
+                    }
+                }
+                if (!user || !*user) {
+                    user = getenv("USER");
+                }
                 if (!user || !*user) {
                     user = getenv("USERNAME");
+                }
+                if (!user || !*user) {
+                    user = getenv("LOGNAME");
                 }
                 if (user && *user) {
                     if (!promptBufferAppendString(&buffer, &length, &capacity, user)) {
@@ -1266,6 +1325,117 @@ static char *shellResolveInteractivePrompt(void) {
         return formatted;
     }
     return strdup(env_prompt);
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static const char *shellResolveEtcFilePath(const char *leaf, char *buf, size_t buf_len) {
+    if (!leaf || !buf || buf_len == 0) {
+        return NULL;
+    }
+    const char *direct = getenv("PSCALI_ETC_ROOT");
+    if (direct && direct[0] == '/' &&
+        snprintf(buf, buf_len, "%s/%s", direct, leaf) < (int)buf_len &&
+        access(buf, R_OK) == 0) {
+        return buf;
+    }
+
+    const char *container = getenv("PSCALI_CONTAINER_ROOT");
+    const char *home = getenv("HOME");
+    const char *roots[][3] = {
+        { container, "Documents/etc", leaf },
+        { container, "etc", leaf },
+        { home, "Documents/etc", leaf },
+        { home, "etc", leaf },
+    };
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        const char *base = roots[i][0];
+        const char *sub = roots[i][1];
+        if (!base || base[0] != '/') {
+            continue;
+        }
+        if (snprintf(buf, buf_len, "%s/%s/%s", base, sub, leaf) >= (int)buf_len) {
+            continue;
+        }
+        if (access(buf, R_OK) == 0) {
+            return buf;
+        }
+    }
+    return NULL;
+}
+
+static int shellLookupUserNameFromContainerPasswd(uid_t uid, char *out, size_t out_len) {
+    if (!out || out_len == 0) {
+        return -1;
+    }
+    out[0] = '\0';
+
+    char path[PATH_MAX];
+    const char *passwd_path = shellResolveEtcFilePath("passwd", path, sizeof(path));
+    if (!passwd_path) {
+        return -1;
+    }
+    FILE *fp = fopen(passwd_path, "r");
+    if (!fp) {
+        return -1;
+    }
+
+    int found = -1;
+    char *line = NULL;
+    size_t cap = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') {
+            continue;
+        }
+        char *saveptr = NULL;
+        char *tok_name = strtok_r(line, ":\n", &saveptr);
+        (void)strtok_r(NULL, ":\n", &saveptr); /* passwd */
+        char *tok_uid = strtok_r(NULL, ":\n", &saveptr);
+        if (!tok_name || !tok_uid) {
+            continue;
+        }
+        uid_t row_uid = (uid_t)strtoul(tok_uid, NULL, 10);
+        if (row_uid != uid) {
+            continue;
+        }
+        size_t name_len = strlen(tok_name);
+        if (name_len < out_len) {
+            memcpy(out, tok_name, name_len + 1);
+            found = 0;
+            break;
+        }
+    }
+
+    free(line);
+    fclose(fp);
+    return found;
+}
+#endif
+
+static void shellSyncIdentityEnvFromPasswd(void) {
+    uid_t uid = getuid();
+    const char *name = NULL;
+#if defined(PSCAL_TARGET_IOS)
+    char name_buf[128];
+    if (shellLookupUserNameFromContainerPasswd(uid, name_buf, sizeof(name_buf)) == 0 &&
+        name_buf[0] != '\0') {
+        name = name_buf;
+    } else if (vprocLookupPasswdName(uid, name_buf, sizeof(name_buf)) == 0 &&
+        name_buf[0] != '\0') {
+        name = name_buf;
+    }
+#endif
+    if (!name || !*name) {
+        struct passwd *pw = getpwuid(uid);
+        if (pw && pw->pw_name && *pw->pw_name) {
+            name = pw->pw_name;
+        }
+    }
+    if (!name || !*name) {
+        return;
+    }
+    setenv("USER", name, 1);
+    setenv("LOGNAME", name, 1);
+    setenv("USERNAME", name, 1);
 }
 
 static size_t shellPromptLineBreakCount(const char *prompt) {
@@ -2731,7 +2901,11 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         raw_termios = original_termios;
+#if defined(PSCAL_TARGET_IOS)
+        raw_termios.c_lflag &= ~(ICANON | ECHO | ISIG);
+#else
         raw_termios.c_lflag &= ~(ICANON | ECHO);
+#endif
         raw_termios.c_cc[VMIN] = 1;
         raw_termios.c_cc[VTIME] = 0;
         gInteractiveOriginalTermios = original_termios;
@@ -2811,10 +2985,14 @@ static char *readInteractiveLine(const char *prompt,
                           cursor,
                           &displayed_length,
                           &displayed_prompt_lines);
+#if defined(PSCAL_TARGET_IOS)
+    shellNotifyPromptReady();
+#endif
 
     bool done = false;
     bool eof_requested = false;
 
+    shellSetPromptReadActive(true);
     while (!done) {
         unsigned char ch = 0;
         ssize_t read_count = shellReadFd(STDIN_FILENO, &ch, 1);
@@ -2833,6 +3011,10 @@ static char *readInteractiveLine(const char *prompt,
         if (read_count == 0) {
             eof_requested = true;
             break;
+        }
+
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-read] ch=%d\\n", (int)ch);
         }
 
         if (ch == '\r' || ch == '\n') {
@@ -2872,8 +3054,8 @@ static char *readInteractiveLine(const char *prompt,
             alt_dot_offset = 0;
             shellWriteStdoutStr("^C\n");
 #if defined(PSCAL_TARGET_IOS)
-            raise(SIGINT);
-            shellRuntimeProcessPendingSignals();
+            /* Never raise host SIGINT on iOS; it can hit app threads. */
+            shellRuntimeSetLastStatus(128 + SIGINT);
 #endif
             length = 0;
             cursor = 0;
@@ -2888,14 +3070,13 @@ static char *readInteractiveLine(const char *prompt,
 
         if (ch == 26) { /* Ctrl-Z */
 #if defined(PSCAL_TARGET_IOS)
-            /* On iOS, deliver SIGTSTP to the running builtin/VM and reset the prompt. */
+            /* At the prompt, treat Ctrl-Z as a logical shell event only.
+             * Foreground job suspend while commands run is handled by the
+             * session input reader via vproc job-control dispatch. */
             alt_dot_active = false;
             alt_dot_offset = 0;
             shellWriteStdoutStr("^Z\n");
-            raise(SIGTSTP);
-#if defined(PSCAL_TARGET_IOS)
-            shellRuntimeProcessPendingSignals();
-#endif
+            shellRuntimeSetLastStatus(128 + SIGTSTP);
             length = 0;
             cursor = 0;
             buffer[0] = '\0';
@@ -3595,12 +3776,22 @@ static char *readInteractiveLine(const char *prompt,
         history_index = 0;
         interactiveUpdateScratch(&scratch, buffer, length);
     }
+    shellSetPromptReadActive(false);
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[prompt-read] loop-exit done=%d eof=%d len=%zu\n", (int)done, (int)eof_requested, length);
+    }
 
     if (installed_sigint_handler) {
         interactiveRestoreSigintHandler();
     }
     interactiveRestoreSigtstpHandler();
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[prompt-read] restoring-termios\n");
+    }
     interactiveRestoreTerminal();
+    if (getenv("PSCALI_PROMPT_DEBUG")) {
+        fprintf(stderr, "[prompt-read] restored-termios\n");
+    }
     free(scratch);
     free(kill_buffer);
 
@@ -3640,6 +3831,8 @@ static int runInteractiveSession(const ShellRunOptions *options) {
     if (force_no_tty && *force_no_tty && force_no_tty[0] != '0') {
         tty = false;
     }
+    shellHistoryConfigurePersistenceFromEnv();
+    shellHistoryLoadFromFile();
 
     while (true) {
 #if defined(PSCAL_TARGET_IOS)
@@ -3695,6 +3888,9 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         } else {
             read = (ssize_t)strlen(line);
         }
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-loop] line-read bytes=%zd text='%s'\n", read, line ? line : "(null)");
+        }
         free(prompt_storage);
         bool only_whitespace = true;
         for (ssize_t i = 0; i < read; ++i) {
@@ -3730,6 +3926,9 @@ static int runInteractiveSession(const ShellRunOptions *options) {
         }
         free(line);
         line = expanded_line;
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-loop] post-history line='%s'\n", line ? line : "(null)");
+        }
 
         char *rewritten_line = interactiveRewriteCombinedRedirects(line);
         if (!rewritten_line) {
@@ -3746,9 +3945,34 @@ static int runInteractiveSession(const ShellRunOptions *options) {
             free(line);
             continue;
         }
+        if (getenv("PSCALI_PROMPT_DEBUG")) {
+            fprintf(stderr, "[prompt-loop] running line='%s'\n", expanded_tilde);
+        }
         shellRuntimeRecordHistory(line);
         bool exit_requested = false;
+#if defined(PSCAL_TARGET_IOS)
+        struct termios runtime_original_termios;
+        bool runtime_isig_disabled = false;
+        if (tty && pscalRuntimeStdinHasRealTTY() &&
+            shellTcgetattr(STDIN_FILENO, &runtime_original_termios) == 0) {
+            struct termios runtime_termios = runtime_original_termios;
+            /* Keep command execution input byte-oriented so Ctrl-C/Z are
+             * observed immediately by the session input reader rather than
+             * line-buffered until newline in canonical mode. */
+            runtime_termios.c_lflag &= ~(ICANON | ECHO | ISIG);
+            runtime_termios.c_cc[VMIN] = 1;
+            runtime_termios.c_cc[VTIME] = 0;
+            if (shellTcsetattr(STDIN_FILENO, TCSANOW, &runtime_termios) == 0) {
+                runtime_isig_disabled = true;
+            }
+        }
+#endif
         last_status = shellRunSource(expanded_tilde, "<stdin>", &exec_opts, &exit_requested);
+#if defined(PSCAL_TARGET_IOS)
+        if (runtime_isig_disabled) {
+            (void)shellTcsetattr(STDIN_FILENO, TCSANOW, &runtime_original_termios);
+        }
+#endif
         free(expanded_tilde);
         free(line);
         if (exit_requested) {
@@ -3918,6 +4142,7 @@ int exsh_main(int argc, char **argv) {
         EXSH_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
     }
 
+    shellSyncIdentityEnvFromPasswd();
     setenv("EXSH_LAST_STATUS", "0", 1);
     shellRuntimeInitSignals();
 
@@ -4024,6 +4249,7 @@ typedef struct {
 
 extern void pscalRuntimeShellSessionExited(uint64_t session_id, int status) __attribute__((weak));
 extern void pscalRuntimeKernelSessionExited(uint64_t session_id, int status) __attribute__((weak));
+extern int32_t pscalRuntimePromptReadyForSession(uint64_t session_id) __attribute__((weak));
 extern void pscalRuntimeRegisterShellThread(uint64_t session_id, pthread_t tid) __attribute__((weak));
 extern ShellRuntimeState *pscalRuntimeShellContextForSession(uint64_t session_id) __attribute__((weak));
 extern void PSCALRuntimeRegisterSessionContext(uint64_t session_id) __attribute__((weak));
@@ -4039,6 +4265,17 @@ static void shellSessionNotifyExit(uint64_t session_id, int status) {
     if (pscalRuntimeKernelSessionExited) {
         pscalRuntimeKernelSessionExited(session_id, status);
     }
+}
+
+static void shellNotifyPromptReady(void) {
+    if (!pscalRuntimePromptReadyForSession) {
+        return;
+    }
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (!session_stdio || session_stdio->session_id == 0) {
+        return;
+    }
+    (void)pscalRuntimePromptReadyForSession(session_stdio->session_id);
 }
 
 static char **shellCopyArgv(int argc, char **argv) {

@@ -58,6 +58,10 @@ final class SshRuntimeSession: ObservableObject {
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
     private let minRenderInterval: TimeInterval = 0.03
+    private var detachedOutputChunks: [Data] = []
+    private var detachedOutputHead: Int = 0
+    private var detachedOutputBytes: Int = 0
+    private let detachedOutputMaxBytes: Int = 2 * 1024 * 1024
     private var started = false
     private var didExit = false
     private var pendingColumns: Int
@@ -115,6 +119,13 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach ssh session=\(self.sessionId)")
             self.htermAttached = true
+            self.withRuntimeContext {
+                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 0)
+            }
+            self.flushDetachedOutputIfNeeded()
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(self.sessionId)
+            }
         }
     }
 
@@ -125,6 +136,12 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach ssh session=\(self.sessionId)")
             self.htermAttached = false
+            self.withRuntimeContext {
+                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 1)
+            }
+            DispatchQueue.main.async {
+                controller.setResizeSessionId(0)
+            }
         }
     }
 
@@ -144,6 +161,7 @@ final class SshRuntimeSession: ObservableObject {
         handlerContext = Unmanaged.passRetained(self).toOpaque()
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
+            PSCALRuntimeSetSessionOutputPaused(sessionId, htermAttached ? 0 : 1)
         }
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
@@ -174,6 +192,7 @@ final class SshRuntimeSession: ObservableObject {
             }
         }
         lastStartErrno = 0
+        applyPendingWinsize()
         closeIfValid(readFd)
         closeIfValid(writeFd)
         return true
@@ -202,13 +221,18 @@ final class SshRuntimeSession: ObservableObject {
     func updateTerminalSize(columns: Int, rows: Int) {
         let clampedColumns = max(10, columns)
         let clampedRows = max(4, rows)
+        sshResizeLog("[ssh-resize] session update id=\(sessionId) req=\(columns)x\(rows) clamped=\(clampedColumns)x\(clampedRows)")
         pendingColumns = clampedColumns
         pendingRows = clampedRows
         if terminalBuffer.resize(columns: clampedColumns, rows: clampedRows) {
             scheduleRender()
         }
+        DispatchQueue.main.async { [weak self] in
+            sshResizeLog("[ssh-resize] session force-grid id=\(self?.sessionId ?? 0) cols=\(clampedColumns) rows=\(clampedRows)")
+            self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
+        }
         withRuntimeContext {
-            _ = PSCALRuntimeSetSessionWinsize(sessionId, Int32(clampedColumns), Int32(clampedRows))
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(clampedColumns), Int32(clampedRows))
         }
     }
 
@@ -300,14 +324,75 @@ final class SshRuntimeSession: ObservableObject {
         }
     }
 
+    private func applyPendingWinsize() {
+        let cols = pendingColumns
+        let rows = pendingRows
+        guard cols > 0, rows > 0 else { return }
+        sshResizeLog("[ssh-resize] session apply-pending id=\(sessionId) cols=\(cols) rows=\(rows)")
+        withRuntimeContext {
+            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(cols), Int32(rows))
+        }
+    }
+
     private func consumeOutput(buffer: UnsafePointer<CChar>, length: Int) {
         guard length > 0 else { return }
         let data = Data(bytes: buffer, count: length)
         outputQueue.async { [weak self] in
             guard let self else { return }
-            self.htermController.enqueueOutput(data)
-            self.terminalBuffer.append(data: data)
+            if self.htermAttached {
+                self.flushDetachedOutputIfNeeded()
+                self.htermController.enqueueOutput(data)
+                self.terminalBuffer.append(data: data)
+            } else {
+                self.queueDetachedOutput(data)
+            }
         }
+    }
+
+    private func queueDetachedOutput(_ data: Data) {
+        guard !data.isEmpty else { return }
+        guard detachedOutputMaxBytes > 0 else { return }
+        if data.count >= detachedOutputMaxBytes {
+            let tail = data.suffix(detachedOutputMaxBytes)
+            detachedOutputChunks = [Data(tail)]
+            detachedOutputHead = 0
+            detachedOutputBytes = tail.count
+            return
+        }
+
+        detachedOutputChunks.append(data)
+        detachedOutputBytes += data.count
+        while detachedOutputBytes > detachedOutputMaxBytes && detachedOutputHead < detachedOutputChunks.count {
+            detachedOutputBytes -= detachedOutputChunks[detachedOutputHead].count
+            detachedOutputHead += 1
+        }
+        if detachedOutputHead > 64 && detachedOutputHead > detachedOutputChunks.count / 2 {
+            detachedOutputChunks.removeFirst(detachedOutputHead)
+            detachedOutputHead = 0
+        }
+    }
+
+    private func flushDetachedOutputIfNeeded() {
+        guard htermAttached else { return }
+        guard detachedOutputHead < detachedOutputChunks.count else {
+            detachedOutputChunks.removeAll(keepingCapacity: true)
+            detachedOutputHead = 0
+            detachedOutputBytes = 0
+            return
+        }
+
+        let slice = detachedOutputChunks[detachedOutputHead...]
+        var merged = Data()
+        merged.reserveCapacity(detachedOutputBytes)
+        for chunk in slice {
+            merged.append(chunk)
+        }
+        detachedOutputChunks.removeAll(keepingCapacity: true)
+        detachedOutputHead = 0
+        detachedOutputBytes = 0
+        guard !merged.isEmpty else { return }
+        htermController.enqueueOutput(merged)
+        terminalBuffer.append(data: merged)
     }
 
     private func launchSshSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {

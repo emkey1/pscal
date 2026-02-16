@@ -52,6 +52,7 @@
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
+#include "common/path_virtualization.h"
 
 static void initSymbolSystem(void) {
     globalSymbols = createHashTable();
@@ -282,6 +283,10 @@ static void collectUsesClauses(AST* node, List* out) {
 }
 
 int rea_main(int argc, char **argv) {
+    /* Always start from a clean slate in case a prior in-process run aborted
+     * early (e.g., exit()/halt during startup). */
+    reaInvalidateGlobalState();
+
     /* Skip process-wide fd redirection on iOS; background jobs share descriptors with the shell. */
 #if !defined(PSCAL_TARGET_IOS)
     const char *stdout_path = getenv("PSCALI_BG_STDOUT");
@@ -355,7 +360,7 @@ int rea_main(int argc, char **argv) {
         if (strcmp(argv[argi], "-h") == 0 || strcmp(argv[argi], "--help") == 0) {
             printf("%s", REA_USAGE);
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
-        } else if (strcmp(argv[argi], "-v") == 0) {
+        } else if (strcmp(argv[argi], "-v") == 0 || strcmp(argv[argi], "--version") == 0) {
             printf("Rea Compiler Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
@@ -436,6 +441,8 @@ int rea_main(int argc, char **argv) {
     gUppercaseBooleans = 0;
     registerAllBuiltins();
     reaRegisterThreadBuiltins();
+    /* memory stream helpers */
+    registerBuiltinFunction("mstreamappendbyte", AST_FUNCTION_DECL, NULL);
     /* C-like style cast helpers */
     registerBuiltinFunction("int", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("double", AST_FUNCTION_DECL, NULL);

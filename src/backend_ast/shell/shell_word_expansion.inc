@@ -7,6 +7,11 @@
 #define stdout shellVprocStdout()
 #define stderr shellVprocStderr()
 #endif
+#if !defined(PSCAL_TAB_TITLE_SUPPORT)
+#if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
+#define PSCAL_TAB_TITLE_SUPPORT 1
+#endif
+#endif
 
 static char *shellExpandWord(const char *text,
                              uint8_t flags,
@@ -1766,7 +1771,7 @@ static void shellUpdateStatus(int status) {
  * async-signal-safe manner and reconcile them once we're back in the main
  * interpreter loop so the runtime can unwind cleanly before honouring traps.
  */
-static void shellHandlePendingSignal(int signo) {
+static void shellHandleSignalCommon(int signo, bool from_status) {
     if (signo <= 0 || signo >= NSIG) {
         return;
     }
@@ -1783,7 +1788,11 @@ static void shellHandlePendingSignal(int signo) {
     }
 
     if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
-        bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled;
+        bool stop_request = (signo == SIGTSTP) && gShellRuntime.job_control_enabled && shellJobControlSupportsStops();
+        bool dispatched = false;
+        if (!from_status && (signo == SIGINT || stop_request)) {
+            dispatched = shellJobControlDispatchForegroundSignal(signo);
+        }
         if (gShellCurrentVm && !stop_request) {
             gShellCurrentVm->exit_requested = true;
             gShellCurrentVm->current_builtin_name = "signal";
@@ -1801,10 +1810,11 @@ static void shellHandlePendingSignal(int signo) {
 
         bool propagate_default =
             (gShellExitOnSignalFlag && (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) &&
-             !gShellRuntime.trap_enabled && !command_trap);
+             !gShellRuntime.trap_enabled && !command_trap && !dispatched && !from_status);
 #if defined(PSCAL_TARGET_IOS)
-        if (signo == SIGTSTP) {
-            /* Never let SIGTSTP stop the host app; handle it logically instead. */
+        if (signo == SIGINT || signo == SIGQUIT || signo == SIGTSTP) {
+            /* iOS job control is virtualized through vproc; never forward
+             * default signal disposition to the host process. */
             propagate_default = false;
         }
 #endif
@@ -1848,6 +1858,14 @@ static void shellHandlePendingSignal(int signo) {
             shellLoopRequestBreakLevels((int)gShellLoopStackSize);
         }
     }
+}
+
+static void shellHandlePendingSignal(int signo) {
+    shellHandleSignalCommon(signo, false);
+}
+
+static void shellHandleStatusSignal(int signo) {
+    shellHandleSignalCommon(signo, true);
 }
 
 void shellRuntimeProcessPendingSignals(void) {
@@ -1900,6 +1918,194 @@ static bool shellHistoryEnsureCapacity(size_t needed) {
     return true;
 }
 
+static bool shellHistoryPersistenceEnabled(void) {
+    return gShellRuntime.history_persist_enabled &&
+           gShellRuntime.history_path &&
+           gShellRuntime.history_path[0] != '\0';
+}
+
+static void shellHistoryTrimMemoryLimit(void) {
+    if (gShellRuntime.history_size_limit == 0) {
+        return;
+    }
+    if (gShellHistory.count <= gShellRuntime.history_size_limit) {
+        return;
+    }
+    size_t excess = gShellHistory.count - gShellRuntime.history_size_limit;
+    for (size_t i = 0; i < excess; ++i) {
+        free(gShellHistory.entries[i]);
+        gShellHistory.entries[i] = NULL;
+    }
+    memmove(gShellHistory.entries,
+            gShellHistory.entries + excess,
+            (gShellHistory.count - excess) * sizeof(char *));
+    gShellHistory.count -= excess;
+}
+
+static void shellHistoryRewriteFileTail(size_t keep) {
+    if (!shellHistoryPersistenceEnabled() || keep == 0) {
+        return;
+    }
+    const char *path = gShellRuntime.history_path;
+    if (!path) {
+        return;
+    }
+    char tmp_path[PATH_MAX];
+    int written = snprintf(tmp_path, sizeof(tmp_path), "%s.tmpXXXXXX", path);
+    if (written < 0 || (size_t)written >= sizeof(tmp_path)) {
+        return;
+    }
+    int tmp_fd = mkstemp(tmp_path);
+    if (tmp_fd < 0) {
+        return;
+    }
+    size_t start = 0;
+    if (gShellHistory.count > keep) {
+        start = gShellHistory.count - keep;
+    }
+    for (size_t i = start; i < gShellHistory.count; ++i) {
+        const char *entry = gShellHistory.entries[i];
+        if (!entry) {
+            continue;
+        }
+        (void)write(tmp_fd, entry, strlen(entry));
+        (void)write(tmp_fd, "\n", 1);
+    }
+    fsync(tmp_fd);
+    close(tmp_fd);
+    if (rename(tmp_path, path) != 0) {
+        unlink(tmp_path);
+    } else {
+        shellHistoryTrimMemoryLimit();
+    }
+}
+
+static void shellHistoryAppendToFile(const char *line) {
+    if (!shellHistoryPersistenceEnabled() || !line || gShellRuntime.history_loading) {
+        return;
+    }
+    int fd = open(gShellRuntime.history_path,
+                  O_WRONLY | O_CREAT | O_APPEND
+#ifdef O_CLOEXEC
+                  | O_CLOEXEC
+#endif
+                  ,
+                  0600);
+    if (fd < 0) {
+        return;
+    }
+    size_t len = strlen(line);
+    if (len > 0) {
+        (void)write(fd, line, len);
+    }
+    (void)write(fd, "\n", 1);
+    fsync(fd);
+    close(fd);
+    if (gShellRuntime.history_file_size_limit > 0 &&
+        gShellHistory.count > gShellRuntime.history_file_size_limit) {
+        shellHistoryRewriteFileTail(gShellRuntime.history_file_size_limit);
+    }
+}
+
+static char *shellHistoryResolvePath(const char *raw_path) {
+    if (!raw_path || !*raw_path) {
+        return NULL;
+    }
+    char path_buf[PATH_MAX];
+    const char *source = raw_path;
+    if (raw_path[0] == '~') {
+        const char *home = shellSafeGetenv("HOME");
+        if (!home || !*home) {
+            return NULL;
+        }
+        const char *rest = raw_path + 1;
+        int written = snprintf(path_buf, sizeof(path_buf), "%s%s",
+                               home,
+                               (*rest == '/') ? rest : (*rest ? rest : ""));
+        if (written < 0 || (size_t)written >= sizeof(path_buf)) {
+            return NULL;
+        }
+        source = path_buf;
+    } else {
+        size_t len = strlen(raw_path);
+        if (len + 1 > sizeof(path_buf)) {
+            return NULL;
+        }
+        memcpy(path_buf, raw_path, len + 1);
+        source = path_buf;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    char expanded[PATH_MAX];
+    if (pathTruncateExpand(source, expanded, sizeof(expanded))) {
+        return strdup(expanded);
+    }
+#endif
+    return strdup(source);
+}
+
+static size_t shellHistoryParseSizeEnv(const char *name, size_t fallback) {
+    if (!name) {
+        return fallback;
+    }
+    const char *value = shellSafeGetenv(name);
+    if (!value || !*value) {
+        return fallback;
+    }
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || parsed <= 0) {
+        return fallback;
+    }
+    return (size_t)parsed;
+}
+
+void shellHistoryLoadFromFile(void) {
+    if (!shellHistoryPersistenceEnabled() || gShellRuntime.history_loaded_from_file) {
+        return;
+    }
+    const char *path = gShellRuntime.history_path;
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return;
+    }
+    gShellRuntime.history_loading = true;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t nread = 0;
+    while ((nread = getline(&line, &cap, fp)) != -1) {
+        if (nread > 0 && (line[nread - 1] == '\n' || line[nread - 1] == '\r')) {
+            line[nread - 1] = '\0';
+        }
+        shellRuntimeRecordHistory(line);
+        shellHistoryTrimMemoryLimit();
+    }
+    free(line);
+    fclose(fp);
+    gShellRuntime.history_loading = false;
+    gShellRuntime.history_loaded_from_file = true;
+}
+
+void shellHistoryConfigurePersistenceFromEnv(void) {
+    const char *histfile = shellSafeGetenv("HISTFILE");
+    if (!histfile || !*histfile) {
+        gShellRuntime.history_persist_enabled = false;
+        return;
+    }
+    char *resolved = shellHistoryResolvePath(histfile);
+    if (!resolved) {
+        gShellRuntime.history_persist_enabled = false;
+        return;
+    }
+    free(gShellRuntime.history_path);
+    gShellRuntime.history_path = resolved;
+    gShellRuntime.history_persist_enabled = true;
+    gShellRuntime.history_append_mode = true;
+    gShellRuntime.history_size_limit = shellHistoryParseSizeEnv("HISTSIZE", 1000);
+    gShellRuntime.history_file_size_limit =
+        shellHistoryParseSizeEnv("HISTFILESIZE",
+                                 gShellRuntime.history_size_limit ? gShellRuntime.history_size_limit : 0);
+}
+
 void shellRuntimeRecordHistory(const char *line) {
     if (!line) {
         return;
@@ -1931,6 +2137,10 @@ void shellRuntimeRecordHistory(const char *line) {
     memcpy(copy, line, len);
     copy[len] = '\0';
     gShellHistory.entries[gShellHistory.count++] = copy;
+    shellHistoryTrimMemoryLimit();
+    if (shellRuntimeIsInteractive()) {
+        shellHistoryAppendToFile(copy);
+    }
 }
 
 size_t shellRuntimeHistoryCount(void) {
@@ -2505,6 +2715,38 @@ invoke_cleanup:
     return true;
 }
 
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
+extern int PSCALRuntimeSetTabTitle(const char *title);
+
+static const char *shellSshTargetFromCommand(const ShellCommand *cmd) {
+    if (!cmd || cmd->argc <= 1) {
+        return NULL;
+    }
+    bool skip_next = false;
+    for (size_t i = 1; i < cmd->argc; ++i) {
+        const char *arg = cmd->argv[i];
+        if (!arg) {
+            continue;
+        }
+        if (skip_next) {
+            skip_next = false;
+            continue;
+        }
+        if (strcmp(arg, "-l") == 0 || strcmp(arg, "-p") == 0 ||
+            strcmp(arg, "-i") == 0 || strcmp(arg, "-F") == 0 ||
+            strcmp(arg, "-o") == 0 || strcmp(arg, "-b") == 0) {
+            skip_next = true;
+            continue;
+        }
+        if (arg[0] == '-') {
+            continue;
+        }
+        return arg;
+    }
+    return NULL;
+}
+#endif
+
 static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || cmd->argc == 0 || !cmd->argv[0] || *cmd->argv[0] == '\0') {
         return false;
@@ -2552,6 +2794,16 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
             lookup = canonical ? canonical : name;
         }
     }
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
+    if (canonical && strcasecmp(canonical, "ssh") == 0) {
+        const char *target = shellSshTargetFromCommand(cmd);
+        if (target && *target) {
+            char label[64];
+            snprintf(label, sizeof(label), "SSH %s", target);
+            (void)PSCALRuntimeSetTabTitle(label);
+        }
+    }
+#endif
 #if defined(PSCAL_TARGET_IOS)
     if (!handler && is_runtime_builtin && shellDispatchIOSFrontendBuiltin(vm, cmd)) {
         return true;
@@ -2574,6 +2826,18 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
         return true;
     }
     int arg_count = (cmd->argc > 0) ? (int)cmd->argc - 1 : 0;
+    bool include_assignments_as_args = false;
+    if (canonical) {
+        if (strcmp(canonical, "local") == 0 ||
+            strcmp(canonical, "declare") == 0 ||
+            strcmp(canonical, "typeset") == 0) {
+            include_assignments_as_args = true;
+        }
+    }
+    int extra_assign_args = (include_assignments_as_args && cmd->assignment_count > 0)
+                                ? (int)cmd->assignment_count
+                                : 0;
+    int total_args = arg_count + extra_assign_args;
     Value *args = NULL;
     int previous_line = gShellCurrentCommandLine;
     int previous_column = gShellCurrentCommandColumn;
@@ -2635,8 +2899,8 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     }
 
     if (!handled) {
-        if (arg_count > 0) {
-            args = calloc((size_t)arg_count, sizeof(Value));
+        if (total_args > 0) {
+            args = calloc((size_t)total_args, sizeof(Value));
             if (!args) {
                 runtimeError(vm, "shell builtin '%s': out of memory", name);
                 shellUpdateStatus(1);
@@ -2648,11 +2912,18 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
                 shellRuntimeSetCurrentCommandLocation(previous_line, previous_column);
                 return true;
             }
-            for (int i = 0; i < arg_count; ++i) {
-                args[i] = makeString(cmd->argv[i + 1]);
+            int arg_index = 0;
+            for (; arg_index < arg_count; ++arg_index) {
+                args[arg_index] = makeString(cmd->argv[arg_index + 1]);
+            }
+            if (extra_assign_args > 0) {
+                for (size_t j = 0; j < cmd->assignment_count; ++j, ++arg_index) {
+                    const char *text = cmd->assignments[j].text ? cmd->assignments[j].text : "";
+                    args[arg_index] = makeString(text);
+                }
             }
         }
-        handler(vm, arg_count, args);
+        handler(vm, total_args, args);
     }
     gShellCurrentBuiltinBackground = previous_background;
     shellRuntimeSetCurrentCommandName(previous_name);
@@ -2660,7 +2931,7 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     shellRestoreExecRedirections(redir_backups, redir_backup_count);
     shellFreeExecRedirBackups(redir_backups, redir_backup_count);
     if (args) {
-        for (int i = 0; i < arg_count; ++i) {
+        for (int i = 0; i < total_args; ++i) {
             freeValue(&args[i]);
         }
         free(args);
@@ -2734,7 +3005,9 @@ static void shellRemoveJobAt(size_t index) {
     }
 }
 
+#if defined(PSCAL_TARGET_IOS)
 static ShellJob *shellFindJobByPid(pid_t pid);
+#endif
 
 static size_t shellAllocateJobId(void) {
     size_t candidate = 1;
@@ -2922,7 +3195,60 @@ static ShellJob *shellRegisterJob(pid_t pgid, const pid_t *pids, size_t pid_coun
     return job;
 }
 
+static void shellJobMarkRunning(ShellJob *job) {
+    if (!job) {
+        return;
+    }
+    job->running = true;
+    job->stopped = false;
+}
+
+static void shellJobMarkStopped(ShellJob *job, int status) {
+    if (!job) {
+        return;
+    }
+    job->running = false;
+    job->stopped = true;
+    job->last_status = status;
+}
+
+static bool shellJobSendSignal(const ShellJob *job, int signo, bool prefer_group) {
+    if (!job || signo <= 0) {
+        return false;
+    }
+    bool delivered = false;
+    if (prefer_group && job->pgid > 0) {
+        if (shellJobControlSendPgid(job->pgid, signo) == 0) {
+            delivered = true;
+        }
+    }
+    if (!prefer_group || !delivered) {
+        for (size_t i = 0; i < job->pid_count; ++i) {
+            pid_t pid = job->pids[i];
+            if (pid <= 0) {
+                continue;
+            }
+            if (shellJobControlSendPid(pid, signo) == 0) {
+                delivered = true;
+            }
+        }
+    }
+    return delivered;
+}
+
+static bool shellJobContinue(ShellJob *job, bool prefer_group) {
+    if (!job) {
+        return false;
+    }
+    bool ok = shellJobSendSignal(job, SIGCONT, prefer_group);
+    if (ok) {
+        shellJobMarkRunning(job);
+    }
+    return ok;
+}
+
 static int shellCollectJobs(void) {
+    bool prompt_dbg = false;
 #if defined(PSCAL_TARGET_IOS)
     int shell_pid = 0;
     int current_sid = 0;
@@ -2934,6 +3260,10 @@ static int shellCollectJobs(void) {
      * carry a non-zero vproc job id, otherwise core session entities (kernel,
      * shell, pumps, etc.) pollute the job table and break job-spec semantics. */
     bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
+    prompt_dbg = getenv("PSCALI_PROMPT_DEBUG") != NULL;
+    if (prompt_dbg) {
+        fprintf(stderr, "[jobs] collect begin count=%zu\n", gShellJobCount);
+    }
     shell_pid = vprocGetShellSelfPid();
     current_sid = (shell_pid > 0) ? vprocGetSid(shell_pid) : 0;
     size_t snap_cap = vprocSnapshot(NULL, 0);
@@ -2941,6 +3271,9 @@ static int shellCollectJobs(void) {
             VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
             if (snaps) {
                 size_t snap_count = vprocSnapshot(snaps, snap_cap);
+                if (prompt_dbg) {
+                    fprintf(stderr, "[jobs] snapshot count=%zu\n", snap_count);
+                }
                 if (dbg) {
                     fprintf(stderr, "[jobs-ios] snapshot count=%zu\n", snap_count);
                 }
@@ -3013,6 +3346,16 @@ static int shellCollectJobs(void) {
     for (size_t i = 0; i < gShellJobCount;) {
         ShellJob *job = &gShellJobs[i];
         bool job_active = false;
+        if (prompt_dbg) {
+            fprintf(stderr,
+                    "[jobs] scan job[%zu] id=%zu pgid=%d stopped=%d running=%d pid_count=%zu\n",
+                    i,
+                    job->id,
+                    (int)job->pgid,
+                    (int)job->stopped,
+                    (int)job->running,
+                    job->pid_count);
+        }
 
 #if defined(PSCAL_TARGET_IOS)
         if (current_sid > 0 && job && job->pgid > 0) {
@@ -3043,8 +3386,15 @@ static int shellCollectJobs(void) {
             if (pid <= 0) {
                 continue;
             }
+            if (prompt_dbg) {
+                fprintf(stderr, "[jobs] waitpid pid=%d opts=WNOHANG|WUNTRACED|WCONTINUED\n", (int)pid);
+            }
             int status = 0;
             pid_t res = vprocWaitPidShim(pid, &status, WNOHANG | WUNTRACED | WCONTINUED);
+            if (prompt_dbg) {
+                fprintf(stderr, "[jobs] waitpid pid=%d -> res=%d errno=%d status=%d\n",
+                        (int)pid, (int)res, errno, status);
+            }
             if (res == 0) {
                 job_active = true;
                 continue;
@@ -3113,6 +3463,9 @@ static int shellCollectJobs(void) {
     }
     if (gShellJobCount == 0) {
         shellResetJobIds();
+    }
+    if (prompt_dbg) {
+        fprintf(stderr, "[jobs] collect end reaped=%d count=%zu\n", reaped, gShellJobCount);
     }
 #if defined(PSCAL_TARGET_IOS)
     if (dbg) {

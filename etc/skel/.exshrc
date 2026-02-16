@@ -4,10 +4,11 @@
 # sensible defaults while remaining easy to extend.  Copy it to your home
 # directory and adjust any sections that need to be customised.
 
-# Shortcut to get to home dir, make terminal size correct.  Yes, this is a 
-# kludge
+# Shortcut to get to home dir, make terminal size correct (when resize exists).
 cd
-resize
+if command -v resize >/dev/null 2>&1; then
+    resize >/dev/null 2>&1
+fi
 
 # ---------------------------------------------------------------------------
 # PATH management helpers
@@ -32,6 +33,22 @@ path_prepend() {
 # Expose user-level executables first when available.
 path_prepend "$HOME/.local/bin"
 path_prepend "$HOME/bin"
+# iOS/iPadOS app bundle bin (mirrored into Documents/bin at launch).
+# Avoid command substitutions here to prevent hangs on constrained runtimes.
+if [ -n "${PSCALI_CONTAINER_ROOT:-}" ]; then
+    docroot="${PSCALI_CONTAINER_ROOT}/Documents"
+else
+    # Derive parent dir without spawning subshells.
+    case "$HOME" in
+        */*) docroot=${HOME%/*} ;;
+        *) docroot="" ;;
+    esac
+fi
+if [ -n "$docroot" ]; then
+    path_prepend "$docroot/bin"
+fi
+# Fallback to system bin if present in sandbox
+path_prepend "/bin"
 export PATH
 
 # ---------------------------------------------------------------------------
@@ -44,7 +61,7 @@ if [ -z "${EDITOR:-}" ]; then
 fi
 
 # Edit to your preference
-USER="user"
+#USER="user"  # Uncomment and change, or edit /etc/passwd for UID 501 to change
 HOST="iDevice"
 
 # Provide coloured prompts when attached to a terminal.  The prompt tokens are
@@ -55,6 +72,19 @@ if [ -t 1 ]; then
 else
     export PS1="exsh$ "
 fi
+
+# Persist interactive history like Bash. Set HISTFILE/HISTSIZE/HISTFILESIZE
+# to control the file path and the number of entries kept in memory/on disk.
+if [ -z "${HISTFILE:-}" ]; then
+    export HISTFILE="$HOME/.exsh_history"
+fi
+if [ -z "${HISTSIZE:-}" ]; then
+    export HISTSIZE=1000
+fi
+if [ -z "${HISTFILESIZE:-}" ]; then
+    export HISTFILESIZE=2000
+fi
+export HISTAPPEND=1
 
 # Keep the terminal safe for pagers that consult $LESS.
 #if [ -z "${LESS:-}" ]; then
@@ -119,40 +149,6 @@ alias man='smallclue-elp'
 alias host='nslookup'
 
 # ---------------------------------------------------------------------------
-# Thread pool tuning & metrics
-# ---------------------------------------------------------------------------
-# Clamp the shared worker pool by exporting PSCALSHELL_THREAD_POOL_SIZE before
-# launching exsh. The VM honours integers between 1 and its compile-time cap.
-#
-# Example:
-#   export PSCALSHELL_THREAD_POOL_SIZE=8
-#
-# The helpers below make it easy to inspect `ThreadStats` output while working
-# interactively. Set PSCALSHELL_THREAD_METRICS=1 to print a snapshot at login.
-threadpool_report() {
-    builtin ThreadStatsJson | python3 - <<'PY'
-import json, sys
-try:
-    data = json.load(sys.stdin)
-except Exception as e:
-    sys.stderr.write(f"threadstats: failed to parse JSON: {e}\n")
-    sys.exit(1)
-print("id\tgen\tname\tactive\tready\tstatus")
-for t in data:
-    print(f"{t.get('id')}\t{t.get('pool_generation', 0)}\t{t.get('name','')}"
-          f"\t{bool(t.get('active'))}\t{bool(t.get('ready_for_reuse'))}\t{bool(t.get('status_success'))}")
-PY
-}
-
-alias threadpool='threadpool_report'
-alias ps-threads='builtin ps-threads'
-
-if [ "${PSCALSHELL_THREAD_METRICS:-0}" != "0" ]; then
-    echo "[exsh] worker pool snapshot"
-    threadpool_report
-fi
-
-# ---------------------------------------------------------------------------
 # Convenience functions
 # ---------------------------------------------------------------------------
 # Create a directory (and parents) before changing into it.
@@ -208,3 +204,8 @@ if [ -r "$HOME/.exshrc.local" ]; then
 fi
 
 # alias ssh='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+# Enable saving history
+export HISTFILE="$HOME/.ex_history"
+export HISTSIZE=1000
+export HISTFILESIZE=2000

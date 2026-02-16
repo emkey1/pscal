@@ -2,7 +2,15 @@
 #include "backend_ast/builtin.h"
 #include "ext_builtins/register.h"
 #include "common/builtin_shared.h"
-#if defined(PSCAL_TARGET_IOS)
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
+#define PSCAL_MOBILE_PLATFORM 1
+#endif
+
+#if defined(PSCAL_MOBILE_PLATFORM)
 #include "smallclue/smallclue.h"
 #endif
 #include <ctype.h>
@@ -55,7 +63,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"bg", "bg", 19},
     {"wait", "wait", 20},
     {"WaitForThread", "waitforthread", 1056},
-#ifdef PSCAL_TARGET_IOS
+#ifdef PSCAL_MOBILE_PLATFORM
     {"cal", "cal", -1},
     {"chmod", "chmod", -1},
     {"clike", "clike", -1},
@@ -79,6 +87,8 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"yes", "yes", -1},
     {"no", "no", -1},
     {"traceroute", "traceroute", -1},
+    {"ps", "lps", 1057},
+    {"ps", "lps", 1057},
     {"lps", "lps", 1057},
     {"ps-threads", "ps-threads", 55},
     {"kill", "kill", -1},
@@ -103,6 +113,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"pscaljson2bc", "pscaljson2bc", -1},
 #ifdef BUILD_PSCALD
     {"pscald", "pscald", -1},
+    {"pscalasm", "pscalasm", -1},
 #endif
 #ifdef BUILD_DASCAL
     {"dascal", "dascal", -1},
@@ -119,7 +130,9 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"script", "script", -1},
     {"sed", "sed", -1},
     {"sort", "sort", -1},
+    {"stat", "stat", -1},
     {"stty", "stty", -1},
+    {"sum", "sum", -1},
     {"tset", "tset", -1},
     {"tty", "tty", -1},
     {"tail", "tail", -1},
@@ -139,9 +152,18 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"wc", "wc", -1},
     {"wget", "wget", -1},
     {"addt", "addt", -1},
+    {"addtab", "addt", -1},
+    {"tabadd", "tabadd", -1},
+    {"tadd", "tadd", -1},
     {"smallclue-help", "smallclue-help", -1},
     {"dmesg", "dmesg", -1},
     {"licenses", "licenses", -1},
+#endif
+#if defined(PSCAL_TAB_TITLE_SUPPORT)
+    {"tabname", "tabname", -1},
+    {"tname", "tabname", -1},
+    {"tscommand", "tscommand", -1},
+    {"tabscommand", "tscommand", -1},
 #endif
     {"ThreadSpawnBuiltin", "threadspawnbuiltin", -1},
     {"ThreadGetResult", "threadgetresult", -1},
@@ -285,7 +307,7 @@ void shellVisitBuiltins(ShellBuiltinVisitor visitor, void *context) {
         const ShellBuiltinEntry *entry = &kShellBuiltins[i];
         visitor(entry->name, entry->canonical, entry->id, context);
     }
-#if defined(PSCAL_TARGET_IOS)
+#if defined(PSCAL_MOBILE_PLATFORM)
     size_t applet_count = 0;
     const SmallclueApplet *applets = smallclueGetApplets(&applet_count);
     if (applets && applet_count > 0) {

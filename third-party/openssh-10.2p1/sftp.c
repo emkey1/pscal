@@ -49,6 +49,7 @@ typedef void EditLine;
 #include <crt_externs.h>
 #ifdef PSCAL_TARGET_IOS
 #include <mach-o/dyld.h>
+#include "common/runtime_tty.h"
 #endif
 #include <unistd.h>
 
@@ -121,81 +122,108 @@ struct complete_ctx {
 int sftp_glob(struct sftp_conn *, const char *, int,
     int (*)(const char *, int), glob_t *); /* proto for sftp-glob.c */
 
+extern char *__progname;
+
 #ifdef PSCAL_TARGET_IOS
-static char *
-pscal_own_executable_path(void)
+static const char *
+pscal_sftp_basename(const char *path)
 {
-	uint32_t size = PATH_MAX;
-	char *buf = xmalloc(size);
-	if (_NSGetExecutablePath(buf, &size) != 0) {
-		buf = xreallocarray(buf, 1, size);
-		if (_NSGetExecutablePath(buf, &size) != 0) {
-			free(buf);
-			return NULL;
-		}
-	}
-	char resolved[PATH_MAX];
-	if (realpath(buf, resolved) != NULL) {
-		free(buf);
-		return xstrdup(resolved);
-	}
-	/* Fall back to the unresolved path if realpath fails. */
-	return buf;
+	const char *slash;
+
+	if (path == NULL)
+		return NULL;
+	slash = strrchr(path, '/');
+	return slash != NULL ? slash + 1 : path;
 }
 
-static char *
-pscal_tool_runner_path(void)
+static int
+pscal_sftp_transport_uses_tool_runner(const char *program)
 {
-	const char *env = getenv("PSCALI_TOOL_RUNNER_PATH");
-	if (env != NULL && *env != '\0' && access(env, X_OK) == 0)
-		return xstrdup(env);
+	const char *base = pscal_sftp_basename(program);
 
-	const char *workspace = getenv("PSCALI_WORKSPACE_ROOT");
-	if (workspace != NULL && *workspace != '\0') {
-		char *candidate;
-		if (xasprintf(&candidate, "%s/pscal_tool_runner", workspace) != -1) {
-			if (access(candidate, X_OK) == 0)
-				return candidate;
-			free(candidate);
-		}
-	}
+	return base != NULL && strcmp(base, "pscal_tool_runner") == 0;
+}
 
-	char *self = pscal_own_executable_path();
-	if (self != NULL) {
-		char *dir = xstrdup(self);
-		free(self);
-		if (dir != NULL) {
-			char *slash = strrchr(dir, '/');
-			if (slash != NULL) {
-				*(slash + 1) = '\0';
-				char *candidate;
-				if (xasprintf(&candidate, "%spscal_tool_runner", dir) != -1) {
-					if (access(candidate, X_OK) == 0) {
-						free(dir);
-						return candidate;
-					}
-					free(candidate);
+static int
+pscal_sftp_stdin_is_interactive(void)
+{
+	if (isatty(STDIN_FILENO))
+		return 1;
+	if (pscalRuntimeStdinIsInteractive())
+		return 1;
+	return 0;
+}
+
+static int
+pscal_sftp_stdin_echo_enabled(void)
+{
+	struct termios tio;
+
+	if (tcgetattr(STDIN_FILENO, &tio) != 0)
+		return 0;
+	return (tio.c_lflag & ECHO) != 0;
+}
+
+static int
+pscal_sftp_readline(char *buf, size_t buflen, int manual_echo)
+{
+	size_t off = 0;
+
+	if (buf == NULL || buflen == 0)
+		return -1;
+	while (off + 1 < buflen) {
+		char ch = '\0';
+		ssize_t n = read(STDIN_FILENO, &ch, 1);
+		if (n == 1) {
+			if (manual_echo && (ch == '\b' || ch == 0x7f)) {
+				if (off > 0 && buf[off - 1] != '\n') {
+					off--;
+					(void)write(STDOUT_FILENO, "\b \b", 3);
+				}
+				continue;
+			}
+			if (ch == '\r')
+				ch = '\n';
+			buf[off++] = ch;
+			if (manual_echo) {
+				if (ch == '\n') {
+					(void)write(STDOUT_FILENO, "\n", 1);
+				} else {
+					(void)write(STDOUT_FILENO, &ch, 1);
 				}
 			}
-			free(dir);
+			if (ch == '\n')
+				break;
+			continue;
+		}
+		if (n == 0) {
+			if (off == 0)
+				return -1;
+			break;
+		}
+		if (errno == EINTR)
+			continue;
+		return -1;
+	}
+	buf[off] = '\0';
+	if (off + 1 == buflen) {
+		char ch = '\0';
+		while (read(STDIN_FILENO, &ch, 1) == 1) {
+			if (manual_echo) {
+				char out = ch == '\r' ? '\n' : ch;
+				if (out == '\n') {
+					(void)write(STDOUT_FILENO, "\n", 1);
+				} else if (out != '\b' && out != 0x7f) {
+					(void)write(STDOUT_FILENO, &out, 1);
+				}
+			}
+			if (ch == '\n' || ch == '\r')
+				break;
 		}
 	}
-
-	const char *home = getenv("HOME");
-	if (home == NULL || *home == '\0')
-		return NULL;
-	char *p;
-	if (xasprintf(&p, "%s/pscal_tool_runner", home) == -1)
-		return NULL;
-	if (access(p, X_OK) == 0)
-		return p;
-	free(p);
-	return NULL;
+	return 0;
 }
-
 #endif
-
-extern char *__progname;
 
 /* Separators for interactive commands */
 #define WHITESPACE " \t\r\n"
@@ -2299,6 +2327,9 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 	char *dir = NULL, *startdir = NULL;
 	char cmd[2048];
 	int err, interactive;
+#if defined(PSCAL_TARGET_IOS)
+	int manual_echo = 0;
+#endif
 	EditLine *el = NULL;
 #ifdef USE_LIBEDIT
 	History *hl = NULL;
@@ -2306,7 +2337,13 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 	extern char *__progname;
 	struct complete_ctx complete_ctx;
 
+#if defined(PSCAL_TARGET_IOS)
+	/* On iOS, libedit and stdio FILE* reads may bypass virtualised vproc
+	 * stdio. Keep line input on read(2) so the shimmed fd path is used. */
+	if (0) {
+#else
 	if (!batchmode && isatty(STDIN_FILENO)) {
+#endif
 		if ((el = el_init(__progname, stdin, stdout, stderr)) == NULL)
 			fatal("Couldn't initialise editline");
 		if ((hl = history_init()) == NULL)
@@ -2377,7 +2414,23 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(infile, NULL, _IOLBF, 0);
 
+#if defined(PSCAL_TARGET_IOS)
+	interactive = !batchmode && pscal_sftp_stdin_is_interactive();
+	if (interactive && infile == stdin && !pscal_sftp_stdin_echo_enabled())
+		manual_echo = 1;
+	if (getenv("PSCALI_SSH_DEBUG") != NULL) {
+		fprintf(stderr,
+		    "[sftp-ios] interactive=%d batch=%d isatty(stdin)=%d runtime_stdin=%d infile_is_stdin=%d manual_echo=%d\n",
+		    interactive,
+		    batchmode,
+		    isatty(STDIN_FILENO),
+		    pscalRuntimeStdinIsInteractive() ? 1 : 0,
+		    infile == stdin ? 1 : 0,
+		    manual_echo);
+	}
+#else
 	interactive = !batchmode && isatty(STDIN_FILENO);
+#endif
 	err = 0;
 	for (;;) {
 		struct sigaction sa;
@@ -2395,6 +2448,17 @@ interactive_loop(struct sftp_conn *conn, char *file1, char *file2)
 				printf("sftp> ");
 				fflush(stdout);
 			}
+#if defined(PSCAL_TARGET_IOS)
+			if (infile == stdin) {
+				if (pscal_sftp_readline(cmd, sizeof(cmd), manual_echo) != 0) {
+					if (interactive)
+						printf("\n");
+					if (interrupted)
+						continue;
+					break;
+				}
+			} else
+#endif
 			if (fgets(cmd, sizeof(cmd), infile) == NULL) {
 				if (interactive)
 					printf("\n");
@@ -2453,12 +2517,12 @@ static void
 connect_to_server(char *path, char **args, int *in, int *out)
 {
 	int c_in, c_out;
-#ifdef PSCAL_TARGET_IOS
-	posix_spawn_file_actions_t actions;
-	pid_t child = -1;
-#endif
 #ifdef USE_PIPES
 	int pin[2], pout[2];
+#if defined(PSCAL_TARGET_IOS)
+	volatile int pin_parent[2] = {-1, -1};
+	volatile int pout_parent[2] = {-1, -1};
+#endif
 
 	if ((pipe(pin) == -1) || (pipe(pout) == -1))
 		fatal("pipe: %s", strerror(errno));
@@ -2466,75 +2530,80 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	*out = pout[1];
 	c_in = pout[0];
 	c_out = pin[1];
+#if defined(PSCAL_TARGET_IOS)
+	pin_parent[0] = pin[0];
+	pin_parent[1] = pin[1];
+	pout_parent[0] = pout[0];
+	pout_parent[1] = pout[1];
+#endif
 #else /* USE_PIPES */
 	int inout[2];
+#if defined(PSCAL_TARGET_IOS)
+	volatile int inout_parent[2] = {-1, -1};
+#endif
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, inout) == -1)
 		fatal("socketpair: %s", strerror(errno));
-	*in = *out = inout[0];
-	c_in = c_out = inout[1];
+	/* Match scp's working iOS orientation: parent keeps endpoint[1],
+	 * child dup2()s endpoint[0] as stdio. */
+	c_in = c_out = inout[0];
+	*in = *out = inout[1];
+#if defined(PSCAL_TARGET_IOS)
+	inout_parent[0] = inout[0];
+	inout_parent[1] = inout[1];
+#endif
 #endif /* USE_PIPES */
 
-#ifdef PSCAL_TARGET_IOS
-	if (posix_spawn_file_actions_init(&actions) != 0)
-		fatal("posix_spawn_file_actions_init failed");
+	if ((sshpid = fork()) == -1) {
 #ifdef USE_PIPES
-	posix_spawn_file_actions_adddup2(&actions, c_in, STDIN_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDOUT_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDERR_FILENO);
-	posix_spawn_file_actions_addclose(&actions, *in);
-	posix_spawn_file_actions_addclose(&actions, *out);
-	posix_spawn_file_actions_addclose(&actions, c_in);
-	posix_spawn_file_actions_addclose(&actions, c_out);
+#if defined(PSCAL_TARGET_IOS)
+		if (pin_parent[0] >= 0) close(pin_parent[0]);
+		if (pin_parent[1] >= 0) close(pin_parent[1]);
+		if (pout_parent[0] >= 0) close(pout_parent[0]);
+		if (pout_parent[1] >= 0) close(pout_parent[1]);
 #else
-	posix_spawn_file_actions_adddup2(&actions, c_in, STDIN_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDOUT_FILENO);
-	posix_spawn_file_actions_adddup2(&actions, c_out, STDERR_FILENO);
-	posix_spawn_file_actions_addclose(&actions, *in);
-	posix_spawn_file_actions_addclose(&actions, c_in);
+		close(pin[0]);
+		close(pin[1]);
+		close(pout[0]);
+		close(pout[1]);
 #endif
-	posix_spawnattr_t attr;
-	sigset_t emptyset, sigdef;
-	posix_spawnattr_init(&attr);
-	sigemptyset(&emptyset);
-	posix_spawnattr_setsigmask(&attr, &emptyset);
-	sigemptyset(&sigdef);
-	posix_spawnattr_setsigdefault(&attr, &sigdef);
-	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
-	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
-
-	if (access(path, X_OK) != 0) {
-		fprintf(stderr, "sftp: transport '%s' not executable: %s\n",
-		    path, strerror(errno));
-		posix_spawn_file_actions_destroy(&actions);
-		posix_spawnattr_destroy(&attr);
-		fatal("sftp: unable to launch ssh transport");
-	}
-
-	if (posix_spawn(&child, path, &actions, &attr, args, environ) != 0) {
-		int spawn_err = errno;
-		posix_spawn_file_actions_destroy(&actions);
-		posix_spawnattr_destroy(&attr);
-		fprintf(stderr, "sftp: posix_spawn failed for '%s' (%s)\n",
-		    path, strerror(spawn_err));
-		fatal("sftp: unable to launch ssh transport");
-	}
-	posix_spawn_file_actions_destroy(&actions);
-	posix_spawnattr_destroy(&attr);
-	sshpid = child;
 #else
-	if ((sshpid = fork()) == -1)
+#if defined(PSCAL_TARGET_IOS)
+		if (inout_parent[0] >= 0) close(inout_parent[0]);
+		if (inout_parent[1] >= 0) close(inout_parent[1]);
+#else
+		close(inout[0]);
+		close(inout[1]);
+#endif
+#endif
 		fatal("fork: %s", strerror(errno));
-	else if (sshpid == 0) {
+	} else if (sshpid == 0) {
 		if ((dup2(c_in, STDIN_FILENO) == -1) ||
 		    (dup2(c_out, STDOUT_FILENO) == -1)) {
 			fprintf(stderr, "dup2: %s\n", strerror(errno));
 			_exit(1);
 		}
-		close(*in);
-		close(*out);
-		close(c_in);
-		close(c_out);
+#ifdef USE_PIPES
+#if defined(PSCAL_TARGET_IOS)
+		close(pin_parent[1]);
+		close(pout_parent[0]);
+		close(pin_parent[0]);
+		close(pout_parent[1]);
+#else
+		close(pin[1]);
+		close(pout[0]);
+		close(pin[0]);
+		close(pout[1]);
+#endif
+#else
+#if defined(PSCAL_TARGET_IOS)
+		close(inout_parent[1]);
+		close(inout_parent[0]);
+#else
+		close(inout[1]);
+		close(inout[0]);
+#endif
+#endif
 
 		/*
 		 * The underlying ssh is in the same process group, so we must
@@ -2548,8 +2617,7 @@ connect_to_server(char *path, char **args, int *in, int *out)
 		execvp(path, args);
 		fprintf(stderr, "exec: %s: %s\n", path, strerror(errno));
 		_exit(1);
-	}
-#endif
+		}
 
 	ssh_signal(SIGTERM, killchild);
 	ssh_signal(SIGINT, killchild);
@@ -2558,8 +2626,25 @@ connect_to_server(char *path, char **args, int *in, int *out)
 	ssh_signal(SIGTTIN, suspchild);
 	ssh_signal(SIGTTOU, suspchild);
 	ssh_signal(SIGCHLD, sigchld_handler);
+#ifdef USE_PIPES
+#if defined(PSCAL_TARGET_IOS)
+	close(pout_parent[0]);
+	close(pin_parent[1]);
+	*in = pin_parent[0];
+	*out = pout_parent[1];
+#else
 	close(c_in);
 	close(c_out);
+#endif
+#else
+#if defined(PSCAL_TARGET_IOS)
+	close(inout_parent[0]);
+	*in = *out = inout_parent[1];
+#else
+	close(c_in);
+	close(c_out);
+#endif
+#endif
 }
 
 static void
@@ -2636,7 +2721,8 @@ main(int argc, char **argv)
 	args.list = NULL;
 	addargs(&args, "%s", ssh_program);
 #ifdef PSCAL_TARGET_IOS
-	addargs(&args, "ssh");
+	if (pscal_sftp_transport_uses_tool_runner(ssh_program))
+		addargs(&args, "ssh");
 #endif
 	addargs(&args, "-oForwardX11 no");
 	addargs(&args, "-oPermitLocalCommand no");
@@ -2870,10 +2956,18 @@ main(int argc, char **argv)
 	if (batchmode)
 		fclose(infile);
 
-	while (waitpid(sshpid, NULL, 0) == -1 && sshpid > 1)
-		if (errno != EINTR)
-			fatal("Couldn't wait for ssh process: %s",
-			    strerror(errno));
+	while (waitpid(sshpid, NULL, 0) == -1 && sshpid > 1) {
+		if (errno == EINTR)
+			continue;
+#ifdef PSCAL_TARGET_IOS
+		if (errno == ECHILD) {
+			sshpid = -1;
+			break;
+		}
+#endif
+		fatal("Couldn't wait for ssh process: %s",
+		    strerror(errno));
+	}
 
 #ifdef PSCAL_TARGET_IOS
 	pscal_openssh_pop_exit_context(&ctx);

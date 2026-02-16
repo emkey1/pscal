@@ -1,8 +1,22 @@
 import SwiftUI
 
 struct TerminalSettingsView: View {
+    @ObservedObject private var appearanceSettings: TerminalTabAppearanceSettings
+    @ObservedObject private var tabManager = TerminalTabManager.shared
     @ObservedObject private var settings = TerminalFontSettings.shared
     @Environment(\.dismiss) private var dismiss
+    private let tabId: UInt64
+    @State private var tabNameDraft: String
+    @State private var resetTabNameOnAppStart: Bool
+    @State private var startupCommandDraft: String
+
+    init(appearanceSettings: TerminalTabAppearanceSettings, tabId: UInt64) {
+        _appearanceSettings = ObservedObject(wrappedValue: appearanceSettings)
+        self.tabId = tabId
+        _tabNameDraft = State(initialValue: TerminalTabManager.shared.tabTitle(tabId: tabId) ?? "")
+        _resetTabNameOnAppStart = State(initialValue: TerminalTabManager.shared.resetTabNameOnAppStart(tabId: tabId))
+        _startupCommandDraft = State(initialValue: TerminalTabManager.shared.startupCommand(tabId: tabId) ?? "")
+    }
 
     var body: some View {
         content
@@ -15,54 +29,107 @@ struct TerminalSettingsView: View {
                 Section(header: Text("Font")) {
                     Picker("Font",
                            selection: Binding(
-                            get: { settings.selectedFontID },
-                            set: { settings.updateFontSelection($0) }
+                            get: { appearanceSettings.selectedFontID },
+                            set: { appearanceSettings.updateFontSelection($0) }
                            )) {
-                        ForEach(settings.fontOptions) { option in
+                        ForEach(appearanceSettings.fontOptions) { option in
                             Text(option.displayName).tag(option.id)
                         }
                     }
 
-                    let previewFont = settings.font(forPointSize: 16)
+                    let previewFont = appearanceSettings.font(forPointSize: 16)
                     Text("Sample AaBb123")
                         .font(Font(previewFont))
-                        .foregroundColor(Color(settings.foregroundColor))
+                        .foregroundColor(Color(appearanceSettings.foregroundColor))
                 }
 
                 Section(header: Text("Font Size")) {
                     Slider(
                         value: Binding(
-                            get: { Double(settings.pointSize) },
-                            set: { settings.updatePointSize(CGFloat($0)) }
+                            get: { Double(appearanceSettings.pointSize) },
+                            set: { appearanceSettings.updatePointSize(CGFloat($0)) }
                         ),
-                        in: Double(settings.minimumPointSize)...Double(settings.maximumPointSize),
+                        in: Double(appearanceSettings.minimumPointSize)...Double(appearanceSettings.maximumPointSize),
                         step: 1
                     )
 
                     HStack {
                         Text("Current")
                         Spacer()
-                        Text("\(Int(settings.pointSize)) pt")
+                        Text("\(Int(appearanceSettings.pointSize)) pt")
                             .font(.system(.body, design: .monospaced))
                     }
+                }
+
+                Section(header: Text("Tab Name")) {
+                    TextField(
+                        "Tab name",
+                        text: Binding(
+                            get: { tabNameDraft },
+                            set: { newValue in
+                                _ = tabManager.updateTabTitle(tabId: tabId, rawTitle: newValue)
+                                tabNameDraft = tabManager.tabTitle(tabId: tabId) ?? newValue
+                            }
+                        )
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+
+                    Toggle(
+                        "Restore on app start",
+                        isOn: Binding(
+                            get: { resetTabNameOnAppStart },
+                            set: { enabled in
+                                _ = tabManager.updateResetTabNameOnAppStart(tabId: tabId, enabled: enabled)
+                                resetTabNameOnAppStart = tabManager.resetTabNameOnAppStart(tabId: tabId)
+                            }
+                        )
+                    )
+
+                    Text("Used for this tab profile. Enable restore to apply the saved name when the app starts.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
+                Section(header: Text("Startup Command")) {
+                    TextField(
+                        "Run on tab startup",
+                        text: Binding(
+                            get: { startupCommandDraft },
+                            set: { newValue in
+                                _ = tabManager.updateStartupCommand(tabId: tabId, rawCommand: newValue)
+                                startupCommandDraft = tabManager.startupCommand(tabId: tabId) ?? newValue
+                            }
+                        )
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+
+                    Text("Runs once each time this tab profile launches. Leave empty to disable.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
 
                 Section(header: Text("Colors")) {
                     ColorPicker(
                         "Background",
                         selection: Binding(
-                            get: { Color(settings.backgroundColor) },
-                            set: { settings.updateBackgroundColor(UIColor(swiftUIColor: $0)) }
+                            get: { Color(appearanceSettings.backgroundColor) },
+                            set: { appearanceSettings.updateBackgroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
 
                     ColorPicker(
                         "Foreground",
                         selection: Binding(
-                            get: { Color(settings.foregroundColor) },
-                            set: { settings.updateForegroundColor(UIColor(swiftUIColor: $0)) }
+                            get: { Color(appearanceSettings.foregroundColor) },
+                            set: { appearanceSettings.updateForegroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
+
+                    Button("Copy First Tab Values") {
+                        _ = tabManager.copyFirstTabColors(tabId: tabId)
+                    }
                 }
 
                 Section(header: Text("Filesystem Paths")) {
@@ -121,6 +188,61 @@ struct TerminalSettingsView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+
+                Section(header: Text("Tabs at App Launch")) {
+                    Picker("Tabs on launch", selection: Binding(
+                        get: { settings.initialTabCount },
+                        set: { settings.updateInitialTabCount($0) }
+                    )) {
+                        Text("One").tag(1)
+                        Text("Two").tag(2)
+                        Text("Three").tag(3)
+                        Text("Four").tag(4)
+                        Text("Five").tag(5)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Opens the chosen number of shell tabs when PSCAL starts.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
+                Section {
+                    VStack(spacing: 10) {
+                        HStack(spacing: 6) {
+                            Text("Subscribe to the PSCAL")
+                            if let url = URL(string: "https://discord.gg/YWQVExN363") {
+                                Link(destination: url) {
+                                    HStack(spacing: 4) {
+                                        Text("Discord").underline()
+                                        Image(systemName: "arrow.up.right.square")
+                                    }
+                                    .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                        .font(.callout.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+
+                        if let github = URL(string: "https://github.com/emkey1/smallclue") {
+                            HStack(spacing: 4) {
+                                Text("Please submit bugs and suggestions on")
+                                Link(destination: github) {
+                                    HStack(spacing: 4) {
+                                        Text("GitHub").underline()
+                                        Image(systemName: "arrow.up.right.square")
+                                    }
+                                    .foregroundColor(.blue)
+                                }
+                            }
+                            .font(.callout)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                }
             }
             .navigationTitle("Terminal Settings")
             .toolbar {
@@ -128,46 +250,6 @@ struct TerminalSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 6) {
-                Divider()
-                VStack(spacing: 6) {
-                    HStack(spacing: 6) {
-                        Text("Subscribe to the PSCAL")
-                        if let url = URL(string: "https://discord.gg/YWQVExN363") {
-                            Link(destination: url) {
-                                HStack(spacing: 4) {
-                                    Text("Discord").underline()
-                                    Image(systemName: "arrow.up.right.square")
-                                }
-                                .foregroundColor(.blue)
-                            }
-                        }
-                    }
-                    .font(.callout.weight(.semibold))
-                    .multilineTextAlignment(.center)
-
-                    if let github = URL(string: "https://github.com/emkey1/smallclue") {
-                        HStack(spacing: 4) {
-                            Text("Please submit bugs and suggestions on")
-                            Link(destination: github) {
-                                HStack(spacing: 4) {
-                                    Text("GitHub").underline()
-                                    Image(systemName: "arrow.up.right.square")
-                                }
-                                .foregroundColor(.blue)
-                            }
-                        }
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                    }
-                }
-                .foregroundColor(.primary)
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal)
-            .background(.ultraThinMaterial)
         }
         .applyDetents()
     }

@@ -11,6 +11,74 @@
             "expected_stdout": "pipeline:start\nalpha\npipeline:end"
         },
         {
+            "id": "pipeline_help_grep_ios",
+            "name": "Pipeline help through grep (iOS)",
+            "category": "pipeline_ios",
+            "description": "Ensure pipeline spool/hand-off works for help output piped into grep.",
+        "script": "Tests/exsh/tests/pipeline_help_grep_ios.exsh",
+        "expect": "runtime_ok",
+        "env": {
+            "RUN_VPROC_TESTS": "1"
+        },
+    "expected_stdout": "pipeline-help-grep:start\nhistory     Print the interactive history list.\npipeline-help-grep:status:0"
+  },
+  {
+    "id": "pipeline_clike_head_ios",
+    "name": "Frontend clike piped to head (iOS)",
+    "category": "pipeline_ios",
+    "description": "Exercise PSCAL in-process pipes with a frontend producer and a short-lived consumer.",
+    "script": "Tests/exsh/tests/pipeline_clike_head_ios.exsh",
+    "expect": "runtime_ok",
+    "env": { "RUN_VPROC_TESTS": "1" },
+    "expected_stdout": "pipeline-clike-head:start\npipeline-clike-head:lines:1\npipeline-clike-head:status:0"
+  },
+  {
+    "id": "pipeline_rea_head_ios",
+    "name": "Frontend rea piped to head (iOS)",
+    "category": "pipeline_ios",
+    "description": "Smoke test PSCAL pipes when a frontend’s version banner is piped through head.",
+    "script": "Tests/exsh/tests/pipeline_rea_head_ios.exsh",
+    "expect": "runtime_ok",
+    "env": { "RUN_VPROC_TESTS": "1" },
+    "expected_stdout": "pipeline-rea-head:start\npipeline-rea-head:lines:1\npipeline-rea-head:status:0"
+  },
+  {
+    "id": "pipeline_empty_ios",
+    "name": "Pipeline empty spool (iOS)",
+    "category": "pipeline_ios",
+    "description": "Empty pipeline input should not hang and should surface nonzero status from grep.",
+            "script": "Tests/exsh/tests/pipeline_empty_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-empty:start\npipeline-empty:status:1"
+  },
+  {
+    "id": "pipeline_bg_redirect_ios",
+    "name": "Background redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background command with redirection writes to file and completes",
+    "script": "Tests/exsh/tests/pipeline_bg_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-redirect:start\nhello-bg\npipeline-bg-redirect:end"
+  },
+  {
+    "id": "pipeline_bg_pipe_redirect_ios",
+    "name": "Background pipeline redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background pipeline output redirected to file and replayed",
+    "script": "Tests/exsh/tests/pipeline_bg_pipe_redirect_ios.exsh",
+        "expect": "runtime_ok",
+        "env": {
+            "RUN_VPROC_TESTS": "1"
+        },
+        "expected_stdout": "pipeline-bg-pipe-redirect:start\nhistory     Print the interactive history list.\npipeline-bg-pipe-redirect:end"
+  },
+        {
             "id": "conditionals_loop",
             "name": "Conditionals execute matching branches",
             "category": "control",
@@ -358,8 +426,17 @@
             "description": "wait with no arguments should wait for all active jobs (bash-compatible).",
             "script": "Tests/exsh/tests/jobs_wait_all.exsh",
             "expect": "runtime_ok",
-            "expected_stdout": "jobs-wait-all:start\njobs:before-start\n[1] Running sleep 1\n[2] Running sleep 1\njobs:before-end\njobs:after-start\njobs:after-end\njobs-wait-all:end"
-        },
+        "expected_stdout": "jobs-wait-all:start\njobs:before-start\n[1] Running sleep 1\n[2] Running sleep 1\njobs:before-end\njobs:after-start\njobs:after-end\njobs-wait-all:end"
+    },
+    {
+        "id": "jobs_stop_resume",
+        "name": "SIGSTOP stops jobs and SIGCONT resumes",
+        "category": "jobs",
+        "description": "Sending STOP stops a job; CONT restarts it and wait observes completion.",
+        "script": "Tests/exsh/tests/jobs_stop_resume.exsh",
+        "expect": "runtime_ok",
+        "expected_stdout": "jobs-stop-resume:start\njobs:after-start\n[1] Running sleep 2\n[1] Stopped sleep 2\n[1] Running sleep 2\njobs-stop-resume:end"
+    },
         {
             "id": "jobspec_kill_stability",
             "name": "job-spec kill keeps ids stable",

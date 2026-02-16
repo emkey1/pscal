@@ -49,6 +49,7 @@
 #include "backend_ast/builtin.h"
 #include "ext_builtins/dump.h"
 #include "common/frontend_kind.h"
+#include "common/path_virtualization.h"
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -162,6 +163,9 @@ static char* resolveImportPath(const char* orig_path) {
 }
 
 int clike_main(int argc, char **argv) {
+    /* Ensure a clean slate when clike is run in-process multiple times. */
+    clikeInvalidateGlobalState();
+
     clikeApplyBgRedirectionFromEnv();
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_CLIKE);
 #define CLIKE_RETURN(value)            \

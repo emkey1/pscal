@@ -15,7 +15,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0040    | POP
 0041    4 CONST_1
 0042    | CONST_1
-0043    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0043    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0049    2 JUMP               30 (to 0082)
 0052    | DUP
 0053    6 PUSH_IMM_I8         2
@@ -24,12 +24,12 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0059    | POP
 0060    7 CONST_1
 0061    | PUSH_IMM_I8         2
-0063    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0063    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0069    2 JUMP               10 (to 0082)
 0072    | POP
 0073   10 CONST_1
 0074    | PUSH_IMM_I8         3
-0076    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0076    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0082    0 HALT
 == End Disassembly: rea/switch_stmt.rea ==
 

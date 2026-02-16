@@ -9,7 +9,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs_true (at 0010) ---
 0010    2 CONST_1
 0011    | CONSTANT            4 'R1'
-0013    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0013    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0019    3 CONST_TRUE
 0020    | RETURN
 0021    1 GET_LOCAL           0 (slot)
@@ -19,7 +19,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 --- Function rhs_false (at 0027) ---
 0027    7 CONST_1
 0028    | CONSTANT            7 'R0'
-0030    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0030    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0036    8 CONST_FALSE
 0037    | RETURN
 0038    6 GET_LOCAL           0 (slot)
@@ -73,11 +73,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0194    | JUMP_IF_FALSE      12 (to 0209)
 0197   12 CONST_1
 0198    | CONSTANT           29 'A hit'
-0200    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0200    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0206   11 JUMP                9 (to 0218)
 0209   14 CONST_1
 0210    | CONSTANT           30 'A skip'
-0212    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0212    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0218   17 CONST_TRUE
 0219    | JUMP_IF_FALSE       4 (to 0226)
 0222    | CONST_TRUE
@@ -87,11 +87,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0231    | JUMP_IF_FALSE      12 (to 0246)
 0234   18 CONST_1
 0235    | CONSTANT           33 'B hit'
-0237    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0237    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0243   17 JUMP                9 (to 0255)
 0246   20 CONST_1
 0247    | CONSTANT           34 'B skip'
-0249    | CALL_BUILTIN_PROC   176 'write' (2 args)
+0249    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0255   29 CONST_1
 0256    | CONSTANT           35 'vals:'
 0258    | GET_GLOBAL          9 'r0' cache=0x0
@@ -103,7 +103,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0294    | GET_GLOBAL         20 'r3' cache=0x0
 0304    | CONSTANT           36 ' '
 0306    | GET_GLOBAL         24 'r4' cache=0x0
-0316    | CALL_BUILTIN_PROC   176 'write' (11 args)
+0316    | CALL_BUILTIN_PROC   177 'write' (11 args)
 0322    0 HALT
 == End Disassembly: rea/short_circuit.rea ==
 

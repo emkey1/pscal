@@ -62,11 +62,22 @@
 #include "authfd.h"
 #include "kex.h"
 
-struct sshkey *previous_host_key = NULL;
+PSCAL_SSH_THREAD_LOCAL struct sshkey *previous_host_key = NULL;
 
 static PSCAL_SSH_THREAD_LOCAL int matching_host_key_dns = 0;
 
 static PSCAL_SSH_THREAD_LOCAL pid_t proxy_command_pid = 0;
+
+void
+pscal_sshconnect_reset_state(void)
+{
+	matching_host_key_dns = 0;
+	proxy_command_pid = 0;
+	if (previous_host_key != NULL) {
+		sshkey_free(previous_host_key);
+		previous_host_key = NULL;
+	}
+}
 
 /* import */
 extern PSCAL_SSH_THREAD_LOCAL int debug_flag;
