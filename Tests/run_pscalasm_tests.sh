@@ -979,7 +979,10 @@ run_real_source_roundtrip_test() {
         cp "$fixture" "$source_path"
     fi
 
-    if ! HOME="$test_home" "$compiler_bin" --dump-bytecode-only "$source_path" > "$tmpd/${compiler_id}.compile.out" 2> "$tmpd/${compiler_id}.compile.err"; then
+    if ! (
+        cd "$ROOT_DIR" &&
+        HOME="$test_home" "$compiler_bin" --dump-bytecode-only "$source_path"
+    ) > "$tmpd/${compiler_id}.compile.out" 2> "$tmpd/${compiler_id}.compile.err"; then
         fail_with_details "$test_id" "$description" "source compilation failed:\n$(sed -n '1,160p' "$tmpd/${compiler_id}.compile.err")"
         trap - RETURN
         rm -rf "$tmpd"

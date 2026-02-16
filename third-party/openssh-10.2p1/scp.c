@@ -468,33 +468,45 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 
 	/* Parent.  Close the other side, and return the local side. */
 #ifdef USE_PIPES
+#if defined(PSCAL_TARGET_IOS)
 	int parent_close_a = pin_parent[0];
 	int parent_close_b = pout_parent[1];
 	int parent_close_a_host_pre = -1;
-#if defined(PSCAL_TARGET_IOS)
 	{
 		VProc *pre_vp = vprocCurrent();
 		if (pre_vp != NULL)
 			parent_close_a_host_pre = vprocTranslateFd(pre_vp, parent_close_a);
 	}
-#endif
 	close(parent_close_a);
 	close(pout_parent[1]);
 	*fdout = pin_parent[1];
 	*fdin = pout_parent[0];
 #else
+	int parent_close_a = pin[0];
+	int parent_close_b = pout[1];
+	close(parent_close_a);
+	close(parent_close_b);
+	*fdout = pin[1];
+	*fdin = pout[0];
+#endif
+#else
+#if defined(PSCAL_TARGET_IOS)
 	int parent_close_a = sv_parent[0];
 	int parent_close_a_host_pre = -1;
-#if defined(PSCAL_TARGET_IOS)
 	{
 		VProc *pre_vp = vprocCurrent();
 		if (pre_vp != NULL)
 			parent_close_a_host_pre = vprocTranslateFd(pre_vp, parent_close_a);
 	}
-#endif
 	close(parent_close_a);
 	*fdin = sv_parent[1];
 	*fdout = sv_parent[1];
+#else
+	int parent_close_a = sv[0];
+	close(parent_close_a);
+	*fdin = sv[1];
+	*fdout = sv[1];
+#endif
 #endif
 #if defined(PSCAL_TARGET_IOS)
 	if (getenv("PSCALI_TOOL_DEBUG") != NULL) {

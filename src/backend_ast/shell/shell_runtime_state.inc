@@ -4491,7 +4491,7 @@ static void shellJobControlRestoreForeground(void) {
 }
 
 static int shellJobControlSendSignal(pid_t target, int signo, bool process_group) {
-    if (target == 0 || signo <= 0) {
+    if (target == 0 || signo < 0) {
         errno = EINVAL;
         return -1;
     }

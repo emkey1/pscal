@@ -2,7 +2,6 @@
 set -e
 
 echo "pipeline-rea-head:start"
-count=$(rea --version | head -n 1 | wc -l | tr -d '[:space:]')
+count=$(rea -v | head -n 1 | wc -l | tr -d '[:space:]')
 echo "pipeline-rea-head:lines:$count"
 echo "pipeline-rea-head:status:$?"
-
