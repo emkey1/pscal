@@ -293,7 +293,13 @@ static void shellTeardownSelfVproc(int status) {
         vprocDeactivate();
         gShellSelfVprocActivated = false;
     }
+    int shell_pid = vprocPid(gShellSelfVproc);
     vprocMarkExit(gShellSelfVproc, status);
+    if (shell_pid > 0) {
+        /* The interactive shell has no external waiter; retire its synthetic
+         * task entry eagerly so stale parent/sid state does not linger. */
+        vprocDiscard(shell_pid);
+    }
     vprocDestroy(gShellSelfVproc);
     gShellSelfVproc = NULL;
     if (session_stdio) {

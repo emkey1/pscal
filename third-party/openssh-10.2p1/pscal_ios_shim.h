@@ -53,6 +53,7 @@ int pscal_ios_remove(const char *path);
 int pscal_ios_rename(const char *oldpath, const char *newpath);
 int pscal_ios_link(const char *target, const char *linkpath);
 int pscal_ios_symlink(const char *target, const char *linkpath);
+char *pscal_ios_realpath(const char *path, char *resolved_path);
 
 extern __thread sigjmp_buf pscal_ios_fork_jmpbuf;
 pid_t pscal_ios_fork_dispatch(int jump_rc);

@@ -700,6 +700,17 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
         pathTruncateUnlock();
         return res;
     }
+    if ((strncmp(input_path, "/etc", 4) == 0 &&
+         (input_path[4] == '\0' || input_path[4] == '/')) ||
+        (strncmp(input_path, "/private/etc", 12) == 0 &&
+         (input_path[12] == '\0' || input_path[12] == '/'))) {
+        const char *etc_root = getenv("PSCALI_ETC_ROOT");
+        if (!etc_root || etc_root[0] != '/') {
+            bool res = pathTruncateCopyString(input_path, out, out_size);
+            pathTruncateUnlock();
+            return res;
+        }
+    }
     if (pathTruncateIsSystemPath(input_path)) {
         bool res = pathTruncateCopyString(input_path, out, out_size);
         pathTruncateUnlock();

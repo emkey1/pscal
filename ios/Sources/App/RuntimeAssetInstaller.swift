@@ -761,9 +761,10 @@ final class RuntimeAssetInstaller {
               let newContents = String(data: data, encoding: .utf8) else {
             return
         }
+        let desiredContents = isExshrc ? migratedExshrcContents(newContents) : newContents
         if !fileManager.fileExists(atPath: destination.path) {
             do {
-                try newContents.write(to: destination, atomically: true, encoding: .utf8)
+                try desiredContents.write(to: destination, atomically: true, encoding: .utf8)
             } catch {
                 NSLog("PSCAL iOS: failed to write %@: %@", destination.lastPathComponent, error.localizedDescription)
             }
@@ -772,19 +773,52 @@ final class RuntimeAssetInstaller {
         // Preserve user-managed ~/.exshrc across launches. If users remove it entirely,
         // the missing-file path above will seed a fresh copy from etc/skel.
         if isExshrc {
+            guard let oldData = try? Data(contentsOf: destination),
+                  let oldContents = String(data: oldData, encoding: .utf8) else {
+                return
+            }
+            let migratedContents = migratedExshrcContents(oldContents)
+            guard migratedContents != oldContents else {
+                return
+            }
+            do {
+                try migratedContents.write(to: destination, atomically: true, encoding: .utf8)
+            } catch {
+                NSLog("PSCAL iOS: failed to migrate %@: %@", destination.lastPathComponent, error.localizedDescription)
+            }
             return
         }
         // For other skel entries, only overwrite when contents differ.
         guard let oldData = try? Data(contentsOf: destination),
               let oldContents = String(data: oldData, encoding: .utf8),
-              oldContents != newContents else {
+              oldContents != desiredContents else {
             return
         }
         do {
-            try newContents.write(to: destination, atomically: true, encoding: .utf8)
+            try desiredContents.write(to: destination, atomically: true, encoding: .utf8)
         } catch {
             NSLog("PSCAL iOS: failed to update %@: %@", destination.lastPathComponent, error.localizedDescription)
         }
+    }
+
+    private func migratedExshrcContents(_ contents: String) -> String {
+        let pattern = #"(?m)^[ \t]*if \[ "\$\{PSCALSHELL_THREAD_METRICS:-0\}" != "0" \]; then\n[ \t]*echo "\[exsh\] worker pool snapshot"\n[ \t]*threadpool_report\n[ \t]*fi\n?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return contents
+        }
+        let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
+        let updated = regex.stringByReplacingMatches(in: contents,
+                                                     options: [],
+                                                     range: range,
+                                                     withTemplate: "")
+        guard updated != contents else {
+            return contents
+        }
+        var normalized = updated
+        while normalized.contains("\n\n\n") {
+            normalized = normalized.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        return normalized
     }
 
     private func writeWorkspaceExamplesVersionMarker() throws {

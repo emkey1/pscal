@@ -1690,7 +1690,15 @@ static void shellInProcessBackgroundCancelCleanup(void *arg) {
     unsetenv("PSCALI_BG_STDERR_APPEND");
 
     if (ctx->vp) {
+        int cancel_pid = vprocPid(ctx->vp);
         vprocDeactivate();
+        if (cancel_pid > 0) {
+            /* Cancellation bypasses the normal stage-finalize path; explicitly
+             * retire the synthetic task entry so stale pids/threads do not
+             * linger in the vproc table. */
+            vprocMarkExit(ctx->vp, 128 + SIGKILL);
+            vprocDiscard(cancel_pid);
+        }
         vprocDestroy(ctx->vp);
         ctx->vp = NULL;
     }

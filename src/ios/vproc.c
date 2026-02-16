@@ -482,33 +482,104 @@ static struct group *pscalGetgrnam(const char *name) {
     return NULL;
 }
 
+static bool pscalAllowHostPasswdFallbackForUid(uid_t uid) {
+    if (!pscalContainerUserDbAvailable("passwd")) {
+        return true;
+    }
+    return uid == getuid() || uid == geteuid();
+}
+
+static bool pscalAllowHostPasswdFallbackForName(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    if (!pscalContainerUserDbAvailable("passwd")) {
+        return true;
+    }
+    const char *user = getenv("USER");
+    if (user && strcmp(user, name) == 0) {
+        return true;
+    }
+    const char *logname = getenv("LOGNAME");
+    if (logname && strcmp(logname, name) == 0) {
+        return true;
+    }
+    return false;
+}
+
+static bool pscalAllowHostGroupFallbackForGid(gid_t gid) {
+    if (!pscalContainerUserDbAvailable("group")) {
+        return true;
+    }
+    return gid == getgid() || gid == getegid();
+}
+
+static bool pscalAllowHostGroupFallbackForName(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    if (!pscalContainerUserDbAvailable("group")) {
+        return true;
+    }
+    struct group *self = pscalGetgrgid(getgid());
+    if (self && self->gr_name && strcmp(self->gr_name, name) == 0) {
+        return true;
+    }
+    return false;
+}
+
 __attribute__((weak)) struct passwd *pscalRuntimeHostGetpwuid(uid_t uid);
 __attribute__((weak)) struct passwd *pscalRuntimeHostGetpwnam(const char *name);
 __attribute__((weak)) struct group *pscalRuntimeHostGetgrgid(gid_t gid);
 __attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name);
 
 __attribute__((weak)) struct passwd *pscalRuntimeHostGetpwuid(uid_t uid) {
-    (void)uid;
-    return NULL;
+    static _Thread_local struct passwd pw;
+    static _Thread_local char storage[16384];
+    struct passwd *result = NULL;
+    if (getpwuid_r(uid, &pw, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
 }
 __attribute__((weak)) struct passwd *pscalRuntimeHostGetpwnam(const char *name) {
-    (void)name;
-    return NULL;
+    if (!name || !*name) {
+        return NULL;
+    }
+    static _Thread_local struct passwd pw;
+    static _Thread_local char storage[16384];
+    struct passwd *result = NULL;
+    if (getpwnam_r(name, &pw, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
 }
 __attribute__((weak)) struct group *pscalRuntimeHostGetgrgid(gid_t gid) {
-    (void)gid;
-    return NULL;
+    static _Thread_local struct group gr;
+    static _Thread_local char storage[16384];
+    struct group *result = NULL;
+    if (getgrgid_r(gid, &gr, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
 }
 __attribute__((weak)) struct group *pscalRuntimeHostGetgrnam(const char *name) {
-    (void)name;
-    return NULL;
+    if (!name || !*name) {
+        return NULL;
+    }
+    static _Thread_local struct group gr;
+    static _Thread_local char storage[16384];
+    struct group *result = NULL;
+    if (getgrnam_r(name, &gr, storage, sizeof(storage), &result) != 0) {
+        return NULL;
+    }
+    return result;
 }
 
 struct passwd *getpwuid(uid_t uid) {
     struct passwd *pw = pscalGetpwuid(uid);
     if (pw) return pw;
-    /* If container passwd exists, do not consult host account DB. */
-    if (pscalContainerUserDbAvailable("passwd")) return NULL;
+    if (!pscalAllowHostPasswdFallbackForUid(uid)) return NULL;
     if (pscalRuntimeHostGetpwuid) return pscalRuntimeHostGetpwuid(uid);
     return NULL;
 }
@@ -516,7 +587,7 @@ struct passwd *getpwuid(uid_t uid) {
 struct passwd *getpwnam(const char *name) {
     struct passwd *pw = pscalGetpwnam(name);
     if (pw) return pw;
-    if (pscalContainerUserDbAvailable("passwd")) return NULL;
+    if (!pscalAllowHostPasswdFallbackForName(name)) return NULL;
     if (pscalRuntimeHostGetpwnam) return pscalRuntimeHostGetpwnam(name);
     return NULL;
 }
@@ -524,8 +595,7 @@ struct passwd *getpwnam(const char *name) {
 struct group *getgrgid(gid_t gid) {
     struct group *gr = pscalGetgrgid(gid);
     if (gr) return gr;
-    /* If container group exists, do not consult host account DB. */
-    if (pscalContainerUserDbAvailable("group")) return NULL;
+    if (!pscalAllowHostGroupFallbackForGid(gid)) return NULL;
     if (pscalRuntimeHostGetgrgid) return pscalRuntimeHostGetgrgid(gid);
     return NULL;
 }
@@ -533,7 +603,7 @@ struct group *getgrgid(gid_t gid) {
 struct group *getgrnam(const char *name) {
     struct group *gr = pscalGetgrnam(name);
     if (gr) return gr;
-    if (pscalContainerUserDbAvailable("group")) return NULL;
+    if (!pscalAllowHostGroupFallbackForName(name)) return NULL;
     if (pscalRuntimeHostGetgrnam) return pscalRuntimeHostGetgrnam(name);
     return NULL;
 }
@@ -547,8 +617,7 @@ int vprocLookupPasswdName(uid_t uid, char *buffer, size_t buffer_len) {
 
     struct passwd *pw = pscalGetpwuid(uid);
     if (!pw) {
-        /* Keep container passwd authoritative when it exists. */
-        if (pscalContainerUserDbAvailable("passwd")) {
+        if (!pscalAllowHostPasswdFallbackForUid(uid)) {
             errno = ENOENT;
             return -1;
         }
@@ -578,8 +647,7 @@ int vprocLookupGroupName(gid_t gid, char *buffer, size_t buffer_len) {
 
     struct group *gr = pscalGetgrgid(gid);
     if (!gr) {
-        /* Keep container group authoritative when it exists. */
-        if (pscalContainerUserDbAvailable("group")) {
+        if (!pscalAllowHostGroupFallbackForGid(gid)) {
             errno = ENOENT;
             return -1;
         }
@@ -4594,7 +4662,11 @@ static void *vprocSessionInputThread(void *arg) {
     struct pscal_fd *pscal_fd = session ? session->stdin_pscal_fd : NULL;
     const bool tool_dbg = vprocToolDebugEnabled();
     unsigned int retry_sleep_us = 1000;
+    if (pscal_fd) {
+        pscal_fd = pscal_fd_retain(pscal_fd);
+    }
     if (pscal_fd && (!pscal_fd->ops || !pscal_fd->ops->read)) {
+        pscal_fd_close(pscal_fd);
         pscal_fd = NULL;
     }
     unsigned char ch = 0;
@@ -4833,6 +4905,10 @@ static void *vprocSessionInputThread(void *arg) {
         pthread_mutex_unlock(&input->mu);
         pscal_fd_poll_wakeup(NULL, POLLIN);
     }
+    if (pscal_fd) {
+        pscal_fd_close(pscal_fd);
+        pscal_fd = NULL;
+    }
     if (session) {
         vprocSessionStdioActivate(NULL);
     }
@@ -4948,16 +5024,13 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
             input->reader_generation++;
             ctx->generation = input->reader_generation;
             input->stop_requested = false;
+            input->reader_active = true;
+            input->reader_fd = session->stdin_host_fd;
             pthread_mutex_unlock(&input->mu);
             pthread_t tid;
             int create_rc = vprocHostPthreadCreate(&tid, NULL, vprocSessionInputThread, ctx);
             if (create_rc == 0) {
                 pthread_detach(tid);
-                pthread_mutex_lock(&input->mu);
-                input->reader_active = true;
-                input->reader_fd = session->stdin_host_fd;
-                input->stop_requested = false;
-                pthread_mutex_unlock(&input->mu);
                 if (tool_dbg) {
                     fprintf(stderr,
                             "[session-input] reader spawned host_fd=%d pscal_fd=%p\n",
@@ -4969,6 +5042,13 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
                             (void *)session->stdin_pscal_fd);
                 }
             } else {
+                pthread_mutex_lock(&input->mu);
+                if (input->reader_generation == ctx->generation) {
+                    input->reader_active = false;
+                    input->reader_fd = -1;
+                    input->stop_requested = false;
+                }
+                pthread_mutex_unlock(&input->mu);
                 if (tool_dbg) {
                     fprintf(stderr, "[session-input] reader spawn failed rc=%d\n", create_rc);
                     vprocDebugLogf(
@@ -6392,6 +6472,7 @@ VProc *vprocCreate(const VProcOptions *opts) {
             vprocDebugLogf( "[vproc] create failed stdin=%d stdout=%d stderr=%d\n",
                     stdin_src, stdout_src, stderr_src);
         }
+        vprocDiscard(vp->pid);
         vprocDestroy(vp);
         return NULL;
     }

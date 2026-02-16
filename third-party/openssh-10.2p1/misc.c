@@ -429,8 +429,6 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 #ifdef PSCAL_TARGET_IOS
 	/* iOS poll/ppoll occasionally reports EBADF spuriously; prefer a simple
 	 * blocking connect with a watchdog that shuts down the socket on timeout. */
-	pscal_debug_logf("timeout_connect: start fd=%d timeout=%d", sockfd, timeoutp ? *timeoutp : -1);
-	fprintf(stderr, "timeout_connect: start fd=%d timeout=%d\n", sockfd, timeoutp ? *timeoutp : -1);
 	__block atomic_int watchdog_state = ATOMIC_VAR_INIT(0);
 	dispatch_block_t watchdog = NULL;
 	if (timeoutp != NULL && *timeoutp > 0) {
@@ -450,8 +448,6 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	for (;;) {
 		rc = connect(sockfd, serv_addr, addrlen);
 		if (rc == 0) {
-			pscal_debug_logf("timeout_connect: blocking connect success");
-			fprintf(stderr, "timeout_connect: blocking connect success\n");
 			break;
 		}
 		if (errno == EINTR) {
@@ -461,8 +457,6 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 			/* Should not happen with blocking connect, but treat as retry. */
 			continue;
 		}
-		pscal_debug_logf("timeout_connect: blocking connect failed errno=%d", errno);
-		fprintf(stderr, "timeout_connect: blocking connect failed errno=%d\n", errno);
 		break;
 	}
 	if (watchdog) {
@@ -2389,12 +2383,20 @@ safe_path(const char *name, struct stat *stp, const char *pw_dir,
 	int comparehome = 0;
 	struct stat st;
 
+#ifdef PSCAL_TARGET_IOS
+	if (pscal_ios_realpath(name, buf) == NULL) {
+#else
 	if (realpath(name, buf) == NULL) {
+#endif
 		snprintf(err, errlen, "realpath %s failed: %s", name,
 		    strerror(errno));
 		return -1;
 	}
+#ifdef PSCAL_TARGET_IOS
+	if (pw_dir != NULL && pscal_ios_realpath(pw_dir, homedir) != NULL)
+#else
 	if (pw_dir != NULL && realpath(pw_dir, homedir) != NULL)
+#endif
 		comparehome = 1;
 
 	if (!S_ISREG(stp->st_mode)) {

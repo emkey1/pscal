@@ -1031,6 +1031,49 @@ static const char *pscal_ios_effective_path(const char *path,
     return buffer;
 }
 
+char *pscal_ios_realpath(const char *path, char *resolved_path) {
+    if (path == NULL) {
+        errno = EINVAL;
+        return NULL;
+    }
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return NULL;
+    }
+
+    char host_resolved[PATH_MAX];
+    if (realpath(target, host_resolved) == NULL) {
+        return NULL;
+    }
+
+    char virtual_resolved[PATH_MAX];
+    const char *final_path = host_resolved;
+    if (pathTruncateStrip(host_resolved, virtual_resolved,
+            sizeof(virtual_resolved))) {
+        final_path = virtual_resolved;
+    }
+
+    if (resolved_path != NULL) {
+        size_t len = strlen(final_path);
+        if (len >= PATH_MAX) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+        memcpy(resolved_path, final_path, len + 1);
+        return resolved_path;
+    }
+
+    char *dup = strdup(final_path);
+    if (dup == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    return dup;
+}
+
 int pscal_ios_stat(const char *path, struct stat *buf) {
     char remapped[PATH_MAX];
     const char *target = pscal_ios_effective_path(path, remapped,

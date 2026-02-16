@@ -337,6 +337,7 @@ struct cauthctxt {
 	/* pubkey */
 	struct idlist keys;
 	int agent_fd;
+	int pubkey_prepared;
 	/* hostbased */
 	Sensitive *sensitive;
 	char *oktypes, *ktypes;
@@ -394,7 +395,7 @@ static Authmethod *authmethod_get(char *authlist);
 static Authmethod *authmethod_lookup(const char *name);
 static char *authmethods_get(void);
 
-Authmethod authmethods[] = {
+static PSCAL_SSH_THREAD_LOCAL Authmethod authmethods[] = {
 #ifdef GSSAPI
 	{"gssapi-with-mic",
 		userauth_gssapi,
@@ -430,15 +431,10 @@ Authmethod authmethods[] = {
 	{NULL, NULL, NULL, NULL, NULL}
 };
 
-static PSCAL_SSH_THREAD_LOCAL int authmethods_initialized = 0;
-
 static void
 pscal_authmethods_init(void)
 {
 	Authmethod *method;
-
-	if (authmethods_initialized)
-		return;
 
 	for (method = authmethods; method->name != NULL; method++) {
 		method->batch_flag = NULL;
@@ -458,8 +454,6 @@ pscal_authmethods_init(void)
 			method->enabled = NULL;
 		}
 	}
-
-	authmethods_initialized = 1;
 }
 
 void
@@ -1949,11 +1943,10 @@ userauth_pubkey(struct ssh *ssh)
 	Identity *id;
 	int sent = 0;
 	char *ident;
-	static int prepared;
 
-	if (!prepared) {
+	if (!authctxt->pubkey_prepared) {
 		pubkey_prepare(ssh, authctxt);
-		prepared = 1;
+		authctxt->pubkey_prepared = 1;
 	}
 
 	while ((id = TAILQ_FIRST(&authctxt->keys))) {
@@ -2384,6 +2377,18 @@ authmethod_lookup(const char *name)
 static PSCAL_SSH_THREAD_LOCAL Authmethod *current = NULL;
 static PSCAL_SSH_THREAD_LOCAL char *supported = NULL;
 static PSCAL_SSH_THREAD_LOCAL char *preferred = NULL;
+
+void
+pscal_sshconnect2_reset_state(void)
+{
+	xxx_host = NULL;
+	xxx_hostaddr = NULL;
+	xxx_conn_info = NULL;
+	current = NULL;
+	free(supported);
+	supported = NULL;
+	preferred = NULL;
+}
 
 /*
  * Given the authentication method list sent by the server, return the
