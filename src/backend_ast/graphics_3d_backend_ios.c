@@ -1466,6 +1466,7 @@ void gfx3dCallList(unsigned int list) {
         }
         gImmediatePrimitive = cmd->primitive;
         gImmediateCount = 0;
+        gImmediateRecording = true;
         for (size_t vi = 0; vi < cmd->vertexCount; ++vi) {
             RecordedVertex* rv = &dl->vertices[cmd->firstVertex + vi];
             emitImmediateVertex(rv->position, rv->normal, rv->color);
