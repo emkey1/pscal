@@ -476,9 +476,11 @@ static void shadeVertex(ImmediateVertex* v) {
         }
         float lightDir[3];
         if (fabsf(gLights[li].position[3]) < 1e-6f) {
-            lightDir[0] = -gLights[li].position[0];
-            lightDir[1] = -gLights[li].position[1];
-            lightDir[2] = -gLights[li].position[2];
+            /* OpenGL directional lights use the (already eye-space) direction
+               vector directly for the vertex-to-light direction. */
+            lightDir[0] = gLights[li].position[0];
+            lightDir[1] = gLights[li].position[1];
+            lightDir[2] = gLights[li].position[2];
         } else {
             lightDir[0] = gLights[li].position[0] - v->eyePos[0];
             lightDir[1] = gLights[li].position[1] - v->eyePos[1];
@@ -495,8 +497,22 @@ static void shadeVertex(ImmediateVertex* v) {
         float ndotl = normal[0]*lightDir[0] + normal[1]*lightDir[1] + normal[2]*lightDir[2];
         float diffuseFactor = fmaxf(ndotl, 0.0f);
 
-        float halfVec[3] = { lightDir[0], lightDir[1], lightDir[2] };
-        halfVec[2] += 1.0f; // viewer direction approx (0,0,1)
+        float viewDir[3] = { -v->eyePos[0], -v->eyePos[1], -v->eyePos[2] };
+        float vLen = sqrtf(viewDir[0]*viewDir[0] + viewDir[1]*viewDir[1] + viewDir[2]*viewDir[2]);
+        if (vLen > 1e-6f) {
+            viewDir[0] /= vLen;
+            viewDir[1] /= vLen;
+            viewDir[2] /= vLen;
+        } else {
+            viewDir[0] = 0.0f;
+            viewDir[1] = 0.0f;
+            viewDir[2] = 1.0f;
+        }
+        float halfVec[3] = {
+            lightDir[0] + viewDir[0],
+            lightDir[1] + viewDir[1],
+            lightDir[2] + viewDir[2]
+        };
         float hLen = sqrtf(halfVec[0]*halfVec[0] + halfVec[1]*halfVec[1] + halfVec[2]*halfVec[2]);
         if (hLen > 1e-6f) {
             halfVec[0] /= hLen;
@@ -1166,6 +1182,7 @@ void gfx3dColor3f(float r, float g, float b) {
     gCurrentColor[0] = r;
     gCurrentColor[1] = g;
     gCurrentColor[2] = b;
+    gCurrentColor[3] = 1.0f;
     applyColorMaterial(gCurrentColor);
 }
 
@@ -1282,7 +1299,13 @@ void gfx3dLightfv(unsigned int light, unsigned int pname, const float* params) {
             memcpy(l->specular, params, sizeof(float) * 4);
             break;
         case GL_POSITION:
-            memcpy(l->position, params, sizeof(float) * 4);
+            ensureStacks();
+            {
+                float inPos[4] = { params[0], params[1], params[2], params[3] };
+                float outPos[4];
+                applyMatrix(&gModelviewStack[gModelviewTop], inPos, outPos);
+                memcpy(l->position, outPos, sizeof(float) * 4);
+            }
             break;
         default:
             break;
