@@ -306,7 +306,20 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         super.didMoveToWindow()
         if window != nil {
             DispatchQueue.main.async { [weak self] in
-                _ = self?.becomeFirstResponder()
+                guard let self else { return }
+                let sceneWindows = UIApplication.shared.connectedScenes
+                    .compactMap { $0 as? UIWindowScene }
+                    .flatMap { $0.windows }
+                let appWindows = UIApplication.shared.windows
+                let allWindows = sceneWindows + appWindows
+                let hasVisibleSDLWindow = allWindows.contains { window in
+                    guard !window.isHidden else { return false }
+                    let className = NSStringFromClass(type(of: window)).lowercased()
+                    return className.contains("sdl") && className.contains("window")
+                }
+                guard pscalIOSSDLModeActive() == 0 else { return }
+                guard !hasVisibleSDLWindow else { return }
+                _ = self.becomeFirstResponder()
             }
         }
     }

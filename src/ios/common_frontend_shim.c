@@ -19,4 +19,24 @@ __attribute__((weak)) void pscalEditorDump(void) {
 __attribute__((weak)) void pscalElvisDump(void) {
     pscalEditorDump();
 }
+
+__attribute__((weak)) void pscalIOSPromoteSDLWindow(void) {
+}
+
+__attribute__((weak)) void pscalIOSPromoteSDLNativeWindow(void *nativeWindow) {
+    (void)nativeWindow;
+}
+
+__attribute__((weak)) void pscalIOSRestoreTerminalWindowKey(void) {
+}
+
+__attribute__((weak)) int pscalIOSSDLModeActive(void) {
+    return 0;
+}
+
+__attribute__((weak)) void pscalRuntimeSdlDidOpen(void) {
+}
+
+__attribute__((weak)) void pscalRuntimeSdlDidClose(void) {
+}
 #endif

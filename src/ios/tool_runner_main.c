@@ -4,6 +4,10 @@
 
 #include "common/frontend_kind.h"
 
+#if defined(__APPLE__)
+extern void SDL_SetMainReady(void) __attribute__((weak_import));
+#endif
+
 extern int pascal_main(int argc, char **argv);
 extern int clike_main(int argc, char **argv);
 extern int rea_main(int argc, char **argv);
@@ -59,6 +63,12 @@ static void printUsage(const char *program) {
 }
 
 int main(int argc, char **argv) {
+#if defined(__APPLE__)
+    if (SDL_SetMainReady) {
+        SDL_SetMainReady();
+    }
+#endif
+
     if (argc < 2) {
         printUsage(argv[0]);
         return EXIT_FAILURE;

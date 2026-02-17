@@ -3,6 +3,25 @@
 #include "core/utils.h"
 #include "vm/vm.h"
 #include "sdl_ios_dispatch.h"
+#if PSCALI_HAS_SYSWM
+#include PSCALI_SDL_SYSWM_HEADER
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+__attribute__((weak)) void pscalIOSPromoteSDLWindow(void);
+__attribute__((weak)) void pscalRuntimeSdlDidOpen(void);
+__attribute__((weak)) void pscalIOSPromoteSDLNativeWindow(void *nativeWindow);
+static inline void sdlPromoteIosWindowIfAvailable(void) {
+    if (pscalIOSPromoteSDLWindow) {
+        pscalIOSPromoteSDLWindow();
+    }
+}
+static inline void sdlNotifyUiSdlDidOpen(void) {
+    if (pscalRuntimeSdlDidOpen) {
+        pscalRuntimeSdlDidOpen();
+    }
+}
+#endif
 
 static bool sdlGlSetAttribute(SDL_GLattr attr, int value) {
 #if defined(PSCALI_SDL3)
@@ -121,12 +140,35 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph3d) {
     SDL_SetWindowInputFocus(gSdlWindow);
 #endif
 #endif
+#if defined(PSCAL_TARGET_IOS)
+#if PSCALI_HAS_SYSWM
+    if (pscalIOSPromoteSDLNativeWindow) {
+        SDL_SysWMinfo wmInfo;
+        SDL_VERSION(&wmInfo.version);
+        if (SDL_GetWindowWMInfo(gSdlWindow, &wmInfo)) {
+            void *nativeWindow = NULL;
+            if (wmInfo.subsystem == SDL_SYSWM_UIKIT && wmInfo.info.uikit.window) {
+                nativeWindow = (void *)wmInfo.info.uikit.window;
+            } else if (wmInfo.info.uikit.window) {
+                nativeWindow = (void *)wmInfo.info.uikit.window;
+            }
+            if (nativeWindow) {
+                pscalIOSPromoteSDLNativeWindow(nativeWindow);
+            }
+        }
+    }
+#endif
+    sdlPromoteIosWindowIfAvailable();
+#endif
     sdlEnsureInputWatch();
     sdlFlushSpuriousQuitEvents();
 
     if (!sdlTextInputActive()) {
         sdlStartTextInput();
     }
+#if defined(PSCAL_TARGET_IOS)
+    sdlNotifyUiSdlDidOpen();
+#endif
 
     return makeVoid();
 }

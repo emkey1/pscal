@@ -22,6 +22,7 @@ final class TerminalTabManager: ObservableObject {
             case shell(PscalRuntimeBootstrap)
             case shellSession(ShellRuntimeSession)
             case ssh(SshRuntimeSession)
+            case sdl(ownerTabId: UInt64)
         }
 
         let id: UInt64
@@ -44,6 +45,7 @@ final class TerminalTabManager: ObservableObject {
     @Published var selectedId: UInt64 {
         didSet {
             if oldValue != selectedId {
+                handleTabSelectionChange(oldId: oldValue, newId: selectedId)
                 logMultiTab("selected tab id=\(selectedId)")
                 tabInitLog("selected tab id=\(selectedId) tabs=\(tabs.count)")
                 bindSelectedAppearanceSettings()
@@ -54,6 +56,7 @@ final class TerminalTabManager: ObservableObject {
     private var appearanceSettingsByProfileID: [String: TerminalTabAppearanceSettings] = [:]
     private var startupCommandAppliedSessions: Set<UInt64> = []
     private var promptReadySessions: Set<UInt64> = []
+    private var activeSdlTabId: UInt64?
     private var selectedAppearanceObserver: AnyCancellable?
     private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
         // Avoid tab switching; just reassert focus on the selected tab a few times.
@@ -182,6 +185,12 @@ final class TerminalTabManager: ObservableObject {
                 tabInitLog("closeSelectedTab request ssh id=\(tab.id)")
                 session.requestClose()
             }
+        case .sdl(let ownerTabId):
+            tabInitLog("closeSelectedTab request sdl id=\(tab.id) owner=\(ownerTabId)")
+            if let ownerKind = kind(forTabId: ownerTabId) {
+                sendInterrupt(for: ownerKind)
+            }
+            pscalIOSRestoreTerminalWindowKey()
         }
         let removedId = removeTab(at: index)
         tabInitLog("closeSelectedTab removed id=\(removedId) tabs=\(tabs.count)")
@@ -290,6 +299,8 @@ final class TerminalTabManager: ObservableObject {
             session.markExited(status: status)
         case .ssh(let session):
             session.markExited(status: status)
+        case .sdl:
+            return
         }
         let removedId = removeTab(at: index)
         logMultiTab("session exit id=\(removedId) status=\(status)")
@@ -303,13 +314,16 @@ final class TerminalTabManager: ObservableObject {
             startupCommandAppliedSessions.remove(sessionId)
             promptReadySessions.remove(sessionId)
         }
+        if removedId == activeSdlTabId {
+            activeSdlTabId = nil
+        }
         tabs.remove(at: index)
         if selectedId == removedId {
             if let shellTab = tabs.first(where: { tab in
                 switch tab.kind {
                 case .shell, .shellSession:
                     return true
-                case .ssh:
+                case .ssh, .sdl:
                     return false
                 }
             }) {
@@ -327,6 +341,13 @@ final class TerminalTabManager: ObservableObject {
 
     var selectedAppearanceSettings: TerminalTabAppearanceSettings {
         selectedTab.appearanceSettings
+    }
+
+    var isSdlTabSelected: Bool {
+        if case .sdl = selectedTab.kind {
+            return true
+        }
+        return false
     }
 
     func selectTab(number: Int) {
@@ -350,6 +371,8 @@ final class TerminalTabManager: ObservableObject {
             session.send(text)
         case .ssh(let session):
             session.send(text)
+        case .sdl:
+            break
         }
     }
 
@@ -362,6 +385,12 @@ final class TerminalTabManager: ObservableObject {
             session.sendInterrupt()
         case .ssh(let session):
             session.send("\u{03}")
+        case .sdl(let ownerTabId):
+            if let ownerKind = kind(forTabId: ownerTabId) {
+                sendInterrupt(for: ownerKind)
+            } else {
+                pscalIOSRestoreTerminalWindowKey()
+            }
         }
     }
 
@@ -374,6 +403,92 @@ final class TerminalTabManager: ObservableObject {
             session.sendSuspend()
         case .ssh(let session):
             session.send("\u{1A}")
+        case .sdl(let ownerTabId):
+            if let ownerKind = kind(forTabId: ownerTabId) {
+                sendSuspend(for: ownerKind)
+            } else {
+                pscalIOSRestoreTerminalWindowKey()
+            }
+        }
+    }
+
+    func handleSdlDidOpen() {
+        if let existingIndex = tabs.firstIndex(where: { tab in
+            if case .sdl = tab.kind {
+                return true
+            }
+            return false
+        }) {
+            let ownerTabId = selectedId
+            tabs[existingIndex] = Tab(id: tabs[existingIndex].id,
+                                      title: tabs[existingIndex].title,
+                                      startupCommand: tabs[existingIndex].startupCommand,
+                                      sessionId: tabs[existingIndex].sessionId,
+                                      appearanceProfileID: tabs[existingIndex].appearanceProfileID,
+                                      appearanceSettings: tabs[existingIndex].appearanceSettings,
+                                      kind: .sdl(ownerTabId: ownerTabId))
+            let existing = tabs[existingIndex]
+            activeSdlTabId = existing.id
+            selectedId = existing.id
+            return
+        }
+
+        let ownerTabId = selectedId
+        let tabId = PSCALRuntimeNextSessionId()
+        let profileID = "sdl.1"
+        let title = TerminalTabManager.sanitizeTitle("SDL")
+        let appearance = appearanceSettings(forProfileID: profileID)
+        let tab = Tab(id: tabId,
+                      title: title,
+                      startupCommand: "",
+                      sessionId: nil,
+                      appearanceProfileID: profileID,
+                      appearanceSettings: appearance,
+                      kind: .sdl(ownerTabId: ownerTabId))
+        tabs.append(tab)
+        activeSdlTabId = tabId
+        tabInitLog("openSdlTab id=\(tabId) owner=\(ownerTabId)")
+        selectedId = tabId
+    }
+
+    func handleSdlDidClose() {
+        guard let index = tabs.firstIndex(where: { tab in
+            if case .sdl = tab.kind {
+                return true
+            }
+            return false
+        }) else {
+            activeSdlTabId = nil
+            pscalIOSRestoreTerminalWindowKey()
+            return
+        }
+
+        var ownerTabId: UInt64?
+        if case .sdl(let owner) = tabs[index].kind {
+            ownerTabId = owner
+        }
+        let removedId = removeTab(at: index)
+        activeSdlTabId = nil
+        tabInitLog("closeSdlTab id=\(removedId)")
+        if let ownerTabId,
+           tabs.contains(where: { $0.id == ownerTabId }) {
+            selectedId = ownerTabId
+        } else if selectedId == removedId {
+            selectFirstNonSdlTab()
+        }
+        pscalIOSRestoreTerminalWindowKey()
+    }
+
+    func selectFirstNonSdlTab() {
+        if let tab = tabs.first(where: { tab in
+            if case .sdl = tab.kind {
+                return false
+            }
+            return true
+        }) {
+            selectedId = tab.id
+        } else {
+            pscalIOSRestoreTerminalWindowKey()
         }
     }
 
@@ -544,6 +659,73 @@ final class TerminalTabManager: ObservableObject {
             session.send(payload)
         case .ssh(let session):
             session.send(payload)
+        case .sdl:
+            break
+        }
+    }
+
+    private func kind(forTabId tabId: UInt64) -> Tab.Kind? {
+        tabs.first(where: { $0.id == tabId })?.kind
+    }
+
+    private func sendInterrupt(for kind: Tab.Kind) {
+        switch kind {
+        case .shell(let runtime):
+            runtime.sendInterrupt()
+        case .shellSession(let session):
+            session.sendInterrupt()
+        case .ssh(let session):
+            session.send("\u{03}")
+        case .sdl:
+            break
+        }
+    }
+
+    private func sendSuspend(for kind: Tab.Kind) {
+        switch kind {
+        case .shell(let runtime):
+            runtime.sendSuspend()
+        case .shellSession(let session):
+            session.sendSuspend()
+        case .ssh(let session):
+            session.send("\u{1A}")
+        case .sdl:
+            break
+        }
+    }
+
+    private func activateSdlTabPresentation() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil,
+                                        from: nil,
+                                        for: nil)
+        pscalIOSPromoteSDLWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            pscalIOSPromoteSDLWindow()
+        }
+    }
+
+    func promoteSdlToFront() {
+        activateSdlTabPresentation()
+        let retryDelays: [TimeInterval] = [0.15, 0.30, 0.60, 1.0]
+        for delay in retryDelays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                guard self.activeSdlTabId != nil else { return }
+                pscalIOSPromoteSDLWindow()
+            }
+        }
+    }
+
+    private func handleTabSelectionChange(oldId: UInt64, newId: UInt64) {
+        let oldKind = kind(forTabId: oldId)
+        let newKind = kind(forTabId: newId)
+        if case .sdl = newKind {
+            activateSdlTabPresentation()
+            return
+        }
+        if case .sdl = oldKind {
+            pscalIOSRestoreTerminalWindowKey()
         }
     }
 
@@ -700,6 +882,9 @@ struct TerminalTabsRootView: View {
             }
         }
         .onChange(of: manager.selectedId) { _ in
+            if manager.isSdlTabSelected {
+                return
+            }
             NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
         }
     }
@@ -723,6 +908,12 @@ struct TerminalTabsRootView: View {
                             isActive: isSelected,
                             tabId: tab.id,
                             appearanceSettings: tab.appearanceSettings)
+        case .sdl:
+            SdlTabView {
+                TerminalTabManager.shared.selectFirstNonSdlTab()
+            } onPromote: {
+                TerminalTabManager.shared.promoteSdlToFront()
+            }
         }
     }
 }
@@ -785,6 +976,41 @@ private struct TerminalTabButton: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct SdlTabView: View {
+    let onReturn: () -> Void
+    let onPromote: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("SDL tab active")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.primary)
+            Text("This tab controls SDL focus. If SDL is behind, tap below.")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+            Button(action: onPromote) {
+                Text("Bring SDL to Front")
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            Button(action: onReturn) {
+                Text("Return to Shell")
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+        .onAppear {
+            onPromote()
+        }
     }
 }
 
@@ -884,5 +1110,19 @@ func pscalRuntimeSshSessionExited(_ sessionId: UInt64, _ status: Int32) {
 func pscalRuntimeShellSessionExited(_ sessionId: UInt64, _ status: Int32) {
     Task { @MainActor in
         TerminalTabManager.shared.handleSessionExit(sessionId: sessionId, status: status)
+    }
+}
+
+@_cdecl("pscalRuntimeSdlDidOpen")
+func pscalRuntimeSdlDidOpen() {
+    Task { @MainActor in
+        TerminalTabManager.shared.handleSdlDidOpen()
+    }
+}
+
+@_cdecl("pscalRuntimeSdlDidClose")
+func pscalRuntimeSdlDidClose() {
+    Task { @MainActor in
+        TerminalTabManager.shared.handleSdlDidClose()
     }
 }

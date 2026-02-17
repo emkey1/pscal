@@ -53,6 +53,8 @@ static uint64_t g_procRefreshLastVmMs = 0;
 static uint64_t g_procRefreshLastPruneMs = 0;
 static uint64_t g_procRefreshLastDevicePruneMs = 0;
 static bool g_procBaseSeeded = false;
+static bool g_procPrunePending = false;
+static bool g_procDevicePrunePending = false;
 
 static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
 static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
@@ -66,8 +68,61 @@ static uint64_t pathTruncateMonotonicMs(void) {
     return ((uint64_t)ts.tv_sec * 1000ull) + ((uint64_t)ts.tv_nsec / 1000000ull);
 }
 
+static bool pathTruncateAtomicWriteBytes(const char *path, const void *data, size_t len) {
+    if (!path || path[0] == '\0') {
+        return false;
+    }
+    if (len > 0 && !data) {
+        return false;
+    }
+
+    char tmp_path[PATH_MAX];
+    uintptr_t tid = (uintptr_t)pthread_self();
+    int tmp_n = snprintf(tmp_path,
+                         sizeof(tmp_path),
+                         "%s.tmp.%d.%llx.XXXXXX",
+                         path,
+                         (int)getpid(),
+                         (unsigned long long)tid);
+    if (tmp_n <= 0 || (size_t)tmp_n >= sizeof(tmp_path)) {
+        return false;
+    }
+
+    int fd = mkstemp(tmp_path);
+    if (fd < 0) {
+        return false;
+    }
+    (void)fchmod(fd, 0644);
+
+    const unsigned char *bytes = (const unsigned char *)data;
+    size_t total_written = 0;
+    while (total_written < len) {
+        ssize_t written = write(fd, bytes + total_written, len - total_written);
+        if (written <= 0) {
+            close(fd);
+            unlink(tmp_path);
+            return false;
+        }
+        total_written += (size_t)written;
+    }
+
+    if (close(fd) != 0) {
+        unlink(tmp_path);
+        return false;
+    }
+    if (rename(tmp_path, path) != 0) {
+        unlink(tmp_path);
+        return false;
+    }
+    return true;
+}
+
 static void write_text_file(const char *path, const char *contents) {
     if (!path || !contents) {
+        return;
+    }
+    size_t len = strlen(contents);
+    if (pathTruncateAtomicWriteBytes(path, contents, len)) {
         return;
     }
     FILE *f = fopen(path, "w");
@@ -274,21 +329,23 @@ static bool pathTruncatePidInList(const int *pids, size_t count, int pid) {
     return false;
 }
 
-static void pathTruncatePruneNumericDirectoryChildrenByPidList(const char *dir_path,
+static bool pathTruncatePruneNumericDirectoryChildrenByPidList(const char *dir_path,
                                                                const int *keep_pids,
                                                                size_t keep_count,
                                                                size_t max_remove) {
     if (!dir_path || dir_path[0] == '\0') {
-        return;
+        return false;
     }
     DIR *dir = opendir(dir_path);
     if (!dir) {
-        return;
+        return false;
     }
     size_t removed = 0;
+    bool more_candidates = false;
     struct dirent *entry = NULL;
     while ((entry = readdir(dir)) != NULL) {
         if (max_remove > 0 && removed >= max_remove) {
+            more_candidates = true;
             break;
         }
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
@@ -313,10 +370,14 @@ static void pathTruncatePruneNumericDirectoryChildrenByPidList(const char *dir_p
         removed++;
     }
     closedir(dir);
+    return more_candidates;
 }
 
 static void pathTruncateWriteBinaryFile(const char *path, const void *data, size_t len) {
     if (!path || !data) {
+        return;
+    }
+    if (pathTruncateAtomicWriteBytes(path, data, len)) {
         return;
     }
     FILE *f = fopen(path, "wb");
@@ -2403,20 +2464,27 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
             vproc_snapshots,
             sizeof(vproc_snapshots) / sizeof(vproc_snapshots[0]));
         bool wrote_any = false;
+        int keep_pids[512];
+        size_t keep_count = 0;
         for (size_t i = 0; i < vproc_snapshot_count; ++i) {
             if (vproc_snapshots[i].pid <= 0) {
                 continue;
             }
             pathTruncateEnsureProcPidDir(procdir, vproc_snapshots[i].pid);
+            if (keep_count < (sizeof(keep_pids) / sizeof(keep_pids[0]))) {
+                keep_pids[keep_count++] = vproc_snapshots[i].pid;
+            }
             wrote_any = true;
         }
         if (!wrote_any && current_vproc_pid > 0) {
             pathTruncateEnsureProcPidDir(procdir, current_vproc_pid);
+            keep_pids[keep_count++] = current_vproc_pid;
             wrote_any = true;
         }
         if (!wrote_any) {
             pathTruncateEnsureProcPidDir(procdir, (int)host_pid);
             current_vproc_pid = (int)host_pid;
+            keep_pids[keep_count++] = (int)host_pid;
         }
         char self_path[PATH_MAX];
         if (snprintf(self_path, sizeof(self_path), "%s/self", procdir) > 0) {
@@ -2424,6 +2492,20 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
             int self_link_pid = current_vproc_pid > 0 ? current_vproc_pid : (int)host_pid;
             snprintf(pid_link, sizeof(pid_link), "%d", self_link_pid);
             pathTruncateEnsureSymlink(self_path, pid_link);
+        }
+        bool allow_vproc_prune = true;
+        uint64_t vproc_prune_interval_ms = g_procPrunePending ? 250 : 2000;
+        if (now_ms != 0 && g_procRefreshLastPruneMs != 0 && now_ms > g_procRefreshLastPruneMs) {
+            allow_vproc_prune = (now_ms - g_procRefreshLastPruneMs) >= vproc_prune_interval_ms;
+        }
+        if (allow_vproc_prune) {
+            g_procPrunePending = pathTruncatePruneNumericDirectoryChildrenByPidList(procdir,
+                                                                                     keep_pids,
+                                                                                     keep_count,
+                                                                                     64);
+            if (now_ms != 0) {
+                g_procRefreshLastPruneMs = now_ms;
+            }
         }
         return;
     }
@@ -3080,15 +3162,19 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
                     }
                 }
                 bool allow_device_prune = true;
+                uint64_t device_prune_interval_ms = g_procDevicePrunePending ? 250 : 2000;
                 if (now_ms != 0 && g_procRefreshLastDevicePruneMs != 0 && now_ms > g_procRefreshLastDevicePruneMs) {
-                    allow_device_prune = (now_ms - g_procRefreshLastDevicePruneMs) >= 2000;
+                    allow_device_prune = (now_ms - g_procRefreshLastDevicePruneMs) >= device_prune_interval_ms;
                 }
                 if (allow_device_prune) {
-                    pathTruncatePruneNumericDirectoryChildrenByPidList(device_dir,
-                                                                       device_keep_pids,
-                                                                       device_keep_count,
-                                                                       64);
-                    g_procRefreshLastDevicePruneMs = now_ms;
+                    g_procDevicePrunePending =
+                        pathTruncatePruneNumericDirectoryChildrenByPidList(device_dir,
+                                                                           device_keep_pids,
+                                                                           device_keep_count,
+                                                                           64);
+                    if (now_ms != 0) {
+                        g_procRefreshLastDevicePruneMs = now_ms;
+                    }
                 }
             }
             char device_self_path[PATH_MAX];
@@ -3173,15 +3259,18 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
             }
         }
         bool allow_vproc_prune = true;
+        uint64_t vproc_prune_interval_ms = g_procPrunePending ? 250 : 2000;
         if (now_ms != 0 && g_procRefreshLastPruneMs != 0 && now_ms > g_procRefreshLastPruneMs) {
-            allow_vproc_prune = (now_ms - g_procRefreshLastPruneMs) >= 2000;
+            allow_vproc_prune = (now_ms - g_procRefreshLastPruneMs) >= vproc_prune_interval_ms;
         }
         if (allow_vproc_prune) {
-            pathTruncatePruneNumericDirectoryChildrenByPidList(procdir,
-                                                               vproc_keep_pids,
-                                                               vproc_keep_count,
-                                                               64);
-            g_procRefreshLastPruneMs = now_ms;
+            g_procPrunePending = pathTruncatePruneNumericDirectoryChildrenByPidList(procdir,
+                                                                                     vproc_keep_pids,
+                                                                                     vproc_keep_count,
+                                                                                     64);
+            if (now_ms != 0) {
+                g_procRefreshLastPruneMs = now_ms;
+            }
         }
 
         if (!host_pid_is_vproc) {
@@ -3206,6 +3295,8 @@ static void pathTruncateResetCaches(void) {
     g_procRefreshLastPruneMs = 0;
     g_procRefreshLastDevicePruneMs = 0;
     g_procBaseSeeded = false;
+    g_procPrunePending = false;
+    g_procDevicePrunePending = false;
 }
 
 static void pathTruncateEnsureDir(const char *path) {

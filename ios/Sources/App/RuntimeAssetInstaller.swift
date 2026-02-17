@@ -68,6 +68,10 @@ private enum RuntimePaths {
         documentsDirectory.appendingPathComponent(".src.version", isDirectory: false)
     }
 
+    static var workspaceFontsDirectory: URL {
+        documentsDirectory.appendingPathComponent("fonts", isDirectory: true)
+    }
+
     static var legacySysfilesDirectory: URL {
         documentsDirectory.appendingPathComponent("sysfiles", isDirectory: true)
     }
@@ -153,6 +157,7 @@ final class RuntimeAssetInstaller {
         installWorkspaceEtcIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceBinIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceSrcIfNeeded(bundleRoot: bundleRoot)
+        installWorkspaceFontsIfNeeded(bundleRoot: bundleRoot)
         stageSimpleWebServerAssets(bundleRoot: bundleRoot)
         configureRuntimeEnvironment(bundleRoot: bundleRoot)
 
@@ -467,6 +472,23 @@ final class RuntimeAssetInstaller {
             } catch {
                 NSLog("PSCAL iOS: failed to install tiny headers: %@", error.localizedDescription)
             }
+        }
+    }
+
+    private func installWorkspaceFontsIfNeeded(bundleRoot: URL) {
+        let bundledFonts = bundleRoot.appendingPathComponent("fonts", isDirectory: true)
+        guard fileManager.fileExists(atPath: bundledFonts.path) else { return }
+        let workspaceFonts = RuntimePaths.workspaceFontsDirectory
+        do {
+            try fileManager.createDirectory(at: workspaceFonts, withIntermediateDirectories: true)
+            let copiedCount = try copyMissingItemsWithCount(from: bundledFonts, to: workspaceFonts)
+            if copiedCount > 0 {
+                NSLog("PSCAL iOS: ensured fonts assets at %@ (installed %d missing file(s))",
+                      workspaceFonts.path, copiedCount)
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to stage fonts assets into workspace (%@): %@",
+                  workspaceFonts.path, error.localizedDescription)
         }
     }
 

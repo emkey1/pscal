@@ -163,6 +163,18 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
 /// Requests the UI to open an additional shell tab (iOS only).
 int pscalRuntimeOpenShellTab(void);
 
+/// Notifies the UI that an SDL window/session became active (iOS only).
+void pscalRuntimeSdlDidOpen(void);
+/// Notifies the UI that the SDL window/session ended (iOS only).
+void pscalRuntimeSdlDidClose(void);
+
+/// Promotes an SDL UIWindow to key/visible on iOS.
+void pscalIOSPromoteSDLWindow(void);
+/// Restores TerminalWindow as key/visible on iOS.
+void pscalIOSRestoreTerminalWindowKey(void);
+/// Returns non-zero while SDL window mode is active on iOS.
+int pscalIOSSDLModeActive(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -428,6 +428,14 @@ static void multiplyMat4(const float a[16], const float b[16], float out[16]) {
     }
 }
 
+static void terrainSetIdentity(float out[16]) {
+    memset(out, 0, sizeof(float) * 16);
+    out[0] = 1.0f;
+    out[5] = 1.0f;
+    out[10] = 1.0f;
+    out[15] = 1.0f;
+}
+
 static void computeNormalMatrix(const float modelView[16], float out[9]) {
     float m00 = modelView[0];
     float m01 = modelView[4];

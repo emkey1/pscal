@@ -100,7 +100,7 @@ experience without destabilising the macOS/Linux toolchain.
 | Toolchain | `cmake/toolchains/ios.cmake` now sets `CMAKE_SYSTEM_NAME=iOS` and handles simulator/device via `PSCALI_IOS_PLATFORM`. |
 | CMake Presets | `CMakePresets.json` adds opt-in `ios-simulator` / `ios-device` configurations. |
 | Entry Points | Frontends now expose `exsh_main`, `pascal_main`, `clike_main`, `rea_main`, `pscalvm_main`, and `pscaljson2bc_main`. `PSCAL_NO_CLI_ENTRYPOINTS` strips duplicate `main` symbols when building libraries. |
-| Static Libs | `PSCAL_BUILD_STATIC_LIBS` builds `libpscal_{pascal,dascal,vm,exsh,clike,clike_repl,rea,json2bc,pscald}_static.a` (dascal/pscald rows obey the usual `BUILD_*` toggles). The iOS presets force `(SDL=OFF, PSCAL_BUILD_STATIC_LIBS=ON, PSCAL_USE_BREW_CURL=ON)` and skip CLI executables/tests so cross-compiles focus purely on embeddable archives. |
+| Static Libs | `PSCAL_BUILD_STATIC_LIBS` builds `libpscal_{pascal,dascal,vm,exsh,clike,clike_repl,rea,json2bc,pscald}_static.a` (dascal/pscald rows obey the usual `BUILD_*` toggles). The iOS presets now default to `(SDL=ON, PSCAL_BUILD_STATIC_LIBS=ON, PSCAL_USE_BREW_CURL=ON)` and skip CLI executables/tests so cross-compiles focus on embeddable archives with graphics/audio support available. |
 | App Layout | `ios/README.md` + SwiftUI stubs (`PscalApp.swift`, `TerminalView.swift`) live under `ios/Sources`. `ios/PscalApp.xcodeproj` links `libpscal_exsh_static.a` through the `PSCALRuntime` bridge so SwiftUI can spawn the VM. |
 | Terminal UX | VT100 renderer + hidden input bridge bring inline editing, and iOS-only builtins (`ls`, `pascal`, `clike`, `rea`, `pscalvm`, `pscaljson2bc`, `pscald`) replace missing CLI binaries. |
 

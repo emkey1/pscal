@@ -31,6 +31,7 @@
 #include <string>
 #include <unordered_map>
 #include <termios.h>
+#include <objc/runtime.h>
 #if __has_include(<util.h>)
 #include <util.h>
 #else
@@ -70,8 +71,8 @@ extern "C" const char *__asan_default_options(void) {
 #endif
 #endif
 
-#if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
-extern "C" void SDL_SetMainReady(void);
+#if defined(PSCAL_TARGET_IOS)
+extern "C" void SDL_SetMainReady(void) __attribute__((weak_import));
 static void PSCALRuntimeEnsureSDLReady(void);
 #endif
 
@@ -1442,7 +1443,6 @@ static void PSCALRuntimeApplyWindowSize(int fd, int columns, int rows) {
 }
 
 int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
-    NSLog(@"PSCALRuntime: launching exsh (argc=%d)", argc);
     PSCALRuntimeInterposeBootstrap();
 #ifdef SIGPIPE
     signal(SIGPIPE, SIG_IGN);
@@ -1468,12 +1468,17 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
 #endif
     pthread_mutex_lock(&s_runtime_mutex);
     if (s_runtime_active || s_runtime_launching) {
+        const bool active = s_runtime_active;
+        const bool launching = s_runtime_launching;
         pthread_mutex_unlock(&s_runtime_mutex);
-        NSLog(@"PSCALRuntime: launch aborted (already running)");
+        NSLog(@"PSCALRuntime: launch aborted (already running active=%d launching=%d)",
+              active ? 1 : 0,
+              launching ? 1 : 0);
         errno = EBUSY;
         return -1;
     }
     s_runtime_launching = true;
+    NSLog(@"PSCALRuntime: launching exsh (argc=%d)", argc);
     PSCALRuntimeEnsurePendingWindowSizeLocked();
 
     const int initial_columns = s_pending_columns;
@@ -1556,7 +1561,7 @@ int PSCALRuntimeLaunchExsh(int argc, char* argv[]) {
 
     memset(&s_output_thread, 0, sizeof(s_output_thread));
 
-#if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
+#if defined(PSCAL_TARGET_IOS)
     PSCALRuntimeEnsureSDLReady();
 #endif
 
@@ -1644,6 +1649,18 @@ static void *PSCALRuntimeThreadMain(void *arg) {
 int PSCALRuntimeLaunchExshWithStackSize(int argc, char* argv[], size_t stackSizeBytes) {
     PSCALRuntimeInterposeBootstrap();
     (void)vprocEnsureKernelPid();
+    pthread_mutex_lock(&s_runtime_mutex);
+    if (s_runtime_active || s_runtime_launching) {
+        const bool active = s_runtime_active;
+        const bool launching = s_runtime_launching;
+        pthread_mutex_unlock(&s_runtime_mutex);
+        NSLog(@"PSCALRuntime: launch request ignored by guard (active=%d launching=%d)",
+              active ? 1 : 0,
+              launching ? 1 : 0);
+        errno = EBUSY;
+        return -1;
+    }
+    pthread_mutex_unlock(&s_runtime_mutex);
     const size_t defaultStack = 16ull * 1024ull * 1024ull; // 16 MiB
     const size_t minStack = (size_t)PTHREAD_STACK_MIN;
     size_t requestedStack = stackSizeBytes > 0 ? stackSizeBytes : defaultStack;
@@ -2051,12 +2068,821 @@ extern "C" char *pscalPlatformClipboardGet(size_t *out_len) {
     return NULL;
 #endif
 }
+#if defined(PSCAL_TARGET_IOS)
+static inline void PSCALRuntimeRunOnMainSync(dispatch_block_t block) {
+    if (!block) {
+        return;
+    }
+    if (pthread_main_np() != 0) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+}
+
+static const void *kPSCALSDLEscapeGestureInstalledKey = &kPSCALSDLEscapeGestureInstalledKey;
+static const void *kPSCALSDLEscapeGestureRecognizerKey = &kPSCALSDLEscapeGestureRecognizerKey;
+static const void *kPSCALSDLExplicitWindowTagKey = &kPSCALSDLExplicitWindowTagKey;
+static const void *kPSCALSuppressedWindowStateKey = &kPSCALSuppressedWindowStateKey;
+static NSArray<UIWindow *> *PSCALRuntimeAllWindows(void);
+
+static UIWindow *PSCALRuntimeFindWindowMatching(BOOL (^predicate)(UIWindow *)) {
+    if (!predicate) {
+        return nil;
+    }
+    NSArray<UIWindow *> *windows = PSCALRuntimeAllWindows();
+    for (UIWindow *window in windows.reverseObjectEnumerator) {
+        if (predicate(window)) {
+            return window;
+        }
+    }
+    return nil;
+}
+
+static NSArray<UIWindow *> *PSCALRuntimeAllWindows(void) {
+    NSMutableArray<UIWindow *> *windows = [NSMutableArray array];
+    NSSet<UIScene *> *scenes = UIApplication.sharedApplication.connectedScenes;
+    for (UIScene *scene in scenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) {
+            continue;
+        }
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        [windows addObjectsFromArray:windowScene.windows];
+    }
+    if ([UIApplication.sharedApplication respondsToSelector:@selector(windows)]) {
+        for (UIWindow *window in UIApplication.sharedApplication.windows) {
+            if (![windows containsObject:window]) {
+                [windows addObject:window];
+            }
+        }
+    }
+    SEL legacyWindowSels[] = {
+        NSSelectorFromString(@"_allWindowsIncludingInternalWindows:onlyVisibleWindows:"),
+        NSSelectorFromString(@"allWindowsIncludingInternalWindows:onlyVisibleWindows:")
+    };
+    id legacyTargets[] = { [UIWindow class], UIApplication.sharedApplication };
+    for (size_t t = 0; t < sizeof(legacyTargets) / sizeof(legacyTargets[0]); ++t) {
+        id target = legacyTargets[t];
+        for (size_t s = 0; s < sizeof(legacyWindowSels) / sizeof(legacyWindowSels[0]); ++s) {
+            SEL selector = legacyWindowSels[s];
+            if (![target respondsToSelector:selector]) {
+                continue;
+            }
+            NSMethodSignature *signature = [target methodSignatureForSelector:selector];
+            if (!signature || signature.numberOfArguments < 4) {
+                continue;
+            }
+            NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+            invocation.target = target;
+            invocation.selector = selector;
+            BOOL includeInternal = YES;
+            BOOL onlyVisible = NO;
+            [invocation setArgument:&includeInternal atIndex:2];
+            [invocation setArgument:&onlyVisible atIndex:3];
+            [invocation invoke];
+            __unsafe_unretained NSArray<UIWindow *> *legacyWindows = nil;
+            [invocation getReturnValue:&legacyWindows];
+            for (UIWindow *window in legacyWindows) {
+                if (![window isKindOfClass:[UIWindow class]]) {
+                    continue;
+                }
+                if (![windows containsObject:window]) {
+                    [windows addObject:window];
+                }
+            }
+        }
+    }
+    return windows;
+}
+
+static BOOL PSCALRuntimeIsSDLWindow(UIWindow *window) {
+    if (!window) {
+        return NO;
+    }
+    NSString *className = NSStringFromClass(window.class);
+    if ([className containsString:@"TerminalWindow"]) {
+        return NO;
+    }
+    NSNumber *explicitTag = objc_getAssociatedObject(window, kPSCALSDLExplicitWindowTagKey);
+    if (explicitTag.boolValue) {
+        return YES;
+    }
+    return [className containsString:@"SDL"] && [className containsString:@"window"];
+}
+
+static void PSCALRuntimeMarkSDLWindow(UIWindow *window) {
+    if (!window) {
+        return;
+    }
+    NSString *className = NSStringFromClass(window.class);
+    if ([className containsString:@"TerminalWindow"]) {
+        return;
+    }
+    objc_setAssociatedObject(window,
+                             kPSCALSDLExplicitWindowTagKey,
+                             @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static BOOL PSCALRuntimeIsTerminalWindow(UIWindow *window) {
+    if (!window) {
+        return NO;
+    }
+    NSString *className = NSStringFromClass(window.class);
+    return [className containsString:@"TerminalWindow"];
+}
+
+static BOOL PSCALRuntimeViewTreeHasFirstResponder(UIView *view) {
+    if (!view) {
+        return NO;
+    }
+    if (view.isFirstResponder) {
+        return YES;
+    }
+    for (UIView *subview in view.subviews) {
+        if (PSCALRuntimeViewTreeHasFirstResponder(subview)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL PSCALRuntimeWindowHasFirstResponder(UIWindow *window) {
+    if (!window) {
+        return NO;
+    }
+    if (window.isFirstResponder) {
+        return YES;
+    }
+    UIViewController *rootController = window.rootViewController;
+    if (!rootController) {
+        return NO;
+    }
+    return PSCALRuntimeViewTreeHasFirstResponder(rootController.view);
+}
+
+static BOOL PSCALRuntimeWindowIsVisible(UIWindow *window) {
+    if (!window) {
+        return NO;
+    }
+    if (window.isHidden) {
+        return NO;
+    }
+    if (window.alpha <= 0.01) {
+        return NO;
+    }
+    return YES;
+}
+
+static void PSCALRuntimeLogWindowFocusState(const char *tag, NSArray<UIWindow *> *windows) {
+    NSMutableString *line = [NSMutableString stringWithFormat:@"[SDLFocus] %s", tag ? tag : "state"];
+    for (UIWindow *window in windows) {
+        if (!window) {
+            continue;
+        }
+        BOOL isTerminal = PSCALRuntimeIsTerminalWindow(window);
+        BOOL isSDL = PSCALRuntimeIsSDLWindow(window);
+        BOOL isRelevant = isTerminal || isSDL || window.isKeyWindow;
+        if (!isRelevant) {
+            continue;
+        }
+        NSString *className = NSStringFromClass(window.class);
+        [line appendFormat:@" | %@ key=%d hidden=%d level=%.1f first=%d ptr=%p sdl=%d terminal=%d",
+                           className,
+                           window.isKeyWindow ? 1 : 0,
+                           window.isHidden ? 1 : 0,
+                           window.windowLevel,
+                           PSCALRuntimeWindowHasFirstResponder(window) ? 1 : 0,
+                           window,
+                           isSDL ? 1 : 0,
+                           isTerminal ? 1 : 0];
+    }
+    NSLog(@"%@", line);
+}
+
+static __weak UIWindow *sSuppressedTerminalWindow = nil;
+static __weak UIWindow *sTrackedTerminalWindow = nil;
+static __weak UIWindow *sTrackedSDLWindow = nil;
+static CGFloat sSuppressedTerminalWindowLevel = 0.0;
+static BOOL sSuppressedTerminalWindowLevelValid = NO;
+static BOOL sSDLKeyWindowGuardInstalled = NO;
+static __weak UIWindow *sActiveSDLWindow = nil;
+static BOOL sSDLModeActive = NO;
+static int sSDLFocusTransitionDepth = 0;
+static BOOL sSDLFocusObserverLocked = NO;
+static uint64_t sSDLFocusObserverLockGeneration = 0;
+
+static void PSCALRuntimeSwitchToTerminalWindowInternal(BOOL hideSDLWindows);
+
+static void PSCALRuntimeBeginSDLFocusTransition(void) {
+    sSDLFocusTransitionDepth += 1;
+}
+
+static void PSCALRuntimeEndSDLFocusTransition(void) {
+    if (sSDLFocusTransitionDepth > 0) {
+        sSDLFocusTransitionDepth -= 1;
+    }
+}
+
+static void PSCALRuntimeLockSDLFocusObserverFor(NSTimeInterval durationSeconds) {
+    if (durationSeconds <= 0.0) {
+        durationSeconds = 0.5;
+    }
+    sSDLFocusObserverLocked = YES;
+    sSDLFocusObserverLockGeneration += 1;
+    uint64_t generation = sSDLFocusObserverLockGeneration;
+    int64_t ns = (int64_t)(durationSeconds * (double)NSEC_PER_SEC);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ns), dispatch_get_main_queue(), ^{
+        if (generation != sSDLFocusObserverLockGeneration) {
+            return;
+        }
+        sSDLFocusObserverLocked = NO;
+    });
+}
+
+static void PSCALRuntimeSuppressCompetingWindow(UIWindow *window) {
+    if (!window || PSCALRuntimeIsSDLWindow(window) || PSCALRuntimeIsTerminalWindow(window)) {
+        return;
+    }
+    NSDictionary *state = objc_getAssociatedObject(window, kPSCALSuppressedWindowStateKey);
+    if (!state) {
+        state = @{
+            @"hidden": @(window.isHidden),
+            @"level": @(window.windowLevel),
+            @"userInteractionEnabled": @(window.userInteractionEnabled)
+        };
+        objc_setAssociatedObject(window,
+                                 kPSCALSuppressedWindowStateKey,
+                                 state,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [window endEditing:YES];
+    if (window.isKeyWindow) {
+        [window resignKeyWindow];
+    }
+    window.windowLevel = UIWindowLevelNormal - 1.0;
+    window.userInteractionEnabled = NO;
+    window.hidden = YES;
+}
+
+static void PSCALRuntimeRestoreSuppressedCompetingWindows(NSArray<UIWindow *> *windows) {
+    for (UIWindow *window in windows) {
+        NSDictionary *state = objc_getAssociatedObject(window, kPSCALSuppressedWindowStateKey);
+        if (!state) {
+            continue;
+        }
+        NSNumber *hidden = state[@"hidden"];
+        NSNumber *level = state[@"level"];
+        NSNumber *userInteractionEnabled = state[@"userInteractionEnabled"];
+        if (level) {
+            window.windowLevel = (CGFloat)level.doubleValue;
+        }
+        if (userInteractionEnabled) {
+            window.userInteractionEnabled = userInteractionEnabled.boolValue;
+        }
+        if (hidden) {
+            window.hidden = hidden.boolValue;
+        } else {
+            window.hidden = NO;
+        }
+        objc_setAssociatedObject(window, kPSCALSuppressedWindowStateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
+@interface PSCALRuntimeSDLEscapeGestureTarget : NSObject <UIGestureRecognizerDelegate>
++ (instancetype)shared;
+- (void)handleEscapeGesture:(UITapGestureRecognizer *)recognizer;
+@end
+
+static __weak UIResponder *sPSCALCapturedFirstResponder = nil;
+
+@interface UIResponder (PSCALFirstResponderCapture)
+- (void)pscalCaptureFirstResponder:(id)sender;
+@end
+
+@implementation PSCALRuntimeSDLEscapeGestureTarget
++ (instancetype)shared {
+    static PSCALRuntimeSDLEscapeGestureTarget *sharedTarget = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sharedTarget = [[PSCALRuntimeSDLEscapeGestureTarget alloc] init];
+    });
+    return sharedTarget;
+}
+
+- (void)handleEscapeGesture:(UITapGestureRecognizer *)recognizer {
+    if (!recognizer || recognizer.state != UIGestureRecognizerStateEnded) {
+        return;
+    }
+    PSCALRuntimeSwitchToTerminalWindowInternal(YES);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+        shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    (void)gestureRecognizer;
+    (void)otherGestureRecognizer;
+    return YES;
+}
+@end
+
+@implementation UIResponder (PSCALFirstResponderCapture)
+- (void)pscalCaptureFirstResponder:(id)sender {
+    (void)sender;
+    sPSCALCapturedFirstResponder = self;
+}
+@end
+
+static UIWindow *PSCALRuntimeFindFirstResponderWindow(void) {
+    sPSCALCapturedFirstResponder = nil;
+    [UIApplication.sharedApplication sendAction:@selector(pscalCaptureFirstResponder:)
+                                             to:nil
+                                           from:nil
+                                       forEvent:nil];
+    UIResponder *responder = sPSCALCapturedFirstResponder;
+    if (!responder) {
+        return nil;
+    }
+    if ([responder isKindOfClass:[UIWindow class]]) {
+        return (UIWindow *)responder;
+    }
+    if ([responder isKindOfClass:[UIView class]]) {
+        return ((UIView *)responder).window;
+    }
+    if ([responder isKindOfClass:[UIViewController class]]) {
+        return ((UIViewController *)responder).view.window;
+    }
+    if ([responder respondsToSelector:@selector(window)]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        id windowCandidate = [responder performSelector:@selector(window)];
+#pragma clang diagnostic pop
+        if ([windowCandidate isKindOfClass:[UIWindow class]]) {
+            return (UIWindow *)windowCandidate;
+        }
+    }
+    return nil;
+}
+
+static UIWindowScene *PSCALRuntimeFindActiveWindowScene(void) {
+    NSSet<UIScene *> *scenes = UIApplication.sharedApplication.connectedScenes;
+    for (UIScene *scene in scenes) {
+        if (scene.activationState != UISceneActivationStateForegroundActive) {
+            continue;
+        }
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            return (UIWindowScene *)scene;
+        }
+    }
+    for (UIScene *scene in scenes) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+            return (UIWindowScene *)scene;
+        }
+    }
+    return nil;
+}
+
+static void PSCALRuntimeSuppressTerminalWindow(UIWindow *terminalWindow) {
+    if (!terminalWindow) {
+        return;
+    }
+    if (sSuppressedTerminalWindow != terminalWindow || !sSuppressedTerminalWindowLevelValid) {
+        sSuppressedTerminalWindowLevel = terminalWindow.windowLevel;
+        sSuppressedTerminalWindowLevelValid = YES;
+    }
+    sSuppressedTerminalWindow = terminalWindow;
+    [terminalWindow endEditing:YES];
+    terminalWindow.windowLevel = UIWindowLevelNormal - 1.0;
+    terminalWindow.userInteractionEnabled = NO;
+    terminalWindow.hidden = YES;
+}
+
+static void PSCALRuntimeUnsuppressTerminalWindow(UIWindow *terminalWindow) {
+    if (!terminalWindow) {
+        return;
+    }
+    if (sSuppressedTerminalWindowLevelValid) {
+        terminalWindow.windowLevel = sSuppressedTerminalWindowLevel;
+    }
+    terminalWindow.hidden = NO;
+    terminalWindow.userInteractionEnabled = YES;
+    if (sSuppressedTerminalWindow == terminalWindow) {
+        sSuppressedTerminalWindow = nil;
+        sSuppressedTerminalWindowLevel = 0.0;
+        sSuppressedTerminalWindowLevelValid = NO;
+    }
+}
+
+static void PSCALRuntimeInstallSDLEscapeGesture(UIWindow *sdlWindow) {
+    if (!sdlWindow) {
+        return;
+    }
+    if (objc_getAssociatedObject(sdlWindow, kPSCALSDLEscapeGestureInstalledKey)) {
+        return;
+    }
+    PSCALRuntimeSDLEscapeGestureTarget *target = [PSCALRuntimeSDLEscapeGestureTarget shared];
+    UITapGestureRecognizer *escapeTap =
+        [[UITapGestureRecognizer alloc] initWithTarget:target action:@selector(handleEscapeGesture:)];
+    escapeTap.numberOfTapsRequired = 2;
+    escapeTap.numberOfTouchesRequired = 2;
+    escapeTap.cancelsTouchesInView = NO;
+    escapeTap.delaysTouchesBegan = NO;
+    escapeTap.delaysTouchesEnded = NO;
+    escapeTap.delegate = target;
+    [sdlWindow addGestureRecognizer:escapeTap];
+    objc_setAssociatedObject(sdlWindow,
+                             kPSCALSDLEscapeGestureRecognizerKey,
+                             escapeTap,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(sdlWindow,
+                             kPSCALSDLEscapeGestureInstalledKey,
+                             @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static UIWindow *PSCALRuntimeFindTerminalWindow(NSArray<UIWindow *> *windows) {
+    if (!windows) {
+        return nil;
+    }
+    UIWindow *visibleTerminal = nil;
+    UIWindow *anyTerminal = nil;
+    for (UIWindow *window in windows.reverseObjectEnumerator) {
+        if (PSCALRuntimeIsTerminalWindow(window)) {
+            if (window.isKeyWindow) {
+                return window;
+            }
+            if (!visibleTerminal && PSCALRuntimeWindowIsVisible(window)) {
+                visibleTerminal = window;
+            }
+            if (!anyTerminal) {
+                anyTerminal = window;
+            }
+        }
+    }
+    if (visibleTerminal) {
+        return visibleTerminal;
+    }
+    return anyTerminal;
+}
+
+static UIWindow *PSCALRuntimeFindSDLWindow(NSArray<UIWindow *> *windows) {
+    if (!windows) {
+        return nil;
+    }
+    UIWindow *focusedSDLWindow = nil;
+    UIWindow *visibleSDLWindow = nil;
+    UIWindow *anySDLWindow = nil;
+    for (UIWindow *window in windows.reverseObjectEnumerator) {
+        if (PSCALRuntimeIsSDLWindow(window)) {
+            if (window.isKeyWindow) {
+                return window;
+            }
+            if (!focusedSDLWindow &&
+                PSCALRuntimeWindowIsVisible(window) &&
+                PSCALRuntimeWindowHasFirstResponder(window)) {
+                focusedSDLWindow = window;
+            }
+            if (!visibleSDLWindow && PSCALRuntimeWindowIsVisible(window)) {
+                visibleSDLWindow = window;
+            }
+            if (!anySDLWindow) {
+                anySDLWindow = window;
+            }
+        }
+    }
+    if (focusedSDLWindow) {
+        return focusedSDLWindow;
+    }
+    if (visibleSDLWindow) {
+        return visibleSDLWindow;
+    }
+    return anySDLWindow;
+}
+
+static void PSCALRuntimeRefreshTrackedWindows(NSArray<UIWindow *> *windows) {
+    UIWindow *terminalWindow = PSCALRuntimeFindTerminalWindow(windows);
+    if (terminalWindow) {
+        sTrackedTerminalWindow = terminalWindow;
+    }
+    UIWindow *sdlWindow = PSCALRuntimeFindSDLWindow(windows);
+    if (sdlWindow) {
+        sTrackedSDLWindow = sdlWindow;
+    }
+}
+
+static BOOL PSCALRuntimeActivateSDLWindow(UIWindow *sdlWindow, NSArray<UIWindow *> *windows) {
+    PSCALRuntimeBeginSDLFocusTransition();
+    PSCALRuntimeLockSDLFocusObserverFor(0.5);
+    PSCALRuntimeRefreshTrackedWindows(windows);
+    PSCALRuntimeLogWindowFocusState("activate.begin", windows);
+    if (sdlWindow) {
+        NSLog(@"[SDLFocus] activate.candidate ptr=%p class=%@ isSDL=%d",
+              sdlWindow,
+              NSStringFromClass(sdlWindow.class),
+              PSCALRuntimeIsSDLWindow(sdlWindow) ? 1 : 0);
+    }
+
+    if (!sdlWindow) {
+        sdlWindow = sTrackedSDLWindow;
+    }
+    if (!sdlWindow) {
+        sdlWindow = PSCALRuntimeFindSDLWindow(windows);
+    }
+    if (!sdlWindow) {
+        UIWindow *firstResponderWindow = PSCALRuntimeFindFirstResponderWindow();
+        if (firstResponderWindow && !PSCALRuntimeIsTerminalWindow(firstResponderWindow)) {
+            PSCALRuntimeMarkSDLWindow(firstResponderWindow);
+            sTrackedSDLWindow = firstResponderWindow;
+            sdlWindow = firstResponderWindow;
+            NSLog(@"[SDLFocus] discovered.fromFirstResponder ptr=%p class=%@",
+                  firstResponderWindow,
+                  NSStringFromClass(firstResponderWindow.class));
+        }
+    }
+    if (!sdlWindow) {
+        UIWindow *terminalWindow = sTrackedTerminalWindow ?: PSCALRuntimeFindTerminalWindow(windows);
+        if (terminalWindow) {
+            [UIApplication.sharedApplication sendAction:@selector(resignFirstResponder)
+                                                     to:nil
+                                                   from:nil
+                                               forEvent:nil];
+            [terminalWindow endEditing:YES];
+            sTrackedTerminalWindow = terminalWindow;
+            NSLog(@"[SDLFocus] fallback.noSDLWindow ptr=%p class=%@",
+                  terminalWindow,
+                  NSStringFromClass(terminalWindow.class));
+        }
+        sSDLModeActive = YES;
+        PSCALRuntimeEndSDLFocusTransition();
+        return NO;
+    }
+    if (!PSCALRuntimeIsSDLWindow(sdlWindow)) {
+        PSCALRuntimeMarkSDLWindow(sdlWindow);
+    }
+
+    UIWindow *terminalWindow = sTrackedTerminalWindow ?: PSCALRuntimeFindTerminalWindow(windows);
+    UIWindow *keyTerminalWindow = PSCALRuntimeFindWindowMatching(^BOOL(UIWindow *window) {
+        return PSCALRuntimeIsTerminalWindow(window) && window.isKeyWindow;
+    });
+    if (keyTerminalWindow) {
+        terminalWindow = keyTerminalWindow;
+        sTrackedTerminalWindow = keyTerminalWindow;
+    }
+    UIWindowScene *activeScene = nil;
+    if (terminalWindow && terminalWindow != sdlWindow) {
+        [UIApplication.sharedApplication sendAction:@selector(resignFirstResponder)
+                                                 to:nil
+                                               from:nil
+                                           forEvent:nil];
+        [terminalWindow endEditing:YES];
+        activeScene = terminalWindow.windowScene ?: PSCALRuntimeFindActiveWindowScene();
+    } else {
+        activeScene = PSCALRuntimeFindActiveWindowScene();
+    }
+    if (activeScene &&
+        sdlWindow.windowScene != activeScene &&
+        [sdlWindow respondsToSelector:@selector(setWindowScene:)]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+        [sdlWindow performSelector:@selector(setWindowScene:) withObject:activeScene];
+#pragma clang diagnostic pop
+    }
+
+    PSCALRuntimeInstallSDLEscapeGesture(sdlWindow);
+    if (sdlWindow.windowScene) {
+        sdlWindow.frame = sdlWindow.windowScene.coordinateSpace.bounds;
+    } else {
+        sdlWindow.frame = UIScreen.mainScreen.bounds;
+    }
+    sdlWindow.windowLevel = UIWindowLevelStatusBar + 1.0;
+    sdlWindow.hidden = NO;
+    sdlWindow.userInteractionEnabled = YES;
+    [sdlWindow endEditing:NO];
+    [sdlWindow makeKeyWindow];
+    [sdlWindow makeKeyAndVisible];
+    if (!sdlWindow.isKeyWindow) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [sdlWindow makeKeyAndVisible];
+        });
+    }
+    if (!sdlWindow.isKeyWindow) {
+        sSDLModeActive = YES;
+        PSCALRuntimeLogWindowFocusState("activate.defer", PSCALRuntimeAllWindows());
+        PSCALRuntimeEndSDLFocusTransition();
+        return NO;
+    }
+
+    for (UIWindow *window in windows) {
+        if (!window || window == sdlWindow) {
+            continue;
+        }
+        if (!PSCALRuntimeIsSDLWindow(window) &&
+            sdlWindow.windowScene &&
+            window.windowScene == sdlWindow.windowScene) {
+            if (PSCALRuntimeIsTerminalWindow(window)) {
+                PSCALRuntimeSuppressTerminalWindow(window);
+            } else {
+                PSCALRuntimeSuppressCompetingWindow(window);
+            }
+        }
+    }
+
+    if (terminalWindow && terminalWindow != sdlWindow) {
+        PSCALRuntimeSuppressTerminalWindow(terminalWindow);
+    }
+
+    [sdlWindow makeKeyAndVisible];
+    sTrackedSDLWindow = sdlWindow;
+    sActiveSDLWindow = sdlWindow;
+    sSDLModeActive = YES;
+    PSCALRuntimeLogWindowFocusState("activate.end", PSCALRuntimeAllWindows());
+    BOOL promoted = sdlWindow.isKeyWindow;
+    PSCALRuntimeEndSDLFocusTransition();
+    return promoted;
+}
+
+static BOOL PSCALRuntimePromoteSDLWindowAttempt(void) {
+    NSArray<UIWindow *> *windows = PSCALRuntimeAllWindows();
+    PSCALRuntimeRefreshTrackedWindows(windows);
+    UIWindow *sdlWindow = sTrackedSDLWindow ?: PSCALRuntimeFindSDLWindow(windows);
+    return PSCALRuntimeActivateSDLWindow(sdlWindow, windows);
+}
+
+static BOOL PSCALRuntimePromoteSpecificSDLWindowAttempt(UIWindow *preferredSDLWindow) {
+    UIWindow *sdlWindow = preferredSDLWindow;
+    if (sdlWindow) {
+        PSCALRuntimeMarkSDLWindow(sdlWindow);
+        sTrackedSDLWindow = sdlWindow;
+    }
+    if (!sdlWindow) {
+        return PSCALRuntimePromoteSDLWindowAttempt();
+    }
+    NSArray<UIWindow *> *windows = PSCALRuntimeAllWindows();
+    return PSCALRuntimeActivateSDLWindow(sdlWindow, windows);
+}
+
+static void PSCALRuntimeInstallSDLKeyWindowGuard(void) {
+    if (sSDLKeyWindowGuardInstalled) {
+        return;
+    }
+    sSDLKeyWindowGuardInstalled = YES;
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIWindowDidBecomeKeyNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        UIWindow *keyWindow = (UIWindow *)note.object;
+        if (![keyWindow isKindOfClass:[UIWindow class]]) {
+            return;
+        }
+        if (PSCALRuntimeIsSDLWindow(keyWindow)) {
+            return;
+        }
+        if (sSDLFocusTransitionDepth > 0 || sSDLFocusObserverLocked) {
+            return;
+        }
+        if (!sSDLModeActive) {
+            return;
+        }
+        [keyWindow endEditing:YES];
+        if (keyWindow.isKeyWindow) {
+            [keyWindow resignKeyWindow];
+        }
+        if (PSCALRuntimeIsTerminalWindow(keyWindow)) {
+            PSCALRuntimeSuppressTerminalWindow(keyWindow);
+        } else {
+            PSCALRuntimeSuppressCompetingWindow(keyWindow);
+        }
+        UIWindow *visibleSDLWindow = sTrackedSDLWindow;
+        if (!visibleSDLWindow || visibleSDLWindow.isHidden) {
+            visibleSDLWindow = PSCALRuntimeFindWindowMatching(^BOOL(UIWindow *window) {
+                return PSCALRuntimeIsSDLWindow(window) && !window.isHidden;
+            });
+        }
+        if (!visibleSDLWindow) {
+            visibleSDLWindow = sActiveSDLWindow;
+        }
+        if (!visibleSDLWindow || visibleSDLWindow == keyWindow) {
+            return;
+        }
+        (void)PSCALRuntimePromoteSpecificSDLWindowAttempt(visibleSDLWindow);
+    }];
+}
+
+static void PSCALRuntimeSwitchToTerminalWindowInternal(BOOL hideSDLWindows) {
+    PSCALRuntimeBeginSDLFocusTransition();
+    PSCALRuntimeLockSDLFocusObserverFor(0.35);
+    NSArray<UIWindow *> *windows = PSCALRuntimeAllWindows();
+    PSCALRuntimeRefreshTrackedWindows(windows);
+    if (hideSDLWindows) {
+        for (UIWindow *window in windows) {
+            if (!PSCALRuntimeIsSDLWindow(window)) {
+                continue;
+            }
+            [window endEditing:YES];
+            if (window.isKeyWindow) {
+                [window resignKeyWindow];
+            }
+            window.userInteractionEnabled = NO;
+            window.hidden = YES;
+        }
+        if (sTrackedSDLWindow && ![windows containsObject:sTrackedSDLWindow]) {
+            [sTrackedSDLWindow endEditing:YES];
+            [sTrackedSDLWindow resignKeyWindow];
+            sTrackedSDLWindow.hidden = YES;
+            sTrackedSDLWindow.userInteractionEnabled = NO;
+        }
+    }
+    sSDLModeActive = NO;
+    PSCALRuntimeRestoreSuppressedCompetingWindows(windows);
+
+    UIWindow *terminalWindow = sTrackedTerminalWindow ?: PSCALRuntimeFindTerminalWindow(windows);
+    if (!terminalWindow) {
+        terminalWindow = sSuppressedTerminalWindow;
+    }
+    if (!terminalWindow) {
+        PSCALRuntimeEndSDLFocusTransition();
+        return;
+    }
+    PSCALRuntimeUnsuppressTerminalWindow(terminalWindow);
+    [terminalWindow makeKeyAndVisible];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_MSEC)),
+                   dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"terminalInputFocusRequested" object:nil];
+    });
+    PSCALRuntimeEndSDLFocusTransition();
+}
+
+extern "C" void pscalIOSPromoteSDLWindow(void) {
+    PSCALRuntimeRunOnMainSync(^{
+        PSCALRuntimeInstallSDLKeyWindowGuard();
+        PSCALRuntimeLockSDLFocusObserverFor(0.5);
+        sSDLModeActive = YES;
+        (void)PSCALRuntimePromoteSDLWindowAttempt();
+        static const int kRetryDelaysMs[] = {0, 50, 100, 200, 350, 500, 750, 1000, 1500, 2000};
+        for (size_t idx = 0; idx < sizeof(kRetryDelaysMs) / sizeof(kRetryDelaysMs[0]); ++idx) {
+            int delayMs = kRetryDelaysMs[idx];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayMs * NSEC_PER_MSEC)),
+                           dispatch_get_main_queue(), ^{
+                if (!sSDLModeActive) {
+                    return;
+                }
+                (void)PSCALRuntimePromoteSDLWindowAttempt();
+            });
+        }
+    });
+}
+
+extern "C" void pscalIOSPromoteSDLNativeWindow(void *nativeWindow) {
+    PSCALRuntimeRunOnMainSync(^{
+        PSCALRuntimeInstallSDLKeyWindowGuard();
+        PSCALRuntimeLockSDLFocusObserverFor(0.5);
+        sSDLModeActive = YES;
+        UIWindow *sdlWindow = (__bridge UIWindow *)nativeWindow;
+        if (sdlWindow) {
+            PSCALRuntimeMarkSDLWindow(sdlWindow);
+            sTrackedSDLWindow = sdlWindow;
+            NSLog(@"[SDLFocus] native.window ptr=%p class=%@",
+                  sdlWindow,
+                  NSStringFromClass(sdlWindow.class));
+        } else {
+            NSLog(@"[SDLFocus] native.window ptr=(nil)");
+        }
+        (void)PSCALRuntimePromoteSpecificSDLWindowAttempt(sdlWindow);
+        static const int kRetryDelaysMs[] = {50, 100, 200, 350, 500, 750, 1000, 1500, 2000};
+        for (size_t idx = 0; idx < sizeof(kRetryDelaysMs) / sizeof(kRetryDelaysMs[0]); ++idx) {
+            int delayMs = kRetryDelaysMs[idx];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayMs * NSEC_PER_MSEC)),
+                           dispatch_get_main_queue(), ^{
+                if (!sSDLModeActive) {
+                    return;
+                }
+                (void)PSCALRuntimePromoteSpecificSDLWindowAttempt(sdlWindow);
+            });
+        }
+    });
+}
+
+extern "C" void pscalIOSRestoreTerminalWindowKey(void) {
+    PSCALRuntimeRunOnMainSync(^{
+        PSCALRuntimeSwitchToTerminalWindowInternal(YES);
+    });
+}
+
+extern "C" int pscalIOSSDLModeActive(void) {
+    __block int active = 0;
+    PSCALRuntimeRunOnMainSync(^{
+        active = sSDLModeActive ? 1 : 0;
+    });
+    return active;
+}
+#endif
 #import <Foundation/Foundation.h>
-#if defined(PSCAL_TARGET_IOS) && (PSCAL_BUILD_SDL || PSCAL_BUILD_SDL3)
+#if defined(PSCAL_TARGET_IOS)
 static void PSCALRuntimeEnsureSDLReady(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        SDL_SetMainReady();
+        if (SDL_SetMainReady) {
+            SDL_SetMainReady();
+        }
     });
 }
 #endif

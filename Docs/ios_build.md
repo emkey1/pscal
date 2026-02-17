@@ -33,8 +33,8 @@ build/ios-simulator           # CMake preset output directory (Ninja/Ninja Multi
 
 | Preset | Description | Notes |
 | --- | --- | --- |
-| `ios-simulator` | Builds PSCAL libs for the iOS simulator | Uses `iphonesimulator` SDK, `arm64` arch, forces `SDL=OFF`, `PSCAL_BUILD_STATIC_LIBS=ON`. |
-| `ios-device` | Builds PSCAL libs for physical devices | Uses `iphoneos` SDK, `arm64` arch, forces `SDL=OFF`, `PSCAL_BUILD_STATIC_LIBS=ON`. |
+| `ios-simulator` | Builds PSCAL libs for the iOS simulator | Uses `iphonesimulator` SDK, `arm64` arch, enables `SDL=ON`, `PSCAL_BUILD_STATIC_LIBS=ON`. |
+| `ios-device` | Builds PSCAL libs for physical devices | Uses `iphoneos` SDK, `arm64` arch, enables `SDL=ON`, `PSCAL_BUILD_STATIC_LIBS=ON`. |
 
 Both reference `cmake/toolchains/ios.cmake`, which sets `CMAKE_SYSTEM_NAME=iOS`
 and toggles the SDK/arch based on `PSCALI_IOS_PLATFORM`.

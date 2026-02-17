@@ -350,9 +350,6 @@ option(PSCAL_BUILD_STATIC_LIBS "Build PSCAL static libraries for embedding runne
 
 # Optionally enable SDL-based features
 set(_PSCAL_SDL_DEFAULT ON)
-if(PSCAL_PLATFORM_IOS)
-    set(_PSCAL_SDL_DEFAULT OFF)
-endif()
 option(SDL "Enable SDL-based graphics and audio" ${_PSCAL_SDL_DEFAULT})
 if(release)
     set(SDL ON CACHE BOOL "Enable SDL-based graphics and audio" FORCE)

@@ -2060,6 +2060,46 @@ static ssize_t read_virtual_file(const char *path, char *buffer, size_t buffer_s
     return n;
 }
 
+static long long monotonic_ms(void) {
+    struct timespec ts;
+    assert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0);
+    return ((long long)ts.tv_sec * 1000ll) + ((long long)ts.tv_nsec / 1000000ll);
+}
+
+static bool int_list_contains(const int *values, size_t count, int needle) {
+    for (size_t i = 0; i < count; ++i) {
+        if (values[i] == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t read_numeric_virtual_entries(const char *dir_path, int *out, size_t out_capacity) {
+    assert(dir_path);
+    assert(out);
+    DIR *dir = pscalPathVirtualized_opendir(dir_path);
+    assert(dir);
+    size_t count = 0;
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '\0') {
+            continue;
+        }
+        char *endptr = NULL;
+        errno = 0;
+        long parsed = strtol(entry->d_name, &endptr, 10);
+        if (errno != 0 || !endptr || *endptr != '\0' || parsed <= 0 || parsed > INT_MAX) {
+            continue;
+        }
+        if (count < out_capacity) {
+            out[count++] = (int)parsed;
+        }
+    }
+    closedir(dir);
+    return count;
+}
+
 static void assert_proc_vm_files_present_and_stable(void) {
     char templ[] = "/tmp/vproc-procvm-XXXXXX";
     char *root = mkdtemp(templ);
@@ -2433,6 +2473,97 @@ static void assert_proc_device_entries_present(void) {
     snprintf(status_path, sizeof(status_path), "/proc/device/%s/io", self_target);
     assert(read_virtual_file(status_path, buf, sizeof(buf)) > 0);
     assert(strstr(buf, "read_bytes:") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_pid_namespace_and_device_namespace_separated(void) {
+    char templ[] = "/tmp/vproc-procpidns-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    int vproc_pid = vprocPid(vp);
+    assert(vproc_pid > 0);
+
+    char buf[256];
+    vprocActivate(vp);
+    assert(read_virtual_file("/proc/loadavg", buf, sizeof(buf)) > 0);
+
+    int proc_pids[1024];
+    size_t proc_pid_count = read_numeric_virtual_entries("/proc", proc_pids, sizeof(proc_pids) / sizeof(proc_pids[0]));
+    assert(proc_pid_count > 0);
+    assert(int_list_contains(proc_pids, proc_pid_count, vproc_pid));
+
+    int host_pid = getpid();
+    char proc_self_target[64] = {0};
+    ssize_t proc_self_n = pscalPathVirtualized_readlink("/proc/self",
+                                                        proc_self_target,
+                                                        sizeof(proc_self_target) - 1);
+    assert(proc_self_n > 0);
+    proc_self_target[proc_self_n] = '\0';
+    char expected_vproc[32];
+    snprintf(expected_vproc, sizeof(expected_vproc), "%d", vproc_pid);
+    assert(strcmp(proc_self_target, expected_vproc) == 0);
+
+    char self_target[64] = {0};
+    ssize_t self_n = pscalPathVirtualized_readlink("/proc/device/self", self_target, sizeof(self_target) - 1);
+    assert(self_n > 0);
+    self_target[self_n] = '\0';
+    char expected[32];
+    snprintf(expected, sizeof(expected), "%d", host_pid);
+    assert(strcmp(self_target, expected) == 0);
+
+    int device_pids[1024];
+    size_t device_pid_count = read_numeric_virtual_entries("/proc/device",
+                                                           device_pids,
+                                                           sizeof(device_pids) / sizeof(device_pids[0]));
+    assert(device_pid_count > 0);
+    assert(int_list_contains(device_pids, device_pid_count, host_pid));
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_root_listing_latency_regression(void) {
+    char templ[] = "/tmp/vproc-proclatency-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    int pids[1024];
+    size_t warm_count = read_numeric_virtual_entries("/proc", pids, sizeof(pids) / sizeof(pids[0]));
+    assert(warm_count > 0);
+
+    long long total_ms = 0;
+    long long max_ms = 0;
+    const int iterations = 5;
+    for (int i = 0; i < iterations; ++i) {
+        long long start_ms = monotonic_ms();
+        size_t count = read_numeric_virtual_entries("/proc", pids, sizeof(pids) / sizeof(pids[0]));
+        long long elapsed_ms = monotonic_ms() - start_ms;
+        assert(count > 0);
+        total_ms += elapsed_ms;
+        if (elapsed_ms > max_ms) {
+            max_ms = elapsed_ms;
+        }
+        assert(elapsed_ms < 2000);
+    }
+    long long avg_ms = total_ms / iterations;
+    assert(avg_ms < 1000);
 
     unsetenv("PATH_TRUNCATE");
     char cleanup_cmd[PATH_MAX + 16];
@@ -6532,6 +6663,10 @@ int main(void) {
     assert_proc_task_entries_present();
     fprintf(stderr, "TEST proc_device_entries_present\n");
     assert_proc_device_entries_present();
+    fprintf(stderr, "TEST proc_pid_namespace_and_device_namespace_separated\n");
+    assert_proc_pid_namespace_and_device_namespace_separated();
+    fprintf(stderr, "TEST proc_root_listing_latency_regression\n");
+    assert_proc_root_listing_latency_regression();
     fprintf(stderr, "TEST path_virtualized_glob_matches_dynamic_proc_entries\n");
     assert_path_virtualized_glob_matches_dynamic_proc_entries();
     fprintf(stderr, "TEST vproc_cwd_isolated_between_vprocs\n");
