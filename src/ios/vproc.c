@@ -12,6 +12,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include <setjmp.h>
 #include <dirent.h>
@@ -32,6 +33,7 @@
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #include <sys/syscall.h>
+#include <os/log.h>
 #endif
 #include "common/path_truncate.h"
 #if defined(__APPLE__)
@@ -3866,6 +3868,16 @@ static bool vprocShouldStopForBackgroundTty(VProc *vp, int sig) {
     return stopped;
 }
 
+static void vprocDebugLogf(const char *format, ...);
+
+static bool vprocStopWaitDebugEnabled(void) {
+    const char *env = getenv("PSCALI_STOPWAIT_DEBUG");
+    if (!env || env[0] == '\0' || strcmp(env, "0") == 0) {
+        return false;
+    }
+    return true;
+}
+
 bool vprocWaitIfStopped(VProc *vp) {
     if (!vp) {
         return false;
@@ -3945,7 +3957,23 @@ bool vprocWaitIfStopped(VProc *vp) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         return false;
     }
+    bool stop_wait_debug = vprocStopWaitDebugEnabled();
+    uint64_t wait_start_ns = 0;
+    uint64_t last_log_ns = 0;
     bool should_wait = (entry && entry->stopped && !entry->exited);
+    if (should_wait && stop_wait_debug) {
+        wait_start_ns = vprocNowMonoNs();
+        last_log_ns = wait_start_ns;
+        vprocDebugLogf("[vproc-stopwait] begin pid=%d sid=%d pgid=%d stop_sig=%d stop_unsup=%d coop=%d pending=0x%08x tid=%p",
+                       pid,
+                       entry->sid,
+                       entry->pgid,
+                       entry->stop_signo,
+                       entry->stop_unsupported ? 1 : 0,
+                       entry->cooperative_stop_wait ? 1 : 0,
+                       entry->pending_signals,
+                       (void*)entry->tid);
+    }
     if (should_wait && gVprocStopWaitBeforeHook) {
         pthread_mutex_unlock(&gVProcTasks.mu);
         gVprocStopWaitBeforeHook();
@@ -3954,10 +3982,48 @@ bool vprocWaitIfStopped(VProc *vp) {
     }
     while (entry && entry->stopped && !entry->exited) {
         waited = true;
-        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        if (stop_wait_debug) {
+            struct timespec deadline;
+            if (clock_gettime(CLOCK_REALTIME, &deadline) == 0) {
+                deadline.tv_sec += 1;
+                int wait_rc = pthread_cond_timedwait(&gVProcTasks.cv, &gVProcTasks.mu, &deadline);
+                if (wait_rc == ETIMEDOUT && entry && entry->stopped && !entry->exited) {
+                    uint64_t now_ns = vprocNowMonoNs();
+                    if (now_ns >= last_log_ns + 1000000000ull) {
+                        uint64_t waited_ms = wait_start_ns > 0 ? (now_ns - wait_start_ns) / 1000000ull : 0;
+                        vprocDebugLogf("[vproc-stopwait] heartbeat pid=%d sid=%d pgid=%d stop_sig=%d waited_ms=%" PRIu64 " pending=0x%08x",
+                                       pid,
+                                       entry->sid,
+                                       entry->pgid,
+                                       entry->stop_signo,
+                                       waited_ms,
+                                       entry->pending_signals);
+                        last_log_ns = now_ns;
+                    }
+                }
+            } else {
+                pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+            }
+        } else {
+            pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        }
         if (entry->pid != pid) {
             entry = vprocTaskFindLocked(pid);
         }
+    }
+    if (waited && stop_wait_debug) {
+        uint64_t waited_ms = 0;
+        if (wait_start_ns > 0) {
+            uint64_t now_ns = vprocNowMonoNs();
+            waited_ms = (now_ns - wait_start_ns) / 1000000ull;
+        }
+        vprocDebugLogf("[vproc-stopwait] end pid=%d waited_ms=%" PRIu64 " entry=%p stopped=%d exited=%d stop_sig=%d",
+                       pid,
+                       waited_ms,
+                       (void*)entry,
+                       (entry && entry->stopped) ? 1 : 0,
+                       (entry && entry->exited) ? 1 : 0,
+                       entry ? entry->stop_signo : 0);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
     if (waited && gVprocStopWaitAfterHook) {
@@ -4147,24 +4213,58 @@ static void vprocDebugLogf(const char *format, ...) {
 #if defined(__APPLE__)
     static void (*log_line)(const char *message) = NULL;
     static int log_line_checked = 0;
+    static void (*debug_log)(const char *message) = NULL;
+    static int debug_log_checked = 0;
+#if defined(PSCAL_TARGET_IOS)
+    os_log_with_type(OS_LOG_DEFAULT, OS_LOG_TYPE_DEFAULT, "%{public}s", buf);
+#endif
     if (!log_line_checked) {
         log_line_checked = 1;
         log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
     }
     if (log_line) {
         log_line(buf);
-        return;
     }
-#endif
-#if defined(PSCAL_TARGET_IOS)
-    if (pscalRuntimeDebugLog) {
-        pscalRuntimeDebugLog(buf);
-        return;
+    if (!debug_log_checked) {
+        debug_log_checked = 1;
+        debug_log = (void (*)(const char *))dlsym(RTLD_DEFAULT, "pscalRuntimeDebugLog");
+    }
+    if (debug_log) {
+        debug_log(buf);
     }
 #endif
 #if !defined(PSCAL_TARGET_IOS)
     fprintf(stderr, "%s\n", buf);
 #endif
+}
+
+static bool vprocResizeDebugEnabled(void) {
+    static int cached = -1;
+    if (cached >= 0) {
+        return cached == 1;
+    }
+    const char *env = getenv("PSCALI_SSH_RESIZE_DEBUG");
+    if (!env || env[0] == '\0') {
+        env = getenv("PSCALI_RESIZE_DEBUG");
+    }
+    if (!env || env[0] == '\0') {
+        cached = 0;
+        return false;
+    }
+    cached = (strcmp(env, "0") != 0) ? 1 : 0;
+    return cached == 1;
+}
+
+static void vprocResizeLogf(const char *format, ...) {
+    if (!vprocResizeDebugEnabled() || !format) {
+        return;
+    }
+    char buf[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buf, sizeof(buf), format, args);
+    va_end(args);
+    vprocDebugLogf("%s", buf);
 }
 
 static void vprocIoTrace(const char *format, ...) {
@@ -4300,14 +4400,14 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     int tty_sid_before = (int)pty_slave->tty->session;
     int tty_fg_before = (int)pty_slave->tty->fg_group;
     int map_fg_before = (tty_sid_before > 0) ? pscalTtyGetForegroundPgid(tty_sid_before) : -1;
-    vprocDebugLogf("[ssh-resize] winsize set session=%llu cols=%d rows=%d tty=%p sid=%d fg=%d map_fg=%d",
-                   (unsigned long long)session_id,
-                   cols,
-                   rows,
-                   (void *)pty_slave->tty,
-                   tty_sid_before,
-                   tty_fg_before,
-                   map_fg_before);
+    vprocResizeLogf("[ssh-resize] winsize set session=%llu cols=%d rows=%d tty=%p sid=%d fg=%d map_fg=%d",
+                    (unsigned long long)session_id,
+                    cols,
+                    rows,
+                    (void *)pty_slave->tty,
+                    tty_sid_before,
+                    tty_fg_before,
+                    map_fg_before);
     vprocIoTrace("[vproc-io] winsize session=%llu before tty=%p sid=%d fg=%d map_fg=%d cols=%d rows=%d",
                  (unsigned long long)session_id,
                  (void *)pty_slave->tty,
@@ -4321,13 +4421,13 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     int tty_fg_after = (int)pty_slave->tty->fg_group;
     int map_fg_after = (tty_sid_after > 0) ? pscalTtyGetForegroundPgid(tty_sid_after) : -1;
     pscal_fd_close(pty_slave);
-    vprocDebugLogf("[ssh-resize] winsize done session=%llu cols=%d rows=%d sid=%d fg=%d map_fg=%d",
-                   (unsigned long long)session_id,
-                   cols,
-                   rows,
-                   tty_sid_after,
-                   tty_fg_after,
-                   map_fg_after);
+    vprocResizeLogf("[ssh-resize] winsize done session=%llu cols=%d rows=%d sid=%d fg=%d map_fg=%d",
+                    (unsigned long long)session_id,
+                    cols,
+                    rows,
+                    tty_sid_after,
+                    tty_fg_after,
+                    map_fg_after);
     vprocIoTrace("[vproc-io] winsize session=%llu applied cols=%d rows=%d tty_sid=%d tty_fg=%d map_fg=%d",
                  (unsigned long long)session_id,
                  cols,
@@ -11414,16 +11514,16 @@ int pscalTtySendGroupSignal(int pgid, int sig) {
         return _ESRCH;
     }
     if (sig == SIGWINCH_) {
-        vprocDebugLogf("[ssh-resize] send-group-signal pgid=%d sig=SIGWINCH", pgid);
+        vprocResizeLogf("[ssh-resize] send-group-signal pgid=%d sig=SIGWINCH", pgid);
     }
     if (vprocKillShim(-pgid, sig) < 0) {
         if (sig == SIGWINCH_) {
-            vprocDebugLogf("[ssh-resize] send-group-signal failed pgid=%d sig=SIGWINCH errno=%d", pgid, errno);
+            vprocResizeLogf("[ssh-resize] send-group-signal failed pgid=%d sig=SIGWINCH errno=%d", pgid, errno);
         }
         return _ESRCH;
     }
     if (sig == SIGWINCH_) {
-        vprocDebugLogf("[ssh-resize] send-group-signal ok pgid=%d sig=SIGWINCH", pgid);
+        vprocResizeLogf("[ssh-resize] send-group-signal ok pgid=%d sig=SIGWINCH", pgid);
     }
     return 0;
 }

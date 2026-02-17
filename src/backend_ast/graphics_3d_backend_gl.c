@@ -172,4 +172,10 @@ unsigned int gfx3dGetError(void) {
     return (unsigned int)glGetError();
 }
 
+void gfx3dPresent(void) {
+}
+
+void gfx3dReleaseResources(void) {
+}
+
 #endif // !defined(PSCAL_TARGET_IOS)

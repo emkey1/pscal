@@ -31,12 +31,22 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include "backend_ast/builtin.h"
+#ifdef SDL
+#include "backend_ast/pscal_sdl_runtime.h"
+#endif
+#if defined(__APPLE__)
+#include <dlfcn.h>
+#endif
+#if defined(PSCAL_TARGET_IOS)
+#include <os/log.h>
+#endif
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/vproc.h"
 #endif
 
 static bool vmHandleGlobalInterrupt(VM* vm);
 static bool vmConsumeSuspendRequest(VM* vm);
+static bool vmIsRootExecutor(const VM* vm);
 
 #define VM_PROC_REGISTRY_CAPACITY 1024
 
@@ -125,6 +135,119 @@ static void vmProcFillSnapshot(const VM* vm, VMProcSnapshot* out) {
 }
 
 #if defined(PSCAL_TARGET_IOS)
+static uint64_t vmNowMonoNs(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    }
+    return 0;
+}
+
+static bool vmIosDebugEnabled(void) {
+    const char* env = getenv("PSCALI_VM_DEBUG");
+    if (!env || env[0] == '\0' || strcmp(env, "0") == 0) {
+        return false;
+    }
+    return true;
+}
+
+static bool vmIosMutexDebugEnabled(void) {
+    const char* env = getenv("PSCALI_VM_MUTEX_DEBUG");
+    if (!env || env[0] == '\0' || strcmp(env, "0") == 0) {
+        return false;
+    }
+    return true;
+}
+
+static bool vmRuntimeSignalAppliesToCurrentVproc(VM* vm);
+
+static bool vmRuntimeScopeFilterEnabled(void) {
+    const char* env = getenv("PSCALI_VM_SCOPE_FILTER");
+    if (!env || env[0] == '\0') {
+        return false;
+    }
+    return strcmp(env, "0") != 0;
+}
+
+static void vmIosDebugLogf(const char* format, ...) {
+    if (!vmIosDebugEnabled() || !format) {
+        return;
+    }
+    char buf[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buf, sizeof(buf), format, args);
+    va_end(args);
+    size_t len = strlen(buf);
+    if (len == 0) {
+        return;
+    }
+    if (buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+#if defined(__APPLE__)
+#if defined(PSCAL_TARGET_IOS)
+    os_log_with_type(OS_LOG_DEFAULT, OS_LOG_TYPE_DEFAULT, "%{public}s", buf);
+#endif
+    static void (*log_line)(const char *message) = NULL;
+    static int log_line_checked = 0;
+    static void (*debug_log)(const char *message) = NULL;
+    static int debug_log_checked = 0;
+    if (!log_line_checked) {
+        log_line_checked = 1;
+        log_line = (void (*)(const char *))dlsym(RTLD_DEFAULT, "PSCALRuntimeLogLine");
+    }
+    if (log_line) {
+        log_line(buf);
+    }
+    if (!debug_log_checked) {
+        debug_log_checked = 1;
+        debug_log = (void (*)(const char *))dlsym(RTLD_DEFAULT, "pscalRuntimeDebugLog");
+    }
+    if (debug_log) {
+        debug_log(buf);
+    }
+#endif
+#if !defined(PSCAL_TARGET_IOS)
+    fprintf(stderr, "%s\n", buf);
+#endif
+}
+
+static bool vmRuntimeSignalAppliesCached(VM* vm, const char* tag) {
+    if (!vmRuntimeScopeFilterEnabled()) {
+        return true;
+    }
+    static _Thread_local uint64_t tlsLastScopeSampleNs = 0;
+    static _Thread_local bool tlsLastScopeAllowed = true;
+    static _Thread_local uint64_t tlsLastScopeLogNs = 0;
+
+    uint64_t scope_start_ns = vmNowMonoNs();
+    if (scope_start_ns == 0 ||
+        tlsLastScopeSampleNs == 0 ||
+        scope_start_ns - tlsLastScopeSampleNs >= 100000000ull) {
+        tlsLastScopeAllowed = vmRuntimeSignalAppliesToCurrentVproc(vm);
+        tlsLastScopeSampleNs = vmNowMonoNs();
+        if (tlsLastScopeSampleNs == 0) {
+            tlsLastScopeSampleNs = scope_start_ns;
+        }
+    }
+
+    uint64_t scope_end_ns = vmNowMonoNs();
+    if (scope_start_ns > 0 && scope_end_ns >= scope_start_ns) {
+        uint64_t scope_elapsed_ns = scope_end_ns - scope_start_ns;
+        if (scope_elapsed_ns >= 5000000ull &&
+            (tlsLastScopeLogNs == 0 || scope_end_ns - tlsLastScopeLogNs >= 250000000ull)) {
+            vmIosDebugLogf("[vm-int] scope-check slow tag=%s vm=%p elapsed_ms=%" PRIu64 " allow=%d",
+                           tag ? tag : "?",
+                           (void*)vm,
+                           scope_elapsed_ns / 1000000ull,
+                           tlsLastScopeAllowed ? 1 : 0);
+            tlsLastScopeLogNs = scope_end_ns;
+        }
+    }
+    return tlsLastScopeAllowed;
+}
+
 static bool vmRuntimeSignalAppliesToCurrentVproc(VM* vm) {
     int fg_pgid = -1;
     if (!vprocGetShellJobControlState(NULL, NULL, NULL, &fg_pgid)) {
@@ -1436,7 +1559,8 @@ static void* threadStart(void* arg) {
         bool canceled = atomic_load(&thread->cancelRequested);
         bool killed = atomic_load(&thread->killRequested) || atomic_load(&owner->shuttingDownWorkers);
 
-        if (vmHandleGlobalInterrupt(owner) || vmHandleGlobalInterrupt(workerVm)) {
+        if (vmHandleGlobalInterrupt(owner) ||
+            (workerVm && (workerVm->abort_requested || workerVm->exit_requested))) {
             canceled = true;
             killed = true;
         }
@@ -1869,17 +1993,50 @@ static void vmMarkAbortRequested(VM* vm) {
     }
 }
 
-static bool vmConsumeInterruptRequest(VM* vm) {
-    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
-#if defined(PSCAL_TARGET_IOS)
-    bool allow_runtime_signal = vmRuntimeSignalAppliesToCurrentVproc(root ? root : vm);
-#else
-    bool allow_runtime_signal = true;
-#endif
-    if (vmHandleGlobalInterrupt(root)) {
+static bool vmIsRootExecutor(const VM* vm) {
+    if (!vm) {
         return true;
     }
-    if (allow_runtime_signal && pscalRuntimeConsumeSigint()) {
+    const VM* root = vm->threadOwner ? vm->threadOwner : vm;
+    return vm == root;
+}
+
+static bool vmConsumeInterruptRequest(VM* vm) {
+    VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+    bool poll_runtime_signal = (vm == NULL) || vmIsRootExecutor(vm);
+#if defined(PSCAL_TARGET_IOS)
+    bool allow_runtime_signal = false;
+    if (poll_runtime_signal) {
+        allow_runtime_signal = vmRuntimeSignalAppliesCached(root ? root : vm, "consume-int");
+    }
+#else
+    bool allow_runtime_signal = true;
+    (void)poll_runtime_signal;
+#endif
+ #if defined(PSCAL_TARGET_IOS)
+    if (poll_runtime_signal && vmIosDebugEnabled()) {
+        static _Thread_local uint64_t tlsLastHeartbeatNs = 0;
+        uint64_t now_ns = vmNowMonoNs();
+        if (now_ns > 0 && (tlsLastHeartbeatNs == 0 || now_ns - tlsLastHeartbeatNs >= 1000000000ull)) {
+            vmIosDebugLogf("[vm-int] heartbeat vm=%p root=%p allow=%d abort=%d exit=%d sigflag=%d sigseen=%d",
+                           (void*)vm,
+                           (void*)root,
+                           allow_runtime_signal ? 1 : 0,
+                           root ? (root->abort_requested ? 1 : 0) : 0,
+                           root ? (root->exit_requested ? 1 : 0) : 0,
+                           pscalRuntimeInterruptFlag() ? 1 : 0,
+                           pscalRuntimeSigintPending() ? 1 : 0);
+            tlsLastHeartbeatNs = now_ns;
+        }
+    }
+ #endif
+    if (poll_runtime_signal && vmHandleGlobalInterrupt(root)) {
+        return true;
+    }
+    if (poll_runtime_signal &&
+        allow_runtime_signal &&
+        pscalRuntimeSigintPending() &&
+        pscalRuntimeConsumeSigint()) {
         vmMarkAbortRequested(root ? root : vm);
         (void)vmHandleGlobalInterrupt(root);
         return true;
@@ -1887,15 +2044,21 @@ static bool vmConsumeInterruptRequest(VM* vm) {
     if (root && (root->abort_requested || root->exit_requested)) {
         return true;
     }
+    if (vm && vm != root && (vm->abort_requested || vm->exit_requested)) {
+        return true;
+    }
     return false;
 }
 
 static bool vmConsumeSuspendRequest(VM* vm) {
     VM* root = vm ? (vm->threadOwner ? vm->threadOwner : vm) : NULL;
+    bool poll_runtime_signal = (vm == NULL) || vmIsRootExecutor(vm);
 #if defined(PSCAL_TARGET_IOS)
-    bool allow_runtime_signal = vmRuntimeSignalAppliesToCurrentVproc(root ? root : vm);
+    bool allow_runtime_signal = poll_runtime_signal &&
+                                vmRuntimeSignalAppliesCached(root ? root : vm, "consume-suspend");
 #else
     bool allow_runtime_signal = true;
+    (void)poll_runtime_signal;
 #endif
     if (!allow_runtime_signal || !pscalRuntimeConsumeSigtstp()) {
         return false;
@@ -1920,7 +2083,7 @@ static bool vmConsumeSuspendRequest(VM* vm) {
 
 static bool vmHandleGlobalInterrupt(VM* vm) {
 #if defined(PSCAL_TARGET_IOS)
-    bool allow_runtime_signal = vmRuntimeSignalAppliesToCurrentVproc(vm);
+    bool allow_runtime_signal = vmRuntimeSignalAppliesCached(vm, "handle-global");
 #else
     bool allow_runtime_signal = true;
 #endif
@@ -2427,6 +2590,48 @@ static bool lockMutex(VM* vm, int id) {
     }
     Mutex* m = &owner->mutexes[id];
     pthread_mutex_unlock(&owner->mutexRegistryLock);
+#if defined(PSCAL_TARGET_IOS)
+    if (vmIosMutexDebugEnabled()) {
+        int rc = pthread_mutex_trylock(&m->handle);
+        if (rc == 0) {
+            return true;
+        }
+        if (rc != EBUSY) {
+            vmIosDebugLogf("[vm-mutex] trylock failed vm=%p owner=%p mid=%d rc=%d",
+                           (void*)vm, (void*)owner, id, rc);
+            return false;
+        }
+
+        uint64_t start_ns = vmNowMonoNs();
+        uint64_t last_log_ns = start_ns;
+        vmIosDebugLogf("[vm-mutex] wait begin vm=%p owner=%p mid=%d tid=%p",
+                       (void*)vm, (void*)owner, id, (void*)pthread_self());
+        while (true) {
+            struct timespec pause_for = {0, 10000000L}; /* 10ms */
+            nanosleep(&pause_for, NULL);
+            int lock_rc = pthread_mutex_trylock(&m->handle);
+            if (lock_rc == 0) {
+                uint64_t waited_ms = (vmNowMonoNs() - start_ns) / 1000000ull;
+                vmIosDebugLogf("[vm-mutex] wait end vm=%p mid=%d waited_ms=%" PRIu64 " tid=%p",
+                               (void*)vm, id, waited_ms, (void*)pthread_self());
+                return true;
+            }
+            if (lock_rc != EBUSY) {
+                vmIosDebugLogf("[vm-mutex] trylock-loop failed vm=%p owner=%p mid=%d rc=%d",
+                               (void*)vm, (void*)owner, id, lock_rc);
+                return false;
+            }
+
+            uint64_t now_ns = vmNowMonoNs();
+            if (now_ns >= last_log_ns + 1000000000ull) {
+                uint64_t waited_ms = (now_ns - start_ns) / 1000000ull;
+                vmIosDebugLogf("[vm-mutex] wait heartbeat vm=%p mid=%d waited_ms=%" PRIu64 " tid=%p",
+                               (void*)vm, id, waited_ms, (void*)pthread_self());
+                last_log_ns = now_ns;
+            }
+        }
+    }
+#endif
     return pthread_mutex_lock(&m->handle) == 0;
 }
 
@@ -2827,6 +3032,12 @@ void runtimeError(VM* vm, const char* format, ...) {
     if (vm) {
         vm->abort_requested = true;
     }
+
+#ifdef SDL
+    if (sdlIsGraphicsActive()) {
+        cleanupSdlWindowResources();
+    }
+#endif
 
     if (pscalRuntimeStdoutIsInteractive()) {
         fflush(stdout);
@@ -5196,8 +5407,22 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     uint8_t instruction_val;
     for (;;) {
 #if defined(PSCAL_TARGET_IOS)
-        if (vprocWaitIfStopped(vprocCurrent())) {
-            continue;
+        if (vmIsRootExecutor(vm)) {
+            if (vprocWaitIfStopped(vprocCurrent())) {
+                if (vmIosDebugEnabled()) {
+                    long ip_offset = -1;
+                    if (vm->chunk && vm->chunk->code && vm->ip) {
+                        ip_offset = (long)(vm->ip - vm->chunk->code);
+                    }
+                    vmIosDebugLogf("[vm-loop] root stop-wait returned vm=%p ip=%ld abort=%d exit=%d suspend=%d",
+                                   (void*)vm,
+                                   ip_offset,
+                                   vm->abort_requested ? 1 : 0,
+                                   vm->exit_requested ? 1 : 0,
+                                   vm->suspend_unwind_requested ? 1 : 0);
+                }
+                continue;
+            }
         }
 #endif
         if (vmConsumeSuspendRequest(vm)) {

@@ -1,0 +1,195 @@
+#!/usr/bin/env pascal
+program Sphere3D;
+
+uses CRT;
+
+const
+  DefaultScreenWidth  = 1280;
+  DefaultScreenHeight = 720;
+  PiConst             = 3.14159265358979323846;
+  FieldOfView         = 55.0;
+  NearClip            = 0.1;
+  FarClip             = 100.0;
+  SphereRadius        = 1.25;
+  SphereLatSegments   = 14;
+  SphereLonSegments   = 22;
+
+var
+  ScreenWidth   : Integer;
+  ScreenHeight  : Integer;
+  Running       : Boolean;
+  LastTicks     : Integer;
+  RotationAngle : Real;
+
+procedure ResolveWindowSize;
+var
+  detectedWidth  : Integer;
+  detectedHeight : Integer;
+begin
+  detectedWidth := DefaultScreenWidth;
+  detectedHeight := DefaultScreenHeight;
+
+  if GetScreenSize(detectedWidth, detectedHeight) then
+  begin
+    if detectedWidth > 0 then
+      ScreenWidth := detectedWidth
+    else
+      ScreenWidth := DefaultScreenWidth;
+
+    if detectedHeight > 0 then
+      ScreenHeight := detectedHeight
+    else
+      ScreenHeight := DefaultScreenHeight;
+  end
+  else
+  begin
+    ScreenWidth := DefaultScreenWidth;
+    ScreenHeight := DefaultScreenHeight;
+  end;
+end;
+
+procedure SetupProjection(width, height: Integer);
+var
+  aspectRatio : Real;
+begin
+  if height <= 0 then
+    height := 1;
+
+  aspectRatio := width / height;
+  GLViewport(0, 0, width, height);
+  GLMatrixMode('projection');
+  GLLoadIdentity();
+  GLPerspective(FieldOfView, aspectRatio, NearClip, FarClip);
+  GLMatrixMode('modelview');
+end;
+
+procedure SetupRenderState;
+begin
+  GLClearDepth(1.0);
+  GLDepthTest(True);
+  GLDisable('lighting');
+  GLDisable('cull_face');
+  GLShadeModel('smooth');
+end;
+
+procedure EmitSphereVertex(radius, phi, theta: Real);
+var
+  x, y, z : Real;
+begin
+  x := sin(phi) * cos(theta) * radius;
+  y := cos(phi) * radius;
+  z := sin(phi) * sin(theta) * radius;
+
+  GLVertex3f(x, y, z);
+end;
+
+procedure DrawWireSphere(radius: Real; latSegments, lonSegments: Integer);
+var
+  lat, lon : Integer;
+  phi, theta : Real;
+begin
+  for lat := 1 to latSegments - 1 do
+  begin
+    phi := PiConst * (lat / latSegments);
+    GLColor3f(0.45, 0.72, 0.98);
+    GLBegin('line_loop');
+    for lon := 0 to lonSegments - 1 do
+    begin
+      theta := 2.0 * PiConst * (lon / lonSegments);
+      EmitSphereVertex(radius, phi, theta);
+    end;
+    GLEnd();
+  end;
+
+  for lon := 0 to lonSegments - 1 do
+  begin
+    theta := 2.0 * PiConst * (lon / lonSegments);
+    GLColor3f(0.70, 0.90, 1.0);
+    GLBegin('line_strip');
+    for lat := 0 to latSegments do
+    begin
+      phi := PiConst * (lat / latSegments);
+      EmitSphereVertex(radius, phi, theta);
+    end;
+    GLEnd();
+  end;
+end;
+
+procedure RenderScene;
+begin
+  GLClearColor(0.05, 0.08, 0.14, 1.0);
+  GLClear();
+
+  GLLoadIdentity();
+  GLTranslatef(0.0, 0.0, -4.2);
+  GLRotatef(-18.0, 1.0, 0.0, 0.0);
+  GLRotatef(RotationAngle, 0.0, 1.0, 0.0);
+
+  GLLineWidth(2.0);
+  GLBegin('lines');
+    GLColor3f(0.95, 0.30, 0.30);
+    GLVertex3f(-1.8, 0.0, 0.0);
+    GLVertex3f( 1.8, 0.0, 0.0);
+    GLColor3f(0.30, 0.95, 0.45);
+    GLVertex3f(0.0, -1.8, 0.0);
+    GLVertex3f(0.0,  1.8, 0.0);
+    GLColor3f(0.35, 0.55, 1.0);
+    GLVertex3f(0.0, 0.0, -1.8);
+    GLVertex3f(0.0, 0.0,  1.8);
+  GLEnd();
+  GLLineWidth(1.0);
+
+  DrawWireSphere(SphereRadius, SphereLatSegments, SphereLonSegments);
+end;
+
+procedure Initialize;
+begin
+  ResolveWindowSize;
+  InitGraph3D(ScreenWidth, ScreenHeight, 'Pascal SDL 3D Sphere', 24, 8);
+  GLSetSwapInterval(1);
+  SetupProjection(ScreenWidth, ScreenHeight);
+  SetupRenderState;
+
+  LastTicks := GetTicks;
+  RotationAngle := 0.0;
+  Running := True;
+end;
+
+procedure MainLoop;
+var
+  nowTicks  : Integer;
+  deltaMs   : Integer;
+  deltaTime : Real;
+begin
+  while Running and (not QuitRequested) do
+  begin
+    nowTicks := GetTicks;
+    deltaMs := nowTicks - LastTicks;
+    if deltaMs < 1 then
+      deltaMs := 1;
+    LastTicks := nowTicks;
+
+    deltaTime := deltaMs / 1000.0;
+    if deltaTime > 0.05 then
+      deltaTime := 0.05;
+
+    if IsKeyDown('q') or IsKeyDown('escape') then
+      Running := False;
+
+    RotationAngle := RotationAngle + deltaTime * 45.0;
+    if RotationAngle > 360.0 then
+      RotationAngle := RotationAngle - 360.0;
+
+    RenderScene;
+    GLSwapWindow();
+    GraphLoop(1);
+  end;
+end;
+
+begin
+  Initialize;
+  writeln('Pascal SDL 3D Sphere Demo');
+  writeln('Controls: Q or Esc to quit.');
+  MainLoop;
+  CloseGraph3D;
+end.

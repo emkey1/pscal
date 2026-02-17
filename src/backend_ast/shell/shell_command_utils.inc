@@ -722,7 +722,9 @@ static void shellDisposeCompiledFunction(ShellCompiledFunction *fn) {
     free(fn);
 }
 
-static ShellFunctionEntry *shellFindFunctionEntry(const char *name) {
+static pthread_mutex_t gShellFunctionTableMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static ShellFunctionEntry *shellFindFunctionEntryUnlocked(const char *name) {
     if (!name) {
         return NULL;
     }
@@ -733,6 +735,26 @@ static ShellFunctionEntry *shellFindFunctionEntry(const char *name) {
         }
     }
     return NULL;
+}
+
+static bool shellFunctionIsDefined(const char *name) {
+    bool defined = false;
+    pthread_mutex_lock(&gShellFunctionTableMutex);
+    ShellFunctionEntry *entry = shellFindFunctionEntryUnlocked(name);
+    defined = (entry && entry->compiled);
+    pthread_mutex_unlock(&gShellFunctionTableMutex);
+    return defined;
+}
+
+static ShellCompiledFunction *shellFindCompiledFunction(const char *name) {
+    ShellCompiledFunction *compiled = NULL;
+    pthread_mutex_lock(&gShellFunctionTableMutex);
+    ShellFunctionEntry *entry = shellFindFunctionEntryUnlocked(name);
+    if (entry) {
+        compiled = entry->compiled;
+    }
+    pthread_mutex_unlock(&gShellFunctionTableMutex);
+    return compiled;
 }
 
 static bool shellStoreFunction(const char *name, const char *param_meta, ShellCompiledFunction *compiled) {
@@ -751,20 +773,21 @@ static bool shellStoreFunction(const char *name, const char *param_meta, ShellCo
             return false;
         }
     }
-    ShellFunctionEntry *existing = shellFindFunctionEntry(name);
+    pthread_mutex_lock(&gShellFunctionTableMutex);
+    ShellFunctionEntry *existing = shellFindFunctionEntryUnlocked(name);
     if (existing) {
-        if (existing->compiled && existing->compiled != compiled) {
-            shellDisposeCompiledFunction(existing->compiled);
-        }
+        /* Another shell session may still be executing the old body. */
         free(existing->name);
         free(existing->parameter_metadata);
         existing->name = name_copy;
         existing->parameter_metadata = meta_copy;
         existing->compiled = compiled;
+        pthread_mutex_unlock(&gShellFunctionTableMutex);
         return true;
     }
     ShellFunctionEntry *entries = realloc(gShellFunctions, sizeof(ShellFunctionEntry) * (gShellFunctionCount + 1));
     if (!entries) {
+        pthread_mutex_unlock(&gShellFunctionTableMutex);
         free(name_copy);
         free(meta_copy);
         return false;
@@ -774,6 +797,7 @@ static bool shellStoreFunction(const char *name, const char *param_meta, ShellCo
     entry->name = name_copy;
     entry->parameter_metadata = meta_copy;
     entry->compiled = compiled;
+    pthread_mutex_unlock(&gShellFunctionTableMutex);
     return true;
 }
 

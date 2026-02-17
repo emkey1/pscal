@@ -95,7 +95,16 @@ class BallsApp {
   bool quit;
 
   void init() {
-    initgraph(WindowWidth, WindowHeight, "Multi Bouncing Balls in Rea");
+    int screenWidth = WindowWidth;
+    int screenHeight = WindowHeight;
+    if (getscreensize(screenWidth, screenHeight)) {
+      if (screenWidth < 640) screenWidth = 640;
+      if (screenHeight < 480) screenHeight = 480;
+    } else {
+      screenWidth = WindowWidth;
+      screenHeight = WindowHeight;
+    }
+    initgraph(screenWidth, screenHeight, "Multi Bouncing Balls in Rea");
     randomize();
     myself.maxX = getmaxx();
     myself.maxY = getmaxy();
@@ -103,7 +112,7 @@ class BallsApp {
     int i = 1;
     while (i <= NumBalls) {
       Ball b = new Ball();
-      myself.balls[i] = b.init(WindowWidth, WindowHeight, MinInitialSpeed, MaxInitialSpeed);
+      myself.balls[i] = b.init(myself.maxX + 1, myself.maxY + 1, MinInitialSpeed, MaxInitialSpeed);
       i = i + 1;
     }
     myself.quit = false;

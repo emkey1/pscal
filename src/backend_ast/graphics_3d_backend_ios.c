@@ -2,10 +2,16 @@
 
 #if defined(PSCAL_TARGET_IOS)
 
+#ifndef GLES_SILENCE_DEPRECATION
+#define GLES_SILENCE_DEPRECATION
+#endif
+
 #include <OpenGLES/ES1/gl.h>
+#include <OpenGLES/ES1/glext.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -81,6 +87,11 @@ static RecordedCommand* gRecordingCurrentCommand = NULL;
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+#ifndef GL_BGRA_EXT
+#define GL_BGRA_EXT 0x80E1
+#endif
+
 static Mat4 gProjectionStack[16];
 static int gProjectionTop = 0;
 static Mat4 gModelviewStack[32];
@@ -96,6 +107,8 @@ static int gViewport[4] = {0, 0, 640, 480};
 static ImmediateVertex* gImmediateVertices = NULL;
 static size_t gImmediateCount = 0;
 static size_t gImmediateCapacity = 0;
+static ImmediateVertex* gImmediateQuadVertices = NULL;
+static size_t gImmediateQuadCapacity = 0;
 static GLenum gImmediatePrimitive = GL_TRIANGLES;
 static bool gImmediateRecording = false;
 
@@ -108,6 +121,9 @@ static float* gDepthBuffer = NULL;
 static int gFramebufferWidth = 0;
 static int gFramebufferHeight = 0;
 static SDL_Texture* gFramebufferTexture = NULL;
+static GLuint gFramebufferGlTexture = 0;
+static int gFramebufferGlTextureWidth = 0;
+static int gFramebufferGlTextureHeight = 0;
 static bool gFramebufferDirty = false;
 
 typedef struct {
@@ -276,6 +292,27 @@ static void ensureImmediateCapacity(size_t count) {
     gImmediateCapacity = newCap;
 }
 
+static bool usingNativeGlPath(void) {
+    return gSdlGLContext != NULL;
+}
+
+static bool ensureImmediateQuadCapacity(size_t count) {
+    if (count <= gImmediateQuadCapacity) {
+        return true;
+    }
+    size_t newCap = gImmediateQuadCapacity == 0 ? 128 : gImmediateQuadCapacity;
+    while (newCap < count) {
+        newCap *= 2;
+    }
+    ImmediateVertex* resized = realloc(gImmediateQuadVertices, newCap * sizeof(ImmediateVertex));
+    if (!resized) {
+        return false;
+    }
+    gImmediateQuadVertices = resized;
+    gImmediateQuadCapacity = newCap;
+    return true;
+}
+
 static Uint8 floatToByte(float c) {
     if (c < 0.0f) c = 0.0f;
     if (c > 1.0f) c = 1.0f;
@@ -399,6 +436,10 @@ static void emitImmediateVertex(const float position[3],
     memcpy(v->position, position, sizeof(float) * 3);
     memcpy(v->normal, normal, sizeof(float) * 3);
     memcpy(v->color, color, sizeof(float) * 4);
+    if (usingNativeGlPath()) {
+        v->valid = true;
+        return;
+    }
     v->valid = transformVertexData(v);
     shadeVertex(v);
 }
@@ -497,6 +538,14 @@ static bool ensureFramebuffer(void) {
             SDL_DestroyTexture(gFramebufferTexture);
             gFramebufferTexture = NULL;
         }
+        if (gFramebufferGlTexture != 0) {
+            if (gSdlGLContext) {
+                glDeleteTextures(1, &gFramebufferGlTexture);
+            }
+            gFramebufferGlTexture = 0;
+            gFramebufferGlTextureWidth = 0;
+            gFramebufferGlTextureHeight = 0;
+        }
         gColorBuffer = calloc((size_t)width * (size_t)height, sizeof(Uint32));
         gDepthBuffer = malloc((size_t)width * (size_t)height * sizeof(float));
         if (!gColorBuffer || !gDepthBuffer) {
@@ -550,6 +599,45 @@ static void presentFramebuffer(void) {
     SDL_UpdateTexture(gFramebufferTexture, NULL, gColorBuffer, gFramebufferWidth * (int)sizeof(Uint32));
     SDL_RenderCopy(gSdlRenderer, gFramebufferTexture, NULL, NULL);
     gFramebufferDirty = false;
+}
+
+static bool ensureFramebufferGlTexture(void) {
+    if (!gSdlGLContext || !gColorBuffer || gFramebufferWidth <= 0 || gFramebufferHeight <= 0) {
+        return false;
+    }
+
+    if (gFramebufferGlTexture == 0) {
+        glGenTextures(1, &gFramebufferGlTexture);
+        if (gFramebufferGlTexture == 0) {
+            return false;
+        }
+        glBindTexture(GL_TEXTURE_2D, gFramebufferGlTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                     gFramebufferWidth, gFramebufferHeight, 0,
+                     GL_BGRA_EXT, GL_UNSIGNED_BYTE, gColorBuffer);
+        gFramebufferGlTextureWidth = gFramebufferWidth;
+        gFramebufferGlTextureHeight = gFramebufferHeight;
+        return true;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, gFramebufferGlTexture);
+    if (gFramebufferGlTextureWidth != gFramebufferWidth ||
+        gFramebufferGlTextureHeight != gFramebufferHeight) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                     gFramebufferWidth, gFramebufferHeight, 0,
+                     GL_BGRA_EXT, GL_UNSIGNED_BYTE, gColorBuffer);
+        gFramebufferGlTextureWidth = gFramebufferWidth;
+        gFramebufferGlTextureHeight = gFramebufferHeight;
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                        gFramebufferWidth, gFramebufferHeight,
+                        GL_BGRA_EXT, GL_UNSIGNED_BYTE, gColorBuffer);
+    }
+    return true;
 }
 
 static bool transformVertexData(ImmediateVertex* v) {
@@ -734,8 +822,66 @@ static void renderTriangles(void) {
     }
 }
 
+static void flushImmediateNative(void) {
+    if (gImmediateCount == 0) {
+        return;
+    }
+
+    GLenum primitive = gImmediatePrimitive;
+    ImmediateVertex* vertices = gImmediateVertices;
+    size_t vertexCount = gImmediateCount;
+
+    if (primitive == GL_QUADS) {
+        size_t quadCount = vertexCount / 4;
+        size_t expandedCount = quadCount * 6;
+        if (expandedCount == 0) {
+            return;
+        }
+        if (!ensureImmediateQuadCapacity(expandedCount)) {
+            return;
+        }
+        size_t out = 0;
+        for (size_t i = 0; i + 3 < vertexCount; i += 4) {
+            const ImmediateVertex* v0 = &vertices[i];
+            const ImmediateVertex* v1 = &vertices[i + 1];
+            const ImmediateVertex* v2 = &vertices[i + 2];
+            const ImmediateVertex* v3 = &vertices[i + 3];
+            gImmediateQuadVertices[out++] = *v0;
+            gImmediateQuadVertices[out++] = *v1;
+            gImmediateQuadVertices[out++] = *v2;
+            gImmediateQuadVertices[out++] = *v0;
+            gImmediateQuadVertices[out++] = *v2;
+            gImmediateQuadVertices[out++] = *v3;
+        }
+        vertices = gImmediateQuadVertices;
+        vertexCount = out;
+        primitive = GL_TRIANGLES;
+    }
+
+    if (vertexCount == 0) {
+        return;
+    }
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_COLOR_ARRAY);
+    glEnableClientState(GL_NORMAL_ARRAY);
+    glVertexPointer(3, GL_FLOAT, sizeof(ImmediateVertex), (const GLvoid*)vertices[0].position);
+    glColorPointer(4, GL_FLOAT, sizeof(ImmediateVertex), (const GLvoid*)vertices[0].color);
+    glNormalPointer(GL_FLOAT, sizeof(ImmediateVertex), (const GLvoid*)vertices[0].normal);
+    glDrawArrays(primitive, 0, (GLsizei)vertexCount);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+}
+
 static void flushImmediate(void) {
     if (!gImmediateRecording || gImmediateCount == 0) {
+        return;
+    }
+    if (usingNativeGlPath()) {
+        flushImmediateNative();
+        gImmediateCount = 0;
+        gImmediateRecording = false;
         return;
     }
     switch (gImmediatePrimitive) {
@@ -758,6 +904,9 @@ static void flushImmediate(void) {
 }
 
 void gfx3dClearColor(float r, float g, float b, float a) {
+    if (usingNativeGlPath()) {
+        glClearColor(r, g, b, a);
+    }
     gClearColor[0] = r;
     gClearColor[1] = g;
     gClearColor[2] = b;
@@ -765,6 +914,10 @@ void gfx3dClearColor(float r, float g, float b, float a) {
 }
 
 void gfx3dClear(unsigned int mask) {
+    if (usingNativeGlPath()) {
+        glClear((GLbitfield)mask);
+        return;
+    }
     if (!ensureFramebuffer()) {
         return;
     }
@@ -787,10 +940,16 @@ void gfx3dClear(unsigned int mask) {
 }
 
 void gfx3dClearDepth(double depth) {
+    if (usingNativeGlPath()) {
+        glClearDepthf((GLfloat)depth);
+    }
     gClearDepthValue = (float)depth;
 }
 
 void gfx3dViewport(int x, int y, int width, int height) {
+    if (usingNativeGlPath()) {
+        glViewport((GLint)x, (GLint)y, (GLsizei)width, (GLsizei)height);
+    }
     gViewport[0] = x;
     gViewport[1] = y;
     gViewport[2] = width > 0 ? width : 1;
@@ -799,6 +958,9 @@ void gfx3dViewport(int x, int y, int width, int height) {
 }
 
 void gfx3dMatrixMode(int mode) {
+    if (usingNativeGlPath()) {
+        glMatrixMode((GLenum)mode);
+    }
     ensureStacks();
     if (mode == GL_PROJECTION) {
         gMatrixMode = GL_PROJECTION;
@@ -808,28 +970,47 @@ void gfx3dMatrixMode(int mode) {
 }
 
 void gfx3dLoadIdentity(void) {
+    if (usingNativeGlPath()) {
+        glLoadIdentity();
+    }
     Mat4* m = currentMatrix();
     *m = matIdentity();
 }
 
 void gfx3dTranslatef(float x, float y, float z) {
+    if (usingNativeGlPath()) {
+        glTranslatef(x, y, z);
+    }
     matrixTranslate(currentMatrix(), x, y, z);
 }
 
 void gfx3dRotatef(float angle, float x, float y, float z) {
+    if (usingNativeGlPath()) {
+        glRotatef(angle, x, y, z);
+    }
     matrixRotate(currentMatrix(), angle, x, y, z);
 }
 
 void gfx3dScalef(float x, float y, float z) {
+    if (usingNativeGlPath()) {
+        glScalef(x, y, z);
+    }
     matrixScale(currentMatrix(), x, y, z);
 }
 
 void gfx3dFrustum(double left, double right, double bottom, double top,
                   double zNear, double zFar) {
+    if (usingNativeGlPath()) {
+        glFrustumf((GLfloat)left, (GLfloat)right, (GLfloat)bottom, (GLfloat)top,
+                   (GLfloat)zNear, (GLfloat)zFar);
+    }
     matrixFrustum(currentMatrix(), left, right, bottom, top, zNear, zFar);
 }
 
 void gfx3dPushMatrix(void) {
+    if (usingNativeGlPath()) {
+        glPushMatrix();
+    }
     ensureStacks();
     Mat4* stack = (gMatrixMode == GL_PROJECTION)
                     ? gProjectionStack
@@ -844,6 +1025,9 @@ void gfx3dPushMatrix(void) {
 }
 
 void gfx3dPopMatrix(void) {
+    if (usingNativeGlPath()) {
+        glPopMatrix();
+    }
     ensureStacks();
     int* top = (gMatrixMode == GL_PROJECTION)
                     ? &gProjectionTop
@@ -928,9 +1112,14 @@ void gfx3dNormal3f(float x, float y, float z) {
 }
 
 void gfx3dEnable(unsigned int capability) {
+    if (usingNativeGlPath()) {
+        glEnable((GLenum)capability);
+    }
     if (capability == GL_BLEND) {
         gBlendEnabled = true;
-        SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
+        if (gSdlRenderer) {
+            SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
+        }
     } else if (capability == GL_LIGHTING) {
         gLightingEnabled = true;
         initLightingState();
@@ -945,9 +1134,14 @@ void gfx3dEnable(unsigned int capability) {
 }
 
 void gfx3dDisable(unsigned int capability) {
+    if (usingNativeGlPath()) {
+        glDisable((GLenum)capability);
+    }
     if (capability == GL_BLEND) {
         gBlendEnabled = false;
-        SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_NONE);
+        if (gSdlRenderer) {
+            SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_NONE);
+        }
     } else if (capability == GL_LIGHTING) {
         gLightingEnabled = false;
     } else if (capability >= GL_LIGHT0 && capability <= GL_LIGHT7) {
@@ -960,10 +1154,15 @@ void gfx3dDisable(unsigned int capability) {
 }
 
 void gfx3dShadeModel(unsigned int mode) {
-    (void)mode;
+    if (usingNativeGlPath()) {
+        glShadeModel((GLenum)mode);
+    }
 }
 
 void gfx3dLightfv(unsigned int light, unsigned int pname, const float* params) {
+    if (usingNativeGlPath()) {
+        glLightfv((GLenum)light, (GLenum)pname, params);
+    }
     initLightingState();
     if (!params) return;
     if (light < GL_LIGHT0 || light > GL_LIGHT7) return;
@@ -987,6 +1186,9 @@ void gfx3dLightfv(unsigned int light, unsigned int pname, const float* params) {
 }
 
 void gfx3dMaterialfv(unsigned int face, unsigned int pname, const float* params) {
+    if (usingNativeGlPath()) {
+        glMaterialfv((GLenum)face, (GLenum)pname, params);
+    }
     (void)face;
     if (!params) return;
     switch (pname) {
@@ -1008,6 +1210,9 @@ void gfx3dMaterialfv(unsigned int face, unsigned int pname, const float* params)
 }
 
 void gfx3dMaterialf(unsigned int face, unsigned int pname, float value) {
+    if (usingNativeGlPath()) {
+        glMaterialf((GLenum)face, (GLenum)pname, value);
+    }
     (void)face;
     if (pname == GL_SHININESS) {
         gMaterialShininess = value;
@@ -1015,11 +1220,16 @@ void gfx3dMaterialf(unsigned int face, unsigned int pname, float value) {
 }
 
 void gfx3dColorMaterial(unsigned int face, unsigned int mode) {
+    /* iOS 26.2 ES1 headers no longer expose glColorMaterial. Keep the state
+       cached so software lighting paths still see the requested mode. */
     gColorMaterialFace = face;
     gColorMaterialMode = mode;
 }
 
 void gfx3dBlendFunc(unsigned int src, unsigned int dst) {
+    if (usingNativeGlPath()) {
+        glBlendFunc((GLenum)src, (GLenum)dst);
+    }
     gBlendSrc = src;
     gBlendDst = dst;
     if (!gSdlRenderer) return;
@@ -1030,10 +1240,29 @@ void gfx3dBlendFunc(unsigned int src, unsigned int dst) {
     }
 }
 
-void gfx3dCullFace(unsigned int mode) { (void)mode; }
-void gfx3dDepthMask(bool enable) { (void)enable; }
-void gfx3dDepthFunc(unsigned int func) { (void)func; }
-void gfx3dLineWidth(float width) { (void)width; }
+void gfx3dCullFace(unsigned int mode) {
+    if (usingNativeGlPath()) {
+        glCullFace((GLenum)mode);
+    }
+}
+
+void gfx3dDepthMask(bool enable) {
+    if (usingNativeGlPath()) {
+        glDepthMask(enable ? GL_TRUE : GL_FALSE);
+    }
+}
+
+void gfx3dDepthFunc(unsigned int func) {
+    if (usingNativeGlPath()) {
+        glDepthFunc((GLenum)func);
+    }
+}
+
+void gfx3dLineWidth(float width) {
+    if (usingNativeGlPath()) {
+        glLineWidth(width);
+    }
+}
 
 unsigned int gfx3dGenLists(int range) {
     if (range <= 0) {
@@ -1116,13 +1345,27 @@ void gfx3dCallList(unsigned int list) {
 }
 
 void gfx3dPixelStorei(unsigned int pname, int param) {
-    (void)pname; (void)param;
+    if (usingNativeGlPath()) {
+        glPixelStorei((GLenum)pname, param);
+    }
 }
 
-void gfx3dReadBuffer(unsigned int mode) { (void)mode; }
+void gfx3dReadBuffer(unsigned int mode) {
+    if (usingNativeGlPath()) {
+#ifdef GL_READ_BUFFER
+        glReadBuffer((GLenum)mode);
+#else
+        (void)mode;
+#endif
+    }
+}
 
 void gfx3dReadPixels(int x, int y, int width, int height,
                      unsigned int format, unsigned int type, void* pixels) {
+    if (usingNativeGlPath()) {
+        glReadPixels(x, y, width, height, (GLenum)format, (GLenum)type, pixels);
+        return;
+    }
     (void)format;
     (void)type;
     if (!pixels || width <= 0 || height <= 0 || !ensureFramebuffer()) {
@@ -1146,7 +1389,146 @@ void gfx3dReadPixels(int x, int y, int width, int height,
 }
 
 unsigned int gfx3dGetError(void) {
+    if (usingNativeGlPath()) {
+        return (unsigned int)glGetError();
+    }
     return 0;
+}
+
+void gfx3dPresent(void) {
+    if (!gFramebufferDirty || !gColorBuffer || gFramebufferWidth <= 0 || gFramebufferHeight <= 0) {
+        return;
+    }
+
+    if (gSdlRenderer) {
+        if (!gFramebufferTexture) {
+            gFramebufferTexture = SDL_CreateTexture(gSdlRenderer,
+                                                    SDL_PIXELFORMAT_ABGR8888,
+                                                    SDL_TEXTUREACCESS_STREAMING,
+                                                    gFramebufferWidth,
+                                                    gFramebufferHeight);
+            if (!gFramebufferTexture) {
+                return;
+            }
+        }
+        SDL_UpdateTexture(gFramebufferTexture, NULL, gColorBuffer, gFramebufferWidth * (int)sizeof(Uint32));
+        SDL_RenderCopy(gSdlRenderer, gFramebufferTexture, NULL, NULL);
+        SDL_RenderPresent(gSdlRenderer);
+        gFramebufferDirty = false;
+        return;
+    }
+
+    if (!ensureFramebufferGlTexture()) {
+        return;
+    }
+
+    GLint savedViewport[4] = {0, 0, 0, 0};
+    GLint savedMatrixMode = GL_MODELVIEW;
+    GLfloat savedProjection[16];
+    GLfloat savedModelview[16];
+    GLint savedTextureBinding = 0;
+
+    GLboolean wasDepthTest = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean wasBlend = glIsEnabled(GL_BLEND);
+    GLboolean wasLighting = glIsEnabled(GL_LIGHTING);
+    GLboolean wasCullFace = glIsEnabled(GL_CULL_FACE);
+    GLboolean wasTexture2D = glIsEnabled(GL_TEXTURE_2D);
+    glGetIntegerv(GL_VIEWPORT, savedViewport);
+    glGetIntegerv(GL_MATRIX_MODE, &savedMatrixMode);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &savedTextureBinding);
+
+    glMatrixMode(GL_PROJECTION);
+    glGetFloatv(GL_PROJECTION_MATRIX, savedProjection);
+    glMatrixMode(GL_MODELVIEW);
+    glGetFloatv(GL_MODELVIEW_MATRIX, savedModelview);
+
+    glViewport(0, 0, gFramebufferWidth, gFramebufferHeight);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, gFramebufferGlTexture);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrthof(0.0f, (GLfloat)gFramebufferWidth, (GLfloat)gFramebufferHeight, 0.0f, -1.0f, 1.0f);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    const GLfloat verts[8] = {
+        0.0f, 0.0f,
+        (GLfloat)gFramebufferWidth, 0.0f,
+        0.0f, (GLfloat)gFramebufferHeight,
+        (GLfloat)gFramebufferWidth, (GLfloat)gFramebufferHeight
+    };
+    const GLfloat texCoords[8] = {
+        0.0f, 1.0f,
+        1.0f, 1.0f,
+        0.0f, 0.0f,
+        1.0f, 0.0f
+    };
+
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    glVertexPointer(2, GL_FLOAT, 0, verts);
+    glTexCoordPointer(2, GL_FLOAT, 0, texCoords);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(savedProjection);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(savedModelview);
+
+    if (wasDepthTest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+    if (wasBlend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+    if (wasLighting) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
+    if (wasCullFace) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if (wasTexture2D) glEnable(GL_TEXTURE_2D); else glDisable(GL_TEXTURE_2D);
+
+    glBindTexture(GL_TEXTURE_2D, (GLuint)savedTextureBinding);
+    glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
+    glMatrixMode(savedMatrixMode);
+
+    gFramebufferDirty = false;
+}
+
+void gfx3dReleaseResources(void) {
+    free(gImmediateVertices);
+    gImmediateVertices = NULL;
+    gImmediateCapacity = 0;
+    gImmediateCount = 0;
+    gImmediateRecording = false;
+
+    free(gImmediateQuadVertices);
+    gImmediateQuadVertices = NULL;
+    gImmediateQuadCapacity = 0;
+
+    free(gColorBuffer);
+    free(gDepthBuffer);
+    gColorBuffer = NULL;
+    gDepthBuffer = NULL;
+    gFramebufferWidth = 0;
+    gFramebufferHeight = 0;
+    gFramebufferDirty = false;
+
+    if (gFramebufferTexture) {
+        SDL_DestroyTexture(gFramebufferTexture);
+        gFramebufferTexture = NULL;
+    }
+
+    if (gFramebufferGlTexture != 0) {
+        if (gSdlGLContext) {
+            glDeleteTextures(1, &gFramebufferGlTexture);
+        }
+        gFramebufferGlTexture = 0;
+    }
+    gFramebufferGlTextureWidth = 0;
+    gFramebufferGlTextureHeight = 0;
 }
 
 #endif // defined(PSCAL_TARGET_IOS)

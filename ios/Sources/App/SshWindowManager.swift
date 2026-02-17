@@ -522,6 +522,31 @@ final class TerminalTabManager: ObservableObject {
         guard sessionId != 0 else { return }
         promptReadySessions.insert(sessionId)
         applyStartupCommandIfReady(forSessionId: sessionId)
+        autoRestoreFromStaleSdlIfNeeded(promptReadySessionId: sessionId)
+    }
+
+    private func autoRestoreFromStaleSdlIfNeeded(promptReadySessionId sessionId: UInt64) {
+        guard let sdlIndex = tabs.firstIndex(where: { tab in
+            if case .sdl = tab.kind {
+                return true
+            }
+            return false
+        }) else {
+            return
+        }
+
+        guard case .sdl(let ownerTabId) = tabs[sdlIndex].kind else {
+            return
+        }
+        guard let ownerIndex = tabs.firstIndex(where: { $0.id == ownerTabId }) else {
+            return
+        }
+        guard let ownerSessionId = tabs[ownerIndex].sessionId, ownerSessionId == sessionId else {
+            return
+        }
+
+        tabInitLog("autoRestoreFromStaleSdl ownerSessionId=\(sessionId) sdlTab=\(tabs[sdlIndex].id)")
+        handleSdlDidClose()
     }
 
     fileprivate func updateTitle(forSessionId sessionId: UInt64, rawTitle: String) -> Bool {

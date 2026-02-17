@@ -96,7 +96,16 @@ class MandelbrotApp {
     double widthSpan = myself.maxRe - myself.minRe;
     double aspect = double(myself.Height) / double(myself.Width);
     myself.maxIm = myself.minIm + widthSpan * aspect;
-    initgraph(myself.Width, myself.Height, "Rea Mandelbrot (ext)");
+    int screenWidth = myself.Width;
+    int screenHeight = myself.Height;
+    if (getscreensize(screenWidth, screenHeight)) {
+      if (screenWidth < 640) screenWidth = 640;
+      if (screenHeight < 480) screenHeight = 480;
+    } else {
+      screenWidth = myself.Width;
+      screenHeight = myself.Height;
+    }
+    initgraph(screenWidth, screenHeight, "Rea Mandelbrot (ext)");
     inittextsystem(resolveFontPath(), 18);
     myself.textureID = createtexture(myself.Width, myself.Height);
     if (myself.textureID < 0) { printf("Error: unable to create texture.\n"); halt(); }

@@ -286,8 +286,8 @@ class Moon3D {
 }
 
 class SolarSystemApp3D {
-  const int WindowWidth = 1600;
-  const int WindowHeight = 1000;
+  int WindowWidth = 1600;
+  int WindowHeight = 1000;
 
   int FrameDelay;
   float DeltaTime;
@@ -414,9 +414,9 @@ class SolarSystemApp3D {
     }
     my.planetRadiusScale = scale;
 
-    float mercuryRadiusWorld = resolvePlanetRadius(mercuryRawRadius);
-    float venusRadiusWorld = resolvePlanetRadius(venusRawRadius);
-    float earthRadiusWorld = resolvePlanetRadius(earthRawRadius);
+    float mercuryRadiusWorld = my.resolvePlanetRadius(mercuryRawRadius);
+    float venusRadiusWorld = my.resolvePlanetRadius(venusRawRadius);
+    float earthRadiusWorld = my.resolvePlanetRadius(earthRawRadius);
 
     my.planets[1] = new Planet3D();
     my.planets[1].init(AUScale * MercuryOrbitAU, mercuryRadiusWorld,
@@ -449,14 +449,14 @@ class SolarSystemApp3D {
                                 my.planets[3].getPosZ());
     my.hasEarthMoon = true;
 
-    float marsRadiusWorld = resolvePlanetRadius(marsRawRadius);
+    float marsRadiusWorld = my.resolvePlanetRadius(marsRawRadius);
 
     my.planets[4] = new Planet3D();
     my.planets[4].init(AUScale * MarsOrbitAU, marsRadiusWorld,
                     2.4, MarsInclination, 49.0,
                     188, 39, 50);
 
-    float jupiterRadiusWorld = resolvePlanetRadius(jupiterRawRadius);
+    float jupiterRadiusWorld = my.resolvePlanetRadius(jupiterRawRadius);
     my.planets[5] = new Planet3D();
     my.planets[5].init(AUScale * JupiterOrbitAU, jupiterRadiusWorld,
                     1.3, JupiterInclination, 100.0,
@@ -631,7 +631,7 @@ class SolarSystemApp3D {
     float delta = toAngle - fromAngle;
     while (delta > 180.0) delta = delta - 360.0;
     while (delta < -180.0) delta = delta + 360.0;
-    return normalizeAngle(fromAngle + delta * t);
+    return my.normalizeAngle(fromAngle + delta * t);
   }
 
   float smoothStep(float t) {
@@ -665,7 +665,7 @@ class SolarSystemApp3D {
     float pitchRadians = -atan2(posY, horizontalDistance);
     float yawDegrees = yawRadians * 180.0 / Pi;
     float pitchDegrees = pitchRadians * 180.0 / Pi;
-    yawDegrees = normalizeAngle(yawDegrees);
+    yawDegrees = my.normalizeAngle(yawDegrees);
     if (pitchDegrees > MaxCameraPitch) pitchDegrees = MaxCameraPitch;
     if (pitchDegrees < MinCameraPitch) pitchDegrees = MinCameraPitch;
 
@@ -789,7 +789,7 @@ class SolarSystemApp3D {
       }
       float orbitDegrees = FlybyOrbitTotalDegrees * progress;
       float orbitRadians = orbitDegrees * DegToRad;
-      float yaw = normalizeAngle(my.flybyOrbitBaseYaw + orbitDegrees);
+      float yaw = my.normalizeAngle(my.flybyOrbitBaseYaw + orbitDegrees);
       float pitchOffset = sin(orbitRadians) * FlybyOrbitPitchAmplitude;
       float pitch = my.flybyOrbitBasePitch + pitchOffset;
       if (pitch > MaxCameraPitch) pitch = MaxCameraPitch;
@@ -817,10 +817,10 @@ class SolarSystemApp3D {
         my.flybyInTransition = false;
         my.flybyTimer = 0.0;
       } else {
-        float eased = smoothStep(progress);
-        my.cameraYaw = lerpAngle(my.flybyStartYaw, my.flybyTargetYaw, eased);
-        my.cameraPitch = lerp(my.flybyStartPitch, my.flybyTargetPitch, eased);
-        my.cameraDistance = lerp(my.flybyStartDistance, my.flybyTargetDistance, eased);
+        float eased = my.smoothStep(progress);
+        my.cameraYaw = my.lerpAngle(my.flybyStartYaw, my.flybyTargetYaw, eased);
+        my.cameraPitch = my.lerp(my.flybyStartPitch, my.flybyTargetPitch, eased);
+        my.cameraDistance = my.lerp(my.flybyStartDistance, my.flybyTargetDistance, eased);
         my.flybyTimer = my.flybyTimer + deltaTime;
       }
     } else {
@@ -1018,7 +1018,7 @@ class SolarSystemApp3D {
 
     GLMatrixMode("projection");
     GLLoadIdentity();
-    float aspect = WindowWidth * 1.0 / WindowHeight;
+    float aspect = my.WindowWidth * 1.0 / my.WindowHeight;
     GLPerspective(55.0, aspect, 24.0, 12000.0);
 
     GLMatrixMode("modelview");
@@ -1030,11 +1030,11 @@ class SolarSystemApp3D {
 
     GLLightfv("light0", "position", LightDirX, LightDirY, LightDirZ, 0.0);
 
-    drawStarField();
-    drawOrbitRings();
-    drawAsteroids();
-    drawSun();
-    drawPlanets();
+    my.drawStarField();
+    my.drawOrbitRings();
+    my.drawAsteroids();
+    my.drawSun();
+    my.drawPlanets();
 
     GLSwapWindow();
   }
@@ -1182,8 +1182,8 @@ class SolarSystemApp3D {
     float simulationDeltaTime = baseDeltaTime * my.timeScale;
     if (!my.orbitPaused) {
       float deltaScale = simulationDeltaTime * TargetFPS;
-      updatePlanets(deltaScale);
-      updateAsteroids(deltaScale);
+      my.updatePlanets(deltaScale);
+      my.updateAsteroids(deltaScale);
       my.elapsedSeconds = my.elapsedSeconds + simulationDeltaTime;
     }
     if (my.flybyActive) {
@@ -1209,16 +1209,26 @@ class SolarSystemApp3D {
   }
 
   void initApp() {
-    InitGraph3D(WindowWidth, WindowHeight, "Rea Inner Planets 3D", 24, 8);
+    int screenWidth = my.WindowWidth;
+    int screenHeight = my.WindowHeight;
+    if (getscreensize(screenWidth, screenHeight)) {
+      if (screenWidth > 0) my.WindowWidth = screenWidth;
+      if (screenHeight > 0) my.WindowHeight = screenHeight;
+    }
+    InitGraph3D(my.WindowWidth, my.WindowHeight, "Rea Inner Planets 3D", 24, 8);
     bool gpuAccelerated = GLIsHardwareAccelerated();
     if (gpuAccelerated) {
       writeln("OpenGL acceleration: hardware (GPU).");
     } else {
       writeln("OpenGL acceleration: software fallback.");
     }
-    GLViewport(0, 0, WindowWidth, WindowHeight);
+    int actualWidth = getmaxx() + 1;
+    int actualHeight = getmaxy() + 1;
+    if (actualWidth > 0) my.WindowWidth = actualWidth;
+    if (actualHeight > 0) my.WindowHeight = actualHeight;
+    GLViewport(0, 0, my.WindowWidth, my.WindowHeight);
     GLSetSwapInterval(1);
-    setupLighting();
+    my.setupLighting();
 
     my.FrameDelay = trunc(1000 / TargetFPS);
     my.DeltaTime = 1.0 / TargetFPS;
@@ -1263,23 +1273,23 @@ class SolarSystemApp3D {
     my.cameraLockPlanet = 0;
 
     randomize();
-    initFlybySequence();
-    initPlanets();
-    initAsteroids();
-    initStars();
+    my.initFlybySequence();
+    my.initPlanets();
+    my.initAsteroids();
+    my.initStars();
   }
 
   void run() {
-    initApp();
+    my.initApp();
     writeln("Inner solar system 3D simulation running. Press Q to quit, P to pause/resume, -/= to adjust speed, F for a planet flyby.");
     while (!my.quit) {
       if (QuitRequested()) {
         my.quit = true;
         break;
       }
-      handleInput();
-      updateSimulation();
-      drawScene();
+      my.handleInput();
+      my.updateSimulation();
+      my.drawScene();
       GraphLoop(my.FrameDelay);
     }
     CloseGraph3D();

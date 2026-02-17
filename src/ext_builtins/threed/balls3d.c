@@ -221,8 +221,15 @@ static bool fetchNumericVarRef(VM* vm, Value* arg, const char* name,
 }
 
 #ifdef SDL
+#ifndef GL_TRIANGLE_STRIP
+#define GL_TRIANGLE_STRIP 0x0005u
+#endif
+#ifndef GL_COMPILE
+#define GL_COMPILE 0x1300u
+#endif
+
 typedef struct SphereDisplayListCache {
-    GLuint displayListId;
+    unsigned int displayListId;
     int stacks;
     int slices;
     bool initialized;
@@ -290,7 +297,7 @@ static bool ensureSphereDisplayList(int stacks, int slices) {
         return true;
     }
 
-    GLuint newList = gfx3dGenLists(1);
+    unsigned int newList = gfx3dGenLists(1);
     if (newList == 0) {
         gSphereDisplayListSupported = false;
         destroySphereDisplayList();
@@ -1567,6 +1574,7 @@ static Value vmBuiltinBouncingBalls3DAccelerate(VM* vm, int arg_count,
 
 void cleanupBalls3DRenderingResources(void) {
 #ifdef SDL
+    gfx3dReleaseResources();
     if (gSphereDisplayListCache.initialized) {
         if (gSdlGLContext) {
             destroySphereDisplayList();

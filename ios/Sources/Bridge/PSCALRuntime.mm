@@ -2704,6 +2704,14 @@ static BOOL PSCALRuntimePromoteSDLWindowAttempt(void) {
     NSArray<UIWindow *> *windows = PSCALRuntimeAllWindows();
     PSCALRuntimeRefreshTrackedWindows(windows);
     UIWindow *sdlWindow = sTrackedSDLWindow ?: PSCALRuntimeFindSDLWindow(windows);
+    if (sSDLModeActive && sdlWindow && sdlWindow.isKeyWindow && !sdlWindow.isHidden) {
+        UIWindow *terminalKeyWindow = PSCALRuntimeFindWindowMatching(^BOOL(UIWindow *window) {
+            return PSCALRuntimeIsTerminalWindow(window) && window.isKeyWindow;
+        });
+        if (!terminalKeyWindow) {
+            return YES;
+        }
+    }
     return PSCALRuntimeActivateSDLWindow(sdlWindow, windows);
 }
 
@@ -2717,6 +2725,14 @@ static BOOL PSCALRuntimePromoteSpecificSDLWindowAttempt(UIWindow *preferredSDLWi
         return PSCALRuntimePromoteSDLWindowAttempt();
     }
     NSArray<UIWindow *> *windows = PSCALRuntimeAllWindows();
+    if (sSDLModeActive && sdlWindow.isKeyWindow && !sdlWindow.isHidden) {
+        UIWindow *terminalKeyWindow = PSCALRuntimeFindWindowMatching(^BOOL(UIWindow *window) {
+            return PSCALRuntimeIsTerminalWindow(window) && window.isKeyWindow;
+        });
+        if (!terminalKeyWindow) {
+            return YES;
+        }
+    }
     return PSCALRuntimeActivateSDLWindow(sdlWindow, windows);
 }
 
@@ -2742,15 +2758,6 @@ static void PSCALRuntimeInstallSDLKeyWindowGuard(void) {
         if (!sSDLModeActive) {
             return;
         }
-        [keyWindow endEditing:YES];
-        if (keyWindow.isKeyWindow) {
-            [keyWindow resignKeyWindow];
-        }
-        if (PSCALRuntimeIsTerminalWindow(keyWindow)) {
-            PSCALRuntimeSuppressTerminalWindow(keyWindow);
-        } else {
-            PSCALRuntimeSuppressCompetingWindow(keyWindow);
-        }
         UIWindow *visibleSDLWindow = sTrackedSDLWindow;
         if (!visibleSDLWindow || visibleSDLWindow.isHidden) {
             visibleSDLWindow = PSCALRuntimeFindWindowMatching(^BOOL(UIWindow *window) {
@@ -2759,6 +2766,18 @@ static void PSCALRuntimeInstallSDLKeyWindowGuard(void) {
         }
         if (!visibleSDLWindow) {
             visibleSDLWindow = sActiveSDLWindow;
+        }
+        if (visibleSDLWindow && visibleSDLWindow.isKeyWindow && !PSCALRuntimeIsTerminalWindow(keyWindow)) {
+            return;
+        }
+        [keyWindow endEditing:YES];
+        if (keyWindow.isKeyWindow) {
+            [keyWindow resignKeyWindow];
+        }
+        if (PSCALRuntimeIsTerminalWindow(keyWindow)) {
+            PSCALRuntimeSuppressTerminalWindow(keyWindow);
+        } else {
+            PSCALRuntimeSuppressCompetingWindow(keyWindow);
         }
         if (!visibleSDLWindow || visibleSDLWindow == keyWindow) {
             return;

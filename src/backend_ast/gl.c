@@ -4,6 +4,7 @@
 #include "backend_ast/pscal_sdl_runtime.h"
 #include "core/utils.h"
 #include "vm/vm.h"
+#include "sdl_ios_dispatch.h"
 
 #if defined(PSCAL_TARGET_IOS)
 #include <OpenGLES/ES1/gl.h>
@@ -19,6 +20,24 @@
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#define PSCAL_DEFINE_IOS_GL_BUILTIN(name) \
+    static Value name##Impl(VM* vm, int arg_count, Value* args); \
+    Value name(VM* vm, int arg_count, Value* args) { \
+        return pscalRunSdlBuiltinOnMainQueue(name##Impl, vm, arg_count, args); \
+    } \
+    static Value name##Impl(VM* vm, int arg_count, Value* args)
+#else
+#define PSCAL_DEFINE_IOS_GL_BUILTIN(name) \
+    Value name(VM* vm, int arg_count, Value* args)
+#endif
+
+#if defined(PSCAL_TARGET_IOS)
+#ifndef GL_QUADS
+#define GL_QUADS 0x0007
+#endif
 #endif
 
 static bool ensureGlContext(VM* vm, const char* name) {
@@ -563,7 +582,7 @@ static bool parseBlendFactor(Value arg, GLenum* factor) {
     return false;
 }
 
-Value vmBuiltinGlclearcolor(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlclearcolor) {
     if (arg_count != 4) {
         runtimeError(vm, "GLClearColor expects 4 numeric arguments (r, g, b, a).");
         return makeVoid();
@@ -584,7 +603,7 @@ Value vmBuiltinGlclearcolor(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlclear(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlclear) {
     if (arg_count > 1) {
         runtimeError(vm, "GLClear expects 0 or 1 argument (GLbitfield mask).");
         return makeVoid();
@@ -604,7 +623,7 @@ Value vmBuiltinGlclear(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlcleardepth(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlcleardepth) {
     if (arg_count != 1) {
         runtimeError(vm, "GLClearDepth expects 1 numeric argument.");
         return makeVoid();
@@ -623,7 +642,7 @@ Value vmBuiltinGlcleardepth(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlviewport(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlviewport) {
     if (arg_count != 4) {
         runtimeError(vm, "GLViewport expects 4 integer arguments (x, y, width, height).");
         return makeVoid();
@@ -642,7 +661,7 @@ Value vmBuiltinGlviewport(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlmatrixmode(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlmatrixmode) {
     if (arg_count != 1) {
         runtimeError(vm, "GLMatrixMode expects 1 argument (string or GLenum).");
         return makeVoid();
@@ -659,7 +678,7 @@ Value vmBuiltinGlmatrixmode(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlloadidentity(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlloadidentity) {
     if (arg_count != 0) {
         runtimeError(vm, "GLLoadIdentity expects 0 arguments.");
         return makeVoid();
@@ -670,7 +689,7 @@ Value vmBuiltinGlloadidentity(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGltranslatef(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGltranslatef) {
     if (arg_count != 3) {
         runtimeError(vm, "GLTranslatef expects 3 numeric arguments.");
         return makeVoid();
@@ -689,7 +708,7 @@ Value vmBuiltinGltranslatef(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlrotatef(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlrotatef) {
     if (arg_count != 4) {
         runtimeError(vm, "GLRotatef expects 4 numeric arguments (angle, x, y, z).");
         return makeVoid();
@@ -708,7 +727,7 @@ Value vmBuiltinGlrotatef(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlscalef(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlscalef) {
     if (arg_count != 3) {
         runtimeError(vm, "GLScalef expects 3 numeric arguments.");
         return makeVoid();
@@ -727,7 +746,7 @@ Value vmBuiltinGlscalef(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlfrustum(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlfrustum) {
     if (arg_count != 6) {
         runtimeError(vm, "GLFrustum expects 6 numeric arguments (left, right, bottom, top, near, far).");
         return makeVoid();
@@ -751,7 +770,7 @@ Value vmBuiltinGlfrustum(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlperspective(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlperspective) {
     if (arg_count != 4) {
         runtimeError(vm, "GLPerspective expects 4 numeric arguments (fovY, aspect, near, far).");
         return makeVoid();
@@ -789,7 +808,7 @@ Value vmBuiltinGlperspective(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlpushmatrix(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlpushmatrix) {
     if (arg_count != 0) {
         runtimeError(vm, "GLPushMatrix expects 0 arguments.");
         return makeVoid();
@@ -800,7 +819,7 @@ Value vmBuiltinGlpushmatrix(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlpopmatrix(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlpopmatrix) {
     if (arg_count != 0) {
         runtimeError(vm, "GLPopMatrix expects 0 arguments.");
         return makeVoid();
@@ -811,7 +830,7 @@ Value vmBuiltinGlpopmatrix(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlbegin(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlbegin) {
     if (arg_count != 1) {
         runtimeError(vm, "GLBegin expects 1 argument (string or GLenum).");
         return makeVoid();
@@ -828,7 +847,7 @@ Value vmBuiltinGlbegin(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlend(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlend) {
     if (arg_count != 0) {
         runtimeError(vm, "GLEnd expects 0 arguments.");
         return makeVoid();
@@ -839,7 +858,7 @@ Value vmBuiltinGlend(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlcolor3f(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlcolor3f) {
     if (arg_count != 3) {
         runtimeError(vm, "GLColor3f expects 3 numeric arguments.");
         return makeVoid();
@@ -860,7 +879,7 @@ Value vmBuiltinGlcolor3f(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlcolor4f(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlcolor4f) {
     if (arg_count != 4) {
         runtimeError(vm, "GLColor4f expects 4 numeric arguments.");
         return makeVoid();
@@ -881,7 +900,7 @@ Value vmBuiltinGlcolor4f(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlvertex3f(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlvertex3f) {
     if (arg_count != 3) {
         runtimeError(vm, "GLVertex3f expects 3 numeric arguments.");
         return makeVoid();
@@ -900,7 +919,7 @@ Value vmBuiltinGlvertex3f(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlnormal3f(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlnormal3f) {
     if (arg_count != 3) {
         runtimeError(vm, "GLNormal3f expects 3 numeric arguments.");
         return makeVoid();
@@ -919,7 +938,7 @@ Value vmBuiltinGlnormal3f(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlenable(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlenable) {
     if (arg_count != 1) {
         runtimeError(vm, "GLEnable expects 1 argument (GL capability).");
         return makeVoid();
@@ -936,7 +955,7 @@ Value vmBuiltinGlenable(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGldisable(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGldisable) {
     if (arg_count != 1) {
         runtimeError(vm, "GLDisable expects 1 argument (GL capability).");
         return makeVoid();
@@ -953,7 +972,7 @@ Value vmBuiltinGldisable(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlshademodel(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlshademodel) {
     if (arg_count != 1) {
         runtimeError(vm, "GLShadeModel expects 1 argument (string or GLenum).");
         return makeVoid();
@@ -970,7 +989,7 @@ Value vmBuiltinGlshademodel(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGllightfv(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGllightfv) {
     if (arg_count != 6) {
         runtimeError(vm, "GLLightfv expects 6 arguments (light, pname, x, y, z, w).");
         return makeVoid();
@@ -1001,7 +1020,7 @@ Value vmBuiltinGllightfv(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlmaterialfv(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlmaterialfv) {
     if (arg_count != 6) {
         runtimeError(vm, "GLMaterialfv expects 6 arguments (face, pname, r, g, b, a).");
         return makeVoid();
@@ -1032,7 +1051,7 @@ Value vmBuiltinGlmaterialfv(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlmaterialf(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlmaterialf) {
     if (arg_count != 3) {
         runtimeError(vm, "GLMaterialf expects 3 arguments (face, pname, value).");
         return makeVoid();
@@ -1065,7 +1084,7 @@ Value vmBuiltinGlmaterialf(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlcolormaterial(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlcolormaterial) {
     if (arg_count != 2) {
         runtimeError(vm, "GLColorMaterial expects 2 arguments (face, mode).");
         return makeVoid();
@@ -1088,7 +1107,7 @@ Value vmBuiltinGlcolormaterial(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlblendfunc(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlblendfunc) {
     if (arg_count != 2) {
         runtimeError(vm, "GLBlendFunc expects 2 arguments (sfactor, dfactor).");
         return makeVoid();
@@ -1111,7 +1130,7 @@ Value vmBuiltinGlblendfunc(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlcullface(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlcullface) {
     if (arg_count != 1) {
         runtimeError(vm, "GLCullFace expects 1 argument specifying a face to cull.");
         return makeVoid();
@@ -1128,7 +1147,7 @@ Value vmBuiltinGlcullface(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGldepthtest(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGldepthtest) {
     if (arg_count != 1) {
         runtimeError(vm, "GLDepthTest expects 1 boolean or integer argument.");
         return makeVoid();
@@ -1155,7 +1174,7 @@ Value vmBuiltinGldepthtest(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGldepthmask(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGldepthmask) {
     if (arg_count != 1) {
         runtimeError(vm, "GLDepthMask expects 1 boolean or numeric argument.");
         return makeVoid();
@@ -1178,7 +1197,7 @@ Value vmBuiltinGldepthmask(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGldepthfunc(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGldepthfunc) {
     if (arg_count != 1) {
         runtimeError(vm, "GLDepthFunc expects 1 argument specifying the depth comparison.");
         return makeVoid();
@@ -1195,7 +1214,7 @@ Value vmBuiltinGldepthfunc(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGllinewidth(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGllinewidth) {
     if (arg_count != 1) {
         runtimeError(vm, "GLLineWidth expects 1 numeric argument.");
         return makeVoid();
@@ -1216,7 +1235,7 @@ Value vmBuiltinGllinewidth(VM* vm, int arg_count, Value* args) {
     return makeVoid();
 }
 
-Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlishardwareaccelerated) {
     if (arg_count != 0) {
         runtimeError(vm, "GLIsHardwareAccelerated does not take any arguments.");
         return makeBoolean(false);
@@ -1238,7 +1257,7 @@ Value vmBuiltinGlishardwareaccelerated(VM* vm, int arg_count, Value* args) {
     return makeBoolean(accelerated != 0);
 }
 
-Value vmBuiltinGlsaveframebufferpng(VM* vm, int arg_count, Value* args) {
+PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlsaveframebufferpng) {
     const char* name = "GLSaveFramebufferPng";
     if (arg_count != 1 && arg_count != 2) {
         runtimeError(vm, "%s expects 1 or 2 arguments (Path: String [, FlipVertical: Boolean]).", name);

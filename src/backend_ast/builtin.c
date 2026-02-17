@@ -268,6 +268,14 @@ static int gSdlReadKeyBufferCount = 0;
 
 #endif
 
+static bool vmShouldBypassTerminalControl(void) {
+#ifdef SDL
+    return sdlIsGraphicsActive();
+#else
+    return false;
+#endif
+}
+
 static const Value* resolveStringPointerBuiltin(const Value* value) {
     const Value* current = value;
     int depth = 0;
@@ -3452,12 +3460,8 @@ bool pscalRuntimeSigintPending(void) {
     if (g_vm_sigint_seen != 0) {
         return true;
     }
-    vmEnsureSigintPipe();
-    if (g_vm_sigint_pipe[0] >= 0) {
-        int pending = 0;
-        if (ioctl(g_vm_sigint_pipe[0], FIONREAD, &pending) == 0 && pending > 0) {
-            return true;
-        }
+    if (atomic_load(&g_vm_interrupt_broadcast)) {
+        return true;
     }
     return false;
 }
@@ -3478,19 +3482,39 @@ bool pscalRuntimeConsumeSigint(void) {
     vmEnsureSigintPipe();
     bool seen = g_vm_sigint_seen != 0;
     g_vm_sigint_seen = 0;
-    if (g_vm_sigint_pipe[0] >= 0) {
-        char token = 0;
-        ssize_t n = -1;
-        do {
-#if defined(PSCAL_TARGET_IOS)
-            n = vprocHostRead(g_vm_sigint_pipe[0], &token, 1);
-#else
-            n = read(g_vm_sigint_pipe[0], &token, 1);
-#endif
-        } while (n < 0 && errno == EINTR);
-        if (n == 1) {
-            seen = true;
+    int fd = g_vm_sigint_pipe[0];
+    if (fd >= 0) {
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags >= 0 && !(flags & O_NONBLOCK)) {
+            (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
         }
+
+        char drain[64];
+        while (true) {
+            ssize_t n;
+#if defined(PSCAL_TARGET_IOS)
+            n = vprocHostRead(fd, drain, sizeof(drain));
+#else
+            n = read(fd, drain, sizeof(drain));
+#endif
+            if (n > 0) {
+                seen = true;
+                continue;
+            }
+            if (n == 0) {
+                break;
+            }
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+            break;
+        }
+    }
+    if (seen) {
+        atomic_store(&g_vm_interrupt_broadcast, false);
     }
     return seen;
 }
@@ -3869,12 +3893,6 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         int read_fd = fd;
 #endif
         int sigint_fd = g_vm_sigint_pipe[0];
-        bool sigint_host = false;
-#if defined(PSCAL_TARGET_IOS)
-        if (sigint_fd >= 0) {
-            sigint_host = true;
-        }
-#endif
         bool saw_newline = false;
         bool pending_caret_control = false;
         while (len < buffer_sz - 1) {
@@ -3954,29 +3972,29 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
             }
 #if defined(PSCAL_TARGET_IOS)
             if (sigint_fd >= 0 && !read_is_host) {
-                int pending = 0;
-                vprocIoctlShim(sigint_fd, FIONREAD, &pending);
-                if (pending > 0) {
-                    char drain[8];
-                    ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
-                    if (drained > 0) {
-                        if (vm) {
-                            vm->abort_requested = true;
-                            vm->exit_requested = true;
-                        }
-                        buffer[0] = '\0';
-                        return false;
+                int sig_flags = fcntl(sigint_fd, F_GETFL, 0);
+                if (sig_flags >= 0 && !(sig_flags & O_NONBLOCK)) {
+                    (void)fcntl(sigint_fd, F_SETFL, sig_flags | O_NONBLOCK);
+                }
+                char drain[8];
+                ssize_t drained = vprocHostRead(sigint_fd, drain, sizeof(drain));
+                if (drained > 0) {
+                    if (vm) {
+                        vm->abort_requested = true;
+                        vm->exit_requested = true;
                     }
-                    if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-                        if (errno == EBADF) {
-                            vmEnsureSigintPipe();
-                            sigint_fd = g_vm_sigint_pipe[0];
-                            continue;
-                        }
-                        if (tool_dbg && stream == stdin) {
-                            fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
-                                    errno, strerror(errno));
-                        }
+                    buffer[0] = '\0';
+                    return false;
+                }
+                if (drained < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                    if (errno == EBADF) {
+                        vmEnsureSigintPipe();
+                        sigint_fd = g_vm_sigint_pipe[0];
+                        continue;
+                    }
+                    if (tool_dbg && stream == stdin) {
+                        fprintf(stderr, "[readln] sigint drain error=%d (%s)\n",
+                                errno, strerror(errno));
                     }
                 }
             }
@@ -4144,7 +4162,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #endif
                 vmDrainSigintFd(sigint_fd,
 #if defined(PSCAL_TARGET_IOS)
-                                sigint_host
+                                true
 #else
                                 false
 #endif
@@ -4392,6 +4410,12 @@ static int getCursorPosition(int *row, int *col) {
     *row = 1;
     *col = 1;
 
+#ifdef SDL
+    if (sdlIsGraphicsActive()) {
+        return 0;
+    }
+#endif
+
     // --- Check if Input is a Terminal ---
     if (!pscalRuntimeStdinIsInteractive()) {
         ret_status = 0; // Non-interactive: fall back to default 1,1 silently.
@@ -4442,8 +4466,35 @@ static int getCursorPosition(int *row, int *col) {
     memset(buf, 0, sizeof(buf));
     i = 0;
     int elapsed_ms = 0;
-    const int poll_step_ms = 20;
-    const int max_wait_ms = 3000; // cap total wait to ~3s
+    const int poll_step_ms = 10;
+    const int max_wait_ms = 150; // keep cursor probe lightweight
+#if defined(PSCAL_TARGET_IOS)
+    while (i < (int)sizeof(buf) - 1 && elapsed_ms <= max_wait_ms) {
+        errno = 0;
+        ssize_t bytes_read = vprocSessionReadInputShimMode(&ch, 1, true);
+        read_errno = errno;
+        if (bytes_read == 1) {
+            buf[i++] = ch;
+            if (ch == 'R') {
+                break;
+            }
+            elapsed_ms = 0; // reset timer on progress
+            continue;
+        }
+        if (bytes_read == 0) {
+            break;
+        }
+        if (bytes_read < 0 && (read_errno == EAGAIN || read_errno == EWOULDBLOCK)) {
+            usleep((useconds_t)poll_step_ms * 1000);
+            elapsed_ms += poll_step_ms;
+            continue;
+        }
+        if (bytes_read < 0 && read_errno == EINTR) {
+            continue;
+        }
+        break;
+    }
+#else
     struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
     while (i < (int)sizeof(buf) - 1 && elapsed_ms <= max_wait_ms) {
         int pr = poll(&pfd, 1, poll_step_ms);
@@ -4466,10 +4517,36 @@ static int getCursorPosition(int *row, int *col) {
         }
         elapsed_ms += poll_step_ms;
     }
+#endif
     // Give a brief grace period for late-arriving bytes so they don't leak into
     // subsequent user input (observed on iOS terminals).
     if (i < (int)sizeof(buf) - 1 && buf[i != 0 ? i - 1 : 0] != 'R') {
         int grace_ms = 100;
+#if defined(PSCAL_TARGET_IOS)
+        while (grace_ms > 0 && i < (int)sizeof(buf) - 1) {
+            errno = 0;
+            ssize_t bytes_read = vprocSessionReadInputShimMode(&ch, 1, true);
+            read_errno = errno;
+            if (bytes_read == 1) {
+                buf[i++] = ch;
+                if (ch == 'R') {
+                    break;
+                }
+                continue;
+            }
+            if (bytes_read == 0) {
+                break;
+            }
+            if (bytes_read < 0 && (read_errno == EAGAIN || read_errno == EWOULDBLOCK)) {
+                usleep(10 * 1000);
+            } else if (bytes_read < 0 && read_errno == EINTR) {
+                continue;
+            } else {
+                break;
+            }
+            grace_ms -= 10;
+        }
+#else
         while (grace_ms > 0 && i < (int)sizeof(buf) - 1) {
             int pr = poll(&pfd, 1, 10);
             if (pr > 0 && (pfd.revents & POLLIN)) {
@@ -4491,6 +4568,7 @@ static int getCursorPosition(int *row, int *col) {
             }
             grace_ms -= 10;
         }
+#endif
     }
     buf[i] = '\0'; // Null-terminate the buffer
 
@@ -4525,6 +4603,23 @@ cleanup:
     /* Drain any residual DSR bytes so later reads (e.g., ReadKey) are not
      * satisfied by a leftover ESC[ row ; col R response. */
     {
+#if defined(PSCAL_TARGET_IOS)
+        char discard[64];
+        while (true) {
+            errno = 0;
+            ssize_t drained = vprocSessionReadInputShimMode(discard, sizeof(discard), true);
+            if (drained > 0) {
+                continue;
+            }
+            if (drained == 0) {
+                break;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || errno == EBADF) {
+                break;
+            }
+            break;
+        }
+#else
         int cur_flags = fcntl(STDIN_FILENO, F_GETFL);
         if (cur_flags != -1 && (cur_flags & O_NONBLOCK) == 0) {
             if (fcntl(STDIN_FILENO, F_SETFL, cur_flags | O_NONBLOCK) == 0) {
@@ -4534,6 +4629,7 @@ cleanup:
                 fcntl(STDIN_FILENO, F_SETFL, cur_flags);
             }
         }
+#endif
     }
 
     // --- Restore Original Terminal Settings ---
@@ -4743,6 +4839,9 @@ Value vmBuiltinGotoxy(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "GotoXY expects 2 integer arguments.");
         return makeVoid();
     }
+    if (vmShouldBypassTerminalControl()) {
+        return makeVoid();
+    }
     long long x = AS_INTEGER(args[0]);
     long long y = AS_INTEGER(args[1]);
     long long absX = gWindowLeft + x - 1;
@@ -4896,6 +4995,9 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
     if (!pscalRuntimeStdoutIsInteractive()) {
         return makeVoid();
     }
+    if (vmShouldBypassTerminalControl()) {
+        return makeVoid();
+    }
 
     /* Clear scrollback + screen, then home. Matches exsh/clear behavior. */
     fputs("\x1B[3J\x1B[H\x1B[2J", stdout);
@@ -4908,6 +5010,9 @@ Value vmBuiltinClreol(VM* vm, int arg_count, Value* args) {
     (void)args;
     if (arg_count != 0) {
         runtimeError(vm, "ClrEol expects no arguments.");
+        return makeVoid();
+    }
+    if (vmShouldBypassTerminalControl()) {
         return makeVoid();
     }
     int cur_row = 1, cur_col = 1;

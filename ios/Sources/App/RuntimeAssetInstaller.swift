@@ -72,6 +72,10 @@ private enum RuntimePaths {
         documentsDirectory.appendingPathComponent("fonts", isDirectory: true)
     }
 
+    static var workspaceLibSoundsDirectory: URL {
+        documentsDirectory.appendingPathComponent("lib/sounds", isDirectory: true)
+    }
+
     static var legacySysfilesDirectory: URL {
         documentsDirectory.appendingPathComponent("sysfiles", isDirectory: true)
     }
@@ -158,6 +162,7 @@ final class RuntimeAssetInstaller {
         installWorkspaceBinIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceSrcIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceFontsIfNeeded(bundleRoot: bundleRoot)
+        installWorkspaceSoundAssetsIfNeeded(bundleRoot: bundleRoot)
         stageSimpleWebServerAssets(bundleRoot: bundleRoot)
         configureRuntimeEnvironment(bundleRoot: bundleRoot)
 
@@ -258,6 +263,16 @@ final class RuntimeAssetInstaller {
                 NSLog("PSCAL iOS: failed to install workspace Examples directory: %@", error.localizedDescription)
             }
         } else {
+            do {
+                let copiedCount = try copyMissingItemsWithCount(from: bundledExamples, to: workspaceExamples)
+                if copiedCount > 0 {
+                    NSLog("PSCAL iOS: ensured Examples workspace at %@ (installed %d missing file(s))",
+                          workspaceExamples.path, copiedCount)
+                }
+            } catch {
+                NSLog("PSCAL iOS: failed to sync missing Examples files at %@: %@",
+                      workspaceExamples.path, error.localizedDescription)
+            }
             rewritePlaceholders(in: workspaceExamples, installRoot: bundleRoot.path)
         }
     }
@@ -489,6 +504,33 @@ final class RuntimeAssetInstaller {
         } catch {
             NSLog("PSCAL iOS: failed to stage fonts assets into workspace (%@): %@",
                   workspaceFonts.path, error.localizedDescription)
+        }
+    }
+
+    private func installWorkspaceSoundAssetsIfNeeded(bundleRoot: URL) {
+        let bundledSounds = bundleRoot.appendingPathComponent("lib/sounds", isDirectory: true)
+        guard fileManager.fileExists(atPath: bundledSounds.path) else {
+            NSLog("PSCAL iOS: bundle missing lib/sounds directory; skipping sound staging.")
+            return
+        }
+
+        let targets: [URL] = [
+            RuntimePaths.workspaceLibSoundsDirectory,
+            RuntimePaths.homeDirectory.appendingPathComponent("lib/sounds", isDirectory: true)
+        ]
+
+        for target in targets {
+            do {
+                try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+                let copiedCount = try copyMissingItemsWithCount(from: bundledSounds, to: target)
+                if copiedCount > 0 {
+                    NSLog("PSCAL iOS: ensured sound assets at %@ (installed %d missing file(s))",
+                          target.path, copiedCount)
+                }
+            } catch {
+                NSLog("PSCAL iOS: failed to stage sound assets into %@: %@",
+                      target.path, error.localizedDescription)
+            }
         }
     }
 
@@ -751,11 +793,23 @@ final class RuntimeAssetInstaller {
         let tmpPath = RuntimePaths.tmpDirectory.path
         setenv("TMPDIR", tmpPath, 1)
         setenv("SESSIONPATH", "\(tmpPath):~:.", 1)
+        let workspaceDefaultFontPath = "/fonts/Roboto/static/Roboto-Regular.ttf"
+        let bundledDefaultFontPath = bundleRoot
+            .appendingPathComponent("fonts/Roboto/static/Roboto-Regular.ttf")
+            .path
+        setenv("PSCAL_FONT_PATH", workspaceDefaultFontPath, 1)
+        setenv("PSCAL_DEFAULT_FONT", bundledDefaultFontPath, 1)
+        let workspaceSoundPath = "/lib/sounds:/home/lib/sounds"
+        let bundledSoundPath = bundleRoot.appendingPathComponent("lib/sounds").path
+        setenv("PSCAL_SOUND_PATH", "\(workspaceSoundPath):\(bundledSoundPath)", 1)
         // Preferred docroot for sample web server inside sandbox.
         setenv("PSCALI_TEMP_DIR", RuntimePaths.sandboxVarHtdocsDirectory.path, 1)
         setenv("HOME", RuntimePaths.homeDirectory.path, 1)
         setenv("TERM", "xterm-256color", 1)
         setenv("COLORTERM", "truecolor", 1)
+        let processInfo = ProcessInfo.processInfo
+        setenv("PSCAL_CPU_COUNT", String(processInfo.processorCount), 1)
+        setenv("PSCAL_ACTIVE_CPU_COUNT", String(processInfo.activeProcessorCount), 1)
     }
 
     private func configureReaImportPath(bundleRoot: URL) {

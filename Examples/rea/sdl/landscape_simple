@@ -3,8 +3,8 @@
 // height field from a seed, renders it with the SDL/OpenGL helpers, and lets
 // the user walk with W/S while steering the camera with the mouse.
 
-const int WindowWidth = 1600;
-const int WindowHeight = 1200;
+int WindowWidth = 1600;
+int WindowHeight = 1200;
 const int TerrainSize = 128
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
@@ -306,7 +306,17 @@ class LandscapeDemo {
   }
 
   void initGraphics() {
+    int screenWidth = WindowWidth;
+    int screenHeight = WindowHeight;
+    if (getscreensize(screenWidth, screenHeight)) {
+      if (screenWidth > 0) WindowWidth = screenWidth;
+      if (screenHeight > 0) WindowHeight = screenHeight;
+    }
     InitGraph3D(WindowWidth, WindowHeight, "Rea Terrain", 24, 8);
+    int actualWidth = getmaxx() + 1;
+    int actualHeight = getmaxy() + 1;
+    if (actualWidth > 0) WindowWidth = actualWidth;
+    if (actualHeight > 0) WindowHeight = actualHeight;
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLClearDepth(1.0);
     GLDepthTest(true);

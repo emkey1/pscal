@@ -26,6 +26,7 @@
       "cacheVariables": {
         "PSCALI_IOS_PLATFORM": "SIMULATOR",
         "SDL": "ON",
+        "ENABLE_EXT_BUILTIN_3D": "ON",
         "PSCAL_BUILD_STATIC_LIBS": "ON",
         "PSCAL_USE_BREW_CURL": "ON",
         "BUILD_DASCAL": "ON"
@@ -42,6 +43,7 @@
       "cacheVariables": {
         "PSCALI_IOS_PLATFORM": "DEVICE",
         "SDL": "ON",
+        "ENABLE_EXT_BUILTIN_3D": "ON",
         "PSCAL_BUILD_STATIC_LIBS": "ON",
         "PSCAL_USE_BREW_CURL": "ON",
         "BUILD_DASCAL": "ON"

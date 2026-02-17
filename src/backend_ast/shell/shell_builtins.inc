@@ -7532,8 +7532,7 @@ static bool shellCommandCollectInfo(const char *name,
         }
     }
 
-    ShellFunctionEntry *function_entry = shellFindFunctionEntry(name);
-    if (function_entry && function_entry->compiled) {
+    if (shellFunctionIsDefined(name)) {
         if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_FUNCTION, NULL)) {
             goto error;
         }

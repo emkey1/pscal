@@ -226,7 +226,16 @@ class SolarSystemApp {
   }
 
   void run() {
-    initgraph(WindowWidth, WindowHeight, "Rea SDL Inner Solar System");
+    int screenWidth = WindowWidth;
+    int screenHeight = WindowHeight;
+    if (getscreensize(screenWidth, screenHeight)) {
+      if (screenWidth < 640) screenWidth = 640;
+      if (screenHeight < 480) screenHeight = 480;
+    } else {
+      screenWidth = WindowWidth;
+      screenHeight = WindowHeight;
+    }
+    initgraph(screenWidth, screenHeight, "Rea SDL Inner Solar System");
     myself.centerX = getmaxx() / 2;
     myself.centerY = getmaxy() / 2;
     // Scale astronomical units so Jupiter stays fully on screen with a small margin

@@ -376,6 +376,11 @@ endif()
 option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ${_ENABLE_EXT_BUILTIN_3D_DEFAULT})
 option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
 option(ENABLE_EXT_BUILTIN_OPENAI "Enable extended OpenAI builtins" ON)
+if(PSCAL_PLATFORM_IOS AND SDL)
+    # iOS builds ship SDL examples that depend on the 3D helper builtins.
+    # Force-enable them so stale cache values cannot silently strip support.
+    set(ENABLE_EXT_BUILTIN_3D ON CACHE BOOL "Enable extended 3D builtins" FORCE)
+endif()
 if(release)
     set(ENABLE_EXT_BUILTIN_MATH ON CACHE BOOL "Enable extended math builtins" FORCE)
     set(ENABLE_EXT_BUILTIN_STRINGS ON CACHE BOOL "Enable extended string builtins" FORCE)
@@ -920,6 +925,23 @@ endif()
 
 if(ENABLE_EXT_BUILTIN_OPENAI)
     add_compile_definitions(ENABLE_EXT_BUILTIN_OPENAI)
+endif()
+
+if(PSCAL_PLATFORM_IOS)
+    foreach(_pscal_ext_opt
+            ENABLE_EXT_BUILTIN_MATH
+            ENABLE_EXT_BUILTIN_STRINGS
+            ENABLE_EXT_BUILTIN_SYSTEM
+            ENABLE_EXT_BUILTIN_USER
+            ENABLE_EXT_BUILTIN_YYJSON
+            ENABLE_EXT_BUILTIN_SQLITE
+            ENABLE_EXT_BUILTIN_3D
+            ENABLE_EXT_BUILTIN_GRAPHICS
+            ENABLE_EXT_BUILTIN_OPENAI)
+        if(NOT ${_pscal_ext_opt})
+            message(FATAL_ERROR "iOS builds require ${_pscal_ext_opt}=ON so all extended builtins remain available.")
+        endif()
+    endforeach()
 endif()
 
 find_package(Threads REQUIRED)

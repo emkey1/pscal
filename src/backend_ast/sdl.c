@@ -290,6 +290,14 @@ static bool isWindowCloseEvent(const SDL_Event* event) {
 }
 #endif
 
+static bool shouldIgnoreQuitEvent(void) {
+#if defined(PSCAL_TARGET_IOS)
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool sdlTextInputActive(void) {
 #if defined(PSCALI_SDL3)
     if (!gSdlWindow) {
@@ -550,6 +558,10 @@ static int sdlInputWatch(void* userdata, SDL_Event* event) {
 
     sdlLogEvent("EventWatch", event);
     if (event->type == SDL_QUIT) {
+        if (shouldIgnoreQuitEvent()) {
+            sdlDebugLogf("[DEBUG SDL] EventWatch ignored SDL_QUIT on iOS\n");
+            return 0;
+        }
         SDL_DEBUG_SET_BREAK_REQUESTED(1, "EventWatch SDL_QUIT");
     } else if (event->type == SDL_KEYDOWN) {
         SDL_Keycode sym = event->key.keysym.sym;
@@ -909,6 +921,7 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph) {
     }
 
     cleanupSdlWindowResources();
+    SDL_DEBUG_SET_BREAK_REQUESTED(0, "InitGraph reset");
 
     int width = (int)AS_INTEGER(args[0]);
     int height = (int)AS_INTEGER(args[1]);
@@ -1646,6 +1659,70 @@ static bool sdlTryOpenFontCandidate(const char *candidate,
 #undef SDL_ADD_FONT_PATH
 }
 
+static const char *sdlFontBasename(const char *path) {
+    if (!path || path[0] == '\0') {
+        return NULL;
+    }
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *base = path;
+    if (slash && slash[1] != '\0') {
+        base = slash + 1;
+    }
+    if (backslash && backslash[1] != '\0' && (!slash || backslash > slash)) {
+        base = backslash + 1;
+    }
+    return (base[0] != '\0') ? base : NULL;
+}
+
+static bool sdlTryOpenFontFromEnvPath(const char *env_path,
+                                      const char *requested_path,
+                                      int font_size,
+                                      char *loaded_path,
+                                      size_t loaded_path_size) {
+    if (!env_path || env_path[0] == '\0') {
+        return false;
+    }
+
+    const char *basename = sdlFontBasename(requested_path);
+    size_t env_len = strlen(env_path);
+    char *paths = (char *)malloc(env_len + 1);
+    if (!paths) {
+        return false;
+    }
+    memcpy(paths, env_path, env_len + 1);
+
+    char *cursor = paths;
+    while (cursor && cursor[0] != '\0') {
+        char *sep = strchr(cursor, ':');
+        if (sep) {
+            *sep = '\0';
+        }
+        if (cursor[0] != '\0') {
+            if (sdlTryOpenFontCandidate(cursor, font_size, loaded_path, loaded_path_size)) {
+                free(paths);
+                return true;
+            }
+            if (basename) {
+                char candidate[PATH_MAX];
+                int written = snprintf(candidate, sizeof(candidate), "%s/%s", cursor, basename);
+                if (written > 0 && (size_t)written < sizeof(candidate) &&
+                    sdlTryOpenFontCandidate(candidate, font_size, loaded_path, loaded_path_size)) {
+                    free(paths);
+                    return true;
+                }
+            }
+        }
+        if (!sep) {
+            break;
+        }
+        cursor = sep + 1;
+    }
+
+    free(paths);
+    return false;
+}
+
 static bool sdlTryOpenFontWithFallbacks(const char *requested_path,
                                         int font_size,
                                         char *loaded_path,
@@ -1696,6 +1773,49 @@ static bool sdlTryOpenFontWithFallbacks(const char *requested_path,
         if (pathTruncateExpand(stripped, expanded, sizeof(expanded)) &&
             strcmp(expanded, requested_path) != 0 &&
             sdlTryOpenFontCandidate(expanded, font_size, loaded_path, loaded_path_size)) {
+            return true;
+        }
+    }
+
+    if (sdlTryOpenFontFromEnvPath(getenv("PSCAL_FONT_PATH"), requested_path,
+                                  font_size, loaded_path, loaded_path_size)) {
+        return true;
+    }
+
+    const char *basename = sdlFontBasename(requested_path);
+    if (basename) {
+        const char *basename_roots[] = {
+            "/fonts",
+            "fonts",
+            "/home/fonts",
+            "/fonts/Roboto/static",
+            "fonts/Roboto/static",
+            "/home/fonts/Roboto/static"
+        };
+        for (size_t i = 0; i < sizeof(basename_roots) / sizeof(basename_roots[0]); i++) {
+            int written = snprintf(candidate, sizeof(candidate), "%s/%s",
+                                   basename_roots[i], basename);
+            if (written > 0 && (size_t)written < sizeof(candidate) &&
+                sdlTryOpenFontCandidate(candidate, font_size, loaded_path, loaded_path_size)) {
+                return true;
+            }
+        }
+    }
+
+    const char *default_font = getenv("PSCAL_DEFAULT_FONT");
+    if (default_font && default_font[0] != '\0' &&
+        sdlTryOpenFontCandidate(default_font, font_size, loaded_path, loaded_path_size)) {
+        return true;
+    }
+
+    const char *default_fallbacks[] = {
+        "/fonts/Roboto/static/Roboto-Regular.ttf",
+        "fonts/Roboto/static/Roboto-Regular.ttf",
+        "../fonts/Roboto/static/Roboto-Regular.ttf"
+    };
+    for (size_t i = 0; i < sizeof(default_fallbacks) / sizeof(default_fallbacks[0]); i++) {
+        if (sdlTryOpenFontCandidate(default_fallbacks[i], font_size,
+                                    loaded_path, loaded_path_size)) {
             return true;
         }
     }
@@ -2223,6 +2343,9 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
 #endif
 
         if (event.type == SDL_QUIT) {
+            if (shouldIgnoreQuitEvent()) {
+                continue;
+            }
             SDL_DEBUG_SET_BREAK_REQUESTED(1, "PollNextKey SDL_QUIT");
             return false;
         }
@@ -2469,6 +2592,9 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGraphloop) {
 #endif
 
                 if (event.type == SDL_QUIT) {
+                    if (shouldIgnoreQuitEvent()) {
+                        continue;
+                    }
                     SDL_DEBUG_SET_BREAK_REQUESTED(1, "GraphLoop SDL_QUIT");
                     return makeVoid();
                 }
@@ -2571,6 +2697,9 @@ static void pumpKeyEvents(void) {
         }
 
         if (event.type == SDL_QUIT) {
+            if (shouldIgnoreQuitEvent()) {
+                continue;
+            }
             SDL_DEBUG_SET_BREAK_REQUESTED(1, "PumpKeyEvents SDL_QUIT");
             continue;
         }
@@ -2627,6 +2756,9 @@ SDL_Keycode sdlWaitNextKeycode(void) {
 
         sdlLogEvent("WaitNextKey", &event);
         if (event.type == SDL_QUIT) {
+            if (shouldIgnoreQuitEvent()) {
+                continue;
+            }
             SDL_DEBUG_SET_BREAK_REQUESTED(1, "WaitNextKey SDL_QUIT");
             return SDLK_UNKNOWN;
         }

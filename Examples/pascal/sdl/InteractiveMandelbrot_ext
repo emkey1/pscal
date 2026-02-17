@@ -4,20 +4,27 @@ PROGRAM TextureMandelbrotZoomBuiltin;
 USES CRT;
 
 CONST
-  MandelWindowWidth   = 1024;
-  MandelWindowHeight  = 768;
+  DefaultMandelWindowWidth   = 1024;
+  DefaultMandelWindowHeight  = 768;
   MandelWindowTitle   = 'Mandelbrot (Builtin Row - LMB:Zoom, RMB:Reset, Q:Quit)';
-  BaseIterations      = 50;
-  IterationStep       = 50;
-  MaxIterationCap     = 1000;
+  DefaultBaseIterations      = 50;
+  MinimumBaseIterations      = 25;
+  ZoomIterationIncrement     = 5;
+  MaxIterationMultiplier     = 2;
+  BenchmarkTargetFrameMs     = 900;
+  BenchmarkSampleWidth       = 320;
+  BenchmarkSampleRows        = 24;
+  BenchmarkSampleIterations  = 100;
+  BenchmarkSafetyFactor      = 0.90;
   MandelZoomFactor    = 2.0;
   MandelBytesPerPixel = 4;
   MandelTextureUpdateIntervalRows = 1;
-  ThreadCount = 6;
+  MaxWorkerThreads = 15;
+  DefaultCpuCount = 4;
 
   InitialMinRe  = -2.0;
   InitialMaxRe  =  1.0;
-  InitialMinIm  = -1.2;
+  InitialCenterIm = 0.0;
 
   ButtonLeft   = 1;
   ButtonRight  = 4;
@@ -32,16 +39,18 @@ TYPE
   PWorkerArg = ^Integer;
 
 VAR
+  MandelWindowWidth, MandelWindowHeight : Integer;
   MinRe, MaxRe, MinIm, MaxIm : Real;
   ViewPixelWidth, ViewPixelHeight : Integer;
   ReRange, ImRange           : Real;
   ScaleRe, ScaleIm           : Real;
 
   InitialSpanRe : Real;
+  BaseIterations : Integer;
   CurrentMaxIterations : Integer;
 
   MandelTextureID : Integer;
-  PixelData, DisplayPixelData : PixelBuffer;
+  DisplayPixelData : PixelBuffer;
   QuitProgram     : Boolean;
   RedrawNeeded    : Boolean;
   RenderInProgress : Boolean;
@@ -52,11 +61,12 @@ VAR
   PendingMinRe, PendingMaxRe, PendingMinIm : Real;
   PendingMouseX, PendingMouseY : Integer;
 
-  ThreadStart, ThreadEnd : ARRAY[0..ThreadCount - 1] OF Integer;
+  ThreadCount : Integer;
+  ThreadStart, ThreadEnd, ThreadStride : ARRAY OF Integer;
   RowDone : RowStateBuffer;
-  RenderThreadIDs : ARRAY[0..ThreadCount - 1] OF Integer;
-  WorkerArgs : ARRAY[0..ThreadCount - 1] OF Integer;
-  WorkReady : ARRAY[0..ThreadCount - 1] OF Integer;
+  RenderThreadIDs : ARRAY OF Integer;
+  WorkerArgs : ARRAY OF Integer;
+  WorkReady : ARRAY OF Integer;
   WorkerShutdown : Boolean;
   RowMutex : Integer;
   WorkMutex : Integer;
@@ -65,6 +75,186 @@ VAR
 
   PercentDone : Integer;
   i : Integer;
+  MinimalConsoleOutput : Boolean;
+
+FUNCTION ResolveMinimalConsoleOutput: Boolean;
+VAR
+  overrideFlag: Integer;
+  sessionPath: String;
+BEGIN
+  overrideFlag := GetEnvInt('PSCAL_MANDEL_MIN_CONSOLE', -1);
+  IF overrideFlag < 0 THEN
+    overrideFlag := GetEnvInt('MANDEL_MIN_CONSOLE', -1);
+  IF overrideFlag >= 0 THEN BEGIN
+    ResolveMinimalConsoleOutput := overrideFlag <> 0;
+    EXIT;
+  END;
+
+  sessionPath := GetEnv('SESSIONPATH');
+  ResolveMinimalConsoleOutput := sessionPath <> '';
+END;
+
+FUNCTION ResolveWorkerThreadCount: Integer;
+VAR
+  overrideCount, totalCpuCount, resolved: Integer;
+BEGIN
+  overrideCount := GetEnvInt('PSCAL_MANDEL_THREADS', 0);
+  IF overrideCount <= 0 THEN
+    overrideCount := GetEnvInt('MANDEL_THREADS', 0);
+
+  IF overrideCount > 0 THEN BEGIN
+    resolved := overrideCount;
+  END ELSE BEGIN
+    totalCpuCount := GetEnvInt('PSCAL_CPU_COUNT', 0);
+    IF totalCpuCount <= 0 THEN
+      totalCpuCount := GetEnvInt('PSCAL_ACTIVE_CPU_COUNT', 0);
+    IF totalCpuCount <= 0 THEN
+      totalCpuCount := DefaultCpuCount;
+
+    resolved := totalCpuCount DIV 2;
+    IF resolved <= 0 THEN
+      resolved := 1;
+  END;
+
+  IF resolved < 1 THEN
+    resolved := 1;
+  IF resolved > MaxWorkerThreads THEN
+    resolved := MaxWorkerThreads;
+
+  ResolveWorkerThreadCount := resolved;
+END;
+
+PROCEDURE RefreshWindowDimensionsFromScreen;
+VAR
+  detectedWidth, detectedHeight: Integer;
+BEGIN
+  detectedWidth := MandelWindowWidth;
+  detectedHeight := MandelWindowHeight;
+  IF GetScreenSize(detectedWidth, detectedHeight) THEN BEGIN
+    IF detectedWidth > 0 THEN
+      MandelWindowWidth := detectedWidth;
+    IF detectedHeight > 0 THEN
+      MandelWindowHeight := detectedHeight;
+  END;
+END;
+
+PROCEDURE ConfigureWorkerArrays;
+BEGIN
+  ThreadCount := ResolveWorkerThreadCount;
+  SetLength(ThreadStart, ThreadCount);
+  SetLength(ThreadEnd, ThreadCount);
+  SetLength(ThreadStride, ThreadCount);
+  SetLength(RenderThreadIDs, ThreadCount);
+  SetLength(WorkerArgs, ThreadCount);
+  SetLength(WorkReady, ThreadCount);
+END;
+
+FUNCTION ResolveBenchmarkTargetFrameMs: Integer;
+VAR
+  targetMs: Integer;
+BEGIN
+  targetMs := GetEnvInt('PSCAL_MANDEL_TARGET_MS', BenchmarkTargetFrameMs);
+  IF targetMs < 250 THEN
+    targetMs := 250;
+  ResolveBenchmarkTargetFrameMs := targetMs;
+END;
+
+FUNCTION BenchmarkBaseIterations(targetFrameMs: Integer): Integer;
+VAR
+  sampleWidth, sampleRows, sampleIterations, threadsForEstimate: Integer;
+  startTicks, endTicks, elapsedMs, rowIndex: Integer;
+  sampleMinRe, sampleMaxRe, sampleReRange: Real;
+  sampleMinIm, sampleMaxIm, sampleScaleRe, sampleScaleIm, y0: Real;
+  samplePixels, fullPixels, estimatedReal: Real;
+  rowIterations: MandelRowIterations;
+  estimated: Integer;
+BEGIN
+  sampleWidth := ViewPixelWidth;
+  IF sampleWidth > BenchmarkSampleWidth THEN
+    sampleWidth := BenchmarkSampleWidth;
+  IF sampleWidth < 64 THEN
+    sampleWidth := 64;
+
+  sampleRows := ViewPixelHeight;
+  IF sampleRows > BenchmarkSampleRows THEN
+    sampleRows := BenchmarkSampleRows;
+  IF sampleRows < 8 THEN
+    sampleRows := 8;
+
+  IF sampleWidth <= 1 THEN BEGIN
+    BenchmarkBaseIterations := MinimumBaseIterations;
+    EXIT;
+  END;
+
+  sampleIterations := BenchmarkSampleIterations;
+
+  sampleMinRe := InitialMinRe;
+  sampleMaxRe := InitialMaxRe;
+  sampleReRange := sampleMaxRe - sampleMinRe;
+  IF sampleReRange <= 0.0 THEN
+    sampleReRange := 3.0;
+
+  IF ViewPixelWidth > 0 THEN
+    sampleMaxIm := InitialCenterIm + ((sampleReRange * ViewPixelHeight / ViewPixelWidth) / 2.0)
+  ELSE
+    sampleMaxIm := InitialCenterIm + (sampleReRange / 2.0);
+  sampleMinIm := InitialCenterIm - (sampleMaxIm - InitialCenterIm);
+
+  sampleScaleRe := sampleReRange / (sampleWidth - 1);
+  IF sampleRows > 1 THEN
+    sampleScaleIm := (sampleMaxIm - sampleMinIm) / (sampleRows - 1)
+  ELSE
+    sampleScaleIm := (sampleMaxIm - sampleMinIm);
+
+  SetLength(rowIterations, sampleWidth);
+  startTicks := GetTicks();
+  FOR rowIndex := 0 TO sampleRows - 1 DO BEGIN
+    y0 := sampleMaxIm - (rowIndex * sampleScaleIm);
+    MandelbrotRow(sampleMinRe, sampleScaleRe, y0, sampleIterations, sampleWidth - 1, rowIterations);
+  END;
+  endTicks := GetTicks();
+  elapsedMs := endTicks - startTicks;
+  IF elapsedMs < 1 THEN
+    elapsedMs := 1;
+
+  threadsForEstimate := ThreadCount;
+  IF threadsForEstimate < 1 THEN
+    threadsForEstimate := 1;
+
+  samplePixels := sampleWidth * sampleRows;
+  fullPixels := ViewPixelWidth * ViewPixelHeight;
+  IF fullPixels < 1.0 THEN
+    fullPixels := 1.0;
+
+  estimatedReal := sampleIterations;
+  estimatedReal := estimatedReal * (targetFrameMs / elapsedMs);
+  estimatedReal := estimatedReal * (samplePixels / fullPixels);
+  estimatedReal := estimatedReal * threadsForEstimate;
+  estimatedReal := estimatedReal * BenchmarkSafetyFactor;
+
+  estimated := Trunc(estimatedReal + 0.5);
+  IF estimated < MinimumBaseIterations THEN
+    estimated := MinimumBaseIterations;
+
+  BenchmarkBaseIterations := estimated;
+END;
+
+PROCEDURE ConfigureAdaptiveIterations;
+VAR
+  targetFrameMs, benchmarkBase, maxIterations: Integer;
+BEGIN
+  targetFrameMs := ResolveBenchmarkTargetFrameMs;
+  benchmarkBase := BenchmarkBaseIterations(targetFrameMs);
+
+  BaseIterations := benchmarkBase;
+  RecomputeMaxIterations;
+  maxIterations := BaseIterations * MaxIterationMultiplier;
+  WriteLn('Mandelbrot initial iterations: ', BaseIterations, ' (max ', maxIterations, ', +', ZoomIterationIncrement, '/zoom)');
+  IF NOT MinimalConsoleOutput THEN BEGIN
+    GotoXY(1, ControlsStartY + 6); ClrEol;
+    Write('Benchmark: base=', BaseIterations, ', max=', maxIterations, ', target=', targetFrameMs, 'ms');
+  END;
+END;
 
 PROCEDURE EnsurePixelBuffersSized;
 VAR
@@ -73,8 +263,6 @@ BEGIN
   RequiredPixels := ViewPixelWidth * ViewPixelHeight;
   RequiredBytes := RequiredPixels * MandelBytesPerPixel;
 
-  IF Length(PixelData) <> RequiredBytes THEN
-    SetLength(PixelData, RequiredBytes);
   IF Length(DisplayPixelData) <> RequiredBytes THEN
     SetLength(DisplayPixelData, RequiredBytes);
   IF Length(RowDone) <> ViewPixelHeight THEN
@@ -84,7 +272,7 @@ END;
 PROCEDURE RecomputeMaxIterations;
 VAR
   spanRe, baseSpan, zoomRatio : Real;
-  zoomSteps : Integer;
+  zoomSteps, maxIterations : Integer;
 BEGIN
   baseSpan := InitialSpanRe;
   IF baseSpan <= 0.0 THEN
@@ -104,9 +292,10 @@ BEGIN
   IF zoomSteps < 0 THEN
     zoomSteps := 0;
 
-  CurrentMaxIterations := BaseIterations + (zoomSteps * IterationStep);
-  IF CurrentMaxIterations > MaxIterationCap THEN
-    CurrentMaxIterations := MaxIterationCap;
+  CurrentMaxIterations := BaseIterations + (zoomSteps * ZoomIterationIncrement);
+  maxIterations := BaseIterations * MaxIterationMultiplier;
+  IF CurrentMaxIterations > maxIterations THEN
+    CurrentMaxIterations := maxIterations;
 END;
 
 // This procedure recalculates MaxIm and scaling factors based on CURRENT MinRe, MaxRe, MinIm
@@ -134,17 +323,25 @@ BEGIN
   RecomputeMaxIterations;
 
   // Update console display
-  GotoXY(1, 2); ClrEol; Write('View: Re[', MinRe:0:4,'..',MaxRe:0:4,'], Im[',MinIm:0:4,'..',MaxIm:0:4,']');
-  GotoXY(1, ControlsStartY + 4); ClrEol;
-  Write('Max Iter: ', CurrentMaxIterations, ', Zoom Factor: ', MandelZoomFactor:0:1, ', Texture ID: ', MandelTextureID); ClrEol;
+  IF NOT MinimalConsoleOutput THEN BEGIN
+    GotoXY(1, 2); ClrEol; Write('View: Re[', MinRe:0:4,'..',MaxRe:0:4,'], Im[',MinIm:0:4,'..',MaxIm:0:4,']');
+    GotoXY(1, ControlsStartY + 4); ClrEol;
+    Write('Max Iter: ', CurrentMaxIterations, ', Zoom Factor: ', MandelZoomFactor:0:1, ', Texture ID: ', MandelTextureID); ClrEol;
+  END;
   EnsurePixelBuffersSized;
 END;
 
 PROCEDURE ResetViewToInitial;
+VAR
+  initialImRange: Real;
 BEGIN
   MinRe := InitialMinRe;
   MaxRe := InitialMaxRe;
-  MinIm := InitialMinIm;
+  IF MandelWindowWidth > 0 THEN
+    initialImRange := (MaxRe - MinRe) * MandelWindowHeight / MandelWindowWidth
+  ELSE
+    initialImRange := (MaxRe - MinRe);
+  MinIm := InitialCenterIm - (initialImRange / 2.0);
   InitialSpanRe := MaxRe - MinRe;
   RecomputeMaxIterations;
   UpdateScalingAndDependentViewParams; // Now calculate MaxIm and scales for these initial values
@@ -175,7 +372,7 @@ BEGIN
   AlreadyCancelling := CancelRender;
   CancelRender := True;
   unlock(CancelMutex);
-  IF NOT AlreadyCancelling THEN BEGIN
+  IF (NOT AlreadyCancelling) AND (NOT MinimalConsoleOutput) THEN BEGIN
     GotoXY(1, StatusLineY); ClrEol; Write('Cancelling current render...');
   END;
 END;
@@ -187,16 +384,19 @@ BEGIN
   unlock(CancelMutex);
 END;
 
-FUNCTION ComputeRows(startY, endY: Integer): Boolean;
+FUNCTION ComputeRows(startY, endY, rowStride: Integer): Boolean;
 VAR LocalPy, LocalPx, BufferBaseIdx, Iteration: Integer;
     y0: Real;
     RowIterations: MandelRowIterations;
     R_calc, G_calc, B_calc: Byte;
     Cancelled: Boolean;
 BEGIN
+  IF rowStride <= 0 THEN
+    rowStride := 1;
   Cancelled := False;
   SetLength(RowIterations, ViewPixelWidth);
-  FOR LocalPy := startY TO endY DO BEGIN
+  LocalPy := startY;
+  WHILE LocalPy <= endY DO BEGIN
     IF RenderCancellationRequested THEN BEGIN
       Cancelled := True;
       BREAK;
@@ -215,14 +415,15 @@ BEGIN
         B_calc := Byte(((Iteration * 5 + 160) MOD 256 + 256) MOD 256);
       END;
       BufferBaseIdx := (LocalPy * ViewPixelWidth + LocalPx) * MandelBytesPerPixel;
-      PixelData[BufferBaseIdx + 0] := R_calc;
-      PixelData[BufferBaseIdx + 1] := G_calc;
-      PixelData[BufferBaseIdx + 2] := B_calc;
-      PixelData[BufferBaseIdx + 3] := Byte(255);
+      DisplayPixelData[BufferBaseIdx + 0] := R_calc;
+      DisplayPixelData[BufferBaseIdx + 1] := G_calc;
+      DisplayPixelData[BufferBaseIdx + 2] := B_calc;
+      DisplayPixelData[BufferBaseIdx + 3] := Byte(255);
     END; // Px
     lock(RowMutex);
     RowDone[LocalPy] := 1;
     unlock(RowMutex);
+    LocalPy := LocalPy + rowStride;
   END; // Py
   ComputeRows := NOT Cancelled;
 END;
@@ -278,16 +479,17 @@ BEGIN
     RenderThreadIDs[idx] := -1;
 END;
 
-PROCEDURE PublishWork(id, startY, endY: Integer);
+PROCEDURE PublishWork(id, startY, endY, rowStride: Integer);
 BEGIN
   lock(WorkMutex);
   ThreadStart[id] := startY;
   ThreadEnd[id] := endY;
+  ThreadStride[id] := rowStride;
   WorkReady[id] := 1;
   unlock(WorkMutex);
 END;
 
-FUNCTION TryClaimWork(id: Integer; VAR startY, endY: Integer): Boolean;
+FUNCTION TryClaimWork(id: Integer; VAR startY, endY, rowStride: Integer): Boolean;
 VAR hasWork: Boolean;
 BEGIN
   lock(WorkMutex);
@@ -295,6 +497,7 @@ BEGIN
   IF hasWork THEN BEGIN
     startY := ThreadStart[id];
     endY := ThreadEnd[id];
+    rowStride := ThreadStride[id];
     WorkReady[id] := 2;
   END;
   unlock(WorkMutex);
@@ -319,11 +522,11 @@ END;
 
 PROCEDURE WorkerLoop(id: Integer);
 VAR Completed: Boolean;
-    startY, endY: Integer;
+    startY, endY, rowStride: Integer;
 BEGIN
   WHILE NOT WorkerShutdownRequested DO BEGIN
-    IF TryClaimWork(id, startY, endY) THEN BEGIN
-      Completed := ComputeRows(startY, endY);
+    IF TryClaimWork(id, startY, endY, rowStride) THEN BEGIN
+      Completed := ComputeRows(startY, endY, rowStride);
       IF NOT Completed THEN
         Delay(0);
       FinishWork(id);
@@ -383,13 +586,11 @@ BEGIN
   END;
 
   IF PendingReset THEN BEGIN
-    MinRe := InitialMinRe;
-    MaxRe := InitialMaxRe;
-    MinIm := InitialMinIm;
-    RecomputeMaxIterations;
-    UpdateScalingAndDependentViewParams;
+    ResetViewToInitial;
     RedrawNeeded := True;
-    GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
+    IF NOT MinimalConsoleOutput THEN BEGIN
+      GotoXY(1,StatusLineY); ClrEol; Write('Resetting view...');
+    END;
     PendingReset := False;
     PendingZoom := False;
   END ELSE IF PendingZoom THEN BEGIN
@@ -398,7 +599,9 @@ BEGIN
     MinIm := PendingMinIm;
     UpdateScalingAndDependentViewParams;
     RedrawNeeded := True;
-    GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', PendingMouseX, ',', PendingMouseY, ')');
+    IF NOT MinimalConsoleOutput THEN BEGIN
+      GotoXY(1,StatusLineY); ClrEol; Write('Zooming... Click @ (', PendingMouseX, ',', PendingMouseY, ')');
+    END;
     PendingZoom := False;
   END;
 END;
@@ -436,7 +639,7 @@ BEGIN
 END;
 
 PROCEDURE FillPixelDataAndDisplayProgressively;
-  VAR i, startY, endY, rowsPerThread, extra, y, bufferIdx, rowBytes, k, displayedRows : Integer;
+  VAR i, startY, endY, y, displayedRows : Integer;
       copied : Boolean;
       Cancelled : Boolean;
 BEGIN
@@ -444,25 +647,18 @@ BEGIN
   RenderInProgress := True;
   RedrawNeeded := False;
   ClearRenderCancellation;
-  GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
+  IF NOT MinimalConsoleOutput THEN BEGIN
+    GotoXY(1, StatusLineY); ClrEol; Write('Calculating and rendering progressively...');
+  END;
 
   EnsurePixelBuffersSized;
   ResetRowState;
-  rowBytes := ViewPixelWidth * MandelBytesPerPixel;
-  // Avoid clearing the entire display buffer each redraw; rows will overwrite
-  // their regions as they complete. Clearing ~1.9MB in the VM per frame causes
-  // noticeable stalls before the first rows show up and on zoom.
-
-  rowsPerThread := ViewPixelHeight DIV ThreadCount;
-  extra := ViewPixelHeight MOD ThreadCount;
-  startY := 0;
+  // Use strided row assignment so expensive center rows are shared across
+  // workers instead of bunching into one contiguous range.
   FOR i := 0 TO ThreadCount - 1 DO BEGIN
-    endY := startY + rowsPerThread - 1;
-    IF extra > 0 THEN BEGIN endY := endY + 1; extra := extra - 1; END;
-    gotoxy(1,12 + i);
-    writeln('Setup Render Thread: ', i, ', endY = ', endY);
-    PublishWork(i, startY, endY);
-    startY := endY + 1;
+    startY := i;
+    endY := ViewPixelHeight - 1;
+    PublishWork(i, startY, endY, ThreadCount);
   END;
 
   displayedRows := 0;
@@ -477,19 +673,19 @@ BEGIN
     END;
 
     copied := False;
-    // Copy at most a chunk of completed rows per pass to keep the UI responsive
+    // Workers write directly into DisplayPixelData. We only claim rows here
+    // for progress tracking and texture upload cadence.
     FOR y := 0 TO ViewPixelHeight - 1 DO BEGIN
       IF TryClaimRowCopy(y) THEN BEGIN
-        bufferIdx := y * rowBytes;
-        FOR k := 0 TO rowBytes - 1 DO
-          DisplayPixelData[bufferIdx + k] := PixelData[bufferIdx + k];
         copied := True;
         displayedRows := displayedRows + 1;
       END;
     END;
     IF copied THEN BEGIN
       PercentDone := Trunc( displayedRows * 100.0 / ViewPixelHeight );
-      GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', displayedRows, '/', ViewPixelHeight, '. ~', PercentDone, '%');
+      IF NOT MinimalConsoleOutput THEN BEGIN
+        GotoXY(1, StatusLineY); ClrEol; Write('Processing: Row ', displayedRows, '/', ViewPixelHeight, '. ~', PercentDone, '%');
+      END;
       IF ((displayedRows MOD MandelTextureUpdateIntervalRows = 0) OR (displayedRows = ViewPixelHeight)) THEN
         UpdateAndDisplayTextureInProgress;
     END ELSE BEGIN
@@ -504,7 +700,9 @@ BEGIN
 
   IF NOT QuitProgram THEN BEGIN
     IF Cancelled THEN BEGIN
-      GotoXY(1, StatusLineY); ClrEol; Write('Render cancelled. Waiting for new view...');
+      IF NOT MinimalConsoleOutput THEN BEGIN
+        GotoXY(1, StatusLineY); ClrEol; Write('Render cancelled. Waiting for new view...');
+      END;
     END ELSE BEGIN
       // Make sure the final frame is copied to the SDL texture and shown.
       // Without this call, the window may stay black once rendering finishes
@@ -512,7 +710,9 @@ BEGIN
       // when the worker threads complete.
       UpdateAndDisplayTextureInProgress;
 
-      GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
+      IF NOT MinimalConsoleOutput THEN BEGIN
+        GotoXY(1, StatusLineY); ClrEol; Write('Render complete. Click, R-Click, or Q.');
+      END;
     END;
   END;
   RenderInProgress := False;
@@ -521,13 +721,18 @@ BEGIN
 END;
 
 BEGIN // Main Program
-  HideCursor; ClrScr;
-  GotoXY(1, 1); Write('Pscal Texture Mandelbrot (Extended Builtin)');
-  GotoXY(1, ControlsStartY);     Write('Controls:');
-  GotoXY(1, ControlsStartY + 1); Write('- LClick: Zoom In');
-  GotoXY(1, ControlsStartY + 2); Write('- RClick: Reset View');
-  GotoXY(1, ControlsStartY + 3); Write('- Q Key (in terminal): Quit');
-  GotoXY(1, ControlsStartY + 5); Write('----------------------------------------------------------');
+  MandelWindowWidth := DefaultMandelWindowWidth;
+  MandelWindowHeight := DefaultMandelWindowHeight;
+  MinimalConsoleOutput := ResolveMinimalConsoleOutput;
+  IF NOT MinimalConsoleOutput THEN BEGIN
+    HideCursor; ClrScr;
+    GotoXY(1, 1); Write('Pscal Texture Mandelbrot (Extended Builtin)');
+    GotoXY(1, ControlsStartY);     Write('Controls:');
+    GotoXY(1, ControlsStartY + 1); Write('- LClick: Zoom In');
+    GotoXY(1, ControlsStartY + 2); Write('- RClick: Reset View');
+    GotoXY(1, ControlsStartY + 3); Write('- Q Key (in terminal): Quit');
+    GotoXY(1, ControlsStartY + 5); Write('----------------------------------------------------------');
+  END;
 
   IF NOT HasExtBuiltin('math', 'MandelbrotRow') THEN BEGIN
     GotoXY(1, StatusLineY); ClrEol; Write('Error: MandelbrotRow extended builtin unavailable.');
@@ -536,6 +741,7 @@ BEGIN // Main Program
   END;
 
   InitGraph(MandelWindowWidth, MandelWindowHeight, MandelWindowTitle);
+  RefreshWindowDimensionsFromScreen;
   MandelTextureID := CreateTexture(MandelWindowWidth, MandelWindowHeight);
   IF MandelTextureID < 0 THEN
   BEGIN
@@ -552,13 +758,17 @@ BEGIN // Main Program
   WorkMutex := mutex();
   CancelMutex := mutex();
   CancelRender := False;
+  ConfigureWorkerArrays;
+
+  BaseIterations := DefaultBaseIterations;
+  ResetViewToInitial; // Sets MinRe,MaxRe,MinIm to defaults AND calculates scales/MaxIm
+  ConfigureAdaptiveIterations;
 
   SetWorkerShutdown(False);
   ClearWorkerAssignments;
   FOR i := 0 TO ThreadCount - 1 DO
     SpawnWorker(i);
 
-  ResetViewToInitial; // Sets MinRe,MaxRe,MinIm to defaults AND calculates scales/MaxIm
   RedrawNeeded := True;
   QuitProgram  := False;
   PrevMouseButtons := 0;
@@ -589,10 +799,13 @@ BEGIN // Main Program
   destroy(RowMutex);
   destroy(WorkMutex);
   destroy(CancelMutex);
-  GotoXY(1, StatusLineY + 8);
-  ClrEol;
+  IF NOT MinimalConsoleOutput THEN BEGIN
+    GotoXY(1, StatusLineY + 8);
+    ClrEol;
+  END;
   NormVideo;
   ShowCursor;
   WriteLn;
-  WriteLn('Program terminated.');
+  IF NOT MinimalConsoleOutput THEN
+    WriteLn('Program terminated.');
 END.

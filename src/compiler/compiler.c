@@ -7898,22 +7898,27 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ADDR_OF: {
-            if (!node->left || node->left->type != AST_VARIABLE || !node->left->token || !node->left->token->value) {
+            if (!node->left) {
                 fprintf(stderr, "L%d: Compiler error: '@' requires addressable operand.\n", line);
                 compiler_had_error = true;
                 break;
             }
 
-            const char* pname = node->left->token->value;
-            Symbol* psym = resolveProcedureSymbolInScope(pname, node, gCurrentProgramRoot);
-            if (!psym) {
-                compileLValue(node->left, chunk, line);
-                break;
+            // Support closure literals for procedures via @ProcName while preserving
+            // regular address-of semantics for addressable l-values such as fields,
+            // array elements, and dereferences.
+            if (node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
+                const char* pname = node->left->token->value;
+                Symbol* psym = resolveProcedureSymbolInScope(pname, node, gCurrentProgramRoot);
+                if (psym) {
+                    if (!emitClosureLiteral(psym, chunk, line)) {
+                        break;
+                    }
+                    break;
+                }
             }
 
-            if (!emitClosureLiteral(psym, chunk, line)) {
-                break;
-            }
+            compileLValue(node->left, chunk, line);
             break;
         }
         case AST_THREAD_SPAWN: {

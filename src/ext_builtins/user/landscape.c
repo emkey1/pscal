@@ -4,73 +4,9 @@
 #include "vm/string_sentinels.h"
 #include "runtime/shaders/terrain/terrain_shader.h"
 
-#if defined(SDL) && defined(PSCAL_TARGET_IOS)
-
-#include "backend_ast/pscal_sdl_runtime.h"
-
-static Value landscapeUnsupportedBuiltin(VM* vm, const char* name) {
-    runtimeError(vm, "%s is not supported on iOS builds (OpenGL renderers unavailable).",
-                 name);
-    return makeVoid();
-}
-
-#define DEFINE_LANDSCAPE_STUB(fn, label)              \
-    static Value fn(VM* vm, int arg_count, Value* args) { \
-        (void)arg_count;                              \
-        (void)args;                                   \
-        return landscapeUnsupportedBuiltin(vm, label);\
-    }
-
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeConfigureProcedural, "LandscapeConfigureProcedural");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawTerrain, "LandscapeDrawTerrain");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawWater, "LandscapeDrawWater");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapePrecomputeWorldCoords, "LandscapePrecomputeWorldCoords");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapePrecomputeWaterOffsets,
-                      "LandscapePrecomputeWaterOffsets");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeBuildHeightField, "LandscapeBuildHeightField");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeBakeVertexData, "LandscapeBakeVertexData");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeSetPalettePreset, "LandscapeSetPalettePreset");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeSetLightingPreset, "LandscapeSetLightingPreset");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawSkyDome, "LandscapeDrawSkyDome");
-DEFINE_LANDSCAPE_STUB(vmBuiltinLandscapeDrawCloudLayer, "LandscapeDrawCloudLayer");
-
-#undef DEFINE_LANDSCAPE_STUB
-
-void registerLandscapeBuiltins(void) {
-    registerVmBuiltin("landscapeconfigureprocedural", vmBuiltinLandscapeConfigureProcedural,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeConfigureProcedural");
-    registerVmBuiltin("landscapedrawterrain", vmBuiltinLandscapeDrawTerrain,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawTerrain");
-    registerVmBuiltin("landscapedrawwater", vmBuiltinLandscapeDrawWater,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawWater");
-    registerVmBuiltin("landscapeprecomputeworldcoords", vmBuiltinLandscapePrecomputeWorldCoords,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapePrecomputeWorldCoords");
-    registerVmBuiltin("landscapeprecomputewateroffsets", vmBuiltinLandscapePrecomputeWaterOffsets,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapePrecomputeWaterOffsets");
-    registerVmBuiltin("landscapebuildheightfield", vmBuiltinLandscapeBuildHeightField,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeBuildHeightField");
-    registerVmBuiltin("landscapebakevertexdata", vmBuiltinLandscapeBakeVertexData,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeBakeVertexData");
-    registerVmBuiltin("landscapesetpalettepreset", vmBuiltinLandscapeSetPalettePreset,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeSetPalettePreset");
-    registerVmBuiltin("landscapesetlightingpreset", vmBuiltinLandscapeSetLightingPreset,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeSetLightingPreset");
-    registerVmBuiltin("landscapedrawskydome", vmBuiltinLandscapeDrawSkyDome,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawSkyDome");
-    registerVmBuiltin("landscapedrawcloudlayer", vmBuiltinLandscapeDrawCloudLayer,
-                      BUILTIN_TYPE_PROCEDURE, "LandscapeDrawCloudLayer");
-}
-
-#else
-
 #ifdef SDL
 #include "backend_ast/pscal_sdl_runtime.h"
-#if defined(PSCAL_TARGET_IOS)
-#include <OpenGLES/ES3/gl.h>
-#include <OpenGLES/ES3/glext.h>
-#else
-#include PSCALI_SDL_OPENGL_HEADER
-#endif
+#include "backend_ast/graphics_3d_backend.h"
 #include "runtime/terrain/terrain_generator.h"
 #include "runtime/shaders/sky/sky_dome.h"
 #include "runtime/shaders/sky/cloud_layer.h"
@@ -514,9 +450,9 @@ static void emitWaterVertexGl(const ArrayArg* worldXCoords,
     if (alpha < 0.18f) alpha = 0.18f;
     if (alpha > 0.82f) alpha = 0.82f;
 
-    glColor4f(r, g, b, alpha);
-    glNormal3f(0.0f, 1.0f, 0.0f);
-    glVertex3f(worldX, surfaceHeight, worldZ);
+    gfx3dColor4f(r, g, b, alpha);
+    gfx3dNormal3f(0.0f, 1.0f, 0.0f);
+    gfx3dVertex3f(worldX, surfaceHeight, worldZ);
 }
 #endif
 
@@ -1401,6 +1337,7 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+#if !defined(PSCAL_TARGET_IOS)
     if (gProceduralTerrain.enabled && gProceduralTerrain.initialised &&
         gProceduralTerrain.lastResolution == terrainSize &&
         terrainGeneratorVertexCount(&gProceduralTerrain.generator) == (size_t)vertexCount) {
@@ -1409,6 +1346,7 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
             return makeVoid();
         }
     }
+#endif
 
     for (int z = 0; z < terrainSize; ++z) {
         int rowIndex = z * vertexStride;
@@ -1416,7 +1354,7 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
         float worldZ0 = (float)asLd(worldZCoords.values[z]);
         float worldZ1 = (float)asLd(worldZCoords.values[z + 1]);
 
-        glBegin(GL_TRIANGLE_STRIP);
+        gfx3dBegin(GL_TRIANGLE_STRIP);
         for (int x = 0; x <= terrainSize; ++x) {
             int idx0 = rowIndex + x;
             int idx1 = nextRowIndex + x;
@@ -1448,15 +1386,15 @@ static Value vmBuiltinLandscapeDrawTerrain(VM* vm, int arg_count, Value* args) {
             float b1 = (float)asLd(vertexColorB.values[idx1]);
             float h1 = (float)asLd(vertexHeights.values[idx1]);
 
-            glNormal3f(nx0, ny0, nz0);
-            glColor3f(r0, g0, b0);
-            glVertex3f(worldX, h0, worldZ0);
+            gfx3dNormal3f(nx0, ny0, nz0);
+            gfx3dColor3f(r0, g0, b0);
+            gfx3dVertex3f(worldX, h0, worldZ0);
 
-            glNormal3f(nx1, ny1, nz1);
-            glColor3f(r1, g1, b1);
-            glVertex3f(worldX, h1, worldZ1);
+            gfx3dNormal3f(nx1, ny1, nz1);
+            gfx3dColor3f(r1, g1, b1);
+            gfx3dVertex3f(worldX, h1, worldZ1);
         }
-        glEnd();
+        gfx3dEnd();
     }
 #else
     runtimeError(vm, "%s requires SDL/OpenGL support.", name);
@@ -1566,7 +1504,7 @@ static Value vmBuiltinLandscapeDrawWater(VM* vm, int arg_count, Value* args) {
     double baseSecondary = timeSeconds * 1.6;
     double baseSparkle = timeSeconds * 2.4;
 
-    glBegin(GL_TRIANGLES);
+    gfx3dBegin(GL_TRIANGLES);
     for (int z = 0; z < terrainSize; ++z) {
         int rowIndex = z * vertexStride;
         int nextRowIndex = (z + 1) * vertexStride;
@@ -1606,7 +1544,7 @@ static Value vmBuiltinLandscapeDrawWater(VM* vm, int arg_count, Value* args) {
             }
         }
     }
-    glEnd();
+    gfx3dEnd();
 #else
     runtimeError(vm, "%s requires SDL/OpenGL support.", name);
     return makeVoid();
@@ -1741,5 +1679,3 @@ void registerLandscapeBuiltins(void) {
                       BUILTIN_TYPE_PROCEDURE, "LandscapeDrawCloudLayer");
 #endif
 }
-
-#endif /* SDL && PSCAL_TARGET_IOS */

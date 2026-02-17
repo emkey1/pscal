@@ -2579,8 +2579,8 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
         return false;
     }
     const char *name = cmd->argv[0];
-    ShellFunctionEntry *entry = shellFindFunctionEntry(name);
-    if (!entry || !entry->compiled) {
+    ShellCompiledFunction *compiled = shellFindCompiledFunction(name);
+    if (!compiled) {
         return false;
     }
     char **saved_params = gParamValues;
@@ -2679,7 +2679,7 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     }
     frame_pushed = true;
 
-    result = interpretBytecode(invoke_vm, &entry->compiled->chunk,
+    result = interpretBytecode(invoke_vm, &compiled->chunk,
                                globalSymbols, constGlobalSymbols, procedure_table, 0);
     if (result != INTERPRET_OK) {
         shellUpdateStatus(1);
