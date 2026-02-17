@@ -5,6 +5,8 @@
 #include "Pascal/globals.h"
 #include "vm/vm.h"
 #include "sdl_ios_dispatch.h"
+#include <stdlib.h>
+#include <string.h>
 #if PSCALI_HAS_SYSWM
 #include PSCALI_SDL_SYSWM_HEADER
 #endif
@@ -56,6 +58,74 @@ static bool sdlGlSwapIntervalUnsupportedError(const char* err) {
     return strstr(err, "not supported") != NULL || strstr(err, "Not supported") != NULL;
 }
 
+static bool sdlUseAppleRenderer3D(void) {
+#if defined(__APPLE__)
+    const char* forceLegacyOpenGL = getenv("PSCAL_APPLE_3D_OPENGL");
+    if (forceLegacyOpenGL != NULL && forceLegacyOpenGL[0] != '\0' &&
+        strcmp(forceLegacyOpenGL, "0") != 0) {
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+static bool sdlCreate3DRendererWindow(const char* title, int width, int height) {
+#if defined(PSCALI_SDL3)
+    gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_SHOWN);
+    if (gSdlWindow) {
+        SDL_SetWindowPosition(gSdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+#else
+    gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                  width, height, SDL_WINDOW_SHOWN);
+#endif
+    if (!gSdlWindow) {
+        return false;
+    }
+
+    gSdlRenderer = NULL;
+#if defined(PSCALI_SDL3)
+#if defined(__APPLE__) && defined(SDL_HINT_RENDER_DRIVER)
+    bool forcedMetalHint = false;
+    const char* explicitRenderer = getenv("SDL_RENDER_DRIVER");
+    if (!explicitRenderer || explicitRenderer[0] == '\0') {
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "metal");
+        forcedMetalHint = true;
+    }
+#endif
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, NULL);
+#if defined(__APPLE__) && defined(SDL_HINT_RENDER_DRIVER)
+    if (!gSdlRenderer && forcedMetalHint) {
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "");
+        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, NULL);
+    }
+#endif
+    if (gSdlRenderer) {
+        SDL_SetRenderVSync(gSdlRenderer, 1);
+    }
+#else
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1,
+                                      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#endif
+    if (!gSdlRenderer) {
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+        return false;
+    }
+
+    gSdlGLContext = NULL;
+    gSdlWidth = width;
+    gSdlHeight = height;
+    initializeTextureSystem();
+
+    SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
+    SDL_RenderClear(gSdlRenderer);
+    SDL_RenderPresent(gSdlRenderer);
+    return true;
+}
+
 PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph3d) {
     if (arg_count != 5 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING
         || !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
@@ -96,52 +166,58 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph3d) {
         return makeVoid();
     }
 
-    if (!sdlGlSetAttribute(SDL_GL_RED_SIZE, 8) ||
-        !sdlGlSetAttribute(SDL_GL_GREEN_SIZE, 8) ||
-        !sdlGlSetAttribute(SDL_GL_BLUE_SIZE, 8) ||
-        !sdlGlSetAttribute(SDL_GL_ALPHA_SIZE, 8) ||
-        !sdlGlSetAttribute(SDL_GL_DEPTH_SIZE, depthBits) ||
-        !sdlGlSetAttribute(SDL_GL_STENCIL_SIZE, stencilBits) ||
-        !sdlGlSetAttribute(SDL_GL_DOUBLEBUFFER, 1)) {
-        runtimeError(vm, "Runtime error: SDL_GL_SetAttribute failed: %s", SDL_GetError());
-        return makeVoid();
-    }
+    if (sdlUseAppleRenderer3D()) {
+        if (!sdlCreate3DRendererWindow(title, width, height)) {
+            runtimeError(vm, "Runtime error: SDL renderer 3D initialisation failed: %s", SDL_GetError());
+            return makeVoid();
+        }
+    } else {
+        if (!sdlGlSetAttribute(SDL_GL_RED_SIZE, 8) ||
+            !sdlGlSetAttribute(SDL_GL_GREEN_SIZE, 8) ||
+            !sdlGlSetAttribute(SDL_GL_BLUE_SIZE, 8) ||
+            !sdlGlSetAttribute(SDL_GL_ALPHA_SIZE, 8) ||
+            !sdlGlSetAttribute(SDL_GL_DEPTH_SIZE, depthBits) ||
+            !sdlGlSetAttribute(SDL_GL_STENCIL_SIZE, stencilBits) ||
+            !sdlGlSetAttribute(SDL_GL_DOUBLEBUFFER, 1)) {
+            runtimeError(vm, "Runtime error: SDL_GL_SetAttribute failed: %s", SDL_GetError());
+            return makeVoid();
+        }
 
 #if defined(PSCALI_SDL3)
-    gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
-    if (gSdlWindow) {
-        SDL_SetWindowPosition(gSdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    }
+        gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+        if (gSdlWindow) {
+            SDL_SetWindowPosition(gSdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
 #else
-    gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                  width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+        gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                      width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
 #endif
-    if (!gSdlWindow) {
-        runtimeError(vm, "Runtime error: SDL_CreateWindow failed: %s", SDL_GetError());
-        return makeVoid();
+        if (!gSdlWindow) {
+            runtimeError(vm, "Runtime error: SDL_CreateWindow failed: %s", SDL_GetError());
+            return makeVoid();
+        }
+
+        gSdlWidth = width;
+        gSdlHeight = height;
+
+        gSdlGLContext = SDL_GL_CreateContext(gSdlWindow);
+        if (!gSdlGLContext) {
+            runtimeError(vm, "Runtime error: SDL_GL_CreateContext failed: %s", SDL_GetError());
+            SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
+            return makeVoid();
+        }
+
+        if (!sdlGlMakeCurrent(gSdlWindow, gSdlGLContext)) {
+            runtimeError(vm, "Runtime error: SDL_GL_MakeCurrent failed: %s", SDL_GetError());
+            SDL_GL_DeleteContext(gSdlGLContext); gSdlGLContext = NULL;
+            SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
+            return makeVoid();
+        }
+
+        sdlGlSetSwapIntervalValue(1);
+        gSdlRenderer = NULL;
+        initializeTextureSystem();
     }
-
-    gSdlWidth = width;
-    gSdlHeight = height;
-
-    gSdlGLContext = SDL_GL_CreateContext(gSdlWindow);
-    if (!gSdlGLContext) {
-        runtimeError(vm, "Runtime error: SDL_GL_CreateContext failed: %s", SDL_GetError());
-        SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
-        return makeVoid();
-    }
-
-    if (!sdlGlMakeCurrent(gSdlWindow, gSdlGLContext)) {
-        runtimeError(vm, "Runtime error: SDL_GL_MakeCurrent failed: %s", SDL_GetError());
-        SDL_GL_DeleteContext(gSdlGLContext); gSdlGLContext = NULL;
-        SDL_DestroyWindow(gSdlWindow); gSdlWindow = NULL;
-        return makeVoid();
-    }
-
-    sdlGlSetSwapIntervalValue(1);
-
-    gSdlRenderer = NULL;
-    initializeTextureSystem();
 
     SDL_PumpEvents();
     SDL_RaiseWindow(gSdlWindow);
@@ -194,20 +270,31 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGlsetswapinterval) {
         runtimeError(vm, "GLSetSwapInterval expects 1 integer argument.");
         return makeVoid();
     }
-    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
-        runtimeError(vm, "Runtime error: GLSetSwapInterval requires an active OpenGL window. Call InitGraph3D first.");
+    if (!gSdlInitialized || !gSdlWindow) {
+        runtimeError(vm, "Runtime error: GLSetSwapInterval requires an active 3D window. Call InitGraph3D first.");
         return makeVoid();
     }
 
     int interval = (int)AS_INTEGER(args[0]);
-    if (!sdlGlSetSwapIntervalValue(interval)) {
-        const char* err = SDL_GetError();
+    if (gSdlGLContext != NULL) {
+        if (!sdlGlSetSwapIntervalValue(interval)) {
+            const char* err = SDL_GetError();
 #if defined(PSCAL_TARGET_IOS)
-        if (sdlGlSwapIntervalUnsupportedError(err)) {
-            return makeVoid();
-        }
+            if (sdlGlSwapIntervalUnsupportedError(err)) {
+                return makeVoid();
+            }
 #endif
-        runtimeError(vm, "Runtime error: SDL_GL_SetSwapInterval failed: %s", err ? err : "unknown error");
+            runtimeError(vm, "Runtime error: SDL_GL_SetSwapInterval failed: %s", err ? err : "unknown error");
+        }
+        return makeVoid();
+    }
+
+    if (gSdlRenderer != NULL) {
+#if defined(PSCALI_SDL3)
+        SDL_SetRenderVSync(gSdlRenderer, interval != 0 ? 1 : 0);
+#else
+        (void)interval;
+#endif
     }
 
     return makeVoid();
@@ -218,13 +305,15 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGlswapwindow) {
         runtimeError(vm, "GLSwapWindow expects 0 arguments.");
         return makeVoid();
     }
-    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
-        runtimeError(vm, "Runtime error: GLSwapWindow requires an active OpenGL window. Call InitGraph3D first.");
+    if (!gSdlInitialized || !gSdlWindow) {
+        runtimeError(vm, "Runtime error: GLSwapWindow requires an active 3D window. Call InitGraph3D first.");
         return makeVoid();
     }
 
     gfx3dPresent();
-    SDL_GL_SwapWindow(gSdlWindow);
+    if (gSdlGLContext != NULL) {
+        SDL_GL_SwapWindow(gSdlWindow);
+    }
     return makeVoid();
 }
 

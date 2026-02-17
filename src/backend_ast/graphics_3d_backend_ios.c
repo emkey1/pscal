@@ -1,13 +1,19 @@
 #include "backend_ast/graphics_3d_backend.h"
 
-#if defined(PSCAL_TARGET_IOS)
+#if defined(PSCAL_TARGET_IOS) || defined(__APPLE__)
 
+#if defined(PSCAL_TARGET_IOS)
 #ifndef GLES_SILENCE_DEPRECATION
 #define GLES_SILENCE_DEPRECATION
 #endif
-
 #include <OpenGLES/ES1/gl.h>
 #include <OpenGLES/ES1/glext.h>
+#else
+#ifndef GL_SILENCE_DEPRECATION
+#define GL_SILENCE_DEPRECATION
+#endif
+#include <OpenGL/gl.h>
+#endif
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -90,6 +96,25 @@ static RecordedCommand* gRecordingCurrentCommand = NULL;
 
 #ifndef GL_BGRA_EXT
 #define GL_BGRA_EXT 0x80E1
+#endif
+
+#if !defined(PSCAL_TARGET_IOS)
+static inline void pscalGlClearDepthf(GLfloat depth) {
+    glClearDepth((GLdouble)depth);
+}
+static inline void pscalGlFrustumf(GLfloat left, GLfloat right, GLfloat bottom,
+                                   GLfloat top, GLfloat zNear, GLfloat zFar) {
+    glFrustum((GLdouble)left, (GLdouble)right, (GLdouble)bottom,
+              (GLdouble)top, (GLdouble)zNear, (GLdouble)zFar);
+}
+static inline void pscalGlOrthof(GLfloat left, GLfloat right, GLfloat bottom,
+                                 GLfloat top, GLfloat zNear, GLfloat zFar) {
+    glOrtho((GLdouble)left, (GLdouble)right, (GLdouble)bottom,
+            (GLdouble)top, (GLdouble)zNear, (GLdouble)zFar);
+}
+#define glClearDepthf pscalGlClearDepthf
+#define glFrustumf pscalGlFrustumf
+#define glOrthof pscalGlOrthof
 #endif
 
 static Mat4 gProjectionStack[16];
@@ -900,7 +925,9 @@ static void flushImmediate(void) {
     }
     gImmediateCount = 0;
     gImmediateRecording = false;
-    presentFramebuffer();
+    if (usingNativeGlPath()) {
+        presentFramebuffer();
+    }
 }
 
 void gfx3dClearColor(float r, float g, float b, float a) {
@@ -1117,7 +1144,7 @@ void gfx3dEnable(unsigned int capability) {
     }
     if (capability == GL_BLEND) {
         gBlendEnabled = true;
-        if (gSdlRenderer) {
+        if (usingNativeGlPath() && gSdlRenderer) {
             SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
         }
     } else if (capability == GL_LIGHTING) {
@@ -1139,7 +1166,7 @@ void gfx3dDisable(unsigned int capability) {
     }
     if (capability == GL_BLEND) {
         gBlendEnabled = false;
-        if (gSdlRenderer) {
+        if (usingNativeGlPath() && gSdlRenderer) {
             SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_NONE);
         }
     } else if (capability == GL_LIGHTING) {
@@ -1232,11 +1259,12 @@ void gfx3dBlendFunc(unsigned int src, unsigned int dst) {
     }
     gBlendSrc = src;
     gBlendDst = dst;
-    if (!gSdlRenderer) return;
-    if (src == GL_SRC_ALPHA && dst == GL_ONE_MINUS_SRC_ALPHA) {
-        SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
-    } else {
-        SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_NONE);
+    if (usingNativeGlPath() && gSdlRenderer) {
+        if (src == GL_SRC_ALPHA && dst == GL_ONE_MINUS_SRC_ALPHA) {
+            SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
+        } else {
+            SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_NONE);
+        }
     }
 }
 
@@ -1531,4 +1559,4 @@ void gfx3dReleaseResources(void) {
     gFramebufferGlTextureHeight = 0;
 }
 
-#endif // defined(PSCAL_TARGET_IOS)
+#endif // defined(PSCAL_TARGET_IOS) || defined(__APPLE__)

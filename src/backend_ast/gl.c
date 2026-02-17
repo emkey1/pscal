@@ -14,6 +14,7 @@
 #endif
 #include <stdbool.h>
 #include <strings.h>
+#include <string.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -23,10 +24,20 @@
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
+static inline Value pscalRunGlBuiltin(VM* vm,
+                                      int arg_count,
+                                      Value* args,
+                                      PscalSdlVmBuiltin function) {
+    if (gSdlGLContext != NULL) {
+        return pscalRunSdlBuiltinOnMainQueue(function, vm, arg_count, args);
+    }
+    return function(vm, arg_count, args);
+}
+
 #define PSCAL_DEFINE_IOS_GL_BUILTIN(name) \
     static Value name##Impl(VM* vm, int arg_count, Value* args); \
     Value name(VM* vm, int arg_count, Value* args) { \
-        return pscalRunSdlBuiltinOnMainQueue(name##Impl, vm, arg_count, args); \
+        return pscalRunGlBuiltin(vm, arg_count, args, name##Impl); \
     } \
     static Value name##Impl(VM* vm, int arg_count, Value* args)
 #else
@@ -41,8 +52,9 @@
 #endif
 
 static bool ensureGlContext(VM* vm, const char* name) {
-    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
-        runtimeError(vm, "Runtime error: %s requires an active OpenGL window. Call InitGraph3D first.", name);
+    if (!gSdlInitialized || !gSdlWindow ||
+        (gSdlGLContext == NULL && gSdlRenderer == NULL)) {
+        runtimeError(vm, "Runtime error: %s requires an active 3D graphics window. Call InitGraph3D first.", name);
         return false;
     }
     return true;
@@ -1244,17 +1256,28 @@ PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlishardwareaccelerated) {
         return makeBoolean(false);
     }
 
-    int accelerated = 0;
+    if (gSdlGLContext != NULL) {
+        int accelerated = 0;
 #if defined(PSCALI_SDL3)
-    if (!SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated)) {
+        if (!SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated)) {
 #else
-    if (SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated) != 0) {
+        if (SDL_GL_GetAttribute(SDL_GL_ACCELERATED_VISUAL, &accelerated) != 0) {
 #endif
-        runtimeError(vm, "GLIsHardwareAccelerated: SDL_GL_GetAttribute failed: %s", SDL_GetError());
-        return makeBoolean(false);
+            runtimeError(vm, "GLIsHardwareAccelerated: SDL_GL_GetAttribute failed: %s", SDL_GetError());
+            return makeBoolean(false);
+        }
+        return makeBoolean(accelerated != 0);
     }
 
-    return makeBoolean(accelerated != 0);
+    if (gSdlRenderer != NULL) {
+        SDL_RendererInfo info;
+        memset(&info, 0, sizeof(info));
+        if (SDL_GetRendererInfo(gSdlRenderer, &info) == 0) {
+            return makeBoolean((info.flags & SDL_RENDERER_ACCELERATED) != 0);
+        }
+    }
+
+    return makeBoolean(false);
 }
 
 PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlsaveframebufferpng) {
@@ -1288,7 +1311,12 @@ PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlsaveframebufferpng) {
 
     int width = 0;
     int height = 0;
-    SDL_GL_GetDrawableSize(gSdlWindow, &width, &height);
+    if (gSdlGLContext != NULL) {
+        SDL_GL_GetDrawableSize(gSdlWindow, &width, &height);
+    } else {
+        width = gSdlWidth;
+        height = gSdlHeight;
+    }
     if (width <= 0 || height <= 0) {
         runtimeError(vm, "%s could not determine the drawable size.", name);
         return makeBoolean(false);

@@ -334,9 +334,10 @@ static void disableProceduralGenerator(void) {
 
 #ifdef SDL
 static bool ensureGlContext(VM* vm, const char* name) {
-    if (!gSdlInitialized || !gSdlWindow || !gSdlGLContext) {
+    if (!gSdlInitialized || !gSdlWindow ||
+        (gSdlGLContext == NULL && gSdlRenderer == NULL)) {
         runtimeError(vm,
-                     "%s requires an active OpenGL window. Call InitGraph3D first.",
+                     "%s requires an active 3D graphics window. Call InitGraph3D first.",
                      name);
         return false;
     }

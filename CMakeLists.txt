@@ -1231,7 +1231,7 @@ if(SDL)
         src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
-    if(PSCAL_PLATFORM_IOS)
+    if(PSCAL_PLATFORM_IOS OR APPLE)
         list(APPEND PSCAL_CORE_SOURCES
             src/backend_ast/graphics_3d_backend_ios.c
         )
