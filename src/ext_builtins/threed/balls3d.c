@@ -341,6 +341,14 @@ static Value vmBuiltinBouncingBalls3DDrawUnitSphereFast(VM* vm, int arg_count,
         return makeVoid();
     }
 
+    /* Software 3D fallback on Apple can be very expensive at desktop-level
+       tessellation values. Clamp sphere complexity there to keep frame time
+       responsive on mobile-class devices. */
+    if (gSdlGLContext == NULL) {
+        if (stacks > 10) stacks = 10;
+        if (slices > 14) slices = 14;
+    }
+
     if (ensureSphereDisplayList(stacks, slices) && gSphereDisplayListCache.displayListId != 0) {
         gfx3dCallList(gSphereDisplayListCache.displayListId);
         return makeVoid();

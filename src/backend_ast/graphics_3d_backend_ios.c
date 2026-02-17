@@ -140,6 +140,9 @@ static bool gImmediateRecording = false;
 static bool gBlendEnabled = false;
 static GLenum gBlendSrc = GL_ONE;
 static GLenum gBlendDst = GL_ZERO;
+static bool gDepthTestEnabled = false;
+static bool gDepthWriteEnabled = true;
+static GLenum gDepthFunc = GL_LESS;
 
 static Uint32* gColorBuffer = NULL;
 static float* gDepthBuffer = NULL;
@@ -350,6 +353,70 @@ static Uint32 packColor(const float color[4]) {
     Uint8 b = floatToByte(color[2]);
     Uint8 a = floatToByte(color[3]);
     return ((Uint32)a << 24) | ((Uint32)r << 16) | ((Uint32)g << 8) | (Uint32)b;
+}
+
+static void unpackColor(Uint32 packed, Uint8* r, Uint8* g, Uint8* b, Uint8* a) {
+    if (a) *a = (Uint8)((packed >> 24) & 0xFF);
+    if (r) *r = (Uint8)((packed >> 16) & 0xFF);
+    if (g) *g = (Uint8)((packed >> 8) & 0xFF);
+    if (b) *b = (Uint8)(packed & 0xFF);
+}
+
+static bool depthTestPasses(float incomingDepth, float storedDepth) {
+    switch (gDepthFunc) {
+        case GL_NEVER:
+            return false;
+        case GL_ALWAYS:
+            return true;
+        case GL_LESS:
+            return incomingDepth < storedDepth;
+        case GL_LEQUAL:
+            return incomingDepth <= storedDepth;
+        case GL_GREATER:
+            return incomingDepth > storedDepth;
+        case GL_GEQUAL:
+            return incomingDepth >= storedDepth;
+        case GL_EQUAL:
+            return fabsf(incomingDepth - storedDepth) <= 1e-6f;
+        case GL_NOTEQUAL:
+            return fabsf(incomingDepth - storedDepth) > 1e-6f;
+        default:
+            return incomingDepth < storedDepth;
+    }
+}
+
+static Uint32 blendColor(Uint32 dstPacked, const float srcColor[4]) {
+    Uint8 srcR = floatToByte(srcColor[0]);
+    Uint8 srcG = floatToByte(srcColor[1]);
+    Uint8 srcB = floatToByte(srcColor[2]);
+    Uint8 srcA = floatToByte(srcColor[3]);
+    Uint8 dstR = 0;
+    Uint8 dstG = 0;
+    Uint8 dstB = 0;
+    Uint8 dstA = 0;
+    unpackColor(dstPacked, &dstR, &dstG, &dstB, &dstA);
+
+    if (gBlendSrc == GL_SRC_ALPHA && gBlendDst == GL_ONE_MINUS_SRC_ALPHA) {
+        Uint8 invA = (Uint8)(255 - srcA);
+        Uint8 outR = (Uint8)((srcR * srcA + dstR * invA + 127) / 255);
+        Uint8 outG = (Uint8)((srcG * srcA + dstG * invA + 127) / 255);
+        Uint8 outB = (Uint8)((srcB * srcA + dstB * invA + 127) / 255);
+        Uint8 outA = (Uint8)((srcA * srcA + dstA * invA + 127) / 255);
+        return ((Uint32)outA << 24) | ((Uint32)outR << 16) | ((Uint32)outG << 8) | (Uint32)outB;
+    }
+
+    if (gBlendSrc == GL_SRC_ALPHA && gBlendDst == GL_ONE) {
+        Uint8 addR = (Uint8)((srcR * srcA + 127) / 255);
+        Uint8 addG = (Uint8)((srcG * srcA + 127) / 255);
+        Uint8 addB = (Uint8)((srcB * srcA + 127) / 255);
+        Uint8 outR = (Uint8)(((int)dstR + (int)addR) > 255 ? 255 : ((int)dstR + (int)addR));
+        Uint8 outG = (Uint8)(((int)dstG + (int)addG) > 255 ? 255 : ((int)dstG + (int)addG));
+        Uint8 outB = (Uint8)(((int)dstB + (int)addB) > 255 ? 255 : ((int)dstB + (int)addB));
+        Uint8 outA = dstA > srcA ? dstA : srcA;
+        return ((Uint32)outA << 24) | ((Uint32)outR << 16) | ((Uint32)outG << 8) | (Uint32)outB;
+    }
+
+    return packColor(srcColor);
 }
 
 static void clampColor(float* c) {
@@ -589,7 +656,7 @@ static bool ensureFramebuffer(void) {
     }
     if (!gFramebufferTexture && gSdlRenderer) {
         gFramebufferTexture = SDL_CreateTexture(gSdlRenderer,
-                                                SDL_PIXELFORMAT_ABGR8888,
+                                                SDL_PIXELFORMAT_ARGB8888,
                                                 SDL_TEXTUREACCESS_STREAMING,
                                                 gFramebufferWidth,
                                                 gFramebufferHeight);
@@ -609,11 +676,17 @@ static inline void drawPixel(int x, int y, float depth, const float color[4]) {
         depth = gClearDepthValue;
     }
     if (depth < 0.0f) depth = 0.0f;
-    if (depth > gDepthBuffer[idx]) {
+    if (gDepthTestEnabled && !depthTestPasses(depth, gDepthBuffer[idx])) {
         return;
     }
-    gDepthBuffer[idx] = depth;
-    gColorBuffer[idx] = packColor(color);
+    if (gBlendEnabled) {
+        gColorBuffer[idx] = blendColor(gColorBuffer[idx], color);
+    } else {
+        gColorBuffer[idx] = packColor(color);
+    }
+    if (gDepthTestEnabled && gDepthWriteEnabled) {
+        gDepthBuffer[idx] = depth;
+    }
     gFramebufferDirty = true;
 }
 
@@ -1147,6 +1220,8 @@ void gfx3dEnable(unsigned int capability) {
         if (usingNativeGlPath() && gSdlRenderer) {
             SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
         }
+    } else if (capability == GL_DEPTH_TEST) {
+        gDepthTestEnabled = true;
     } else if (capability == GL_LIGHTING) {
         gLightingEnabled = true;
         initLightingState();
@@ -1169,6 +1244,8 @@ void gfx3dDisable(unsigned int capability) {
         if (usingNativeGlPath() && gSdlRenderer) {
             SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_NONE);
         }
+    } else if (capability == GL_DEPTH_TEST) {
+        gDepthTestEnabled = false;
     } else if (capability == GL_LIGHTING) {
         gLightingEnabled = false;
     } else if (capability >= GL_LIGHT0 && capability <= GL_LIGHT7) {
@@ -1278,12 +1355,14 @@ void gfx3dDepthMask(bool enable) {
     if (usingNativeGlPath()) {
         glDepthMask(enable ? GL_TRUE : GL_FALSE);
     }
+    gDepthWriteEnabled = enable;
 }
 
 void gfx3dDepthFunc(unsigned int func) {
     if (usingNativeGlPath()) {
         glDepthFunc((GLenum)func);
     }
+    gDepthFunc = (GLenum)func;
 }
 
 void gfx3dLineWidth(float width) {
@@ -1431,7 +1510,7 @@ void gfx3dPresent(void) {
     if (gSdlRenderer) {
         if (!gFramebufferTexture) {
             gFramebufferTexture = SDL_CreateTexture(gSdlRenderer,
-                                                    SDL_PIXELFORMAT_ABGR8888,
+                                                    SDL_PIXELFORMAT_ARGB8888,
                                                     SDL_TEXTUREACCESS_STREAMING,
                                                     gFramebufferWidth,
                                                     gFramebufferHeight);
@@ -1557,6 +1636,13 @@ void gfx3dReleaseResources(void) {
     }
     gFramebufferGlTextureWidth = 0;
     gFramebufferGlTextureHeight = 0;
+
+    gBlendEnabled = false;
+    gBlendSrc = GL_ONE;
+    gBlendDst = GL_ZERO;
+    gDepthTestEnabled = false;
+    gDepthWriteEnabled = true;
+    gDepthFunc = GL_LESS;
 }
 
 #endif // defined(PSCAL_TARGET_IOS) || defined(__APPLE__)
