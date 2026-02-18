@@ -2554,6 +2554,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
 
     /* command_is_cd is computed above when finding the command token. */
     if (command_is_cd) {
+        size_t original_pathc = results.gl_pathc;
         size_t write_index = 0;
         for (size_t i = 0; i < results.gl_pathc; ++i) {
             const char *match = results.gl_pathv[i];
@@ -2561,14 +2562,38 @@ static bool interactiveHandleTabCompletion(const char *prompt,
                 continue;
             }
             size_t match_len = strlen(match);
-            if (match_len > 0 && match[match_len - 1] == '/') {
+            bool is_directory = (match_len > 0 && match[match_len - 1] == '/');
+            if (!is_directory) {
+                struct stat st;
+#if defined(PSCAL_TARGET_IOS)
+                if (pscalPathVirtualized_stat(match, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    is_directory = true;
+                }
+#else
+                if (stat(match, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    is_directory = true;
+                }
+#endif
+                if (!is_directory) {
+                    DIR *d = opendir(match);
+                    if (d) {
+                        is_directory = true;
+                        closedir(d);
+                    }
+                }
+            }
+            if (is_directory) {
                 results.gl_pathv[write_index++] = results.gl_pathv[i];
             }
         }
-        results.gl_pathc = write_index;
-        if (results.gl_pathc == 0) {
-            globfree(&results);
-            return false;
+        if (write_index > 0) {
+            results.gl_pathc = write_index;
+        } else {
+            /*
+             * If directory detection fails under a virtualized filesystem, keep
+             * the original matches instead of making tab completion a no-op.
+             */
+            results.gl_pathc = original_pathc;
         }
     }
 
