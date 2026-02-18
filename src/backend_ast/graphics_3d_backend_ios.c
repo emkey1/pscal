@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "backend_ast/pscal_sdl_runtime.h"
+#include "backend_ast/graphics_3d_metal_apple.h"
 #include "core/sdl_headers.h"
 
 typedef struct {
@@ -32,12 +33,20 @@ typedef struct {
     float position[3];
     float color[4];
     float screen[2];
+    float clip[2];
     float depth;
     bool valid;
     float normal[3];
     float eyePos[3];
 } ImmediateVertex;
 static bool transformVertexData(ImmediateVertex* v);
+
+typedef struct {
+    int i0;
+    int i1;
+    int i2;
+    float depth;
+} RendererTri;
 
 typedef struct {
     float position[3];
@@ -153,6 +162,33 @@ static GLuint gFramebufferGlTexture = 0;
 static int gFramebufferGlTextureWidth = 0;
 static int gFramebufferGlTextureHeight = 0;
 static bool gFramebufferDirty = false;
+static bool gRendererFrameUsesSoftwareBuffer = false;
+static RendererTri* gRendererTriBuffer = NULL;
+static size_t gRendererTriCapacity = 0;
+static SDL_Vertex* gRendererVertexBuffer = NULL;
+static size_t gRendererVertexCapacity = 0;
+static int* gRendererIndexBuffer = NULL;
+static size_t gRendererIndexCapacity = 0;
+static int gRendererBlendModeCache = -1;
+static PscalMetalVertex* gMetalVertexBuffer = NULL;
+static size_t gMetalVertexCapacity = 0;
+
+typedef struct {
+    size_t firstVertex;
+    size_t vertexCount;
+    bool lines;
+    bool depthTestEnabled;
+    bool depthWriteEnabled;
+    unsigned int depthFunc;
+    bool blendEnabled;
+    unsigned int blendSrc;
+    unsigned int blendDst;
+} MetalDrawCommand;
+
+static MetalDrawCommand* gMetalDrawCommands = NULL;
+static size_t gMetalDrawCommandCount = 0;
+static size_t gMetalDrawCommandCapacity = 0;
+static size_t gMetalQueuedVertexCount = 0;
 
 typedef struct {
     bool enabled;
@@ -177,6 +213,221 @@ static bool gColorMaterialEnabled = false;
 static GLenum gColorMaterialFace = GL_FRONT;
 static GLenum gColorMaterialMode = GL_AMBIENT_AND_DIFFUSE;
 static float gCurrentNormal[3] = { 0.0f, 0.0f, 1.0f };
+
+static int rendererTriDepthDescending(const void* lhsPtr, const void* rhsPtr) {
+    const RendererTri* lhs = (const RendererTri*)lhsPtr;
+    const RendererTri* rhs = (const RendererTri*)rhsPtr;
+    if (lhs->depth < rhs->depth) return 1;
+    if (lhs->depth > rhs->depth) return -1;
+    return 0;
+}
+
+static void sortRendererTrisByDepth(RendererTri* tris, size_t count) {
+    if (count < 32) {
+        for (size_t i = 1; i < count; ++i) {
+            RendererTri key = tris[i];
+            size_t j = i;
+            while (j > 0 && tris[j - 1].depth < key.depth) {
+                tris[j] = tris[j - 1];
+                --j;
+            }
+            tris[j] = key;
+        }
+        return;
+    }
+    qsort(tris, count, sizeof(RendererTri), rendererTriDepthDescending);
+}
+
+static bool ensureRendererTriCapacity(size_t count) {
+    if (count <= gRendererTriCapacity) {
+        return true;
+    }
+    size_t newCap = gRendererTriCapacity == 0 ? 512 : gRendererTriCapacity;
+    while (newCap < count) {
+        newCap *= 2;
+    }
+    RendererTri* resized = (RendererTri*)realloc(gRendererTriBuffer, newCap * sizeof(RendererTri));
+    if (!resized) {
+        return false;
+    }
+    gRendererTriBuffer = resized;
+    gRendererTriCapacity = newCap;
+    return true;
+}
+
+static bool ensureRendererVertexCapacity(size_t count) {
+    if (count <= gRendererVertexCapacity) {
+        return true;
+    }
+    size_t newCap = gRendererVertexCapacity == 0 ? 1024 : gRendererVertexCapacity;
+    while (newCap < count) {
+        newCap *= 2;
+    }
+    SDL_Vertex* resized = (SDL_Vertex*)realloc(gRendererVertexBuffer, newCap * sizeof(SDL_Vertex));
+    if (!resized) {
+        return false;
+    }
+    gRendererVertexBuffer = resized;
+    gRendererVertexCapacity = newCap;
+    return true;
+}
+
+static bool ensureRendererIndexCapacity(size_t count) {
+    if (count <= gRendererIndexCapacity) {
+        return true;
+    }
+    size_t newCap = gRendererIndexCapacity == 0 ? 1024 : gRendererIndexCapacity;
+    while (newCap < count) {
+        newCap *= 2;
+    }
+    int* resized = (int*)realloc(gRendererIndexBuffer, newCap * sizeof(int));
+    if (!resized) {
+        return false;
+    }
+    gRendererIndexBuffer = resized;
+    gRendererIndexCapacity = newCap;
+    return true;
+}
+
+static bool ensureMetalVertexCapacity(size_t count) {
+    if (count <= gMetalVertexCapacity) {
+        return true;
+    }
+    size_t newCap = gMetalVertexCapacity == 0 ? 1024 : gMetalVertexCapacity;
+    while (newCap < count) {
+        newCap *= 2;
+    }
+    PscalMetalVertex* resized =
+        (PscalMetalVertex*)realloc(gMetalVertexBuffer, newCap * sizeof(PscalMetalVertex));
+    if (!resized) {
+        return false;
+    }
+    gMetalVertexBuffer = resized;
+    gMetalVertexCapacity = newCap;
+    return true;
+}
+
+static bool ensureMetalDrawCommandCapacity(size_t count) {
+    if (count <= gMetalDrawCommandCapacity) {
+        return true;
+    }
+    size_t newCap = gMetalDrawCommandCapacity == 0 ? 256 : gMetalDrawCommandCapacity;
+    while (newCap < count) {
+        newCap *= 2;
+    }
+    MetalDrawCommand* resized =
+        (MetalDrawCommand*)realloc(gMetalDrawCommands, newCap * sizeof(MetalDrawCommand));
+    if (!resized) {
+        return false;
+    }
+    gMetalDrawCommands = resized;
+    gMetalDrawCommandCapacity = newCap;
+    return true;
+}
+
+static bool metalCommandMatchesState(const MetalDrawCommand* cmd,
+                                     bool lines,
+                                     bool depthTestEnabled,
+                                     bool depthWriteEnabled,
+                                     unsigned int depthFunc,
+                                     bool blendEnabled,
+                                     unsigned int blendSrc,
+                                     unsigned int blendDst) {
+    return cmd &&
+           cmd->lines == lines &&
+           cmd->depthTestEnabled == depthTestEnabled &&
+           cmd->depthWriteEnabled == depthWriteEnabled &&
+           cmd->depthFunc == depthFunc &&
+           cmd->blendEnabled == blendEnabled &&
+           cmd->blendSrc == blendSrc &&
+           cmd->blendDst == blendDst;
+}
+
+static bool queueMetalDraw(const PscalMetalVertex* vertices,
+                           size_t vertexCount,
+                           bool lines,
+                           bool depthTestEnabled,
+                           bool depthWriteEnabled,
+                           unsigned int depthFunc,
+                           bool blendEnabled,
+                           unsigned int blendSrc,
+                           unsigned int blendDst) {
+    if (!vertices || vertexCount == 0) {
+        return true;
+    }
+    if (!ensureMetalVertexCapacity(gMetalQueuedVertexCount + vertexCount)) {
+        return false;
+    }
+    if (!ensureMetalDrawCommandCapacity(gMetalDrawCommandCount + 1)) {
+        return false;
+    }
+
+    memmove(&gMetalVertexBuffer[gMetalQueuedVertexCount], vertices,
+            vertexCount * sizeof(PscalMetalVertex));
+
+    if (gMetalDrawCommandCount > 0) {
+        MetalDrawCommand* prev = &gMetalDrawCommands[gMetalDrawCommandCount - 1];
+        if (metalCommandMatchesState(prev, lines, depthTestEnabled, depthWriteEnabled,
+                                     depthFunc, blendEnabled, blendSrc, blendDst) &&
+            prev->firstVertex + prev->vertexCount == gMetalQueuedVertexCount) {
+            prev->vertexCount += vertexCount;
+            gMetalQueuedVertexCount += vertexCount;
+            return true;
+        }
+    }
+
+    MetalDrawCommand* cmd = &gMetalDrawCommands[gMetalDrawCommandCount++];
+    cmd->firstVertex = gMetalQueuedVertexCount;
+    cmd->vertexCount = vertexCount;
+    cmd->lines = lines;
+    cmd->depthTestEnabled = depthTestEnabled;
+    cmd->depthWriteEnabled = depthWriteEnabled;
+    cmd->depthFunc = depthFunc;
+    cmd->blendEnabled = blendEnabled;
+    cmd->blendSrc = blendSrc;
+    cmd->blendDst = blendDst;
+    gMetalQueuedVertexCount += vertexCount;
+    return true;
+}
+
+static bool flushQueuedMetalDraws(void) {
+    if (gMetalDrawCommandCount == 0) {
+        return true;
+    }
+    for (size_t i = 0; i < gMetalDrawCommandCount; ++i) {
+        const MetalDrawCommand* cmd = &gMetalDrawCommands[i];
+        const PscalMetalVertex* vertices = &gMetalVertexBuffer[cmd->firstVertex];
+        bool ok = cmd->lines
+                      ? pscalMetal3DDrawLines(vertices, cmd->vertexCount,
+                                              cmd->depthTestEnabled, cmd->depthWriteEnabled,
+                                              cmd->depthFunc, cmd->blendEnabled,
+                                              cmd->blendSrc, cmd->blendDst)
+                      : pscalMetal3DDrawTriangles(vertices, cmd->vertexCount,
+                                                  cmd->depthTestEnabled, cmd->depthWriteEnabled,
+                                                  cmd->depthFunc, cmd->blendEnabled,
+                                                  cmd->blendSrc, cmd->blendDst);
+        if (!ok) {
+            gMetalDrawCommandCount = 0;
+            gMetalQueuedVertexCount = 0;
+            return false;
+        }
+    }
+    gMetalDrawCommandCount = 0;
+    gMetalQueuedVertexCount = 0;
+    return true;
+}
+
+static inline void buildMetalVertex(PscalMetalVertex* out, const ImmediateVertex* in) {
+    out->clipX = in->clip[0];
+    out->clipY = in->clip[1];
+    out->depth = in->depth;
+    if (out->depth < 0.0f) out->depth = 0.0f;
+    if (out->depth > 1.0f) out->depth = 1.0f;
+    out->r = in->color[0];
+    out->g = in->color[1];
+    out->b = in->color[2];
+    out->a = in->color[3];
+}
 
 static inline Mat4 matIdentity(void) {
     Mat4 m = { .m = {
@@ -322,6 +573,20 @@ static void ensureImmediateCapacity(size_t count) {
 
 static bool usingNativeGlPath(void) {
     return gSdlGLContext != NULL;
+}
+
+static bool usingRenderer3DPath(void) {
+    return !usingNativeGlPath() && gSdlRenderer != NULL;
+}
+
+static bool usingMetal3DPath(void) {
+    if (!usingRenderer3DPath()) {
+        return false;
+    }
+    if (!pscalMetal3DIsSupported()) {
+        return false;
+    }
+    return pscalMetal3DEnsureRenderer(gSdlRenderer);
 }
 
 static bool ensureImmediateQuadCapacity(size_t count) {
@@ -549,6 +814,13 @@ static void emitImmediateVertex(const float position[3],
         return;
     }
     v->valid = transformVertexData(v);
+    if (!v->valid) {
+        v->screen[0] = 0.0f;
+        v->screen[1] = 0.0f;
+        v->clip[0] = 0.0f;
+        v->clip[1] = 0.0f;
+        v->depth = 1.0f;
+    }
     shadeVertex(v);
 }
 
@@ -771,8 +1043,13 @@ static bool transformVertexData(ImmediateVertex* v) {
     float ndcX = clip[0] * invW;
     float ndcY = clip[1] * invW;
     float ndcZ = clip[2] * invW;
+    if (!isfinite(ndcX) || !isfinite(ndcY) || !isfinite(ndcZ)) {
+        return false;
+    }
     v->screen[0] = (ndcX * 0.5f + 0.5f) * gViewport[2] + gViewport[0];
     v->screen[1] = (-ndcY * 0.5f + 0.5f) * gViewport[3] + gViewport[1];
+    v->clip[0] = ndcX;
+    v->clip[1] = ndcY;
     v->depth = ndcZ * 0.5f + 0.5f;
     const Mat4* mvMat = &gModelviewStack[gModelviewTop];
     float nx = v->normal[0];
@@ -818,9 +1095,117 @@ static void drawLineSegment(const ImmediateVertex* a, const ImmediateVertex* b) 
 }
 
 static void renderLines(void) {
-    if (gImmediateCount < 2 || !ensureFramebuffer()) {
+    if (gImmediateCount < 2) {
         return;
     }
+    if (usingMetal3DPath()) {
+        size_t segmentCount = 0;
+        if (gImmediatePrimitive == GL_LINE_LOOP || gImmediatePrimitive == GL_LINE_STRIP) {
+            segmentCount = gImmediateCount > 1 ? (gImmediateCount - 1) : 0;
+            if (gImmediatePrimitive == GL_LINE_LOOP && gImmediateCount >= 2) {
+                segmentCount += 1;
+            }
+        } else {
+            segmentCount = gImmediateCount / 2;
+        }
+        size_t vertexCount = segmentCount * 2;
+        if (vertexCount > 0 && ensureMetalVertexCapacity(vertexCount)) {
+            size_t out = 0;
+            if (gImmediatePrimitive == GL_LINE_LOOP || gImmediatePrimitive == GL_LINE_STRIP) {
+                for (size_t i = 1; i < gImmediateCount; ++i) {
+                    const ImmediateVertex* prev = &gImmediateVertices[i - 1];
+                    const ImmediateVertex* cur = &gImmediateVertices[i];
+                    if (!prev->valid || !cur->valid) continue;
+                    buildMetalVertex(&gMetalVertexBuffer[out++], prev);
+                    buildMetalVertex(&gMetalVertexBuffer[out++], cur);
+                }
+                if (gImmediatePrimitive == GL_LINE_LOOP && gImmediateCount >= 2) {
+                    const ImmediateVertex* first = &gImmediateVertices[0];
+                    const ImmediateVertex* last = &gImmediateVertices[gImmediateCount - 1];
+                    if (first->valid && last->valid) {
+                        buildMetalVertex(&gMetalVertexBuffer[out++], last);
+                        buildMetalVertex(&gMetalVertexBuffer[out++], first);
+                    }
+                }
+            } else {
+                for (size_t i = 0; i + 1 < gImmediateCount; i += 2) {
+                    const ImmediateVertex* v0 = &gImmediateVertices[i];
+                    const ImmediateVertex* v1 = &gImmediateVertices[i + 1];
+                    if (!v0->valid || !v1->valid) continue;
+                    buildMetalVertex(&gMetalVertexBuffer[out++], v0);
+                    buildMetalVertex(&gMetalVertexBuffer[out++], v1);
+                }
+            }
+            if (out > 0) {
+                if (queueMetalDraw(gMetalVertexBuffer, out, true,
+                                   gDepthTestEnabled, gDepthWriteEnabled, gDepthFunc,
+                                   gBlendEnabled, gBlendSrc, gBlendDst)) {
+                    return;
+                }
+                pscalMetal3DShutdown();
+                gMetalDrawCommandCount = 0;
+                gMetalQueuedVertexCount = 0;
+            }
+        }
+    }
+    if (usingRenderer3DPath() && !gDepthTestEnabled) {
+        SDL_BlendMode blend = (gBlendEnabled && gBlendSrc == GL_SRC_ALPHA &&
+                               gBlendDst == GL_ONE_MINUS_SRC_ALPHA)
+                                  ? SDL_BLENDMODE_BLEND
+                                  : SDL_BLENDMODE_NONE;
+        if (gRendererBlendModeCache != (int)blend) {
+            SDL_SetRenderDrawBlendMode(gSdlRenderer, blend);
+            gRendererBlendModeCache = (int)blend;
+        }
+        if (gImmediatePrimitive == GL_LINE_LOOP || gImmediatePrimitive == GL_LINE_STRIP) {
+            for (size_t i = 1; i < gImmediateCount; ++i) {
+                const ImmediateVertex* prev = &gImmediateVertices[i - 1];
+                const ImmediateVertex* cur = &gImmediateVertices[i];
+                if (!prev->valid || !cur->valid) continue;
+                Uint8 r = (Uint8)((floatToByte(prev->color[0]) + floatToByte(cur->color[0])) / 2);
+                Uint8 g = (Uint8)((floatToByte(prev->color[1]) + floatToByte(cur->color[1])) / 2);
+                Uint8 b = (Uint8)((floatToByte(prev->color[2]) + floatToByte(cur->color[2])) / 2);
+                Uint8 a = (Uint8)((floatToByte(prev->color[3]) + floatToByte(cur->color[3])) / 2);
+                SDL_SetRenderDrawColor(gSdlRenderer, r, g, b, a);
+                SDL_RenderDrawLineF(gSdlRenderer,
+                                    prev->screen[0], prev->screen[1],
+                                    cur->screen[0], cur->screen[1]);
+            }
+            if (gImmediatePrimitive == GL_LINE_LOOP && gImmediateCount >= 2) {
+                const ImmediateVertex* first = &gImmediateVertices[0];
+                const ImmediateVertex* last = &gImmediateVertices[gImmediateCount - 1];
+                if (first->valid && last->valid) {
+                    Uint8 r = (Uint8)((floatToByte(first->color[0]) + floatToByte(last->color[0])) / 2);
+                    Uint8 g = (Uint8)((floatToByte(first->color[1]) + floatToByte(last->color[1])) / 2);
+                    Uint8 b = (Uint8)((floatToByte(first->color[2]) + floatToByte(last->color[2])) / 2);
+                    Uint8 a = (Uint8)((floatToByte(first->color[3]) + floatToByte(last->color[3])) / 2);
+                    SDL_SetRenderDrawColor(gSdlRenderer, r, g, b, a);
+                    SDL_RenderDrawLineF(gSdlRenderer,
+                                        last->screen[0], last->screen[1],
+                                        first->screen[0], first->screen[1]);
+                }
+            }
+        } else {
+            for (size_t i = 0; i + 1 < gImmediateCount; i += 2) {
+                const ImmediateVertex* v0 = &gImmediateVertices[i];
+                const ImmediateVertex* v1 = &gImmediateVertices[i + 1];
+                if (!v0->valid || !v1->valid) continue;
+                Uint8 r = (Uint8)((floatToByte(v0->color[0]) + floatToByte(v1->color[0])) / 2);
+                Uint8 g = (Uint8)((floatToByte(v0->color[1]) + floatToByte(v1->color[1])) / 2);
+                Uint8 b = (Uint8)((floatToByte(v0->color[2]) + floatToByte(v1->color[2])) / 2);
+                Uint8 a = (Uint8)((floatToByte(v0->color[3]) + floatToByte(v1->color[3])) / 2);
+                SDL_SetRenderDrawColor(gSdlRenderer, r, g, b, a);
+                SDL_RenderDrawLineF(gSdlRenderer,
+                                    v0->screen[0], v0->screen[1],
+                                    v1->screen[0], v1->screen[1]);
+            }
+        }
+        return;
+    }
+    if (!ensureFramebuffer()) {
+        return;
+    }
+    gRendererFrameUsesSoftwareBuffer = true;
     if (gImmediatePrimitive == GL_LINE_LOOP || gImmediatePrimitive == GL_LINE_STRIP) {
         for (size_t i = 1; i < gImmediateCount; ++i) {
             const ImmediateVertex* prev = &gImmediateVertices[i - 1];
@@ -896,9 +1281,223 @@ static void rasterizeTriangle(const ImmediateVertex* a,
 }
 
 static void renderTriangles(void) {
+    if (usingMetal3DPath()) {
+        size_t maxTriCount = 0;
+        if (gImmediatePrimitive == GL_TRIANGLES) {
+            maxTriCount = gImmediateCount / 3;
+        } else if (gImmediatePrimitive == GL_TRIANGLE_STRIP) {
+            maxTriCount = gImmediateCount >= 3 ? (gImmediateCount - 2) : 0;
+        } else if (gImmediatePrimitive == GL_TRIANGLE_FAN) {
+            maxTriCount = gImmediateCount >= 3 ? (gImmediateCount - 2) : 0;
+        } else if (gImmediatePrimitive == GL_QUADS) {
+            maxTriCount = (gImmediateCount / 4) * 2;
+        }
+        size_t maxVertexCount = maxTriCount * 3;
+        if (maxVertexCount > 0 && ensureMetalVertexCapacity(maxVertexCount)) {
+            size_t out = 0;
+            if (gImmediatePrimitive == GL_TRIANGLES) {
+                for (size_t i = 0; i + 2 < gImmediateCount; i += 3) {
+                    const ImmediateVertex* a = &gImmediateVertices[i];
+                    const ImmediateVertex* b = &gImmediateVertices[i + 1];
+                    const ImmediateVertex* c = &gImmediateVertices[i + 2];
+                    if (!a->valid || !b->valid || !c->valid) continue;
+                    buildMetalVertex(&gMetalVertexBuffer[out++], a);
+                    buildMetalVertex(&gMetalVertexBuffer[out++], b);
+                    buildMetalVertex(&gMetalVertexBuffer[out++], c);
+                }
+            } else if (gImmediatePrimitive == GL_TRIANGLE_STRIP) {
+                for (size_t i = 0; i + 2 < gImmediateCount; ++i) {
+                    size_t aIndex = (i % 2 == 0) ? i : (i + 1);
+                    size_t bIndex = (i % 2 == 0) ? (i + 1) : i;
+                    const ImmediateVertex* a = &gImmediateVertices[aIndex];
+                    const ImmediateVertex* b = &gImmediateVertices[bIndex];
+                    const ImmediateVertex* c = &gImmediateVertices[i + 2];
+                    if (!a->valid || !b->valid || !c->valid) continue;
+                    buildMetalVertex(&gMetalVertexBuffer[out++], a);
+                    buildMetalVertex(&gMetalVertexBuffer[out++], b);
+                    buildMetalVertex(&gMetalVertexBuffer[out++], c);
+                }
+            } else if (gImmediatePrimitive == GL_TRIANGLE_FAN) {
+                const ImmediateVertex* center = &gImmediateVertices[0];
+                if (center->valid) {
+                    for (size_t i = 1; i + 1 < gImmediateCount; ++i) {
+                        const ImmediateVertex* b = &gImmediateVertices[i];
+                        const ImmediateVertex* c = &gImmediateVertices[i + 1];
+                        if (!b->valid || !c->valid) continue;
+                        buildMetalVertex(&gMetalVertexBuffer[out++], center);
+                        buildMetalVertex(&gMetalVertexBuffer[out++], b);
+                        buildMetalVertex(&gMetalVertexBuffer[out++], c);
+                    }
+                }
+            } else if (gImmediatePrimitive == GL_QUADS) {
+                for (size_t i = 0; i + 3 < gImmediateCount; i += 4) {
+                    const ImmediateVertex* a = &gImmediateVertices[i];
+                    const ImmediateVertex* b = &gImmediateVertices[i + 1];
+                    const ImmediateVertex* c = &gImmediateVertices[i + 2];
+                    const ImmediateVertex* d = &gImmediateVertices[i + 3];
+                    if (a->valid && b->valid && c->valid) {
+                        buildMetalVertex(&gMetalVertexBuffer[out++], a);
+                        buildMetalVertex(&gMetalVertexBuffer[out++], b);
+                        buildMetalVertex(&gMetalVertexBuffer[out++], c);
+                    }
+                    if (a->valid && c->valid && d->valid) {
+                        buildMetalVertex(&gMetalVertexBuffer[out++], a);
+                        buildMetalVertex(&gMetalVertexBuffer[out++], c);
+                        buildMetalVertex(&gMetalVertexBuffer[out++], d);
+                    }
+                }
+            }
+            if (out > 0) {
+                if (queueMetalDraw(gMetalVertexBuffer, out, false,
+                                   gDepthTestEnabled, gDepthWriteEnabled, gDepthFunc,
+                                   gBlendEnabled, gBlendSrc, gBlendDst)) {
+                    return;
+                }
+                pscalMetal3DShutdown();
+                gMetalDrawCommandCount = 0;
+                gMetalQueuedVertexCount = 0;
+            }
+        }
+    }
+    if (usingRenderer3DPath() && !gDepthTestEnabled) {
+        size_t triCount = 0;
+        if (gImmediatePrimitive == GL_TRIANGLES) {
+            triCount = gImmediateCount / 3;
+        } else if (gImmediatePrimitive == GL_TRIANGLE_STRIP) {
+            triCount = gImmediateCount >= 3 ? (gImmediateCount - 2) : 0;
+        } else if (gImmediatePrimitive == GL_TRIANGLE_FAN) {
+            triCount = gImmediateCount >= 3 ? (gImmediateCount - 2) : 0;
+        } else if (gImmediatePrimitive == GL_QUADS) {
+            triCount = (gImmediateCount / 4) * 2;
+        }
+        if (triCount == 0) {
+            return;
+        }
+        if (!ensureRendererTriCapacity(triCount)) {
+            return;
+        }
+        RendererTri* tris = gRendererTriBuffer;
+        size_t out = 0;
+        if (gImmediatePrimitive == GL_TRIANGLES) {
+            for (size_t i = 0; i + 2 < gImmediateCount; i += 3) {
+                const ImmediateVertex* a = &gImmediateVertices[i];
+                const ImmediateVertex* b = &gImmediateVertices[i + 1];
+                const ImmediateVertex* c = &gImmediateVertices[i + 2];
+                if (!a->valid || !b->valid || !c->valid) continue;
+                tris[out].i0 = (int)i;
+                tris[out].i1 = (int)(i + 1);
+                tris[out].i2 = (int)(i + 2);
+                tris[out].depth = (a->depth + b->depth + c->depth) * (1.0f / 3.0f);
+                out++;
+            }
+        } else if (gImmediatePrimitive == GL_TRIANGLE_STRIP) {
+            for (size_t i = 0; i + 2 < gImmediateCount; ++i) {
+                size_t aIndex = (i % 2 == 0) ? i : (i + 1);
+                size_t bIndex = (i % 2 == 0) ? (i + 1) : i;
+                const ImmediateVertex* a = &gImmediateVertices[aIndex];
+                const ImmediateVertex* b = &gImmediateVertices[bIndex];
+                const ImmediateVertex* c = &gImmediateVertices[i + 2];
+                if (!a->valid || !b->valid || !c->valid) continue;
+                tris[out].i0 = (int)aIndex;
+                tris[out].i1 = (int)bIndex;
+                tris[out].i2 = (int)(i + 2);
+                tris[out].depth = (a->depth + b->depth + c->depth) * (1.0f / 3.0f);
+                out++;
+            }
+        } else if (gImmediatePrimitive == GL_TRIANGLE_FAN) {
+            const ImmediateVertex* center = &gImmediateVertices[0];
+            if (center->valid) {
+                for (size_t i = 1; i + 1 < gImmediateCount; ++i) {
+                    const ImmediateVertex* b = &gImmediateVertices[i];
+                    const ImmediateVertex* c = &gImmediateVertices[i + 1];
+                    if (!b->valid || !c->valid) continue;
+                    tris[out].i0 = 0;
+                    tris[out].i1 = (int)i;
+                    tris[out].i2 = (int)(i + 1);
+                    tris[out].depth = (center->depth + b->depth + c->depth) * (1.0f / 3.0f);
+                    out++;
+                }
+            }
+        } else if (gImmediatePrimitive == GL_QUADS) {
+            for (size_t i = 0; i + 3 < gImmediateCount; i += 4) {
+                const ImmediateVertex* a = &gImmediateVertices[i];
+                const ImmediateVertex* b = &gImmediateVertices[i + 1];
+                const ImmediateVertex* c = &gImmediateVertices[i + 2];
+                const ImmediateVertex* d = &gImmediateVertices[i + 3];
+                if (a->valid && b->valid && c->valid) {
+                    tris[out].i0 = (int)i;
+                    tris[out].i1 = (int)(i + 1);
+                    tris[out].i2 = (int)(i + 2);
+                    tris[out].depth = (a->depth + b->depth + c->depth) * (1.0f / 3.0f);
+                    out++;
+                }
+                if (a->valid && c->valid && d->valid) {
+                    tris[out].i0 = (int)i;
+                    tris[out].i1 = (int)(i + 2);
+                    tris[out].i2 = (int)(i + 3);
+                    tris[out].depth = (a->depth + c->depth + d->depth) * (1.0f / 3.0f);
+                    out++;
+                }
+            }
+        }
+        triCount = out;
+        if (triCount == 0) {
+            return;
+        }
+        if (gDepthTestEnabled && triCount > 1) {
+            sortRendererTrisByDepth(tris, triCount);
+        }
+
+        size_t indexCount = triCount * 3;
+        if (!ensureRendererVertexCapacity(gImmediateCount) ||
+            !ensureRendererIndexCapacity(gImmediateCount + indexCount)) {
+            return;
+        }
+        SDL_Vertex* verts = gRendererVertexBuffer;
+        int* remap = gRendererIndexBuffer;
+        int* indices = gRendererIndexBuffer + gImmediateCount;
+        SDL_BlendMode blend = (gBlendEnabled && gBlendSrc == GL_SRC_ALPHA &&
+                               gBlendDst == GL_ONE_MINUS_SRC_ALPHA)
+                                  ? SDL_BLENDMODE_BLEND
+                                  : SDL_BLENDMODE_NONE;
+        if (gRendererBlendModeCache != (int)blend) {
+            SDL_SetRenderDrawBlendMode(gSdlRenderer, blend);
+            gRendererBlendModeCache = (int)blend;
+        }
+        for (size_t i = 0; i < gImmediateCount; ++i) {
+            remap[i] = -1;
+        }
+        int vertexCount = 0;
+        for (size_t i = 0; i < triCount; ++i) {
+            size_t base = i * 3;
+            int srcIndices[3] = { tris[i].i0, tris[i].i1, tris[i].i2 };
+            for (int c = 0; c < 3; ++c) {
+                int srcIndex = srcIndices[c];
+                int dstIndex = remap[srcIndex];
+                if (dstIndex < 0) {
+                    const ImmediateVertex* src = &gImmediateVertices[srcIndex];
+                    dstIndex = vertexCount++;
+                    remap[srcIndex] = dstIndex;
+                    verts[dstIndex].position.x = src->screen[0];
+                    verts[dstIndex].position.y = src->screen[1];
+                    verts[dstIndex].color.r = floatToByte(src->color[0]);
+                    verts[dstIndex].color.g = floatToByte(src->color[1]);
+                    verts[dstIndex].color.b = floatToByte(src->color[2]);
+                    verts[dstIndex].color.a = floatToByte(src->color[3]);
+                    verts[dstIndex].tex_coord.x = 0.0f;
+                    verts[dstIndex].tex_coord.y = 0.0f;
+                }
+                indices[base + (size_t)c] = dstIndex;
+            }
+        }
+        SDL_RenderGeometry(gSdlRenderer, NULL, verts, vertexCount,
+                           indices, (int)indexCount);
+        return;
+    }
     if (!ensureFramebuffer()) {
         return;
     }
+    gRendererFrameUsesSoftwareBuffer = true;
     if (gImmediatePrimitive == GL_TRIANGLES) {
         for (size_t i = 0; i + 2 < gImmediateCount; i += 3) {
             rasterizeTriangle(&gImmediateVertices[i],
@@ -1006,6 +1605,7 @@ static void flushImmediate(void) {
             break;
         case GL_TRIANGLES:
         case GL_TRIANGLE_STRIP:
+        case GL_TRIANGLE_FAN:
         case GL_QUADS:
             renderTriangles();
             break;
@@ -1034,9 +1634,35 @@ void gfx3dClear(unsigned int mask) {
         glClear((GLbitfield)mask);
         return;
     }
+    if (usingRenderer3DPath()) {
+        if (usingMetal3DPath()) {
+            gMetalDrawCommandCount = 0;
+            gMetalQueuedVertexCount = 0;
+            pscalMetal3DSetViewport(gViewport[0], gViewport[1], gViewport[2], gViewport[3]);
+            if (pscalMetal3DBeginFrame((mask & GL_COLOR_BUFFER_BIT) != 0, gClearColor,
+                                       (mask & GL_DEPTH_BUFFER_BIT) != 0, gClearDepthValue)) {
+                gRendererFrameUsesSoftwareBuffer = false;
+                gFramebufferDirty = false;
+                return;
+            }
+            pscalMetal3DShutdown();
+        }
+        gRendererBlendModeCache = -1;
+        if (mask & GL_COLOR_BUFFER_BIT) {
+            SDL_SetRenderDrawColor(gSdlRenderer,
+                                   floatToByte(gClearColor[0]),
+                                   floatToByte(gClearColor[1]),
+                                   floatToByte(gClearColor[2]),
+                                   floatToByte(gClearColor[3]));
+            SDL_RenderClear(gSdlRenderer);
+        }
+        gRendererFrameUsesSoftwareBuffer = false;
+        return;
+    }
     if (!ensureFramebuffer()) {
         return;
     }
+    gRendererFrameUsesSoftwareBuffer = true;
     if (mask & GL_COLOR_BUFFER_BIT) {
         Uint32 packed = packColor(gClearColor);
         for (int y = 0; y < gFramebufferHeight; ++y) {
@@ -1070,7 +1696,10 @@ void gfx3dViewport(int x, int y, int width, int height) {
     gViewport[1] = y;
     gViewport[2] = width > 0 ? width : 1;
     gViewport[3] = height > 0 ? height : 1;
-    ensureFramebuffer();
+    pscalMetal3DSetViewport(gViewport[0], gViewport[1], gViewport[2], gViewport[3]);
+    if (!usingRenderer3DPath()) {
+        ensureFramebuffer();
+    }
 }
 
 void gfx3dMatrixMode(int mode) {
@@ -1234,7 +1863,7 @@ void gfx3dEnable(unsigned int capability) {
     }
     if (capability == GL_BLEND) {
         gBlendEnabled = true;
-        if (usingNativeGlPath() && gSdlRenderer) {
+        if (gSdlRenderer) {
             SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
         }
     } else if (capability == GL_DEPTH_TEST) {
@@ -1258,7 +1887,7 @@ void gfx3dDisable(unsigned int capability) {
     }
     if (capability == GL_BLEND) {
         gBlendEnabled = false;
-        if (usingNativeGlPath() && gSdlRenderer) {
+        if (gSdlRenderer) {
             SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_NONE);
         }
     } else if (capability == GL_DEPTH_TEST) {
@@ -1359,7 +1988,7 @@ void gfx3dBlendFunc(unsigned int src, unsigned int dst) {
     }
     gBlendSrc = src;
     gBlendDst = dst;
-    if (usingNativeGlPath() && gSdlRenderer) {
+    if (gSdlRenderer) {
         if (src == GL_SRC_ALPHA && dst == GL_ONE_MINUS_SRC_ALPHA) {
             SDL_SetRenderDrawBlendMode(gSdlRenderer, SDL_BLENDMODE_BLEND);
         } else {
@@ -1497,6 +2126,44 @@ void gfx3dReadPixels(int x, int y, int width, int height,
         glReadPixels(x, y, width, height, (GLenum)format, (GLenum)type, pixels);
         return;
     }
+    if (usingRenderer3DPath() && !gRendererFrameUsesSoftwareBuffer) {
+        (void)format;
+        (void)type;
+        if (!pixels || width <= 0 || height <= 0 || !gSdlRenderer) {
+            return;
+        }
+        int drawableW = gViewport[2];
+        int drawableH = gViewport[3];
+        if (drawableW <= 0 || drawableH <= 0) {
+            return;
+        }
+        int srcY = drawableH - y - height;
+        if (x < 0 || y < 0 || srcY < 0 ||
+            x + width > drawableW || srcY + height > drawableH) {
+            memset(pixels, 0, (size_t)width * (size_t)height * sizeof(Uint32));
+            return;
+        }
+        size_t pitch = (size_t)width * sizeof(Uint32);
+        Uint8* temp = (Uint8*)malloc(pitch * (size_t)height);
+        if (!temp) {
+            memset(pixels, 0, pitch * (size_t)height);
+            return;
+        }
+        SDL_Rect rect = { x, srcY, width, height };
+        if (SDL_RenderReadPixels(gSdlRenderer, &rect, SDL_PIXELFORMAT_RGBA32,
+                                 temp, (int)pitch) != 0) {
+            memset(pixels, 0, pitch * (size_t)height);
+            free(temp);
+            return;
+        }
+        Uint8* outBytes = (Uint8*)pixels;
+        for (int row = 0; row < height; ++row) {
+            const Uint8* srcRow = temp + (size_t)(height - 1 - row) * pitch;
+            memcpy(outBytes + (size_t)row * pitch, srcRow, pitch);
+        }
+        free(temp);
+        return;
+    }
     (void)format;
     (void)type;
     if (!pixels || width <= 0 || height <= 0 || !ensureFramebuffer()) {
@@ -1527,25 +2194,38 @@ unsigned int gfx3dGetError(void) {
 }
 
 void gfx3dPresent(void) {
-    if (!gFramebufferDirty || !gColorBuffer || gFramebufferWidth <= 0 || gFramebufferHeight <= 0) {
+    if (gSdlRenderer) {
+        if (!gRendererFrameUsesSoftwareBuffer && usingMetal3DPath()) {
+            if (!flushQueuedMetalDraws()) {
+                pscalMetal3DShutdown();
+            }
+            pscalMetal3DPresent();
+            gFramebufferDirty = false;
+            gRendererFrameUsesSoftwareBuffer = false;
+            return;
+        }
+        if (gRendererFrameUsesSoftwareBuffer && gFramebufferDirty &&
+            gColorBuffer && gFramebufferWidth > 0 && gFramebufferHeight > 0) {
+            if (!gFramebufferTexture) {
+                gFramebufferTexture = SDL_CreateTexture(gSdlRenderer,
+                                                        SDL_PIXELFORMAT_ARGB8888,
+                                                        SDL_TEXTUREACCESS_STREAMING,
+                                                        gFramebufferWidth,
+                                                        gFramebufferHeight);
+            }
+            if (gFramebufferTexture) {
+                SDL_UpdateTexture(gFramebufferTexture, NULL, gColorBuffer,
+                                  gFramebufferWidth * (int)sizeof(Uint32));
+                SDL_RenderCopy(gSdlRenderer, gFramebufferTexture, NULL, NULL);
+            }
+        }
+        SDL_RenderPresent(gSdlRenderer);
+        gFramebufferDirty = false;
+        gRendererFrameUsesSoftwareBuffer = false;
         return;
     }
 
-    if (gSdlRenderer) {
-        if (!gFramebufferTexture) {
-            gFramebufferTexture = SDL_CreateTexture(gSdlRenderer,
-                                                    SDL_PIXELFORMAT_ARGB8888,
-                                                    SDL_TEXTUREACCESS_STREAMING,
-                                                    gFramebufferWidth,
-                                                    gFramebufferHeight);
-            if (!gFramebufferTexture) {
-                return;
-            }
-        }
-        SDL_UpdateTexture(gFramebufferTexture, NULL, gColorBuffer, gFramebufferWidth * (int)sizeof(Uint32));
-        SDL_RenderCopy(gSdlRenderer, gFramebufferTexture, NULL, NULL);
-        SDL_RenderPresent(gSdlRenderer);
-        gFramebufferDirty = false;
+    if (!gFramebufferDirty || !gColorBuffer || gFramebufferWidth <= 0 || gFramebufferHeight <= 0) {
         return;
     }
 
@@ -1626,6 +2306,7 @@ void gfx3dPresent(void) {
     glMatrixMode(savedMatrixMode);
 
     gFramebufferDirty = false;
+    gRendererFrameUsesSoftwareBuffer = false;
 }
 
 void gfx3dReleaseResources(void) {
@@ -1639,6 +2320,24 @@ void gfx3dReleaseResources(void) {
     gImmediateQuadVertices = NULL;
     gImmediateQuadCapacity = 0;
 
+    free(gRendererTriBuffer);
+    gRendererTriBuffer = NULL;
+    gRendererTriCapacity = 0;
+    free(gRendererVertexBuffer);
+    gRendererVertexBuffer = NULL;
+    gRendererVertexCapacity = 0;
+    free(gRendererIndexBuffer);
+    gRendererIndexBuffer = NULL;
+    gRendererIndexCapacity = 0;
+    free(gMetalVertexBuffer);
+    gMetalVertexBuffer = NULL;
+    gMetalVertexCapacity = 0;
+    free(gMetalDrawCommands);
+    gMetalDrawCommands = NULL;
+    gMetalDrawCommandCount = 0;
+    gMetalDrawCommandCapacity = 0;
+    gMetalQueuedVertexCount = 0;
+
     free(gColorBuffer);
     free(gDepthBuffer);
     gColorBuffer = NULL;
@@ -1646,6 +2345,7 @@ void gfx3dReleaseResources(void) {
     gFramebufferWidth = 0;
     gFramebufferHeight = 0;
     gFramebufferDirty = false;
+    gRendererFrameUsesSoftwareBuffer = false;
 
     if (gFramebufferTexture) {
         SDL_DestroyTexture(gFramebufferTexture);
@@ -1664,9 +2364,11 @@ void gfx3dReleaseResources(void) {
     gBlendEnabled = false;
     gBlendSrc = GL_ONE;
     gBlendDst = GL_ZERO;
+    gRendererBlendModeCache = -1;
     gDepthTestEnabled = false;
     gDepthWriteEnabled = true;
     gDepthFunc = GL_LESS;
+    pscalMetal3DShutdown();
 }
 
 #endif // defined(PSCAL_TARGET_IOS) || defined(__APPLE__)

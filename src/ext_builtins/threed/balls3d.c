@@ -4,6 +4,7 @@
 
 #ifdef SDL
 #include "backend_ast/graphics_3d_backend.h"
+#include "backend_ast/graphics_3d_metal_apple.h"
 #include "backend_ast/pscal_sdl_runtime.h"
 #include "core/sdl_headers.h"
 #include PSCALI_SDL_OPENGL_HEADER
@@ -258,6 +259,12 @@ static void destroySphereDisplayList(void) {
 
 static void drawUnitSphereImmediate(int stacks, int slices) {
     const double pi = 3.14159265358979323846;
+    float prevLastX = 0.0f;
+    float prevLastY = 0.0f;
+    float prevLastZ = 0.0f;
+    bool hasPrevLast = false;
+
+    gfx3dBegin(GL_TRIANGLE_STRIP);
     for (int stack = 0; stack < stacks; ++stack) {
         double phi0 = -pi * 0.5 + pi * stack / (double)stacks;
         double phi1 = -pi * 0.5 + pi * (stack + 1) / (double)stacks;
@@ -266,26 +273,54 @@ static void drawUnitSphereImmediate(int stacks, int slices) {
         double cosPhi1 = cos(phi1);
         double sinPhi1 = sin(phi1);
 
-        gfx3dBegin(GL_TRIANGLE_STRIP);
-        for (int slice = 0; slice <= slices; ++slice) {
+        double thetaStart = 0.0;
+        double cosThetaStart = cos(thetaStart);
+        double sinThetaStart = sin(thetaStart);
+        float startV1x = (float)(cosPhi1 * cosThetaStart);
+        float startV1y = (float)sinPhi1;
+        float startV1z = (float)(cosPhi1 * sinThetaStart);
+        float startV0x = (float)(cosPhi0 * cosThetaStart);
+        float startV0y = (float)sinPhi0;
+        float startV0z = (float)(cosPhi0 * sinThetaStart);
+
+        if (hasPrevLast) {
+            /* Two degenerate vertices stitch this strip to the previous one
+               while preserving a single draw command. */
+            gfx3dNormal3f(prevLastX, prevLastY, prevLastZ);
+            gfx3dVertex3f(prevLastX, prevLastY, prevLastZ);
+            gfx3dNormal3f(startV1x, startV1y, startV1z);
+            gfx3dVertex3f(startV1x, startV1y, startV1z);
+        }
+
+        gfx3dNormal3f(startV1x, startV1y, startV1z);
+        gfx3dVertex3f(startV1x, startV1y, startV1z);
+        gfx3dNormal3f(startV0x, startV0y, startV0z);
+        gfx3dVertex3f(startV0x, startV0y, startV0z);
+
+        for (int slice = 1; slice <= slices; ++slice) {
             double theta = 2.0 * pi * slice / (double)slices;
             double cosTheta = cos(theta);
             double sinTheta = sin(theta);
 
-            float n1x = (float)(cosPhi1 * cosTheta);
-            float n1y = (float)sinPhi1;
-            float n1z = (float)(cosPhi1 * sinTheta);
-            gfx3dNormal3f(n1x, n1y, n1z);
-            gfx3dVertex3f(n1x, n1y, n1z);
+            float v1x = (float)(cosPhi1 * cosTheta);
+            float v1y = (float)sinPhi1;
+            float v1z = (float)(cosPhi1 * sinTheta);
+            float v0x = (float)(cosPhi0 * cosTheta);
+            float v0y = (float)sinPhi0;
+            float v0z = (float)(cosPhi0 * sinTheta);
 
-            float n0x = (float)(cosPhi0 * cosTheta);
-            float n0y = (float)sinPhi0;
-            float n0z = (float)(cosPhi0 * sinTheta);
-            gfx3dNormal3f(n0x, n0y, n0z);
-            gfx3dVertex3f(n0x, n0y, n0z);
+            gfx3dNormal3f(v1x, v1y, v1z);
+            gfx3dVertex3f(v1x, v1y, v1z);
+            gfx3dNormal3f(v0x, v0y, v0z);
+            gfx3dVertex3f(v0x, v0y, v0z);
+
+            prevLastX = v0x;
+            prevLastY = v0y;
+            prevLastZ = v0z;
+            hasPrevLast = true;
         }
-        gfx3dEnd();
     }
+    gfx3dEnd();
 }
 
 static bool ensureSphereDisplayList(int stacks, int slices) {
@@ -341,12 +376,16 @@ static Value vmBuiltinBouncingBalls3DDrawUnitSphereFast(VM* vm, int arg_count,
         return makeVoid();
     }
 
-    /* Software 3D fallback on Apple can be very expensive at desktop-level
-       tessellation values. Clamp sphere complexity there to keep frame time
-       responsive on mobile-class devices. */
-    if (gSdlGLContext == NULL) {
-        if (stacks > 10) stacks = 10;
-        if (slices > 14) slices = 14;
+    /* Keep software fallback responsive, but allow full tessellation when the
+       renderer path is backed by Metal. */
+    bool software3dPath = (gSdlGLContext == NULL);
+    if (software3dPath && gSdlRenderer && pscalMetal3DIsSupported() &&
+        pscalMetal3DEnsureRenderer(gSdlRenderer)) {
+        software3dPath = false;
+    }
+    if (software3dPath) {
+        if (stacks > 12) stacks = 12;
+        if (slices > 18) slices = 18;
     }
 
     if (ensureSphereDisplayList(stacks, slices) && gSphereDisplayListCache.displayListId != 0) {

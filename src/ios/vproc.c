@@ -4239,6 +4239,12 @@ static void vprocDebugLogf(const char *format, ...) {
 }
 
 static bool vprocResizeDebugEnabled(void) {
+#if !defined(PSCALI_ENABLE_SSH_RESIZE_DEBUG_LOGS)
+#define PSCALI_ENABLE_SSH_RESIZE_DEBUG_LOGS 0
+#endif
+#if PSCALI_ENABLE_SSH_RESIZE_DEBUG_LOGS == 0
+    return false;
+#else
     static int cached = -1;
     if (cached >= 0) {
         return cached == 1;
@@ -4253,6 +4259,7 @@ static bool vprocResizeDebugEnabled(void) {
     }
     cached = (strcmp(env, "0") != 0) ? 1 : 0;
     return cached == 1;
+#endif
 }
 
 static void vprocResizeLogf(const char *format, ...) {

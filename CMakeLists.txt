@@ -1,6 +1,9 @@
 # CMakeLists.txt – top of your repo
 cmake_minimum_required(VERSION 3.18)
 project(pscal C)
+if(APPLE)
+    enable_language(OBJC)
+endif()
 enable_testing()
 
 option(PSCAL_FORCE_IOS "Force iOS mode (PSCAL_TARGET_IOS + vproc shims) on non-iOS hosts." OFF)
@@ -465,6 +468,10 @@ if(ENABLE_EXT_BUILTIN_SQLITE)
         endif()
     endif()
 endif()
+if(APPLE)
+    set_property(SOURCE src/backend_ast/graphics_3d_metal_apple.m
+        APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc)
+endif()
 
 # ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
 if(APPLE AND NOT DEFINED CMAKE_OSX_SYSROOT)
@@ -712,6 +719,12 @@ if(SDL)
                 endif()
                 message(STATUS "Found X11 for SDL backend: ${PSCAL_SDL_PLATFORM_LIBS}")
             endif()
+        endif()
+        if(APPLE)
+            list(APPEND PSCAL_SDL_PLATFORM_LIBS
+                "-framework Metal"
+                "-framework QuartzCore"
+                "-framework Foundation")
         endif()
 
         if(NOT PSCAL_PLATFORM_IOS)
@@ -1234,6 +1247,7 @@ if(SDL)
     if(PSCAL_PLATFORM_IOS OR APPLE)
         list(APPEND PSCAL_CORE_SOURCES
             src/backend_ast/graphics_3d_backend_ios.c
+            src/backend_ast/graphics_3d_metal_apple.m
         )
     else()
         list(APPEND PSCAL_CORE_SOURCES

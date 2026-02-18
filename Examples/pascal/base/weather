@@ -282,8 +282,7 @@ begin
   apiKeyFromFile := LoadApiKey();
   if apiKeyFromFile = '' then
   begin
-    ExitCode := 1;
-    Exit;
+    Halt(1);
   end;
 
   // --- Check for command-line argument for Zip Code ---
@@ -296,8 +295,7 @@ begin
   begin
     writeln;
     writeln('Usage: weather <zipcode>');
-    ExitCode := 1;
-    Exit;
+    Halt(1);
   end;
   // ---------------------------------------
 
@@ -313,8 +311,7 @@ begin
   if ms = 0 then
   begin
     writeln('Error: Unable to reach weather service (apiSend failed).');
-    ExitCode := 1;
-    Exit;
+    Halt(1);
   end;
 
   // Convert the memory stream response to a string
@@ -322,8 +319,7 @@ begin
   if response = '' then
   begin
     writeln('Error: Empty response from weather service.');
-    ExitCode := 1;
-    Exit;
+    Halt(1);
   end;
   // { DEBUG: Raw response debug lines removed }
 

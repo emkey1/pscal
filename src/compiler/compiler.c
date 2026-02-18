@@ -388,6 +388,29 @@ typedef struct FunctionCompilerState {
 
 static FunctionCompilerState* current_function_compiler = NULL;
 
+static bool isCurrentFunctionResultIdentifier(const FunctionCompilerState* fc, const char* name) {
+    if (!fc || !fc->returns_value || !name) {
+        return false;
+    }
+
+    if (strcasecmp(name, "result") == 0) {
+        return true;
+    }
+
+    if (fc->name && strcasecmp(name, fc->name) == 0) {
+        return true;
+    }
+
+    if (fc->name) {
+        const char* dot = strrchr(fc->name, '.');
+        if (dot && dot[1] != '\0' && strcasecmp(name, dot + 1) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Track global objects created with NEW so their hidden
 // vtable fields can be initialised after all vtables are defined.
 typedef struct {
@@ -1664,9 +1687,7 @@ static AST* getInterfaceTypeFromExpression(AST* expr) {
         expr->type == AST_VARIABLE && expr->token && expr->token->value) {
         const char* varName = expr->token->value;
         bool isFunctionResult =
-            (strcasecmp(varName, "result") == 0) ||
-            (current_function_compiler->name &&
-             strcasecmp(varName, current_function_compiler->name) == 0);
+            isCurrentFunctionResultIdentifier(current_function_compiler, varName);
         if (isFunctionResult && current_function_compiler->function_symbol &&
             current_function_compiler->function_symbol->type_def &&
             current_function_compiler->function_symbol->type_def->type == AST_FUNCTION_DECL) {
@@ -4124,7 +4145,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool is_ref = false;
 
             if (current_function_compiler) {
-                if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
+                if (isCurrentFunctionResultIdentifier(current_function_compiler, varName)) {
                     local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 } else {
                     local_slot = resolveLocal(current_function_compiler, varName);
@@ -4400,7 +4421,7 @@ static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int li
 
     if (current_function_compiler) {
         int local_slot = -1;
-        if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
+        if (isCurrentFunctionResultIdentifier(current_function_compiler, varName)) {
             local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
         } else {
             local_slot = resolveLocal(current_function_compiler, varName);
@@ -6515,8 +6536,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (current_function_compiler && current_function_compiler->returns_value &&
                     current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
-                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                     strcasecmp(lvalue->token->value, "result") == 0)) {
+                    isCurrentFunctionResultIdentifier(current_function_compiler, lvalue->token->value)) {
 
                     int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     if (return_slot != -1) {
@@ -7969,7 +7989,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool is_ref = false;
             if (current_function_compiler) {
                 // Check if it's an assignment to the function name itself
-                if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
+                if (isCurrentFunctionResultIdentifier(current_function_compiler, varName)) {
                     local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 } else {
                     local_slot = resolveLocal(current_function_compiler, varName);
@@ -8257,8 +8277,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (current_function_compiler && current_function_compiler->returns_value &&
                     current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
-                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                     strcasecmp(lvalue->token->value, "result") == 0)) {
+                    isCurrentFunctionResultIdentifier(current_function_compiler, lvalue->token->value)) {
 
                     int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     if (return_slot != -1) {
