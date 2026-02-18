@@ -263,7 +263,6 @@ final class TerminalKeyInputView: UITextView {
         makeCommand(input: UIKeyCommand.inputDownArrow, output: "\u{1B}[B")
         makeCommand(input: UIKeyCommand.inputLeftArrow, output: "\u{1B}[D")
         makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
-        makeCommand(input: "\t", output: "\t")
         makeCommand(input: "\r", output: "\r")
         return commands
     }
@@ -304,10 +303,18 @@ final class TerminalKeyInputView: UITextView {
         let escape = UIKeyCommand(input: UIKeyCommand.inputEscape,
                                   modifierFlags: [],
                                   action: #selector(handleEscapeKey))
+        let tab = UIKeyCommand(input: "\t",
+                               modifierFlags: [],
+                               action: #selector(handleTabKeyCommand(_:)))
+        let shiftTab = UIKeyCommand(input: "\t",
+                                    modifierFlags: [.shift],
+                                    action: #selector(handleTabKeyCommand(_:)))
         if #available(iOS 15.0, *) {
             escape.wantsPriorityOverSystemBehavior = true
+            tab.wantsPriorityOverSystemBehavior = true
+            shiftTab.wantsPriorityOverSystemBehavior = true
         }
-        commands.append(escape)
+        commands.append(contentsOf: [escape, tab, shiftTab])
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
@@ -558,6 +565,14 @@ final class TerminalKeyInputView: UITextView {
 
     @objc private func handleEscapeKey() {
         onInput?("\u{1B}")
+    }
+
+    @objc private func handleTabKeyCommand(_ command: UIKeyCommand) {
+        if command.modifierFlags.contains(.shift) {
+            onInput?("\u{1B}[Z")
+        } else {
+            onInput?("\t")
+        }
     }
 
     private func buildControlCommands() -> [UIKeyCommand] {

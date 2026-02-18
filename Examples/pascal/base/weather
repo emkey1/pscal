@@ -308,11 +308,7 @@ begin
 
   // Perform the API call
   ms := apiSend(url, '');
-  if ms = 0 then
-  begin
-    writeln('Error: Unable to reach weather service (apiSend failed).');
-    Halt(1);
-  end;
+  // apiSend returns an mstream handle; comparing it to an integer raises a type error.
 
   // Convert the memory stream response to a string
   response := apiReceive(ms);

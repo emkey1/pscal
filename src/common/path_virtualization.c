@@ -192,6 +192,30 @@ static const char *pathVirtualizedExpand(const char *input, char *buffer, size_t
     return buffer;
 }
 
+static bool pathVirtualizedGetCwd(char *buffer, size_t size) {
+    if (!buffer || size == 0) {
+        return false;
+    }
+    buffer[0] = '\0';
+#if defined(PSCAL_TARGET_IOS)
+    if (vprocGetcwdShim(buffer, size) && buffer[0] != '\0') {
+        return true;
+    }
+#endif
+    const char *pwd = getenv("PWD");
+    if (pwd && pwd[0] == '/') {
+        int written = snprintf(buffer, size, "%s", pwd);
+        if (written > 0 && (size_t)written < size) {
+            return true;
+        }
+    }
+    if (getcwd(buffer, size) && buffer[0] != '\0') {
+        return true;
+    }
+    buffer[0] = '\0';
+    return false;
+}
+
 static void pathVirtualizedStripInPlace(char *buffer, size_t current_length) {
     if (!buffer) {
         return;
@@ -219,7 +243,7 @@ static const char *pathVirtualizedResolveAgainstVirtualCwd(const char *path,
         return path;
     }
     char cwd[PATH_MAX];
-    if (!vprocGetcwdShim(cwd, sizeof(cwd)) || cwd[0] == '\0') {
+    if (!pathVirtualizedGetCwd(cwd, sizeof(cwd))) {
         return path;
     }
     size_t cwd_len = strlen(cwd);
@@ -419,6 +443,24 @@ int pscalPathVirtualized_glob(const char *pattern,
     char expanded_pattern[PATH_MAX];
     const char *target = pathVirtualizedExpand(resolved_input, expanded_pattern, sizeof(expanded_pattern));
     int result = glob(target ? target : pattern, flags, errfunc, pglob);
+    if (result == GLOB_NOMATCH && relative_pattern && pattern && pattern[0] != '~') {
+        const char *pwd = getenv("PWD");
+        if (pwd && pwd[0] == '/') {
+            char resolved_from_pwd[PATH_MAX];
+            int written = snprintf(resolved_from_pwd,
+                                   sizeof(resolved_from_pwd),
+                                   "%s%s%s",
+                                   pwd,
+                                   (pwd[0] != '\0' && pwd[strlen(pwd) - 1] == '/') ? "" : "/",
+                                   pattern);
+            if (written > 0 && (size_t)written < sizeof(resolved_from_pwd)) {
+                char expanded_from_pwd[PATH_MAX];
+                const char *pwd_target =
+                    pathVirtualizedExpand(resolved_from_pwd, expanded_from_pwd, sizeof(expanded_from_pwd));
+                result = glob(pwd_target ? pwd_target : resolved_from_pwd, flags, errfunc, pglob);
+            }
+        }
+    }
     if (result != 0 || !pglob || !pglob->gl_pathv) {
         return result;
     }
@@ -426,7 +468,7 @@ int pscalPathVirtualized_glob(const char *pattern,
     char cwd[PATH_MAX] = {0};
     size_t cwd_len = 0;
     bool have_cwd = false;
-    if (relative_pattern && vprocGetcwdShim(cwd, sizeof(cwd)) && cwd[0] == '/') {
+    if (relative_pattern && pathVirtualizedGetCwd(cwd, sizeof(cwd)) && cwd[0] == '/') {
         pathVirtualizedTrimTrailingSlash(cwd);
         cwd_len = strlen(cwd);
         have_cwd = cwd_len > 0;

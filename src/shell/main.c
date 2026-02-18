@@ -3446,10 +3446,26 @@ static char *readInteractiveLine(const char *prompt,
                 continue;
             }
             if (seq[0] == '[') {
-                if (shellReadFd(STDIN_FILENO, &seq[1], 1) <= 0) {
+                unsigned char csi[16];
+                size_t csi_len = 0;
+                bool csi_complete = false;
+                while (csi_len + 1 < sizeof(csi)) {
+                    unsigned char next = 0;
+                    if (shellReadFd(STDIN_FILENO, &next, 1) <= 0) {
+                        break;
+                    }
+                    csi[csi_len++] = next;
+                    if (next >= '@' && next <= '~') {
+                        csi_complete = true;
+                        break;
+                    }
+                }
+                if (!csi_complete || csi_len == 0) {
                     continue;
                 }
-                if (seq[1] == 'A') { /* Up arrow */
+                csi[csi_len] = '\0';
+                unsigned char final = csi[csi_len - 1];
+                if (final == 'A') { /* Up arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (!interactiveHistoryNavigateUp(prompt,
@@ -3464,7 +3480,7 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] == 'B') { /* Down arrow */
+                } else if (final == 'B') { /* Down arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (!interactiveHistoryNavigateDown(prompt,
@@ -3479,7 +3495,7 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] == 'C') { /* Right arrow */
+                } else if (final == 'C') { /* Right arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (cursor < length) {
@@ -3494,7 +3510,7 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] == 'D') { /* Left arrow */
+                } else if (final == 'D') { /* Left arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (cursor > 0) {
@@ -3509,11 +3525,24 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] >= '0' && seq[1] <= '9') {
-                    if (shellReadFd(STDIN_FILENO, &seq[2], 1) <= 0) {
-                        continue;
+                } else if (final == 'Z' || (final == '~' && csi_len >= 2 && csi[0] == '9')) {
+                    /* Some iOS/iPadOS keyboard paths emit Tab as CSI Z/backtab (or 9~). */
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
+                    if (!interactiveHandleTabCompletion(prompt,
+                                                        &buffer,
+                                                        &length,
+                                                        &cursor,
+                                                        &capacity,
+                                                        &displayed_length,
+                                                        &displayed_prompt_lines,
+                                                        &scratch)) {
+                        shellWriteStdoutChar('\a');
+                    } else {
+                        history_index = 0;
                     }
-                    if (seq[1] == '3' && seq[2] == '~') { /* Delete */
+                    continue;
+                } else if (final == '~' && csi_len >= 2 && csi[0] == '3') { /* Delete */
                         alt_dot_active = false;
                         alt_dot_offset = 0;
                         if (cursor < length) {
@@ -3531,9 +3560,9 @@ static char *readInteractiveLine(const char *prompt,
                         } else {
                             shellWriteStdoutChar('\a');
                         }
-                        continue;
-                    }
+                    continue;
                 }
+                continue;
             } else if (seq[0] == 'f' || seq[0] == 'F') { /* Alt+F */
                 alt_dot_active = false;
                 alt_dot_offset = 0;
