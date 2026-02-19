@@ -17,6 +17,10 @@ uses SysUtils;
 // when the window is closed or 'q' is pressed.
 
 const
+  DefaultWindowWidth = 800;
+  DefaultWindowHeight = 600;
+  PlayFieldBaseWidth = 800;
+  PlayFieldBaseHeight = 600;
   ConfiguredFontPath = '@PSCAL_INSTALL_ROOT_RESOLVED@/fonts/Roboto/static/Roboto-Regular.ttf';
   LegacyFontPath = '/usr/local/Pscal/fonts/Roboto/static/Roboto-Regular.ttf';
   RepoFontFallbacks: array[0..2] of string = (
@@ -64,8 +68,20 @@ begin
   ResolveFontPath := ConfiguredFontPath;
 end;
 
+function ClampInt(value, minValue, maxValue: Integer): Integer;
+begin
+  if value < minValue then
+    ClampInt := minValue
+  else if value > maxValue then
+    ClampInt := maxValue
+  else
+    ClampInt := value;
+end;
+
 var
   WindowWidth, WindowHeight : Integer;
+  PlayFieldWidth, PlayFieldHeight : Integer;
+  PlayFieldOffsetX, PlayFieldOffsetY : Integer;
   PlayerPaddleY, ComputerPaddleY : Integer;
   PaddleWidth, PaddleHeight : Integer;
   BallX, BallY : Integer;
@@ -88,6 +104,7 @@ var
 
   // Variables to hold score strings
   PlayerScoreStr, ComputerScoreStr : String;
+  ComputerScoreTextWidth, ComputerScoreTextHeight : Integer;
 
   // Variable for computer paddle speed
   ComputerPaddleSpeed : Integer;
@@ -123,9 +140,27 @@ var
 
 begin
   // --- Initialization ---
-  WindowWidth := 800;
-  WindowHeight := 600;
+  WindowWidth := DefaultWindowWidth;
+  WindowHeight := DefaultWindowHeight;
   InitGraph(WindowWidth, WindowHeight, 'Pascal Simple Pong');
+
+  if GetScreenSize(WindowWidth, WindowHeight) then
+  begin
+    if WindowWidth <= 0 then WindowWidth := DefaultWindowWidth;
+    if WindowHeight <= 0 then WindowHeight := DefaultWindowHeight;
+  end
+  else
+  begin
+    WindowWidth := GetMaxX + 1;
+    WindowHeight := GetMaxY + 1;
+    if WindowWidth <= 0 then WindowWidth := DefaultWindowWidth;
+    if WindowHeight <= 0 then WindowHeight := DefaultWindowHeight;
+  end;
+
+  PlayFieldWidth := ClampInt(PlayFieldBaseWidth, 1, WindowWidth);
+  PlayFieldHeight := ClampInt(PlayFieldBaseHeight, 1, WindowHeight);
+  PlayFieldOffsetX := (WindowWidth - PlayFieldWidth) div 2;
+  PlayFieldOffsetY := (WindowHeight - PlayFieldHeight) div 2;
 
   // Randomize the random number generator
   Randomize;
@@ -161,16 +196,16 @@ begin
   PaddleWidth := 10;
   PaddleHeight := 80;
 
-  PlayerPaddleY := WindowHeight div 2 - PaddleHeight div 2;
-  ComputerPaddleY := WindowHeight div 2 - PaddleHeight div 2;
+  PlayerPaddleY := PlayFieldHeight div 2 - PaddleHeight div 2;
+  ComputerPaddleY := PlayFieldHeight div 2 - PaddleHeight div 2;
 
   // <<< Initialize previous paddle positions >>>
   PrevPlayerPaddleY := PlayerPaddleY;
   PrevComputerPaddleY := ComputerPaddleY;
 
   BallSize := 8;
-  BallX := WindowWidth div 2;
-  BallY := WindowHeight div 2;
+  BallX := PlayFieldWidth div 2;
+  BallY := PlayFieldHeight div 2;
 
   BallSpeedX := 4;
   BallSpeedY := 4;
@@ -198,13 +233,13 @@ begin
     // --- Input ---
     GetMouseState(MouseX, MouseY, MouseButtons);
 
-    PlayerPaddleY := MouseY - PaddleHeight div 2;
+    PlayerPaddleY := (MouseY - PlayFieldOffsetY) - PaddleHeight div 2;
 
     // Clamp player paddle Y position
     if PlayerPaddleY < 0 then
       PlayerPaddleY := 0;
-    if PlayerPaddleY > WindowHeight - PaddleHeight then
-      PlayerPaddleY := WindowHeight - PaddleHeight;
+    if PlayerPaddleY > PlayFieldHeight - PaddleHeight then
+      PlayerPaddleY := PlayFieldHeight - PaddleHeight;
 
     // --- Game Logic ---
     BallX := BallX + BallSpeedX;
@@ -223,7 +258,7 @@ begin
 
       // Clamp the desired position within screen bounds before calculating movement
       if DesiredComputerPaddleY < 0 then DesiredComputerPaddleY := 0;
-      if DesiredComputerPaddleY > WindowHeight - PaddleHeight then DesiredComputerPaddleY := WindowHeight - PaddleHeight;
+      if DesiredComputerPaddleY > PlayFieldHeight - PaddleHeight then DesiredComputerPaddleY := PlayFieldHeight - PaddleHeight;
 
     end
     else // Ball is moving away from the computer, just keep paddle centered vertically
@@ -252,11 +287,11 @@ begin
     // Clamp computer paddle Y position after moving it
     if ComputerPaddleY < 0 then
       ComputerPaddleY := 0;
-    if ComputerPaddleY > WindowHeight - PaddleHeight then
-      ComputerPaddleY := WindowHeight - PaddleHeight;
+    if ComputerPaddleY > PlayFieldHeight - PaddleHeight then
+      ComputerPaddleY := PlayFieldHeight - PaddleHeight;
 
     // Collision Detection (Ball with Top/Bottom Walls)
-    if (BallY <= 0) or (BallY + BallSize >= WindowHeight) then
+    if (BallY <= 0) or (BallY + BallSize >= PlayFieldHeight) then
     begin
       BallSpeedY := -BallSpeedY;
       // Play Wall Hit Sound
@@ -291,7 +326,7 @@ begin
     end;
 
     // Computer Paddle Collision (right side)
-    if (BallX + BallSize >= WindowWidth - PaddleWidth) and
+    if (BallX + BallSize >= PlayFieldWidth - PaddleWidth) and
        (BallSpeedX > 0) and
        (BallY + BallSize >= ComputerPaddleY) and
        (BallY <= ComputerPaddleY + PaddleHeight)
@@ -322,8 +357,8 @@ begin
     begin
       ScoreComputer := ScoreComputer + 1;
 
-      BallX := WindowWidth div 2;
-      BallY := WindowHeight div 2;
+      BallX := PlayFieldWidth div 2;
+      BallY := PlayFieldHeight div 2;
 
       BallSpeedX := 4; // Serve towards player (adjust initial speed if needed)
       if Random(2) = 1 then BallSpeedY := 4 else BallSpeedY := -4; // Randomize initial vertical direction
@@ -335,12 +370,12 @@ begin
       end;
     end;
 
-    if (BallX + BallSize > WindowWidth) then // Ball went past computer paddle (player scores)
+    if (BallX + BallSize > PlayFieldWidth) then // Ball went past computer paddle (player scores)
     begin
       ScorePlayer := ScorePlayer + 1;
 
-      BallX := WindowWidth div 2;
-      BallY := WindowHeight div 2;
+      BallX := PlayFieldWidth div 2;
+      BallY := PlayFieldHeight div 2;
 
       BallSpeedX := -4; // Serve towards computer (adjust initial speed if needed)
       if Random(2) = 1 then BallSpeedY := 4 else BallSpeedY := -4; // Randomize initial vertical direction
@@ -358,14 +393,27 @@ begin
 
     SetRGBColor(255, 255, 255); // White
 
+    // Draw border around the centered play field
+    SetRGBColor(192, 192, 192);
+    DrawRect(PlayFieldOffsetX, PlayFieldOffsetY,
+             PlayFieldOffsetX + PlayFieldWidth - 1, PlayFieldOffsetY + PlayFieldHeight - 1);
+    if (PlayFieldWidth > 2) and (PlayFieldHeight > 2) then
+      DrawRect(PlayFieldOffsetX + 1, PlayFieldOffsetY + 1,
+               PlayFieldOffsetX + PlayFieldWidth - 2, PlayFieldOffsetY + PlayFieldHeight - 2);
+
+    SetRGBColor(255, 255, 255); // White
+
     //Draw the Player Paddle
-    FillRect(0, PlayerPaddleY, PaddleWidth - 1, PlayerPaddleY + PaddleHeight - 1);
+    FillRect(PlayFieldOffsetX, PlayFieldOffsetY + PlayerPaddleY,
+             PlayFieldOffsetX + PaddleWidth - 1, PlayFieldOffsetY + PlayerPaddleY + PaddleHeight - 1);
 
     //Draw the Computer Paddle
-    FillRect(WindowWidth - PaddleWidth, ComputerPaddleY, WindowWidth - 1, ComputerPaddleY + PaddleHeight - 1);
+    FillRect(PlayFieldOffsetX + PlayFieldWidth - PaddleWidth, PlayFieldOffsetY + ComputerPaddleY,
+             PlayFieldOffsetX + PlayFieldWidth - 1, PlayFieldOffsetY + ComputerPaddleY + PaddleHeight - 1);
 
     //Draw the Ball
-    FillRect(BallX, BallY, BallX + BallSize - 1, BallY + BallSize - 1);
+    FillRect(PlayFieldOffsetX + BallX, PlayFieldOffsetY + BallY,
+             PlayFieldOffsetX + BallX + BallSize - 1, PlayFieldOffsetY + BallY + BallSize - 1);
 
     //--- Draw Scores ---
     PlayerScoreStr := 'Player: ' + IntToStr(ScorePlayer);
@@ -373,8 +421,9 @@ begin
 
     SetRGBColor(255, 255, 0); // Yellow
 
-    OutTextXY(20, 20, PlayerScoreStr);
-    OutTextXY(WindowWidth - 150, 20, ComputerScoreStr);
+    OutTextXY(PlayFieldOffsetX + 20, PlayFieldOffsetY + 20, PlayerScoreStr);
+    GetTextSize(ComputerScoreStr, ComputerScoreTextWidth, ComputerScoreTextHeight);
+    OutTextXY(PlayFieldOffsetX + PlayFieldWidth - 20 - ComputerScoreTextWidth, PlayFieldOffsetY + 20, ComputerScoreStr);
 
     //--- End Draw Scores ---
 
@@ -394,14 +443,14 @@ begin
   // Display message based on exit reason or score limit
   if QuitRequested() then // Check if the user quit
   begin
-    OutTextXY(WindowWidth div 2 - 50, WindowHeight div 2, 'Quit');
+    OutTextXY(PlayFieldOffsetX + PlayFieldWidth div 2 - 50, PlayFieldOffsetY + PlayFieldHeight div 2, 'Quit');
   end
   else // Game ended because score limit reached
   begin
     if ScorePlayer >= MaxScore then
-      OutTextXY(WindowWidth div 2 - 100, WindowHeight div 2, 'Player Wins!')
+      OutTextXY(PlayFieldOffsetX + PlayFieldWidth div 2 - 100, PlayFieldOffsetY + PlayFieldHeight div 2, 'Player Wins!')
     else if ScoreComputer >= MaxScore then
-      OutTextXY(WindowWidth div 2 - 100, WindowHeight div 2, 'Computer Wins!');
+      OutTextXY(PlayFieldOffsetX + PlayFieldWidth div 2 - 100, PlayFieldOffsetY + PlayFieldHeight div 2, 'Computer Wins!');
   end;
 
   UpdateScreen; // Show the final screen message
