@@ -39,7 +39,7 @@ For additional examples and the full specification, see `rea_language_reference.
 
 Rea (pronounced like the English word "Area" without the leading A) was my best friend, wife and near 
 constant companion for twenty five plus years.  She passed in January of 2021 from complications related 
-to Creutzfeldt-Jakob Disease (CJD), and increadily rare degenerative brain disease that strikes about 
-four hundred people a year in the US, about one in a million.
+to Creutzfeldt-Jakob Disease (CJD), an increadily rare degenerative brain disease that strikes about 
+four hundred people a year in the US, roughly one in a million.
 
 If you find this code useful, please consider a donation to the CJD foundation in her name (Rea Simpson).
