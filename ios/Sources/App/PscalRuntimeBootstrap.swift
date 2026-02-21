@@ -646,6 +646,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
             tabInitLog("runtime=\(runtimeId) start skipped (already started)")
             return
         }
+        let persistedRunInitSetting = UserDefaults.standard.bool(
+            forKey: "com.pscal.terminal.runInitAsPid1OnFirstTab"
+        )
+        let runInitSetting = TerminalFontSettings.shared.runInitAsPid1OnFirstTab || persistedRunInitSetting
+        let launchInitAsPid1 = (self === PscalRuntimeBootstrap.shared) && runInitSetting
+        let launchArgs = launchInitAsPid1 ? ["init", "--service-mode"] : ["exsh"]
+        let launchCommand = launchArgs.joined(separator: " ")
+        tabInitLog("runtime=\(runtimeId) launchInit=\(launchInitAsPid1) persisted=\(persistedRunInitSetting) shared=\(self === PscalRuntimeBootstrap.shared)")
         tabInitLog("runtime=\(runtimeId) start begin")
         stateQueue.async { self.promptKickPending = true }
         outputDrainQueue.async { [weak self] in
@@ -653,7 +661,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         DispatchQueue.main.async {
             self.terminalBuffer.reset()
-            self.screenText = NSAttributedString(string: "Launching exsh...")
+            self.screenText = NSAttributedString(string: "Launching \(launchCommand)...")
             self.exitStatus = nil
             self.terminalBackgroundColor = UIColor.systemBackground
             self.cursorInfo = nil
@@ -703,7 +711,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
             self.startOutputDrain()
 
-            let args = ["exsh"]
+            let args = launchArgs
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
             let argc = Int32(cArgs.count)
             cArgs.append(nil)

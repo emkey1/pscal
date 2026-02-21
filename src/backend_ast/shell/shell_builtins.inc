@@ -10253,6 +10253,34 @@ static const char *shellPsStateForEntry(const ShellJob *job, const VProcSnapshot
     return "running";
 }
 
+static const char *shellPsCommandForEntry(const ShellJob *job, const VProcSnapshot *snap) {
+    if (snap && snap->command[0]) {
+        return snap->command;
+    }
+    const int shell_pid = vprocGetShellSelfPid();
+    if (snap && snap->pid == shell_pid) {
+        if (snap->comm[0]) {
+            return snap->comm;
+        }
+        if (job && job->command && job->command[0]) {
+            return job->command;
+        }
+        return "shell";
+    }
+    if (job && job->command && job->command[0]) {
+        return job->command;
+    }
+    if (snap) {
+        if (snap->comm[0]) {
+            return snap->comm;
+        }
+        if (snap->command[0]) {
+            return snap->command;
+        }
+    }
+    return "task";
+}
+
 static void shellPsPrintLine(pid_t pid, pid_t pgid, const char *state, int utime_cs, int stime_cs, const char *command) {
     char pgid_buf[16];
     if (pgid > 0) {
@@ -11362,10 +11390,7 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
                 }
                 ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
                 pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
-                const char *cmd = (job && job->command) ? job->command
-                                : (snap->command[0] ? snap->command
-                                : (snap->comm[0] ? snap->comm
-                                : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+                const char *cmd = shellPsCommandForEntry(job, snap);
                 const char *state = shellPsStateForEntry(job, snap);
                 shellPsPrintLineTree(snap, pgid, state, cmd, row->depth);
                 if (seen && seen_count < seen_cap) {
@@ -11383,10 +11408,7 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
             }
             ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
             pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
-            const char *cmd = (job && job->command) ? job->command
-                            : (snap->command[0] ? snap->command
-                            : (snap->comm[0] ? snap->comm
-                            : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+            const char *cmd = shellPsCommandForEntry(job, snap);
             const char *state = shellPsStateForEntry(job, snap);
             shellPsPrintLine((pid_t)snap->pid, pgid, state, snap->rusage_utime, snap->rusage_stime, cmd);
             if (seen && seen_count < seen_cap) {
