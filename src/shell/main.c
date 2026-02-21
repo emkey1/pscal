@@ -4298,6 +4298,9 @@ extern void PSCALRuntimeUnregisterSessionContext(uint64_t session_id) __attribut
 extern PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) __attribute__((weak));
 extern void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) __attribute__((weak));
 extern void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx) __attribute__((weak));
+extern int smallclueMain(int argc, char **argv) __attribute__((weak));
+typedef struct SmallclueApplet SmallclueApplet;
+extern const SmallclueApplet *smallclueFindApplet(const char *name) __attribute__((weak));
 
 static void shellSessionNotifyExit(uint64_t session_id, int status) {
     if (pscalRuntimeShellSessionExited) {
@@ -4371,6 +4374,33 @@ static bool shellIoDebugEnabled(void) {
         return false;
     }
     return strcmp(env, "0") != 0;
+}
+
+static int shellRunSessionArgv(int argc, char **argv) {
+    const char *arg0 = (argc > 0 && argv && argv[0]) ? argv[0] : "exsh";
+    const char *slash = strrchr(arg0, '/');
+    const char *call_name = (slash && slash[1] != '\0') ? slash + 1 : arg0;
+
+#if defined(PSCAL_TARGET_IOS)
+    int self_pid = vprocGetPidShim();
+    if (self_pid > 0 && call_name && call_name[0] != '\0') {
+        vprocSetCommandLabel(self_pid, call_name);
+    }
+#endif
+
+    if (strcmp(call_name, "exsh") == 0 ||
+        strcmp(call_name, "sh") == 0 ||
+        strcmp(call_name, "shell") == 0) {
+        return exsh_main(argc, argv);
+    }
+
+    if (&smallclueMain != NULL && &smallclueFindApplet != NULL) {
+        if (strcmp(call_name, "smallclue") == 0 || smallclueFindApplet(call_name) != NULL) {
+            return smallclueMain(argc, argv);
+        }
+    }
+
+    return exsh_main(argc, argv);
 }
 
 static void *shellRunSessionThread(void *arg) {
@@ -4450,7 +4480,7 @@ static void *shellRunSessionThread(void *arg) {
     if (session_ctx) {
         ShellRuntimeState *prev_ctx = shellRuntimeActivateContext(session_ctx);
         shellRuntimeInitSignals();
-        status = exsh_main(ctx->argc, ctx->argv);
+        status = shellRunSessionArgv(ctx->argc, ctx->argv);
         shellRuntimeActivateContext(prev_ctx);
         if (session_ctx_owned) {
             shellRuntimeDestroyContext(session_ctx);

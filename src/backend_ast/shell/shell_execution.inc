@@ -1437,7 +1437,9 @@ static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
         }
         return false;
     }
-    const char *name = cmd->argv[0];
+    const char *name_raw = cmd->argv[0];
+    char lookup_buf[PATH_MAX];
+    const char *name = shellCommandLookupName(name_raw, lookup_buf, sizeof(lookup_buf));
     if (smallclueFindApplet(name) != NULL) {
         if (dbg) {
             fprintf(stderr, "[pipe-worker] prefer=1 reason=smallclue cmd=%s\n", name);
@@ -1458,14 +1460,14 @@ static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
         }
         return false;
     }
-    if (shellCommandResolvesToShebang(name)) {
+    if (shellCommandResolvesToShebang(name_raw)) {
         if (dbg) {
-            fprintf(stderr, "[pipe-worker] prefer=1 reason=shebang cmd=%s\n", name);
+            fprintf(stderr, "[pipe-worker] prefer=1 reason=shebang cmd=%s\n", name_raw);
         }
         return true;
     }
     if (dbg) {
-        fprintf(stderr, "[pipe-worker] prefer=0 reason=default cmd=%s\n", name);
+        fprintf(stderr, "[pipe-worker] prefer=0 reason=default cmd=%s\n", name_raw);
     }
     return false;
 }
@@ -3780,15 +3782,19 @@ static int shellRunBuiltinInProcess(VM *vm,
     if (!builtin_ran) {
         bool kill_dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
         bool pipe_dbg = getenv("PSCALI_PIPE_DEBUG") != NULL;
-        VmBuiltinFn handler = getVmBuiltinHandler(cmd && cmd->argv ? cmd->argv[0] : NULL);
+        const char *cmd_name_raw = (cmd && cmd->argv) ? cmd->argv[0] : NULL;
+        char lookup_buf[PATH_MAX];
+        const char *cmd_name = shellCommandLookupName(cmd_name_raw, lookup_buf, sizeof(lookup_buf));
+        VmBuiltinFn handler = getVmBuiltinHandler(cmd_name);
         if (kill_dbg) {
             fprintf(stderr, "[exec] lookup cmd=%s handler=%p\n",
                     (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
                     (void *)handler);
         }
         if (pipe_dbg) {
-            fprintf(stderr, "[exec] run cmd=%s argc=%zu handler=%p\n",
+            fprintf(stderr, "[exec] run cmd=%s lookup=%s argc=%zu handler=%p\n",
                     (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
+                    cmd_name ? cmd_name : "<nil>",
                     cmd ? cmd->argc : 0,
                     (void *)handler);
         }
@@ -3812,10 +3818,11 @@ static int shellRunBuiltinInProcess(VM *vm,
         } else {
 #if defined(PSCAL_TARGET_IOS)
             /* Fall back to smallclue applets executed in-process when no shell builtin exists. */
-            const SmallclueApplet *applet = smallclueFindApplet(cmd && cmd->argv ? cmd->argv[0] : NULL);
+            const SmallclueApplet *applet = smallclueFindApplet(cmd_name);
             if (pipe_dbg) {
-                fprintf(stderr, "[run-builtin] smallclue lookup name=%s applet=%p\n",
+                fprintf(stderr, "[run-builtin] smallclue lookup name=%s lookup=%s applet=%p\n",
                         (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",
+                        cmd_name ? cmd_name : "<nil>",
                         (void *)applet);
             }
             if (applet) {
@@ -3824,8 +3831,12 @@ static int shellRunBuiltinInProcess(VM *vm,
                 if (argv_copy) {
                     bool ok = true;
                     for (int i = 0; i < argc; ++i) {
-                        if (cmd->argv[i]) {
-                            argv_copy[i] = strdup(cmd->argv[i]);
+                        const char *src_arg = cmd->argv[i];
+                        if (i == 0 && cmd_name && *cmd_name) {
+                            src_arg = cmd_name;
+                        }
+                        if (src_arg) {
+                            argv_copy[i] = strdup(src_arg);
                             if (!argv_copy[i]) {
                                 ok = false;
                                 break;
@@ -4809,7 +4820,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     bool prefer_worker = shellShouldRunCommandInForegroundWorker(cmd);
     bool force_pipeline_builtin = false;
     if (cmd->argc > 0 && !shellCommandIsExecBuiltin(cmd)) {
-        const char *cmd_name = (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : NULL;
+        const char *cmd_name_raw = (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : NULL;
+        char lookup_buf[PATH_MAX];
+        const char *cmd_name = shellCommandLookupName(cmd_name_raw, lookup_buf, sizeof(lookup_buf));
         if (shellIsRuntimeBuiltin(cmd_name) || smallclueFindApplet(cmd_name) != NULL) {
             force_pipeline_builtin = true;
             /*
@@ -4945,7 +4958,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
     bool previous_local_scope_flag = gShellRuntime.local_scope_active;
     bool localizes_assignments = false;
     if (cmd->argc > 0 && cmd->argv && cmd->argv[0]) {
-        const char *canon = shellBuiltinCanonicalName(cmd->argv[0]);
+        char lookup_buf[PATH_MAX];
+        const char *lookup_name = shellCommandLookupName(cmd->argv[0], lookup_buf, sizeof(lookup_buf));
+        const char *canon = shellBuiltinCanonicalName(lookup_name);
         if (canon && (strcmp(canon, "local") == 0 ||
                       strcmp(canon, "declare") == 0 ||
                       strcmp(canon, "typeset") == 0)) {

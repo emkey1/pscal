@@ -393,13 +393,19 @@ begin
 
     SetRGBColor(255, 255, 255); // White
 
-    // Draw border around the centered play field
+    // Draw top/bottom border around the centered play field (no left/right walls)
     SetRGBColor(192, 192, 192);
-    DrawRect(PlayFieldOffsetX, PlayFieldOffsetY,
-             PlayFieldOffsetX + PlayFieldWidth - 1, PlayFieldOffsetY + PlayFieldHeight - 1);
-    if (PlayFieldWidth > 2) and (PlayFieldHeight > 2) then
-      DrawRect(PlayFieldOffsetX + 1, PlayFieldOffsetY + 1,
-               PlayFieldOffsetX + PlayFieldWidth - 2, PlayFieldOffsetY + PlayFieldHeight - 2);
+    FillRect(PlayFieldOffsetX, PlayFieldOffsetY,
+             PlayFieldOffsetX + PlayFieldWidth - 1, PlayFieldOffsetY);
+    if PlayFieldHeight > 1 then
+      FillRect(PlayFieldOffsetX, PlayFieldOffsetY + PlayFieldHeight - 1,
+               PlayFieldOffsetX + PlayFieldWidth - 1, PlayFieldOffsetY + PlayFieldHeight - 1);
+    if PlayFieldHeight > 2 then
+      FillRect(PlayFieldOffsetX, PlayFieldOffsetY + 1,
+               PlayFieldOffsetX + PlayFieldWidth - 1, PlayFieldOffsetY + 1);
+    if PlayFieldHeight > 3 then
+      FillRect(PlayFieldOffsetX, PlayFieldOffsetY + PlayFieldHeight - 2,
+               PlayFieldOffsetX + PlayFieldWidth - 1, PlayFieldOffsetY + PlayFieldHeight - 2);
 
     SetRGBColor(255, 255, 255); // White
 

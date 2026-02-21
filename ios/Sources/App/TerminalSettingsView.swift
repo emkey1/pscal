@@ -207,6 +207,28 @@ struct TerminalSettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
+                Section(header: Text("Init (Service Mode)")) {
+                    Toggle(
+                        "Run init in first tab",
+                        isOn: Binding(
+                            get: { settings.runInitAsPid1OnFirstTab },
+                            set: { settings.updateRunInitAsPid1OnFirstTab($0) }
+                        )
+                    )
+
+                    Text("When enabled, PSCAL starts tab 1 with init --service-mode as the first process.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+
+                    Text("Default is off. Restart PSCAL to apply.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+
+                    Text("Init is non-interactive; open another tab for a shell prompt.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
                 Section {
                     VStack(spacing: 10) {
                         HStack(spacing: 6) {

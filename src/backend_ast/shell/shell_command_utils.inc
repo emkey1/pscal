@@ -45,6 +45,49 @@ static const char *shellVisiblePath(const char *path, char *buffer, size_t buffe
     return path;
 }
 #endif
+
+static const char *shellCommandLookupName(const char *name,
+                                          char *buffer,
+                                          size_t buffer_size) {
+    if (!name || !*name) {
+        return name;
+    }
+
+    const char *candidate = name;
+#if defined(PSCAL_TARGET_IOS)
+    if (name[0] == '/' &&
+        buffer &&
+        buffer_size > 0 &&
+        pathTruncateStrip(name, buffer, buffer_size) &&
+        buffer[0] == '/') {
+        candidate = buffer;
+    }
+#else
+    (void)buffer;
+    (void)buffer_size;
+#endif
+
+    static const char *prefixes[] = {
+        "/usr/bin/",
+        "/bin/",
+        "/private/usr/bin/",
+        "/private/bin/"
+    };
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        const char *prefix = prefixes[i];
+        size_t prefix_len = strlen(prefix);
+        if (strncmp(candidate, prefix, prefix_len) != 0) {
+            continue;
+        }
+        const char *leaf = candidate + prefix_len;
+        if (!*leaf || strchr(leaf, '/') != NULL) {
+            return name;
+        }
+        return leaf;
+    }
+    return name;
+}
+
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
 static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
 static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal);

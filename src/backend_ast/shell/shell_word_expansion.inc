@@ -2505,7 +2505,8 @@ static bool shellDispatchIOSFrontendBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || !cmd->argv || !cmd->argv[0]) {
         return false;
     }
-    const char *name = cmd->argv[0];
+    char lookup_buf[PATH_MAX];
+    const char *name = shellCommandLookupName(cmd->argv[0], lookup_buf, sizeof(lookup_buf));
     VmBuiltinFn handler = NULL;
     if (strcasecmp(name, "clike") == 0) {
         handler = vmBuiltinShellClike;
@@ -2751,10 +2752,12 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || cmd->argc == 0 || !cmd->argv[0] || *cmd->argv[0] == '\0') {
         return false;
     }
-    const char *name = cmd->argv[0];
+    const char *name_raw = cmd->argv[0];
     if (!cmd->ignore_functions && shellInvokeFunction(vm, cmd)) {
         return true;
     }
+    char lookup_buf[PATH_MAX];
+    const char *name = shellCommandLookupName(name_raw, lookup_buf, sizeof(lookup_buf));
     const char *canonical = shellBuiltinCanonicalName(name);
     const char *lookup = canonical ? canonical : name;
     if (shellRuntimeBuiltinDisabled(lookup)) {

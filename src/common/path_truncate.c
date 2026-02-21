@@ -59,6 +59,19 @@ static bool g_procDevicePrunePending = false;
 static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncateMutex); }
 static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
 static void pathTruncateEnsureDir(const char *path);
+static void pathTruncateProvisionUsrBin(const char *prefix);
+
+typedef struct PathTruncateSmallclueApplet {
+    const char *name;
+    int (*entry)(int argc, char **argv);
+    const char *description;
+} PathTruncateSmallclueApplet;
+
+#if defined(__APPLE__)
+extern const PathTruncateSmallclueApplet *smallclueGetApplets(size_t *count) __attribute__((weak_import));
+#else
+extern const PathTruncateSmallclueApplet *smallclueGetApplets(size_t *count) __attribute__((weak));
+#endif
 
 static uint64_t pathTruncateMonotonicMs(void) {
     struct timespec ts;
@@ -234,6 +247,170 @@ static void pathTruncateEnsureSymlink(const char *link_path, const char *target)
     }
     if (rename(temp_path, link_path) != 0) {
         unlink(temp_path);
+    }
+}
+
+static bool pathTruncatePathIsUsrBinTree(const char *path) {
+    static const char *kUsrBin = "/usr/bin";
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    size_t len = strlen(kUsrBin);
+    if (strncmp(path, kUsrBin, len) != 0) {
+        return false;
+    }
+    return path[len] == '\0' || path[len] == '/';
+}
+
+static void pathTruncateProvisionUsrBinLink(const char *usr_bin_dir,
+                                            const char *name,
+                                            const char *target) {
+    if (!usr_bin_dir || !name || !target || name[0] == '\0' || target[0] == '\0') {
+        return;
+    }
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0 || strchr(name, '/')) {
+        return;
+    }
+    char link_path[PATH_MAX];
+    int written = snprintf(link_path, sizeof(link_path), "%s/%s", usr_bin_dir, name);
+    if (written <= 0 || (size_t)written >= sizeof(link_path)) {
+        return;
+    }
+    pathTruncateEnsureSymlink(link_path, target);
+}
+
+typedef struct PathTruncateFrontendAlias {
+    const char *name;
+    const char *target;
+} PathTruncateFrontendAlias;
+
+static const PathTruncateFrontendAlias kPathTruncateFrontendAliases[] = {
+    {"pascal", "/bin/pscal_tool_runner"},
+    {"clike", "/bin/pscal_tool_runner"},
+    {"rea", "/bin/pscal_tool_runner"},
+    {"pscalvm", "/bin/pscal_tool_runner"},
+    {"pscaljson2bc", "/bin/pscal_tool_runner"},
+#ifdef BUILD_DASCAL
+    {"dascal", "/bin/pscal_tool_runner"},
+#endif
+#ifdef BUILD_PSCALD
+    {"pscald", "/bin/pscal_tool_runner"},
+    {"pscalasm", "/bin/pscal_tool_runner"},
+#endif
+#if defined(PSCAL_TARGET_IOS)
+    {"ssh", "/bin/pscal_tool_runner"},
+    {"scp", "/bin/pscal_tool_runner"},
+    {"sftp", "/bin/pscal_tool_runner"},
+#endif
+    {"exsh", "/bin/exsh"},
+    {"sh", "/bin/exsh"},
+    {"smallclue", "/bin/exsh"},
+};
+
+static bool pathTruncateUsrBinIsFrontendAlias(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(kPathTruncateFrontendAliases) / sizeof(kPathTruncateFrontendAliases[0]); ++i) {
+        if (strcmp(kPathTruncateFrontendAliases[i].name, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool pathTruncateVirtualBinHasName(const char *prefix, const char *name) {
+    if (!prefix || prefix[0] != '/' || !name || name[0] == '\0') {
+        return false;
+    }
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0 || strchr(name, '/')) {
+        return false;
+    }
+    char path[PATH_MAX];
+    int written = snprintf(path, sizeof(path), "%s/bin/%s", prefix, name);
+    if (written <= 0 || (size_t)written >= sizeof(path)) {
+        return false;
+    }
+    struct stat st;
+    return lstat(path, &st) == 0;
+}
+
+static void pathTruncateProvisionUsrBinFromBinDirectory(const char *prefix, const char *usr_bin_dir) {
+    if (!prefix || prefix[0] != '/' || !usr_bin_dir || usr_bin_dir[0] == '\0') {
+        return;
+    }
+    char host_bin[PATH_MAX];
+    int written = snprintf(host_bin, sizeof(host_bin), "%s/bin", prefix);
+    if (written <= 0 || (size_t)written >= sizeof(host_bin)) {
+        return;
+    }
+    DIR *dir = opendir(host_bin);
+    if (!dir) {
+        return;
+    }
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        const char *name = entry->d_name;
+        if (!name || name[0] == '\0') {
+            continue;
+        }
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0 || strchr(name, '/')) {
+            continue;
+        }
+        char target[PATH_MAX];
+        int target_written = snprintf(target, sizeof(target), "/bin/%s", name);
+        if (target_written <= 0 || (size_t)target_written >= sizeof(target)) {
+            continue;
+        }
+        pathTruncateProvisionUsrBinLink(usr_bin_dir, name, target);
+    }
+    closedir(dir);
+}
+
+static void pathTruncateProvisionUsrBin(const char *prefix) {
+    if (!prefix || prefix[0] != '/') {
+        return;
+    }
+    char usr_dir[PATH_MAX];
+    int written = snprintf(usr_dir, sizeof(usr_dir), "%s/usr", prefix);
+    if (written <= 0 || (size_t)written >= sizeof(usr_dir)) {
+        return;
+    }
+    pathTruncateEnsureDir(usr_dir);
+
+    char usr_bin_dir[PATH_MAX];
+    written = snprintf(usr_bin_dir, sizeof(usr_bin_dir), "%s/usr/bin", prefix);
+    if (written <= 0 || (size_t)written >= sizeof(usr_bin_dir)) {
+        return;
+    }
+    pathTruncateEnsureDir(usr_bin_dir);
+
+    pathTruncateProvisionUsrBinFromBinDirectory(prefix, usr_bin_dir);
+
+    for (size_t i = 0; i < sizeof(kPathTruncateFrontendAliases) / sizeof(kPathTruncateFrontendAliases[0]); ++i) {
+        const PathTruncateFrontendAlias *alias = &kPathTruncateFrontendAliases[i];
+        if (pathTruncateVirtualBinHasName(prefix, alias->name)) {
+            continue;
+        }
+        pathTruncateProvisionUsrBinLink(usr_bin_dir, alias->name, alias->target);
+    }
+
+    if (smallclueGetApplets) {
+        size_t applet_count = 0;
+        const PathTruncateSmallclueApplet *applets = smallclueGetApplets(&applet_count);
+        for (size_t i = 0; applets && i < applet_count; ++i) {
+            const char *name = applets[i].name;
+            if (!name || name[0] == '\0') {
+                continue;
+            }
+            if (pathTruncateUsrBinIsFrontendAlias(name)) {
+                continue;
+            }
+            if (pathTruncateVirtualBinHasName(prefix, name)) {
+                continue;
+            }
+            pathTruncateProvisionUsrBinLink(usr_bin_dir, name, "/bin/exsh");
+        }
     }
 }
 
@@ -3622,6 +3799,8 @@ void pathTruncateApplyEnvironment(const char *prefix) {
         pathTruncateProvisionDev(prefix);
         /* Seed a minimal /proc tree with cpuinfo. */
         pathTruncateProvisionProc(prefix);
+        /* Seed a virtual /usr/bin catalog for frontends and smallclue applets. */
+        pathTruncateProvisionUsrBin(prefix);
     } else {
         unsetenv("PATH_TRUNCATE");
     }
@@ -3718,6 +3897,9 @@ static bool pathTruncateMatchesEnvRoot(const char *path, const char *env_name) {
 
 static bool pathTruncateIsSystemPath(const char *path) {
     if (!path || path[0] != '/') {
+        return false;
+    }
+    if (pathTruncatePathIsUsrBinTree(path)) {
         return false;
     }
     const char *prefixes[] = { "/System", "/usr", "/Library", "/Applications" };

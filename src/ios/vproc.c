@@ -5837,8 +5837,23 @@ static bool vprocPathIsDevPtsRoot(const char *path) {
     return vprocPathMatches(path, "/dev/pts") || vprocPathMatches(path, "/private/dev/pts");
 }
 
+static bool vprocPathIsUsrBinTree(const char *path) {
+    static const char *kUsrBin = "/usr/bin";
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    size_t len = strlen(kUsrBin);
+    if (strncmp(path, kUsrBin, len) != 0) {
+        return false;
+    }
+    return path[len] == '\0' || path[len] == '/';
+}
+
 static bool vprocPathIsSystemPath(const char *path) {
     if (!path || path[0] != '/') {
+        return false;
+    }
+    if (vprocPathIsUsrBinTree(path)) {
         return false;
     }
     const char *prefixes[] = { "/System", "/usr", "/Library", "/Applications" };

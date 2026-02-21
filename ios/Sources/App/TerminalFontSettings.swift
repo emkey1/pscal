@@ -23,6 +23,7 @@ final class TerminalFontSettings: ObservableObject {
     private let editorWindowKey = "com.pscal.terminal.nextviWindow"
     private let locationDeviceKey = "com.pscal.terminal.locationDeviceEnabled"
     private let initialTabCountKey = "com.pscal.terminal.initialTabCount"
+    private let runInitAsPid1OnFirstTabKey = "com.pscal.terminal.runInitAsPid1OnFirstTab"
 
     static let editorWindowBuildEnabled: Bool = {
 #if EDITOR_FLOATING_WINDOW
@@ -46,6 +47,7 @@ final class TerminalFontSettings: ObservableObject {
     @Published private(set) var pathTruncationPath: String = ""
     @Published var locationDeviceEnabled: Bool = false
     @Published var initialTabCount: Int = 1
+    @Published var runInitAsPid1OnFirstTab: Bool = false
 
     @Published private(set) var selectedFontID: String
     @Published private(set) var editorWindowEnabled: Bool
@@ -131,6 +133,12 @@ final class TerminalFontSettings: ObservableObject {
             initialTabCount = TerminalFontSettings.clampInitialTabCount(storedCount)
         } else {
             initialTabCount = 1
+        }
+
+        if UserDefaults.standard.object(forKey: runInitAsPid1OnFirstTabKey) != nil {
+            runInitAsPid1OnFirstTab = UserDefaults.standard.bool(forKey: runInitAsPid1OnFirstTabKey)
+        } else {
+            runInitAsPid1OnFirstTab = false
         }
 
         applyPathTruncationPreferences()
@@ -311,6 +319,13 @@ final class TerminalFontSettings: ObservableObject {
         locationDeviceEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: locationDeviceKey)
         LocationDeviceProvider.shared.setDeviceEnabled(enabled)
+    }
+
+    func updateRunInitAsPid1OnFirstTab(_ enabled: Bool) {
+        guard enabled != runInitAsPid1OnFirstTab else { return }
+        runInitAsPid1OnFirstTab = enabled
+        UserDefaults.standard.set(enabled, forKey: runInitAsPid1OnFirstTabKey)
+        notifyPreferencesChange()
     }
 
     func useDocumentsPathForTruncation() {
