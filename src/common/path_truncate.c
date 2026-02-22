@@ -2916,9 +2916,10 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
 
     char mounts_path[PATH_MAX];
     char mountinfo_path[PATH_MAX];
-    struct statfs sfs;
     const char *mnt_from = "rootfs";
     const char *fs_type = "ext4";
+#if defined(__APPLE__)
+    struct statfs sfs;
     if (statfs("/", &sfs) == 0) {
         if (sfs.f_mntfromname[0]) {
             mnt_from = sfs.f_mntfromname;
@@ -2927,6 +2928,7 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
             fs_type = sfs.f_fstypename;
         }
     }
+#endif
     if (snprintf(mounts_path, sizeof(mounts_path), "%s/mounts", procdir) > 0) {
         FILE *f = fopen(mounts_path, "w");
         if (f) {
