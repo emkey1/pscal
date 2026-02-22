@@ -302,6 +302,21 @@ file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openssh")
 configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
     "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
+set(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR "")
+if(NOT PSCAL_PLATFORM_IOS)
+    find_path(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR
+        NAMES rpc/types.h
+        PATH_SUFFIXES "" tirpc)
+    if(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR)
+        message(STATUS "OpenSSH: using rpc/types.h from ${PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR}")
+    else()
+        file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
+        string(REPLACE "#define HAVE_RPC_TYPES_H 1" "/* #undef HAVE_RPC_TYPES_H */"
+            _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+        file(WRITE "${CMAKE_BINARY_DIR}/generated/openssh/config.h" "${_pscal_openssh_config_h}")
+        message(STATUS "OpenSSH: rpc/types.h not found; disabling HAVE_RPC_TYPES_H")
+    endif()
+endif()
 
 # Resolve the final runtime destination so install rules can write directly to
 # either an absolute override or the default path under the chosen prefix.
@@ -1209,11 +1224,16 @@ set(PSCAL_OPENSSH_SOURCES
 )
 
 list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENSSH_SOURCES})
-set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
-    APPEND PROPERTY INCLUDE_DIRECTORIES
+set(_pscal_openssh_include_dirs
     "${CMAKE_BINARY_DIR}/generated/openssh"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
-    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat}")
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat")
+if(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR)
+    list(APPEND _pscal_openssh_include_dirs "${PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR}")
+endif()
+set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
+    APPEND PROPERTY INCLUDE_DIRECTORIES
+    ${_pscal_openssh_include_dirs})
 set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     APPEND PROPERTY COMPILE_OPTIONS
     -Wno-deprecated-declarations
