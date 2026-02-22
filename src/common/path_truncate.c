@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <sys/un.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -27,7 +28,6 @@
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #include <sys/sysctl.h>
-#include <sys/utsname.h>
 #include <sys/mount.h>
 #include <mach-o/dyld.h>
 #if !TARGET_OS_IPHONE
