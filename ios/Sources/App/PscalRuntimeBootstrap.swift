@@ -702,6 +702,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
             DispatchQueue.main.async {
                 LocationDeviceProvider.shared.start()
                 self.editorBridge.deactivate()
+#if EDITOR_FLOATING_WINDOW
+                EditorWindowManager.shared.markRuntimeEditorInactive(self)
+#endif
             }
 
             self.handlerContext = Unmanaged.passRetained(self).toOpaque()
@@ -2228,6 +2231,7 @@ func pscalTerminalBegin(_ columns: Int32, _ rows: Int32) {
     bootstrap.editorBridge.activate(columns: Int(columns), rows: Int(rows))
     bootstrap.setEditorModeActive(true)
 #if EDITOR_FLOATING_WINDOW
+    EditorWindowManager.shared.markRuntimeEditorActive(bootstrap)
     EditorWindowManager.shared.showWindow()
 #endif
 }
@@ -2241,6 +2245,7 @@ func pscalTerminalEnd() {
     bootstrap.editorBridge.deactivate()
     bootstrap.setEditorModeActive(false)
 #if EDITOR_FLOATING_WINDOW
+    EditorWindowManager.shared.markRuntimeEditorInactive(bootstrap)
     EditorWindowManager.shared.hideWindow()
 #endif
 }

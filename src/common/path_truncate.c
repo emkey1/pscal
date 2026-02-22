@@ -163,6 +163,80 @@ static bool pathTruncateIsProcRequestPath(const char *path) {
            pathTruncateProcPrefixMatch(path, "/private/proc");
 }
 
+static bool pathTruncateParseProcPidRequest(const char *request_path,
+                                            int *out_pid,
+                                            bool *out_is_self,
+                                            bool *out_exact_dir) {
+    if (out_pid) {
+        *out_pid = -1;
+    }
+    if (out_is_self) {
+        *out_is_self = false;
+    }
+    if (out_exact_dir) {
+        *out_exact_dir = false;
+    }
+    if (!request_path) {
+        return false;
+    }
+
+    const char *suffix = NULL;
+    if (pathTruncateProcPrefixMatch(request_path, "/proc")) {
+        suffix = request_path + strlen("/proc");
+    } else if (pathTruncateProcPrefixMatch(request_path, "/private/proc")) {
+        suffix = request_path + strlen("/private/proc");
+    } else {
+        return false;
+    }
+
+    while (*suffix == '/') {
+        suffix++;
+    }
+    if (*suffix == '\0') {
+        return false;
+    }
+
+    const char *segment_start = suffix;
+    while (*suffix && *suffix != '/') {
+        suffix++;
+    }
+    size_t segment_len = (size_t)(suffix - segment_start);
+    while (*suffix == '/') {
+        suffix++;
+    }
+    bool exact_dir = (*suffix == '\0');
+    if (out_exact_dir) {
+        *out_exact_dir = exact_dir;
+    }
+
+    if (segment_len == 4 && strncmp(segment_start, "self", 4) == 0) {
+        if (out_is_self) {
+            *out_is_self = true;
+        }
+        return true;
+    }
+
+    int pid = 0;
+    for (size_t i = 0; i < segment_len; ++i) {
+        unsigned char ch = (unsigned char)segment_start[i];
+        if (!isdigit(ch)) {
+            return false;
+        }
+        int digit = (int)(ch - '0');
+        if (pid > ((INT_MAX - digit) / 10)) {
+            return false;
+        }
+        pid = (pid * 10) + digit;
+    }
+    if (pid <= 0) {
+        return false;
+    }
+    if (out_pid) {
+        *out_pid = pid;
+    }
+    return true;
+}
+
 static void pathTruncateProcStripContainerPrefix(const char *prefix,
                                                  const char *input,
                                                  char *out,
@@ -2112,6 +2186,10 @@ static void pathTruncateEnsureProcPidDir(const char *procdir, int pid) {
     if (snprintf(pid_dir, sizeof(pid_dir), "%s/%d", procdir, pid) <= 0) {
         return;
     }
+    struct stat st;
+    if (stat(pid_dir, &st) == 0 && S_ISDIR(st.st_mode)) {
+        return;
+    }
     pathTruncateEnsureDir(pid_dir);
 }
 
@@ -2574,6 +2652,46 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
          strcmp(request_path, "/proc/") == 0 ||
          strcmp(request_path, "/private/proc") == 0 ||
          strcmp(request_path, "/private/proc/") == 0);
+    int request_proc_pid = -1;
+    bool request_proc_self = false;
+    bool request_proc_exact_dir = false;
+    bool request_proc_pid_path = pathTruncateParseProcPidRequest(request_path,
+                                                                 &request_proc_pid,
+                                                                 &request_proc_self,
+                                                                 &request_proc_exact_dir);
+
+    char procdir[PATH_MAX];
+    if (snprintf(procdir, sizeof(procdir), "%s/proc", prefix) <= 0) {
+        return;
+    }
+    pathTruncateEnsureDir(procdir);
+
+    pid_t host_pid = getpid();
+    if (host_pid <= 0) {
+        host_pid = 1;
+    }
+
+    if (request_proc_pid_path &&
+        request_proc_exact_dir &&
+        !request_net &&
+        !request_device &&
+        !request_vm) {
+        int pid_to_ensure = request_proc_pid;
+        if (request_proc_self) {
+            int current_vproc_pid = pathTruncateCurrentVProcPid();
+            pid_to_ensure = current_vproc_pid > 0 ? current_vproc_pid : (int)host_pid;
+            char self_path[PATH_MAX];
+            if (snprintf(self_path, sizeof(self_path), "%s/self", procdir) > 0) {
+                char pid_link[32];
+                snprintf(pid_link, sizeof(pid_link), "%d", pid_to_ensure);
+                pathTruncateEnsureSymlink(self_path, pid_link);
+            }
+        }
+        if (pid_to_ensure > 0) {
+            pathTruncateEnsureProcPidDir(procdir, pid_to_ensure);
+        }
+        return;
+    }
 
     uint64_t now_ms = pathTruncateMonotonicMs();
     uint64_t *bucket = &g_procRefreshLastFullMs;
@@ -2605,12 +2723,6 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         refresh_device_entries = false;
     }
 
-    char procdir[PATH_MAX];
-    if (snprintf(procdir, sizeof(procdir), "%s/proc", prefix) <= 0) {
-        return;
-    }
-    pathTruncateEnsureDir(procdir);
-
     char cpuinfo_sentinel[PATH_MAX];
     bool has_cpuinfo = false;
     if (snprintf(cpuinfo_sentinel, sizeof(cpuinfo_sentinel), "%s/cpuinfo", procdir) > 0) {
@@ -2628,10 +2740,6 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     time_t now = time(NULL);
     if (g_procBootTime == 0 || g_procBootTime > now) {
         g_procBootTime = now;
-    }
-    pid_t host_pid = getpid();
-    if (host_pid <= 0) {
-        host_pid = 1;
     }
 
     if (request_proc_root && !seed_needed) {

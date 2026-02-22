@@ -1157,22 +1157,10 @@ final class TerminalDisplayTextView: UITextView {
 // MARK: - Floating Editor Renderer
 
 struct EditorFloatingRendererView: View {
-    @ObservedObject private var manager = TerminalTabManager.shared
+    @ObservedObject private var editorManager = EditorWindowManager.shared
 
     var body: some View {
-        EditorFloatingRendererContent(runtime: activeRuntime())
-    }
-
-    private func activeRuntime() -> PscalRuntimeBootstrap {
-        for tab in manager.tabs {
-            if case .shell(let runtime) = tab.kind, runtime.editorBridge.isActive {
-                return runtime
-            }
-        }
-        if case .shell(let runtime) = manager.selectedTab.kind {
-            return runtime
-        }
-        return PscalRuntimeBootstrap.shared
+        EditorFloatingRendererContent(runtime: editorManager.activeEditorRuntime())
     }
 }
 
