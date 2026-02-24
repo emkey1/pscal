@@ -10614,7 +10614,14 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         fprintf(stderr, "kill: %s: no associated processes\n", spec_text ? spec_text : "job");
         return false;
     }
-    if (terminate && job->pgid > 0) {
+    bool use_group_kill = terminate && job->pgid > 0;
+#if defined(PSCAL_TARGET_IOS)
+    /* iOS/vproc mode should only target tracked job members. Group-directed
+     * delivery can leak to non-job tasks when synthetic pgid mappings drift.
+     */
+    use_group_kill = false;
+#endif
+    if (use_group_kill) {
         /* Deliver to the whole synthetic group; safer for pipelines and job-spec parity. */
         if (shellJobControlSendPgid(job->pgid, signo) == 0) {
             sent = true;
@@ -10909,7 +10916,15 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     /* Pull in any state changes caused by the signals (stops, exits) so jobs/
      * lps reflect the new status immediately. */
     shellCollectJobs();
-    shellUpdateStatus(overall_ok ? 0 : 1);
+    if (overall_ok) {
+        /* kill reports success/failure of signal delivery, not the target's
+         * eventual exit code. Make sure asynchronous reaping does not leak
+         * 128+SIGNO into the command status on successful delivery.
+         */
+        shellRuntimeSetLastStatus(0);
+    } else {
+        shellUpdateStatus(1);
+    }
     return makeVoid();
 }
 

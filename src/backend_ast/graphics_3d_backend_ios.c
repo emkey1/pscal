@@ -1036,7 +1036,10 @@ static bool transformVertexData(ImmediateVertex* v) {
     v->eyePos[1] = mv[1] * invWmv;
     v->eyePos[2] = mv[2] * invWmv;
     applyMatrix(&gProjectionStack[gProjectionTop], mv, clip);
-    if (fabsf(clip[3]) < 1e-6f) {
+    /* Renderer/Metal fallback paths do not implement full primitive clipping.
+       Reject vertices at/behind the eye plane to avoid projection blowups
+       that appear as long "ray" artifacts for line primitives. */
+    if (clip[3] <= 1e-6f) {
         return false;
     }
     float invW = 1.0f / clip[3];

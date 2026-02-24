@@ -1440,12 +1440,6 @@ static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
     const char *name_raw = cmd->argv[0];
     char lookup_buf[PATH_MAX];
     const char *name = shellCommandLookupName(name_raw, lookup_buf, sizeof(lookup_buf));
-    if (smallclueFindApplet(name) != NULL) {
-        if (dbg) {
-            fprintf(stderr, "[pipe-worker] prefer=1 reason=smallclue cmd=%s\n", name);
-        }
-        return true;
-    }
     if (shellCommandIsFrontendToolName(name)) {
         if (dbg) {
             fprintf(stderr, "[pipe-worker] prefer=1 reason=frontend-tool cmd=%s\n", name);
@@ -1459,6 +1453,12 @@ static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
             fprintf(stderr, "[pipe-worker] prefer=0 reason=builtin cmd=%s\n", name);
         }
         return false;
+    }
+    if (smallclueFindApplet(name) != NULL) {
+        if (dbg) {
+            fprintf(stderr, "[pipe-worker] prefer=1 reason=smallclue cmd=%s\n", name);
+        }
+        return true;
     }
     if (shellCommandResolvesToShebang(name_raw)) {
         if (dbg) {
@@ -4834,6 +4834,7 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 (strcmp(canonical, "fg") == 0 ||
                  strcmp(canonical, "bg") == 0 ||
                  strcmp(canonical, "jobs") == 0 ||
+                 strcmp(canonical, "kill") == 0 ||
                  strcmp(canonical, "wait") == 0 ||
                  strcmp(canonical, "disown") == 0)) {
                 force_pipeline_builtin = false;

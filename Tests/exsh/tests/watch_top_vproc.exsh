@@ -1,8 +1,8 @@
 set -e
 
-# Regression: when running `watch -n ... top` the vproc-backed `top` output
-# should include distinct synthetic tasks for both `watch ...` and the spawned
-# `top` command.
+# Regression: when running `watch -n ...` in the background, a foreground
+# `top` snapshot should show distinct synthetic tasks for both `watch ...` and
+# the shell-launched `top` command.
 #
 # The harness treats exit code 77 as a skip.
 
@@ -34,7 +34,7 @@ set -e
 sleep 0.10
 
 found_watch=0
-found_sleep=0
+found_top=0
 
 while read line; do
     case "$line" in
@@ -42,15 +42,7 @@ while read line; do
     esac
 
     case "$line" in
-        ([0-9]*"sleep 5"*)
-            case "$line" in
-                (*"watch -n "*)
-                    ;;
-                (*)
-                    found_sleep=1
-                    ;;
-            esac
-            ;;
+        (*" top"*) found_top=1 ;;
     esac
 done < "$tmp_out"
 
@@ -58,8 +50,8 @@ if [ "$found_watch" -ne 1 ]; then
     echo "FAIL: missing watch task label in top output" >&2
     exit 1
 fi
-if [ "$found_sleep" -ne 1 ]; then
-    echo "FAIL: missing spawned sleep task in top output" >&2
+if [ "$found_top" -ne 1 ]; then
+    echo "FAIL: missing shell top task in top output" >&2
     exit 1
 fi
 

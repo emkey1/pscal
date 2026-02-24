@@ -54,7 +54,7 @@ kill_expect_ok() {
 file_contains_jobid() {
     path="$1"
     jobid="$2"
-    if ! grep "[${jobid}]" "$path" >/dev/null 2>&1; then
+    if ! grep -E "^\\[${jobid}\\][+-]?[[:space:]]+.*\\b(Running|Stopped)\\b" "$path" >/dev/null 2>&1; then
         echo "FAIL: expected output to contain: [${jobid}]" >&2
         echo "OUTPUT:" >&2
         while read dump_line; do
@@ -67,7 +67,7 @@ file_contains_jobid() {
 file_not_contains_jobid() {
     path="$1"
     jobid="$2"
-    if grep "[${jobid}]" "$path" >/dev/null 2>&1; then
+    if grep -E "^\\[${jobid}\\][+-]?[[:space:]]+.*\\b(Running|Stopped)\\b" "$path" >/dev/null 2>&1; then
         echo "FAIL: expected output to NOT contain: [${jobid}]" >&2
         echo "OUTPUT:" >&2
         while read dump_line; do
