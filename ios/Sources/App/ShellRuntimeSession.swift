@@ -205,9 +205,9 @@ final class ShellRuntimeSession: ObservableObject {
             PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
         }
         if !delivered {
-            withRuntimeContext {
-                PSCALRuntimeSendSignal(SIGINT)
-            }
+            // Session signaling can intentionally defer for remote foreground
+            // clients (ssh/scp/sftp). Fall back to literal ETX passthrough.
+            sendControlByte(0x03)
         }
     }
 
@@ -216,9 +216,9 @@ final class ShellRuntimeSession: ObservableObject {
             PSCALRuntimeSendSignalForSession(sessionId, SIGTSTP) != 0
         }
         if !delivered {
-            withRuntimeContext {
-                PSCALRuntimeSendSignal(SIGTSTP)
-            }
+            // Match Ctrl-Z terminal semantics when session routing defers to
+            // control-byte passthrough.
+            sendControlByte(0x1A)
         }
     }
 
@@ -353,6 +353,18 @@ final class ShellRuntimeSession: ObservableObject {
                     guard let base = buffer.baseAddress else { return }
                     let ptr = base.assumingMemoryBound(to: CChar.self)
                     PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
+                }
+            }
+        }
+    }
+
+    private func sendControlByte(_ byte: UInt8) {
+        inputQueue.async { [weak self] in
+            guard let self else { return }
+            self.withRuntimeContext {
+                var value = CChar(bitPattern: byte)
+                withUnsafePointer(to: &value) { ptr in
+                    PSCALRuntimeSendInputForSession(self.sessionId, ptr, 1)
                 }
             }
         }

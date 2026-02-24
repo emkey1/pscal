@@ -853,9 +853,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
             }
             if !delivered {
-                withRuntimeContext {
-                    PSCALRuntimeSendSignal(SIGINT)
-                }
+                // Session signaling can intentionally defer for remote foreground
+                // clients (ssh/scp/sftp). Fall back to literal ETX passthrough.
+                sendControlByteToSession(0x03, sessionId: activeSession)
             }
             return
         }
@@ -871,9 +871,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
                 PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
             }
             if !delivered {
-                withRuntimeContext {
-                    PSCALRuntimeSendSignal(SIGTSTP)
-                }
+                // Match Ctrl-Z terminal semantics when session signal routing
+                // defers to control-byte passthrough.
+                sendControlByteToSession(0x1A, sessionId: activeSession)
             }
             return
         }
@@ -896,6 +896,19 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
         return runtimeSession
+    }
+
+    private func sendControlByteToSession(_ byte: UInt8, sessionId: UInt64) {
+        guard sessionId != 0 else { return }
+        inputQueue.async { [weak self] in
+            guard let self else { return }
+            self.withRuntimeContext {
+                var value = CChar(bitPattern: byte)
+                withUnsafePointer(to: &value) { ptr in
+                    PSCALRuntimeSendInputForSession(sessionId, ptr, 1)
+                }
+            }
+        }
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {
@@ -2440,7 +2453,9 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
 
     private let locationManager: CLLocationManager
     private let workQueue = DispatchQueue(label: "com.pscal.location", qos: .utility)
+    private let workQueueKey = DispatchSpecificKey<UInt8>()
     private var started = false
+    private var userDeviceEnabled = true
     private var deviceEnabled = false
     private var locationActive = false
     private var latestCoordinate: CLLocationCoordinate2D?
@@ -2448,6 +2463,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private override init() {
         locationManager = CLLocationManager()
         super.init()
+        workQueue.setSpecific(key: workQueueKey, value: 1)
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
@@ -2463,19 +2479,23 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     func start() {
-        if started {
-            debugLog("start ignored (already started, enabled=\(deviceEnabled))")
-            return
+        runOnWorkQueueSync {
+            if started {
+                debugLog("start ignored (already started, enabled=\(deviceEnabled))")
+                return
+            }
+            started = true
+            debugLog("start triggered (enabled=\(deviceEnabled))")
+            syncDeviceStateImpl()
         }
-        started = true
-        debugLog("start triggered (enabled=\(deviceEnabled))")
-        scheduleSync()
     }
 
     func setDeviceEnabled(_ enabled: Bool) {
-        deviceEnabled = enabled
-        debugLog("setDeviceEnabled(\(enabled)) started=\(started)")
-        scheduleSync()
+        runOnWorkQueueSync {
+            userDeviceEnabled = enabled
+            debugLog("setDeviceEnabled(\(enabled)) started=\(started)")
+            syncDeviceStateImpl()
+        }
     }
 
     func runtimeBecameReady() {
@@ -2489,7 +2509,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func syncDeviceStateImpl() {
         let forcedOff = getenv("PSCALI_LOCATION_DISABLED") != nil
         let forcedOn = getenv("PSCALI_LOCATION_FORCE") != nil
-        let desiredEnabled = forcedOn || (!forcedOff && readerCount > 0)
+        let desiredEnabled = forcedOn || (!forcedOff && userDeviceEnabled && readerCount > 0)
 
         if desiredEnabled != deviceEnabled {
             deviceEnabled = desiredEnabled
@@ -2623,11 +2643,17 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
 
     private func handleReaderCountChanged(_ count: Int) {
         let normalized = max(0, count)
-        if readerCount == normalized {
-            return
+        runOnWorkQueueSync {
+            if readerCount == normalized {
+                return
+            }
+            readerCount = normalized
+            if readerCount > 0 && !started {
+                started = true
+                debugLog("auto-start triggered by reader count=\(readerCount)")
+            }
+            syncDeviceStateImpl()
         }
-        readerCount = normalized
-        scheduleSync()
     }
 
     private static func createLocationPayload(location: CLLocation) -> String {
@@ -2657,6 +2683,14 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func scheduleSync() {
         workQueue.async { [weak self] in
             self?.syncDeviceStateImpl()
+        }
+    }
+
+    private func runOnWorkQueueSync(_ body: () -> Void) {
+        if DispatchQueue.getSpecific(key: workQueueKey) != nil {
+            body()
+        } else {
+            workQueue.sync(execute: body)
         }
     }
 

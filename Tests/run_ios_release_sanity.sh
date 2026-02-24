@@ -18,6 +18,8 @@ echo "Running iOS/iPadOS release sanity suite..."
 
 run_step "Vproc/TTY shim unit checks" \
   bash "${TESTS_DIR}/run_ios_port_tests.sh"
+run_step "Extended builtin inventory parity (incl. SDL/3D entries)" \
+  bash "${TESTS_DIR}/run_ios_ext_builtin_sanity.sh"
 run_step "SCP prompt unit regression" \
   bash "${TESTS_DIR}/run_ios_scp_prompt_regression.sh"
 
