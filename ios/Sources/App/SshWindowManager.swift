@@ -247,11 +247,6 @@ final class TerminalTabManager: ObservableObject {
 
     func openSshSession(argv: [String]) -> Int32 {
         tabInitLog("openSshSession request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
-        if hasActiveSshSession {
-            errno = EBUSY
-            tabInitLog("openSshSession rejected (existing ssh)")
-            return -1
-        }
         let sessionId = PSCALRuntimeNextSessionId()
         let session = SshRuntimeSession(sessionId: sessionId, argv: argv)
         guard session.start() else {
@@ -266,20 +261,15 @@ final class TerminalTabManager: ObservableObject {
             fallback: defaultTitle,
             restoreProfileDefaults: true
         )
-        let startupCommand = Self.persistedStartupCommand(forProfileID: profileID)
         let appearance = appearanceSettings(forProfileID: profileID)
         let tab = Tab(id: sessionId,
                       title: title,
-                      startupCommand: startupCommand,
+                      startupCommand: "",
                       sessionId: sessionId,
                       appearanceProfileID: profileID,
                       appearanceSettings: appearance,
                       kind: .ssh(session))
         tabs.append(tab)
-        // SSH sessions do not emit the exsh prompt-ready callback, so keep
-        // startup-command behavior as immediate best-effort for ssh tabs.
-        promptReadySessions.insert(sessionId)
-        applyStartupCommandIfReady(forSessionId: sessionId)
         selectedId = sessionId
         logMultiTab("open ssh tab id=\(sessionId) title=\(title)")
         tabInitLog("openSshSession created id=\(sessionId) title=\(title)")
@@ -299,6 +289,7 @@ final class TerminalTabManager: ObservableObject {
             session.markExited(status: status)
         case .ssh(let session):
             session.markExited(status: status)
+            return
         case .sdl:
             return
         }

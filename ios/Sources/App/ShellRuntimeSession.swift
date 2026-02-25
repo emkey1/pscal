@@ -201,25 +201,13 @@ final class ShellRuntimeSession: ObservableObject {
     }
 
     func sendInterrupt() {
-        let delivered = withRuntimeContext {
-            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
-        }
-        if !delivered {
-            // Session signaling can intentionally defer for remote foreground
-            // clients (ssh/scp/sftp). Fall back to literal ETX passthrough.
-            sendControlByte(0x03)
-        }
+        // Match terminal semantics: inject ETX into the session PTY stream.
+        sendControlByte(0x03)
     }
 
     func sendSuspend() {
-        let delivered = withRuntimeContext {
-            PSCALRuntimeSendSignalForSession(sessionId, SIGTSTP) != 0
-        }
-        if !delivered {
-            // Match Ctrl-Z terminal semantics when session routing defers to
-            // control-byte passthrough.
-            sendControlByte(0x1A)
-        }
+        // Match terminal semantics: inject SUB into the session PTY stream.
+        sendControlByte(0x1A)
     }
 
     func sendPasted(_ text: String) {
@@ -364,7 +352,7 @@ final class ShellRuntimeSession: ObservableObject {
             self.withRuntimeContext {
                 var value = CChar(bitPattern: byte)
                 withUnsafePointer(to: &value) { ptr in
-                    PSCALRuntimeSendInputForSession(self.sessionId, ptr, 1)
+                    PSCALRuntimeSendInputUrgent(self.sessionId, ptr, 1)
                 }
             }
         }

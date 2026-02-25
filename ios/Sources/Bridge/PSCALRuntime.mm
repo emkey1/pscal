@@ -1731,11 +1731,31 @@ void PSCALRuntimeSendInputUrgent(uint64_t session_id, const char *utf8, size_t l
         return;
     }
     ssize_t wrote = PSCALRuntimeWriteMasterNonBlocking(session_id, utf8, length);
-    if (wrote < 0 && PSCALRuntimeIODebugEnabled()) {
+    if (wrote == (ssize_t)length) {
+        return;
+    }
+
+    size_t offset = 0;
+    if (wrote > 0 && (size_t)wrote < length) {
+        offset = (size_t)wrote;
+    } else if (wrote < 0 && PSCALRuntimeIODebugEnabled()) {
         PSCALRuntimeDebugLogf(
-            "[runtime-io] urgent input write failed session=%llu errno=%d\n",
+            "[runtime-io] urgent input write failed session=%llu errno=%d; enqueue fallback\n",
             (unsigned long long)session_id,
             errno);
+    }
+
+    const char *remaining = utf8 + offset;
+    size_t remaining_len = length - offset;
+    if (remaining_len == 0) {
+        return;
+    }
+    if (!PSCALRuntimeEnqueueInput(PSCALRuntimeInputKindSession, session_id, -1, remaining, remaining_len) &&
+        PSCALRuntimeIODebugEnabled()) {
+        PSCALRuntimeDebugLogf(
+            "[runtime-io] urgent input enqueue fallback failed session=%llu len=%zu\n",
+            (unsigned long long)session_id,
+            remaining_len);
     }
 }
 
@@ -1897,6 +1917,12 @@ int PSCALRuntimeSendSignalForSession(uint64_t session_id, int signo) {
 
     if (terminate_session) {
         return vprocTerminateSessionById(session_id) ? 1 : 0;
+    }
+
+    if (vprocSessionGetControlBytePassthrough(session_id)) {
+        /* Defer to literal control-byte injection for active SSH-style
+         * passthrough sessions. */
+        return 0;
     }
 
     if (vprocRequestControlSignalForSession(session_id, sig)) {

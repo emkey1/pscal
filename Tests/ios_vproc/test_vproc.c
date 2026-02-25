@@ -3954,6 +3954,35 @@ static void assert_session_control_chars_route_to_shell_input_when_shell_foregro
     vprocSetShellSelfPid(prev_shell);
 }
 
+static void assert_session_ctrl_fallback_byte_remains_readable_without_forced_interrupt(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    unsigned char ctrl_c = 3;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_c, 1) == 1);
+    assert(session_input_wait_len(input, 1, 500));
+
+    char got = 0;
+    errno = 0;
+    assert(vprocSessionReadInputShimMode(&got, 1, true) == 1);
+    assert((unsigned char)got == ctrl_c);
+
+    pthread_mutex_lock(&input->mu);
+    assert(!input->interrupt_pending);
+    pthread_mutex_unlock(&input->mu);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 static void assert_session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground(void) {
     int prev_shell = vprocGetShellSelfPid();
     int shell_pid = vprocReservePid();
@@ -6715,6 +6744,8 @@ int main(void) {
     assert_scp_like_prompt_survives_transient_eio_after_first_character();
     fprintf(stderr, "TEST session_control_chars_route_to_shell_input_when_shell_foreground\n");
     assert_session_control_chars_route_to_shell_input_when_shell_foreground();
+    fprintf(stderr, "TEST session_ctrl_fallback_byte_remains_readable_without_forced_interrupt\n");
+    assert_session_ctrl_fallback_byte_remains_readable_without_forced_interrupt();
     fprintf(stderr, "TEST session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground\n");
     assert_session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground();
     fprintf(stderr, "TEST session_ctrl_z_stops_foreground_job_when_not_shell_foreground\n");

@@ -225,6 +225,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "case", 4) == 0) return REA_TOKEN_CASE;
             if (strncmp(start, "char", 4) == 0) return REA_TOKEN_CHAR;
             if (strncmp(start, "byte", 4) == 0) return REA_TOKEN_BYTE;
+            if (strncmp(start, "word", 4) == 0) return REA_TOKEN_WORD;
             if (strncmp(start, "text", 4) == 0) return REA_TOKEN_TEXT;
             if (strncmp(start, "int8", 4) == 0) return REA_TOKEN_INT8;
             if (strncmp(start, "join", 4) == 0) return REA_TOKEN_JOIN;
@@ -241,6 +242,7 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "int16", 5) == 0) return REA_TOKEN_INT16;
             if (strncmp(start, "int32", 5) == 0) return REA_TOKEN_INT32;
             if (strncmp(start, "int64", 5) == 0) return REA_TOKEN_INT64;
+            if (strncmp(start, "uint8", 5) == 0) return REA_TOKEN_UINT8;
             if (strncmp(start, "spawn", 5) == 0) return REA_TOKEN_SPAWN;
             if (strncmp(start, "alias", 5) == 0) return REA_TOKEN_ALIAS;
             if (strncmp(start, "match", 5) == 0) return REA_TOKEN_MATCH;
@@ -256,6 +258,9 @@ static ReaTokenType keywordType(const char *start, size_t length) {
             if (strncmp(start, "string", 6) == 0) return REA_TOKEN_STR;
             if (strncmp(start, "module", 6) == 0) return REA_TOKEN_MODULE;
             if (strncmp(start, "export", 6) == 0) return REA_TOKEN_EXPORT;
+            if (strncmp(start, "uint16", 6) == 0) return REA_TOKEN_UINT16;
+            if (strncmp(start, "uint32", 6) == 0) return REA_TOKEN_UINT32;
+            if (strncmp(start, "uint64", 6) == 0) return REA_TOKEN_UINT64;
             break;
         case 7:
             if (strncmp(start, "extends", 7) == 0) return REA_TOKEN_EXTENDS;
@@ -322,14 +327,14 @@ ReaToken reaNextToken(ReaLexer *lexer) {
             if (match(lexer, '>')) return makeToken(lexer, REA_TOKEN_ARROW, start);
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_MINUS_EQUAL : REA_TOKEN_MINUS, start);
         case '*':
-            return makeToken(lexer, REA_TOKEN_STAR, start);
+            return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_STAR_EQUAL : REA_TOKEN_STAR, start);
         case '/':
             if (match(lexer, '/')) {
                 return makeToken(lexer, REA_TOKEN_INT_DIV, start);
             }
-            return makeToken(lexer, REA_TOKEN_SLASH, start);
+            return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_SLASH_EQUAL : REA_TOKEN_SLASH, start);
         case '%':
-            return makeToken(lexer, REA_TOKEN_PERCENT, start);
+            return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_PERCENT_EQUAL : REA_TOKEN_PERCENT, start);
         case '!':
             return makeToken(lexer, match(lexer, '=') ? REA_TOKEN_BANG_EQUAL : REA_TOKEN_BANG, start);
         case '&':
@@ -478,9 +483,12 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_MINUS_MINUS: return "MINUS_MINUS";
         case REA_TOKEN_MINUS_EQUAL: return "MINUS_EQUAL";
         case REA_TOKEN_STAR: return "STAR";
+        case REA_TOKEN_STAR_EQUAL: return "STAR_EQUAL";
         case REA_TOKEN_SLASH: return "SLASH";
+        case REA_TOKEN_SLASH_EQUAL: return "SLASH_EQUAL";
         case REA_TOKEN_INT_DIV: return "INT_DIV";
         case REA_TOKEN_PERCENT: return "PERCENT";
+        case REA_TOKEN_PERCENT_EQUAL: return "PERCENT_EQUAL";
         case REA_TOKEN_EQUAL: return "EQUAL";
         case REA_TOKEN_EQUAL_EQUAL: return "EQUAL_EQUAL";
         case REA_TOKEN_BANG: return "BANG";
@@ -530,11 +538,16 @@ const char* reaTokenTypeToString(ReaTokenType type) {
         case REA_TOKEN_INT32: return "INT32";
         case REA_TOKEN_INT16: return "INT16";
         case REA_TOKEN_INT8: return "INT8";
+        case REA_TOKEN_UINT64: return "UINT64";
+        case REA_TOKEN_UINT32: return "UINT32";
+        case REA_TOKEN_UINT16: return "UINT16";
+        case REA_TOKEN_UINT8: return "UINT8";
         case REA_TOKEN_FLOAT: return "FLOAT";
         case REA_TOKEN_FLOAT32: return "FLOAT32";
         case REA_TOKEN_LONG_DOUBLE: return "LONG_DOUBLE";
         case REA_TOKEN_CHAR: return "CHAR";
         case REA_TOKEN_BYTE: return "BYTE";
+        case REA_TOKEN_WORD: return "WORD";
         case REA_TOKEN_STR: return "STR";
         case REA_TOKEN_TEXT: return "TEXT";
         case REA_TOKEN_MSTREAM: return "MSTREAM";

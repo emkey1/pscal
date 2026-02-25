@@ -1,0 +1,29 @@
+program CompoundAssignmentMulDiv;
+
+var
+  idx: integer;
+  arr: array[0..2] of integer;
+  ratio: double;
+
+function NextIndex: integer;
+begin
+  NextIndex := idx;
+  idx += 1;
+end;
+
+begin
+  idx := 0;
+  arr[0] := 6;
+  arr[1] := 10;
+  arr[2] := 14;
+
+  arr[NextIndex()] *= 3;
+
+  ratio := 20.0;
+  ratio /= 4.0;
+
+  writeln('arr0=', arr[0]);
+  writeln('arr1=', arr[1]);
+  writeln('idx=', idx);
+  writeln('ratio=', ratio:0:1);
+end.

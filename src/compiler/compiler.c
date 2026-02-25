@@ -6521,13 +6521,41 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
-            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
+            if (node->token &&
+                (node->token->type == TOKEN_PLUS ||
+                 node->token->type == TOKEN_MINUS ||
+                 node->token->type == TOKEN_MUL ||
+                 node->token->type == TOKEN_SLASH ||
+                 node->token->type == TOKEN_INT_DIV ||
+                 node->token->type == TOKEN_MOD)) {
                 compileLValue(lvalue, chunk, getLine(lvalue));
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);
                 compileRValue(rvalue, chunk, getLine(rvalue));
-                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
-                else writeBytecodeChunk(chunk, SUBTRACT, line);
+                switch (node->token->type) {
+                    case TOKEN_PLUS:
+                        writeBytecodeChunk(chunk, ADD, line);
+                        break;
+                    case TOKEN_MINUS:
+                        writeBytecodeChunk(chunk, SUBTRACT, line);
+                        break;
+                    case TOKEN_MUL:
+                        writeBytecodeChunk(chunk, MULTIPLY, line);
+                        break;
+                    case TOKEN_SLASH:
+                        writeBytecodeChunk(chunk, DIVIDE, line);
+                        break;
+                    case TOKEN_INT_DIV:
+                        writeBytecodeChunk(chunk, INT_DIV, line);
+                        break;
+                    case TOKEN_MOD:
+                        writeBytecodeChunk(chunk, MOD, line);
+                        break;
+                    default:
+                        fprintf(stderr, "L%d: Compiler error: unsupported compound assignment operator.\n", line);
+                        compiler_had_error = true;
+                        break;
+                }
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
@@ -8258,15 +8286,43 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
+            if (node->token &&
+                (node->token->type == TOKEN_PLUS ||
+                 node->token->type == TOKEN_MINUS ||
+                 node->token->type == TOKEN_MUL ||
+                 node->token->type == TOKEN_SLASH ||
+                 node->token->type == TOKEN_INT_DIV ||
+                 node->token->type == TOKEN_MOD)) {
                 // Compound assignment: evaluate LHS once and preserve result on the stack
                 compileLValue(lvalue, chunk, getLine(lvalue));            // stack: [addr]
                 writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr]
                 writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr, addr]
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [addr, addr, value]
                 compileRValue(rvalue, chunk, getLine(rvalue));            // [addr, addr, value, rhs]
-                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
-                else writeBytecodeChunk(chunk, SUBTRACT, line);           // [addr, addr, result]
+                switch (node->token->type) {
+                    case TOKEN_PLUS:
+                        writeBytecodeChunk(chunk, ADD, line);
+                        break;
+                    case TOKEN_MINUS:
+                        writeBytecodeChunk(chunk, SUBTRACT, line);
+                        break;
+                    case TOKEN_MUL:
+                        writeBytecodeChunk(chunk, MULTIPLY, line);
+                        break;
+                    case TOKEN_SLASH:
+                        writeBytecodeChunk(chunk, DIVIDE, line);
+                        break;
+                    case TOKEN_INT_DIV:
+                        writeBytecodeChunk(chunk, INT_DIV, line);
+                        break;
+                    case TOKEN_MOD:
+                        writeBytecodeChunk(chunk, MOD, line);
+                        break;
+                    default:
+                        fprintf(stderr, "L%d: Compiler error: unsupported compound assignment operator.\n", line);
+                        compiler_had_error = true;
+                        break;
+                }
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);            // [addr]
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [result]
             } else {

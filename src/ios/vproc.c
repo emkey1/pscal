@@ -5041,6 +5041,7 @@ static void *vprocSessionInputThread(void *arg) {
             if (!dispatched) {
                 dispatched = vprocDispatchControlSignalToForeground(shell_hint, sig, true);
             }
+            bool buffered_control_byte = false;
             if (!dispatched && input) {
                 /* Keep control bytes observable even if virtual dispatch cannot
                  * resolve a foreground target. This preserves SSH passthrough
@@ -5050,12 +5051,13 @@ static void *vprocSessionInputThread(void *arg) {
                 if (vprocEnsureSessionInputWritableLocked(input, 1)) {
                     input->buf[input->off + input->len] = ch;
                     input->len++;
+                    buffered_control_byte = true;
                 }
                 pthread_cond_broadcast(&input->cv);
                 pthread_mutex_unlock(&input->mu);
                 pscal_fd_poll_wakeup(NULL, POLLIN);
             }
-            if (input) {
+            if (input && !buffered_control_byte) {
                 pthread_mutex_lock(&input->mu);
                 input->interrupt_pending = true;
                 pthread_cond_broadcast(&input->cv);
