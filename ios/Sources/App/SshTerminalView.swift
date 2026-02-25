@@ -95,10 +95,10 @@ private struct SshTerminalContentView: View {
                 onInput: handleInput,
                 onPaste: handlePaste,
                 onInterrupt: {
-                    session.send("\u{03}")
+                    session.sendInterrupt()
                 },
                 onSuspend: {
-                    session.send("\u{1A}")
+                    session.sendSuspend()
                 },
                 onResize: { cols, rows in
                     tabInitLog("SshTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")

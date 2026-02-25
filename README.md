@@ -43,6 +43,13 @@ cmake ..            # add -DSDL=ON to enable SDL support, optionally add -DPSCAL
 make
 ```
 
+If you use submodules, run this before pushing to make sure pinned commits are
+fetchable by others:
+
+```sh
+tools/check_submodule_refs.sh
+```
+
 Binaries are written to `build/bin` (e.g. `pascal`).
 To also build the debugging-oriented `dascal` binary, configure CMake with `-DBUILD_DASCAL=ON`.
 

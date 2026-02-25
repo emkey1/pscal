@@ -375,7 +375,7 @@ final class TerminalTabManager: ObservableObject {
         case .shellSession(let session):
             session.sendInterrupt()
         case .ssh(let session):
-            session.send("\u{03}")
+            session.sendInterrupt()
         case .sdl(let ownerTabId):
             if let ownerKind = kind(forTabId: ownerTabId) {
                 sendInterrupt(for: ownerKind)
@@ -393,7 +393,7 @@ final class TerminalTabManager: ObservableObject {
         case .shellSession(let session):
             session.sendSuspend()
         case .ssh(let session):
-            session.send("\u{1A}")
+            session.sendSuspend()
         case .sdl(let ownerTabId):
             if let ownerKind = kind(forTabId: ownerTabId) {
                 sendSuspend(for: ownerKind)
@@ -691,7 +691,7 @@ final class TerminalTabManager: ObservableObject {
         case .shellSession(let session):
             session.sendInterrupt()
         case .ssh(let session):
-            session.send("\u{03}")
+            session.sendInterrupt()
         case .sdl:
             break
         }
@@ -704,7 +704,7 @@ final class TerminalTabManager: ObservableObject {
         case .shellSession(let session):
             session.sendSuspend()
         case .ssh(let session):
-            session.send("\u{1A}")
+            session.sendSuspend()
         case .sdl:
             break
         }
