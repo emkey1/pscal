@@ -32,7 +32,7 @@ type
   end;
 
   { --- 4. Define the Button Record --- }
-  PButton = ^PButton;
+  PButton = ^TButton;
   TButton = record
     X, Y, W, H: integer;
     Caption: string;

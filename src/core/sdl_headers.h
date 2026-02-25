@@ -60,6 +60,8 @@
 #endif
 #if __has_include(<SDL2/SDL_syswm.h>)
 #define PSCALI_SDL_SYSWM_HEADER "SDL2/SDL_syswm.h"
+#elif __has_include(<SDL_syswm.h>)
+#define PSCALI_SDL_SYSWM_HEADER "SDL_syswm.h"
 #endif
 #if __has_include(<SDL2/SDL_opengl.h>)
 #define PSCALI_SDL_OPENGL_HEADER "SDL_opengl.h"

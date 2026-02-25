@@ -773,11 +773,16 @@ static int isTypeKeywordToken(ReaTokenType t) {
         case REA_TOKEN_INT32:
         case REA_TOKEN_INT16:
         case REA_TOKEN_INT8:
+        case REA_TOKEN_UINT64:
+        case REA_TOKEN_UINT32:
+        case REA_TOKEN_UINT16:
+        case REA_TOKEN_UINT8:
         case REA_TOKEN_FLOAT:
         case REA_TOKEN_FLOAT32:
         case REA_TOKEN_LONG_DOUBLE:
         case REA_TOKEN_CHAR:
         case REA_TOKEN_BYTE:
+        case REA_TOKEN_WORD:
         case REA_TOKEN_BOOL:
             return 1;
         default:
@@ -813,11 +818,16 @@ static VarType tokenTypeToVarType(ReaTokenType t) {
         case REA_TOKEN_INT32: return TYPE_INT32;
         case REA_TOKEN_INT16: return TYPE_INT16;
         case REA_TOKEN_INT8:  return TYPE_INT8;
+        case REA_TOKEN_UINT64: return TYPE_UINT64;
+        case REA_TOKEN_UINT32: return TYPE_UINT32;
+        case REA_TOKEN_UINT16: return TYPE_UINT16;
+        case REA_TOKEN_UINT8:  return TYPE_UINT8;
         case REA_TOKEN_FLOAT: return TYPE_DOUBLE;
         case REA_TOKEN_FLOAT32: return TYPE_FLOAT;
         case REA_TOKEN_LONG_DOUBLE: return TYPE_LONG_DOUBLE;
         case REA_TOKEN_CHAR: return TYPE_CHAR;
         case REA_TOKEN_BYTE: return TYPE_BYTE;
+        case REA_TOKEN_WORD: return TYPE_WORD;
         case REA_TOKEN_BOOL: return TYPE_BOOLEAN;
         default: return TYPE_UNKNOWN;
     }
@@ -1830,7 +1840,12 @@ static AST *parseAssignment(ReaParser *p) {
     AST *left = parseConditional(p);
     if (!left) return NULL;
     if ((left->type == AST_VARIABLE || left->type == AST_FIELD_ACCESS || left->type == AST_ARRAY_ACCESS) &&
-        (p->current.type == REA_TOKEN_EQUAL || p->current.type == REA_TOKEN_PLUS_EQUAL || p->current.type == REA_TOKEN_MINUS_EQUAL)) {
+        (p->current.type == REA_TOKEN_EQUAL ||
+         p->current.type == REA_TOKEN_PLUS_EQUAL ||
+         p->current.type == REA_TOKEN_MINUS_EQUAL ||
+         p->current.type == REA_TOKEN_STAR_EQUAL ||
+         p->current.type == REA_TOKEN_SLASH_EQUAL ||
+         p->current.type == REA_TOKEN_PERCENT_EQUAL)) {
         ReaToken op = p->current;
         reaAdvance(p);
         AST *value = parseAssignment(p);
@@ -1838,6 +1853,9 @@ static AST *parseAssignment(ReaParser *p) {
         TokenType assignType = TOKEN_ASSIGN;
         if (op.type == REA_TOKEN_PLUS_EQUAL) assignType = TOKEN_PLUS;
         else if (op.type == REA_TOKEN_MINUS_EQUAL) assignType = TOKEN_MINUS;
+        else if (op.type == REA_TOKEN_STAR_EQUAL) assignType = TOKEN_MUL;
+        else if (op.type == REA_TOKEN_SLASH_EQUAL) assignType = TOKEN_SLASH;
+        else if (op.type == REA_TOKEN_PERCENT_EQUAL) assignType = TOKEN_MOD;
 
         Token *assignTok = newToken(assignType, opLexeme(assignType), op.line, 0);
         AST *node = newASTNode(AST_ASSIGN, assignTok);
@@ -1925,11 +1943,16 @@ static VarType mapType(ReaTokenType t) {
         case REA_TOKEN_INT32: return TYPE_INT32;
         case REA_TOKEN_INT16: return TYPE_INT16;
         case REA_TOKEN_INT8:  return TYPE_INT8;
+        case REA_TOKEN_UINT64: return TYPE_UINT64;
+        case REA_TOKEN_UINT32: return TYPE_UINT32;
+        case REA_TOKEN_UINT16: return TYPE_UINT16;
+        case REA_TOKEN_UINT8:  return TYPE_UINT8;
         case REA_TOKEN_FLOAT: return TYPE_DOUBLE;
         case REA_TOKEN_FLOAT32: return TYPE_FLOAT;
         case REA_TOKEN_LONG_DOUBLE: return TYPE_LONG_DOUBLE;
         case REA_TOKEN_CHAR: return TYPE_CHAR;
         case REA_TOKEN_BYTE: return TYPE_BYTE;
+        case REA_TOKEN_WORD: return TYPE_WORD;
         case REA_TOKEN_STR: return TYPE_STRING;
         case REA_TOKEN_TEXT: return TYPE_FILE;
         case REA_TOKEN_MSTREAM: return TYPE_MEMORYSTREAM;
@@ -1946,11 +1969,16 @@ static const char *typeName(ReaTokenType t) {
         case REA_TOKEN_INT32: return "int32";
         case REA_TOKEN_INT16: return "int16";
         case REA_TOKEN_INT8: return "int8";
+        case REA_TOKEN_UINT64: return "uint64";
+        case REA_TOKEN_UINT32: return "uint32";
+        case REA_TOKEN_UINT16: return "uint16";
+        case REA_TOKEN_UINT8: return "uint8";
         case REA_TOKEN_FLOAT: return "float";
         case REA_TOKEN_FLOAT32: return "float32";
         case REA_TOKEN_LONG_DOUBLE: return "longdouble";
         case REA_TOKEN_CHAR: return "char";
         case REA_TOKEN_BYTE: return "byte";
+        case REA_TOKEN_WORD: return "word";
         case REA_TOKEN_STR: return "str";
         case REA_TOKEN_TEXT: return "text";
         case REA_TOKEN_MSTREAM: return "mstream";
@@ -2016,11 +2044,16 @@ static bool tokenIsTypeKeyword(ReaTokenType t) {
         case REA_TOKEN_INT32:
         case REA_TOKEN_INT16:
         case REA_TOKEN_INT8:
+        case REA_TOKEN_UINT64:
+        case REA_TOKEN_UINT32:
+        case REA_TOKEN_UINT16:
+        case REA_TOKEN_UINT8:
         case REA_TOKEN_FLOAT:
         case REA_TOKEN_FLOAT32:
         case REA_TOKEN_LONG_DOUBLE:
         case REA_TOKEN_CHAR:
         case REA_TOKEN_BYTE:
+        case REA_TOKEN_WORD:
         case REA_TOKEN_STR:
         case REA_TOKEN_TEXT:
         case REA_TOKEN_MSTREAM:
@@ -2087,6 +2120,9 @@ static bool looksLikeMatchStatement(ReaParser *p) {
             case REA_TOKEN_EQUAL:
             case REA_TOKEN_PLUS_EQUAL:
             case REA_TOKEN_MINUS_EQUAL:
+            case REA_TOKEN_STAR_EQUAL:
+            case REA_TOKEN_SLASH_EQUAL:
+            case REA_TOKEN_PERCENT_EQUAL:
             case REA_TOKEN_PLUS_PLUS:
             case REA_TOKEN_MINUS_MINUS:
             case REA_TOKEN_SEMICOLON:
@@ -2979,13 +3015,7 @@ static AST *parseFor(ReaParser *p) {
     if (p->current.type == REA_TOKEN_LEFT_PAREN) reaAdvance(p);
     // init (may be var decl or expr) and ends with ';'
     AST *init = NULL;
-    if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_INT64 ||
-        p->current.type == REA_TOKEN_INT32 || p->current.type == REA_TOKEN_INT16 ||
-        p->current.type == REA_TOKEN_INT8 || p->current.type == REA_TOKEN_FLOAT ||
-        p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
-        p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
-        p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
-        p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL) {
+    if (tokenIsTypeKeyword(p->current.type) && p->current.type != REA_TOKEN_VOID) {
         init = parseVarDecl(p);
     } else if (p->current.type != REA_TOKEN_SEMICOLON) {
         AST *ie = parseExpression(p);
@@ -3861,14 +3891,7 @@ static AST *parseStatement(ReaParser *p) {
                     } else {
                         reaAdvance(p);
                     }
-                } else if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_INT64 ||
-                           p->current.type == REA_TOKEN_INT32 || p->current.type == REA_TOKEN_INT16 ||
-                           p->current.type == REA_TOKEN_INT8 || p->current.type == REA_TOKEN_FLOAT ||
-                           p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
-                           p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
-                           p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
-                           p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
-                           p->current.type == REA_TOKEN_VOID ||
+                } else if (tokenIsTypeKeyword(p->current.type) ||
                            tokenIsIdentifierLike(p->current.type)) {
                     AST *decl = parseVarDecl(p);
                     if (decl) {
@@ -3982,14 +4005,7 @@ static AST *parseStatement(ReaParser *p) {
     if (p->current.type == REA_TOKEN_RETURN) {
         return parseReturn(p);
     }
-    if (p->current.type == REA_TOKEN_INT || p->current.type == REA_TOKEN_INT64 ||
-        p->current.type == REA_TOKEN_INT32 || p->current.type == REA_TOKEN_INT16 ||
-        p->current.type == REA_TOKEN_INT8 || p->current.type == REA_TOKEN_FLOAT ||
-        p->current.type == REA_TOKEN_FLOAT32 || p->current.type == REA_TOKEN_LONG_DOUBLE ||
-        p->current.type == REA_TOKEN_CHAR || p->current.type == REA_TOKEN_BYTE ||
-        p->current.type == REA_TOKEN_STR || p->current.type == REA_TOKEN_TEXT ||
-        p->current.type == REA_TOKEN_MSTREAM || p->current.type == REA_TOKEN_BOOL ||
-        p->current.type == REA_TOKEN_VOID) {
+    if (tokenIsTypeKeyword(p->current.type)) {
         return parseVarDecl(p);
     }
     // Allow declarations that start with user-defined type identifiers

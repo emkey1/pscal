@@ -15,6 +15,20 @@
 #include "core/list.h"
 #include "ast/ast.h"
 
+static bool symbolTypeIsUnsignedInt(VarType type) {
+    switch (type) {
+        case TYPE_UINT64:
+        case TYPE_UINT32:
+        case TYPE_UINT16:
+        case TYPE_UINT8:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // --- Hash Table Implementation ---
 
 /**
@@ -1001,6 +1015,22 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
             break;
         }
 
+        case TYPE_UINT8: {
+            if (isIntlikeType(val.type)) {
+                bool srcUnsigned = symbolTypeIsUnsignedInt(val.type);
+                long long signedTmp = asI64(val);
+                unsigned long long raw = srcUnsigned ? val.u_val : (unsigned long long)signedTmp;
+                if (!srcUnsigned && signedTmp < 0) {
+                    fprintf(stderr, "Runtime warning: Assignment to UINT8 variable '%s' with negative value %lld will wrap.\n", name, signedTmp);
+                } else if (raw > UINT8_MAX) {
+                    fprintf(stderr, "Runtime warning: Assignment to UINT8 variable '%s' out of range (0-%u). Value %llu will be truncated.\n",
+                            name, (unsigned)UINT8_MAX, raw);
+                }
+                SET_INT_VALUE(sym->value, (raw & 0xFFULL));
+            }
+            break;
+        }
+
         case TYPE_WORD: {
             if (isIntlikeType(val.type)) {
                 long long tmp = asI64(val);
@@ -1008,6 +1038,51 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
                     fprintf(stderr, "Runtime warning: Assignment to WORD variable '%s' out of range (0-65535). Value %lld will be truncated.\n", name, tmp);
                 }
                 SET_INT_VALUE(sym->value, (tmp & 0xFFFF));
+            }
+            break;
+        }
+
+        case TYPE_UINT16: {
+            if (isIntlikeType(val.type)) {
+                bool srcUnsigned = symbolTypeIsUnsignedInt(val.type);
+                long long signedTmp = asI64(val);
+                unsigned long long raw = srcUnsigned ? val.u_val : (unsigned long long)signedTmp;
+                if (!srcUnsigned && signedTmp < 0) {
+                    fprintf(stderr, "Runtime warning: Assignment to UINT16 variable '%s' with negative value %lld will wrap.\n", name, signedTmp);
+                } else if (raw > UINT16_MAX) {
+                    fprintf(stderr, "Runtime warning: Assignment to UINT16 variable '%s' out of range (0-%u). Value %llu will be truncated.\n",
+                            name, (unsigned)UINT16_MAX, raw);
+                }
+                SET_INT_VALUE(sym->value, (raw & 0xFFFFULL));
+            }
+            break;
+        }
+
+        case TYPE_UINT32: {
+            if (isIntlikeType(val.type)) {
+                bool srcUnsigned = symbolTypeIsUnsignedInt(val.type);
+                long long signedTmp = asI64(val);
+                unsigned long long raw = srcUnsigned ? val.u_val : (unsigned long long)signedTmp;
+                if (!srcUnsigned && signedTmp < 0) {
+                    fprintf(stderr, "Runtime warning: Assignment to UINT32 variable '%s' with negative value %lld will wrap.\n", name, signedTmp);
+                } else if (raw > UINT32_MAX) {
+                    fprintf(stderr, "Runtime warning: Assignment to UINT32 variable '%s' out of range (0-%u). Value %llu will be truncated.\n",
+                            name, (unsigned)UINT32_MAX, raw);
+                }
+                SET_INT_VALUE(sym->value, (raw & 0xFFFFFFFFULL));
+            }
+            break;
+        }
+
+        case TYPE_UINT64: {
+            if (isIntlikeType(val.type)) {
+                bool srcUnsigned = symbolTypeIsUnsignedInt(val.type);
+                long long signedTmp = asI64(val);
+                unsigned long long raw = srcUnsigned ? val.u_val : (unsigned long long)signedTmp;
+                if (!srcUnsigned && signedTmp < 0) {
+                    fprintf(stderr, "Runtime warning: Assignment to UINT64 variable '%s' with negative value %lld will wrap.\n", name, signedTmp);
+                }
+                SET_INT_VALUE(sym->value, raw);
             }
             break;
         }

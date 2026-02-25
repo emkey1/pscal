@@ -1263,7 +1263,12 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         guard let window = notification.object as? UIWindow else { return }
         guard window === self.window else { return }
         if !window.isKeyWindow && isAppActive() {
-            return
+            let hasOtherKeyWindow = window.windowScene?.windows.contains(where: { other in
+                other !== window && other.isKeyWindow
+            }) ?? false
+            if !hasOtherKeyWindow {
+                return
+            }
         }
         updateFocusForKeyWindow()
         updateVisibilityForInput()
@@ -1378,12 +1383,36 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         if !isAppActive() {
             return false
         }
+        if pscalIOSSDLModeActive() != 0 {
+            return false
+        }
+        if hasVisibleSDLWindow() {
+            return false
+        }
         if let window, window.isKeyWindow {
             return isEffectivelyVisible()
+        }
+        if let window,
+           let scene = window.windowScene,
+           scene.windows.contains(where: { other in other !== window && other.isKeyWindow }) {
+            return false
         }
         /* On iPad we can attach before the window is key; allow focus to be
          * requested and retried so the keyboard appears without an extra tap. */
         return isEffectivelyVisible()
+    }
+
+    private func hasVisibleSDLWindow() -> Bool {
+        let sceneWindows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+        let appWindows = UIApplication.shared.windows
+        let allWindows = sceneWindows + appWindows
+        return allWindows.contains { window in
+                guard !window.isHidden else { return false }
+                let className = NSStringFromClass(type(of: window)).lowercased()
+                return className.contains("sdl") && className.contains("window")
+            }
     }
 
     private func isEffectivelyVisible() -> Bool {

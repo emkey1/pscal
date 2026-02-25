@@ -768,8 +768,30 @@ Token *getNextToken(Lexer *lexer) {
             }
             return newToken(TOKEN_MINUS, "-", start_line, start_column);
         }
-        if (lexer->current_char == '*') { advance(lexer); return newToken(TOKEN_MUL, "*", start_line, start_column); }
-        if (lexer->current_char == '/') { advance(lexer); return newToken(TOKEN_SLASH, "/", start_line, start_column); }
+        if (lexer->current_char == '*') {
+            advance(lexer);
+            if (lexer->current_char == '=') {
+                advance(lexer);
+                return newToken(TOKEN_MUL_EQUAL, "*=", start_line, start_column);
+            }
+            return newToken(TOKEN_MUL, "*", start_line, start_column);
+        }
+        if (lexer->current_char == '/') {
+            advance(lexer);
+            if (lexer->current_char == '=') {
+                advance(lexer);
+                return newToken(TOKEN_SLASH_EQUAL, "/=", start_line, start_column);
+            }
+            return newToken(TOKEN_SLASH, "/", start_line, start_column);
+        }
+        if (lexer->current_char == '%') {
+            advance(lexer);
+            if (lexer->current_char == '=') {
+                advance(lexer);
+                return newToken(TOKEN_PERCENT_EQUAL, "%=", start_line, start_column);
+            }
+            return newToken(TOKEN_MOD, "%", start_line, start_column);
+        }
 
         // Parentheses and Brackets
         if (lexer->current_char == '(') { advance(lexer); return newToken(TOKEN_LPAREN, "(", start_line, start_column); }

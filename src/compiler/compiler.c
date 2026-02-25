@@ -388,6 +388,29 @@ typedef struct FunctionCompilerState {
 
 static FunctionCompilerState* current_function_compiler = NULL;
 
+static bool isCurrentFunctionResultIdentifier(const FunctionCompilerState* fc, const char* name) {
+    if (!fc || !fc->returns_value || !name) {
+        return false;
+    }
+
+    if (strcasecmp(name, "result") == 0) {
+        return true;
+    }
+
+    if (fc->name && strcasecmp(name, fc->name) == 0) {
+        return true;
+    }
+
+    if (fc->name) {
+        const char* dot = strrchr(fc->name, '.');
+        if (dot && dot[1] != '\0' && strcasecmp(name, dot + 1) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Track global objects created with NEW so their hidden
 // vtable fields can be initialised after all vtables are defined.
 typedef struct {
@@ -1664,9 +1687,7 @@ static AST* getInterfaceTypeFromExpression(AST* expr) {
         expr->type == AST_VARIABLE && expr->token && expr->token->value) {
         const char* varName = expr->token->value;
         bool isFunctionResult =
-            (strcasecmp(varName, "result") == 0) ||
-            (current_function_compiler->name &&
-             strcasecmp(varName, current_function_compiler->name) == 0);
+            isCurrentFunctionResultIdentifier(current_function_compiler, varName);
         if (isFunctionResult && current_function_compiler->function_symbol &&
             current_function_compiler->function_symbol->type_def &&
             current_function_compiler->function_symbol->type_def->type == AST_FUNCTION_DECL) {
@@ -4124,7 +4145,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool is_ref = false;
 
             if (current_function_compiler) {
-                if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
+                if (isCurrentFunctionResultIdentifier(current_function_compiler, varName)) {
                     local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 } else {
                     local_slot = resolveLocal(current_function_compiler, varName);
@@ -4400,7 +4421,7 @@ static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int li
 
     if (current_function_compiler) {
         int local_slot = -1;
-        if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
+        if (isCurrentFunctionResultIdentifier(current_function_compiler, varName)) {
             local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
         } else {
             local_slot = resolveLocal(current_function_compiler, varName);
@@ -6500,13 +6521,41 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
-            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
+            if (node->token &&
+                (node->token->type == TOKEN_PLUS ||
+                 node->token->type == TOKEN_MINUS ||
+                 node->token->type == TOKEN_MUL ||
+                 node->token->type == TOKEN_SLASH ||
+                 node->token->type == TOKEN_INT_DIV ||
+                 node->token->type == TOKEN_MOD)) {
                 compileLValue(lvalue, chunk, getLine(lvalue));
                 writeBytecodeChunk(chunk, DUP, line);
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);
                 compileRValue(rvalue, chunk, getLine(rvalue));
-                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
-                else writeBytecodeChunk(chunk, SUBTRACT, line);
+                switch (node->token->type) {
+                    case TOKEN_PLUS:
+                        writeBytecodeChunk(chunk, ADD, line);
+                        break;
+                    case TOKEN_MINUS:
+                        writeBytecodeChunk(chunk, SUBTRACT, line);
+                        break;
+                    case TOKEN_MUL:
+                        writeBytecodeChunk(chunk, MULTIPLY, line);
+                        break;
+                    case TOKEN_SLASH:
+                        writeBytecodeChunk(chunk, DIVIDE, line);
+                        break;
+                    case TOKEN_INT_DIV:
+                        writeBytecodeChunk(chunk, INT_DIV, line);
+                        break;
+                    case TOKEN_MOD:
+                        writeBytecodeChunk(chunk, MOD, line);
+                        break;
+                    default:
+                        fprintf(stderr, "L%d: Compiler error: unsupported compound assignment operator.\n", line);
+                        compiler_had_error = true;
+                        break;
+                }
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             } else {
                 compileRValue(rvalue, chunk, getLine(rvalue));
@@ -6515,8 +6564,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (current_function_compiler && current_function_compiler->returns_value &&
                     current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
-                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                     strcasecmp(lvalue->token->value, "result") == 0)) {
+                    isCurrentFunctionResultIdentifier(current_function_compiler, lvalue->token->value)) {
 
                     int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     if (return_slot != -1) {
@@ -7898,22 +7946,27 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ADDR_OF: {
-            if (!node->left || node->left->type != AST_VARIABLE || !node->left->token || !node->left->token->value) {
+            if (!node->left) {
                 fprintf(stderr, "L%d: Compiler error: '@' requires addressable operand.\n", line);
                 compiler_had_error = true;
                 break;
             }
 
-            const char* pname = node->left->token->value;
-            Symbol* psym = resolveProcedureSymbolInScope(pname, node, gCurrentProgramRoot);
-            if (!psym) {
-                compileLValue(node->left, chunk, line);
-                break;
+            // Support closure literals for procedures via @ProcName while preserving
+            // regular address-of semantics for addressable l-values such as fields,
+            // array elements, and dereferences.
+            if (node->left->type == AST_VARIABLE && node->left->token && node->left->token->value) {
+                const char* pname = node->left->token->value;
+                Symbol* psym = resolveProcedureSymbolInScope(pname, node, gCurrentProgramRoot);
+                if (psym) {
+                    if (!emitClosureLiteral(psym, chunk, line)) {
+                        break;
+                    }
+                    break;
+                }
             }
 
-            if (!emitClosureLiteral(psym, chunk, line)) {
-                break;
-            }
+            compileLValue(node->left, chunk, line);
             break;
         }
         case AST_THREAD_SPAWN: {
@@ -7964,7 +8017,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool is_ref = false;
             if (current_function_compiler) {
                 // Check if it's an assignment to the function name itself
-                if (current_function_compiler->name && strcasecmp(varName, current_function_compiler->name) == 0) {
+                if (isCurrentFunctionResultIdentifier(current_function_compiler, varName)) {
                     local_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                 } else {
                     local_slot = resolveLocal(current_function_compiler, varName);
@@ -8233,15 +8286,43 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
-            if (node->token && (node->token->type == TOKEN_PLUS || node->token->type == TOKEN_MINUS)) {
+            if (node->token &&
+                (node->token->type == TOKEN_PLUS ||
+                 node->token->type == TOKEN_MINUS ||
+                 node->token->type == TOKEN_MUL ||
+                 node->token->type == TOKEN_SLASH ||
+                 node->token->type == TOKEN_INT_DIV ||
+                 node->token->type == TOKEN_MOD)) {
                 // Compound assignment: evaluate LHS once and preserve result on the stack
                 compileLValue(lvalue, chunk, getLine(lvalue));            // stack: [addr]
                 writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr]
                 writeBytecodeChunk(chunk, DUP, line);                     // [addr, addr, addr]
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [addr, addr, value]
                 compileRValue(rvalue, chunk, getLine(rvalue));            // [addr, addr, value, rhs]
-                if (node->token->type == TOKEN_PLUS) writeBytecodeChunk(chunk, ADD, line);
-                else writeBytecodeChunk(chunk, SUBTRACT, line);           // [addr, addr, result]
+                switch (node->token->type) {
+                    case TOKEN_PLUS:
+                        writeBytecodeChunk(chunk, ADD, line);
+                        break;
+                    case TOKEN_MINUS:
+                        writeBytecodeChunk(chunk, SUBTRACT, line);
+                        break;
+                    case TOKEN_MUL:
+                        writeBytecodeChunk(chunk, MULTIPLY, line);
+                        break;
+                    case TOKEN_SLASH:
+                        writeBytecodeChunk(chunk, DIVIDE, line);
+                        break;
+                    case TOKEN_INT_DIV:
+                        writeBytecodeChunk(chunk, INT_DIV, line);
+                        break;
+                    case TOKEN_MOD:
+                        writeBytecodeChunk(chunk, MOD, line);
+                        break;
+                    default:
+                        fprintf(stderr, "L%d: Compiler error: unsupported compound assignment operator.\n", line);
+                        compiler_had_error = true;
+                        break;
+                }
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);            // [addr]
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [result]
             } else {
@@ -8252,8 +8333,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 if (current_function_compiler && current_function_compiler->returns_value &&
                     current_function_compiler->name && lvalue->type == AST_VARIABLE &&
                     lvalue->token && lvalue->token->value &&
-                    (strcasecmp(lvalue->token->value, current_function_compiler->name) == 0 ||
-                     strcasecmp(lvalue->token->value, "result") == 0)) {
+                    isCurrentFunctionResultIdentifier(current_function_compiler, lvalue->token->value)) {
 
                     int return_slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     if (return_slot != -1) {

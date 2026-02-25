@@ -4,12 +4,14 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <glob.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sched.h>
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <setjmp.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -2045,6 +2047,637 @@ static void assert_path_truncate_maps_to_sandbox(void) {
     rmdir(root);
 }
 
+static ssize_t read_virtual_file(const char *path, char *buffer, size_t buffer_size) {
+    assert(path);
+    assert(buffer);
+    assert(buffer_size > 1);
+    int fd = pscalPathVirtualized_open(path, O_RDONLY, 0);
+    assert(fd >= 0);
+    ssize_t n = read(fd, buffer, buffer_size - 1);
+    assert(n >= 0);
+    buffer[n] = '\0';
+    close(fd);
+    return n;
+}
+
+static long long monotonic_ms(void) {
+    struct timespec ts;
+    assert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0);
+    return ((long long)ts.tv_sec * 1000ll) + ((long long)ts.tv_nsec / 1000000ll);
+}
+
+static bool int_list_contains(const int *values, size_t count, int needle) {
+    for (size_t i = 0; i < count; ++i) {
+        if (values[i] == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t read_numeric_virtual_entries(const char *dir_path, int *out, size_t out_capacity) {
+    assert(dir_path);
+    assert(out);
+    DIR *dir = pscalPathVirtualized_opendir(dir_path);
+    assert(dir);
+    size_t count = 0;
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '\0') {
+            continue;
+        }
+        char *endptr = NULL;
+        errno = 0;
+        long parsed = strtol(entry->d_name, &endptr, 10);
+        if (errno != 0 || !endptr || *endptr != '\0' || parsed <= 0 || parsed > INT_MAX) {
+            continue;
+        }
+        if (count < out_capacity) {
+            out[count++] = (int)parsed;
+        }
+    }
+    closedir(dir);
+    return count;
+}
+
+static void assert_proc_vm_files_present_and_stable(void) {
+    char templ[] = "/tmp/vproc-procvm-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    /* Pre-create a stale by-address VM directory and ensure refreshes do not
+     * delete it (directory churn can invalidate CWD in other sessions). */
+    assert(pscalPathVirtualized_mkdir("/proc/vm", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/proc/vm/by-address", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/proc/vm/by-address/deadbeef", 0700) == 0 || errno == EEXIST);
+
+    char first[1024] = {0};
+    char second[1024] = {0};
+    for (int pass = 0; pass < 2; ++pass) {
+        int fd = pscalPathVirtualized_open("/proc/vm/summary", O_RDONLY, 0);
+        assert(fd >= 0);
+        char *target = (pass == 0) ? first : second;
+        ssize_t n = read(fd, target, sizeof(first) - 1);
+        assert(n >= 0);
+        target[n] = '\0';
+        close(fd);
+    }
+    assert(strstr(first, "vm_count ") != NULL);
+    assert(strstr(second, "vm_count ") != NULL);
+
+    int list_fd = pscalPathVirtualized_open("/proc/vm/list", O_RDONLY, 0);
+    assert(list_fd >= 0);
+    char list_buf[1024] = {0};
+    ssize_t list_n = read(list_fd, list_buf, sizeof(list_buf) - 1);
+    assert(list_n >= 0);
+    list_buf[list_n] = '\0';
+    close(list_fd);
+    assert(strstr(list_buf, "idx vm_addr owner_addr") != NULL);
+
+    struct stat st;
+    assert(pscalPathVirtualized_stat("/proc/vm/by-address", &st) == 0);
+    assert(S_ISDIR(st.st_mode));
+    assert(pscalPathVirtualized_stat("/proc/vm/by-address/deadbeef", &st) == 0);
+    assert(S_ISDIR(st.st_mode));
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_core_and_net_entries_present(void) {
+    char templ[] = "/tmp/vproc-procnet-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/interrupts", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "CPU0") != NULL);
+    assert(strstr(buf, "PSCAL-virt-timer") != NULL);
+
+    assert(read_virtual_file("/proc/softirqs", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "TIMER") != NULL);
+    assert(strstr(buf, "RCU") != NULL);
+
+    assert(read_virtual_file("/proc/modules", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "vproc") != NULL);
+
+    assert(read_virtual_file("/proc/net/protocols", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "TCP") != NULL);
+    assert(strstr(buf, "UNIX") != NULL);
+
+    assert(read_virtual_file("/proc/net/wireless", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Inter-|") != NULL);
+
+    assert(read_virtual_file("/proc/net/softnet_stat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "00000000") != NULL);
+
+    assert(read_virtual_file("/proc/net/dev_mcast", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "333300000001") != NULL);
+
+    assert(read_virtual_file("/proc/net/igmp", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Group") != NULL);
+    assert(strstr(buf, "010000E0") != NULL);
+
+    assert(read_virtual_file("/proc/net/igmp6", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "ff020000000000000000000000000001") != NULL);
+
+    assert(read_virtual_file("/proc/net/ipv6_route", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "00000000000000000000000000000000") != NULL);
+
+    assert(read_virtual_file("/proc/net/rt6_stats", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0001") != NULL);
+
+    assert(read_virtual_file("/proc/net/fib_trie", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Main:") != NULL);
+
+    assert(read_virtual_file("/proc/net/fib_triestat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Basic info:") != NULL);
+
+    assert(read_virtual_file("/proc/net/netlink", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Pid") != NULL);
+
+    assert(read_virtual_file("/proc/net/ptype", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Type") != NULL);
+    assert(strstr(buf, "0800") != NULL);
+
+    assert(read_virtual_file("/proc/net/psched", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "000003e8") != NULL);
+
+    assert(read_virtual_file("/proc/net/xfrm_stat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "XfrmInError") != NULL);
+
+    assert(read_virtual_file("/proc/net/stat/rt_cache", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "entries") != NULL);
+
+    assert(read_virtual_file("/proc/net/stat/arp_cache", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "allocs") != NULL);
+
+    assert(read_virtual_file("/proc/net/stat/ndisc_cache", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "lookups") != NULL);
+
+    char target[PATH_MAX];
+    ssize_t link_n = pscalPathVirtualized_readlink("/proc/self/root", target, sizeof(target) - 1);
+    assert(link_n > 0);
+    target[link_n] = '\0';
+    assert(strcmp(target, "/") == 0);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_sys_entries_present(void) {
+    char templ[] = "/tmp/vproc-procsys-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/sys/kernel/hostname", buf, sizeof(buf)) > 0);
+    assert(read_virtual_file("/proc/sys/kernel/pid_max", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "4194304") != NULL);
+    assert(read_virtual_file("/proc/sys/kernel/threads-max", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "65535") != NULL);
+    assert(read_virtual_file("/proc/sys/kernel/random/boot_id", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "-") != NULL);
+    assert(read_virtual_file("/proc/sys/kernel/random/uuid", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "-") != NULL);
+
+    assert(read_virtual_file("/proc/sys/vm/swappiness", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "60") != NULL);
+    assert(read_virtual_file("/proc/sys/vm/overcommit_memory", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+    assert(read_virtual_file("/proc/sys/vm/max_map_count", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "65530") != NULL);
+    assert(read_virtual_file("/proc/sys/vm/min_free_kbytes", buf, sizeof(buf)) > 0);
+
+    assert(read_virtual_file("/proc/sys/fs/file-max", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "1048576") != NULL);
+    assert(read_virtual_file("/proc/sys/fs/inode-nr", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "16384") != NULL);
+
+    assert(read_virtual_file("/proc/sys/net/core/somaxconn", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "4096") != NULL);
+    assert(read_virtual_file("/proc/sys/net/ipv4/ip_forward", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+    assert(read_virtual_file("/proc/sys/net/ipv4/ip_local_port_range", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "32768") != NULL);
+    assert(read_virtual_file("/proc/sys/net/ipv6/conf/all/forwarding", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_misc_entries_present(void) {
+    char templ[] = "/tmp/vproc-procmisc-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/partitions", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "#blocks") != NULL);
+    assert(strstr(buf, "vda") != NULL);
+
+    assert(read_virtual_file("/proc/locks", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "POSIX") != NULL);
+
+    assert(read_virtual_file("/proc/pressure/cpu", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "some avg10=") != NULL);
+    assert(strstr(buf, "full avg10=") != NULL);
+
+    assert(read_virtual_file("/proc/pressure/memory", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "some avg10=") != NULL);
+
+    assert(read_virtual_file("/proc/pressure/io", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "some avg10=") != NULL);
+
+    assert(read_virtual_file("/proc/sysvipc/msg", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "msqid") != NULL);
+
+    assert(read_virtual_file("/proc/sysvipc/sem", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "semid") != NULL);
+
+    assert(read_virtual_file("/proc/sysvipc/shm", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "shmid") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_self_entries_present(void) {
+    char templ[] = "/tmp/vproc-procself-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char buf[4096];
+    assert(read_virtual_file("/proc/self/status", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Name:\t") != NULL);
+    assert(strstr(buf, "Pid:\t") != NULL);
+
+    assert(read_virtual_file("/proc/self/limits", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Max open files") != NULL);
+
+    assert(read_virtual_file("/proc/self/io", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "read_bytes:") != NULL);
+
+    assert(read_virtual_file("/proc/self/cgroup", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0::/") != NULL);
+
+    assert(read_virtual_file("/proc/self/sched", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "#threads: 1") != NULL);
+
+    assert(read_virtual_file("/proc/self/schedstat", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0 0 0") != NULL);
+
+    assert(read_virtual_file("/proc/self/stack", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "userspace") != NULL);
+
+    assert(read_virtual_file("/proc/self/oom_score", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    assert(read_virtual_file("/proc/self/oom_score_adj", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    assert(read_virtual_file("/proc/self/personality", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "00000000") != NULL);
+
+    assert(read_virtual_file("/proc/self/loginuid", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "4294967295") != NULL);
+
+    assert(read_virtual_file("/proc/self/cpuset", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "/") != NULL);
+
+    assert(read_virtual_file("/proc/self/attr/current", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "unconfined") != NULL);
+
+    assert(read_virtual_file("/proc/self/wchan", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_task_entries_present(void) {
+    char templ[] = "/tmp/vproc-proctask-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char self_link[64] = {0};
+    ssize_t self_n = pscalPathVirtualized_readlink("/proc/self", self_link, sizeof(self_link) - 1);
+    assert(self_n > 0);
+    self_link[self_n] = '\0';
+
+    char thread_self[128] = {0};
+    ssize_t thread_n = pscalPathVirtualized_readlink("/proc/thread-self", thread_self, sizeof(thread_self) - 1);
+    assert(thread_n > 0);
+    thread_self[thread_n] = '\0';
+    assert(strstr(thread_self, "/task/") != NULL);
+    assert(strstr(thread_self, self_link) == thread_self);
+
+    char pathbuf[PATH_MAX];
+    char buf[4096];
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/comm", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(buf[0] != '\0');
+    assert(buf[0] != '\n');
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/status", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Name:\t") != NULL);
+    assert(strstr(buf, "Threads:\t1") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/stat", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strchr(buf, '(') != NULL);
+    assert(strchr(buf, ')') != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/sched", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "#threads: 1") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/schedstat", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0 0 0") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/io", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "read_bytes:") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/cgroup", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0::/") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/wchan", self_link);
+    assert(read_virtual_file(pathbuf, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "0") != NULL);
+
+    snprintf(pathbuf, sizeof(pathbuf), "/proc/self/task/%s/cwd", self_link);
+    char target[PATH_MAX];
+    ssize_t link_n = pscalPathVirtualized_readlink(pathbuf, target, sizeof(target) - 1);
+    assert(link_n > 0);
+    target[link_n] = '\0';
+    assert(strstr(target, "../../") == target);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_device_entries_present(void) {
+    char templ[] = "/tmp/vproc-procdevice-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char self_target[64] = {0};
+    ssize_t n = pscalPathVirtualized_readlink("/proc/device/self", self_target, sizeof(self_target) - 1);
+    assert(n > 0);
+    self_target[n] = '\0';
+
+    int host_pid = getpid();
+    char expected[32];
+    snprintf(expected, sizeof(expected), "%d", host_pid);
+    assert(strcmp(self_target, expected) == 0);
+
+    char status_path[PATH_MAX];
+    snprintf(status_path, sizeof(status_path), "/proc/device/%s/status", self_target);
+    char buf[4096];
+    assert(read_virtual_file(status_path, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "Name:\t") != NULL);
+    assert(strstr(buf, "Pid:\t") != NULL);
+
+    snprintf(status_path, sizeof(status_path), "/proc/device/%s/io", self_target);
+    assert(read_virtual_file(status_path, buf, sizeof(buf)) > 0);
+    assert(strstr(buf, "read_bytes:") != NULL);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_pid_namespace_and_device_namespace_separated(void) {
+    char templ[] = "/tmp/vproc-procpidns-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = vprocReservePid();
+    VProc *vp = vprocCreate(&opts);
+    assert(vp);
+    int vproc_pid = vprocPid(vp);
+    assert(vproc_pid > 0);
+
+    char buf[256];
+    vprocActivate(vp);
+    assert(read_virtual_file("/proc/loadavg", buf, sizeof(buf)) > 0);
+
+    int proc_pids[1024];
+    size_t proc_pid_count = read_numeric_virtual_entries("/proc", proc_pids, sizeof(proc_pids) / sizeof(proc_pids[0]));
+    assert(proc_pid_count > 0);
+    assert(int_list_contains(proc_pids, proc_pid_count, vproc_pid));
+
+    int host_pid = getpid();
+    char proc_self_target[64] = {0};
+    ssize_t proc_self_n = pscalPathVirtualized_readlink("/proc/self",
+                                                        proc_self_target,
+                                                        sizeof(proc_self_target) - 1);
+    assert(proc_self_n > 0);
+    proc_self_target[proc_self_n] = '\0';
+    char expected_vproc[32];
+    snprintf(expected_vproc, sizeof(expected_vproc), "%d", vproc_pid);
+    assert(strcmp(proc_self_target, expected_vproc) == 0);
+
+    char self_target[64] = {0};
+    ssize_t self_n = pscalPathVirtualized_readlink("/proc/device/self", self_target, sizeof(self_target) - 1);
+    assert(self_n > 0);
+    self_target[self_n] = '\0';
+    char expected[32];
+    snprintf(expected, sizeof(expected), "%d", host_pid);
+    assert(strcmp(self_target, expected) == 0);
+
+    int device_pids[1024];
+    size_t device_pid_count = read_numeric_virtual_entries("/proc/device",
+                                                           device_pids,
+                                                           sizeof(device_pids) / sizeof(device_pids[0]));
+    assert(device_pid_count > 0);
+    assert(int_list_contains(device_pids, device_pid_count, host_pid));
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_root_listing_latency_regression(void) {
+    char templ[] = "/tmp/vproc-proclatency-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    int pids[1024];
+    size_t warm_count = read_numeric_virtual_entries("/proc", pids, sizeof(pids) / sizeof(pids[0]));
+    assert(warm_count > 0);
+
+    long long total_ms = 0;
+    long long max_ms = 0;
+    const int iterations = 5;
+    for (int i = 0; i < iterations; ++i) {
+        long long start_ms = monotonic_ms();
+        size_t count = read_numeric_virtual_entries("/proc", pids, sizeof(pids) / sizeof(pids[0]));
+        long long elapsed_ms = monotonic_ms() - start_ms;
+        assert(count > 0);
+        total_ms += elapsed_ms;
+        if (elapsed_ms > max_ms) {
+            max_ms = elapsed_ms;
+        }
+        assert(elapsed_ms < 2000);
+    }
+    long long avg_ms = total_ms / iterations;
+    assert(avg_ms < 1000);
+
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_path_virtualized_glob_matches_dynamic_proc_entries(void) {
+    char templ[] = "/tmp/vproc-procglob-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    assert(vprocChdirShim("/proc/net") == 0);
+
+    glob_t relative_results;
+    memset(&relative_results, 0, sizeof(relative_results));
+    int rc = pscalPathVirtualized_glob("net*", 0, NULL, &relative_results);
+    assert(rc == 0);
+    bool found_relative = false;
+    for (size_t i = 0; i < relative_results.gl_pathc; ++i) {
+        if (relative_results.gl_pathv[i] &&
+            strcmp(relative_results.gl_pathv[i], "netstat") == 0) {
+            found_relative = true;
+            break;
+        }
+    }
+    assert(found_relative);
+    globfree(&relative_results);
+
+    glob_t absolute_results;
+    memset(&absolute_results, 0, sizeof(absolute_results));
+    rc = pscalPathVirtualized_glob("/proc/net/net*", 0, NULL, &absolute_results);
+    assert(rc == 0);
+    bool found_absolute = false;
+    for (size_t i = 0; i < absolute_results.gl_pathc; ++i) {
+        if (absolute_results.gl_pathv[i] &&
+            strcmp(absolute_results.gl_pathv[i], "/proc/net/netstat") == 0) {
+            found_absolute = true;
+            break;
+        }
+    }
+    assert(found_absolute);
+    globfree(&absolute_results);
+
+    vprocDeactivate();
+    vprocDestroy(vp);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_vproc_cwd_isolated_between_vprocs(void) {
+    char templ[] = "/tmp/vproc-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    VProc *vp_a = vprocCreate(NULL);
+    VProc *vp_b = vprocCreate(NULL);
+    assert(vp_a);
+    assert(vp_b);
+
+    vprocActivate(vp_a);
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+    char cwd_a[PATH_MAX];
+    assert(vprocGetcwdShim(cwd_a, sizeof(cwd_a)) != NULL);
+    assert(strcmp(cwd_a, "/tmp/cwd-a") == 0);
+    int fd_a = vprocOpenShim("a.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(fd_a >= 0);
+    assert(vprocWriteShim(fd_a, "a", 1) == 1);
+    assert(vprocCloseShim(fd_a) == 0);
+    vprocDeactivate();
+
+    vprocActivate(vp_b);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+    char cwd_b[PATH_MAX];
+    assert(vprocGetcwdShim(cwd_b, sizeof(cwd_b)) != NULL);
+    assert(strcmp(cwd_b, "/tmp/cwd-b") == 0);
+    int fd_b = vprocOpenShim("b.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(fd_b >= 0);
+    assert(vprocWriteShim(fd_b, "b", 1) == 1);
+    assert(vprocCloseShim(fd_b) == 0);
+    vprocDeactivate();
+
+    vprocActivate(vp_a);
+    assert(vprocGetcwdShim(cwd_a, sizeof(cwd_a)) != NULL);
+    assert(strcmp(cwd_a, "/tmp/cwd-a") == 0);
+    vprocDeactivate();
+
+    struct stat st;
+    assert(pscalPathVirtualized_stat("/tmp/cwd-a/a.txt", &st) == 0);
+    assert(pscalPathVirtualized_stat("/tmp/cwd-b/b.txt", &st) == 0);
+    assert(pscalPathVirtualized_stat("/tmp/cwd-b/a.txt", &st) != 0);
+    assert(pscalPathVirtualized_stat("/tmp/cwd-a/b.txt", &st) != 0);
+
+    vprocDestroy(vp_a);
+    vprocDestroy(vp_b);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
 static void assert_passthrough_when_inactive(void) {
     char tmpl[] = "/tmp/vproc-passXXXXXX";
     int fd = mkstemp(tmpl);
@@ -3321,6 +3954,35 @@ static void assert_session_control_chars_route_to_shell_input_when_shell_foregro
     vprocSetShellSelfPid(prev_shell);
 }
 
+static void assert_session_ctrl_fallback_byte_remains_readable_without_forced_interrupt(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    vprocSessionStdioActivate(session);
+
+    VProcSessionInput *input = vprocSessionInputEnsureShim();
+    assert(input);
+
+    unsigned char ctrl_c = 3;
+    assert(vprocHostWrite(host_pipe[1], &ctrl_c, 1) == 1);
+    assert(session_input_wait_len(input, 1, 500));
+
+    char got = 0;
+    errno = 0;
+    assert(vprocSessionReadInputShimMode(&got, 1, true) == 1);
+    assert((unsigned char)got == ctrl_c);
+
+    pthread_mutex_lock(&input->mu);
+    assert(!input->interrupt_pending);
+    pthread_mutex_unlock(&input->mu);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocSetShellSelfPid(prev_shell);
+}
+
 static void assert_session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground(void) {
     int prev_shell = vprocGetShellSelfPid();
     int shell_pid = vprocReservePid();
@@ -4247,6 +4909,412 @@ static void assert_session_ctrl_z_does_not_bleed_between_sessions(void) {
     vprocDestroy(worker_a_vp);
     vprocDestroy(shell_a_vp);
     vprocSetShellSelfPid(prev_shell);
+}
+
+static void assert_session_cwd_does_not_bleed_between_reused_worker_contexts(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-session-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_a_pid = vprocReservePid();
+    int shell_b_pid = vprocReservePid();
+    assert(shell_a_pid > 0);
+    assert(shell_b_pid > 0);
+
+    VProcOptions shell_a_opts = vprocDefaultOptions();
+    shell_a_opts.pid_hint = shell_a_pid;
+    VProc *shell_a_vp = vprocCreate(&shell_a_opts);
+    assert(shell_a_vp);
+    assert(vprocPid(shell_a_vp) == shell_a_pid);
+
+    VProcOptions shell_b_opts = vprocDefaultOptions();
+    shell_b_opts.pid_hint = shell_b_pid;
+    VProc *shell_b_vp = vprocCreate(&shell_b_opts);
+    assert(shell_b_vp);
+    assert(vprocPid(shell_b_vp) == shell_b_pid);
+
+    int host_pipe_a[2];
+    int host_pipe_b[2];
+    assert(vprocHostPipe(host_pipe_a) == 0);
+    assert(vprocHostPipe(host_pipe_b) == 0);
+
+    VProcSessionStdio *session_a = session_create_with_host_stdin(host_pipe_a[0]);
+    VProcSessionStdio *session_b = session_create_with_host_stdin(host_pipe_b[0]);
+    session_a->session_id = 9701;
+    session_b->session_id = 9702;
+
+    /* Seed per-session shell identity and registry metadata. */
+    vprocSessionStdioActivate(session_a);
+    vprocSetShellSelfPid(shell_a_pid);
+    vprocSessionStdioActivate(session_b);
+    vprocSetShellSelfPid(shell_b_pid);
+
+    /* Simulate worker contexts that lost the per-session cached shell pid. */
+    session_a->shell_pid = 0;
+    session_b->shell_pid = 0;
+
+    /* Worker executes tab A command first. */
+    vprocSessionStdioActivate(NULL);
+    vprocSetShellSelfPid(shell_a_pid);
+    vprocSessionStdioActivate(session_a);
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    /* Reused worker then serves tab B. */
+    vprocSessionStdioActivate(NULL);
+    vprocSetShellSelfPid(shell_b_pid);
+    vprocSessionStdioActivate(session_b);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    /* Switching back to tab A must restore A's cwd and not bleed B's state. */
+    vprocSessionStdioActivate(session_a);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    assert(vprocHostClose(host_pipe_a[1]) == 0);
+    assert(vprocHostClose(host_pipe_b[1]) == 0);
+    vprocSessionStdioDestroy(session_b);
+    vprocSessionStdioDestroy(session_a);
+    vprocDestroy(shell_b_vp);
+    vprocDestroy(shell_a_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_path_virtualized_chdir_updates_session_cwd_when_interpose_bypassed(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-pathvirt-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9801;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    /*
+     * With interpose bypassed, path virtualization must still update the
+     * session's virtual cwd (not just host process cwd).
+     */
+    vprocRegisterInterposeBypassThread(pthread_self());
+    assert(pscalPathVirtualized_chdir("/tmp/cwd-b") == 0);
+    vprocUnregisterInterposeBypassThread(pthread_self());
+
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_vproc_chdir_accepts_expanded_container_path(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-expanded-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9802;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    char expanded_path[PATH_MAX];
+    snprintf(expanded_path, sizeof(expanded_path), "%s/tmp/cwd-b", root);
+    assert(vprocChdirShim(expanded_path) == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_path_virtualized_relative_ops_follow_session_cwd(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-relative-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/home", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+
+    int host_only_fd = pscalPathVirtualized_open("/home/host-only.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(host_only_fd >= 0);
+    assert(write(host_only_fd, "host", 4) == 4);
+    close(host_only_fd);
+
+    int tab_only_fd = pscalPathVirtualized_open("/tmp/cwd-a/tab-only.txt", O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(tab_only_fd >= 0);
+    assert(write(tab_only_fd, "tab", 3) == 3);
+    close(tab_only_fd);
+
+    char expanded_home[PATH_MAX];
+    snprintf(expanded_home, sizeof(expanded_home), "%s/home", root);
+    assert(chdir(expanded_home) == 0);
+
+    int shell_pid = vprocReservePid();
+    assert(shell_pid > 0);
+
+    VProcOptions opts = vprocDefaultOptions();
+    opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9903;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(pscalPathVirtualized_chdir("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(pscalPathVirtualized_getcwd(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    DIR *dir = pscalPathVirtualized_opendir(".");
+    assert(dir);
+    bool saw_tab_only = false;
+    bool saw_host_only = false;
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, "tab-only.txt") == 0) {
+            saw_tab_only = true;
+        } else if (strcmp(entry->d_name, "host-only.txt") == 0) {
+            saw_host_only = true;
+        }
+    }
+    closedir(dir);
+    assert(saw_tab_only);
+    assert(!saw_host_only);
+
+    struct stat st;
+    assert(pscalPathVirtualized_stat("tab-only.txt", &st) == 0);
+    assert(pscalPathVirtualized_stat("host-only.txt", &st) != 0);
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_session_cwd_prefers_active_session_over_stale_thread_hint(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-session-cwd-priority-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+
+    int shell_a_pid = vprocReservePid();
+    int shell_b_pid = vprocReservePid();
+    assert(shell_a_pid > 0);
+    assert(shell_b_pid > 0);
+
+    VProcOptions shell_a_opts = vprocDefaultOptions();
+    shell_a_opts.pid_hint = shell_a_pid;
+    VProc *shell_a_vp = vprocCreate(&shell_a_opts);
+    assert(shell_a_vp);
+    assert(vprocPid(shell_a_vp) == shell_a_pid);
+
+    VProcOptions shell_b_opts = vprocDefaultOptions();
+    shell_b_opts.pid_hint = shell_b_pid;
+    VProc *shell_b_vp = vprocCreate(&shell_b_opts);
+    assert(shell_b_vp);
+    assert(vprocPid(shell_b_vp) == shell_b_pid);
+
+    int host_pipe_a[2];
+    int host_pipe_b[2];
+    assert(vprocHostPipe(host_pipe_a) == 0);
+    assert(vprocHostPipe(host_pipe_b) == 0);
+
+    VProcSessionStdio *session_a = session_create_with_host_stdin(host_pipe_a[0]);
+    VProcSessionStdio *session_b = session_create_with_host_stdin(host_pipe_b[0]);
+    session_a->session_id = 9901;
+    session_b->session_id = 9902;
+
+    /* Seed each session's shell pid and cwd. */
+    vprocSessionStdioActivate(session_a);
+    vprocSetShellSelfPid(shell_a_pid);
+    assert(vprocChdirShim("/tmp/cwd-a") == 0);
+
+    vprocSessionStdioActivate(session_b);
+    vprocSetShellSelfPid(shell_b_pid);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+
+    /* Simulate a reused worker thread carrying a stale pid hint from tab B. */
+    assert(vprocRegisterTidHint(shell_b_pid, pthread_self()) == shell_b_pid);
+
+    char cwd[PATH_MAX];
+    vprocSessionStdioActivate(session_a);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    assert(vprocHostClose(host_pipe_a[1]) == 0);
+    assert(vprocHostClose(host_pipe_b[1]) == 0);
+    vprocSessionStdioDestroy(session_b);
+    vprocSessionStdioDestroy(session_a);
+    vprocDestroy(shell_b_vp);
+    vprocDestroy(shell_a_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_shell_cwd_apis_target_shell_vproc_with_worker_active(void) {
+    int prev_shell = vprocGetShellSelfPid();
+    char templ[] = "/tmp/vproc-shell-cwd-XXXXXX";
+    char *root = mkdtemp(templ);
+    assert(root);
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/tmp", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-a", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-b", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/tmp/cwd-c", 0700) == 0 || errno == EEXIST);
+
+    int shell_pid = vprocReservePid();
+    int worker_pid = vprocReservePid();
+    assert(shell_pid > 0);
+    assert(worker_pid > 0);
+
+    VProcOptions shell_opts = vprocDefaultOptions();
+    shell_opts.pid_hint = shell_pid;
+    VProc *shell_vp = vprocCreate(&shell_opts);
+    assert(shell_vp);
+    assert(vprocPid(shell_vp) == shell_pid);
+
+    VProcOptions worker_opts = vprocDefaultOptions();
+    worker_opts.pid_hint = worker_pid;
+    VProc *worker_vp = vprocCreate(&worker_opts);
+    assert(worker_vp);
+    assert(vprocPid(worker_vp) == worker_pid);
+
+    int host_pipe[2];
+    assert(vprocHostPipe(host_pipe) == 0);
+    VProcSessionStdio *session = session_create_with_host_stdin(host_pipe[0]);
+    session->session_id = 9910;
+    vprocSessionStdioActivate(session);
+    vprocSetShellSelfPid(shell_pid);
+
+    assert(vprocShellChdirShim("/tmp/cwd-a") == 0);
+
+    char cwd[PATH_MAX];
+    assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    vprocRegisterThread(worker_vp, pthread_self());
+    vprocActivate(worker_vp);
+    assert(vprocChdirShim("/tmp/cwd-b") == 0);
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+
+    assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-a") == 0);
+
+    assert(vprocShellChdirShim("/tmp/cwd-c") == 0);
+    assert(vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-c") == 0);
+
+    assert(vprocGetcwdShim(cwd, sizeof(cwd)) != NULL);
+    assert(strcmp(cwd, "/tmp/cwd-b") == 0);
+    vprocDeactivate();
+
+    assert(vprocHostClose(host_pipe[1]) == 0);
+    vprocSessionStdioDestroy(session);
+    vprocDestroy(worker_vp);
+    vprocDestroy(shell_vp);
+    vprocSetShellSelfPid(prev_shell);
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 16];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s", root);
+    (void)system(cleanup_cmd);
 }
 
 static void assert_job_id_and_label_round_trip(void) {
@@ -5610,6 +6678,28 @@ int main(void) {
     assert_setpgid_zero_defaults_to_pid();
     fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");
     assert_path_truncate_maps_to_sandbox();
+    fprintf(stderr, "TEST proc_vm_files_present_and_stable\n");
+    assert_proc_vm_files_present_and_stable();
+    fprintf(stderr, "TEST proc_core_and_net_entries_present\n");
+    assert_proc_core_and_net_entries_present();
+    fprintf(stderr, "TEST proc_sys_entries_present\n");
+    assert_proc_sys_entries_present();
+    fprintf(stderr, "TEST proc_misc_entries_present\n");
+    assert_proc_misc_entries_present();
+    fprintf(stderr, "TEST proc_self_entries_present\n");
+    assert_proc_self_entries_present();
+    fprintf(stderr, "TEST proc_task_entries_present\n");
+    assert_proc_task_entries_present();
+    fprintf(stderr, "TEST proc_device_entries_present\n");
+    assert_proc_device_entries_present();
+    fprintf(stderr, "TEST proc_pid_namespace_and_device_namespace_separated\n");
+    assert_proc_pid_namespace_and_device_namespace_separated();
+    fprintf(stderr, "TEST proc_root_listing_latency_regression\n");
+    assert_proc_root_listing_latency_regression();
+    fprintf(stderr, "TEST path_virtualized_glob_matches_dynamic_proc_entries\n");
+    assert_path_virtualized_glob_matches_dynamic_proc_entries();
+    fprintf(stderr, "TEST vproc_cwd_isolated_between_vprocs\n");
+    assert_vproc_cwd_isolated_between_vprocs();
     fprintf(stderr, "TEST write_reads_back\n");
     assert_write_reads_back();
     fprintf(stderr, "TEST passthrough_when_inactive\n");
@@ -5654,6 +6744,8 @@ int main(void) {
     assert_scp_like_prompt_survives_transient_eio_after_first_character();
     fprintf(stderr, "TEST session_control_chars_route_to_shell_input_when_shell_foreground\n");
     assert_session_control_chars_route_to_shell_input_when_shell_foreground();
+    fprintf(stderr, "TEST session_ctrl_fallback_byte_remains_readable_without_forced_interrupt\n");
+    assert_session_ctrl_fallback_byte_remains_readable_without_forced_interrupt();
     fprintf(stderr, "TEST session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground\n");
     assert_session_ctrl_c_dispatches_to_foreground_job_when_not_shell_foreground();
     fprintf(stderr, "TEST session_ctrl_z_stops_foreground_job_when_not_shell_foreground\n");
@@ -5670,6 +6762,18 @@ int main(void) {
     assert_session_ctrl_c_does_not_bleed_between_sessions();
     fprintf(stderr, "TEST session_ctrl_z_does_not_bleed_between_sessions\n");
     assert_session_ctrl_z_does_not_bleed_between_sessions();
+    fprintf(stderr, "TEST session_cwd_does_not_bleed_between_reused_worker_contexts\n");
+    assert_session_cwd_does_not_bleed_between_reused_worker_contexts();
+    fprintf(stderr, "TEST path_virtualized_chdir_updates_session_cwd_when_interpose_bypassed\n");
+    assert_path_virtualized_chdir_updates_session_cwd_when_interpose_bypassed();
+    fprintf(stderr, "TEST vproc_chdir_accepts_expanded_container_path\n");
+    assert_vproc_chdir_accepts_expanded_container_path();
+    fprintf(stderr, "TEST path_virtualized_relative_ops_follow_session_cwd\n");
+    assert_path_virtualized_relative_ops_follow_session_cwd();
+    fprintf(stderr, "TEST session_cwd_prefers_active_session_over_stale_thread_hint\n");
+    assert_session_cwd_prefers_active_session_over_stale_thread_hint();
+    fprintf(stderr, "TEST shell_cwd_apis_target_shell_vproc_with_worker_active\n");
+    assert_shell_cwd_apis_target_shell_vproc_with_worker_active();
     fprintf(stderr, "TEST runtime_request_ctrl_c_dispatches_to_foreground_job\n");
     assert_runtime_request_ctrl_c_dispatches_to_foreground_job();
     fprintf(stderr, "TEST runtime_request_ctrl_z_stops_foreground_job\n");

@@ -1,0 +1,11 @@
+uint8 a = 250;
+uint16 b = 60000;
+uint32 c = 4000000000;
+uint64 d = 5000000000;
+word w = 65530;
+
+writeln(a);
+writeln(b);
+writeln(c);
+writeln(d);
+writeln(w);

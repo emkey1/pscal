@@ -2505,7 +2505,8 @@ static bool shellDispatchIOSFrontendBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || !cmd->argv || !cmd->argv[0]) {
         return false;
     }
-    const char *name = cmd->argv[0];
+    char lookup_buf[PATH_MAX];
+    const char *name = shellCommandLookupName(cmd->argv[0], lookup_buf, sizeof(lookup_buf));
     VmBuiltinFn handler = NULL;
     if (strcasecmp(name, "clike") == 0) {
         handler = vmBuiltinShellClike;
@@ -2579,8 +2580,8 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
         return false;
     }
     const char *name = cmd->argv[0];
-    ShellFunctionEntry *entry = shellFindFunctionEntry(name);
-    if (!entry || !entry->compiled) {
+    ShellCompiledFunction *compiled = shellFindCompiledFunction(name);
+    if (!compiled) {
         return false;
     }
     char **saved_params = gParamValues;
@@ -2679,7 +2680,7 @@ static bool shellInvokeFunction(VM *vm, ShellCommand *cmd) {
     }
     frame_pushed = true;
 
-    result = interpretBytecode(invoke_vm, &entry->compiled->chunk,
+    result = interpretBytecode(invoke_vm, &compiled->chunk,
                                globalSymbols, constGlobalSymbols, procedure_table, 0);
     if (result != INTERPRET_OK) {
         shellUpdateStatus(1);
@@ -2751,10 +2752,12 @@ static bool shellInvokeBuiltin(VM *vm, ShellCommand *cmd) {
     if (!cmd || cmd->argc == 0 || !cmd->argv[0] || *cmd->argv[0] == '\0') {
         return false;
     }
-    const char *name = cmd->argv[0];
+    const char *name_raw = cmd->argv[0];
     if (!cmd->ignore_functions && shellInvokeFunction(vm, cmd)) {
         return true;
     }
+    char lookup_buf[PATH_MAX];
+    const char *name = shellCommandLookupName(name_raw, lookup_buf, sizeof(lookup_buf));
     const char *canonical = shellBuiltinCanonicalName(name);
     const char *lookup = canonical ? canonical : name;
     if (shellRuntimeBuiltinDisabled(lookup)) {
@@ -3764,37 +3767,13 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
         bool appended = false;
         if (shellWordShouldGlob(flags, field)) {
             glob_t glob_result;
-            const char *glob_pattern = field;
+            int glob_status =
 #if defined(PSCAL_TARGET_IOS)
-            char expanded_pattern[PATH_MAX];
-            bool glob_used_virtual = false;
-            if (field[0] == '/' &&
-                pathTruncateEnabled() &&
-                pathTruncateExpand(field, expanded_pattern, sizeof(expanded_pattern))) {
-                glob_pattern = expanded_pattern;
-                glob_used_virtual = true;
-            }
+                pscalPathVirtualized_glob(field, 0, NULL, &glob_result);
+#else
+                glob(field, 0, NULL, &glob_result);
 #endif
-            int glob_status = glob(glob_pattern, 0, NULL, &glob_result);
             if (glob_status == 0) {
-#if defined(PSCAL_TARGET_IOS)
-                if (glob_used_virtual) {
-                    for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
-                        char *match = glob_result.gl_pathv[g];
-                        if (!match) {
-                            continue;
-                        }
-                        char stripped[PATH_MAX];
-                        if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
-                            char *copy = strdup(stripped);
-                            if (copy) {
-                                free(glob_result.gl_pathv[g]);
-                                glob_result.gl_pathv[g] = copy;
-                            }
-                        }
-                    }
-                }
-#endif
                 size_t original_argc = cmd->argc;
                 bool ok = true;
                 for (size_t g = 0; g < glob_result.gl_pathc; ++g) {

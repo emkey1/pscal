@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal --no-cache 
 program ScreenFillingMazeSDL;
 
 uses

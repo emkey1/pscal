@@ -21,6 +21,11 @@ VarType clikeTokenTypeToVarType(ClikeTokenType t) {
         case CLIKE_TOKEN_VOID:       return TYPE_VOID;
         case CLIKE_TOKEN_CHAR:       return TYPE_CHAR;
         case CLIKE_TOKEN_BYTE:       return TYPE_BYTE;
+        case CLIKE_TOKEN_WORD:       return TYPE_WORD;
+        case CLIKE_TOKEN_UINT8:      return TYPE_UINT8;
+        case CLIKE_TOKEN_UINT16:     return TYPE_UINT16;
+        case CLIKE_TOKEN_UINT32:     return TYPE_UINT32;
+        case CLIKE_TOKEN_UINT64:     return TYPE_UINT64;
         default:                     return TYPE_UNKNOWN;
     }
 }
@@ -38,6 +43,11 @@ const char *clikeTokenTypeToTypeName(ClikeTokenType t) {
         case CLIKE_TOKEN_MSTREAM:return "mstream";
         case CLIKE_TOKEN_CHAR:   return "char";
         case CLIKE_TOKEN_BYTE:   return "byte";
+        case CLIKE_TOKEN_WORD:   return "word";
+        case CLIKE_TOKEN_UINT8:  return "uint8";
+        case CLIKE_TOKEN_UINT16: return "uint16";
+        case CLIKE_TOKEN_UINT32: return "uint32";
+        case CLIKE_TOKEN_UINT64: return "uint64";
         case CLIKE_TOKEN_VOID:   return "void";
         default: return NULL;
     }
@@ -473,7 +483,10 @@ static int isTypeToken(ClikeTokenType t) {
            t == CLIKE_TOKEN_FLOAT || t == CLIKE_TOKEN_DOUBLE ||
            t == CLIKE_TOKEN_LONG_DOUBLE || t == CLIKE_TOKEN_STR ||
            t == CLIKE_TOKEN_TEXT || t == CLIKE_TOKEN_MSTREAM ||
-           t == CLIKE_TOKEN_CHAR || t == CLIKE_TOKEN_BYTE;
+           t == CLIKE_TOKEN_CHAR || t == CLIKE_TOKEN_BYTE ||
+           t == CLIKE_TOKEN_WORD || t == CLIKE_TOKEN_UINT8 ||
+           t == CLIKE_TOKEN_UINT16 || t == CLIKE_TOKEN_UINT32 ||
+           t == CLIKE_TOKEN_UINT64;
 }
 
 
@@ -1299,6 +1312,11 @@ static ASTNodeClike* factor(ParserClike *p) {
                 case CLIKE_TOKEN_INT:
                 case CLIKE_TOKEN_LONG:
                 case CLIKE_TOKEN_LONG_LONG:
+                case CLIKE_TOKEN_WORD:
+                case CLIKE_TOKEN_UINT8:
+                case CLIKE_TOKEN_UINT16:
+                case CLIKE_TOKEN_UINT32:
+                case CLIKE_TOKEN_UINT64:
                     fname = "trunc";
                     break;
                 case CLIKE_TOKEN_CHAR:

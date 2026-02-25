@@ -69,6 +69,18 @@ echo "Running Example Program Tests"
 python3 ./examples/run_examples.py
 echo "Example Program Tests End"
 echo
+if [ "${RUN_COMPILE_ALL_EXAMPLES:-0}" = "1" ]; then
+    echo "====================================="
+    echo "Running Compile-All Example Sweep"
+    python3 ./examples/compile_all_examples.py
+    echo "Compile-All Example Sweep End"
+    echo
+else
+    echo "====================================="
+    echo "Skipping Compile-All Example Sweep (set RUN_COMPILE_ALL_EXAMPLES=1 to enable)"
+    echo
+fi
+
 echo "Running JSON2BC Tests"
 bash ./run_json2bc_tests.sh
 echo "JSON2BC Tests End"

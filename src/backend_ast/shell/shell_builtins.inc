@@ -17,15 +17,6 @@
 #include "common/path_truncate.h"
 #include "smallclue/smallclue.h"
 #include "ios/vproc.h"
-static const char *shellResolvePathForIOS(const char *input, char *buffer, size_t buffer_len) {
-    if (!input) {
-        return NULL;
-    }
-    if (pathTruncateExpand(input, buffer, buffer_len)) {
-        return buffer;
-    }
-    return input;
-}
 #endif
 #if !defined(PSCAL_TAB_TITLE_SUPPORT)
 #if defined(PSCAL_TARGET_IOS) || (defined(TARGET_OS_MACCATALYST) && TARGET_OS_MACCATALYST)
@@ -1406,37 +1397,13 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                     }
                     if (shellWordShouldGlob(word_flags, field_value)) {
                         glob_t glob_result;
-                        const char *glob_pattern = field_value;
+                        int glob_status =
 #if defined(PSCAL_TARGET_IOS)
-                        char expanded_pattern[PATH_MAX];
-                        bool glob_used_virtual = false;
-                        if (field_value[0] == '/' &&
-                            pathTruncateEnabled() &&
-                            pathTruncateExpand(field_value, expanded_pattern, sizeof(expanded_pattern))) {
-                            glob_pattern = expanded_pattern;
-                            glob_used_virtual = true;
-                        }
+                            pscalPathVirtualized_glob(field_value, 0, NULL, &glob_result);
+#else
+                            glob(field_value, 0, NULL, &glob_result);
 #endif
-                        int glob_status = glob(glob_pattern, 0, NULL, &glob_result);
                         if (glob_status == 0) {
-#if defined(PSCAL_TARGET_IOS)
-                            if (glob_used_virtual) {
-                                for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
-                                    char *match = glob_result.gl_pathv[g];
-                                    if (!match) {
-                                        continue;
-                                    }
-                                    char stripped[PATH_MAX];
-                                    if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
-                                        char *copy = strdup(stripped);
-                                        if (copy) {
-                                            free(glob_result.gl_pathv[g]);
-                                            glob_result.gl_pathv[g] = copy;
-                                        }
-                                    }
-                                }
-                            }
-#endif
                             bool glob_ok = true;
                             for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
                                 char *dup = strdup(glob_result.gl_pathv[g]);
@@ -2824,16 +2791,6 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
 
-#if defined(PSCAL_TARGET_IOS)
-    char resolved_target[PATH_MAX];
-    if (path) {
-        const char *expanded = shellResolvePathForIOS(path, resolved_target, sizeof(resolved_target));
-        if (expanded) {
-            path = expanded;
-        }
-    }
-#endif
-
     char *new_cwd = NULL;
     char *old_cwd = NULL;
     if (!shellDirectoryStackChdir(vm, "cd", path, &new_cwd, &old_cwd)) {
@@ -2844,7 +2801,7 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
         shellDirectoryStackReportError(vm, "cd", "out of memory");
         shellUpdateStatus(1);
         if (old_cwd) {
-            (void)chdir(old_cwd);
+            (void)SHELL_CHDIR(old_cwd);
             shellDirectoryStackEnsureInitialised(vm, "cd");
             (void)shellDirectoryStackUpdateEnvironment(NULL, old_cwd);
         }
@@ -2855,7 +2812,7 @@ Value vmBuiltinShellCd(VM *vm, int arg_count, Value *args) {
     if (!shellDirectoryStackUpdateEnvironment(old_cwd, gShellRuntime.dir_stack[0])) {
         const char *readonly = shellReadonlyGetErrorName();
         if (old_cwd) {
-            (void)chdir(old_cwd);
+            (void)SHELL_CHDIR(old_cwd);
             if (!shellDirectoryStackAssignTopOwned(old_cwd)) {
                 free(old_cwd);
             }
@@ -2883,7 +2840,7 @@ Value vmBuiltinShellPwd(VM *vm, int arg_count, Value *args) {
     (void)arg_count;
     (void)args;
     char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) {
+    if (!SHELL_GETCWD(cwd, sizeof(cwd))) {
         runtimeError(vm, "pwd: %s", strerror(errno));
         shellUpdateStatus(errno ? errno : 1);
         return makeVoid();
@@ -3573,10 +3530,21 @@ static int shellRunToolInlineWithRestore(ShellToolEntryFn entry,
     } else {
         vprocSessionStdioActivate(NULL);
     }
+    VProc *current_vproc = vprocCurrent();
     if (prev_vproc) {
-        vprocActivate(prev_vproc);
+        if (current_vproc != prev_vproc) {
+            if (current_vproc) {
+                vprocDeactivate();
+                current_vproc = vprocCurrent();
+            }
+            if (current_vproc != prev_vproc) {
+                vprocActivate(prev_vproc);
+            }
+        }
     } else {
-        vprocDeactivate();
+        while (vprocCurrent() != NULL) {
+            vprocDeactivate();
+        }
     }
     if (manage_process_state) {
         shellRestoreStandardFds(&fd_backup, dbg);
@@ -7564,8 +7532,7 @@ static bool shellCommandCollectInfo(const char *name,
         }
     }
 
-    ShellFunctionEntry *function_entry = shellFindFunctionEntry(name);
-    if (function_entry && function_entry->compiled) {
+    if (shellFunctionIsDefined(name)) {
         if (!shellCommandAppendResult(&results, &count, SHELL_COMMAND_RESULT_FUNCTION, NULL)) {
             goto error;
         }
@@ -10286,6 +10253,34 @@ static const char *shellPsStateForEntry(const ShellJob *job, const VProcSnapshot
     return "running";
 }
 
+static const char *shellPsCommandForEntry(const ShellJob *job, const VProcSnapshot *snap) {
+    if (snap && snap->command[0]) {
+        return snap->command;
+    }
+    const int shell_pid = vprocGetShellSelfPid();
+    if (snap && snap->pid == shell_pid) {
+        if (snap->comm[0]) {
+            return snap->comm;
+        }
+        if (job && job->command && job->command[0]) {
+            return job->command;
+        }
+        return "shell";
+    }
+    if (job && job->command && job->command[0]) {
+        return job->command;
+    }
+    if (snap) {
+        if (snap->comm[0]) {
+            return snap->comm;
+        }
+        if (snap->command[0]) {
+            return snap->command;
+        }
+    }
+    return "task";
+}
+
 static void shellPsPrintLine(pid_t pid, pid_t pgid, const char *state, int utime_cs, int stime_cs, const char *command) {
     char pgid_buf[16];
     if (pgid > 0) {
@@ -10619,7 +10614,14 @@ static bool shellKillSignalJob(VM *vm, const char *spec_text, size_t index, int 
         fprintf(stderr, "kill: %s: no associated processes\n", spec_text ? spec_text : "job");
         return false;
     }
-    if (terminate && job->pgid > 0) {
+    bool use_group_kill = terminate && job->pgid > 0;
+#if defined(PSCAL_TARGET_IOS)
+    /* iOS/vproc mode should only target tracked job members. Group-directed
+     * delivery can leak to non-job tasks when synthetic pgid mappings drift.
+     */
+    use_group_kill = false;
+#endif
+    if (use_group_kill) {
         /* Deliver to the whole synthetic group; safer for pipelines and job-spec parity. */
         if (shellJobControlSendPgid(job->pgid, signo) == 0) {
             sent = true;
@@ -10914,7 +10916,15 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     /* Pull in any state changes caused by the signals (stops, exits) so jobs/
      * lps reflect the new status immediately. */
     shellCollectJobs();
-    shellUpdateStatus(overall_ok ? 0 : 1);
+    if (overall_ok) {
+        /* kill reports success/failure of signal delivery, not the target's
+         * eventual exit code. Make sure asynchronous reaping does not leak
+         * 128+SIGNO into the command status on successful delivery.
+         */
+        shellRuntimeSetLastStatus(0);
+    } else {
+        shellUpdateStatus(1);
+    }
     return makeVoid();
 }
 
@@ -11395,10 +11405,7 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
                 }
                 ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
                 pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
-                const char *cmd = (job && job->command) ? job->command
-                                : (snap->command[0] ? snap->command
-                                : (snap->comm[0] ? snap->comm
-                                : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+                const char *cmd = shellPsCommandForEntry(job, snap);
                 const char *state = shellPsStateForEntry(job, snap);
                 shellPsPrintLineTree(snap, pgid, state, cmd, row->depth);
                 if (seen && seen_count < seen_cap) {
@@ -11416,10 +11423,7 @@ Value vmBuiltinShellPs(VM *vm, int arg_count, Value *args) {
             }
             ShellJob *job = shellFindJobByPid((pid_t)snap->pid);
             pid_t pgid = (job && job->pgid > 0) ? job->pgid : snap->pid;
-            const char *cmd = (job && job->command) ? job->command
-                            : (snap->command[0] ? snap->command
-                            : (snap->comm[0] ? snap->comm
-                            : ((snap->pid == vprocGetShellSelfPid()) ? "shell" : "task")));
+            const char *cmd = shellPsCommandForEntry(job, snap);
             const char *state = shellPsStateForEntry(job, snap);
             shellPsPrintLine((pid_t)snap->pid, pgid, state, snap->rusage_utime, snap->rusage_stime, cmd);
             if (seen && seen_count < seen_cap) {

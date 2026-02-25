@@ -3,8 +3,8 @@
 // This version uses the fixed-function pipeline (lighting, materials,
 // blending) instead of the 2D circle impostor trick.
 
-const int WindowWidth = 1600;
-const int WindowHeight = 1000;
+int WindowWidth = 1600;
+int WindowHeight = 1000;
 
 float TargetFPS = 90.0;
 
@@ -399,6 +399,12 @@ void handleInput() {
 }
 
 void initApp() {
+    int screenWidth = WindowWidth;
+    int screenHeight = WindowHeight;
+    if (getscreensize(screenWidth, screenHeight)) {
+        if (screenWidth > 0) WindowWidth = screenWidth;
+        if (screenHeight > 0) WindowHeight = screenHeight;
+    }
     InitGraph3D(WindowWidth, WindowHeight, "Rea Multi Bouncing Balls 3D", 24, 8);
     bool gpuAccelerated = GLIsHardwareAccelerated();
     if (gpuAccelerated) {
@@ -406,6 +412,10 @@ void initApp() {
     } else {
         writeln("OpenGL acceleration: software fallback.");
     }
+    int actualWidth = getmaxx() + 1;
+    int actualHeight = getmaxy() + 1;
+    if (actualWidth > 0) WindowWidth = actualWidth;
+    if (actualHeight > 0) WindowHeight = actualHeight;
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLSetSwapInterval(1);
     setupLighting();

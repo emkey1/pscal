@@ -6,8 +6,8 @@
 // elevation, and weather controls so the demo can be explored without
 // restarting.
 
-const int WindowWidth = 1280;
-const int WindowHeight = 1024;
+int WindowWidth = 1280;
+int WindowHeight = 1024;
 const int TerrainSize = 300;
 const int VertexStride = TerrainSize + 1;
 const int VertexCount = VertexStride * VertexStride;
@@ -1990,7 +1990,17 @@ class LandscapeDemo {
   }
 
   void initGraphics() {
+    int screenWidth = WindowWidth;
+    int screenHeight = WindowHeight;
+    if (getscreensize(screenWidth, screenHeight)) {
+      if (screenWidth > 0) WindowWidth = screenWidth;
+      if (screenHeight > 0) WindowHeight = screenHeight;
+    }
     InitGraph3D(WindowWidth, WindowHeight, "Rea Terrain", 24, 8);
+    int actualWidth = getmaxx() + 1;
+    int actualHeight = getmaxy() + 1;
+    if (actualWidth > 0) WindowWidth = actualWidth;
+    if (actualHeight > 0) WindowHeight = actualHeight;
     GLViewport(0, 0, WindowWidth, WindowHeight);
     GLSetSwapInterval(1);
     my.setupLighting();

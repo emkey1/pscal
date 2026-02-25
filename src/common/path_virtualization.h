@@ -8,6 +8,7 @@ extern "C" {
 
 #if defined(PSCAL_TARGET_IOS)
 #include <dirent.h>
+#include <glob.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -26,6 +27,10 @@ int pscalPathVirtualized_unlink(const char *path);
 int pscalPathVirtualized_remove(const char *path);
 int pscalPathVirtualized_rename(const char *oldpath, const char *newpath);
 DIR *pscalPathVirtualized_opendir(const char *name);
+int pscalPathVirtualized_glob(const char *pattern,
+                              int flags,
+                              int (*errfunc)(const char *, int),
+                              glob_t *pglob);
 int pscalPathVirtualized_symlink(const char *target, const char *linkpath);
 ssize_t pscalPathVirtualized_readlink(const char *path, char *buf, size_t size);
 char *pscalPathVirtualized_realpath(const char *path, char *resolved_path);

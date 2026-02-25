@@ -12,7 +12,7 @@ private func editorRuntimeLog(_ message: String) {
     #endif
 }
 
-final class EditorWindowManager {
+final class EditorWindowManager: ObservableObject {
     static let shared = EditorWindowManager()
     static let activityType = "com.pscal.editor.scene"
 
@@ -26,6 +26,8 @@ final class EditorWindowManager {
     private weak var controller: TerminalEditorViewController?
     private weak var mainSession: UISceneSession?
     private var pendingSceneActivity: NSUserActivity?
+    @Published private(set) var activeEditorRuntimeId: Int = 0
+    private weak var preferredEditorRuntime: PscalRuntimeBootstrap?
 
     private init() {
         preferenceObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.preferencesDidChangeNotification,
@@ -85,6 +87,23 @@ final class EditorWindowManager {
         guard EditorWindowManager.externalWindowEnabled else { return }
     }
 
+    func markRuntimeEditorActive(_ runtime: PscalRuntimeBootstrap) {
+        DispatchQueue.main.async {
+            if self.preferredEditorRuntime !== runtime {
+                self.preferredEditorRuntime = runtime
+                self.activeEditorRuntimeId = runtime.runtimeId
+            }
+        }
+    }
+
+    func markRuntimeEditorInactive(_ runtime: PscalRuntimeBootstrap) {
+        DispatchQueue.main.async {
+            guard self.preferredEditorRuntime === runtime else { return }
+            self.preferredEditorRuntime = nil
+            self.activeEditorRuntimeId = 0
+        }
+    }
+
     func sceneDidConnect(session: UISceneSession, controller: TerminalEditorViewController) {
         guard EditorWindowManager.externalWindowEnabled else { return }
         DispatchQueue.main.async {
@@ -140,30 +159,61 @@ final class EditorWindowManager {
 
     @MainActor
     private func activeEditorBridge() -> EditorTerminalBridge? {
+        if let runtime = preferredActiveEditorRuntime() {
+            return runtime.editorBridge
+        }
+        if let runtime = selectedShellRuntime(), runtime.editorBridge.isActive {
+            return runtime.editorBridge
+        }
         let manager = TerminalTabManager.shared
         for tab in manager.tabs {
             if case .shell(let runtime) = tab.kind, runtime.editorBridge.isActive {
                 return runtime.editorBridge
             }
         }
-        if case .shell(let runtime) = manager.selectedTab.kind {
+        if let runtime = selectedShellRuntime() {
             return runtime.editorBridge
         }
         return nil
     }
 
     @MainActor
-    fileprivate func activeEditorRuntime() -> PscalRuntimeBootstrap {
+    func activeEditorRuntime() -> PscalRuntimeBootstrap {
+        if let runtime = preferredActiveEditorRuntime() {
+            return runtime
+        }
+        if let runtime = selectedShellRuntime(), runtime.editorBridge.isActive {
+            return runtime
+        }
         let manager = TerminalTabManager.shared
         for tab in manager.tabs {
             if case .shell(let runtime) = tab.kind, runtime.editorBridge.isActive {
                 return runtime
             }
         }
-        if case .shell(let runtime) = manager.selectedTab.kind {
+        if let runtime = selectedShellRuntime() {
             return runtime
         }
         return PscalRuntimeBootstrap.shared
+    }
+
+    @MainActor
+    private func preferredActiveEditorRuntime() -> PscalRuntimeBootstrap? {
+        guard let runtime = preferredEditorRuntime else { return nil }
+        if runtime.editorBridge.isActive {
+            return runtime
+        }
+        preferredEditorRuntime = nil
+        activeEditorRuntimeId = 0
+        return nil
+    }
+
+    @MainActor
+    private func selectedShellRuntime() -> PscalRuntimeBootstrap? {
+        if case .shell(let runtime) = TerminalTabManager.shared.selectedTab.kind {
+            return runtime
+        }
+        return nil
     }
 }
 

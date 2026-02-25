@@ -203,6 +203,16 @@ final class SshRuntimeSession: ObservableObject {
         sendData(text.data(using: .utf8) ?? Data())
     }
 
+    func sendInterrupt() {
+        // Match terminal semantics: inject ETX into the session PTY stream.
+        sendControlByte(0x03)
+    }
+
+    func sendSuspend() {
+        // Match terminal semantics: inject SUB into the session PTY stream.
+        sendControlByte(0x1A)
+    }
+
     func sendPasted(_ text: String) {
         guard !text.isEmpty else { return }
         let wrapped: String
@@ -215,7 +225,17 @@ final class SshRuntimeSession: ObservableObject {
     }
 
     func requestClose() {
-        send("\u{04}")
+        sendInterrupt()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, self.exitStatus == nil else { return }
+            self.send("\u{04}")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.exitStatus == nil else { return }
+            self.withRuntimeContext {
+                _ = PSCALRuntimeSendSignalForSession(self.sessionId, SIGTERM)
+            }
+        }
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {
@@ -319,6 +339,18 @@ final class SshRuntimeSession: ObservableObject {
                     guard let base = buffer.baseAddress else { return }
                     let ptr = base.assumingMemoryBound(to: CChar.self)
                     PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
+                }
+            }
+        }
+    }
+
+    private func sendControlByte(_ byte: UInt8) {
+        inputQueue.async { [weak self] in
+            guard let self else { return }
+            self.withRuntimeContext {
+                var value = CChar(bitPattern: byte)
+                withUnsafePointer(to: &value) { ptr in
+                    PSCALRuntimeSendInputUrgent(self.sessionId, ptr, 1)
                 }
             }
         }

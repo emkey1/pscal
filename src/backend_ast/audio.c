@@ -4,7 +4,9 @@
 #include "Pascal/globals.h" // For EXIT_FAILURE_HANDLER
 #include "core/utils.h" // For EXIT_FAILURE_HANDLER
 #include "pscal_paths.h"
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h> // For strdup
 #include "vm/vm.h" // <<< ADDED: For VM struct and runtimeError prototype
 
@@ -13,6 +15,128 @@
 // Define and initialize global variables from audio.h
 Mix_Chunk* gLoadedSounds[MAX_SOUNDS];
 bool gSoundSystemInitialized = false;
+
+static bool audioPathHasDirectorySeparator(const char* path) {
+    if (!path) {
+        return false;
+    }
+    return strchr(path, '/') != NULL || strchr(path, '\\') != NULL;
+}
+
+static Mix_Chunk* audioTryLoadChunk(const char* candidate, char* resolved, size_t resolved_size) {
+    if (!candidate || candidate[0] == '\0') {
+        return NULL;
+    }
+    Mix_Chunk* chunk = Mix_LoadWAV(candidate);
+    if (!chunk) {
+        return NULL;
+    }
+    if (resolved && resolved_size > 0) {
+        snprintf(resolved, resolved_size, "%s", candidate);
+    }
+    return chunk;
+}
+
+static Mix_Chunk* audioTryLoadFromRoot(const char* root,
+                                       const char* filename,
+                                       char* resolved,
+                                       size_t resolved_size) {
+    if (!root || root[0] == '\0' || !filename || filename[0] == '\0') {
+        return NULL;
+    }
+    char candidate[PATH_MAX];
+    int written = snprintf(candidate, sizeof(candidate), "%s/%s", root, filename);
+    if (written <= 0 || (size_t)written >= sizeof(candidate)) {
+        return NULL;
+    }
+    return audioTryLoadChunk(candidate, resolved, resolved_size);
+}
+
+static Mix_Chunk* audioResolveAndLoadChunk(const char* filename,
+                                           char* resolved,
+                                           size_t resolved_size) {
+    Mix_Chunk* chunk = audioTryLoadChunk(filename, resolved, resolved_size);
+    if (chunk) {
+        return chunk;
+    }
+    if (!filename || filename[0] == '\0') {
+        return NULL;
+    }
+    if (audioPathHasDirectorySeparator(filename)) {
+        return NULL;
+    }
+
+    const char* searchEnv = getenv("PSCAL_SOUND_PATH");
+    if (searchEnv && searchEnv[0] != '\0') {
+        size_t envLen = strlen(searchEnv);
+        char* roots = (char*)malloc(envLen + 1);
+        if (roots) {
+            memcpy(roots, searchEnv, envLen + 1);
+            char* cursor = roots;
+            while (cursor && cursor[0] != '\0') {
+                char* sep = strchr(cursor, ':');
+                if (sep) {
+                    *sep = '\0';
+                }
+                if (cursor[0] != '\0') {
+                    chunk = audioTryLoadFromRoot(cursor, filename, resolved, resolved_size);
+                    if (chunk) {
+                        free(roots);
+                        return chunk;
+                    }
+                }
+                if (!sep) {
+                    break;
+                }
+                cursor = sep + 1;
+            }
+            free(roots);
+        }
+    }
+
+    const char* fallbackRoots[] = {
+        "/lib/sounds",
+        "lib/sounds",
+        "../lib/sounds"
+    };
+    for (size_t i = 0; i < sizeof(fallbackRoots) / sizeof(fallbackRoots[0]); ++i) {
+        chunk = audioTryLoadFromRoot(fallbackRoots[i], filename, resolved, resolved_size);
+        if (chunk) {
+            return chunk;
+        }
+    }
+
+    const char* installRootResolved = getenv("PSCAL_INSTALL_ROOT_RESOLVED");
+    if (installRootResolved && installRootResolved[0] != '\0') {
+        char installSounds[PATH_MAX];
+        int written = snprintf(installSounds, sizeof(installSounds), "%s/lib/sounds", installRootResolved);
+        if (written > 0 && (size_t)written < sizeof(installSounds)) {
+            chunk = audioTryLoadFromRoot(installSounds, filename, resolved, resolved_size);
+            if (chunk) {
+                return chunk;
+            }
+        }
+    }
+
+    const char* installRoot = getenv("PSCAL_INSTALL_ROOT");
+    if (installRoot && installRoot[0] != '\0') {
+        char installSounds[PATH_MAX];
+        int written = snprintf(installSounds, sizeof(installSounds), "%s/lib/sounds", installRoot);
+        if (written > 0 && (size_t)written < sizeof(installSounds)) {
+            chunk = audioTryLoadFromRoot(installSounds, filename, resolved, resolved_size);
+            if (chunk) {
+                return chunk;
+            }
+        }
+    }
+
+    chunk = audioTryLoadFromRoot(PSCAL_SOUNDS_DIR, filename, resolved, resolved_size);
+    if (chunk) {
+        return chunk;
+    }
+
+    return NULL;
+}
 
 // VM-native version of LoadSound.
 Value vmBuiltinLoadsound(VM* vm, int arg_count, Value* args) {
@@ -26,15 +150,7 @@ Value vmBuiltinLoadsound(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
 
-    // This path-handling logic can be shared or duplicated from the AST version.
-    char full_path[512];
-    const char* filename_to_pass = fileNameVal.s_val;
-    if (filename_to_pass && filename_to_pass[0] != '.' && filename_to_pass[0] != '/') {
-        snprintf(full_path, sizeof(full_path), "%s/%s", PSCAL_SOUNDS_DIR, filename_to_pass);
-        filename_to_pass = full_path;
-    }
-    
-    int soundID = audioLoadSound(filename_to_pass);
+    int soundID = audioLoadSound(fileNameVal.s_val);
     return makeInt(soundID);
 }
 
@@ -134,9 +250,11 @@ int audioLoadSound(const char* filename) {
         return -1; // Indicate error
     }
 
-    // Load the sound file into a Mix_Chunk
-    // Mix_LoadWAV is a common loader, can often handle formats initialized by Mix_Init
-    Mix_Chunk* chunk = Mix_LoadWAV(filename);
+    // Load the sound file into a Mix_Chunk.
+    // For bare filenames, fall back to common lib/sounds roots.
+    char resolved_path[PATH_MAX];
+    resolved_path[0] = '\0';
+    Mix_Chunk* chunk = audioResolveAndLoadChunk(filename, resolved_path, sizeof(resolved_path));
     if (!chunk) {
         fprintf(stderr, "Runtime error: Mix_LoadWAV failed for '%s': %s\n", filename, Mix_GetError());
         return -1; // Indicate error
@@ -146,7 +264,13 @@ int audioLoadSound(const char* filename) {
     gLoadedSounds[soundID] = chunk;
 
     // Return a 1-based ID to the Pascal side (as Pascal arrays/indices are often 1-based)
-    DEBUG_PRINT("[DEBUG AUDIO] Successfully loaded sound '%s'. Assigned ID: %d (internal index %d).\n", filename, soundID + 1, soundID);
+    if (resolved_path[0] != '\0') {
+        DEBUG_PRINT("[DEBUG AUDIO] Successfully loaded sound '%s' from '%s'. Assigned ID: %d (internal index %d).\n",
+                    filename, resolved_path, soundID + 1, soundID);
+    } else {
+        DEBUG_PRINT("[DEBUG AUDIO] Successfully loaded sound '%s'. Assigned ID: %d (internal index %d).\n",
+                    filename, soundID + 1, soundID);
+    }
     return soundID + 1;
 }
 

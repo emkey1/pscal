@@ -56,12 +56,17 @@ AST* rea_lookupType(const char* name) {
     else if (strcasecmp(name, "int32")    == 0) setTypeAST(node, TYPE_INT32);
     else if (strcasecmp(name, "int16")    == 0) setTypeAST(node, TYPE_INT16);
     else if (strcasecmp(name, "int8")     == 0) setTypeAST(node, TYPE_INT8);
+    else if (strcasecmp(name, "uint64")   == 0) setTypeAST(node, TYPE_UINT64);
+    else if (strcasecmp(name, "uint32")   == 0) setTypeAST(node, TYPE_UINT32);
+    else if (strcasecmp(name, "uint16")   == 0) setTypeAST(node, TYPE_UINT16);
+    else if (strcasecmp(name, "uint8")    == 0) setTypeAST(node, TYPE_UINT8);
     else if (strcasecmp(name, "float")    == 0) setTypeAST(node, TYPE_DOUBLE);
     else if (strcasecmp(name, "float32")  == 0) setTypeAST(node, TYPE_FLOAT);
     else if (strcasecmp(name, "long double") == 0)
         setTypeAST(node, TYPE_LONG_DOUBLE);
     else if (strcasecmp(name, "char")     == 0) setTypeAST(node, TYPE_CHAR);
     else if (strcasecmp(name, "byte")     == 0) setTypeAST(node, TYPE_BYTE);
+    else if (strcasecmp(name, "word")     == 0) setTypeAST(node, TYPE_WORD);
     else if (strcasecmp(name, "str")      == 0 ||
              strcasecmp(name, "text")     == 0)
         setTypeAST(node, TYPE_STRING);

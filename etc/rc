@@ -1,0 +1,62 @@
+#!/bin/exsh
+
+# Basic init bootstrap for iOS/iPadOS service-mode validation.
+etc_root="${PSCALI_ETC_ROOT:-/etc}"
+service_dir_real="$etc_root/service"
+service_dir="/etc/service"
+
+log_dir="/var/log"
+if ! mkdir -p "$log_dir" 2>/dev/null; then
+    sandbox_root=""
+    if [ -n "$etc_root" ]; then
+        sandbox_root="$(dirname "$etc_root")"
+    fi
+    if [ -z "$sandbox_root" ] && [ -n "$PATH_TRUNCATE" ]; then
+        sandbox_root="$PATH_TRUNCATE"
+    fi
+    if [ -z "$sandbox_root" ] && [ -n "$PSCALI_CONTAINER_ROOT" ]; then
+        sandbox_root="$PSCALI_CONTAINER_ROOT/Documents"
+    fi
+    if [ -n "$sandbox_root" ]; then
+        log_dir="$sandbox_root/var/log"
+        mkdir -p "$log_dir"
+    fi
+fi
+
+rm -f "$log_dir"/rc-nodate-*.log 2>/dev/null
+
+stamp="pid$$"
+log="$log_dir/rc-${stamp}.log"
+cwd="$(pwd 2>/dev/null)"
+if [ -z "$cwd" ]; then
+    cwd="(unknown)"
+fi
+echo "smallclue /etc/rc start" > "$log" 2>&1
+echo "pid=$$" >> "$log" 2>&1
+echo "stamp=$stamp" >> "$log" 2>&1
+echo "date=$(date 2>/dev/null)" >> "$log" 2>&1
+echo "cwd=$cwd" >> "$log" 2>&1
+echo "etc_root=$etc_root" >> "$log" 2>&1
+echo "service_dir=$service_dir" >> "$log" 2>&1
+echo "service_dir_real=$service_dir_real" >> "$log" 2>&1
+echo "log_dir=$log_dir" >> "$log" 2>&1
+echo "rc_format=v2" >> "$log" 2>&1
+
+# Keep a lightweight heartbeat so we can verify init+rc lifecycle over time.
+(
+    while true; do
+        sleep 600
+        echo "heartbeat date=$(date 2>/dev/null)" >> "$log" 2>&1
+    done
+) &
+echo "heartbeat logger pid=$!" >> "$log" 2>&1
+
+if mkdir -p "$service_dir_real" 2>/dev/null; then
+    runit "$service_dir" >> "$log" 2>&1 &
+    echo "runit started pid=$!" >> "$log" 2>&1
+else
+    echo "failed to create service directory; skipping runit startup" >> "$log" 2>&1
+fi
+
+echo "smallclue /etc/rc done" >> "$log" 2>&1
+exit 0

@@ -105,6 +105,59 @@ typedef struct {
 } ThreadMetrics;
 
 typedef struct {
+    uintptr_t vm_address;
+    uintptr_t thread_owner_address;
+    uintptr_t frontend_context_address;
+    uintptr_t chunk_address;
+    uintptr_t globals_address;
+    uintptr_t const_globals_address;
+    uintptr_t procedures_address;
+    uintptr_t mutex_owner_address;
+    int thread_id;
+    int thread_count;
+    int worker_count;
+    int available_workers;
+    int mutex_count;
+    int frame_count;
+    int trace_head_instructions;
+    int trace_executed;
+    int chunk_bytecode_count;
+    size_t stack_depth;
+    size_t global_symbol_count;
+    size_t const_symbol_count;
+    size_t procedure_symbol_count;
+    bool is_root_vm;
+    bool has_job_queue;
+    bool shell_indexing;
+    bool exit_requested;
+    bool abort_requested;
+    bool suspend_unwind_requested;
+} VMProcSnapshot;
+
+typedef struct {
+    int slot_id;
+    uintptr_t vm_address;
+    bool in_pool;
+    bool active;
+    bool idle;
+    bool owns_vm;
+    bool pool_worker;
+    bool awaiting_reuse;
+    bool ready_for_reuse;
+    bool status_ready;
+    bool result_ready;
+    bool paused;
+    bool cancel_requested;
+    bool kill_requested;
+    int pool_generation;
+    char name[THREAD_NAME_MAX];
+    struct timespec queued_at;
+    struct timespec started_at;
+    struct timespec finished_at;
+    ThreadMetrics metrics;
+} VMProcWorkerSnapshot;
+
+typedef struct {
     pthread_t handle;           // OS-level thread handle
     struct VM_s* vm;            // Pointer to the VM executing on this thread
     bool active;                // Whether this thread is running
@@ -236,6 +289,8 @@ bool vmThreadResume(struct VM_s* vm, int threadId);
 bool vmThreadCancel(struct VM_s* vm, int threadId);
 bool vmThreadKill(struct VM_s* vm, int threadId);
 size_t vmSnapshotWorkerUsage(struct VM_s* vm, ThreadMetrics* outMetrics, size_t capacity);
+size_t vmSnapshotProcState(VMProcSnapshot* out, size_t capacity);
+size_t vmSnapshotProcWorkers(uintptr_t vm_address, VMProcWorkerSnapshot* out, size_t capacity);
 
 // Register and lookup class methods in the VM's procedure table
 void vmRegisterClassMethod(VM* vm, const char* className, uint16_t methodIndex, Symbol* methodSymbol);

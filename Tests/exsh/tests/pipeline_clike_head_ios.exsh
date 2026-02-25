@@ -2,6 +2,7 @@
 set -e
 
 echo "pipeline-clike-head:start"
-count=$(clike -v | head -n 1 | wc -l | tr -d '[:space:]')
+count=$(clike -v | head -n 1 | wc -l)
+count=$((count + 0))
 echo "pipeline-clike-head:lines:$count"
 echo "pipeline-clike-head:status:$?"

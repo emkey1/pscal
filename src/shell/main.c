@@ -46,6 +46,9 @@ void shellHistoryLoadFromFile(void);
 #include "common/runtime_tty.h"
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_truncate.h"
+#define PATH_VIRTUALIZATION_NO_MACROS 1
+#include "common/path_virtualization.h"
+#undef PATH_VIRTUALIZATION_NO_MACROS
 #include "ios/vproc.h"
 #include "ios/tty/pscal_pty.h"
 #if defined(__has_include)
@@ -318,10 +321,25 @@ static void shellEnsureSelfVprocActive(void) {
     if (!gShellSelfVproc) {
         return;
     }
-    if (vprocCurrent() == NULL) {
-        vprocActivate(gShellSelfVproc);
-        gShellSelfVprocActivated = true;
+    int self_pid = vprocPid(gShellSelfVproc);
+    if (self_pid > 0) {
+        vprocSetShellSelfPid(self_pid);
+        vprocSetShellSelfTid(pthread_self());
     }
+    VProc *current = vprocCurrent();
+    if (current == gShellSelfVproc) {
+        return;
+    }
+    size_t unwind_steps = 0;
+    while (current && current != gShellSelfVproc && unwind_steps < 64) {
+        vprocDeactivate();
+        unwind_steps++;
+        current = vprocCurrent();
+    }
+    if (current != gShellSelfVproc) {
+        vprocActivate(gShellSelfVproc);
+    }
+    gShellSelfVprocActivated = true;
 }
 #endif
 
@@ -1003,7 +1021,11 @@ static bool promptBufferAppendWorkingDir(char **buffer,
                                          size_t *capacity,
                                          bool basename_only) {
     char cwd[PATH_MAX];
+#if defined(PSCAL_TARGET_IOS)
+    if (!pscalPathVirtualized_getcwd(cwd, sizeof(cwd))) {
+#else
     if (!getcwd(cwd, sizeof(cwd))) {
+#endif
         return true;
     }
     char display[PATH_MAX + 2];
@@ -2407,22 +2429,6 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     const char *glob_base = word;
     size_t glob_base_len = word_len;
     bool had_trailing_slash = (word_len > 0 && word[word_len - 1] == '/');
-#if defined(PSCAL_TARGET_IOS)
-    bool glob_used_virtual = false;
-    if (pathTruncateEnabled() && word_len > 0 && word[0] == '/') {
-        char word_copy[PATH_MAX];
-        if (word_len < sizeof(word_copy)) {
-            memcpy(word_copy, word, word_len);
-            word_copy[word_len] = '\0';
-            char expanded[PATH_MAX];
-            if (pathTruncateExpand(word_copy, expanded, sizeof(expanded))) {
-                glob_base = expanded;
-                glob_base_len = strlen(expanded);
-                glob_used_virtual = true;
-            }
-        }
-    }
-#endif
     while (glob_base_len > 1 && glob_base[glob_base_len - 1] == '/') {
         glob_base_len--;
     }
@@ -2534,34 +2540,21 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     glob_t results;
     memset(&results, 0, sizeof(results));
     int glob_flags = GLOB_TILDE | GLOB_MARK;
-    int glob_status = glob(pattern, glob_flags, NULL, &results);
+    int glob_status =
+#if defined(PSCAL_TARGET_IOS)
+        pscalPathVirtualized_glob(pattern, glob_flags, NULL, &results);
+#else
+        glob(pattern, glob_flags, NULL, &results);
+#endif
     free(pattern);
     if (glob_status != 0 || results.gl_pathc == 0) {
         globfree(&results);
         return false;
     }
 
-#if defined(PSCAL_TARGET_IOS)
-    if (glob_used_virtual) {
-        for (size_t i = 0; i < results.gl_pathc; ++i) {
-            const char *match = results.gl_pathv[i];
-            if (!match) {
-                continue;
-            }
-            char stripped[PATH_MAX];
-            if (pathTruncateStrip(match, stripped, sizeof(stripped))) {
-                char *copy = strdup(stripped);
-                if (copy) {
-                    free(results.gl_pathv[i]);
-                    results.gl_pathv[i] = copy;
-                }
-            }
-        }
-    }
-#endif
-
     /* command_is_cd is computed above when finding the command token. */
     if (command_is_cd) {
+        size_t original_pathc = results.gl_pathc;
         size_t write_index = 0;
         for (size_t i = 0; i < results.gl_pathc; ++i) {
             const char *match = results.gl_pathv[i];
@@ -2569,14 +2562,38 @@ static bool interactiveHandleTabCompletion(const char *prompt,
                 continue;
             }
             size_t match_len = strlen(match);
-            if (match_len > 0 && match[match_len - 1] == '/') {
+            bool is_directory = (match_len > 0 && match[match_len - 1] == '/');
+            if (!is_directory) {
+                struct stat st;
+#if defined(PSCAL_TARGET_IOS)
+                if (pscalPathVirtualized_stat(match, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    is_directory = true;
+                }
+#else
+                if (stat(match, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    is_directory = true;
+                }
+#endif
+                if (!is_directory) {
+                    DIR *d = opendir(match);
+                    if (d) {
+                        is_directory = true;
+                        closedir(d);
+                    }
+                }
+            }
+            if (is_directory) {
                 results.gl_pathv[write_index++] = results.gl_pathv[i];
             }
         }
-        results.gl_pathc = write_index;
-        if (results.gl_pathc == 0) {
-            globfree(&results);
-            return false;
+        if (write_index > 0) {
+            results.gl_pathc = write_index;
+        } else {
+            /*
+             * If directory detection fails under a virtualized filesystem, keep
+             * the original matches instead of making tab completion a no-op.
+             */
+            results.gl_pathc = original_pathc;
         }
     }
 
@@ -2614,17 +2631,12 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         }
     }
 
-    /* If PATH_TRUNCATE is active, double-check directory matches so we keep the trailing slash. */
+    /* Double-check directory matches so we keep the trailing slash. */
 #if defined(PSCAL_TARGET_IOS)
-    if (glob_used_virtual && results.gl_pathv[0] && replacement_len > 0) {
+    if (results.gl_pathv[0] && replacement_len > 0) {
         const char *visible = results.gl_pathv[0];
-        char expanded[PATH_MAX];
-        const char *real_path = visible;
-        if (pathTruncateExpand(visible, expanded, sizeof(expanded))) {
-            real_path = expanded;
-        }
         struct stat st;
-        if (real_path && stat(real_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (pscalPathVirtualized_stat(visible, &st) == 0 && S_ISDIR(st.st_mode)) {
             if (visible[replacement_len - 1] != '/') {
                 append_slash = true;
             }
@@ -3459,10 +3471,26 @@ static char *readInteractiveLine(const char *prompt,
                 continue;
             }
             if (seq[0] == '[') {
-                if (shellReadFd(STDIN_FILENO, &seq[1], 1) <= 0) {
+                unsigned char csi[16];
+                size_t csi_len = 0;
+                bool csi_complete = false;
+                while (csi_len + 1 < sizeof(csi)) {
+                    unsigned char next = 0;
+                    if (shellReadFd(STDIN_FILENO, &next, 1) <= 0) {
+                        break;
+                    }
+                    csi[csi_len++] = next;
+                    if (next >= '@' && next <= '~') {
+                        csi_complete = true;
+                        break;
+                    }
+                }
+                if (!csi_complete || csi_len == 0) {
                     continue;
                 }
-                if (seq[1] == 'A') { /* Up arrow */
+                csi[csi_len] = '\0';
+                unsigned char final = csi[csi_len - 1];
+                if (final == 'A') { /* Up arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (!interactiveHistoryNavigateUp(prompt,
@@ -3477,7 +3505,7 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] == 'B') { /* Down arrow */
+                } else if (final == 'B') { /* Down arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (!interactiveHistoryNavigateDown(prompt,
@@ -3492,7 +3520,7 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] == 'C') { /* Right arrow */
+                } else if (final == 'C') { /* Right arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (cursor < length) {
@@ -3507,7 +3535,7 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] == 'D') { /* Left arrow */
+                } else if (final == 'D') { /* Left arrow */
                     alt_dot_active = false;
                     alt_dot_offset = 0;
                     if (cursor > 0) {
@@ -3522,11 +3550,24 @@ static char *readInteractiveLine(const char *prompt,
                         shellWriteStdoutChar('\a');
                     }
                     continue;
-                } else if (seq[1] >= '0' && seq[1] <= '9') {
-                    if (shellReadFd(STDIN_FILENO, &seq[2], 1) <= 0) {
-                        continue;
+                } else if (final == 'Z' || (final == '~' && csi_len >= 2 && csi[0] == '9')) {
+                    /* Some iOS/iPadOS keyboard paths emit Tab as CSI Z/backtab (or 9~). */
+                    alt_dot_active = false;
+                    alt_dot_offset = 0;
+                    if (!interactiveHandleTabCompletion(prompt,
+                                                        &buffer,
+                                                        &length,
+                                                        &cursor,
+                                                        &capacity,
+                                                        &displayed_length,
+                                                        &displayed_prompt_lines,
+                                                        &scratch)) {
+                        shellWriteStdoutChar('\a');
+                    } else {
+                        history_index = 0;
                     }
-                    if (seq[1] == '3' && seq[2] == '~') { /* Delete */
+                    continue;
+                } else if (final == '~' && csi_len >= 2 && csi[0] == '3') { /* Delete */
                         alt_dot_active = false;
                         alt_dot_offset = 0;
                         if (cursor < length) {
@@ -3544,9 +3585,9 @@ static char *readInteractiveLine(const char *prompt,
                         } else {
                             shellWriteStdoutChar('\a');
                         }
-                        continue;
-                    }
+                    continue;
                 }
+                continue;
             } else if (seq[0] == 'f' || seq[0] == 'F') { /* Alt+F */
                 alt_dot_active = false;
                 alt_dot_offset = 0;
@@ -4257,6 +4298,9 @@ extern void PSCALRuntimeUnregisterSessionContext(uint64_t session_id) __attribut
 extern PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void) __attribute__((weak));
 extern void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx) __attribute__((weak));
 extern void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx) __attribute__((weak));
+extern int smallclueMain(int argc, char **argv) __attribute__((weak));
+typedef struct SmallclueApplet SmallclueApplet;
+extern const SmallclueApplet *smallclueFindApplet(const char *name) __attribute__((weak));
 
 static void shellSessionNotifyExit(uint64_t session_id, int status) {
     if (pscalRuntimeShellSessionExited) {
@@ -4330,6 +4374,33 @@ static bool shellIoDebugEnabled(void) {
         return false;
     }
     return strcmp(env, "0") != 0;
+}
+
+static int shellRunSessionArgv(int argc, char **argv) {
+    const char *arg0 = (argc > 0 && argv && argv[0]) ? argv[0] : "exsh";
+    const char *slash = strrchr(arg0, '/');
+    const char *call_name = (slash && slash[1] != '\0') ? slash + 1 : arg0;
+
+#if defined(PSCAL_TARGET_IOS)
+    int self_pid = vprocGetPidShim();
+    if (self_pid > 0 && call_name && call_name[0] != '\0') {
+        vprocSetCommandLabel(self_pid, call_name);
+    }
+#endif
+
+    if (strcmp(call_name, "exsh") == 0 ||
+        strcmp(call_name, "sh") == 0 ||
+        strcmp(call_name, "shell") == 0) {
+        return exsh_main(argc, argv);
+    }
+
+    if (&smallclueMain != NULL && &smallclueFindApplet != NULL) {
+        if (strcmp(call_name, "smallclue") == 0 || smallclueFindApplet(call_name) != NULL) {
+            return smallclueMain(argc, argv);
+        }
+    }
+
+    return exsh_main(argc, argv);
 }
 
 static void *shellRunSessionThread(void *arg) {
@@ -4409,7 +4480,7 @@ static void *shellRunSessionThread(void *arg) {
     if (session_ctx) {
         ShellRuntimeState *prev_ctx = shellRuntimeActivateContext(session_ctx);
         shellRuntimeInitSignals();
-        status = exsh_main(ctx->argc, ctx->argv);
+        status = shellRunSessionArgv(ctx->argc, ctx->argv);
         shellRuntimeActivateContext(prev_ctx);
         if (session_ctx_owned) {
             shellRuntimeDestroyContext(session_ctx);

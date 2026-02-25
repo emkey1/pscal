@@ -201,21 +201,13 @@ final class ShellRuntimeSession: ObservableObject {
     }
 
     func sendInterrupt() {
-        let delivered = withRuntimeContext {
-            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
-        }
-        if !delivered {
-            send("\u{03}")
-        }
+        // Match terminal semantics: inject ETX into the session PTY stream.
+        sendControlByte(0x03)
     }
 
     func sendSuspend() {
-        let delivered = withRuntimeContext {
-            PSCALRuntimeSendSignalForSession(sessionId, SIGTSTP) != 0
-        }
-        if !delivered {
-            send("\u{1A}")
-        }
+        // Match terminal semantics: inject SUB into the session PTY stream.
+        sendControlByte(0x1A)
     }
 
     func sendPasted(_ text: String) {
@@ -230,7 +222,24 @@ final class ShellRuntimeSession: ObservableObject {
     }
 
     func requestClose() {
-        send("\u{04}")
+        let interrupted = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
+        }
+        if !interrupted {
+            withRuntimeContext {
+                PSCALRuntimeSendSignal(SIGINT)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
+            guard self.exitStatus == nil else { return }
+            self.send("\u{04}")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [self] in
+            guard self.exitStatus == nil else { return }
+            self.withRuntimeContext {
+                _ = PSCALRuntimeSendSignalForSession(self.sessionId, SIGTERM)
+            }
+        }
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {
@@ -332,6 +341,18 @@ final class ShellRuntimeSession: ObservableObject {
                     guard let base = buffer.baseAddress else { return }
                     let ptr = base.assumingMemoryBound(to: CChar.self)
                     PSCALRuntimeSendInputForSession(self.sessionId, ptr, buffer.count)
+                }
+            }
+        }
+    }
+
+    private func sendControlByte(_ byte: UInt8) {
+        inputQueue.async { [weak self] in
+            guard let self else { return }
+            self.withRuntimeContext {
+                var value = CChar(bitPattern: byte)
+                withUnsafePointer(to: &value) { ptr in
+                    PSCALRuntimeSendInputUrgent(self.sessionId, ptr, 1)
                 }
             }
         }

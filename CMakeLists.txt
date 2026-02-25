@@ -1,6 +1,9 @@
 # CMakeLists.txt – top of your repo
 cmake_minimum_required(VERSION 3.18)
 project(pscal C)
+if(APPLE)
+    enable_language(OBJC)
+endif()
 enable_testing()
 
 option(PSCAL_FORCE_IOS "Force iOS mode (PSCAL_TARGET_IOS + vproc shims) on non-iOS hosts." OFF)
@@ -299,6 +302,21 @@ file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openssh")
 configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
     "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
+set(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR "")
+if(NOT PSCAL_PLATFORM_IOS)
+    find_path(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR
+        NAMES rpc/types.h
+        PATH_SUFFIXES "" tirpc)
+    if(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR)
+        message(STATUS "OpenSSH: using rpc/types.h from ${PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR}")
+    else()
+        file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
+        string(REPLACE "#define HAVE_RPC_TYPES_H 1" "/* #undef HAVE_RPC_TYPES_H */"
+            _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+        file(WRITE "${CMAKE_BINARY_DIR}/generated/openssh/config.h" "${_pscal_openssh_config_h}")
+        message(STATUS "OpenSSH: rpc/types.h not found; disabling HAVE_RPC_TYPES_H")
+    endif()
+endif()
 
 # Resolve the final runtime destination so install rules can write directly to
 # either an absolute override or the default path under the chosen prefix.
@@ -350,9 +368,6 @@ option(PSCAL_BUILD_STATIC_LIBS "Build PSCAL static libraries for embedding runne
 
 # Optionally enable SDL-based features
 set(_PSCAL_SDL_DEFAULT ON)
-if(PSCAL_PLATFORM_IOS)
-    set(_PSCAL_SDL_DEFAULT OFF)
-endif()
 option(SDL "Enable SDL-based graphics and audio" ${_PSCAL_SDL_DEFAULT})
 if(release)
     set(SDL ON CACHE BOOL "Enable SDL-based graphics and audio" FORCE)
@@ -379,6 +394,11 @@ endif()
 option(ENABLE_EXT_BUILTIN_3D "Enable extended 3D builtins" ${_ENABLE_EXT_BUILTIN_3D_DEFAULT})
 option(ENABLE_EXT_BUILTIN_GRAPHICS "Enable extended graphics builtins" ON)
 option(ENABLE_EXT_BUILTIN_OPENAI "Enable extended OpenAI builtins" ON)
+if(PSCAL_PLATFORM_IOS AND SDL)
+    # iOS builds ship SDL examples that depend on the 3D helper builtins.
+    # Force-enable them so stale cache values cannot silently strip support.
+    set(ENABLE_EXT_BUILTIN_3D ON CACHE BOOL "Enable extended 3D builtins" FORCE)
+endif()
 if(release)
     set(ENABLE_EXT_BUILTIN_MATH ON CACHE BOOL "Enable extended math builtins" FORCE)
     set(ENABLE_EXT_BUILTIN_STRINGS ON CACHE BOOL "Enable extended string builtins" FORCE)
@@ -462,6 +482,10 @@ if(ENABLE_EXT_BUILTIN_SQLITE)
             endif()
         endif()
     endif()
+endif()
+if(APPLE)
+    set_property(SOURCE src/backend_ast/graphics_3d_metal_apple.m
+        APPEND PROPERTY COMPILE_OPTIONS -fobjc-arc)
 endif()
 
 # ---- macOS SDK auto-detect (fixes stale MacOSX.sdk paths) ----
@@ -711,6 +735,12 @@ if(SDL)
                 message(STATUS "Found X11 for SDL backend: ${PSCAL_SDL_PLATFORM_LIBS}")
             endif()
         endif()
+        if(APPLE)
+            list(APPEND PSCAL_SDL_PLATFORM_LIBS
+                "-framework Metal"
+                "-framework QuartzCore"
+                "-framework Foundation")
+        endif()
 
         if(NOT PSCAL_PLATFORM_IOS)
             find_package(OpenGL REQUIRED)
@@ -923,6 +953,23 @@ endif()
 
 if(ENABLE_EXT_BUILTIN_OPENAI)
     add_compile_definitions(ENABLE_EXT_BUILTIN_OPENAI)
+endif()
+
+if(PSCAL_PLATFORM_IOS)
+    foreach(_pscal_ext_opt
+            ENABLE_EXT_BUILTIN_MATH
+            ENABLE_EXT_BUILTIN_STRINGS
+            ENABLE_EXT_BUILTIN_SYSTEM
+            ENABLE_EXT_BUILTIN_USER
+            ENABLE_EXT_BUILTIN_YYJSON
+            ENABLE_EXT_BUILTIN_SQLITE
+            ENABLE_EXT_BUILTIN_3D
+            ENABLE_EXT_BUILTIN_GRAPHICS
+            ENABLE_EXT_BUILTIN_OPENAI)
+        if(NOT ${_pscal_ext_opt})
+            message(FATAL_ERROR "iOS builds require ${_pscal_ext_opt}=ON so all extended builtins remain available.")
+        endif()
+    endforeach()
 endif()
 
 find_package(Threads REQUIRED)
@@ -1177,11 +1224,16 @@ set(PSCAL_OPENSSH_SOURCES
 )
 
 list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENSSH_SOURCES})
-set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
-    APPEND PROPERTY INCLUDE_DIRECTORIES
+set(_pscal_openssh_include_dirs
     "${CMAKE_BINARY_DIR}/generated/openssh"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
-    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat}")
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1/openbsd-compat")
+if(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR)
+    list(APPEND _pscal_openssh_include_dirs "${PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR}")
+endif()
+set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
+    APPEND PROPERTY INCLUDE_DIRECTORIES
+    ${_pscal_openssh_include_dirs})
 set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     APPEND PROPERTY COMPILE_OPTIONS
     -Wno-deprecated-declarations
@@ -1212,9 +1264,10 @@ if(SDL)
         src/backend_ast/gl.c
         src/backend_ast/audio.c
     )
-    if(PSCAL_PLATFORM_IOS)
+    if(PSCAL_PLATFORM_IOS OR APPLE)
         list(APPEND PSCAL_CORE_SOURCES
             src/backend_ast/graphics_3d_backend_ios.c
+            src/backend_ast/graphics_3d_metal_apple.m
         )
     else()
         list(APPEND PSCAL_CORE_SOURCES

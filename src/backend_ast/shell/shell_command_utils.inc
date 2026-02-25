@@ -5,6 +5,7 @@
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
+#include "ios/vproc.h"
 extern void pscalRuntimeDebugLog(const char *message);
 #endif
 
@@ -26,8 +27,8 @@ extern void pscalRuntimeDebugLog(const char *message);
 #endif
 
 #if defined(PSCAL_TARGET_IOS)
-#define SHELL_GETCWD(buf, len) pscalPathVirtualized_getcwd((buf), (len))
-#define SHELL_CHDIR(path) pscalPathVirtualized_chdir((path))
+#define SHELL_GETCWD(buf, len) vprocShellGetcwdShim((buf), (len))
+#define SHELL_CHDIR(path) vprocShellChdirShim((path))
 #else
 #define SHELL_GETCWD(buf, len) getcwd((buf), (len))
 #define SHELL_CHDIR(path) chdir((path))
@@ -44,6 +45,49 @@ static const char *shellVisiblePath(const char *path, char *buffer, size_t buffe
     return path;
 }
 #endif
+
+static const char *shellCommandLookupName(const char *name,
+                                          char *buffer,
+                                          size_t buffer_size) {
+    if (!name || !*name) {
+        return name;
+    }
+
+    const char *candidate = name;
+#if defined(PSCAL_TARGET_IOS)
+    if (name[0] == '/' &&
+        buffer &&
+        buffer_size > 0 &&
+        pathTruncateStrip(name, buffer, buffer_size) &&
+        buffer[0] == '/') {
+        candidate = buffer;
+    }
+#else
+    (void)buffer;
+    (void)buffer_size;
+#endif
+
+    static const char *prefixes[] = {
+        "/usr/bin/",
+        "/bin/",
+        "/private/usr/bin/",
+        "/private/bin/"
+    };
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        const char *prefix = prefixes[i];
+        size_t prefix_len = strlen(prefix);
+        if (strncmp(candidate, prefix, prefix_len) != 0) {
+            continue;
+        }
+        const char *leaf = candidate + prefix_len;
+        if (!*leaf || strchr(leaf, '/') != NULL) {
+            return name;
+        }
+        return leaf;
+    }
+    return name;
+}
+
 static bool shellBufferEnsure(char **buffer, size_t *length, size_t *capacity, size_t extra);
 static bool shellCommandAppendArgOwned(ShellCommand *cmd, char *value);
 static bool shellCommandAppendAssignmentOwned(ShellCommand *cmd, char *value, bool is_array_literal);
@@ -721,7 +765,9 @@ static void shellDisposeCompiledFunction(ShellCompiledFunction *fn) {
     free(fn);
 }
 
-static ShellFunctionEntry *shellFindFunctionEntry(const char *name) {
+static pthread_mutex_t gShellFunctionTableMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static ShellFunctionEntry *shellFindFunctionEntryUnlocked(const char *name) {
     if (!name) {
         return NULL;
     }
@@ -732,6 +778,26 @@ static ShellFunctionEntry *shellFindFunctionEntry(const char *name) {
         }
     }
     return NULL;
+}
+
+static bool shellFunctionIsDefined(const char *name) {
+    bool defined = false;
+    pthread_mutex_lock(&gShellFunctionTableMutex);
+    ShellFunctionEntry *entry = shellFindFunctionEntryUnlocked(name);
+    defined = (entry && entry->compiled);
+    pthread_mutex_unlock(&gShellFunctionTableMutex);
+    return defined;
+}
+
+static ShellCompiledFunction *shellFindCompiledFunction(const char *name) {
+    ShellCompiledFunction *compiled = NULL;
+    pthread_mutex_lock(&gShellFunctionTableMutex);
+    ShellFunctionEntry *entry = shellFindFunctionEntryUnlocked(name);
+    if (entry) {
+        compiled = entry->compiled;
+    }
+    pthread_mutex_unlock(&gShellFunctionTableMutex);
+    return compiled;
 }
 
 static bool shellStoreFunction(const char *name, const char *param_meta, ShellCompiledFunction *compiled) {
@@ -750,20 +816,21 @@ static bool shellStoreFunction(const char *name, const char *param_meta, ShellCo
             return false;
         }
     }
-    ShellFunctionEntry *existing = shellFindFunctionEntry(name);
+    pthread_mutex_lock(&gShellFunctionTableMutex);
+    ShellFunctionEntry *existing = shellFindFunctionEntryUnlocked(name);
     if (existing) {
-        if (existing->compiled && existing->compiled != compiled) {
-            shellDisposeCompiledFunction(existing->compiled);
-        }
+        /* Another shell session may still be executing the old body. */
         free(existing->name);
         free(existing->parameter_metadata);
         existing->name = name_copy;
         existing->parameter_metadata = meta_copy;
         existing->compiled = compiled;
+        pthread_mutex_unlock(&gShellFunctionTableMutex);
         return true;
     }
     ShellFunctionEntry *entries = realloc(gShellFunctions, sizeof(ShellFunctionEntry) * (gShellFunctionCount + 1));
     if (!entries) {
+        pthread_mutex_unlock(&gShellFunctionTableMutex);
         free(name_copy);
         free(meta_copy);
         return false;
@@ -773,6 +840,7 @@ static bool shellStoreFunction(const char *name, const char *param_meta, ShellCo
     entry->name = name_copy;
     entry->parameter_metadata = meta_copy;
     entry->compiled = compiled;
+    pthread_mutex_unlock(&gShellFunctionTableMutex);
     return true;
 }
 
@@ -3345,7 +3413,7 @@ static bool shellDirectoryStackEnsureInitialised(VM *vm, const char *builtin) {
     }
     char cwd[PATH_MAX];
     const char *initial_path = NULL;
-    if (getcwd(cwd, sizeof(cwd))) {
+    if (SHELL_GETCWD(cwd, sizeof(cwd))) {
         initial_path = cwd;
     }
     if (!initial_path || *initial_path == '\0') {

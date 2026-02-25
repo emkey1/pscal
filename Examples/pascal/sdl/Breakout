@@ -4,18 +4,13 @@ program PscalBreakout;
 uses CRT; // For Delay, potentially KeyPressed/ReadKey if not using full GraphLoop for input
 
 const
-  ScreenWidth = 800;
-  ScreenHeight = 600;
-  PaddleWidth = 80;
-  PaddleHeight = 20;
-  BallSize = 10;
+  DefaultScreenWidth = 1024;
+  DefaultScreenHeight = 640;
   BrickRows = 5;
   BricksPerRow = 8;
-  BrickWidth = ScreenWidth div BricksPerRow;
-  BrickHeight = 20;
   BrickGap = 2;
   PaddleInfluenceFactor = 4.0; // How much impact position affects BallDX. Higher = more angled shots.
-  MaxBallDX = 5; // Maximum horizontal speed for the ball after paddle hit
+  MaxBallDXBase = 5; // Maximum horizontal speed for the ball after paddle hit
   MinBallAbsDY = 2; // Minimum absolute vertical speed to prevent overly flat shots
 
 type
@@ -29,6 +24,14 @@ type
   TBrickArray = array[1..BrickRows, 1..BricksPerRow] of BrickRecord;
 
 var
+  // --- Dynamic Layout Variables ---
+  ScreenWidth, ScreenHeight: Integer;
+  PaddleWidth, PaddleHeight: Integer;
+  BallSize: Integer;
+  BrickWidth, BrickHeight: Integer;
+  HudPadding, HudTopOffset, BrickTopOffset, BottomMargin: Integer;
+  MaxBallDX: Integer;
+
   // --- Game State Variables ---
   PaddleX, PaddleY: Integer;
   BallX, BallY: Integer;
@@ -55,12 +58,61 @@ var
 // PROCEDURES AND FUNCTIONS
 //******************************************************************************
 
+function ClampInt(value, minValue, maxValue: Integer): Integer;
+begin
+  if value < minValue then
+    ClampInt := minValue
+  else if value > maxValue then
+    ClampInt := maxValue
+  else
+    ClampInt := value;
+end;
+
+procedure ResolveWindowSize;
+var
+  detectedWidth, detectedHeight: Integer;
+begin
+  detectedWidth := 0;
+  detectedHeight := 0;
+  if not GetScreenSize(detectedWidth, detectedHeight) then
+  begin
+    detectedWidth := GetMaxX + 1;
+    detectedHeight := GetMaxY + 1;
+  end;
+
+  if detectedWidth <= 0 then detectedWidth := DefaultScreenWidth;
+  if detectedHeight <= 0 then detectedHeight := DefaultScreenHeight;
+
+  ScreenWidth := detectedWidth;
+  ScreenHeight := detectedHeight;
+end;
+
+procedure ConfigureLayout;
+begin
+  PaddleWidth := ClampInt(ScreenWidth div 8, 70, 150);
+  PaddleHeight := ClampInt(ScreenHeight div 30, 12, 24);
+  BallSize := ClampInt(ScreenHeight div 40, 8, 16);
+
+  BrickWidth := ScreenWidth div BricksPerRow;
+  BrickHeight := ClampInt(ScreenHeight div 30, 16, 28);
+
+  HudPadding := ClampInt(ScreenHeight div 40, 10, 18);
+  HudTopOffset := ClampInt(ScreenHeight div 24, 18, 40);
+  BrickTopOffset := HudTopOffset + 48;
+  BottomMargin := ClampInt(ScreenHeight div 16, 20, 56);
+
+  MaxBallDX := ClampInt(MaxBallDXBase + (ScreenWidth div 500), MaxBallDXBase, MaxBallDXBase + 3);
+end;
+
 procedure InitializeGame;
 var
   r, c: Integer;
   colorSeed: Integer;
 begin
-  InitGraph(ScreenWidth, ScreenHeight, 'Pscal Breakout');
+  InitGraph(DefaultScreenWidth, DefaultScreenHeight, 'Pscal Breakout');
+  ResolveWindowSize;
+  ConfigureLayout;
+
   InitSoundSystem;
   InitTextSystem('/System/Library/Fonts/Supplemental/Arial.ttf', 18); // Ensure this font path is correct for your system
 
@@ -70,7 +122,7 @@ begin
   LoseLifeSoundID  := LoadSound('lose_life.wav');
 
   PaddleX := (ScreenWidth - PaddleWidth) div 2;
-  PaddleY := ScreenHeight - PaddleHeight - 10;
+  PaddleY := ScreenHeight - PaddleHeight - BottomMargin;
 
   BallX := ScreenWidth div 2;
   BallY := PaddleY - BallSize - 5;
@@ -83,7 +135,7 @@ begin
     for c := 1 to BricksPerRow do
     begin
       Bricks[r,c].X := (c - 1) * BrickWidth + BrickGap div 2;
-      Bricks[r,c].Y := (r - 1) * BrickHeight + BrickGap div 2 + 50;
+      Bricks[r,c].Y := (r - 1) * BrickHeight + BrickGap div 2 + BrickTopOffset;
       Bricks[r,c].Width := BrickWidth - BrickGap;
       Bricks[r,c].Height := BrickHeight - BrickGap;
       Bricks[r,c].IsVisible := True;
@@ -160,7 +212,7 @@ begin
   PaddleX := mouseX - (PaddleWidth div 2);
 
   if PaddleX < 0 then PaddleX := 0;
-  if PaddleX + PaddleWidth > GetMaxX then PaddleX := GetMaxX - PaddleWidth;
+  if PaddleX + PaddleWidth > ScreenWidth then PaddleX := ScreenWidth - PaddleWidth;
 end;
 
 //------------------------------------------------------------------------------
@@ -363,11 +415,15 @@ begin
 
   // Render Score Texture
   if ScoreTextureID <> -1 then
-    RenderCopyRect(ScoreTextureID, 10, 10, ScoreTextWidth, ScoreTextHeight);
+    RenderCopyRect(ScoreTextureID, HudPadding, HudTopOffset, ScoreTextWidth, ScoreTextHeight);
 
   // Render Lives Texture
   if LivesTextureID <> -1 then
-    RenderCopyRect(LivesTextureID, ScreenWidth - LivesTextWidth - 10, 10, LivesTextWidth, LivesTextHeight);
+    RenderCopyRect(LivesTextureID,
+                   ScreenWidth - LivesTextWidth - HudPadding,
+                   HudTopOffset,
+                   LivesTextWidth,
+                   LivesTextHeight);
 
   UpdateScreen;
 end;

@@ -17,12 +17,50 @@
 #include "audio.h"
 
 #include "core/utils.h"
+#include "common/path_truncate.h"
+#if defined(PSCAL_TARGET_IOS)
+#define PATH_VIRTUALIZATION_NO_MACROS 1
+#include "common/path_virtualization.h"
+#undef PATH_VIRTUALIZATION_NO_MACROS
+#endif
 #include "vm/vm.h"
 #include "sdl_ios_dispatch.h"
 static void sdlLogEvent(const char *label, const SDL_Event *event);
 #if defined(PSCAL_TARGET_IOS)
 #include <dispatch/dispatch.h>
 #include <pthread.h>
+__attribute__((weak)) void pscalIOSPromoteSDLWindow(void);
+__attribute__((weak)) void pscalIOSRestoreTerminalWindowKey(void);
+__attribute__((weak)) void pscalRuntimeSdlDidOpen(void);
+__attribute__((weak)) void pscalRuntimeSdlDidClose(void);
+#if PSCALI_HAS_SYSWM && !defined(PSCALI_SDL3)
+__attribute__((weak)) void pscalIOSPromoteSDLNativeWindow(void *nativeWindow);
+#endif
+
+static inline void sdlPromoteIosWindowIfAvailable(void) {
+    if (pscalIOSPromoteSDLWindow) {
+        pscalIOSPromoteSDLWindow();
+    }
+}
+
+static inline void sdlRestoreTerminalWindowIfAvailable(void) {
+    if (pscalIOSRestoreTerminalWindowKey) {
+        pscalIOSRestoreTerminalWindowKey();
+    }
+}
+
+static inline void sdlNotifyUiSdlDidOpen(void) {
+    if (pscalRuntimeSdlDidOpen) {
+        pscalRuntimeSdlDidOpen();
+    }
+}
+
+static inline void sdlNotifyUiSdlDidClose(void) {
+    if (pscalRuntimeSdlDidClose) {
+        pscalRuntimeSdlDidClose();
+    }
+}
+
 static inline void sdlRunOnMainThreadSync(void (^block)(void)) {
     if (pthread_main_np() != 0) {
         block();
@@ -252,6 +290,14 @@ static bool isWindowCloseEvent(const SDL_Event* event) {
 }
 #endif
 
+static bool shouldIgnoreQuitEvent(void) {
+#if defined(PSCAL_TARGET_IOS)
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool sdlTextInputActive(void) {
 #if defined(PSCALI_SDL3)
     if (!gSdlWindow) {
@@ -264,12 +310,24 @@ bool sdlTextInputActive(void) {
 }
 
 void sdlStartTextInput(void) {
+#if defined(PSCAL_TARGET_IOS)
+    sdlRunOnMainThreadSync(^{
+#if defined(PSCALI_SDL3)
+        if (gSdlWindow) {
+            SDL_StartTextInput(gSdlWindow);
+        }
+#else
+        SDL_StartTextInput();
+#endif
+    });
+#else
 #if defined(PSCALI_SDL3)
     if (gSdlWindow) {
         SDL_StartTextInput(gSdlWindow);
     }
 #else
     SDL_StartTextInput();
+#endif
 #endif
 }
 
@@ -500,6 +558,10 @@ static int sdlInputWatch(void* userdata, SDL_Event* event) {
 
     sdlLogEvent("EventWatch", event);
     if (event->type == SDL_QUIT) {
+        if (shouldIgnoreQuitEvent()) {
+            sdlDebugLogf("[DEBUG SDL] EventWatch ignored SDL_QUIT on iOS\n");
+            return 0;
+        }
         SDL_DEBUG_SET_BREAK_REQUESTED(1, "EventWatch SDL_QUIT");
     } else if (event->type == SDL_KEYDOWN) {
         SDL_Keycode sym = event->key.keysym.sym;
@@ -650,6 +712,9 @@ void sdlEnsureInputWatch(void) {
 }
 
 static void cleanupSdlWindowResourcesInternal(void) {
+#if defined(PSCAL_TARGET_IOS)
+    bool hadWindow = (gSdlWindow != NULL);
+#endif
     resetPendingKeycodes();
 
     if (gSdlInitialized && sdlTextInputActive()) {
@@ -684,6 +749,12 @@ static void cleanupSdlWindowResourcesInternal(void) {
     gSdlCurrentColor.g = 255;
     gSdlCurrentColor.b = 255;
     gSdlCurrentColor.a = 255;
+#if defined(PSCAL_TARGET_IOS)
+    if (hadWindow) {
+        sdlNotifyUiSdlDidClose();
+        sdlRestoreTerminalWindowIfAvailable();
+    }
+#endif
 }
 
 void cleanupSdlWindowResources(void) {
@@ -811,22 +882,46 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph) {
     }
 
     if (!gSdlInitialized) {
+#if defined(PSCAL_TARGET_IOS)
+        __block struct {
+            bool failed;
+            char msg[256];
+        } initState = { false, {0} };
+        sdlRunOnMainThreadSync(^{
+            if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
+                snprintf(initState.msg, sizeof(initState.msg), "%s", SDL_GetError());
+                initState.failed = true;
+                return;
+            }
+            gSdlInitialized = true;
+#ifdef SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH
+            SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+#endif
+#if PSCALI_HAS_SYSWM
+            SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+#endif
+        });
+        if (initState.failed) {
+            runtimeError(vm, "Runtime error: SDL_Init failed in InitGraph: %s", initState.msg[0] ? initState.msg : "unknown");
+            return makeVoid();
+        }
+#else
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
             runtimeError(vm, "Runtime error: SDL_Init failed in InitGraph: %s", SDL_GetError());
             return makeVoid();
         }
         gSdlInitialized = true;
-
-        // Allow clicks to focus the window on macOS and avoid dropped initial events
 #ifdef SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
 #endif
 #if PSCALI_HAS_SYSWM
         SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
 #endif
+#endif
     }
 
     cleanupSdlWindowResources();
+    SDL_DEBUG_SET_BREAK_REQUESTED(0, "InitGraph reset");
 
     int width = (int)AS_INTEGER(args[0]);
     int height = (int)AS_INTEGER(args[1]);
@@ -837,6 +932,86 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph) {
         return makeVoid();
     }
     
+    gSdlWindow = NULL;
+#if defined(PSCAL_TARGET_IOS)
+    __block struct {
+        bool failed;
+        char msg[256];
+    } createState = { false, {0} };
+    sdlRunOnMainThreadSync(^{
+#if defined(PSCALI_SDL3)
+        gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_SHOWN);
+        if (gSdlWindow) {
+            SDL_SetWindowPosition(gSdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+#else
+        gSdlWindow = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, SDL_WINDOW_SHOWN);
+#endif
+        if (!gSdlWindow) {
+            snprintf(createState.msg, sizeof(createState.msg), "SDL_CreateWindow failed: %s", SDL_GetError());
+            createState.failed = true;
+            return;
+        }
+
+        gSdlWidth = width;
+        gSdlHeight = height;
+
+        gSdlRenderer = NULL;
+#if defined(PSCALI_SDL3)
+        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, NULL);
+        if (gSdlRenderer) {
+            SDL_SetRenderVSync(gSdlRenderer, 1);
+        }
+#else
+        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#endif
+        if (!gSdlRenderer) {
+            snprintf(createState.msg, sizeof(createState.msg), "SDL_CreateRenderer failed: %s", SDL_GetError());
+            createState.failed = true;
+            SDL_DestroyWindow(gSdlWindow);
+            gSdlWindow = NULL;
+            return;
+        }
+
+        gSdlGLContext = NULL;
+        initializeTextureSystem();
+
+        SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
+        SDL_RenderClear(gSdlRenderer);
+        SDL_RenderPresent(gSdlRenderer);
+        SDL_PumpEvents(); // Process any pending events so the window becomes visible
+        SDL_RaiseWindow(gSdlWindow); // Ensure the window appears in the foreground
+#if SDL_VERSION_ATLEAST(2,0,5)
+#ifndef PSCALI_SDL3
+        SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
+#endif
+#endif
+#if defined(PSCAL_TARGET_IOS)
+#if PSCALI_HAS_SYSWM && !defined(PSCALI_SDL3)
+        if (pscalIOSPromoteSDLNativeWindow) {
+            SDL_SysWMinfo wmInfo;
+            SDL_VERSION(&wmInfo.version);
+            if (SDL_GetWindowWMInfo(gSdlWindow, &wmInfo)) {
+                void *nativeWindow = NULL;
+                if (wmInfo.subsystem == SDL_SYSWM_UIKIT && wmInfo.info.uikit.window) {
+                    nativeWindow = (void *)wmInfo.info.uikit.window;
+                } else if (wmInfo.info.uikit.window) {
+                    nativeWindow = (void *)wmInfo.info.uikit.window;
+                }
+                if (nativeWindow) {
+                    pscalIOSPromoteSDLNativeWindow(nativeWindow);
+                }
+            }
+        }
+#endif
+        sdlPromoteIosWindowIfAvailable();
+#endif
+    });
+    if (createState.failed) {
+        runtimeError(vm, "Runtime error: %s", createState.msg[0] ? createState.msg : "SDL init failed");
+        return makeVoid();
+    }
+#else
     gSdlWindow = NULL;
 #if defined(PSCALI_SDL3)
     gSdlWindow = SDL_CreateWindow(title, width, height, SDL_WINDOW_SHOWN);
@@ -875,11 +1050,12 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph) {
     SDL_SetRenderDrawColor(gSdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderPresent(gSdlRenderer);
-    SDL_PumpEvents(); // Process any pending events so the window becomes visible
-    SDL_RaiseWindow(gSdlWindow); // Ensure the window appears in the foreground
+    SDL_PumpEvents();
+    SDL_RaiseWindow(gSdlWindow);
 #if SDL_VERSION_ATLEAST(2,0,5)
 #ifndef PSCALI_SDL3
-    SDL_SetWindowInputFocus(gSdlWindow); // Request focus for the new window
+    SDL_SetWindowInputFocus(gSdlWindow);
+#endif
 #endif
 #endif
 
@@ -891,6 +1067,9 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph) {
     if (!sdlTextInputActive()) {
         sdlStartTextInput();
     }
+#if defined(PSCAL_TARGET_IOS)
+    sdlNotifyUiSdlDidOpen();
+#endif
 
     return makeVoid();
 }
@@ -1384,6 +1563,266 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinRendertexttotexture) {
     return makeInt(free_slot);
 }
 
+static bool sdlTryOpenFontCandidate(const char *candidate,
+                                    int font_size,
+                                    char *loaded_path,
+                                    size_t loaded_path_size) {
+    if (!candidate || candidate[0] == '\0') {
+        return false;
+    }
+
+    const char *paths[12];
+    size_t path_count = 0;
+    char expanded[PATH_MAX];
+    char stripped[PATH_MAX];
+    char unprivate[PATH_MAX];
+#if defined(PSCAL_TARGET_IOS)
+    char realpath_buf[PATH_MAX];
+    char cwd_virtual[PATH_MAX];
+    char joined_virtual[PATH_MAX];
+#endif
+
+#define SDL_ADD_FONT_PATH(_p)                                                   \
+    do {                                                                        \
+        if ((_p) && (_p)[0] != '\0' && path_count < (sizeof(paths) / sizeof(paths[0]))) { \
+            bool seen = false;                                                  \
+            for (size_t i = 0; i < path_count; i++) {                           \
+                if (strcmp(paths[i], (_p)) == 0) {                              \
+                    seen = true;                                                 \
+                    break;                                                       \
+                }                                                                \
+            }                                                                    \
+            if (!seen) {                                                         \
+                paths[path_count++] = (_p);                                      \
+            }                                                                    \
+        }                                                                        \
+    } while (0)
+
+    SDL_ADD_FONT_PATH(candidate);
+
+    if (strncmp(candidate, "/private/", 9) == 0) {
+        if (snprintf(unprivate, sizeof(unprivate), "%s", candidate + 8) > 0 &&
+            strlen(unprivate) < sizeof(unprivate)) {
+            SDL_ADD_FONT_PATH(unprivate);
+        }
+    }
+
+    if (pathTruncateExpand(candidate, expanded, sizeof(expanded)) &&
+        strcmp(expanded, candidate) != 0) {
+        SDL_ADD_FONT_PATH(expanded);
+    }
+
+    if (pathTruncateStrip(candidate, stripped, sizeof(stripped)) &&
+        stripped[0] != '\0' &&
+        strcmp(stripped, candidate) != 0) {
+        SDL_ADD_FONT_PATH(stripped);
+        if (pathTruncateExpand(stripped, expanded, sizeof(expanded)) &&
+            strcmp(expanded, stripped) != 0) {
+            SDL_ADD_FONT_PATH(expanded);
+        }
+    }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (pscalPathVirtualized_realpath(candidate, realpath_buf) &&
+        realpath_buf[0] != '\0' &&
+        strcmp(realpath_buf, candidate) != 0) {
+        SDL_ADD_FONT_PATH(realpath_buf);
+    }
+
+    if (candidate[0] != '\0' && candidate[0] != '/' &&
+        pscalPathVirtualized_getcwd(cwd_virtual, sizeof(cwd_virtual)) &&
+        cwd_virtual[0] == '/') {
+        int written = snprintf(joined_virtual, sizeof(joined_virtual),
+                               "%s/%s", cwd_virtual, candidate);
+        if (written > 0 && (size_t)written < sizeof(joined_virtual)) {
+            if (pathTruncateExpand(joined_virtual, expanded, sizeof(expanded))) {
+                SDL_ADD_FONT_PATH(expanded);
+            }
+        }
+    }
+#endif
+
+    for (size_t i = 0; i < path_count; i++) {
+        TTF_Font *font = TTF_OpenFont(paths[i], font_size);
+        if (!font) {
+            continue;
+        }
+        gSdlFont = font;
+        if (loaded_path && loaded_path_size > 0) {
+            snprintf(loaded_path, loaded_path_size, "%s", paths[i]);
+        }
+        return true;
+    }
+
+    return false;
+
+#undef SDL_ADD_FONT_PATH
+}
+
+static const char *sdlFontBasename(const char *path) {
+    if (!path || path[0] == '\0') {
+        return NULL;
+    }
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    const char *base = path;
+    if (slash && slash[1] != '\0') {
+        base = slash + 1;
+    }
+    if (backslash && backslash[1] != '\0' && (!slash || backslash > slash)) {
+        base = backslash + 1;
+    }
+    return (base[0] != '\0') ? base : NULL;
+}
+
+static bool sdlTryOpenFontFromEnvPath(const char *env_path,
+                                      const char *requested_path,
+                                      int font_size,
+                                      char *loaded_path,
+                                      size_t loaded_path_size) {
+    if (!env_path || env_path[0] == '\0') {
+        return false;
+    }
+
+    const char *basename = sdlFontBasename(requested_path);
+    size_t env_len = strlen(env_path);
+    char *paths = (char *)malloc(env_len + 1);
+    if (!paths) {
+        return false;
+    }
+    memcpy(paths, env_path, env_len + 1);
+
+    char *cursor = paths;
+    while (cursor && cursor[0] != '\0') {
+        char *sep = strchr(cursor, ':');
+        if (sep) {
+            *sep = '\0';
+        }
+        if (cursor[0] != '\0') {
+            if (sdlTryOpenFontCandidate(cursor, font_size, loaded_path, loaded_path_size)) {
+                free(paths);
+                return true;
+            }
+            if (basename) {
+                char candidate[PATH_MAX];
+                int written = snprintf(candidate, sizeof(candidate), "%s/%s", cursor, basename);
+                if (written > 0 && (size_t)written < sizeof(candidate) &&
+                    sdlTryOpenFontCandidate(candidate, font_size, loaded_path, loaded_path_size)) {
+                    free(paths);
+                    return true;
+                }
+            }
+        }
+        if (!sep) {
+            break;
+        }
+        cursor = sep + 1;
+    }
+
+    free(paths);
+    return false;
+}
+
+static bool sdlTryOpenFontWithFallbacks(const char *requested_path,
+                                        int font_size,
+                                        char *loaded_path,
+                                        size_t loaded_path_size) {
+    if (!requested_path || requested_path[0] == '\0') {
+        return false;
+    }
+
+    if (sdlTryOpenFontCandidate(requested_path, font_size, loaded_path, loaded_path_size)) {
+        return true;
+    }
+
+    char candidate[PATH_MAX];
+    char candidate_alt[PATH_MAX];
+    char stripped[PATH_MAX];
+    char expanded[PATH_MAX];
+
+    const char *fonts_suffix = strstr(requested_path, "/fonts/");
+    if (fonts_suffix && fonts_suffix[0] == '/') {
+        if (snprintf(candidate, sizeof(candidate), "%s", fonts_suffix) > 0 &&
+            (size_t)strlen(candidate) < sizeof(candidate) &&
+            sdlTryOpenFontCandidate(candidate, font_size, loaded_path, loaded_path_size)) {
+            return true;
+        }
+
+        const char *runtime_root = getenv("PSCALI_SYSFILES_ROOT");
+        if (runtime_root && runtime_root[0] == '/') {
+            if (snprintf(candidate, sizeof(candidate), "%s%s", runtime_root, fonts_suffix) > 0 &&
+                (size_t)strlen(candidate) < sizeof(candidate) &&
+                sdlTryOpenFontCandidate(candidate, font_size, loaded_path, loaded_path_size)) {
+                return true;
+            }
+        }
+
+        if (snprintf(candidate_alt, sizeof(candidate_alt), "fonts/%s", fonts_suffix + strlen("/fonts/")) > 0 &&
+            (size_t)strlen(candidate_alt) < sizeof(candidate_alt) &&
+            sdlTryOpenFontCandidate(candidate_alt, font_size, loaded_path, loaded_path_size)) {
+            return true;
+        }
+    }
+
+    if (pathTruncateStrip(requested_path, stripped, sizeof(stripped)) &&
+        stripped[0] == '/' &&
+        strcmp(stripped, requested_path) != 0) {
+        if (sdlTryOpenFontCandidate(stripped, font_size, loaded_path, loaded_path_size)) {
+            return true;
+        }
+        if (pathTruncateExpand(stripped, expanded, sizeof(expanded)) &&
+            strcmp(expanded, requested_path) != 0 &&
+            sdlTryOpenFontCandidate(expanded, font_size, loaded_path, loaded_path_size)) {
+            return true;
+        }
+    }
+
+    if (sdlTryOpenFontFromEnvPath(getenv("PSCAL_FONT_PATH"), requested_path,
+                                  font_size, loaded_path, loaded_path_size)) {
+        return true;
+    }
+
+    const char *basename = sdlFontBasename(requested_path);
+    if (basename) {
+        const char *basename_roots[] = {
+            "/fonts",
+            "fonts",
+            "/home/fonts",
+            "/fonts/Roboto/static",
+            "fonts/Roboto/static",
+            "/home/fonts/Roboto/static"
+        };
+        for (size_t i = 0; i < sizeof(basename_roots) / sizeof(basename_roots[0]); i++) {
+            int written = snprintf(candidate, sizeof(candidate), "%s/%s",
+                                   basename_roots[i], basename);
+            if (written > 0 && (size_t)written < sizeof(candidate) &&
+                sdlTryOpenFontCandidate(candidate, font_size, loaded_path, loaded_path_size)) {
+                return true;
+            }
+        }
+    }
+
+    const char *default_font = getenv("PSCAL_DEFAULT_FONT");
+    if (default_font && default_font[0] != '\0' &&
+        sdlTryOpenFontCandidate(default_font, font_size, loaded_path, loaded_path_size)) {
+        return true;
+    }
+
+    const char *default_fallbacks[] = {
+        "/fonts/Roboto/static/Roboto-Regular.ttf",
+        "fonts/Roboto/static/Roboto-Regular.ttf",
+        "../fonts/Roboto/static/Roboto-Regular.ttf"
+    };
+    for (size_t i = 0; i < sizeof(default_fallbacks) / sizeof(default_fallbacks[0]); i++) {
+        if (sdlTryOpenFontCandidate(default_fallbacks[i], font_size,
+                                    loaded_path, loaded_path_size)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInittextsystem) {
     if (arg_count != 2) {
         runtimeError(vm, "InitTextSystem expects 2 arguments (FontFileName: String; FontSize: Integer).");
@@ -1420,10 +1859,16 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInittextsystem) {
         gSdlFont = NULL;
     }
 
-    gSdlFont = TTF_OpenFont(font_path, font_size);
-    if (!gSdlFont) {
+    char loaded_font_path[PATH_MAX];
+    loaded_font_path[0] = '\0';
+    if (!sdlTryOpenFontWithFallbacks(font_path, font_size,
+                                     loaded_font_path, sizeof(loaded_font_path))) {
         runtimeError(vm, "Failed to load font '%s': %s", font_path, TTF_GetError());
         return makeVoid();
+    }
+    if (loaded_font_path[0] != '\0' && strcmp(loaded_font_path, font_path) != 0) {
+        SDL_DEBUG_LOG("InitTextSystem: using fallback font path %s -> %s\n",
+                      font_path, loaded_font_path);
     }
     gSdlFontSize = font_size;
 
@@ -1898,6 +2343,9 @@ bool sdlPollNextKey(SDL_Keycode* outCode) {
 #endif
 
         if (event.type == SDL_QUIT) {
+            if (shouldIgnoreQuitEvent()) {
+                continue;
+            }
             SDL_DEBUG_SET_BREAK_REQUESTED(1, "PollNextKey SDL_QUIT");
             return false;
         }
@@ -2144,6 +2592,9 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinGraphloop) {
 #endif
 
                 if (event.type == SDL_QUIT) {
+                    if (shouldIgnoreQuitEvent()) {
+                        continue;
+                    }
                     SDL_DEBUG_SET_BREAK_REQUESTED(1, "GraphLoop SDL_QUIT");
                     return makeVoid();
                 }
@@ -2246,6 +2697,9 @@ static void pumpKeyEvents(void) {
         }
 
         if (event.type == SDL_QUIT) {
+            if (shouldIgnoreQuitEvent()) {
+                continue;
+            }
             SDL_DEBUG_SET_BREAK_REQUESTED(1, "PumpKeyEvents SDL_QUIT");
             continue;
         }
@@ -2302,6 +2756,9 @@ SDL_Keycode sdlWaitNextKeycode(void) {
 
         sdlLogEvent("WaitNextKey", &event);
         if (event.type == SDL_QUIT) {
+            if (shouldIgnoreQuitEvent()) {
+                continue;
+            }
             SDL_DEBUG_SET_BREAK_REQUESTED(1, "WaitNextKey SDL_QUIT");
             return SDLK_UNKNOWN;
         }

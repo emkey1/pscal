@@ -48,6 +48,14 @@ private let sshDebugEnabled: Bool = {
     return false
 }()
 
+private let sshResizeDebugEnabled: Bool = {
+    let env = ProcessInfo.processInfo.environment
+    if let value = env["PSCALI_SSH_RESIZE_DEBUG"], !value.isEmpty {
+        return value != "0"
+    }
+    return false
+}()
+
 func sshDebugLog(_ message: String) {
     guard sshDebugEnabled else { return }
     terminalViewLog(message)
@@ -55,5 +63,7 @@ func sshDebugLog(_ message: String) {
 }
 
 func sshResizeLog(_ message: String) {
-    sshDebugLog(message)
+    guard sshResizeDebugEnabled else { return }
+    terminalViewLog(message)
+    NSLog("%@", message)
 }

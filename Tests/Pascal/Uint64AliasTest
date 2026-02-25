@@ -1,0 +1,16 @@
+program Uint64AliasTest;
+
+var
+  total: uint64;
+  bonus: qword;
+
+begin
+  total := 40;
+  bonus := 2;
+
+  total += bonus;
+  bonus := total * 2;
+
+  writeln('total=', total);
+  writeln('bonus=', bonus);
+end.

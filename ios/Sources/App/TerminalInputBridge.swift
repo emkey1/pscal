@@ -49,6 +49,10 @@ struct TerminalInputBridge: UIViewRepresentable {
         view.inputAssistantItem.trailingBarButtonGroups = []
 
         DispatchQueue.main.async {
+            guard view.window?.isKeyWindow == true else { return }
+            guard pscalIOSSDLModeActive() == 0 else { return }
+            guard !TerminalKeyInputView.hasVisibleSDLWindow() else { return }
+            guard !TerminalTabManager.shared.isSdlTabSelected else { return }
             view.becomeFirstResponder()
         }
         return view
@@ -66,6 +70,10 @@ struct TerminalInputBridge: UIViewRepresentable {
         if context.coordinator.focusAnchor != focusAnchor {
             context.coordinator.focusAnchor = focusAnchor
             DispatchQueue.main.async {
+                guard uiView.window?.isKeyWindow == true else { return }
+                guard pscalIOSSDLModeActive() == 0 else { return }
+                guard !TerminalKeyInputView.hasVisibleSDLWindow() else { return }
+                guard !TerminalTabManager.shared.isSdlTabSelected else { return }
                 uiView.becomeFirstResponder()
             }
         }
@@ -100,6 +108,19 @@ final class TerminalKeyInputView: UITextView {
     private var softKeyboardVisible: Bool = false
     private var keyboardObservers: [NSObjectProtocol] = []
     private let hardwareKeyboardHeightEpsilon: CGFloat = 80.0
+
+    fileprivate static func hasVisibleSDLWindow() -> Bool {
+        let sceneWindows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+        let appWindows = UIApplication.shared.windows
+        let allWindows = sceneWindows + appWindows
+        return allWindows.contains { window in
+                guard !window.isHidden else { return false }
+                let className = NSStringFromClass(type(of: window)).lowercased()
+                return className.contains("sdl") && className.contains("window")
+            }
+    }
 
     private func isHardwareKeyboard(_ notification: Notification) -> Bool {
         guard let userInfo = notification.userInfo,
@@ -242,7 +263,6 @@ final class TerminalKeyInputView: UITextView {
         makeCommand(input: UIKeyCommand.inputDownArrow, output: "\u{1B}[B")
         makeCommand(input: UIKeyCommand.inputLeftArrow, output: "\u{1B}[D")
         makeCommand(input: UIKeyCommand.inputRightArrow, output: "\u{1B}[C")
-        makeCommand(input: "\t", output: "\t")
         makeCommand(input: "\r", output: "\r")
         return commands
     }
@@ -283,10 +303,18 @@ final class TerminalKeyInputView: UITextView {
         let escape = UIKeyCommand(input: UIKeyCommand.inputEscape,
                                   modifierFlags: [],
                                   action: #selector(handleEscapeKey))
+        let tab = UIKeyCommand(input: "\t",
+                               modifierFlags: [],
+                               action: #selector(handleTabKeyCommand(_:)))
+        let shiftTab = UIKeyCommand(input: "\t",
+                                    modifierFlags: [.shift],
+                                    action: #selector(handleTabKeyCommand(_:)))
         if #available(iOS 15.0, *) {
             escape.wantsPriorityOverSystemBehavior = true
+            tab.wantsPriorityOverSystemBehavior = true
+            shiftTab.wantsPriorityOverSystemBehavior = true
         }
-        commands.append(escape)
+        commands.append(contentsOf: [escape, tab, shiftTab])
         commands.append(UIKeyCommand(input: "v",
                                      modifierFlags: [.command],
                                      action: #selector(handlePasteCommand)))
@@ -539,6 +567,14 @@ final class TerminalKeyInputView: UITextView {
         onInput?("\u{1B}")
     }
 
+    @objc private func handleTabKeyCommand(_ command: UIKeyCommand) {
+        if command.modifierFlags.contains(.shift) {
+            onInput?("\u{1B}[Z")
+        } else {
+            onInput?("\t")
+        }
+    }
+
     private func buildControlCommands() -> [UIKeyCommand] {
         let inputs = "abcdefghijklmnopqrstuvwxyz".map { String($0) }
         return inputs.map { input in
@@ -616,6 +652,9 @@ final class TerminalKeyInputView: UITextView {
             Task { @MainActor in
                 guard self.inputEnabled else { return }
                 guard let window = self.window, window.isKeyWindow else { return }
+                guard pscalIOSSDLModeActive() == 0 else { return }
+                guard !Self.hasVisibleSDLWindow() else { return }
+                guard !TerminalTabManager.shared.isSdlTabSelected else { return }
                 if !self.isFirstResponder {
                     self.becomeFirstResponder()
                 } else if !self.softKeyboardVisible {

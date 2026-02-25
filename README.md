@@ -46,6 +46,13 @@ cmake ..            # add -DSDL=ON to enable SDL support, optionally add -DPSCAL
 make
 ```
 
+If you use submodules, run this before pushing to make sure pinned commits are
+fetchable by others:
+
+```sh
+tools/check_submodule_refs.sh
+```
+
 Binaries are written to `build/bin` (e.g. `pascal`).
 To also build the debugging-oriented `dascal` binary, configure CMake with `-DBUILD_DASCAL=ON`.
 
@@ -285,13 +292,26 @@ To exercise the iOS-style virtual-process path on macOS (without a simulator/dev
 ```sh
 Tests/run_exsh_ios_host_tests.sh          # configures build/ios-host, builds exsh, runs jobspec sanity
 # or manually:
-cmake -S . -B build/ios-host -DPSCAL_FORCE_IOS=ON -DVPROC_ENABLE_STUBS_FOR_TESTS=ON -DPSCAL_BUILD_STATIC_LIBS=ON -DSDL=OFF -DPSCAL_USE_BUNDLED_CURL=OFF
+cmake -S . -B build/ios-host -DPSCAL_FORCE_IOS=ON -DVPROC_ENABLE_STUBS_FOR_TESTS=ON -DENABLE_EXT_BUILTIN_3D=ON -DPSCAL_BUILD_STATIC_LIBS=ON -DSDL=OFF -DPSCAL_USE_BUNDLED_CURL=OFF
 cmake --build build/ios-host --target exsh
 python Tests/exsh/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobspec
 ```
 
 The exsh harness accepts `--executable` to point at any built exsh, so you can run the full manifest against the iOS-flavored binary when debugging vproc/job-control behavior.
 Use `-DPSCAL_FORCE_IOS=ON` to enable iOS mode on macOS; this defines `PSCAL_TARGET_IOS` and injects the vproc shim include so behavior matches the iOS/iPadOS app build.
+
+For a one-command release sanity sweep across the iOS-targeted host regressions:
+
+```sh
+Tests/run_ios_release_sanity.sh
+# optional deeper checks:
+#   RUN_INTERACTIVE_SIGNAL_TESTS=1 Tests/run_ios_release_sanity.sh
+#   RUN_IOS_PRESET_BUILDS=1 Tests/run_ios_release_sanity.sh
+#   RUN_IOS_XCODEBUILD=1 Tests/run_ios_release_sanity.sh
+```
+
+`RUN_IOS_PRESET_BUILDS=1` adds `ios-simulator` and `ios-device` preset builds.
+`RUN_IOS_XCODEBUILD=1` adds a generic iOS `xcodebuild` pass with signing disabled.
 
 More details and operational tips live in
 [Docs/exsh_overview.md](Docs/exsh_overview.md).

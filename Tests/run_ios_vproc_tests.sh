@@ -25,6 +25,7 @@ VPROC_SOURCES=(
   "${ROOT}/src/ios/tty/pscal_tty.c"
   "${ROOT}/src/ios/tty/pscal_pty.c"
   "${ROOT}/src/ios/tty/pscal_tty_host.c"
+  "${ROOT}/Tests/ios_vproc/test_smallclue_applets_stub.c"
 )
 
 cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \

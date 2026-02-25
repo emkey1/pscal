@@ -73,6 +73,11 @@ static ClikeToken identifierOrKeyword(ClikeLexer *lexer, const char *start, int 
     if (length == 7 && strncmp(start, "mstream", 7) == 0) return makeToken(lexer, CLIKE_TOKEN_MSTREAM, start, length, column);
     if (length == 4 && strncmp(start, "char", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_CHAR, start, length, column);
     if (length == 4 && strncmp(start, "byte", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_BYTE, start, length, column);
+    if (length == 4 && strncmp(start, "word", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_WORD, start, length, column);
+    if (length == 5 && strncmp(start, "uint8", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_UINT8, start, length, column);
+    if (length == 6 && strncmp(start, "uint16", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_UINT16, start, length, column);
+    if (length == 6 && strncmp(start, "uint32", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_UINT32, start, length, column);
+    if (length == 6 && strncmp(start, "uint64", 6) == 0) return makeToken(lexer, CLIKE_TOKEN_UINT64, start, length, column);
     if (length == 2 && strncmp(start, "if", 2) == 0) return makeToken(lexer, CLIKE_TOKEN_IF, start, length, column);
     if (length == 4 && strncmp(start, "else", 4) == 0) return makeToken(lexer, CLIKE_TOKEN_ELSE, start, length, column);
     if (length == 5 && strncmp(start, "while", 5) == 0) return makeToken(lexer, CLIKE_TOKEN_WHILE, start, length, column);
@@ -294,6 +299,11 @@ const char* clikeTokenTypeToString(ClikeTokenType type) {
         case CLIKE_TOKEN_CHAR_LITERAL: return "TOKEN_CHAR";
         case CLIKE_TOKEN_CHAR: return "TOKEN_CHAR_TYPE";
         case CLIKE_TOKEN_BYTE: return "TOKEN_BYTE";
+        case CLIKE_TOKEN_WORD: return "TOKEN_WORD";
+        case CLIKE_TOKEN_UINT8: return "TOKEN_UINT8";
+        case CLIKE_TOKEN_UINT16: return "TOKEN_UINT16";
+        case CLIKE_TOKEN_UINT32: return "TOKEN_UINT32";
+        case CLIKE_TOKEN_UINT64: return "TOKEN_UINT64";
         case CLIKE_TOKEN_STRING: return "TOKEN_STRING";
         case CLIKE_TOKEN_PLUS: return "+";
         case CLIKE_TOKEN_PLUS_EQUAL: return "+=";

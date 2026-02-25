@@ -50,6 +50,8 @@ void gfx3dReadBuffer(unsigned int mode);
 void gfx3dReadPixels(int x, int y, int width, int height,
                      unsigned int format, unsigned int type, void* pixels);
 unsigned int gfx3dGetError(void);
+void gfx3dPresent(void);
+void gfx3dReleaseResources(void);
 
 #ifdef __cplusplus
 }

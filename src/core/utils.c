@@ -101,6 +101,9 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_ASSIGN:        return "ASSIGN";
         case TOKEN_PLUS_EQUAL:    return "PLUS_EQUAL";
         case TOKEN_MINUS_EQUAL:   return "MINUS_EQUAL";
+        case TOKEN_MUL_EQUAL:     return "MUL_EQUAL";
+        case TOKEN_SLASH_EQUAL:   return "SLASH_EQUAL";
+        case TOKEN_PERCENT_EQUAL: return "PERCENT_EQUAL";
         case TOKEN_PLUS:          return "PLUS";
         case TOKEN_MINUS:         return "MINUS";
         case TOKEN_MUL:           return "MUL";
@@ -398,6 +401,7 @@ static VarType deduceBasicVarType(const char *name) {
     if (strcasecmp(name, "smallint") == 0) return TYPE_INT16;
     if (strcasecmp(name, "int64") == 0) return TYPE_INT64;
     if (strcasecmp(name, "uint64") == 0) return TYPE_UINT64;
+    if (strcasecmp(name, "qword") == 0) return TYPE_UINT64;
     if (strcasecmp(name, "single") == 0) return TYPE_FLOAT;
     if (strcasecmp(name, "double") == 0) return TYPE_DOUBLE;
     if (strcasecmp(name, "extended") == 0) return TYPE_LONG_DOUBLE;

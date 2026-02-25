@@ -68,12 +68,24 @@ private enum RuntimePaths {
         documentsDirectory.appendingPathComponent(".src.version", isDirectory: false)
     }
 
+    static var workspaceFontsDirectory: URL {
+        documentsDirectory.appendingPathComponent("fonts", isDirectory: true)
+    }
+
+    static var workspaceLibSoundsDirectory: URL {
+        documentsDirectory.appendingPathComponent("lib/sounds", isDirectory: true)
+    }
+
     static var legacySysfilesDirectory: URL {
         documentsDirectory.appendingPathComponent("sysfiles", isDirectory: true)
     }
 
     static var sandboxVarHtdocsDirectory: URL {
         documentsDirectory.appendingPathComponent("var/htdocs", isDirectory: true)
+    }
+
+    static var sandboxVarLogDirectory: URL {
+        documentsDirectory.appendingPathComponent("var/log", isDirectory: true)
     }
 }
 
@@ -153,6 +165,8 @@ final class RuntimeAssetInstaller {
         installWorkspaceEtcIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceBinIfNeeded(bundleRoot: bundleRoot)
         installWorkspaceSrcIfNeeded(bundleRoot: bundleRoot)
+        installWorkspaceFontsIfNeeded(bundleRoot: bundleRoot)
+        installWorkspaceSoundAssetsIfNeeded(bundleRoot: bundleRoot)
         stageSimpleWebServerAssets(bundleRoot: bundleRoot)
         configureRuntimeEnvironment(bundleRoot: bundleRoot)
 
@@ -253,6 +267,16 @@ final class RuntimeAssetInstaller {
                 NSLog("PSCAL iOS: failed to install workspace Examples directory: %@", error.localizedDescription)
             }
         } else {
+            do {
+                let copiedCount = try copyMissingItemsWithCount(from: bundledExamples, to: workspaceExamples)
+                if copiedCount > 0 {
+                    NSLog("PSCAL iOS: ensured Examples workspace at %@ (installed %d missing file(s))",
+                          workspaceExamples.path, copiedCount)
+                }
+            } catch {
+                NSLog("PSCAL iOS: failed to sync missing Examples files at %@: %@",
+                      workspaceExamples.path, error.localizedDescription)
+            }
             rewritePlaceholders(in: workspaceExamples, installRoot: bundleRoot.path)
         }
     }
@@ -346,11 +370,19 @@ final class RuntimeAssetInstaller {
 
         ensureEtcFileNamed("passwd", bundleRoot: bundleRoot)
         ensureEtcFileNamed("group", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("hosts", bundleRoot: bundleRoot)
         // Ensure word lists are always present even if workspace/etc already exists.
         ensureEtcFileNamed("words", bundleRoot: bundleRoot)
         ensureEtcFileNamed("words.short", bundleRoot: bundleRoot)
         ensureEtcFileNamed("words.many", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("rc",
+                           bundleRoot: bundleRoot,
+                           executable: true,
+                           replaceExisting: true,
+                           replaceExistingIfDifferent: true)
+        installWorkspaceRcScript()
         ensureEtcSubdirectoryNamed("ssh", bundleRoot: bundleRoot)
+        ensureWorkspaceEtcSubdirectoryNamed("service")
     }
 
     private func installWorkspaceBinIfNeeded(bundleRoot: URL) {
@@ -470,6 +502,50 @@ final class RuntimeAssetInstaller {
         }
     }
 
+    private func installWorkspaceFontsIfNeeded(bundleRoot: URL) {
+        let bundledFonts = bundleRoot.appendingPathComponent("fonts", isDirectory: true)
+        guard fileManager.fileExists(atPath: bundledFonts.path) else { return }
+        let workspaceFonts = RuntimePaths.workspaceFontsDirectory
+        do {
+            try fileManager.createDirectory(at: workspaceFonts, withIntermediateDirectories: true)
+            let copiedCount = try copyMissingItemsWithCount(from: bundledFonts, to: workspaceFonts)
+            if copiedCount > 0 {
+                NSLog("PSCAL iOS: ensured fonts assets at %@ (installed %d missing file(s))",
+                      workspaceFonts.path, copiedCount)
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to stage fonts assets into workspace (%@): %@",
+                  workspaceFonts.path, error.localizedDescription)
+        }
+    }
+
+    private func installWorkspaceSoundAssetsIfNeeded(bundleRoot: URL) {
+        let bundledSounds = bundleRoot.appendingPathComponent("lib/sounds", isDirectory: true)
+        guard fileManager.fileExists(atPath: bundledSounds.path) else {
+            NSLog("PSCAL iOS: bundle missing lib/sounds directory; skipping sound staging.")
+            return
+        }
+
+        let targets: [URL] = [
+            RuntimePaths.workspaceLibSoundsDirectory,
+            RuntimePaths.homeDirectory.appendingPathComponent("lib/sounds", isDirectory: true)
+        ]
+
+        for target in targets {
+            do {
+                try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+                let copiedCount = try copyMissingItemsWithCount(from: bundledSounds, to: target)
+                if copiedCount > 0 {
+                    NSLog("PSCAL iOS: ensured sound assets at %@ (installed %d missing file(s))",
+                          target.path, copiedCount)
+                }
+            } catch {
+                NSLog("PSCAL iOS: failed to stage sound assets into %@: %@",
+                      target.path, error.localizedDescription)
+            }
+        }
+    }
+
     private func needsWorkspaceExamplesRefresh() -> Bool {
         let workspaceExamples = RuntimePaths.examplesWorkspaceDirectory
         var isDirectory: ObjCBool = false
@@ -568,7 +644,11 @@ final class RuntimeAssetInstaller {
         }
     }
 
-    private func ensureEtcFileNamed(_ name: String, bundleRoot: URL) {
+    private func ensureEtcFileNamed(_ name: String,
+                                    bundleRoot: URL,
+                                    executable: Bool = false,
+                                    replaceExisting: Bool = false,
+                                    replaceExistingIfDifferent: Bool = false) {
         let bundledEtc = bundleRoot.appendingPathComponent("etc", isDirectory: true)
         let bundleFile = bundledEtc.appendingPathComponent(name, isDirectory: false)
         guard fileManager.fileExists(atPath: bundleFile.path) else {
@@ -579,9 +659,61 @@ final class RuntimeAssetInstaller {
             try ensureWorkspaceDirectoriesExist()
             if !fileManager.fileExists(atPath: workspaceFile.path) {
                 try fileManager.copyItem(at: bundleFile, to: workspaceFile)
+            } else if replaceExisting {
+                try fileManager.removeItem(at: workspaceFile)
+                try fileManager.copyItem(at: bundleFile, to: workspaceFile)
+            } else if replaceExistingIfDifferent {
+                let bundledData = try? Data(contentsOf: bundleFile)
+                let workspaceData = try? Data(contentsOf: workspaceFile)
+                let shouldReplace = (bundledData == nil || workspaceData == nil)
+                    ? true
+                    : (bundledData != workspaceData)
+                if shouldReplace {
+                    try fileManager.removeItem(at: workspaceFile)
+                    try fileManager.copyItem(at: bundleFile, to: workspaceFile)
+                }
+            }
+            if executable {
+                try markExecutable(at: workspaceFile)
             }
         } catch {
             NSLog("PSCAL iOS: failed to ensure etc/%@: %@", name, error.localizedDescription)
+        }
+    }
+
+    private func ensureWorkspaceEtcSubdirectoryNamed(_ name: String) {
+        let workspaceSubdirectory = RuntimePaths.workspaceEtcDirectory.appendingPathComponent(name, isDirectory: true)
+        do {
+            try ensureWorkspaceDirectoriesExist()
+            var isDirectory: ObjCBool = false
+            let exists = fileManager.fileExists(atPath: workspaceSubdirectory.path, isDirectory: &isDirectory)
+            if !exists {
+                try fileManager.createDirectory(at: workspaceSubdirectory, withIntermediateDirectories: true)
+            } else if !isDirectory.boolValue {
+                try fileManager.removeItem(at: workspaceSubdirectory)
+                try fileManager.createDirectory(at: workspaceSubdirectory, withIntermediateDirectories: true)
+            }
+        } catch {
+            NSLog("PSCAL iOS: failed to ensure etc/%@ directory: %@", name, error.localizedDescription)
+        }
+    }
+
+    private func installWorkspaceRcScript() {
+        guard let scriptData = embeddedRcScript.data(using: .utf8) else {
+            NSLog("PSCAL iOS: failed to encode embedded rc script")
+            return
+        }
+        let workspaceRc = RuntimePaths.workspaceEtcDirectory.appendingPathComponent("rc", isDirectory: false)
+        do {
+            try ensureWorkspaceDirectoriesExist()
+            ensureWorkspaceEtcSubdirectoryNamed("service")
+            let existing = try? Data(contentsOf: workspaceRc)
+            if existing != scriptData {
+                try scriptData.write(to: workspaceRc, options: [.atomic])
+            }
+            try markExecutable(at: workspaceRc)
+        } catch {
+            NSLog("PSCAL iOS: failed to install embedded etc/rc: %@", error.localizedDescription)
         }
     }
 
@@ -729,11 +861,23 @@ final class RuntimeAssetInstaller {
         let tmpPath = RuntimePaths.tmpDirectory.path
         setenv("TMPDIR", tmpPath, 1)
         setenv("SESSIONPATH", "\(tmpPath):~:.", 1)
+        let workspaceDefaultFontPath = "/fonts/Roboto/static/Roboto-Regular.ttf"
+        let bundledDefaultFontPath = bundleRoot
+            .appendingPathComponent("fonts/Roboto/static/Roboto-Regular.ttf")
+            .path
+        setenv("PSCAL_FONT_PATH", workspaceDefaultFontPath, 1)
+        setenv("PSCAL_DEFAULT_FONT", bundledDefaultFontPath, 1)
+        let workspaceSoundPath = "/lib/sounds:/home/lib/sounds"
+        let bundledSoundPath = bundleRoot.appendingPathComponent("lib/sounds").path
+        setenv("PSCAL_SOUND_PATH", "\(workspaceSoundPath):\(bundledSoundPath)", 1)
         // Preferred docroot for sample web server inside sandbox.
         setenv("PSCALI_TEMP_DIR", RuntimePaths.sandboxVarHtdocsDirectory.path, 1)
         setenv("HOME", RuntimePaths.homeDirectory.path, 1)
         setenv("TERM", "xterm-256color", 1)
         setenv("COLORTERM", "truecolor", 1)
+        let processInfo = ProcessInfo.processInfo
+        setenv("PSCAL_CPU_COUNT", String(processInfo.processorCount), 1)
+        setenv("PSCAL_ACTIVE_CPU_COUNT", String(processInfo.activeProcessorCount), 1)
     }
 
     private func configureReaImportPath(bundleRoot: URL) {
@@ -951,7 +1095,8 @@ final class RuntimeAssetInstaller {
         try ensureDocumentsDirectoryExists()
         let requiredDirectories = [
             RuntimePaths.homeDirectory,
-            RuntimePaths.tmpDirectory
+            RuntimePaths.tmpDirectory,
+            RuntimePaths.sandboxVarLogDirectory
         ]
         for directory in requiredDirectories {
             if !fileManager.fileExists(atPath: directory.path) {
@@ -1025,6 +1170,71 @@ final class RuntimeAssetInstaller {
     // --- Embedded fallbacks to guarantee Tiny assets ship even if the bundle is missing bin/src ---
 
     // Keep in sync with repository bin/tiny (shortened copy to avoid missing asset errors)
+    private let embeddedRcScript: String = """
+#!/bin/exsh
+
+# Basic init bootstrap for iOS/iPadOS service-mode validation.
+etc_root="${PSCALI_ETC_ROOT:-/etc}"
+service_dir_real="$etc_root/service"
+service_dir="/etc/service"
+
+log_dir="/var/log"
+if ! mkdir -p "$log_dir" 2>/dev/null; then
+    sandbox_root=""
+    if [ -n "$etc_root" ]; then
+        sandbox_root="$(dirname "$etc_root")"
+    fi
+    if [ -z "$sandbox_root" ] && [ -n "$PATH_TRUNCATE" ]; then
+        sandbox_root="$PATH_TRUNCATE"
+    fi
+    if [ -z "$sandbox_root" ] && [ -n "$PSCALI_CONTAINER_ROOT" ]; then
+        sandbox_root="$PSCALI_CONTAINER_ROOT/Documents"
+    fi
+    if [ -n "$sandbox_root" ]; then
+        log_dir="$sandbox_root/var/log"
+        mkdir -p "$log_dir"
+    fi
+fi
+
+rm -f "$log_dir"/rc-nodate-*.log 2>/dev/null
+
+stamp="pid$$"
+log="$log_dir/rc-${stamp}.log"
+cwd="$(pwd 2>/dev/null)"
+if [ -z "$cwd" ]; then
+    cwd="(unknown)"
+fi
+echo "smallclue /etc/rc start" > "$log" 2>&1
+echo "pid=$$" >> "$log" 2>&1
+echo "stamp=$stamp" >> "$log" 2>&1
+echo "date=$(date 2>/dev/null)" >> "$log" 2>&1
+echo "cwd=$cwd" >> "$log" 2>&1
+echo "etc_root=$etc_root" >> "$log" 2>&1
+echo "service_dir=$service_dir" >> "$log" 2>&1
+echo "service_dir_real=$service_dir_real" >> "$log" 2>&1
+echo "log_dir=$log_dir" >> "$log" 2>&1
+echo "rc_format=v2" >> "$log" 2>&1
+
+# Keep a lightweight heartbeat so we can verify init+rc lifecycle over time.
+(
+    while true; do
+        sleep 600
+        echo "heartbeat date=$(date 2>/dev/null)" >> "$log" 2>&1
+    done
+) &
+echo "heartbeat logger pid=$!" >> "$log" 2>&1
+
+if mkdir -p "$service_dir_real" 2>/dev/null; then
+    runit "$service_dir" >> "$log" 2>&1 &
+    echo "runit started pid=$!" >> "$log" 2>&1
+else
+    echo "failed to create service directory; skipping runit startup" >> "$log" 2>&1
+fi
+
+echo "smallclue /etc/rc done" >> "$log" 2>&1
+exit 0
+"""
+
     private let embeddedTinyWrapper: String = """
 #!/bin/exsh
 # Tiny wrapper for iOS/iPadOS: one-arg = compile+run, two-arg = compile only.

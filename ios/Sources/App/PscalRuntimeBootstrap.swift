@@ -646,6 +646,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
             tabInitLog("runtime=\(runtimeId) start skipped (already started)")
             return
         }
+        let persistedRunInitSetting = UserDefaults.standard.bool(
+            forKey: "com.pscal.terminal.runInitAsPid1OnFirstTab"
+        )
+        let runInitSetting = TerminalFontSettings.shared.runInitAsPid1OnFirstTab || persistedRunInitSetting
+        let launchInitAsPid1 = (self === PscalRuntimeBootstrap.shared) && runInitSetting
+        let launchArgs = launchInitAsPid1 ? ["init", "--service-mode"] : ["exsh"]
+        let launchCommand = launchArgs.joined(separator: " ")
+        tabInitLog("runtime=\(runtimeId) launchInit=\(launchInitAsPid1) persisted=\(persistedRunInitSetting) shared=\(self === PscalRuntimeBootstrap.shared)")
         tabInitLog("runtime=\(runtimeId) start begin")
         stateQueue.async { self.promptKickPending = true }
         outputDrainQueue.async { [weak self] in
@@ -653,7 +661,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         }
         DispatchQueue.main.async {
             self.terminalBuffer.reset()
-            self.screenText = NSAttributedString(string: "Launching exsh...")
+            self.screenText = NSAttributedString(string: "Launching \(launchCommand)...")
             self.exitStatus = nil
             self.terminalBackgroundColor = UIColor.systemBackground
             self.cursorInfo = nil
@@ -694,6 +702,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
             DispatchQueue.main.async {
                 LocationDeviceProvider.shared.start()
                 self.editorBridge.deactivate()
+#if EDITOR_FLOATING_WINDOW
+                EditorWindowManager.shared.markRuntimeEditorInactive(self)
+#endif
             }
 
             self.handlerContext = Unmanaged.passRetained(self).toOpaque()
@@ -703,7 +714,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
             self.startOutputDrain()
 
-            let args = ["exsh"]
+            let args = launchArgs
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
             let argc = Int32(cArgs.count)
             cArgs.append(nil)
@@ -838,12 +849,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func sendInterrupt() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            let delivered = withRuntimeContext {
-                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
-            }
-            if !delivered {
-                send("\u{03}")
-            }
+            // Match terminal semantics for interactive tabs: inject ETX.
+            sendControlByteToSession(0x03, sessionId: activeSession)
             return
         }
         withRuntimeContext {
@@ -854,12 +861,8 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func sendSuspend() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            let delivered = withRuntimeContext {
-                PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
-            }
-            if !delivered {
-                send("\u{1A}")
-            }
+            // Match terminal semantics for interactive tabs: inject SUB.
+            sendControlByteToSession(0x1A, sessionId: activeSession)
             return
         }
         withRuntimeContext {
@@ -881,6 +884,19 @@ final class PscalRuntimeBootstrap: ObservableObject {
             }
         }
         return runtimeSession
+    }
+
+    private func sendControlByteToSession(_ byte: UInt8, sessionId: UInt64) {
+        guard sessionId != 0 else { return }
+        inputQueue.async { [weak self] in
+            guard let self else { return }
+            self.withRuntimeContext {
+                var value = CChar(bitPattern: byte)
+                withUnsafePointer(to: &value) { ptr in
+                    PSCALRuntimeSendInputUrgent(sessionId, ptr, 1)
+                }
+            }
+        }
     }
 
     func updateTerminalSize(columns: Int, rows: Int) {
@@ -955,7 +971,41 @@ final class PscalRuntimeBootstrap: ObservableObject {
 
     func requestClose() {
         withState { closeOnExit = true }
-        send("\u{04}")
+        let activeSession = resolveActiveSessionId()
+        let scheduleFallbackClose = { [weak self] in
+            guard let self else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
+                guard self.exitStatus == nil else { return }
+                self.send("\u{04}")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [self] in
+                guard self.exitStatus == nil else { return }
+                self.withRuntimeContext {
+                    if activeSession != 0 {
+                        _ = PSCALRuntimeSendSignalForSession(activeSession, SIGTERM)
+                    } else {
+                        PSCALRuntimeSendSignal(SIGTERM)
+                    }
+                }
+            }
+        }
+        if activeSession != 0 {
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
+            }
+            if !delivered {
+                withRuntimeContext {
+                    PSCALRuntimeSendSignal(SIGINT)
+                }
+            }
+            scheduleFallbackClose()
+            return
+        } else {
+            withRuntimeContext {
+                PSCALRuntimeSendSignal(SIGINT)
+            }
+        }
+        scheduleFallbackClose()
     }
 
     func assignTabId(_ id: UInt64) {
@@ -2182,6 +2232,7 @@ func pscalTerminalBegin(_ columns: Int32, _ rows: Int32) {
     bootstrap.editorBridge.activate(columns: Int(columns), rows: Int(rows))
     bootstrap.setEditorModeActive(true)
 #if EDITOR_FLOATING_WINDOW
+    EditorWindowManager.shared.markRuntimeEditorActive(bootstrap)
     EditorWindowManager.shared.showWindow()
 #endif
 }
@@ -2195,6 +2246,7 @@ func pscalTerminalEnd() {
     bootstrap.editorBridge.deactivate()
     bootstrap.setEditorModeActive(false)
 #if EDITOR_FLOATING_WINDOW
+    EditorWindowManager.shared.markRuntimeEditorInactive(bootstrap)
     EditorWindowManager.shared.hideWindow()
 #endif
 }
@@ -2389,7 +2441,9 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
 
     private let locationManager: CLLocationManager
     private let workQueue = DispatchQueue(label: "com.pscal.location", qos: .utility)
+    private let workQueueKey = DispatchSpecificKey<UInt8>()
     private var started = false
+    private var userDeviceEnabled = true
     private var deviceEnabled = false
     private var locationActive = false
     private var latestCoordinate: CLLocationCoordinate2D?
@@ -2397,6 +2451,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private override init() {
         locationManager = CLLocationManager()
         super.init()
+        workQueue.setSpecific(key: workQueueKey, value: 1)
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.distanceFilter = kCLDistanceFilterNone
@@ -2412,19 +2467,23 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     }
 
     func start() {
-        if started {
-            debugLog("start ignored (already started, enabled=\(deviceEnabled))")
-            return
+        runOnWorkQueueSync {
+            if started {
+                debugLog("start ignored (already started, enabled=\(deviceEnabled))")
+                return
+            }
+            started = true
+            debugLog("start triggered (enabled=\(deviceEnabled))")
+            syncDeviceStateImpl()
         }
-        started = true
-        debugLog("start triggered (enabled=\(deviceEnabled))")
-        scheduleSync()
     }
 
     func setDeviceEnabled(_ enabled: Bool) {
-        deviceEnabled = enabled
-        debugLog("setDeviceEnabled(\(enabled)) started=\(started)")
-        scheduleSync()
+        runOnWorkQueueSync {
+            userDeviceEnabled = enabled
+            debugLog("setDeviceEnabled(\(enabled)) started=\(started)")
+            syncDeviceStateImpl()
+        }
     }
 
     func runtimeBecameReady() {
@@ -2438,7 +2497,7 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func syncDeviceStateImpl() {
         let forcedOff = getenv("PSCALI_LOCATION_DISABLED") != nil
         let forcedOn = getenv("PSCALI_LOCATION_FORCE") != nil
-        let desiredEnabled = forcedOn || (!forcedOff && readerCount > 0)
+        let desiredEnabled = forcedOn || (!forcedOff && userDeviceEnabled && readerCount > 0)
 
         if desiredEnabled != deviceEnabled {
             deviceEnabled = desiredEnabled
@@ -2572,11 +2631,17 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
 
     private func handleReaderCountChanged(_ count: Int) {
         let normalized = max(0, count)
-        if readerCount == normalized {
-            return
+        runOnWorkQueueSync {
+            if readerCount == normalized {
+                return
+            }
+            readerCount = normalized
+            if readerCount > 0 && !started {
+                started = true
+                debugLog("auto-start triggered by reader count=\(readerCount)")
+            }
+            syncDeviceStateImpl()
         }
-        readerCount = normalized
-        scheduleSync()
     }
 
     private static func createLocationPayload(location: CLLocation) -> String {
@@ -2606,6 +2671,14 @@ final class LocationDeviceProvider: NSObject, CLLocationManagerDelegate {
     private func scheduleSync() {
         workQueue.async { [weak self] in
             self?.syncDeviceStateImpl()
+        }
+    }
+
+    private func runOnWorkQueueSync(_ body: () -> Void) {
+        if DispatchQueue.getSpecific(key: workQueueKey) != nil {
+            body()
+        } else {
+            workQueue.sync(execute: body)
         }
     }
 

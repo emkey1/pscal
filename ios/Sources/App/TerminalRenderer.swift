@@ -306,7 +306,20 @@ final class TerminalRendererContainerView: UIView, UIGestureRecognizerDelegate, 
         super.didMoveToWindow()
         if window != nil {
             DispatchQueue.main.async { [weak self] in
-                _ = self?.becomeFirstResponder()
+                guard let self else { return }
+                let sceneWindows = UIApplication.shared.connectedScenes
+                    .compactMap { $0 as? UIWindowScene }
+                    .flatMap { $0.windows }
+                let appWindows = UIApplication.shared.windows
+                let allWindows = sceneWindows + appWindows
+                let hasVisibleSDLWindow = allWindows.contains { window in
+                    guard !window.isHidden else { return false }
+                    let className = NSStringFromClass(type(of: window)).lowercased()
+                    return className.contains("sdl") && className.contains("window")
+                }
+                guard pscalIOSSDLModeActive() == 0 else { return }
+                guard !hasVisibleSDLWindow else { return }
+                _ = self.becomeFirstResponder()
             }
         }
     }
@@ -1144,22 +1157,10 @@ final class TerminalDisplayTextView: UITextView {
 // MARK: - Floating Editor Renderer
 
 struct EditorFloatingRendererView: View {
-    @ObservedObject private var manager = TerminalTabManager.shared
+    @ObservedObject private var editorManager = EditorWindowManager.shared
 
     var body: some View {
-        EditorFloatingRendererContent(runtime: activeRuntime())
-    }
-
-    private func activeRuntime() -> PscalRuntimeBootstrap {
-        for tab in manager.tabs {
-            if case .shell(let runtime) = tab.kind, runtime.editorBridge.isActive {
-                return runtime
-            }
-        }
-        if case .shell(let runtime) = manager.selectedTab.kind {
-            return runtime
-        }
-        return PscalRuntimeBootstrap.shared
+        EditorFloatingRendererContent(runtime: editorManager.activeEditorRuntime())
     }
 }
 

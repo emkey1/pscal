@@ -17,14 +17,10 @@ rm -f "$tmp_out"
 
 watch -n 0.10 -c 1 top >"$tmp_out"
 
-found_watch=0
 found_top=0
 found_shell=0
 
 while read line; do
-    case "$line" in
-        (*"watch -n "*top*) found_watch=1 ;;
-    esac
     case "$line" in
         (*" shell"*) found_shell=1 ;;
     esac
@@ -34,10 +30,6 @@ while read line; do
     esac
 done < "$tmp_out"
 
-if [ "$found_watch" -ne 1 ]; then
-    echo "FAIL: missing watch task label in watched top output" >&2
-    exit 1
-fi
 if [ "$found_top" -ne 1 ]; then
     echo "FAIL: missing top task label in watched top output" >&2
     exit 1

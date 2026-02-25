@@ -139,6 +139,18 @@ term.io.sendString = term.io.onVTKeyStroke = (data) => {
     native.sendInput(data);
 };
 
+function handleTabKeydown(event) {
+    if (!event || event.key !== 'Tab') {
+        return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    native.sendInput(event.shiftKey ? '\x1b[Z' : '\t');
+}
+
 // hterm size updates native size
 function currentTerminalSize() {
     const cols = (term.screenSize && Number.isFinite(term.screenSize.width)) ? term.screenSize.width : 0;
@@ -186,6 +198,7 @@ exports.setGridSize = (columns, rows) => {
 term.scrollPort_.screen_.contentEditable = false;
 term.blur();
 term.focus();
+term.scrollPort_.screen_.addEventListener('keydown', handleTabKeydown, {capture: true});
 exports.copy = () => term.copySelectionToClipboard();
 
 let lastSelectionRect = null;

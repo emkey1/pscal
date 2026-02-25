@@ -2066,6 +2066,8 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
              else if (strcasecmp(typeNameCopy, "shortint") == 0) basicType = TYPE_INT8;
              else if (strcasecmp(typeNameCopy, "smallint") == 0) basicType = TYPE_INT16;
              else if (strcasecmp(typeNameCopy, "int64") == 0) basicType = TYPE_INT64;
+             else if (strcasecmp(typeNameCopy, "uint64") == 0) basicType = TYPE_UINT64;
+             else if (strcasecmp(typeNameCopy, "qword") == 0) basicType = TYPE_UINT64;
              else if (strcasecmp(typeNameCopy, "single") == 0) basicType = TYPE_FLOAT;
              else if (strcasecmp(typeNameCopy, "double") == 0) basicType = TYPE_DOUBLE;
              else if (strcasecmp(typeNameCopy, "extended") == 0) basicType = TYPE_LONG_DOUBLE;
@@ -2739,7 +2741,10 @@ AST *statement(Parser *parser) {
             // Check for assignment first
             if (parser->current_token->type == TOKEN_ASSIGN ||
                 parser->current_token->type == TOKEN_PLUS_EQUAL ||
-                parser->current_token->type == TOKEN_MINUS_EQUAL) {
+                parser->current_token->type == TOKEN_MINUS_EQUAL ||
+                parser->current_token->type == TOKEN_MUL_EQUAL ||
+                parser->current_token->type == TOKEN_SLASH_EQUAL ||
+                parser->current_token->type == TOKEN_PERCENT_EQUAL) {
                 // --- Assignment Statement ---
                 node = assignmentStatement(parser, lval_or_proc_id); // assignmentStatement handles := and RHS
                                                                      // It will use lval_or_proc_id as is (e.g. AST_VARIABLE or AST_FIELD_ACCESS for LHS)
@@ -2979,7 +2984,12 @@ AST *assignmentStatement(Parser *parser, AST *parsedLValue) {
     }
 
     TokenType opType = parser->current_token->type;
-    if (opType != TOKEN_ASSIGN && opType != TOKEN_PLUS_EQUAL && opType != TOKEN_MINUS_EQUAL) {
+    if (opType != TOKEN_ASSIGN &&
+        opType != TOKEN_PLUS_EQUAL &&
+        opType != TOKEN_MINUS_EQUAL &&
+        opType != TOKEN_MUL_EQUAL &&
+        opType != TOKEN_SLASH_EQUAL &&
+        opType != TOKEN_PERCENT_EQUAL) {
         errorParser(parser, "Expected assignment operator");
         return newASTNode(AST_NOOP, NULL);
     }
@@ -2995,32 +3005,47 @@ AST *assignmentStatement(Parser *parser, AST *parsedLValue) {
         return newASTNode(AST_NOOP, NULL);
     }
 
-    AST *assignNode = newASTNode(AST_ASSIGN, NULL);
-    setLeft(assignNode, parsedLValue);
-
     if (opType == TOKEN_ASSIGN) {
+        AST *assignNode = newASTNode(AST_ASSIGN, NULL);
+        setLeft(assignNode, parsedLValue);
         setRight(assignNode, rhs);
         return assignNode;
     }
 
-    AST *lhsCopy = copyAST(parsedLValue);
-    if (!lhsCopy) {
-        errorParser(parser, "Failed to duplicate assignment target");
-        freeAST(rhs);
-        return newASTNode(AST_NOOP, NULL);
+    TokenType compoundType = TOKEN_UNKNOWN;
+    const char *compoundLexeme = NULL;
+    switch (opType) {
+        case TOKEN_PLUS_EQUAL:
+            compoundType = TOKEN_PLUS;
+            compoundLexeme = "+";
+            break;
+        case TOKEN_MINUS_EQUAL:
+            compoundType = TOKEN_MINUS;
+            compoundLexeme = "-";
+            break;
+        case TOKEN_MUL_EQUAL:
+            compoundType = TOKEN_MUL;
+            compoundLexeme = "*";
+            break;
+        case TOKEN_SLASH_EQUAL:
+            compoundType = TOKEN_SLASH;
+            compoundLexeme = "/";
+            break;
+        case TOKEN_PERCENT_EQUAL:
+            compoundType = TOKEN_MOD;
+            compoundLexeme = "mod";
+            break;
+        default:
+            errorParser(parser, "Expected assignment operator");
+            freeAST(rhs);
+            return newASTNode(AST_NOOP, NULL);
     }
 
-    Token *opToken = newToken(
-        (opType == TOKEN_PLUS_EQUAL) ? TOKEN_PLUS : TOKEN_MINUS,
-        (opType == TOKEN_PLUS_EQUAL) ? "+" : "-",
-        opLine,
-        opColumn);
-    AST *binaryNode = newASTNode(AST_BINARY_OP, opToken);
-    freeToken(opToken);
-    setLeft(binaryNode, lhsCopy);
-    setRight(binaryNode, rhs);
-    setRight(assignNode, binaryNode);
-
+    Token *compoundToken = newToken(compoundType, compoundLexeme, opLine, opColumn);
+    AST *assignNode = newASTNode(AST_ASSIGN, compoundToken);
+    freeToken(compoundToken);
+    setLeft(assignNode, parsedLValue);
+    setRight(assignNode, rhs);
     return assignNode;
 }
 

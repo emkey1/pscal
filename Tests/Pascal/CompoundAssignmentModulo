@@ -1,0 +1,26 @@
+program CompoundAssignmentModulo;
+
+var
+  x, idx: integer;
+  arr: array[0..1] of integer;
+
+function NextIndex: integer;
+begin
+  NextIndex := idx;
+  idx += 1;
+end;
+
+begin
+  x := 29;
+  x %= 6;
+
+  arr[0] := 23;
+  arr[1] := 41;
+  idx := 0;
+  arr[NextIndex()] %= 7;
+
+  writeln('x=', x);
+  writeln('arr0=', arr[0]);
+  writeln('arr1=', arr[1]);
+  writeln('idx=', idx);
+end.

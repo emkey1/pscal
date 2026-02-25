@@ -1,6 +1,6 @@
 #include "backend_ast/graphics_3d_backend.h"
 
-#if !defined(PSCAL_TARGET_IOS)
+#if !defined(PSCAL_TARGET_IOS) && !defined(__APPLE__)
 
 #include "core/sdl_headers.h"
 #include PSCALI_SDL_OPENGL_HEADER
@@ -172,4 +172,10 @@ unsigned int gfx3dGetError(void) {
     return (unsigned int)glGetError();
 }
 
-#endif // !defined(PSCAL_TARGET_IOS)
+void gfx3dPresent(void) {
+}
+
+void gfx3dReleaseResources(void) {
+}
+
+#endif // !defined(PSCAL_TARGET_IOS) && !defined(__APPLE__)

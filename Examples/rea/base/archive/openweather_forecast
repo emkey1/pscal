@@ -193,7 +193,7 @@ void printCurrentConditions(int currentHandle, str tempUnitSymbol) {
 
   humidityHandle = YyjsonGetKey(currentHandle, "humidity");
   if (humidityHandle >= 0) {
-    humidity = (int)YyjsonGetInt(humidityHandle);
+    humidity = int(YyjsonGetInt(humidityHandle));
     YyjsonFreeValue(humidityHandle);
   }
 
@@ -273,7 +273,7 @@ void printDailyForecast(int dailyHandle, int timezoneOffset, str tempUnitSymbol)
       dtHandle = YyjsonGetKey(dayHandle, "dt");
       dt = 0;
       if (dtHandle >= 0) {
-        dt = (int)YyjsonGetInt(dtHandle);
+        dt = int(YyjsonGetInt(dtHandle));
         YyjsonFreeValue(dtHandle);
       }
 
@@ -608,7 +608,7 @@ int main() {
             }
             tzOffsetHandle = YyjsonGetKey(rootHandle, "timezone_offset");
             if (tzOffsetHandle >= 0) {
-              timezoneOffset = (int)YyjsonGetInt(tzOffsetHandle);
+              timezoneOffset = int(YyjsonGetInt(tzOffsetHandle));
               YyjsonFreeValue(tzOffsetHandle);
               tzOffsetHandle = -1;
             }
