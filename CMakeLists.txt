@@ -304,17 +304,25 @@ configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
     "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
 set(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR "")
 if(NOT PSCAL_PLATFORM_IOS)
+    file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
+    string(REPLACE "#define SOCK_HAS_LEN 1" "/* #undef SOCK_HAS_LEN */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+
     find_path(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR
         NAMES rpc/types.h
         PATH_SUFFIXES "" tirpc)
     if(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR)
         message(STATUS "OpenSSH: using rpc/types.h from ${PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR}")
     else()
-        file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
         string(REPLACE "#define HAVE_RPC_TYPES_H 1" "/* #undef HAVE_RPC_TYPES_H */"
             _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-        file(WRITE "${CMAKE_BINARY_DIR}/generated/openssh/config.h" "${_pscal_openssh_config_h}")
         message(STATUS "OpenSSH: rpc/types.h not found; disabling HAVE_RPC_TYPES_H")
+    endif()
+    file(WRITE "${CMAKE_BINARY_DIR}/generated/openssh/config.h" "${_pscal_openssh_config_h}")
+
+    file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h_verify)
+    if(_pscal_openssh_config_h_verify MATCHES "#define[ \t]+SOCK_HAS_LEN[ \t]+1")
+        message(FATAL_ERROR "OpenSSH host config unexpectedly defines SOCK_HAS_LEN; expected it to be undefined off iOS.")
     endif()
 endif()
 
