@@ -1403,7 +1403,9 @@
 #define HAVE_STRTOLL 1
 
 /* Define to 1 if you have the `strtonum' function. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRTONUM 1
+#endif
 
 /* Define to 1 if you have the `strtoul' function. */
 #define HAVE_STRTOUL 1
@@ -1939,7 +1941,9 @@
 #define SNPRINTF_CONST /* not const */
 
 /* sockaddr_in has sin_len */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define SOCK_HAS_LEN 1
+#endif
 
 /* Define to a Set Process Title type if your system is supported by
    bsd-setproctitle.c */
