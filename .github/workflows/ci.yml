@@ -179,6 +179,9 @@ jobs:
       - name: Verify example discovery counts
         if: steps.plan.outputs.skip != 'true'
         run: bash Tests/examples/test_compile_all_examples_discovery.sh
+      - name: Verify workflow example paths
+        if: steps.plan.outputs.skip != 'true'
+        run: python3 Tests/tools/verify_workflow_example_paths.py
       - name: Compile CLike examples (dump-only)
         if: steps.plan.outputs.skip != 'true' && steps.plan.outputs.run_clike == 'true'
         run: |

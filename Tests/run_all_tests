@@ -94,3 +94,8 @@ echo "====================================="
 echo "Running submodule checker tool tests"
 bash ./tools/test_check_submodule_refs.sh
 echo "Submodule checker tool tests End"
+
+echo "====================================="
+echo "Running workflow example path validation"
+python3 ./tools/verify_workflow_example_paths.py
+echo "Workflow example path validation End"
