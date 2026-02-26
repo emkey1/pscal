@@ -307,6 +307,12 @@ if(NOT PSCAL_PLATFORM_IOS)
     file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
     string(REPLACE "#define SOCK_HAS_LEN 1" "/* #undef SOCK_HAS_LEN */"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REPLACE "#define HAVE_STRUCT_PASSWD_PW_CHANGE 1" "/* #undef HAVE_STRUCT_PASSWD_PW_CHANGE */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REPLACE "#define HAVE_STRUCT_PASSWD_PW_CLASS 1" "/* #undef HAVE_STRUCT_PASSWD_PW_CLASS */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REPLACE "#define HAVE_STRUCT_PASSWD_PW_EXPIRE 1" "/* #undef HAVE_STRUCT_PASSWD_PW_EXPIRE */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
 
     find_path(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR
         NAMES rpc/types.h
@@ -324,6 +330,11 @@ if(NOT PSCAL_PLATFORM_IOS)
     if(_pscal_openssh_config_h_verify MATCHES "#define[ \t]+SOCK_HAS_LEN[ \t]+1")
         message(FATAL_ERROR "OpenSSH host config unexpectedly defines SOCK_HAS_LEN; expected it to be undefined off iOS.")
     endif()
+    foreach(_pscal_bad_def IN ITEMS HAVE_STRUCT_PASSWD_PW_CHANGE HAVE_STRUCT_PASSWD_PW_CLASS HAVE_STRUCT_PASSWD_PW_EXPIRE)
+        if(_pscal_openssh_config_h_verify MATCHES "#define[ \t]+${_pscal_bad_def}[ \t]+1")
+            message(FATAL_ERROR "OpenSSH host config unexpectedly defines ${_pscal_bad_def}; expected it to be undefined off iOS.")
+        endif()
+    endforeach()
 endif()
 
 # Resolve the final runtime destination so install rules can write directly to
