@@ -319,6 +319,16 @@ if(NOT PSCAL_PLATFORM_IOS)
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
     string(REGEX REPLACE "#define[ \t]+HAVE_STRLCAT[ \t]+1" "/* #undef HAVE_STRLCAT */"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_UTIL_H[ \t]+1" "/* #undef HAVE_UTIL_H */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_LE32TOH[ \t]+0" "#define HAVE_DECL_LE32TOH 1"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_LE64TOH[ \t]+0" "#define HAVE_DECL_LE64TOH 1"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_HTOLE64[ \t]+0" "#define HAVE_DECL_HTOLE64 1"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_UINT32_MAX[ \t]+1" "#define HAVE_DECL_UINT32_MAX 1"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
 
     find_path(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR
         NAMES rpc/types.h
