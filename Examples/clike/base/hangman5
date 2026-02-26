@@ -172,7 +172,7 @@ void sort_string(str* sp) {
 }
 
 struct WordNode {
-    str word;
+    str value;
     struct WordNode* next;
 };
 
@@ -215,7 +215,7 @@ struct WordNode* load_words(str path, int* word_count, int min_length, int max_l
                         printf("Out of memory loading words.\n");
                         break;
                     }
-                    node->word = copy(buffer, start, word_len);
+                    node->value = copy(buffer, start, word_len);
                     node->next = words;
                     words = node;
                     *word_count = *word_count + 1;
@@ -235,7 +235,7 @@ void cleanup_words(struct WordNode* words) {
         struct WordNode* next;
         next = tmp->next;
         tmp->next = NULL;  // prevent dispose from traversing the rest of the list
-        dispose(&tmp);     // also releases tmp->word
+        dispose(&tmp);     // also releases tmp->value
         tmp = next;
     }
 }
@@ -291,7 +291,7 @@ int play_round(struct WordNode* words, int word_count, int max_wrong) {
     index = random(word_count);
     current = words;
     while (index > 0) { current = current->next; index--; }
-    secret = current->word;
+    secret = current->value;
     so_far = secret;
     len = strlen(so_far);
     i = 1; while (i <= len) { so_far[i] = '-'; i++; }

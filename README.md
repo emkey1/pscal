@@ -47,7 +47,13 @@ If you use submodules, run this before pushing to make sure pinned commits are
 fetchable by others:
 
 ```sh
-tools/check_submodule_refs.sh
+Tools/check_submodule_refs.sh
+```
+
+To verify both protected branches in one pass:
+
+```sh
+Tools/check_submodule_refs.sh --protected-refs
 ```
 
 Binaries are written to `build/bin` (e.g. `pascal`).
