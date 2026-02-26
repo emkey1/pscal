@@ -1423,13 +1423,19 @@
 #define HAVE_STRUCT_IN6_ADDR 1
 
 /* Define to 1 if `pw_change' is a member of `struct passwd'. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRUCT_PASSWD_PW_CHANGE 1
+#endif
 
 /* Define to 1 if `pw_class' is a member of `struct passwd'. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRUCT_PASSWD_PW_CLASS 1
+#endif
 
 /* Define to 1 if `pw_expire' is a member of `struct passwd'. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRUCT_PASSWD_PW_EXPIRE 1
+#endif
 
 /* Define to 1 if `pw_gecos' is a member of `struct passwd'. */
 #define HAVE_STRUCT_PASSWD_PW_GECOS 1
