@@ -274,6 +274,8 @@ static Value vmBuiltinOpenAIChatCompletions(struct VM_s *vm, int arg_count,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "PscalOpenAI/1.0");
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
 
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
