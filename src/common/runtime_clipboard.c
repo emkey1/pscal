@@ -25,10 +25,8 @@ char *pscalPlatformClipboardGet(size_t *out_len) {
 int runtimeClipboardSet(const char *utf8, size_t len) {
 	if (!utf8)
 		return -1;
-	if (pscalPlatformClipboardSet) {
-		if (pscalPlatformClipboardSet(utf8, len) == 0) {
-			return 0;
-		}
+	if (pscalPlatformClipboardSet(utf8, len) == 0) {
+		return 0;
 	}
 	free(clipboard_fallback);
 	clipboard_fallback = (char *)malloc(len + 1);
@@ -41,14 +39,12 @@ int runtimeClipboardSet(const char *utf8, size_t len) {
 }
 
 char *runtimeClipboardGet(size_t *out_len) {
-	if (pscalPlatformClipboardGet) {
-		char *buf = pscalPlatformClipboardGet(out_len);
-		if (buf)
-			return buf;
-	}
+	char *buf = pscalPlatformClipboardGet(out_len);
+	if (buf)
+		return buf;
 	if (!clipboard_fallback)
 		return NULL;
-	char *buf = (char *)malloc(clipboard_fallback_len + 1);
+	buf = (char *)malloc(clipboard_fallback_len + 1);
 	if (!buf)
 		return NULL;
 	memcpy(buf, clipboard_fallback, clipboard_fallback_len + 1);
