@@ -553,9 +553,11 @@ include_directories(
 if(PSCAL_PLATFORM_IOS)
     include_directories(
         src/smallclue/src
-        src/smallclue
     )
 endif()
+include_directories(
+    src/smallclue
+)
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
     include_directories(${PSCAL_SQLITE_INCLUDE_DIRS})
 endif()
