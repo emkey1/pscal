@@ -39,9 +39,23 @@ struct TerminalSettingsView: View {
                     }
 
                     let previewFont = appearanceSettings.font(forPointSize: 16)
-                    Text("Sample AaBb123")
-                        .font(Font(previewFont))
-                        .foregroundColor(Color(appearanceSettings.foregroundColor))
+                    HStack {
+                        Spacer()
+                        Text("Sample AaBb123")
+                            .font(Font(previewFont))
+                            .foregroundColor(Color(appearanceSettings.foregroundColor))
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .background(Color(appearanceSettings.backgroundColor))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                            )
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                    .accessibilityLabel("Font preview with current settings")
                 }
 
                 Section(header: Text("Font Size")) {
@@ -154,7 +168,7 @@ struct TerminalSettingsView: View {
                         )
                     )
 
-                    Text("Requires restarting PSCAL take effect.")
+                    Text("Requires restarting PSCAL to take effect.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
 
