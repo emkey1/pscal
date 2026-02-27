@@ -146,7 +146,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var reloadPending = false
     private var didLogFirstOutput = false
     private var didLogFirstFlush = false
-    private let maxFlushBytes = 32 * 1024
+    private let maxFlushBytes = 128 * 1024
     private var hostSizeReady = false
     private var hostSize = CGSize.zero
 
@@ -159,6 +159,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var scrollToBottomPending = false
     private var resizeRequestGeneration: UInt64 = 0
     private var pendingForcedGridSize: (columns: Int, rows: Int)?
+    private var appliedForcedGridSize: (columns: Int, rows: Int)?
     private var resizeSessionId: UInt64 = 0
     private var pendingRuntimeResize: (columns: Int, rows: Int, source: String)?
 
@@ -363,6 +364,11 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     func forceGridSize(columns: Int, rows: Int) {
         let clampedColumns = max(1, columns)
         let clampedRows = max(1, rows)
+        if let pending = pendingForcedGridSize,
+           pending.columns == clampedColumns,
+           pending.rows == clampedRows {
+            return
+        }
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] force-grid req=\(columns)x\(rows) clamped=\(clampedColumns)x\(clampedRows) loaded=\(isLoaded)")
         pendingForcedGridSize = (clampedColumns, clampedRows)
         guard isLoaded else { return }
@@ -505,7 +511,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] request-resize gen=\(generation) delay=\(String(format: "%.3f", delay)) loaded=\(isLoaded)")
         let evaluate: () -> Void = { [weak self] in
             guard let self = self else { return }
-            self.webView.evaluateJavaScript("exports.getSize()") { [weak self] result, error in
+            self.webView.evaluateJavaScript("exports.reflowAndGetSize ? exports.reflowAndGetSize() : exports.getSize()") { [weak self] result, error in
                 guard let self = self else { return }
                 if let error = error {
                     NSLog("Hterm resize error: %@", error.localizedDescription)
@@ -514,7 +520,6 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
                 guard generation == self.resizeRequestGeneration else { return }
                 guard let array = result as? [NSNumber], array.count == 2 else { return }
                 sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] request-resize result=\(array[0].intValue)x\(array[1].intValue) gen=\(generation)")
-                self.forwardResizeToRuntime(columns: array[0].intValue, rows: array[1].intValue, source: "request")
                 self.onResize?(array[0].intValue, array[1].intValue)
             }
         }
@@ -529,6 +534,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         func parsePair(_ columns: Int, _ rows: Int) -> Bool {
             guard columns > 0, rows > 0 else { return false }
             sshResizeLog("[ssh-resize] hterm[\(instanceId)] native-resize=\(columns)x\(rows)")
+            appliedForcedGridSize = (columns, rows)
             forwardResizeToRuntime(columns: columns, rows: rows, source: "native")
             onResize?(columns, rows)
             return true
@@ -694,12 +700,18 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
 
     private func applyForcedGridSize(columns: Int, rows: Int) {
         guard columns > 0, rows > 0 else { return }
+        if let applied = appliedForcedGridSize,
+           applied.columns == columns,
+           applied.rows == rows {
+            return
+        }
         let script = "exports.setGridSize(\(columns), \(rows))"
         webView.evaluateJavaScript(script) { _, error in
             if let error = error {
                 NSLog("Hterm force size error: %@", error.localizedDescription)
                 sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid error=\(error.localizedDescription) cols=\(columns) rows=\(rows)")
             } else {
+                self.appliedForcedGridSize = (columns, rows)
                 sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid applied=\(columns)x\(rows)")
             }
         }
@@ -787,6 +799,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         }
         let wasLoaded = isLoaded
         isLoaded = false
+        appliedForcedGridSize = nil
         outputLock.lock()
         outputInProgress = false
         outputLock.unlock()

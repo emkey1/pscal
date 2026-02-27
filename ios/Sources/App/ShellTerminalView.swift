@@ -102,7 +102,9 @@ private struct ShellTerminalContentView: View {
                 },
                 onResize: { cols, rows in
                     tabInitLog("ShellTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
-                    applyTerminalSize(columns: cols, rows: rows)
+                    if !hasMeasuredGeometry {
+                        applyTerminalSize(columns: cols, rows: rows)
+                    }
                 },
                 onReady: { controller in
                     tabInitLog("ShellTerminalView ready session=\(session.sessionId) controller=\(controller.instanceId)")
@@ -118,7 +120,7 @@ private struct ShellTerminalContentView: View {
 
             if let status = session.exitStatus {
                 Divider()
-                Text("Shell exited with status \(status)")
+                Text("\(session.sessionDisplayName) exited with status \(status)")
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .padding(.vertical, 8)

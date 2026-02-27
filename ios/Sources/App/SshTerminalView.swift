@@ -102,7 +102,9 @@ private struct SshTerminalContentView: View {
                 },
                 onResize: { cols, rows in
                     tabInitLog("SshTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
-                    applyTerminalSize(columns: cols, rows: rows)
+                    if !hasMeasuredGeometry {
+                        applyTerminalSize(columns: cols, rows: rows)
+                    }
                 },
                 onReady: { controller in
                     tabInitLog("SshTerminalView ready session=\(session.sessionId) controller=\(controller.instanceId)")
@@ -146,7 +148,6 @@ private struct SshTerminalContentView: View {
             updateTerminalGeometry()
         }
         .onChange(of: fontSettings.pointSize) { _ in
-            sshResizeLog("[ssh-resize] view font change session=\(session.sessionId) pt=\(fontSettings.pointSize)")
             hasMeasuredGeometry = false
             updateTerminalGeometry()
         }
@@ -167,7 +168,6 @@ private struct SshTerminalContentView: View {
 
     private func updateTerminalGeometry() {
         guard isActive else {
-            sshResizeLog("[ssh-resize] view geometry skipped session=\(session.sessionId) inactive")
             return
         }
         let font = fontSettings.currentFont
@@ -179,7 +179,6 @@ private struct SshTerminalContentView: View {
         )
         let columns = max(10, grid.columns)
         let rows = max(4, grid.rows)
-        sshResizeLog("[ssh-resize] view geometry session=\(session.sessionId) size=\(Int(usableSize.width))x\(Int(usableSize.height)) font=\(font.pointSize) grid=\(columns)x\(rows)")
         applyTerminalSize(columns: columns, rows: rows)
     }
 
@@ -192,12 +191,8 @@ private struct SshTerminalContentView: View {
             hasMeasuredGeometry = true
         }
         let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(columns: columns, rows: rows)
-        guard lastReportedMetrics != metrics else {
-            sshResizeLog("[ssh-resize] view apply skipped session=\(session.sessionId) unchanged=\(metrics.columns)x\(metrics.rows)")
-            return
-        }
+        guard lastReportedMetrics != metrics else { return }
         lastReportedMetrics = metrics
-        sshResizeLog("[ssh-resize] view apply session=\(session.sessionId) cols=\(metrics.columns) rows=\(metrics.rows)")
         session.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }

@@ -37,7 +37,9 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <errno.h>
+#ifdef HAVE_UTIL_H
 #include <util.h>
+#endif
 #ifdef USE_SYSTEM_GLOB
 # include <glob.h>
 #else

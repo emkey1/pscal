@@ -47,6 +47,9 @@ static char xsrerr[] = "range not found";
 static char *xrerr;
 
 extern void pscalRuntimeDebugLog(const char *message);
+#if defined(PSCAL_TARGET_IOS)
+extern int pscalRuntimeOpenShellTab(void) __attribute__((weak));
+#endif
 
 static int ex_write_debug_enabled(void)
 {
@@ -1202,6 +1205,24 @@ static void *ec_exec(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+static void *ec_shell(char *loc, char *cmd, char *arg)
+{
+	(void)loc;
+	(void)cmd;
+	(void)arg;
+#if defined(PSCAL_TARGET_IOS)
+	if (pscalRuntimeOpenShellTab) {
+		return pscalRuntimeOpenShellTab() == 0 ? NULL : xuerr;
+	}
+#endif
+	int ret = 0;
+	if (!(xvis & 4))
+		term_chr('\n');
+	cmd_pipe("exec \"${SHELL:-sh}\" -i", NULL, 2, &ret);
+	xmpt = xmpt >= 0 ? 0 : xmpt;
+	return ret ? xuerr : NULL;
+}
+
 static void *ec_ft(char *loc, char *cmd, char *arg)
 {
 	xb_ft = syn_setft(arg[0] ? arg : xb_ft);
@@ -1510,6 +1531,7 @@ static struct excmd {
 	{"uz", ec_setenc},
 	{"ub", ec_setenc},
 	{"u", ec_undoredo},
+	{"shell", ec_shell},
 	EO(shape),
 	EO(seq),
 	EO(sep),

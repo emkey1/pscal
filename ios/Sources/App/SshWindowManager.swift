@@ -21,7 +21,7 @@ final class TerminalTabManager: ObservableObject {
         enum Kind {
             case shell(PscalRuntimeBootstrap)
             case shellSession(ShellRuntimeSession)
-            case ssh(SshRuntimeSession)
+            case ssh(ShellRuntimeSession)
             case sdl(ownerTabId: UInt64)
         }
 
@@ -248,12 +248,7 @@ final class TerminalTabManager: ObservableObject {
     func openSshSession(argv: [String]) -> Int32 {
         tabInitLog("openSshSession request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
         let sessionId = PSCALRuntimeNextSessionId()
-        let session = SshRuntimeSession(sessionId: sessionId, argv: argv)
-        guard session.start() else {
-            let err = session.lastStartErrno
-            tabInitLog("openSshSession start failed errno=\(err)")
-            return -(err == 0 ? EIO : err)
-        }
+        let session = ShellRuntimeSession(sessionId: sessionId, argv: argv, program: .ssh)
         let defaultTitle = TerminalTabManager.sanitizeTitle(sshTitle(argv: argv))
         let profileID = "ssh.1"
         let title = Self.startupTabTitle(
@@ -269,8 +264,19 @@ final class TerminalTabManager: ObservableObject {
                       appearanceProfileID: profileID,
                       appearanceSettings: appearance,
                       kind: .ssh(session))
+        let previousSelectedId = selectedId
         tabs.append(tab)
         selectedId = sessionId
+        guard session.start() else {
+            let err = session.lastStartErrno
+            if let idx = tabs.firstIndex(where: { $0.id == sessionId }) {
+                _ = removeTab(at: idx)
+            } else {
+                selectedId = previousSelectedId
+            }
+            tabInitLog("openSshSession start failed errno=\(err)")
+            return -(err == 0 ? EIO : err)
+        }
         logMultiTab("open ssh tab id=\(sessionId) title=\(title)")
         tabInitLog("openSshSession created id=\(sessionId) title=\(title)")
         tabInitLog("openSshSession selectedId=\(selectedId) tabs=\(tabs.count)")
@@ -920,10 +926,10 @@ struct TerminalTabsRootView: View {
                               tabId: tab.id,
                               appearanceSettings: tab.appearanceSettings)
         case .ssh(let session):
-            SshTerminalView(session: session,
-                            isActive: isSelected,
-                            tabId: tab.id,
-                            appearanceSettings: tab.appearanceSettings)
+            ShellTerminalView(session: session,
+                              isActive: isSelected,
+                              tabId: tab.id,
+                              appearanceSettings: tab.appearanceSettings)
         case .sdl:
             SdlTabView {
                 TerminalTabManager.shared.selectFirstNonSdlTab()

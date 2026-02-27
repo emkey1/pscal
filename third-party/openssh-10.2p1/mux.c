@@ -38,7 +38,9 @@
 
 #include <poll.h>
 
+#ifdef HAVE_UTIL_H
 #include <util.h>
+#endif
 
 #include "openbsd-compat/sys-queue.h"
 #include "xmalloc.h"

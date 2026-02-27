@@ -69,6 +69,22 @@ function syncProp(name, value) {
     if (oldProps[name] !== value)
         native.propUpdate(name, value);
 }
+let pendingViewportRefresh = false;
+function scheduleViewportRefresh() {
+    if (pendingViewportRefresh) {
+        return;
+    }
+    pendingViewportRefresh = true;
+    requestAnimationFrame(() => {
+        pendingViewportRefresh = false;
+        if (!term.scrollPort_) {
+            return;
+        }
+        term.scrollPort_.scheduleInvalidate();
+        term.scrollPort_.scheduleRedraw();
+        syncScroll();
+    });
+}
 let didLogFirstWrite = false;
 let writeLogCount = 0;
 const writeUtf8Bytes = (bytes) => {
@@ -78,6 +94,8 @@ const writeUtf8Bytes = (bytes) => {
         term.scrollPort_.scrollRowToBottom(term.getRowCount());
     }
     syncProp('applicationCursor', term.keyboard.applicationCursor);
+    // Coalesced refresh avoids partially painted row ranges on large startup bursts.
+    scheduleViewportRefresh();
     if (debugEnabled && (!didLogFirstWrite || writeLogCount < 3)) {
         didLogFirstWrite = true;
         writeLogCount += 1;
@@ -180,6 +198,10 @@ term.io.onTerminalResize = (columns, rows) => {
     notifyTerminalResize();
 };
 exports.getSize = () => currentTerminalSize();
+exports.reflowAndGetSize = () => {
+    forceTerminalReflow();
+    return currentTerminalSize();
+};
 exports.setGridSize = (columns, rows) => {
     const cols = Number(columns);
     const rws = Number(rows);

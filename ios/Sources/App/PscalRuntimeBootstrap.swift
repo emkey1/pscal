@@ -849,8 +849,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func sendInterrupt() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            // Match terminal semantics for interactive tabs: inject ETX.
-            sendControlByteToSession(0x03, sessionId: activeSession)
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
+            }
+            if !delivered {
+                // Fallback keeps local semantics working if foreground signal
+                // routing is temporarily unresolved.
+                sendControlByteToSession(0x03, sessionId: activeSession)
+            }
             return
         }
         withRuntimeContext {
@@ -861,8 +867,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func sendSuspend() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            // Match terminal semantics for interactive tabs: inject SUB.
-            sendControlByteToSession(0x1A, sessionId: activeSession)
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
+            }
+            if !delivered {
+                // Fallback keeps local semantics working if foreground signal
+                // routing is temporarily unresolved.
+                sendControlByteToSession(0x1A, sessionId: activeSession)
+            }
             return
         }
         withRuntimeContext {
@@ -1331,7 +1343,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if timeSinceLast < minRenderInterval {
             renderQueued = true
             let delay = minRenderInterval - timeSinceLast
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.performRender(preserveBackground: preserveBackground)
             }
         } else {
@@ -1533,6 +1545,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let runtimeColumns = metrics.columns
         let runtimeRows = metrics.rows
         if resizeTerminalBuffer {
+            DispatchQueue.main.async { [weak self] in
+                self?.htermController?.forceGridSize(columns: runtimeColumns, rows: runtimeRows)
+            }
             let resized = terminalBuffer.resize(columns: runtimeColumns, rows: runtimeRows)
             if resized {
                 scheduleRender()

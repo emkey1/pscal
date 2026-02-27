@@ -29,6 +29,8 @@ extern void pscalTerminalSetCursorVisible(int visible);
 extern void pscalTerminalInsertLines(int row, int count);
 extern void pscalTerminalDeleteLines(int row, int count);
 extern int pscalTerminalRead(unsigned char *buffer, int maxlen, int timeout_ms);
+extern int pscalRuntimeDetectWindowRows(void) __attribute__((weak));
+extern int pscalRuntimeDetectWindowCols(void) __attribute__((weak));
 static int ios_row = 0;
 static int ios_col = 0;
 static int ios_wrap = 1;
@@ -533,6 +535,18 @@ void term_init(void)
 		xrows = atoi(getenv("LINES"));
 	if (getenv("COLUMNS"))
 		xcols = atoi(getenv("COLUMNS"));
+#if defined(PSCAL_TARGET_IOS)
+	if (pscalRuntimeDetectWindowRows) {
+		int rows = pscalRuntimeDetectWindowRows();
+		if (rows > 0)
+			xrows = rows;
+	}
+	if (pscalRuntimeDetectWindowCols) {
+		int cols = pscalRuntimeDetectWindowCols();
+		if (cols > 0)
+			xcols = cols;
+	}
+#endif
 #if !defined(PSCAL_TARGET_IOS)
 	struct winsize win;
 	if (!ioctl(0, TIOCGWINSZ, &win)) {

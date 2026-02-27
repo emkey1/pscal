@@ -3,7 +3,31 @@ import UIKit
 import Darwin
 
 final class ShellRuntimeSession: ObservableObject {
+    enum SessionProgram {
+        case shell
+        case ssh
+
+        var displayName: String {
+            switch self {
+            case .shell:
+                return "Shell"
+            case .ssh:
+                return "SSH"
+            }
+        }
+
+        var launchLabel: String {
+            switch self {
+            case .shell:
+                return "shell"
+            case .ssh:
+                return "ssh"
+            }
+        }
+    }
+
     let sessionId: UInt64
+    let sessionDisplayName: String
     private static let htermDebugEnabled: Bool = {
         let env = ProcessInfo.processInfo.environment
         if let value = env["PSCALI_HERM_DEBUG"] {
@@ -36,6 +60,8 @@ final class ShellRuntimeSession: ObservableObject {
     private(set) var lastStartErrno: Int32 = 0
 
     private let argv: [String]
+    private let sessionProgram: SessionProgram
+    private let sessionLogLabel: String
     private lazy var terminalBuffer: TerminalBuffer = {
         let buffer = TerminalBuffer(columns: pendingColumns,
                                     rows: pendingRows,
@@ -57,7 +83,7 @@ final class ShellRuntimeSession: ObservableObject {
     private let outputQueue = DispatchQueue(label: "com.pscal.shell.session.output", qos: .utility)
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
-    private let minRenderInterval: TimeInterval = 0.03
+    private let minRenderInterval: TimeInterval = 0.016
     private var detachedOutputChunks: [Data] = []
     private var detachedOutputHead: Int = 0
     private var detachedOutputBytes: Int = 0
@@ -89,14 +115,17 @@ final class ShellRuntimeSession: ObservableObject {
         session.outputHandlerGroup.leave()
     }
 
-    init(sessionId: UInt64, argv: [String]) {
+    init(sessionId: UInt64, argv: [String], program: SessionProgram = .shell) {
         self.sessionId = sessionId
         self.argv = argv
+        self.sessionProgram = program
+        self.sessionDisplayName = program.displayName
+        self.sessionLogLabel = program.launchLabel
         self.runtimeContext = PSCALRuntimeCreateRuntimeContext()
         let metrics = PscalRuntimeBootstrap.defaultGeometryMetrics()
         self.pendingColumns = metrics.columns
         self.pendingRows = metrics.rows
-        self.screenText = NSAttributedString(string: "Launching shell...")
+        self.screenText = NSAttributedString(string: "Launching \(sessionLogLabel)...")
         self.htermController = HtermTerminalController.makeOnMainThread()
         _ = terminalBuffer
     }
@@ -110,18 +139,15 @@ final class ShellRuntimeSession: ObservableObject {
     func attachHtermController(_ controller: HtermTerminalController?) {
         outputQueue.async {
             guard let controller else {
-                Self.logHterm("Hterm: attach shell session=\(self.sessionId) (nil controller)")
+                Self.logHterm("Hterm: attach \(self.sessionLogLabel) session=\(self.sessionId) (nil controller)")
                 return
             }
             guard controller === self.htermController else {
-                Self.logHterm("Hterm[\(controller.instanceId)]: attach shell session=\(self.sessionId) ignored (unexpected controller)")
+                Self.logHterm("Hterm[\(controller.instanceId)]: attach \(self.sessionLogLabel) session=\(self.sessionId) ignored (unexpected controller)")
                 return
             }
-            Self.logHterm("Hterm[\(controller.instanceId)]: attach shell session=\(self.sessionId)")
+            Self.logHterm("Hterm[\(controller.instanceId)]: attach \(self.sessionLogLabel) session=\(self.sessionId)")
             self.htermAttached = true
-            self.withRuntimeContext {
-                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 0)
-            }
             self.flushDetachedOutputIfNeeded()
             DispatchQueue.main.async {
                 controller.setResizeSessionId(self.sessionId)
@@ -134,11 +160,8 @@ final class ShellRuntimeSession: ObservableObject {
             guard controller === self.htermController else {
                 return
             }
-            Self.logHterm("Hterm[\(controller.instanceId)]: detach shell session=\(self.sessionId)")
+            Self.logHterm("Hterm[\(controller.instanceId)]: detach \(self.sessionLogLabel) session=\(self.sessionId)")
             self.htermAttached = false
-            self.withRuntimeContext {
-                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 1)
-            }
             DispatchQueue.main.async {
                 controller.setResizeSessionId(0)
             }
@@ -160,11 +183,10 @@ final class ShellRuntimeSession: ObservableObject {
         handlerContext = Unmanaged.passRetained(self).toOpaque()
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
-            PSCALRuntimeSetSessionOutputPaused(sessionId, htermAttached ? 0 : 1)
         }
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
-            let message = "ShellSession: start id=\(sessionId) ctx=\(ctxDesc)\n"
+            let message = "Session(\(sessionLogLabel)): start id=\(sessionId) ctx=\(ctxDesc)\n"
             if let data = message.data(using: .utf8) {
                 FileHandle.standardError.write(data)
             }
@@ -172,7 +194,7 @@ final class ShellRuntimeSession: ObservableObject {
 
         var readFd: Int32 = -1
         var writeFd: Int32 = -1
-        let launched = launchShellSession(readFd: &readFd, writeFd: &writeFd)
+        let launched = launchSession(readFd: &readFd, writeFd: &writeFd)
         if !launched {
             let err = errno
             lastStartErrno = err == 0 ? EIO : err
@@ -183,7 +205,7 @@ final class ShellRuntimeSession: ObservableObject {
             return false
         }
         if Self.ioDebugEnabled {
-            let message = "ShellSession: launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)\n"
+            let message = "Session(\(sessionLogLabel)): launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)\n"
             if let data = message.data(using: .utf8) {
                 FileHandle.standardError.write(data)
             }
@@ -306,7 +328,7 @@ final class ShellRuntimeSession: ObservableObject {
         if timeSinceLast < minRenderInterval {
             renderQueued = true
             let delay = minRenderInterval - timeSinceLast
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.performRender()
             }
         } else {
@@ -414,21 +436,17 @@ final class ShellRuntimeSession: ObservableObject {
             return
         }
 
-        let slice = detachedOutputChunks[detachedOutputHead...]
-        var merged = Data()
-        merged.reserveCapacity(detachedOutputBytes)
-        for chunk in slice {
-            merged.append(chunk)
+        for index in detachedOutputHead..<detachedOutputChunks.count {
+            let chunk = detachedOutputChunks[index]
+            htermController.enqueueOutput(chunk)
+            terminalBuffer.append(data: chunk)
         }
         detachedOutputChunks.removeAll(keepingCapacity: true)
         detachedOutputHead = 0
         detachedOutputBytes = 0
-        guard !merged.isEmpty else { return }
-        htermController.enqueueOutput(merged)
-        terminalBuffer.append(data: merged)
     }
 
-    private func launchShellSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {
+    private func launchSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {
         guard !argv.isEmpty else { return false }
         var cStrings: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) }
         cStrings.append(nil)
@@ -443,11 +461,20 @@ final class ShellRuntimeSession: ObservableObject {
         let result = cStrings.withUnsafeMutableBufferPointer { buffer -> Int32 in
             guard let base = buffer.baseAddress else { return -1 }
             return withRuntimeContext {
-                PSCALRuntimeCreateShellSession(argc,
-                                               base,
-                                               sessionId,
-                                               &readFd,
-                                               &writeFd)
+                switch sessionProgram {
+                case .shell:
+                    return PSCALRuntimeCreateShellSession(argc,
+                                                          base,
+                                                          sessionId,
+                                                          &readFd,
+                                                          &writeFd)
+                case .ssh:
+                    return PSCALRuntimeCreateSshSession(argc,
+                                                        base,
+                                                        sessionId,
+                                                        &readFd,
+                                                        &writeFd)
+                }
             }
         }
         return result == 0

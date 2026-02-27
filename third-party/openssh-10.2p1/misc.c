@@ -447,14 +447,17 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	int rc = -1;
 	for (;;) {
 		rc = connect(sockfd, serv_addr, addrlen);
-		if (rc == 0) {
+		if (rc == 0 || (rc == -1 && errno == EISCONN)) {
+			/* Nonblocking callers may report EISCONN once handshake completes. */
+			rc = 0;
 			break;
 		}
 		if (errno == EINTR) {
 			continue;
 		}
-		if (errno == EINPROGRESS) {
-			/* Should not happen with blocking connect, but treat as retry. */
+		if (errno == EINPROGRESS || errno == EALREADY) {
+			/* Socket may already be O_NONBLOCK at call-site. */
+			usleep(1000);
 			continue;
 		}
 		break;
