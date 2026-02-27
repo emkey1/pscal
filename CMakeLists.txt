@@ -553,9 +553,11 @@ include_directories(
 if(PSCAL_PLATFORM_IOS)
     include_directories(
         src/smallclue/src
-        src/smallclue
     )
 endif()
+include_directories(
+    src/smallclue
+)
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
     include_directories(${PSCAL_SQLITE_INCLUDE_DIRS})
 endif()
@@ -1691,6 +1693,8 @@ if(NOT PSCAL_PLATFORM_IOS OR (PSCAL_FORCE_IOS AND NOT PSCAL_MACCATALYST))
     if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
         target_link_libraries(exsh PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
+
+    target_include_directories(exsh PRIVATE src)
 
     if(SDL)
         target_include_directories(exsh PRIVATE
