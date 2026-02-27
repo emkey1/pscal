@@ -95,7 +95,7 @@ struct TerminalView: View {
                     .padding(8)
                     .background(.ultraThinMaterial, in: Circle())
             }
-            .accessibilityLabel("Adjust Font Size")
+            .accessibilityLabel("Terminal Settings")
             
 //            Button {
 //                runtime.forceExshRestart()

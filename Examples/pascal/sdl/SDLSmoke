@@ -1,0 +1,30 @@
+#!/usr/bin/env pascal
+program SDLSmoke;
+
+var
+  i, width, height, cx, cy: Integer;
+
+begin
+  InitGraph(640, 360, 'Pascal SDL Smoke');
+  width := GetMaxX + 1;
+  height := GetMaxY + 1;
+  cx := width div 2;
+  cy := height div 2;
+
+  SetRGBColor(18, 24, 42);
+  FillRect(0, 0, width, height);
+  SetRGBColor(48, 148, 255);
+  FillRect(32, 32, width - 64, height - 64);
+  SetRGBColor(250, 220, 96);
+  FillCircle(cx, cy, 44);
+  UpdateScreen;
+
+  for i := 1 to 45 do
+  begin
+    GraphLoop(16);
+    if QuitRequested then
+      Break;
+  end;
+
+  CloseGraph;
+end.

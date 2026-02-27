@@ -1,0 +1,33 @@
+#!/usr/bin/env pascal
+program SDLSoundSmoke;
+
+var
+  i, width, height: Integer;
+
+begin
+  InitGraph(480, 240, 'Pascal SDL Sound Smoke');
+  width := GetMaxX + 1;
+  height := GetMaxY + 1;
+
+  SetRGBColor(12, 12, 12);
+  FillRect(0, 0, width, height);
+  SetRGBColor(126, 230, 124);
+  OutTextXY(20, 24, 'Initializing SDL audio...');
+  UpdateScreen;
+
+  InitSoundSystem;
+
+  SetRGBColor(126, 230, 124);
+  OutTextXY(20, 56, 'Audio init succeeded. Holding briefly then shutting down.');
+  UpdateScreen;
+
+  for i := 1 to 30 do
+  begin
+    GraphLoop(16);
+    if QuitRequested then
+      Break;
+  end;
+
+  QuitSoundSystem;
+  CloseGraph;
+end.

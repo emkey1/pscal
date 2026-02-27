@@ -69,6 +69,11 @@ echo "Running Example Program Tests"
 python3 ./examples/run_examples.py
 echo "Example Program Tests End"
 echo
+echo "====================================="
+echo "Running Example Discovery Sanity"
+bash ./examples/test_compile_all_examples_discovery.sh
+echo "Example Discovery Sanity End"
+echo
 if [ "${RUN_COMPILE_ALL_EXAMPLES:-0}" = "1" ]; then
     echo "====================================="
     echo "Running Compile-All Example Sweep"
@@ -84,3 +89,13 @@ fi
 echo "Running JSON2BC Tests"
 bash ./run_json2bc_tests.sh
 echo "JSON2BC Tests End"
+
+echo "====================================="
+echo "Running submodule checker tool tests"
+bash ./tools/test_check_submodule_refs.sh
+echo "Submodule checker tool tests End"
+
+echo "====================================="
+echo "Running workflow example path validation"
+python3 ./tools/verify_workflow_example_paths.py
+echo "Workflow example path validation End"

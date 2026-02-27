@@ -191,8 +191,11 @@ final class TerminalKeyInputView: UITextView {
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        func makeButton(_ title: String, action: Selector) -> UIButton {
+        func makeButton(_ title: String, action: Selector, label: String? = nil) -> UIButton {
             let button = UIButton(type: .system)
+            if let label {
+                button.accessibilityLabel = label
+            }
             var config = UIButton.Configuration.filled()
             config.cornerStyle = .medium
             config.baseBackgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.8)
@@ -211,22 +214,22 @@ final class TerminalKeyInputView: UITextView {
             return button
         }
 
-        let esc = makeButton("\u{238B}", action: #selector(handleEsc))
-        let ctrl = makeButton("^", action: #selector(handleCtrlToggle))
+        let esc = makeButton("\u{238B}", action: #selector(handleEsc), label: "Escape")
+        let ctrl = makeButton("^", action: #selector(handleCtrlToggle), label: "Control")
         ctrlButton = ctrl
         updateCtrlButtonAppearance()
-        let up = makeButton("↑", action: #selector(handleUp))
-        let down = makeButton("↓", action: #selector(handleDown))
-        let left = makeButton("←", action: #selector(handleLeft))
-        let right = makeButton("→", action: #selector(handleRight))
-        let fslash = makeButton("/", action: #selector(handleFSlash))
-        let dot = makeButton(".", action: #selector(handleDot))
-        let minus = makeButton("-", action: #selector(handleMinus))
-        let pipe = makeButton("|", action: #selector(handlePipe))
+        let up = makeButton("↑", action: #selector(handleUp), label: "Up Arrow")
+        let down = makeButton("↓", action: #selector(handleDown), label: "Down Arrow")
+        let left = makeButton("←", action: #selector(handleLeft), label: "Left Arrow")
+        let right = makeButton("→", action: #selector(handleRight), label: "Right Arrow")
+        let fslash = makeButton("/", action: #selector(handleFSlash), label: "Slash")
+        let dot = makeButton(".", action: #selector(handleDot), label: "Period")
+        let minus = makeButton("-", action: #selector(handleMinus), label: "Hyphen")
+        let pipe = makeButton("|", action: #selector(handlePipe), label: "Pipe")
 
         if UIDevice.current.userInterfaceIdiom == .phone {
             // Replaced "Tab" with the Unicode symbol \u{21E5}
-            let tab = makeButton("\u{21E5}", action: #selector(handleTab))
+            let tab = makeButton("\u{21E5}", action: #selector(handleTab), label: "Tab")
             [esc, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         } else {
             [esc, ctrl, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
