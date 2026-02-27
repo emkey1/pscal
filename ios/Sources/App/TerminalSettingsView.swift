@@ -9,6 +9,7 @@ struct TerminalSettingsView: View {
     @State private var tabNameDraft: String
     @State private var resetTabNameOnAppStart: Bool
     @State private var startupCommandDraft: String
+    @State private var copiedColors: Bool = false
 
     init(appearanceSettings: TerminalTabAppearanceSettings, tabId: UInt64) {
         _appearanceSettings = ObservedObject(wrappedValue: appearanceSettings)
@@ -127,8 +128,20 @@ struct TerminalSettingsView: View {
                         )
                     )
 
-                    Button("Copy First Tab Values") {
+                    Button {
                         _ = tabManager.copyFirstTabColors(tabId: tabId)
+                        copiedColors = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            copiedColors = false
+                        }
+                    } label: {
+                        HStack {
+                            Text(copiedColors ? "Copied!" : "Copy First Tab Values")
+                            if copiedColors {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            }
+                        }
                     }
                 }
 
@@ -231,39 +244,29 @@ struct TerminalSettingsView: View {
 
                 Section {
                     VStack(spacing: 10) {
-                        HStack(spacing: 6) {
-                            Text("Subscribe to the PSCAL")
-                            if let url = URL(string: "https://discord.gg/YWQVExN363") {
-                                Link(destination: url) {
-                                    HStack(spacing: 4) {
-                                        Text("Discord").underline()
-                                        Image(systemName: "arrow.up.right.square")
-                                    }
-                                    .foregroundColor(.blue)
+                        if let url = URL(string: "https://discord.gg/YWQVExN363") {
+                            Link(destination: url) {
+                                HStack {
+                                    Text("Join the PSCAL Discord")
+                                    Image(systemName: "arrow.up.right.square")
                                 }
                             }
+                            .accessibilityLabel("Join the P S C A L Discord server")
                         }
-                        .font(.callout.weight(.semibold))
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
 
                         if let github = URL(string: "https://github.com/emkey1/smallclue") {
-                            HStack(spacing: 4) {
-                                Text("Please submit bugs and suggestions on")
-                                Link(destination: github) {
-                                    HStack(spacing: 4) {
-                                        Text("GitHub").underline()
-                                        Image(systemName: "arrow.up.right.square")
-                                    }
-                                    .foregroundColor(.blue)
+                            Link(destination: github) {
+                                HStack {
+                                    Text("Report bugs on GitHub")
+                                    Image(systemName: "arrow.up.right.square")
                                 }
                             }
-                            .font(.callout)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
+                            .accessibilityLabel("Report bugs and suggestions on GitHub")
                         }
                     }
-                    .foregroundColor(.primary)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity)
+                    .foregroundColor(.blue)
                 }
             }
             .navigationTitle("Terminal Settings")

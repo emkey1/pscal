@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -19,6 +20,10 @@ LANG_CONFIG = {
     "clike": {
         "binary": REPO_ROOT / "build/bin/clike",
         "source_suffixes": {".cl"},
+    },
+    "exsh": {
+        "binary": REPO_ROOT / "build/bin/exsh",
+        "source_suffixes": {".psh"},
     },
     "rea": {
         "binary": REPO_ROOT / "build/bin/rea",
@@ -85,6 +90,21 @@ def discover_sources(root: Path, source_suffixes: set) -> List[Path]:
     return paths
 
 
+def read_sdl_enabled_from_cache(cache_path: Path) -> bool:
+    if not cache_path.exists():
+        return False
+    marker = re.compile(r"^SDL:BOOL=(ON|1|TRUE)$", re.IGNORECASE)
+    with cache_path.open("r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            if marker.match(line.strip()):
+                return True
+    return False
+
+
+def is_sdl_example(path: Path) -> bool:
+    return any(part.lower() == "sdl" for part in path.parts)
+
+
 def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> subprocess.CompletedProcess:
     cmd = [str(binary), "--no-cache", "--dump-bytecode-only", str(script_path)]
     return subprocess.run(
@@ -98,12 +118,21 @@ def compile_example(binary: Path, script_path: Path, timeout_seconds: float) -> 
     )
 
 
-def run_compile_sweep(timeout_seconds: float) -> int:
+def run_compile_sweep(
+    timeout_seconds: float,
+    languages: List[str],
+    list_only: bool,
+    skip_sdl_when_disabled: bool,
+    fail_on_empty: bool,
+) -> int:
     total = 0
     failures: List[CompileFailure] = []
     discovered: Dict[str, int] = {}
+    skipped_sdl: Dict[str, int] = {}
+    sdl_enabled = read_sdl_enabled_from_cache(REPO_ROOT / "build/CMakeCache.txt")
 
-    for language, config in LANG_CONFIG.items():
+    for language in languages:
+        config = LANG_CONFIG[language]
         binary = config["binary"]
         root = REPO_ROOT / "Examples" / language
         source_suffixes = config["source_suffixes"]
@@ -116,7 +145,22 @@ def run_compile_sweep(timeout_seconds: float) -> int:
             return 2
 
         sources = discover_sources(root, source_suffixes)
+        if skip_sdl_when_disabled and not sdl_enabled:
+            filtered_sources: List[Path] = []
+            skipped = 0
+            for source in sources:
+                if is_sdl_example(source.relative_to(REPO_ROOT)):
+                    skipped += 1
+                else:
+                    filtered_sources.append(source)
+            sources = filtered_sources
+            skipped_sdl[language] = skipped
+        else:
+            skipped_sdl[language] = 0
         discovered[language] = len(sources)
+
+        if list_only:
+            continue
 
         for source in sources:
             total += 1
@@ -146,9 +190,27 @@ def run_compile_sweep(timeout_seconds: float) -> int:
                 print(f"[PASS] {relative}")
 
     print("\nDiscovery summary:")
-    for language in ("pascal", "clike", "rea"):
-        print(f"  {language}: {discovered.get(language, 0)} source file(s)")
-    print(f"  total: {total} source file(s)")
+    listed_total = 0
+    for language in languages:
+        discovered_count = discovered.get(language, 0)
+        skipped_count = skipped_sdl.get(language, 0)
+        listed_total += discovered_count
+        if skipped_count > 0:
+            print(f"  {language}: {discovered_count} source file(s) (skipped {skipped_count} SDL file(s))")
+        else:
+            print(f"  {language}: {discovered_count} source file(s)")
+    print(f"  total: {listed_total} source file(s)")
+
+    if fail_on_empty:
+        empty_languages = [language for language in languages if discovered.get(language, 0) == 0]
+        if empty_languages:
+            joined = ", ".join(empty_languages)
+            print(f"\n[FAIL] No discoverable example sources found for: {joined}")
+            return 1
+
+    if list_only:
+        print("\nList-only mode complete (no compilation executed).")
+        return 0
 
     if failures:
         print(f"\nCompile failures: {len(failures)}")
@@ -172,7 +234,7 @@ def run_compile_sweep(timeout_seconds: float) -> int:
 
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Compile all Pascal/CLike/Rea examples with --dump-bytecode-only."
+        description="Compile selected Pascal/CLike/exsh/Rea examples with --dump-bytecode-only."
     )
     parser.add_argument(
         "--timeout",
@@ -180,10 +242,39 @@ def main(argv: List[str]) -> int:
         default=DEFAULT_TIMEOUT_SECONDS,
         help=f"Per-example compile timeout in seconds (default: {DEFAULT_TIMEOUT_SECONDS}).",
     )
+    parser.add_argument(
+        "--languages",
+        nargs="+",
+        choices=sorted(LANG_CONFIG.keys()),
+        default=sorted(LANG_CONFIG.keys()),
+        help="Subset of language front ends to process.",
+    )
+    parser.add_argument(
+        "--list-only",
+        action="store_true",
+        help="Discover and report examples without compiling them.",
+    )
+    parser.add_argument(
+        "--no-skip-sdl-when-disabled",
+        action="store_true",
+        help="Do not auto-skip examples under */sdl when SDL is disabled in build/CMakeCache.txt.",
+    )
+    parser.add_argument(
+        "--fail-on-empty",
+        action="store_true",
+        help="Return non-zero if any selected language discovers zero source files.",
+    )
     args = parser.parse_args(argv)
 
     os.chdir(REPO_ROOT)
-    return run_compile_sweep(timeout_seconds=args.timeout)
+    languages = sorted(set(args.languages))
+    return run_compile_sweep(
+        timeout_seconds=args.timeout,
+        languages=languages,
+        list_only=args.list_only,
+        skip_sdl_when_disabled=not args.no_skip_sdl_when_disabled,
+        fail_on_empty=args.fail_on_empty,
+    )
 
 
 if __name__ == "__main__":

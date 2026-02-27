@@ -31,7 +31,7 @@ jobs:
           SDL_AUDIODRIVER: dummy
           RUN_SDL: "1"
         run: |
-          xvfb-run -s "-screen 0 1024x768x24" build/bin/pascal Examples/Pascal/SDLSmoke
+          xvfb-run -s "-screen 0 1024x768x24" timeout 60s build/bin/pascal Examples/pascal/sdl/SDLSmoke
 
       - name: Run SDL sound smoke (Pascal)
         env:
@@ -39,7 +39,7 @@ jobs:
           SDL_AUDIODRIVER: dummy
           RUN_SDL: "1"
         run: |
-          xvfb-run -s "-screen 0 1024x768x24" build/bin/pascal Examples/Pascal/SDLSoundSmoke
+          xvfb-run -s "-screen 0 1024x768x24" timeout 60s build/bin/pascal Examples/pascal/sdl/SDLSoundSmoke
 
       - name: Run SDL graphics smoke (CLike)
         env:
@@ -47,5 +47,4 @@ jobs:
           SDL_AUDIODRIVER: dummy
           RUN_SDL: "1"
         run: |
-          xvfb-run -s "-screen 0 1024x768x24" build/bin/clike Examples/clike/sdl_smoke
-
+          xvfb-run -s "-screen 0 1024x768x24" timeout 60s build/bin/clike Examples/clike/sdl/smoke

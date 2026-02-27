@@ -1,8 +1,5 @@
 # Pscal
 
-iOS/iPadOS Port available in TestFlight Currently...
-- https://testflight.apple.com/join/M6bvAXeX
-
 Pscal started out as a Pascal interpreter, written for the most part with the help of various AI's.  Most notably Google's Gemini 2.5 Pro and more recently OpenAI's GPT5 in conjunction with their codex.  It has quickly evolved into a VM with multiple front ends, documented below.
 
 There are currently four front end languages:
@@ -50,7 +47,13 @@ If you use submodules, run this before pushing to make sure pinned commits are
 fetchable by others:
 
 ```sh
-tools/check_submodule_refs.sh
+Tools/check_submodule_refs.sh
+```
+
+To verify both protected branches in one pass:
+
+```sh
+Tools/check_submodule_refs.sh --protected-refs
 ```
 
 Binaries are written to `build/bin` (e.g. `pascal`).
