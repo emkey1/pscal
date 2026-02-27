@@ -5685,26 +5685,7 @@ dispatch_switch:
                 push(vm, makePointer(&frame->slots[slot], NULL));
                 break;
             }
-            case ADD: {
-                /* Optimization: Fast path for in-place integer addition */
-                if (vm->stackTop - vm->stack >= 2) {
-                    Value* a_ptr = vm->stackTop - 2;
-                    Value* b_ptr = vm->stackTop - 1;
-                    if (a_ptr->type == TYPE_INT32 && b_ptr->type == TYPE_INT32) {
-                        long long iresult;
-                        if (!__builtin_add_overflow(a_ptr->i_val, b_ptr->i_val, &iresult)) {
-                             a_ptr->i_val = iresult;
-                             a_ptr->u_val = (unsigned long long)iresult;
-                             /* a_ptr->type is already TYPE_INT32 */
-                             /* b_ptr is simple integer, no need to free */
-                             vm->stackTop--;
-                             goto next_instruction;
-                        }
-                    }
-                }
-                BINARY_OP("+", instruction_val);
-                break;
-            }
+            case ADD:      BINARY_OP("+", instruction_val); break;
             case SUBTRACT: BINARY_OP("-", instruction_val); break;
             case MULTIPLY: BINARY_OP("*", instruction_val); break;
             case DIVIDE:   BINARY_OP("/", instruction_val); break;
