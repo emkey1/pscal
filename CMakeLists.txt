@@ -1258,7 +1258,9 @@ set(PSCAL_OPENSSH_SOURCES
     ${PSCAL_OPENSSH_OPENBSD_COMPAT_SOURCES}
 )
 
-list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENSSH_SOURCES})
+if(PSCAL_PLATFORM_IOS OR APPLE)
+    list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENSSH_SOURCES})
+endif()
 set(_pscal_openssh_include_dirs
     "${CMAKE_BINARY_DIR}/generated/openssh"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
@@ -1480,6 +1482,7 @@ function(add_pscal_executable target_name)
 
     # Construct the list of libraries and flags to link
     set(TARGET_LINK_LIBS "")
+    list(APPEND TARGET_LINK_LIBS pscal_core_static)
 
     if(SDL)
         # Core SDL
@@ -1515,7 +1518,6 @@ function(add_pscal_executable target_name)
         list(APPEND TARGET_LINK_LIBS ${PSCAL_SQLITE_LIBS})
     endif()
 
-    list(APPEND TARGET_LINK_LIBS pscal_core_static)
     list(APPEND TARGET_LINK_LIBS m) # Math library
     list(APPEND TARGET_LINK_LIBS Threads::Threads)
 
