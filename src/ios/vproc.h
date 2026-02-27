@@ -669,7 +669,13 @@ static inline int vprocSigtimedwait(int pid, const sigset_t *set, const struct t
     errno = ENOSYS;
     return -1;
 #else
-    return sigtimedwait(set, sig, timeout);
+    siginfo_t info;
+    int rc = sigtimedwait(set, &info, timeout);
+    if (rc > 0) {
+        if (sig) *sig = rc;
+        return 0;
+    }
+    return (rc == -1) ? errno : rc;
 #endif
 }
 static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id; }

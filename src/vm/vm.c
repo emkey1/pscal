@@ -5213,32 +5213,31 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         \
         /* String/char concatenation for ADD */ \
         if (current_instruction_code == ADD) { \
-            while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
-                Value tmp = copyValueForStack(a_val_popped.ptr_val); \
-                freeValue(&a_val_popped); \
-                a_val_popped = tmp; \
+            /* Optimization: Resolve pointers without deep copying for string/char operands */ \
+            Value* final_a = &a_val_popped; \
+            while (final_a->type == TYPE_POINTER && final_a->ptr_val) { \
+                final_a = (Value*)final_a->ptr_val; \
             } \
-            while (b_val_popped.type == TYPE_POINTER && b_val_popped.ptr_val) { \
-                Value tmp = copyValueForStack(b_val_popped.ptr_val); \
-                freeValue(&b_val_popped); \
-                b_val_popped = tmp; \
+            Value* final_b = &b_val_popped; \
+            while (final_b->type == TYPE_POINTER && final_b->ptr_val) { \
+                final_b = (Value*)final_b->ptr_val; \
             } \
-            if ((IS_STRING(a_val_popped) || IS_CHAR(a_val_popped)) && \
-                (IS_STRING(b_val_popped) || IS_CHAR(b_val_popped))) { \
+            if ((IS_STRING(*final_a) || IS_CHAR(*final_a)) && \
+                (IS_STRING(*final_b) || IS_CHAR(*final_b))) { \
                 char a_buffer[2] = {0}; \
                 char b_buffer[2] = {0}; \
                 const char* s_a = NULL; \
                 const char* s_b = NULL; \
-                if (IS_STRING(a_val_popped)) { \
-                    s_a = AS_STRING(a_val_popped) ? AS_STRING(a_val_popped) : ""; \
+                if (IS_STRING(*final_a)) { \
+                    s_a = AS_STRING(*final_a) ? AS_STRING(*final_a) : ""; \
                 } else { \
-                    a_buffer[0] = AS_CHAR(a_val_popped); \
+                    a_buffer[0] = AS_CHAR(*final_a); \
                     s_a = a_buffer; \
                 } \
-                if (IS_STRING(b_val_popped)) { \
-                    s_b = AS_STRING(b_val_popped) ? AS_STRING(b_val_popped) : ""; \
+                if (IS_STRING(*final_b)) { \
+                    s_b = AS_STRING(*final_b) ? AS_STRING(*final_b) : ""; \
                 } else { \
-                    b_buffer[0] = AS_CHAR(b_val_popped); \
+                    b_buffer[0] = AS_CHAR(*final_b); \
                     s_b = b_buffer; \
                 } \
                 size_t len_a = strlen(s_a); \
@@ -5259,7 +5258,22 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 memcpy(temp_concat_buffer + len_a, s_b, len_b); \
                 temp_concat_buffer[total_len] = '\0'; \
                 result_val = makeOwnedString(temp_concat_buffer, total_len); \
+                /* Operands are consumed; if they were pointers, they are just dropped. */ \
+                /* If they were strings (on stack), freeValue handles them. */ \
+                freeValue(&a_val_popped); freeValue(&b_val_popped); \
                 op_is_handled = true; \
+            } else { \
+                /* Fallback for non-string types: preserve original pointer resolution behavior */ \
+                while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
+                    Value tmp = copyValueForStack(a_val_popped.ptr_val); \
+                    freeValue(&a_val_popped); \
+                    a_val_popped = tmp; \
+                } \
+                while (b_val_popped.type == TYPE_POINTER && b_val_popped.ptr_val) { \
+                    Value tmp = copyValueForStack(b_val_popped.ptr_val); \
+                    freeValue(&b_val_popped); \
+                    b_val_popped = tmp; \
+                } \
             } \
         } \
         \
@@ -7074,11 +7088,9 @@ comparison_error_label:
                             target_lvalue_ptr->max_length = -1;
                         } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
                             freeValue(target_lvalue_ptr);
-                            target_lvalue_ptr->s_val = strdup(value_to_set.s_val);
-                            if (!target_lvalue_ptr->s_val) {
-                                runtimeError(vm, "VM Error: strdup failed for string assignment.");
-                                target_lvalue_ptr->s_val = NULL;
-                            }
+                            /* Optimization: Steal buffer from temporary value on stack */
+                            target_lvalue_ptr->s_val = value_to_set.s_val;
+                            value_to_set.s_val = NULL; /* Prevent double-free */
                             target_lvalue_ptr->type = TYPE_STRING;
                             target_lvalue_ptr->max_length = -1;
                         } else {

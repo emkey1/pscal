@@ -305,15 +305,29 @@ configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
 set(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR "")
 if(NOT PSCAL_PLATFORM_IOS)
     file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
-    string(REPLACE "#define SOCK_HAS_LEN 1" "/* #undef SOCK_HAS_LEN */"
+    string(REGEX REPLACE "#define[ \t]+SOCK_HAS_LEN[ \t]+1" "/* #undef SOCK_HAS_LEN */"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-    string(REPLACE "#define HAVE_STRUCT_PASSWD_PW_CHANGE 1" "/* #undef HAVE_STRUCT_PASSWD_PW_CHANGE */"
+    string(REGEX REPLACE "#define[ \t]+HAVE_STRUCT_PASSWD_PW_CHANGE[ \t]+1" "/* #undef HAVE_STRUCT_PASSWD_PW_CHANGE */"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-    string(REPLACE "#define HAVE_STRUCT_PASSWD_PW_CLASS 1" "/* #undef HAVE_STRUCT_PASSWD_PW_CLASS */"
+    string(REGEX REPLACE "#define[ \t]+HAVE_STRUCT_PASSWD_PW_CLASS[ \t]+1" "/* #undef HAVE_STRUCT_PASSWD_PW_CLASS */"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-    string(REPLACE "#define HAVE_STRUCT_PASSWD_PW_EXPIRE 1" "/* #undef HAVE_STRUCT_PASSWD_PW_EXPIRE */"
+    string(REGEX REPLACE "#define[ \t]+HAVE_STRUCT_PASSWD_PW_EXPIRE[ \t]+1" "/* #undef HAVE_STRUCT_PASSWD_PW_EXPIRE */"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-    string(REPLACE "#define HAVE_UTIL_H 1" "/* #undef HAVE_UTIL_H */"
+    string(REGEX REPLACE "#define[ \t]+HAVE_STRTONUM[ \t]+1" "/* #undef HAVE_STRTONUM */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_STRLCPY[ \t]+1" "/* #undef HAVE_STRLCPY */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_STRLCAT[ \t]+1" "/* #undef HAVE_STRLCAT */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_UTIL_H[ \t]+1" "/* #undef HAVE_UTIL_H */"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_LE32TOH[ \t]+0" "#define HAVE_DECL_LE32TOH 1"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_LE64TOH[ \t]+0" "#define HAVE_DECL_LE64TOH 1"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_HTOLE64[ \t]+0" "#define HAVE_DECL_HTOLE64 1"
+        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
+    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_UINT32_MAX[ \t]+1" "#define HAVE_DECL_UINT32_MAX 1"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
 
     find_path(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR
@@ -539,9 +553,11 @@ include_directories(
 if(PSCAL_PLATFORM_IOS)
     include_directories(
         src/smallclue/src
-        src/smallclue
     )
 endif()
+include_directories(
+    src/smallclue
+)
 if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_INCLUDE_DIRS)
     include_directories(${PSCAL_SQLITE_INCLUDE_DIRS})
 endif()
@@ -1245,7 +1261,9 @@ set(PSCAL_OPENSSH_SOURCES
     ${PSCAL_OPENSSH_OPENBSD_COMPAT_SOURCES}
 )
 
-list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENSSH_SOURCES})
+if(PSCAL_PLATFORM_IOS OR APPLE)
+    list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENSSH_SOURCES})
+endif()
 set(_pscal_openssh_include_dirs
     "${CMAKE_BINARY_DIR}/generated/openssh"
     "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1"
@@ -1467,6 +1485,7 @@ function(add_pscal_executable target_name)
 
     # Construct the list of libraries and flags to link
     set(TARGET_LINK_LIBS "")
+    list(APPEND TARGET_LINK_LIBS pscal_core_static)
 
     if(SDL)
         # Core SDL
@@ -1502,7 +1521,6 @@ function(add_pscal_executable target_name)
         list(APPEND TARGET_LINK_LIBS ${PSCAL_SQLITE_LIBS})
     endif()
 
-    list(APPEND TARGET_LINK_LIBS pscal_core_static)
     list(APPEND TARGET_LINK_LIBS m) # Math library
     list(APPEND TARGET_LINK_LIBS Threads::Threads)
 
@@ -1676,6 +1694,8 @@ if(NOT PSCAL_PLATFORM_IOS OR (PSCAL_FORCE_IOS AND NOT PSCAL_MACCATALYST))
     if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
         target_link_libraries(exsh PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
+
+    target_include_directories(exsh PRIVATE src)
 
     if(SDL)
         target_include_directories(exsh PRIVATE
