@@ -677,6 +677,11 @@ final class PscalRuntimeBootstrap: ObservableObject {
             if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
                 setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
             }
+            if let microPath = RuntimeAssetInstaller.shared.ensureMicroExecutable() {
+                setenv("PSCALI_MICRO_PATH", microPath, 1)
+            } else {
+                unsetenv("PSCALI_MICRO_PATH")
+            }
             let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
             setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
             let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")

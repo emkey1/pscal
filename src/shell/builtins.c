@@ -75,6 +75,7 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"env", "env", -1},
     {"version", "version", -1},
     {"vproc-test", "vproc-test", -1},
+    {"micro", "micro", -1},
     {"nextvi", "nextvi", -1},
     {"vi", "nextvi", -1},
     {"pwd", "pwd", -1},

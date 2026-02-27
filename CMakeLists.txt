@@ -1036,6 +1036,7 @@ set(PSCAL_CORE_SOURCES
 set(SMALLCLUE_SOURCES
     src/smallclue/src/core.c
     src/smallclue/src/integration.c
+    src/smallclue/src/micro_app.c
     src/smallclue/src/nextvi_app.c
     src/smallclue/src/openssh_app.c
     src/smallclue/src/vproc_test_app.c
