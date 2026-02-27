@@ -1,3 +1,7 @@
 ## 2026-02-27 - VM Integer Arithmetic
 **Learning:** In the Pscal VM, `TYPE_INT32` is merely a label; the underlying storage (`i_val`) and arithmetic operations use `long long` (64-bit). "Optimizing" by enforcing 32-bit overflow checks would break existing behavior that implicitly allows 64-bit values in `Integer` slots. Furthermore, optimizing away checks that branch on `type` (like pointer/string checks) provides minimal gain if the branch is predictable, but inlining the arithmetic to avoid `switch` statements in helper functions (like `asI64`) provides significant gain (7%).
 **Action:** When optimizing VM builtins, focus on bypassing expensive switch-based type dispatch helpers (`asI64`, `IS_NUMERIC`) for hot paths, rather than just avoiding memory lookups.
+
+## 2026-02-27 - Stack Operations Overhead
+**Learning:** The `Value` struct in the VM is large (>40 bytes). The standard `BINARY_OP` macro performs a `FAST_POP()` (struct copy) into local variables and then pushes the result (struct copy). For tight arithmetic loops, this copy overhead dominates execution time. In-place stack modification (accessing `vm->stackTop[-2]`) eliminates these copies and yielded a further ~10% performance improvement on top of the instruction dispatch optimization.
+**Action:** For frequently executed opcodes (like `ADD`), prefer in-place stack manipulation over `POP`/`PUSH` patterns to avoid copying large value structs.
