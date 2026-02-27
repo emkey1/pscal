@@ -1694,6 +1694,8 @@ if(NOT PSCAL_PLATFORM_IOS OR (PSCAL_FORCE_IOS AND NOT PSCAL_MACCATALYST))
         target_link_libraries(exsh PRIVATE ${PSCAL_SQLITE_LIBS})
     endif()
 
+    target_include_directories(exsh PRIVATE src)
+
     if(SDL)
         target_include_directories(exsh PRIVATE
             ${PSCAL_SDL_INCLUDE_DIRS}
