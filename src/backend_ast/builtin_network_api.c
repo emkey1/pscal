@@ -1856,6 +1856,14 @@ Value vmBuiltinApiSend(VM* vm, int arg_count, Value* args) {
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    /* Restrict protocols to HTTP/HTTPS to prevent SSRF via redirects to file:// etc. */
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https,file");
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS | CURLPROTO_FILE);
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+#endif
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response_stream);
     curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
@@ -2907,6 +2915,14 @@ static void* httpAsyncThread(void* arg) {
     CURL* eh = curl_easy_init();
     if (!eh) { job->status = -1; job->error = strdup("curl init failed"); job->done = 1; return NULL; }
     curl_easy_setopt(eh, CURLOPT_URL, job->url);
+    /* Restrict protocols to HTTP/HTTPS to prevent SSRF via redirects to file:// etc. */
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(eh, CURLOPT_PROTOCOLS_STR, "http,https,file");
+    curl_easy_setopt(eh, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(eh, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS | CURLPROTO_FILE);
+    curl_easy_setopt(eh, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+#endif
     // choose sink
     FILE* tmp_file = NULL;
     DualSink dual = (DualSink){0};

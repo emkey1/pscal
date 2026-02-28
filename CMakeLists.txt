@@ -1534,7 +1534,7 @@ function(add_pscal_executable target_name)
     endif()
 
     message(STATUS "Linking ${target_name} with: ${TARGET_LINK_LIBS}")
-    target_link_libraries(${target_name} PRIVATE ${TARGET_LINK_LIBS})
+    target_link_libraries(${target_name} PRIVATE ${TARGET_LINK_LIBS} m Threads::Threads)
 
     if(SDL)
         target_compile_definitions(${target_name} PRIVATE SDL)
@@ -1875,7 +1875,7 @@ set(REA_SOURCES
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(rea ${REA_SOURCES})
     target_compile_definitions(rea PRIVATE FRONTEND_REA)
-    target_link_libraries(rea PRIVATE pscal_pascal_static)
+    target_link_libraries(rea PRIVATE pscal_pascal_static pscal_core_static m Threads::Threads)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(rea PRIVATE CURL::libcurl)
