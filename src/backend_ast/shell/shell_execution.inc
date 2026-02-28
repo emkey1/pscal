@@ -2,8 +2,8 @@
 
 #include "ios/vproc.h"
 #include "backend_ast/builtin.h"
-#include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
+#include "smallclue/smallclue.h"
 #include "common/path_virtualization.h"
 #include "ios/tty/pscal_fd.h"
 #include <unistd.h>
@@ -1454,12 +1454,14 @@ static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
         }
         return false;
     }
+#if defined(PSCAL_TARGET_IOS)
     if (smallclueFindApplet(name) != NULL) {
         if (dbg) {
             fprintf(stderr, "[pipe-worker] prefer=1 reason=smallclue cmd=%s\n", name);
         }
         return true;
     }
+#endif
     if (shellCommandResolvesToShebang(name_raw)) {
         if (dbg) {
             fprintf(stderr, "[pipe-worker] prefer=1 reason=shebang cmd=%s\n", name_raw);
@@ -4823,7 +4825,11 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
         const char *cmd_name_raw = (cmd->argv && cmd->argv[0]) ? cmd->argv[0] : NULL;
         char lookup_buf[PATH_MAX];
         const char *cmd_name = shellCommandLookupName(cmd_name_raw, lookup_buf, sizeof(lookup_buf));
+#if defined(PSCAL_TARGET_IOS)
         if (shellIsRuntimeBuiltin(cmd_name) || smallclueFindApplet(cmd_name) != NULL) {
+#else
+        if (shellIsRuntimeBuiltin(cmd_name)) {
+#endif
             force_pipeline_builtin = true;
             /*
              * Job-control builtins must execute in the shell context so fg/bg/wait
