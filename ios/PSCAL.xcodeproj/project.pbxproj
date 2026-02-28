@@ -190,6 +190,7 @@
 			buildConfigurationList = 145F4FD52BE0729000603B3F /* Build configuration list for PBXNativeTarget "PSCALApp" */;
 			buildPhases = (
 				145F4FBA2BE0719A00603B3F /* Sources */,
+				5DFF9BA22EC3E8CC004DFE5D /* Ensure PSCAL Static Libs */,
 				145F4FBB2BE0719A00603B3F /* Frameworks */,
 				5DFF9B992EC3E8CC004DFE5A /* Embed Tool Runner */,
 				145F4FBC2BE0719A00603B3F /* Resources */,
@@ -263,29 +264,23 @@
 			buildActionMask = 2147483647;
 			files = (
 			);
-				inputPaths = (
-					"$(PROJECT_DIR)/Tools/pscal_tool_runner.deflate",
-					"$(PROJECT_DIR)/Tools/micro.deflate",
+					inputPaths = (
+						"$(PROJECT_DIR)/Tools/embed_tool_runner.sh",
 					"$(PROJECT_DIR)/../build/ios-device/bin/pscal_tool_runner.app/pscal_tool_runner",
 					"$(PROJECT_DIR)/../build/ios-device/bin/pscal_tool_runner",
-					"$(PROJECT_DIR)/../build/ios-device/bin/micro",
 					"$(PROJECT_DIR)/../build/ios-simulator/bin/pscal_tool_runner.app/pscal_tool_runner",
 					"$(PROJECT_DIR)/../build/ios-simulator/bin/pscal_tool_runner",
-					"$(PROJECT_DIR)/../build/ios-simulator/bin/micro",
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-arm64/bin/pscal_tool_runner",
 					"$(PROJECT_DIR)/../build/ios-maccatalyst/bin/pscal_tool_runner",
-					"$(PROJECT_DIR)/../build/ios-maccatalyst-arm64/bin/micro",
-					"$(PROJECT_DIR)/../build/ios-maccatalyst/bin/micro",
 				);
 			name = "Embed Tool Runner";
 			outputPaths = (
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/pscal_tool_runner.deflate",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/pscal_tool_runner",
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/micro.deflate",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\n/bin/mkdir -p \"${bundle_root}\"\nraw_dest=\"${bundle_root}/pscal_tool_runner\"\ncompressed_dest=\"${bundle_root}/pscal_tool_runner.deflate\"\nlicense_dest=\"${bundle_root}/Docs/Licenses\"\nfallback_deflate=\"${PROJECT_DIR}/Tools/pscal_tool_runner.deflate\"\n\nrunner_src=\"\"\ncase \"${PLATFORM_NAME:-}\" in\n    iphoneos*)\n        for candidate in \"${PROJECT_DIR}/../build/ios-device/bin/pscal_tool_runner.app/pscal_tool_runner\" \"${PROJECT_DIR}/../build/ios-device/bin/pscal_tool_runner\"; do\n            if [ -f \"${candidate}\" ]; then\n                runner_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\n    iphonesimulator*)\n        for candidate in \"${PROJECT_DIR}/../build/ios-simulator/bin/pscal_tool_runner.app/pscal_tool_runner\" \"${PROJECT_DIR}/../build/ios-simulator/bin/pscal_tool_runner\"; do\n            if [ -f \"${candidate}\" ]; then\n                runner_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\n    *)\n        for candidate in \"${PROJECT_DIR}/../build/ios-maccatalyst-arm64/bin/pscal_tool_runner\" \"${PROJECT_DIR}/../build/ios-maccatalyst/bin/pscal_tool_runner\"; do\n            if [ -f \"${candidate}\" ]; then\n                runner_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\nesac\n\n# Do not bundle the raw runner executable (App Store rejects extra binaries).\n/bin/rm -f \"${raw_dest}\"\n\nif [ -n \"${runner_src}\" ]; then\n    /usr/bin/ruby -rzlib -e 'src, dst = ARGV; data = File.binread(src); File.binwrite(dst, Zlib::Deflate.deflate(data, Zlib::BEST_COMPRESSION))' \"${runner_src}\" \"${compressed_dest}\"\n    echo \"[pscal_tool_runner] compressed ${runner_src} -> ${compressed_dest}\"\nelif [ -f \"${fallback_deflate}\" ]; then\n    /bin/cp -f \"${fallback_deflate}\" \"${compressed_dest}\"\n    echo \"[pscal_tool_runner] warning: using fallback payload ${fallback_deflate}\" 1>&2\nelse\n    echo \"[pscal_tool_runner] error: missing tool runner binary and fallback payload.\" 1>&2\n    exit 1\nfi\n\n# Optionally stage micro payload when available.\nmicro_raw_dest=\"${bundle_root}/micro\"\nmicro_compressed_dest=\"${bundle_root}/micro.deflate\"\nmicro_fallback_deflate=\"${PROJECT_DIR}/Tools/micro.deflate\"\nmicro_src=\"\"\ncase \"${PLATFORM_NAME:-}\" in\n    iphoneos*)\n        for candidate in \"${PROJECT_DIR}/../build/ios-device/bin/micro\"; do\n            if [ -f \"${candidate}\" ]; then\n                micro_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\n    iphonesimulator*)\n        for candidate in \"${PROJECT_DIR}/../build/ios-simulator/bin/micro\"; do\n            if [ -f \"${candidate}\" ]; then\n                micro_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\n    *)\n        for candidate in \"${PROJECT_DIR}/../build/ios-maccatalyst-arm64/bin/micro\" \"${PROJECT_DIR}/../build/ios-maccatalyst/bin/micro\"; do\n            if [ -f \"${candidate}\" ]; then\n                micro_src=\"${candidate}\"\n                break\n            fi\n        done\n        ;;\nesac\n/bin/rm -f \"${micro_raw_dest}\"\nif [ -n \"${micro_src}\" ]; then\n    /usr/bin/ruby -rzlib -e 'src, dst = ARGV; data = File.binread(src); File.binwrite(dst, Zlib::Deflate.deflate(data, Zlib::BEST_COMPRESSION))' \"${micro_src}\" \"${micro_compressed_dest}\"\n    echo \"[micro] compressed ${micro_src} -> ${micro_compressed_dest}\"\nelif [ -f \"${micro_fallback_deflate}\" ]; then\n    /bin/cp -f \"${micro_fallback_deflate}\" \"${micro_compressed_dest}\"\n    echo \"[micro] warning: using fallback payload ${micro_fallback_deflate}\" 1>&2\nelse\n    /bin/rm -f \"${micro_compressed_dest}\" || true\n    echo \"[micro] warning: micro payload not found; command will be unavailable.\" 1>&2\nfi\n\n# Bundle license texts for the in-app viewer.\n/bin/mkdir -p \"${license_dest}\"\n/bin/cp -f \"${PROJECT_DIR}/../LICENSE\" \"${license_dest}/pscal_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssl-3.6.0/LICENSE.txt\" \"${license_dest}/openssl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/curl-8.17.0/COPYING\" \"${license_dest}/curl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/SDL/LICENSE.txt\" \"${license_dest}/sdl_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/nextvi/LICENSE\" \"${license_dest}/nextvi_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/micro/LICENSE\" \"${license_dest}/micro_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/openssh-10.2p1/LICENCE\" \"${license_dest}/openssh_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../src/third_party/yyjson/LICENSE\" \"${license_dest}/yyjson_LICENSE.txt\" || true\n/bin/cp -f \"${PROJECT_DIR}/../third-party/hterm/LICENSE\" \"${license_dest}/hterm_LICENSE.txt\" || true\n";
+				shellScript = "/bin/sh \"${PROJECT_DIR}/Tools/embed_tool_runner.sh\"\n";
 		};
 		5DFF9BA02EC3E8CC004DFE5B /* Fix Tool Runner Permissions */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -302,6 +297,23 @@
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\n\nrunner=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/pscal_tool_runner\"\nif [ -f \"${runner}\" ]; then\n    /bin/rm -f \"${runner}\" || true\nfi\nstamp=\"${DERIVED_FILE_DIR}/fix_tool_runner_permissions.stamp\"\n/bin/mkdir -p \"${DERIVED_FILE_DIR}\"\ntouch \"${stamp}\"\n";
 		};
+			5DFF9BA22EC3E8CC004DFE5D /* Ensure PSCAL Static Libs */ = {
+				isa = PBXShellScriptBuildPhase;
+				alwaysOutOfDate = 1;
+				buildActionMask = 2147483647;
+				files = (
+				);
+			inputPaths = (
+				"$(PROJECT_DIR)/Tools/ensure_static_libs.sh",
+			);
+			name = "Ensure PSCAL Static Libs";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/ensure_pscal_static_libs.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\n/bin/bash \"${PROJECT_DIR}/Tools/ensure_static_libs.sh\"\nstamp=\"${DERIVED_FILE_DIR}/ensure_pscal_static_libs.stamp\"\n/bin/mkdir -p \"${DERIVED_FILE_DIR}\"\n/usr/bin/touch \"${stamp}\"\n";
+		};
 		5F73F4B42FCA5CB000EFC123 /* Bundle Toolchain Data */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -316,13 +328,10 @@
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_etc.stamp",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_docs.stamp",
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_testslibs.stamp",
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_bin.stamp",
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_src_compiler.stamp",
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/.bundle_src_core.stamp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\ntoolchain_root=\"${PROJECT_DIR}/..\"\nmkdir -p \"${bundle_root}\"\n\ncopy_dir() {\n    local src=\"$1\"\n    local dest_name=\"$2\"\n    local stamp=\"$3\"\n    if [ ! -d \"${src}\" ]; then\n        echo \"[bundle toolchain] warning: missing ${src}\" >&2\n        return\n    fi\n    local rsync_opts=\"-a --delete\"\n    if [ \"${dest_name}\" = \"Docs\" ]; then\n        rsync_opts+=\" --exclude archive\"\n    fi\n    /usr/bin/rsync ${rsync_opts} \"${src}/\" \"${bundle_root}/${dest_name}/\"\n    /usr/bin/touch \"${bundle_root}/${stamp}\"\n}\n\ncopy_dir \"${toolchain_root}/lib\" \"lib\" .bundle_lib.stamp\ncopy_dir \"${toolchain_root}/fonts\" \"fonts\" .bundle_fonts.stamp\ncopy_dir \"${toolchain_root}/etc\" \"etc\" .bundle_etc.stamp\ncopy_dir \"${toolchain_root}/Docs\" \"Docs\" .bundle_docs.stamp\ncopy_dir \"${toolchain_root}/Tests/libs\" \"TestsLibs\" .bundle_testslibs.stamp\ncopy_dir \"${toolchain_root}/bin\" \"bin\" .bundle_bin.stamp\n\n# Minimal headers needed by Tiny compiler runtime\n/bin/mkdir -p \"${bundle_root}/src/compiler\" \"${bundle_root}/src/core\"\n/bin/cp -f \"${toolchain_root}/src/compiler/bytecode.h\" \"${bundle_root}/src/compiler/\" || true\n/bin/cp -f \"${toolchain_root}/src/core/version.h\" \"${bundle_root}/src/core/\" || true\n/bin/cp -f \"${toolchain_root}/src/core/types.h\" \"${bundle_root}/src/core/\" || true\n/usr/bin/touch \"${bundle_root}/.bundle_src_compiler.stamp\" \"${bundle_root}/.bundle_src_core.stamp\"\n\nlicense_dest=\"${bundle_root}/Docs/Licenses\"\n/bin/mkdir -p \"${license_dest}\"\n/bin/cp -f \"${toolchain_root}/LICENSE\" \"${license_dest}/pscal_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/openssl-3.6.0/LICENSE.txt\" \"${license_dest}/openssl_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/curl-8.17.0/COPYING\" \"${license_dest}/curl_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/SDL/LICENSE.txt\" \"${license_dest}/sdl_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/nextvi/LICENSE\" \"${license_dest}/nextvi_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/micro/LICENSE\" \"${license_dest}/micro_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/openssh-10.2p1/LICENCE\" \"${license_dest}/openssh_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/src/third_party/yyjson/LICENSE\" \"${license_dest}/yyjson_LICENSE.txt\" || true\n/bin/cp -f \"${toolchain_root}/third-party/hterm/LICENSE\" \"${license_dest}/hterm_LICENSE.txt\" || true\n";
+			shellScript = "set -euo pipefail\n\nbundle_root=\"${CONFIGURATION_BUILD_DIR}/${FULL_PRODUCT_NAME}\"\ntoolchain_root=\"${PROJECT_DIR}/..\"\nmkdir -p \"${bundle_root}\"\n\ncopy_dir() {\n    local src=\"$1\"\n    local dest_name=\"$2\"\n    local stamp=\"$3\"\n    if [ ! -d \"${src}\" ]; then\n        echo \"[bundle toolchain] warning: missing ${src}\" >&2\n        return\n    fi\n    /usr/bin/rsync -a --delete \"${src}/\" \"${bundle_root}/${dest_name}/\"\n    /usr/bin/touch \"${bundle_root}/${stamp}\"\n}\n\ncopy_dir \"${toolchain_root}/lib\" \"lib\" .bundle_lib.stamp\ncopy_dir \"${toolchain_root}/fonts\" \"fonts\" .bundle_fonts.stamp\ncopy_dir \"${toolchain_root}/etc\" \"etc\" .bundle_etc.stamp\ncopy_dir \"${toolchain_root}/Docs\" \"Docs\" .bundle_docs.stamp\ncopy_dir \"${toolchain_root}/Tests/libs\" \"TestsLibs\" .bundle_testslibs.stamp\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -459,6 +468,7 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 							"-lpscal_pscalasm_static",
 							"-lz",
 						"-lsqlite3",
+						"-lresolv",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -513,6 +523,7 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 							"-lpscal_pscalasm_static",
 							"-lz",
 						"-lsqlite3",
+						"-lresolv",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -567,6 +578,7 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 						"-lpscal_pscalasm_static",
 						"-lz",
 					"-lsqlite3",
+						"-lresolv",
 					"-lcurl",
 					"-lssl",
 					"-lcrypto",
@@ -704,6 +716,7 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 							"-lpscal_pscalasm_static",
 							"-lz",
 						"-lsqlite3",
+						"-lresolv",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -758,6 +771,7 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 							"-lpscal_pscalasm_static",
 							"-lz",
 						"-lsqlite3",
+						"-lresolv",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -810,6 +824,7 @@ shellScript = "set -euo pipefail\n\nbundle_root=\"${TARGET_BUILD_DIR}/${UNLOCALI
 						"-lpscal_pscalasm_static",
 						"-lz",
 					"-lsqlite3",
+						"-lresolv",
 					"-lcurl",
 					"-lssl",
 					"-lcrypto",

@@ -49,6 +49,7 @@ typedef struct {
     int parent_pid;
     int pgid;
     int sid;
+    int tty_pty_num;
     bool exited;
     bool stopped;
     bool continued;
@@ -410,6 +411,10 @@ void vprocApplyPathTruncation(const char *prefix);
 void vprocInterposeBypassEnter(void);
 void vprocInterposeBypassExit(void);
 int vprocInterposeBypassActive(void);
+/* Temporarily protect kqueue descriptors from accidental close paths. */
+void vprocProtectKqueueCloseEnter(void);
+void vprocProtectKqueueCloseExit(void);
+int vprocProtectKqueueCloseActive(void);
 
 static inline void vprocFormatCpuTimes(int utime_cs, int stime_cs, double *utime_s, double *stime_s) {
     if (utime_s) {
@@ -602,6 +607,9 @@ static inline void vprocApplyPathTruncation(const char *prefix) { (void)prefix; 
 static inline void vprocInterposeBypassEnter(void) {}
 static inline void vprocInterposeBypassExit(void) {}
 static inline int vprocInterposeBypassActive(void) { return 0; }
+static inline void vprocProtectKqueueCloseEnter(void) {}
+static inline void vprocProtectKqueueCloseExit(void) {}
+static inline int vprocProtectKqueueCloseActive(void) { return 0; }
 static inline void vprocSetKernelPid(int pid) { (void)pid; }
 static inline int vprocGetKernelPid(void) { return 0; }
 static inline void vprocClearKernelPidGlobal(void) {}

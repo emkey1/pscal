@@ -167,6 +167,7 @@ struct tty *tty_alloc(struct tty_driver *driver, int type, int num);
 int tty_open(struct tty *tty, struct pscal_fd *fd);
 void tty_release(struct tty *tty);
 int pscalTtyOpenControlling(int flags, struct pscal_fd **out_fd);
+int pscalTtySessionPtyNum(pid_t_ sid);
 
 ssize_t tty_input(struct tty *tty, const char *input, size_t len, bool blocking);
 void tty_set_winsize(struct tty *tty, struct winsize_ winsize);

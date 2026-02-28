@@ -33,6 +33,7 @@
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #include <sys/syscall.h>
+#include <sys/event.h>
 #include <os/log.h>
 #endif
 #include "common/path_truncate.h"
@@ -860,8 +861,38 @@ static ssize_t vprocHostWriteRaw(int fd, const void *buf, size_t count) {
     return res;
 }
 
+static bool vprocHostFdLooksLikeKqueue(int fd) {
+#if defined(__APPLE__)
+    if (fd < 0) {
+        return false;
+    }
+    struct timespec timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+    vprocInterposeBypassEnter();
+    errno = 0;
+    int rc = kevent(fd, NULL, 0, NULL, 0, &timeout);
+    int err = errno;
+    vprocInterposeBypassExit();
+    if (rc >= 0) {
+        return true;
+    }
+    /* kevent(2) returns EINVAL for non-kqueue descriptors and EBADF for
+     * invalid descriptors. Any other outcome is treated conservatively. */
+    return err != EINVAL && err != EBADF;
+#else
+    (void)fd;
+    return false;
+#endif
+}
+
 static int vprocHostCloseRaw(int fd) {
     static int (*fn)(int) = NULL;
+    if (vprocProtectKqueueCloseActive() &&
+        fd > STDERR_FILENO &&
+        vprocHostFdLooksLikeKqueue(fd)) {
+        return 0;
+    }
 #if defined(__APPLE__)
     if (&__close_nocancel) {
         vprocInterposeBypassEnter();
@@ -1892,6 +1923,7 @@ static int gKernelPidGlobal = 0;
 static volatile sig_atomic_t gVProcInterposeReady = 0;
 static volatile sig_atomic_t gVProcTlsReady = 0; // Avoid TLV access before TLS is initialized.
 static _Thread_local int gVProcInterposeBypassDepth = 0;
+static volatile sig_atomic_t gVProcProtectKqueueCloseDepth = 0;
 typedef struct {
     pthread_t *items;
     size_t count;
@@ -2065,6 +2097,30 @@ static void vprocResourceRemove(VProc *vp, int host_fd) {
     pthread_mutex_lock(&vp->mu);
     (void)vprocResourceRemoveLocked(vp, host_fd);
     pthread_mutex_unlock(&vp->mu);
+}
+
+static bool vprocResourceContainsLocked(VProc *vp, int host_fd) {
+    if (!vp || host_fd < 0) {
+        return false;
+    }
+    for (size_t i = 0; i < vp->resource_count; ++i) {
+        if (vp->resources[i].host_fd == host_fd) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool vprocOwnsHostFdLocked(VProc *vp, int host_fd) {
+    if (!vp || host_fd < 0) {
+        return false;
+    }
+    if (host_fd == vp->stdin_host_fd ||
+        host_fd == vp->stdout_host_fd ||
+        host_fd == vp->stderr_host_fd) {
+        return true;
+    }
+    return vprocResourceContainsLocked(vp, host_fd);
 }
 
 static void vprocResourceCloseAllLocked(VProc *vp) {
@@ -2929,6 +2985,7 @@ static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 static void vprocClearEntryLocked(VProcTaskEntry *entry);
 static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
 static void vprocTaskTableRepairLocked(void);
+static int vprocPtyNumForPid(int pid);
 static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty);
 static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid);
 static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
@@ -5839,6 +5896,42 @@ static bool vprocPathIsDevPtsRoot(const char *path) {
     return vprocPathMatches(path, "/dev/pts") || vprocPathMatches(path, "/private/dev/pts");
 }
 
+static bool vprocPathIsDevPtsNode(const char *path) {
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    const char *candidate = path;
+    if (strncmp(candidate, "/private", 8) == 0) {
+        candidate += 8;
+    }
+    if (strncmp(candidate, "/dev/pts/", 9) != 0) {
+        return false;
+    }
+    return candidate[9] != '\0';
+}
+
+static bool vprocPathIsDevTtyFamily(const char *path) {
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    if (vprocPathIsDevTty(path)) {
+        return true;
+    }
+    const char *candidate = path;
+    if (strncmp(candidate, "/private", 8) == 0) {
+        candidate += 8;
+    }
+    return strncmp(candidate, "/dev/tty", 8) == 0;
+}
+
+static bool vprocPathRequiresRawHostOpen(const char *path) {
+    return vprocPathIsDevConsole(path) ||
+           vprocPathIsPtyMaster(path) ||
+           vprocPathIsDevPtsRoot(path) ||
+           vprocPathIsDevPtsNode(path) ||
+           vprocPathIsDevTtyFamily(path);
+}
+
 static bool vprocPathIsUsrBinTree(const char *path) {
     static const char *kUsrBin = "/usr/bin";
     if (!path || path[0] != '/') {
@@ -7240,6 +7333,15 @@ int vprocPthreadCreateShim(pthread_t *thread,
                            const pthread_attr_t *attr,
                            void *(*start_routine)(void *),
                            void *arg) {
+    if (vprocInterposeBypassActive() ||
+        vprocThreadIsInterposeBypassed(pthread_self())) {
+        int rc = vprocHostPthreadCreateRaw(thread, attr, start_routine, arg);
+        if (rc != 0) {
+            errno = rc;
+        }
+        return rc;
+    }
+
     VProcThreadStartCtx *ctx = (VProcThreadStartCtx *)calloc(1, sizeof(VProcThreadStartCtx));
     if (!ctx) {
         errno = ENOMEM;
@@ -7305,7 +7407,12 @@ int vprocHostDup2(int host_fd, int target_fd) {
 
 int vprocHostDup(int fd) {
 #if defined(PSCAL_TARGET_IOS)
-    return vprocHostDupRaw(fd);
+    int duped = vprocHostDupRaw(fd);
+    VProc *vp = vprocForThread();
+    if (vp && duped >= 0) {
+        vprocResourceTrack(vp, duped, VPROC_RESOURCE_GENERIC);
+    }
+    return duped;
 #else
     return dup(fd);
 #endif
@@ -7321,11 +7428,30 @@ int vprocHostOpen(const char *path, int flags, ...) {
     }
 #if defined(PSCAL_TARGET_IOS)
     if (vprocPathIsLocationDevice(path)) {
-        return vprocLocationDeviceOpenHost(flags);
+        int fd = vprocLocationDeviceOpenHost(flags);
+        VProc *vp = vprocForThread();
+        if (vp && fd >= 0) {
+            vprocResourceTrack(vp, fd, VPROC_RESOURCE_GENERIC);
+        }
+        return fd;
+    }
+    if (vprocPathRequiresRawHostOpen(path)) {
+        bool has_mode = (flags & O_CREAT) != 0;
+        int fd = vprocHostOpenRawInternal(path, flags, (mode_t)mode, has_mode);
+        VProc *vp = vprocForThread();
+        if (vp && fd >= 0) {
+            vprocResourceTrack(vp, fd, VPROC_RESOURCE_GENERIC);
+        }
+        return fd;
     }
 #endif
 #if defined(PSCAL_TARGET_IOS)
-    return vprocHostOpenVirtualized(path, flags, mode);
+    int fd = vprocHostOpenVirtualized(path, flags, mode);
+    VProc *vp = vprocForThread();
+    if (vp && fd >= 0) {
+        vprocResourceTrack(vp, fd, VPROC_RESOURCE_GENERIC);
+    }
+    return fd;
 #else
     return open(path, flags, mode);
 #endif
@@ -8462,6 +8588,12 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
         uint64_t now = vprocNowMonoNs();
         if (out && count < capacity) {
             int fg_for_session = (entry->sid > 0) ? vprocForegroundPgidLocked(entry->sid) : -1;
+            int tty_pty_num = -1;
+#if defined(PSCAL_TARGET_IOS)
+            if (entry->pid > 0) {
+                tty_pty_num = vprocPtyNumForPid(entry->pid);
+            }
+#endif
             int utime = entry->rusage_utime;
             int stime = entry->rusage_stime;
             int cpu_utime = 0;
@@ -8487,6 +8619,7 @@ size_t vprocSnapshot(VProcSnapshot *out, size_t capacity) {
             out[count].parent_pid = entry->parent_pid;
             out[count].pgid = entry->pgid;
             out[count].sid = entry->sid;
+            out[count].tty_pty_num = tty_pty_num;
             out[count].exited = entry->exited;
             out[count].stopped = entry->stopped;
             out[count].continued = entry->continued;
@@ -9173,6 +9306,7 @@ static void vprocCloseAllFdsLocked(VProc *vp) {
             pscal_fd_close(vp->entries[i].pscal_fd);
         } else if (vp->entries[i].kind == VPROC_FD_HOST &&
                    vp->entries[i].host_fd >= 0) {
+            (void)vprocResourceRemoveLocked(vp, vp->entries[i].host_fd);
             vprocHostCloseRaw(vp->entries[i].host_fd);
         }
         vp->entries[i].host_fd = -1;
@@ -10021,6 +10155,28 @@ int vprocInterposeBypassActive(void) {
         return 0;
     }
     return gVProcInterposeBypassDepth > 0;
+}
+
+void vprocProtectKqueueCloseEnter(void) {
+    __atomic_add_fetch(&gVProcProtectKqueueCloseDepth, 1, __ATOMIC_RELAXED);
+}
+
+void vprocProtectKqueueCloseExit(void) {
+    sig_atomic_t depth = __atomic_load_n(&gVProcProtectKqueueCloseDepth, __ATOMIC_RELAXED);
+    while (depth > 0) {
+        if (__atomic_compare_exchange_n(&gVProcProtectKqueueCloseDepth,
+                                        &depth,
+                                        depth - 1,
+                                        false,
+                                        __ATOMIC_RELAXED,
+                                        __ATOMIC_RELAXED)) {
+            return;
+        }
+    }
+}
+
+int vprocProtectKqueueCloseActive(void) {
+    return __atomic_load_n(&gVProcProtectKqueueCloseDepth, __ATOMIC_RELAXED) > 0;
 }
 
 static void vprocEnsurePathTruncationDefault(void) {
@@ -11121,6 +11277,67 @@ static VProc *vprocFindByPid(int pid) {
     return match;
 }
 
+static int vprocPtyNumFromPscalFd(const struct pscal_fd *pscal_fd) {
+    if (!pscal_fd || !pscal_fd->tty) {
+        return -1;
+    }
+    const struct tty *tty = pscal_fd->tty;
+    if (tty->type != TTY_PSEUDO_MASTER_MAJOR && tty->type != TTY_PSEUDO_SLAVE_MAJOR) {
+        return -1;
+    }
+    return tty->num;
+}
+
+static int vprocPtyNumFromVProcLocked(const VProc *vp) {
+    if (!vp) {
+        return -1;
+    }
+    const int stdio_fds[] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+    for (size_t i = 0; i < sizeof(stdio_fds) / sizeof(stdio_fds[0]); ++i) {
+        int fd = stdio_fds[i];
+        if ((size_t)fd >= vp->capacity) {
+            continue;
+        }
+        const VProcFdEntry *entry = &vp->entries[fd];
+        if (entry->kind != VPROC_FD_PSCAL || !entry->pscal_fd) {
+            continue;
+        }
+        int pty_num = vprocPtyNumFromPscalFd(entry->pscal_fd);
+        if (pty_num >= 0) {
+            return pty_num;
+        }
+    }
+    return -1;
+}
+
+static int vprocPtyNumForPid(int pid) {
+    if (pid <= 0) {
+        return -1;
+    }
+    int pty_num = -1;
+    pthread_mutex_lock(&gVProcRegistryMu);
+    VProc *vp = NULL;
+    if (gVProcRegistryHint && gVProcRegistryHint->pid == pid) {
+        vp = gVProcRegistryHint;
+    } else {
+        for (size_t i = 0; i < gVProcRegistryCount; ++i) {
+            VProc *entry = gVProcRegistry[i];
+            if (entry && entry->pid == pid) {
+                vp = entry;
+                gVProcRegistryHint = entry;
+                break;
+            }
+        }
+    }
+    if (vp) {
+        pthread_mutex_lock(&vp->mu);
+        pty_num = vprocPtyNumFromVProcLocked(vp);
+        pthread_mutex_unlock(&vp->mu);
+    }
+    pthread_mutex_unlock(&gVProcRegistryMu);
+    return pty_num;
+}
+
 static int vprocFindPrimaryPidForThread(pthread_t tid) {
     int pid = 0;
     pthread_mutex_lock(&gVProcTasks.mu);
@@ -11870,10 +12087,15 @@ int vprocCloseShim(int fd) {
     if (vprocHasFd(vp, fd)) {
         return vprocClose(vp, fd);
     }
-    struct stat st;
-    if (vprocHostFstatRaw(fd, &st) == 0) {
+
+    bool owns_host_fd = false;
+    pthread_mutex_lock(&vp->mu);
+    owns_host_fd = vprocOwnsHostFdLocked(vp, fd);
+    pthread_mutex_unlock(&vp->mu);
+    if (owns_host_fd) {
         return vprocHostClose(fd);
     }
+
     errno = EBADF;
     return -1;
 }

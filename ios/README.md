@@ -54,14 +54,6 @@ to the relevant commits.
    copies `pscal_tool_runner` from the corresponding CMake build directory into
    the app bundle so the shell can launch the non-exsh frontends in a separate
    process.
-   For Micro payload fallback packaging, generate `ios/Tools/micro.deflate`:
-   ```sh
-   ./ios/Tools/make_micro_deflate.sh
-   ```
-   Or specify an explicit binary:
-   ```sh
-   ./ios/Tools/make_micro_deflate.sh --input /path/to/micro
-   ```
 3. Select the desired destination (e.g., "My Mac (Designed for iPad)" or an
    iPad simulator) and build/run. The app links against `libpscal_exsh_static.a`
    and starts `exsh_main` through the bridge.

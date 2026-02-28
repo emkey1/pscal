@@ -23,10 +23,6 @@ private enum RuntimePaths {
         documentsDirectory.appendingPathComponent("pscal_tool_runner", isDirectory: false)
     }
 
-    static var stagedMicroExecutable: URL {
-        documentsDirectory.appendingPathComponent("micro", isDirectory: false)
-    }
-
     static var workspaceExamplesVersionMarker: URL {
         homeDirectory.appendingPathComponent(".examples.version", isDirectory: false)
     }
@@ -99,7 +95,6 @@ final class RuntimeAssetInstaller {
     private let fileManager = FileManager.default
     private let workspaceInstallLock = NSLock()
     private var cachedToolRunnerPath: String?
-    private var cachedMicroPath: String?
     private var skelHomeInstalled: Bool = false
     private let skelInstallLock = NSLock()
     private let assetsVersion: String = {
@@ -115,9 +110,16 @@ final class RuntimeAssetInstaller {
     private init() {}
 
     private func decompressDeflate(_ data: Data) -> Data? {
-        var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 0)!,
+        let initialDstPtr = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        let initialSrcMutable = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        defer {
+            initialDstPtr.deallocate()
+            initialSrcMutable.deallocate()
+        }
+
+        var stream = compression_stream(dst_ptr: initialDstPtr,
                                         dst_size: 0,
-                                        src_ptr: UnsafePointer<UInt8>(bitPattern: 0)!,
+                                        src_ptr: UnsafePointer<UInt8>(initialSrcMutable),
                                         src_size: 0,
                                         state: nil)
         var status = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
@@ -245,63 +247,6 @@ final class RuntimeAssetInstaller {
 
         NSLog("PSCAL iOS: missing pscal_tool_runner payload in bundle.")
         cachedToolRunnerPath = nil
-        return nil
-    }
-
-    func ensureMicroExecutable() -> String? {
-        if let cached = cachedMicroPath, fileManager.isExecutableFile(atPath: cached) {
-            return cached
-        }
-
-        let stagedMicro = RuntimePaths.stagedMicroExecutable
-        if fileManager.isExecutableFile(atPath: stagedMicro.path) {
-            cachedMicroPath = stagedMicro.path
-            return stagedMicro.path
-        }
-
-        let workspaceCandidates = [
-            RuntimePaths.workspaceBinDirectory.appendingPathComponent("micro.bin", isDirectory: false),
-            RuntimePaths.workspaceBinDirectory.appendingPathComponent("micro", isDirectory: false)
-        ]
-        for candidate in workspaceCandidates where fileManager.isExecutableFile(atPath: candidate.path) {
-            cachedMicroPath = candidate.path
-            return candidate.path
-        }
-
-        let stageMicro: (Data) -> String? = { payload in
-            do {
-                try self.ensureDocumentsDirectoryExists()
-                if self.fileManager.fileExists(atPath: stagedMicro.path) {
-                    try self.fileManager.removeItem(at: stagedMicro)
-                }
-                try payload.write(to: stagedMicro, options: .atomic)
-                try self.markExecutable(at: stagedMicro)
-                self.cachedMicroPath = stagedMicro.path
-                return stagedMicro.path
-            } catch {
-                NSLog("PSCAL iOS: failed to stage micro payload: %@", error.localizedDescription)
-                self.cachedMicroPath = nil
-                return nil
-            }
-        }
-
-        if let deflated = Bundle.main.url(forResource: "micro", withExtension: "deflate"),
-           let data = try? Data(contentsOf: deflated) {
-            if let decompressed = decompressDeflate(data),
-               let path = stageMicro(decompressed) {
-                return path
-            }
-            NSLog("PSCAL iOS: failed to decompress micro payload.")
-        }
-
-        if let bundledMicro = Bundle.main.url(forResource: "micro", withExtension: nil),
-           fileManager.isExecutableFile(atPath: bundledMicro.path),
-           let rawData = try? Data(contentsOf: bundledMicro),
-           let path = stageMicro(rawData) {
-            return path
-        }
-
-        cachedMicroPath = nil
         return nil
     }
 

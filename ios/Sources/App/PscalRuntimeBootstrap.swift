@@ -677,15 +677,22 @@ final class PscalRuntimeBootstrap: ObservableObject {
             if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
                 setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
             }
-            if let microPath = RuntimeAssetInstaller.shared.ensureMicroExecutable() {
-                setenv("PSCALI_MICRO_PATH", microPath, 1)
-            } else {
-                unsetenv("PSCALI_MICRO_PATH")
-            }
+            unsetenv("PSCALI_MICRO_PATH")
             let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
             setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
             let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
             setenv("PSCALI_WORKDIR", workdir, 1)
+            setenv("HOME", workdir, 1)
+            let xdgConfigHome = (workdir as NSString).appendingPathComponent(".config")
+            let microConfigHome = (xdgConfigHome as NSString).appendingPathComponent("micro")
+            _ = try? FileManager.default.createDirectory(atPath: xdgConfigHome,
+                                                         withIntermediateDirectories: true,
+                                                         attributes: nil)
+            _ = try? FileManager.default.createDirectory(atPath: microConfigHome,
+                                                         withIntermediateDirectories: true,
+                                                         attributes: nil)
+            setenv("XDG_CONFIG_HOME", xdgConfigHome, 1)
+            setenv("MICRO_CONFIG_HOME", microConfigHome, 1)
             if getenv("PSCALI_PTY_OUTPUT_DIRECT") == nil {
                 setenv("PSCALI_PTY_OUTPUT_DIRECT", "1", 1)
             }
