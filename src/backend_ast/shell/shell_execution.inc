@@ -2,8 +2,9 @@
 
 #include "ios/vproc.h"
 #include "backend_ast/builtin.h"
-#include "smallclue/smallclue.h"
 #if defined(PSCAL_TARGET_IOS)
+#include "smallclue/smallclue.h"
+
 #include "common/path_virtualization.h"
 #include "ios/tty/pscal_fd.h"
 #include <unistd.h>
