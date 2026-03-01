@@ -18,6 +18,7 @@
 #include <sys/wait.h>
 #if defined(PSCAL_TARGET_IOS)
 #include "common/path_truncate.h"
+#include "ios/vproc.h"
 #endif
 #include "vi.h"
 #if defined(PSCAL_TARGET_IOS)

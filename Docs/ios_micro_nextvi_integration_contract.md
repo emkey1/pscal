@@ -93,6 +93,38 @@ Any failure above is a hard build error.
 - Build gate fails if `src/smallclue/src/micro_app.c` references `nextvi`.
 - iOS/iPadOS/Catalyst static builds now include an embedded `libpscal_micro_embed.a` archive built from `third-party/micro`.
 
+## Current Field Status (2026-03-01)
+
+- `micro` no longer fails bridge initialization on second launch in the same tab (re-entry regression fixed).
+- PTY bridge behavior remains sensitive to host PTY availability; shim PTY fallback is enabled by default and can be disabled with `PSCALI_MICRO_ALLOW_SHIM_PTY=0` for diagnostics.
+- Bridge startup is strict by default (`PSCALI_MICRO_BRIDGE_STRICT=1` behavior): if no PTY is available, launch aborts with a bridge error instead of entering a blank non-PTY run.
+- Observed on-device failure mode: host PTY allocation can fail with `errno=1 (Operation not permitted)` for active sessions, confirming sandbox denial of host PTY creation on some launches/devices.
+- Current fallback order in `micro_app.c` is now:
+  - host PTY (`/dev/ptmx` family),
+  - host `openpty()`,
+  - shim PTY (`vprocOpenShim("/dev/ptmx")`, unless disabled with `PSCALI_MICRO_ALLOW_SHIM_PTY=0`),
+  - host pipe relay bridge (only used in non-strict mode).
+- User-reported interactive parity gaps remain open in embedded micro:
+  - Enter/Return handling is inconsistent in micro while other tools continue to receive input correctly.
+  - Mouse input emits escape/control sequences instead of expected micro mouse interactions.
+  - Resize/input behavior still needs a dedicated end-to-end stabilization pass for embedded micro.
+- `ioctl` is now interposed on Apple targets in `vproc` and routed through `vprocIoctlShim`, so Darwin libc ioctl callers (including Go `x/sys/unix` `IoctlGetWinsize`) use the virtual PTY/session-aware path instead of bypassing shim state.
+- Latest field trace (2026-03-01, iPadOS) confirms the winsize pipeline is active after session binding:
+  - `hterm[...] runtime-forward source=native session=7 ...`
+  - `runtime updateSessionWindowSize session=7 ... rc=0`
+  - `vproc setSessionWinsize applied session=7 ...`
+- Early `vproc setSessionWinsize missing-pty` for sessions 6/7 appears before tab/session PTY registration completes; treat this as startup ordering/race, not final steady-state behavior.
+- Current blocking failure is no longer "winsize not delivered": `micro` still fails to render/open in-tab and leaves shell state stuck (typed `micro` remains, Return does not produce a fresh prompt) despite successful repeated winsize applies.
+- Cross-session resize bleed mitigation is now in-tree (`pscalMicroNotifySessionWinsize` only applies updates for the active bridge session id); field validation is still pending.
+- Bridge resize path now sends explicit `SIGWINCH` to micro's launch thread after applying `TIOCSWINSZ`, so embedded tcell receives resize notifications even when PTY-generated job-control signaling is unreliable.
+- `nextvi` path-display hardening is now in-tree: absolute paths are normalized through `pathTruncateStrip` before buffer store/lookup (`bufs_open`, `ex_edit`, `ec_edit`, `ec_setpath`, `ec_read`) so "Present sandbox as /" is honored even if launch arguments arrive as container-prefixed host paths.
+- Follow-up `nextvi` write-failure investigation (2026-03-01): an attempted global path-virtualization fd-routing change (`open/fopen/freopen` -> `vprocOpenShim` when vproc-active) regressed tab shell startup and was rolled back the same day.
+- Current status: tab shell spawn stability takes priority; `nextvi` save-path fix must remain editor-local and avoid global stdio/path virtualization behavior changes.
+- `nextvi` now has editor-local fd tracking for file I/O on iOS: file descriptors returned by `open`/`mkstemp` in nextvi write/read paths are adopted into the active vproc (`vprocAdoptHostFd`) before `read`/`write`/`close`, avoiding host-fd vs virtual-fd collisions under interposed I/O.
+- `nextvi` launch thread now force-syncs cwd from the invoking shell vproc (`vprocShellGetcwdShim` -> `vprocChdirShim`, plus `PWD`) before editor startup to keep relative path opens stable across repeated invocations.
+- `nextvi` argv file targets are now normalized to absolute virtual paths at launch (`/home/...`) using shell cwd, so reopening newly created relative files resolves consistently even if thread-local cwd drifts.
+- Nextvi cwd resolution now prefers shell `PWD` (then vproc cwd, then host cwd) before argv normalization and thread cwd sync, reducing cross-context cwd drift when reopening relative filenames.
+
 ## Progress Log
 
 - 2026-02-27: Added hard validation in `ios/Tools/ensure_static_libs.sh` for:
@@ -195,6 +227,131 @@ Any failure above is a hard build error.
   - compile validation:
     - `cmake --build --preset ios-simulator --target pscal_core_static`
     - `cmake --build --preset ios-device --target pscal_core_static`
+- 2026-03-01: Added host PTY allocation fallback in `src/smallclue/src/micro_app.c`:
+  - bridge setup now attempts host `openpty()` when `/dev/ptmx` family paths are unavailable.
+  - host PTY remains the default required path for in-tab rendering/input correctness.
+- 2026-03-01: Retained strict fallback policy for embedded micro bridge:
+  - shim PTY fallback remains disabled by default and only enabled via `PSCALI_MICRO_ALLOW_SHIM_PTY=1`.
+  - rationale: avoid regressions where micro output appears in Xcode console rather than the active PSCAL terminal tab.
+- 2026-03-01: Verified static-library rebuilds after bridge updates:
+  - `cmake --build build/ios-device --target pscal_core_static`
+  - `cmake --build build/ios-simulator --target pscal_core_static`
+- 2026-03-01: Corrected tracking source:
+  - this document (`Docs/ios_micro_nextvi_integration_contract.md`) is the authoritative integration tracker for ongoing micro/nextvi iOS work; earlier updates accidentally written to `Notes/smallclue.md` were superseded here.
+- 2026-03-01: Relaxed bridge startup policy in `src/smallclue/src/micro_app.c`:
+  - `microHostStdioBridgeSetup` failures now emit explicit `errno` + strerror diagnostics.
+  - `smallclueRunMicro` now continues without bridge on setup failure (instead of hard aborting), unless `PSCALI_MICRO_BRIDGE_STRICT=1` is set.
+  - compile validation:
+    - `cmake --build build/ios-device --target pscal_core_static`
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+- 2026-03-01: Added pipe-relay bridge fallback in `src/smallclue/src/micro_app.c` for host-PTY-denied sessions:
+  - when host PTY and optional shim PTY setup are unavailable, micro stdio is redirected through host pipes and bridged to session input/output threads.
+  - goal: keep embedded micro attached to the active terminal tab even when iOS denies host PTY creation (`errno=1`).
+  - compile validation:
+    - `cmake --build build/ios-device --target pscal_core_static`
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+- 2026-03-01: Corrected iOS bridge policy to prefer vproc virtual PTY by default:
+  - `PSCALI_MICRO_ALLOW_SHIM_PTY` now defaults to enabled (can be disabled explicitly with `PSCALI_MICRO_ALLOW_SHIM_PTY=0` for diagnostics).
+  - intent: avoid host-PTY dependency on iOS where `/dev/ptmx` is sandbox-denied (`errno=1`) and keep micro aligned with vproc virtual PTY architecture.
+  - compile validation:
+    - `cmake --build build/ios-device --target pscal_core_static`
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+- 2026-03-01: Added host stdio capture guardrail to prevent Xcode-console leakage:
+  - micro bridge now always installs host stdin/stdout/stderr capture pipes while active, even when vproc virtual PTY mode is enabled.
+  - session input is relayed into captured stdin, and captured stdout/stderr is relayed back via `vprocSessionEmitOutput`, so writes that bypass vproc interpose still remain in-tab.
+  - bridge failure policy is now strict by default (`PSCALI_MICRO_BRIDGE_STRICT=1` default behavior; set `PSCALI_MICRO_BRIDGE_STRICT=0` to allow degraded no-bridge launch for diagnostics).
+  - compile validation:
+    - `cmake --build build/ios-device --target pscal_core_static`
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+- 2026-03-01: Corrected stale bridge-mode notes after field validation:
+  - the "always install host stdio capture pipes" path above was superseded; it caused blank-screen launches when micro/tcell lost PTY semantics.
+  - current behavior in `src/smallclue/src/micro_app.c` is mode-separated:
+    - PTY mode (`host` or `vproc shim`): stdio stays attached to PTY slave, session input is injected into PTY master, output is drained from PTY master to `vprocSessionEmitOutput`.
+    - pipe relay mode (no PTY available): stdio capture pipes are used.
+  - strict bridge policy now treats pipe-relay-only startup as failure (`micro: unable to initialize PTY bridge (strict mode, no PTY available)`) instead of launching into blank output.
+  - compile validation:
+    - `cmake --build build/ios-device --target pscal_core_static`
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+- 2026-03-01: Fixed repeated `TIOCGWINSZ` bypass on embedded micro by interposing libc `ioctl` at `vproc` layer:
+  - added Apple dyld interpose hook in `src/ios/vproc.c` mapping `ioctl` -> `vprocIoctlShim`.
+  - interpose path bypasses itself safely via existing `vprocInterposeBypass*` gates and falls through to host raw ioctl when interpose is not ready.
+  - goal: make Go `x/sys/unix` ioctl callers (tcell winsize probing) honor virtual PTY/session stdio mapping instead of host-only fd semantics.
+  - compile validation:
+    - `cmake --build build/ios-device --target pscal_micro_embed_archive`
+    - `cmake --build build/ios-simulator --target pscal_micro_embed_archive`
+    - direct compile checks for `src/ios/vproc.c` object in both `build/ios-device` and `build/ios-simulator` via ninja command extraction.
+- 2026-03-01: Field incident review (window-size registration focus) from Xcode console trace:
+  - observed startup-order misses: `vproc setSessionWinsize missing-pty` before stable session<->PTY binding.
+  - observed steady-state success: repeated `runtime updateSessionWindowSize ... rc=0` and `vproc setSessionWinsize applied ...` for active session 7.
+  - no direct evidence in this trace of bridge setup abort, embedded panic, or `micro: already running` rejection.
+  - failure mode persists: micro UI does not appear, shell prompt remains blocked after `micro`; debugging focus shifts to launch/bridge/job-control lifecycle after successful winsize registration.
+  - next capture requirements:
+    - `PSCALI_MICRO_RESIZE_TRACE=1`
+    - `PSCALI_MICRO_DEBUG=1`
+    - `PSCALI_IO_DEBUG=1`
+    - `PSCALI_SSH_RESIZE_DEBUG=1`
+    - `PSCALI_PTY_TRACE=1`
+    - confirm whether `micro bridgeSetup active`, `micro notifySessionWinsize ... match=...`, and `micro bridgeApplySessionWinsize ... applied=...` stay pinned to the launch session id.
+- 2026-03-01: Winsize registration hardening in `src/smallclue/src/micro_app.c`:
+  - `pscalMicroNotifySessionWinsize` no longer applies non-matching session updates when a bridge is active (removed drift-tolerant cross-session fallback).
+  - `microSignalResizeLocked` now delivers `SIGWINCH` to the tracked micro launch thread after bridge winsize updates.
+  - intent: stop multi-tab resize cross-talk (session 6/7 interleave) and ensure embedded tcell sees resize events even without reliable PTY-driven signal propagation.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Added bridge-thread exit diagnostics in `src/smallclue/src/micro_app.c`:
+  - `microIoBridgeThreadMain` now emits `[micro-resize] micro ioBridgeThread exit ...` with reason/errno and read/write mode flags.
+  - intent: make it explicit whether micro launch stalls come from bridge read EOF, write failure, or stop-request teardown.
+  - capture requirement: enable `PSCALI_MICRO_RESIZE_TRACE=1` for these exit logs.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Fixed `nextvi` not honoring "Present sandbox as /" when opened paths were host-expanded:
+  - `third-party/nextvi/ex.c` now normalizes absolute paths with `pathTruncateStrip` before path storage and buffer matching in `bufs_open`, `ex_edit`, `ec_edit`, `ec_setpath`, and `ec_read`.
+  - intent: keep editor-visible paths virtualized (`/...`) even when argv/path sources provide container host paths.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Rolled back attempted global fd-routing change in `src/common/path_virtualization.c`:
+  - reverted behavior: non-device `open/fopen/freopen` no longer force `vprocOpenShim` under active vproc context.
+  - reason: regression where new tabs no longer reliably spawned interactive shell sessions after launch.
+  - compile validation after rollback:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Added nextvi-local fd adoption fix (no global path virtualization changes):
+  - `third-party/nextvi/ex.c` now routes file opens in editor read/write paths through helpers that adopt host fds into vproc (`vprocAdoptHostFd`) on iOS.
+  - adopted paths include readonly opens, write-truncate fallback opens, and `mkstemp` temp-file creation used by atomic save.
+  - `third-party/nextvi/vi.c` now includes `ios/vproc.h` for the adopted-fd path.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Adjusted nextvi fd strategy for reopen-empty regression:
+  - readonly file opens in `third-party/nextvi/ex.c` now stay as plain host `open(..., O_RDONLY)` (no vproc adopt).
+  - rationale: avoid fd-number aliasing on readonly paths that could make existing files reopen as empty buffers.
+  - write-path helpers (`mkstemp` / write-truncate fallback) remain on the adopted-fd path for save stability.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Added nextvi cwd sync guard in `src/smallclue/src/nextvi_app.c`:
+  - at editor thread activation, nextvi now aligns cwd/PWD with the shell session cwd before opening targets.
+  - intent: prevent relative `nextvi <filename>` opens from drifting to a different virtual cwd and appearing as empty "new" buffers while the shell sees populated files.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Added nextvi launch-argv path normalization in `src/smallclue/src/nextvi_app.c`:
+  - non-option file arguments are rewritten to absolute virtual paths using shell cwd before thread launch.
+  - absolute host/container-prefixed paths are stripped to virtual paths (`/home/...`) when path truncation is enabled.
+  - intent: eliminate reopen mismatches where relative file opens resolved to a different cwd than the shell.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
+- 2026-03-01: Tightened nextvi cwd source ordering in `src/smallclue/src/nextvi_app.c`:
+  - `smallclueResolveEditorCwd` now prefers `getenv("PWD")` (with path-truncate strip), then falls back to `vprocShellGetcwdShim`, then host `getcwd`.
+  - same resolver is used for both argv absolute-path normalization and launch-thread `vprocChdirShim`/`PWD` sync.
+  - intent: keep reopen target resolution identical to shell-visible cwd for relative `nextvi <filename>` usage.
+  - compile validation:
+    - `cmake --build build/ios-simulator --target pscal_core_static`
+    - `cmake --build build/ios-device --target pscal_core_static`
 
 ## Entrypoint Naming Notes
 
