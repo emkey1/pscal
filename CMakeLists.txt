@@ -1429,7 +1429,10 @@ endif()
 target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
-    z resolv)
+    z resolv m Threads::Threads)
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(pscal_core_static PUBLIC ${PSCAL_SQLITE_LIBS})
+endif()
 if(PSCAL_PLATFORM_IOS AND NOT PSCAL_USE_HOST_OPENSSL)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
@@ -1875,7 +1878,7 @@ set(REA_SOURCES
 if(NOT PSCAL_PLATFORM_IOS)
     add_executable(rea ${REA_SOURCES})
     target_compile_definitions(rea PRIVATE FRONTEND_REA)
-    target_link_libraries(rea PRIVATE pscal_pascal_static)
+    target_link_libraries(rea PRIVATE pscal_core_static pscal_pascal_static)
     if(PSCAL_HAS_LIBCURL)
         if(TARGET CURL::libcurl)
             target_link_libraries(rea PRIVATE CURL::libcurl)
