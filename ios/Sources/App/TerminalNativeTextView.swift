@@ -92,10 +92,18 @@ final class NativeTerminalView: UITextView {
         keysStack.spacing = 6
         keysStack.translatesAutoresizingMaskIntoConstraints = false
 
-        let keys = ["Esc", "Tab", "Ctrl", "/", "-", "⚙️"]
+        let keys: [(title: String, a11y: String)] = [
+            ("Esc", "Escape"),
+            ("Tab", "Tab"),
+            ("Ctrl", "Control"),
+            ("/", "Slash"),
+            ("-", "Minus"),
+            ("⚙️", "Settings")
+        ]
         for key in keys {
             let btn = UIButton(type: .system)
-            btn.setTitle(key, for: .normal)
+            btn.setTitle(key.title, for: .normal)
+            btn.accessibilityLabel = key.a11y
             btn.setTitleColor(.white, for: .normal)
             btn.backgroundColor = UIColor(white: 0.3, alpha: 1.0)
             btn.layer.cornerRadius = 6
