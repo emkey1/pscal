@@ -1429,7 +1429,10 @@ endif()
 target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
-    z resolv)
+    z resolv m)
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(pscal_core_static PUBLIC ${PSCAL_SQLITE_LIBS})
+endif()
 if(PSCAL_PLATFORM_IOS AND NOT PSCAL_USE_HOST_OPENSSL)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
