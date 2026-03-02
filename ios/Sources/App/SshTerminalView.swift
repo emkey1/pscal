@@ -48,7 +48,7 @@ struct SshTerminalView: View {
                 }
                 .padding(.bottom, 16)
                 .padding(.trailing, 10)
-                .accessibilityLabel("Adjust Font Size")
+                .accessibilityLabel("Terminal Settings")
             }
         }
         .sheet(isPresented: $showingSettings) {
