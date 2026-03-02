@@ -33,6 +33,10 @@
 #include <sys/resource.h>
 #include <sys/select.h>
 #include <stdio.h>   // For printf, fprintf
+#ifndef PSCAL_TARGET_IOS
+#include <wordexp.h>
+#include <sys/wait.h>
+#endif
 #include <pthread.h>
 #include <stdatomic.h>
 #include <signal.h>
@@ -7385,7 +7389,28 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
 #ifdef PSCAL_TARGET_IOS
     runtimeError(vm, "dosExec is unavailable on iOS builds.");
 #else
-    result = system(cmd);
+    wordexp_t p;
+    if (wordexp(cmd, &p, WRDE_NOCMD) == 0) {
+        if (p.we_wordc > 0) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                execvp(p.we_wordv[0], p.we_wordv);
+                exit(127);
+            } else if (pid > 0) {
+                int status;
+                if (waitpid(pid, &status, 0) == pid) {
+                    if (WIFEXITED(status)) {
+                        result = WEXITSTATUS(status);
+                    }
+                }
+            }
+        } else {
+            result = 0;
+        }
+        wordfree(&p);
+    } else {
+        runtimeError(vm, "dosExec wordexp failed.");
+    }
 #endif
     free(cmd);
     return makeInt(result);
