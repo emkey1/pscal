@@ -1455,6 +1455,16 @@ static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
         return false;
     }
     if (smallclueFindApplet(name) != NULL) {
+        /* Keep interactive full-screen editors on the shell thread so
+         * SIGWINCH/foreground PTY state tracks the active UI session. */
+        if (strcasecmp(name, "micro") == 0 ||
+            strcasecmp(name, "nextvi") == 0 ||
+            strcasecmp(name, "vi") == 0) {
+            if (dbg) {
+                fprintf(stderr, "[pipe-worker] prefer=0 reason=interactive-applet cmd=%s\n", name);
+            }
+            return false;
+        }
         if (dbg) {
             fprintf(stderr, "[pipe-worker] prefer=1 reason=smallclue cmd=%s\n", name);
         }

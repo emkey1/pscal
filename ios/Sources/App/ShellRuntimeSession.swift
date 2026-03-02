@@ -273,6 +273,7 @@ final class ShellRuntimeSession: ObservableObject {
             scheduleRender()
         }
         DispatchQueue.main.async { [weak self] in
+            self?.htermController.noteRuntimeSize(columns: clampedColumns, rows: clampedRows)
             self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
         }
         withRuntimeContext {
@@ -384,6 +385,9 @@ final class ShellRuntimeSession: ObservableObject {
         let cols = pendingColumns
         let rows = pendingRows
         guard cols > 0, rows > 0 else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.htermController.noteRuntimeSize(columns: cols, rows: rows)
+        }
         withRuntimeContext {
             PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(cols), Int32(rows))
         }

@@ -2573,6 +2573,8 @@ typedef struct {
     int shell_pid;
     struct pscal_fd *pty_slave;
     struct pscal_fd *pty_master;
+    int last_winsize_cols;
+    int last_winsize_rows;
     bool control_bytes_passthrough;
     VProcSessionOutputHandler output_handler;
     void *output_context;
@@ -2607,6 +2609,8 @@ static _Thread_local size_t gVProcSessionPtyTlsHintIndex = 0;
 static bool vprocSessionPtyEntryIsEmpty(const VProcSessionPtyEntry *entry) {
     return !entry || (!entry->pty_slave &&
                       !entry->pty_master &&
+                      entry->last_winsize_cols <= 0 &&
+                      entry->last_winsize_rows <= 0 &&
                       !entry->output_handler &&
                       entry->pending_output_len == 0 &&
                       !entry->output_paused);
@@ -4467,6 +4471,16 @@ static void vprocSessionPtyRegister(uint64_t session_id,
     entry->pty_slave = pscal_fd_retain(pty_slave);
     entry->pty_master = pscal_fd_retain(pty_master);
     entry->control_bytes_passthrough = false;
+    if (entry->pty_slave &&
+        entry->pty_slave->tty &&
+        entry->last_winsize_cols > 0 &&
+        entry->last_winsize_rows > 0) {
+        struct winsize_ ws;
+        memset(&ws, 0, sizeof(ws));
+        ws.col = (word_t)entry->last_winsize_cols;
+        ws.row = (word_t)entry->last_winsize_rows;
+        tty_set_winsize(entry->pty_slave->tty, ws);
+    }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 }
 
@@ -4484,6 +4498,8 @@ static void vprocSessionPtyUnregister(uint64_t session_id) {
         if (entry->pty_master) {
             pscal_fd_close(entry->pty_master);
         }
+        entry->last_winsize_cols = 0;
+        entry->last_winsize_rows = 0;
         entry->control_bytes_passthrough = false;
         vprocSessionPtyRemoveAtLocked(idx);
     }
@@ -4501,7 +4517,11 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     }
     struct pscal_fd *pty_slave = NULL;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
-    VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
+    VProcSessionPtyEntry *entry = vprocSessionPtyEnsureLocked(session_id);
+    if (entry) {
+        entry->last_winsize_cols = cols;
+        entry->last_winsize_rows = rows;
+    }
     if (entry && entry->pty_slave) {
         pty_slave = pscal_fd_retain(entry->pty_slave);
     }
@@ -4512,7 +4532,7 @@ int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows) {
             pscal_fd_close(pty_slave);
         }
         errno = ESRCH;
-        vprocIoTrace("[vproc-io] winsize session=%llu missing-pty cols=%d rows=%d",
+        vprocIoTrace("[vproc-io] winsize session=%llu missing-pty cols=%d rows=%d (stored)",
                      (unsigned long long)session_id,
                      cols,
                      rows);
@@ -4573,16 +4593,27 @@ int vprocGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out) {
     *rows_out = 0;
 
     struct pscal_fd *pty_slave = NULL;
+    int fallback_cols = 0;
+    int fallback_rows = 0;
     pthread_mutex_lock(&gVProcSessionPtys.mu);
     VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session_id, NULL);
     if (entry && entry->pty_slave) {
         pty_slave = pscal_fd_retain(entry->pty_slave);
+    }
+    if (entry) {
+        fallback_cols = entry->last_winsize_cols;
+        fallback_rows = entry->last_winsize_rows;
     }
     pthread_mutex_unlock(&gVProcSessionPtys.mu);
 
     if (!pty_slave || !pty_slave->tty) {
         if (pty_slave) {
             pscal_fd_close(pty_slave);
+        }
+        if (fallback_cols > 0 && fallback_rows > 0) {
+            *cols_out = fallback_cols;
+            *rows_out = fallback_rows;
+            return 0;
         }
         errno = ESRCH;
         return -1;
@@ -4597,6 +4628,12 @@ int vprocGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out) {
 
     *cols_out = (int)ws.col;
     *rows_out = (int)ws.row;
+    if (*cols_out <= 0 || *rows_out <= 0) {
+        if (fallback_cols > 0 && fallback_rows > 0) {
+            *cols_out = fallback_cols;
+            *rows_out = fallback_rows;
+        }
+    }
     return 0;
 }
 
@@ -12084,6 +12121,10 @@ int pscalTtyGetForegroundPgid(int sid) {
 
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows) {
     return vprocSetSessionWinsize(session_id, cols, rows);
+}
+
+int PSCALRuntimeGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out) {
+    return vprocGetSessionWinsize(session_id, cols_out, rows_out);
 }
 
 static int gVprocPipelineReadLogCount = 0;

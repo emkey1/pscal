@@ -387,6 +387,11 @@ final class TerminalEditorViewController: UIViewController {
         reportGeometryIfNeeded()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        reportGeometryIfNeeded()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         reportGeometryIfNeeded()

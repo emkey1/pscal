@@ -161,6 +161,8 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var pendingForcedGridSize: (columns: Int, rows: Int)?
     private var appliedForcedGridSize: (columns: Int, rows: Int)?
     private var resizeSessionId: UInt64 = 0
+    private var deferredRuntimeResize: (columns: Int, rows: Int, source: String)?
+    private var runtimeSizeHint: (columns: Int, rows: Int)?
 
     private static let terminalScheme = "pscal-terminal"
     private static let schemeHandler = TerminalResourceSchemeHandler()
@@ -379,6 +381,17 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         resizeSessionId = sessionId
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] bind-session previous=\(previous) session=\(sessionId)")
         guard sessionId != 0 else { return }
+        if let deferred = deferredRuntimeResize {
+            deferredRuntimeResize = nil
+            if let hint = runtimeSizeHint,
+               (hint.columns != deferred.columns || hint.rows != deferred.rows) {
+                sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay skipped source=\(deferred.source) session=\(sessionId) deferred=\(deferred.columns)x\(deferred.rows) hint=\(hint.columns)x\(hint.rows)")
+            } else {
+                sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay source=\(deferred.source) session=\(sessionId) cols=\(deferred.columns) rows=\(deferred.rows)")
+                PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(deferred.columns), Int32(deferred.rows))
+                runtimeSizeHint = (deferred.columns, deferred.rows)
+            }
+        }
         // Re-query hterm size at bind-time so newly attached sessions start with
         // the actual rendered grid, not a stale default.
         if isLoaded {
@@ -572,10 +585,18 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         let sessionId = resizeSessionId
         guard sessionId != 0 else {
             sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-defer source=\(source) session=0 cols=\(columns) rows=\(rows)")
+            deferredRuntimeResize = (columns, rows, source)
             return
         }
+        deferredRuntimeResize = nil
+        runtimeSizeHint = (columns, rows)
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-forward source=\(source) session=\(sessionId) cols=\(columns) rows=\(rows)")
         PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(columns), Int32(rows))
+    }
+
+    func noteRuntimeSize(columns: Int, rows: Int) {
+        guard columns > 0, rows > 0 else { return }
+        runtimeSizeHint = (columns, rows)
     }
 
     func updateHostSize(_ size: CGSize, reason: String) {

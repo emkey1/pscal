@@ -765,7 +765,9 @@ int term_read(void)
 		 * nextvi as TK_INT and can corrupt command-repeat flow (e.g. '.' after
 		 * 'dd'). Block until input or shutdown to match desktop behavior. */
 		while (ibuf_pos >= ibuf_cnt) {
-			int n = pscalTerminalRead(ibuf, 1, 0);
+			/* Use a finite timeout so idle loops can still process resize
+			 * updates without requiring keyboard input. */
+			int n = pscalTerminalRead(ibuf, 1, 50);
 			if (n > 0) {
 				ibuf_cnt = (unsigned int)n;
 				ibuf_pos = 0;

@@ -31,6 +31,16 @@ typedef struct {
     int signal_rc;
 } ResizeDispatchResult;
 
+typedef struct {
+    uint64_t bound_session_id;
+    int deferred_cols;
+    int deferred_rows;
+    bool has_deferred;
+    int runtime_cols;
+    int runtime_rows;
+    bool has_runtime_override;
+} FrontendResizeRelay;
+
 static ResizeDispatchResult runtimeLikeResizeRequest(uint64_t session_id, int cols, int rows, pthread_t shell_thread) {
     ResizeDispatchResult result;
     char buf[16];
@@ -44,6 +54,83 @@ static ResizeDispatchResult runtimeLikeResizeRequest(uint64_t session_id, int co
         result.signal_rc = pthread_kill(shell_thread, SIGWINCH);
     }
     return result;
+}
+
+static void frontendResizeRelayInit(FrontendResizeRelay *relay) {
+    assert(relay);
+    memset(relay, 0, sizeof(*relay));
+}
+
+static void frontendResizeRelayRecordRuntimeUpdate(FrontendResizeRelay *relay,
+                                                   int cols,
+                                                   int rows) {
+    assert(relay);
+    if (cols <= 0 || rows <= 0) {
+        return;
+    }
+    relay->runtime_cols = cols;
+    relay->runtime_rows = rows;
+    relay->has_runtime_override = true;
+}
+
+static bool frontendResizeRelayHandleNative(FrontendResizeRelay *relay,
+                                            int cols,
+                                            int rows,
+                                            pthread_t shell_thread,
+                                            ResizeDispatchResult *out_dispatch) {
+    assert(relay);
+    if (out_dispatch) {
+        out_dispatch->set_rc = -1;
+        out_dispatch->signal_rc = -1;
+    }
+    if (cols <= 0 || rows <= 0) {
+        return false;
+    }
+    if (relay->bound_session_id == 0) {
+        relay->deferred_cols = cols;
+        relay->deferred_rows = rows;
+        relay->has_deferred = true;
+        return false;
+    }
+    ResizeDispatchResult dispatch = runtimeLikeResizeRequest(relay->bound_session_id, cols, rows, shell_thread);
+    if (out_dispatch) {
+        *out_dispatch = dispatch;
+    }
+    return true;
+}
+
+static bool frontendResizeRelayBindSession(FrontendResizeRelay *relay,
+                                           uint64_t session_id,
+                                           pthread_t shell_thread,
+                                           ResizeDispatchResult *out_dispatch) {
+    assert(relay);
+    if (out_dispatch) {
+        out_dispatch->set_rc = -1;
+        out_dispatch->signal_rc = -1;
+    }
+    relay->bound_session_id = session_id;
+    if (session_id == 0 || !relay->has_deferred) {
+        return false;
+    }
+    if (relay->has_runtime_override &&
+        (relay->runtime_cols != relay->deferred_cols ||
+         relay->runtime_rows != relay->deferred_rows)) {
+        relay->has_deferred = false;
+        relay->deferred_cols = 0;
+        relay->deferred_rows = 0;
+        return false;
+    }
+    ResizeDispatchResult dispatch = runtimeLikeResizeRequest(session_id,
+                                                             relay->deferred_cols,
+                                                             relay->deferred_rows,
+                                                             shell_thread);
+    relay->has_deferred = false;
+    relay->deferred_cols = 0;
+    relay->deferred_rows = 0;
+    if (out_dispatch) {
+        *out_dispatch = dispatch;
+    }
+    return true;
 }
 
 static void resizeHarnessInitSession(ResizeHarnessContext *ctx, uint64_t session_id) {
@@ -186,10 +273,130 @@ static void assert_resize_request_apply_and_dispatch(void) {
     resizeHarnessDestroySession(&ctx);
 }
 
+static void assert_deferred_resize_before_pty_bind_is_replayed(void) {
+    const uint64_t deferred_session = 9717;
+    const int deferred_cols = 149;
+    const int deferred_rows = 46;
+
+    ResizeDispatchResult dispatch = runtimeLikeResizeRequest(deferred_session,
+                                                             deferred_cols,
+                                                             deferred_rows,
+                                                             (pthread_t)0);
+    assert(dispatch.set_rc != 0);
+    assert(dispatch.signal_rc == -1);
+
+    /* The runtime path still updates env even if the PTY has not been bound. */
+    resizeHarnessAssertRuntimeDetectedSize(deferred_cols, deferred_rows);
+
+    ResizeHarnessContext ctx;
+    resizeHarnessInitSession(&ctx, deferred_session);
+    resizeHarnessAssertSessionSize(deferred_session, deferred_cols, deferred_rows);
+    fprintf(stderr,
+            "[resize-harness] deferred-bind session=%llu request=%dx%d replayed=1\n",
+            (unsigned long long)deferred_session,
+            deferred_cols,
+            deferred_rows);
+    resizeHarnessDestroySession(&ctx);
+}
+
+static void assert_frontend_deferred_rebind_flow(void) {
+    FrontendResizeRelay relay;
+    frontendResizeRelayInit(&relay);
+
+    ResizeDispatchResult dispatch;
+
+    /* Native resize events while hterm is unbound are deferred. */
+    bool forwarded = frontendResizeRelayHandleNative(&relay, 121, 37, pthread_self(), &dispatch);
+    assert(!forwarded);
+    assert(dispatch.set_rc == -1);
+    assert(dispatch.signal_rc == -1);
+
+    forwarded = frontendResizeRelayHandleNative(&relay, 142, 41, pthread_self(), &dispatch);
+    assert(!forwarded);
+    assert(dispatch.set_rc == -1);
+    assert(dispatch.signal_rc == -1);
+
+    ResizeHarnessContext ctx;
+    resizeHarnessInitSession(&ctx, 9724);
+
+    /* Binding to a real session should replay the latest deferred size. */
+    bool replayed = frontendResizeRelayBindSession(&relay, ctx.session_id, pthread_self(), &dispatch);
+    assert(replayed);
+    assert(dispatch.set_rc == 0);
+    assert(dispatch.signal_rc == 0);
+    resizeHarnessAssertSessionSize(ctx.session_id, 142, 41);
+
+    /* Subsequent live resize should forward immediately while bound. */
+    forwarded = frontendResizeRelayHandleNative(&relay, 132, 38, pthread_self(), &dispatch);
+    assert(forwarded);
+    assert(dispatch.set_rc == 0);
+    assert(dispatch.signal_rc == 0);
+    resizeHarnessAssertSessionSize(ctx.session_id, 132, 38);
+
+    /* If hterm detaches, resize defers again, then rebind replays latest. */
+    replayed = frontendResizeRelayBindSession(&relay, 0, pthread_self(), &dispatch);
+    assert(!replayed);
+    forwarded = frontendResizeRelayHandleNative(&relay, 155, 48, pthread_self(), &dispatch);
+    assert(!forwarded);
+    replayed = frontendResizeRelayBindSession(&relay, ctx.session_id, pthread_self(), &dispatch);
+    assert(replayed);
+    assert(dispatch.set_rc == 0);
+    assert(dispatch.signal_rc == 0);
+    resizeHarnessAssertSessionSize(ctx.session_id, 155, 48);
+
+    fprintf(stderr,
+            "[resize-harness] frontend-defer-rebind session=%llu replayed-latest=%dx%d\n",
+            (unsigned long long)ctx.session_id,
+            155,
+            48);
+    resizeHarnessDestroySession(&ctx);
+}
+
+static void assert_frontend_stale_deferred_replay_is_skipped(void) {
+    FrontendResizeRelay relay;
+    frontendResizeRelayInit(&relay);
+    ResizeDispatchResult dispatch;
+
+    ResizeHarnessContext ctx;
+    resizeHarnessInitSession(&ctx, 9731);
+
+    dispatch = runtimeLikeResizeRequest(ctx.session_id, 132, 38, pthread_self());
+    assert(dispatch.set_rc == 0);
+    assert(dispatch.signal_rc == 0);
+    resizeHarnessAssertSessionSize(ctx.session_id, 132, 38);
+    frontendResizeRelayRecordRuntimeUpdate(&relay, 132, 38);
+
+    bool replayed = frontendResizeRelayBindSession(&relay, 0, pthread_self(), &dispatch);
+    assert(!replayed);
+    bool forwarded = frontendResizeRelayHandleNative(&relay, 86, 25, pthread_self(), &dispatch);
+    assert(!forwarded);
+
+    replayed = frontendResizeRelayBindSession(&relay, ctx.session_id, pthread_self(), &dispatch);
+    assert(!replayed);
+    assert(dispatch.set_rc == -1);
+    assert(dispatch.signal_rc == -1);
+    resizeHarnessAssertSessionSize(ctx.session_id, 132, 38);
+
+    fprintf(stderr,
+            "[resize-harness] frontend-stale-replay-skipped session=%llu kept=%dx%d deferred=%dx%d\n",
+            (unsigned long long)ctx.session_id,
+            132,
+            38,
+            86,
+            25);
+    resizeHarnessDestroySession(&ctx);
+}
+
 int main(void) {
     setenv("PATH_TRUNCATE", "/tmp", 1);
     fprintf(stderr, "TEST resize_request_apply_and_dispatch\n");
     assert_resize_request_apply_and_dispatch();
+    fprintf(stderr, "TEST deferred_resize_before_pty_bind_is_replayed\n");
+    assert_deferred_resize_before_pty_bind_is_replayed();
+    fprintf(stderr, "TEST frontend_deferred_rebind_flow\n");
+    assert_frontend_deferred_rebind_flow();
+    fprintf(stderr, "TEST frontend_stale_deferred_replay_is_skipped\n");
+    assert_frontend_stale_deferred_replay_is_skipped();
     fprintf(stderr, "TEST micro_pipe_probe_follows_env\n");
     assert_micro_pipe_probe_follows_env();
     fprintf(stderr, "PASS ios resize harness\n");

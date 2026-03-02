@@ -1832,6 +1832,11 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
     if (session_id == 0 || columns <= 0 || rows <= 0) {
         return;
     }
+    /*
+     * Avoid mutating process-global COLUMNS/LINES for session-scoped updates.
+     * Multiple tabs/sessions share one process and cross-session env writes can
+     * cause embedded tools (notably micro) to consume foreign geometry.
+     */
     if (PSCALRuntimeIODebugEnabled()) {
         NSLog(@"[micro-resize] runtime updateSessionWindowSize session=%llu cols=%d rows=%d",
               (unsigned long long)session_id,
@@ -1854,6 +1859,7 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
                                   columns,
                                   rows);
         }
+        pscalMicroNotifySessionWinsize(session_id, columns, rows);
         return;
     }
     int rc = PSCALRuntimeSetSessionWinsize(session_id, columns, rows);
