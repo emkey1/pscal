@@ -556,6 +556,8 @@ final class TerminalKeyInputView: UITextView {
         }
 
         switch key.keyCode {
+        case .keyboardReturnOrEnter:
+            onInput?("\r"); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:

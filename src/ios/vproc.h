@@ -310,6 +310,7 @@ int vprocAdoptPscalStdio(VProc *vp,
                          struct pscal_fd *stderr_fd);
 int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd);
 int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows);
+int vprocGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out);
 bool vprocSessionStdioNeedsRefresh(VProcSessionStdio *stdio_ctx);
 void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid);
 void vprocSessionDebugDumpShim(const char *tag);
@@ -330,6 +331,8 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
                                   void *context);
 void vprocSessionClearOutputHandler(uint64_t session_id);
 void vprocSessionSetOutputPaused(uint64_t session_id, bool paused);
+/* Emit output bytes to a session's registered output handler/backlog. */
+ssize_t vprocSessionEmitOutput(uint64_t session_id, const void *buf, size_t len);
 /* Write input data directly to a session PTY master. */
 ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len);
 ssize_t vprocSessionWriteToMasterMode(uint64_t session_id, const void *buf, size_t len, bool blocking);
@@ -658,6 +661,17 @@ static inline int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows
     (void)session_id;
     (void)cols;
     (void)rows;
+    errno = ENOTSUP;
+    return -1;
+}
+static inline int vprocGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out) {
+    (void)session_id;
+    if (cols_out) {
+        *cols_out = 0;
+    }
+    if (rows_out) {
+        *rows_out = 0;
+    }
     errno = ENOTSUP;
     return -1;
 }

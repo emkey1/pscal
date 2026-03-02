@@ -102,9 +102,11 @@ private struct ShellTerminalContentView: View {
                 },
                 onResize: { cols, rows in
                     tabInitLog("ShellTerminalView resize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
-                    if !hasMeasuredGeometry {
-                        applyTerminalSize(columns: cols, rows: rows)
-                    }
+                    sshResizeLog("[micro-resize] shell view onResize session=\(session.sessionId) cols=\(cols) rows=\(rows)")
+                    // Always accept hterm's measured grid. The first SwiftUI
+                    // geometry pass can be stale; hterm's startup/resize query
+                    // reflects the actual rendered terminal size.
+                    applyTerminalSize(columns: cols, rows: rows, source: "hterm")
                 },
                 onReady: { controller in
                     tabInitLog("ShellTerminalView ready session=\(session.sessionId) controller=\(controller.instanceId)")
@@ -179,20 +181,21 @@ private struct ShellTerminalContentView: View {
         )
         let columns = max(10, grid.columns)
         let rows = max(4, grid.rows)
-        applyTerminalSize(columns: columns, rows: rows)
+        applyTerminalSize(columns: columns, rows: rows, source: "swiftui")
     }
 
     private func requestInputFocus() {
         focusAnchor &+= 1
     }
 
-    private func applyTerminalSize(columns: Int, rows: Int) {
+    private func applyTerminalSize(columns: Int, rows: Int, source: String) {
         if !hasMeasuredGeometry {
             hasMeasuredGeometry = true
         }
         let metrics = TerminalGeometryCalculator.TerminalGeometryMetrics(columns: columns, rows: rows)
         guard lastReportedMetrics != metrics else { return }
         lastReportedMetrics = metrics
+        sshResizeLog("[micro-resize] shell view applyTerminalSize source=\(source) session=\(session.sessionId) cols=\(metrics.columns) rows=\(metrics.rows)")
         session.updateTerminalSize(columns: metrics.columns, rows: metrics.rows)
     }
 }

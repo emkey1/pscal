@@ -82,6 +82,14 @@ required_libs=(
     libpscal_pscalasm_static.a
 )
 
+third_party_archive_specs=(
+    "SDL2-static|third-party/SDL2/libSDL2d.a|third-party/SDL2/libSDL2.a"
+    "SDL2_image|third-party/SDL2_image/libSDL2_imaged.a|third-party/SDL2_image/libSDL2_image.a"
+    "SDL2_mixer|third-party/SDL2_mixer/libSDL2_mixerd.a|third-party/SDL2_mixer/libSDL2_mixer.a"
+    "SDL2_ttf|third-party/SDL2_ttf/libSDL2_ttfd.a|third-party/SDL2_ttf/libSDL2_ttf.a"
+    "freetype|third-party/SDL2_ttf/external/freetype/libfreetyped.a|third-party/SDL2_ttf/external/freetype/libfreetype.a"
+)
+
 nm_tool=""
 if command -v xcrun >/dev/null 2>&1; then
     nm_tool="$(xcrun -f nm 2>/dev/null || true)"
@@ -106,7 +114,69 @@ require_symbol_in_archive() {
     fi
 }
 
+resolve_existing_archive_path() {
+    local primary_rel="$1"
+    local fallback_rel="$2"
+    local candidate=""
+
+    candidate="${build_dir}/${primary_rel}"
+    if [[ -f "${candidate}" ]]; then
+        printf '%s\n' "${candidate}"
+        return 0
+    fi
+
+    candidate="${build_dir}/${fallback_rel}"
+    if [[ -f "${candidate}" ]]; then
+        printf '%s\n' "${candidate}"
+        return 0
+    fi
+
+    return 1
+}
+
+verify_or_rebuild_third_party_archives() {
+    local spec=""
+    local target=""
+    local primary_rel=""
+    local fallback_rel=""
+    local archive_path=""
+    local needs_rebuild=()
+
+    for spec in "${third_party_archive_specs[@]}"; do
+        IFS='|' read -r target primary_rel fallback_rel <<< "${spec}"
+        archive_path="$(resolve_existing_archive_path "${primary_rel}" "${fallback_rel}" || true)"
+        if [[ -z "${archive_path}" ]]; then
+            echo "[ios] error: missing required archive ${build_dir}/${primary_rel} (or ${build_dir}/${fallback_rel})" >&2
+            exit 1
+        fi
+        if [[ ! -s "${archive_path}" ]]; then
+            echo "[ios] warning: archive is empty, scheduling rebuild: ${archive_path}" >&2
+            needs_rebuild+=("${target}")
+        fi
+    done
+
+    if [[ "${#needs_rebuild[@]}" -eq 0 ]]; then
+        return
+    fi
+
+    echo "[ios] rebuilding third-party static archives: ${needs_rebuild[*]}"
+    "${cmake_bin}" --build "${build_dir}" --target "${needs_rebuild[@]}"
+
+    for spec in "${third_party_archive_specs[@]}"; do
+        IFS='|' read -r target primary_rel fallback_rel <<< "${spec}"
+        archive_path="$(resolve_existing_archive_path "${primary_rel}" "${fallback_rel}" || true)"
+        if [[ -z "${archive_path}" || ! -s "${archive_path}" ]]; then
+            echo "[ios] error: archive is still missing or empty after rebuild: ${build_dir}/${primary_rel}" >&2
+            exit 1
+        fi
+    done
+}
+
 verify_required_artifacts() {
+    if [[ -n "${preset}" ]]; then
+        verify_or_rebuild_third_party_archives
+    fi
+
     for lib in "${required_libs[@]}"; do
         if [[ ! -f "${build_dir}/${lib}" ]]; then
             echo "[ios] error: missing required archive ${build_dir}/${lib}" >&2

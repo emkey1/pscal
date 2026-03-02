@@ -507,15 +507,7 @@ final class TerminalBuffer {
                 case 0x09: // TAB
                     wrapPending = false
                     resetUTF8Decoder()
-                    
-                    var nextStop = columns - 1
-                    for stop in tabStops.sorted() {
-                        if stop > cursorCol {
-                            nextStop = stop
-                            break
-                        }
-                    }
-                    cursorCol = min(nextStop, columns - 1)
+                    cursorCol = nextTabStop(after: cursorCol)
                     
                 case 0x1B: // ESC
                     resetUTF8Decoder()
@@ -634,6 +626,33 @@ final class TerminalBuffer {
             }
         }
 
+        private func nextTabStop(after column: Int) -> Int {
+            guard columns > 0 else { return 0 }
+            var probe = min(columns - 1, max(0, column + 1))
+            while probe < columns {
+                if tabStops.contains(probe) {
+                    return probe
+                }
+                probe += 1
+            }
+            return columns - 1
+        }
+
+        private func previousTabStop(before column: Int) -> Int {
+            guard columns > 0 else { return 0 }
+            var probe = min(columns - 1, max(0, column - 1))
+            while probe >= 0 {
+                if tabStops.contains(probe) {
+                    return probe
+                }
+                if probe == 0 {
+                    break
+                }
+                probe -= 1
+            }
+            return 0
+        }
+
         private func handleCSIByte(_ byte: UInt8) {
             switch byte {
             case 0x30...0x39:
@@ -690,27 +709,12 @@ final class TerminalBuffer {
             case 0x5A: // Z
                 let count = max(1, csiParameters.first ?? 1)
                 for _ in 0..<count {
-                    var prevStop = 0
-                    let sorted = tabStops.sorted()
-                    for stop in sorted.reversed() {
-                        if stop < cursorCol {
-                            prevStop = stop
-                            break
-                        }
-                    }
-                    cursorCol = prevStop
+                    cursorCol = previousTabStop(before: cursorCol)
                 }
             case 0x49: // I
                 let count = max(1, csiParameters.first ?? 1)
                 for _ in 0..<count {
-                    var nextStop = columns - 1
-                    for stop in tabStops.sorted() {
-                        if stop > cursorCol {
-                            nextStop = stop
-                            break
-                        }
-                    }
-                    cursorCol = min(nextStop, columns - 1)
+                    cursorCol = nextTabStop(after: cursorCol)
                 }
             case 0x67: // g
                 let mode = csiParameters.first ?? 0

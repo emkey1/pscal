@@ -10,26 +10,12 @@ import (
 )
 
 func pscalUseEmbeddedStdio() bool {
-	return os.Getenv("PSCAL_MICRO_EMBEDDED") == "1"
+	return true
 }
 
 func openTty() (io.Reader, io.Writer, error) {
-	if pscalUseEmbeddedStdio() {
-		return os.Stdin, os.Stdout, nil
-	}
-	inFD, err := poller.Open("/dev/tty", poller.O_RO)
-	if err != nil {
-		// iOS containers frequently block /dev/tty; stdin/stdout are already
-		// bound to the PSCAL PTY in that case.
-		return os.Stdin, os.Stdout, nil
-	}
-	outFD, err := poller.Open("/dev/tty", poller.O_WO)
-	if err != nil {
-		_ = inFD.Close()
-		return os.Stdin, os.Stdout, nil
-	}
-
-	return inFD, outFD, nil
+	_ = pscalUseEmbeddedStdio
+	return os.Stdin, os.Stdout, nil
 }
 
 func closeTty(f interface{}) {

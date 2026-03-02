@@ -53,6 +53,15 @@ private let sshResizeDebugEnabled: Bool = {
     if let value = env["PSCALI_SSH_RESIZE_DEBUG"], !value.isEmpty {
         return value != "0"
     }
+    if let value = env["PSCALI_RESIZE_DEBUG"], !value.isEmpty {
+        return value != "0"
+    }
+    if let value = env["PSCALI_SSH_DEBUG"], !value.isEmpty {
+        return value != "0"
+    }
+    if let value = env["PSCALI_TOOL_DEBUG"], !value.isEmpty {
+        return value != "0"
+    }
     return false
 }()
 

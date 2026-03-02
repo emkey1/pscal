@@ -161,7 +161,6 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var pendingForcedGridSize: (columns: Int, rows: Int)?
     private var appliedForcedGridSize: (columns: Int, rows: Int)?
     private var resizeSessionId: UInt64 = 0
-    private var pendingRuntimeResize: (columns: Int, rows: Int, source: String)?
 
     private static let terminalScheme = "pscal-terminal"
     private static let schemeHandler = TerminalResourceSchemeHandler()
@@ -380,10 +379,10 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         resizeSessionId = sessionId
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] bind-session previous=\(previous) session=\(sessionId)")
         guard sessionId != 0 else { return }
-        if let pending = pendingRuntimeResize {
-            pendingRuntimeResize = nil
-            sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay source=\(pending.source) session=\(sessionId) cols=\(pending.columns) rows=\(pending.rows)")
-            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(pending.columns), Int32(pending.rows))
+        // Re-query hterm size at bind-time so newly attached sessions start with
+        // the actual rendered grid, not a stale default.
+        if isLoaded {
+            requestResize()
         }
     }
 
@@ -444,15 +443,25 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             onSyncFocus?()
         case HandlerName.newScrollHeight.rawValue:
             if let value = message.body as? NSNumber {
-                onScrollHeight?(CGFloat(value.doubleValue))
+                let height = value.doubleValue
+                if height.isFinite {
+                    onScrollHeight?(CGFloat(height))
+                }
             } else if let value = message.body as? Double {
-                onScrollHeight?(CGFloat(value))
+                if value.isFinite {
+                    onScrollHeight?(CGFloat(value))
+                }
             }
         case HandlerName.newScrollTop.rawValue:
             if let value = message.body as? NSNumber {
-                onScrollTop?(CGFloat(value.doubleValue))
+                let top = value.doubleValue
+                if top.isFinite {
+                    onScrollTop?(CGFloat(top))
+                }
             } else if let value = message.body as? Double {
-                onScrollTop?(CGFloat(value))
+                if value.isFinite {
+                    onScrollTop?(CGFloat(value))
+                }
             }
         case HandlerName.openLink.rawValue:
             if let urlString = message.body as? String, let url = URL(string: urlString) {
@@ -562,11 +571,9 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private func forwardResizeToRuntime(columns: Int, rows: Int, source: String) {
         let sessionId = resizeSessionId
         guard sessionId != 0 else {
-            pendingRuntimeResize = (columns, rows, source)
             sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-defer source=\(source) session=0 cols=\(columns) rows=\(rows)")
             return
         }
-        pendingRuntimeResize = nil
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-forward source=\(source) session=\(sessionId) cols=\(columns) rows=\(rows)")
         PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(columns), Int32(rows))
     }
@@ -1083,17 +1090,22 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     func updateScrollHeight(_ height: CGFloat) {
-        let width = scrollView.bounds.width > 0 ? scrollView.bounds.width : max(scrollView.contentSize.width, 1)
-        scrollView.contentSize = CGSize(width: width, height: height)
+        guard isTerminalInstalled else { return }
+        let saneHeight = height.isFinite ? max(height, 0) : 0
+        let widthCandidate = scrollView.bounds.width > 0 ? scrollView.bounds.width : max(scrollView.contentSize.width, 1)
+        let saneWidth = widthCandidate.isFinite ? max(widthCandidate, 1) : 1
+        scrollView.contentSize = CGSize(width: saneWidth, height: saneHeight)
         clampScrollOffset(reason: "height")
         if HtermTerminalController.debugEnabled {
-            debugLog("Hterm[\(controller.instanceId)]: scroll height=\(String(format: "%.2f", height)) " +
+            debugLog("Hterm[\(controller.instanceId)]: scroll height=\(String(format: "%.2f", saneHeight)) " +
                      "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
                      "bounds=\(NSCoder.string(for: scrollView.bounds))")
         }
     }
 
     func updateScrollTop(_ top: CGFloat) {
+        guard isTerminalInstalled else { return }
+        guard top.isFinite else { return }
         let maxTop = max(0, scrollView.contentSize.height - scrollView.bounds.height)
         let clampedTop = min(max(top, 0), maxTop)
         if abs(scrollView.contentOffset.y - clampedTop) < 0.5 {

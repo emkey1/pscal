@@ -115,6 +115,11 @@ Any failure above is a hard build error.
   - `vproc setSessionWinsize applied session=7 ...`
 - Early `vproc setSessionWinsize missing-pty` for sessions 6/7 appears before tab/session PTY registration completes; treat this as startup ordering/race, not final steady-state behavior.
 - Current blocking failure is no longer "winsize not delivered": `micro` still fails to render/open in-tab and leaves shell state stuck (typed `micro` remains, Return does not produce a fresh prompt) despite successful repeated winsize applies.
+- Latest trace (2026-03-01, user report) shows `micro` UI escape sequences rendered directly in Xcode console (`\x1b[?1049h ...`) while shell session resize telemetry continues normally, confirming at least one launch path is still writing to host stdio instead of staying fully attached to tab session output.
+- Same trace shows repeated no-context resize updates for session 9 (`runtime updateSessionWindowSize ... no-ctx rc=-1` + `vproc setSessionWinsize missing-pty`) triggered from hterm-side runtime forwarding while shell view resize propagation is also active.
+- Micro bridge now prefers shim-only PTY allocation by default; host PTY fallback is opt-in via `PSCALI_MICRO_ALLOW_HOST_PTY=1` for diagnostics.
+- `smallclueRunMicro` now reconciles launch-session selection against the active runtime session id and overrides stale thread-local session ids, so bridge attach follows the currently bound runtime session.
+- Verification note: there are no active `nextvi` source edits in the current working tree; current regressions under investigation are in iOS runtime/session/micro integration layers.
 - Cross-session resize bleed mitigation is now in-tree (`pscalMicroNotifySessionWinsize` only applies updates for the active bridge session id); field validation is still pending.
 - Bridge resize path now sends explicit `SIGWINCH` to micro's launch thread after applying `TIOCSWINSZ`, so embedded tcell receives resize notifications even when PTY-generated job-control signaling is unreliable.
 - `nextvi` path-display hardening is now in-tree: absolute paths are normalized through `pathTruncateStrip` before buffer store/lookup (`bufs_open`, `ex_edit`, `ec_edit`, `ec_setpath`, `ec_read`) so "Present sandbox as /" is honored even if launch arguments arrive as container-prefixed host paths.
@@ -127,6 +132,10 @@ Any failure above is a hard build error.
 
 ## Progress Log
 
+- 2026-03-01: Attempted shell/ssh resize-session binding removal was rolled back after field regression (nextvi auto-resize/tab behavior impact). Current code keeps `setResizeSessionId(...)` in `ShellRuntimeSession`/`SshRuntimeSession` attach/detach.
+- 2026-03-01: Build verification after rollback reaches Swift compile for touched files; local macOS Catalyst link remains blocked in this environment by missing OpenSSL link inputs (`ld: library 'ssl' not found`), unrelated to resize wiring.
+- 2026-03-01: Updated `micro_app.c` PTY bridge policy to require shim PTY by default and only attempt host PTY fallback when explicitly enabled (`PSCALI_MICRO_ALLOW_HOST_PTY=1`), to keep embedded micro on session/vproc PTY paths.
+- 2026-03-01: Updated `smallclueRunMicro` launch context selection to prefer active runtime session identity when it differs from thread-local session stdio, reducing micro launches attaching to stale/non-visible sessions.
 - 2026-02-27: Added hard validation in `ios/Tools/ensure_static_libs.sh` for:
   - required archive presence
   - `nextvi_main_entry` symbol in `libpscal_core_static.a`

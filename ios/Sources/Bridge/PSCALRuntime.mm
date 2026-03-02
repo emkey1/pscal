@@ -81,6 +81,7 @@ static void PSCALRuntimeEnsureSDLReady(void);
 extern "C" {
     // Forward declare exsh entrypoint exposed by the existing CLI target.
     int exsh_main(int argc, char* argv[]);
+    void pscalMicroNotifySessionWinsize(uint64_t session_id, int cols, int rows);
     char *pscalRuntimeCopyMarketingVersion(void);
     void shellRuntimeInitSignals(void);
     ShellRuntimeState *shellRuntimeCreateContext(void);
@@ -1802,6 +1803,9 @@ void PSCALRuntimeUpdateWindowSize(int columns, int rows) {
     } else {
         PSCALRuntimeApplyWindowSize(fd, columns, rows);
     }
+    if (session_id != 0) {
+        pscalMicroNotifySessionWinsize(session_id, columns, rows);
+    }
 
     if (active && runtime_thread) {
         (void)pthread_kill(runtime_thread, SIGWINCH);
@@ -1828,18 +1832,40 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
     if (session_id == 0 || columns <= 0 || rows <= 0) {
         return;
     }
+    if (PSCALRuntimeIODebugEnabled()) {
+        NSLog(@"[micro-resize] runtime updateSessionWindowSize session=%llu cols=%d rows=%d",
+              (unsigned long long)session_id,
+              columns,
+              rows);
+    }
     PSCALRuntimeContext *ctx = PSCALRuntimeContextForSession(session_id);
     if (!ctx) {
+        int noCtxRc = PSCALRuntimeSetSessionWinsize(session_id, columns, rows);
+        if (PSCALRuntimeIODebugEnabled()) {
+            NSLog(@"[micro-resize] runtime updateSessionWindowSize session=%llu cols=%d rows=%d no-ctx rc=%d",
+                  (unsigned long long)session_id,
+                  columns,
+                  rows,
+                  noCtxRc);
+        }
         if (PSCALRuntimeIODebugEnabled()) {
             PSCALRuntimeDebugLogf("[runtime-io] winsize session=%llu %dx%d (no ctx)\n",
                                   (unsigned long long)session_id,
                                   columns,
                                   rows);
         }
-        (void)PSCALRuntimeSetSessionWinsize(session_id, columns, rows);
         return;
     }
     int rc = PSCALRuntimeSetSessionWinsize(session_id, columns, rows);
+    if (PSCALRuntimeIODebugEnabled()) {
+        NSLog(@"[micro-resize] runtime updateSessionWindowSize session=%llu cols=%d rows=%d rc=%d ctx=%p",
+              (unsigned long long)session_id,
+              columns,
+              rows,
+              rc,
+              (void *)ctx);
+    }
+    pscalMicroNotifySessionWinsize(session_id, columns, rows);
     PSCALRuntimeContext *prev_ctx = PSCALRuntimeSetCurrentContext(ctx);
     pthread_mutex_lock(&s_runtime_mutex);
     if (rc == 0) {
