@@ -6,4 +6,4 @@
 	url = https://github.com/libsdl-org/SDL_mixer.git
 [submodule "third-party/micro"]
 	path = third-party/micro
-	url = https://github.com/micro-editor/micro
+	url = https://github.com/emkey1/micro.git
