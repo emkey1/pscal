@@ -521,6 +521,37 @@ static void ios_term_write(const char *s, int n) {
 #define term_write(s, n) ios_term_write(s, n)
 #endif
 
+void term_updatewinsize(void)
+{
+	int rows = xrows;
+	int cols = xcols;
+	if (getenv("LINES"))
+		rows = atoi(getenv("LINES"));
+	if (getenv("COLUMNS"))
+		cols = atoi(getenv("COLUMNS"));
+#if defined(PSCAL_TARGET_IOS)
+	if (pscalRuntimeDetectWindowRows) {
+		int detected_rows = pscalRuntimeDetectWindowRows();
+		if (detected_rows > 0)
+			rows = detected_rows;
+	}
+	if (pscalRuntimeDetectWindowCols) {
+		int detected_cols = pscalRuntimeDetectWindowCols();
+		if (detected_cols > 0)
+			cols = detected_cols;
+	}
+#endif
+	struct winsize win;
+	if (!ioctl(0, TIOCGWINSZ, &win)) {
+		if (win.ws_col > 0)
+			cols = win.ws_col;
+		if (win.ws_row > 0)
+			rows = win.ws_row;
+	}
+	xcols = cols > 0 ? cols : 80;
+	xrows = rows > 0 ? rows : 25;
+}
+
 void term_init(void)
 {
 	if (xvis & 2)
@@ -531,31 +562,7 @@ void term_init(void)
 	newtermios = termios;
 	newtermios.c_lflag &= ~(ICANON | ISIG | ECHO);
 	tcsetattr(0, TCSAFLUSH, &newtermios);
-	if (getenv("LINES"))
-		xrows = atoi(getenv("LINES"));
-	if (getenv("COLUMNS"))
-		xcols = atoi(getenv("COLUMNS"));
-#if defined(PSCAL_TARGET_IOS)
-	if (pscalRuntimeDetectWindowRows) {
-		int rows = pscalRuntimeDetectWindowRows();
-		if (rows > 0)
-			xrows = rows;
-	}
-	if (pscalRuntimeDetectWindowCols) {
-		int cols = pscalRuntimeDetectWindowCols();
-		if (cols > 0)
-			xcols = cols;
-	}
-#endif
-#if !defined(PSCAL_TARGET_IOS)
-	struct winsize win;
-	if (!ioctl(0, TIOCGWINSZ, &win)) {
-		xcols = win.ws_col;
-		xrows = win.ws_row;
-	}
-#endif
-	xcols = xcols ? xcols : 80;
-	xrows = xrows ? xrows : 25;
+	term_updatewinsize();
 #if defined(PSCAL_TARGET_IOS)
 	pscalTerminalBegin(xcols, xrows);
 	pscalTerminalClear();

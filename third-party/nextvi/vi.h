@@ -313,6 +313,7 @@ extern unsigned char *ibuf, icmd[4096];
 extern unsigned int texec, tn;
 #define term_write(s, n) if (xled) write(1, s, n);
 void term_init(void);
+void term_updatewinsize(void);
 void term_done(void);
 void term_clean(void);
 void term_suspend(void);

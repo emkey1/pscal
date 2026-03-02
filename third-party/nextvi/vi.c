@@ -2098,6 +2098,7 @@ static void vi_handle_sigwinch(void)
 		return;
 	vi_sigwinch_handling = 1;
 	vi_sigwinch_pending = 0;
+	term_updatewinsize();
 	if (term_sbuf && !(xvis & 4))
 		term_exec("", 1, '&')
 	vi_sigwinch_handling = 0;
