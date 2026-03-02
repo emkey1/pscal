@@ -326,6 +326,8 @@ void term_commit(void);
 char *term_att(int att);
 void term_push(char *s, unsigned int n);
 void term_back(int c);
+int vi_sigwinch_pending_poll(void);
+void vi_sigwinch_pending_mark(void);
 #define term_dec() { \
 	if (ibuf_pos > 0) \
 		ibuf_pos--; \

@@ -749,6 +749,12 @@ void term_back(int c)
 int term_read(void)
 {
 #if defined(PSCAL_TARGET_IOS)
+	static int ios_last_cols = -1;
+	static int ios_last_rows = -1;
+	if (ios_last_cols < 0 || ios_last_rows < 0) {
+		ios_last_cols = xcols;
+		ios_last_rows = xrows;
+	}
 	if (ibuf_pos >= ibuf_cnt) {
 		if (texec) {
 			xquit = !xquit ? 1 : xquit;
@@ -766,8 +772,22 @@ int term_read(void)
 				break;
 			}
 			/* n == 0 means timeout/no data: retry instead of emitting TK_INT. */
-			if (n == 0)
+			if (n == 0) {
+				/* Poll winsize during idle periods so resize propagates even when
+				 * no keyboard input arrives or SIGWINCH routing is delayed. */
+				term_updatewinsize();
+				if (xcols != ios_last_cols || xrows != ios_last_rows) {
+					ios_last_cols = xcols;
+					ios_last_rows = xrows;
+					vi_sigwinch_pending_mark();
+					return 0;
+				}
+				if (vi_sigwinch_pending_poll()) {
+					return 0;
+				}
+				usleep(5000);
 				continue;
+			}
 			/* n < 0 means terminal/editor shutdown. */
 			if (texec)
 				xquit = texec == '&' ? -1 : 1;

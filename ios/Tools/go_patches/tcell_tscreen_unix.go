@@ -23,6 +23,10 @@ func pscalUseEmbeddedStdioMode() bool {
 		os.Getenv("PSCAL_MICRO_EMBEDDED") == "1"
 }
 
+func pscalUseResizePoller() bool {
+	return pscalAllowNonRawMode() || pscalUseEmbeddedStdioMode()
+}
+
 func (t *tScreen) pscalSafePostResizeEvent(cols int, rows int) {
 	if t.evch == nil {
 		return
@@ -59,7 +63,7 @@ func (t *tScreen) pscalApplyResize(cols int, rows int) {
 }
 
 func (t *tScreen) pscalStartResizePoller() {
-	if !pscalAllowNonRawMode() {
+	if !pscalUseResizePoller() {
 		return
 	}
 	go func() {
@@ -130,7 +134,7 @@ func (t *tScreen) termioInit() error {
 
 	// Embedded iOS mode drives resize via the poller path only; disabling
 	// signal.Notify avoids late shutdown SIGWINCH delivery races.
-	if t.sigwinch != nil && !pscalAllowNonRawMode() {
+	if t.sigwinch != nil && !pscalUseResizePoller() {
 		signal.Notify(t.sigwinch, syscall.SIGWINCH)
 	}
 	t.pscalStartResizePoller()
@@ -152,7 +156,7 @@ failed:
 }
 
 func (t *tScreen) termioFini() {
-	if t.sigwinch != nil && !pscalAllowNonRawMode() {
+	if t.sigwinch != nil && !pscalUseResizePoller() {
 		signal.Stop(t.sigwinch)
 	}
 

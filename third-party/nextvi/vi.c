@@ -2092,6 +2092,16 @@ void vi(int init)
 static volatile sig_atomic_t vi_sigwinch_pending;
 static volatile sig_atomic_t vi_sigwinch_handling;
 
+int vi_sigwinch_pending_poll(void)
+{
+	return vi_sigwinch_pending != 0;
+}
+
+void vi_sigwinch_pending_mark(void)
+{
+	vi_sigwinch_pending = 1;
+}
+
 static void vi_handle_sigwinch(void)
 {
 	if (!vi_sigwinch_pending || vi_sigwinch_handling)
