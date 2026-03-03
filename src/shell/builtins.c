@@ -72,6 +72,9 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"cut", "cut", -1},
     {"date", "date", -1},
     {"du", "du", -1},
+#ifdef SMALLCLUE_WITH_DVTM
+    {"dvtm", "dvtm", -1},
+#endif
     {"env", "env", -1},
     {"version", "version", -1},
     {"vproc-test", "vproc-test", -1},

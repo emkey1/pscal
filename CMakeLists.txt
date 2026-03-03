@@ -1063,6 +1063,7 @@ set(PSCAL_CORE_SOURCES
 set(SMALLCLUE_SOURCES
     src/smallclue/src/core.c
     src/smallclue/src/integration.c
+    src/smallclue/src/dvtm_app.c
     src/smallclue/src/micro_app.c
     src/smallclue/src/micro_main_stub.c
     src/smallclue/src/nextvi_app.c
@@ -1335,6 +1336,51 @@ list(APPEND PSCAL_CORE_SOURCES ${NEXTVI_CORE_SOURCES})
 set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS "main=nextvi_main_entry")
 set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
 
+option(SMALLCLUE_WITH_DVTM "Enable the dvtm front end as the smallclue 'dvtm' applet (host builds)." OFF)
+set(PSCAL_DVTM_ENABLED OFF)
+if(SMALLCLUE_WITH_DVTM)
+    if(PSCAL_PLATFORM_IOS)
+        message(WARNING "SMALLCLUE_WITH_DVTM is currently unsupported on iOS targets; disabling.")
+        set(SMALLCLUE_WITH_DVTM OFF CACHE BOOL "Enable the dvtm front end as the smallclue 'dvtm' applet (host builds)." FORCE)
+    else()
+        find_package(Curses REQUIRED)
+        set(_pscal_dvtm_config_dir "${CMAKE_BINARY_DIR}/third-party/dvtm")
+        file(MAKE_DIRECTORY "${_pscal_dvtm_config_dir}")
+        configure_file(
+            "${CMAKE_SOURCE_DIR}/third-party/dvtm/config.def.h"
+            "${_pscal_dvtm_config_dir}/config.h"
+            COPYONLY
+        )
+        add_library(pscal_dvtm_static STATIC
+            third-party/dvtm/dvtm.c
+            third-party/dvtm/vt.c
+        )
+        set_property(SOURCE third-party/dvtm/dvtm.c APPEND PROPERTY COMPILE_DEFINITIONS "main=dvtm_main_entry")
+        target_compile_features(pscal_dvtm_static PRIVATE c_std_99)
+        target_compile_definitions(pscal_dvtm_static PRIVATE
+            _POSIX_C_SOURCE=200809L
+            _XOPEN_SOURCE=700
+            _XOPEN_SOURCE_EXTENDED
+            VERSION="0.16-pscal"
+        )
+        if(APPLE)
+            target_compile_definitions(pscal_dvtm_static PRIVATE _DARWIN_C_SOURCE)
+        endif()
+        target_include_directories(pscal_dvtm_static PRIVATE
+            "${_pscal_dvtm_config_dir}"
+            "${CMAKE_SOURCE_DIR}/third-party/dvtm"
+        )
+        if(CURSES_LIBRARIES)
+            target_link_libraries(pscal_dvtm_static PRIVATE ${CURSES_LIBRARIES})
+        endif()
+        find_library(PSCAL_LIB_UTIL util)
+        if(PSCAL_LIB_UTIL)
+            target_link_libraries(pscal_dvtm_static PRIVATE ${PSCAL_LIB_UTIL})
+        endif()
+        set(PSCAL_DVTM_ENABLED ON)
+    endif()
+endif()
+
 if(PSCAL_PLATFORM_IOS)
     set(_pscal_micro_embed_stub OFF)
     if(PSCAL_FORCE_IOS AND NOT PSCAL_REAL_IOS AND NOT PSCAL_MACCATALYST)
@@ -1584,6 +1630,20 @@ endif()
 target_include_directories(pscal_core_static BEFORE PRIVATE
     third-party/nextvi
 )
+if(PSCAL_DVTM_ENABLED)
+    target_include_directories(pscal_core_static BEFORE PRIVATE
+        third-party/dvtm
+        "${_pscal_dvtm_config_dir}"
+    )
+    target_compile_definitions(pscal_core_static PUBLIC SMALLCLUE_WITH_DVTM)
+    target_link_libraries(pscal_core_static PUBLIC pscal_dvtm_static)
+    if(CURSES_LIBRARIES)
+        target_link_libraries(pscal_core_static PUBLIC ${CURSES_LIBRARIES})
+    endif()
+    if(PSCAL_LIB_UTIL)
+        target_link_libraries(pscal_core_static PUBLIC ${PSCAL_LIB_UTIL})
+    endif()
+endif()
 if(PSCAL_PLATFORM_IOS)
     target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
     target_link_libraries(pscal_core_static PUBLIC pscal_micro_embed)

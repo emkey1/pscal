@@ -7,3 +7,6 @@
 [submodule "third-party/micro"]
 	path = third-party/micro
 	url = https://github.com/emkey1/micro.git
+[submodule "third-party/dvtm"]
+	path = third-party/dvtm
+	url = https://github.com/emkey1/dvtm.git
