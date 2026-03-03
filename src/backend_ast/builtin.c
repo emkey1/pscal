@@ -32,6 +32,8 @@
 #include <sys/time.h> // For gettimeofday
 #include <sys/resource.h>
 #include <sys/select.h>
+#include <sys/wait.h>
+#include <wordexp.h>
 #include <stdio.h>   // For printf, fprintf
 #include <pthread.h>
 #include <stdatomic.h>
@@ -7374,6 +7376,11 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
     }
     const char* path = AS_STRING(args[0]);
     const char* cmdline = AS_STRING(args[1]);
+
+    int result = -1;
+#ifdef PSCAL_TARGET_IOS
+    runtimeError(vm, "dosExec is unavailable on iOS builds.");
+#else
     size_t len = strlen(path) + strlen(cmdline) + 2;
     char* cmd = malloc(len);
     if (!cmd) {
@@ -7381,13 +7388,37 @@ Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     snprintf(cmd, len, "%s %s", path, cmdline);
-    int result = -1;
-#ifdef PSCAL_TARGET_IOS
-    runtimeError(vm, "dosExec is unavailable on iOS builds.");
-#else
-    result = system(cmd);
-#endif
+
+    wordexp_t p;
+    // WRDE_NOCMD prevents command substitution $(...) which is a security risk.
+    // This effectively blocks shell injection attacks while allowing argument parsing.
+    int ret = wordexp(cmd, &p, WRDE_NOCMD);
+    if (ret == 0) {
+        if (p.we_wordc > 0) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                // Child process
+                execvp(p.we_wordv[0], p.we_wordv);
+                // If execvp fails, exit with error
+                _exit(127);
+            } else if (pid > 0) {
+                // Parent process
+                int status;
+                if (waitpid(pid, &status, 0) != -1) {
+                    if (WIFEXITED(status)) {
+                        result = WEXITSTATUS(status);
+                    }
+                }
+            }
+        }
+        wordfree(&p);
+    } else {
+        // wordexp failed, likely due to bad characters (WRDE_BADCHAR) or other issues.
+        // Treat as execution failure to prevent injection.
+        result = -1;
+    }
     free(cmd);
+#endif
     return makeInt(result);
 }
 
