@@ -5213,66 +5213,78 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
         \
         /* String/char concatenation for ADD */ \
         if (current_instruction_code == ADD) { \
-            /* Optimization: Resolve pointers without deep copying for string/char operands */ \
-            Value* final_a = &a_val_popped; \
-            while (final_a->type == TYPE_POINTER && final_a->ptr_val) { \
-                final_a = (Value*)final_a->ptr_val; \
-            } \
-            Value* final_b = &b_val_popped; \
-            while (final_b->type == TYPE_POINTER && final_b->ptr_val) { \
-                final_b = (Value*)final_b->ptr_val; \
-            } \
-            if ((IS_STRING(*final_a) || IS_CHAR(*final_a)) && \
-                (IS_STRING(*final_b) || IS_CHAR(*final_b))) { \
-                char a_buffer[2] = {0}; \
-                char b_buffer[2] = {0}; \
-                const char* s_a = NULL; \
-                const char* s_b = NULL; \
-                if (IS_STRING(*final_a)) { \
-                    s_a = AS_STRING(*final_a) ? AS_STRING(*final_a) : ""; \
-                } else { \
-                    a_buffer[0] = AS_CHAR(*final_a); \
-                    s_a = a_buffer; \
-                } \
-                if (IS_STRING(*final_b)) { \
-                    s_b = AS_STRING(*final_b) ? AS_STRING(*final_b) : ""; \
-                } else { \
-                    b_buffer[0] = AS_CHAR(*final_b); \
-                    s_b = b_buffer; \
-                } \
-                size_t len_a = strlen(s_a); \
-                size_t len_b = strlen(s_b); \
-                if (len_b > SIZE_MAX - len_a - 1) { \
-                    runtimeError(vm, "Runtime Error: String concatenation overflow."); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-                } \
-                size_t total_len = len_a + len_b; \
-                char* temp_concat_buffer = (char*)malloc(total_len + 1); \
-                if (!temp_concat_buffer) { \
-                    runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
-                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                    return INTERPRET_RUNTIME_ERROR; \
-                } \
-                memcpy(temp_concat_buffer, s_a, len_a); \
-                memcpy(temp_concat_buffer + len_a, s_b, len_b); \
-                temp_concat_buffer[total_len] = '\0'; \
-                result_val = makeOwnedString(temp_concat_buffer, total_len); \
-                /* Operands are consumed; if they were pointers, they are just dropped. */ \
-                /* If they were strings (on stack), freeValue handles them. */ \
-                freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                op_is_handled = true; \
+            /* Optimization: Fast path for common integer arithmetic */ \
+            if (a_val_popped.type == TYPE_INT32 && b_val_popped.type == TYPE_INT32) { \
+                 long long iresult; \
+                 if (__builtin_add_overflow(a_val_popped.i_val, b_val_popped.i_val, &iresult)) { \
+                     runtimeError(vm, "Runtime Error: Integer overflow."); \
+                     freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                     return INTERPRET_RUNTIME_ERROR; \
+                 } \
+                 result_val = makeInt(iresult); \
+                 op_is_handled = true; \
             } else { \
-                /* Fallback for non-string types: preserve original pointer resolution behavior */ \
-                while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
-                    Value tmp = copyValueForStack(a_val_popped.ptr_val); \
-                    freeValue(&a_val_popped); \
-                    a_val_popped = tmp; \
+                /* Optimization: Resolve pointers without deep copying for string/char operands */ \
+                Value* final_a = &a_val_popped; \
+                while (final_a->type == TYPE_POINTER && final_a->ptr_val) { \
+                    final_a = (Value*)final_a->ptr_val; \
                 } \
-                while (b_val_popped.type == TYPE_POINTER && b_val_popped.ptr_val) { \
-                    Value tmp = copyValueForStack(b_val_popped.ptr_val); \
-                    freeValue(&b_val_popped); \
-                    b_val_popped = tmp; \
+                Value* final_b = &b_val_popped; \
+                while (final_b->type == TYPE_POINTER && final_b->ptr_val) { \
+                    final_b = (Value*)final_b->ptr_val; \
+                } \
+                if ((IS_STRING(*final_a) || IS_CHAR(*final_a)) && \
+                    (IS_STRING(*final_b) || IS_CHAR(*final_b))) { \
+                    char a_buffer[2] = {0}; \
+                    char b_buffer[2] = {0}; \
+                    const char* s_a = NULL; \
+                    const char* s_b = NULL; \
+                    if (IS_STRING(*final_a)) { \
+                        s_a = AS_STRING(*final_a) ? AS_STRING(*final_a) : ""; \
+                    } else { \
+                        a_buffer[0] = AS_CHAR(*final_a); \
+                        s_a = a_buffer; \
+                    } \
+                    if (IS_STRING(*final_b)) { \
+                        s_b = AS_STRING(*final_b) ? AS_STRING(*final_b) : ""; \
+                    } else { \
+                        b_buffer[0] = AS_CHAR(*final_b); \
+                        s_b = b_buffer; \
+                    } \
+                    size_t len_a = strlen(s_a); \
+                    size_t len_b = strlen(s_b); \
+                    if (len_b > SIZE_MAX - len_a - 1) { \
+                        runtimeError(vm, "Runtime Error: String concatenation overflow."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    size_t total_len = len_a + len_b; \
+                    char* temp_concat_buffer = (char*)malloc(total_len + 1); \
+                    if (!temp_concat_buffer) { \
+                        runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    memcpy(temp_concat_buffer, s_a, len_a); \
+                    memcpy(temp_concat_buffer + len_a, s_b, len_b); \
+                    temp_concat_buffer[total_len] = '\0'; \
+                    result_val = makeOwnedString(temp_concat_buffer, total_len); \
+                    /* Operands are consumed; if they were pointers, they are just dropped. */ \
+                    /* If they were strings (on stack), freeValue handles them. */ \
+                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                    op_is_handled = true; \
+                } else { \
+                    /* Fallback for non-string types: preserve original pointer resolution behavior */ \
+                    while (a_val_popped.type == TYPE_POINTER && a_val_popped.ptr_val) { \
+                        Value tmp = copyValueForStack(a_val_popped.ptr_val); \
+                        freeValue(&a_val_popped); \
+                        a_val_popped = tmp; \
+                    } \
+                    while (b_val_popped.type == TYPE_POINTER && b_val_popped.ptr_val) { \
+                        Value tmp = copyValueForStack(b_val_popped.ptr_val); \
+                        freeValue(&b_val_popped); \
+                        b_val_popped = tmp; \
+                    } \
                 } \
             } \
         } \
