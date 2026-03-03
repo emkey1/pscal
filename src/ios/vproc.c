@@ -5622,6 +5622,41 @@ static VProcSessionInput *vprocSessionInputEnsure(VProcSessionStdio *session, in
     return input;
 }
 
+static int vprocResolveSessionShellPidForInput(VProcSessionStdio *session) {
+    if (!session || vprocSessionStdioIsDefault(session)) {
+        return vprocGetShellSelfPid();
+    }
+    if (session->shell_pid > 0) {
+        return session->shell_pid;
+    }
+    if (session->session_id != 0) {
+        int shell_pid = 0;
+        pthread_mutex_lock(&gVProcSessionPtys.mu);
+        VProcSessionPtyEntry *entry = vprocSessionPtyFindLocked(session->session_id, NULL);
+        if (entry && entry->shell_pid > 0) {
+            shell_pid = entry->shell_pid;
+        }
+        pthread_mutex_unlock(&gVProcSessionPtys.mu);
+        if (shell_pid > 0) {
+            session->shell_pid = shell_pid;
+            return shell_pid;
+        }
+    }
+
+    VProc *current = vprocCurrent();
+    if (current) {
+        int current_pid = vprocPid(current);
+        if (current_pid > 0) {
+            session->shell_pid = current_pid;
+            if (session->session_id != 0) {
+                vprocSessionPtySetShellPid(session->session_id, current_pid);
+            }
+            return current_pid;
+        }
+    }
+    return 0;
+}
+
 static ssize_t vprocSessionReadInput(VProcSessionStdio *session, void *buf, size_t count, bool nonblocking) {
     if (!session || !session->input || !buf || count == 0) {
         return 0;
@@ -5708,8 +5743,9 @@ ssize_t vprocSessionReadInputShimMode(void *buf, size_t count, bool nonblocking)
         return -1;
     }
     const bool tool_dbg = vprocToolDebugEnabled();
+    int shell_pid = vprocResolveSessionShellPidForInput(session);
     VProcSessionInput *input = vprocSessionInputEnsure(session,
-                                                       vprocGetShellSelfPid(),
+                                                       shell_pid,
                                                        vprocGetKernelPid());
     if (!input) {
         errno = EBADF;
@@ -5728,7 +5764,7 @@ VProcSessionInput *vprocSessionInputEnsureShim(void) {
     if (!session) {
         return NULL;
     }
-    int shell_pid = vprocGetShellSelfPid();
+    int shell_pid = vprocResolveSessionShellPidForInput(session);
     int kernel_pid = vprocGetKernelPid();
     const bool tool_dbg = vprocToolDebugEnabled();
     if (tool_dbg) {
@@ -5750,7 +5786,7 @@ bool vprocSessionInjectInputShim(const void *data, size_t len) {
     if (!session) {
         return false;
     }
-    int shell_pid = vprocGetShellSelfPid();
+    int shell_pid = vprocResolveSessionShellPidForInput(session);
     int kernel_pid = vprocGetKernelPid();
     VProcSessionInput *input = vprocSessionInputEnsure(session, shell_pid, kernel_pid);
     if (!input) {
