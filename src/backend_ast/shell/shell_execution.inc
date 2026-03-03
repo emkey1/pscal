@@ -166,21 +166,21 @@ static char *shellFindExecutableOnPath(const char *name) {
     return NULL;
 }
 
-static void shellPagerPushVirtualTTYOverride(int fd) {
+static void __attribute__((unused)) shellPagerPushVirtualTTYOverride(int fd) {
     if (gShellPagerVirtualTTYFd >= 0) {
         close(gShellPagerVirtualTTYFd);
     }
     gShellPagerVirtualTTYFd = fd;
 }
 
-static void shellPagerPopVirtualTTYOverride(void) {
+static void __attribute__((unused)) shellPagerPopVirtualTTYOverride(void) {
     if (gShellPagerVirtualTTYFd >= 0) {
         close(gShellPagerVirtualTTYFd);
         gShellPagerVirtualTTYFd = -1;
     }
 }
 
-static int shellPagerGetVirtualTTYOverride(void) {
+static int __attribute__((unused)) shellPagerGetVirtualTTYOverride(void) {
     return gShellPagerVirtualTTYFd;
 }
 
@@ -1260,7 +1260,7 @@ typedef struct {
     bool continued;
 } ShellWaitResult;
 
-static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
+static int __attribute__((unused)) shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
     ShellWaitResult res = { .pid = pid, .status_raw = 0, .status_mapped = 0, .stopped = false, .continued = false };
     int err = 0;
     int status = 0;
@@ -1668,7 +1668,7 @@ static void shellInProcessWorkerCleanup(void *arg) {
     free(ctx);
 }
 
-static void shellInstallVprocSigintHandler(VProc *vp) {
+static void __attribute__((unused)) shellInstallVprocSigintHandler(VProc *vp) {
     if (!vp) {
         return;
     }
@@ -1857,7 +1857,7 @@ static void *shellShebangBackgroundMain(void *arg) {
     return NULL;
 }
 
-static void *shellInProcessBackgroundMain(void *arg) {
+static void *__attribute__((unused)) shellInProcessBackgroundMain(void *arg) {
     ShellBackgroundStageCtx *ctx = (ShellBackgroundStageCtx *)arg;
     if (!ctx) {
         return NULL;
@@ -3579,7 +3579,7 @@ static bool __attribute__((unused)) shellPipelineReadPipeToBuffer(int fd, char *
     return true;
 }
 
-static int shellPipelineCreateSpoolFile(void) {
+static int __attribute__((unused)) shellPipelineCreateSpoolFile(void) {
     const char *tmp_root = getenv("TMPDIR");
     if (!tmp_root || !*tmp_root) {
         tmp_root = "/tmp";

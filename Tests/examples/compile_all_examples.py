@@ -55,6 +55,11 @@ SKIP_BASENAMES = {
     "Makefile",
 }
 
+# Intentionally-negative examples that should fail compilation.
+EXPECTED_COMPILE_FAILURES = {
+    "Examples/pascal/base/ClosureEscapeError",
+}
+
 
 @dataclass
 class CompileFailure:
@@ -127,8 +132,10 @@ def run_compile_sweep(
 ) -> int:
     total = 0
     failures: List[CompileFailure] = []
+    unexpected_successes: List[Path] = []
     discovered: Dict[str, int] = {}
     skipped_sdl: Dict[str, int] = {}
+    expected_failures_seen = 0
     sdl_enabled = read_sdl_enabled_from_cache(REPO_ROOT / "build/CMakeCache.txt")
 
     for language in languages:
@@ -165,6 +172,8 @@ def run_compile_sweep(
         for source in sources:
             total += 1
             relative = source.relative_to(REPO_ROOT)
+            relative_key = relative.as_posix()
+            expected_compile_failure = relative_key in EXPECTED_COMPILE_FAILURES
             print(f"[RUN ] {relative}")
             try:
                 result = compile_example(binary, source, timeout_seconds)
@@ -177,17 +186,25 @@ def run_compile_sweep(
                 continue
 
             if result.returncode != 0:
-                failures.append(
-                    CompileFailure(
-                        language=language,
-                        path=source,
-                        returncode=result.returncode,
-                        output=(result.stdout or "").strip(),
+                if expected_compile_failure:
+                    expected_failures_seen += 1
+                    print(f"[PASS] {relative} (expected compile failure)")
+                else:
+                    failures.append(
+                        CompileFailure(
+                            language=language,
+                            path=source,
+                            returncode=result.returncode,
+                            output=(result.stdout or "").strip(),
+                        )
                     )
-                )
-                print(f"[FAIL] {relative} (exit={result.returncode})")
+                    print(f"[FAIL] {relative} (exit={result.returncode})")
             else:
-                print(f"[PASS] {relative}")
+                if expected_compile_failure:
+                    unexpected_successes.append(source)
+                    print(f"[FAIL] {relative} (unexpected compile success)")
+                else:
+                    print(f"[PASS] {relative}")
 
     print("\nDiscovery summary:")
     listed_total = 0
@@ -200,6 +217,8 @@ def run_compile_sweep(
         else:
             print(f"  {language}: {discovered_count} source file(s)")
     print(f"  total: {listed_total} source file(s)")
+    if expected_failures_seen > 0:
+        print(f"  expected compile failures observed: {expected_failures_seen}")
 
     if fail_on_empty:
         empty_languages = [language for language in languages if discovered.get(language, 0) == 0]
@@ -226,6 +245,12 @@ def run_compile_sweep(
                     print(f"    ... ({len(lines) - 40} more lines)")
             else:
                 print("    <no output>")
+    if unexpected_successes:
+        print(f"\nUnexpected compile successes: {len(unexpected_successes)}")
+        for success in unexpected_successes:
+            relative = success.relative_to(REPO_ROOT)
+            print(f"  {relative}")
+    if failures or unexpected_successes:
         return 1
 
     print("\nAll discovered examples compiled successfully with --dump-bytecode-only.")

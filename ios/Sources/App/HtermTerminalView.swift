@@ -166,7 +166,6 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
 
     private static let terminalScheme = "pscal-terminal"
     private static let schemeHandler = TerminalResourceSchemeHandler()
-    private static let sharedProcessPool = WKProcessPool()
     let webView: WKWebView
     private let userContentController: WKUserContentController
     private var scriptMessageBridges: [WeakScriptMessageHandler] = []
@@ -212,9 +211,6 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         self.instanceId = Self.nextInstanceId
         let controller = WKUserContentController()
         let config = WKWebViewConfiguration()
-        // Keep one process pool for all terminal tabs to avoid high-memory
-        // churn when users open/close tabs rapidly under load.
-        config.processPool = Self.sharedProcessPool
         config.setURLSchemeHandler(Self.schemeHandler, forURLScheme: Self.terminalScheme)
         config.userContentController = controller
         let debugValue = Self.debugEnabled ? "true" : "false"
@@ -915,7 +911,7 @@ private final class ScrollbarViewDelegateProxy: NSObject, UIScrollViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard let scrollbarView = scrollView as? ScrollbarView,
-              let contentView = scrollbarView.contentView else {
+              scrollbarView.contentView != nil else {
             innerDelegate?.scrollViewDidScroll?(scrollView)
             return
         }
@@ -1179,22 +1175,21 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
                     return
                 }
                 if keyInputView.isFirstResponder {
-                    keyInputView.resignFirstResponder()
+                    _ = keyInputView.resignFirstResponder()
                 }
                 _ = webView.becomeFirstResponder()
                 let target = rect.insetBy(dx: -4, dy: -4)
                 let clamped = target.intersection(webView.bounds)
                 let effectiveTarget = clamped.isNull ? target : clamped
-                UIMenuController.shared.setTargetRect(effectiveTarget, in: webView)
-                UIMenuController.shared.setMenuVisible(true, animated: true)
+                UIMenuController.shared.showMenu(from: webView, rect: effectiveTarget)
                 selectionMenuVisible = true
                 lastSelectionRect = rect
             } else if selectionMenuVisible {
-                UIMenuController.shared.setMenuVisible(false, animated: true)
+                UIMenuController.shared.hideMenu(from: webView)
                 selectionMenuVisible = false
                 lastSelectionRect = nil
                 if isActiveForInput {
-                    keyInputView.becomeFirstResponder()
+                    _ = keyInputView.becomeFirstResponder()
                 }
             }
         }
@@ -1241,7 +1236,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             pendingFocus = false
             controller.setFocused(false)
             if keyInputView.isFirstResponder {
-                keyInputView.resignFirstResponder()
+                _ = keyInputView.resignFirstResponder()
             }
             updateDisplayAttachment()
         } else if controller.isLoaded {
@@ -1419,7 +1414,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         if focused {
             updateVisibilityForInput()
         } else if keyInputView.isFirstResponder {
-            keyInputView.resignFirstResponder()
+            _ = keyInputView.resignFirstResponder()
         }
     }
 
@@ -1449,11 +1444,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     private func hasVisibleSDLWindow() -> Bool {
-        let sceneWindows = UIApplication.shared.connectedScenes
+        let allWindows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
-        let appWindows = UIApplication.shared.windows
-        let allWindows = sceneWindows + appWindows
         return allWindows.contains { window in
                 guard !window.isHidden else { return false }
                 let className = NSStringFromClass(type(of: window)).lowercased()
@@ -1480,7 +1473,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         lastVisibilityForInput = visible
         if !visible {
             if keyInputView.isFirstResponder {
-                keyInputView.resignFirstResponder()
+                _ = keyInputView.resignFirstResponder()
             }
             updateDisplayAttachment()
             return

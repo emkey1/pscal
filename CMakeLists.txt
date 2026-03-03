@@ -322,12 +322,6 @@ if(NOT PSCAL_PLATFORM_IOS)
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
     string(REGEX REPLACE "#define[ \t]+HAVE_UTIL_H[ \t]+1" "/* #undef HAVE_UTIL_H */"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_LE32TOH[ \t]+0" "#define HAVE_DECL_LE32TOH 1"
-        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_LE64TOH[ \t]+0" "#define HAVE_DECL_LE64TOH 1"
-        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
-    string(REGEX REPLACE "#define[ \t]+HAVE_DECL_HTOLE64[ \t]+0" "#define HAVE_DECL_HTOLE64 1"
-        _pscal_openssh_config_h "${_pscal_openssh_config_h}")
     string(REGEX REPLACE "#define[ \t]+HAVE_DECL_UINT32_MAX[ \t]+1" "#define HAVE_DECL_UINT32_MAX 1"
         _pscal_openssh_config_h "${_pscal_openssh_config_h}")
 
@@ -630,10 +624,26 @@ if(SDL)
         set(SDL2TTF_VENDORED ON CACHE BOOL "Use vendored dependencies for SDL2_ttf" FORCE)
         set(SDL2TTF_BUILD_SHARED_LIBS OFF CACHE BOOL "Build SDL2_ttf as a static library" FORCE)
 
+        set(_PSCAL_VENDORED_SDL_C_FLAGS_SAVE "${CMAKE_C_FLAGS}")
+        set(_PSCAL_VENDORED_SDL_CXX_FLAGS_SAVE "${CMAKE_CXX_FLAGS}")
+        set(_PSCAL_VENDORED_SDL_OBJC_FLAGS_SAVE "${CMAKE_OBJC_FLAGS}")
+        set(_PSCAL_VENDORED_SDL_OBJCXX_FLAGS_SAVE "${CMAKE_OBJCXX_FLAGS}")
+        set(_PSCAL_VENDORED_SDL_WARN_SILENCE
+            "-Wno-deprecated-declarations -Wno-macro-redefined -Wno-unused-but-set-variable -DGLES_SILENCE_DEPRECATION")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${_PSCAL_VENDORED_SDL_WARN_SILENCE}")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_PSCAL_VENDORED_SDL_WARN_SILENCE}")
+        set(CMAKE_OBJC_FLAGS "${CMAKE_OBJC_FLAGS} ${_PSCAL_VENDORED_SDL_WARN_SILENCE}")
+        set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} ${_PSCAL_VENDORED_SDL_WARN_SILENCE}")
+
         _pscal_add_vendored_component("SDL2" "${_PSCAL_VENDORED_SDL2_SRC}")
         _pscal_add_vendored_component("SDL2_image" "${_PSCAL_VENDORED_SDL2_IMAGE_SRC}")
         _pscal_add_vendored_component("SDL2_mixer" "${_PSCAL_VENDORED_SDL2_MIXER_SRC}")
         _pscal_add_vendored_component("SDL2_ttf" "${_PSCAL_VENDORED_SDL2_TTF_SRC}")
+
+        set(CMAKE_C_FLAGS "${_PSCAL_VENDORED_SDL_C_FLAGS_SAVE}")
+        set(CMAKE_CXX_FLAGS "${_PSCAL_VENDORED_SDL_CXX_FLAGS_SAVE}")
+        set(CMAKE_OBJC_FLAGS "${_PSCAL_VENDORED_SDL_OBJC_FLAGS_SAVE}")
+        set(CMAKE_OBJCXX_FLAGS "${_PSCAL_VENDORED_SDL_OBJCXX_FLAGS_SAVE}")
 
         function(_pscal_select_target out_target static_target fallback_target)
             if(TARGET ${static_target})
@@ -1054,6 +1064,7 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/core.c
     src/smallclue/src/integration.c
     src/smallclue/src/micro_app.c
+    src/smallclue/src/micro_main_stub.c
     src/smallclue/src/nextvi_app.c
     src/smallclue/src/openssh_app.c
     src/smallclue/src/vproc_test_app.c
@@ -1281,7 +1292,9 @@ set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
     -Wno-pointer-sign
     -Wno-unused-variable
     -Wno-unused-function
-    -Wno-string-compare)
+    -Wno-string-compare
+    -U_FORTIFY_SOURCE
+    -D_FORTIFY_SOURCE=0)
 if(PSCAL_PLATFORM_IOS)
     set_property(SOURCE ${PSCAL_OPENSSH_SOURCES}
         APPEND PROPERTY COMPILE_DEFINITIONS HAVE_CONFIG_H;PSCAL_TARGET_IOS;__progname=pscal_progname;VPROC_SHIM_DISABLED=1;VPROC_SHIM_HARD_DISABLED=1)
@@ -1323,94 +1336,104 @@ set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS 
 set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
 
 if(PSCAL_PLATFORM_IOS)
-    set(_pscal_micro_arch "${CMAKE_OSX_ARCHITECTURES}")
-    if(_pscal_micro_arch MATCHES ";")
-        message(FATAL_ERROR "Micro iOS embedding currently requires a single target arch, got '${_pscal_micro_arch}'")
+    set(_pscal_micro_embed_stub OFF)
+    if(PSCAL_FORCE_IOS AND NOT PSCAL_REAL_IOS AND NOT PSCAL_MACCATALYST)
+        set(_pscal_micro_embed_stub ON)
     endif()
-    if(NOT _pscal_micro_arch)
-        if(CMAKE_SYSTEM_PROCESSOR)
-            set(_pscal_micro_arch "${CMAKE_SYSTEM_PROCESSOR}")
-        else()
+
+    if(_pscal_micro_embed_stub)
+        add_library(pscal_micro_embed STATIC src/smallclue/src/micro_embed_stub.c)
+        message(STATUS "Using stub micro embed archive for forced-iOS host build")
+    else()
+        set(_pscal_micro_arch "${CMAKE_OSX_ARCHITECTURES}")
+        if(_pscal_micro_arch MATCHES ";")
+            message(FATAL_ERROR "Micro iOS embedding currently requires a single target arch, got '${_pscal_micro_arch}'")
+        endif()
+        if(NOT _pscal_micro_arch)
+            if(CMAKE_SYSTEM_PROCESSOR)
+                set(_pscal_micro_arch "${CMAKE_SYSTEM_PROCESSOR}")
+            else()
+                set(_pscal_micro_arch "arm64")
+            endif()
+        endif()
+        if(_pscal_micro_arch STREQUAL "x86_64")
+            set(_pscal_micro_goarch "amd64")
+        elseif(_pscal_micro_arch STREQUAL "arm64" OR _pscal_micro_arch STREQUAL "aarch64")
+            set(_pscal_micro_goarch "arm64")
             set(_pscal_micro_arch "arm64")
+        else()
+            message(FATAL_ERROR "Unsupported micro embed architecture '${_pscal_micro_arch}'")
         endif()
-    endif()
-    if(_pscal_micro_arch STREQUAL "x86_64")
-        set(_pscal_micro_goarch "amd64")
-    elseif(_pscal_micro_arch STREQUAL "arm64" OR _pscal_micro_arch STREQUAL "aarch64")
-        set(_pscal_micro_goarch "arm64")
-        set(_pscal_micro_arch "arm64")
-    else()
-        message(FATAL_ERROR "Unsupported micro embed architecture '${_pscal_micro_arch}'")
-    endif()
 
-    string(TOLOWER "${CMAKE_OSX_SYSROOT}" _pscal_micro_sysroot)
-    if(PSCAL_MACCATALYST)
-        set(_pscal_micro_goos "ios")
-        set(_pscal_micro_sdk "macosx")
-        set(_pscal_micro_deployment "${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        if(NOT _pscal_micro_deployment)
-            set(_pscal_micro_deployment "15.0")
+        string(TOLOWER "${CMAKE_OSX_SYSROOT}" _pscal_micro_sysroot)
+        if(PSCAL_MACCATALYST)
+            set(_pscal_micro_goos "ios")
+            set(_pscal_micro_sdk "macosx")
+            set(_pscal_micro_deployment "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+            if(NOT _pscal_micro_deployment)
+                set(_pscal_micro_deployment "15.0")
+            endif()
+            set(_pscal_micro_target "${_pscal_micro_arch}-apple-ios${_pscal_micro_deployment}-macabi")
+        elseif(_pscal_micro_sysroot MATCHES "iphoneos")
+            set(_pscal_micro_goos "ios")
+            set(_pscal_micro_sdk "iphoneos")
+            set(_pscal_micro_deployment "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+            if(NOT _pscal_micro_deployment)
+                set(_pscal_micro_deployment "15.0")
+            endif()
+            set(_pscal_micro_target "${_pscal_micro_arch}-apple-ios${_pscal_micro_deployment}")
+        elseif(_pscal_micro_sysroot MATCHES "iphonesimulator")
+            set(_pscal_micro_goos "ios")
+            set(_pscal_micro_sdk "iphonesimulator")
+            set(_pscal_micro_deployment "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+            if(NOT _pscal_micro_deployment)
+                set(_pscal_micro_deployment "15.0")
+            endif()
+            set(_pscal_micro_target "${_pscal_micro_arch}-apple-ios${_pscal_micro_deployment}-simulator")
+        else()
+            message(FATAL_ERROR "Unable to resolve iOS micro embed target from CMAKE_OSX_SYSROOT='${CMAKE_OSX_SYSROOT}'")
         endif()
-        set(_pscal_micro_target "${_pscal_micro_arch}-apple-ios${_pscal_micro_deployment}-macabi")
-    elseif(_pscal_micro_sysroot MATCHES "iphoneos")
-        set(_pscal_micro_goos "ios")
-        set(_pscal_micro_sdk "iphoneos")
-        set(_pscal_micro_deployment "${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        if(NOT _pscal_micro_deployment)
-            set(_pscal_micro_deployment "15.0")
-        endif()
-        set(_pscal_micro_target "${_pscal_micro_arch}-apple-ios${_pscal_micro_deployment}")
-    elseif(_pscal_micro_sysroot MATCHES "iphonesimulator")
-        set(_pscal_micro_goos "ios")
-        set(_pscal_micro_sdk "iphonesimulator")
-        set(_pscal_micro_deployment "${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        if(NOT _pscal_micro_deployment)
-            set(_pscal_micro_deployment "15.0")
-        endif()
-        set(_pscal_micro_target "${_pscal_micro_arch}-apple-ios${_pscal_micro_deployment}-simulator")
-    else()
-        message(FATAL_ERROR "Unable to resolve iOS micro embed target from CMAKE_OSX_SYSROOT='${CMAKE_OSX_SYSROOT}'")
-    endif()
 
-    if(NOT DEFINED PSCAL_GO_BIN)
-        set(PSCAL_GO_BIN "")
-    endif()
-    if(PSCAL_GO_BIN)
-        set(_pscal_go_bin "${PSCAL_GO_BIN}")
-    else()
-        find_program(_pscal_go_bin NAMES go HINTS /opt/homebrew/bin /usr/local/bin)
-    endif()
-    if(NOT _pscal_go_bin)
-        message(FATAL_ERROR "Go toolchain is required for iOS micro embedding; set PSCAL_GO_BIN to a valid go binary")
-    endif()
+        if(NOT DEFINED PSCAL_GO_BIN)
+            set(PSCAL_GO_BIN "")
+        endif()
+        if(PSCAL_GO_BIN)
+            set(_pscal_go_bin "${PSCAL_GO_BIN}")
+        else()
+            find_program(_pscal_go_bin NAMES go HINTS /opt/homebrew/bin /usr/local/bin)
+        endif()
+        if(NOT _pscal_go_bin)
+            message(FATAL_ERROR "Go toolchain is required for iOS micro embedding; set PSCAL_GO_BIN to a valid go binary")
+        endif()
 
-    set(_pscal_micro_embed_lib "${CMAKE_BINARY_DIR}/libpscal_micro_embed.a")
-    set(_pscal_micro_embed_hdr "${CMAKE_BINARY_DIR}/libpscal_micro_embed.h")
-    add_custom_command(
-        OUTPUT "${_pscal_micro_embed_lib}" "${_pscal_micro_embed_hdr}"
-        COMMAND /bin/bash "${CMAKE_SOURCE_DIR}/ios/Tools/build_micro_embed_archive.sh"
-            --output-lib "${_pscal_micro_embed_lib}"
-            --output-header "${_pscal_micro_embed_hdr}"
-            --go-bin "${_pscal_go_bin}"
-            --goos "${_pscal_micro_goos}"
-            --goarch "${_pscal_micro_goarch}"
-            --sdk "${_pscal_micro_sdk}"
-            --target "${_pscal_micro_target}"
-        DEPENDS
-            "${CMAKE_SOURCE_DIR}/ios/Tools/build_micro_embed_archive.sh"
-            "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix.go"
-            "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix_darwin.go"
-            "${CMAKE_SOURCE_DIR}/third-party/micro/go.mod"
-            "${CMAKE_SOURCE_DIR}/third-party/micro/go.sum"
-            "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/micro.go"
-            "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/pscal_embed.go"
-        VERBATIM
-        COMMENT "Building embedded micro archive for ${_pscal_micro_sdk}/${_pscal_micro_arch}"
-    )
-    add_custom_target(pscal_micro_embed_archive DEPENDS "${_pscal_micro_embed_lib}" "${_pscal_micro_embed_hdr}")
-    add_library(pscal_micro_embed STATIC IMPORTED GLOBAL)
-    set_target_properties(pscal_micro_embed PROPERTIES IMPORTED_LOCATION "${_pscal_micro_embed_lib}")
-    add_dependencies(pscal_micro_embed pscal_micro_embed_archive)
+        set(_pscal_micro_embed_lib "${CMAKE_BINARY_DIR}/libpscal_micro_embed.a")
+        set(_pscal_micro_embed_hdr "${CMAKE_BINARY_DIR}/libpscal_micro_embed.h")
+        add_custom_command(
+            OUTPUT "${_pscal_micro_embed_lib}" "${_pscal_micro_embed_hdr}"
+            COMMAND /bin/bash "${CMAKE_SOURCE_DIR}/ios/Tools/build_micro_embed_archive.sh"
+                --output-lib "${_pscal_micro_embed_lib}"
+                --output-header "${_pscal_micro_embed_hdr}"
+                --go-bin "${_pscal_go_bin}"
+                --goos "${_pscal_micro_goos}"
+                --goarch "${_pscal_micro_goarch}"
+                --sdk "${_pscal_micro_sdk}"
+                --target "${_pscal_micro_target}"
+            DEPENDS
+                "${CMAKE_SOURCE_DIR}/ios/Tools/build_micro_embed_archive.sh"
+                "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix.go"
+                "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix_darwin.go"
+                "${CMAKE_SOURCE_DIR}/third-party/micro/go.mod"
+                "${CMAKE_SOURCE_DIR}/third-party/micro/go.sum"
+                "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/micro.go"
+                "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/pscal_embed.go"
+            VERBATIM
+            COMMENT "Building embedded micro archive for ${_pscal_micro_sdk}/${_pscal_micro_arch}"
+        )
+        add_custom_target(pscal_micro_embed_archive DEPENDS "${_pscal_micro_embed_lib}" "${_pscal_micro_embed_hdr}")
+        add_library(pscal_micro_embed STATIC IMPORTED GLOBAL)
+        set_target_properties(pscal_micro_embed PROPERTIES IMPORTED_LOCATION "${_pscal_micro_embed_lib}")
+        add_dependencies(pscal_micro_embed pscal_micro_embed_archive)
+    endif()
 endif()
 
 if(PSCAL_PLATFORM_IOS)

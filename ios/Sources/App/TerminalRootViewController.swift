@@ -4,11 +4,9 @@ import UIKit
 @MainActor
 final class TerminalWindow: UIWindow {
     private static func hasVisibleSDLWindow() -> Bool {
-        let sceneWindows = UIApplication.shared.connectedScenes
+        let allWindows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
-        let appWindows = UIApplication.shared.windows
-        let allWindows = sceneWindows + appWindows
         return allWindows.contains { window in
             guard !window.isHidden else { return false }
             let className = NSStringFromClass(type(of: window)).lowercased()

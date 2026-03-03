@@ -62,6 +62,7 @@
 
 static int s_vm_trace_head = 0;
 
+#ifndef PSCAL_NO_CLI_ENTRYPOINTS
 static void pascalApplyBgRedirectionFromEnv(void) {
 #if defined(PSCAL_TARGET_IOS)
     /* Avoid process-wide fd redirection on iOS; background jobs would steal the shell TTY. */
@@ -91,6 +92,7 @@ static void pascalApplyBgRedirectionFromEnv(void) {
         dup2(STDOUT_FILENO, STDERR_FILENO);
     }
 }
+#endif
 static VM *s_sigint_vm = NULL;
 
 static void pascalHandleSigint(int signo) {

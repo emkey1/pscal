@@ -251,7 +251,7 @@ func pscalRuntimeBindSessionToBootstrapHandle(_ bootstrapHandle: UnsafeMutableRa
 
 // MARK: - Runtime Bootstrap
 
-final class PscalRuntimeBootstrap: ObservableObject {
+final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     static let shared = PscalRuntimeBootstrap() // Main/Global instance
     
     // MARK: - Runtime ID Generation

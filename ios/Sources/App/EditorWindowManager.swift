@@ -372,7 +372,9 @@ final class TerminalEditorViewController: UIViewController {
         fontObserver = NotificationCenter.default.addObserver(forName: TerminalFontSettings.appearanceDidChangeNotification,
                                                               object: nil,
                                                               queue: .main) { [weak self] _ in
-            self?.reportGeometryIfNeeded()
+            Task { @MainActor in
+                self?.reportGeometryIfNeeded()
+            }
         }
     }
 
@@ -397,7 +399,7 @@ final class TerminalEditorViewController: UIViewController {
         reportGeometryIfNeeded()
         DispatchQueue.main.async { [weak self] in
             guard let self, self.view.window?.isKeyWindow == true else { return }
-            self.inputViewBridge.becomeFirstResponder()
+            _ = self.inputViewBridge.becomeFirstResponder()
         }
     }
 
@@ -442,7 +444,7 @@ final class TerminalEditorViewController: UIViewController {
 
     func resignInputFocus() {
         DispatchQueue.main.async {
-            self.inputViewBridge.resignFirstResponder()
+            _ = self.inputViewBridge.resignFirstResponder()
         }
     }
 
