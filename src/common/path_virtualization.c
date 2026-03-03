@@ -599,6 +599,21 @@ static int pathVirtualizedOpenHost(const char *path, int oflag, mode_t mode, boo
     return has_mode ? open(path, oflag, mode) : open(path, oflag);
 }
 
+static bool pathVirtualizedIsProcPath(const char *path) {
+    if (!path || path[0] != '/') {
+        return false;
+    }
+    if (strncmp(path, "/proc", 5) == 0 &&
+        (path[5] == '\0' || path[5] == '/')) {
+        return true;
+    }
+    if (strncmp(path, "/private/proc", 13) == 0 &&
+        (path[13] == '\0' || path[13] == '/')) {
+        return true;
+    }
+    return false;
+}
+
 int pscalPathVirtualized_open(const char *path, int oflag, ...) {
     mode_t mode = 0;
     bool has_mode = false;
@@ -626,7 +641,18 @@ int pscalPathVirtualized_open(const char *path, int oflag, ...) {
         pathVirtualizedEnsureParent(target);
         return pathVirtualizedOpenHost(target, oflag, mode, true);
     }
-    return pathVirtualizedOpenHost(target, oflag, 0, false);
+
+    int fd = pathVirtualizedOpenHost(target, oflag, 0, false);
+    if (fd >= 0 || errno != ENOENT || !pathVirtualizedIsProcPath(path)) {
+        return fd;
+    }
+
+    /* /proc entries are refreshed on demand and can be pruned/rebuilt by
+     * neighboring calls. Retry once after a fresh expansion/refresh cycle. */
+    char retry_expanded[PATH_MAX];
+    const char *retry_target = pathVirtualizedPrepare(path, retry_expanded);
+    LOG_EXPANSION("open-retry", path, retry_target);
+    return pathVirtualizedOpenHost(retry_target, oflag, 0, false);
 }
 
 FILE *pscalPathVirtualized_fopen(const char *path, const char *mode) {
