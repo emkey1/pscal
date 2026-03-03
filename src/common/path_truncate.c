@@ -2671,6 +2671,36 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         host_pid = 1;
     }
 
+    if (request_proc_pid_path && request_proc_self) {
+        int current_vproc_pid = pathTruncateCurrentVProcPid();
+        int pid_to_ensure = current_vproc_pid > 0 ? current_vproc_pid : (int)host_pid;
+        if (pid_to_ensure > 0) {
+            pid_t host_ppid = getppid();
+            if (host_ppid < 0) {
+                host_ppid = 0;
+            }
+            struct timespec mono = {0};
+            double uptime_secs = 0.0;
+            if (clock_gettime(CLOCK_MONOTONIC, &mono) == 0) {
+                uptime_secs = (double)mono.tv_sec + ((double)mono.tv_nsec / 1e9);
+            }
+            uint64_t mem_total_kb = 1024ull * 1024ull;
+            char self_path[PATH_MAX];
+            if (snprintf(self_path, sizeof(self_path), "%s/self", procdir) > 0) {
+                char pid_link[32];
+                snprintf(pid_link, sizeof(pid_link), "%d", pid_to_ensure);
+                pathTruncateEnsureSymlink(self_path, pid_link);
+            }
+            pathTruncateWriteProcPidEntries(procdir,
+                                            prefix,
+                                            (pid_t)pid_to_ensure,
+                                            host_ppid,
+                                            "proc",
+                                            mem_total_kb,
+                                            uptime_secs);
+        }
+    }
+
     if (request_proc_pid_path &&
         request_proc_exact_dir &&
         !request_net &&
@@ -2706,8 +2736,15 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         bucket = &g_procRefreshLastVmMs;
         min_interval_ms = 200;
     }
+    char cpuinfo_sentinel[PATH_MAX];
+    bool has_cpuinfo = false;
+    if (snprintf(cpuinfo_sentinel, sizeof(cpuinfo_sentinel), "%s/cpuinfo", procdir) > 0) {
+        has_cpuinfo = (access(cpuinfo_sentinel, F_OK) == 0);
+    }
+    bool seed_needed = !g_procBaseSeeded || !has_cpuinfo;
+
     if (now_ms != 0 && *bucket != 0 && now_ms > *bucket &&
-        (now_ms - *bucket) < min_interval_ms) {
+        (now_ms - *bucket) < min_interval_ms && !seed_needed) {
         return;
     }
     if (now_ms != 0) {
@@ -2722,13 +2759,6 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
     if (!request_device) {
         refresh_device_entries = false;
     }
-
-    char cpuinfo_sentinel[PATH_MAX];
-    bool has_cpuinfo = false;
-    if (snprintf(cpuinfo_sentinel, sizeof(cpuinfo_sentinel), "%s/cpuinfo", procdir) > 0) {
-        has_cpuinfo = (access(cpuinfo_sentinel, F_OK) == 0);
-    }
-    bool seed_needed = !g_procBaseSeeded || !has_cpuinfo;
 
     struct timespec mono = {0};
     double uptime_secs = 0.0;
@@ -2749,15 +2779,26 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
             vproc_snapshots,
             sizeof(vproc_snapshots) / sizeof(vproc_snapshots[0]));
         bool wrote_any = false;
+        bool current_in_snapshot = false;
         int keep_pids[512];
         size_t keep_count = 0;
         for (size_t i = 0; i < vproc_snapshot_count; ++i) {
             if (vproc_snapshots[i].pid <= 0) {
                 continue;
             }
+            if (current_vproc_pid > 0 && vproc_snapshots[i].pid == current_vproc_pid) {
+                current_in_snapshot = true;
+            }
             pathTruncateEnsureProcPidDir(procdir, vproc_snapshots[i].pid);
             if (keep_count < (sizeof(keep_pids) / sizeof(keep_pids[0]))) {
                 keep_pids[keep_count++] = vproc_snapshots[i].pid;
+            }
+            wrote_any = true;
+        }
+        if (current_vproc_pid > 0 && !current_in_snapshot) {
+            pathTruncateEnsureProcPidDir(procdir, current_vproc_pid);
+            if (keep_count < (sizeof(keep_pids) / sizeof(keep_pids[0]))) {
+                keep_pids[keep_count++] = current_vproc_pid;
             }
             wrote_any = true;
         }
@@ -3473,11 +3514,15 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         }
 
         bool wrote_vproc = false;
+        bool current_in_snapshot = false;
         bool host_pid_is_vproc = false;
         for (size_t i = 0; i < vproc_snapshot_count; ++i) {
             const PathTruncateVProcSnapshot *snapshot = &vproc_snapshots[i];
             if (snapshot->pid <= 0) {
                 continue;
+            }
+            if (current_vproc_pid > 0 && snapshot->pid == current_vproc_pid) {
+                current_in_snapshot = true;
             }
             if (snapshot->pid == (int)host_pid) {
                 host_pid_is_vproc = true;
@@ -3496,6 +3541,20 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
                                             mem_total_kb,
                                             uptime_secs);
             wrote_vproc = true;
+        }
+
+        if (current_vproc_pid > 0 && !current_in_snapshot) {
+            pathTruncateWriteProcPidEntries(procdir,
+                                            prefix,
+                                            (pid_t)current_vproc_pid,
+                                            0,
+                                            "vproc",
+                                            mem_total_kb,
+                                            uptime_secs);
+            wrote_vproc = true;
+            if (current_vproc_pid == (int)host_pid) {
+                host_pid_is_vproc = true;
+            }
         }
 
         if (!wrote_vproc && current_vproc_pid > 0) {
@@ -3543,6 +3602,13 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
             if (vproc_snapshot_count == 0 && current_vproc_pid > 0 &&
                 vproc_keep_count < (sizeof(vproc_keep_pids) / sizeof(vproc_keep_pids[0]))) {
                 vproc_keep_pids[vproc_keep_count++] = current_vproc_pid;
+            }
+            if (vproc_keep_count == 0) {
+                int fallback_pid = proc_display_pid > 0 ? proc_display_pid : (int)host_pid;
+                if (fallback_pid > 0 &&
+                    vproc_keep_count < (sizeof(vproc_keep_pids) / sizeof(vproc_keep_pids[0]))) {
+                    vproc_keep_pids[vproc_keep_count++] = fallback_pid;
+                }
             }
         }
         bool allow_vproc_prune = true;

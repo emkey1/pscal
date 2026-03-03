@@ -251,7 +251,7 @@ func pscalRuntimeBindSessionToBootstrapHandle(_ bootstrapHandle: UnsafeMutableRa
 
 // MARK: - Runtime Bootstrap
 
-final class PscalRuntimeBootstrap: ObservableObject {
+final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
     static let shared = PscalRuntimeBootstrap() // Main/Global instance
     
     // MARK: - Runtime ID Generation
@@ -677,10 +677,22 @@ final class PscalRuntimeBootstrap: ObservableObject {
             if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
                 setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
             }
+            unsetenv("PSCALI_MICRO_PATH")
             let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
             setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
             let workdir = (containerRoot as NSString).appendingPathComponent("Documents/home")
             setenv("PSCALI_WORKDIR", workdir, 1)
+            setenv("HOME", workdir, 1)
+            let xdgConfigHome = (workdir as NSString).appendingPathComponent(".config")
+            let microConfigHome = (xdgConfigHome as NSString).appendingPathComponent("micro")
+            _ = try? FileManager.default.createDirectory(atPath: xdgConfigHome,
+                                                         withIntermediateDirectories: true,
+                                                         attributes: nil)
+            _ = try? FileManager.default.createDirectory(atPath: microConfigHome,
+                                                         withIntermediateDirectories: true,
+                                                         attributes: nil)
+            setenv("XDG_CONFIG_HOME", xdgConfigHome, 1)
+            setenv("MICRO_CONFIG_HOME", microConfigHome, 1)
             if getenv("PSCALI_PTY_OUTPUT_DIRECT") == nil {
                 setenv("PSCALI_PTY_OUTPUT_DIRECT", "1", 1)
             }
@@ -849,8 +861,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func sendInterrupt() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            // Match terminal semantics for interactive tabs: inject ETX.
-            sendControlByteToSession(0x03, sessionId: activeSession)
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGINT) != 0
+            }
+            if !delivered {
+                // Fallback keeps local semantics working if foreground signal
+                // routing is temporarily unresolved.
+                sendControlByteToSession(0x03, sessionId: activeSession)
+            }
             return
         }
         withRuntimeContext {
@@ -861,8 +879,14 @@ final class PscalRuntimeBootstrap: ObservableObject {
     func sendSuspend() {
         let activeSession = resolveActiveSessionId()
         if activeSession != 0 {
-            // Match terminal semantics for interactive tabs: inject SUB.
-            sendControlByteToSession(0x1A, sessionId: activeSession)
+            let delivered = withRuntimeContext {
+                PSCALRuntimeSendSignalForSession(activeSession, SIGTSTP) != 0
+            }
+            if !delivered {
+                // Fallback keeps local semantics working if foreground signal
+                // routing is temporarily unresolved.
+                sendControlByteToSession(0x1A, sessionId: activeSession)
+            }
             return
         }
         withRuntimeContext {
@@ -1331,7 +1355,7 @@ final class PscalRuntimeBootstrap: ObservableObject {
         if timeSinceLast < minRenderInterval {
             renderQueued = true
             let delay = minRenderInterval - timeSinceLast
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.performRender(preserveBackground: preserveBackground)
             }
         } else {
@@ -1533,6 +1557,9 @@ final class PscalRuntimeBootstrap: ObservableObject {
         let runtimeColumns = metrics.columns
         let runtimeRows = metrics.rows
         if resizeTerminalBuffer {
+            DispatchQueue.main.async { [weak self] in
+                self?.htermController?.forceGridSize(columns: runtimeColumns, rows: runtimeRows)
+            }
             let resized = terminalBuffer.resize(columns: runtimeColumns, rows: runtimeRows)
             if resized {
                 scheduleRender()

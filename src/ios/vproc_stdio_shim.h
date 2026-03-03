@@ -3,7 +3,9 @@
 
 #if defined(PSCAL_TARGET_IOS) && !defined(VPROC_SHIM_DISABLED)
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,7 +40,27 @@ static inline int pscalStdioWriteAll(int fd, const void *buf, size_t count) {
 }
 
 static inline int pscalLibcVfprintf(FILE *stream, const char *fmt, va_list ap) {
-    return vfprintf(stream, fmt, ap);
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
+    int result = vfprintf(stream, fmt, ap);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+    return result;
+}
+
+static inline int pscalLibcVsnprintf(char *dst, size_t len, const char *fmt, va_list ap) {
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
+    int result = vsnprintf(dst, len, fmt, ap);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+    return result;
 }
 
 static inline size_t pscalLibcFwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
@@ -54,41 +76,48 @@ static inline int pscalLibcFputc(int c, FILE *stream) {
 }
 
 static inline int pscalVfprintf(FILE *stream, const char *fmt, va_list ap) {
+    char stack_buf[1024];
+    va_list copy;
+    int needed;
+    size_t len;
+    char *heap_buf;
+    va_list copy2;
+    int result;
+    int fd;
+
     if (!pscalStdioIsStdStream(stream)) {
         return pscalLibcVfprintf(stream, fmt, ap);
     }
 
-    char stack_buf[1024];
-    va_list copy;
     va_copy(copy, ap);
-    int needed = vsnprintf(stack_buf, sizeof(stack_buf), fmt, copy);
+    needed = pscalLibcVsnprintf(stack_buf, sizeof(stack_buf), fmt, copy);
     va_end(copy);
 
     if (needed < 0) {
         return needed;
     }
 
+    fd = pscalStdioFdForStream(stream);
     if ((size_t)needed < sizeof(stack_buf)) {
-        if (pscalStdioWriteAll(pscalStdioFdForStream(stream), stack_buf, (size_t)needed) < 0) {
+        if (pscalStdioWriteAll(fd, stack_buf, (size_t)needed) < 0) {
             return -1;
         }
         return needed;
     }
 
-    size_t len = (size_t)needed;
-    char *heap_buf = (char *)malloc(len + 1);
+    len = (size_t)needed;
+    heap_buf = (char *)malloc(len + 1);
     if (!heap_buf) {
         errno = ENOMEM;
         return -1;
     }
 
-    va_list copy2;
     va_copy(copy2, ap);
-    vsnprintf(heap_buf, len + 1, fmt, copy2);
+    pscalLibcVsnprintf(heap_buf, len + 1, fmt, copy2);
     va_end(copy2);
 
-    int result = -1;
-    if (pscalStdioWriteAll(pscalStdioFdForStream(stream), heap_buf, len) == 0) {
+    result = -1;
+    if (pscalStdioWriteAll(fd, heap_buf, len) == 0) {
         result = (int)len;
     }
     free(heap_buf);
@@ -96,9 +125,10 @@ static inline int pscalVfprintf(FILE *stream, const char *fmt, va_list ap) {
 }
 
 static inline int pscalFprintf(FILE *stream, const char *fmt, ...) {
+    int res;
     va_list ap;
     va_start(ap, fmt);
-    int res = pscalVfprintf(stream, fmt, ap);
+    res = pscalVfprintf(stream, fmt, ap);
     va_end(ap);
     return res;
 }
@@ -108,19 +138,24 @@ static inline int pscalVprintf(const char *fmt, va_list ap) {
 }
 
 static inline int pscalPrintf(const char *fmt, ...) {
+    int res;
     va_list ap;
     va_start(ap, fmt);
-    int res = pscalVfprintf(stdout, fmt, ap);
+    res = pscalVfprintf(stdout, fmt, ap);
     va_end(ap);
     return res;
 }
 
 static inline int pscalFputs(const char *s, FILE *stream) {
+    size_t len;
+    int fd;
+
     if (!pscalStdioIsStdStream(stream)) {
         return pscalLibcFputs(s, stream);
     }
-    size_t len = strlen(s);
-    if (pscalStdioWriteAll(pscalStdioFdForStream(stream), s, len) < 0) {
+    len = strlen(s);
+    fd = pscalStdioFdForStream(stream);
+    if (pscalStdioWriteAll(fd, s, len) < 0) {
         return EOF;
     }
     return 0;
@@ -137,11 +172,15 @@ static inline int pscalPuts(const char *s) {
 }
 
 static inline int pscalFputc(int c, FILE *stream) {
+    unsigned char ch;
+    int fd;
+
     if (!pscalStdioIsStdStream(stream)) {
         return pscalLibcFputc(c, stream);
     }
-    unsigned char ch = (unsigned char)c;
-    if (pscalStdioWriteAll(pscalStdioFdForStream(stream), &ch, 1) < 0) {
+    ch = (unsigned char)c;
+    fd = pscalStdioFdForStream(stream);
+    if (pscalStdioWriteAll(fd, &ch, 1) < 0) {
         return EOF;
     }
     return (int)ch;
@@ -152,6 +191,11 @@ static inline int pscalPutchar(int c) {
 }
 
 static inline size_t pscalFwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    size_t total;
+    size_t written;
+    const unsigned char *bytes;
+    int fd;
+
     if (!pscalStdioIsStdStream(stream)) {
         return pscalLibcFwrite(ptr, size, nmemb, stream);
     }
@@ -162,10 +206,10 @@ static inline size_t pscalFwrite(const void *ptr, size_t size, size_t nmemb, FIL
         errno = EOVERFLOW;
         return 0;
     }
-    size_t total = size * nmemb;
-    size_t written = 0;
-    const unsigned char *bytes = (const unsigned char *)ptr;
-    int fd = pscalStdioFdForStream(stream);
+    total = size * nmemb;
+    written = 0;
+    bytes = (const unsigned char *)ptr;
+    fd = pscalStdioFdForStream(stream);
 
     while (written < total) {
         ssize_t chunk = vprocWriteShim(fd, bytes + written, total - written);
@@ -204,15 +248,15 @@ static inline void pscalPerror(const char *label) {
 #undef fwrite
 #undef perror
 
-#define vfprintf pscalVfprintf
-#define fprintf pscalFprintf
-#define vprintf pscalVprintf
-#define printf pscalPrintf
-#define fputs pscalFputs
-#define puts pscalPuts
-#define fputc pscalFputc
-#define putchar pscalPutchar
-#define fwrite pscalFwrite
+#define vfprintf(stream, fmt, ap) pscalVfprintf((stream), (fmt), (ap))
+#define fprintf(stream, ...) pscalFprintf((stream), __VA_ARGS__)
+#define vprintf(fmt, ap) pscalVprintf((fmt), (ap))
+#define printf(...) pscalPrintf(__VA_ARGS__)
+#define fputs(s, stream) pscalFputs((s), (stream))
+#define puts(s) pscalPuts((s))
+#define fputc(c, stream) pscalFputc((c), (stream))
+#define putchar(c) pscalPutchar((c))
+#define fwrite(ptr, size, nmemb, stream) pscalFwrite((ptr), (size), (nmemb), (stream))
 #define perror(label) pscalPerror((label))
 
 #endif /* PSCAL_TARGET_IOS && !VPROC_SHIM_DISABLED */

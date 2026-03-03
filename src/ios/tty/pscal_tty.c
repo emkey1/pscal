@@ -286,6 +286,24 @@ static struct tty *get_slave_side_tty(struct tty *tty) {
     return tty;
 }
 
+int pscalTtySessionPtyNum(pid_t_ sid) {
+    if (sid <= 0) {
+        return -1;
+    }
+    struct tty *tty = ttySessionRetain(sid);
+    if (!tty) {
+        return -1;
+    }
+    int pty_num = -1;
+    lock(&tty->lock);
+    if (tty->type == TTY_PSEUDO_MASTER_MAJOR || tty->type == TTY_PSEUDO_SLAVE_MAJOR) {
+        pty_num = tty->num;
+    }
+    unlock(&tty->lock);
+    ttySessionReleaseRef(tty);
+    return pty_num;
+}
+
 static void tty_poll_wakeup(struct tty *tty, int events) {
     unlock(&tty->lock);
     struct pscal_fd *fd;

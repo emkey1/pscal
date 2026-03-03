@@ -233,6 +233,14 @@ struct TerminalContentView: View {
                                 tabInitLog("TerminalView loadState runtime=\(runtime.runtimeId) loaded=true")
                             }
                             DispatchQueue.main.async {
+                                if loaded {
+                                    // Startup can report a transient stale hterm grid before
+                                    // final layout settles; re-apply SwiftUI geometry.
+                                    updateTerminalGeometry()
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                                        updateTerminalGeometry()
+                                    }
+                                }
                                 if localHtermLoaded != loaded {
                                     localHtermLoaded = loaded
                                     if loaded {

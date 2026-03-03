@@ -53,7 +53,7 @@ struct TerminalInputBridge: UIViewRepresentable {
             guard pscalIOSSDLModeActive() == 0 else { return }
             guard !TerminalKeyInputView.hasVisibleSDLWindow() else { return }
             guard !TerminalTabManager.shared.isSdlTabSelected else { return }
-            view.becomeFirstResponder()
+            _ = view.becomeFirstResponder()
         }
         return view
     }
@@ -74,7 +74,7 @@ struct TerminalInputBridge: UIViewRepresentable {
                 guard pscalIOSSDLModeActive() == 0 else { return }
                 guard !TerminalKeyInputView.hasVisibleSDLWindow() else { return }
                 guard !TerminalTabManager.shared.isSdlTabSelected else { return }
-                uiView.becomeFirstResponder()
+                _ = uiView.becomeFirstResponder()
             }
         }
     }
@@ -110,11 +110,9 @@ final class TerminalKeyInputView: UITextView {
     private let hardwareKeyboardHeightEpsilon: CGFloat = 80.0
 
     fileprivate static func hasVisibleSDLWindow() -> Bool {
-        let sceneWindows = UIApplication.shared.connectedScenes
+        let allWindows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
-        let appWindows = UIApplication.shared.windows
-        let allWindows = sceneWindows + appWindows
         return allWindows.contains { window in
                 guard !window.isHidden else { return false }
                 let className = NSStringFromClass(type(of: window)).lowercased()
@@ -437,7 +435,7 @@ final class TerminalKeyInputView: UITextView {
         }
         var unhandled: Set<UIPress> = []
         for press in presses {
-            if !handle(press: press) {
+            if !handle(press: press, eventModifierFlags: event?.modifierFlags) {
                 unhandled.insert(press)
             }
         }
@@ -454,7 +452,7 @@ final class TerminalKeyInputView: UITextView {
         }
         var unhandled: Set<UIPress> = []
         for press in presses {
-            if !handle(press: press) {
+            if !handle(press: press, eventModifierFlags: event?.modifierFlags) {
                 unhandled.insert(press)
             }
         }
@@ -525,11 +523,12 @@ final class TerminalKeyInputView: UITextView {
         }
     }
 
-    private func handle(press: UIPress) -> Bool {
+    private func handle(press: UIPress, eventModifierFlags: UIKeyModifierFlags?) -> Bool {
         guard let key = press.key else { return false }
+        let modifierFlags = key.modifierFlags.union(eventModifierFlags ?? [])
 
         if key.keyCode == .keyboardTab {
-            if key.modifierFlags.contains(.shift) {
+            if modifierFlags.contains(.shift) {
                 onInput?("\u{1B}[Z")
             } else {
                 onInput?("\t")
@@ -537,7 +536,15 @@ final class TerminalKeyInputView: UITextView {
             return true
         }
 
-        if key.modifierFlags.contains(.control),
+        if modifierFlags.contains(.alternate),
+           !modifierFlags.contains(.control),
+           !modifierFlags.contains(.command),
+           let optionSequence = optionModifiedSequence(for: key, modifierFlags: modifierFlags) {
+            onInput?(optionSequence)
+            return true
+        }
+
+        if modifierFlags.contains(.control),
            let scalar = key.charactersIgnoringModifiers.unicodeScalars.first {
             if let control = controlCharacter(for: scalar) {
                 let handled = maybeTriggerControlSignal(scalar: scalar)
@@ -556,6 +563,8 @@ final class TerminalKeyInputView: UITextView {
         }
 
         switch key.keyCode {
+        case .keyboardReturnOrEnter:
+            onInput?("\r"); return true
         case .keyboardDeleteForward:
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:
@@ -564,6 +573,76 @@ final class TerminalKeyInputView: UITextView {
             break
         }
         return false
+    }
+
+    private func optionModifiedSequence(for key: UIKey, modifierFlags: UIKeyModifierFlags) -> String? {
+        switch key.keyCode {
+        case .keyboardUpArrow:
+            return "\u{1B}[1;3A"
+        case .keyboardDownArrow:
+            return "\u{1B}[1;3B"
+        case .keyboardLeftArrow:
+            return "\u{1B}[1;3D"
+        case .keyboardRightArrow:
+            return "\u{1B}[1;3C"
+        default:
+            break
+        }
+
+        if let letterScalar = optionLetterScalar(for: key.keyCode,
+                                                 shift: modifierFlags.contains(.shift)) {
+            return "\u{1B}" + String(letterScalar)
+        }
+
+        guard key.charactersIgnoringModifiers.unicodeScalars.count == 1,
+              let scalar = key.charactersIgnoringModifiers.unicodeScalars.first,
+              scalar.isASCII else {
+            return nil
+        }
+
+        var outputScalar = scalar
+        if modifierFlags.contains(.shift),
+           scalar.value >= 0x61,
+           scalar.value <= 0x7A,
+           let upper = UnicodeScalar(scalar.value - 0x20) {
+            outputScalar = upper
+        }
+        return "\u{1B}" + String(outputScalar)
+    }
+
+    private func optionLetterScalar(for keyCode: UIKeyboardHIDUsage, shift: Bool) -> UnicodeScalar? {
+        let base: UInt32
+        switch keyCode {
+        case .keyboardA: base = 0x61
+        case .keyboardB: base = 0x62
+        case .keyboardC: base = 0x63
+        case .keyboardD: base = 0x64
+        case .keyboardE: base = 0x65
+        case .keyboardF: base = 0x66
+        case .keyboardG: base = 0x67
+        case .keyboardH: base = 0x68
+        case .keyboardI: base = 0x69
+        case .keyboardJ: base = 0x6A
+        case .keyboardK: base = 0x6B
+        case .keyboardL: base = 0x6C
+        case .keyboardM: base = 0x6D
+        case .keyboardN: base = 0x6E
+        case .keyboardO: base = 0x6F
+        case .keyboardP: base = 0x70
+        case .keyboardQ: base = 0x71
+        case .keyboardR: base = 0x72
+        case .keyboardS: base = 0x73
+        case .keyboardT: base = 0x74
+        case .keyboardU: base = 0x75
+        case .keyboardV: base = 0x76
+        case .keyboardW: base = 0x77
+        case .keyboardX: base = 0x78
+        case .keyboardY: base = 0x79
+        case .keyboardZ: base = 0x7A
+        default:
+            return nil
+        }
+        return UnicodeScalar(shift ? (base - 0x20) : base)
     }
 
     @objc private func handleEscapeKey() {
@@ -659,7 +738,7 @@ final class TerminalKeyInputView: UITextView {
                 guard !Self.hasVisibleSDLWindow() else { return }
                 guard !TerminalTabManager.shared.isSdlTabSelected else { return }
                 if !self.isFirstResponder {
-                    self.becomeFirstResponder()
+                    _ = self.becomeFirstResponder()
                 } else if !self.softKeyboardVisible {
                     self.reloadInputViews()
                 }

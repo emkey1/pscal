@@ -49,6 +49,7 @@ typedef struct {
     int parent_pid;
     int pgid;
     int sid;
+    int tty_pty_num;
     bool exited;
     bool stopped;
     bool continued;
@@ -309,6 +310,7 @@ int vprocAdoptPscalStdio(VProc *vp,
                          struct pscal_fd *stderr_fd);
 int vprocAdoptPscalFd(VProc *vp, int target_fd, struct pscal_fd *pscal_fd);
 int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows);
+int vprocGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out);
 bool vprocSessionStdioNeedsRefresh(VProcSessionStdio *stdio_ctx);
 void vprocSessionStdioRefresh(VProcSessionStdio *stdio_ctx, int kernel_pid);
 void vprocSessionDebugDumpShim(const char *tag);
@@ -329,6 +331,8 @@ void vprocSessionSetOutputHandler(uint64_t session_id,
                                   void *context);
 void vprocSessionClearOutputHandler(uint64_t session_id);
 void vprocSessionSetOutputPaused(uint64_t session_id, bool paused);
+/* Emit output bytes to a session's registered output handler/backlog. */
+ssize_t vprocSessionEmitOutput(uint64_t session_id, const void *buf, size_t len);
 /* Write input data directly to a session PTY master. */
 ssize_t vprocSessionWriteToMaster(uint64_t session_id, const void *buf, size_t len);
 ssize_t vprocSessionWriteToMasterMode(uint64_t session_id, const void *buf, size_t len, bool blocking);
@@ -410,6 +414,10 @@ void vprocApplyPathTruncation(const char *prefix);
 void vprocInterposeBypassEnter(void);
 void vprocInterposeBypassExit(void);
 int vprocInterposeBypassActive(void);
+/* Temporarily protect kqueue descriptors from accidental close paths. */
+void vprocProtectKqueueCloseEnter(void);
+void vprocProtectKqueueCloseExit(void);
+int vprocProtectKqueueCloseActive(void);
 
 static inline void vprocFormatCpuTimes(int utime_cs, int stime_cs, double *utime_s, double *stime_s) {
     if (utime_s) {
@@ -602,6 +610,9 @@ static inline void vprocApplyPathTruncation(const char *prefix) { (void)prefix; 
 static inline void vprocInterposeBypassEnter(void) {}
 static inline void vprocInterposeBypassExit(void) {}
 static inline int vprocInterposeBypassActive(void) { return 0; }
+static inline void vprocProtectKqueueCloseEnter(void) {}
+static inline void vprocProtectKqueueCloseExit(void) {}
+static inline int vprocProtectKqueueCloseActive(void) { return 0; }
 static inline void vprocSetKernelPid(int pid) { (void)pid; }
 static inline int vprocGetKernelPid(void) { return 0; }
 static inline void vprocClearKernelPidGlobal(void) {}
@@ -650,6 +661,17 @@ static inline int vprocSetSessionWinsize(uint64_t session_id, int cols, int rows
     (void)session_id;
     (void)cols;
     (void)rows;
+    errno = ENOTSUP;
+    return -1;
+}
+static inline int vprocGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out) {
+    (void)session_id;
+    if (cols_out) {
+        *cols_out = 0;
+    }
+    if (rows_out) {
+        *rows_out = 0;
+    }
     errno = ENOTSUP;
     return -1;
 }

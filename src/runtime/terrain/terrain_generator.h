@@ -7,7 +7,7 @@
 
 #ifdef SDL
 #include "core/sdl_headers.h"
-#if defined(PSCAL_TARGET_IOS)
+#if defined(PSCAL_TARGET_IOS) && !defined(PSCAL_MACCATALYST)
 #include <OpenGLES/ES3/gl.h>
 #include <OpenGLES/ES3/glext.h>
 #else

@@ -7,6 +7,7 @@ OUT="${BUILD_DIR}/ios_vproc_test"
 OUT_PGID="${BUILD_DIR}/ios_vproc_pgid_test"
 OUT_SHIMS="${BUILD_DIR}/ios_vproc_signal_shim_test"
 OUT_JOBCTRL="${BUILD_DIR}/ios_vproc_jobcontrol_shim_test"
+OUT_RESIZE="${BUILD_DIR}/ios_vproc_resize_harness_test"
 INCLUDE_DIRS=(
   "-I${ROOT}/src"
   "-I${ROOT}"
@@ -56,8 +57,16 @@ cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    "${VPROC_SOURCES[@]}" \
    -o "${OUT_JOBCTRL}"
 
+cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
+   -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   "${ROOT}/Tests/ios_vproc/test_resize_harness.c" \
+   "${VPROC_SOURCES[@]}" \
+   -o "${OUT_RESIZE}"
+
 echo "Running ios_vproc tests..."
 "${OUT}"
 "${OUT_PGID}"
 "${OUT_SHIMS}"
 "${OUT_JOBCTRL}"
+"${OUT_RESIZE}"

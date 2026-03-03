@@ -110,9 +110,16 @@ final class RuntimeAssetInstaller {
     private init() {}
 
     private func decompressDeflate(_ data: Data) -> Data? {
-        var stream = compression_stream(dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 0)!,
+        let initialDstPtr = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        let initialSrcMutable = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        defer {
+            initialDstPtr.deallocate()
+            initialSrcMutable.deallocate()
+        }
+
+        var stream = compression_stream(dst_ptr: initialDstPtr,
                                         dst_size: 0,
-                                        src_ptr: UnsafePointer<UInt8>(bitPattern: 0)!,
+                                        src_ptr: UnsafePointer<UInt8>(initialSrcMutable),
                                         src_size: 0,
                                         state: nil)
         var status = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
@@ -207,17 +214,13 @@ final class RuntimeAssetInstaller {
         let deflated = Bundle.main.url(forResource: "pscal_tool_runner", withExtension: "deflate")
         let stagedRunner = RuntimePaths.stagedToolRunner
 
-        let stageRunner: (Data) -> String? = { data in
-            guard let decompressed = self.decompressDeflate(data) else {
-                NSLog("PSCAL iOS: failed to decompress tool runner payload.")
-                return nil
-            }
+        let stageRunner: (Data) -> String? = { payload in
             do {
                 try self.ensureDocumentsDirectoryExists()
                 if self.fileManager.fileExists(atPath: stagedRunner.path) {
                     try self.fileManager.removeItem(at: stagedRunner)
                 }
-                try decompressed.write(to: stagedRunner, options: .atomic)
+                try payload.write(to: stagedRunner, options: .atomic)
                 try self.markExecutable(at: stagedRunner)
                 self.cachedToolRunnerPath = stagedRunner.path
                 return stagedRunner.path
@@ -229,9 +232,11 @@ final class RuntimeAssetInstaller {
         }
 
         if let deflated, let data = try? Data(contentsOf: deflated) {
-            if let path = stageRunner(data) {
+            if let decompressed = self.decompressDeflate(data),
+               let path = stageRunner(decompressed) {
                 return path
             }
+            NSLog("PSCAL iOS: failed to decompress tool runner payload.")
         }
 
         // Fallback: if an old-style raw runner is present in the bundle, stage it.
@@ -318,7 +323,7 @@ final class RuntimeAssetInstaller {
         }
         if sources.isEmpty {
             // Fallback: look for flat license files in the bundle root.
-            let fallbackNames = ["pscal_LICENSE.txt", "openssl_LICENSE.txt", "curl_LICENSE.txt", "sdl_LICENSE.txt", "nextvi_LICENSE.txt", "openssh_LICENSE.txt", "yyjson_LICENSE.txt", "hterm_LICENSE.txt"]
+            let fallbackNames = ["pscal_LICENSE.txt", "openssl_LICENSE.txt", "curl_LICENSE.txt", "sdl_LICENSE.txt", "nextvi_LICENSE.txt", "micro_LICENSE.txt", "openssh_LICENSE.txt", "yyjson_LICENSE.txt", "hterm_LICENSE.txt"]
             for name in fallbackNames {
                 let candidate = bundleRoot.appendingPathComponent(name)
                 if fileManager.fileExists(atPath: candidate.path) {

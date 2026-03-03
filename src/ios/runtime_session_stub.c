@@ -9,6 +9,11 @@ VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
 }
 
 __attribute__((weak))
+uint64_t PSCALRuntimeCurrentSessionId(void) {
+    return 0;
+}
+
+__attribute__((weak))
 void PSCALRuntimeSetCurrentRuntimeStdio(VProcSessionStdio *stdio_ctx) {
     (void)stdio_ctx;
 }

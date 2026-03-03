@@ -16,8 +16,9 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/wait.h>
-#if defined(PSCAL_TARGET_IOS)
 #include "common/path_truncate.h"
+#if defined(PSCAL_TARGET_IOS)
+#include "ios/vproc.h"
 #endif
 #include "vi.h"
 #if defined(PSCAL_TARGET_IOS)
@@ -2091,12 +2092,23 @@ void vi(int init)
 static volatile sig_atomic_t vi_sigwinch_pending;
 static volatile sig_atomic_t vi_sigwinch_handling;
 
+int vi_sigwinch_pending_poll(void)
+{
+	return vi_sigwinch_pending != 0;
+}
+
+void vi_sigwinch_pending_mark(void)
+{
+	vi_sigwinch_pending = 1;
+}
+
 static void vi_handle_sigwinch(void)
 {
 	if (!vi_sigwinch_pending || vi_sigwinch_handling)
 		return;
 	vi_sigwinch_handling = 1;
 	vi_sigwinch_pending = 0;
+	term_updatewinsize();
 	if (term_sbuf && !(xvis & 4))
 		term_exec("", 1, '&')
 	vi_sigwinch_handling = 0;

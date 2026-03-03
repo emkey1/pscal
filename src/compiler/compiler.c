@@ -392,6 +392,9 @@ static bool isCurrentFunctionResultIdentifier(const FunctionCompilerState* fc, c
     if (!fc || !fc->returns_value || !name) {
         return false;
     }
+    if (!frontendIsPascal()) {
+        return false;
+    }
 
     if (strcasecmp(name, "result") == 0) {
         return true;

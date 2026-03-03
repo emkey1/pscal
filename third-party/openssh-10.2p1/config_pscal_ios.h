@@ -1403,7 +1403,9 @@
 #define HAVE_STRTOLL 1
 
 /* Define to 1 if you have the `strtonum' function. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRTONUM 1
+#endif
 
 /* Define to 1 if you have the `strtoul' function. */
 #define HAVE_STRTOUL 1
@@ -1421,13 +1423,19 @@
 #define HAVE_STRUCT_IN6_ADDR 1
 
 /* Define to 1 if `pw_change' is a member of `struct passwd'. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRUCT_PASSWD_PW_CHANGE 1
+#endif
 
 /* Define to 1 if `pw_class' is a member of `struct passwd'. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRUCT_PASSWD_PW_CLASS 1
+#endif
 
 /* Define to 1 if `pw_expire' is a member of `struct passwd'. */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define HAVE_STRUCT_PASSWD_PW_EXPIRE 1
+#endif
 
 /* Define to 1 if `pw_gecos' is a member of `struct passwd'. */
 #define HAVE_STRUCT_PASSWD_PW_GECOS 1
@@ -1939,7 +1947,9 @@
 #define SNPRINTF_CONST /* not const */
 
 /* sockaddr_in has sin_len */
+#if defined(__APPLE__) || defined(PSCAL_TARGET_IOS)
 #define SOCK_HAS_LEN 1
+#endif
 
 /* Define to a Set Process Title type if your system is supported by
    bsd-setproctitle.c */

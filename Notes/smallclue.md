@@ -20,3 +20,10 @@
   `tr`) and utility helpers (`id`) all follow the same pattern as the
   other commands: smallclue implementation + integration wrapper +
   iOS-only shell builtin entry so exsh pipelines work.
+- `micro` on iOS currently requires a host PTY (`/dev/ptmx` or
+  `/private/dev/ptmx`) for reliable in-tab rendering/input. Forcing the
+  internal shim PTY path can make `micro` render into the Xcode console
+  because Go/tcell writes bypass vproc shim on some paths.
+- Shim PTY fallback for `micro` is therefore opt-in only via
+  `PSCALI_MICRO_ALLOW_SHIM_PTY=1`; default behavior is to fail fast if a
+  host PTY is unavailable instead of hijacking host console output.

@@ -47,6 +47,9 @@ static char xsrerr[] = "range not found";
 static char *xrerr;
 
 extern void pscalRuntimeDebugLog(const char *message);
+#if defined(PSCAL_TARGET_IOS)
+extern int pscalRuntimeOpenShellTab(void) __attribute__((weak));
+#endif
 
 static int ex_write_debug_enabled(void)
 {
@@ -79,6 +82,76 @@ static void ex_write_debugf(const char *fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	pscalRuntimeDebugLog(buf);
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static int exTrackFdForVproc(int fd, const char *path)
+{
+	if (fd < 0)
+		return fd;
+	/* Device/TTY paths are already routed by vproc path shims; don't remap. */
+	if (path && (!strncmp(path, "/dev/", 5) || !strncmp(path, "/private/dev/", 13)))
+		return fd;
+	VProc *vp = vprocCurrent();
+	if (!vp)
+		return fd;
+	int vfd = vprocAdoptHostFd(vp, fd);
+	if (vfd < 0) {
+		int saved = errno;
+		vprocHostClose(fd);
+		errno = saved;
+		return -1;
+	}
+	return vfd;
+}
+
+static int exOpenTracked(const char *path, int flags, mode_t mode, int has_mode)
+{
+	int fd = has_mode ? open(path, flags, mode) : open(path, flags);
+	return exTrackFdForVproc(fd, path);
+}
+
+static int exMkstempTracked(char *template_path)
+{
+	int fd = mkstemp(template_path);
+	return exTrackFdForVproc(fd, template_path);
+}
+#endif
+
+static int exOpenReadonlyPath(const char *path)
+{
+#if defined(PSCAL_TARGET_IOS)
+	/*
+	 * Keep readonly opens on host fds. vproc read shim can consume raw host
+	 * fds directly, while remapping readonly opens can alias fd numbers and
+	 * make existing files appear as empty buffers on reopen.
+	 */
+	return open(path, O_RDONLY);
+#else
+	return open(path, O_RDONLY);
+#endif
+}
+
+static int exOpenWriteTruncPath(const char *path, mode_t mode)
+{
+#if defined(PSCAL_TARGET_IOS)
+	return exOpenTracked(path, O_WRONLY | O_CREAT | O_TRUNC, mode, 1);
+#else
+	return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+#endif
+}
+
+static const char *ex_visible_path(const char *path, char *buf, size_t buf_len)
+{
+#if defined(PSCAL_TARGET_IOS)
+	if (path && path[0] == '/' && buf && buf_len > 0 &&
+			pathTruncateStrip(path, buf, buf_len) && buf[0])
+		return buf;
+#else
+	(void)buf;
+	(void)buf_len;
+#endif
+	return path;
 }
 
 static int rstrcmp(const char *s1, const char *s2, int l1, int l2)
@@ -129,13 +202,18 @@ void bufs_switch(int idx)
 static int bufs_open(const char *path, int len)
 {
 	int i = xbufcur;
+	char visible[4096];
+	const char *store_path = ex_visible_path(path, visible, sizeof(visible));
+	(void)len;
+	if (!store_path)
+		store_path = "";
 	if (i <= xbufsmax - 1)
 		xbufcur++;
 	else
 		bufs_free(--i);
-	bufs[i].path = uc_dup(path);
+	bufs[i].path = uc_dup(store_path);
 	bufs[i].lb = lbuf_make();
-	bufs[i].plen = len;
+	bufs[i].plen = strlen(store_path);
 	bufs[i].row = 0;
 	bufs[i].off = 0;
 	bufs[i].top = 0;
@@ -426,7 +504,7 @@ static int ex_read(sbuf *sb, char *msg, char *ft, int ps, int hist)
 }
 
 #define readfile(errchk) \
-fd = open(xb_path, O_RDONLY); \
+fd = exOpenReadonlyPath(xb_path); \
 if (fd >= 0) { \
 	errchk lbuf_rd(xb, fd, 0, lbuf_len(xb)); \
 	close(fd); \
@@ -435,10 +513,13 @@ if (fd >= 0) { \
 int ex_edit(const char *path, int len)
 {
 	int fd;
+	char visible[4096];
 	if (path[0] == '.' && path[1] == '/') {
 		path += 2;
 		len -= 2;
 	}
+	path = ex_visible_path(path, visible, sizeof(visible));
+	len = strlen(path);
 	if (path[0] && ((fd = bufs_find(path, len)) >= 0)) {
 		bufs_switch(fd);
 		return 1;
@@ -451,18 +532,21 @@ int ex_edit(const char *path, int len)
 static void *ec_edit(char *loc, char *cmd, char *arg)
 {
 	char msg[128];
+	char visible[4096];
+	const char *epath;
 	int fd, len, rd = 0, cd = 0;
 	if (arg[0] == '.' && arg[1] == '/')
 		cd = 2;
-	len = strlen(arg+cd);
-	if (len && ((fd = bufs_find(arg+cd, len)) >= 0)) {
+	epath = ex_visible_path(arg + cd, visible, sizeof(visible));
+	len = strlen(epath);
+	if (len && ((fd = bufs_find(epath, len)) >= 0)) {
 		bufs_switchwft(fd)
 		return NULL;
 	} else if (xbufcur == xbufsmax && !strchr(cmd, '!') &&
 			bufs[xbufsmax - 1].lb->modified) {
 		return "last buffer modified";
 	} else if (len || !xbufcur || !strchr(cmd, '!')) {
-		bufs_switch(bufs_open(arg+cd, len));
+		bufs_switch(bufs_open(epath, len));
 		cd = 3; /* XXX: quick hack to indicate new lbuf */
 	}
 	readfile(rd =)
@@ -539,9 +623,11 @@ static void *ec_editapprox(char *loc, char *cmd, char *arg)
 
 static void *ec_setpath(char *loc, char *cmd, char *arg)
 {
+	char visible[4096];
+	const char *path = ex_visible_path(arg, visible, sizeof(visible));
 	free(xb_path);
-	xb_path = uc_dup(arg);
-	ex_buf->plen = strlen(arg);
+	xb_path = uc_dup(path ? path : "");
+	ex_buf->plen = strlen(path ? path : "");
 	return NULL;
 }
 
@@ -549,18 +635,21 @@ static void *ec_read(char *loc, char *cmd, char *arg)
 {
 	sbuf obuf, *sb;
 	char msg[512];
+	char visible[4096];
 	char *path, *ret = NULL;
 	int beg, end, o1 = 0, o2 = -1;
 	int row = xrow, off = xoff, fd = -1;
 	struct lbuf *lb = lbuf_make(), *pxb = xb;
 	path = arg[0] ? arg : xb_path;
+	path = (char *)ex_visible_path(path, visible, sizeof(visible));
 	if (arg[0] == '!') {
 		if ((sb = cmd_pipe(arg + 1, NULL, 1, NULL))) {
 			lbuf_edit(lb, sb->s, 0, 0, 0, 0);
 			sbuf_free(sb)
 		}
 	} else {
-		if ((fd = open(path, O_RDONLY)) < 0) {
+		fd = exOpenReadonlyPath(path);
+		if (fd < 0) {
 			ret = "open failed";
 			goto err;
 		}
@@ -668,7 +757,7 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 	}
 	ex_write_debugf("[nextvi-write] mkstemp template=%s expanded=%d",
 		mkstemp_path, tmp_expanded);
-	fd = mkstemp(mkstemp_path);
+	fd = exMkstempTracked(mkstemp_path);
 #else
 	fd = mkstemp(tmp);
 #endif
@@ -708,7 +797,7 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 		{
 			ex_write_debugf("[nextvi-write] fallback direct write target=%s",
 				target);
-			int dfd = open(target, O_WRONLY | O_CREAT | O_TRUNC, mode);
+			int dfd = exOpenWriteTruncPath(target, mode);
 			if (dfd < 0) {
 				ex_write_debugf("[nextvi-write] fallback open failed err=%d %s",
 					errno, strerror(errno));
@@ -789,7 +878,7 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 		{
 			ex_write_debugf("[nextvi-write] fallback rename write target=%s",
 				target);
-			int dfd = open(target, O_WRONLY | O_CREAT | O_TRUNC, mode);
+			int dfd = exOpenWriteTruncPath(target, mode);
 			if (dfd < 0) {
 				ex_write_debugf("[nextvi-write] fallback rename open failed err=%d %s",
 					errno, strerror(errno));
@@ -1202,6 +1291,24 @@ static void *ec_exec(char *loc, char *cmd, char *arg)
 	return NULL;
 }
 
+static void *ec_shell(char *loc, char *cmd, char *arg)
+{
+	(void)loc;
+	(void)cmd;
+	(void)arg;
+#if defined(PSCAL_TARGET_IOS)
+	if (pscalRuntimeOpenShellTab) {
+		return pscalRuntimeOpenShellTab() == 0 ? NULL : xuerr;
+	}
+#endif
+	int ret = 0;
+	if (!(xvis & 4))
+		term_chr('\n');
+	cmd_pipe("exec \"${SHELL:-sh}\" -i", NULL, 2, &ret);
+	xmpt = xmpt >= 0 ? 0 : xmpt;
+	return ret ? xuerr : NULL;
+}
+
 static void *ec_ft(char *loc, char *cmd, char *arg)
 {
 	xb_ft = syn_setft(arg[0] ? arg : xb_ft);
@@ -1310,7 +1417,13 @@ static void *ec_chdir(char *loc, char *cmd, char *arg)
 		return "chdir error";
 	if (!getcwd(newpath, sizeof(newpath)))
 		return "getcwd error";
-	setenv("PWD", newpath, 1);
+	{
+		char visible[4096];
+		if (pathTruncateStrip(newpath, visible, sizeof(visible)) && visible[0])
+			setenv("PWD", visible, 1);
+		else
+			setenv("PWD", newpath, 1);
+	}
 	plen = strlen(oldpath);
 	if (plen == sizeof(oldpath)-1)
 		return "oldpath >= 4096";
@@ -1510,6 +1623,7 @@ static struct excmd {
 	{"uz", ec_setenc},
 	{"ub", ec_setenc},
 	{"u", ec_undoredo},
+	{"shell", ec_shell},
 	EO(shape),
 	EO(seq),
 	EO(sep),

@@ -10928,17 +10928,36 @@ Value vmBuiltinShellKill(VM *vm, int arg_count, Value *args) {
     return makeVoid();
 }
 
-static bool shellJobIsVirtualStoppedWithoutThread(const ShellJob *job) {
+static bool shellJobCommandLooksLikeWatch(const char *command) {
+    if (!command) {
+        return false;
+    }
+    if (strncmp(command, "watch", 5) != 0) {
+        return false;
+    }
+    return command[5] == '\0' || isspace((unsigned char)command[5]);
+}
+
+static bool shellJobHasThreadlessSnapshot(const ShellJob *job, bool *out_has_nonresumable) {
     if (!job || !job->pids || job->pid_count == 0) {
+        if (out_has_nonresumable) {
+            *out_has_nonresumable = false;
+        }
         return false;
     }
     bool dbg = getenv("PSCALI_KILL_DEBUG") != NULL;
     size_t snap_cap = vprocSnapshot(NULL, 0);
     if (snap_cap == 0) {
+        if (out_has_nonresumable) {
+            *out_has_nonresumable = false;
+        }
         return false;
     }
     VProcSnapshot *snaps = (VProcSnapshot *)calloc(snap_cap, sizeof(VProcSnapshot));
     if (!snaps) {
+        if (out_has_nonresumable) {
+            *out_has_nonresumable = false;
+        }
         return false;
     }
     size_t snap_count = vprocSnapshot(snaps, snap_cap);
@@ -10946,6 +10965,7 @@ static bool shellJobIsVirtualStoppedWithoutThread(const ShellJob *job) {
     memset(&zero_tid, 0, sizeof(zero_tid));
     bool has_live_thread = false;
     bool has_snapshot_without_thread = false;
+    bool has_threadless_non_resumable = false;
     bool has_untracked_pid = false;
 
     for (size_t j = 0; j < job->pid_count; ++j) {
@@ -10973,6 +10993,11 @@ static bool shellJobIsVirtualStoppedWithoutThread(const ShellJob *job) {
                     has_live_thread = true;
                 } else {
                     has_snapshot_without_thread = true;
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+                    if (!vprocGetStopUnsupported((int)pid)) {
+                        has_threadless_non_resumable = true;
+                    }
+#endif
                 }
             }
             break;
@@ -10986,7 +11011,21 @@ static bool shellJobIsVirtualStoppedWithoutThread(const ShellJob *job) {
     }
 
     free(snaps);
+    if (out_has_nonresumable) {
+        *out_has_nonresumable = has_threadless_non_resumable;
+    }
     return !has_live_thread && has_snapshot_without_thread && !has_untracked_pid;
+}
+
+static bool shellJobIsVirtualStoppedWithoutThread(const ShellJob *job) {
+    bool has_nonresumable = false;
+    if (!shellJobHasThreadlessSnapshot(job, &has_nonresumable)) {
+        return false;
+    }
+    if (shellJobCommandLooksLikeWatch(job ? job->command : NULL)) {
+        return false;
+    }
+    return has_nonresumable;
 }
 
 Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
@@ -10998,6 +11037,26 @@ Value vmBuiltinShellFg(VM *vm, int arg_count, Value *args) {
         return makeVoid();
     }
     ShellJob *job = &gShellJobs[index];
+    if (shellJobCommandLooksLikeWatch(job->command) &&
+        shellJobHasThreadlessSnapshot(job, NULL)) {
+        char *resume_command = job->command ? strdup(job->command) : NULL;
+        if (!resume_command || resume_command[0] == '\0') {
+            free(resume_command);
+            shellUpdateStatus(1);
+            return makeVoid();
+        }
+        size_t resumed_job_id = job->id;
+        shellRemoveJobAt(index);
+        shellFdPrintf(STDOUT_FILENO, "\033[2J\033[H");
+        shellFdPrintf(STDOUT_FILENO, "[%zu]  + resumed  %s\n", resumed_job_id, resume_command);
+        Value eval_arg;
+        memset(&eval_arg, 0, sizeof(eval_arg));
+        eval_arg.type = TYPE_STRING;
+        eval_arg.s_val = resume_command;
+        (void)vmBuiltinShellEval(vm, 1, &eval_arg);
+        free(resume_command);
+        return makeVoid();
+    }
     if (shellJobIsVirtualStoppedWithoutThread(job)) {
         const char *name = (job->command && job->command[0]) ? job->command : "job";
         shellFdPrintf(STDERR_FILENO,

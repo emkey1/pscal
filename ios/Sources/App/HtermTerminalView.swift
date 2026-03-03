@@ -146,7 +146,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var reloadPending = false
     private var didLogFirstOutput = false
     private var didLogFirstFlush = false
-    private let maxFlushBytes = 32 * 1024
+    private let maxFlushBytes = 128 * 1024
     private var hostSizeReady = false
     private var hostSize = CGSize.zero
 
@@ -159,12 +159,13 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var scrollToBottomPending = false
     private var resizeRequestGeneration: UInt64 = 0
     private var pendingForcedGridSize: (columns: Int, rows: Int)?
+    private var appliedForcedGridSize: (columns: Int, rows: Int)?
     private var resizeSessionId: UInt64 = 0
-    private var pendingRuntimeResize: (columns: Int, rows: Int, source: String)?
+    private var deferredRuntimeResize: (columns: Int, rows: Int, source: String)?
+    private var runtimeSizeHint: (columns: Int, rows: Int)?
 
     private static let terminalScheme = "pscal-terminal"
     private static let schemeHandler = TerminalResourceSchemeHandler()
-    private static let sharedProcessPool = WKProcessPool()
     let webView: WKWebView
     private let userContentController: WKUserContentController
     private var scriptMessageBridges: [WeakScriptMessageHandler] = []
@@ -210,9 +211,6 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         self.instanceId = Self.nextInstanceId
         let controller = WKUserContentController()
         let config = WKWebViewConfiguration()
-        // Keep one process pool for all terminal tabs to avoid high-memory
-        // churn when users open/close tabs rapidly under load.
-        config.processPool = Self.sharedProcessPool
         config.setURLSchemeHandler(Self.schemeHandler, forURLScheme: Self.terminalScheme)
         config.userContentController = controller
         let debugValue = Self.debugEnabled ? "true" : "false"
@@ -363,6 +361,11 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     func forceGridSize(columns: Int, rows: Int) {
         let clampedColumns = max(1, columns)
         let clampedRows = max(1, rows)
+        if let pending = pendingForcedGridSize,
+           pending.columns == clampedColumns,
+           pending.rows == clampedRows {
+            return
+        }
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] force-grid req=\(columns)x\(rows) clamped=\(clampedColumns)x\(clampedRows) loaded=\(isLoaded)")
         pendingForcedGridSize = (clampedColumns, clampedRows)
         guard isLoaded else { return }
@@ -374,10 +377,21 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         resizeSessionId = sessionId
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] bind-session previous=\(previous) session=\(sessionId)")
         guard sessionId != 0 else { return }
-        if let pending = pendingRuntimeResize {
-            pendingRuntimeResize = nil
-            sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay source=\(pending.source) session=\(sessionId) cols=\(pending.columns) rows=\(pending.rows)")
-            PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(pending.columns), Int32(pending.rows))
+        if let deferred = deferredRuntimeResize {
+            deferredRuntimeResize = nil
+            if let hint = runtimeSizeHint,
+               (hint.columns != deferred.columns || hint.rows != deferred.rows) {
+                sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay skipped source=\(deferred.source) session=\(sessionId) deferred=\(deferred.columns)x\(deferred.rows) hint=\(hint.columns)x\(hint.rows)")
+            } else {
+                sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-replay source=\(deferred.source) session=\(sessionId) cols=\(deferred.columns) rows=\(deferred.rows)")
+                PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(deferred.columns), Int32(deferred.rows))
+                runtimeSizeHint = (deferred.columns, deferred.rows)
+            }
+        }
+        // Re-query hterm size at bind-time so newly attached sessions start with
+        // the actual rendered grid, not a stale default.
+        if isLoaded {
+            requestResize()
         }
     }
 
@@ -438,15 +452,25 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             onSyncFocus?()
         case HandlerName.newScrollHeight.rawValue:
             if let value = message.body as? NSNumber {
-                onScrollHeight?(CGFloat(value.doubleValue))
+                let height = value.doubleValue
+                if height.isFinite {
+                    onScrollHeight?(CGFloat(height))
+                }
             } else if let value = message.body as? Double {
-                onScrollHeight?(CGFloat(value))
+                if value.isFinite {
+                    onScrollHeight?(CGFloat(value))
+                }
             }
         case HandlerName.newScrollTop.rawValue:
             if let value = message.body as? NSNumber {
-                onScrollTop?(CGFloat(value.doubleValue))
+                let top = value.doubleValue
+                if top.isFinite {
+                    onScrollTop?(CGFloat(top))
+                }
             } else if let value = message.body as? Double {
-                onScrollTop?(CGFloat(value))
+                if value.isFinite {
+                    onScrollTop?(CGFloat(value))
+                }
             }
         case HandlerName.openLink.rawValue:
             if let urlString = message.body as? String, let url = URL(string: urlString) {
@@ -505,7 +529,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] request-resize gen=\(generation) delay=\(String(format: "%.3f", delay)) loaded=\(isLoaded)")
         let evaluate: () -> Void = { [weak self] in
             guard let self = self else { return }
-            self.webView.evaluateJavaScript("exports.getSize()") { [weak self] result, error in
+            self.webView.evaluateJavaScript("exports.reflowAndGetSize ? exports.reflowAndGetSize() : exports.getSize()") { [weak self] result, error in
                 guard let self = self else { return }
                 if let error = error {
                     NSLog("Hterm resize error: %@", error.localizedDescription)
@@ -514,7 +538,6 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
                 guard generation == self.resizeRequestGeneration else { return }
                 guard let array = result as? [NSNumber], array.count == 2 else { return }
                 sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] request-resize result=\(array[0].intValue)x\(array[1].intValue) gen=\(generation)")
-                self.forwardResizeToRuntime(columns: array[0].intValue, rows: array[1].intValue, source: "request")
                 self.onResize?(array[0].intValue, array[1].intValue)
             }
         }
@@ -529,6 +552,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         func parsePair(_ columns: Int, _ rows: Int) -> Bool {
             guard columns > 0, rows > 0 else { return false }
             sshResizeLog("[ssh-resize] hterm[\(instanceId)] native-resize=\(columns)x\(rows)")
+            appliedForcedGridSize = (columns, rows)
             forwardResizeToRuntime(columns: columns, rows: rows, source: "native")
             onResize?(columns, rows)
             return true
@@ -556,13 +580,19 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private func forwardResizeToRuntime(columns: Int, rows: Int, source: String) {
         let sessionId = resizeSessionId
         guard sessionId != 0 else {
-            pendingRuntimeResize = (columns, rows, source)
             sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-defer source=\(source) session=0 cols=\(columns) rows=\(rows)")
+            deferredRuntimeResize = (columns, rows, source)
             return
         }
-        pendingRuntimeResize = nil
+        deferredRuntimeResize = nil
+        runtimeSizeHint = (columns, rows)
         sshResizeLog("[ssh-resize] hterm[\(instanceId)] runtime-forward source=\(source) session=\(sessionId) cols=\(columns) rows=\(rows)")
         PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(columns), Int32(rows))
+    }
+
+    func noteRuntimeSize(columns: Int, rows: Int) {
+        guard columns > 0, rows > 0 else { return }
+        runtimeSizeHint = (columns, rows)
     }
 
     func updateHostSize(_ size: CGSize, reason: String) {
@@ -694,12 +724,18 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
 
     private func applyForcedGridSize(columns: Int, rows: Int) {
         guard columns > 0, rows > 0 else { return }
+        if let applied = appliedForcedGridSize,
+           applied.columns == columns,
+           applied.rows == rows {
+            return
+        }
         let script = "exports.setGridSize(\(columns), \(rows))"
         webView.evaluateJavaScript(script) { _, error in
             if let error = error {
                 NSLog("Hterm force size error: %@", error.localizedDescription)
                 sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid error=\(error.localizedDescription) cols=\(columns) rows=\(rows)")
             } else {
+                self.appliedForcedGridSize = (columns, rows)
                 sshResizeLog("[ssh-resize] hterm[\(self.instanceId)] force-grid applied=\(columns)x\(rows)")
             }
         }
@@ -787,6 +823,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         }
         let wasLoaded = isLoaded
         isLoaded = false
+        appliedForcedGridSize = nil
         outputLock.lock()
         outputInProgress = false
         outputLock.unlock()
@@ -874,7 +911,7 @@ private final class ScrollbarViewDelegateProxy: NSObject, UIScrollViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard let scrollbarView = scrollView as? ScrollbarView,
-              let contentView = scrollbarView.contentView else {
+              scrollbarView.contentView != nil else {
             innerDelegate?.scrollViewDidScroll?(scrollView)
             return
         }
@@ -1070,17 +1107,22 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     func updateScrollHeight(_ height: CGFloat) {
-        let width = scrollView.bounds.width > 0 ? scrollView.bounds.width : max(scrollView.contentSize.width, 1)
-        scrollView.contentSize = CGSize(width: width, height: height)
+        guard isTerminalInstalled else { return }
+        let saneHeight = height.isFinite ? max(height, 0) : 0
+        let widthCandidate = scrollView.bounds.width > 0 ? scrollView.bounds.width : max(scrollView.contentSize.width, 1)
+        let saneWidth = widthCandidate.isFinite ? max(widthCandidate, 1) : 1
+        scrollView.contentSize = CGSize(width: saneWidth, height: saneHeight)
         clampScrollOffset(reason: "height")
         if HtermTerminalController.debugEnabled {
-            debugLog("Hterm[\(controller.instanceId)]: scroll height=\(String(format: "%.2f", height)) " +
+            debugLog("Hterm[\(controller.instanceId)]: scroll height=\(String(format: "%.2f", saneHeight)) " +
                      "contentOffset=\(NSCoder.string(for: scrollView.contentOffset)) " +
                      "bounds=\(NSCoder.string(for: scrollView.bounds))")
         }
     }
 
     func updateScrollTop(_ top: CGFloat) {
+        guard isTerminalInstalled else { return }
+        guard top.isFinite else { return }
         let maxTop = max(0, scrollView.contentSize.height - scrollView.bounds.height)
         let clampedTop = min(max(top, 0), maxTop)
         if abs(scrollView.contentOffset.y - clampedTop) < 0.5 {
@@ -1133,22 +1175,21 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
                     return
                 }
                 if keyInputView.isFirstResponder {
-                    keyInputView.resignFirstResponder()
+                    _ = keyInputView.resignFirstResponder()
                 }
                 _ = webView.becomeFirstResponder()
                 let target = rect.insetBy(dx: -4, dy: -4)
                 let clamped = target.intersection(webView.bounds)
                 let effectiveTarget = clamped.isNull ? target : clamped
-                UIMenuController.shared.setTargetRect(effectiveTarget, in: webView)
-                UIMenuController.shared.setMenuVisible(true, animated: true)
+                UIMenuController.shared.showMenu(from: webView, rect: effectiveTarget)
                 selectionMenuVisible = true
                 lastSelectionRect = rect
             } else if selectionMenuVisible {
-                UIMenuController.shared.setMenuVisible(false, animated: true)
+                UIMenuController.shared.hideMenu(from: webView)
                 selectionMenuVisible = false
                 lastSelectionRect = nil
                 if isActiveForInput {
-                    keyInputView.becomeFirstResponder()
+                    _ = keyInputView.becomeFirstResponder()
                 }
             }
         }
@@ -1195,7 +1236,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
             pendingFocus = false
             controller.setFocused(false)
             if keyInputView.isFirstResponder {
-                keyInputView.resignFirstResponder()
+                _ = keyInputView.resignFirstResponder()
             }
             updateDisplayAttachment()
         } else if controller.isLoaded {
@@ -1373,7 +1414,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         if focused {
             updateVisibilityForInput()
         } else if keyInputView.isFirstResponder {
-            keyInputView.resignFirstResponder()
+            _ = keyInputView.resignFirstResponder()
         }
     }
 
@@ -1403,11 +1444,9 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
     }
 
     private func hasVisibleSDLWindow() -> Bool {
-        let sceneWindows = UIApplication.shared.connectedScenes
+        let allWindows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
-        let appWindows = UIApplication.shared.windows
-        let allWindows = sceneWindows + appWindows
         return allWindows.contains { window in
                 guard !window.isHidden else { return false }
                 let className = NSStringFromClass(type(of: window)).lowercased()
@@ -1434,7 +1473,7 @@ final class HtermTerminalContainerView: UIView, UIScrollViewDelegate {
         lastVisibilityForInput = visible
         if !visible {
             if keyInputView.isFirstResponder {
-                keyInputView.resignFirstResponder()
+                _ = keyInputView.resignFirstResponder()
             }
             updateDisplayAttachment()
             return

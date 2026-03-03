@@ -157,6 +157,8 @@ void PSCALRuntimeSetSessionOutputPaused(uint64_t session_id, int paused);
 
 /// Updates the virtual terminal size for a session-backed PTY.
 int PSCALRuntimeSetSessionWinsize(uint64_t session_id, int cols, int rows);
+/// Reads the current virtual terminal size for a session-backed PTY.
+int PSCALRuntimeGetSessionWinsize(uint64_t session_id, int *cols_out, int *rows_out);
 /// Updates the session PTY size and notifies the session thread (SIGWINCH).
 void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int rows);
 

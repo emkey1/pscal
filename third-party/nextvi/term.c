@@ -29,6 +29,8 @@ extern void pscalTerminalSetCursorVisible(int visible);
 extern void pscalTerminalInsertLines(int row, int count);
 extern void pscalTerminalDeleteLines(int row, int count);
 extern int pscalTerminalRead(unsigned char *buffer, int maxlen, int timeout_ms);
+extern int pscalRuntimeDetectWindowRows(void) __attribute__((weak));
+extern int pscalRuntimeDetectWindowCols(void) __attribute__((weak));
 static int ios_row = 0;
 static int ios_col = 0;
 static int ios_wrap = 1;
@@ -519,6 +521,37 @@ static void ios_term_write(const char *s, int n) {
 #define term_write(s, n) ios_term_write(s, n)
 #endif
 
+void term_updatewinsize(void)
+{
+	int rows = xrows;
+	int cols = xcols;
+	if (getenv("LINES"))
+		rows = atoi(getenv("LINES"));
+	if (getenv("COLUMNS"))
+		cols = atoi(getenv("COLUMNS"));
+#if defined(PSCAL_TARGET_IOS)
+	if (pscalRuntimeDetectWindowRows) {
+		int detected_rows = pscalRuntimeDetectWindowRows();
+		if (detected_rows > 0)
+			rows = detected_rows;
+	}
+	if (pscalRuntimeDetectWindowCols) {
+		int detected_cols = pscalRuntimeDetectWindowCols();
+		if (detected_cols > 0)
+			cols = detected_cols;
+	}
+#endif
+	struct winsize win;
+	if (!ioctl(0, TIOCGWINSZ, &win)) {
+		if (win.ws_col > 0)
+			cols = win.ws_col;
+		if (win.ws_row > 0)
+			rows = win.ws_row;
+	}
+	xcols = cols > 0 ? cols : 80;
+	xrows = rows > 0 ? rows : 25;
+}
+
 void term_init(void)
 {
 	if (xvis & 2)
@@ -529,19 +562,7 @@ void term_init(void)
 	newtermios = termios;
 	newtermios.c_lflag &= ~(ICANON | ISIG | ECHO);
 	tcsetattr(0, TCSAFLUSH, &newtermios);
-	if (getenv("LINES"))
-		xrows = atoi(getenv("LINES"));
-	if (getenv("COLUMNS"))
-		xcols = atoi(getenv("COLUMNS"));
-#if !defined(PSCAL_TARGET_IOS)
-	struct winsize win;
-	if (!ioctl(0, TIOCGWINSZ, &win)) {
-		xcols = win.ws_col;
-		xrows = win.ws_row;
-	}
-#endif
-	xcols = xcols ? xcols : 80;
-	xrows = xrows ? xrows : 25;
+	term_updatewinsize();
 #if defined(PSCAL_TARGET_IOS)
 	pscalTerminalBegin(xcols, xrows);
 	pscalTerminalClear();
@@ -728,6 +749,12 @@ void term_back(int c)
 int term_read(void)
 {
 #if defined(PSCAL_TARGET_IOS)
+	static int ios_last_cols = -1;
+	static int ios_last_rows = -1;
+	if (ios_last_cols < 0 || ios_last_rows < 0) {
+		ios_last_cols = xcols;
+		ios_last_rows = xrows;
+	}
 	if (ibuf_pos >= ibuf_cnt) {
 		if (texec) {
 			xquit = !xquit ? 1 : xquit;
@@ -738,15 +765,31 @@ int term_read(void)
 		 * nextvi as TK_INT and can corrupt command-repeat flow (e.g. '.' after
 		 * 'dd'). Block until input or shutdown to match desktop behavior. */
 		while (ibuf_pos >= ibuf_cnt) {
-			int n = pscalTerminalRead(ibuf, 1, 0);
+			/* Use a finite timeout so idle loops can still process resize
+			 * updates without requiring keyboard input. */
+			int n = pscalTerminalRead(ibuf, 1, 50);
 			if (n > 0) {
 				ibuf_cnt = (unsigned int)n;
 				ibuf_pos = 0;
 				break;
 			}
 			/* n == 0 means timeout/no data: retry instead of emitting TK_INT. */
-			if (n == 0)
+			if (n == 0) {
+				/* Poll winsize during idle periods so resize propagates even when
+				 * no keyboard input arrives or SIGWINCH routing is delayed. */
+				term_updatewinsize();
+				if (xcols != ios_last_cols || xrows != ios_last_rows) {
+					ios_last_cols = xcols;
+					ios_last_rows = xrows;
+					vi_sigwinch_pending_mark();
+					return 0;
+				}
+				if (vi_sigwinch_pending_poll()) {
+					return 0;
+				}
+				usleep(5000);
 				continue;
+			}
 			/* n < 0 means terminal/editor shutdown. */
 			if (texec)
 				xquit = texec == '&' ? -1 : 1;

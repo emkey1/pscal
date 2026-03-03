@@ -160,6 +160,16 @@
             value = "1"
             isEnabled = "NO">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "PSCALI_RUNTIME_DEBUG"
+            value = "1"
+            isEnabled = "NO">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = ""
+            value = ""
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction

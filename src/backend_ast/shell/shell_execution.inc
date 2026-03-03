@@ -166,21 +166,21 @@ static char *shellFindExecutableOnPath(const char *name) {
     return NULL;
 }
 
-static void shellPagerPushVirtualTTYOverride(int fd) {
+static void __attribute__((unused)) shellPagerPushVirtualTTYOverride(int fd) {
     if (gShellPagerVirtualTTYFd >= 0) {
         close(gShellPagerVirtualTTYFd);
     }
     gShellPagerVirtualTTYFd = fd;
 }
 
-static void shellPagerPopVirtualTTYOverride(void) {
+static void __attribute__((unused)) shellPagerPopVirtualTTYOverride(void) {
     if (gShellPagerVirtualTTYFd >= 0) {
         close(gShellPagerVirtualTTYFd);
         gShellPagerVirtualTTYFd = -1;
     }
 }
 
-static int shellPagerGetVirtualTTYOverride(void) {
+static int __attribute__((unused)) shellPagerGetVirtualTTYOverride(void) {
     return gShellPagerVirtualTTYFd;
 }
 
@@ -1260,7 +1260,7 @@ typedef struct {
     bool continued;
 } ShellWaitResult;
 
-static int shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
+static int __attribute__((unused)) shellWaitPid(pid_t pid, int *status_out, bool allow_stop, bool *out_stopped) {
     ShellWaitResult res = { .pid = pid, .status_raw = 0, .status_mapped = 0, .stopped = false, .continued = false };
     int err = 0;
     int status = 0;
@@ -1455,6 +1455,16 @@ static bool shellShouldRunCommandInForegroundWorker(const ShellCommand *cmd) {
         return false;
     }
     if (smallclueFindApplet(name) != NULL) {
+        /* Keep interactive full-screen editors on the shell thread so
+         * SIGWINCH/foreground PTY state tracks the active UI session. */
+        if (strcasecmp(name, "micro") == 0 ||
+            strcasecmp(name, "nextvi") == 0 ||
+            strcasecmp(name, "vi") == 0) {
+            if (dbg) {
+                fprintf(stderr, "[pipe-worker] prefer=0 reason=interactive-applet cmd=%s\n", name);
+            }
+            return false;
+        }
         if (dbg) {
             fprintf(stderr, "[pipe-worker] prefer=1 reason=smallclue cmd=%s\n", name);
         }
@@ -1658,7 +1668,7 @@ static void shellInProcessWorkerCleanup(void *arg) {
     free(ctx);
 }
 
-static void shellInstallVprocSigintHandler(VProc *vp) {
+static void __attribute__((unused)) shellInstallVprocSigintHandler(VProc *vp) {
     if (!vp) {
         return;
     }
@@ -1847,7 +1857,7 @@ static void *shellShebangBackgroundMain(void *arg) {
     return NULL;
 }
 
-static void *shellInProcessBackgroundMain(void *arg) {
+static void *__attribute__((unused)) shellInProcessBackgroundMain(void *arg) {
     ShellBackgroundStageCtx *ctx = (ShellBackgroundStageCtx *)arg;
     if (!ctx) {
         return NULL;
@@ -3569,7 +3579,7 @@ static bool __attribute__((unused)) shellPipelineReadPipeToBuffer(int fd, char *
     return true;
 }
 
-static int shellPipelineCreateSpoolFile(void) {
+static int __attribute__((unused)) shellPipelineCreateSpoolFile(void) {
     const char *tmp_root = getenv("TMPDIR");
     if (!tmp_root || !*tmp_root) {
         tmp_root = "/tmp";
@@ -3583,6 +3593,111 @@ static int shellPipelineCreateSpoolFile(void) {
     }
     return fd;
 }
+
+#if defined(PSCAL_TARGET_IOS)
+static bool shellDispatchSmallclueAppletInProcess(VM *vm, ShellCommand *cmd) {
+    (void)vm;
+    if (!cmd || !cmd->argv || !cmd->argv[0] || cmd->argc <= 0) {
+        return false;
+    }
+
+    char lookup_buf[PATH_MAX];
+    const char *cmd_name = shellCommandLookupName(cmd->argv[0], lookup_buf, sizeof(lookup_buf));
+    const SmallclueApplet *applet = smallclueFindApplet(cmd_name);
+    if (!applet) {
+        return false;
+    }
+
+    int argc = cmd->argc;
+    char **argv_copy = (char **)calloc((size_t)(argc + 1), sizeof(char *));
+    if (!argv_copy) {
+        shellUpdateStatus(1);
+        return true;
+    }
+
+    bool ok = true;
+    for (int i = 0; i < argc; ++i) {
+        const char *src_arg = cmd->argv[i];
+        if (i == 0 && cmd_name && *cmd_name) {
+            src_arg = cmd_name;
+        }
+        if (src_arg) {
+            argv_copy[i] = strdup(src_arg);
+            if (!argv_copy[i]) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if (!ok) {
+        for (int i = 0; i < argc; ++i) {
+            free(argv_copy[i]);
+        }
+        free(argv_copy);
+        shellUpdateStatus(1);
+        return true;
+    }
+
+    int sc_status = 0;
+    char label[96] = {0};
+    shellVprocFormatLabel(cmd, label, sizeof(label));
+    VProcCommandScope vproc_scope;
+    memset(&vproc_scope, 0, sizeof(vproc_scope));
+    int saved_fg_pgid = -1;
+    int session_sid = -1;
+    bool inherit_pgid = false;
+    bool run_scoped = vprocIsShellSelfThread();
+    if (run_scoped) {
+        /* Worker-stage applets already have an owning vproc. */
+        VProc *active_vp = vprocCurrent();
+        int active_pid = active_vp ? vprocPid(active_vp) : -1;
+        int shell_pid = vprocGetShellSelfPid();
+        if (active_pid > 0 && shell_pid > 0 && active_pid != shell_pid) {
+            run_scoped = false;
+        }
+    }
+    bool scoped = false;
+    if (run_scoped) {
+        scoped = vprocCommandScopeBegin(&vproc_scope,
+                                        label[0] ? label : (cmd->argv && cmd->argv[0] ? cmd->argv[0] : "task"),
+                                        true,
+                                        inherit_pgid);
+    }
+    if (scoped && vproc_scope.pid > 0) {
+        vprocSetStopUnsupported(vproc_scope.pid, true);
+        int shell_pid = vprocGetShellSelfPid();
+        int scope_pgid = vprocGetPgid(vproc_scope.pid);
+        if (scope_pgid <= 0) {
+            scope_pgid = vproc_scope.pid;
+        }
+        if (shell_pid > 0) {
+            session_sid = vprocGetSid(shell_pid);
+        }
+        if (session_sid > 0 && scope_pgid > 0) {
+            saved_fg_pgid = vprocGetForegroundPgid(session_sid);
+            if (saved_fg_pgid <= 0) {
+                saved_fg_pgid = vprocGetPgid(shell_pid);
+            }
+            (void)vprocSetForegroundPgid(session_sid, scope_pgid);
+        }
+    }
+
+    sc_status = smallclueDispatchApplet(applet, argc, argv_copy);
+    if (scoped) {
+        vprocCommandScopeEnd(&vproc_scope, sc_status);
+    }
+    if (session_sid > 0 && saved_fg_pgid > 0) {
+        (void)vprocSetForegroundPgid(session_sid, saved_fg_pgid);
+    }
+    shellUpdateStatus(sc_status);
+
+    for (int i = 0; i < argc; ++i) {
+        free(argv_copy[i]);
+    }
+    free(argv_copy);
+    return true;
+}
+#endif
 
 static int shellRunBuiltinInProcess(VM *vm,
                                     ShellCommand *cmd,
@@ -5033,6 +5148,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
                 ShellVprocLabelScope label_scope;
                 shellVprocLabelScopeBegin(&label_scope, cmd);
                 bool ran_builtin = shellInvokeBuiltin(vm, cmd);
+                if (!ran_builtin) {
+                    ran_builtin = shellDispatchSmallclueAppletInProcess(vm, cmd);
+                }
                 shellVprocLabelScopeEnd(&label_scope);
                 if (ran_builtin) {
                     if (assignments_applied) {
@@ -5156,6 +5274,9 @@ static Value shellExecuteCommand(VM *vm, ShellCommand *cmd) {
 #endif
             bool ran_builtin = shellInvokeBuiltin(vm, cmd);
 #if defined(PSCAL_TARGET_IOS)
+            if (!ran_builtin) {
+                ran_builtin = shellDispatchSmallclueAppletInProcess(vm, cmd);
+            }
             shellVprocLabelScopeEnd(&label_scope);
 #endif
             if (ran_builtin) {

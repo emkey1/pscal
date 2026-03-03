@@ -62,6 +62,16 @@ final class SshRuntimeSession: ObservableObject {
     private var detachedOutputHead: Int = 0
     private var detachedOutputBytes: Int = 0
     private let detachedOutputMaxBytes: Int = 2 * 1024 * 1024
+    private var attachedOutputChunks: [Data] = []
+    private var attachedOutputHead: Int = 0
+    private var attachedOutputBytes: Int = 0
+    private var attachedFlushScheduled = false
+    private let attachedFlushInterval: TimeInterval = 0.001
+    private let attachedFlushChunkBytes: Int = 128 * 1024
+    private let attachedOutputPauseHighWatermark: Int = 512 * 1024
+    private let attachedOutputPauseLowWatermark: Int = 128 * 1024
+    private var outputPausedForBackpressure = false
+    private var sessionOutputPaused = false
     private var started = false
     private var didExit = false
     private var pendingColumns: Int
@@ -119,10 +129,9 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach ssh session=\(self.sessionId)")
             self.htermAttached = true
-            self.withRuntimeContext {
-                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 0)
-            }
             self.flushDetachedOutputIfNeeded()
+            self.updateSessionOutputPauseLocked()
+            self.scheduleAttachedFlushLocked()
             DispatchQueue.main.async {
                 controller.setResizeSessionId(self.sessionId)
             }
@@ -136,9 +145,9 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach ssh session=\(self.sessionId)")
             self.htermAttached = false
-            self.withRuntimeContext {
-                PSCALRuntimeSetSessionOutputPaused(self.sessionId, 1)
-            }
+            self.moveAttachedOutputToDetachedLocked()
+            self.outputPausedForBackpressure = false
+            self.updateSessionOutputPauseLocked()
             DispatchQueue.main.async {
                 controller.setResizeSessionId(0)
             }
@@ -154,15 +163,15 @@ final class SshRuntimeSession: ObservableObject {
         }
         guard shouldStart else { return false }
 
-        sshDebugLog("[ssh-session] start id=\(sessionId)")
         withRuntimeContext {
             PSCALRuntimeRegisterSessionContext(sessionId)
         }
         handlerContext = Unmanaged.passRetained(self).toOpaque()
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
-            PSCALRuntimeSetSessionOutputPaused(sessionId, htermAttached ? 0 : 1)
         }
+        sessionOutputPaused = false
+        updateSessionOutputPauseLocked()
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
             let message = "SshSession: start id=\(sessionId) ctx=\(ctxDesc)\n"
@@ -177,14 +186,12 @@ final class SshRuntimeSession: ObservableObject {
         if !launched {
             let err = errno
             lastStartErrno = err == 0 ? EIO : err
-            sshDebugLog("[ssh-session] start failed id=\(sessionId) errno=\(lastStartErrno)")
             stopOutputHandler()
             closeIfValid(readFd)
             closeIfValid(writeFd)
             markExited(status: 255)
             return false
         }
-        sshDebugLog("[ssh-session] launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)")
         if Self.ioDebugEnabled {
             let message = "SshSession: launched id=\(sessionId) readFd=\(readFd) writeFd=\(writeFd)\n"
             if let data = message.data(using: .utf8) {
@@ -225,13 +232,20 @@ final class SshRuntimeSession: ObservableObject {
     }
 
     func requestClose() {
-        sendInterrupt()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            guard let self, self.exitStatus == nil else { return }
+        let interrupted = withRuntimeContext {
+            PSCALRuntimeSendSignalForSession(sessionId, SIGINT) != 0
+        }
+        if !interrupted {
+            withRuntimeContext {
+                PSCALRuntimeSendSignal(SIGINT)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
+            guard self.exitStatus == nil else { return }
             self.send("\u{04}")
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self, self.exitStatus == nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [self] in
+            guard self.exitStatus == nil else { return }
             self.withRuntimeContext {
                 _ = PSCALRuntimeSendSignalForSession(self.sessionId, SIGTERM)
             }
@@ -241,14 +255,13 @@ final class SshRuntimeSession: ObservableObject {
     func updateTerminalSize(columns: Int, rows: Int) {
         let clampedColumns = max(10, columns)
         let clampedRows = max(4, rows)
-        sshResizeLog("[ssh-resize] session update id=\(sessionId) req=\(columns)x\(rows) clamped=\(clampedColumns)x\(clampedRows)")
         pendingColumns = clampedColumns
         pendingRows = clampedRows
         if terminalBuffer.resize(columns: clampedColumns, rows: clampedRows) {
             scheduleRender()
         }
         DispatchQueue.main.async { [weak self] in
-            sshResizeLog("[ssh-resize] session force-grid id=\(self?.sessionId ?? 0) cols=\(clampedColumns) rows=\(clampedRows)")
+            self?.htermController.noteRuntimeSize(columns: clampedColumns, rows: clampedRows)
             self?.htermController.forceGridSize(columns: clampedColumns, rows: clampedRows)
         }
         withRuntimeContext {
@@ -360,7 +373,9 @@ final class SshRuntimeSession: ObservableObject {
         let cols = pendingColumns
         let rows = pendingRows
         guard cols > 0, rows > 0 else { return }
-        sshResizeLog("[ssh-resize] session apply-pending id=\(sessionId) cols=\(cols) rows=\(rows)")
+        DispatchQueue.main.async { [weak self] in
+            self?.htermController.noteRuntimeSize(columns: cols, rows: rows)
+        }
         withRuntimeContext {
             PSCALRuntimeUpdateSessionWindowSize(sessionId, Int32(cols), Int32(rows))
         }
@@ -373,8 +388,8 @@ final class SshRuntimeSession: ObservableObject {
             guard let self else { return }
             if self.htermAttached {
                 self.flushDetachedOutputIfNeeded()
-                self.htermController.enqueueOutput(data)
-                self.terminalBuffer.append(data: data)
+                self.queueAttachedOutputLocked(data)
+                self.scheduleAttachedFlushLocked()
             } else {
                 self.queueDetachedOutput(data)
             }
@@ -413,18 +428,114 @@ final class SshRuntimeSession: ObservableObject {
             return
         }
 
-        let slice = detachedOutputChunks[detachedOutputHead...]
-        var merged = Data()
-        merged.reserveCapacity(detachedOutputBytes)
-        for chunk in slice {
-            merged.append(chunk)
+        for index in detachedOutputHead..<detachedOutputChunks.count {
+            queueAttachedOutputLocked(detachedOutputChunks[index])
         }
         detachedOutputChunks.removeAll(keepingCapacity: true)
         detachedOutputHead = 0
         detachedOutputBytes = 0
-        guard !merged.isEmpty else { return }
-        htermController.enqueueOutput(merged)
-        terminalBuffer.append(data: merged)
+    }
+
+    private func queueAttachedOutputLocked(_ data: Data) {
+        guard !data.isEmpty else { return }
+        attachedOutputChunks.append(data)
+        attachedOutputBytes += data.count
+        if !outputPausedForBackpressure && attachedOutputBytes >= attachedOutputPauseHighWatermark {
+            outputPausedForBackpressure = true
+            updateSessionOutputPauseLocked()
+        }
+    }
+
+    private func scheduleAttachedFlushLocked() {
+        guard htermAttached else { return }
+        guard attachedOutputBytes > 0 else { return }
+        guard !attachedFlushScheduled else { return }
+        attachedFlushScheduled = true
+        outputQueue.asyncAfter(deadline: .now() + attachedFlushInterval) { [weak self] in
+            self?.flushAttachedOutput()
+        }
+    }
+
+    private func flushAttachedOutput() {
+        guard htermAttached else {
+            attachedFlushScheduled = false
+            return
+        }
+        guard attachedOutputHead < attachedOutputChunks.count, attachedOutputBytes > 0 else {
+            attachedFlushScheduled = false
+            attachedOutputChunks.removeAll(keepingCapacity: true)
+            attachedOutputHead = 0
+            attachedOutputBytes = 0
+            if outputPausedForBackpressure {
+                outputPausedForBackpressure = false
+                updateSessionOutputPauseLocked()
+            }
+            return
+        }
+
+        var remaining = min(attachedFlushChunkBytes, attachedOutputBytes)
+        var merged = Data()
+        merged.reserveCapacity(remaining)
+        while remaining > 0 && attachedOutputHead < attachedOutputChunks.count {
+            let chunk = attachedOutputChunks[attachedOutputHead]
+            if chunk.count <= remaining {
+                merged.append(chunk)
+                remaining -= chunk.count
+                attachedOutputHead += 1
+            } else {
+                merged.append(chunk.prefix(remaining))
+                attachedOutputChunks[attachedOutputHead].removeFirst(remaining)
+                remaining = 0
+            }
+        }
+
+        let emittedBytes = merged.count
+        if emittedBytes > 0 {
+            attachedOutputBytes -= emittedBytes
+            htermController.enqueueOutput(merged)
+            terminalBuffer.append(data: merged)
+        }
+
+        if attachedOutputHead > 64 && attachedOutputHead > attachedOutputChunks.count / 2 {
+            attachedOutputChunks.removeFirst(attachedOutputHead)
+            attachedOutputHead = 0
+        }
+
+        if outputPausedForBackpressure && attachedOutputBytes <= attachedOutputPauseLowWatermark {
+            outputPausedForBackpressure = false
+            updateSessionOutputPauseLocked()
+        }
+
+        attachedFlushScheduled = false
+        if attachedOutputBytes > 0 {
+            scheduleAttachedFlushLocked()
+        }
+    }
+
+    private func moveAttachedOutputToDetachedLocked() {
+        guard attachedOutputHead < attachedOutputChunks.count else {
+            attachedOutputChunks.removeAll(keepingCapacity: true)
+            attachedOutputHead = 0
+            attachedOutputBytes = 0
+            attachedFlushScheduled = false
+            return
+        }
+        for index in attachedOutputHead..<attachedOutputChunks.count {
+            queueDetachedOutput(attachedOutputChunks[index])
+        }
+        attachedOutputChunks.removeAll(keepingCapacity: true)
+        attachedOutputHead = 0
+        attachedOutputBytes = 0
+        attachedFlushScheduled = false
+    }
+
+    private func updateSessionOutputPauseLocked() {
+        let shouldPause = !htermAttached || outputPausedForBackpressure
+        guard shouldPause != sessionOutputPaused else { return }
+        sessionOutputPaused = shouldPause
+        withRuntimeContext {
+            PSCALRuntimeSetSessionOutputPaused(sessionId, shouldPause ? 1 : 0)
+        }
     }
 
     private func launchSshSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {
@@ -443,10 +554,10 @@ final class SshRuntimeSession: ObservableObject {
             guard let base = buffer.baseAddress else { return -1 }
             return withRuntimeContext {
                 PSCALRuntimeCreateSshSession(argc,
-                                             base,
-                                             sessionId,
-                                             &readFd,
-                                             &writeFd)
+                                               base,
+                                               sessionId,
+                                               &readFd,
+                                               &writeFd)
             }
         }
         return result == 0
