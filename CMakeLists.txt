@@ -976,7 +976,7 @@ else()
     find_package(CURL QUIET)
     if(NOT CURL_FOUND)
         if(_PSCAL_REQUIRE_CURL)
-            message(FATAL_ERROR "libcurl is required for this configuration. Install libcurl dev headers or set PSCAL_USE_BUNDLED_CURL=ON.")
+            message(WARNING "libcurl is required for this configuration. Install libcurl dev headers or set PSCAL_USE_BUNDLED_CURL=ON. Proceeding without curl (network builtins disabled).")
         else()
             message(WARNING "libcurl not found; network builtins will be disabled for this build.")
         endif()
@@ -1591,7 +1591,13 @@ endif()
 target_link_libraries(pscal_core_static PUBLIC
     ${PSCAL_OPENSSL_SSL_TARGET}
     ${PSCAL_OPENSSL_CRYPTO_TARGET}
-    z resolv)
+    z resolv
+    m
+    Threads::Threads)
+if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+    target_link_libraries(pscal_core_static PUBLIC ${PSCAL_SQLITE_LIBS})
+endif()
+
 if(PSCAL_PLATFORM_IOS AND NOT PSCAL_USE_HOST_OPENSSL)
     add_dependencies(pscal_core_static pscal_openssl)
     target_include_directories(pscal_core_static PUBLIC
