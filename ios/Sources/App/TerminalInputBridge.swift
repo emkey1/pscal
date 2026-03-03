@@ -373,6 +373,12 @@ final class TerminalKeyInputView: UITextView {
                 return
             }
         }
+        if text.unicodeScalars.count == 1,
+           let scalar = text.unicodeScalars.first,
+           let optionSequence = optionComposedFallbackSequence(for: scalar) {
+            onInput?(optionSequence)
+            return
+        }
         let normalized = text.replacingOccurrences(of: "\n", with: "\r")
         onInput?(normalized)
     }
@@ -643,6 +649,56 @@ final class TerminalKeyInputView: UITextView {
             return nil
         }
         return UnicodeScalar(shift ? (base - 0x20) : base)
+    }
+
+    private func optionComposedFallbackSequence(for scalar: UnicodeScalar) -> String? {
+        let mapped: UnicodeScalar
+        switch scalar {
+        case "å", "Å": mapped = "a"
+        case "∫": mapped = "b"
+        case "ç", "Ç": mapped = "c"
+        case "∂": mapped = "d"
+        case "´", "É": mapped = "e"
+        case "ƒ": mapped = "f"
+        case "©": mapped = "g"
+        case "˙": mapped = "h"
+        case "ˆ": mapped = "i"
+        case "∆": mapped = "j"
+        case "˚": mapped = "k"
+        case "¬": mapped = "l"
+        case "µ": mapped = "m"
+        case "˜", "ı": mapped = "n"
+        case "ø", "Ø": mapped = "o"
+        case "π", "∏": mapped = "p"
+        case "œ", "Œ": mapped = "q"
+        case "®": mapped = "r"
+        case "ß": mapped = "s"
+        case "†": mapped = "t"
+        case "¨": mapped = "u"
+        case "√": mapped = "v"
+        case "∑": mapped = "w"
+        case "≈": mapped = "x"
+        case "¥": mapped = "y"
+        case "Ω": mapped = "z"
+        case "¡": mapped = "1"
+        case "™": mapped = "2"
+        case "£": mapped = "3"
+        case "¢": mapped = "4"
+        case "∞": mapped = "5"
+        case "§": mapped = "6"
+        case "¶": mapped = "7"
+        case "•": mapped = "8"
+        case "ª": mapped = "9"
+        case "º": mapped = "0"
+        case "≤": mapped = ","
+        case "≥": mapped = "."
+        case "÷": mapped = "/"
+        case "–": mapped = "-"
+        case "≠": mapped = "="
+        default:
+            return nil
+        }
+        return "\u{1B}" + String(mapped)
     }
 
     @objc private func handleEscapeKey() {
