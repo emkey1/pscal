@@ -3901,6 +3901,18 @@ static int shellRunBuiltinInProcess(VM *vm,
         char lookup_buf[PATH_MAX];
         const char *cmd_name = shellCommandLookupName(cmd_name_raw, lookup_buf, sizeof(lookup_buf));
         VmBuiltinFn handler = getVmBuiltinHandler(cmd_name);
+#if defined(PSCAL_TARGET_IOS)
+        if (handler && cmd_name && *cmd_name) {
+            /*
+             * Prefer smallclue applets for overlapping command names on iOS.
+             * Applets provide user-facing diagnostics and path-virtualized
+             * behavior expected by the mobile shell UX.
+             */
+            if (smallclueFindApplet(cmd_name) != NULL) {
+                handler = NULL;
+            }
+        }
+#endif
         if (kill_dbg) {
             fprintf(stderr, "[exec] lookup cmd=%s handler=%p\n",
                     (cmd && cmd->argv && cmd->argv[0]) ? cmd->argv[0] : "<nil>",

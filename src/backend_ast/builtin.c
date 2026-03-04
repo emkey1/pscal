@@ -42,6 +42,9 @@
 
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/vproc.h"
+#define PATH_VIRTUALIZATION_NO_MACROS 1
+#include "common/path_virtualization.h"
+#undef PATH_VIRTUALIZATION_NO_MACROS
 #if defined(__APPLE__)
 extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak_import));
 #else
@@ -7445,14 +7448,22 @@ static int dosMkdirParents(const char *path) {
     for (; *p; p++) {
         if (*p != '/') continue;
         *p = '\0';
+#if defined(PSCAL_TARGET_IOS)
+        if (pscalPathVirtualized_mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#else
         if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#endif
             rc = -1;
             break;
         }
         *p = '/';
     }
     if (rc == 0) {
+#if defined(PSCAL_TARGET_IOS)
+        if (pscalPathVirtualized_mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#else
         if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#endif
             rc = -1;
         }
     }
@@ -7487,7 +7498,16 @@ Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
         }
         const char *path = AS_STRING(args[i]);
         any = true;
-        int rc = parents ? dosMkdirParents(path) : mkdir(path, 0777);
+        int rc = -1;
+        if (parents) {
+            rc = dosMkdirParents(path);
+        } else {
+#if defined(PSCAL_TARGET_IOS)
+            rc = pscalPathVirtualized_mkdir(path, 0777);
+#else
+            rc = mkdir(path, 0777);
+#endif
+        }
         if (rc != 0 && errno != EEXIST) {
             last_err = errno ? errno : EIO;
         }
@@ -7504,7 +7524,12 @@ Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "dosRmdir expects 1 string argument.");
         return makeInt(errno);
     }
-    int rc = rmdir(AS_STRING(args[0]));
+    int rc = -1;
+#if defined(PSCAL_TARGET_IOS)
+    rc = pscalPathVirtualized_rmdir(AS_STRING(args[0]));
+#else
+    rc = rmdir(AS_STRING(args[0]));
+#endif
     return makeInt(rc == 0 ? 0 : errno);
 }
 
