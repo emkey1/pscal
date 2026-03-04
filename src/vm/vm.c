@@ -5877,6 +5877,24 @@ dispatch_switch:
 
                 // Handle explicit NIL-to-NIL comparisons first.  Pointer/NIL
                 // comparisons are handled in the pointer block below.
+
+                // Optimization: Fast path for TYPE_INT32 comparisons.
+                // Bypasses the overhead of IS_NUMERIC and asI64 type resolution switches
+                // which provides significant performance gains in hot loops.
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    long long ia = a_val.i_val;
+                    long long ib = b_val.i_val;
+                    switch (instruction_val) {
+                        case EQUAL:         result_val = makeBoolean(ia == ib); break;
+                        case NOT_EQUAL:     result_val = makeBoolean(ia != ib); break;
+                        case GREATER:       result_val = makeBoolean(ia >  ib); break;
+                        case GREATER_EQUAL: result_val = makeBoolean(ia >= ib); break;
+                        case LESS:          result_val = makeBoolean(ia <  ib); break;
+                        case LESS_EQUAL:    result_val = makeBoolean(ia <= ib); break;
+                        default: goto comparison_error_label;
+                    }
+                    comparison_succeeded = true;
+                } else
                 if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
                     if (instruction_val == EQUAL) {
                         result_val = makeBoolean(true);
