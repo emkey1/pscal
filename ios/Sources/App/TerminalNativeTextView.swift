@@ -99,6 +99,25 @@ final class NativeTerminalView: UITextView {
             btn.setTitleColor(.white, for: .normal)
             btn.backgroundColor = UIColor(white: 0.3, alpha: 1.0)
             btn.layer.cornerRadius = 6
+
+            // Add accessibility labels for VoiceOver
+            switch key {
+            case "Esc":
+                btn.accessibilityLabel = "Escape"
+            case "Tab":
+                btn.accessibilityLabel = "Tab"
+            case "Ctrl":
+                btn.accessibilityLabel = "Control"
+            case "/":
+                btn.accessibilityLabel = "Forward Slash"
+            case "-":
+                btn.accessibilityLabel = "Minus"
+            case "⚙️":
+                btn.accessibilityLabel = "Settings"
+            default:
+                btn.accessibilityLabel = key
+            }
+
             btn.addTarget(self, action: #selector(keyTapped(_:)), for: .touchUpInside)
             keysStack.addArrangedSubview(btn)
         }
