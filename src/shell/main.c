@@ -1653,6 +1653,77 @@ static bool interactiveInsertText(char **buffer,
     return true;
 }
 
+static bool interactiveMapMacOptionComposedRune(wchar_t wc, unsigned char *out_key) {
+    if (!out_key) {
+        return false;
+    }
+    switch ((uint32_t)wc) {
+        case 0x0192: /* ƒ (Option+f) */
+            *out_key = 'f';
+            return true;
+        case 0x222B: /* ∫ (Option+b) */
+            *out_key = 'b';
+            return true;
+        case 0x2202: /* ∂ (Option+d) */
+            *out_key = 'd';
+            return true;
+        case 0x2020: /* † (Option+t) */
+            *out_key = 't';
+            return true;
+        case 0x2265: /* ≥ (Option+.) */
+            *out_key = '.';
+            return true;
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool interactiveReadUtf8Codepoint(unsigned char first,
+                                         wchar_t *out_wc,
+                                         char *bytes,
+                                         size_t *out_len) {
+    if (!out_wc || !bytes || !out_len) {
+        return false;
+    }
+    if (first < 0x80) {
+        bytes[0] = (char)first;
+        *out_len = 1;
+        *out_wc = (wchar_t)first;
+        return true;
+    }
+
+    size_t expected = 0;
+    if ((first & 0xE0) == 0xC0) {
+        expected = 2;
+    } else if ((first & 0xF0) == 0xE0) {
+        expected = 3;
+    } else if ((first & 0xF8) == 0xF0) {
+        expected = 4;
+    } else {
+        return false;
+    }
+
+    bytes[0] = (char)first;
+    for (size_t i = 1; i < expected; ++i) {
+        unsigned char next = 0;
+        ssize_t count = shellReadFd(STDIN_FILENO, &next, 1);
+        if (count <= 0 || (next & 0xC0) != 0x80) {
+            return false;
+        }
+        bytes[i] = (char)next;
+    }
+
+    mbstate_t st;
+    memset(&st, 0, sizeof(st));
+    size_t consumed = mbrtowc(out_wc, bytes, expected, &st);
+    if (consumed == (size_t)-1 || consumed == (size_t)-2 || consumed == 0) {
+        return false;
+    }
+    *out_len = consumed;
+    return true;
+}
+
 static bool interactiveHistoryNavigateUp(const char *prompt,
                                          char **buffer,
                                          size_t *length,
@@ -2064,11 +2135,14 @@ static size_t interactiveNextWord(const char *buffer, size_t length, size_t curs
     return pos;
 }
 
-static size_t interactiveFindWordStart(const char *buffer, size_t length) {
+static size_t interactiveFindWordStart(const char *buffer, size_t length, size_t cursor) {
     if (!buffer || length == 0) {
         return length;
     }
-    size_t index = length;
+    if (cursor > length) {
+        cursor = length;
+    }
+    size_t index = cursor;
     while (index > 0) {
         unsigned char c = (unsigned char)buffer[index - 1];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
@@ -2411,12 +2485,14 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     if (!buffer || !*buffer || !length || !capacity || !cursor) {
         return false;
     }
-    if (*cursor != *length) {
-        return false;
+    size_t insertion_point = *cursor;
+    if (insertion_point > *length) {
+        insertion_point = *length;
     }
-    size_t word_start = interactiveFindWordStart(*buffer, *length);
+    size_t suffix_len = *length - insertion_point;
+    size_t word_start = interactiveFindWordStart(*buffer, *length, insertion_point);
     char *word = *buffer + word_start;
-    size_t word_len = *length - word_start;
+    size_t word_len = insertion_point - word_start;
     if (interactiveWordLooksDynamic(word)) {
         return false;
     }
@@ -2438,7 +2514,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     bool completing_command = false;
     bool command_is_cd = false;
     if (interactiveExtractCommandToken(*buffer,
-                                       *length,
+                                       insertion_point,
                                        word_start,
                                        &command_start,
                                        &command_len)) {
@@ -2475,7 +2551,6 @@ static bool interactiveHandleTabCompletion(const char *prompt,
                     interactivePrintMatchesInColumns(matches, match_count);
                     interactiveFreeMatches(matches, match_count);
 
-                    *cursor = *length;
                     redrawInteractiveLine(prompt,
                                           *buffer,
                                           *length,
@@ -2489,21 +2564,25 @@ static bool interactiveHandleTabCompletion(const char *prompt,
                 }
             }
 
-            size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+            size_t inserted_len = replacement_len + (append_space ? 1 : 0);
+            size_t total_len = word_start + inserted_len + suffix_len;
             if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
                 interactiveFreeMatches(matches, match_count);
                 return false;
             }
 
+            memmove(*buffer + word_start + inserted_len,
+                    *buffer + insertion_point,
+                    suffix_len + 1);
             memcpy(*buffer + word_start, matches[0], replacement_len);
             if (append_space) {
                 (*buffer)[word_start + replacement_len] = ' ';
                 replacement_len += 1;
             }
-            *length = word_start + replacement_len;
+            *length = word_start + replacement_len + suffix_len;
             (*buffer)[*length] = '\0';
 
-            *cursor = *length;
+            *cursor = word_start + replacement_len;
             redrawInteractiveLine(prompt,
                                   *buffer,
                                   *length,
@@ -2617,7 +2696,6 @@ static bool interactiveHandleTabCompletion(const char *prompt,
             interactivePrintMatchesInColumns(results.gl_pathv, results.gl_pathc);
             globfree(&results);
 
-            *cursor = *length;
             redrawInteractiveLine(prompt,
                                   *buffer,
                                   *length,
@@ -2645,12 +2723,16 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     }
 #endif
 
-    size_t total_len = word_start + replacement_len + (append_slash ? 1 : 0) + (append_space ? 1 : 0);
+    size_t inserted_len = replacement_len + (append_slash ? 1 : 0) + (append_space ? 1 : 0);
+    size_t total_len = word_start + inserted_len + suffix_len;
     if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
         globfree(&results);
         return false;
     }
 
+    memmove(*buffer + word_start + inserted_len,
+            *buffer + insertion_point,
+            suffix_len + 1);
     memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
     if (append_slash) {
         (*buffer)[word_start + replacement_len] = '/';
@@ -2660,11 +2742,11 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         (*buffer)[word_start + replacement_len] = ' ';
         replacement_len += 1;
     }
-    *length = word_start + replacement_len;
+    *length = word_start + replacement_len + suffix_len;
     (*buffer)[*length] = '\0';
     globfree(&results);
 
-    *cursor = *length;
+    *cursor = word_start + replacement_len;
     redrawInteractiveLine(prompt,
                           *buffer,
                           *length,
@@ -2883,6 +2965,207 @@ copy_char:
 
     out[out_len] = '\0';
     return out;
+}
+
+static bool interactiveHandleAltShortcut(unsigned char key,
+                                         const char *prompt,
+                                         char **buffer,
+                                         size_t *length,
+                                         size_t *cursor,
+                                         size_t *capacity,
+                                         size_t *displayed_length,
+                                         size_t *displayed_prompt_lines,
+                                         size_t *history_index,
+                                         char **scratch,
+                                         char **kill_buffer,
+                                         size_t *alt_dot_offset,
+                                         bool *alt_dot_active) {
+    if (!prompt || !buffer || !*buffer || !length || !cursor || !capacity ||
+        !displayed_length || !displayed_prompt_lines || !history_index ||
+        !scratch || !kill_buffer || !alt_dot_offset || !alt_dot_active) {
+        return false;
+    }
+
+    if (key == 'f' || key == 'F') { /* Alt+F */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        size_t next = interactiveNextWord(*buffer, *length, *cursor);
+        if (next != *cursor) {
+            *cursor = next;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == 'b' || key == 'B') { /* Alt+B */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        size_t prev = interactivePreviousWord(*buffer, *length, *cursor);
+        if (prev != *cursor) {
+            *cursor = prev;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == 'd' || key == 'D') { /* Alt+D */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        size_t next = interactiveNextWord(*buffer, *length, *cursor);
+        if (next > *cursor) {
+            size_t removed_len = next - *cursor;
+            if (!interactiveSetKillBuffer(kill_buffer, *buffer + *cursor, removed_len)) {
+                shellWriteStdoutChar('\a');
+                return true;
+            }
+            memmove(*buffer + *cursor, *buffer + next, *length - next + 1);
+            *length -= removed_len;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            *history_index = 0;
+            interactiveUpdateScratch(scratch, *buffer, *length);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == 't' || key == 'T') { /* Alt+T */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        if (*length > 0 && *cursor > 0) {
+            size_t current_start = *cursor;
+            if (current_start > 0 && isspace((unsigned char)(*buffer)[current_start])) {
+                while (current_start < *length &&
+                       isspace((unsigned char)(*buffer)[current_start])) {
+                    current_start++;
+                }
+                if (current_start >= *length) {
+                    shellWriteStdoutChar('\a');
+                    return true;
+                }
+            } else {
+                while (current_start > 0 &&
+                       !isspace((unsigned char)(*buffer)[current_start - 1])) {
+                    current_start--;
+                }
+            }
+            size_t current_end = current_start;
+            while (current_end < *length &&
+                   !isspace((unsigned char)(*buffer)[current_end])) {
+                current_end++;
+            }
+            size_t prev_end = current_start;
+            while (prev_end > 0 && isspace((unsigned char)(*buffer)[prev_end - 1])) {
+                prev_end--;
+            }
+            if (prev_end == 0) {
+                shellWriteStdoutChar('\a');
+                return true;
+            }
+            size_t prev_start = prev_end;
+            while (prev_start > 0 &&
+                   !isspace((unsigned char)(*buffer)[prev_start - 1])) {
+                prev_start--;
+            }
+            size_t word1_len = prev_end - prev_start;
+            size_t middle_len = current_start - prev_end;
+            size_t word2_len = current_end - current_start;
+            char *temp = (char *)malloc(*length + 1);
+            if (!temp) {
+                shellWriteStdoutChar('\a');
+                return true;
+            }
+            memcpy(temp, *buffer, prev_start);
+            size_t offset = prev_start;
+            memcpy(temp + offset, *buffer + current_start, word2_len);
+            offset += word2_len;
+            memcpy(temp + offset, *buffer + prev_end, middle_len);
+            offset += middle_len;
+            memcpy(temp + offset, *buffer + prev_start, word1_len);
+            offset += word1_len;
+            memcpy(temp + offset, *buffer + current_end, *length - current_end + 1);
+            memcpy(*buffer, temp, *length + 1);
+            free(temp);
+            *cursor = prev_start + word2_len + middle_len + word1_len;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            *history_index = 0;
+            interactiveUpdateScratch(scratch, *buffer, *length);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == '.') { /* Alt+. */
+        if (!*alt_dot_active) {
+            *alt_dot_offset = 0;
+        } else {
+            (*alt_dot_offset)++;
+        }
+        char *argument = NULL;
+        if (!interactiveExtractLastArgument(*alt_dot_offset, &argument)) {
+            shellWriteStdoutChar('\a');
+            *alt_dot_active = false;
+            *alt_dot_offset = 0;
+            return true;
+        }
+        if (!argument) {
+            shellWriteStdoutChar('\a');
+            *alt_dot_active = false;
+            *alt_dot_offset = 0;
+            return true;
+        }
+        size_t arg_len = strlen(argument);
+        if (!interactiveInsertText(buffer,
+                                   length,
+                                   capacity,
+                                   cursor,
+                                   argument,
+                                   arg_len)) {
+            shellWriteStdoutChar('\a');
+            free(argument);
+            *alt_dot_active = false;
+            *alt_dot_offset = 0;
+            return true;
+        }
+        free(argument);
+        redrawInteractiveLine(prompt,
+                              *buffer,
+                              *length,
+                              *cursor,
+                              displayed_length,
+                              displayed_prompt_lines);
+        *history_index = 0;
+        interactiveUpdateScratch(scratch, *buffer, *length);
+        *alt_dot_active = true;
+        return true;
+    }
+
+    return false;
 }
 
 static char *readInteractiveLine(const char *prompt,
@@ -3588,170 +3871,20 @@ static char *readInteractiveLine(const char *prompt,
                     continue;
                 }
                 continue;
-            } else if (seq[0] == 'f' || seq[0] == 'F') { /* Alt+F */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                size_t next = interactiveNextWord(buffer, length, cursor);
-                if (next != cursor) {
-                    cursor = next;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == 'b' || seq[0] == 'B') { /* Alt+B */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                size_t prev = interactivePreviousWord(buffer, length, cursor);
-                if (prev != cursor) {
-                    cursor = prev;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == 'd' || seq[0] == 'D') { /* Alt+D */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                size_t next = interactiveNextWord(buffer, length, cursor);
-                if (next > cursor) {
-                    size_t removed_len = next - cursor;
-                    if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, removed_len)) {
-                        shellWriteStdoutChar('\a');
-                        continue;
-                    }
-                    memmove(buffer + cursor, buffer + next, length - next + 1);
-                    length -= removed_len;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                    history_index = 0;
-                    interactiveUpdateScratch(&scratch, buffer, length);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == 't' || seq[0] == 'T') { /* Alt+T */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                if (length > 0 && cursor > 0) {
-                    size_t current_start = cursor;
-                    if (current_start > 0 && isspace((unsigned char)buffer[current_start])) {
-                        while (current_start < length && isspace((unsigned char)buffer[current_start])) {
-                            current_start++;
-                        }
-                        if (current_start >= length) {
-                            shellWriteStdoutChar('\a');
-                            continue;
-                        }
-                    } else {
-                        while (current_start > 0 && !isspace((unsigned char)buffer[current_start - 1])) {
-                            current_start--;
-                        }
-                    }
-                    size_t current_end = current_start;
-                    while (current_end < length && !isspace((unsigned char)buffer[current_end])) {
-                        current_end++;
-                    }
-                    size_t prev_end = current_start;
-                    while (prev_end > 0 && isspace((unsigned char)buffer[prev_end - 1])) {
-                        prev_end--;
-                    }
-                    if (prev_end == 0) {
-                        shellWriteStdoutChar('\a');
-                        continue;
-                    }
-                    size_t prev_start = prev_end;
-                    while (prev_start > 0 && !isspace((unsigned char)buffer[prev_start - 1])) {
-                        prev_start--;
-                    }
-                    size_t word1_len = prev_end - prev_start;
-                    size_t middle_len = current_start - prev_end;
-                    size_t word2_len = current_end - current_start;
-                    char *temp = (char *)malloc(length + 1);
-                    if (!temp) {
-                        shellWriteStdoutChar('\a');
-                        continue;
-                    }
-                    memcpy(temp, buffer, prev_start);
-                    size_t offset = prev_start;
-                    memcpy(temp + offset, buffer + current_start, word2_len);
-                    offset += word2_len;
-                    memcpy(temp + offset, buffer + prev_end, middle_len);
-                    offset += middle_len;
-                    memcpy(temp + offset, buffer + prev_start, word1_len);
-                    offset += word1_len;
-                    memcpy(temp + offset, buffer + current_end, length - current_end + 1);
-                    memcpy(buffer, temp, length + 1);
-                    free(temp);
-                    cursor = prev_start + word2_len + middle_len + word1_len;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                    history_index = 0;
-                    interactiveUpdateScratch(&scratch, buffer, length);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == '.') { /* Alt+. */
-                if (!alt_dot_active) {
-                    alt_dot_offset = 0;
-                } else {
-                    alt_dot_offset++;
-                }
-                char *argument = NULL;
-                if (!interactiveExtractLastArgument(alt_dot_offset, &argument)) {
-                    shellWriteStdoutChar('\a');
-                    alt_dot_active = false;
-                    alt_dot_offset = 0;
-                    continue;
-                }
-                if (!argument) {
-                    shellWriteStdoutChar('\a');
-                    alt_dot_active = false;
-                    alt_dot_offset = 0;
-                    continue;
-                }
-                size_t arg_len = strlen(argument);
-                if (!interactiveInsertText(&buffer,
-                                           &length,
-                                           &capacity,
-                                           &cursor,
-                                           argument,
-                                           arg_len)) {
-                    shellWriteStdoutChar('\a');
-                    free(argument);
-                    alt_dot_active = false;
-                    alt_dot_offset = 0;
-                    continue;
-                }
-                free(argument);
-                redrawInteractiveLine(prompt,
-                                      buffer,
-                                      length,
-                                      cursor,
-                                      &displayed_length,
-                                      &displayed_prompt_lines);
-                history_index = 0;
-                interactiveUpdateScratch(&scratch, buffer, length);
-                alt_dot_active = true;
+            }
+            if (interactiveHandleAltShortcut(seq[0],
+                                             prompt,
+                                             &buffer,
+                                             &length,
+                                             &cursor,
+                                             &capacity,
+                                             &displayed_length,
+                                             &displayed_prompt_lines,
+                                             &history_index,
+                                             &scratch,
+                                             &kill_buffer,
+                                             &alt_dot_offset,
+                                             &alt_dot_active)) {
                 continue;
             }
             alt_dot_active = false;
@@ -3778,6 +3911,29 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (!isprint(ch)) {
+            if (ch >= 0x80) {
+                wchar_t option_wc = 0;
+                char utf8_bytes[4];
+                size_t utf8_len = 0;
+                unsigned char alt_key = 0;
+                if (interactiveReadUtf8Codepoint(ch, &option_wc, utf8_bytes, &utf8_len) &&
+                    interactiveMapMacOptionComposedRune(option_wc, &alt_key) &&
+                    interactiveHandleAltShortcut(alt_key,
+                                                 prompt,
+                                                 &buffer,
+                                                 &length,
+                                                 &cursor,
+                                                 &capacity,
+                                                 &displayed_length,
+                                                 &displayed_prompt_lines,
+                                                 &history_index,
+                                                 &scratch,
+                                                 &kill_buffer,
+                                                 &alt_dot_offset,
+                                                 &alt_dot_active)) {
+                    continue;
+                }
+            }
             alt_dot_active = false;
             alt_dot_offset = 0;
             shellWriteStdoutChar('\a');

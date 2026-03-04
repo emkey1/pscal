@@ -3738,7 +3738,6 @@ static bool pathTruncateNormalizeAbsolute(const char *input, char *out, size_t o
         size_t anchor = (segment_start_pos > 1) ? (segment_start_pos - 1) : 1;
         anchors[depth++] = anchor;
     }
-
     return true;
 }
 
