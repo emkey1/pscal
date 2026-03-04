@@ -736,9 +736,8 @@ int pscal_ios_close(int fd) {
         pscal_ios_virtual_tty_release(fd, &writer);
         return 0;
     }
-    VProc *vp = vprocCurrent();
-    if (vp) {
-        int res = vprocClose(vp, fd);
+    {
+        int res = vprocCloseShim(fd);
         if (res == 0 || errno != EBADF) {
             return res;
         }
@@ -746,7 +745,10 @@ int pscal_ios_close(int fd) {
     int writer = -1;
     if (pscal_ios_virtual_tty_release(fd, &writer) && writer >= 0 &&
         writer != fd) {
-        close(writer);
+        int writer_res = vprocCloseShim(writer);
+        if (writer_res < 0 && errno == EBADF) {
+            close(pscal_ios_translate_fd(writer));
+        }
     }
     return close(pscal_ios_translate_fd(fd));
 }
@@ -875,7 +877,7 @@ void pscal_ios_closefrom(int lowfd) {
         maxfd = 32768;
     }
     for (int fd = lowfd; fd < (int)maxfd; ++fd) {
-        (void)vprocClose(vp, fd);
+        (void)vprocCloseShim(fd);
     }
 }
 

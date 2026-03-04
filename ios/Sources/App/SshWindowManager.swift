@@ -3,6 +3,7 @@ import Foundation
 import UIKit
 import Darwin
 import Combine
+import UniformTypeIdentifiers
 
 @MainActor
 final class TerminalTabManager: ObservableObject {
@@ -1055,6 +1056,132 @@ private func runOnMainBlocking<T>(_ label: String, work: @MainActor @escaping ()
     let elapsedMs = Double(end.uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000.0
     tabInitLog("\(label) completed wait_ms=\(String(format: "%.1f", elapsedMs))")
     return result
+}
+
+@MainActor
+private final class RuntimeMountFolderPicker: NSObject, UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate {
+    static let shared = RuntimeMountFolderPicker()
+
+    private var completion: ((String?, Int32) -> Void)?
+    private var securityScopedURLs: [String: URL] = [:]
+
+    func present(completion: @escaping (String?, Int32) -> Void) {
+        guard self.completion == nil else {
+            completion(nil, Int32(EBUSY))
+            return
+        }
+        guard let presenter = Self.topPresentingViewController() else {
+            completion(nil, Int32(ENODEV))
+            return
+        }
+
+        self.completion = completion
+
+        let picker: UIDocumentPickerViewController
+        if #available(iOS 14.0, *) {
+            picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        } else {
+            picker = UIDocumentPickerViewController(documentTypes: ["public.folder"], in: .open)
+        }
+        picker.delegate = self
+        picker.allowsMultipleSelection = false
+        picker.presentationController?.delegate = self
+        if let popover = picker.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = presenter.view.bounds
+        }
+        presenter.present(picker, animated: true)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController,
+                        didPickDocumentsAt urls: [URL]) {
+        guard let selectedURL = urls.first else {
+            finish(path: nil, err: Int32(ECANCELED))
+            return
+        }
+        let path = selectedURL.path
+        let started = selectedURL.startAccessingSecurityScopedResource()
+        if started {
+            if let existing = securityScopedURLs[path], existing != selectedURL {
+                existing.stopAccessingSecurityScopedResource()
+            }
+            securityScopedURLs[path] = selectedURL
+        }
+        if started || FileManager.default.isReadableFile(atPath: path) {
+            finish(path: path, err: 0)
+            return
+        }
+        finish(path: nil, err: Int32(EPERM))
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        finish(path: nil, err: Int32(ECANCELED))
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        finish(path: nil, err: Int32(ECANCELED))
+    }
+
+    private func finish(path: String?, err: Int32) {
+        guard let completion else {
+            return
+        }
+        self.completion = nil
+        completion(path, err)
+    }
+
+    private static func topPresentingViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
+        let windows = scenes.flatMap { $0.windows }
+        let preferredWindow = windows.first(where: { $0.isKeyWindow }) ??
+            windows.first(where: { !$0.isHidden && $0.alpha > 0.01 })
+        guard let root = preferredWindow?.rootViewController else {
+            return nil
+        }
+        return topViewController(from: root)
+    }
+
+    private static func topViewController(from root: UIViewController) -> UIViewController {
+        if let nav = root as? UINavigationController, let visible = nav.visibleViewController {
+            return topViewController(from: visible)
+        }
+        if let tab = root as? UITabBarController, let selected = tab.selectedViewController {
+            return topViewController(from: selected)
+        }
+        if let presented = root.presentedViewController {
+            return topViewController(from: presented)
+        }
+        return root
+    }
+}
+
+@_cdecl("pscalRuntimePickMountSourceDirectory")
+func pscalRuntimePickMountSourceDirectory() -> UnsafeMutablePointer<CChar>? {
+    if Thread.isMainThread {
+        errno = EDEADLK
+        return nil
+    }
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var selectedPath: String?
+    var pickErrno: Int32 = Int32(EAGAIN)
+
+    DispatchQueue.main.async {
+        RuntimeMountFolderPicker.shared.present { path, err in
+            selectedPath = path
+            pickErrno = err
+            semaphore.signal()
+        }
+    }
+    semaphore.wait()
+
+    guard let selectedPath else {
+        errno = pickErrno
+        return nil
+    }
+    return strdup(selectedPath)
 }
 
 @_cdecl("pscalRuntimeOpenSshSession")

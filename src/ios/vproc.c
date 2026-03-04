@@ -2769,6 +2769,11 @@ static void vprocSessionPtyRemoveAtLocked(size_t idx) {
     gVProcSessionPtyHintIndex = 0;
     gVProcSessionPtyTlsHintId = 0;
     gVProcSessionPtyTlsHintIndex = 0;
+    if (gVProcSessionPtys.count == 0) {
+        free(gVProcSessionPtys.items);
+        gVProcSessionPtys.items = NULL;
+        gVProcSessionPtys.capacity = 0;
+    }
 }
 
 static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
@@ -2915,6 +2920,12 @@ static void vprocRegistryRemove(VProc *vp) {
             if (gVProcRegistryHint == vp) {
                 gVProcRegistryHint = (gVProcRegistryCount > 0) ? gVProcRegistry[0] : NULL;
             }
+            if (gVProcRegistryCount == 0) {
+                free(gVProcRegistry);
+                gVProcRegistry = NULL;
+                gVProcRegistryCapacity = 0;
+                gVProcRegistryHint = NULL;
+            }
             __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
             break;
         }
@@ -3036,6 +3047,7 @@ typedef struct {
     void *(*start_routine)(void *);
     void *arg;
     VProc *vp;
+    int vp_pid;
     VProcSessionStdio *session_stdio;
     int shell_self_pid;
     int kernel_pid;
@@ -3055,6 +3067,8 @@ static int vprocPtyNumForPid(int pid);
 static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty);
 static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid);
 static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
+static void vprocUnregisterThreadByPid(int pid, pthread_t tid);
+static void vprocScratchTlsCleanupCurrentThread(void);
 static __thread bool gVprocPipelineStage = false;
 typedef void (*VprocStopWaitHookFn)(void);
 static __thread VprocStopWaitHookFn gVprocStopWaitBeforeHook = NULL;
@@ -7670,8 +7684,14 @@ static void *vprocThreadTrampoline(void *arg) {
     }
 
     VProc *vp = ctx ? ctx->vp : NULL;
+    int vp_pid = (ctx && ctx->vp_pid > 0) ? ctx->vp_pid : 0;
+    bool vp_activated = false;
     if (vp) {
+        if (vp_pid <= 0) {
+            vp_pid = vp->pid;
+        }
         vprocActivate(vp);
+        vp_activated = true;
         vprocRegisterThread(vp, pthread_self());
     }
 
@@ -7680,10 +7700,10 @@ static void *vprocThreadTrampoline(void *arg) {
         res = ctx->start_routine(ctx->arg);
     }
 
-    if (vp) {
+    if (vp_activated) {
         /* Threads share the owning vproc; do not mark the process as exited on
          * thread teardown. */
-        vprocUnregisterThread(vp, pthread_self());
+        vprocUnregisterThreadByPid(vp_pid, pthread_self());
         vprocDeactivate();
     }
 
@@ -7697,6 +7717,7 @@ static void *vprocThreadTrampoline(void *arg) {
     }
 #endif
 
+    vprocScratchTlsCleanupCurrentThread();
     free(ctx);
     return res;
 }
@@ -7722,6 +7743,7 @@ int vprocPthreadCreateShim(pthread_t *thread,
     ctx->start_routine = start_routine;
     ctx->arg = arg;
     ctx->vp = vprocCurrent();
+    ctx->vp_pid = (ctx->vp && ctx->vp->pid > 0) ? ctx->vp->pid : 0;
     ctx->session_stdio = vprocSessionStdioCurrent();
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
@@ -8351,12 +8373,12 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
     return vp->pid;
 }
 
-void vprocUnregisterThread(VProc *vp, pthread_t tid) {
-    if (!vp || vp->pid <= 0) {
+static void vprocUnregisterThreadByPid(int pid, pthread_t tid) {
+    if (pid <= 0) {
         return;
     }
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskFindLocked(vp->pid);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
         bool cleared_primary = false;
         if (entry->tid && pthread_equal(entry->tid, tid)) {
@@ -8379,6 +8401,13 @@ void vprocUnregisterThread(VProc *vp, pthread_t tid) {
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
 
+void vprocUnregisterThread(VProc *vp, pthread_t tid) {
+    if (!vp || vp->pid <= 0) {
+        return;
+    }
+    vprocUnregisterThreadByPid(vp->pid, tid);
+}
+
 int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthread_t *thread_out) {
     if (!vp || !start_routine) {
         errno = EINVAL;
@@ -8392,6 +8421,7 @@ int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthre
     ctx->start_routine = start_routine;
     ctx->arg = arg;
     ctx->vp = vp;
+    ctx->vp_pid = vp->pid;
     ctx->session_stdio = vprocSessionStdioCurrent();
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
@@ -10497,6 +10527,11 @@ void vprocUnregisterInterposeBypassThread(pthread_t tid) {
         gVProcInterposeBypassRegistry.hint_valid = false;
         gVProcInterposeBypassRegistry.hint_tid = 0;
         gVProcInterposeBypassRegistry.hint_index = 0;
+        if (gVProcInterposeBypassRegistry.count == 0) {
+            free(gVProcInterposeBypassRegistry.items);
+            gVProcInterposeBypassRegistry.items = NULL;
+            gVProcInterposeBypassRegistry.capacity = 0;
+        }
     }
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
 }
@@ -13612,8 +13647,49 @@ typedef struct {
 
 static __thread VProcPollScratch gVProcPollScratch = {0};
 static __thread VProcSelectScratch gVProcSelectScratch = {0};
+static pthread_key_t gVProcScratchTlsKey;
+static pthread_once_t gVProcScratchTlsKeyOnce = PTHREAD_ONCE_INIT;
+static bool gVProcScratchTlsKeyReady = false;
+
+static void vprocScratchTlsCleanupCurrentThread(void) {
+    free(gVProcPollScratch.pscal_fds);
+    free(gVProcPollScratch.host_index);
+    free(gVProcPollScratch.host_fds);
+    gVProcPollScratch.pscal_fds = NULL;
+    gVProcPollScratch.host_index = NULL;
+    gVProcPollScratch.host_fds = NULL;
+    gVProcPollScratch.capacity = 0;
+
+    free(gVProcSelectScratch.pfds);
+    free(gVProcSelectScratch.fd_map);
+    gVProcSelectScratch.pfds = NULL;
+    gVProcSelectScratch.fd_map = NULL;
+    gVProcSelectScratch.capacity = 0;
+}
+
+static void vprocScratchTlsDestructor(void *value) {
+    (void)value;
+    if (gVProcScratchTlsKeyReady) {
+        (void)pthread_setspecific(gVProcScratchTlsKey, NULL);
+    }
+    vprocScratchTlsCleanupCurrentThread();
+}
+
+static void vprocScratchTlsKeyInit(void) {
+    if (pthread_key_create(&gVProcScratchTlsKey, vprocScratchTlsDestructor) == 0) {
+        gVProcScratchTlsKeyReady = true;
+    }
+}
+
+static inline void vprocScratchTlsMarkThread(void) {
+    pthread_once(&gVProcScratchTlsKeyOnce, vprocScratchTlsKeyInit);
+    if (gVProcScratchTlsKeyReady) {
+        (void)pthread_setspecific(gVProcScratchTlsKey, (void *)1);
+    }
+}
 
 static bool vprocPollScratchEnsure(size_t needed) {
+    vprocScratchTlsMarkThread();
     if (needed <= gVProcPollScratch.capacity) {
         return true;
     }
@@ -13654,6 +13730,7 @@ static bool vprocPollScratchEnsure(size_t needed) {
 }
 
 static bool vprocSelectScratchEnsure(size_t needed) {
+    vprocScratchTlsMarkThread();
     if (needed <= gVProcSelectScratch.capacity) {
         return true;
     }

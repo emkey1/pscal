@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,6 +26,34 @@ bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size);
  * already contain the full prefix are returned unchanged.
  */
 bool pathTruncateExpand(const char *input_path, char *out, size_t out_size);
+
+typedef struct PathTruncateMountEntry {
+    char source[PATH_MAX];
+    char target[PATH_MAX];
+    char type[32];
+    char options[128];
+    unsigned long flags;
+} PathTruncateMountEntry;
+
+/*
+ * Adds or replaces a virtual mount mapping used by iOS path truncation.
+ * `source_path` is resolved to a host path, while `target_path` is a virtual
+ * absolute path (for example "/mnt/docs").
+ */
+bool pathTruncateMountAdd(const char *source_path,
+                          const char *target_path,
+                          const char *type,
+                          const char *options,
+                          unsigned long flags);
+
+/*
+ * Copies the current mount table into `out` and returns the total number of
+ * active mount entries.
+ */
+size_t pathTruncateMountSnapshot(PathTruncateMountEntry *out, size_t out_capacity);
+
+/* Clears all virtual mount mappings. */
+void pathTruncateMountClearAll(void);
 
 /**
  * Applies the PATH_TRUNCATE environment variable using the provided prefix.

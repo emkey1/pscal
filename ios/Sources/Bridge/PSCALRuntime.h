@@ -164,6 +164,9 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
 
 /// Requests the UI to open an additional shell tab (iOS only).
 int pscalRuntimeOpenShellTab(void);
+/// Opens an interactive iOS folder picker and returns a malloc-allocated path.
+/// Caller must free() the returned string; NULL indicates cancel/error with errno set.
+char *pscalRuntimePickMountSourceDirectory(void);
 
 /// Notifies the UI that an SDL window/session became active (iOS only).
 void pscalRuntimeSdlDidOpen(void);

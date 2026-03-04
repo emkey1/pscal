@@ -100,6 +100,14 @@ static void vmProcUnregister(VM* vm) {
     pthread_mutex_unlock(&gVmProcRegistryLock);
 }
 
+static bool vmProcRegistryIsEmpty(void) {
+    bool empty = false;
+    pthread_mutex_lock(&gVmProcRegistryLock);
+    empty = (gVmProcRegistryCount == 0);
+    pthread_mutex_unlock(&gVmProcRegistryLock);
+    return empty;
+}
+
 static void vmProcFillSnapshot(const VM* vm, VMProcSnapshot* out) {
     if (!vm || !out) {
         return;
@@ -491,6 +499,18 @@ static void vmOpcodeProfileAtExit(void) {
         gVmOpcodeProfileStream = NULL;
         gVmOpcodeProfileStreamOwned = false;
     }
+}
+
+static void vmFreeShellBuiltinProfiles(void) {
+    for (size_t i = 0; i < gVmShellBuiltinProfileCount; ++i) {
+        free(gVmShellBuiltinProfiles[i].name);
+        gVmShellBuiltinProfiles[i].name = NULL;
+        gVmShellBuiltinProfiles[i].count = 0;
+    }
+    free(gVmShellBuiltinProfiles);
+    gVmShellBuiltinProfiles = NULL;
+    gVmShellBuiltinProfileCount = 0;
+    gVmShellBuiltinProfileCapacity = 0;
 }
 
 static void vmOpcodeProfileRecord(uint8_t opcode) {
@@ -3531,6 +3551,29 @@ static RuntimeVTableEntry* createRuntimeVTableEntry(const char* classNameLower) 
     return entry;
 }
 
+static void vmFreeRuntimeVTables(void) {
+    RuntimeVTableEntry* entry = runtimeVTables;
+    while (entry) {
+        RuntimeVTableEntry* next = entry->next;
+        free(entry->className);
+        if (entry->table) {
+            freeValue(entry->table);
+            free(entry->table);
+        }
+        free(entry);
+        entry = next;
+    }
+    runtimeVTables = NULL;
+}
+
+static void vmCleanupGlobalCachesIfIdle(void) {
+    if (!vmProcRegistryIsEmpty()) {
+        return;
+    }
+    vmFreeRuntimeVTables();
+    vmFreeShellBuiltinProfiles();
+}
+
 static bool ensureRuntimeClassVTable(VM* vm, const char* className, Value* tableValue) {
     if (!vm || !className || !tableValue) {
         return false;
@@ -4404,28 +4447,14 @@ static Value vmHostShellLoopIsReadyHost(VM* vm) {
     return vmHostShellLoopIsReady(vm);
 }
 
-// --- Host Function Registration ---
-bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
-    if (!vm) return false;
-    if (id >= HOST_FN_COUNT || id < 0) {
-        fprintf(stderr, "VM Error: HostFunctionID %d out of bounds during registration.\n", id);
-        return false;
-    }
-    vm->host_functions[id] = fn;
-    return true;
-}
-
-// --- VM Initialization and Cleanup ---
-void vmResetExecutionState(VM* vm) {
+static void vmReleaseExecutionResources(VM* vm) {
     if (!vm) return;
 
-    // Free any lingering values on the operand stack before clearing it.
     for (Value* slot = vm->stack; slot < vm->stackTop; ++slot) {
         freeValue(slot);
     }
     resetStack(vm);
 
-    // Release resources held by call frames from prior executions.
     for (int i = 0; i < vm->frameCount; ++i) {
         CallFrame* frame = &vm->frames[i];
         if (frame->closureEnv) {
@@ -4446,6 +4475,24 @@ void vmResetExecutionState(VM* vm) {
         frame->vtable = NULL;
     }
     vm->frameCount = 0;
+}
+
+// --- Host Function Registration ---
+bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
+    if (!vm) return false;
+    if (id >= HOST_FN_COUNT || id < 0) {
+        fprintf(stderr, "VM Error: HostFunctionID %d out of bounds during registration.\n", id);
+        return false;
+    }
+    vm->host_functions[id] = fn;
+    return true;
+}
+
+// --- VM Initialization and Cleanup ---
+void vmResetExecutionState(VM* vm) {
+    if (!vm) return;
+
+    vmReleaseExecutionResources(vm);
 
     vm->chunk = NULL;
     vm->ip = NULL;
@@ -4598,6 +4645,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 void freeVM(VM* vm) {
     if (!vm) return;
     vmProcUnregister(vm);
+    vmReleaseExecutionResources(vm);
     // The VM holds references to global symbol tables that are owned and
     // managed by the caller (e.g. vm_main.c). Freeing them here would lead to
     // double-free errors when the caller performs its own cleanup. Simply
@@ -4661,6 +4709,7 @@ void freeVM(VM* vm) {
         vmThreadDestroySlot(&vm->threads[i]);
     }
     pthread_mutex_destroy(&vm->mutexRegistryLock);
+    vmCleanupGlobalCachesIfIdle();
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
     // additional handling.

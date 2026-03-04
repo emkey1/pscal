@@ -69,6 +69,16 @@ static bool strictScanTop(AST* n) {
     return false;
 }
 
+static HashTable *reaEnsureProcedureTable(void) {
+    if (!procedure_table) {
+        procedure_table = createHashTable();
+    }
+    if (!current_procedure_table) {
+        current_procedure_table = procedure_table;
+    }
+    return current_procedure_table ? current_procedure_table : procedure_table;
+}
+
 static void ensureGenericFrameCapacity(ReaParser *p) {
     if (p->genericFrameDepth >= p->genericFrameCapacity) {
         int newCap = p->genericFrameCapacity ? p->genericFrameCapacity * 2 : 8;
@@ -2794,6 +2804,9 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
     for (int i = 0; lower_name[i]; i++) lower_name[i] = (char)tolower((unsigned char)lower_name[i]);
 
     HashTable *target_table = outer_proc_table ? outer_proc_table : procedure_table;
+    if (!target_table) {
+        target_table = reaEnsureProcedureTable();
+    }
 
     char symbol_lookup_name[MAX_SYMBOL_LENGTH * 2 + 2];
     if (target_table == procedure_table && p->inModule && p->currentModuleName && *p->currentModuleName) {
@@ -2847,6 +2860,12 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
                 alias2->type_def = copyAST(sym->type_def);
                 if (target_table) {
                     hashTableInsert(target_table, alias2);
+                } else {
+                    if (alias2->type_def) {
+                        freeAST(alias2->type_def);
+                    }
+                    free(alias2->name);
+                    free(alias2);
                 }
             }
         }
@@ -2872,6 +2891,12 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
                         alias->type_def = sym ? copyAST(sym->type_def) : NULL;
                         if (target_table) {
                             hashTableInsert(target_table, alias);
+                        } else {
+                            if (alias->type_def) {
+                                freeAST(alias->type_def);
+                            }
+                            free(alias->name);
+                            free(alias);
                         }
                     }
                 }
@@ -3650,8 +3675,11 @@ static AST *parseImport(ReaParser *p) {
             }
             addChild(uses, importNode);
             free(path);
-            if (alias) free(alias);
             parsed_any = true;
+        }
+        if (alias) {
+            free(alias);
+            alias = NULL;
         }
 
         if (p->current.type == REA_TOKEN_COMMA) {

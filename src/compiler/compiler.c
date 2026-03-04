@@ -880,19 +880,27 @@ static int findVTableIndex(VTableInfo* tables, int table_count, const char* name
     return -1;
 }
 
-static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt) {
-    if (!vt || vt->merged) return;
+static bool mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt) {
+    if (!vt || vt->merged) return true;
     AST* cls = lookupType(vt->class_name);
     const char* parent_name = NULL;
     if (cls && cls->extra && cls->extra->token) parent_name = cls->extra->token->value;
     if (parent_name) {
         int pidx = findVTableIndex(tables, table_count, parent_name);
         if (pidx != -1) {
-            mergeParentTable(tables, table_count, &tables[pidx]);
+            if (!mergeParentTable(tables, table_count, &tables[pidx])) {
+                return false;
+            }
             VTableInfo* parent = &tables[pidx];
             if (vt->capacity < parent->method_count) {
                 int newcap = parent->method_count;
-                vt->addrs = realloc(vt->addrs, sizeof(int) * newcap);
+                int* resized = (int*)realloc(vt->addrs, sizeof(int) * newcap);
+                if (!resized) {
+                    fprintf(stderr, "Compiler error: Out of memory expanding merged vtable entries.\n");
+                    compiler_had_error = true;
+                    return false;
+                }
+                vt->addrs = resized;
                 for (int j = vt->capacity; j < newcap; j++) vt->addrs[j] = NO_VTABLE_ENTRY;
                 vt->capacity = newcap;
             }
@@ -906,6 +914,7 @@ static void mergeParentTable(VTableInfo* tables, int table_count, VTableInfo* vt
         }
     }
     vt->merged = true;
+    return true;
 }
 
 static void emitVTables(BytecodeChunk* chunk) {
@@ -932,19 +941,43 @@ static void emitVTables(BytecodeChunk* chunk) {
                             if (strcmp(tables[i].class_name, cls) == 0) { idx = i; break; }
                         }
                         if (idx == -1) {
-                            tables = realloc(tables, sizeof(VTableInfo) * (table_count + 1));
+                            VTableInfo* resized_tables =
+                                (VTableInfo*)realloc(tables, sizeof(VTableInfo) * (table_count + 1));
+                            if (!resized_tables) {
+                                fprintf(stderr, "Compiler error: Out of memory growing vtable table list.\n");
+                                compiler_had_error = true;
+                                goto oom_cleanup;
+                            }
+                            tables = resized_tables;
                             idx = table_count++;
-                            tables[idx].class_name = strdup(cls);
                             tables[idx].method_count = 0;
                             tables[idx].capacity = 0;
                             tables[idx].addrs = NULL;
                             tables[idx].merged = false;
                             tables[idx].has_unresolved = false;
+                            tables[idx].class_name = strdup(cls);
+                            if (!tables[idx].class_name) {
+                                fprintf(stderr, "Compiler error: Out of memory storing vtable class name.\n");
+                                compiler_had_error = true;
+                                goto oom_cleanup;
+                            }
                         }
                         int mindex = base->type_def->i_val;
+                        if (mindex < 0) {
+                            tables[idx].has_unresolved = true;
+                            sym = sym->next;
+                            continue;
+                        }
                         if (mindex >= tables[idx].capacity) {
                             int newcap = mindex + 1;
-                            tables[idx].addrs = realloc(tables[idx].addrs, sizeof(int) * newcap);
+                            int* resized_addrs =
+                                (int*)realloc(tables[idx].addrs, sizeof(int) * newcap);
+                            if (!resized_addrs) {
+                                fprintf(stderr, "Compiler error: Out of memory growing vtable method slots.\n");
+                                compiler_had_error = true;
+                                goto oom_cleanup;
+                            }
+                            tables[idx].addrs = resized_addrs;
                             for (int j = tables[idx].capacity; j < newcap; j++) tables[idx].addrs[j] = NO_VTABLE_ENTRY;
                             tables[idx].capacity = newcap;
                         }
@@ -961,7 +994,9 @@ static void emitVTables(BytecodeChunk* chunk) {
     }
 
     for (int i = 0; i < table_count; i++) {
-        mergeParentTable(tables, table_count, &tables[i]);
+        if (!mergeParentTable(tables, table_count, &tables[i])) {
+            goto oom_cleanup;
+        }
     }
 
     for (int i = 0; i < table_count; i++) {
@@ -1014,6 +1049,14 @@ static void emitVTables(BytecodeChunk* chunk) {
         vtableTrackerRecordClass(vt->class_name);
         free(vt->class_name);
         free(vt->addrs);
+    }
+    free(tables);
+    return;
+
+oom_cleanup:
+    for (int i = 0; i < table_count; i++) {
+        free(tables[i].class_name);
+        free(tables[i].addrs);
     }
     free(tables);
 }
