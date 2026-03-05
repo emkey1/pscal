@@ -114,6 +114,7 @@ final class NativeTerminalView: UITextView {
                 btn.accessibilityLabel = "Minus"
             case "⚙️":
                 btn.accessibilityLabel = "Settings"
+                btn.accessibilityHint = "Configure appearance and behavior"
             default:
                 btn.accessibilityLabel = key
             }
