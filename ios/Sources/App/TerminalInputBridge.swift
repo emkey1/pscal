@@ -189,10 +189,13 @@ final class TerminalKeyInputView: UITextView {
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        func makeButton(_ title: String, action: Selector, label: String? = nil) -> UIButton {
+        func makeButton(_ title: String, action: Selector, label: String? = nil, hint: String? = nil) -> UIButton {
             let button = UIButton(type: .system)
             if let label {
                 button.accessibilityLabel = label
+            }
+            if let hint {
+                button.accessibilityHint = hint
             }
             var config = UIButton.Configuration.filled()
             config.cornerStyle = .medium
@@ -213,7 +216,7 @@ final class TerminalKeyInputView: UITextView {
         }
 
         let esc = makeButton("\u{238B}", action: #selector(handleEsc), label: "Escape")
-        let ctrl = makeButton("^", action: #selector(handleCtrlToggle), label: "Control")
+        let ctrl = makeButton("^", action: #selector(handleCtrlToggle), label: "Control", hint: "Toggles the control modifier for the next key press")
         ctrlButton = ctrl
         updateCtrlButtonAppearance()
         let up = makeButton("↑", action: #selector(handleUp), label: "Up Arrow")
@@ -940,5 +943,11 @@ final class TerminalKeyInputView: UITextView {
             ? UIColor.systemBlue.withAlphaComponent(0.8)
             : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
         button.configuration = config
+
+        if controlLatch {
+            button.accessibilityTraits.insert(.selected)
+        } else {
+            button.accessibilityTraits.remove(.selected)
+        }
     }
 }
