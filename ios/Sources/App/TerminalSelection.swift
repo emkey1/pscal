@@ -129,6 +129,8 @@ final class TerminalSelectionMenuView: UIView {
         let button = UIButton(type: .system)
         button.setTitle("Copy", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        button.accessibilityLabel = "Copy selection"
+        button.accessibilityHint = "Copies the selected text to the clipboard"
         return button
     }()
 
@@ -136,6 +138,8 @@ final class TerminalSelectionMenuView: UIView {
         let button = UIButton(type: .system)
         button.setTitle("All", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        button.accessibilityLabel = "Copy all"
+        button.accessibilityHint = "Copies the entire terminal output to the clipboard"
         return button
     }()
 
@@ -143,6 +147,8 @@ final class TerminalSelectionMenuView: UIView {
         let button = UIButton(type: .system)
         button.setTitle("Paste", for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        button.accessibilityLabel = "Paste"
+        button.accessibilityHint = "Pastes text from the clipboard into the terminal"
         return button
     }()
 
