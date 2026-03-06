@@ -1,5 +1,0 @@
-#!/usr/bin/env exsh
-sleep 60 &
-kill -s TERM $!
-wait $!
-echo "Done"

@@ -628,13 +628,9 @@ static ASTNodeClike* structDeclaration(ParserClike *p, ClikeToken nameTok) {
 
         AST *typeAst = NULL;
         if (typeTok.type == CLIKE_TOKEN_STRUCT) {
-            AST *base = NULL;
             char *stype = clikeTokenToCString(structTypeTok);
-            if (strncmp(stype, nameTok.lexeme, nameTok.length) == 0 && strlen(stype) == (size_t)nameTok.length) {
-                base = recordAst;
-            } else {
-                base = clikeLookupStruct(stype);
-            }
+            Token *stypeTok = makeIdentToken(stype);
+            AST *base = newASTNode(AST_TYPE_IDENTIFIER, stypeTok);
             if (isPtr) {
                 AST *ptrAst = newASTNode(AST_POINTER_TYPE, NULL);
                 setRight(ptrAst, base);
