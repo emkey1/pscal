@@ -1,12 +1,12 @@
-static struct termios termios;
-sbuf *term_sbuf;
-int term_record;
-int xrows, xcols;
-unsigned int ibuf_pos, ibuf_cnt, ibuf_sz = 128, icmd_pos;
-unsigned char *ibuf, icmd[4096];
-unsigned int texec, tn;
+static NEXTVI_TLS struct termios termios;
+NEXTVI_TLS sbuf *term_sbuf;
+NEXTVI_TLS int term_record;
+NEXTVI_TLS int xrows, xcols;
+NEXTVI_TLS unsigned int ibuf_pos, ibuf_cnt, ibuf_sz = 128, icmd_pos;
+NEXTVI_TLS unsigned char *ibuf, icmd[4096];
+NEXTVI_TLS unsigned int texec, tn;
 #if !defined(PSCAL_TARGET_IOS)
-static struct pollfd ufds[1];
+static NEXTVI_TLS struct pollfd ufds[1];
 #endif
 
 /* iOS bridge for floating window rendering */
@@ -31,23 +31,23 @@ extern void pscalTerminalDeleteLines(int row, int count);
 extern int pscalTerminalRead(unsigned char *buffer, int maxlen, int timeout_ms);
 extern int pscalRuntimeDetectWindowRows(void) __attribute__((weak));
 extern int pscalRuntimeDetectWindowCols(void) __attribute__((weak));
-static int ios_row = 0;
-static int ios_col = 0;
-static int ios_wrap = 1;
-static int ios_fg = -1;
-static int ios_bg = -1;
-static int ios_attr = 0; /* bit0=bold, bit1=underline, bit2=inverse, bit3=blink, bit4=faint, bit5=italic, bit6=strike */
-static int ios_margin_top = 0;
-static int ios_margin_bottom = 0;
-static int ios_origin_mode = 0;
-static int ios_wrap_mode = 1;
-static int ios_saved_row = 0;
-static int ios_saved_col = 0;
-static int ios_tab_width = 8;
-static unsigned char ios_tabs[256];
-static int ios_bracketed_paste = 0;
-static int ios_mouse_tracking = 0;
-static FILE *ios_dump_fp = NULL;
+static NEXTVI_TLS int ios_row = 0;
+static NEXTVI_TLS int ios_col = 0;
+static NEXTVI_TLS int ios_wrap = 1;
+static NEXTVI_TLS int ios_fg = -1;
+static NEXTVI_TLS int ios_bg = -1;
+static NEXTVI_TLS int ios_attr = 0; /* bit0=bold, bit1=underline, bit2=inverse, bit3=blink, bit4=faint, bit5=italic, bit6=strike */
+static NEXTVI_TLS int ios_margin_top = 0;
+static NEXTVI_TLS int ios_margin_bottom = 0;
+static NEXTVI_TLS int ios_origin_mode = 0;
+static NEXTVI_TLS int ios_wrap_mode = 1;
+static NEXTVI_TLS int ios_saved_row = 0;
+static NEXTVI_TLS int ios_saved_col = 0;
+static NEXTVI_TLS int ios_tab_width = 8;
+static NEXTVI_TLS unsigned char ios_tabs[256];
+static NEXTVI_TLS int ios_bracketed_paste = 0;
+static NEXTVI_TLS int ios_mouse_tracking = 0;
+static NEXTVI_TLS FILE *ios_dump_fp = NULL;
 
 static void ios_sync_cursor(void) {
 	if (ios_row < 0) ios_row = 0;
@@ -715,7 +715,7 @@ static void ios_term_render_buf(const char *s, int n) {
 /* read s before reading from the terminal */
 void term_push(char *s, unsigned int n)
 {
-	static unsigned int tibuf_pos, tibuf_cnt;
+	static NEXTVI_TLS unsigned int tibuf_pos, tibuf_cnt;
 	if (texec == '@' && xquit > 0) {
 		xquit = 0;
 		tn = 0;
@@ -749,8 +749,8 @@ void term_back(int c)
 int term_read(void)
 {
 #if defined(PSCAL_TARGET_IOS)
-	static int ios_last_cols = -1;
-	static int ios_last_rows = -1;
+	static NEXTVI_TLS int ios_last_cols = -1;
+	static NEXTVI_TLS int ios_last_rows = -1;
 	if (ios_last_cols < 0 || ios_last_rows < 0) {
 		ios_last_cols = xcols;
 		ios_last_rows = xrows;
@@ -827,7 +827,7 @@ int term_read(void)
 /* return a static string that changes text attributes to att */
 char *term_att(int att)
 {
-	static char buf[128];
+	static NEXTVI_TLS char buf[128];
 	char *s = buf;
 	int fg = SYN_FG(att);
 	int bg = SYN_BG(att);

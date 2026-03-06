@@ -1,0 +1,44 @@
+#!/usr/bin/env exsh
+
+tmp=".tmp-watch-local-script-$$"
+rm -rf "$tmp"
+mkdir "$tmp" || exit 1
+cd "$tmp" || exit 1
+
+cat > foo <<'EOF'
+#!/bin/sh
+echo watch-script-ok
+EOF
+chmod +x foo || exit 1
+
+out_foo="$(watch -n 0.05 -c 1 foo 2>&1)"
+status_foo=$?
+out_dot="$(watch -n 0.05 -c 1 ./foo 2>&1)"
+status_dot=$?
+
+if [[ "$out_foo" == *"command not found"* ]]; then
+    echo "watch-local:foo-resolve:fail"
+else
+    echo "watch-local:foo-resolve:ok"
+fi
+
+if [[ "$out_dot" == *"command not found"* ]]; then
+    echo "watch-local:dot-resolve:fail"
+else
+    echo "watch-local:dot-resolve:ok"
+fi
+
+if [[ "$status_foo" -eq 127 ]]; then
+    echo "watch-local:foo-status:fail"
+else
+    echo "watch-local:foo-status:ok"
+fi
+
+if [[ "$status_dot" -eq 127 ]]; then
+    echo "watch-local:dot-status:fail"
+else
+    echo "watch-local:dot-status:ok"
+fi
+
+cd ..
+rm -rf "$tmp"

@@ -378,6 +378,18 @@ uint64_t PSCALRuntimeCurrentSessionId(void) {
     return session_id;
 }
 
+uint64_t PSCALRuntimeCurrentThreadSessionId(void) {
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (session_stdio && session_stdio->session_id != 0) {
+        return session_stdio->session_id;
+    }
+    return 0;
+}
+
+PSCALRuntimeContext *PSCALRuntimeGetRuntimeContextForSession(uint64_t session_id) {
+    return PSCALRuntimeContextForSession(session_id);
+}
+
 VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) {
     PSCALRuntimeContext *ctx = PSCALRuntimeCurrentContext();
     return ctx ? ctx->runtime_stdio : NULL;

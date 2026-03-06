@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <errno.h>
 
 typedef struct PathTruncateSmallclueApplet {
     const char *name;
@@ -16,4 +17,10 @@ const PathTruncateSmallclueApplet *smallclueGetApplets(size_t *count) {
         *count = 0;
     }
     return NULL;
+}
+
+int pscalRuntimeEnsureMountSourceAccess(const char *path) {
+    (void)path;
+    errno = ENOSYS;
+    return -1;
 }

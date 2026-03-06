@@ -1,8 +1,8 @@
 /* line editing and drawing */
 
-static sbuf *suggestsb;
-static sbuf *acsb;
-sbuf *led_attsb;
+static NEXTVI_TLS sbuf *suggestsb;
+static NEXTVI_TLS sbuf *acsb;
+NEXTVI_TLS sbuf *led_attsb;
 
 int dstrlen(const char *s, char delim)
 {
@@ -85,7 +85,7 @@ static void file_index(struct lbuf *buf)
 
 static char *kmap_map(int kmap, int c)
 {
-	static char cs[4];
+	static NEXTVI_TLS char cs[4];
 	char **keymap = conf_kmap(kmap);
 	cs[0] = c;
 	return keymap[c] ? keymap[c] : cs;
@@ -319,7 +319,7 @@ static void led_printparts(sbuf *sb, int pre, int ps,
 /* read a character from the terminal */
 char *led_read(int *kmap, int c)
 {
-	static char buf[5];
+	static NEXTVI_TLS char buf[5];
 	int c1, c2, i, n;
 	while (!TK_INT(c)) {
 		switch (c) {

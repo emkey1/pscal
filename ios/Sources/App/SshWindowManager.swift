@@ -57,6 +57,8 @@ final class TerminalTabManager: ObservableObject {
     private var appearanceSettingsByProfileID: [String: TerminalTabAppearanceSettings] = [:]
     private var startupCommandAppliedSessions: Set<UInt64> = []
     private var promptReadySessions: Set<UInt64> = []
+    private var pendingTitlesBySessionId: [UInt64: String] = [:]
+    private var pendingStartupCommandsBySessionId: [UInt64: String] = [:]
     private var activeSdlTabId: UInt64?
     private var selectedAppearanceObserver: AnyCancellable?
     private func scheduleFocusDance(primary: UInt64, secondary: UInt64) {
@@ -289,6 +291,8 @@ final class TerminalTabManager: ObservableObject {
         guard let index = tabs.firstIndex(where: { $0.id == sessionId }) else { return }
         startupCommandAppliedSessions.remove(sessionId)
         promptReadySessions.remove(sessionId)
+        pendingTitlesBySessionId.removeValue(forKey: sessionId)
+        pendingStartupCommandsBySessionId.removeValue(forKey: sessionId)
         switch tabs[index].kind {
         case .shell:
             return
@@ -311,6 +315,8 @@ final class TerminalTabManager: ObservableObject {
         if let sessionId = tabs[index].sessionId {
             startupCommandAppliedSessions.remove(sessionId)
             promptReadySessions.remove(sessionId)
+            pendingTitlesBySessionId.removeValue(forKey: sessionId)
+            pendingStartupCommandsBySessionId.removeValue(forKey: sessionId)
         }
         if removedId == activeSdlTabId {
             activeSdlTabId = nil
@@ -513,6 +519,7 @@ final class TerminalTabManager: ObservableObject {
     func registerShellSession(tabId: UInt64, sessionId: UInt64) {
         guard sessionId != 0, let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         tabs[idx].sessionId = sessionId
+        applyPendingSessionMetadata(sessionId: sessionId, tabIndex: idx)
         applyStartupCommandIfReady(forSessionId: sessionId)
     }
 
@@ -548,33 +555,30 @@ final class TerminalTabManager: ObservableObject {
     }
 
     fileprivate func updateTitle(forSessionId sessionId: UInt64, rawTitle: String) -> Bool {
-        // Prefer an exact session match; otherwise fall back to the currently selected tab, and
-        // finally any tab (first) so that we never fail during early startup when sessionId
-        // registration may lag behind the tab being visible.
-        let targetIdx =
-            tabs.firstIndex(where: { $0.sessionId == sessionId }) ??
-            tabs.firstIndex(where: { $0.id == selectedId }) ??
-            tabs.indices.first
-        guard let idx = targetIdx else { return false }
-        if tabs[idx].sessionId == nil && sessionId != 0 {
-            tabs[idx].sessionId = sessionId
+        guard sessionId != 0 else { return false }
+        guard let idx = tabs.firstIndex(where: { $0.sessionId == sessionId }) else {
+            pendingTitlesBySessionId[sessionId] = rawTitle
+            return true
         }
         return applyTabTitle(rawTitle, toTabAtIndex: idx, persist: true)
     }
 
     fileprivate func updateStartupCommand(forSessionId sessionId: UInt64, rawCommand: String) -> Bool {
-        // Prefer an exact session match; otherwise fall back to the currently selected tab, and
-        // finally any tab (first) so that we never fail during early startup when sessionId
-        // registration may lag behind the tab being visible.
-        let targetIdx =
-            tabs.firstIndex(where: { $0.sessionId == sessionId }) ??
-            tabs.firstIndex(where: { $0.id == selectedId }) ??
-            tabs.indices.first
-        guard let idx = targetIdx else { return false }
-        if tabs[idx].sessionId == nil && sessionId != 0 {
-            tabs[idx].sessionId = sessionId
+        guard sessionId != 0 else { return false }
+        guard let idx = tabs.firstIndex(where: { $0.sessionId == sessionId }) else {
+            pendingStartupCommandsBySessionId[sessionId] = rawCommand
+            return true
         }
         return applyStartupCommand(rawCommand, toTabAtIndex: idx, persist: true)
+    }
+
+    private func applyPendingSessionMetadata(sessionId: UInt64, tabIndex: Int) {
+        if let pendingTitle = pendingTitlesBySessionId.removeValue(forKey: sessionId) {
+            _ = applyTabTitle(pendingTitle, toTabAtIndex: tabIndex, persist: true)
+        }
+        if let pendingStartup = pendingStartupCommandsBySessionId.removeValue(forKey: sessionId) {
+            _ = applyStartupCommand(pendingStartup, toTabAtIndex: tabIndex, persist: true)
+        }
     }
 
     @discardableResult
@@ -1061,9 +1065,166 @@ private func runOnMainBlocking<T>(_ label: String, work: @MainActor @escaping ()
 @MainActor
 private final class RuntimeMountFolderPicker: NSObject, UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate {
     static let shared = RuntimeMountFolderPicker()
+    private static let bookmarkDefaultsKey = "com.pscal.mount.securityScopedBookmarks.v1"
+    private static let bookmarkCreationOptions: URL.BookmarkCreationOptions = {
+#if targetEnvironment(macCatalyst)
+        return [.withSecurityScope]
+#else
+        return []
+#endif
+    }()
+    private static let bookmarkResolutionOptions: URL.BookmarkResolutionOptions = {
+#if targetEnvironment(macCatalyst)
+        return [.withSecurityScope]
+#else
+        return []
+#endif
+    }()
 
     private var completion: ((String?, Int32) -> Void)?
     private var securityScopedURLs: [String: URL] = [:]
+    private var bookmarkDataByPath: [String: Data] = [:]
+    private var bookmarksLoaded = false
+
+    private static func normalizePath(_ path: String) -> String {
+        var normalized = (path as NSString).standardizingPath
+        while normalized.count > 1 && normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        return normalized
+    }
+
+    private func persistBookmarks() {
+        UserDefaults.standard.set(bookmarkDataByPath, forKey: Self.bookmarkDefaultsKey)
+    }
+
+    private func loadPersistedBookmarksIfNeeded() {
+        guard !bookmarksLoaded else {
+            return
+        }
+        bookmarksLoaded = true
+        if let stored = UserDefaults.standard.object(forKey: Self.bookmarkDefaultsKey) as? [String: Data] {
+            bookmarkDataByPath = stored
+        } else if let dict = UserDefaults.standard.dictionary(forKey: Self.bookmarkDefaultsKey) {
+            var recovered: [String: Data] = [:]
+            for (key, value) in dict {
+                if let data = value as? Data {
+                    recovered[key] = data
+                }
+            }
+            bookmarkDataByPath = recovered
+        } else {
+            bookmarkDataByPath = [:]
+        }
+        restoreSecurityScopedURLsFromBookmarks()
+    }
+
+    private func restoreSecurityScopedURLsFromBookmarks() {
+        guard !bookmarkDataByPath.isEmpty else {
+            return
+        }
+        var updatedURLs: [String: URL] = [:]
+        var updatedBookmarks: [String: Data] = [:]
+        for (_, data) in bookmarkDataByPath {
+            var stale = false
+            guard let url = try? URL(resolvingBookmarkData: data,
+                                     options: Self.bookmarkResolutionOptions,
+                                     relativeTo: nil,
+                                     bookmarkDataIsStale: &stale) else {
+                continue
+            }
+            let normalized = Self.normalizePath(url.path)
+            guard url.startAccessingSecurityScopedResource() else {
+                continue
+            }
+            if let existing = updatedURLs[normalized], existing != url {
+                existing.stopAccessingSecurityScopedResource()
+            }
+            updatedURLs[normalized] = url
+            if stale,
+               let refreshed = try? url.bookmarkData(options: Self.bookmarkCreationOptions,
+                                                     includingResourceValuesForKeys: nil,
+                                                     relativeTo: nil) {
+                updatedBookmarks[normalized] = refreshed
+            } else {
+                updatedBookmarks[normalized] = data
+            }
+        }
+        for (path, url) in securityScopedURLs where updatedURLs[path] == nil {
+            url.stopAccessingSecurityScopedResource()
+        }
+        let changed = updatedBookmarks != bookmarkDataByPath
+        securityScopedURLs = updatedURLs
+        bookmarkDataByPath = updatedBookmarks
+        if changed {
+            persistBookmarks()
+        }
+    }
+
+    private func registerSecurityScopedURL(_ selectedURL: URL) -> Bool {
+        let normalized = Self.normalizePath(selectedURL.path)
+        guard selectedURL.startAccessingSecurityScopedResource() else {
+            return false
+        }
+        if let existing = securityScopedURLs[normalized], existing != selectedURL {
+            existing.stopAccessingSecurityScopedResource()
+        }
+        securityScopedURLs[normalized] = selectedURL
+        if let bookmark = try? selectedURL.bookmarkData(options: Self.bookmarkCreationOptions,
+                                                        includingResourceValuesForKeys: nil,
+                                                        relativeTo: nil) {
+            bookmarkDataByPath[normalized] = bookmark
+            persistBookmarks()
+        }
+        return true
+    }
+
+    private func hasActiveSecurityScope(for normalizedPath: String) -> Bool {
+        if securityScopedURLs[normalizedPath] != nil {
+            return true
+        }
+        for root in securityScopedURLs.keys {
+            if normalizedPath == root || normalizedPath.hasPrefix(root + "/") {
+                return true
+            }
+        }
+        return false
+    }
+
+    func ensureSecurityScopedAccess(forPath path: String) -> Bool {
+        let normalizedPath = Self.normalizePath(path)
+        loadPersistedBookmarksIfNeeded()
+        if hasActiveSecurityScope(for: normalizedPath) {
+            return true
+        }
+
+        // Try to reactivate a bookmark that is exactly this path or the
+        // nearest parent directory bookmark.
+        var bestMatch: String?
+        for key in bookmarkDataByPath.keys {
+            if normalizedPath == key || normalizedPath.hasPrefix(key + "/") {
+                if bestMatch == nil || key.count > bestMatch!.count {
+                    bestMatch = key
+                }
+            }
+        }
+        if let key = bestMatch, let data = bookmarkDataByPath[key] {
+            var stale = false
+            if let url = try? URL(resolvingBookmarkData: data,
+                                  options: Self.bookmarkResolutionOptions,
+                                  relativeTo: nil,
+                                  bookmarkDataIsStale: &stale),
+               registerSecurityScopedURL(url) {
+                if stale {
+                    restoreSecurityScopedURLsFromBookmarks()
+                }
+                return hasActiveSecurityScope(for: normalizedPath)
+            }
+            bookmarkDataByPath.removeValue(forKey: key)
+            persistBookmarks()
+        }
+        return FileManager.default.isReadableFile(atPath: normalizedPath)
+    }
 
     func present(completion: @escaping (String?, Int32) -> Void) {
         guard self.completion == nil else {
@@ -1099,16 +1260,11 @@ private final class RuntimeMountFolderPicker: NSObject, UIDocumentPickerDelegate
             finish(path: nil, err: Int32(ECANCELED))
             return
         }
-        let path = selectedURL.path
-        let started = selectedURL.startAccessingSecurityScopedResource()
-        if started {
-            if let existing = securityScopedURLs[path], existing != selectedURL {
-                existing.stopAccessingSecurityScopedResource()
-            }
-            securityScopedURLs[path] = selectedURL
-        }
-        if started || FileManager.default.isReadableFile(atPath: path) {
-            finish(path: path, err: 0)
+        loadPersistedBookmarksIfNeeded()
+        let normalizedPath = Self.normalizePath(selectedURL.path)
+        let started = registerSecurityScopedURL(selectedURL)
+        if started || FileManager.default.isReadableFile(atPath: normalizedPath) {
+            finish(path: normalizedPath, err: 0)
             return
         }
         finish(path: nil, err: Int32(EPERM))
@@ -1182,6 +1338,26 @@ func pscalRuntimePickMountSourceDirectory() -> UnsafeMutablePointer<CChar>? {
         return nil
     }
     return strdup(selectedPath)
+}
+
+@_cdecl("pscalRuntimeEnsureMountSourceAccess")
+func pscalRuntimeEnsureMountSourceAccess(_ path: UnsafePointer<CChar>?) -> Int32 {
+    guard let path else {
+        errno = EINVAL
+        return -1
+    }
+    let sourcePath = String(cString: path)
+    if sourcePath.isEmpty {
+        errno = EINVAL
+        return -1
+    }
+    if let ok = runOnMainBlocking("ensureMountSourceAccess", work: {
+        RuntimeMountFolderPicker.shared.ensureSecurityScopedAccess(forPath: sourcePath)
+    }), ok {
+        return 0
+    }
+    errno = EACCES
+    return -1
 }
 
 @_cdecl("pscalRuntimeOpenSshSession")

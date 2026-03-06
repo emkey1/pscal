@@ -28,6 +28,10 @@ void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
 PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
 /// Returns the active session id for the current runtime context (0 if none).
 uint64_t PSCALRuntimeCurrentSessionId(void);
+/// Returns the active session id from the calling thread's vproc stdio (0 if none).
+uint64_t PSCALRuntimeCurrentThreadSessionId(void);
+/// Returns the runtime context currently associated with a session id (or NULL).
+PSCALRuntimeContext *PSCALRuntimeGetRuntimeContextForSession(uint64_t session_id);
 /// Returns the VProc session stdio stored in the current runtime context.
 VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void);
 /// Sets the VProc session stdio for the current runtime context.

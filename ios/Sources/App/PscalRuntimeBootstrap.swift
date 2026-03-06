@@ -1752,6 +1752,13 @@ final class EditorTerminalBridge {
         var cursorCol: Int = 0
         var active: Bool = false
         var cursorVisible: Bool = true
+
+        func frozenCopy() -> ScreenState {
+            var copy = self
+            copy.grid = grid.map { Array($0) }
+            copy.attrs = attrs.map { Array($0) }
+            return copy
+        }
     }
 
     private let stateQueue = DispatchQueue(label: "com.pscal.editor.bridge.state", attributes: .concurrent)
@@ -2100,7 +2107,7 @@ final class EditorTerminalBridge {
     }
 
     func snapshot() -> EditorSnapshot {
-        let currentState = stateQueue.sync { state }
+        let currentState = stateQueue.sync { state.frozenCopy() }
         let lines: [String]
         if currentState.rows == 0 || currentState.columns == 0 || currentState.grid.isEmpty {
             lines = [""]
@@ -2148,7 +2155,8 @@ final class EditorTerminalBridge {
             for c in 0..<currentState.columns {
                 let ch = currentState.grid[r][c]
                 let attr = currentState.attrs[r][c]
-                let displayCharacter: Character = ch.unicodeScalars.allSatisfy({ $0.value >= 0x20 }) ? ch : " "
+                let hasControlScalar = ch.unicodeScalars.contains(where: { $0.value < 0x20 })
+                let displayCharacter: Character = hasControlScalar ? " " : ch
                 plainBuilder.append(displayCharacter)
 
                 if runAttributes == nil {
@@ -2249,13 +2257,38 @@ final class EditorTerminalBridge {
 
 // MARK: - C Bridge Callbacks (Routed to Correct Instance)
 
+@inline(__always)
+private func runtimeBootstrapForEditorCallback(_ callback: String) -> PscalRuntimeBootstrap? {
+    let sessionId = PSCALRuntimeCurrentThreadSessionId()
+    if sessionId != 0,
+       let sessionContext = PSCALRuntimeGetRuntimeContextForSession(sessionId),
+       let bootstrap = PscalRuntimeBootstrap.lookupBootstrap(for: UnsafeMutableRawPointer(sessionContext)) {
+        if editorDebugLoggingEnabled {
+            runtimeDebugLog("[editor-route] \(callback) recovered via session=\(sessionId)")
+        }
+        return bootstrap
+    }
+
+    if let runtimeContext = PSCALRuntimeGetCurrentRuntimeContext(),
+       let bootstrap = PscalRuntimeBootstrap.lookupBootstrap(for: UnsafeMutableRawPointer(runtimeContext)) {
+        if editorDebugLoggingEnabled {
+            runtimeDebugLog("[editor-route] \(callback) fallback via runtime-context session=\(sessionId)")
+        }
+        return bootstrap
+    }
+
+    if editorDebugLoggingEnabled {
+        runtimeDebugLog("[editor-route] \(callback) dropped: missing route ctx session=\(sessionId)")
+    }
+    return nil
+}
+
 @_cdecl("pscalTerminalBegin")
 func pscalTerminalBegin(_ columns: Int32, _ rows: Int32) {
     if editorDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalBegin cols=\(columns) rows=\(rows)")
     }
-    // ROUTING: Use .current instance derived from C Context
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalBegin") else { return }
     bootstrap.editorBridge.activate(columns: Int(columns), rows: Int(rows))
     bootstrap.setEditorModeActive(true)
 #if EDITOR_FLOATING_WINDOW
@@ -2269,7 +2302,7 @@ func pscalTerminalEnd() {
     if editorDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalEnd")
     }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalEnd") else { return }
     bootstrap.editorBridge.deactivate()
     bootstrap.setEditorModeActive(false)
 #if EDITOR_FLOATING_WINDOW
@@ -2283,7 +2316,7 @@ func pscalTerminalResize(_ columns: Int32, _ rows: Int32) {
     if editorDebugLoggingEnabled {
         runtimeDebugLog("pscalTerminalResize cols=\(columns) rows=\(rows)")
     }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalResize") else { return }
     bootstrap.editorBridge.resize(columns: Int(columns), rows: Int(rows))
     bootstrap.refreshEditorDisplay()
 }
@@ -2295,7 +2328,7 @@ func pscalTerminalRender(_ utf8: UnsafePointer<CChar>?, _ len: Int32, _ row: Int
         let bytes = (0..<previewLen).compactMap { idx in utf8?[idx] }.map { String(format: "%02X", $0) }.joined(separator: " ")
         terminalLog("RENDER row=\(row) col=\(col) len=\(len) fg=\(fg) bg=\(bg) attr=\(attr) bytes=\(bytes)")
     }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalRender") else { return }
     bootstrap.editorBridge.draw(row: Int(row),
                                      column: Int(col),
                                      text: utf8,
@@ -2312,7 +2345,7 @@ func pscalTerminalClear() {
         runtimeDebugLog("pscalTerminalClear")
     }
     if terminalLogURL() != nil { terminalLog("CLEAR") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalClear") else { return }
     bootstrap.editorBridge.clear()
     bootstrap.refreshEditorDisplay()
 }
@@ -2322,20 +2355,20 @@ func pscalTerminalMoveCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil {
         terminalLog("CURSOR row=\(row) col=\(column)")
     }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalMoveCursor") else { return }
     bootstrap.editorBridge.moveCursor(row: Int(row), column: Int(column))
     bootstrap.refreshEditorDisplay()
 }
 @_cdecl("pscalTerminalClearEol")
 func pscalTerminalClearEol(_ row: Int32, _ column: Int32) {
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalClearEol") else { return }
     bootstrap.editorBridge.clearToEndOfLine(row: Int(row), column: Int(column))
     bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalClearBol")
 func pscalTerminalClearBol(_ row: Int32, _ column: Int32) {
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalClearBol") else { return }
     bootstrap.editorBridge.clearLineToCursor(row: Int(row), col: Int(column))
     bootstrap.refreshEditorDisplay()
 }
@@ -2343,7 +2376,7 @@ func pscalTerminalClearBol(_ row: Int32, _ column: Int32) {
 @_cdecl("pscalTerminalClearLine")
 func pscalTerminalClearLine(_ row: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_LINE row=\(row)") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalClearLine") else { return }
     bootstrap.editorBridge.clearLine(row: Int(row))
     bootstrap.refreshEditorDisplay()
 }
@@ -2351,7 +2384,7 @@ func pscalTerminalClearLine(_ row: Int32) {
 @_cdecl("pscalTerminalClearScreenFromCursor")
 func pscalTerminalClearScreenFromCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_SCR_FROM row=\(row) col=\(column)") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalClearScreenFromCursor") else { return }
     bootstrap.editorBridge.clearToEndOfScreen(row: Int(row), col: Int(column))
     bootstrap.refreshEditorDisplay()
 }
@@ -2359,7 +2392,7 @@ func pscalTerminalClearScreenFromCursor(_ row: Int32, _ column: Int32) {
 @_cdecl("pscalTerminalClearScreenToCursor")
 func pscalTerminalClearScreenToCursor(_ row: Int32, _ column: Int32) {
     if terminalLogURL() != nil { terminalLog("CLEAR_SCR_TO row=\(row) col=\(column)") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalClearScreenToCursor") else { return }
     bootstrap.editorBridge.clearToStartOfScreen(row: Int(row), col: Int(column))
     bootstrap.refreshEditorDisplay()
 }
@@ -2367,7 +2400,7 @@ func pscalTerminalClearScreenToCursor(_ row: Int32, _ column: Int32) {
 @_cdecl("pscalTerminalInsertLines")
 func pscalTerminalInsertLines(_ row: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("IL row=\(row) count=\(count)") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalInsertLines") else { return }
     bootstrap.editorBridge.insertLines(at: Int(row), count: Int(max(1, count)))
     bootstrap.refreshEditorDisplay()
 }
@@ -2375,7 +2408,7 @@ func pscalTerminalInsertLines(_ row: Int32, _ count: Int32) {
 @_cdecl("pscalTerminalDeleteLines")
 func pscalTerminalDeleteLines(_ row: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("DL row=\(row) count=\(count)") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalDeleteLines") else { return }
     bootstrap.editorBridge.deleteLines(at: Int(row), count: Int(max(1, count)))
     bootstrap.refreshEditorDisplay()
 }
@@ -2383,7 +2416,7 @@ func pscalTerminalDeleteLines(_ row: Int32, _ count: Int32) {
 @_cdecl("pscalTerminalInsertChars")
 func pscalTerminalInsertChars(_ row: Int32, _ col: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("ICH row=\(row) col=\(col) count=\(count)") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalInsertChars") else { return }
     bootstrap.editorBridge.insertChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
     bootstrap.refreshEditorDisplay()
 }
@@ -2391,7 +2424,7 @@ func pscalTerminalInsertChars(_ row: Int32, _ col: Int32, _ count: Int32) {
 @_cdecl("pscalTerminalDeleteChars")
 func pscalTerminalDeleteChars(_ row: Int32, _ col: Int32, _ count: Int32) {
     if terminalLogURL() != nil { terminalLog("DCH row=\(row) col=\(col) count=\(count)") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalDeleteChars") else { return }
     bootstrap.editorBridge.deleteChars(at: Int(row), col: Int(col), count: Int(max(1, count)))
     bootstrap.refreshEditorDisplay()
 }
@@ -2399,7 +2432,7 @@ func pscalTerminalDeleteChars(_ row: Int32, _ col: Int32, _ count: Int32) {
 @_cdecl("pscalTerminalEnterAltScreen")
 func pscalTerminalEnterAltScreen() {
     if terminalLogURL() != nil { terminalLog("ALT_ENTER") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalEnterAltScreen") else { return }
     bootstrap.editorBridge.enterAltScreen()
     bootstrap.refreshEditorDisplay()
 }
@@ -2407,14 +2440,14 @@ func pscalTerminalEnterAltScreen() {
 @_cdecl("pscalTerminalExitAltScreen")
 func pscalTerminalExitAltScreen() {
     if terminalLogURL() != nil { terminalLog("ALT_EXIT") }
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalExitAltScreen") else { return }
     bootstrap.editorBridge.exitAltScreen()
     bootstrap.refreshEditorDisplay()
 }
 
 @_cdecl("pscalTerminalSetCursorVisible")
 func pscalTerminalSetCursorVisible(_ visible: Int32) {
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalSetCursorVisible") else { return }
     bootstrap.editorBridge.setCursorVisible(visible != 0)
     bootstrap.refreshEditorDisplay()
 }
@@ -2422,16 +2455,14 @@ func pscalTerminalSetCursorVisible(_ visible: Int32) {
 @_cdecl("pscalTerminalRead")
 func pscalTerminalRead(_ buffer: UnsafeMutablePointer<UInt8>?, _ maxlen: Int32, _ timeout: Int32) -> Int32 {
     guard let buffer else { return 0 }
-    // Read from the current bootstrap's bridge
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return 0 }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalTerminalRead") else { return 0 }
     let bytesRead = bootstrap.editorBridge.read(into: buffer, maxLength: Int(maxlen), timeoutMs: Int(timeout))
     return Int32(bytesRead)
 }
 
 @_cdecl("pscalEditorDump")
 func pscalEditorDump() {
-    // Debug dump logic for current instance
-    guard let bootstrap = PscalRuntimeBootstrap.current else { return }
+    guard let bootstrap = runtimeBootstrapForEditorCallback("pscalEditorDump") else { return }
     let snapshot = bootstrap.editorBridge.snapshot()
     if let ptr = withCStringPointerRuntime(snapshot.text, { $0 }) {
         fputs(ptr, stdout)

@@ -1,0 +1,17 @@
+# PSCAL iOS/iPadOS persistent mounts
+#
+# Format:
+#   <source> <target> <type> <options> <dump> <pass>
+#
+# Notes:
+# - source and target must be absolute paths.
+# - target directory must already exist in the virtual filesystem.
+# - type defaults to "bind" and options defaults to "rw" when omitted by parser.
+# - supported options include: rw, ro, bind, nosuid, nodev, noexec, remount.
+# - escape whitespace using octal escapes (for example, space -> \040).
+#
+# Example: iCloud Drive mount into the shell namespace.
+# /private/var/mobile/Library/Mobile\040Documents/com~apple~CloudDocs /iCloud bind rw 0 0
+#
+# Example: mount app-private Documents as /hostdocs (adjust source to your container path).
+# /private/var/mobile/Containers/Data/Application/<APP-UUID>/Documents /hostdocs bind rw 0 0

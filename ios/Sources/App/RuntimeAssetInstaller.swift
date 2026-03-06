@@ -376,6 +376,7 @@ final class RuntimeAssetInstaller {
         ensureEtcFileNamed("passwd", bundleRoot: bundleRoot)
         ensureEtcFileNamed("group", bundleRoot: bundleRoot)
         ensureEtcFileNamed("hosts", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("fstab", bundleRoot: bundleRoot)
         // Ensure word lists are always present even if workspace/etc already exists.
         ensureEtcFileNamed("words", bundleRoot: bundleRoot)
         ensureEtcFileNamed("words.short", bundleRoot: bundleRoot)

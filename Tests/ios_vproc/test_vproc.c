@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include <glob.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -2102,7 +2103,7 @@ static void assert_path_truncate_mount_rewrites_virtual_paths(void) {
 
     pathTruncateMountClearAll();
     unsetenv("PATH_TRUNCATE");
-    char cleanup_cmd[PATH_MAX + 32];
+    char cleanup_cmd[PATH_MAX * 2 + 32];
     snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
     (void)system(cleanup_cmd);
 }
@@ -2135,6 +2136,95 @@ static void assert_proc_mount_files_include_virtual_mounts(void) {
 
     pathTruncateMountClearAll();
     unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 32];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
+    (void)system(cleanup_cmd);
+}
+
+static bool testEncodeFstabField(const char *input, char *out, size_t out_size) {
+    if (!input || !out || out_size == 0) {
+        return false;
+    }
+    size_t out_len = 0;
+    for (size_t i = 0; input[i] != '\0'; ++i) {
+        unsigned char ch = (unsigned char)input[i];
+        if (ch == '\\' || isspace(ch) || ch == '#') {
+            if (out_len + 4 >= out_size) {
+                return false;
+            }
+            out[out_len++] = '\\';
+            out[out_len++] = (char)('0' + ((ch >> 6) & 0x07));
+            out[out_len++] = (char)('0' + ((ch >> 3) & 0x07));
+            out[out_len++] = (char)('0' + (ch & 0x07));
+            continue;
+        }
+        if (out_len + 1 >= out_size) {
+            return false;
+        }
+        out[out_len++] = (char)ch;
+    }
+    out[out_len] = '\0';
+    return true;
+}
+
+static void assert_kernel_mounts_from_fstab_at_startup(void) {
+    char source_templ[] = "/tmp/vproc-fstab-src-XXXXXX";
+    char *source_root = mkdtemp(source_templ);
+    assert(source_root);
+    char root_templ[] = "/tmp/vproc-fstab-root-XXXXXX";
+    char *root = mkdtemp(root_templ);
+    assert(root);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char etc_path[PATH_MAX];
+    snprintf(etc_path, sizeof(etc_path), "%s/etc", root);
+    assert(mkdir(etc_path, 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt/ext", 0700) == 0 || errno == EEXIST);
+
+    char source_file[PATH_MAX];
+    char source_with_space[PATH_MAX];
+    snprintf(source_with_space, sizeof(source_with_space), "%s/dir with space", source_root);
+    assert(mkdir(source_with_space, 0700) == 0 || errno == EEXIST);
+    snprintf(source_file, sizeof(source_file), "%s/hello.txt", source_with_space);
+    int source_fd = open(source_file, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(source_fd >= 0);
+    assert(write(source_fd, "fstab-mounted", 13) == 13);
+    close(source_fd);
+
+    char fstab_path[PATH_MAX];
+    snprintf(fstab_path, sizeof(fstab_path), "%s/etc/fstab", root);
+    FILE *fstab = fopen(fstab_path, "w");
+    assert(fstab);
+    char source_escaped[PATH_MAX * 4];
+    assert(testEncodeFstabField(source_with_space, source_escaped, sizeof(source_escaped)));
+    assert(fprintf(fstab, "# test mount\n%s /mnt/ext bind rw 0 0\n", source_escaped) > 0);
+    assert(fclose(fstab) == 0);
+
+    vprocResetStartupFstabStateForTests();
+    assert(vprocEnsureKernelPid() > 0);
+
+    char expanded[PATH_MAX];
+    assert(pathTruncateExpand("/mnt/ext/hello.txt", expanded, sizeof(expanded)));
+    assert(strstr(expanded, "/hello.txt") != NULL);
+
+    int mounted_fd = pscalPathVirtualized_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+    assert(mounted_fd >= 0);
+    char buf[32] = {0};
+    assert(read(mounted_fd, buf, sizeof(buf)) == 13);
+    assert(strncmp(buf, "fstab-mounted", 13) == 0);
+    close(mounted_fd);
+
+    char mounts_buf[8192];
+    assert(read_virtual_file("/proc/mounts", mounts_buf, sizeof(mounts_buf)) > 0);
+    assert(strstr(mounts_buf, source_root) != NULL);
+    assert(strstr(mounts_buf, " /mnt/ext ") != NULL);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", "/tmp", 1);
     char cleanup_cmd[PATH_MAX + 32];
     snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
     (void)system(cleanup_cmd);
@@ -6892,6 +6982,8 @@ int main(void) {
     assert_stop_unsupported_sigtstp_queues_pending_signal();
     fprintf(stderr, "TEST sigint_non_shell_same_tid_does_not_request_runtime_interrupt\n");
     assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt();
+    fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");
+    assert_kernel_mounts_from_fstab_at_startup();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;

@@ -1454,6 +1454,10 @@ if(PSCAL_PLATFORM_IOS)
 
         set(_pscal_micro_embed_lib "${CMAKE_BINARY_DIR}/libpscal_micro_embed.a")
         set(_pscal_micro_embed_hdr "${CMAKE_BINARY_DIR}/libpscal_micro_embed.h")
+        file(GLOB_RECURSE _pscal_micro_embed_go_sources CONFIGURE_DEPENDS
+            "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/*.go"
+            "${CMAKE_SOURCE_DIR}/third-party/micro/internal/*.go"
+        )
         add_custom_command(
             OUTPUT "${_pscal_micro_embed_lib}" "${_pscal_micro_embed_hdr}"
             COMMAND /bin/bash "${CMAKE_SOURCE_DIR}/ios/Tools/build_micro_embed_archive.sh"
@@ -1470,8 +1474,7 @@ if(PSCAL_PLATFORM_IOS)
                 "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix_darwin.go"
                 "${CMAKE_SOURCE_DIR}/third-party/micro/go.mod"
                 "${CMAKE_SOURCE_DIR}/third-party/micro/go.sum"
-                "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/micro.go"
-                "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/pscal_embed.go"
+                ${_pscal_micro_embed_go_sources}
             VERBATIM
             COMMENT "Building embedded micro archive for ${_pscal_micro_sdk}/${_pscal_micro_arch}"
         )

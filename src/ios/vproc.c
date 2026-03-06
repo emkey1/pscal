@@ -2007,6 +2007,8 @@ static VProcInterposeBypassRegistry gVProcInterposeBypassRegistry = {
 };
 static pthread_mutex_t gPathTruncateMu = PTHREAD_MUTEX_INITIALIZER;
 static bool gPathTruncateInit = false;
+static pthread_mutex_t gFstabMountsMu = PTHREAD_MUTEX_INITIALIZER;
+static bool gFstabMountsLoaded = false;
 static VProc *gKernelVproc = NULL;
 static pthread_mutex_t gKernelVprocMu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t gKernelThread;
@@ -2054,6 +2056,33 @@ static VProcSessionStdio gSessionStdioDefault = {
 };
 static pthread_once_t gSessionStdioDefaultOnce = PTHREAD_ONCE_INIT;
 static _Thread_local VProcSessionStdio *gSessionStdioTls = NULL;
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    pthread_t owner;
+    bool owner_valid;
+    unsigned int depth;
+    const char *name;
+} VProcIsolationLock;
+
+static VProcIsolationLock gVProcIsolationLocks[VPROC_ISOLATION_DOMAIN_COUNT] = {
+    [VPROC_ISOLATION_DOMAIN_NEXTVI] = {
+        .mu = PTHREAD_MUTEX_INITIALIZER,
+        .cv = PTHREAD_COND_INITIALIZER,
+        .owner = (pthread_t)0,
+        .owner_valid = false,
+        .depth = 0,
+        .name = "nextvi",
+    },
+    [VPROC_ISOLATION_DOMAIN_MICRO] = {
+        .mu = PTHREAD_MUTEX_INITIALIZER,
+        .cv = PTHREAD_COND_INITIALIZER,
+        .owner = (pthread_t)0,
+        .owner_valid = false,
+        .depth = 0,
+        .name = "micro",
+    },
+};
 static pthread_mutex_t gSessionInputInitMu = PTHREAD_MUTEX_INITIALIZER;
 static const char *kLocationDevicePath = "/dev/location";
 static const char *kLegacyGpsDevicePath = "/dev/gps";
@@ -2183,6 +2212,20 @@ static bool vprocOwnsHostFdLocked(VProc *vp, int host_fd) {
         return true;
     }
     return vprocResourceContainsLocked(vp, host_fd);
+}
+
+static bool vprocAllowRealFdFallback(VProc *vp, int fd) {
+    if (!vp || fd < 0) {
+        return false;
+    }
+    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        return true;
+    }
+    bool allow = false;
+    pthread_mutex_lock(&vp->mu);
+    allow = vprocOwnsHostFdLocked(vp, fd);
+    pthread_mutex_unlock(&vp->mu);
+    return allow;
 }
 
 static void vprocResourceCloseAllLocked(VProc *vp) {
@@ -7768,6 +7811,79 @@ int vprocPthreadCreateShim(pthread_t *thread,
     return rc;
 }
 
+int vprocIsolationEnter(VProcIsolationDomain domain) {
+    if (domain < 0 || domain >= VPROC_ISOLATION_DOMAIN_COUNT) {
+        errno = EINVAL;
+        return -1;
+    }
+    VProcIsolationLock *lock = &gVProcIsolationLocks[domain];
+    pthread_t self = pthread_self();
+
+    pthread_mutex_lock(&lock->mu);
+    while (lock->depth > 0 &&
+           (!lock->owner_valid || !pthread_equal(lock->owner, self))) {
+        pthread_cond_wait(&lock->cv, &lock->mu);
+    }
+    if (lock->depth == 0) {
+        lock->owner = self;
+        lock->owner_valid = true;
+    }
+    lock->depth++;
+    pthread_mutex_unlock(&lock->mu);
+    return 0;
+}
+
+int vprocIsolationTryEnter(VProcIsolationDomain domain) {
+    if (domain < 0 || domain >= VPROC_ISOLATION_DOMAIN_COUNT) {
+        errno = EINVAL;
+        return -1;
+    }
+    VProcIsolationLock *lock = &gVProcIsolationLocks[domain];
+    pthread_t self = pthread_self();
+
+    pthread_mutex_lock(&lock->mu);
+    if (lock->depth > 0 &&
+        (!lock->owner_valid || !pthread_equal(lock->owner, self))) {
+        pthread_mutex_unlock(&lock->mu);
+        errno = EBUSY;
+        return -1;
+    }
+    if (lock->depth == 0) {
+        lock->owner = self;
+        lock->owner_valid = true;
+    }
+    lock->depth++;
+    pthread_mutex_unlock(&lock->mu);
+    return 0;
+}
+
+void vprocIsolationLeave(VProcIsolationDomain domain) {
+    if (domain < 0 || domain >= VPROC_ISOLATION_DOMAIN_COUNT) {
+        return;
+    }
+    VProcIsolationLock *lock = &gVProcIsolationLocks[domain];
+    pthread_t self = pthread_self();
+
+    pthread_mutex_lock(&lock->mu);
+    if (lock->depth == 0 ||
+        !lock->owner_valid ||
+        !pthread_equal(lock->owner, self)) {
+        pthread_mutex_unlock(&lock->mu);
+        return;
+    }
+    lock->depth--;
+    if (lock->depth == 0) {
+        if (vprocToolDebugEnabled()) {
+            vprocDebugLogf("[vproc-isolation] release domain=%s\n",
+                           lock->name ? lock->name : "unknown");
+        }
+        lock->owner = (pthread_t)0;
+        lock->owner_valid = false;
+        pthread_cond_broadcast(&lock->cv);
+    }
+    pthread_mutex_unlock(&lock->mu);
+}
+
 int vprocTranslateFd(VProc *vp, int fd) {
     if (!vp || fd < 0) {
         errno = EBADF;
@@ -10586,6 +10702,383 @@ int vprocProtectKqueueCloseActive(void) {
     return __atomic_load_n(&gVProcProtectKqueueCloseDepth, __ATOMIC_RELAXED) > 0;
 }
 
+enum {
+    VPROC_FSTAB_MOUNT_RDONLY = 1ul << 0,
+    VPROC_FSTAB_MOUNT_NOSUID = 1ul << 1,
+    VPROC_FSTAB_MOUNT_NODEV = 1ul << 2,
+    VPROC_FSTAB_MOUNT_NOEXEC = 1ul << 3,
+    VPROC_FSTAB_MOUNT_REMOUNT = 1ul << 4,
+    VPROC_FSTAB_MOUNT_BIND = 1ul << 5
+};
+
+static unsigned long vprocParseFstabMountFlags(const char *options) {
+    unsigned long flags = 0;
+    if (!options || options[0] == '\0') {
+        return flags;
+    }
+    char *copy = strdup(options);
+    if (!copy) {
+        return flags;
+    }
+    char *saveptr = NULL;
+    for (char *token = strtok_r(copy, ",", &saveptr);
+         token;
+         token = strtok_r(NULL, ",", &saveptr)) {
+        while (*token && isspace((unsigned char)*token)) {
+            token++;
+        }
+        size_t len = strlen(token);
+        while (len > 0 && isspace((unsigned char)token[len - 1])) {
+            token[--len] = '\0';
+        }
+        if (strcmp(token, "ro") == 0) flags |= VPROC_FSTAB_MOUNT_RDONLY;
+        else if (strcmp(token, "rw") == 0) flags &= ~VPROC_FSTAB_MOUNT_RDONLY;
+        else if (strcmp(token, "nosuid") == 0) flags |= VPROC_FSTAB_MOUNT_NOSUID;
+        else if (strcmp(token, "suid") == 0) flags &= ~VPROC_FSTAB_MOUNT_NOSUID;
+        else if (strcmp(token, "nodev") == 0) flags |= VPROC_FSTAB_MOUNT_NODEV;
+        else if (strcmp(token, "dev") == 0) flags &= ~VPROC_FSTAB_MOUNT_NODEV;
+        else if (strcmp(token, "noexec") == 0) flags |= VPROC_FSTAB_MOUNT_NOEXEC;
+        else if (strcmp(token, "exec") == 0) flags &= ~VPROC_FSTAB_MOUNT_NOEXEC;
+        else if (strcmp(token, "remount") == 0) flags |= VPROC_FSTAB_MOUNT_REMOUNT;
+        else if (strcmp(token, "bind") == 0) flags |= VPROC_FSTAB_MOUNT_BIND;
+    }
+    free(copy);
+    return flags;
+}
+
+static bool vprocDecodeFstabField(const char *input, char *out, size_t out_size) {
+    if (!input || !out || out_size == 0) {
+        errno = EINVAL;
+        return false;
+    }
+    size_t out_len = 0;
+    for (size_t i = 0; input[i] != '\0'; ++i) {
+        unsigned char ch = (unsigned char)input[i];
+        if (ch == '\\') {
+            unsigned char next = (unsigned char)input[i + 1];
+            if (next == '\0') {
+                ch = '\\';
+            } else if (next >= '0' && next <= '7') {
+                int value = (int)(next - '0');
+                i++;
+                for (int digits = 1; digits < 3; ++digits) {
+                    unsigned char oct = (unsigned char)input[i + 1];
+                    if (oct < '0' || oct > '7') {
+                        break;
+                    }
+                    i++;
+                    value = (value * 8) + (int)(oct - '0');
+                }
+                ch = (unsigned char)value;
+            } else {
+                i++;
+                switch (next) {
+                    case 'n': ch = '\n'; break;
+                    case 'r': ch = '\r'; break;
+                    case 't': ch = '\t'; break;
+                    default: ch = next; break;
+                }
+            }
+        }
+        if (out_len + 1 >= out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        out[out_len++] = (char)ch;
+    }
+    out[out_len] = '\0';
+    return true;
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static int vprocEnsureMountSourceAccessFromRuntime(const char *path) {
+    typedef int (*VprocEnsureMountSourceAccessFn)(const char *path);
+    static VprocEnsureMountSourceAccessFn fn = NULL;
+    static bool looked_up = false;
+    if (!looked_up) {
+        looked_up = true;
+        fn = (VprocEnsureMountSourceAccessFn)dlsym(RTLD_DEFAULT, "pscalRuntimeEnsureMountSourceAccess");
+    }
+    if (!fn) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return fn(path);
+}
+#endif
+
+static bool vprocResolveFstabSourceDir(const char *source, char *source_real, size_t source_real_size) {
+    if (!source || source[0] != '/' || !source_real || source_real_size == 0) {
+        errno = EINVAL;
+        return false;
+    }
+    char expanded[PATH_MAX];
+    const char *candidates[2] = { source, NULL };
+    if (pathTruncateExpand(source, expanded, sizeof(expanded))) {
+        candidates[1] = expanded;
+    }
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        const char *candidate = candidates[i];
+        if (!candidate) {
+            continue;
+        }
+#if defined(PSCAL_TARGET_IOS)
+        (void)vprocEnsureMountSourceAccessFromRuntime(candidate);
+#endif
+        char real_buf[PATH_MAX];
+        if (!vprocHostRealpathRaw(candidate, real_buf)) {
+            continue;
+        }
+        struct stat st;
+        if (vprocHostStatRaw(real_buf, &st) != 0) {
+            continue;
+        }
+        if (!S_ISDIR(st.st_mode)) {
+            errno = ENOTDIR;
+            continue;
+        }
+        size_t len = strlen(real_buf);
+        if (len >= source_real_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        memcpy(source_real, real_buf, len + 1);
+        return true;
+    }
+    if (errno == 0) {
+        errno = ENOENT;
+    }
+    return false;
+}
+
+static bool vprocResolveFstabTargetDir(const char *target, char *target_virtual, size_t target_virtual_size) {
+    if (!target || target[0] != '/' || !target_virtual || target_virtual_size == 0) {
+        errno = EINVAL;
+        return false;
+    }
+    char expanded[PATH_MAX];
+    if (!pathTruncateExpand(target, expanded, sizeof(expanded))) {
+        return false;
+    }
+    char target_real[PATH_MAX];
+    if (!vprocHostRealpathRaw(expanded, target_real)) {
+        return false;
+    }
+    struct stat st;
+    if (vprocHostStatRaw(target_real, &st) != 0) {
+        return false;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        errno = ENOTDIR;
+        return false;
+    }
+    if (!pathTruncateStrip(target_real, target_virtual, target_virtual_size)) {
+        return false;
+    }
+    if (target_virtual[0] != '/') {
+        errno = EINVAL;
+        return false;
+    }
+    return true;
+}
+
+static bool vprocApplyFstabMountLine(char *line, size_t line_no) {
+    if (!line) {
+        return false;
+    }
+    char *comment = strchr(line, '#');
+    if (comment) {
+        *comment = '\0';
+    }
+
+    char *cursor = line;
+    while (*cursor && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (*cursor == '\0') {
+        return true;
+    }
+
+    char *fields[6] = {0};
+    size_t field_count = 0;
+    char *saveptr = NULL;
+    for (char *token = strtok_r(cursor, " \t\r\n", &saveptr);
+         token;
+         token = strtok_r(NULL, " \t\r\n", &saveptr)) {
+        if (field_count < sizeof(fields) / sizeof(fields[0])) {
+            fields[field_count++] = token;
+        }
+    }
+
+    if (field_count < 2) {
+        vprocDebugLogf("[vproc-fstab] line %zu ignored (needs source and target)", line_no);
+        return false;
+    }
+
+    char source_field[PATH_MAX];
+    char target_field[PATH_MAX];
+    char type_field[sizeof(((PathTruncateMountEntry *)0)->type)];
+    char options_field[sizeof(((PathTruncateMountEntry *)0)->options)];
+
+    if (!vprocDecodeFstabField(fields[0], source_field, sizeof(source_field)) ||
+        !vprocDecodeFstabField(fields[1], target_field, sizeof(target_field))) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu field decode failed: %s",
+                       line_no,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    if (field_count >= 3 && fields[2][0] != '\0' && strcmp(fields[2], "-") != 0) {
+        if (!vprocDecodeFstabField(fields[2], type_field, sizeof(type_field))) {
+            int saved_errno = errno;
+            vprocDebugLogf("[vproc-fstab] line %zu type decode failed: %s",
+                           line_no,
+                           strerror(saved_errno ? saved_errno : EINVAL));
+            errno = saved_errno;
+            return false;
+        }
+    } else {
+        strlcpy(type_field, "bind", sizeof(type_field));
+    }
+
+    if (field_count >= 4 && fields[3][0] != '\0' && strcmp(fields[3], "-") != 0) {
+        if (!vprocDecodeFstabField(fields[3], options_field, sizeof(options_field))) {
+            int saved_errno = errno;
+            vprocDebugLogf("[vproc-fstab] line %zu options decode failed: %s",
+                           line_no,
+                           strerror(saved_errno ? saved_errno : EINVAL));
+            errno = saved_errno;
+            return false;
+        }
+    } else {
+        strlcpy(options_field, "rw", sizeof(options_field));
+    }
+
+    const char *source = source_field;
+    const char *target = target_field;
+    const char *type = type_field;
+    const char *options = options_field;
+    if (type[0] == '\0' || strcmp(type, "-") == 0) {
+        type = "bind";
+    }
+    if (options[0] == '\0' || strcmp(options, "-") == 0) {
+        options = "rw";
+    }
+
+    unsigned long flags = vprocParseFstabMountFlags(options);
+    if (strcmp(type, "bind") == 0) {
+        flags |= VPROC_FSTAB_MOUNT_BIND;
+    }
+
+    char source_real[PATH_MAX];
+    if (!vprocResolveFstabSourceDir(source, source_real, sizeof(source_real))) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu source %s rejected: %s",
+                       line_no,
+                       source,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    char target_virtual[PATH_MAX];
+    if (!vprocResolveFstabTargetDir(target, target_virtual, sizeof(target_virtual))) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu target %s rejected: %s",
+                       line_no,
+                       target,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    if (!pathTruncateMountAdd(source_real, target_virtual, type, options, flags)) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu mount %s -> %s failed: %s",
+                       line_no,
+                       source_real,
+                       target_virtual,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    return true;
+}
+
+static void vprocEnsureStartupFstabMounts(void) {
+    if (__atomic_load_n(&gFstabMountsLoaded, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+
+    pthread_mutex_lock(&gFstabMountsMu);
+    if (gFstabMountsLoaded) {
+        pthread_mutex_unlock(&gFstabMountsMu);
+        return;
+    }
+
+    int fd = -1;
+    char fstab_path[PATH_MAX] = "/etc/fstab";
+    char root_path[PATH_MAX];
+    if (pathTruncateExpand("/", root_path, sizeof(root_path))) {
+        char candidate[PATH_MAX];
+        int n = snprintf(candidate, sizeof(candidate), "%s/etc/fstab", root_path);
+        if (n > 0 && n < (int)sizeof(candidate)) {
+            fd = vprocHostOpenRawInternal(candidate, O_RDONLY, 0, false);
+            if (fd >= 0) {
+                strlcpy(fstab_path, candidate, sizeof(fstab_path));
+            }
+        }
+    }
+    if (fd < 0) {
+        fd = vprocHostOpenVirtualized("/etc/fstab", O_RDONLY, 0);
+    }
+    if (fd < 0) {
+        if (errno != ENOENT && errno != ENOTDIR) {
+            vprocDebugLogf("[vproc-fstab] open %s failed: %s", fstab_path, strerror(errno));
+        }
+        __atomic_store_n(&gFstabMountsLoaded, true, __ATOMIC_RELEASE);
+        pthread_mutex_unlock(&gFstabMountsMu);
+        return;
+    }
+
+    FILE *fp = fdopen(fd, "r");
+    if (!fp) {
+        int saved_errno = errno;
+        close(fd);
+        vprocDebugLogf("[vproc-fstab] fdopen %s failed: %s",
+                       fstab_path,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        __atomic_store_n(&gFstabMountsLoaded, true, __ATOMIC_RELEASE);
+        pthread_mutex_unlock(&gFstabMountsMu);
+        return;
+    }
+
+    char *line = NULL;
+    size_t cap = 0;
+    size_t line_no = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        line_no++;
+        (void)vprocApplyFstabMountLine(line, line_no);
+    }
+    free(line);
+    fclose(fp);
+
+    __atomic_store_n(&gFstabMountsLoaded, true, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&gFstabMountsMu);
+}
+
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+void vprocResetStartupFstabStateForTests(void) {
+    pthread_mutex_lock(&gFstabMountsMu);
+    __atomic_store_n(&gFstabMountsLoaded, false, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&gFstabMountsMu);
+}
+#endif
+
 static void vprocEnsurePathTruncationDefault(void) {
     if (__atomic_load_n(&gPathTruncateInit, __ATOMIC_ACQUIRE)) {
         return;
@@ -11001,6 +11494,7 @@ int vprocEnsureKernelPid(void) {
     if (pid > 0) {
         pthread_mutex_unlock(&gKernelVprocMu);
         vprocEnsureKernelThread(pid);
+        vprocEnsureStartupFstabMounts();
         return pid;
     }
 
@@ -11042,6 +11536,9 @@ int vprocEnsureKernelPid(void) {
             }
         }
         pthread_mutex_unlock(&gVProcTasks.mu);
+    }
+    if (pid > 0) {
+        vprocEnsureStartupFstabMounts();
     }
     return pid;
 }
@@ -12042,7 +12539,8 @@ static int vprocResolveFdForShim(VProc *vp, int fd, int allow_real, struct pscal
         pthread_mutex_unlock(&vp->mu);
     }
 
-    if (host < 0 && allow_real && fd >= 0) {
+    if (host < 0 && allow_real && fd >= 0 &&
+        (vp == NULL || vprocAllowRealFdFallback(vp, fd))) {
         struct stat st;
         if (vprocHostFstatRaw(fd, &st) == 0) {
             return fd;
@@ -13904,7 +14402,8 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         }
 
         int host_fd = host_index[i];
-        if (host_fd < 0) {
+        if (host_fd < 0 &&
+            (vp == NULL || vprocAllowRealFdFallback(vp, fds[i].fd))) {
             struct stat st;
             if (vprocHostFstatRaw(fds[i].fd, &st) == 0) {
                 host_fd = fds[i].fd;

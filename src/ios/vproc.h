@@ -43,6 +43,12 @@ typedef struct {
     int rows;
 } VProcWinsize;
 
+typedef enum {
+    VPROC_ISOLATION_DOMAIN_NEXTVI = 0,
+    VPROC_ISOLATION_DOMAIN_MICRO,
+    VPROC_ISOLATION_DOMAIN_COUNT
+} VProcIsolationDomain;
+
 typedef struct {
     int pid;
     pthread_t tid;
@@ -139,6 +145,9 @@ int vprocPthreadCreateShim(pthread_t *thread,
                            const pthread_attr_t *attr,
                            void *(*start_routine)(void *),
                            void *arg);
+int vprocIsolationEnter(VProcIsolationDomain domain);
+int vprocIsolationTryEnter(VProcIsolationDomain domain);
+void vprocIsolationLeave(VProcIsolationDomain domain);
 int vprocOpenAt(VProc *vp, const char *path, int flags, int mode);
 int vprocSetWinsize(VProc *vp, int cols, int rows);
 int vprocGetWinsize(VProc *vp, VProcWinsize *out);
@@ -247,6 +256,9 @@ int vprocGetSessionKernelPid(void);
 void vprocSetSessionKernelPid(int pid);
 /* Ensure a shared kernel vproc exists and return its pid. */
 int vprocEnsureKernelPid(void);
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+void vprocResetStartupFstabStateForTests(void);
+#endif
 
 /* Per-session stdio ownership: duplicated host fds that define the
  * controlling stdio for a given shell window/session. */
@@ -499,6 +511,9 @@ static inline int vprocHostPthreadCreate(pthread_t *thread,
 }
 static inline int vprocAdoptHostFd(VProc *vp, int host_fd) { (void)vp; return host_fd; }
 static inline int vprocPthreadCreateShim(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *arg) { return pthread_create(t, a, fn, arg); }
+static inline int vprocIsolationEnter(VProcIsolationDomain domain) { (void)domain; return 0; }
+static inline int vprocIsolationTryEnter(VProcIsolationDomain domain) { (void)domain; return 0; }
+static inline void vprocIsolationLeave(VProcIsolationDomain domain) { (void)domain; }
 static inline int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) { (void)vp; return open(path, flags, mode); }
 static inline int vprocSetWinsize(VProc *vp, int cols, int rows) { (void)vp; (void)cols; (void)rows; return 0; }
 static inline int vprocGetWinsize(VProc *vp, VProcWinsize *out) { if (out) { out->cols = 80; out->rows = 24; } return 0; }

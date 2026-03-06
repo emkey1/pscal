@@ -17,6 +17,7 @@
 
 ## Coding Practices
 - C11 style: 4-space indent, braces on same line, camelCase for functions, uppercase snake for macros.
+- Concurrency is the default design target. Do not "fix" races by serializing whole applets/subsystems with global locks unless explicitly requested; prefer per-instance/per-session isolation and thread-safe state ownership.
 - Many compiler helpers rely on implicit global state; when adding new stacks (like the vtable tracker), ensure push/pop happen on every exit path.
 - Keep allocations paired with frees; leak auditors assume matcher functions like `freeVTableClassList` exist.
 - When adding VM builtins, append them to the end of the dispatch tables/registration arrays so legacy builtin IDs remain stable.

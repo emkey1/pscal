@@ -837,6 +837,18 @@
             "expected_stdout": "status:0\nline_count:2\nfirst_format:ok\nsecond_format:ok\n"
         },
         {
+            "id": "watch_local_script_path_ios",
+            "name": "watch resolves local scripts (vproc)",
+            "category": "jobs",
+            "description": "On iOS/vproc, watch should resolve local scripts for both foo and ./foo forms instead of returning command-not-found.",
+            "script": "Tests/exsh/tests/watch_local_script_path_ios.exsh",
+            "expect": "runtime_ok",
+            "env": {
+                "RUN_VPROC_TESTS": "1"
+            },
+            "expected_stdout": "watch-local:foo-resolve:ok\nwatch-local:dot-resolve:ok\nwatch-local:foo-status:ok\nwatch-local:dot-status:ok"
+        },
+        {
             "id": "watch_top_vproc",
             "name": "watch/top produce distinct vprocs (vproc)",
             "category": "jobs",

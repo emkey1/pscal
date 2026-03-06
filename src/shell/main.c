@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #include <wchar.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -2268,6 +2269,25 @@ typedef struct {
     size_t *capacity;
 } InteractiveCompletionContext;
 
+static bool __attribute__((unused)) interactivePathHasShebang(const char *path) {
+    if (!path || !*path) {
+        return false;
+    }
+    int fd =
+#if defined(PSCAL_TARGET_IOS)
+        pscalPathVirtualized_open(path, O_RDONLY);
+#else
+        open(path, O_RDONLY);
+#endif
+    if (fd < 0) {
+        return false;
+    }
+    char header[2];
+    ssize_t n = read(fd, header, sizeof(header));
+    close(fd);
+    return n == 2 && header[0] == '#' && header[1] == '!';
+}
+
 static bool interactiveAddCompletionMatch(const char *name,
                                           const char *prefix,
                                           size_t prefix_len,
@@ -2341,7 +2361,12 @@ static bool interactiveCollectPathExecutables(const char *prefix,
     char *dir = strtok_r(copy, ":", &saveptr);
     while (ok && dir) {
         const char *real_dir = (*dir == '\0') ? "." : dir;
-        DIR *d = opendir(real_dir);
+        DIR *d =
+#if defined(PSCAL_TARGET_IOS)
+            pscalPathVirtualized_opendir(real_dir);
+#else
+            opendir(real_dir);
+#endif
         if (d) {
             struct dirent *ent = NULL;
             while (ok && (ent = readdir(d)) != NULL) {
@@ -2364,13 +2389,36 @@ static bool interactiveCollectPathExecutables(const char *prefix,
                 }
                 memcpy(full + dir_len, ent->d_name, name_len + 1);
                 struct stat st;
-                if (stat(full, &st) != 0) {
+                if (
+#if defined(PSCAL_TARGET_IOS)
+                    pscalPathVirtualized_stat(full, &st)
+#else
+                    stat(full, &st)
+#endif
+                    != 0) {
                     continue;
                 }
                 if (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
                     continue;
                 }
-                if (access(full, X_OK) != 0) {
+                bool runnable = (
+#if defined(PSCAL_TARGET_IOS)
+                    pscalPathVirtualized_access(full, X_OK)
+#else
+                    access(full, X_OK)
+#endif
+                    == 0);
+#if defined(PSCAL_TARGET_IOS)
+                if (!runnable && (st.st_mode & 0111) != 0) {
+                    runnable = true;
+                }
+                if (!runnable &&
+                    pscalPathVirtualized_access(full, R_OK) == 0 &&
+                    interactivePathHasShebang(full)) {
+                    runnable = true;
+                }
+#endif
+                if (!runnable) {
                     continue;
                 }
                 if (!interactiveAddCompletionMatch(ent->d_name,
@@ -2387,6 +2435,69 @@ static bool interactiveCollectPathExecutables(const char *prefix,
         }
         dir = strtok_r(NULL, ":", &saveptr);
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (ok) {
+        const char *fallback_dirs[] = { "/bin", "/Documents/bin" };
+        for (size_t i = 0; ok && i < sizeof(fallback_dirs) / sizeof(fallback_dirs[0]); ++i) {
+            const char *real_dir = fallback_dirs[i];
+            DIR *d = pscalPathVirtualized_opendir(real_dir);
+            if (!d) {
+                continue;
+            }
+            struct dirent *ent = NULL;
+            while (ok && (ent = readdir(d)) != NULL) {
+                if (ent->d_name[0] == '\0') {
+                    continue;
+                }
+                if (ent->d_name[0] == '.' && prefix_len == 0) {
+                    continue;
+                }
+                char full[PATH_MAX];
+                size_t dir_len = strlen(real_dir);
+                size_t name_len = strlen(ent->d_name);
+                if (dir_len + 1 + name_len + 1 >= sizeof(full)) {
+                    continue;
+                }
+                memcpy(full, real_dir, dir_len);
+                if (dir_len > 0 && real_dir[dir_len - 1] != '/') {
+                    full[dir_len] = '/';
+                    dir_len += 1;
+                }
+                memcpy(full + dir_len, ent->d_name, name_len + 1);
+                struct stat st;
+                if (pscalPathVirtualized_stat(full, &st) != 0) {
+                    continue;
+                }
+                if (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
+                    continue;
+                }
+                bool runnable = (pscalPathVirtualized_access(full, X_OK) == 0);
+                if (!runnable && (st.st_mode & 0111) != 0) {
+                    runnable = true;
+                }
+                if (!runnable &&
+                    pscalPathVirtualized_access(full, R_OK) == 0 &&
+                    interactivePathHasShebang(full)) {
+                    runnable = true;
+                }
+                if (!runnable) {
+                    continue;
+                }
+                if (!interactiveAddCompletionMatch(ent->d_name,
+                                                   prefix,
+                                                   prefix_len,
+                                                   matches,
+                                                   count,
+                                                   capacity)) {
+                    ok = false;
+                    break;
+                }
+            }
+            closedir(d);
+        }
+    }
+#endif
 
     free(copy);
     return ok;
@@ -4565,11 +4676,13 @@ static void *shellRunSessionThread(void *arg) {
         return NULL;
     }
     PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    bool runtime_ctx_swapped = false;
     if (PSCALRuntimeGetCurrentRuntimeContext) {
         prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
     }
     if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
         PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
+        runtime_ctx_swapped = true;
         if (getenv("PSCALI_VPROC_DEBUG")) {
             shellDebugLogf("[session] id=%llu runtime_ctx=%p\n",
                            (unsigned long long)ctx->session_id,
@@ -4584,7 +4697,7 @@ static void *shellRunSessionThread(void *arg) {
         shellSessionNotifyExit(ctx->session_id, status);
         shellFreeArgv(ctx->argv, ctx->argc);
         free(ctx);
-        if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+        if (runtime_ctx_swapped && PSCALRuntimeSetCurrentRuntimeContext) {
             PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
         }
         return NULL;
@@ -4599,6 +4712,9 @@ static void *shellRunSessionThread(void *arg) {
         shellSessionNotifyExit(ctx->session_id, status);
         shellFreeArgv(ctx->argv, ctx->argc);
         free(ctx);
+        if (runtime_ctx_swapped && PSCALRuntimeSetCurrentRuntimeContext) {
+            PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+        }
         return NULL;
     }
     vprocSessionStdioActivate(session_stdio);
@@ -4654,7 +4770,7 @@ static void *shellRunSessionThread(void *arg) {
     shellSessionNotifyExit(ctx->session_id, status);
     shellFreeArgv(ctx->argv, ctx->argc);
     free(ctx);
-    if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+    if (runtime_ctx_swapped && PSCALRuntimeSetCurrentRuntimeContext) {
         PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
     }
     return NULL;

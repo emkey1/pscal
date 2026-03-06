@@ -166,6 +166,22 @@ static char *shellFindExecutableOnPath(const char *name) {
     return NULL;
 }
 
+static bool shellResolveExecutionPath(const char *name, char *resolved, size_t resolved_size) {
+    if (!name || !*name || !resolved || resolved_size == 0) {
+        return false;
+    }
+    if (strchr(name, '/')) {
+        return shellResolveExecutableCandidate(name, resolved, resolved_size);
+    }
+    char *found = shellFindExecutableOnPath(name);
+    if (!found) {
+        return false;
+    }
+    int copied = snprintf(resolved, resolved_size, "%s", found);
+    free(found);
+    return copied >= 0 && (size_t)copied < resolved_size;
+}
+
 static void __attribute__((unused)) shellPagerPushVirtualTTYOverride(int fd) {
     if (gShellPagerVirtualTTYFd >= 0) {
         close(gShellPagerVirtualTTYFd);
@@ -1167,8 +1183,23 @@ static int shellSpawnProcess(VM *vm,
                 _exit(shebang_status);
             }
 #endif
+            int err = 0;
+#if defined(PSCAL_TARGET_IOS)
+            char exec_path[PATH_MAX];
+            const char *resolved_exec = cmd->argv[0];
+            if (shellResolveExecutionPath(cmd->argv[0], exec_path, sizeof(exec_path))) {
+                resolved_exec = exec_path;
+            }
+            execv(resolved_exec, cmd->argv);
+            err = errno;
+            if ((err == ENOENT || err == EACCES) && strcmp(resolved_exec, cmd->argv[0]) != 0) {
+                execvp(cmd->argv[0], cmd->argv);
+                err = errno;
+            }
+#else
             execvp(cmd->argv[0], cmd->argv);
-            int err = errno;
+            err = errno;
+#endif
             int script_status = shellTryRunScriptFallback(vm ? vm : gShellCurrentVm, cmd);
             if (script_status >= 0) {
                 _exit(script_status);
@@ -4915,8 +4946,22 @@ static bool shellExecuteExecBuiltin(VM *vm, ShellCommand *cmd) {
         return true;
     }
 
+#if defined(PSCAL_TARGET_IOS)
+    char exec_path[PATH_MAX];
+    const char *resolved_exec = argv[0];
+    if (shellResolveExecutionPath(argv[0], exec_path, sizeof(exec_path))) {
+        resolved_exec = exec_path;
+    }
+    execv(resolved_exec, argv);
+    int err = errno;
+    if ((err == ENOENT || err == EACCES) && strcmp(resolved_exec, argv[0]) != 0) {
+        execvp(argv[0], argv);
+        err = errno;
+    }
+#else
     execvp(argv[0], argv);
     int err = errno;
+#endif
     runtimeError(vm, "exec: %s: %s", argv[0], strerror(err));
     shellRestoreExecRedirections(backups, backup_count);
     shellFreeExecRedirBackups(backups, backup_count);
