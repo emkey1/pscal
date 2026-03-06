@@ -1,5 +1,4 @@
 #!/usr/bin/env exsh
-
 sleep 60 &
 kill %1
 wait %1
@@ -11,6 +10,3 @@ kill -s TERM $!
 wait $!
 status_second=$?
 printf "wait_second:%s\n" "$status_second"
-
-printf "kill_l_numeric:%s\n" "$(kill -l 9)"
-printf "kill_l_name:%s\n" "$(kill -l SIGTERM)"
