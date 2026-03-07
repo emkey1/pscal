@@ -5840,7 +5840,20 @@ dispatch_switch:
             case INT_DIV: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    int32_t ia = (int32_t)a_val.i_val;
+                    int32_t ib = (int32_t)b_val.i_val;
+                    if (ib == 0) {
+                        runtimeError(vm, "Runtime Error: Integer division by zero.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (ia == INT32_MIN && ib == -1) {
+                        // Prevent x86 hardware trap and preserve 64-bit promotion semantics
+                        push(vm, makeInt(2147483648LL));
+                    } else {
+                        push(vm, makeInt((long long)(ia / ib)));
+                    }
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
@@ -5867,7 +5880,20 @@ dispatch_switch:
             case MOD: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    int32_t ia = (int32_t)a_val.i_val;
+                    int32_t ib = (int32_t)b_val.i_val;
+                    if (ib == 0) {
+                        runtimeError(vm, "Runtime Error: Modulo by zero.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (ia == INT32_MIN && ib == -1) {
+                        // For mod, division by -1 is always exactly representable, modulo is 0
+                        push(vm, makeInt(0));
+                    } else {
+                        push(vm, makeInt((long long)(ia % ib)));
+                    }
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
