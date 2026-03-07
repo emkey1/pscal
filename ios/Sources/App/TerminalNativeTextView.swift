@@ -141,10 +141,14 @@ final class NativeTerminalView: UITextView {
         sizeSlider.maximumValue = 24
         sizeSlider.tintColor = .gray
         sizeSlider.translatesAutoresizingMaskIntoConstraints = false
+        sizeSlider.accessibilityLabel = "Font Size"
+        sizeSlider.accessibilityHint = "Adjusts the size of the terminal font"
         sizeSlider.addTarget(self, action: #selector(settingsChanged), for: .valueChanged)
 
         colorSegmentedControl.selectedSegmentIndex = 0
         colorSegmentedControl.translatesAutoresizingMaskIntoConstraints = false
+        colorSegmentedControl.accessibilityLabel = "Text Color"
+        colorSegmentedControl.accessibilityHint = "Selects the terminal text color"
         colorSegmentedControl.addTarget(self, action: #selector(settingsChanged), for: .valueChanged)
 
         settingsContainer.addSubview(sizeLabel)
