@@ -307,6 +307,16 @@ static void registerBuiltinFunctions(void) {
 
 }
 
+static void registerPredeclaredStreamGlobals(ScopeStack *globalsScope) {
+    static const char *const streamNames[] = { "stdin", "stdout", "stderr" };
+    for (size_t i = 0; i < sizeof(streamNames) / sizeof(streamNames[0]); ++i) {
+        const char *name = streamNames[i];
+        if (ssAdd(globalsScope, name, TYPE_FILE, NULL, 0)) {
+            vtAdd(&globalVars, name, TYPE_FILE, NULL, 0);
+        }
+    }
+}
+
 static VarType getFunctionType(const char *name) {
     for (int i = 0; i < functionCount; ++i) {
         if (strcasecmp(functions[i].name, name) == 0) return functions[i].type;
@@ -1252,6 +1262,7 @@ void analyzeSemanticsClike(ASTNodeClike *program, const char *current_path) {
         return;
     }
     ssPush(globalsScope);
+    registerPredeclaredStreamGlobals(globalsScope);
     for (int i = 0; i < clike_import_count; ++i) {
         if (!modules[i].prog) continue;
         for (int j = 0; j < modules[i].prog->child_count; ++j) {

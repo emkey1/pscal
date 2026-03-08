@@ -195,6 +195,7 @@ void initSymbolSystem(void) {
         fprintf(stderr, "FATAL: Failed to create global symbol hash table.\n");
         EXIT_FAILURE_HANDLER();
     }
+    insertStandardStreamSymbols();
     DEBUG_PRINT("[DEBUG MAIN] Created global symbol table %p.\n", (void*)globalSymbols);
 
     insertGlobalSymbol("TextAttr", TYPE_BYTE, NULL);

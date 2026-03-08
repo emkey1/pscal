@@ -9,6 +9,7 @@
 # - type defaults to "bind" and options defaults to "rw" when omitted by parser.
 # - supported options include: rw, ro, bind, nosuid, nodev, noexec, remount.
 # - escape whitespace using octal escapes (for example, space -> \040).
+# - use `mount -p` to add entries and `umount -p` to remove entries by target.
 #
 # Example: iCloud Drive mount into the shell namespace.
 # /private/var/mobile/Library/Mobile\040Documents/com~apple~CloudDocs /iCloud bind rw 0 0

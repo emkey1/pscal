@@ -431,11 +431,6 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 	 * blocking connect with a watchdog that shuts down the socket on timeout. */
 	__block atomic_int watchdog_state = ATOMIC_VAR_INIT(0);
 	dispatch_block_t watchdog = NULL;
-	int timeout_ms = (timeoutp != NULL && *timeoutp > 0) ? *timeoutp : 0;
-	struct timespec start_ts = {0};
-	if (timeout_ms > 0) {
-		(void)clock_gettime(CLOCK_MONOTONIC, &start_ts);
-	}
 	if (timeoutp != NULL && *timeoutp > 0) {
 		atomic_store(&watchdog_state, 1);
 		watchdog = dispatch_block_create(DISPATCH_BLOCK_ENFORCE_QOS_CLASS, ^{
@@ -462,28 +457,7 @@ timeout_connect(int sockfd, const struct sockaddr *serv_addr,
 		}
 		if (errno == EINPROGRESS || errno == EALREADY) {
 			/* Socket may already be O_NONBLOCK at call-site. */
-			usleep(20000);
-			continue;
-		}
-		/*
-		 * In our in-process tabbed runtime, early socket lifecycle races may
-		 * surface as immediate connect failures (e.g. ENOTCONN/ECONNRESET).
-		 * Honor the configured timeout budget instead of failing instantly.
-		 */
-		if (timeout_ms > 0) {
-			struct timespec now_ts;
-			(void)clock_gettime(CLOCK_MONOTONIC, &now_ts);
-			long long elapsed_ms = (long long)(now_ts.tv_sec - start_ts.tv_sec) * 1000LL;
-			elapsed_ms += (long long)(now_ts.tv_nsec - start_ts.tv_nsec) / 1000000LL;
-			if (elapsed_ms < timeout_ms) {
-				usleep(20000);
-				continue;
-			}
-			errno = ETIMEDOUT;
-			break;
-		}
-		if (errno == ENOTCONN || errno == ECONNRESET || errno == EPIPE) {
-			usleep(20000);
+			usleep(1000);
 			continue;
 		}
 		break;

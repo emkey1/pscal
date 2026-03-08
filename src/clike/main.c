@@ -91,6 +91,7 @@ static void initSymbolSystemClike(void) {
     globalSymbols = createHashTable();
     constGlobalSymbols = createHashTable();
     procedure_table = createHashTable();
+    insertStandardStreamSymbols();
     current_procedure_table = procedure_table;
 }
 

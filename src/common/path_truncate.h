@@ -47,6 +47,11 @@ bool pathTruncateMountAdd(const char *source_path,
                           unsigned long flags);
 
 /*
+ * Removes a virtual mount mapping identified by `target_path`.
+ */
+bool pathTruncateMountRemove(const char *target_path);
+
+/*
  * Copies the current mount table into `out` and returns the total number of
  * active mount entries.
  */

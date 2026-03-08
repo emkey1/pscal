@@ -461,6 +461,84 @@ def scenario_ctrl_c_interrupts_watch_top(shell: PtyShell) -> tuple[bool, str]:
     return True, "watch -n 3 top interrupted by Ctrl-C"
 
 
+def scenario_ctrl_c_interrupts_simple_web_frontend(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker = _new_marker_path("ctrlc-simple-web")
+    _unlink_if_exists(marker)
+    shell.send_line("Examples/clike/base/simple_web_server")
+    shell.wait_for_substring("Waiting for connections", timeout=2.5)
+    shell._pump(0.20)
+    shell.send(b"\x03")
+    shell._pump(0.35)
+    shell.send_line(f"touch {_shell_path(marker)}")
+    if not shell.wait_for_path(marker, timeout=2.5):
+        return False, "Ctrl-C did not return control to shell during simple_web_server"
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.20)
+    _unlink_if_exists(marker)
+    return True, "simple_web_server interrupted by Ctrl-C"
+
+
+def scenario_bg_simple_web_prompt_and_redirect(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    marker_prompt = _new_marker_path("bg-simple-web-prompt")
+    marker_after_kill = _new_marker_path("bg-simple-web-after-kill")
+    log_file = _new_marker_path("bg-simple-web-log")
+    log_file = log_file.with_suffix(".log")
+    _unlink_if_exists(marker_prompt)
+    _unlink_if_exists(marker_after_kill)
+    _unlink_if_exists(log_file)
+
+    shell.send_line(
+        f"Examples/clike/base/simple_web_server > {_shell_path(log_file)} 2>&1 &"
+    )
+    shell._pump(0.50)
+
+    shell.send_line(f"touch {_shell_path(marker_prompt)}")
+    if not shell.wait_for_path(marker_prompt, timeout=1.5):
+        return False, "Prompt did not return after background simple_web_server launch"
+
+    deadline = time.monotonic() + 2.5
+    saw_output = False
+    while time.monotonic() < deadline:
+        shell._pump(0.05)
+        if log_file.exists() and log_file.stat().st_size > 0:
+            saw_output = True
+            break
+    if not saw_output:
+        return False, "Background simple_web_server redirection file remained empty"
+
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.50)
+    shell.send_line(f"touch {_shell_path(marker_after_kill)}")
+    if not shell.wait_for_path(marker_after_kill, timeout=1.5):
+        return False, "Shell became unresponsive after killing background simple_web_server"
+
+    _unlink_if_exists(marker_prompt)
+    _unlink_if_exists(marker_after_kill)
+    _unlink_if_exists(log_file)
+    return True, "Background simple_web_server kept prompt responsive and redirected output"
+
+
+def scenario_bg_simple_web_prompt_and_redirect_pipe_debug(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    shell.send_line("export PSCALI_PIPE_DEBUG=1")
+    shell._pump(0.20)
+    passed, detail = scenario_bg_simple_web_prompt_and_redirect(shell)
+    shell.send_line("unset PSCALI_PIPE_DEBUG")
+    shell._pump(0.20)
+    if passed:
+        return True, "Background simple_web_server stayed responsive with PSCALI_PIPE_DEBUG=1"
+    return False, f"{detail} (with PSCALI_PIPE_DEBUG=1)"
+
+
 def scenario_ctrl_c_interrupts_pascal_readkey_frontend(shell: PtyShell) -> tuple[bool, str]:
     ok, reason = _wait_for_prompt(shell)
     if not ok:
@@ -634,6 +712,21 @@ SCENARIOS: List[Scenario] = [
         test_id="interactive_ctrl_c_watch_top",
         name="Ctrl-C interrupts foreground watch -n 3 top",
         run=scenario_ctrl_c_interrupts_watch_top,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_c_simple_web_frontend",
+        name="Ctrl-C interrupts foreground simple_web_server",
+        run=scenario_ctrl_c_interrupts_simple_web_frontend,
+    ),
+    Scenario(
+        test_id="interactive_bg_simple_web_prompt_and_redirect",
+        name="Background simple_web_server keeps prompt and redirects output",
+        run=scenario_bg_simple_web_prompt_and_redirect,
+    ),
+    Scenario(
+        test_id="interactive_bg_simple_web_prompt_and_redirect_pipe_debug",
+        name="Background simple_web_server keeps prompt and redirects output (PSCALI_PIPE_DEBUG=1)",
+        run=scenario_bg_simple_web_prompt_and_redirect_pipe_debug,
     ),
     Scenario(
         test_id="interactive_ctrl_c_pascal_readkey_frontend",

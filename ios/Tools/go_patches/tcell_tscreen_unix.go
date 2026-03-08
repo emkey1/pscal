@@ -62,6 +62,14 @@ func (t *tScreen) pscalApplyResize(cols int, rows int) {
 	t.Unlock()
 }
 
+// PSCALApplyResize is an embedded-host hook used by micro's iOS bridge to
+// apply a runtime-reported geometry update and enqueue a resize event in one
+// step. This keeps tcell's internal size synchronized for handlers that read
+// screen.Size() during EventResize processing.
+func (t *tScreen) PSCALApplyResize(cols int, rows int) {
+	t.pscalApplyResize(cols, rows)
+}
+
 func (t *tScreen) pscalStartResizePoller() {
 	if !pscalUseResizePoller() {
 		return
@@ -187,18 +195,29 @@ func (t *tScreen) getWinSize() (int, int, error) {
 		return -1, -1, err
 	}
 	if cols == 0 {
-		colsEnv := os.Getenv("COLUMNS")
-		if colsEnv != "" {
-			if parsed, parseErr := strconv.Atoi(colsEnv); parseErr == nil && parsed > 0 {
-				cols = parsed
+		if pscalUseEmbeddedStdioMode() && t.w > 0 {
+			// In embedded multi-runtime mode COLUMNS/LINES are process-global and can
+			// cross-contaminate instances. Keep current screen width unless ioctl
+			// reports a concrete value.
+			cols = t.w
+		} else {
+			colsEnv := os.Getenv("COLUMNS")
+			if colsEnv != "" {
+				if parsed, parseErr := strconv.Atoi(colsEnv); parseErr == nil && parsed > 0 {
+					cols = parsed
+				}
 			}
 		}
 	}
 	if rows == 0 {
-		rowsEnv := os.Getenv("LINES")
-		if rowsEnv != "" {
-			if parsed, parseErr := strconv.Atoi(rowsEnv); parseErr == nil && parsed > 0 {
-				rows = parsed
+		if pscalUseEmbeddedStdioMode() && t.h > 0 {
+			rows = t.h
+		} else {
+			rowsEnv := os.Getenv("LINES")
+			if rowsEnv != "" {
+				if parsed, parseErr := strconv.Atoi(rowsEnv); parseErr == nil && parsed > 0 {
+					rows = parsed
+				}
 			}
 		}
 	}

@@ -164,6 +164,12 @@ final class TerminalKeyInputView: UITextView {
         }
     }
     private weak var ctrlButton: UIButton?
+    private var optionLatch: Bool = false {
+        didSet {
+            updateOptionButtonAppearance()
+        }
+    }
+    private weak var optionButton: UIButton?
 
     // MARK: - FIXED ACCESSORY BAR
     private let accessoryBar: UIInputView
@@ -216,6 +222,9 @@ final class TerminalKeyInputView: UITextView {
         }
 
         let esc = makeButton("\u{238B}", action: #selector(handleEsc), label: "Escape")
+        let option = makeButton("⌥", action: #selector(handleAltToggle), label: "Option", hint: "Toggles the Option modifier for the next key press")
+        optionButton = option
+        updateOptionButtonAppearance()
         let ctrl = makeButton("^", action: #selector(handleCtrlToggle), label: "Control", hint: "Toggles the control modifier for the next key press")
         ctrlButton = ctrl
         updateCtrlButtonAppearance()
@@ -231,9 +240,9 @@ final class TerminalKeyInputView: UITextView {
         if UIDevice.current.userInterfaceIdiom == .phone {
             // Replaced "Tab" with the Unicode symbol \u{21E5}
             let tab = makeButton("\u{21E5}", action: #selector(handleTab), label: "Tab")
-            [esc, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+            [esc, option, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         } else {
-            [esc, ctrl, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+            [esc, option, ctrl, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         }
 
         accessoryBar.addSubview(stack)
@@ -286,6 +295,7 @@ final class TerminalKeyInputView: UITextView {
 
     override func resignFirstResponder() -> Bool {
         controlLatch = false
+        optionLatch = false
         let resigned = super.resignFirstResponder()
         if resigned {
             onFocusChange?(false)
@@ -367,6 +377,23 @@ final class TerminalKeyInputView: UITextView {
                 }
                 return
             }
+        }
+        if optionLatch {
+            optionLatch = false
+            let normalizedText = text.replacingOccurrences(of: "\n", with: "\r")
+            if normalizedText.unicodeScalars.count == 1,
+               let scalar = normalizedText.unicodeScalars.first {
+                if let optionSequence = optionComposedFallbackSequence(for: scalar) {
+                    onInput?(optionSequence)
+                    return
+                }
+                if scalar.isASCII {
+                    onInput?("\u{1B}" + String(scalar))
+                    return
+                }
+            }
+            onInput?("\u{1B}" + normalizedText)
+            return
         }
         if text.unicodeScalars.count == 1,
            let scalar = text.unicodeScalars.first,
@@ -534,13 +561,27 @@ final class TerminalKeyInputView: UITextView {
 
     private func handle(press: UIPress, eventModifierFlags: UIKeyModifierFlags?) -> Bool {
         guard let key = press.key else { return false }
-        let modifierFlags = key.modifierFlags.union(eventModifierFlags ?? [])
+        let latchedControl = controlLatch
+        let latchedOption = optionLatch
+        var modifierFlags = key.modifierFlags.union(eventModifierFlags ?? [])
+        if latchedControl {
+            modifierFlags.insert(.control)
+        }
+        if latchedOption {
+            modifierFlags.insert(.alternate)
+        }
 
         if key.keyCode == .keyboardTab {
             if modifierFlags.contains(.shift) {
                 onInput?("\u{1B}[Z")
             } else {
                 onInput?("\t")
+            }
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
             }
             return true
         }
@@ -550,6 +591,9 @@ final class TerminalKeyInputView: UITextView {
            !modifierFlags.contains(.command),
            let optionSequence = optionModifiedSequence(for: key, modifierFlags: modifierFlags) {
             onInput?(optionSequence)
+            if latchedOption {
+                optionLatch = false
+            }
             return true
         }
 
@@ -560,6 +604,12 @@ final class TerminalKeyInputView: UITextView {
                 if !handled {
                     onInput?(control)
                 }
+                if latchedControl {
+                    controlLatch = false
+                }
+                if latchedOption {
+                    optionLatch = false
+                }
                 return true
             }
             if signalScalarForRawControlCode(scalar) != nil {
@@ -567,16 +617,40 @@ final class TerminalKeyInputView: UITextView {
                 if !handled {
                     onInput?(String(scalar))
                 }
+                if latchedControl {
+                    controlLatch = false
+                }
+                if latchedOption {
+                    optionLatch = false
+                }
                 return true
             }
         }
 
         switch key.keyCode {
         case .keyboardReturnOrEnter:
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
+            }
             onInput?("\r"); return true
         case .keyboardDeleteForward:
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
+            }
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
+            }
             onInput?("\u{1B}"); return true
         default:
             break
@@ -820,6 +894,10 @@ final class TerminalKeyInputView: UITextView {
         controlLatch.toggle()
     }
 
+    @objc private func handleAltToggle(_ sender: UIButton) {
+        optionLatch.toggle()
+    }
+
     @objc private func handleUp() {
         onInput?(arrowSequence("A"))
     }
@@ -945,6 +1023,21 @@ final class TerminalKeyInputView: UITextView {
         button.configuration = config
 
         if controlLatch {
+            button.accessibilityTraits.insert(.selected)
+        } else {
+            button.accessibilityTraits.remove(.selected)
+        }
+    }
+
+    private func updateOptionButtonAppearance() {
+        guard let button = optionButton else { return }
+        var config = button.configuration ?? UIButton.Configuration.filled()
+        config.baseBackgroundColor = optionLatch
+            ? UIColor.systemBlue.withAlphaComponent(0.8)
+            : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
+        button.configuration = config
+
+        if optionLatch {
             button.accessibilityTraits.insert(.selected)
         } else {
             button.accessibilityTraits.remove(.selected)

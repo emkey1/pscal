@@ -1,0 +1,32 @@
+#!/bin/sh
+set -e
+
+tmp="./exsh-bg-tool-dual-stream.$$"
+tool="./exsh-bg-dual-stream.$$"
+rm -f "$tmp" "$tool"
+
+echo "pipeline-bg-tool-dual-stream:start"
+
+cat > "$tool" <<'EOF'
+int main() {
+    fprintf(stdout, "BG-OUT-1\n");
+    fprintf(stdout, "BG-OUT-2\n");
+    fprintf(stderr, "BG-ERR\n");
+    return 0;
+}
+EOF
+
+clike "$tool" > "$tmp" 2>&1 &
+wait
+
+if grep "BG-OUT-1" "$tmp" >/dev/null 2>&1 &&
+   grep "BG-OUT-2" "$tmp" >/dev/null 2>&1 &&
+   grep "BG-ERR" "$tmp" >/dev/null 2>&1; then
+    echo "pipeline-bg-tool-dual-stream:file-ok"
+else
+    echo "pipeline-bg-tool-dual-stream:file-missing"
+fi
+
+rm -f "$tmp" "$tool"
+echo "pipeline-bg-tool-dual-stream:end"
+exit 0

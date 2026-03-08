@@ -569,7 +569,7 @@ final class TerminalTabManager: ObservableObject {
             pendingStartupCommandsBySessionId[sessionId] = rawCommand
             return true
         }
-        return applyStartupCommand(rawCommand, toTabAtIndex: idx, persist: true)
+        return applyStartupCommand(rawCommand, toTabAtIndex: idx, persist: false)
     }
 
     private func applyPendingSessionMetadata(sessionId: UInt64, tabIndex: Int) {
@@ -577,7 +577,7 @@ final class TerminalTabManager: ObservableObject {
             _ = applyTabTitle(pendingTitle, toTabAtIndex: tabIndex, persist: true)
         }
         if let pendingStartup = pendingStartupCommandsBySessionId.removeValue(forKey: sessionId) {
-            _ = applyStartupCommand(pendingStartup, toTabAtIndex: tabIndex, persist: true)
+            _ = applyStartupCommand(pendingStartup, toTabAtIndex: tabIndex, persist: false)
         }
     }
 
@@ -664,7 +664,7 @@ final class TerminalTabManager: ObservableObject {
         guard tabs.indices.contains(index) else { return false }
         let sanitized = TerminalTabManager.sanitizeStartupCommand(rawCommand)
         tabs[index].startupCommand = sanitized
-        if persist {
+        if persist && tabKindSupportsPersistentStartupCommand(at: index) {
             Self.persistStartupCommand(sanitized, forProfileID: tabs[index].appearanceProfileID)
         }
         return true
@@ -684,10 +684,20 @@ final class TerminalTabManager: ObservableObject {
             runtime.send(payload)
         case .shellSession(let session):
             session.send(payload)
-        case .ssh(let session):
-            session.send(payload)
+        case .ssh:
+            break
         case .sdl:
             break
+        }
+    }
+
+    private func tabKindSupportsPersistentStartupCommand(at index: Int) -> Bool {
+        guard tabs.indices.contains(index) else { return false }
+        switch tabs[index].kind {
+        case .shell, .shellSession:
+            return true
+        case .ssh, .sdl:
+            return false
         }
     }
 

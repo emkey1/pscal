@@ -79,6 +79,62 @@ static const char * const proposal_names[PROPOSAL_MAX] = {
 	"languages stoc",
 };
 
+#ifdef PSCAL_TARGET_IOS
+static int
+pscalKexBannerRetryBudgetMs(void)
+{
+	static int cached = -1;
+	const char *value = NULL;
+	long parsed = 0;
+	char *end = NULL;
+
+	if (cached >= 0) {
+		return cached;
+	}
+	cached = 5000;
+	value = getenv("PSCALI_SSH_BANNER_GRACE_MS");
+	if (value == NULL || *value == '\0') {
+		return cached;
+	}
+	parsed = strtol(value, &end, 10);
+	if (end == value || (end && *end != '\0')) {
+		return cached;
+	}
+	if (parsed < 0) {
+		cached = 0;
+		return cached;
+	}
+	if (parsed > 60000) {
+		parsed = 60000;
+	}
+	cached = (int)parsed;
+	return cached;
+}
+
+static int
+pscalKexBannerRetryableErrno(int err)
+{
+	return err == ENOTCONN ||
+	    err == EAGAIN ||
+	    err == EWOULDBLOCK ||
+	    err == EBADF;
+}
+
+static int
+pscalKexBannerRetryWait(int *budget_ms)
+{
+	int sleep_ms;
+
+	if (budget_ms == NULL || *budget_ms <= 0) {
+		return 0;
+	}
+	sleep_ms = *budget_ms < 25 ? *budget_ms : 25;
+	usleep((useconds_t)sleep_ms * 1000);
+	*budget_ms -= sleep_ms;
+	return 1;
+}
+#endif
+
 /*
  * Fill out a proposal array with dynamically allocated values, which may
  * be modified as required for compatibility reasons.
@@ -1238,6 +1294,9 @@ kex_exchange_identification(struct ssh *ssh, int timeout_ms,
 	size_t len, n;
 	int r, expect_nl;
 	u_char c;
+#ifdef PSCAL_TARGET_IOS
+	int ios_banner_retry_budget_ms = pscalKexBannerRetryBudgetMs();
+#endif
 	struct sshbuf *our_version = ssh->kex->server ?
 	    ssh->kex->server_version : ssh->kex->client_version;
 	struct sshbuf *peer_version = ssh->kex->server ?
@@ -1258,9 +1317,18 @@ kex_exchange_identification(struct ssh *ssh, int timeout_ms,
 		goto out;
 	}
 
-	if (atomicio(vwrite, ssh_packet_get_connection_out(ssh),
-	    sshbuf_mutable_ptr(our_version),
-	    sshbuf_len(our_version)) != sshbuf_len(our_version)) {
+	for (;;) {
+		if (atomicio(vwrite, ssh_packet_get_connection_out(ssh),
+		    sshbuf_mutable_ptr(our_version),
+		    sshbuf_len(our_version)) == sshbuf_len(our_version)) {
+			break;
+		}
+#ifdef PSCAL_TARGET_IOS
+		if (pscalKexBannerRetryableErrno(errno) &&
+		    pscalKexBannerRetryWait(&ios_banner_retry_budget_ms)) {
+			continue;
+		}
+#endif
 		oerrno = errno;
 		debug_f("write: %.100s", strerror(errno));
 		r = SSH_ERR_SYSTEM_ERROR;
@@ -1303,6 +1371,12 @@ kex_exchange_identification(struct ssh *ssh, int timeout_ms,
 					r = SSH_ERR_CONN_TIMEOUT;
 					goto out;
 				} else if (r == -1) {
+#ifdef PSCAL_TARGET_IOS
+					if (pscalKexBannerRetryableErrno(errno) &&
+					    pscalKexBannerRetryWait(&ios_banner_retry_budget_ms)) {
+						continue;
+					}
+#endif
 					oerrno = errno;
 					error_f("%s", strerror(errno));
 					r = SSH_ERR_SYSTEM_ERROR;
@@ -1317,6 +1391,12 @@ kex_exchange_identification(struct ssh *ssh, int timeout_ms,
 				r = SSH_ERR_CONN_CLOSED;
 				goto out;
 			} else if (len != 1) {
+#ifdef PSCAL_TARGET_IOS
+				if (pscalKexBannerRetryableErrno(errno) &&
+				    pscalKexBannerRetryWait(&ios_banner_retry_budget_ms)) {
+					continue;
+				}
+#endif
 				oerrno = errno;
 				error_f("read: %.100s", strerror(errno));
 				r = SSH_ERR_SYSTEM_ERROR;
@@ -1434,4 +1514,3 @@ kex_exchange_identification(struct ssh *ssh, int timeout_ms,
 		errno = oerrno;
 	return r;
 }
-

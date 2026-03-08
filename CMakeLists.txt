@@ -1655,7 +1655,9 @@ if(PSCAL_DVTM_ENABLED)
 endif()
 if(PSCAL_PLATFORM_IOS)
     target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
-    target_link_libraries(pscal_core_static PUBLIC pscal_micro_embed)
+    # pscal_micro_embed is merged into libpscal_core_static.a via libtool above.
+    # Keep linkage private to avoid duplicate symbols when exsh links both.
+    target_link_libraries(pscal_core_static PRIVATE pscal_micro_embed)
     target_link_libraries(pscal_core_static PUBLIC "-framework CoreFoundation" "-framework Security")
 endif()
 

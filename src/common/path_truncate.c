@@ -37,6 +37,7 @@
 #include <time.h>
 #include <pthread.h>
 #include "vm/vm.h"
+#include "ios/vproc.h"
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
@@ -1759,6 +1760,43 @@ typedef struct {
 } PathTruncateDeviceProcSnapshot;
 
 static size_t pathTruncateSnapshotVProcState(PathTruncateVProcSnapshot *out, size_t capacity) {
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    if (!out || capacity == 0) {
+        return vprocSnapshot(NULL, 0);
+    }
+
+    VProcSnapshot *snapshots = (VProcSnapshot *)calloc(capacity, sizeof(VProcSnapshot));
+    if (!snapshots) {
+        return 0;
+    }
+
+    size_t count = vprocSnapshot(snapshots, capacity);
+    size_t copy_count = count < capacity ? count : capacity;
+    for (size_t i = 0; i < copy_count; ++i) {
+        out[i].pid = snapshots[i].pid;
+        out[i].tid = snapshots[i].tid;
+        out[i].parent_pid = snapshots[i].parent_pid;
+        out[i].pgid = snapshots[i].pgid;
+        out[i].sid = snapshots[i].sid;
+        out[i].exited = snapshots[i].exited;
+        out[i].stopped = snapshots[i].stopped;
+        out[i].continued = snapshots[i].continued;
+        out[i].zombie = snapshots[i].zombie;
+        out[i].exit_signal = snapshots[i].exit_signal;
+        out[i].status = snapshots[i].status;
+        out[i].stop_signo = snapshots[i].stop_signo;
+        out[i].sigchld_pending = snapshots[i].sigchld_pending;
+        out[i].rusage_utime = snapshots[i].rusage_utime;
+        out[i].rusage_stime = snapshots[i].rusage_stime;
+        out[i].fg_pgid = snapshots[i].fg_pgid;
+        out[i].job_id = snapshots[i].job_id;
+        snprintf(out[i].comm, sizeof(out[i].comm), "%s", snapshots[i].comm);
+        snprintf(out[i].command, sizeof(out[i].command), "%s", snapshots[i].command);
+    }
+
+    free(snapshots);
+    return copy_count;
+#else
     typedef size_t (*SnapshotFn)(PathTruncateVProcSnapshot *, size_t);
     static SnapshotFn snapshot_fn = NULL;
     static bool resolved = false;
@@ -1770,9 +1808,17 @@ static size_t pathTruncateSnapshotVProcState(PathTruncateVProcSnapshot *out, siz
         return 0;
     }
     return snapshot_fn(out, capacity);
+#endif
 }
 
 static int pathTruncateCurrentVProcPid(void) {
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    pid_t pid = vprocGetPidShim();
+    if (pid <= 0) {
+        return -1;
+    }
+    return (int)pid;
+#else
     typedef pid_t (*GetPidFn)(void);
     static GetPidFn getpid_fn = NULL;
     static bool resolved = false;
@@ -1788,6 +1834,7 @@ static int pathTruncateCurrentVProcPid(void) {
         return -1;
     }
     return (int)pid;
+#endif
 }
 
 static size_t pathTruncateSnapshotDeviceProcesses(PathTruncateDeviceProcSnapshot *out,
@@ -4002,6 +4049,48 @@ bool pathTruncateMountAdd(const char *source_path,
     entry->flags = flags;
 
     pathTruncateMountSortLocked();
+    g_procRefreshLastFullMs = 0;
+
+    pathTruncateUnlock();
+    return true;
+}
+
+bool pathTruncateMountRemove(const char *target_path) {
+    pathTruncateLock();
+    if (!target_path || target_path[0] != '/') {
+        pathTruncateUnlock();
+        errno = EINVAL;
+        return false;
+    }
+
+    char normalized_target[PATH_MAX];
+    if (!pathTruncateNormalizeAbsolute(target_path,
+                                       normalized_target,
+                                       sizeof(normalized_target))) {
+        pathTruncateUnlock();
+        return false;
+    }
+
+    size_t slot = g_pathTruncateMountCount;
+    for (size_t i = 0; i < g_pathTruncateMountCount; ++i) {
+        if (strcmp(g_pathTruncateMounts[i].target, normalized_target) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == g_pathTruncateMountCount) {
+        pathTruncateUnlock();
+        errno = ENOENT;
+        return false;
+    }
+
+    if (slot + 1 < g_pathTruncateMountCount) {
+        memmove(&g_pathTruncateMounts[slot],
+                &g_pathTruncateMounts[slot + 1],
+                (g_pathTruncateMountCount - slot - 1) * sizeof(g_pathTruncateMounts[0]));
+    }
+    g_pathTruncateMountCount--;
+    memset(&g_pathTruncateMounts[g_pathTruncateMountCount], 0, sizeof(g_pathTruncateMounts[0]));
     g_procRefreshLastFullMs = 0;
 
     pathTruncateUnlock();

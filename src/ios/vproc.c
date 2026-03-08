@@ -9494,10 +9494,12 @@ static bool vprocKillDeliverEntryLocked(VProcTaskEntry *entry,
         return true;
     }
 
-    if (active_entry_thread && requested_pid < 0 && (sig == SIGINT || sig == SIGTSTP)) {
+    if (active_entry_thread && requested_pid < 0 &&
+        (sig == SIGINT || (sig == SIGTSTP && entry->stop_unsupported))) {
         /* Cooperative in-process frontends run on this same thread. Queue the
-         * signal so their polling paths (sigpending/sigwait/runtime checks)
-         * can observe Ctrl-C/Z without tearing down the thread immediately. */
+         * signal so polling paths can observe Ctrl-C/Z without tearing down
+         * the thread immediately. Only keep SIGTSTP cooperative for entries
+         * that explicitly opted out of hard-stop semantics. */
 #if defined(PSCAL_TARGET_IOS)
         if (sig == SIGINT && request_runtime_sigint) {
             *request_runtime_sigint = true;

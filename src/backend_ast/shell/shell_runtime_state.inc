@@ -44,6 +44,9 @@ typedef struct {
     FILE *fp;
     int host_fd;
     int std_fd;
+    dev_t host_dev;
+    ino_t host_ino;
+    bool host_identity_valid;
 } ShellVprocStream;
 
 typedef struct {
@@ -52,9 +55,57 @@ typedef struct {
     bool can_write;
 } ShellVprocShimCookie;
 
+typedef struct ShellShimCookieNode {
+    void *cookie;
+    struct ShellShimCookieNode *next;
+} ShellShimCookieNode;
+
 static __thread ShellVprocStream gShellVprocStdout = { NULL, -1, STDOUT_FILENO };
 static __thread ShellVprocStream gShellVprocStderr = { NULL, -1, STDERR_FILENO };
 static __thread ShellVprocStream gShellVprocStdin = { NULL, -1, STDIN_FILENO };
+static pthread_mutex_t gShellShimCookieLock = PTHREAD_MUTEX_INITIALIZER;
+static ShellShimCookieNode *gShellShimCookieHead = NULL;
+
+static void shellShimCookieTrackAdd(void *cookie) {
+    if (!cookie) {
+        return;
+    }
+    ShellShimCookieNode *node = (ShellShimCookieNode *)calloc(1, sizeof(ShellShimCookieNode));
+    if (!node) {
+        return;
+    }
+    node->cookie = cookie;
+    pthread_mutex_lock(&gShellShimCookieLock);
+    node->next = gShellShimCookieHead;
+    gShellShimCookieHead = node;
+    pthread_mutex_unlock(&gShellShimCookieLock);
+}
+
+static bool shellShimCookieTrackRemove(void *cookie) {
+    if (!cookie) {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&gShellShimCookieLock);
+    ShellShimCookieNode *prev = NULL;
+    ShellShimCookieNode *cur = gShellShimCookieHead;
+    while (cur) {
+        if (cur->cookie == cookie) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                gShellShimCookieHead = cur->next;
+            }
+            free(cur);
+            found = true;
+            break;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    pthread_mutex_unlock(&gShellShimCookieLock);
+    return found;
+}
 
 static FILE *shellVprocStreamFallback(int std_fd) {
     if (std_fd == STDIN_FILENO) {
@@ -99,6 +150,9 @@ static int shellVprocShimWrite(void *cookie, const char *buf, int len) {
 }
 
 static int shellVprocShimClose(void *cookie) {
+    if (!shellShimCookieTrackRemove(cookie)) {
+        return 0;
+    }
     free(cookie);
     return 0;
 }
@@ -121,6 +175,7 @@ static FILE *shellVprocStreamOpenShim(int std_fd,
         cache->fp = NULL;
     }
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
 
     ShellVprocShimCookie *cookie = (ShellVprocShimCookie *)calloc(1, sizeof(ShellVprocShimCookie));
     if (!cookie) {
@@ -129,6 +184,7 @@ static FILE *shellVprocStreamOpenShim(int std_fd,
     cookie->std_fd = std_fd;
     cookie->can_read = strchr(mode, 'r') != NULL;
     cookie->can_write = (strchr(mode, 'w') != NULL) || (strchr(mode, 'a') != NULL);
+    shellShimCookieTrackAdd(cookie);
 
     FILE *fp = funopen(cookie,
                        cookie->can_read ? shellVprocShimRead : NULL,
@@ -136,6 +192,7 @@ static FILE *shellVprocStreamOpenShim(int std_fd,
                        NULL,
                        shellVprocShimClose);
     if (!fp) {
+        (void)shellShimCookieTrackRemove(cookie);
         free(cookie);
         return shellVprocStreamFallback(std_fd);
     }
@@ -144,6 +201,7 @@ static FILE *shellVprocStreamOpenShim(int std_fd,
     }
     cache->fp = fp;
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
     return fp;
 }
 
@@ -176,7 +234,15 @@ static FILE *shellVprocStreamOpen(int std_fd,
     }
 
     if (cache->fp && cache->host_fd == host_fd) {
-        return cache->fp;
+        if (!cache->host_identity_valid) {
+            return cache->fp;
+        }
+        struct stat current_st;
+        if (fstat(host_fd, &current_st) == 0 &&
+            current_st.st_dev == cache->host_dev &&
+            current_st.st_ino == cache->host_ino) {
+            return cache->fp;
+        }
     }
 
     if (cache->fp) {
@@ -185,6 +251,7 @@ static FILE *shellVprocStreamOpen(int std_fd,
         cache->fp = NULL;
     }
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
 
     int dup_fd = -1;
 #ifdef F_DUPFD_CLOEXEC
@@ -210,6 +277,12 @@ static FILE *shellVprocStreamOpen(int std_fd,
     }
     cache->fp = fp;
     cache->host_fd = host_fd;
+    struct stat host_st;
+    if (fstat(host_fd, &host_st) == 0) {
+        cache->host_dev = host_st.st_dev;
+        cache->host_ino = host_st.st_ino;
+        cache->host_identity_valid = true;
+    }
     return fp;
 }
 
@@ -244,6 +317,25 @@ static void shellVprocPerror(const char *label) {
         fprintf(errfp, "%s\n", strerror(saved_errno));
     }
     errno = saved_errno;
+}
+
+bool shellRuntimeIsSharedFileStream(FILE *stream) {
+    if (!stream) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (stream == stdin || stream == stdout || stream == stderr) {
+        return true;
+    }
+    if (stream == gShellVprocStdin.fp ||
+        stream == gShellVprocStdout.fp ||
+        stream == gShellVprocStderr.fp) {
+        return true;
+    }
+    return false;
+#else
+    return stream == stdin || stream == stdout || stream == stderr;
+#endif
 }
 
 static void shellFlushVprocStreams(void) {

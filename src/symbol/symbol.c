@@ -14,6 +14,7 @@
 #include <assert.h>
 #include "core/list.h"
 #include "ast/ast.h"
+#include "backend_ast/builtin.h"
 
 static bool symbolTypeIsUnsignedInt(VarType type) {
     switch (type) {
@@ -409,6 +410,43 @@ void insertGlobalAlias(const char *name, Symbol *target) {
     }
 
     hashTableInsert(globalSymbols, alias);
+}
+
+void insertStandardStreamSymbols(void) {
+    if (!ensureGlobalSymbolsTable()) {
+        return;
+    }
+
+    static const char *const streamNames[] = { "stdin", "stdout", "stderr" };
+    for (size_t i = 0; i < sizeof(streamNames) / sizeof(streamNames[0]); ++i) {
+        const char *name = streamNames[i];
+        Symbol *sym = lookupGlobalSymbol(name);
+        if (!sym) {
+            insertGlobalSymbol(name, TYPE_FILE, NULL);
+            sym = lookupGlobalSymbol(name);
+        }
+        if (!sym) {
+            continue;
+        }
+
+        sym = resolveSymbolAlias(sym);
+        if (!sym) {
+            continue;
+        }
+
+        sym->type = TYPE_FILE;
+        if (!sym->value) {
+            sym->value = malloc(sizeof(Value));
+            if (!sym->value) {
+                fprintf(stderr, "Memory allocation error in insertStandardStreamSymbols\n");
+                EXIT_FAILURE_HANDLER();
+            }
+            *(sym->value) = makeValueForType(TYPE_FILE, NULL, sym);
+        } else if (sym->value->type != TYPE_FILE) {
+            freeValue(sym->value);
+            *(sym->value) = makeValueForType(TYPE_FILE, NULL, sym);
+        }
+    }
 }
 
 // Insert a constant symbol into constGlobalSymbols.
@@ -1121,7 +1159,13 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
 
         case TYPE_FILE:
             if (val.type == TYPE_FILE) {
-                if (sym->value->f_val) fclose(sym->value->f_val);
+                if (sym->value->f_val) {
+                    if (!pscalRuntimeVmIsSharedFileStream(sym->value->f_val)) {
+                        fclose(sym->value->f_val);
+                    } else {
+                        fflush(sym->value->f_val);
+                    }
+                }
                 sym->value->f_val = val.f_val;
                 if (sym->value->filename) free(sym->value->filename);
                 sym->value->filename = val.filename ? strdup(val.filename) : NULL;

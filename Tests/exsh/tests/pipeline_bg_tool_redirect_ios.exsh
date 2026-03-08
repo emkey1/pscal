@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+tmp="./exsh-bg-tool-redirect.$$"
+rm -f "$tmp"
+echo "pipeline-bg-tool-redirect:start"
+
+Examples/clike/base/hello > "$tmp" 2>&1 &
+wait
+
+if grep "Hello World!" "$tmp" >/dev/null 2>&1; then
+    echo "pipeline-bg-tool-redirect:file-ok"
+else
+    echo "pipeline-bg-tool-redirect:file-missing"
+fi
+
+rm -f "$tmp"
+echo "pipeline-bg-tool-redirect:end"
+exit 0

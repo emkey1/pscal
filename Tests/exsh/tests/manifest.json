@@ -78,7 +78,107 @@
         },
         "expected_stdout": "pipeline-bg-pipe-redirect:start\nhistory     Print the interactive history list.\npipeline-bg-pipe-redirect:end"
   },
-        {
+  {
+    "id": "pipeline_bg_tool_redirect_ios",
+    "name": "Background tool redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background shebang tool output stays redirected to file",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-redirect:start\npipeline-bg-tool-redirect:file-ok\npipeline-bg-tool-redirect:end"
+  },
+  {
+    "id": "pipeline_bg_tool_dual_stream_ios",
+    "name": "Background tool stdout+stderr redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background shebang tool writes both stdout and stderr into redirected file",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_dual_stream_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-dual-stream:start\npipeline-bg-tool-dual-stream:file-ok\npipeline-bg-tool-dual-stream:end"
+  },
+  {
+    "id": "pipeline_bg_tool_dual_stream_shell_vproc_ios",
+    "name": "Background tool stdout+stderr redirection with shell vproc (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background shebang tool redirection remains stable with PSCALI_SHELL_VPROC enabled",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_dual_stream_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_SHELL_VPROC": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-dual-stream:start\npipeline-bg-tool-dual-stream:file-ok\npipeline-bg-tool-dual-stream:end"
+  },
+  {
+    "id": "pipeline_bg_tool_abs_log_redirect_ios",
+    "name": "Background tool absolute-path redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background tool output redirected to an absolute path should be written to the target file.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_abs_log_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-abs-log:start\npipeline-bg-tool-abs-log:file-ok\npipeline-bg-tool-abs-log:end"
+  },
+  {
+    "id": "pipeline_bg_tool_abs_log_redirect_shell_vproc_ios",
+    "name": "Background tool absolute-path redirection with shell vproc (iOS)",
+    "category": "pipeline_ios",
+    "description": "Absolute-path redirection should remain stable when PSCALI_SHELL_VPROC is enabled.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_abs_log_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_SHELL_VPROC": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-abs-log:start\npipeline-bg-tool-abs-log:file-ok\npipeline-bg-tool-abs-log:end"
+  },
+  {
+    "id": "pipeline_bg_tool_simple_web_redirect_ios",
+    "name": "Background simple_web_server redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background simple_web_server startup diagnostics should be captured in redirected output.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_kill_cleanup_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-simple-web:start\npipeline-bg-tool-simple-web:file-ok\npipeline-bg-tool-simple-web:end"
+  },
+  {
+    "id": "pipeline_bg_tool_simple_web_redirect_pipe_debug_ios",
+    "name": "Background simple_web_server redirection with PSCALI_PIPE_DEBUG (iOS)",
+    "category": "pipeline_ios",
+    "description": "simple_web_server redirection should remain stable when pipeline debug logging is enabled.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_kill_cleanup_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_PIPE_DEBUG": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-simple-web:start\npipeline-bg-tool-simple-web:file-ok\npipeline-bg-tool-simple-web:end"
+  },
+  {
+    "id": "pipeline_bg_tool_simple_web_redirect_shell_vproc_ios",
+    "name": "Background simple_web_server redirection with shell vproc (iOS)",
+    "category": "pipeline_ios",
+    "description": "simple_web_server redirection should remain stable with PSCALI_SHELL_VPROC enabled.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_kill_cleanup_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_SHELL_VPROC": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-simple-web:start\npipeline-bg-tool-simple-web:file-ok\npipeline-bg-tool-simple-web:end"
+  },
+  {
             "id": "conditionals_loop",
             "name": "Conditionals execute matching branches",
             "category": "control",

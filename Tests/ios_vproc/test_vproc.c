@@ -2108,6 +2108,59 @@ static void assert_path_truncate_mount_rewrites_virtual_paths(void) {
     (void)system(cleanup_cmd);
 }
 
+static void assert_path_truncate_mount_remove_unmaps_virtual_paths(void) {
+    char source_templ[] = "/tmp/vproc-umount-src-XXXXXX";
+    char *source_root = mkdtemp(source_templ);
+    assert(source_root);
+    char root_templ[] = "/tmp/vproc-umount-root-XXXXXX";
+    char *root = mkdtemp(root_templ);
+    assert(root);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/mnt", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt/ext", 0700) == 0 || errno == EEXIST);
+
+    char source_file[PATH_MAX];
+    snprintf(source_file, sizeof(source_file), "%s/hello.txt", source_root);
+    int source_fd = open(source_file, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(source_fd >= 0);
+    assert(write(source_fd, "mounted", 7) == 7);
+    close(source_fd);
+
+    assert(pathTruncateMountAdd(source_root, "/mnt/ext", "bind", "rw", 0));
+
+    int fd = pscalPathVirtualized_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+    assert(fd >= 0);
+    close(fd);
+
+    assert(pathTruncateMountRemove("/mnt/ext"));
+    assert(!pathTruncateMountRemove("/mnt/ext"));
+    assert(errno == ENOENT);
+
+    char expanded[PATH_MAX];
+    assert(pathTruncateExpand("/mnt/ext/hello.txt", expanded, sizeof(expanded)));
+    assert(strcmp(expanded, source_file) != 0);
+    assert(strstr(expanded, "/mnt/ext/hello.txt") != NULL);
+
+    errno = 0;
+    fd = pscalPathVirtualized_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+    assert(fd < 0);
+    assert(errno == ENOENT);
+
+    char mounts_buf[8192];
+    assert(read_virtual_file("/proc/mounts", mounts_buf, sizeof(mounts_buf)) > 0);
+    assert(strstr(mounts_buf, " /mnt/ext ") == NULL);
+
+    pathTruncateMountClearAll();
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX * 2 + 32];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
+    (void)system(cleanup_cmd);
+}
+
 static void assert_proc_mount_files_include_virtual_mounts(void) {
     char source_templ[] = "/tmp/vproc-proc-mount-src-XXXXXX";
     char *source_root = mkdtemp(source_templ);
@@ -6850,6 +6903,8 @@ int main(void) {
     assert_path_truncate_maps_to_sandbox();
     fprintf(stderr, "TEST path_truncate_mount_rewrites_virtual_paths\n");
     assert_path_truncate_mount_rewrites_virtual_paths();
+    fprintf(stderr, "TEST path_truncate_mount_remove_unmaps_virtual_paths\n");
+    assert_path_truncate_mount_remove_unmaps_virtual_paths();
     fprintf(stderr, "TEST proc_mount_files_include_virtual_mounts\n");
     assert_proc_mount_files_include_virtual_mounts();
     fprintf(stderr, "TEST proc_vm_files_present_and_stable\n");

@@ -1686,9 +1686,13 @@ void freeValue(Value *v) {
         }
         case TYPE_FILE:
             if (v->f_val) {
-                // This is a file handle. Close it if it's not NULL.
-                fclose(v->f_val);
-                // Set the pointer to NULL after closing to prevent accidental reuse.
+                // Runtime-owned stdio wrappers must not be fclose()'d by generic
+                // value cleanup; they are owned by the active runtime context.
+                if (!pscalRuntimeVmIsSharedFileStream(v->f_val)) {
+                    fclose(v->f_val);
+                } else {
+                    fflush(v->f_val);
+                }
                 v->f_val = NULL;
             }
             break; // Break from the switch statement

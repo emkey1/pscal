@@ -1,0 +1,30 @@
+#!/bin/sh
+set -e
+
+echo "pipeline-bg-tool-abs-log:start"
+
+tool="./exsh-bg-abs-log.$$"
+log="$(pwd)/exsh-bg-abs-log.$$.log"
+rm -f "$tool" "$log"
+
+cat > "$tool" <<'EOF'
+int main() {
+    fprintf(stdout, "ABS-OUT\n");
+    fprintf(stderr, "ABS-ERR\n");
+    return 0;
+}
+EOF
+
+clike "$tool" > "$log" 2>&1 &
+wait
+
+if grep "ABS-OUT" "$log" >/dev/null 2>&1 && grep "ABS-ERR" "$log" >/dev/null 2>&1; then
+    echo "pipeline-bg-tool-abs-log:file-ok"
+else
+    echo "pipeline-bg-tool-abs-log:file-missing"
+fi
+
+rm -f "$tool" "$log"
+
+echo "pipeline-bg-tool-abs-log:end"
+exit 0

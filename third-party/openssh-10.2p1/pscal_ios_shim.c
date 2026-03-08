@@ -674,7 +674,13 @@ ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte) {
     if (vp) {
         int saved_errno = errno;
         int host_fd = vprocTranslateFd(vp, fd);
-        if (host_fd < 0) {
+        if (host_fd >= 0) {
+            errno = saved_errno;
+            return vprocReadShim(fd, buf, nbyte);
+        }
+        struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+        if (pscal_fd) {
+            pscal_fd_close(pscal_fd);
             errno = saved_errno;
             return vprocReadShim(fd, buf, nbyte);
         }

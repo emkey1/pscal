@@ -302,6 +302,7 @@ void serveConn(int c) {
   } else {
     printf("request: from=%s raw_len=%d
 ", remote, length(reqText));
+    fflush();
   }
   // Parse request line robustly: take first line then split by spaces
   int ln = pos(reqText, "\r\n");
@@ -385,6 +386,7 @@ void serveConn(int c) {
     } else {
       printf("resolve: rel=%s full=%s exists=%d
 ", rel, fullPath, fileexists(fullPath));
+      fflush();
     }
     mstream ms = mstreamcreate();
     int ok = mstreamloadfromfile(&ms, fullPath);
@@ -419,6 +421,7 @@ void serveConn(int c) {
   } else {
     printf("%s [%s] %s %s -> %d %s | q=%d served=%d enq=%d drop=%d\n",
            ts, remote, method, path, code, logDetail, depth, served, enq, drop);
+    fflush();
   }
   socketclose(c);
 }
@@ -477,6 +480,7 @@ void heartbeat() {
     } else {
       printf("%s [HB] q=%d/%d thr=%d accepted=%d enq=%d served=%d drop=%d dps=%d\n",
              timestamp(), depth, cap, thr, acc, enq, served, drop, dps);
+      fflush();
     }
   }
 }
@@ -654,6 +658,7 @@ void initFiles() {
     printf("initFiles: RootDir=%s preexisting=%d indexExists=%d
 ",
            RootDir, preexisting, fileexists(IndexPath));
+    fflush();
   }
 
   // If the directory already exists (populated or not), avoid copying bundle assets.
@@ -697,11 +702,11 @@ void initFiles() {
     fprintf(GFile, "%s\n", Body);
     fclose(GFile);
     if (LogEnabled) { fprintf(LogFile, "Using inline default index page.\n"); fflush(LogFile); }
-    else { printf("Using inline default index page.\n"); }
+    else { printf("Using inline default index page.\n"); fflush(); }
   } else {
     if (copied) {
       if (LogEnabled) { fprintf(LogFile, "Copied sample site into %s\n", RootDir); fflush(LogFile); }
-      else { printf("Copied sample site into %s\n", RootDir); }
+      else { printf("Copied sample site into %s\n", RootDir); fflush(); }
     } else if (LogEnabled) {
       fprintf(LogFile, "Sample site already present in %s; skipping copy.\n", RootDir);
       fflush(LogFile);
@@ -765,12 +770,13 @@ int main() {
   } else {
     printf("Serving %s on http://%s:%d\n", IndexPath, BindAddr, Port);
     printf("Root: %s\n", RootDir);
+    fflush();
   }
 
   int srv = socketcreate(0);
   if (srv < 0) {
     if (LogEnabled) { fprintf(LogFile, "socketcreate failed\n"); fflush(LogFile); }
-    else { printf("socketcreate failed\n"); }
+    else { printf("socketcreate failed\n"); fflush(); }
     return 1;
   }
   // Bind and listen; current API binds all interfaces (INADDR_ANY)
@@ -778,16 +784,16 @@ int main() {
   int bindrc = socketbindaddr(srv, BindAddr, Port);
   if (bindrc != 0) {
     if (LogEnabled) { fprintf(LogFile, "socketbind failed: %d\n", socketlasterror()); fflush(LogFile); }
-    else { printf("socketbind failed: %d\n", socketlasterror()); }
+    else { printf("socketbind failed: %d\n", socketlasterror()); fflush(); }
     return 1;
   }
   if (socketlisten(srv, 16) != 0) {
     if (LogEnabled) { fprintf(LogFile, "socketlisten failed: %d\n", socketlasterror()); fflush(LogFile); }
-    else { printf("socketlisten failed: %d\n", socketlasterror()); }
+    else { printf("socketlisten failed: %d\n", socketlasterror()); fflush(); }
     return 1;
   }
   if (LogEnabled) { fprintf(LogFile, "Waiting for connections... (Ctrl+C to quit)\n"); fflush(LogFile); }
-  else { printf("Waiting for connections... (Ctrl+C to quit)\n"); }
+  else { printf("Waiting for connections... (Ctrl+C to quit)\n"); fflush(); }
   // Heartbeat: periodically report metrics
   spawn heartbeat();
   // Start worker pool

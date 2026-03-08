@@ -5206,21 +5206,46 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     bool opcode_profile_enabled = vmOpcodeProfileIsEnabled();
     const volatile bool *pending_exit_flag = shellRuntimePendingExitFlag();
 
-    // Initialize default file variables if present but not yet opened.
+    // Initialize stream globals lazily. These are shared symbols, so avoid
+    // per-run/per-thread rebinding that can race across concurrent VMs.
     if (vm->vmGlobalSymbols) {
+        FILE* runtime_stdin = pscalRuntimeVmStdin();
+        FILE* runtime_stdout = pscalRuntimeVmStdout();
+        FILE* runtime_stderr = pscalRuntimeVmStderr();
         pthread_mutex_lock(&globals_mutex);
+        Symbol* stdinSym = hashTableLookup(vm->vmGlobalSymbols, "stdin");
+        if (stdinSym && stdinSym->value &&
+            stdinSym->value->type == TYPE_FILE &&
+            stdinSym->value->f_val == NULL) {
+            stdinSym->value->f_val = runtime_stdin;
+        }
+
+        Symbol* stdoutSym = hashTableLookup(vm->vmGlobalSymbols, "stdout");
+        if (stdoutSym && stdoutSym->value &&
+            stdoutSym->value->type == TYPE_FILE &&
+            stdoutSym->value->f_val == NULL) {
+            stdoutSym->value->f_val = runtime_stdout;
+        }
+
+        Symbol* stderrSym = hashTableLookup(vm->vmGlobalSymbols, "stderr");
+        if (stderrSym && stderrSym->value &&
+            stderrSym->value->type == TYPE_FILE &&
+            stderrSym->value->f_val == NULL) {
+            stderrSym->value->f_val = runtime_stderr;
+        }
+
         Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
         if (inputSym && inputSym->value &&
             inputSym->value->type == TYPE_FILE &&
             inputSym->value->f_val == NULL) {
-            inputSym->value->f_val = stdin;
+            inputSym->value->f_val = runtime_stdin;
         }
 
         Symbol* outputSym = hashTableLookup(vm->vmGlobalSymbols, "output");
         if (outputSym && outputSym->value &&
             outputSym->value->type == TYPE_FILE &&
             outputSym->value->f_val == NULL) {
-            outputSym->value->f_val = stdout;
+            outputSym->value->f_val = runtime_stdout;
         }
         pthread_mutex_unlock(&globals_mutex);
     }
@@ -8335,7 +8360,7 @@ comparison_error_label:
                     }
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type == TYPE_POINTER) {
+                        if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                             continue;
                         }
                         freeValue(&args[i]);
@@ -8369,7 +8394,7 @@ comparison_error_label:
 
                 vm->stackTop -= arg_count;
                 for (int i = 0; i < arg_count; i++) {
-                    if (args[i].type == TYPE_POINTER) {
+                    if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                         continue;
                     }
                     freeValue(&args[i]);
@@ -8463,7 +8488,7 @@ comparison_error_label:
 
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type == TYPE_POINTER) {
+                        if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                             continue;
                         }
                         freeValue(&args[i]);
@@ -8484,7 +8509,7 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type == TYPE_POINTER) {
+                        if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                             continue;
                         }
                         freeValue(&args[i]);

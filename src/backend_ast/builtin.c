@@ -40,6 +40,14 @@
 #include <signal.h>
 #include <fcntl.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((weak))
+#endif
+bool shellRuntimeIsSharedFileStream(FILE *stream) {
+    (void)stream;
+    return false;
+}
+
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/vproc.h"
 #define PATH_VIRTUALIZATION_NO_MACROS 1
@@ -54,6 +62,9 @@ typedef struct {
     FILE *fp;
     int host_fd;
     int std_fd;
+    dev_t host_dev;
+    ino_t host_ino;
+    bool host_identity_valid;
 } VmVprocStream;
 
 typedef struct {
@@ -62,9 +73,61 @@ typedef struct {
     bool can_write;
 } VmVprocShimCookie;
 
+typedef struct VmShimCookieNode {
+    void *cookie;
+    struct VmShimCookieNode *next;
+} VmShimCookieNode;
+
 static __thread VmVprocStream gVmVprocStdout = { NULL, -1, STDOUT_FILENO };
 static __thread VmVprocStream gVmVprocStderr = { NULL, -1, STDERR_FILENO };
 static __thread VmVprocStream gVmVprocStdin = { NULL, -1, STDIN_FILENO };
+static VmVprocStream gVmStdoutSharedShim = { NULL, -1, STDOUT_FILENO };
+static VmVprocStream gVmStderrSharedShim = { NULL, -1, STDERR_FILENO };
+static VmVprocStream gVmStdinSharedShim = { NULL, -1, STDIN_FILENO };
+static pthread_mutex_t gVmSharedShimLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t gVmShimCookieLock = PTHREAD_MUTEX_INITIALIZER;
+static VmShimCookieNode *gVmShimCookieHead = NULL;
+
+static void vmShimCookieTrackAdd(void *cookie) {
+    if (!cookie) {
+        return;
+    }
+    VmShimCookieNode *node = (VmShimCookieNode *)calloc(1, sizeof(VmShimCookieNode));
+    if (!node) {
+        return;
+    }
+    node->cookie = cookie;
+    pthread_mutex_lock(&gVmShimCookieLock);
+    node->next = gVmShimCookieHead;
+    gVmShimCookieHead = node;
+    pthread_mutex_unlock(&gVmShimCookieLock);
+}
+
+static bool vmShimCookieTrackRemove(void *cookie) {
+    if (!cookie) {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&gVmShimCookieLock);
+    VmShimCookieNode *prev = NULL;
+    VmShimCookieNode *cur = gVmShimCookieHead;
+    while (cur) {
+        if (cur->cookie == cookie) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                gVmShimCookieHead = cur->next;
+            }
+            free(cur);
+            found = true;
+            break;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    pthread_mutex_unlock(&gVmShimCookieLock);
+    return found;
+}
 
 static FILE *vmVprocStreamFallback(int std_fd) {
     if (std_fd == STDIN_FILENO) {
@@ -109,6 +172,9 @@ static int vmVprocShimWrite(void *cookie, const char *buf, int len) {
 }
 
 static int vmVprocShimClose(void *cookie) {
+    if (!vmShimCookieTrackRemove(cookie)) {
+        return 0;
+    }
     free(cookie);
     return 0;
 }
@@ -131,6 +197,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
         cache->fp = NULL;
     }
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
 
     VmVprocShimCookie *cookie = (VmVprocShimCookie *)calloc(1, sizeof(VmVprocShimCookie));
     if (!cookie) {
@@ -139,6 +206,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
     cookie->std_fd = std_fd;
     cookie->can_read = strchr(mode, 'r') != NULL;
     cookie->can_write = (strchr(mode, 'w') != NULL) || (strchr(mode, 'a') != NULL);
+    vmShimCookieTrackAdd(cookie);
 
     FILE *fp = funopen(cookie,
                        cookie->can_read ? vmVprocShimRead : NULL,
@@ -146,6 +214,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
                        NULL,
                        vmVprocShimClose);
     if (!fp) {
+        (void)vmShimCookieTrackRemove(cookie);
         free(cookie);
         return vmVprocStreamFallback(std_fd);
     }
@@ -154,6 +223,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
     }
     cache->fp = fp;
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
     return fp;
 }
 
@@ -191,7 +261,15 @@ static FILE *vmVprocStreamOpen(int std_fd,
     }
 
     if (cache->fp && cache->host_fd == host_fd) {
-        return cache->fp;
+        if (!cache->host_identity_valid) {
+            return cache->fp;
+        }
+        struct stat current_st;
+        if (fstat(host_fd, &current_st) == 0 &&
+            current_st.st_dev == cache->host_dev &&
+            current_st.st_ino == cache->host_ino) {
+            return cache->fp;
+        }
     }
 
     if (cache->fp) {
@@ -200,6 +278,7 @@ static FILE *vmVprocStreamOpen(int std_fd,
         cache->fp = NULL;
     }
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
 
     int dup_fd = -1;
 #ifdef F_DUPFD_CLOEXEC
@@ -225,6 +304,12 @@ static FILE *vmVprocStreamOpen(int std_fd,
     }
     cache->fp = fp;
     cache->host_fd = host_fd;
+    struct stat host_st;
+    if (fstat(host_fd, &host_st) == 0) {
+        cache->host_dev = host_st.st_dev;
+        cache->host_ino = host_st.st_ino;
+        cache->host_identity_valid = true;
+    }
     return fp;
 }
 
@@ -241,6 +326,55 @@ static FILE *vmVprocStdin(void) {
     return vmVprocStreamOpen(STDIN_FILENO, &gVmVprocStdin, "r", -1);
 }
 
+static FILE *vmVprocSharedShimStream(int std_fd,
+                                     VmVprocStream *cache,
+                                     const char *mode,
+                                     int buf_mode) {
+    FILE *fp = NULL;
+    pthread_mutex_lock(&gVmSharedShimLock);
+    fp = vmVprocStreamOpenShim(std_fd, cache, mode, buf_mode);
+    pthread_mutex_unlock(&gVmSharedShimLock);
+    return fp;
+}
+
+FILE* pscalRuntimeVmStdin(void) {
+    return vmVprocSharedShimStream(STDIN_FILENO, &gVmStdinSharedShim, "r", -1);
+}
+
+FILE* pscalRuntimeVmStdout(void) {
+    return vmVprocSharedShimStream(STDOUT_FILENO, &gVmStdoutSharedShim, "w", _IONBF);
+}
+
+FILE* pscalRuntimeVmStderr(void) {
+    return vmVprocSharedShimStream(STDERR_FILENO, &gVmStderrSharedShim, "w", _IONBF);
+}
+
+bool pscalRuntimeVmIsSharedFileStream(FILE* stream) {
+    if (!stream) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (stream == stdin || stream == stdout || stream == stderr) {
+        return true;
+    }
+    if (stream == gVmVprocStdin.fp || stream == gVmVprocStdout.fp || stream == gVmVprocStderr.fp) {
+        return true;
+    }
+    if (stream == gVmStdinSharedShim.fp || stream == gVmStdoutSharedShim.fp || stream == gVmStderrSharedShim.fp) {
+        return true;
+    }
+    if (shellRuntimeIsSharedFileStream && shellRuntimeIsSharedFileStream(stream)) {
+        return true;
+    }
+    return false;
+#else
+    if (shellRuntimeIsSharedFileStream && shellRuntimeIsSharedFileStream(stream)) {
+        return true;
+    }
+    return stream == stdin || stream == stdout || stream == stderr;
+#endif
+}
+
 #undef stdin
 #undef stdout
 #undef stderr
@@ -248,6 +382,43 @@ static FILE *vmVprocStdin(void) {
 #define stdout vmVprocStdout()
 #define stderr vmVprocStderr()
 #endif
+
+#if !defined(PSCAL_TARGET_IOS)
+FILE* pscalRuntimeVmStdin(void) {
+    return stdin;
+}
+
+FILE* pscalRuntimeVmStdout(void) {
+    return stdout;
+}
+
+FILE* pscalRuntimeVmStderr(void) {
+    return stderr;
+}
+
+bool pscalRuntimeVmIsSharedFileStream(FILE* stream) {
+    if (!stream) {
+        return false;
+    }
+    if (shellRuntimeIsSharedFileStream && shellRuntimeIsSharedFileStream(stream)) {
+        return true;
+    }
+    return stream == stdin || stream == stdout || stream == stderr;
+}
+#endif
+
+static void vmMaybeCloseFileValue(Value *file_value) {
+    if (!file_value || file_value->type != TYPE_FILE || !file_value->f_val) {
+        return;
+    }
+    FILE *fp = file_value->f_val;
+    if (pscalRuntimeVmIsSharedFileStream(fp)) {
+        fflush(fp);
+    } else {
+        fclose(fp);
+    }
+    file_value->f_val = NULL;
+}
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -2429,13 +2600,13 @@ Value vmBuiltinFclose(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "fclose expects (file).");
         return makeVoid();
     }
-    const Value* farg = &args[0];
-    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (const Value*)farg->ptr_val;
+    Value* farg = (Value*)&args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (Value*)farg->ptr_val;
     if (farg->type != TYPE_FILE || !farg->f_val) {
         runtimeError(vm, "fclose requires a valid file argument.");
         return makeVoid();
     }
-    fclose(farg->f_val);
+    vmMaybeCloseFileValue(farg);
     return makeVoid();
 }
 
@@ -5264,7 +5435,7 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Rewrite must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rewrite."); return makeVoid(); }
-    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+    vmMaybeCloseFileValue(fileVarLValue);
 
     bool has_record_size_arg = (arg_count == 2);
     int new_record_size = fileVarLValue->record_size;
@@ -6049,7 +6220,7 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Reset must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Reset."); return makeVoid(); }
-    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+    vmMaybeCloseFileValue(fileVarLValue);
 
     bool has_record_size_arg = (arg_count == 2);
     int new_record_size = fileVarLValue->record_size;
@@ -6096,7 +6267,7 @@ Value vmBuiltinAppend(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Append must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Append."); return makeVoid(); }
-    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+    vmMaybeCloseFileValue(fileVarLValue);
 
     FILE* f = fopen(fileVarLValue->filename, "a");
     if (f == NULL) {
@@ -6118,10 +6289,7 @@ Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
     Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Close must be a file variable."); return makeVoid(); }
-    if (fileVarLValue->f_val) {
-        fclose(fileVarLValue->f_val);
-        fileVarLValue->f_val = NULL;
-    }
+    vmMaybeCloseFileValue(fileVarLValue);
     // Standard Pascal does not de-assign the filename on Close.
     return makeVoid();
 }
@@ -6138,7 +6306,7 @@ Value vmBuiltinRename(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First argument to Rename must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rename."); return makeVoid(); }
     if (args[1].type != TYPE_STRING) { runtimeError(vm, "Second argument to Rename must be a string."); return makeVoid(); }
-    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+    vmMaybeCloseFileValue(fileVarLValue);
 
     int res = rename(fileVarLValue->filename, args[1].s_val);
     if (res != 0) {
@@ -6165,7 +6333,7 @@ Value vmBuiltinErase(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Erase must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Erase."); return makeVoid(); }
-    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+    vmMaybeCloseFileValue(fileVarLValue);
 
     int res = remove(fileVarLValue->filename);
     if (res != 0) {

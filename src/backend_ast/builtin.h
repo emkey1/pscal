@@ -6,6 +6,7 @@
 #include "Pascal/globals.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -43,6 +44,12 @@ void registerVmBuiltin(const char *vm_name, VmBuiltinFn handler,
 /* Optional hook for externally linked built-ins.  The weak
  * definition in builtin.c does nothing unless overridden. */
 void registerExtendedBuiltins(void);
+
+/* Runtime stdio stream accessors used by VM startup stream binding. */
+FILE* pscalRuntimeVmStdin(void);
+FILE* pscalRuntimeVmStdout(void);
+FILE* pscalRuntimeVmStderr(void);
+bool pscalRuntimeVmIsSharedFileStream(FILE* stream);
 
 /* VM-native general built-ins */
 Value vmBuiltinInttostr(struct VM_s* vm, int arg_count, Value* args);
