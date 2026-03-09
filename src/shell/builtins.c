@@ -99,7 +99,10 @@ static const ShellBuiltinEntry kShellBuiltins[] = {
     {"file", "file", -1},
     {"find", "find", -1},
     {"grep", "grep", -1},
+    {"git", "git", -1},
+#ifndef PSCAL_TARGET_IOS
     {"gwin", "gwin", -1},
+#endif
     {"halt", "halt", -1},
     {"head", "head", -1},
     {"id", "id", -1},

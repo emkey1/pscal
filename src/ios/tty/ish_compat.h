@@ -164,9 +164,9 @@ static inline void list_remove_safe(struct list *item) {
     container_of(item, type, member)
 
 #define list_for_each_entry(list, item, member) \
-    for (item = list_entry((list)->next, typeof(*item), member); \
+    for (item = list_entry((list)->next, __typeof__(*item), member); \
          &item->member != (list); \
-         item = list_entry(item->member.next, typeof(*item), member))
+         item = list_entry(item->member.next, __typeof__(*item), member))
 
 /* Lightweight mutex/cond wrappers. */
 typedef struct {

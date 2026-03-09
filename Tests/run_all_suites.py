@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 BASE_SUITE_KEYS = ["core", "library", "scope"]
-OPTIONAL_SUITE_KEYS = ["ios"]
+OPTIONAL_SUITE_KEYS = ["ios", "smallclue-git", "smallclue-git-mutation", "smallclue-git-path-truncate", "smallclue-git-remote"]
 SUITE_KEYS = BASE_SUITE_KEYS + OPTIONAL_SUITE_KEYS
 
 
@@ -111,12 +111,60 @@ def main(argv: Sequence[str]) -> int:
         action="store_true",
         help="Run the iOS/iPadOS portability suite (opt-in, off by default).",
     )
+    parser.add_argument(
+        "--include-smallclue-git",
+        action="store_true",
+        help="Run the SmallClue git Phase A parity suite (opt-in, off by default).",
+    )
+    parser.add_argument(
+        "--smallclue-git-args",
+        default="",
+        help="Extra arguments (shlex-split) forwarded to Tests/smallclue/run_git_phase_a_parity.py.",
+    )
+    parser.add_argument(
+        "--include-smallclue-git-mutation",
+        action="store_true",
+        help="Run the SmallClue mutating git parity suite (opt-in, off by default).",
+    )
+    parser.add_argument(
+        "--smallclue-git-mutation-args",
+        default="",
+        help="Extra arguments (shlex-split) forwarded to Tests/smallclue/run_git_mutation_parity.py.",
+    )
+    parser.add_argument(
+        "--include-smallclue-git-path-truncate",
+        action="store_true",
+        help="Run the SmallClue git PATH_TRUNCATE smoke suite (opt-in, off by default).",
+    )
+    parser.add_argument(
+        "--smallclue-git-path-truncate-args",
+        default="",
+        help="Extra arguments (shlex-split) forwarded to Tests/smallclue/run_git_path_truncate_smoke.py.",
+    )
+    parser.add_argument(
+        "--include-smallclue-git-remote",
+        action="store_true",
+        help="Run the SmallClue git remote workflow parity suite (opt-in, off by default).",
+    )
+    parser.add_argument(
+        "--smallclue-git-remote-args",
+        default="",
+        help="Extra arguments (shlex-split) forwarded to Tests/smallclue/run_git_remote_parity.py.",
+    )
     args = parser.parse_args(argv)
 
     skip = set(args.skip or [])
     selected = [key for key in BASE_SUITE_KEYS if key not in skip]
     if args.include_ios and "ios" not in skip:
         selected.append("ios")
+    if args.include_smallclue_git and "smallclue-git" not in skip:
+        selected.append("smallclue-git")
+    if args.include_smallclue_git_mutation and "smallclue-git-mutation" not in skip:
+        selected.append("smallclue-git-mutation")
+    if args.include_smallclue_git_path_truncate and "smallclue-git-path-truncate" not in skip:
+        selected.append("smallclue-git-path-truncate")
+    if args.include_smallclue_git_remote and "smallclue-git-remote" not in skip:
+        selected.append("smallclue-git-remote")
 
     if not selected:
         print("No suites selected. Use --skip judiciously or omit it altogether.")
@@ -142,6 +190,38 @@ def main(argv: Sequence[str]) -> int:
     if "ios" in selected:
         ios_script = tests_root / "run_ios_port_tests.sh"
         commands["ios"] = (["bash", str(ios_script)], tests_root, False)
+
+    if "smallclue-git" in selected:
+        smallclue_git_script = tests_root / "smallclue" / "run_git_phase_a_parity.py"
+        extra = shlex_split(args.smallclue_git_args)
+        commands["smallclue-git"] = ([args.python, str(smallclue_git_script), *extra], repo_root, False)
+
+    if "smallclue-git-mutation" in selected:
+        smallclue_git_mutation_script = tests_root / "smallclue" / "run_git_mutation_parity.py"
+        extra = shlex_split(args.smallclue_git_mutation_args)
+        commands["smallclue-git-mutation"] = (
+            [args.python, str(smallclue_git_mutation_script), *extra],
+            repo_root,
+            False,
+        )
+
+    if "smallclue-git-path-truncate" in selected:
+        smallclue_git_path_truncate_script = tests_root / "smallclue" / "run_git_path_truncate_smoke.py"
+        extra = shlex_split(args.smallclue_git_path_truncate_args)
+        commands["smallclue-git-path-truncate"] = (
+            [args.python, str(smallclue_git_path_truncate_script), *extra],
+            repo_root,
+            False,
+        )
+
+    if "smallclue-git-remote" in selected:
+        smallclue_git_remote_script = tests_root / "smallclue" / "run_git_remote_parity.py"
+        extra = shlex_split(args.smallclue_git_remote_args)
+        commands["smallclue-git-remote"] = (
+            [args.python, str(smallclue_git_remote_script), *extra],
+            repo_root,
+            False,
+        )
 
     summary: List[Tuple[str, int]] = []
     for key in selected:

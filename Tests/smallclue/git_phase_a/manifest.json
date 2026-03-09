@@ -1,0 +1,1209 @@
+{
+  "version": 1,
+  "suite": "smallclue_git_parity",
+  "description": "Parity matrix for SmallClue git applet versus system git (local-repo commands only).",
+  "fixture": {
+    "id": "phase_a_baseline_dirty",
+    "setup_script": "Tests/smallclue/git_phase_a/setup_phase_a_fixture.sh",
+    "repo_root_token": "${REPO_ROOT}",
+    "tokens": [
+      "REPO_ROOT",
+      "HEAD_OID",
+      "HEAD_SHORT",
+      "FEATURE_SHORT12",
+      "TAG_TARGET"
+    ],
+    "notes": [
+      "Fixture is deterministic (fixed author/committer names and timestamps).",
+      "Harness must run all commands with cwd=${REPO_ROOT}.",
+      "SmallClue invocation should be: smallclue <smallclue_argv...>.",
+      "Baseline invocation should be: git <git_argv...>.",
+      "Replace ${REPO_ROOT} token in expectations before comparison."
+    ]
+  },
+  "tests": [
+    {
+      "id": "config_get_user_name",
+      "category": "config",
+      "git_argv": [
+        "config",
+        "--get",
+        "user.name"
+      ],
+      "smallclue_argv": [
+        "git",
+        "config",
+        "--get",
+        "user.name"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "PSCAL Tester\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_inside",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--is-inside-work-tree"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--is-inside-work-tree"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "true\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_toplevel",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--show-toplevel"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--show-toplevel"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "${REPO_ROOT}\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_gitdir",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--git-dir"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--git-dir"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": ".git\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_abbrev_head",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--abbrev-ref",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--abbrev-ref",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "main\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_short_head",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--short",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--short",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_verify_head",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--verify",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--verify",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0028adcd61f01615e016024afc7b13cf33\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_short12_feature",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--short=12",
+        "feature"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--short=12",
+        "feature"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "35a89c2f31c3\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_parse_verify_missing",
+      "category": "rev_parse",
+      "git_argv": [
+        "rev-parse",
+        "--verify",
+        "does-not-exist"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-parse",
+        "--verify",
+        "does-not-exist"
+      ],
+      "expected_exit": 128,
+      "expected_stdout": "",
+      "expected_stderr": "fatal: Needed a single revision\n",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "symbolic_ref_head",
+      "category": "symbolic_ref",
+      "git_argv": [
+        "symbolic-ref",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "symbolic-ref",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "refs/heads/main\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "symbolic_ref_short_head",
+      "category": "symbolic_ref",
+      "git_argv": [
+        "symbolic-ref",
+        "--short",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "symbolic-ref",
+        "--short",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "main\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "show_ref_all",
+      "category": "show_ref",
+      "git_argv": [
+        "show-ref"
+      ],
+      "smallclue_argv": [
+        "git",
+        "show-ref"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "35a89c2f31c3edda005e58e5b98798ce5b262738 refs/heads/feature\nba9f8c0028adcd61f01615e016024afc7b13cf33 refs/heads/main\n68e0346cb0210c35f03a49f5b89a218e39832c46 refs/tags/v1.0\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "show_ref_heads",
+      "category": "show_ref",
+      "git_argv": [
+        "show-ref",
+        "--heads"
+      ],
+      "smallclue_argv": [
+        "git",
+        "show-ref",
+        "--heads"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "35a89c2f31c3edda005e58e5b98798ce5b262738 refs/heads/feature\nba9f8c0028adcd61f01615e016024afc7b13cf33 refs/heads/main\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "show_ref_tags",
+      "category": "show_ref",
+      "git_argv": [
+        "show-ref",
+        "--tags"
+      ],
+      "smallclue_argv": [
+        "git",
+        "show-ref",
+        "--tags"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "68e0346cb0210c35f03a49f5b89a218e39832c46 refs/tags/v1.0\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_list_3",
+      "category": "rev_list",
+      "git_argv": [
+        "rev-list",
+        "--max-count",
+        "3",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-list",
+        "--max-count",
+        "3",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0028adcd61f01615e016024afc7b13cf33\n615658d41877b56ed898e331f67d4ed82616192a\ne2cbee9be00d4f9d3dbfb9a8307af6f20e3fd001\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "rev_list_reverse_2",
+      "category": "rev_list",
+      "git_argv": [
+        "rev-list",
+        "--max-count",
+        "2",
+        "--reverse",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "rev-list",
+        "--max-count",
+        "2",
+        "--reverse",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "615658d41877b56ed898e331f67d4ed82616192a\nba9f8c0028adcd61f01615e016024afc7b13cf33\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "ls_files_cached",
+      "category": "ls_files",
+      "git_argv": [
+        "ls-files"
+      ],
+      "smallclue_argv": [
+        "git",
+        "ls-files"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "README.md\nnotes.txt\nstaged.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "ls_files_others",
+      "category": "ls_files",
+      "git_argv": [
+        "ls-files",
+        "--others",
+        "--exclude-standard"
+      ],
+      "smallclue_argv": [
+        "git",
+        "ls-files",
+        "--others",
+        "--exclude-standard"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "untracked.log\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "status_porcelain",
+      "category": "status",
+      "git_argv": [
+        "status",
+        "--porcelain=v1"
+      ],
+      "smallclue_argv": [
+        "git",
+        "status",
+        "--porcelain=v1"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": " M README.md\nA  staged.txt\n?? untracked.log\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "status_porcelain_branch",
+      "category": "status",
+      "git_argv": [
+        "status",
+        "--porcelain=v1",
+        "-b"
+      ],
+      "smallclue_argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "-b"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "## main\n M README.md\nA  staged.txt\n?? untracked.log\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "status_short_branch_all",
+      "category": "status",
+      "git_argv": [
+        "status",
+        "--short",
+        "-b",
+        "--untracked-files=all"
+      ],
+      "smallclue_argv": [
+        "git",
+        "status",
+        "--short",
+        "-b",
+        "--untracked-files=all"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "## main\n M README.md\nA  staged.txt\n?? untracked.log\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "status_porcelain_no_untracked",
+      "category": "status",
+      "git_argv": [
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no"
+      ],
+      "smallclue_argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": " M README.md\nA  staged.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "log_oneline_3",
+      "category": "log",
+      "git_argv": [
+        "log",
+        "--oneline",
+        "-n",
+        "3"
+      ],
+      "smallclue_argv": [
+        "git",
+        "log",
+        "--oneline",
+        "-n",
+        "3"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0 update notes\n615658d add notes\ne2cbee9 initial commit\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "log_oneline_decorate_3",
+      "category": "log",
+      "git_argv": [
+        "log",
+        "--oneline",
+        "--decorate",
+        "-n",
+        "3"
+      ],
+      "smallclue_argv": [
+        "git",
+        "log",
+        "--oneline",
+        "--decorate",
+        "-n",
+        "3"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0 (HEAD -> main) update notes\n615658d (tag: v1.0) add notes\ne2cbee9 initial commit\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "log_reverse_2",
+      "category": "log",
+      "git_argv": [
+        "log",
+        "--oneline",
+        "--max-count",
+        "2",
+        "--reverse"
+      ],
+      "smallclue_argv": [
+        "git",
+        "log",
+        "--oneline",
+        "--max-count",
+        "2",
+        "--reverse"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "615658d add notes\nba9f8c0 update notes\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "log_author_1",
+      "category": "log",
+      "git_argv": [
+        "log",
+        "--author",
+        "PSCAL Tester",
+        "--oneline",
+        "-n",
+        "1"
+      ],
+      "smallclue_argv": [
+        "git",
+        "log",
+        "--author",
+        "PSCAL Tester",
+        "--oneline",
+        "-n",
+        "1"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0 update notes\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "log_grep_update_1",
+      "category": "log",
+      "git_argv": [
+        "log",
+        "--grep",
+        "update",
+        "--oneline",
+        "-n",
+        "1"
+      ],
+      "smallclue_argv": [
+        "git",
+        "log",
+        "--grep",
+        "update",
+        "--oneline",
+        "-n",
+        "1"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0 update notes\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "show_oneline_head",
+      "category": "show",
+      "git_argv": [
+        "show",
+        "--no-patch",
+        "--pretty=oneline",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "show",
+        "--no-patch",
+        "--pretty=oneline",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "ba9f8c0028adcd61f01615e016024afc7b13cf33 update notes\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "show_name_only_head",
+      "category": "show",
+      "git_argv": [
+        "show",
+        "--name-only",
+        "--pretty=format:%s",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "show",
+        "--name-only",
+        "--pretty=format:%s",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "update notes\nnotes.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "show_name_status_head",
+      "category": "show",
+      "git_argv": [
+        "show",
+        "--name-status",
+        "--pretty=format:%s",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "show",
+        "--name-status",
+        "--pretty=format:%s",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "update notes\nM\tnotes.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "show_stat_head",
+      "category": "show",
+      "git_argv": [
+        "show",
+        "--stat",
+        "--pretty=format:%s",
+        "HEAD"
+      ],
+      "smallclue_argv": [
+        "git",
+        "show",
+        "--stat",
+        "--pretty=format:%s",
+        "HEAD"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "update notes\n notes.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_name_only_worktree",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "--name-only"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "--name-only"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "README.md\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_name_status_worktree",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "--name-status"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "--name-status"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "M\tREADME.md\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_stat_worktree",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "--stat"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "--stat"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": " README.md | 1 +\n 1 file changed, 1 insertion(+)\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_u1_worktree",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "-U1"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "-U1"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "diff --git a/README.md b/README.md\nindex c0d0fb4..a07179b 100644\n--- a/README.md\n+++ b/README.md\n@@ -2 +2,2 @@ line1\n line2\n+worktree change\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_cached_name_only",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "--cached",
+        "--name-only"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--name-only"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "staged.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_cached_name_status",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "--cached",
+        "--name-status"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--name-status"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "A\tstaged.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_cached_stat",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "--cached",
+        "--stat"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--stat"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": " staged.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_cached_u1",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "--cached",
+        "-U1"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "--cached",
+        "-U1"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "diff --git a/staged.txt b/staged.txt\nnew file mode 100644\nindex 0000000..be5661a\n--- /dev/null\n+++ b/staged.txt\n@@ -0,0 +1 @@\n+staged line\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_rev_name_only",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "HEAD~1",
+        "HEAD",
+        "--name-only"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "HEAD~1",
+        "HEAD",
+        "--name-only"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "notes.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_rev_name_status",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "HEAD~1",
+        "HEAD",
+        "--name-status"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "HEAD~1",
+        "HEAD",
+        "--name-status"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "M\tnotes.txt\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "diff_rev_stat",
+      "category": "diff",
+      "git_argv": [
+        "diff",
+        "HEAD~1",
+        "HEAD",
+        "--stat"
+      ],
+      "smallclue_argv": [
+        "git",
+        "diff",
+        "HEAD~1",
+        "HEAD",
+        "--stat"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": " notes.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "branch_list",
+      "category": "branch",
+      "git_argv": [
+        "branch",
+        "--list"
+      ],
+      "smallclue_argv": [
+        "git",
+        "branch",
+        "--list"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "  feature\n* main\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "branch_list_a",
+      "category": "branch",
+      "git_argv": [
+        "branch",
+        "--list",
+        "-a"
+      ],
+      "smallclue_argv": [
+        "git",
+        "branch",
+        "--list",
+        "-a"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "  feature\n* main\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "branch_list_v",
+      "category": "branch",
+      "git_argv": [
+        "branch",
+        "--list",
+        "-v"
+      ],
+      "smallclue_argv": [
+        "git",
+        "branch",
+        "--list",
+        "-v"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "  feature 35a89c2 feature work\n* main    ba9f8c0 update notes\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "branch_list_vv",
+      "category": "branch",
+      "git_argv": [
+        "branch",
+        "--list",
+        "-vv"
+      ],
+      "smallclue_argv": [
+        "git",
+        "branch",
+        "--list",
+        "-vv"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "  feature 35a89c2 feature work\n* main    ba9f8c0 update notes\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "branch_list_pattern",
+      "category": "branch",
+      "git_argv": [
+        "branch",
+        "--list",
+        "f*"
+      ],
+      "smallclue_argv": [
+        "git",
+        "branch",
+        "--list",
+        "f*"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "  feature\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "tag_list",
+      "category": "tag",
+      "git_argv": [
+        "tag",
+        "--list"
+      ],
+      "smallclue_argv": [
+        "git",
+        "tag",
+        "--list"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "v1.0\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "tag_list_pattern",
+      "category": "tag",
+      "git_argv": [
+        "tag",
+        "--list",
+        "v*"
+      ],
+      "smallclue_argv": [
+        "git",
+        "tag",
+        "--list",
+        "v*"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "v1.0\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "tag_list_n",
+      "category": "tag",
+      "git_argv": [
+        "tag",
+        "--list",
+        "-n"
+      ],
+      "smallclue_argv": [
+        "git",
+        "tag",
+        "--list",
+        "-n"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "v1.0            release 1.0\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    },
+    {
+      "id": "tag_list_n2",
+      "category": "tag",
+      "git_argv": [
+        "tag",
+        "--list",
+        "-n2"
+      ],
+      "smallclue_argv": [
+        "git",
+        "tag",
+        "--list",
+        "-n2"
+      ],
+      "expected_exit": 0,
+      "expected_stdout": "v1.0            release 1.0\n",
+      "expected_stderr": "",
+      "comparison": {
+        "stdout": "exact",
+        "stderr": "exact",
+        "exit": "exact"
+      }
+    }
+  ]
+}

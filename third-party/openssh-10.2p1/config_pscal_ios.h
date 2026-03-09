@@ -1011,7 +1011,8 @@
 #define HAVE_MEMMOVE 1
 
 /* Define to 1 if you have the `memset_s' function. */
-#define HAVE_MEMSET_S 1
+/* iOS SDK exposes memset_s only under Annex K feature-test macros. */
+/* #undef HAVE_MEMSET_S */
 
 /* Define to 1 if you have the `mkdtemp' function. */
 #define HAVE_MKDTEMP 1

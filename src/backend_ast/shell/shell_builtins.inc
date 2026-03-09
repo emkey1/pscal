@@ -3190,6 +3190,13 @@ Value vmBuiltinShellResize(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
+#ifdef PSCAL_TARGET_IOS
+    (void)arg_count;
+    (void)args;
+    runtimeError(vm, "gwin: unavailable on iOS/iPadOS");
+    shellUpdateStatus(1);
+    return makeVoid();
+#else
     char *piped_message = NULL;
     if (!pscalRuntimeStdinIsInteractive()) {
         size_t cap = 1024;
@@ -3240,6 +3247,7 @@ Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
         free(piped_message);
     }
     return makeVoid();
+#endif
 }
 
 Value vmBuiltinShellEditorDump(VM *vm, int arg_count, Value *args) {

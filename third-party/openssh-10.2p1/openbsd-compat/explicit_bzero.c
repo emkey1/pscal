@@ -7,6 +7,16 @@
 
 #include "includes.h"
 
+/*
+ * On Darwin SDKs, memset_s is only declared when Annex K is requested
+ * before including <string.h>.
+ */
+#ifdef HAVE_MEMSET_S
+# if !defined(__STDC_WANT_LIB_EXT1__)
+#  define __STDC_WANT_LIB_EXT1__ 1
+# endif
+#endif
+
 #include <string.h>
 
 /*
