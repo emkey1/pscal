@@ -1013,6 +1013,9 @@ private struct TerminalTabButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : [.isButton])
+        .accessibilityHint(isSelected ? "Selected tab" : "Selects this tab")
     }
 }
 
@@ -1035,6 +1038,9 @@ private struct SdlTabView: View {
                     .padding(.vertical, 8)
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityLabel("Bring SDL to Front")
+            .accessibilityHint("Brings the SDL window to the foreground if it is hidden behind the terminal")
+
             Button(action: onReturn) {
                 Text("Return to Shell")
                     .font(.system(size: 14, weight: .semibold))
@@ -1042,6 +1048,7 @@ private struct SdlTabView: View {
                     .padding(.vertical, 8)
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityHint("Closes the SDL tab and returns you to a shell prompt")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
