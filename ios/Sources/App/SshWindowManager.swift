@@ -985,6 +985,7 @@ private struct TerminalTabBar: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("New Shell Tab")
+                .accessibilityHint("Creates a new shell tab")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -1013,6 +1014,9 @@ private struct TerminalTabButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(isSelected ? "Currently selected tab" : "Double tap to select this tab")
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : [.isButton])
     }
 }
 
