@@ -285,6 +285,32 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_add_mirror_fetch",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--mirror=fetch", "mf", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--mirror=fetch", "mf", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get-all", "remote.mf.fetch"]},
+            ],
+        },
+        {
+            "id": "remote_add_mirror_push",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--mirror=push", "mp", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--mirror=push", "mp", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get", "remote.mp.mirror"]},
+                {"git_argv": ["config", "--get-all", "remote.mp.fetch"]},
+            ],
+        },
+        {
+            "id": "remote_add_mirror_push_track_error",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--mirror=push", "--track", "main", "mpe", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--mirror=push", "--track", "main", "mpe", "{REMOTE}"],
+            "checks": [],
+        },
+        {
             "id": "remote_get_url_all_fetch",
             "mode": "repo",
             "compare_output": True,
