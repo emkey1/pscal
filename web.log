@@ -1,9 +1,0 @@
-[run-builtin] active_vp=0x10581a7c0 stdin_fd=3 stdout_fd=4 stderr_fd=5
-[redir] vprocDup2 3->0 rc=0 host_src=21 (stdin)
-[redir] vprocDup2 4->1 rc=1 host_src=26 (stdout)
-[redir] vprocDup2 5->2 rc=2 host_src=26 (stderr)
-[run-builtin] invoking cmd=Examples/clike/base/simple_web_server argc=1 redirs=0 apply_exec_redirs=0
-[run-builtin] begin lookup for Examples/clike/base/simple_web_server
-initFiles: RootDir=/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/htdocs.3 preexisting=0 indexExists=0
-MStreamSaveToFile: Cannot open file '/var/folders/dj/363wwg7d28zf1xy8z1qtcxww0000gn/T/htdocs.3/index.html' for writing.
-[run-builtin] final fd map stdout_fd=4 stderr_fd=5
