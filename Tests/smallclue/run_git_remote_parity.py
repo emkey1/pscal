@@ -431,6 +431,22 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_prune_origin_dry_run",
+            "mode": "repo",
+            "git_argv": ["remote", "prune", "--dry-run", "origin"],
+            "smallclue_argv": ["git", "remote", "prune", "--dry-run", "origin"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "prune-dry-topic"]},
+                {"op": "git", "argv": ["push", "origin", "prune-dry-topic"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+                {"op": "git", "argv": ["fetch", "origin"]},
+                {"op": "git", "argv": ["push", "origin", "--delete", "prune-dry-topic"]},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/prune-dry-topic"]},
+            ],
+        },
+        {
             "id": "remote_set_head_branch",
             "mode": "repo",
             "git_argv": ["remote", "set-head", "origin", "main"],
