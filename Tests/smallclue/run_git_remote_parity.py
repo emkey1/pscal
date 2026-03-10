@@ -515,6 +515,24 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_show_no_query",
+            "mode": "repo",
+            "git_argv": ["remote", "show", "-n", "origin"],
+            "smallclue_argv": ["git", "remote", "show", "-n", "origin"],
+            "checks": [
+                {"git_argv": ["remote", "get-url", "origin"]},
+            ],
+        },
+        {
+            "id": "remote_show_query",
+            "mode": "repo",
+            "git_argv": ["remote", "show", "origin"],
+            "smallclue_argv": ["git", "remote", "show", "origin"],
+            "checks": [
+                {"git_argv": ["remote", "get-url", "origin"]},
+            ],
+        },
+        {
             "id": "remote_set_branches_replace",
             "mode": "repo",
             "git_argv": ["remote", "set-branches", "origin", "main"],
