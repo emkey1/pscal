@@ -391,6 +391,46 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_update_all",
+            "mode": "repo",
+            "git_argv": ["remote", "update"],
+            "smallclue_argv": ["git", "remote", "update"],
+            "actions": [
+                {"op": "seed_commit_push", "path": "README.md", "text": "remote-update-all\n", "message": "remote update all"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "refs/remotes/origin/main"]},
+            ],
+        },
+        {
+            "id": "remote_update_named_origin",
+            "mode": "repo",
+            "git_argv": ["remote", "update", "origin"],
+            "smallclue_argv": ["git", "remote", "update", "origin"],
+            "actions": [
+                {"op": "seed_commit_push", "path": "README.md", "text": "remote-update-origin\n", "message": "remote update origin"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "refs/remotes/origin/main"]},
+            ],
+        },
+        {
+            "id": "remote_prune_origin",
+            "mode": "repo",
+            "git_argv": ["remote", "prune", "origin"],
+            "smallclue_argv": ["git", "remote", "prune", "origin"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "prune-topic"]},
+                {"op": "git", "argv": ["push", "origin", "prune-topic"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+                {"op": "git", "argv": ["fetch", "origin"]},
+                {"op": "git", "argv": ["push", "origin", "--delete", "prune-topic"]},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/prune-topic"]},
+            ],
+        },
+        {
             "id": "pull_fast_forward",
             "mode": "repo",
             "git_argv": ["pull", "--ff-only", "origin", "main"],
