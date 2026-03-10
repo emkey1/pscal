@@ -955,6 +955,21 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "push_no_follow_tags_overrides_follow_tags",
+            "mode": "repo",
+            "git_argv": ["push", "--follow-tags", "--no-follow-tags", "origin"],
+            "smallclue_argv": ["git", "push", "--follow-tags", "--no-follow-tags", "origin"],
+            "actions": [
+                {"op": "append", "path": "README.md", "text": "no-follow-tags\n"},
+                {"op": "git", "argv": ["add", "README.md"]},
+                {"op": "git", "argv": ["commit", "-m", "no follow tags commit"]},
+                {"op": "git", "argv": ["tag", "-a", "v-no-follow-1", "-m", "annotated no follow tag"]},
+            ],
+            "checks": [
+                {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "show-ref", "--verify", "--quiet", "refs/tags/v-no-follow-1"]},
+            ],
+        },
+        {
             "id": "push_set_upstream_explicit_refspec",
             "mode": "repo",
             "git_argv": ["push", "-u", "origin", "main:main"],
@@ -979,6 +994,22 @@ def build_cases() -> List[Dict[str, object]]:
             ],
             "checks": [
                 {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "show-ref", "--verify", "refs/tags/v-test-1"]},
+            ],
+        },
+        {
+            "id": "push_no_tags_overrides_tags",
+            "mode": "repo",
+            "git_argv": ["push", "--tags", "--no-tags", "origin"],
+            "smallclue_argv": ["git", "push", "--tags", "--no-tags", "origin"],
+            "actions": [
+                {"op": "append", "path": "README.md", "text": "no-tags-push\n"},
+                {"op": "git", "argv": ["add", "README.md"]},
+                {"op": "git", "argv": ["commit", "-m", "no tags push commit"]},
+                {"op": "git", "argv": ["tag", "v-no-tags-1"]},
+            ],
+            "checks": [
+                {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "show-ref", "--verify", "--quiet", "refs/tags/v-no-tags-1"]},
+                {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "rev-list", "--count", "main"]},
             ],
         },
         {
