@@ -1105,6 +1105,90 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "log_pretty_format_subject",
+            "mode": "repo",
+            "git_argv": ["log", "-n", "1", "--pretty=format:%s"],
+            "smallclue_argv": ["git", "log", "-n", "1", "--pretty=format:%s"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_pretty_format_author_committer",
+            "mode": "repo",
+            "git_argv": ["log", "-n", "1", "--format=%an <%ae>|%cn <%ce>"],
+            "smallclue_argv": ["git", "log", "-n", "1", "--format=%an <%ae>|%cn <%ce>"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_oneline_decorate_mode_short",
+            "mode": "repo",
+            "git_argv": ["log", "--oneline", "--decorate=short", "-n", "1"],
+            "smallclue_argv": ["git", "log", "--oneline", "--decorate=short", "-n", "1"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-log-deco"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_oneline_no_decorate_overrides_decorate",
+            "mode": "repo",
+            "git_argv": ["log", "--oneline", "--decorate", "--no-decorate", "-n", "1"],
+            "smallclue_argv": ["git", "log", "--oneline", "--decorate", "--no-decorate", "-n", "1"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-log-nodeco"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_oneline_no_abbrev_commit",
+            "mode": "repo",
+            "git_argv": ["log", "--oneline", "--no-abbrev-commit", "-n", "1"],
+            "smallclue_argv": ["git", "log", "--oneline", "--no-abbrev-commit", "-n", "1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_oneline_custom_abbrev",
+            "mode": "repo",
+            "git_argv": ["log", "--oneline", "--abbrev=12", "-n", "1"],
+            "smallclue_argv": ["git", "log", "--oneline", "--abbrev=12", "-n", "1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_format_h_no_abbrev_commit",
+            "mode": "repo",
+            "git_argv": ["log", "-n", "1", "--format=%h", "--no-abbrev-commit"],
+            "smallclue_argv": ["git", "log", "-n", "1", "--format=%h", "--no-abbrev-commit"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_format_h_custom_abbrev",
+            "mode": "repo",
+            "git_argv": ["log", "-n", "1", "--format=%h", "--abbrev=12"],
+            "smallclue_argv": ["git", "log", "-n", "1", "--format=%h", "--abbrev=12"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "commit_quiet_staged_change",
             "mode": "repo",
             "git_argv": ["commit", "-q", "-m", "third change"],
