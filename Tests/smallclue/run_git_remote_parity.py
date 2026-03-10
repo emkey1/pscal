@@ -455,6 +455,18 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_set_head_auto",
+            "mode": "repo",
+            "git_argv": ["remote", "set-head", "origin", "--auto"],
+            "smallclue_argv": ["git", "remote", "set-head", "origin", "--auto"],
+            "actions": [
+                {"op": "git", "argv": ["remote", "set-head", "origin", "--delete"]},
+            ],
+            "checks": [
+                {"git_argv": ["symbolic-ref", "refs/remotes/origin/HEAD"]},
+            ],
+        },
+        {
             "id": "remote_set_branches_replace",
             "mode": "repo",
             "git_argv": ["remote", "set-branches", "origin", "main"],
