@@ -932,6 +932,23 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "pull_dash_r_rebase_diverged",
+            "mode": "repo",
+            "git_argv": ["pull", "-r", "origin", "main"],
+            "smallclue_argv": ["git", "pull", "-r", "origin", "main"],
+            "actions": [
+                {"op": "append", "path": "README.md", "text": "local-dash-r-diverge\n"},
+                {"op": "git", "argv": ["add", "README.md"]},
+                {"op": "git", "argv": ["commit", "-m", "local dash r diverge"]},
+                {"op": "seed_commit_push", "path": "README.md", "text": "remote-dash-r-diverge\n", "message": "remote dash r diverge"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-list", "--count", "--merges", "HEAD"]},
+                {"git_argv": ["rev-parse", "--verify", "HEAD^"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "pull_rebase_equals_true_diverged",
             "mode": "repo",
             "git_argv": ["pull", "--rebase=true", "origin", "main"],
