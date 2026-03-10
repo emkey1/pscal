@@ -557,6 +557,18 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "fetch_verbose_progress_flags",
+            "mode": "repo",
+            "git_argv": ["fetch", "--verbose", "--progress", "origin"],
+            "smallclue_argv": ["git", "fetch", "--verbose", "--progress", "origin"],
+            "actions": [
+                {"op": "seed_commit_push", "path": "README.md", "text": "from-seed-verbose-progress\n", "message": "seed update verbose progress"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "refs/remotes/origin/main"]},
+            ],
+        },
+        {
             "id": "fetch_no_all_overrides_all",
             "mode": "repo",
             "git_argv": ["fetch", "--all", "--no-all", "origin"],
@@ -852,6 +864,19 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "pull_verbose_progress_flags",
+            "mode": "repo",
+            "git_argv": ["pull", "--verbose", "--progress", "--ff-only", "origin", "main"],
+            "smallclue_argv": ["git", "pull", "--verbose", "--progress", "--ff-only", "origin", "main"],
+            "actions": [
+                {"op": "seed_commit_push", "path": "README.md", "text": "pull-verbose-progress\n", "message": "pull verbose progress"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "HEAD"]},
+                {"git_argv": ["rev-parse", "refs/remotes/origin/main"]},
+            ],
+        },
+        {
             "id": "pull_default_upstream",
             "mode": "repo",
             "git_argv": ["pull"],
@@ -969,6 +994,34 @@ def build_cases() -> List[Dict[str, object]]:
             ],
             "checks": [
                 {"mode": "repo", "git_argv": ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]},
+                {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "rev-list", "--count", "main"]},
+            ],
+        },
+        {
+            "id": "push_verbose_progress_flags",
+            "mode": "repo",
+            "git_argv": ["push", "--verbose", "--progress", "origin"],
+            "smallclue_argv": ["git", "push", "--verbose", "--progress", "origin"],
+            "actions": [
+                {"op": "write", "path": "push_verbose.txt", "text": "push verbose content\n"},
+                {"op": "git", "argv": ["add", "push_verbose.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "push verbose commit"]},
+            ],
+            "checks": [
+                {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "rev-list", "--count", "main"]},
+            ],
+        },
+        {
+            "id": "push_no_force_overrides_force",
+            "mode": "repo",
+            "git_argv": ["push", "--force", "--no-force", "origin", "main:main"],
+            "smallclue_argv": ["git", "push", "--force", "--no-force", "origin", "main:main"],
+            "actions": [
+                {"op": "write", "path": "push_no_force.txt", "text": "push no-force content\n"},
+                {"op": "git", "argv": ["add", "push_no_force.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "push no force commit"]},
+            ],
+            "checks": [
                 {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "rev-list", "--count", "main"]},
             ],
         },
