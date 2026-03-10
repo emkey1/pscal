@@ -6,6 +6,7 @@
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
 #include "ios/vproc.h"
+#include "ios/tty/pscal_fd.h"
 extern void pscalRuntimeDebugLog(const char *message);
 #endif
 
@@ -434,9 +435,8 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool stdout_redirected = false;
     bool mapped_stdout_redirected = false;
 #if defined(PSCAL_TARGET_IOS)
-    VProcSessionStdio *prev_session_stdio = NULL;
-    VProcSessionStdio *cmdsub_session_stdio = NULL;
-    bool cmdsub_session_activated = false;
+    VProc *active_vp = NULL;
+    struct pscal_fd *saved_stdout_pscal = NULL;
 #endif
 
     ShellRunOptions opts;
@@ -450,7 +450,8 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool previous_pipeline_flag = gShellRuntime.pipeline_subshell_active;
     char **env_snapshot = NULL;
 
-    if (*source) {
+    bool allow_scalar_cache = (gShellScriptDepth <= 1);
+    if (*source && allow_scalar_cache) {
         cached_entry = shellScalarCacheFind(source);
         if (cached_entry && cached_entry->result) {
             from_cache = true;
@@ -486,9 +487,9 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    VProc *active_vp = vprocCurrent();
-    prev_session_stdio = vprocSessionStdioCurrent();
+    active_vp = vprocCurrent();
     if (active_vp) {
+        saved_stdout_pscal = vprocGetPscalFd(active_vp, STDOUT_FILENO);
         int translated = vprocTranslateFd(active_vp, STDOUT_FILENO);
         if (translated >= 0 && translated != STDOUT_FILENO) {
             mapped_stdout_fd = translated;
@@ -524,12 +525,29 @@ static char *shellRunCommandSubstitution(const char *command) {
         goto substitution_finish;
     }
     stdout_redirected = true;
+#if defined(PSCAL_TARGET_IOS)
+    if (active_vp) {
+        /* Keep shimmed writes (vproc fd table) aligned with host fd 1. */
+        (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, STDOUT_FILENO);
+    }
+#endif
 
 #if defined(PSCAL_TARGET_IOS)
     if (mapped_stdout_fd >= 0) {
         if (vprocHostDup2(pipes[1], mapped_stdout_fd) < 0) {
             int err = errno;
             vprocHostDup2(saved_stdout, STDOUT_FILENO);
+#if defined(PSCAL_TARGET_IOS)
+            if (active_vp) {
+                if (saved_stdout_pscal) {
+                    /* Restore original PSCAL-backed stdout mapping. */
+                    (void)vprocAdoptPscalFd(active_vp, STDOUT_FILENO, saved_stdout_pscal);
+                } else {
+                    /* Restore shim stdout back to the session-mapped fd on failure. */
+                    (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, mapped_stdout_fd);
+                }
+            }
+#endif
             vprocHostClose(saved_stdout);
             saved_stdout = -1;
             vprocHostClose(pipes[0]);
@@ -551,30 +569,6 @@ static char *shellRunCommandSubstitution(const char *command) {
     pipes[1] = -1;
 
     reader.fd = pipes[0];
-
-#if defined(PSCAL_TARGET_IOS)
-    cmdsub_session_stdio = vprocSessionStdioCreate();
-    if (cmdsub_session_stdio) {
-        int session_kernel_pid = prev_session_stdio ? prev_session_stdio->kernel_pid : vprocGetKernelPid();
-        int session_stdin = (prev_session_stdio && prev_session_stdio->stdin_host_fd >= 0)
-            ? prev_session_stdio->stdin_host_fd
-            : STDIN_FILENO;
-        int session_stderr = (prev_session_stdio && prev_session_stdio->stderr_host_fd >= 0)
-            ? prev_session_stdio->stderr_host_fd
-            : STDERR_FILENO;
-        vprocSessionStdioInitWithFds(cmdsub_session_stdio,
-                                     session_stdin,
-                                     STDOUT_FILENO,
-                                     session_stderr,
-                                     session_kernel_pid);
-        if (prev_session_stdio) {
-            cmdsub_session_stdio->shell_pid = prev_session_stdio->shell_pid;
-            cmdsub_session_stdio->session_id = prev_session_stdio->session_id;
-        }
-        vprocSessionStdioActivate(cmdsub_session_stdio);
-        cmdsub_session_activated = true;
-    }
-#endif
 
     memset(&opts, 0, sizeof(opts));
     opts.no_cache = 1;
@@ -632,6 +626,16 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
     if (stdout_redirected) {
         vprocHostDup2(saved_stdout, STDOUT_FILENO);
+#if defined(PSCAL_TARGET_IOS)
+        if (active_vp) {
+            if (saved_stdout_pscal) {
+                (void)vprocAdoptPscalFd(active_vp, STDOUT_FILENO, saved_stdout_pscal);
+            } else {
+                int restore_stdout_fd = (mapped_stdout_fd >= 0) ? mapped_stdout_fd : STDOUT_FILENO;
+                (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, restore_stdout_fd);
+            }
+        }
+#endif
         stdout_redirected = false;
     }
     if (saved_stdout >= 0) {
@@ -650,6 +654,12 @@ static char *shellRunCommandSubstitution(const char *command) {
         vprocHostClose(pipes[0]);
         pipes[0] = -1;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (saved_stdout_pscal) {
+        pscal_fd_close(saved_stdout_pscal);
+        saved_stdout_pscal = NULL;
+    }
+#endif
 
     int final_status = shellRuntimeLastStatus();
     if (!exit_requested && status != EXIT_SUCCESS) {
@@ -671,7 +681,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     result = output;
     result_length = length;
 
-    if (*source) {
+    if (*source && allow_scalar_cache) {
         stored_entry = shellScalarCacheStore(source, result, result_length);
         if (stored_entry) {
             gShellRuntime.scalar_cache_stores++;
@@ -680,13 +690,9 @@ static char *shellRunCommandSubstitution(const char *command) {
 
 substitution_finish:
 #if defined(PSCAL_TARGET_IOS)
-    if (cmdsub_session_activated) {
-        vprocSessionStdioActivate(prev_session_stdio);
-        cmdsub_session_activated = false;
-    }
-    if (cmdsub_session_stdio) {
-        vprocSessionStdioDestroy(cmdsub_session_stdio);
-        cmdsub_session_stdio = NULL;
+    if (saved_stdout_pscal) {
+        pscal_fd_close(saved_stdout_pscal);
+        saved_stdout_pscal = NULL;
     }
 #endif
     if (reader.error && !exit_requested) {

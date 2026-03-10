@@ -3,6 +3,82 @@
 
 #ifdef PSCAL_TARGET_IOS
 
+/*
+ * The iOS build injects src/ios/vproc_shim.h with -include, which defines
+ * syscall-like macros (open/read/fstat/...).
+ *
+ * This file is the implementation of PSCAL's OpenSSH shim and must call the
+ * underlying libc/syscall APIs directly unless it intentionally calls vproc
+ * helpers. Undefine injected macros before libc headers are parsed so normal
+ * declarations remain visible.
+ */
+#ifdef read
+#undef read
+#endif
+#ifdef write
+#undef write
+#endif
+#ifdef dup
+#undef dup
+#endif
+#ifdef dup2
+#undef dup2
+#endif
+#ifdef close
+#undef close
+#endif
+#ifdef fsync
+#undef fsync
+#endif
+#ifdef pipe
+#undef pipe
+#endif
+#ifdef socket
+#undef socket
+#endif
+#ifdef accept
+#undef accept
+#endif
+#ifdef socketpair
+#undef socketpair
+#endif
+#ifdef fstat
+#undef fstat
+#endif
+#ifdef stat
+#undef stat
+#endif
+#ifdef lstat
+#undef lstat
+#endif
+#ifdef chmod
+#undef chmod
+#endif
+#ifdef chown
+#undef chown
+#endif
+#ifdef fchmod
+#undef fchmod
+#endif
+#ifdef fchown
+#undef fchown
+#endif
+#ifdef ioctl
+#undef ioctl
+#endif
+#ifdef lseek
+#undef lseek
+#endif
+#ifdef isatty
+#undef isatty
+#endif
+#ifdef open
+#undef open
+#endif
+#ifdef pthread_create
+#undef pthread_create
+#endif
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -57,6 +133,8 @@ __thread sigjmp_buf pscal_ios_fork_jmpbuf;
 
 static int pscal_ios_translate_fd(int fd);
 static int pscal_ios_register_virtual_tty(void);
+static const char *pscal_ios_effective_path(const char *path,
+    char *buffer, size_t buflen);
 
 static bool pscal_ios_debug_enabled(void) {
     const char *tool_debug = getenv("PSCALI_TOOL_DEBUG");
@@ -109,6 +187,65 @@ static int pscal_ios_askpass_main(int argc, char **argv) {
     fputs(buf, stdout);
     fflush(stdout);
     return 0;
+}
+
+static bool pscal_ios_env_has_absolute_path(const char *name) {
+    if (!name || !*name) {
+        return false;
+    }
+    const char *value = getenv(name);
+    if (!value) {
+        return false;
+    }
+    while (*value == ' ' || *value == '\t') {
+        value++;
+    }
+    return value[0] == '/';
+}
+
+static size_t pscal_ios_trimmed_path_length(const char *path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+    size_t len = strlen(path);
+    while (len > 1 && path[len - 1] == '/') {
+        len--;
+    }
+    return len;
+}
+
+static bool pscal_ios_paths_equal_normalized(const char *lhs, const char *rhs) {
+    size_t lhs_len = pscal_ios_trimmed_path_length(lhs);
+    size_t rhs_len = pscal_ios_trimmed_path_length(rhs);
+    if (lhs_len == 0 || rhs_len == 0 || lhs_len != rhs_len) {
+        return false;
+    }
+    return strncmp(lhs, rhs, lhs_len) == 0;
+}
+
+static bool pscal_ios_path_truncate_is_home_fallback(void) {
+    if (pscal_ios_env_has_absolute_path("PSCALI_CONTAINER_ROOT")) {
+        return false;
+    }
+    const char *truncate = getenv("PATH_TRUNCATE");
+    const char *home = getenv("HOME");
+    if (!truncate || truncate[0] != '/' || !home || home[0] != '/') {
+        return false;
+    }
+    return pscal_ios_paths_equal_normalized(truncate, home);
+}
+
+static bool pscal_ios_path_truncate_context_active(void) {
+    if (pscal_ios_env_has_absolute_path("PSCALI_CONTAINER_ROOT")) {
+        return true;
+    }
+    if (pscal_ios_env_has_absolute_path("PATH_TRUNCATE")) {
+        return !pscal_ios_path_truncate_is_home_fallback();
+    }
+    if (vprocCurrent() != NULL) {
+        return !pscal_ios_path_truncate_is_home_fallback();
+    }
+    return false;
 }
 
 static bool pscal_ios_path_is_devtty(const char *path) {
@@ -280,6 +417,30 @@ static bool pscal_ios_virtual_tty_exists(int fd) {
     return pscal_ios_virtual_tty_snapshot(fd, NULL);
 }
 
+static int pscal_ios_relocate_host_fd(int fd) {
+    if (fd < 0) {
+        return fd;
+    }
+    if (vprocCurrent() == NULL) {
+        return fd;
+    }
+    if (fd >= 256) {
+        return fd;
+    }
+    int relocated = fcntl(fd, F_DUPFD_CLOEXEC, 256);
+    if (relocated < 0 && errno == EINVAL) {
+        relocated = fcntl(fd, F_DUPFD, 256);
+        if (relocated >= 0) {
+            (void)fcntl(relocated, F_SETFD, FD_CLOEXEC);
+        }
+    }
+    if (relocated < 0) {
+        return fd;
+    }
+    (void)close(fd);
+    return relocated;
+}
+
 static bool pscal_ios_stream_uses_session_write(FILE *stream) {
     return stream == stdout || stream == stderr;
 }
@@ -409,6 +570,27 @@ static int pscal_ios_translate_fd(int fd) {
         return fd;
     }
     return host_fd;
+}
+
+static bool pscal_ios_fd_is_vproc_managed(int fd) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return false;
+    }
+    int saved_errno = errno;
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd >= 0) {
+        errno = saved_errno;
+        return true;
+    }
+    struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+    if (pscal_fd) {
+        pscal_fd_close(pscal_fd);
+        errno = saved_errno;
+        return true;
+    }
+    errno = saved_errno;
+    return false;
 }
 
 static bool pscal_ios_session_stdio_matches(int fd) {
@@ -590,27 +772,21 @@ int pscal_ios_open(const char *path, int oflag, ...) {
         return pscal_ios_open_devtty();
     }
 
-    if (!path) {
+    char remapped[PATH_MAX];
+    const char *target_path = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target_path == NULL) {
         errno = EFAULT;
         return -1;
     }
 
-    char remapped_path[PATH_MAX];
-    char expanded_path[PATH_MAX];
-    const char *target_path = path;
-    if (pscal_ios_translate_etc_path(path, remapped_path,
-            sizeof(remapped_path))) {
-        target_path = remapped_path;
-    } else if (!pathTruncateExpand(path, expanded_path, sizeof(expanded_path))) {
-        return -1;
-    } else {
-        target_path = expanded_path;
-    }
-
+    int fd;
     if (has_mode) {
-        return open(target_path, oflag, mode);
+        fd = open(target_path, oflag, mode);
+    } else {
+        fd = open(target_path, oflag);
     }
-    return open(target_path, oflag);
+    return pscal_ios_relocate_host_fd(fd);
 }
 
 int pscal_ios_openat(int fd, const char *path, int oflag, ...) {
@@ -633,22 +809,34 @@ int pscal_ios_openat(int fd, const char *path, int oflag, ...) {
         return pscal_ios_open_devtty();
     }
 
-    char remapped_path[PATH_MAX];
-    char expanded_path[PATH_MAX];
+    char remapped[PATH_MAX];
     const char *target_path = path;
-    if (pscal_ios_translate_etc_path(path, remapped_path,
-            sizeof(remapped_path))) {
-        target_path = remapped_path;
-    } else if (!pathTruncateExpand(path, expanded_path, sizeof(expanded_path))) {
-        return -1;
+    if (path[0] == '/') {
+        target_path = pscal_ios_effective_path(path, remapped, sizeof(remapped));
+        if (target_path == NULL) {
+            errno = EFAULT;
+            return -1;
+        }
     } else {
-        target_path = expanded_path;
+#if defined(AT_FDCWD)
+        if (fd == AT_FDCWD) {
+            target_path = pscal_ios_effective_path(path, remapped, sizeof(remapped));
+            if (target_path == NULL) {
+                errno = EFAULT;
+                return -1;
+            }
+        }
+#endif
     }
 
+    int fd_host = pscal_ios_translate_fd(fd);
+    int opened;
     if (has_mode) {
-        return openat(fd, target_path, oflag, mode);
+        opened = openat(fd_host, target_path, oflag, mode);
+    } else {
+        opened = openat(fd_host, target_path, oflag);
     }
-    return openat(fd, target_path, oflag);
+    return pscal_ios_relocate_host_fd(opened);
 }
 
 ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte) {
@@ -687,46 +875,20 @@ ssize_t pscal_ios_read(int fd, void *buf, size_t nbyte) {
         errno = saved_errno;
     }
     int host_fd = pscal_ios_translate_fd(fd);
-    if (pscalRuntimeStdinIsInteractive()) {
-        VProcSessionStdio *session = vprocSessionStdioCurrent();
-        if (session && session->stdin_host_fd >= 0) {
-            if (session->stdin_host_fd == host_fd) {
-                int flags = fcntl(host_fd, F_GETFL, 0);
-                bool nonblocking = (flags >= 0) && ((flags & O_NONBLOCK) != 0);
-                return vprocSessionReadInputShimMode(buf, nbyte, nonblocking);
-            }
-            struct stat session_st;
-            struct stat fd_st;
-            if (fstat(session->stdin_host_fd, &session_st) == 0 &&
-                fstat(host_fd, &fd_st) == 0 &&
-                session_st.st_dev == fd_st.st_dev &&
-                session_st.st_ino == fd_st.st_ino) {
-                int flags = fcntl(host_fd, F_GETFL, 0);
-                bool nonblocking = (flags >= 0) && ((flags & O_NONBLOCK) != 0);
-                return vprocSessionReadInputShimMode(buf, nbyte, nonblocking);
-            }
-        }
-        struct stat stdin_st;
-        struct stat fd_st;
-        if (fstat(STDIN_FILENO, &stdin_st) == 0 &&
-            fstat(host_fd, &fd_st) == 0 &&
-            stdin_st.st_dev == fd_st.st_dev &&
-            stdin_st.st_ino == fd_st.st_ino) {
-            int flags = fcntl(host_fd, F_GETFL, 0);
-            bool nonblocking = (flags >= 0) && ((flags & O_NONBLOCK) != 0);
-            return vprocSessionReadInputShimMode(buf, nbyte, nonblocking);
-        }
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (session && session->stdin_host_fd >= 0 &&
+        session->stdin_host_fd == host_fd) {
+        int flags = fcntl(host_fd, F_GETFL, 0);
+        bool nonblocking = (flags >= 0) && ((flags & O_NONBLOCK) != 0);
+        return vprocSessionReadInputShimMode(buf, nbyte, nonblocking);
     }
     return read(host_fd, buf, nbyte);
 }
 
 ssize_t pscal_ios_write(int fd, const void *buf, size_t nbyte) {
     VProc *vp = vprocCurrent();
-    if (vp) {
-        ssize_t res = vprocWriteShim(fd, buf, nbyte);
-        if (res >= 0 || errno != EBADF) {
-            return res;
-        }
+    if (vp && pscal_ios_fd_is_vproc_managed(fd)) {
+        return vprocWriteShim(fd, buf, nbyte);
     }
     pscal_ios_virtual_tty entry;
     if (pscal_ios_virtual_tty_snapshot(fd, &entry)) {
@@ -741,6 +903,14 @@ int pscal_ios_close(int fd) {
         int writer = -1;
         pscal_ios_virtual_tty_release(fd, &writer);
         return 0;
+    }
+    if (!pscal_ios_fd_is_vproc_managed(fd)) {
+        int writer = -1;
+        if (pscal_ios_virtual_tty_release(fd, &writer) && writer >= 0 &&
+            writer != fd) {
+            (void)close(pscal_ios_translate_fd(writer));
+        }
+        return close(pscal_ios_translate_fd(fd));
     }
     {
         int res = vprocCloseShim(fd);
@@ -970,6 +1140,26 @@ int pscal_ios_isatty(int fd) {
     return isatty(pscal_ios_translate_fd(fd));
 }
 
+int pscal_ios_fstat(int fd, struct stat *buf) {
+    if (!buf) {
+        errno = EFAULT;
+        return -1;
+    }
+
+    if (fstat(fd, buf) == 0) {
+        return 0;
+    }
+
+    /*
+     * In mixed host/vproc flows (common on iOS OpenSSH), descriptors may be
+     * virtualized. Only fall back when the host fstat path reports EBADF.
+     */
+    if (errno == EBADF && vprocCurrent() != NULL) {
+        return vprocFstatShim(fd, buf);
+    }
+    return -1;
+}
+
 int pscal_ios_ioctl(int fd, unsigned long request, ...) {
     va_list ap;
     void *arg = NULL;
@@ -1030,11 +1220,37 @@ static const char *pscal_ios_effective_path(const char *path,
     if (path == NULL) {
         return NULL;
     }
-    if (pscal_ios_translate_etc_path(path, buffer, buflen)) {
+    const char *source_path = path;
+    char joined[PATH_MAX];
+    if (path[0] != '/') {
+        char cwd[PATH_MAX];
+        if (vprocShellGetcwdShim(cwd, sizeof(cwd)) != NULL && cwd[0] == '/') {
+            int written = snprintf(joined, sizeof(joined), "%s/%s", cwd, path);
+            if (written < 0 || (size_t)written >= sizeof(joined)) {
+                errno = ENAMETOOLONG;
+                return NULL;
+            }
+            source_path = joined;
+        }
+    }
+    if (pscal_ios_translate_etc_path(source_path, buffer, buflen)) {
         return buffer;
     }
-    if (!pathTruncateExpand(path, buffer, buflen)) {
+    if (source_path[0] == '/' && !pscal_ios_path_truncate_context_active()) {
+        return source_path;
+    }
+    if (!pathTruncateExpand(source_path, buffer, buflen)) {
         return NULL;
+    }
+    if (source_path[0] == '/' && strcmp(source_path, buffer) != 0) {
+        struct stat original_st;
+        if (lstat(source_path, &original_st) == 0) {
+            struct stat expanded_st;
+            if (lstat(buffer, &expanded_st) != 0 &&
+                (errno == ENOENT || errno == ENOTDIR)) {
+                return source_path;
+            }
+        }
     }
     return buffer;
 }

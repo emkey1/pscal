@@ -10095,6 +10095,8 @@ pid_t vprocSimulatedForkParentResume(void) {
     return (pid_t)pid;
 }
 
+void vprocSetCommandLabel(int pid, const char *label);
+
 int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
     VProcSimForkState *state = &gVProcSimForkState;
     vprocSimForkLog("[vproc-fork] exec entry=%p active=%d in_child=%d child_vp=%p child_pid=%d",
@@ -10114,6 +10116,14 @@ int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
         errno = ENOENT;
         vprocSimForkLog("[vproc-fork] exec missing entry");
         return -1;
+    }
+    if (state->child_pid > 0 && argv && argv[0] && argv[0][0]) {
+        const char *label = argv[0];
+        const char *slash = strrchr(label, '/');
+        if (slash && slash[1] != '\0') {
+            label = slash + 1;
+        }
+        vprocSetCommandLabel(state->child_pid, label);
     }
     if (vprocSimSpawnChild(state->child_vp, entry, argv) != 0) {
         if (errno == 0) {

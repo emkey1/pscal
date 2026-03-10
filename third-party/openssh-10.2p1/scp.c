@@ -156,6 +156,16 @@ pscal_scp_transport_uses_tool_runner(const char *program)
 	return base != NULL && strcmp(base, "pscal_tool_runner") == 0;
 }
 
+static char *
+pscal_scp_default_transport_program(void)
+{
+	/*
+	 * iOS won't execute staged binaries from writable app data paths
+	 * (Documents/...), so always use in-process ssh transport here.
+	 */
+	return xstrdup("ssh");
+}
+
 #endif
 
 extern char *__progname;
@@ -268,6 +278,9 @@ do_local_cmd(arglist *a)
 	u_int i;
 	int status;
 	pid_t pid;
+	posix_spawnattr_t attr;
+	sigset_t emptyset, sigdef;
+	int spawn_rc;
 
 	if (a->num == 0)
 		fatal("do_local_cmd: no arguments");
@@ -278,13 +291,21 @@ do_local_cmd(arglist *a)
 			fmprintf(stderr, " %s", a->list[i]);
 		fprintf(stderr, "\n");
 	}
-	if ((pid = fork()) == -1)
-		fatal("do_local_cmd: fork: %s", strerror(errno));
-
-	if (pid == 0) {
-		execvp(a->list[0], a->list);
-		perror(a->list[0]);
-		exit(1);
+	if (posix_spawnattr_init(&attr) != 0)
+		fatal("do_local_cmd: posix_spawnattr_init: %s",
+		    strerror(errno));
+	sigemptyset(&emptyset);
+	posix_spawnattr_setsigmask(&attr, &emptyset);
+	sigemptyset(&sigdef);
+	posix_spawnattr_setsigdefault(&attr, &sigdef);
+	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
+	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
+	spawn_rc = posix_spawnp(&pid, a->list[0], NULL, &attr, a->list, environ);
+	posix_spawnattr_destroy(&attr);
+	if (spawn_rc != 0) {
+		errno = spawn_rc;
+		fatal("do_local_cmd: posix_spawnp(%s): %s", a->list[0],
+		    strerror(errno));
 	}
 
 	do_cmd_pid = pid;
@@ -327,10 +348,11 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	volatile int sv_parent[2] = {-1, -1};
 #endif
 #endif
-#if !defined(PSCAL_TARGET_IOS)
 	posix_spawn_file_actions_t actions;
+	posix_spawnattr_t attr;
+	sigset_t emptyset, sigdef;
 	pid_t child = -1;
-#endif
+	int spawn_rc;
 	if (verbose_mode)
 		fmprintf(stderr,
 		    "Executing: program %s host %s, user %s, command %s\n",
@@ -379,46 +401,55 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	addargs(&args, "%s", cmd);
 
 #if defined(PSCAL_TARGET_IOS)
-	if ((*pid = fork()) == -1) {
+	if (!pscal_scp_transport_uses_tool_runner(program)) {
 #ifdef USE_PIPES
-		close(pin_parent[0]);
-		close(pin_parent[1]);
-		close(pout_parent[0]);
-		close(pout_parent[1]);
-#else
-		close(sv_parent[0]);
-		close(sv_parent[1]);
-#endif
-		fprintf(stderr, "scp: fork failed for transport '%s' (%s)\n",
-		    program, strerror(errno));
-		return -1;
-	}
-
-	if (*pid == 0) {
-#ifdef USE_PIPES
-		if (dup2(pin[0], STDIN_FILENO) == -1 ||
-		    dup2(pout[1], STDOUT_FILENO) == -1) {
-			fprintf(stderr, "dup2: %s\n", strerror(errno));
+		if ((*pid = fork()) == -1) {
+			close(pin_parent[0]);
+			close(pin_parent[1]);
+			close(pout_parent[0]);
+			close(pout_parent[1]);
+			fprintf(stderr, "scp: fork failed for transport '%s' (%s)\n",
+			    program, strerror(errno));
+			return -1;
+		}
+		if (*pid == 0) {
+			if (dup2(pin[0], STDIN_FILENO) == -1 ||
+			    dup2(pout[1], STDOUT_FILENO) == -1) {
+				fprintf(stderr, "dup2: %s\n", strerror(errno));
+				_exit(1);
+			}
+			close(pin[1]);
+			close(pout[0]);
+			close(pin[0]);
+			close(pout[1]);
+			execvp(program, args.list);
+			fprintf(stderr, "exec: %s: %s\n", program, strerror(errno));
 			_exit(1);
 		}
-		close(pin[1]);
-		close(pout[0]);
-		close(pin[0]);
-		close(pout[1]);
 #else
-		if (dup2(sv[0], STDIN_FILENO) == -1 ||
-		    dup2(sv[0], STDOUT_FILENO) == -1) {
-			fprintf(stderr, "dup2: %s\n", strerror(errno));
+		if ((*pid = fork()) == -1) {
+			close(sv_parent[0]);
+			close(sv_parent[1]);
+			fprintf(stderr, "scp: fork failed for transport '%s' (%s)\n",
+			    program, strerror(errno));
+			return -1;
+		}
+		if (*pid == 0) {
+			if (dup2(sv[0], STDIN_FILENO) == -1 ||
+			    dup2(sv[0], STDOUT_FILENO) == -1) {
+				fprintf(stderr, "dup2: %s\n", strerror(errno));
+				_exit(1);
+			}
+			close(sv[1]);
+			close(sv[0]);
+			execvp(program, args.list);
+			fprintf(stderr, "exec: %s: %s\n", program, strerror(errno));
 			_exit(1);
 		}
-		close(sv[1]);
-		close(sv[0]);
 #endif
-		execvp(program, args.list);
-		fprintf(stderr, "exec: %s: %s\n", program, strerror(errno));
-		_exit(1);
-	}
-#else
+	} else
+#endif
+	{
 	if (posix_spawn_file_actions_init(&actions) != 0)
 		fatal("posix_spawn_file_actions_init failed");
 #ifdef USE_PIPES
@@ -437,8 +468,6 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawn_file_actions_addclose(&actions, sv[0]);
 #endif
 
-	posix_spawnattr_t attr;
-	sigset_t emptyset, sigdef;
 	posix_spawnattr_init(&attr);
 	sigemptyset(&emptyset);
 	posix_spawnattr_setsigmask(&attr, &emptyset);
@@ -447,26 +476,22 @@ do_cmd(char *program, char *host, char *remuser, int port, int subsystem,
 	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
 	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
 
-	if (access(program, X_OK) != 0) {
-		fprintf(stderr, "scp: transport '%s' not executable: %s\n",
-		    program, strerror(errno));
-		posix_spawn_file_actions_destroy(&actions);
-		posix_spawnattr_destroy(&attr);
-		return -1;
-	}
-
-	if (posix_spawn(&child, program, &actions, &attr, args.list, environ) != 0) {
-		int spawn_err = errno;
-		posix_spawn_file_actions_destroy(&actions);
-		posix_spawnattr_destroy(&attr);
-		fprintf(stderr, "scp: posix_spawn failed for '%s' (%s)\n",
-		    program, strerror(spawn_err));
-		return -1;
-	}
+	if (strchr(program, '/') != NULL)
+		spawn_rc = posix_spawn(&child, program, &actions, &attr, args.list,
+		    environ);
+	else
+		spawn_rc = posix_spawnp(&child, program, &actions, &attr, args.list,
+		    environ);
 	posix_spawn_file_actions_destroy(&actions);
 	posix_spawnattr_destroy(&attr);
+	if (spawn_rc != 0) {
+		errno = spawn_rc;
+		fprintf(stderr, "scp: spawn failed for '%s' (%s)\n",
+		    program, strerror(errno));
+		return -1;
+	}
 	*pid = child;
-#endif
+	}
 
 	/* Parent.  Close the other side, and return the local side. */
 #ifdef USE_PIPES
@@ -572,6 +597,10 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 {
 	int status;
 	pid_t pid;
+	posix_spawn_file_actions_t actions;
+	posix_spawnattr_t attr;
+	sigset_t emptyset, sigdef;
+	int spawn_rc;
 
 	if (verbose_mode)
 		fmprintf(stderr,
@@ -582,34 +611,68 @@ do_cmd2(char *host, char *remuser, int port, char *cmd,
 	if (port == -1)
 		port = sshport;
 
-	/* Fork a child to execute the command on the remote host using ssh. */
-	pid = fork();
-	if (pid == 0) {
-		if (dup2(fdin, 0) == -1)
-			perror("dup2");
-		if (dup2(fdout, 1) == -1)
-			perror("dup2");
-
-		replacearg(&args, 0, "%s", ssh_program);
-		if (port != -1) {
-			addargs(&args, "-p");
-			addargs(&args, "%d", port);
-		}
-		if (remuser != NULL) {
-			addargs(&args, "-l");
-			addargs(&args, "%s", remuser);
-		}
-		addargs(&args, "-oBatchMode=yes");
-		addargs(&args, "--");
-		addargs(&args, "%s", host);
-		addargs(&args, "%s", cmd);
-
-		execvp(ssh_program, args.list);
-		perror(ssh_program);
-		exit(1);
-	} else if (pid == -1) {
-		fatal("fork: %s", strerror(errno));
+	replacearg(&args, 0, "%s", ssh_program);
+	if (port != -1) {
+		addargs(&args, "-p");
+		addargs(&args, "%d", port);
 	}
+	if (remuser != NULL) {
+		addargs(&args, "-l");
+		addargs(&args, "%s", remuser);
+	}
+	addargs(&args, "-oBatchMode=yes");
+	addargs(&args, "--");
+	addargs(&args, "%s", host);
+	addargs(&args, "%s", cmd);
+
+#if defined(PSCAL_TARGET_IOS)
+	if (!pscal_scp_transport_uses_tool_runner(ssh_program)) {
+		pid = fork();
+		if (pid == 0) {
+			if (dup2(fdin, 0) == -1)
+				perror("dup2");
+			if (dup2(fdout, 1) == -1)
+				perror("dup2");
+			execvp(ssh_program, args.list);
+			perror(ssh_program);
+			exit(1);
+		} else if (pid == -1) {
+			fatal("fork: %s", strerror(errno));
+		}
+	} else
+#endif
+	{
+	if (posix_spawn_file_actions_init(&actions) != 0)
+		fatal("do_cmd2: posix_spawn_file_actions_init: %s",
+		    strerror(errno));
+	posix_spawn_file_actions_adddup2(&actions, fdin, STDIN_FILENO);
+	posix_spawn_file_actions_adddup2(&actions, fdout, STDOUT_FILENO);
+
+	if (posix_spawnattr_init(&attr) != 0) {
+		posix_spawn_file_actions_destroy(&actions);
+		fatal("do_cmd2: posix_spawnattr_init: %s", strerror(errno));
+	}
+	sigemptyset(&emptyset);
+	posix_spawnattr_setsigmask(&attr, &emptyset);
+	sigemptyset(&sigdef);
+	posix_spawnattr_setsigdefault(&attr, &sigdef);
+	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
+	    POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_CLOEXEC_DEFAULT);
+
+	if (strchr(ssh_program, '/') != NULL)
+		spawn_rc = posix_spawn(&pid, ssh_program, &actions, &attr,
+		    args.list, environ);
+	else
+		spawn_rc = posix_spawnp(&pid, ssh_program, &actions, &attr,
+		    args.list, environ);
+	posix_spawn_file_actions_destroy(&actions);
+	posix_spawnattr_destroy(&attr);
+	if (spawn_rc != 0) {
+		errno = spawn_rc;
+		fatal("do_cmd2: spawn(%s): %s", ssh_program, strerror(errno));
+	}
+	}
+
 	while (waitpid(pid, &status, 0) == -1)
 		if (errno != EINTR)
 			fatal("do_cmd2: waitpid: %s", strerror(errno));
@@ -726,7 +789,7 @@ main(int argc, char **argv)
 
 #ifdef PSCAL_TARGET_IOS
 	if (ssh_program == _PATH_SSH_PROGRAM) {
-		ssh_program = xstrdup("ssh");
+		ssh_program = pscal_scp_default_transport_program();
 		if (ssh_program == NULL)
 			fatal("xstrdup failed");
 	}

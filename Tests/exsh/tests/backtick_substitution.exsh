@@ -5,5 +5,7 @@ echo "legacy:`printf 'X'\\
 echo "combo:z`printf 1; echo; printf 2`z"
 assign=`printf 'alpha beta'`
 printf "assign:%s\n" "$assign"
+export HOST=`printf ipp`
+echo "exported:$HOST"
 echo plain:`printf foo`
 echo "backtick:end"

@@ -40,6 +40,7 @@ int pscal_ios_tcgetattr(int fd, struct termios *termios_p);
 int pscal_ios_tcsetattr(int fd, int optional_actions,
     const struct termios *termios_p);
 int pscal_ios_isatty(int fd);
+int pscal_ios_fstat(int fd, struct stat *buf);
 int pscal_ios_stat(const char *path, struct stat *buf);
 int pscal_ios_lstat(const char *path, struct stat *buf);
 int pscal_ios_access(const char *path, int mode);
@@ -92,11 +93,15 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define tcsetattr(fd, opt, termios_p) \
     pscal_ios_tcsetattr((fd), (opt), (termios_p))
 # define isatty(fd) pscal_ios_isatty((fd))
+# undef fstat
+# define fstat(fd, buf) pscal_ios_fstat((fd), (buf))
 # define stat(path, buf) pscal_ios_stat((path), (buf))
 # define lstat(path, buf) pscal_ios_lstat((path), (buf))
 # define access(path, mode) pscal_ios_access((path), (mode))
 # define faccessat(fd, path, mode, flag) \
     pscal_ios_faccessat((fd), (path), (mode), (flag))
+# define chdir(path) vprocChdirShim((path))
+# define getcwd(buffer, size) vprocGetcwdShim((buffer), (size))
 # define fopen(path, mode) pscal_ios_fopen((path), (mode))
 # define opendir(path) pscal_ios_opendir((path))
 # define mkdir(path, mode) pscal_ios_mkdir((path), (mode))

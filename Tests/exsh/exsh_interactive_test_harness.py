@@ -671,12 +671,45 @@ def scenario_ctrl_c_at_prompt_keeps_shell_alive(shell: PtyShell) -> tuple[bool, 
     _unlink_if_exists(marker)
     return True, "prompt-level Ctrl-C preserved shell responsiveness"
 
+def scenario_backtick_export_hostname_restores_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    prompt_before = _prompt_count(shell)
+    marker = _new_marker_path("backtick-export-hostname")
+    _unlink_if_exists(marker)
+
+    shell.send_line("export HOST=`hostname`")
+    shell._pump(0.30)
+    end = time.monotonic() + 2.5
+    while time.monotonic() < end:
+        shell._pump(0.10)
+        if _prompt_count(shell) > prompt_before:
+            break
+    if _prompt_count(shell) <= prompt_before:
+        return False, "backtick export did not return prompt"
+
+    shell.send_line("export HOST=`echo hostsub`")
+    shell._pump(0.20)
+    shell.send_line(f"printf '__HOST__%s\\n' \"$HOST\"; touch {_shell_path(marker)}")
+    if not shell.wait_for_path(marker, timeout=1.5):
+        return False, "shell stayed unresponsive after backtick export"
+    _unlink_if_exists(marker)
+    if "__HOST__hostsub" not in shell.tail():
+        return False, "did not observe HOST assignment after backtick export"
+    return True, "backtick export returned prompt and preserved HOST assignment"
+
 
 SCENARIOS: List[Scenario] = [
     Scenario(
         test_id="interactive_ctrl_c_prompt",
         name="Ctrl-C at prompt keeps shell responsive",
         run=scenario_ctrl_c_at_prompt_keeps_shell_alive,
+    ),
+    Scenario(
+        test_id="interactive_backtick_export_hostname_prompt",
+        name="backtick export hostname returns prompt",
+        run=scenario_backtick_export_hostname_restores_prompt,
     ),
     Scenario(
         test_id="interactive_ctrl_c_sleep",

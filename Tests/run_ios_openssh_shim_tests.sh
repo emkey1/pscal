@@ -27,6 +27,7 @@ VPROC_SOURCES=(
 
 cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    -pthread \
+   -include "${ROOT}/src/ios/vproc_shim.h" \
    "${INCLUDE_DIRS[@]}" \
    "${ROOT}/Tests/ios_vproc/test_pscal_ios_shim_fd_lifecycle.c" \
    "${ROOT}/third-party/openssh-10.2p1/pscal_ios_shim.c" \

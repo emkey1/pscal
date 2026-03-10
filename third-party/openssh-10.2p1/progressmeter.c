@@ -78,7 +78,18 @@ static const char unit[] = " KMGT";
 static int
 can_output(void)
 {
-	return (getpgrp() == tcgetpgrp(STDOUT_FILENO));
+	pid_t fg = tcgetpgrp(STDOUT_FILENO);
+#if defined(PSCAL_TARGET_IOS)
+	if (fg == -1) {
+		/*
+		 * iOS virtual PTY sessions may not expose process-group
+		 * semantics to tcgetpgrp(), but still behave as interactive
+		 * terminals for rendering progress output.
+		 */
+		return isatty(STDOUT_FILENO);
+	}
+#endif
+	return (getpgrp() == fg);
 }
 
 /* size needed to format integer type v, using (nbits(v) * log2(10) / 10) */
@@ -132,9 +143,22 @@ refresh_progress_meter(int force_update)
 	int hours, minutes, seconds;
 	int file_len, cols;
 
-	if (file == NULL || (!force_update && !alarm_fired && !win_resized) ||
-	    !can_output())
+	now = monotime_double();
+	if (file == NULL || !can_output())
 		return;
+	if (!force_update && !alarm_fired && !win_resized) {
+#if defined(PSCAL_TARGET_IOS)
+		/*
+		 * SIGALRM delivery is not reliable in PSCAL's threaded iOS
+		 * runtime. Fall back to monotonic-time polling when refresh
+		 * callbacks arrive from transfer I/O.
+		 */
+		if ((now - last_update) < UPDATE_INTERVAL)
+			return;
+#else
+		return;
+#endif
+	}
 	alarm_fired = 0;
 
 	if (win_resized) {
@@ -144,7 +168,6 @@ refresh_progress_meter(int force_update)
 
 	transferred = *counter - (cur_pos ? cur_pos : start_pos);
 	cur_pos = *counter;
-	now = monotime_double();
 	bytes_left = end_pos - cur_pos;
 
 	if (bytes_left > 0)
