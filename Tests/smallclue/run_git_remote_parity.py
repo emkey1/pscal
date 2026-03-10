@@ -257,6 +257,15 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_add_fetch",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--fetch", "backup", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--fetch", "backup", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "refs/remotes/backup/main"]},
+            ],
+        },
+        {
             "id": "remote_get_url_all_fetch",
             "mode": "repo",
             "compare_output": True,
