@@ -266,6 +266,25 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_add_track",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--track", "main", "tracked", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--track", "main", "tracked", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get-all", "remote.tracked.fetch"]},
+            ],
+        },
+        {
+            "id": "remote_add_track_fetch",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--fetch", "--track", "main", "trackedf", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--fetch", "--track", "main", "trackedf", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get-all", "remote.trackedf.fetch"]},
+                {"git_argv": ["rev-parse", "--verify", "refs/remotes/trackedf/main"]},
+            ],
+        },
+        {
             "id": "remote_get_url_all_fetch",
             "mode": "repo",
             "compare_output": True,
