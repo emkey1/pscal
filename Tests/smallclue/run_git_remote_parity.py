@@ -343,6 +343,43 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_add_no_fetch_overrides_fetch",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--fetch", "--no-fetch", "nf", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--fetch", "--no-fetch", "nf", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "--quiet", "refs/remotes/nf/main"]},
+            ],
+        },
+        {
+            "id": "remote_add_no_track_overrides_track",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--track", "main", "--no-track", "ntrk", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--track", "main", "--no-track", "ntrk", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get-all", "remote.ntrk.fetch"]},
+            ],
+        },
+        {
+            "id": "remote_add_no_master_overrides_master",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--master", "main", "--no-master", "nmh", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--master", "main", "--no-master", "nmh", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["symbolic-ref", "--quiet", "refs/remotes/nmh/HEAD"]},
+            ],
+        },
+        {
+            "id": "remote_add_no_mirror_overrides_mirror",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--mirror=fetch", "--no-mirror", "nmr", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--mirror=fetch", "--no-mirror", "nmr", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get", "remote.nmr.mirror"]},
+                {"git_argv": ["config", "--get-all", "remote.nmr.fetch"]},
+            ],
+        },
+        {
             "id": "remote_add_tags",
             "mode": "repo",
             "git_argv": ["remote", "add", "--tags", "tg", "{REMOTE}"],
@@ -532,6 +569,51 @@ def build_cases() -> List[Dict[str, object]]:
             ],
             "checks": [
                 {"git_argv": ["show-ref", "--verify", "--quiet", "refs/tags/v-fetch-no-tags"]},
+            ],
+        },
+        {
+            "id": "fetch_with_dash_n_no_tags",
+            "mode": "repo",
+            "git_argv": ["fetch", "-n", "origin"],
+            "smallclue_argv": ["git", "fetch", "-n", "origin"],
+            "actions": [
+                {"op": "seed_git", "argv": ["tag", "v-fetch-dash-n"]},
+                {"op": "seed_git", "argv": ["push", "origin", "refs/tags/v-fetch-dash-n:refs/tags/v-fetch-dash-n"]},
+            ],
+            "checks": [
+                {"git_argv": ["show-ref", "--verify", "--quiet", "refs/tags/v-fetch-dash-n"]},
+            ],
+        },
+        {
+            "id": "fetch_with_dash_p_prune",
+            "mode": "repo",
+            "git_argv": ["fetch", "-p", "origin"],
+            "smallclue_argv": ["git", "fetch", "-p", "origin"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "fetch-prune-topic"]},
+                {"op": "git", "argv": ["push", "origin", "fetch-prune-topic"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+                {"op": "git", "argv": ["fetch", "origin"]},
+                {"op": "git", "argv": ["push", "origin", "--delete", "fetch-prune-topic"]},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/fetch-prune-topic"]},
+            ],
+        },
+        {
+            "id": "fetch_no_prune_overrides_prune",
+            "mode": "repo",
+            "git_argv": ["fetch", "--prune", "--no-prune", "origin"],
+            "smallclue_argv": ["git", "fetch", "--prune", "--no-prune", "origin"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "fetch-no-prune-topic"]},
+                {"op": "git", "argv": ["push", "origin", "fetch-no-prune-topic"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+                {"op": "git", "argv": ["fetch", "origin"]},
+                {"op": "git", "argv": ["push", "origin", "--delete", "fetch-no-prune-topic"]},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/fetch-no-prune-topic"]},
             ],
         },
         {
