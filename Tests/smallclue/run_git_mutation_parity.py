@@ -1125,6 +1125,26 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "log_pretty_percent_subject",
+            "mode": "repo",
+            "git_argv": ["log", "-n", "1", "--pretty=%s"],
+            "smallclue_argv": ["git", "log", "-n", "1", "--pretty=%s"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_pretty_percent_hash_with_abbrev",
+            "mode": "repo",
+            "git_argv": ["log", "-n", "1", "--pretty=%h", "--abbrev=12"],
+            "smallclue_argv": ["git", "log", "-n", "1", "--pretty=%h", "--abbrev=12"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "log_oneline_decorate_mode_short",
             "mode": "repo",
             "git_argv": ["log", "--oneline", "--decorate=short", "-n", "1"],
