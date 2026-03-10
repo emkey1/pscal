@@ -96,7 +96,17 @@ def apply_actions(repo: Path, actions: List[Dict[str, object]], git_bin: str) ->
             argv = action.get("argv")
             if not isinstance(argv, list) or not argv:
                 raise RuntimeError("git action requires non-empty 'argv' list")
-            proc = run_cmd([git_bin, *[str(a) for a in argv]], repo)
+            env = None
+            env_overrides = action.get("env")
+            if env_overrides is not None:
+                if not isinstance(env_overrides, dict):
+                    raise RuntimeError("git action env must be an object")
+                env = dict(os.environ)
+                for key, value in env_overrides.items():
+                    if not isinstance(key, str):
+                        raise RuntimeError("git action env keys must be strings")
+                    env[key] = str(value)
+            proc = run_cmd([git_bin, *[str(a) for a in argv]], repo, env=env)
             ensure_ok(proc, f"pre-action git {' '.join(str(a) for a in argv)}")
             continue
         raise RuntimeError(f"unsupported action op: {op}")
@@ -221,6 +231,697 @@ def build_cases() -> List[Dict[str, object]]:
             ],
             "checks": [
                 {"git_argv": ["diff", "--cached", "--name-status"]},
+            ],
+        },
+        {
+            "id": "rm_single_tracked_file_quiet",
+            "mode": "repo",
+            "git_argv": ["rm", "-q", "keep.txt"],
+            "smallclue_argv": ["git", "rm", "-q", "keep.txt"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+            ],
+        },
+        {
+            "id": "rm_cached_keeps_worktree_file",
+            "mode": "repo",
+            "git_argv": ["rm", "--cached", "-q", "keep.txt"],
+            "smallclue_argv": ["git", "rm", "--cached", "-q", "keep.txt"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+            ],
+        },
+        {
+            "id": "rm_recursive_directory",
+            "mode": "repo",
+            "git_argv": ["rm", "-r", "-q", "tree"],
+            "smallclue_argv": ["git", "rm", "-r", "-q", "tree"],
+            "actions": [
+                {"op": "write", "path": "tree/a.txt", "text": "a\n"},
+                {"op": "write", "path": "tree/sub/b.txt", "text": "b\n"},
+                {"op": "git", "argv": ["add", "tree/a.txt", "tree/sub/b.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "add tree files"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+            ],
+        },
+        {
+            "id": "mv_tracked_file",
+            "mode": "repo",
+            "git_argv": ["mv", "tracked.txt", "renamed.txt"],
+            "smallclue_argv": ["git", "mv", "tracked.txt", "renamed.txt"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+                {"git_argv": ["ls-files"]},
+            ],
+        },
+        {
+            "id": "clean_force_removes_untracked_file",
+            "mode": "repo",
+            "git_argv": ["clean", "-f", "-q"],
+            "smallclue_argv": ["git", "clean", "-f", "-q"],
+            "actions": [{"op": "write", "path": "scratch.txt", "text": "scratch\n"}],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "clean_force_removes_untracked_dir_with_d",
+            "mode": "repo",
+            "git_argv": ["clean", "-f", "-d", "-q"],
+            "smallclue_argv": ["git", "clean", "-f", "-d", "-q"],
+            "actions": [{"op": "write", "path": "tmpdir/sub/file.txt", "text": "scratch\n"}],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "clean_x_removes_untracked_and_ignored",
+            "mode": "repo",
+            "git_argv": ["clean", "-f", "-x", "-q"],
+            "smallclue_argv": ["git", "clean", "-f", "-x", "-q"],
+            "actions": [
+                {"op": "write", "path": ".gitignore", "text": "*.tmp\nignored/\n"},
+                {"op": "git", "argv": ["add", ".gitignore"]},
+                {"op": "git", "argv": ["commit", "-m", "add ignore rules"]},
+                {"op": "write", "path": "ignored.tmp", "text": "ignored\n"},
+                {"op": "write", "path": "plain.tmp", "text": "plain\n"},
+                {"op": "write", "path": "ignored/deep/file.txt", "text": "deep\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "clean_X_removes_only_ignored",
+            "mode": "repo",
+            "git_argv": ["clean", "-f", "-X", "-d", "-q"],
+            "smallclue_argv": ["git", "clean", "-f", "-X", "-d", "-q"],
+            "actions": [
+                {"op": "write", "path": ".gitignore", "text": "*.tmp\nignored/\n"},
+                {"op": "git", "argv": ["add", ".gitignore"]},
+                {"op": "git", "argv": ["commit", "-m", "add ignore rules"]},
+                {"op": "write", "path": "ignored.tmp", "text": "ignored\n"},
+                {"op": "write", "path": "plain.tmp", "text": "plain\n"},
+                {"op": "write", "path": "ignored/deep/file.txt", "text": "deep\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "clean_dry_run_preserves_untracked",
+            "mode": "repo",
+            "git_argv": ["clean", "-n", "-d", "-q"],
+            "smallclue_argv": ["git", "clean", "-n", "-d", "-q"],
+            "actions": [
+                {"op": "write", "path": "dry/file.txt", "text": "dry\n"},
+                {"op": "write", "path": "dry.txt", "text": "dry\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "clean_pathspec_single_file",
+            "mode": "repo",
+            "git_argv": ["clean", "-f", "-q", "keep.tmp"],
+            "smallclue_argv": ["git", "clean", "-f", "-q", "keep.tmp"],
+            "actions": [
+                {"op": "write", "path": "keep.tmp", "text": "keep\n"},
+                {"op": "write", "path": "leave.tmp", "text": "leave\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "clean_pathspec_glob",
+            "mode": "repo",
+            "git_argv": ["clean", "-f", "-q", "*.tmp"],
+            "smallclue_argv": ["git", "clean", "-f", "-q", "*.tmp"],
+            "actions": [
+                {"op": "write", "path": "a.tmp", "text": "a\n"},
+                {"op": "write", "path": "b.log", "text": "b\n"},
+                {"op": "write", "path": "dir/c.tmp", "text": "c\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "blame_default_tracked_file",
+            "mode": "repo",
+            "git_argv": ["blame", "tracked.txt"],
+            "smallclue_argv": ["git", "blame", "tracked.txt"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "blame_line_porcelain_tracked_file",
+            "mode": "repo",
+            "git_argv": ["blame", "--line-porcelain", "tracked.txt"],
+            "smallclue_argv": ["git", "blame", "--line-porcelain", "tracked.txt"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "ls_tree_head_default",
+            "mode": "repo",
+            "git_argv": ["ls-tree", "HEAD"],
+            "smallclue_argv": ["git", "ls-tree", "HEAD"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "ls_tree_recursive_name_only",
+            "mode": "repo",
+            "git_argv": ["ls-tree", "-r", "--name-only", "HEAD"],
+            "smallclue_argv": ["git", "ls-tree", "-r", "--name-only", "HEAD"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "ls_tree_path_entry_only",
+            "mode": "repo",
+            "git_argv": ["ls-tree", "HEAD", "tree"],
+            "smallclue_argv": ["git", "ls-tree", "HEAD", "tree"],
+            "actions": [
+                {"op": "write", "path": "tree/a.txt", "text": "a\n"},
+                {"op": "write", "path": "tree/sub/b.txt", "text": "b\n"},
+                {"op": "git", "argv": ["add", "tree/a.txt", "tree/sub/b.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "add tree files for ls-tree"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "ls_tree_path_slash_contents",
+            "mode": "repo",
+            "git_argv": ["ls-tree", "HEAD", "tree/"],
+            "smallclue_argv": ["git", "ls-tree", "HEAD", "tree/"],
+            "actions": [
+                {"op": "write", "path": "tree/a.txt", "text": "a\n"},
+                {"op": "write", "path": "tree/sub/b.txt", "text": "b\n"},
+                {"op": "git", "argv": ["add", "tree/a.txt", "tree/sub/b.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "add tree files for ls-tree slash"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "ls_tree_recursive_dirs_only",
+            "mode": "repo",
+            "git_argv": ["ls-tree", "-r", "-d", "HEAD", "tree"],
+            "smallclue_argv": ["git", "ls-tree", "-r", "-d", "HEAD", "tree"],
+            "actions": [
+                {"op": "write", "path": "tree/a.txt", "text": "a\n"},
+                {"op": "write", "path": "tree/sub/b.txt", "text": "b\n"},
+                {"op": "git", "argv": ["add", "tree/a.txt", "tree/sub/b.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "add tree files for ls-tree dirs"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "describe_always_without_tags",
+            "mode": "repo",
+            "git_argv": ["describe", "--always"],
+            "smallclue_argv": ["git", "describe", "--always"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "describe_annotated_tag_head",
+            "mode": "repo",
+            "git_argv": ["describe"],
+            "smallclue_argv": ["git", "describe"],
+            "actions": [
+                {"op": "git", "argv": ["tag", "-a", "-m", "release", "v1.0.0"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "describe_long_after_tag",
+            "mode": "repo",
+            "git_argv": ["describe", "--long"],
+            "smallclue_argv": ["git", "describe", "--long"],
+            "actions": [
+                {"op": "git", "argv": ["tag", "-a", "-m", "release", "v1.0.0"]},
+                {"op": "append", "path": "tracked.txt", "text": "after tag\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "after tag"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "describe_dirty_suffix",
+            "mode": "repo",
+            "git_argv": ["describe", "--dirty"],
+            "smallclue_argv": ["git", "describe", "--dirty"],
+            "actions": [
+                {"op": "git", "argv": ["tag", "-a", "-m", "release", "v1.0.0"]},
+                {"op": "append", "path": "tracked.txt", "text": "dirty state\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "reflog_default_head",
+            "mode": "repo",
+            "git_argv": ["reflog"],
+            "smallclue_argv": ["git", "reflog"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "reflog_max_count_one",
+            "mode": "repo",
+            "git_argv": ["reflog", "-n", "1"],
+            "smallclue_argv": ["git", "reflog", "-n", "1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "reflog_date_raw",
+            "mode": "repo",
+            "git_argv": ["reflog", "--date=raw", "--max-count=2"],
+            "smallclue_argv": ["git", "reflog", "--date=raw", "--max-count=2"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "reflog_show_main",
+            "mode": "repo",
+            "git_argv": ["reflog", "show", "main", "-n", "1"],
+            "smallclue_argv": ["git", "reflog", "show", "main", "-n", "1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "merge_base_head_parent",
+            "mode": "repo",
+            "git_argv": ["merge-base", "HEAD", "HEAD~1"],
+            "smallclue_argv": ["git", "merge-base", "HEAD", "HEAD~1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "merge_base_all_head_parent",
+            "mode": "repo",
+            "git_argv": ["merge-base", "--all", "HEAD", "HEAD~1"],
+            "smallclue_argv": ["git", "merge-base", "--all", "HEAD", "HEAD~1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "merge_base_is_ancestor_true",
+            "mode": "repo",
+            "git_argv": ["merge-base", "--is-ancestor", "HEAD~1", "HEAD"],
+            "smallclue_argv": ["git", "merge-base", "--is-ancestor", "HEAD~1", "HEAD"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "merge_base_is_ancestor_false",
+            "mode": "repo",
+            "git_argv": ["merge-base", "--is-ancestor", "HEAD", "HEAD~1"],
+            "smallclue_argv": ["git", "merge-base", "--is-ancestor", "HEAD", "HEAD~1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cherry_basic_plus",
+            "mode": "repo",
+            "git_argv": ["cherry", "HEAD~1", "HEAD"],
+            "smallclue_argv": ["git", "cherry", "HEAD~1", "HEAD"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cherry_verbose_abbrev",
+            "mode": "repo",
+            "git_argv": ["cherry", "-v", "--abbrev", "HEAD~1", "HEAD"],
+            "smallclue_argv": ["git", "cherry", "-v", "--abbrev", "HEAD~1", "HEAD"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cherry_patch_equivalent_minus",
+            "mode": "repo",
+            "git_argv": ["cherry", "main", "topic"],
+            "smallclue_argv": ["git", "cherry", "main", "topic"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "topic"]},
+                {"op": "append", "path": "tracked.txt", "text": "equivalent change\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "topic equivalent change"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-01T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-01T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "main"]},
+                {"op": "append", "path": "tracked.txt", "text": "equivalent change\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "main equivalent change"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-02T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-02T00:00:00Z",
+                    },
+                },
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cherry_with_limit",
+            "mode": "repo",
+            "git_argv": ["cherry", "main", "topic", "topic~1"],
+            "smallclue_argv": ["git", "cherry", "main", "topic", "topic~1"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "topic"]},
+                {"op": "append", "path": "tracked.txt", "text": "topic one\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "topic one"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-03T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-03T00:00:00Z",
+                    },
+                },
+                {"op": "append", "path": "tracked.txt", "text": "topic two\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "topic two"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-04T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-04T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "branch_show_current_attached",
+            "mode": "repo",
+            "git_argv": ["branch", "--show-current"],
+            "smallclue_argv": ["git", "branch", "--show-current"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "branch_show_current_detached",
+            "mode": "repo",
+            "git_argv": ["branch", "--show-current"],
+            "smallclue_argv": ["git", "branch", "--show-current"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "--detach", "HEAD~1"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "rev_parse_abbrev_ref_named_branch",
+            "mode": "repo",
+            "git_argv": ["rev-parse", "--abbrev-ref", "topic"],
+            "smallclue_argv": ["git", "rev-parse", "--abbrev-ref", "topic"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "rev_parse_symbolic_full_name_named_branch",
+            "mode": "repo",
+            "git_argv": ["rev-parse", "--symbolic-full-name", "topic"],
+            "smallclue_argv": ["git", "rev-parse", "--symbolic-full-name", "topic"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "rev_parse_abbrev_ref_detached_head",
+            "mode": "repo",
+            "git_argv": ["rev-parse", "--abbrev-ref", "HEAD"],
+            "smallclue_argv": ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "--detach", "HEAD~1"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "rev_parse_symbolic_full_name_detached_head",
+            "mode": "repo",
+            "git_argv": ["rev-parse", "--symbolic-full-name", "HEAD"],
+            "smallclue_argv": ["git", "rev-parse", "--symbolic-full-name", "HEAD"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "--detach", "HEAD~1"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cat_file_type_head_commit",
+            "mode": "repo",
+            "git_argv": ["cat-file", "-t", "HEAD"],
+            "smallclue_argv": ["git", "cat-file", "-t", "HEAD"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cat_file_size_head_blob",
+            "mode": "repo",
+            "git_argv": ["cat-file", "-s", "HEAD:tracked.txt"],
+            "smallclue_argv": ["git", "cat-file", "-s", "HEAD:tracked.txt"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cat_file_pretty_tree",
+            "mode": "repo",
+            "git_argv": ["cat-file", "-p", "HEAD^{tree}"],
+            "smallclue_argv": ["git", "cat-file", "-p", "HEAD^{tree}"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "cat_file_blob_legacy_mode",
+            "mode": "repo",
+            "git_argv": ["cat-file", "blob", "HEAD:tracked.txt"],
+            "smallclue_argv": ["git", "cat-file", "blob", "HEAD:tracked.txt"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "stash_push_quiet",
+            "mode": "repo",
+            "git_argv": ["stash", "push", "-q", "-m", "stash-one"],
+            "smallclue_argv": ["git", "stash", "push", "-q", "-m", "stash-one"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "stash me\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["stash", "list"]},
+            ],
+        },
+        {
+            "id": "stash_pop_quiet",
+            "mode": "repo",
+            "git_argv": ["stash", "pop", "-q"],
+            "smallclue_argv": ["git", "stash", "pop", "-q"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "stash then pop\n"},
+                {"op": "git", "argv": ["stash", "push", "-q", "-m", "seed-pop"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["stash", "list"]},
+            ],
+        },
+        {
+            "id": "stash_drop_specific_entry",
+            "mode": "repo",
+            "git_argv": ["stash", "drop", "stash@{1}"],
+            "smallclue_argv": ["git", "stash", "drop", "stash@{1}"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "one\n"},
+                {"op": "git", "argv": ["stash", "push", "-q", "-m", "seed-one"]},
+                {"op": "append", "path": "tracked.txt", "text": "two\n"},
+                {"op": "git", "argv": ["stash", "push", "-q", "-m", "seed-two"]},
+            ],
+            "checks": [
+                {"git_argv": ["stash", "list"]},
+            ],
+        },
+        {
+            "id": "merge_fast_forward_branch",
+            "mode": "repo",
+            "git_argv": ["merge", "-q", "topic-ff"],
+            "smallclue_argv": ["git", "merge", "-q", "topic-ff"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "topic-ff"]},
+                {"op": "append", "path": "tracked.txt", "text": "topic ff\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "topic fast-forward"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["rev-list", "--count", "HEAD"]},
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+            ],
+        },
+        {
+            "id": "merge_no_ff_creates_merge_commit",
+            "mode": "repo",
+            "git_argv": ["merge", "--no-ff", "-q", "topic-nff"],
+            "smallclue_argv": ["git", "merge", "--no-ff", "-q", "topic-nff"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "topic-nff"]},
+                {"op": "append", "path": "tracked.txt", "text": "topic nff\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "topic no-ff"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["rev-list", "--count", "HEAD"]},
+                {"git_argv": ["show", "--pretty=%P", "-s", "HEAD"]},
+            ],
+        },
+        {
+            "id": "cherry_pick_branch_head",
+            "mode": "repo",
+            "git_argv": ["cherry-pick", "-n", "topic-cp"],
+            "smallclue_argv": ["git", "cherry-pick", "-n", "topic-cp"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "topic-cp"]},
+                {"op": "append", "path": "tracked.txt", "text": "topic cp\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "topic cp"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
+            ],
+        },
+        {
+            "id": "revert_head_commit",
+            "mode": "repo",
+            "git_argv": ["revert", "-n", "HEAD"],
+            "smallclue_argv": ["git", "revert", "-n", "HEAD"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "to-revert\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "to revert"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
+            ],
+        },
+        {
+            "id": "rebase_linear_on_main",
+            "mode": "repo",
+            "git_argv": ["rebase", "main"],
+            "smallclue_argv": ["git", "rebase", "main"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-b", "topic-rb"]},
+                {"op": "append", "path": "tracked.txt", "text": "topic rb\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "topic rebase commit"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+                {"op": "append", "path": "keep.txt", "text": "main rb\n"},
+                {"op": "git", "argv": ["add", "keep.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "main rebase base"]},
+                {"op": "git", "argv": ["checkout", "topic-rb"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["rev-parse", "--abbrev-ref", "HEAD"]},
+                {"git_argv": ["rev-list", "--count", "main..HEAD"]},
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
             ],
         },
         {
