@@ -257,6 +257,29 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "remote_get_url_all_fetch",
+            "mode": "repo",
+            "compare_output": True,
+            "git_argv": ["remote", "get-url", "--all", "origin"],
+            "smallclue_argv": ["git", "remote", "get-url", "--all", "origin"],
+            "actions": [
+                {"op": "git", "argv": ["remote", "set-url", "--add", "origin", "https://example.invalid/extra.git"]},
+            ],
+            "checks": [],
+        },
+        {
+            "id": "remote_get_url_all_push",
+            "mode": "repo",
+            "compare_output": True,
+            "git_argv": ["remote", "get-url", "--push", "--all", "origin"],
+            "smallclue_argv": ["git", "remote", "get-url", "--push", "--all", "origin"],
+            "actions": [
+                {"op": "git", "argv": ["remote", "set-url", "--push", "--add", "origin", "https://example.invalid/push1.git"]},
+                {"op": "git", "argv": ["remote", "set-url", "--push", "--add", "origin", "https://example.invalid/push2.git"]},
+            ],
+            "checks": [],
+        },
+        {
             "id": "remote_set_url_add",
             "mode": "repo",
             "git_argv": ["remote", "set-url", "--add", "origin", "https://example.invalid/extra.git"],
