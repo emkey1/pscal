@@ -408,6 +408,10 @@ int vprocSigsuspendShim(const sigset_t *mask);
 int vprocPthreadSigmaskShim(int how, const sigset_t *set, sigset_t *oldset);
 int vprocRaiseShim(int sig);
 VProcSigHandler vprocSignalShim(int sig, VProcSigHandler handler);
+unsigned int vprocAlarmShim(unsigned int seconds);
+useconds_t vprocUalarmShim(useconds_t useconds, useconds_t interval_useconds);
+int vprocSetitimerShim(int which, const struct itimerval *new_value, struct itimerval *old_value);
+int vprocGetitimerShim(int which, struct itimerval *curr_value);
 /* Indicates when it is safe for interposed libc calls to enter vproc shims. */
 int vprocInterposeReady(void);
 /* True when the thread has been registered as part of a vproc task. */
@@ -714,6 +718,18 @@ static inline int vprocSigtimedwait(int pid, const sigset_t *set, const struct t
     }
     return (rc == -1) ? errno : rc;
 #endif
+}
+static inline unsigned int vprocAlarmShim(unsigned int seconds) {
+    return alarm(seconds);
+}
+static inline useconds_t vprocUalarmShim(useconds_t useconds, useconds_t interval_useconds) {
+    return ualarm(useconds, interval_useconds);
+}
+static inline int vprocSetitimerShim(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+    return setitimer(which, new_value, old_value);
+}
+static inline int vprocGetitimerShim(int which, struct itimerval *curr_value) {
+    return getitimer(which, curr_value);
 }
 static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id; }
 static inline int vprocGetJobId(int pid) { (void)pid; return 0; }

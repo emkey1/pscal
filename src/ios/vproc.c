@@ -3069,6 +3069,9 @@ typedef struct {
     int pending_counts[32];
     int fg_override_pgid;
     struct sigaction actions[32];
+    bool real_timer_active;
+    uint64_t real_timer_deadline_ns;
+    uint64_t real_timer_interval_ns;
     uint64_t start_mono_ns;
 } VProcTaskEntry;
 
@@ -3104,6 +3107,7 @@ typedef struct {
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
 static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 static void vprocClearEntryLocked(VProcTaskEntry *entry);
+static void vprocQueuePendingSignalLocked(VProcTaskEntry *entry, int sig);
 static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
 static void vprocTaskTableRepairLocked(void);
 static int vprocPtyNumForPid(int pid);
@@ -3635,6 +3639,248 @@ static uint64_t vprocNowMonoNs(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (uint64_t)tv.tv_sec * 1000000000ull + (uint64_t)tv.tv_usec * 1000ull;
+}
+
+static int vprocTimespecCmp(const struct timespec *a, const struct timespec *b) {
+    if (!a || !b) {
+        return 0;
+    }
+    if (a->tv_sec < b->tv_sec) {
+        return -1;
+    }
+    if (a->tv_sec > b->tv_sec) {
+        return 1;
+    }
+    if (a->tv_nsec < b->tv_nsec) {
+        return -1;
+    }
+    if (a->tv_nsec > b->tv_nsec) {
+        return 1;
+    }
+    return 0;
+}
+
+static bool vprocRealtimeDeadlineFromMonoNs(uint64_t mono_deadline_ns, struct timespec *out_abs_rt) {
+    if (!out_abs_rt) {
+        return false;
+    }
+    struct timespec mono_now;
+    struct timespec real_now;
+    if (clock_gettime(CLOCK_MONOTONIC, &mono_now) != 0) {
+        return false;
+    }
+    if (clock_gettime(CLOCK_REALTIME, &real_now) != 0) {
+        return false;
+    }
+    uint64_t mono_now_ns = (uint64_t)mono_now.tv_sec * 1000000000ull + (uint64_t)mono_now.tv_nsec;
+    uint64_t delta_ns = 0;
+    if (mono_deadline_ns > mono_now_ns) {
+        delta_ns = mono_deadline_ns - mono_now_ns;
+    }
+    uint64_t sec_add = delta_ns / 1000000000ull;
+    uint64_t nsec_add = delta_ns % 1000000000ull;
+    time_t sec = real_now.tv_sec;
+    long nsec = real_now.tv_nsec;
+    if (sec_add > (uint64_t)LONG_MAX) {
+        sec = (time_t)LONG_MAX;
+        nsec = 999999999L;
+    } else {
+        sec = (time_t)(sec + (time_t)sec_add);
+        nsec = nsec + (long)nsec_add;
+        if (nsec >= 1000000000L) {
+            sec += 1;
+            nsec -= 1000000000L;
+        }
+    }
+    out_abs_rt->tv_sec = sec;
+    out_abs_rt->tv_nsec = nsec;
+    return true;
+}
+
+static bool vprocTimevalValid(const struct timeval *tv) {
+    if (!tv) {
+        return false;
+    }
+    if (tv->tv_sec < 0) {
+        return false;
+    }
+    if (tv->tv_usec < 0 || tv->tv_usec >= 1000000) {
+        return false;
+    }
+    return true;
+}
+
+static uint64_t vprocTimevalToNs(const struct timeval *tv) {
+    if (!tv) {
+        return 0;
+    }
+    return (uint64_t)tv->tv_sec * 1000000000ull + (uint64_t)tv->tv_usec * 1000ull;
+}
+
+static void vprocNsToTimeval(uint64_t ns, struct timeval *tv) {
+    if (!tv) {
+        return;
+    }
+    tv->tv_sec = (time_t)(ns / 1000000000ull);
+    tv->tv_usec = (suseconds_t)((ns % 1000000000ull) / 1000ull);
+}
+
+static unsigned int vprocNsToSecondsCeil(uint64_t ns) {
+    if (ns == 0) {
+        return 0;
+    }
+    uint64_t seconds = (ns + 1000000000ull - 1ull) / 1000000000ull;
+    if (seconds > (uint64_t)UINT_MAX) {
+        return UINT_MAX;
+    }
+    return (unsigned int)seconds;
+}
+
+static uint64_t vprocTaskRealTimerRemainingNsLocked(const VProcTaskEntry *entry, uint64_t now_ns) {
+    if (!entry || !entry->real_timer_active || entry->real_timer_deadline_ns == 0) {
+        return 0;
+    }
+    if (entry->real_timer_deadline_ns <= now_ns) {
+        return 0;
+    }
+    return entry->real_timer_deadline_ns - now_ns;
+}
+
+static bool vprocTaskExpireRealTimerLocked(VProcTaskEntry *entry, uint64_t now_ns) {
+    if (!entry || !entry->real_timer_active || entry->real_timer_deadline_ns == 0) {
+        return false;
+    }
+    if (entry->real_timer_deadline_ns > now_ns) {
+        return false;
+    }
+    vprocQueuePendingSignalLocked(entry, SIGALRM);
+    if (entry->real_timer_interval_ns > 0) {
+        uint64_t interval = entry->real_timer_interval_ns;
+        uint64_t elapsed = now_ns - entry->real_timer_deadline_ns;
+        uint64_t ticks = (elapsed / interval) + 1u;
+        uint64_t advance = interval;
+        if (ticks > 1u) {
+            if (ticks > UINT64_MAX / interval) {
+                advance = interval;
+            } else {
+                advance = ticks * interval;
+            }
+        }
+        if (UINT64_MAX - entry->real_timer_deadline_ns < advance) {
+            entry->real_timer_deadline_ns = now_ns + interval;
+        } else {
+            entry->real_timer_deadline_ns += advance;
+        }
+    } else {
+        entry->real_timer_active = false;
+        entry->real_timer_deadline_ns = 0;
+        entry->real_timer_interval_ns = 0;
+    }
+    return true;
+}
+
+static void vprocTaskFillRealTimerLocked(const VProcTaskEntry *entry, uint64_t now_ns, struct itimerval *out_timer) {
+    if (!out_timer) {
+        return;
+    }
+    memset(out_timer, 0, sizeof(*out_timer));
+    if (!entry || !entry->real_timer_active) {
+        return;
+    }
+    uint64_t remain_ns = vprocTaskRealTimerRemainingNsLocked(entry, now_ns);
+    vprocNsToTimeval(remain_ns, &out_timer->it_value);
+    vprocNsToTimeval(entry->real_timer_interval_ns, &out_timer->it_interval);
+}
+
+static void vprocTaskSetRealTimerLocked(VProcTaskEntry *entry, const struct itimerval *new_timer, uint64_t now_ns) {
+    if (!entry || !new_timer) {
+        return;
+    }
+    uint64_t interval_ns = vprocTimevalToNs(&new_timer->it_interval);
+    uint64_t value_ns = vprocTimevalToNs(&new_timer->it_value);
+    if (value_ns == 0) {
+        entry->real_timer_active = false;
+        entry->real_timer_deadline_ns = 0;
+        entry->real_timer_interval_ns = interval_ns;
+        return;
+    }
+    entry->real_timer_active = true;
+    entry->real_timer_interval_ns = interval_ns;
+    if (UINT64_MAX - now_ns < value_ns) {
+        entry->real_timer_deadline_ns = UINT64_MAX;
+    } else {
+        entry->real_timer_deadline_ns = now_ns + value_ns;
+    }
+}
+
+static int vprocClampTimeoutByCurrentRealTimer(VProc *vp, int timeout_ms, bool *timer_limited) {
+    if (timer_limited) {
+        *timer_limited = false;
+    }
+    if (!vp || timeout_ms == 0) {
+        return timeout_ms;
+    }
+    int pid = vprocPid(vp);
+    if (pid <= 0) {
+        return timeout_ms;
+    }
+    uint64_t remain_ns = 0;
+    bool has_timer = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry && entry->real_timer_active && entry->real_timer_deadline_ns > 0) {
+        uint64_t now_ns = vprocNowMonoNs();
+        remain_ns = vprocTaskRealTimerRemainingNsLocked(entry, now_ns);
+        has_timer = true;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    if (!has_timer) {
+        return timeout_ms;
+    }
+    int timer_ms = 0;
+    if (remain_ns > 0) {
+        uint64_t rounded_ms = (remain_ns + 1000000ull - 1ull) / 1000000ull;
+        if (rounded_ms == 0) {
+            rounded_ms = 1;
+        }
+        if (rounded_ms > (uint64_t)INT_MAX) {
+            timer_ms = INT_MAX;
+        } else {
+            timer_ms = (int)rounded_ms;
+        }
+    }
+    if (timeout_ms < 0 || timer_ms < timeout_ms) {
+        if (timer_limited) {
+            *timer_limited = true;
+        }
+        return timer_ms;
+    }
+    return timeout_ms;
+}
+
+static int vprocWaitUntilTimerOrSignalLocked(VProcTaskEntry *entry,
+                                             const struct timespec *abs_deadline_rt,
+                                             bool *timeout_hit) {
+    if (timeout_hit) {
+        *timeout_hit = false;
+    }
+    struct timespec timer_deadline_rt;
+    const struct timespec *wait_abs = abs_deadline_rt;
+    if (entry && entry->real_timer_active && entry->real_timer_deadline_ns > 0) {
+        if (vprocRealtimeDeadlineFromMonoNs(entry->real_timer_deadline_ns, &timer_deadline_rt)) {
+            if (!wait_abs || vprocTimespecCmp(&timer_deadline_rt, wait_abs) < 0) {
+                wait_abs = &timer_deadline_rt;
+            }
+        }
+    }
+    if (!wait_abs) {
+        return pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+    }
+    int rc = pthread_cond_timedwait(&gVProcTasks.cv, &gVProcTasks.mu, wait_abs);
+    if (rc == ETIMEDOUT && timeout_hit) {
+        *timeout_hit = true;
+    }
+    return rc;
 }
 
 static inline bool vprocSigIndexValid(int sig) {
@@ -8591,6 +8837,9 @@ void vprocMarkExit(VProc *vp, int status) {
         entry->continued = false;
         entry->stop_signo = 0;
         entry->zombie = true;
+        entry->real_timer_active = false;
+        entry->real_timer_deadline_ns = 0;
+        entry->real_timer_interval_ns = 0;
         int adopt_parent = vprocAdoptiveParentPidLocked(entry);
         vprocReparentChildrenLocked(vp->pid, adopt_parent);
 
@@ -8639,6 +8888,9 @@ void vprocMarkGroupExit(int pid, int status) {
             peer->group_exit_code = status;
             peer->exited = true;
             peer->zombie = true;
+            peer->real_timer_active = false;
+            peer->real_timer_deadline_ns = 0;
+            peer->real_timer_interval_ns = 0;
             vprocNotifyParentSigchldLocked(peer, VPROC_SIGCHLD_EVENT_EXIT);
         }
         pthread_cond_broadcast(&gVProcTasks.cv);
@@ -9082,6 +9334,9 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
         entry->actions[i].sa_handler = SIG_DFL;
         entry->actions[i].sa_flags = 0;
     }
+    entry->real_timer_active = false;
+    entry->real_timer_deadline_ns = 0;
+    entry->real_timer_interval_ns = 0;
     entry->child_capacity = 0;
     entry->child_count = 0;
     entry->start_mono_ns = 0;
@@ -12324,6 +12579,9 @@ static void vprocDeliverPendingSignalsForCurrent(void) {
     VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
     bool exit_current = false;
     if (entry) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         exit_current = vprocDeliverPendingSignalsLocked(entry);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -12341,6 +12599,9 @@ int vprocSigpending(int pid, sigset_t *set) {
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         uint32_t pending = entry->pending_signals;
         for (int sig = 1; sig < 32; ++sig) {
             if ((pending & vprocSigMask(sig)) || entry->pending_counts[sig] > 0) {
@@ -12374,12 +12635,15 @@ int vprocSigsuspend(int pid, const sigset_t *mask) {
         }
     }
     while (true) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         uint32_t orig_pending = entry->pending_signals;
         vprocDeliverPendingSignalsLocked(entry);
         if (orig_pending != 0) {
             break;
         }
-        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        (void)vprocWaitUntilTimerOrSignalLocked(entry, NULL, NULL);
     }
     entry->blocked_signals = original_blocked;
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -12444,6 +12708,9 @@ int vprocSigwait(int pid, const sigset_t *set, int *sig) {
         return -1;
     }
     while (true) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         for (int s = 1; s < 32; ++s) {
             if (!sigismember(set, s)) continue;
             uint32_t bit = vprocSigMask(s);
@@ -12460,7 +12727,7 @@ int vprocSigwait(int pid, const sigset_t *set, int *sig) {
                 return 0;
             }
         }
-        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        (void)vprocWaitUntilTimerOrSignalLocked(entry, NULL, NULL);
     }
 }
 
@@ -12495,6 +12762,9 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
         return -1;
     }
     while (true) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         for (int s = 1; s < 32; ++s) {
             if (!sigismember(set, s)) continue;
             uint32_t bit = vprocSigMask(s);
@@ -12512,17 +12782,24 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
             }
         }
         if (timeout) {
-            struct timespec now;
-            clock_gettime(CLOCK_REALTIME, &now);
-            if (now.tv_sec > deadline.tv_sec ||
-                (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+            struct timespec now_rt;
+            if (clock_gettime(CLOCK_REALTIME, &now_rt) == 0 &&
+                vprocTimespecCmp(&now_rt, &deadline) >= 0) {
                 pthread_mutex_unlock(&gVProcTasks.mu);
                 errno = EAGAIN;
                 return -1;
             }
-            pthread_cond_timedwait(&gVProcTasks.cv, &gVProcTasks.mu, &deadline);
-        } else {
-            pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        }
+        bool timeout_hit = false;
+        (void)vprocWaitUntilTimerOrSignalLocked(entry, timeout ? &deadline : NULL, &timeout_hit);
+        if (timeout_hit && timeout) {
+            struct timespec now_rt;
+            if (clock_gettime(CLOCK_REALTIME, &now_rt) == 0 &&
+                vprocTimespecCmp(&now_rt, &deadline) >= 0) {
+                pthread_mutex_unlock(&gVProcTasks.mu);
+                errno = EAGAIN;
+                return -1;
+            }
         }
     }
 }
@@ -14334,7 +14611,13 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         return vprocHostPollRaw(fds, nfds, timeout);
     }
     if (!fds || nfds == 0) {
-        return vprocHostPollRaw(fds, nfds, timeout);
+        bool timer_limited = false;
+        int wait_timeout = vprocClampTimeoutByCurrentRealTimer(vp, timeout, &timer_limited);
+        int rc = vprocHostPollRaw(fds, nfds, wait_timeout);
+        if (timer_limited && rc == 0) {
+            vprocDeliverPendingSignalsForCurrent();
+        }
+        return rc;
     }
     if (nfds > (nfds_t)(INT_MAX - 1)) {
         errno = EINVAL;
@@ -14462,12 +14745,14 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
                 host_poll_count++;
             }
 
+            bool timer_limited = false;
+            int effective_wait = vprocClampTimeoutByCurrentRealTimer(vp, wait_timeout, &timer_limited);
             int host_ready = 0;
             if (host_poll_count > 0) {
-                host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_poll_count, wait_timeout);
+                host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_poll_count, effective_wait);
                 if (host_ready < 0) {
                     if (errno == EINTR) {
-                        if (wait_timeout == 0) {
+                        if (effective_wait == 0) {
                             break;
                         }
                         goto vproc_poll_update_timeout;
@@ -14479,10 +14764,17 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
                     }
                     return -1;
                 }
-            } else if (wait_timeout > 0) {
-                usleep((useconds_t)wait_timeout * 1000u);
-            } else if (wait_timeout < 0) {
+            } else if (effective_wait > 0) {
+                usleep((useconds_t)effective_wait * 1000u);
+            } else if (effective_wait < 0) {
                 usleep(1000u);
+            }
+            if (timer_limited && host_ready == 0) {
+                vprocDeliverPendingSignalsForCurrent();
+                if (wait_timeout < 0) {
+                    ready_count = 0;
+                    break;
+                }
             }
 
             int host_ready_count = 0;
@@ -14523,7 +14815,7 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
             }
 
             ready_count = host_ready_count + pscal_ready;
-            if (ready_count > 0 || wait_timeout == 0) {
+            if (ready_count > 0 || effective_wait == 0) {
                 break;
             }
 
@@ -14593,9 +14885,14 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
     }
 
     if (count == 0) {
-        int res = vprocHostPollRaw(NULL, 0, timeout_ms);
+        bool timer_limited = false;
+        int wait_timeout = vprocClampTimeoutByCurrentRealTimer(vp, timeout_ms, &timer_limited);
+        int res = vprocHostPollRaw(NULL, 0, wait_timeout);
         if (res < 0) {
             return -1;
+        }
+        if (timer_limited && res == 0) {
+            vprocDeliverPendingSignalsForCurrent();
         }
         if (readfds) FD_ZERO(readfds);
         if (writefds) FD_ZERO(writefds);
@@ -14957,6 +15254,109 @@ int vprocPthreadSigmaskShim(int how, const sigset_t *set, sigset_t *oldset) {
         return 0;
     }
     return errno ? errno : EINVAL;
+}
+
+int vprocGetitimerShim(int which, struct itimerval *curr_value) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return getitimer(which, curr_value);
+    }
+    if (!curr_value) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (which != ITIMER_REAL) {
+        errno = ENOTSUP;
+        return -1;
+    }
+    int pid = vprocPid(vp);
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    uint64_t now_ns = vprocNowMonoNs();
+    if (vprocTaskExpireRealTimerLocked(entry, now_ns)) {
+        pthread_cond_broadcast(&gVProcTasks.cv);
+    }
+    vprocTaskFillRealTimerLocked(entry, now_ns, curr_value);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return 0;
+}
+
+int vprocSetitimerShim(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return setitimer(which, new_value, old_value);
+    }
+    if (which != ITIMER_REAL) {
+        errno = ENOTSUP;
+        return -1;
+    }
+    if (!new_value || !vprocTimevalValid(&new_value->it_value) || !vprocTimevalValid(&new_value->it_interval)) {
+        errno = EINVAL;
+        return -1;
+    }
+    int pid = vprocPid(vp);
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    uint64_t now_ns = vprocNowMonoNs();
+    if (vprocTaskExpireRealTimerLocked(entry, now_ns)) {
+        pthread_cond_broadcast(&gVProcTasks.cv);
+    }
+    if (old_value) {
+        vprocTaskFillRealTimerLocked(entry, now_ns, old_value);
+    }
+    vprocTaskSetRealTimerLocked(entry, new_value, now_ns);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return 0;
+}
+
+unsigned int vprocAlarmShim(unsigned int seconds) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return alarm(seconds);
+    }
+    struct itimerval old_timer;
+    struct itimerval new_timer;
+    memset(&old_timer, 0, sizeof(old_timer));
+    memset(&new_timer, 0, sizeof(new_timer));
+    new_timer.it_value.tv_sec = (time_t)seconds;
+    if (vprocSetitimerShim(ITIMER_REAL, &new_timer, &old_timer) != 0) {
+        return 0;
+    }
+    uint64_t old_ns = vprocTimevalToNs(&old_timer.it_value);
+    return vprocNsToSecondsCeil(old_ns);
+}
+
+useconds_t vprocUalarmShim(useconds_t useconds, useconds_t interval_useconds) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return ualarm(useconds, interval_useconds);
+    }
+    struct itimerval old_timer;
+    struct itimerval new_timer;
+    memset(&old_timer, 0, sizeof(old_timer));
+    memset(&new_timer, 0, sizeof(new_timer));
+    new_timer.it_value.tv_sec = (time_t)(useconds / 1000000u);
+    new_timer.it_value.tv_usec = (suseconds_t)(useconds % 1000000u);
+    new_timer.it_interval.tv_sec = (time_t)(interval_useconds / 1000000u);
+    new_timer.it_interval.tv_usec = (suseconds_t)(interval_useconds % 1000000u);
+    if (vprocSetitimerShim(ITIMER_REAL, &new_timer, &old_timer) != 0) {
+        return (useconds_t)-1;
+    }
+    uint64_t old_us = (uint64_t)old_timer.it_value.tv_sec * 1000000ull + (uint64_t)old_timer.it_value.tv_usec;
+    if (old_us > (uint64_t)UINT_MAX) {
+        return (useconds_t)UINT_MAX;
+    }
+    return (useconds_t)old_us;
 }
 
 int vprocRaiseShim(int sig) {

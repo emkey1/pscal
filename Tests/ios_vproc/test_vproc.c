@@ -1800,6 +1800,121 @@ static void assert_sigtimedwait_rejects_invalid_timeout(void) {
     vprocDestroy(vp);
 }
 
+static void assert_itimer_real_pending_when_blocked(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    vprocRegisterThread(vp, pthread_self());
+    int pid = vprocPid(vp);
+
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGALRM);
+    assert(vprocSigprocmask(pid, SIG_BLOCK, &block, NULL) == 0);
+
+    struct itimerval timer;
+    memset(&timer, 0, sizeof(timer));
+    timer.it_value.tv_usec = 50000; /* 50ms */
+    assert(vprocSetitimerShim(ITIMER_REAL, &timer, NULL) == 0);
+
+    bool saw_pending = false;
+    for (int i = 0; i < 50; ++i) {
+        sigset_t pending;
+        sigemptyset(&pending);
+        assert(vprocSigpending(pid, &pending) == 0);
+        if (sigismember(&pending, SIGALRM) == 1) {
+            saw_pending = true;
+            break;
+        }
+        usleep(5000);
+    }
+    assert(saw_pending);
+
+    struct itimerval now;
+    memset(&now, 0, sizeof(now));
+    assert(vprocGetitimerShim(ITIMER_REAL, &now) == 0);
+    assert(now.it_value.tv_sec == 0);
+    assert(now.it_value.tv_usec == 0);
+
+    sigset_t waitset;
+    sigemptyset(&waitset);
+    sigaddset(&waitset, SIGALRM);
+    int got = 0;
+    assert(vprocSigwait(pid, &waitset, &got) == 0);
+    assert(got == SIGALRM);
+
+    sigset_t pending_after;
+    sigemptyset(&pending_after);
+    assert(vprocSigpending(pid, &pending_after) == 0);
+    assert(sigismember(&pending_after, SIGALRM) == 0);
+
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_sigwait_wakes_for_itimer_real(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    vprocRegisterThread(vp, pthread_self());
+    int pid = vprocPid(vp);
+
+    sigset_t waitset;
+    sigemptyset(&waitset);
+    sigaddset(&waitset, SIGALRM);
+    assert(vprocSigprocmask(pid, SIG_BLOCK, &waitset, NULL) == 0);
+
+    struct itimerval timer;
+    memset(&timer, 0, sizeof(timer));
+    timer.it_value.tv_usec = 30000; /* 30ms */
+    assert(vprocSetitimerShim(ITIMER_REAL, &timer, NULL) == 0);
+
+    int got = 0;
+    assert(vprocSigwait(pid, &waitset, &got) == 0);
+    assert(got == SIGALRM);
+
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_alarm_cancel_returns_remaining(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    vprocRegisterThread(vp, pthread_self());
+    int pid = vprocPid(vp);
+
+    unsigned int old = vprocAlarmShim(2);
+    assert(old == 0);
+    usleep(200000); /* 200ms */
+    old = vprocAlarmShim(0);
+    assert(old >= 1);
+    assert(old <= 2);
+
+    struct itimerval now;
+    memset(&now, 0, sizeof(now));
+    assert(vprocGetitimerShim(ITIMER_REAL, &now) == 0);
+    assert(now.it_value.tv_sec == 0);
+    assert(now.it_value.tv_usec == 0);
+
+    sigset_t pending;
+    sigemptyset(&pending);
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(sigismember(&pending, SIGALRM) == 0);
+
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 static void assert_signal_handler_invoked(void) {
     g_handler_hits = 0;
     g_handler_sig = 0;
@@ -6867,6 +6982,12 @@ int main(void) {
     assert_sigtimedwait_timeout_and_drains();
     fprintf(stderr, "TEST sigtimedwait_rejects_invalid_timeout\n");
     assert_sigtimedwait_rejects_invalid_timeout();
+    fprintf(stderr, "TEST itimer_real_pending_when_blocked\n");
+    assert_itimer_real_pending_when_blocked();
+    fprintf(stderr, "TEST sigwait_wakes_for_itimer_real\n");
+    assert_sigwait_wakes_for_itimer_real();
+    fprintf(stderr, "TEST alarm_cancel_returns_remaining\n");
+    assert_alarm_cancel_returns_remaining();
     fprintf(stderr, "TEST signal_handler_invoked\n");
     assert_signal_handler_invoked();
     fprintf(stderr, "TEST siginfo_handler_invoked\n");

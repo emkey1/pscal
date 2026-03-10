@@ -99,6 +99,10 @@
 #define signal(sig, handler) vprocSignalShim((sig), (handler))
 #define raise(sig) vprocRaiseShim((sig))
 #define pthread_sigmask(how, set, oldset) vprocPthreadSigmaskShim((how), (set), (oldset))
+#define alarm(seconds) vprocAlarmShim((seconds))
+#define ualarm(useconds, interval_useconds) vprocUalarmShim((useconds), (interval_useconds))
+#define setitimer(which, new_value, old_value) vprocSetitimerShim((which), (new_value), (old_value))
+#define getitimer(which, curr_value) vprocGetitimerShim((which), (curr_value))
 
 #endif /* !PSCAL_IOS_SHIM_H */
 
