@@ -311,6 +311,22 @@ def build_cases() -> List[Dict[str, object]]:
             "checks": [],
         },
         {
+            "id": "remote_add_master_head",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--master", "main", "mh", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--master", "main", "mh", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["symbolic-ref", "refs/remotes/mh/HEAD"]},
+            ],
+        },
+        {
+            "id": "remote_add_master_mirror_error",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--mirror=fetch", "--master", "main", "mme", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--mirror=fetch", "--master", "main", "mme", "{REMOTE}"],
+            "checks": [],
+        },
+        {
             "id": "remote_get_url_all_fetch",
             "mode": "repo",
             "compare_output": True,
