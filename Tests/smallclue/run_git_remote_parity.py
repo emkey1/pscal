@@ -907,6 +907,40 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "pull_rebase_equals_true_diverged",
+            "mode": "repo",
+            "git_argv": ["pull", "--rebase=true", "origin", "main"],
+            "smallclue_argv": ["git", "pull", "--rebase=true", "origin", "main"],
+            "actions": [
+                {"op": "append", "path": "README.md", "text": "local-rebase-eq-true\n"},
+                {"op": "git", "argv": ["add", "README.md"]},
+                {"op": "git", "argv": ["commit", "-m", "local rebase eq true"]},
+                {"op": "seed_commit_push", "path": "README.md", "text": "remote-rebase-eq-true\n", "message": "remote rebase eq true"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-list", "--count", "--merges", "HEAD"]},
+                {"git_argv": ["rev-parse", "--verify", "HEAD^"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "pull_rebase_equals_false_diverged",
+            "mode": "repo",
+            "git_argv": ["pull", "--rebase=false", "origin", "main"],
+            "smallclue_argv": ["git", "pull", "--rebase=false", "origin", "main"],
+            "actions": [
+                {"op": "append", "path": "README.md", "text": "local-rebase-eq-false\n"},
+                {"op": "git", "argv": ["add", "README.md"]},
+                {"op": "git", "argv": ["commit", "-m", "local rebase eq false"]},
+                {"op": "seed_commit_push", "path": "README.md", "text": "remote-rebase-eq-false\n", "message": "remote rebase eq false"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-list", "--count", "--merges", "HEAD"]},
+                {"git_argv": ["rev-parse", "--verify", "HEAD^2"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "pull_no_rebase_overrides_rebase",
             "mode": "repo",
             "git_argv": ["pull", "--rebase", "--no-rebase", "origin", "main"],
