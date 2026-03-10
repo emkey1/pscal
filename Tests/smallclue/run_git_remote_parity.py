@@ -162,6 +162,13 @@ def apply_actions(world: Dict[str, Path], actions: List[Dict[str, object]], git_
             ensure_ok(run_cmd([git_bin, "commit", "-m", msg], cwd=world["seed"], env=env), "seed commit update")
             ensure_ok(run_cmd([git_bin, "push", "origin", "main"], cwd=world["seed"], env=env), "seed push update")
             continue
+        if op == "seed_git":
+            argv = [str(x) for x in action.get("argv", [])]
+            ensure_ok(
+                run_cmd([git_bin, *replace_tokens(argv, world)], cwd=world["seed"], env=env),
+                f"action seed git {' '.join(argv)}",
+            )
+            continue
         raise RuntimeError(f"unsupported action op: {op}")
 
 
@@ -499,6 +506,32 @@ def build_cases() -> List[Dict[str, object]]:
             ],
             "checks": [
                 {"git_argv": ["rev-parse", "refs/remotes/origin/main"]},
+            ],
+        },
+        {
+            "id": "fetch_with_tags_option",
+            "mode": "repo",
+            "git_argv": ["fetch", "--tags", "origin"],
+            "smallclue_argv": ["git", "fetch", "--tags", "origin"],
+            "actions": [
+                {"op": "seed_git", "argv": ["tag", "v-fetch-tags"]},
+                {"op": "seed_git", "argv": ["push", "origin", "refs/tags/v-fetch-tags:refs/tags/v-fetch-tags"]},
+            ],
+            "checks": [
+                {"git_argv": ["show-ref", "--verify", "--quiet", "refs/tags/v-fetch-tags"]},
+            ],
+        },
+        {
+            "id": "fetch_with_no_tags_option",
+            "mode": "repo",
+            "git_argv": ["fetch", "--no-tags", "origin"],
+            "smallclue_argv": ["git", "fetch", "--no-tags", "origin"],
+            "actions": [
+                {"op": "seed_git", "argv": ["tag", "v-fetch-no-tags"]},
+                {"op": "seed_git", "argv": ["push", "origin", "refs/tags/v-fetch-no-tags:refs/tags/v-fetch-no-tags"]},
+            ],
+            "checks": [
+                {"git_argv": ["show-ref", "--verify", "--quiet", "refs/tags/v-fetch-no-tags"]},
             ],
         },
         {
