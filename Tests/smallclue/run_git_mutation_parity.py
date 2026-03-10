@@ -493,7 +493,14 @@ def build_cases() -> List[Dict[str, object]]:
                 {"op": "git", "argv": ["tag", "-a", "-m", "release", "v1.0.0"]},
                 {"op": "append", "path": "tracked.txt", "text": "after tag\n"},
                 {"op": "git", "argv": ["add", "tracked.txt"]},
-                {"op": "git", "argv": ["commit", "-m", "after tag"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "after tag"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-01-03T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-01-03T00:00:00Z",
+                    },
+                },
             ],
             "checks": [
                 {"git_argv": ["status", "--porcelain=v1"]},
@@ -701,6 +708,122 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "branch_list_merged_default_head",
+            "mode": "repo",
+            "git_argv": ["branch", "--merged"],
+            "smallclue_argv": ["git", "branch", "--merged"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-merged"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "branch_list_no_merged_default_head",
+            "mode": "repo",
+            "git_argv": ["branch", "--no-merged"],
+            "smallclue_argv": ["git", "branch", "--no-merged"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-q", "-b", "topic-diverge"]},
+                {"op": "append", "path": "tracked.txt", "text": "diverge\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "diverge"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-05T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-05T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "-q", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "branch_list_merged_with_explicit_commit",
+            "mode": "repo",
+            "git_argv": ["branch", "--merged=topic-diverge"],
+            "smallclue_argv": ["git", "branch", "--merged=topic-diverge"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-q", "-b", "topic-diverge"]},
+                {"op": "append", "path": "tracked.txt", "text": "diverge\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "diverge"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-05T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-05T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "-q", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "branch_list_contains_explicit_commit",
+            "mode": "repo",
+            "git_argv": ["branch", "--contains=topic-diverge"],
+            "smallclue_argv": ["git", "branch", "--contains=topic-diverge"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-q", "-b", "topic-diverge"]},
+                {"op": "append", "path": "tracked.txt", "text": "diverge\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "diverge"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-05T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-05T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "-q", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "branch_list_no_contains_explicit_commit",
+            "mode": "repo",
+            "git_argv": ["branch", "--no-contains=topic-diverge"],
+            "smallclue_argv": ["git", "branch", "--no-contains=topic-diverge"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-q", "-b", "topic-diverge"]},
+                {"op": "append", "path": "tracked.txt", "text": "diverge\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "diverge"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-05T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-05T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "-q", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "branch_list_points_at_head",
+            "mode": "repo",
+            "git_argv": ["branch", "--points-at=HEAD"],
+            "smallclue_argv": ["git", "branch", "--points-at=HEAD"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-points"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "rev_parse_abbrev_ref_named_branch",
             "mode": "repo",
             "git_argv": ["rev-parse", "--abbrev-ref", "topic"],
@@ -818,8 +941,8 @@ def build_cases() -> List[Dict[str, object]]:
         {
             "id": "stash_drop_specific_entry",
             "mode": "repo",
-            "git_argv": ["stash", "drop", "stash@{1}"],
-            "smallclue_argv": ["git", "stash", "drop", "stash@{1}"],
+            "git_argv": ["stash", "drop", "-q", "stash@{1}"],
+            "smallclue_argv": ["git", "stash", "drop", "-q", "stash@{1}"],
             "actions": [
                 {"op": "append", "path": "tracked.txt", "text": "one\n"},
                 {"op": "git", "argv": ["stash", "push", "-q", "-m", "seed-one"]},
@@ -863,7 +986,8 @@ def build_cases() -> List[Dict[str, object]]:
             "checks": [
                 {"git_argv": ["status", "--porcelain=v1"]},
                 {"git_argv": ["rev-list", "--count", "HEAD"]},
-                {"git_argv": ["show", "--pretty=%P", "-s", "HEAD"]},
+                {"git_argv": ["rev-list", "--count", "--merges", "HEAD~1..HEAD"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
             ],
         },
         {
@@ -925,6 +1049,62 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "log_oneline_specific_revision",
+            "mode": "repo",
+            "git_argv": ["log", "--oneline", "-n", "1", "HEAD~1"],
+            "smallclue_argv": ["git", "log", "--oneline", "-n", "1", "HEAD~1"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_oneline_range",
+            "mode": "repo",
+            "git_argv": ["log", "--oneline", "main..topic-log"],
+            "smallclue_argv": ["git", "log", "--oneline", "main..topic-log"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-q", "-b", "topic-log"]},
+                {"op": "append", "path": "tracked.txt", "text": "topic log\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-q", "-m", "topic log commit"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-06T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-06T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "-q", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "log_oneline_all",
+            "mode": "repo",
+            "git_argv": ["log", "--oneline", "--all", "-n", "5"],
+            "smallclue_argv": ["git", "log", "--oneline", "--all", "-n", "5"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-q", "-b", "topic-log-all"]},
+                {"op": "append", "path": "tracked.txt", "text": "topic log all\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-q", "-m", "topic log all commit"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-03-07T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-03-07T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "-q", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "commit_quiet_staged_change",
             "mode": "repo",
             "git_argv": ["commit", "-q", "-m", "third change"],
@@ -964,6 +1144,132 @@ def build_cases() -> List[Dict[str, object]]:
             "checks": [
                 {"git_argv": ["rev-list", "--count", "HEAD"]},
                 {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+            ],
+        },
+        {
+            "id": "commit_with_author_override",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "--author=Alt Author <alt@example.com>", "-m", "authored commit"],
+            "smallclue_argv": ["git", "commit", "-q", "--author=Alt Author <alt@example.com>", "-m", "authored commit"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "author override\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%an <%ae>|%cn <%ce>"]},
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "commit_with_signoff",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "-s", "-m", "signed commit"],
+            "smallclue_argv": ["git", "commit", "-q", "-s", "-m", "signed commit"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "signoff\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["log", "-n", "1", "--pretty=format:%(trailers:key=Signed-off-by,valueonly)"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "commit_amend_with_message",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "--amend", "-m", "amended message"],
+            "smallclue_argv": ["git", "commit", "-q", "--amend", "-m", "amended message"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "amend staged\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-q", "-m", "temporary message"]},
+            ],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["rev-list", "--count", "HEAD"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "commit_amend_no_edit_with_staged_changes",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "--amend", "--no-edit"],
+            "smallclue_argv": ["git", "commit", "-q", "--amend", "--no-edit"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "no edit base\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-q", "-m", "keep message"]},
+                {"op": "append", "path": "tracked.txt", "text": "no edit amend\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["rev-list", "--count", "HEAD"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "commit_amend_no_changes_message_only",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "--amend", "-m", "retitle without changes"],
+            "smallclue_argv": ["git", "commit", "-q", "--amend", "-m", "retitle without changes"],
+            "actions": [],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["rev-list", "--count", "HEAD"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "commit_amend_reset_author",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "--amend", "--reset-author", "-m", "reset author amend"],
+            "smallclue_argv": ["git", "commit", "-q", "--amend", "--reset-author", "-m", "reset author amend"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "reset author base\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "git", "argv": ["commit", "-q", "--author=Legacy Author <legacy@example.com>", "-m", "legacy authored"]},
+                {"op": "append", "path": "tracked.txt", "text": "reset author amend\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%an <%ae>|%cn <%ce>|%s"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
+            ],
+        },
+        {
+            "id": "reset_pathspec_unstage_single_file",
+            "mode": "repo",
+            "git_argv": ["reset", "-q", "--", "tracked.txt"],
+            "smallclue_argv": ["git", "reset", "-q", "--", "tracked.txt"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "pathspec one\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
+            ],
+        },
+        {
+            "id": "reset_pathspec_with_revision",
+            "mode": "repo",
+            "git_argv": ["reset", "-q", "HEAD~1", "--", "tracked.txt"],
+            "smallclue_argv": ["git", "reset", "-q", "HEAD~1", "--", "tracked.txt"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "pathspec two\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["diff", "--cached", "--name-status"]},
+                {"git_argv": ["show", ":tracked.txt"]},
             ],
         },
         {
@@ -1024,6 +1330,42 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "branch_force_reset_existing",
+            "mode": "repo",
+            "git_argv": ["branch", "-f", "topic-force", "HEAD~1"],
+            "smallclue_argv": ["git", "branch", "-f", "topic-force", "HEAD~1"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-force"]},
+                {"op": "append", "path": "tracked.txt", "text": "third\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "third"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-01-03T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-01-03T00:00:00Z",
+                    },
+                },
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "topic-force"]},
+                {"git_argv": ["rev-parse", "--verify", "HEAD~1"]},
+            ],
+        },
+        {
+            "id": "branch_copy_existing",
+            "mode": "repo",
+            "git_argv": ["branch", "-c", "copy-src", "copy-dst"],
+            "smallclue_argv": ["git", "branch", "-c", "copy-src", "copy-dst"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "copy-src"]},
+            ],
+            "checks": [
+                {"git_argv": ["show-ref", "--verify", "refs/heads/copy-dst"]},
+                {"git_argv": ["rev-parse", "--verify", "copy-src"]},
+            ],
+        },
+        {
             "id": "branch_rename_existing",
             "mode": "repo",
             "git_argv": ["branch", "-m", "rename-src", "rename-dst"],
@@ -1037,6 +1379,29 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "branch_delete_long_force_option",
+            "mode": "repo",
+            "git_argv": ["branch", "--delete", "--force", "doomed-long"],
+            "smallclue_argv": ["git", "branch", "--delete", "--force", "doomed-long"],
+            "actions": [
+                {"op": "git", "argv": ["checkout", "-q", "-b", "doomed-long"]},
+                {"op": "append", "path": "tracked.txt", "text": "doomed\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-m", "doomed work"],
+                    "env": {
+                        "GIT_AUTHOR_DATE": "2024-01-04T00:00:00Z",
+                        "GIT_COMMITTER_DATE": "2024-01-04T00:00:00Z",
+                    },
+                },
+                {"op": "git", "argv": ["checkout", "-q", "main"]},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--verify", "--quiet", "refs/heads/doomed-long"]},
+            ],
+        },
+        {
             "id": "branch_delete_merged",
             "mode": "repo",
             "git_argv": ["branch", "-d", "doomed"],
@@ -1046,6 +1411,74 @@ def build_cases() -> List[Dict[str, object]]:
             ],
             "checks": [
                 {"git_argv": ["rev-parse", "--verify", "--quiet", "refs/heads/doomed"]},
+            ],
+        },
+        {
+            "id": "branch_set_upstream_named_branch",
+            "mode": "repo",
+            "git_argv": ["branch", "--set-upstream-to=origin/topic-up", "topic-up"],
+            "smallclue_argv": ["git", "branch", "--set-upstream-to=origin/topic-up", "topic-up"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-up"]},
+                {"op": "git", "argv": ["clone", "--bare", ".", "../remote.git"]},
+                {"op": "git", "argv": ["remote", "add", "origin", "../remote.git"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "main"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "topic-up"]},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "topic-up@{upstream}"]},
+            ],
+        },
+        {
+            "id": "branch_set_upstream_current_short_option",
+            "mode": "repo",
+            "git_argv": ["branch", "-u", "origin/topic-cur"],
+            "smallclue_argv": ["git", "branch", "-u", "origin/topic-cur"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-cur"]},
+                {"op": "git", "argv": ["clone", "--bare", ".", "../remote.git"]},
+                {"op": "git", "argv": ["remote", "add", "origin", "../remote.git"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "main"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "topic-cur"]},
+                {"op": "git", "argv": ["checkout", "-q", "topic-cur"]},
+            ],
+            "checks": [
+                {"git_argv": ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]},
+            ],
+        },
+        {
+            "id": "branch_unset_upstream_named_branch",
+            "mode": "repo",
+            "git_argv": ["branch", "--unset-upstream", "topic-unset"],
+            "smallclue_argv": ["git", "branch", "--unset-upstream", "topic-unset"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-unset"]},
+                {"op": "git", "argv": ["clone", "--bare", ".", "../remote.git"]},
+                {"op": "git", "argv": ["remote", "add", "origin", "../remote.git"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "main"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "topic-unset"]},
+                {"op": "git", "argv": ["branch", "--set-upstream-to=origin/topic-unset", "topic-unset"]},
+            ],
+            "checks": [
+                {"git_argv": ["for-each-ref", "--format=%(upstream:short)", "refs/heads/topic-unset"]},
+            ],
+        },
+        {
+            "id": "branch_unset_upstream_current_branch",
+            "mode": "repo",
+            "git_argv": ["branch", "--unset-upstream"],
+            "smallclue_argv": ["git", "branch", "--unset-upstream"],
+            "actions": [
+                {"op": "git", "argv": ["branch", "topic-unset-cur"]},
+                {"op": "git", "argv": ["clone", "--bare", ".", "../remote.git"]},
+                {"op": "git", "argv": ["remote", "add", "origin", "../remote.git"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "main"]},
+                {"op": "git", "argv": ["push", "-q", "origin", "topic-unset-cur"]},
+                {"op": "git", "argv": ["checkout", "-q", "topic-unset-cur"]},
+                {"op": "git", "argv": ["branch", "--set-upstream-to=origin/topic-unset-cur"]},
+            ],
+            "checks": [
+                {"git_argv": ["for-each-ref", "--format=%(upstream:short)", "refs/heads/topic-unset-cur"]},
             ],
         },
         {
@@ -1110,6 +1543,37 @@ def build_cases() -> List[Dict[str, object]]:
             "actions": [],
             "checks": [
                 {"git_argv": ["symbolic-ref", "--quiet", "--short", "HEAD"]},
+            ],
+        },
+        {
+            "id": "checkout_path_from_index",
+            "mode": "repo",
+            "git_argv": ["checkout", "--", "tracked.txt"],
+            "smallclue_argv": ["git", "checkout", "--", "tracked.txt"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "staged line\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {"op": "append", "path": "tracked.txt", "text": "unstaged line\n"},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["show", ":tracked.txt"]},
+                {"git_argv": ["show", "HEAD:tracked.txt"]},
+            ],
+        },
+        {
+            "id": "checkout_treeish_path_updates_index_and_worktree",
+            "mode": "repo",
+            "git_argv": ["checkout", "HEAD~1", "--", "tracked.txt"],
+            "smallclue_argv": ["git", "checkout", "HEAD~1", "--", "tracked.txt"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "new staged line\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["show", ":tracked.txt"]},
+                {"git_argv": ["show", "HEAD~1:tracked.txt"]},
             ],
         },
         {
