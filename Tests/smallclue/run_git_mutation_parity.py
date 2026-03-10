@@ -954,6 +954,19 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "stash_show_name_only",
+            "mode": "repo",
+            "git_argv": ["stash", "show", "--name-only", "stash@{0}"],
+            "smallclue_argv": ["git", "stash", "show", "--name-only", "stash@{0}"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "stash show\n"},
+                {"op": "git", "argv": ["stash", "push", "-q", "-m", "seed-show"]},
+            ],
+            "checks": [
+                {"git_argv": ["stash", "list"]},
+            ],
+        },
+        {
             "id": "merge_fast_forward_branch",
             "mode": "repo",
             "git_argv": ["merge", "-q", "topic-ff"],
