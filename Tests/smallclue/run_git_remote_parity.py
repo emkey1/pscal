@@ -327,6 +327,24 @@ def build_cases() -> List[Dict[str, object]]:
             "checks": [],
         },
         {
+            "id": "remote_add_no_tags",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--no-tags", "nt", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--no-tags", "nt", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get", "remote.nt.tagOpt"]},
+            ],
+        },
+        {
+            "id": "remote_add_tags",
+            "mode": "repo",
+            "git_argv": ["remote", "add", "--tags", "tg", "{REMOTE}"],
+            "smallclue_argv": ["git", "remote", "add", "--tags", "tg", "{REMOTE}"],
+            "checks": [
+                {"git_argv": ["config", "--get", "remote.tg.tagOpt"]},
+            ],
+        },
+        {
             "id": "remote_get_url_all_fetch",
             "mode": "repo",
             "compare_output": True,
