@@ -125,6 +125,8 @@ def run_case(case: Dict[str, object], *, git_bin: str, smallclue: Path) -> CaseR
     sc_argv = [str(x) for x in case.get("smallclue_argv", [])]
     actions = case.get("actions", [])
     checks = case.get("checks", [])
+    compare_stdout = bool(case.get("compare_stdout", True))
+    compare_stderr = bool(case.get("compare_stderr", True))
     if not git_argv or not sc_argv:
         return CaseResult(case_id, False, "bad-case", "missing git_argv or smallclue_argv")
     if not isinstance(actions, list) or not isinstance(checks, list):
@@ -161,12 +163,14 @@ def run_case(case: Dict[str, object], *, git_bin: str, smallclue: Path) -> CaseR
                 f"git={proc_git.returncode} smallclue={proc_sc.returncode}",
             )
 
-        ok, detail = compare_streams(proc_git.stdout, proc_sc.stdout)
-        if not ok:
-            return CaseResult(case_id, False, "stdout", detail)
-        ok, detail = compare_streams(proc_git.stderr, proc_sc.stderr)
-        if not ok:
-            return CaseResult(case_id, False, "stderr", detail)
+        if compare_stdout:
+            ok, detail = compare_streams(proc_git.stdout, proc_sc.stdout)
+            if not ok:
+                return CaseResult(case_id, False, "stdout", detail)
+        if compare_stderr:
+            ok, detail = compare_streams(proc_git.stderr, proc_sc.stderr)
+            if not ok:
+                return CaseResult(case_id, False, "stderr", detail)
 
         for check in checks:
             if not isinstance(check, dict):
@@ -963,6 +967,23 @@ def build_cases() -> List[Dict[str, object]]:
                 {"op": "git", "argv": ["stash", "push", "-q", "-m", "seed-show"]},
             ],
             "checks": [
+                {"git_argv": ["stash", "list"]},
+            ],
+        },
+        {
+            "id": "stash_branch_from_entry",
+            "mode": "repo",
+            "git_argv": ["stash", "branch", "stash-topic", "stash@{0}"],
+            "smallclue_argv": ["git", "stash", "branch", "stash-topic", "stash@{0}"],
+            "compare_stdout": False,
+            "compare_stderr": False,
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "stash branch\n"},
+                {"op": "git", "argv": ["stash", "push", "-q", "-m", "seed-branch"]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["rev-parse", "--abbrev-ref", "HEAD"]},
                 {"git_argv": ["stash", "list"]},
             ],
         },
