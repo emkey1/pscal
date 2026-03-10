@@ -1261,6 +1261,66 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "commit_reuse_message_short_option",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "-C", "HEAD"],
+            "smallclue_argv": ["git", "commit", "-q", "-C", "HEAD"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "reuse source\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-q", "-m", "template message"],
+                    "env": {
+                        "GIT_AUTHOR_NAME": "Template Author",
+                        "GIT_AUTHOR_EMAIL": "template@example.com",
+                    },
+                },
+                {"op": "append", "path": "tracked.txt", "text": "reuse target\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["log", "-n", "1", "--pretty=%an <%ae>|%cn <%ce>"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "commit_amend_reuse_message",
+            "mode": "repo",
+            "git_argv": ["commit", "-q", "--amend", "-C", "HEAD~1"],
+            "smallclue_argv": ["git", "commit", "-q", "--amend", "-C", "HEAD~1"],
+            "actions": [
+                {"op": "append", "path": "tracked.txt", "text": "source base\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-q", "-m", "source reused message"],
+                    "env": {
+                        "GIT_AUTHOR_NAME": "Source Author",
+                        "GIT_AUTHOR_EMAIL": "source@example.com",
+                    },
+                },
+                {"op": "append", "path": "tracked.txt", "text": "target base\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+                {
+                    "op": "git",
+                    "argv": ["commit", "-q", "-m", "target message"],
+                    "env": {
+                        "GIT_AUTHOR_NAME": "Target Author",
+                        "GIT_AUTHOR_EMAIL": "target@example.com",
+                    },
+                },
+                {"op": "append", "path": "tracked.txt", "text": "target amend payload\n"},
+                {"op": "git", "argv": ["add", "tracked.txt"]},
+            ],
+            "checks": [
+                {"git_argv": ["log", "-n", "1", "--pretty=%s"]},
+                {"git_argv": ["log", "-n", "1", "--pretty=%an <%ae>|%cn <%ce>"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "commit_amend_with_message",
             "mode": "repo",
             "git_argv": ["commit", "-q", "--amend", "-m", "amended message"],
