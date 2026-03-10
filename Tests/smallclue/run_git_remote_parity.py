@@ -890,6 +890,40 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "pull_rebase_diverged",
+            "mode": "repo",
+            "git_argv": ["pull", "--rebase", "origin", "main"],
+            "smallclue_argv": ["git", "pull", "--rebase", "origin", "main"],
+            "actions": [
+                {"op": "append", "path": "README.md", "text": "local-rebase-diverge\n"},
+                {"op": "git", "argv": ["add", "README.md"]},
+                {"op": "git", "argv": ["commit", "-m", "local rebase diverge"]},
+                {"op": "seed_commit_push", "path": "README.md", "text": "remote-rebase-diverge\n", "message": "remote rebase diverge"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-list", "--count", "--merges", "HEAD"]},
+                {"git_argv": ["rev-parse", "--verify", "HEAD^"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
+            "id": "pull_no_rebase_overrides_rebase",
+            "mode": "repo",
+            "git_argv": ["pull", "--rebase", "--no-rebase", "origin", "main"],
+            "smallclue_argv": ["git", "pull", "--rebase", "--no-rebase", "origin", "main"],
+            "actions": [
+                {"op": "append", "path": "README.md", "text": "local-no-rebase-diverge\n"},
+                {"op": "git", "argv": ["add", "README.md"]},
+                {"op": "git", "argv": ["commit", "-m", "local no-rebase diverge"]},
+                {"op": "seed_commit_push", "path": "README.md", "text": "remote-no-rebase-diverge\n", "message": "remote no-rebase diverge"},
+            ],
+            "checks": [
+                {"git_argv": ["rev-list", "--count", "--merges", "HEAD"]},
+                {"git_argv": ["rev-parse", "--verify", "HEAD^2"]},
+                {"git_argv": ["status", "--porcelain=v1"]},
+            ],
+        },
+        {
             "id": "push_set_upstream",
             "mode": "repo",
             "git_argv": ["push", "-u", "origin"],
