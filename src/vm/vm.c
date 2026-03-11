@@ -5831,7 +5831,17 @@ dispatch_switch:
                 Value a_val = pop(vm);
                 Value result_val;
 
-                if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    long long ia = a_val.i_val;
+                    long long ib = b_val.i_val;
+                    if (instruction_val == AND) {
+                        result_val = makeInt(ia & ib);
+                    } else if (instruction_val == OR) {
+                        result_val = makeInt(ia | ib);
+                    } else {
+                        result_val = makeInt(ia ^ ib);
+                    }
+                } else if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
                     bool ba = AS_BOOLEAN(a_val);
                     bool bb = AS_BOOLEAN(b_val);
                     if (instruction_val == AND) {
@@ -5941,7 +5951,19 @@ dispatch_switch:
             case SHR: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    long long ia = a_val.i_val;
+                    long long ib = b_val.i_val;
+                    if (ib < 0) {
+                        runtimeError(vm, "Runtime Error: Shift amount cannot be negative.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (instruction_val == SHL) {
+                        push(vm, makeInt(ia << ib));
+                    } else {
+                        push(vm, makeInt(ia >> ib));
+                    }
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib < 0) {
