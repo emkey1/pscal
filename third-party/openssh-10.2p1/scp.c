@@ -166,6 +166,18 @@ pscal_scp_default_transport_program(void)
 	return xstrdup("ssh");
 }
 
+static int
+pscal_scp_follow_symlink_dirs(void)
+{
+	const char *no_follow = getenv("PSCALI_SCP_NO_FOLLOW_SYMLINK_DIRS");
+
+	if (no_follow == NULL || *no_follow == '\0')
+		return 1;
+	if (strcmp(no_follow, "0") == 0 || strcasecmp(no_follow, "false") == 0)
+		return 1;
+	return 0;
+}
+
 #endif
 
 extern char *__progname;
@@ -1698,8 +1710,13 @@ source_sftp(int argc, char *src, char *targ, struct sftp_conn *conn)
 	debug3_f("copying local %s to remote %s", src, abs_dst);
 
 	if (src_is_dir && iamrecursive) {
+#ifdef PSCAL_TARGET_IOS
+		int follow_link_flag = pscal_scp_follow_symlink_dirs();
+#else
+		int follow_link_flag = 1;
+#endif
 		if (sftp_upload_dir(conn, src, abs_dst, pflag,
-		    SFTP_PROGRESS_ONLY, 0, 0, 1, 1) != 0) {
+		    SFTP_PROGRESS_ONLY, 0, 0, follow_link_flag, 1) != 0) {
 			error("failed to upload directory %s to %s", src, targ);
 			errs = 1;
 		}
@@ -1954,8 +1971,14 @@ sink_sftp(int argc, char *dst, const char *src, struct sftp_conn *conn)
 
 		debug("Fetching %s to %s\n", g.gl_pathv[i], abs_dst);
 		if (sftp_globpath_is_dir(g.gl_pathv[i]) && iamrecursive) {
+#ifdef PSCAL_TARGET_IOS
+			int follow_link_flag = pscal_scp_follow_symlink_dirs();
+#else
+			int follow_link_flag = 1;
+#endif
 			if (sftp_download_dir(conn, g.gl_pathv[i], abs_dst,
-			    NULL, pflag, SFTP_PROGRESS_ONLY, 0, 0, 1, 1) == -1)
+			    NULL, pflag, SFTP_PROGRESS_ONLY, 0, 0,
+			    follow_link_flag, 1) == -1)
 				err = -1;
 		} else {
 			if (sftp_download(conn, g.gl_pathv[i], abs_dst, NULL,

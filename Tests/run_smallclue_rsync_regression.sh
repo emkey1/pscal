@@ -9,10 +9,23 @@ if [[ ! -x "${SMALLCLUE}" ]]; then
   exit 1
 fi
 
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "Skipping: native rsync backend not available in PATH" >&2
+  exit 0
+fi
+
 echo "Running smallclue rsync regression test..."
 
 TEST_ROOT="$(mktemp -d "${ROOT}/build/.tmp-rsync-regression.XXXXXX")"
 trap 'rm -rf "${TEST_ROOT}"' EXIT
+
+"${SMALLCLUE}" rsync --version >"${TEST_ROOT}/smallclue-version.out" 2>&1
+rsync --version >"${TEST_ROOT}/native-version.out" 2>&1
+if ! cmp -s "${TEST_ROOT}/smallclue-version.out" "${TEST_ROOT}/native-version.out"; then
+  echo "FAIL: smallclue rsync --version does not match native rsync --version" >&2
+  diff -u "${TEST_ROOT}/native-version.out" "${TEST_ROOT}/smallclue-version.out" >&2 || true
+  exit 1
+fi
 
 mkdir -p "${TEST_ROOT}/src/sub" "${TEST_ROOT}/dst"
 printf "alpha\n" > "${TEST_ROOT}/src/sub/file.txt"
@@ -50,12 +63,6 @@ if [[ -e "${TEST_ROOT}/dst/new.txt" ]]; then
   exit 1
 fi
 
-if ! grep -q "copy " "${TEST_ROOT}/run2.out"; then
-  echo "FAIL: dry-run output did not report planned copy operations" >&2
-  cat "${TEST_ROOT}/run2.out" >&2 || true
-  exit 1
-fi
-
 printf "source-older\n" > "${TEST_ROOT}/src/update.txt"
 sleep 1
 printf "destination-newer\n" > "${TEST_ROOT}/dst/update.txt"
@@ -87,7 +94,11 @@ printf "keep-one\n" > "${TEST_ROOT}/src/filter/keep.txt"
 printf "drop-one\n" > "${TEST_ROOT}/src/filter/drop.log"
 printf "keep-two\n" > "${TEST_ROOT}/src/filter/nested/keep2.txt"
 printf "drop-two\n" > "${TEST_ROOT}/src/filter/nested/drop2.log"
-"${SMALLCLUE}" rsync -av --include="*.txt" "${TEST_ROOT}/src/filter/" "${TEST_ROOT}/dst/filter/" >"${TEST_ROOT}/run6.out" 2>&1
+"${SMALLCLUE}" rsync -av \
+   --include="*/" \
+   --include="*.txt" \
+   --exclude="*" \
+   "${TEST_ROOT}/src/filter/" "${TEST_ROOT}/dst/filter/" >"${TEST_ROOT}/run6.out" 2>&1
 if [[ ! -f "${TEST_ROOT}/dst/filter/keep.txt" || ! -f "${TEST_ROOT}/dst/filter/nested/keep2.txt" ]]; then
   echo "FAIL: --include did not preserve expected *.txt files" >&2
   cat "${TEST_ROOT}/run6.out" >&2 || true
@@ -96,32 +107,6 @@ fi
 if [[ -e "${TEST_ROOT}/dst/filter/drop.log" || -e "${TEST_ROOT}/dst/filter/nested/drop2.log" ]]; then
   echo "FAIL: --include should have omitted non-matching files" >&2
   cat "${TEST_ROOT}/run6.out" >&2 || true
-  exit 1
-fi
-
-REMOTE_HOST="example-remote"
-"${SMALLCLUE}" rsync -avn "${TEST_ROOT}/src/" "${REMOTE_HOST}:/tmp/rsync-dst/" >"${TEST_ROOT}/run7.out" 2>&1
-if ! grep -q "copy ${TEST_ROOT}/src/ -> ${REMOTE_HOST}:/tmp/rsync-dst/" "${TEST_ROOT}/run7.out"; then
-  echo "FAIL: remote upload dry-run did not report planned copy" >&2
-  cat "${TEST_ROOT}/run7.out" >&2 || true
-  exit 1
-fi
-
-"${SMALLCLUE}" rsync -avn "${REMOTE_HOST}:/tmp/rsync-src/" "${TEST_ROOT}/dst/" >"${TEST_ROOT}/run8.out" 2>&1
-if ! grep -q "copy ${REMOTE_HOST}:/tmp/rsync-src/ -> ${TEST_ROOT}/dst/" "${TEST_ROOT}/run8.out"; then
-  echo "FAIL: remote download dry-run did not report planned copy" >&2
-  cat "${TEST_ROOT}/run8.out" >&2 || true
-  exit 1
-fi
-
-if "${SMALLCLUE}" rsync -au "${REMOTE_HOST}:/tmp/rsync-src/file.txt" "${TEST_ROOT}/dst/file.txt" >"${TEST_ROOT}/run9.out" 2>&1; then
-  echo "FAIL: remote -u should currently be rejected" >&2
-  cat "${TEST_ROOT}/run9.out" >&2 || true
-  exit 1
-fi
-if ! grep -q -- "-u/-c/--include/--exclude are not supported for remote transfers yet" "${TEST_ROOT}/run9.out"; then
-  echo "FAIL: remote unsupported-option error message missing" >&2
-  cat "${TEST_ROOT}/run9.out" >&2 || true
   exit 1
 fi
 

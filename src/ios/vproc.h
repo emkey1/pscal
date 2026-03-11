@@ -216,6 +216,8 @@ int vprocChmodShim(const char *path, mode_t mode);
 int vprocChownShim(const char *path, uid_t uid, gid_t gid);
 int vprocFchmodShim(int fd, mode_t mode);
 int vprocFchownShim(int fd, uid_t uid, gid_t gid);
+int vprocUtimesShim(const char *path, const struct timeval times[2]);
+int vprocFutimesShim(int fd, const struct timeval times[2]);
 int vprocMkdirShim(const char *path, mode_t mode);
 int vprocRmdirShim(const char *path);
 int vprocUnlinkShim(const char *path);
@@ -568,6 +570,8 @@ static inline int vprocChmodShim(const char *path, mode_t mode) { return chmod(p
 static inline int vprocChownShim(const char *path, uid_t uid, gid_t gid) { return chown(path, uid, gid); }
 static inline int vprocFchmodShim(int fd, mode_t mode) { return fchmod(fd, mode); }
 static inline int vprocFchownShim(int fd, uid_t uid, gid_t gid) { return fchown(fd, uid, gid); }
+static inline int vprocUtimesShim(const char *path, const struct timeval times[2]) { return utimes(path, times); }
+static inline int vprocFutimesShim(int fd, const struct timeval times[2]) { return futimes(fd, times); }
 static inline int vprocMkdirShim(const char *path, mode_t mode) { return mkdir(path, mode); }
 static inline int vprocRmdirShim(const char *path) { return rmdir(path); }
 static inline int vprocUnlinkShim(const char *path) { return unlink(path); }

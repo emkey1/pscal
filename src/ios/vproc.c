@@ -1299,6 +1299,66 @@ static int vprocHostFchownRaw(int fd, uid_t uid, gid_t gid) {
     return -1;
 }
 
+static int vprocHostUtimesRaw(const char *path, const struct timeval times[2]) {
+    static int (*fn)(const char *, const struct timeval *) = NULL;
+    if (!fn) {
+        fn = (int (*)(const char *, const struct timeval *))vprocResolveSymbol("utimes");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(path, times);
+        vprocInterposeBypassExit();
+        return res;
+    }
+#if defined(AT_FDCWD)
+    struct timespec ts[2];
+    struct timespec *tsp = NULL;
+    if (times) {
+        ts[0].tv_sec = times[0].tv_sec;
+        ts[0].tv_nsec = (long)times[0].tv_usec * 1000L;
+        ts[1].tv_sec = times[1].tv_sec;
+        ts[1].tv_nsec = (long)times[1].tv_usec * 1000L;
+        tsp = ts;
+    }
+    vprocInterposeBypassEnter();
+    int res = utimensat(AT_FDCWD, path, tsp, 0);
+    vprocInterposeBypassExit();
+    return res;
+#endif
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostFutimesRaw(int fd, const struct timeval times[2]) {
+    static int (*fn)(int, const struct timeval *) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, const struct timeval *))vprocResolveSymbol("futimes");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(fd, times);
+        vprocInterposeBypassExit();
+        return res;
+    }
+#if defined(HAVE_FUTIMENS) || defined(__APPLE__)
+    struct timespec ts[2];
+    struct timespec *tsp = NULL;
+    if (times) {
+        ts[0].tv_sec = times[0].tv_sec;
+        ts[0].tv_nsec = (long)times[0].tv_usec * 1000L;
+        ts[1].tv_sec = times[1].tv_sec;
+        ts[1].tv_nsec = (long)times[1].tv_usec * 1000L;
+        tsp = ts;
+    }
+    vprocInterposeBypassEnter();
+    int res = futimens(fd, tsp);
+    vprocInterposeBypassExit();
+    return res;
+#endif
+    errno = ENOSYS;
+    return -1;
+}
+
 static int vprocHostMkdirRaw(const char *path, mode_t mode) {
     static int (*fn)(const char *, mode_t) = NULL;
     if (!fn) {
@@ -8349,6 +8409,18 @@ int vprocDup2(VProc *vp, int fd, int target) {
         errno = EBADF;
         return -1;
     }
+    if (fd == target) {
+        struct pscal_fd *same_pscal = vprocGetPscalFd(vp, fd);
+        if (same_pscal) {
+            pscal_fd_close(same_pscal);
+            return target;
+        }
+        if (vprocTranslateFd(vp, fd) >= 0) {
+            return target;
+        }
+        errno = EBADF;
+        return -1;
+    }
 
     struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
     if (pscal_fd) {
@@ -10148,8 +10220,25 @@ static bool vprocSimForkCloneFdTable(VProc *child, VProc *parent) {
         }
         int duped = vprocCloneFd(clone_entries[i].source_host_fd);
         if (duped < 0) {
-            vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
-            return false;
+            int saved_errno = (errno != 0) ? errno : EIO;
+            /*
+             * Some host descriptors owned by UIKit/WebKit/runtime threads are
+             * not safely duplicable inside the app sandbox. Dropping those
+             * non-stdio descriptors keeps fork-compatible applets (rsync/scp)
+             * functional while preserving required stdin/stdout/stderr wiring.
+             */
+            if (i <= (size_t)STDERR_FILENO) {
+                vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+                errno = saved_errno;
+                return false;
+            }
+            clone_entries[i].kind = VPROC_FD_NONE;
+            clone_entries[i].source_host_fd = -1;
+            if (vprocSimForkDebugEnabled()) {
+                vprocSimForkLog("[vproc-fork] skip unclonable fd=%zu errno=%d",
+                                i, saved_errno);
+            }
+            continue;
         }
         clone_entries[i].cloned_host_fd = duped;
         if (getenv("PSCALI_TOOL_DEBUG") != NULL && i < 8) {
@@ -13685,6 +13774,10 @@ int vprocFchmodShim(int fd, mode_t mode) {
     }
     int host_fd = vprocTranslateFd(vp, fd);
     if (host_fd < 0) {
+        struct stat st;
+        if (vprocHostFstatRaw(fd, &st) == 0) {
+            return vprocHostFchmodRaw(fd, mode);
+        }
         return -1;
     }
     return vprocHostFchmodRaw(host_fd, mode);
@@ -13706,9 +13799,45 @@ int vprocFchownShim(int fd, uid_t uid, gid_t gid) {
     }
     int host_fd = vprocTranslateFd(vp, fd);
     if (host_fd < 0) {
+        struct stat st;
+        if (vprocHostFstatRaw(fd, &st) == 0) {
+            return vprocHostFchownRaw(fd, uid, gid);
+        }
         return -1;
     }
     return vprocHostFchownRaw(host_fd, uid, gid);
+}
+
+int vprocUtimesShim(const char *path, const struct timeval times[2]) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostUtimesRaw(path, times);
+    }
+    char expanded[PATH_MAX];
+    const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
+    return vprocHostUtimesRaw(target ? target : path, times);
+}
+
+int vprocFutimesShim(int fd, const struct timeval times[2]) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostFutimesRaw(fd, times);
+    }
+    struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+    if (pscal_fd) {
+        pscal_fd_close(pscal_fd);
+        errno = EBADF;
+        return -1;
+    }
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd < 0) {
+        struct stat st;
+        if (vprocHostFstatRaw(fd, &st) == 0) {
+            return vprocHostFutimesRaw(fd, times);
+        }
+        return -1;
+    }
+    return vprocHostFutimesRaw(host_fd, times);
 }
 
 int vprocMkdirShim(const char *path, mode_t mode) {

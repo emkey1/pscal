@@ -306,6 +306,9 @@ file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openssh")
 configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
     "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openrsync")
+configure_file(third-party/openrsync/config_pscal.h
+    "${CMAKE_BINARY_DIR}/generated/openrsync/config.h" COPYONLY)
 set(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR "")
 if(NOT PSCAL_PLATFORM_IOS)
     file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
@@ -1141,6 +1144,7 @@ set(SMALLCLUE_SOURCES
     src/smallclue/src/micro_main_stub.c
     src/smallclue/src/nextvi_app.c
     src/smallclue/src/openssh_app.c
+    src/smallclue/src/openrsync_app.c
     src/smallclue/src/vproc_test_app.c
 )
 
@@ -1384,6 +1388,66 @@ set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/sftp.c
     APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_sftp_main)
 set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/ssh-keygen.c
     APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_ssh_keygen_main)
+
+set(PSCAL_OPENRSYNC_ROOT third-party/openrsync)
+set(PSCAL_OPENRSYNC_SOURCES
+    ${PSCAL_OPENRSYNC_ROOT}/blocks.c
+    ${PSCAL_OPENRSYNC_ROOT}/client.c
+    ${PSCAL_OPENRSYNC_ROOT}/compats.c
+    ${PSCAL_OPENRSYNC_ROOT}/copy.c
+    ${PSCAL_OPENRSYNC_ROOT}/downloader.c
+    ${PSCAL_OPENRSYNC_ROOT}/fargs.c
+    ${PSCAL_OPENRSYNC_ROOT}/flist.c
+    ${PSCAL_OPENRSYNC_ROOT}/hash.c
+    ${PSCAL_OPENRSYNC_ROOT}/ids.c
+    ${PSCAL_OPENRSYNC_ROOT}/io.c
+    ${PSCAL_OPENRSYNC_ROOT}/log.c
+    ${PSCAL_OPENRSYNC_ROOT}/main.c
+    ${PSCAL_OPENRSYNC_ROOT}/md4.c
+    ${PSCAL_OPENRSYNC_ROOT}/misc.c
+    ${PSCAL_OPENRSYNC_ROOT}/mkpath.c
+    ${PSCAL_OPENRSYNC_ROOT}/mktemp.c
+    ${PSCAL_OPENRSYNC_ROOT}/receiver.c
+    ${PSCAL_OPENRSYNC_ROOT}/rmatch.c
+    ${PSCAL_OPENRSYNC_ROOT}/rules.c
+    ${PSCAL_OPENRSYNC_ROOT}/sender.c
+    ${PSCAL_OPENRSYNC_ROOT}/server.c
+    ${PSCAL_OPENRSYNC_ROOT}/session.c
+    ${PSCAL_OPENRSYNC_ROOT}/socket.c
+    ${PSCAL_OPENRSYNC_ROOT}/symlinks.c
+    ${PSCAL_OPENRSYNC_ROOT}/uploader.c
+)
+
+if(PSCAL_PLATFORM_IOS OR APPLE)
+    list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENRSYNC_SOURCES})
+endif()
+
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY INCLUDE_DIRECTORIES
+    "${CMAKE_BINARY_DIR}/generated/openrsync"
+    "${CMAKE_SOURCE_DIR}/third-party/openrsync"
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1")
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY COMPILE_OPTIONS
+    "-include${CMAKE_BINARY_DIR}/generated/openrsync/config.h"
+    "-include${CMAKE_SOURCE_DIR}/src/smallclue/src/openrsync_hooks.h")
+if(PSCAL_PLATFORM_IOS)
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY COMPILE_OPTIONS
+    "-include${CMAKE_SOURCE_DIR}/src/smallclue/src/openrsync_ios_shim.h")
+endif()
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY COMPILE_DEFINITIONS
+    err=pscal_openrsync_err
+    errc=pscal_openrsync_errc
+    errx=pscal_openrsync_errx
+    warn=pscal_openrsync_warn
+    warnc=pscal_openrsync_warnc
+    warnx=pscal_openrsync_warnx
+    exit=pscal_openrsync_request_exit
+    getprogname=pscal_openrsync_getprogname)
+set_property(SOURCE ${PSCAL_OPENRSYNC_ROOT}/main.c
+    APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openrsync_main)
 # --- Conditionally add SDL source files ---
 if(SDL)
     list(APPEND PSCAL_CORE_SOURCES

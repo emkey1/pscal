@@ -30,6 +30,8 @@
 #undef chown
 #undef fchmod
 #undef fchown
+#undef utimes
+#undef futimes
 #undef ioctl
 #undef lseek
 #undef isatty
@@ -72,6 +74,8 @@
 #define chown(path, uid, gid) vprocChownShim((path), (uid), (gid))
 #define fchmod(fd, mode) vprocFchmodShim((fd), (mode))
 #define fchown(fd, uid, gid) vprocFchownShim((fd), (uid), (gid))
+#define utimes(path, times) vprocUtimesShim((path), (times))
+#define futimes(fd, times) vprocFutimesShim((fd), (times))
 #define ioctl vprocIoctlShim
 #define lseek vprocLseekShim
 #define isatty vprocIsattyShim

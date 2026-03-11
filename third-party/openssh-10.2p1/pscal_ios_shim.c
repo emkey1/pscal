@@ -92,6 +92,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -1048,12 +1049,17 @@ void pscal_ios_closefrom(int lowfd) {
         /* Never close process-global FDs inside the PSCAL app runtime. */
         return;
     }
+    /*
+     * In the virtualized iOS runtime, closefrom() must operate on virtual
+     * descriptor numbers only. Using the shim-level close path here can match
+     * host fd values by accident and invalidate unrelated virtual mappings.
+     */
     long maxfd = sysconf(_SC_OPEN_MAX);
     if (maxfd <= 0 || maxfd > 32768) {
         maxfd = 32768;
     }
     for (int fd = lowfd; fd < (int)maxfd; ++fd) {
-        (void)vprocCloseShim(fd);
+        (void)vprocClose(vp, fd);
     }
 }
 
@@ -1343,6 +1349,34 @@ int pscal_ios_faccessat(int fd, const char *path, int mode, int flag) {
         return faccessat(fd, target, mode, flag);
     }
     return faccessat(fd, path, mode, flag);
+}
+
+int pscal_ios_utimes(const char *path, const struct timeval times[2]) {
+    char remapped[PATH_MAX];
+    const char *target = pscal_ios_effective_path(path, remapped,
+        sizeof(remapped));
+    if (target == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+    if (times != NULL) {
+        struct timeval tv[2];
+        tv[0] = times[0];
+        tv[1] = times[1];
+        return utimes(target, tv);
+    }
+    return utimes(target, NULL);
+}
+
+int pscal_ios_futimes(int fd, const struct timeval times[2]) {
+    int host_fd = pscal_ios_translate_fd(fd);
+    if (times != NULL) {
+        struct timeval tv[2];
+        tv[0] = times[0];
+        tv[1] = times[1];
+        return futimes(host_fd, tv);
+    }
+    return futimes(host_fd, NULL);
 }
 
 FILE *pscal_ios_fopen(const char *path, const char *mode) {

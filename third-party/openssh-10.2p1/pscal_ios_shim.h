@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <pthread.h>
@@ -45,6 +46,8 @@ int pscal_ios_stat(const char *path, struct stat *buf);
 int pscal_ios_lstat(const char *path, struct stat *buf);
 int pscal_ios_access(const char *path, int mode);
 int pscal_ios_faccessat(int fd, const char *path, int mode, int flag);
+int pscal_ios_utimes(const char *path, const struct timeval times[2]);
+int pscal_ios_futimes(int fd, const struct timeval times[2]);
 FILE *pscal_ios_fopen(const char *path, const char *mode);
 DIR *pscal_ios_opendir(const char *path);
 int pscal_ios_mkdir(const char *path, mode_t mode);
@@ -100,6 +103,8 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define access(path, mode) pscal_ios_access((path), (mode))
 # define faccessat(fd, path, mode, flag) \
     pscal_ios_faccessat((fd), (path), (mode), (flag))
+# define utimes(path, times) pscal_ios_utimes((path), (times))
+# define futimes(fd, times) pscal_ios_futimes((fd), (times))
 # define chdir(path) vprocChdirShim((path))
 # define getcwd(buffer, size) vprocGetcwdShim((buffer), (size))
 # define fopen(path, mode) pscal_ios_fopen((path), (mode))
