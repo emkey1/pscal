@@ -1029,6 +1029,34 @@ def build_cases() -> List[Dict[str, object]]:
             ],
         },
         {
+            "id": "push_dry_run_does_not_update_remote",
+            "mode": "repo",
+            "git_argv": ["push", "--dry-run", "origin", "main:main"],
+            "smallclue_argv": ["git", "push", "--dry-run", "origin", "main:main"],
+            "actions": [
+                {"op": "write", "path": "push_dry_run.txt", "text": "push dry run content\n"},
+                {"op": "git", "argv": ["add", "push_dry_run.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "push dry run commit"]},
+            ],
+            "checks": [
+                {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "rev-list", "--count", "main"]},
+            ],
+        },
+        {
+            "id": "push_dash_n_dry_run_does_not_update_remote",
+            "mode": "repo",
+            "git_argv": ["push", "-n", "origin", "main:main"],
+            "smallclue_argv": ["git", "push", "-n", "origin", "main:main"],
+            "actions": [
+                {"op": "write", "path": "push_dash_n_dry_run.txt", "text": "push -n dry run content\n"},
+                {"op": "git", "argv": ["add", "push_dash_n_dry_run.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "push -n dry run commit"]},
+            ],
+            "checks": [
+                {"mode": "root", "git_argv": ["--git-dir", "{REMOTE}", "rev-list", "--count", "main"]},
+            ],
+        },
+        {
             "id": "push_no_force_overrides_force",
             "mode": "repo",
             "git_argv": ["push", "--force", "--no-force", "origin", "main:main"],
