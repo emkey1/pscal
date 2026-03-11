@@ -88,7 +88,11 @@ static void initGlobalsMutex(void) __attribute__((constructor));
 static void initGlobalsMutex(void) {
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
+#ifdef PTHREAD_MUTEX_RECURSIVE
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+#else
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE_NP);
+#endif
     pthread_mutex_init(&globals_mutex, &attr);
     pthread_mutexattr_destroy(&attr);
 }
