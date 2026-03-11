@@ -150,6 +150,18 @@ def apply_actions(world: Dict[str, Path], actions: List[Dict[str, object]], git_
             argv = [str(x) for x in action.get("argv", [])]
             ensure_ok(run_cmd([git_bin, *replace_tokens(argv, world)], cwd=world["repo"], env=env), f"action git {' '.join(argv)}")
             continue
+        if op == "git_allow_failure":
+            argv = [str(x) for x in action.get("argv", [])]
+            allow_rc_raw = action.get("allow_rc", [1])
+            allow_rc = [int(x) for x in allow_rc_raw] if isinstance(allow_rc_raw, list) else [int(allow_rc_raw)]
+            result = run_cmd([git_bin, *replace_tokens(argv, world)], cwd=world["repo"], env=env)
+            if result.returncode not in allow_rc:
+                raise RuntimeError(
+                    f"action git_allow_failure {' '.join(argv)} failed (rc={result.returncode}, expected one of {allow_rc})\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+            continue
         if op == "seed_commit_push":
             rel = str(action.get("path", "seed_update.txt"))
             text = str(action.get("text", "update\n"))
@@ -848,6 +860,39 @@ def build_cases() -> List[Dict[str, object]]:
             ],
             "checks": [
                 {"git_argv": ["config", "--get-all", "remote.origin.fetch"]},
+            ],
+        },
+        {
+            "id": "merge_abort_without_merge_state",
+            "mode": "repo",
+            "compare_output": True,
+            "git_argv": ["merge", "--abort"],
+            "smallclue_argv": ["git", "merge", "--abort"],
+            "checks": [],
+        },
+        {
+            "id": "merge_abort_after_conflict",
+            "mode": "repo",
+            "git_argv": ["merge", "--abort"],
+            "smallclue_argv": ["git", "merge", "--abort"],
+            "actions": [
+                {"op": "write", "path": "conflict.txt", "text": "base\n"},
+                {"op": "git", "argv": ["add", "conflict.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "add conflict base"]},
+                {"op": "git", "argv": ["checkout", "-b", "topic-conflict"]},
+                {"op": "write", "path": "conflict.txt", "text": "topic\n"},
+                {"op": "git", "argv": ["add", "conflict.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "topic conflict change"]},
+                {"op": "git", "argv": ["checkout", "main"]},
+                {"op": "write", "path": "conflict.txt", "text": "main\n"},
+                {"op": "git", "argv": ["add", "conflict.txt"]},
+                {"op": "git", "argv": ["commit", "-m", "main conflict change"]},
+                {"op": "git_allow_failure", "argv": ["merge", "topic-conflict"], "allow_rc": [1]},
+            ],
+            "checks": [
+                {"git_argv": ["status", "--porcelain=v1"]},
+                {"git_argv": ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]},
+                {"git_argv": ["show", "HEAD:conflict.txt"]},
             ],
         },
         {
