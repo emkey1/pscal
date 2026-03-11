@@ -157,6 +157,8 @@ struct TerminalSettingsView: View {
                             }
                         }
                     }
+                    .accessibilityLabel(copiedColors ? "Copied first tab colors" : "Copy first tab colors")
+                    .accessibilityHint("Copies background and foreground colors from the first tab to the current tab")
                 }
 
                 Section(header: Text("Filesystem Paths")) {
@@ -188,6 +190,7 @@ struct TerminalSettingsView: View {
                         settings.useDocumentsPathForTruncation()
                     }
                     .disabled(!settings.pathTruncationEnabled)
+                    .accessibilityHint("Resets the path truncation to the default Documents directory")
 
                     Text(
                         settings.pathTruncationEnabled

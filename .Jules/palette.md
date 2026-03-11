@@ -12,3 +12,7 @@
 ## 2025-02-18 - Missing Accessibility Hints for Custom Keyboard Accessory Keys
 **Learning:** While custom keyboard accessory keys (like arrows, escape, or symbols) may have basic `accessibilityLabel`s, they often lack an `accessibilityHint`. For a terminal emulator, it's crucial that VoiceOver users understand what these specialized, symbol-only keys actually *do* (e.g., "Moves the cursor up or navigates history" vs just "Up Arrow").
 **Action:** Added detailed `accessibilityHint`s to all icon-only buttons in the terminal accessory bar. Always ensure that `accessibilityHint`s are provided for symbol-based keys that perform complex terminal operations.
+
+## 2025-02-18 - Missing Accessibility Hints on Secondary Options and Dynamic Buttons
+**Learning:** Utilities and supplementary views often have buttons with ambiguous labels or text that dynamically changes upon action (e.g., "Copied!" for 2 seconds). Screen readers can miss the intent of "Use Documents root" or fail to announce state changes clearly.
+**Action:** Always add explicit `accessibilityHint`s describing the outcome of secondary buttons (e.g., "Resets the path truncation..."). For transient state changes, use dynamic `accessibilityLabel`s (e.g., `.accessibilityLabel(copiedColors ? "Copied" : "Copy")`) to ensure the state update is accessible.
