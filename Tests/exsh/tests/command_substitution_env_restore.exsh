@@ -1,0 +1,8 @@
+export TEST_CMD_SUB_AA=1
+export TEST_CMD_SUB_BB=1
+result=$(export TEST_CMD_SUB_CC=3; export TEST_CMD_SUB_DD=4; printf ok)
+printf "result:%s\n" "$result"
+printf "AA:%s\n" "${TEST_CMD_SUB_AA-unset}"
+printf "BB:%s\n" "${TEST_CMD_SUB_BB-unset}"
+printf "CC:%s\n" "${TEST_CMD_SUB_CC-unset}"
+printf "DD:%s\n" "${TEST_CMD_SUB_DD-unset}"

@@ -457,6 +457,15 @@
             "expected_stdout": "cmdsub-retain:start\ncmdsub:func:outer inside:outer after:inner\nfunc:outer\nafter-var:outer\ncmdsub-retain:end"
         },
         {
+            "id": "command_substitution_env_restore",
+            "name": "Command substitution restores the parent environment",
+            "category": "expansion",
+            "description": "Variables exported inside $(...) do not leak into the caller environment.",
+            "script": "Tests/exsh/tests/command_substitution_env_restore.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "result:ok\nAA:1\nBB:1\nCC:unset\nDD:unset"
+        },
+        {
             "id": "repeated_command_execution",
             "name": "Command substitution loops reuse builtins",
             "category": "expansion",

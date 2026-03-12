@@ -1119,6 +1119,7 @@ set(PSCAL_CORE_SOURCES
     src/common/runtime_params.c
     src/common/runtime_tty.c
     src/common/runtime_clipboard.c
+    src/common/env_snapshot.c
     src/common/pscal_hosts.c
     src/common/path_truncate.c
     src/common/path_virtualization.c
