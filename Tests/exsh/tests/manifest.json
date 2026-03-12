@@ -946,6 +946,35 @@
             "expected_stdout": "shebang-fixture"
         },
         {
+            "id": "time_frontend_example",
+            "name": "time runs frontend example scripts",
+            "category": "runtime",
+            "description": "The smallclue time applet should execute frontend shebang programs such as the CLike hello example instead of rejecting them as missing commands.",
+            "script": "Tests/exsh/tests/time_frontend_example.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "time-frontend-status:ok\ntime-frontend-resolve:ok\ntime-frontend-output:ok\ntime-frontend-metrics:ok"
+        },
+        {
+            "id": "frontend_stdin_findprimes_direct",
+            "name": "frontend shebang programs read stdin on iOS",
+            "category": "runtime",
+            "description": "Frontend programs dispatched through the iOS shell path should read stdin correctly during direct execution.",
+            "script": "Tests/exsh/tests/frontend_stdin_findprimes_direct.exsh",
+            "expect": "runtime_ok",
+            "stdin": "10\n",
+            "expected_stdout": "frontend-stdin-direct-status:ok\nfrontend-stdin-direct-output:ok"
+        },
+        {
+            "id": "frontend_stdin_findprimes_time",
+            "name": "time forwards stdin to frontend shebang programs on iOS",
+            "category": "runtime",
+            "description": "The smallclue time applet should preserve stdin when running frontend programs through the iOS shell path.",
+            "script": "Tests/exsh/tests/frontend_stdin_findprimes_time.exsh",
+            "expect": "runtime_ok",
+            "stdin": "10\n",
+            "expected_stdout": "frontend-stdin-time-status:ok\nfrontend-stdin-time-output:ok"
+        },
+        {
             "id": "times_builtin",
             "name": "times reports CPU usage lines",
             "category": "builtins",

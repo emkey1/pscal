@@ -41,6 +41,9 @@ RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable 
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_bg_tool_abs_log_redirect_shell_vproc_ios
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_bg_tool_simple_web_redirect_ios
 RUN_VPROC_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only pipeline_bg_tool_simple_web_redirect_shell_vproc_ios
+RUN_VPROC_TESTS=1 RUN_IOS_TIME_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only time_frontend_example
+RUN_VPROC_TESTS=1 RUN_IOS_FRONTEND_STDIN_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only frontend_stdin_findprimes_direct
+RUN_VPROC_TESTS=1 RUN_IOS_FRONTEND_STDIN_TESTS=1 python "${ROOT}/Tests/exsh/exsh_test_harness.py" --executable "${EXE}" --only frontend_stdin_findprimes_time
 
 # Optional interactive PTY signal regressions. Enable explicitly while
 # debugging local Ctrl-C/Ctrl-Z behavior:

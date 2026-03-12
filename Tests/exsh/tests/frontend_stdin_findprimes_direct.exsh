@@ -1,0 +1,27 @@
+#!/usr/bin/env exsh
+
+if [ "${RUN_IOS_FRONTEND_STDIN_TESTS:-0}" != "1" ]; then
+    exit 77
+fi
+
+tmp=".tmp-frontend-stdin-direct-$$"
+rm -rf "$tmp"
+mkdir "$tmp" || exit 1
+
+./Examples/pascal/base/FindPrimes >"$tmp/out" 2>&1
+status=$?
+
+if [ "$status" -eq 0 ]; then
+    echo "frontend-stdin-direct-status:ok"
+else
+    echo "frontend-stdin-direct-status:fail"
+fi
+
+if grep "Prime numbers found up to 10:" "$tmp/out" >/dev/null 2>&1 &&
+   grep "2 3 5 7" "$tmp/out" >/dev/null 2>&1; then
+    echo "frontend-stdin-direct-output:ok"
+else
+    echo "frontend-stdin-direct-output:fail"
+fi
+
+rm -rf "$tmp"

@@ -3992,8 +3992,11 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
 #if defined(PSCAL_TARGET_IOS)
     FILE *stdin_stream = stdin;
     bool is_stdin_stream = (stream == stdin_stream);
+    bool is_shared_stdin_stream = (is_stdin_stream && pscalRuntimeVmIsSharedFileStream(stream));
     bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
-    if (fd < 0 && is_stdin_stream) {
+    if (is_shared_stdin_stream) {
+        fd = STDIN_FILENO;
+    } else if (fd < 0 && is_stdin_stream) {
         fd = STDIN_FILENO;
     }
 #else
