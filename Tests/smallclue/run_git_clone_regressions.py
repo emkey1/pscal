@@ -140,6 +140,80 @@ def case_clone_recurse_submodules_pathspec(smallclue: Path, git_bin: str) -> Non
             raise RuntimeError("unselected submodule deps/sub2 was cloned despite recurse pathspec")
 
 
+def case_clone_recurse_nested_submodule_pathspec(smallclue: Path, git_bin: str) -> None:
+    env = build_env()
+    with tempfile.TemporaryDirectory(prefix="pscal_git_clone_nested_submodules_") as td:
+        root = Path(td)
+        nested = root / "nested"
+        sub1 = root / "sub1"
+        sub2 = root / "sub2"
+        super_repo = root / "super"
+
+        init_repo(nested, git_bin, env)
+        commit_file(nested, git_bin, env, "nested.txt", "nested\n", "nested")
+
+        init_repo(sub1, git_bin, env)
+        commit_file(sub1, git_bin, env, "sub1.txt", "sub1\n", "sub1")
+        ensure_ok(
+            run_cmd(
+                [git_bin, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "../nested", "deps/nested"],
+                cwd=sub1,
+                env=env,
+            ),
+            "add submodule deps/nested",
+        )
+        ensure_ok(run_cmd([git_bin, "commit", "-q", "-am", "add nested submodule"], cwd=sub1, env=env), "commit nested submodule")
+
+        init_repo(sub2, git_bin, env)
+        commit_file(sub2, git_bin, env, "sub2.txt", "sub2\n", "sub2")
+
+        init_repo(super_repo, git_bin, env)
+        commit_file(super_repo, git_bin, env, "root.txt", "root\n", "root")
+        ensure_ok(
+            run_cmd(
+                [git_bin, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "../sub1", "deps/sub1"],
+                cwd=super_repo,
+                env=env,
+            ),
+            "add submodule deps/sub1",
+        )
+        ensure_ok(
+            run_cmd(
+                [git_bin, "-c", "protocol.file.allow=always", "submodule", "add", "-q", "../sub2", "deps/sub2"],
+                cwd=super_repo,
+                env=env,
+            ),
+            "add submodule deps/sub2",
+        )
+        ensure_ok(run_cmd([git_bin, "commit", "-q", "-am", "add submodules"], cwd=super_repo, env=env), "commit submodules")
+
+        cloned = root / "cloned"
+        result = run_cmd(
+            [
+                str(smallclue),
+                "git",
+                "clone",
+                "--recurse-submodules=deps/sub1/deps/nested",
+                str(super_repo),
+                str(cloned),
+            ],
+            cwd=root,
+            env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"nested pathspec recurse clone failed (rc={result.returncode})\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}"
+            )
+        if not (cloned / "deps" / "sub1" / "sub1.txt").is_file():
+            raise RuntimeError("selected parent submodule deps/sub1 was not cloned for nested recurse pathspec")
+        if not (cloned / "deps" / "sub1" / "deps" / "nested" / "nested.txt").is_file():
+            raise RuntimeError("selected nested submodule deps/sub1/deps/nested was not cloned")
+        if (cloned / "deps" / "sub2" / "sub2.txt").exists():
+            raise RuntimeError("unselected sibling submodule deps/sub2 was cloned during nested recurse pathspec")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -158,6 +232,7 @@ def main() -> int:
     cases = [
         ("clone_scp_implicit_dest", lambda: case_clone_scp_implicit_dest(smallclue)),
         ("clone_recurse_submodules_pathspec", lambda: case_clone_recurse_submodules_pathspec(smallclue, args.git_bin)),
+        ("clone_recurse_nested_submodule_pathspec", lambda: case_clone_recurse_nested_submodule_pathspec(smallclue, args.git_bin)),
     ]
 
     passed = 0
