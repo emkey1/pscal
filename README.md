@@ -112,6 +112,10 @@ PSCAL uses a mix of submodules and vendored source trees:
 - Submodules (tracked/pinned in `.gitmodules`): `src/smallclue`, `third-party/SDL`, `third-party/micro`, `third-party/dvtm`, `third-party/libgit2`, `third-party/openrsync`.
 - Vendored in-tree sources (tracked directly by PSCAL): notably `third-party/nextvi` and `third-party/openssh-10.2p1`.
 
+SmallCLUE note:
+- `src/smallclue/third-party` is bootstrap-generated and intentionally not tracked as git submodules.
+- It is populated by SmallCLUE setup scripts (`src/smallclue/setup_posix_env.sh`, `src/smallclue/setup_ish_env.sh`) via `src/smallclue/fetch_dependencies.sh`.
+
 For SmallCLUE applet coverage (`git`, `ssh/scp/sftp`, `rsync`, etc.), see [src/smallclue/README.md](src/smallclue/README.md).
 
 ## Tests
