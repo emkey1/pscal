@@ -9,6 +9,105 @@ NEXTVI_TLS unsigned int texec, tn;
 static NEXTVI_TLS struct pollfd ufds[1];
 #endif
 
+#if defined(PSCAL_TARGET_IOS)
+static NEXTVI_TLS int term_bp_active = 0;
+static NEXTVI_TLS unsigned int term_bp_seq_len = 0;
+static NEXTVI_TLS unsigned char term_bp_seq[8];
+static NEXTVI_TLS unsigned int term_bp_replay_len = 0;
+static NEXTVI_TLS unsigned int term_bp_replay_pos = 0;
+static NEXTVI_TLS unsigned char term_bp_replay[8];
+
+static const unsigned char term_bp_start_seq[] = {0x1b, '[', '2', '0', '0', '~'};
+static const unsigned char term_bp_end_seq[] = {0x1b, '[', '2', '0', '1', '~'};
+
+static int termBpPopReplay(unsigned char *out)
+{
+	if (!out || term_bp_replay_pos >= term_bp_replay_len)
+		return 0;
+	*out = term_bp_replay[term_bp_replay_pos++];
+	if (term_bp_replay_pos >= term_bp_replay_len) {
+		term_bp_replay_pos = 0;
+		term_bp_replay_len = 0;
+	}
+	return 1;
+}
+
+static int termBpPrefixMatch(const unsigned char *pattern, size_t pattern_len)
+{
+	return term_bp_seq_len <= pattern_len &&
+		memcmp(term_bp_seq, pattern, term_bp_seq_len) == 0;
+}
+
+static int termBpExactMatch(const unsigned char *pattern, size_t pattern_len)
+{
+	return term_bp_seq_len == pattern_len &&
+		memcmp(term_bp_seq, pattern, pattern_len) == 0;
+}
+
+static void termBpQueueReplay(const unsigned char *bytes, unsigned int len)
+{
+	if (!bytes || len == 0)
+		return;
+	if (len > sizeof(term_bp_replay))
+		len = (unsigned int)sizeof(term_bp_replay);
+	memcpy(term_bp_replay, bytes, len);
+	term_bp_replay_len = len;
+	term_bp_replay_pos = 0;
+}
+
+static int termBpFilterRawByte(unsigned char raw, unsigned char *out)
+{
+	if (term_bp_seq_len == 0 && raw != 0x1b) {
+		if (out)
+			*out = raw;
+		return 1;
+	}
+
+	if (term_bp_seq_len < sizeof(term_bp_seq))
+		term_bp_seq[term_bp_seq_len++] = raw;
+	else {
+		termBpQueueReplay(term_bp_seq, term_bp_seq_len);
+		term_bp_seq_len = 0;
+		if (out && termBpPopReplay(out))
+			return 1;
+		if (out)
+			*out = raw;
+		return 1;
+	}
+
+	if (termBpExactMatch(term_bp_start_seq, sizeof(term_bp_start_seq))) {
+		term_bp_active = 1;
+		term_bp_seq_len = 0;
+		return 0;
+	}
+	if (termBpExactMatch(term_bp_end_seq, sizeof(term_bp_end_seq))) {
+		term_bp_active = 0;
+		term_bp_seq_len = 0;
+		return 0;
+	}
+	if (termBpPrefixMatch(term_bp_start_seq, sizeof(term_bp_start_seq)) ||
+			termBpPrefixMatch(term_bp_end_seq, sizeof(term_bp_end_seq)))
+		return 0;
+
+	termBpQueueReplay(term_bp_seq, term_bp_seq_len);
+	term_bp_seq_len = 0;
+	if (out && termBpPopReplay(out))
+		return 1;
+	return 0;
+}
+
+static int termBpFlushPending(unsigned char *out)
+{
+	if (termBpPopReplay(out))
+		return 1;
+	if (term_bp_seq_len == 0)
+		return 0;
+	termBpQueueReplay(term_bp_seq, term_bp_seq_len);
+	term_bp_seq_len = 0;
+	return termBpPopReplay(out);
+}
+#endif
+
 /* iOS bridge for floating window rendering */
 #if defined(PSCAL_TARGET_IOS)
 extern void pscalTerminalBegin(int columns, int rows);
@@ -495,9 +594,9 @@ static void ios_term_write(const char *s, int n) {
                                     pscalTerminalExitAltScreen();
                                 ios_term_reset();
                                 pscalTerminalMoveCursor(ios_row, ios_col);
-                            } else if (mode == 2004) {
-                                /* bracketed paste toggle: ignore but consume */ 
-                            } else if (mode == 1000 || mode == 1002 || mode == 1006) {
+	                            } else if (mode == 2004) {
+	                                ios_bracketed_paste = on;
+	                            } else if (mode == 1000 || mode == 1002 || mode == 1006) {
                                 /* mouse tracking toggles: ignore */ 
                             }
                         }
@@ -564,6 +663,10 @@ void term_init(void)
 	tcsetattr(0, TCSAFLUSH, &newtermios);
 	term_updatewinsize();
 #if defined(PSCAL_TARGET_IOS)
+	term_bp_active = 0;
+	term_bp_seq_len = 0;
+	term_bp_replay_len = 0;
+	term_bp_replay_pos = 0;
 	pscalTerminalBegin(xcols, xrows);
 	pscalTerminalClear();
 	ios_term_reset();
@@ -746,16 +849,41 @@ void term_back(int c)
 	term_push(s, 1);
 }
 
+int term_bracketed_paste_active(void)
+{
+#if defined(PSCAL_TARGET_IOS)
+	return term_bp_active != 0;
+#else
+	return 0;
+#endif
+}
+
+static int termRecordInputByte(unsigned char c)
+{
+	if (icmd_pos < sizeof(icmd))
+		icmd[icmd_pos++] = c;
+	return c;
+}
+
 int term_read(void)
 {
 #if defined(PSCAL_TARGET_IOS)
 	static NEXTVI_TLS int ios_last_cols = -1;
 	static NEXTVI_TLS int ios_last_rows = -1;
+	unsigned char out = 0;
 	if (ios_last_cols < 0 || ios_last_rows < 0) {
 		ios_last_cols = xcols;
 		ios_last_rows = xrows;
 	}
-	if (ibuf_pos >= ibuf_cnt) {
+	while (1) {
+		if (termBpPopReplay(&out))
+			return termRecordInputByte(out);
+		if (ibuf_pos < ibuf_cnt) {
+			unsigned char raw = ibuf[ibuf_pos++];
+			if (termBpFilterRawByte(raw, &out))
+				return termRecordInputByte(out);
+			continue;
+		}
 		if (texec) {
 			xquit = !xquit ? 1 : xquit;
 			if (texec == '&')
@@ -775,6 +903,10 @@ int term_read(void)
 			}
 			/* n == 0 means timeout/no data: retry instead of emitting TK_INT. */
 			if (n == 0) {
+				/* Flush partial escape prefixes (e.g. bare ESC) if no follow-up
+				 * arrives within a timeout tick. */
+				if (termBpFlushPending(&out))
+					return termRecordInputByte(out);
 				/* Poll winsize during idle periods so resize propagates even when
 				 * no keyboard input arrives or SIGWINCH routing is delayed. */
 				term_updatewinsize();
@@ -784,21 +916,19 @@ int term_read(void)
 					vi_sigwinch_pending_mark();
 					return 0;
 				}
-				if (vi_sigwinch_pending_poll()) {
+				if (vi_sigwinch_pending_poll())
 					return 0;
-				}
 				usleep(5000);
 				continue;
 			}
 			/* n < 0 means terminal/editor shutdown. */
 			if (texec)
 				xquit = texec == '&' ? -1 : 1;
+			if (termBpFlushPending(&out))
+				return termRecordInputByte(out);
 			return 0;
 		}
 	}
-	if (icmd_pos < sizeof(icmd))
-		icmd[icmd_pos++] = ibuf[ibuf_pos];
-	return ibuf[ibuf_pos++];
 #else
 	if (ibuf_pos >= ibuf_cnt) {
 		if (texec) {
@@ -818,9 +948,7 @@ int term_read(void)
 		ibuf_cnt = 1;
 		ibuf_pos = 0;
 	}
-	if (icmd_pos < sizeof(icmd))
-		icmd[icmd_pos++] = ibuf[ibuf_pos];
-	return ibuf[ibuf_pos++];
+	return termRecordInputByte(ibuf[ibuf_pos++]);
 #endif
 }
 

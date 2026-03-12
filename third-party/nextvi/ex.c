@@ -722,11 +722,67 @@ static int ex_write_buffer(int fd, int beg, int end, int o1, int o2)
 	return lbuf_wr(xb, fd, beg, end);
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static int exResolveHostPathForAtomicWrite(const char *input, char *out, size_t out_sz)
+{
+	if (!input || !input[0] || !out || out_sz == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	out[0] = '\0';
+	if (pathTruncateExpand(input, out, out_sz) && out[0] == '/') {
+		return 0;
+	}
+	if (input[0] == '/') {
+		if (snprintf(out, out_sz, "%s", input) >= (int)out_sz) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+		return 0;
+	}
+	char cwd_virtual[PATH_MAX];
+	if (!getcwd(cwd_virtual, sizeof(cwd_virtual)) || cwd_virtual[0] != '/') {
+		return -1;
+	}
+	char joined[PATH_MAX];
+	if (!strcmp(cwd_virtual, "/")) {
+		if (snprintf(joined, sizeof(joined), "/%s", input) >= (int)sizeof(joined)) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+	} else {
+		if (snprintf(joined, sizeof(joined), "%s/%s", cwd_virtual, input) >= (int)sizeof(joined)) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+	}
+	if (pathTruncateExpand(joined, out, out_sz) && out[0]) {
+		return 0;
+	}
+	if (snprintf(out, out_sz, "%s", joined) >= (int)out_sz) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	return 0;
+}
+#endif
+
+#if defined(NEXTVI_REGRESSION_TEST_HOOKS) && defined(PSCAL_TARGET_IOS)
+int nextviTestResolveHostPathForAtomicWrite(const char *input, char *out, size_t out_sz)
+{
+	return exResolveHostPathForAtomicWrite(input, out, out_sz);
+}
+
+const char *nextviTestVisiblePath(const char *path, char *buf, size_t buf_len)
+{
+	return ex_visible_path(path, buf, buf_len);
+}
+#endif
+
 static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 {
 	char tmp[PATH_MAX];
 #if defined(PSCAL_TARGET_IOS)
-	char tmp_real[PATH_MAX];
 	char path_real[PATH_MAX];
 #endif
 	struct stat st;
@@ -739,7 +795,7 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 	if (!path || !path[0])
 		return -1;
 #if defined(PSCAL_TARGET_IOS)
-	if (pathTruncateExpand(path, path_real, sizeof(path_real))) {
+	if (exResolveHostPathForAtomicWrite(path, path_real, sizeof(path_real)) == 0) {
 		target = path_real;
 		expanded = 1;
 	}
@@ -750,13 +806,8 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 		return -1;
 #if defined(PSCAL_TARGET_IOS)
 	char *mkstemp_path = tmp;
-	int tmp_expanded = 0;
-	if (pathTruncateExpand(tmp, tmp_real, sizeof(tmp_real))) {
-		mkstemp_path = tmp_real;
-		tmp_expanded = 1;
-	}
 	ex_write_debugf("[nextvi-write] mkstemp template=%s expanded=%d",
-		mkstemp_path, tmp_expanded);
+		mkstemp_path, 1);
 	fd = exMkstempTracked(mkstemp_path);
 #else
 	fd = mkstemp(tmp);

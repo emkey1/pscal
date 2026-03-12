@@ -615,8 +615,12 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
 
     func sendPasted(_ text: String) {
         guard !text.isEmpty else { return }
+        // Nextvi/editor mode renders through EditorBridge, so TerminalBuffer's
+        // DECSET state can be stale. Force bracketed wrappers there so paste
+        // boundaries remain explicit to the editor input path.
+        let useBracketedPaste = isEditorModeActive() || terminalBuffer.bracketedPasteEnabled
         let wrapped: String
-        if terminalBuffer.bracketedPasteEnabled {
+        if useBracketedPaste {
             wrapped = "\u{1B}[200~" + text + "\u{1B}[201~"
         } else {
             wrapped = text

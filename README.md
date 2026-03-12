@@ -21,27 +21,54 @@ The PSCAL suite is extensible through extended builtins.  Check the Docs directo
 ## Requirements
 
 - C compiler with C11 support
-- [CMake](https://cmake.org/) 3.24 or newer
-- [libcurl](https://curl.se/libcurl/)
+- [CMake](https://cmake.org/) 3.18 or newer
+- [Git](https://git-scm.com/) (required for submodules)
+- [libcurl](https://curl.se/libcurl/) when building with `-DPSCAL_USE_BUNDLED_CURL=OFF`
 - **Optional**: SDL2 or SDL3 plus the matching `SDL*_image`, `SDL*_mixer` and `SDL*_ttf` libraries when building with `-DSDL=ON`
 
 On Debian/Ubuntu the required packages can be installed with:
 
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential cmake libcurl4-openssl-dev \
+sudo apt-get install build-essential cmake git libcurl4-openssl-dev \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+```
+
+## Clone (with submodules)
+
+Use a recursive clone so all required subprojects are present:
+
+```sh
+git clone --recurse-submodules https://github.com/emkey1/pscal.git
+cd pscal
+```
+
+If you already cloned without submodules:
+
+```sh
+git submodule update --init --recursive
+```
+
+After each pull, refresh submodules:
+
+```sh
+git pull --recurse-submodules
+git submodule update --init --recursive
 ```
 
 ## Building
 
 ```sh
-git clone https://github.com/emkey1/pscal.git
-cd pscal
-mkdir build && cd build
-cmake ..            # add -DSDL=ON to enable SDL support, optionally add -DPSCAL_USE_SDL3=ON to prefer SDL3, add -DRELEASE_BUILD=ON to append _REL and keep optional extended builtins enabled
-make
+cmake -S . -B build
+cmake --build build -j
 ```
+
+Common configure options:
+
+- `-DSDL=ON`: enable SDL-dependent graphics/audio builtins and examples.
+- `-DPSCAL_USE_SDL3=ON`: prefer SDL3 where supported by the build.
+- `-DRELEASE_BUILD=ON`: append `_REL` to version naming while keeping optional extended builtins enabled.
+- `-DBUILD_DASCAL=ON`: build the debug-oriented `dascal` binary.
 
 If you use submodules, run this before pushing to make sure pinned commits are
 fetchable by others:
@@ -64,8 +91,28 @@ The `dascal` binary has very verbose debugging enabled and is not built by defau
 To build without SDL explicitly:
 
 ```sh
-cmake -DSDL=OFF ..
+cmake -S . -B build -DSDL=OFF
+cmake --build build -j
 ```
+
+For iOS presets:
+
+```sh
+cmake --preset ios-simulator
+cmake --build --preset ios-simulator
+
+cmake --preset ios-device
+cmake --build --preset ios-device
+```
+
+## Repository layout (git)
+
+PSCAL uses a mix of submodules and vendored source trees:
+
+- Submodules (tracked/pinned in `.gitmodules`): `src/smallclue`, `third-party/SDL`, `third-party/micro`, `third-party/dvtm`, `third-party/libgit2`, `third-party/openrsync`.
+- Vendored in-tree sources (tracked directly by PSCAL): notably `third-party/nextvi` and `third-party/openssh-10.2p1`.
+
+For SmallCLUE applet coverage (`git`, `ssh/scp/sftp`, `rsync`, etc.), see [src/smallclue/README.md](src/smallclue/README.md).
 
 ## Tests
 

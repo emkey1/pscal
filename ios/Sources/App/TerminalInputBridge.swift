@@ -417,8 +417,18 @@ final class TerminalKeyInputView: UITextView {
         onInput?("\u{7F}")
     }
 
+    private func clearLatchedModifiersForPaste() {
+        if controlLatch {
+            controlLatch = false
+        }
+        if optionLatch {
+            optionLatch = false
+        }
+    }
+
     override func paste(_ sender: Any?) {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        clearLatchedModifiersForPaste()
         onPaste?(text)
     }
 
@@ -932,6 +942,7 @@ final class TerminalKeyInputView: UITextView {
     
     @objc private func handlePasteCommand() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        clearLatchedModifiersForPaste()
         onPaste?(text)
     }
 

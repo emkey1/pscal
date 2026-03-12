@@ -328,6 +328,7 @@ void term_pos(int r, int c);
 void term_kill(void);
 void term_room(int n);
 int term_read(void);
+int term_bracketed_paste_active(void);
 void term_commit(void);
 char *term_att(int att);
 void term_push(char *s, unsigned int n);

@@ -8,6 +8,8 @@ OUT_PGID="${BUILD_DIR}/ios_vproc_pgid_test"
 OUT_SHIMS="${BUILD_DIR}/ios_vproc_signal_shim_test"
 OUT_JOBCTRL="${BUILD_DIR}/ios_vproc_jobcontrol_shim_test"
 OUT_RESIZE="${BUILD_DIR}/ios_vproc_resize_harness_test"
+OUT_NEXTVI_PASTE="${BUILD_DIR}/ios_nextvi_bracketed_paste_test"
+NEXTVI_OBJ="${BUILD_DIR}/nextvi_ios_regression_vi.o"
 INCLUDE_DIRS=(
   "-I${ROOT}/src"
   "-I${ROOT}"
@@ -64,9 +66,25 @@ cc -DVPROC_ENABLE_STUBS_FOR_TESTS=1 -DPSCAL_TARGET_IOS=1 \
    "${VPROC_SOURCES[@]}" \
    -o "${OUT_RESIZE}"
 
+cc -DPSCAL_TARGET_IOS=1 \
+   -DNEXTVI_REGRESSION_TEST_HOOKS=1 \
+   -Dmain=nextvi_main_entry \
+   -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   -c "${ROOT}/third-party/nextvi/vi.c" \
+   -o "${NEXTVI_OBJ}"
+
+cc -DPSCAL_TARGET_IOS=1 \
+   -pthread \
+   "${INCLUDE_DIRS[@]}" \
+   "${ROOT}/Tests/ios_vproc/test_nextvi_bracketed_paste_regression.c" \
+   "${NEXTVI_OBJ}" \
+   -o "${OUT_NEXTVI_PASTE}"
+
 echo "Running ios_vproc tests..."
 "${OUT}"
 "${OUT_PGID}"
 "${OUT_SHIMS}"
 "${OUT_JOBCTRL}"
 "${OUT_RESIZE}"
+"${OUT_NEXTVI_PASTE}"

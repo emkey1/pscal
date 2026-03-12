@@ -646,9 +646,9 @@ void led_prompt(sbuf *sb, char *insert, int *kmap, int *key, int ps, int hist)
 /* read visual command input */
 void led_input(sbuf *sb, char **post, int postn, int row, int lsh)
 {
-	int ai_max = 128 * xai;
 	int n, key, ps = 0;
 	while (1) {
+		int ai_max = term_bracketed_paste_active() ? 0 : 128 * xai;
 		led_line(sb, ps, sb->s_n, *post, postn, ai_max, &key, &xkmap, row, lsh);
 		if (key != '\n') {
 			if (!xled)
@@ -662,7 +662,7 @@ void led_input(sbuf *sb, char **post, int postn, int row, int lsh)
 		xrow++;
 		n = ps;
 		ps = sb->s_n;
-		if (ai_max) {	/* updating autoindent */
+		if (ai_max && !term_bracketed_paste_active()) {	/* updating autoindent */
 			for (; **post == ' ' || **post == '\t'; postn--)
 				++*post;
 			int ai_new = n;
