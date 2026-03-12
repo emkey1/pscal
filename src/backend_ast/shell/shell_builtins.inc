@@ -10009,6 +10009,23 @@ static void shellHelpPrintTopic(const ShellHelpTopic *topic) {
     }
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static void shellHelpPrintSmallclueAppletTopic(const SmallclueApplet *applet) {
+    if (!applet || !applet->name || !*applet->name) {
+        return;
+    }
+    printf("%s - %s\n",
+           applet->name,
+           (applet->description && *applet->description) ? applet->description : "smallclue applet");
+    const char *usage = smallclueLookupAppletUsage(applet->name);
+    if (usage && *usage) {
+        printf("Usage: %s\n", usage);
+    } else {
+        printf("Usage: smallclue-help %s\n", applet->name);
+    }
+}
+#endif
+
 Value vmBuiltinShellHelp(VM *vm, int arg_count, Value *args) {
     if (arg_count == 0) {
         shellHelpPrintOverview();
@@ -10038,6 +10055,17 @@ Value vmBuiltinShellHelp(VM *vm, int arg_count, Value *args) {
     const char *canonical = shellBuiltinCanonicalName(requested);
     const ShellHelpTopic *topic = shellHelpFindTopic(canonical);
     if (!topic) {
+#if defined(PSCAL_TARGET_IOS)
+        const SmallclueApplet *applet = smallclueFindApplet(requested);
+        if (!applet && canonical && *canonical) {
+            applet = smallclueFindApplet(canonical);
+        }
+        if (applet) {
+            shellHelpPrintSmallclueAppletTopic(applet);
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+#endif
         runtimeError(vm, "help: unknown builtin '%s'", requested);
         shellUpdateStatus(1);
         return makeVoid();

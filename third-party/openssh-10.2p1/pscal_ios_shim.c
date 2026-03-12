@@ -1050,16 +1050,18 @@ void pscal_ios_closefrom(int lowfd) {
         return;
     }
     /*
-     * In the virtualized iOS runtime, closefrom() must operate on virtual
-     * descriptor numbers only. Using the shim-level close path here can match
-     * host fd values by accident and invalidate unrelated virtual mappings.
+     * Sweep through descriptor numbers via the shim close path so we close:
+     * 1) virtual descriptor-table entries, and
+     * 2) host descriptors that are explicitly owned by this VProc.
+     * This keeps closefrom() semantics for OpenSSH while avoiding closure of
+     * unrelated process-global descriptors from other sessions/tabs.
      */
     long maxfd = sysconf(_SC_OPEN_MAX);
     if (maxfd <= 0 || maxfd > 32768) {
         maxfd = 32768;
     }
     for (int fd = lowfd; fd < (int)maxfd; ++fd) {
-        (void)vprocClose(vp, fd);
+        (void)vprocCloseShim(fd);
     }
 }
 

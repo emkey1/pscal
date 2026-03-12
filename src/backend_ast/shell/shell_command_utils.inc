@@ -449,6 +449,18 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool previous_local_scope_flag = gShellRuntime.local_scope_active;
     bool previous_pipeline_flag = gShellRuntime.pipeline_subshell_active;
     char **env_snapshot = NULL;
+    bool runtime_state_overridden = false;
+    bool saved_exit_requested = gShellExitRequested;
+    bool saved_break_requested = gShellRuntime.break_requested;
+    int saved_break_levels = gShellRuntime.break_requested_levels;
+    bool saved_continue_requested = gShellRuntime.continue_requested;
+    int saved_continue_levels = gShellRuntime.continue_requested_levels;
+    bool saved_errexit_pending = gShellRuntime.errexit_pending;
+    bool saved_errexit_defer_active = gShellRuntime.errexit_defer_active;
+    VM *saved_vm = gShellCurrentVm;
+    bool saved_vm_exit = saved_vm ? saved_vm->exit_requested : false;
+    bool saved_vm_abort = saved_vm ? saved_vm->abort_requested : false;
+    const char *saved_vm_builtin = saved_vm ? saved_vm->current_builtin_name : NULL;
 
     bool allow_scalar_cache = (gShellScriptDepth <= 1);
     if (*source && allow_scalar_cache) {
@@ -543,8 +555,8 @@ static char *shellRunCommandSubstitution(const char *command) {
                     /* Restore original PSCAL-backed stdout mapping. */
                     (void)vprocAdoptPscalFd(active_vp, STDOUT_FILENO, saved_stdout_pscal);
                 } else {
-                    /* Restore shim stdout back to the session-mapped fd on failure. */
-                    (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, mapped_stdout_fd);
+                    /* Restore shim stdout from the now-restored host fd 1. */
+                    (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, STDOUT_FILENO);
                 }
             }
 #endif
@@ -600,6 +612,20 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
     if (can_run) {
+        /* Command substitution must not leak flow-control state into caller. */
+        gShellExitRequested = false;
+        gShellRuntime.break_requested = false;
+        gShellRuntime.break_requested_levels = 0;
+        gShellRuntime.continue_requested = false;
+        gShellRuntime.continue_requested_levels = 0;
+        gShellRuntime.errexit_pending = false;
+        gShellRuntime.errexit_defer_active = false;
+        if (saved_vm) {
+            saved_vm->exit_requested = false;
+            saved_vm->abort_requested = false;
+            saved_vm->current_builtin_name = NULL;
+        }
+        runtime_state_overridden = true;
         env_snapshot = shellCommandSubSnapshotEnv();
         status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
     }
@@ -613,6 +639,20 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
     gShellRuntime.local_scope_active = previous_local_scope_flag;
     gShellRuntime.pipeline_subshell_active = previous_pipeline_flag;
+    if (runtime_state_overridden) {
+        gShellExitRequested = saved_exit_requested;
+        gShellRuntime.break_requested = saved_break_requested;
+        gShellRuntime.break_requested_levels = saved_break_levels;
+        gShellRuntime.continue_requested = saved_continue_requested;
+        gShellRuntime.continue_requested_levels = saved_continue_levels;
+        gShellRuntime.errexit_pending = saved_errexit_pending;
+        gShellRuntime.errexit_defer_active = saved_errexit_defer_active;
+        if (saved_vm) {
+            saved_vm->exit_requested = saved_vm_exit;
+            saved_vm->abort_requested = saved_vm_abort;
+            saved_vm->current_builtin_name = saved_vm_builtin;
+        }
+    }
 
     shellFlushStandardStreams();
 
@@ -631,8 +671,7 @@ static char *shellRunCommandSubstitution(const char *command) {
             if (saved_stdout_pscal) {
                 (void)vprocAdoptPscalFd(active_vp, STDOUT_FILENO, saved_stdout_pscal);
             } else {
-                int restore_stdout_fd = (mapped_stdout_fd >= 0) ? mapped_stdout_fd : STDOUT_FILENO;
-                (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, restore_stdout_fd);
+                (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, STDOUT_FILENO);
             }
         }
 #endif

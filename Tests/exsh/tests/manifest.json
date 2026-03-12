@@ -341,6 +341,15 @@
             "expected_stdout": "help-builtin-present\n"
         },
         {
+            "id": "help_smallclue_applets",
+            "name": "help resolves smallclue applets",
+            "category": "builtins",
+            "description": "help <name> should describe smallclue applets exposed as shell commands.",
+            "script": "Tests/exsh/tests/help_smallclue_applets.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "help-rsync:ok\nhelp-git:ok\nhelp-micro:ok\nhelp-tadd:ok\nhelp-tabadd:ok\n"
+        },
+        {
             "id": "jobs_disown",
             "name": "disown removes jobs from listings",
             "category": "builtins",
