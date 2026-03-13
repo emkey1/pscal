@@ -326,6 +326,53 @@ static FILE *vmVprocStdin(void) {
     return vmVprocStreamOpen(STDIN_FILENO, &gVmVprocStdin, "r", -1);
 }
 
+static bool vmFdMatchesFileIdentity(int fd, int other_fd) {
+    if (fd < 0 || other_fd < 0) {
+        return false;
+    }
+    struct stat fd_st;
+    struct stat other_st;
+    if (fstat(fd, &fd_st) != 0 || fstat(other_fd, &other_st) != 0) {
+        return false;
+    }
+    return fd_st.st_dev == other_st.st_dev && fd_st.st_ino == other_st.st_ino;
+}
+
+static bool vmStreamTargetsSharedStdin(FILE *stream) {
+    if (!stream) {
+        return false;
+    }
+    if (stream == stdin) {
+        return true;
+    }
+    if (pscalRuntimeVmIsSharedFileStream(stream)) {
+        return true;
+    }
+    int fd = fileno(stream);
+    if (fd < 0) {
+        return false;
+    }
+    if (vmFdMatchesFileIdentity(fd, STDIN_FILENO)) {
+        return true;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int translated = vprocTranslateFd(vp, STDIN_FILENO);
+        if (translated >= 0 && vmFdMatchesFileIdentity(fd, translated)) {
+            return true;
+        }
+    }
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (session && !vprocSessionStdioIsDefault(session) &&
+        session->stdin_host_fd >= 0 &&
+        vmFdMatchesFileIdentity(fd, session->stdin_host_fd)) {
+        return true;
+    }
+#endif
+    return false;
+}
+
 static FILE *vmVprocSharedShimStream(int std_fd,
                                      VmVprocStream *cache,
                                      const char *mode,
@@ -3990,9 +4037,8 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
     }
     int fd = fileno(stream);
 #if defined(PSCAL_TARGET_IOS)
-    FILE *stdin_stream = stdin;
-    bool is_stdin_stream = (stream == stdin_stream);
-    bool is_shared_stdin_stream = (is_stdin_stream && pscalRuntimeVmIsSharedFileStream(stream));
+    bool is_stdin_stream = vmStreamTargetsSharedStdin(stream);
+    bool is_shared_stdin_stream = is_stdin_stream;
     bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     if (is_shared_stdin_stream) {
         fd = STDIN_FILENO;
@@ -4000,7 +4046,7 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         fd = STDIN_FILENO;
     }
 #else
-    bool is_stdin_stream = (stream == stdin);
+    bool is_stdin_stream = vmStreamTargetsSharedStdin(stream);
     bool tool_dbg = false;
 #endif
     if (fd < 0) {
@@ -4026,10 +4072,26 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 vprocSessionStdioActivate(session_stdio);
             }
         }
-        if (session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
+        if (session_stdio) {
             bool has_host_stdin = (session_stdio->stdin_host_fd >= 0);
             bool has_pscal_stdin = (session_stdio->stdin_pscal_fd != NULL);
-            if (has_host_stdin && !has_pscal_stdin) {
+            bool has_session_input = (session_stdio->input != NULL);
+            bool session_backed_input = has_host_stdin || has_pscal_stdin || has_session_input;
+            /* Shared stdin streams in the iOS runtime should consume input
+             * from the per-session buffer when they are attached to a real
+             * runtime session, even if isatty(0) is false on the current
+             * worker thread. Frontend tools launched from applets like time
+             * inherit the runtime context but may not present fd 0 as a tty
+             * through the active VProc mapping, which leaves ReadLn blocked in
+             * select/poll after the user has already typed a line. */
+            if (is_shared_stdin_stream &&
+                session_backed_input &&
+                (!vprocSessionStdioIsDefault(session_stdio) ||
+                 pscalRuntimeStdinIsInteractive())) {
+                use_session_read = true;
+            } else if (!vprocSessionStdioIsDefault(session_stdio) &&
+                       has_host_stdin &&
+                       !has_pscal_stdin) {
                 use_session_read = true;
             }
         }

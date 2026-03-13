@@ -700,6 +700,50 @@ def scenario_backtick_export_hostname_restores_prompt(shell: PtyShell) -> tuple[
     return True, "backtick export returned prompt and preserved HOST assignment"
 
 
+def scenario_time_findprimes_returns_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    shell.send_line("time ./Examples/pascal/base/FindPrimes")
+    if not shell.wait_for_substring("Find all prime numbers up to:", timeout=2.0):
+        return False, "FindPrimes prompt did not appear"
+
+    shell.send_line("10")
+    if not shell.wait_for_substring("Done.", timeout=10.0):
+        return False, "time FindPrimes did not finish after stdin input"
+    if not shell.wait_for_substring("real\t", timeout=3.0):
+        return False, "time FindPrimes did not print timing output"
+    if not shell.wait_for_substring("PROMPT> ", timeout=3.0):
+        return False, "time FindPrimes did not return the shell prompt after input"
+
+    output = shell.output
+    if "Prime numbers found up to 10:" not in output or "2 3 5 7" not in output:
+        return False, "time FindPrimes did not print the expected primes"
+    return True, "time FindPrimes returned prompt and produced expected output"
+
+
+def scenario_findprimes_returns_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    shell.send_line("./Examples/pascal/base/FindPrimes")
+    if not shell.wait_for_substring("Find all prime numbers up to:", timeout=2.0):
+        return False, "FindPrimes prompt did not appear"
+
+    shell.send_line("10")
+    if not shell.wait_for_substring("Done.", timeout=10.0):
+        return False, "FindPrimes did not finish after stdin input"
+    if not shell.wait_for_substring("PROMPT> ", timeout=3.0):
+        return False, "FindPrimes did not return the shell prompt after input"
+
+    output = shell.output
+    if "Prime numbers found up to 10:" not in output or "2 3 5 7" not in output:
+        return False, "FindPrimes did not print the expected primes"
+    return True, "FindPrimes returned prompt and produced expected output"
+
+
 SCENARIOS: List[Scenario] = [
     Scenario(
         test_id="interactive_ctrl_c_prompt",
@@ -710,6 +754,16 @@ SCENARIOS: List[Scenario] = [
         test_id="interactive_backtick_export_hostname_prompt",
         name="backtick export hostname returns prompt",
         run=scenario_backtick_export_hostname_restores_prompt,
+    ),
+    Scenario(
+        test_id="interactive_time_findprimes_prompt",
+        name="time FindPrimes returns prompt after stdin input",
+        run=scenario_time_findprimes_returns_prompt,
+    ),
+    Scenario(
+        test_id="interactive_findprimes_prompt",
+        name="FindPrimes returns prompt after stdin input",
+        run=scenario_findprimes_returns_prompt,
     ),
     Scenario(
         test_id="interactive_ctrl_c_sleep",
