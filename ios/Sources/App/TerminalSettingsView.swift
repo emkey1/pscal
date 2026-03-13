@@ -157,6 +157,8 @@ struct TerminalSettingsView: View {
                             }
                         }
                     }
+                    .accessibilityLabel(copiedColors ? "Colors copied" : "Copy First Tab Values")
+                    .accessibilityHint("Copies the background and foreground colors from the first tab to this tab")
                 }
 
                 Section(header: Text("Filesystem Paths")) {
