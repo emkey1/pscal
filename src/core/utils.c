@@ -18,6 +18,12 @@
 #include <unistd.h>    // For STDOUT_FILENO
 #include <sys/stat.h>  // For stat
 #include <limits.h>    // For PATH_MAX
+#ifdef __linux__
+#include <linux/limits.h>
+#endif
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 #include "pscal_paths.h"
 
 
