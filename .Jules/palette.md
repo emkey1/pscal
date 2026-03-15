@@ -12,3 +12,7 @@
 ## 2025-02-18 - Missing Accessibility Hints for Custom Keyboard Accessory Keys
 **Learning:** While custom keyboard accessory keys (like arrows, escape, or symbols) may have basic `accessibilityLabel`s, they often lack an `accessibilityHint`. For a terminal emulator, it's crucial that VoiceOver users understand what these specialized, symbol-only keys actually *do* (e.g., "Moves the cursor up or navigates history" vs just "Up Arrow").
 **Action:** Added detailed `accessibilityHint`s to all icon-only buttons in the terminal accessory bar. Always ensure that `accessibilityHint`s are provided for symbol-based keys that perform complex terminal operations.
+
+## 2025-03-05 - Dynamic Accessibility Labels for Transient Visual Feedback
+**Learning:** Found that buttons displaying transient visual feedback (like changing text from "Copy" to "Copied!" and showing a checkmark) do not automatically announce their new state to VoiceOver unless `accessibilityLabel` is dynamically updated. This leaves screen reader users unaware that their action succeeded.
+**Action:** Always bind the `accessibilityLabel` and `accessibilityHint` to the same state variables controlling the transient visual feedback (e.g., `.accessibilityLabel(copiedColors ? "Colors copied" : "Copy First Tab Values")`).
