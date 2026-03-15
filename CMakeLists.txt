@@ -1033,9 +1033,9 @@ if(PSCAL_USE_BUNDLED_LIBGIT2)
     # HTTPS must be enabled so `git clone https://...` works in PSCAL.
     # Use provider auto-selection (OpenSSL/SecureTransport/etc depending on platform/toolchain).
     set(USE_HTTPS ON CACHE STRING "libgit2 HTTPS backend" FORCE)
-    if(NOT PSCAL_TARGET_IOS)
-        set(USE_SHA1 OpenSSL CACHE STRING "libgit2 SHA1 backend" FORCE)
-        set(USE_SHA256 OpenSSL CACHE STRING "libgit2 SHA256 backend" FORCE)
+    if(NOT PSCAL_PLATFORM_IOS)
+        set(USE_SHA1 openssl CACHE STRING "libgit2 SHA1 backend" FORCE)
+        set(USE_SHA256 openssl CACHE STRING "libgit2 SHA256 backend" FORCE)
     else()
         set(USE_SHA1 builtin CACHE STRING "libgit2 SHA1 backend" FORCE)
         set(USE_SHA256 builtin CACHE STRING "libgit2 SHA256 backend" FORCE)
