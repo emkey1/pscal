@@ -9,9 +9,10 @@ jobs:
   submodule-ref-guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
       - name: Verify protected-branch submodule refs
         run: Tools/check_submodule_refs.sh --protected-refs --remote origin
       - name: Run submodule checker regression tests
@@ -21,9 +22,10 @@ jobs:
     needs: submodule-ref-guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
       - name: Compute changed files
         id: changed-files
         uses: tj-actions/changed-files@v46
