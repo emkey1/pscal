@@ -104,14 +104,19 @@ final class NativeTerminalView: UITextView {
             switch key {
             case "Esc":
                 btn.accessibilityLabel = "Escape"
+                btn.accessibilityHint = "Sends an Escape character"
             case "Tab":
                 btn.accessibilityLabel = "Tab"
+                btn.accessibilityHint = "Inserts a tab character"
             case "Ctrl":
                 btn.accessibilityLabel = "Control"
+                btn.accessibilityHint = "Toggles the control modifier for the next key press"
             case "/":
                 btn.accessibilityLabel = "Forward Slash"
+                btn.accessibilityHint = "Inserts a forward slash character"
             case "-":
                 btn.accessibilityLabel = "Minus"
+                btn.accessibilityHint = "Inserts a minus character"
             case "⚙️":
                 btn.accessibilityLabel = "Settings"
                 btn.accessibilityHint = "Configure appearance and behavior"

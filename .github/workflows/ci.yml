@@ -9,7 +9,7 @@ jobs:
   submodule-ref-guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Verify protected-branch submodule refs
@@ -21,9 +21,10 @@ jobs:
     needs: submodule-ref-guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
       - name: Compute changed files
         id: changed-files
         uses: tj-actions/changed-files@v46
