@@ -186,6 +186,86 @@ static bool PSCALRuntimePingDecodeReply(const unsigned char *buf, size_t len,
     return true;
 }
 
+typedef struct {
+    CFSocketRef socket_ref;
+    CFRunLoopSourceRef run_loop_source;
+    CFRunLoopRef run_loop;
+    struct sockaddr_in target_addr;
+    uint16_t ident;
+    uint16_t expected_seq;
+    size_t reply_len;
+    bool got_reply;
+    int last_errno;
+    struct timespec received_at;
+} PSCALRuntimePingSession;
+
+static void PSCALRuntimePingInvalidateSession(PSCALRuntimePingSession *session) {
+    if (!session) {
+        return;
+    }
+    if (session->run_loop && session->run_loop_source) {
+        CFRunLoopRemoveSource(session->run_loop, session->run_loop_source, kCFRunLoopDefaultMode);
+    }
+    if (session->run_loop_source) {
+        CFRelease(session->run_loop_source);
+        session->run_loop_source = NULL;
+    }
+    if (session->socket_ref) {
+        CFSocketInvalidate(session->socket_ref);
+        CFRelease(session->socket_ref);
+        session->socket_ref = NULL;
+    }
+    session->run_loop = NULL;
+}
+
+static void PSCALRuntimePingSocketCallback(CFSocketRef s,
+                                           CFSocketCallBackType type,
+                                           CFDataRef address,
+                                           const void *data,
+                                           void *info) {
+    (void)type;
+    (void)address;
+    (void)data;
+    PSCALRuntimePingSession *session = (PSCALRuntimePingSession *)info;
+    if (!session) {
+        return;
+    }
+
+    uint8_t buffer[1500];
+    struct sockaddr_in from_addr;
+    socklen_t from_len = (socklen_t)sizeof(from_addr);
+    ssize_t received = recvfrom(CFSocketGetNative(s),
+                                buffer,
+                                sizeof(buffer),
+                                0,
+                                (struct sockaddr *)&from_addr,
+                                &from_len);
+    if (received < 0) {
+        session->last_errno = errno;
+        return;
+    }
+
+    size_t reply_len = 0;
+    if (!PSCALRuntimePingDecodeReply(buffer,
+                                     (size_t)received,
+                                     session->ident,
+                                     session->expected_seq,
+                                     &reply_len)) {
+        session->last_errno = errno;
+        return;
+    }
+
+    session->reply_len = reply_len;
+    session->got_reply = true;
+    session->last_errno = 0;
+    if (clock_gettime(CLOCK_MONOTONIC, &session->received_at) != 0) {
+        memset(&session->received_at, 0, sizeof(session->received_at));
+    }
+    if (session->run_loop) {
+        CFRunLoopStop(session->run_loop);
+    }
+}
+
 static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
                                    int timeout_ms,
                                    uint16_t ident,
@@ -197,23 +277,34 @@ static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
         return -1;
     }
 
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
-    if (sock < 0) {
-        return -1;
-    }
+    PSCALRuntimePingSession session;
+    memset(&session, 0, sizeof(session));
+    session.target_addr = *target_addr;
+    session.ident = ident;
+    session.expected_seq = seq;
+    session.last_errno = EAGAIN;
 
-    struct timeval tv;
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-        close(sock);
+    CFSocketContext context = {};
+    context.info = &session;
+    session.socket_ref = CFSocketCreate(kCFAllocatorDefault,
+                                        AF_INET,
+                                        SOCK_DGRAM,
+                                        IPPROTO_ICMP,
+                                        kCFSocketReadCallBack,
+                                        PSCALRuntimePingSocketCallback,
+                                        &context);
+    if (!session.socket_ref) {
+        errno = EIO;
         return -1;
     }
-
-    if (connect(sock, (const struct sockaddr *)target_addr, sizeof(*target_addr)) < 0) {
-        close(sock);
+    session.run_loop = CFRunLoopGetCurrent();
+    session.run_loop_source = CFSocketCreateRunLoopSource(kCFAllocatorDefault, session.socket_ref, 0);
+    if (!session.run_loop_source) {
+        PSCALRuntimePingInvalidateSession(&session);
+        errno = EIO;
         return -1;
     }
+    CFRunLoopAddSource(session.run_loop, session.run_loop_source, kCFRunLoopDefaultMode);
 
     unsigned char packet[ICMP_MINLEN + PSCAL_SIMPLEPING_PAYLOAD_SIZE];
     memset(packet, 0, sizeof(packet));
@@ -230,49 +321,50 @@ static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
 
     struct timespec start;
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
-        close(sock);
+        PSCALRuntimePingInvalidateSession(&session);
         return -1;
     }
 
-    ssize_t sent = send(sock, packet, sizeof(packet), 0);
+    ssize_t sent = sendto(CFSocketGetNative(session.socket_ref),
+                          packet,
+                          sizeof(packet),
+                          0,
+                          (const struct sockaddr *)target_addr,
+                          (socklen_t)sizeof(*target_addr));
     if (sent != (ssize_t)sizeof(packet)) {
         if (sent >= 0) {
             errno = EIO;
         }
-        close(sock);
+        PSCALRuntimePingInvalidateSession(&session);
         return -1;
     }
 
-    unsigned char reply[1500];
-    for (;;) {
-        ssize_t received = recv(sock, reply, sizeof(reply), 0);
-        if (received < 0) {
-            close(sock);
-            return -1;
+    double remaining_ms = (double)timeout_ms;
+    while (!session.got_reply && remaining_ms > 0.0) {
+        CFTimeInterval step = MIN(remaining_ms / 1000.0, 0.05);
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, step, true);
+        if (session.got_reply) {
+            break;
         }
-
-        struct timespec end;
-        if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
-            close(sock);
-            return -1;
-        }
-
-        size_t reply_len = 0;
-        if (!PSCALRuntimePingDecodeReply(reply, (size_t)received, ident, seq, &reply_len)) {
-            continue;
-        }
-
-        if (out_ms) {
-            double start_ms = (double)start.tv_sec * 1000.0 + (double)start.tv_nsec / 1e6;
-            double end_ms = (double)end.tv_sec * 1000.0 + (double)end.tv_nsec / 1e6;
-            *out_ms = end_ms - start_ms;
-        }
-        if (out_reply_len) {
-            *out_reply_len = reply_len;
-        }
-        close(sock);
-        return 0;
+        remaining_ms -= step * 1000.0;
     }
+
+    if (!session.got_reply) {
+        PSCALRuntimePingInvalidateSession(&session);
+        errno = session.last_errno ? session.last_errno : EAGAIN;
+        return -1;
+    }
+
+    if (out_ms) {
+        double start_ms = (double)start.tv_sec * 1000.0 + (double)start.tv_nsec / 1e6;
+        double end_ms = (double)session.received_at.tv_sec * 1000.0 + (double)session.received_at.tv_nsec / 1e6;
+        *out_ms = end_ms - start_ms;
+    }
+    if (out_reply_len) {
+        *out_reply_len = session.reply_len;
+    }
+    PSCALRuntimePingInvalidateSession(&session);
+    return 0;
 }
 
 static int PSCALRuntimePingHostBypassed(const char *host,
