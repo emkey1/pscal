@@ -15,6 +15,11 @@
 #include <errno.h>
 #include <TargetConditionals.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -25,6 +30,8 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <poll.h>
 #include <setjmp.h>
 #include <atomic>
@@ -42,6 +49,7 @@
 #include "ios/tty/pscal_fd.h"
 #include "ios/tty/pscal_pty.h"
 extern "C" {
+#include "common/pscal_hosts.h"
 #include "backend_ast/builtin.h"
 }
 
@@ -100,6 +108,269 @@ static const size_t kOutputRingCapacity = 512 * 1024;
 static bool PSCALRuntimeOutputLoggingEnabled(void);
 static bool PSCALRuntimeIODebugEnabled(void);
 static void PSCALRuntimeDebugLogf(const char *format, ...);
+
+enum {
+    PSCAL_SIMPLEPING_PAYLOAD_SIZE = 56
+};
+
+static uint16_t PSCALRuntimePingChecksum(const void *data, size_t len) {
+    const uint8_t *bytes = (const uint8_t *)data;
+    uint32_t sum = 0;
+    while (len > 1) {
+        sum += (uint32_t)((bytes[0] << 8) | bytes[1]);
+        bytes += 2;
+        len -= 2;
+    }
+    if (len > 0) {
+        sum += (uint32_t)(bytes[0] << 8);
+    }
+    while ((sum >> 16) != 0) {
+        sum = (sum & 0xffffu) + (sum >> 16);
+    }
+    return (uint16_t)~sum;
+}
+
+static void PSCALRuntimePingAppendf(std::string &buffer, const char *format, ...) {
+    if (!format) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, format);
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+    int needed = vsnprintf(NULL, 0, format, ap_copy);
+    va_end(ap_copy);
+    if (needed <= 0) {
+        va_end(ap);
+        return;
+    }
+    std::string chunk;
+    chunk.resize((size_t)needed + 1);
+    vsnprintf(chunk.data(), (size_t)needed + 1, format, ap);
+    buffer.append(chunk.c_str(), (size_t)needed);
+    va_end(ap);
+}
+
+static bool PSCALRuntimePingDecodeReply(const unsigned char *buf, size_t len,
+                                        uint16_t ident, uint16_t seq,
+                                        size_t *out_reply_len) {
+    const struct icmp *icmp_hdr = NULL;
+    size_t reply_len = len;
+
+    if (len >= sizeof(struct ip)) {
+        const struct ip *ip_hdr = (const struct ip *)buf;
+        if (ip_hdr->ip_v == 4) {
+            size_t ip_len = (size_t)ip_hdr->ip_hl << 2;
+            if (ip_len >= sizeof(struct ip) && len >= ip_len + ICMP_MINLEN) {
+                icmp_hdr = (const struct icmp *)(buf + ip_len);
+                reply_len = len - ip_len;
+            }
+        }
+    }
+    if (!icmp_hdr && len >= ICMP_MINLEN) {
+        icmp_hdr = (const struct icmp *)buf;
+    }
+    if (!icmp_hdr) {
+        errno = EPROTO;
+        return false;
+    }
+    (void)ident;
+    if (icmp_hdr->icmp_type != ICMP_ECHOREPLY ||
+        ntohs((uint16_t)icmp_hdr->icmp_seq) != seq) {
+        errno = EPROTO;
+        return false;
+    }
+    if (out_reply_len) {
+        *out_reply_len = reply_len;
+    }
+    return true;
+}
+
+static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
+                                   int timeout_ms,
+                                   uint16_t ident,
+                                   uint16_t seq,
+                                   double *out_ms,
+                                   size_t *out_reply_len) {
+    if (!target_addr) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
+    if (sock < 0) {
+        return -1;
+    }
+
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        close(sock);
+        return -1;
+    }
+
+    if (connect(sock, (const struct sockaddr *)target_addr, sizeof(*target_addr)) < 0) {
+        close(sock);
+        return -1;
+    }
+
+    unsigned char packet[ICMP_MINLEN + PSCAL_SIMPLEPING_PAYLOAD_SIZE];
+    memset(packet, 0, sizeof(packet));
+    struct icmp *icmp_hdr = (struct icmp *)packet;
+    icmp_hdr->icmp_type = ICMP_ECHO;
+    icmp_hdr->icmp_code = 0;
+    icmp_hdr->icmp_id = htons(ident);
+    icmp_hdr->icmp_seq = htons(seq);
+    for (size_t i = ICMP_MINLEN; i < sizeof(packet); ++i) {
+        packet[i] = (unsigned char)(i & 0xffu);
+    }
+    icmp_hdr->icmp_cksum = 0;
+    icmp_hdr->icmp_cksum = PSCALRuntimePingChecksum(packet, sizeof(packet));
+
+    struct timespec start;
+    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
+        close(sock);
+        return -1;
+    }
+
+    ssize_t sent = send(sock, packet, sizeof(packet), 0);
+    if (sent != (ssize_t)sizeof(packet)) {
+        if (sent >= 0) {
+            errno = EIO;
+        }
+        close(sock);
+        return -1;
+    }
+
+    unsigned char reply[1500];
+    for (;;) {
+        ssize_t received = recv(sock, reply, sizeof(reply), 0);
+        if (received < 0) {
+            close(sock);
+            return -1;
+        }
+
+        struct timespec end;
+        if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) {
+            close(sock);
+            return -1;
+        }
+
+        size_t reply_len = 0;
+        if (!PSCALRuntimePingDecodeReply(reply, (size_t)received, ident, seq, &reply_len)) {
+            continue;
+        }
+
+        if (out_ms) {
+            double start_ms = (double)start.tv_sec * 1000.0 + (double)start.tv_nsec / 1e6;
+            double end_ms = (double)end.tv_sec * 1000.0 + (double)end.tv_nsec / 1e6;
+            *out_ms = end_ms - start_ms;
+        }
+        if (out_reply_len) {
+            *out_reply_len = reply_len;
+        }
+        close(sock);
+        return 0;
+    }
+}
+
+static int PSCALRuntimePingHostBypassed(const char *host,
+                                        int count,
+                                        int timeout_ms,
+                                        std::string &output) {
+    if (!host || host[0] == '\0') {
+        PSCALRuntimePingAppendf(output, "ping: missing host\n");
+        return 1;
+    }
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+
+    struct addrinfo *res = NULL;
+    int gai = pscalHostsGetAddrInfo(host, NULL, &hints, &res);
+    if (gai != 0) {
+        PSCALRuntimePingAppendf(output, "ping: %s: %s\n", host, gai_strerror(gai));
+        return 1;
+    }
+
+    struct addrinfo *selected = NULL;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        if (ai->ai_family == AF_INET && ai->ai_addrlen >= (socklen_t)sizeof(struct sockaddr_in)) {
+            selected = ai;
+            break;
+        }
+    }
+    if (!selected) {
+        PSCALRuntimePingAppendf(output, "ping: %s: no IPv4 ICMP address resolved\n", host);
+        pscalHostsFreeAddrInfo(res);
+        return 1;
+    }
+
+    struct sockaddr_in target_addr;
+    memcpy(&target_addr, selected->ai_addr, sizeof(target_addr));
+
+    char addrbuf[NI_MAXHOST];
+    if (getnameinfo((const struct sockaddr *)&target_addr, sizeof(target_addr),
+                    addrbuf, sizeof(addrbuf), NULL, 0, NI_NUMERICHOST) != 0) {
+        strncpy(addrbuf, "unknown", sizeof(addrbuf));
+        addrbuf[sizeof(addrbuf) - 1] = '\0';
+    }
+
+    PSCALRuntimePingAppendf(output, "PING %s (%s): %d data bytes\n",
+                            host, addrbuf, PSCAL_SIMPLEPING_PAYLOAD_SIZE);
+
+    int successes = 0;
+    double min_ms = 0.0;
+    double max_ms = 0.0;
+    double total_ms = 0.0;
+    uint16_t ident = (uint16_t)(getpid() & 0xffff);
+
+    for (int i = 0; i < count; ++i) {
+        double elapsed_ms = 0.0;
+        size_t reply_len = 0;
+        int rc = PSCALRuntimePingAttempt(&target_addr, timeout_ms, ident, (uint16_t)(i + 1),
+                                         &elapsed_ms, &reply_len);
+        if (rc == 0) {
+            successes++;
+            if (successes == 1 || elapsed_ms < min_ms) {
+                min_ms = elapsed_ms;
+            }
+            if (elapsed_ms > max_ms) {
+                max_ms = elapsed_ms;
+            }
+            total_ms += elapsed_ms;
+            PSCALRuntimePingAppendf(output,
+                                    "%zu bytes from %s: icmp_seq=%d time=%.3f ms\n",
+                                    reply_len, addrbuf, i + 1, elapsed_ms);
+        } else {
+            PSCALRuntimePingAppendf(output,
+                                    "Request timeout for icmp_seq %d (%s)\n",
+                                    i + 1, strerror(errno));
+        }
+        if (i + 1 < count) {
+            usleep(1000000);
+        }
+    }
+
+    PSCALRuntimePingAppendf(output, "--- %s ping statistics ---\n", host);
+    PSCALRuntimePingAppendf(output,
+                            "%d packets transmitted, %d packets received, %.1f%% packet loss\n",
+                            count,
+                            successes,
+                            count > 0 ? ((double)(count - successes) * 100.0 / (double)count) : 0.0);
+    if (successes > 0) {
+        PSCALRuntimePingAppendf(output,
+                                "round-trip min/avg/max = %.3f/%.3f/%.3f ms\n",
+                                min_ms,
+                                total_ms / (double)successes,
+                                max_ms);
+    }
+
+    pscalHostsFreeAddrInfo(res);
+    return (successes > 0) ? 0 : 1;
+}
 
 typedef struct {
     uint8_t *data;
@@ -2962,6 +3233,34 @@ extern "C" int pscalIOSSDLModeActive(void) {
         active = sSDLModeActive ? 1 : 0;
     });
     return active;
+}
+
+extern "C" int PSCALRuntimePingHost(const char *host,
+                                    int count,
+                                    int timeout_ms,
+                                    char **out_output) {
+    if (out_output) {
+        *out_output = NULL;
+    }
+    if (!host || host[0] == '\0') {
+        errno = EINVAL;
+        return 1;
+    }
+
+    std::string output;
+    int status = 1;
+    vprocRegisterInterposeBypassThread(pthread_self());
+    status = PSCALRuntimePingHostBypassed(host, count, timeout_ms, output);
+    vprocUnregisterInterposeBypassThread(pthread_self());
+
+    if (out_output) {
+        *out_output = strdup(output.c_str());
+        if (!*out_output) {
+            errno = ENOMEM;
+            return 1;
+        }
+    }
+    return status;
 }
 #endif
 #import <Foundation/Foundation.h>

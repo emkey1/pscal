@@ -142,6 +142,13 @@ int PSCALRuntimeCreateSshSession(int argc,
                                  int *out_read_fd,
                                  int *out_write_fd);
 
+/// Runs an ICMP echo ping through the native iOS networking stack.
+/// On success, returns a malloc-allocated UTF-8 transcript in out_output.
+int PSCALRuntimePingHost(const char *host,
+                         int count,
+                         int timeout_ms,
+                         char **out_output);
+
 /// Launches an exsh shell session backed by a kernel-managed virtual TTY.
 /// Returns 0 on success and provides UI read/write fds.
 int PSCALRuntimeCreateShellSession(int argc,

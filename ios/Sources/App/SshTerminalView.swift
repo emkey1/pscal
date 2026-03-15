@@ -138,6 +138,7 @@ private struct SshTerminalContentView: View {
         }
         .onAppear {
             tabInitLog("SshTerminalView appear session=\(session.sessionId) active=\(isActive)")
+            session.setViewVisible(isActive)
             updateTerminalGeometry()
             let started = session.start()
             tabInitLog("SshTerminalView start session=\(session.sessionId) started=\(started)")
@@ -153,9 +154,13 @@ private struct SshTerminalContentView: View {
             updateTerminalGeometry()
         }
         .onChange(of: isActive) { active in
+            session.setViewVisible(active)
             if active {
                 updateTerminalGeometry()
             }
+        }
+        .onDisappear {
+            session.setViewVisible(false)
         }
     }
 

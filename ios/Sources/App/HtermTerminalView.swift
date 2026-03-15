@@ -146,7 +146,13 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
     private var reloadPending = false
     private var didLogFirstOutput = false
     private var didLogFirstFlush = false
+    private var didLogOutputTrim = false
     private let maxFlushBytes = 128 * 1024
+    private let maxPendingOutputBytes = 2 * 1024 * 1024
+    private var outputEpoch: Int = 1
+    private var outputTrimCount: Int = 0
+    private var outputReloadCount: Int = 0
+    private var outputDiscardCount: Int = 0
     private var hostSizeReady = false
     private var hostSize = CGSize.zero
 
@@ -296,6 +302,15 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         logTabInit("flush unblocked pending=\(pendingOutputSize())")
     }
 
+    struct OutputMetrics {
+        let pendingBytes: Int
+        let isLoaded: Bool
+        let hostSizeReady: Bool
+        let trimCount: Int
+        let reloadCount: Int
+        let discardCount: Int
+    }
+
     func attach(to view: UIView) {
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webView)
@@ -309,8 +324,15 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
 
     func enqueueOutput(_ data: Data) {
         guard !data.isEmpty else { return }
+        var trimmed = false
         outputLock.lock()
         pendingOutput.append(data)
+        if pendingOutput.count > maxPendingOutputBytes {
+            let overflow = pendingOutput.count - maxPendingOutputBytes
+            pendingOutput.removeFirst(overflow)
+            trimmed = true
+            outputTrimCount += 1
+        }
         let shouldFlush = !outputInProgress
         if shouldFlush {
             outputInProgress = true
@@ -319,12 +341,83 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             didLogFirstOutput = true
             NSLog("Hterm[%d]: first output enqueued (%lu bytes)", instanceId, data.count)
         }
+        if trimmed && !didLogOutputTrim {
+            didLogOutputTrim = true
+            NSLog("Hterm[%d]: trimming pending output backlog to %d bytes", instanceId, maxPendingOutputBytes)
+        }
         outputLock.unlock()
         if shouldFlush {
             DispatchQueue.main.async { [weak self] in
                 self?.flushOutput()
             }
         }
+    }
+
+    func discardPendingOutput() {
+        let work = {
+            self.outputLock.lock()
+            self.outputEpoch &+= 1
+            self.outputDiscardCount += 1
+            self.pendingOutput.removeAll(keepingCapacity: false)
+            self.outputInProgress = false
+            self.outputLock.unlock()
+        }
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
+        }
+    }
+
+    func reloadFromSnapshot(_ data: Data) {
+        let work = {
+            self.outputLock.lock()
+            self.outputEpoch &+= 1
+            self.outputReloadCount += 1
+            let epoch = self.outputEpoch
+            self.pendingOutput.removeAll(keepingCapacity: true)
+            if !data.isEmpty {
+                self.pendingOutput.append(data)
+                self.outputInProgress = true
+            } else {
+                self.outputInProgress = false
+            }
+            self.outputLock.unlock()
+
+            self.webView.evaluateJavaScript("exports.resetForEpoch(\(epoch))", completionHandler: nil)
+            guard !data.isEmpty, self.isLoaded, self.hostSizeReady else { return }
+            self.flushOutput(forEpoch: epoch)
+        }
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.async(execute: work)
+        }
+    }
+
+    func outputMetrics() -> OutputMetrics {
+        let loaded: Bool
+        let sizeReady: Bool
+        if Thread.isMainThread {
+            loaded = isLoaded
+            sizeReady = hostSizeReady
+        } else {
+            var mainThreadState = (loaded: false, sizeReady: false)
+            DispatchQueue.main.sync {
+                mainThreadState = (loaded: self.isLoaded, sizeReady: self.hostSizeReady)
+            }
+            loaded = mainThreadState.loaded
+            sizeReady = mainThreadState.sizeReady
+        }
+        outputLock.lock()
+        let metrics = OutputMetrics(pendingBytes: pendingOutput.count,
+                                    isLoaded: loaded,
+                                    hostSizeReady: sizeReady,
+                                    trimCount: outputTrimCount,
+                                    reloadCount: outputReloadCount,
+                                    discardCount: outputDiscardCount)
+        outputLock.unlock()
+        return metrics
     }
 
     func updateStyle(font: UIFont, foreground: UIColor, background: UIColor) {
@@ -645,7 +738,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         }
     }
 
-    private func flushOutput() {
+    private func flushOutput(forEpoch requestedEpoch: Int? = nil) {
         guard isLoaded else {
             logFlushBlocked("not-loaded")
             outputLock.lock()
@@ -662,7 +755,14 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         }
         clearFlushBlocked()
         let chunk: Data
+        let epoch: Int
         outputLock.lock()
+        epoch = outputEpoch
+        if let requestedEpoch, requestedEpoch != epoch {
+            outputInProgress = false
+            outputLock.unlock()
+            return
+        }
         if pendingOutput.isEmpty {
             outputInProgress = false
             outputLock.unlock()
@@ -677,8 +777,8 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         }
         outputLock.unlock()
 
-        guard let js = jsWriteString(for: chunk) else {
-            scheduleNextFlushIfNeeded()
+        guard let js = jsWriteString(for: chunk, epoch: epoch) else {
+            scheduleNextFlushIfNeeded(forEpoch: epoch)
             return
         }
 
@@ -686,12 +786,17 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
             if let error = error {
                 NSLog("Hterm output error: %@", error.localizedDescription)
             }
-            self?.scheduleNextFlushIfNeeded()
+            self?.scheduleNextFlushIfNeeded(forEpoch: epoch)
         }
     }
 
-    private func scheduleNextFlushIfNeeded() {
+    private func scheduleNextFlushIfNeeded(forEpoch epoch: Int) {
         outputLock.lock()
+        guard epoch == outputEpoch else {
+            outputInProgress = !pendingOutput.isEmpty
+            outputLock.unlock()
+            return
+        }
         let hasMore = !pendingOutput.isEmpty
         if !hasMore {
             outputInProgress = false
@@ -699,7 +804,7 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         outputLock.unlock()
         if hasMore {
             DispatchQueue.main.async { [weak self] in
-                self?.flushOutput()
+                self?.flushOutput(forEpoch: epoch)
             }
         }
     }
@@ -762,9 +867,9 @@ final class HtermTerminalController: NSObject, WKScriptMessageHandler, WKNavigat
         webView.evaluateJavaScript("exports.copy()", completionHandler: nil)
     }
 
-    private func jsWriteString(for data: Data) -> String? {
+    private func jsWriteString(for data: Data, epoch: Int) -> String? {
         let encoded = data.base64EncodedString()
-        return "exports.writeB64(\"\(encoded)\")"
+        return "exports.writeB64ForEpoch(\(epoch), \"\(encoded)\")"
     }
 
     private func scheduleScrollToBottom() {

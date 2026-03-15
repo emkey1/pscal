@@ -1,5 +1,8 @@
 #include "ext_builtins/register.h"
 
+#include <errno.h>
+#include <stdlib.h>
+
 __attribute__((weak)) void registerShellFrontendBuiltins(void) {
     /* No-op on iOS tool runner builds */
 }
@@ -38,5 +41,17 @@ __attribute__((weak)) void pscalRuntimeSdlDidOpen(void) {
 }
 
 __attribute__((weak)) void pscalRuntimeSdlDidClose(void) {
+}
+
+__attribute__((weak))
+int PSCALRuntimePingHost(const char *host, int count, int timeout_ms, char **out_output) {
+    (void)host;
+    (void)count;
+    (void)timeout_ms;
+    if (out_output) {
+        *out_output = NULL;
+    }
+    errno = ENOSYS;
+    return 1;
 }
 #endif

@@ -84,10 +84,17 @@ final class ShellRuntimeSession: ObservableObject {
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
     private let minRenderInterval: TimeInterval = 0.016
-    private var detachedOutputChunks: [Data] = []
-    private var detachedOutputHead: Int = 0
-    private var detachedOutputBytes: Int = 0
-    private let detachedOutputMaxBytes: Int = 2 * 1024 * 1024
+    private var attachedOutputChunks: [Data] = []
+    private var attachedOutputHead: Int = 0
+    private var attachedOutputBytes: Int = 0
+    private var attachedFlushScheduled = false
+    private let attachedFlushInterval: TimeInterval = 0.001
+    private let attachedFlushChunkBytes: Int = 128 * 1024
+    private let attachedOutputPauseHighWatermark: Int = 512 * 1024
+    private let attachedOutputPauseLowWatermark: Int = 128 * 1024
+    private var outputPausedForBackpressure = false
+    private var sessionOutputPaused = false
+    private var pauseTransitionCount = 0
     private var started = false
     private var didExit = false
     private var pendingColumns: Int
@@ -97,6 +104,8 @@ final class ShellRuntimeSession: ObservableObject {
     private let outputHandlerGroup = DispatchGroup()
     let htermController: HtermTerminalController
     private var htermAttached = false
+    private var viewVisible = false
+    private let metricsLogger: TerminalSessionMetricsLogger
     private func withRuntimeContext<T>(_ body: () -> T) -> T {
         guard let runtimeContext else {
             return body()
@@ -127,12 +136,23 @@ final class ShellRuntimeSession: ObservableObject {
         self.pendingRows = metrics.rows
         self.screenText = NSAttributedString(string: "Launching \(sessionLogLabel)...")
         self.htermController = HtermTerminalController.makeOnMainThread()
+        self.metricsLogger = TerminalSessionMetricsLogger(sessionKind: sessionLogLabel, sessionId: sessionId)
         _ = terminalBuffer
     }
 
     deinit {
         if let runtimeContext = runtimeContext {
             PSCALRuntimeDestroyRuntimeContext(runtimeContext)
+        }
+    }
+
+    func setViewVisible(_ visible: Bool) {
+        outputQueue.async {
+            self.viewVisible = visible
+            if visible && !self.htermAttached {
+                self.scheduleRender()
+            }
+            self.recordMetricsLocked(reason: visible ? "view-visible" : "view-hidden", force: true)
         }
     }
 
@@ -148,7 +168,10 @@ final class ShellRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach \(self.sessionLogLabel) session=\(self.sessionId)")
             self.htermAttached = true
-            self.flushDetachedOutputIfNeeded()
+            self.drainAttachedOutputToTerminalLocked()
+            self.reloadHtermFromTerminalStateLocked()
+            self.updateSessionOutputPauseLocked()
+            self.recordMetricsLocked(reason: "attach", force: true)
             DispatchQueue.main.async {
                 controller.setResizeSessionId(self.sessionId)
             }
@@ -162,8 +185,13 @@ final class ShellRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach \(self.sessionLogLabel) session=\(self.sessionId)")
             self.htermAttached = false
+            self.drainAttachedOutputToTerminalLocked()
+            self.outputPausedForBackpressure = false
+            self.updateSessionOutputPauseLocked()
+            self.recordMetricsLocked(reason: "detach", force: true)
             DispatchQueue.main.async {
                 controller.setResizeSessionId(0)
+                controller.discardPendingOutput()
             }
         }
     }
@@ -184,6 +212,9 @@ final class ShellRuntimeSession: ObservableObject {
         withRuntimeContext {
             PSCALRuntimeRegisterSessionOutputHandler(sessionId, sessionOutputHandler, handlerContext)
         }
+        sessionOutputPaused = false
+        updateSessionOutputPauseLocked()
+        recordMetricsLocked(reason: "start", force: true)
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
             let message = "Session(\(sessionLogLabel)): start id=\(sessionId) ctx=\(ctxDesc)\n"
@@ -214,6 +245,9 @@ final class ShellRuntimeSession: ObservableObject {
         applyPendingWinsize()
         closeIfValid(readFd)
         closeIfValid(writeFd)
+        outputQueue.async { [weak self] in
+            self?.recordMetricsLocked(reason: "launched", force: true)
+        }
         return true
     }
 
@@ -301,6 +335,9 @@ final class ShellRuntimeSession: ObservableObject {
                 self.exitStatus = status
             }
         }
+        outputQueue.async { [weak self] in
+            self?.recordMetricsLocked(reason: "exit", force: true)
+        }
     }
 
     // MARK: - Output Handler
@@ -318,7 +355,7 @@ final class ShellRuntimeSession: ObservableObject {
     // MARK: - Rendering
 
     private func scheduleRender() {
-        if htermAttached {
+        if htermAttached || !viewVisible {
             return
         }
         if renderQueued {
@@ -341,7 +378,7 @@ final class ShellRuntimeSession: ObservableObject {
     }
 
     private func performRender() {
-        if htermAttached {
+        if htermAttached || !viewVisible {
             renderQueued = false
             return
         }
@@ -399,55 +436,146 @@ final class ShellRuntimeSession: ObservableObject {
         outputQueue.async { [weak self] in
             guard let self else { return }
             if self.htermAttached {
-                self.flushDetachedOutputIfNeeded()
-                self.htermController.enqueueOutput(data)
-                self.terminalBuffer.append(data: data)
+                self.queueAttachedOutputLocked(data)
+                self.scheduleAttachedFlushLocked()
+                self.recordMetricsLocked(reason: "attached-queue")
             } else {
-                self.queueDetachedOutput(data)
+                self.terminalBuffer.append(data: data) { [weak self] in
+                    self?.recordMetrics(reason: "terminal-append")
+                    self?.scheduleRender()
+                }
             }
         }
     }
 
-    private func queueDetachedOutput(_ data: Data) {
+    private func queueAttachedOutputLocked(_ data: Data) {
         guard !data.isEmpty else { return }
-        guard detachedOutputMaxBytes > 0 else { return }
-        if data.count >= detachedOutputMaxBytes {
-            let tail = data.suffix(detachedOutputMaxBytes)
-            detachedOutputChunks = [Data(tail)]
-            detachedOutputHead = 0
-            detachedOutputBytes = tail.count
-            return
-        }
-
-        detachedOutputChunks.append(data)
-        detachedOutputBytes += data.count
-        while detachedOutputBytes > detachedOutputMaxBytes && detachedOutputHead < detachedOutputChunks.count {
-            detachedOutputBytes -= detachedOutputChunks[detachedOutputHead].count
-            detachedOutputHead += 1
-        }
-        if detachedOutputHead > 64 && detachedOutputHead > detachedOutputChunks.count / 2 {
-            detachedOutputChunks.removeFirst(detachedOutputHead)
-            detachedOutputHead = 0
+        attachedOutputChunks.append(data)
+        attachedOutputBytes += data.count
+        if !outputPausedForBackpressure && attachedOutputBytes >= attachedOutputPauseHighWatermark {
+            outputPausedForBackpressure = true
+            updateSessionOutputPauseLocked()
+            recordMetricsLocked(reason: "backpressure-on", force: true)
         }
     }
 
-    private func flushDetachedOutputIfNeeded() {
+    private func scheduleAttachedFlushLocked() {
         guard htermAttached else { return }
-        guard detachedOutputHead < detachedOutputChunks.count else {
-            detachedOutputChunks.removeAll(keepingCapacity: true)
-            detachedOutputHead = 0
-            detachedOutputBytes = 0
+        guard attachedOutputBytes > 0 else { return }
+        guard !attachedFlushScheduled else { return }
+        attachedFlushScheduled = true
+        outputQueue.asyncAfter(deadline: .now() + attachedFlushInterval) { [weak self] in
+            self?.flushAttachedOutput()
+        }
+    }
+
+    private func flushAttachedOutput() {
+        guard htermAttached else {
+            attachedFlushScheduled = false
+            return
+        }
+        guard attachedOutputHead < attachedOutputChunks.count, attachedOutputBytes > 0 else {
+            attachedFlushScheduled = false
+            attachedOutputChunks.removeAll(keepingCapacity: true)
+            attachedOutputHead = 0
+            attachedOutputBytes = 0
+            if outputPausedForBackpressure {
+                outputPausedForBackpressure = false
+                updateSessionOutputPauseLocked()
+            }
             return
         }
 
-        for index in detachedOutputHead..<detachedOutputChunks.count {
-            let chunk = detachedOutputChunks[index]
-            htermController.enqueueOutput(chunk)
-            terminalBuffer.append(data: chunk)
+        var remaining = min(attachedFlushChunkBytes, attachedOutputBytes)
+        var merged = Data()
+        merged.reserveCapacity(remaining)
+        while remaining > 0 && attachedOutputHead < attachedOutputChunks.count {
+            let chunk = attachedOutputChunks[attachedOutputHead]
+            if chunk.count <= remaining {
+                merged.append(chunk)
+                remaining -= chunk.count
+                attachedOutputHead += 1
+            } else {
+                merged.append(chunk.prefix(remaining))
+                attachedOutputChunks[attachedOutputHead].removeFirst(remaining)
+                remaining = 0
+            }
         }
-        detachedOutputChunks.removeAll(keepingCapacity: true)
-        detachedOutputHead = 0
-        detachedOutputBytes = 0
+
+        let emittedBytes = merged.count
+        if emittedBytes > 0 {
+            attachedOutputBytes -= emittedBytes
+            htermController.enqueueOutput(merged)
+            terminalBuffer.append(data: merged) { [weak self] in
+                self?.recordMetrics(reason: "attached-flush")
+            }
+        }
+
+        if attachedOutputHead > 64 && attachedOutputHead > attachedOutputChunks.count / 2 {
+            attachedOutputChunks.removeFirst(attachedOutputHead)
+            attachedOutputHead = 0
+        }
+
+        if outputPausedForBackpressure && attachedOutputBytes <= attachedOutputPauseLowWatermark {
+            outputPausedForBackpressure = false
+            updateSessionOutputPauseLocked()
+            recordMetricsLocked(reason: "backpressure-off", force: true)
+        }
+
+        attachedFlushScheduled = false
+        if attachedOutputBytes > 0 {
+            scheduleAttachedFlushLocked()
+        }
+    }
+
+    private func drainAttachedOutputToTerminalLocked() {
+        guard attachedOutputHead < attachedOutputChunks.count else {
+            attachedOutputChunks.removeAll(keepingCapacity: true)
+            attachedOutputHead = 0
+            attachedOutputBytes = 0
+            attachedFlushScheduled = false
+            return
+        }
+        for index in attachedOutputHead..<attachedOutputChunks.count {
+            terminalBuffer.append(data: attachedOutputChunks[index])
+        }
+        attachedOutputChunks.removeAll(keepingCapacity: true)
+        attachedOutputHead = 0
+        attachedOutputBytes = 0
+        attachedFlushScheduled = false
+    }
+
+    private func reloadHtermFromTerminalStateLocked() {
+        let snapshotData = terminalBuffer.vt100SnapshotData(includeScrollback: true)
+        htermController.reloadFromSnapshot(snapshotData)
+    }
+
+    private func updateSessionOutputPauseLocked() {
+        let shouldPause = htermAttached && outputPausedForBackpressure
+        guard shouldPause != sessionOutputPaused else { return }
+        sessionOutputPaused = shouldPause
+        pauseTransitionCount += 1
+        withRuntimeContext {
+            PSCALRuntimeSetSessionOutputPaused(sessionId, shouldPause ? 1 : 0)
+        }
+        recordMetricsLocked(reason: shouldPause ? "session-pause" : "session-resume", force: true)
+    }
+
+    private func recordMetrics(reason: String, force: Bool = false) {
+        outputQueue.async { [weak self] in
+            self?.recordMetricsLocked(reason: reason, force: force)
+        }
+    }
+
+    private func recordMetricsLocked(reason: String, force: Bool = false) {
+        let snapshot = TerminalSessionMetricsSnapshot(visible: viewVisible,
+                                                     htermAttached: htermAttached,
+                                                     sessionOutputPaused: sessionOutputPaused,
+                                                     attachedOutputBytes: attachedOutputBytes,
+                                                     pauseTransitions: pauseTransitionCount,
+                                                     terminalBuffer: terminalBuffer.metrics(),
+                                                     htermOutput: htermController.outputMetrics())
+        metricsLogger.record(snapshot, reason: reason, force: force)
     }
 
     private func launchSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {

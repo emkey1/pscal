@@ -70,6 +70,7 @@ function syncProp(name, value) {
         native.propUpdate(name, value);
 }
 let pendingViewportRefresh = false;
+let outputEpoch = 1;
 function scheduleViewportRefresh() {
     if (pendingViewportRefresh) {
         return;
@@ -152,6 +153,25 @@ exports.writeB64 = (b64) => {
     const binary = atob(b64);
     const bytes = lib.codec.stringToCodeUnitArray(binary);
     writeUtf8Bytes(bytes);
+};
+exports.writeB64ForEpoch = (epoch, b64) => {
+    const nextEpoch = Number(epoch);
+    if (!Number.isFinite(nextEpoch) || nextEpoch !== outputEpoch || !b64) {
+        return;
+    }
+    exports.writeB64(b64);
+};
+exports.resetForEpoch = (epoch) => {
+    const nextEpoch = Number(epoch);
+    if (Number.isFinite(nextEpoch)) {
+        outputEpoch = nextEpoch;
+    } else {
+        outputEpoch += 1;
+    }
+    term.reset();
+    syncProp('applicationCursor', term.keyboard.applicationCursor);
+    scheduleViewportRefresh();
+    syncScroll();
 };
 term.io.sendString = term.io.onVTKeyStroke = (data) => {
     native.sendInput(data);

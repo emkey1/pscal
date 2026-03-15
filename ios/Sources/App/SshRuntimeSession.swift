@@ -58,10 +58,6 @@ final class SshRuntimeSession: ObservableObject {
     private var renderQueued = false
     private var lastRenderTime: TimeInterval = 0
     private let minRenderInterval: TimeInterval = 0.03
-    private var detachedOutputChunks: [Data] = []
-    private var detachedOutputHead: Int = 0
-    private var detachedOutputBytes: Int = 0
-    private let detachedOutputMaxBytes: Int = 2 * 1024 * 1024
     private var attachedOutputChunks: [Data] = []
     private var attachedOutputHead: Int = 0
     private var attachedOutputBytes: Int = 0
@@ -72,6 +68,7 @@ final class SshRuntimeSession: ObservableObject {
     private let attachedOutputPauseLowWatermark: Int = 128 * 1024
     private var outputPausedForBackpressure = false
     private var sessionOutputPaused = false
+    private var pauseTransitionCount = 0
     private var started = false
     private var didExit = false
     private var pendingColumns: Int
@@ -81,6 +78,8 @@ final class SshRuntimeSession: ObservableObject {
     private let outputHandlerGroup = DispatchGroup()
     let htermController: HtermTerminalController
     private var htermAttached = false
+    private var viewVisible = false
+    private let metricsLogger: TerminalSessionMetricsLogger
     private func withRuntimeContext<T>(_ body: () -> T) -> T {
         guard let runtimeContext else {
             return body()
@@ -108,12 +107,23 @@ final class SshRuntimeSession: ObservableObject {
         self.pendingRows = metrics.rows
         self.screenText = NSAttributedString(string: "Launching ssh...")
         self.htermController = HtermTerminalController.makeOnMainThread()
+        self.metricsLogger = TerminalSessionMetricsLogger(sessionKind: "ssh", sessionId: sessionId)
         _ = terminalBuffer
     }
 
     deinit {
         if let runtimeContext = runtimeContext {
             PSCALRuntimeDestroyRuntimeContext(runtimeContext)
+        }
+    }
+
+    func setViewVisible(_ visible: Bool) {
+        outputQueue.async {
+            self.viewVisible = visible
+            if visible && !self.htermAttached {
+                self.scheduleRender()
+            }
+            self.recordMetricsLocked(reason: visible ? "view-visible" : "view-hidden", force: true)
         }
     }
 
@@ -129,9 +139,10 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: attach ssh session=\(self.sessionId)")
             self.htermAttached = true
-            self.flushDetachedOutputIfNeeded()
+            self.drainAttachedOutputToTerminalLocked()
+            self.reloadHtermFromTerminalStateLocked()
             self.updateSessionOutputPauseLocked()
-            self.scheduleAttachedFlushLocked()
+            self.recordMetricsLocked(reason: "attach", force: true)
             DispatchQueue.main.async {
                 controller.setResizeSessionId(self.sessionId)
             }
@@ -145,11 +156,13 @@ final class SshRuntimeSession: ObservableObject {
             }
             Self.logHterm("Hterm[\(controller.instanceId)]: detach ssh session=\(self.sessionId)")
             self.htermAttached = false
-            self.moveAttachedOutputToDetachedLocked()
+            self.drainAttachedOutputToTerminalLocked()
             self.outputPausedForBackpressure = false
             self.updateSessionOutputPauseLocked()
+            self.recordMetricsLocked(reason: "detach", force: true)
             DispatchQueue.main.async {
                 controller.setResizeSessionId(0)
+                controller.discardPendingOutput()
             }
         }
     }
@@ -172,6 +185,7 @@ final class SshRuntimeSession: ObservableObject {
         }
         sessionOutputPaused = false
         updateSessionOutputPauseLocked()
+        recordMetricsLocked(reason: "start", force: true)
         if Self.ioDebugEnabled {
             let ctxDesc = runtimeContext.map { String(describing: $0) } ?? "nil"
             let message = "SshSession: start id=\(sessionId) ctx=\(ctxDesc)\n"
@@ -202,6 +216,9 @@ final class SshRuntimeSession: ObservableObject {
         applyPendingWinsize()
         closeIfValid(readFd)
         closeIfValid(writeFd)
+        outputQueue.async { [weak self] in
+            self?.recordMetricsLocked(reason: "launched", force: true)
+        }
         return true
     }
 
@@ -289,6 +306,9 @@ final class SshRuntimeSession: ObservableObject {
                 self.exitStatus = status
             }
         }
+        outputQueue.async { [weak self] in
+            self?.recordMetricsLocked(reason: "exit", force: true)
+        }
     }
 
     // MARK: - Output Handler
@@ -306,7 +326,7 @@ final class SshRuntimeSession: ObservableObject {
     // MARK: - Rendering
 
     private func scheduleRender() {
-        if htermAttached {
+        if htermAttached || !viewVisible {
             return
         }
         if renderQueued {
@@ -329,7 +349,7 @@ final class SshRuntimeSession: ObservableObject {
     }
 
     private func performRender() {
-        if htermAttached {
+        if htermAttached || !viewVisible {
             renderQueued = false
             return
         }
@@ -387,53 +407,16 @@ final class SshRuntimeSession: ObservableObject {
         outputQueue.async { [weak self] in
             guard let self else { return }
             if self.htermAttached {
-                self.flushDetachedOutputIfNeeded()
                 self.queueAttachedOutputLocked(data)
                 self.scheduleAttachedFlushLocked()
+                self.recordMetricsLocked(reason: "attached-queue")
             } else {
-                self.queueDetachedOutput(data)
+                self.terminalBuffer.append(data: data) { [weak self] in
+                    self?.recordMetrics(reason: "terminal-append")
+                    self?.scheduleRender()
+                }
             }
         }
-    }
-
-    private func queueDetachedOutput(_ data: Data) {
-        guard !data.isEmpty else { return }
-        guard detachedOutputMaxBytes > 0 else { return }
-        if data.count >= detachedOutputMaxBytes {
-            let tail = data.suffix(detachedOutputMaxBytes)
-            detachedOutputChunks = [Data(tail)]
-            detachedOutputHead = 0
-            detachedOutputBytes = tail.count
-            return
-        }
-
-        detachedOutputChunks.append(data)
-        detachedOutputBytes += data.count
-        while detachedOutputBytes > detachedOutputMaxBytes && detachedOutputHead < detachedOutputChunks.count {
-            detachedOutputBytes -= detachedOutputChunks[detachedOutputHead].count
-            detachedOutputHead += 1
-        }
-        if detachedOutputHead > 64 && detachedOutputHead > detachedOutputChunks.count / 2 {
-            detachedOutputChunks.removeFirst(detachedOutputHead)
-            detachedOutputHead = 0
-        }
-    }
-
-    private func flushDetachedOutputIfNeeded() {
-        guard htermAttached else { return }
-        guard detachedOutputHead < detachedOutputChunks.count else {
-            detachedOutputChunks.removeAll(keepingCapacity: true)
-            detachedOutputHead = 0
-            detachedOutputBytes = 0
-            return
-        }
-
-        for index in detachedOutputHead..<detachedOutputChunks.count {
-            queueAttachedOutputLocked(detachedOutputChunks[index])
-        }
-        detachedOutputChunks.removeAll(keepingCapacity: true)
-        detachedOutputHead = 0
-        detachedOutputBytes = 0
     }
 
     private func queueAttachedOutputLocked(_ data: Data) {
@@ -443,6 +426,7 @@ final class SshRuntimeSession: ObservableObject {
         if !outputPausedForBackpressure && attachedOutputBytes >= attachedOutputPauseHighWatermark {
             outputPausedForBackpressure = true
             updateSessionOutputPauseLocked()
+            recordMetricsLocked(reason: "backpressure-on", force: true)
         }
     }
 
@@ -493,7 +477,9 @@ final class SshRuntimeSession: ObservableObject {
         if emittedBytes > 0 {
             attachedOutputBytes -= emittedBytes
             htermController.enqueueOutput(merged)
-            terminalBuffer.append(data: merged)
+            terminalBuffer.append(data: merged) { [weak self] in
+                self?.recordMetrics(reason: "attached-flush")
+            }
         }
 
         if attachedOutputHead > 64 && attachedOutputHead > attachedOutputChunks.count / 2 {
@@ -504,6 +490,7 @@ final class SshRuntimeSession: ObservableObject {
         if outputPausedForBackpressure && attachedOutputBytes <= attachedOutputPauseLowWatermark {
             outputPausedForBackpressure = false
             updateSessionOutputPauseLocked()
+            recordMetricsLocked(reason: "backpressure-off", force: true)
         }
 
         attachedFlushScheduled = false
@@ -512,7 +499,7 @@ final class SshRuntimeSession: ObservableObject {
         }
     }
 
-    private func moveAttachedOutputToDetachedLocked() {
+    private func drainAttachedOutputToTerminalLocked() {
         guard attachedOutputHead < attachedOutputChunks.count else {
             attachedOutputChunks.removeAll(keepingCapacity: true)
             attachedOutputHead = 0
@@ -521,7 +508,7 @@ final class SshRuntimeSession: ObservableObject {
             return
         }
         for index in attachedOutputHead..<attachedOutputChunks.count {
-            queueDetachedOutput(attachedOutputChunks[index])
+            terminalBuffer.append(data: attachedOutputChunks[index])
         }
         attachedOutputChunks.removeAll(keepingCapacity: true)
         attachedOutputHead = 0
@@ -529,13 +516,37 @@ final class SshRuntimeSession: ObservableObject {
         attachedFlushScheduled = false
     }
 
+    private func reloadHtermFromTerminalStateLocked() {
+        let snapshotData = terminalBuffer.vt100SnapshotData(includeScrollback: true)
+        htermController.reloadFromSnapshot(snapshotData)
+    }
+
     private func updateSessionOutputPauseLocked() {
-        let shouldPause = !htermAttached || outputPausedForBackpressure
+        let shouldPause = htermAttached && outputPausedForBackpressure
         guard shouldPause != sessionOutputPaused else { return }
         sessionOutputPaused = shouldPause
+        pauseTransitionCount += 1
         withRuntimeContext {
             PSCALRuntimeSetSessionOutputPaused(sessionId, shouldPause ? 1 : 0)
         }
+        recordMetricsLocked(reason: shouldPause ? "session-pause" : "session-resume", force: true)
+    }
+
+    private func recordMetrics(reason: String, force: Bool = false) {
+        outputQueue.async { [weak self] in
+            self?.recordMetricsLocked(reason: reason, force: force)
+        }
+    }
+
+    private func recordMetricsLocked(reason: String, force: Bool = false) {
+        let snapshot = TerminalSessionMetricsSnapshot(visible: viewVisible,
+                                                     htermAttached: htermAttached,
+                                                     sessionOutputPaused: sessionOutputPaused,
+                                                     attachedOutputBytes: attachedOutputBytes,
+                                                     pauseTransitions: pauseTransitionCount,
+                                                     terminalBuffer: terminalBuffer.metrics(),
+                                                     htermOutput: htermController.outputMetrics())
+        metricsLogger.record(snapshot, reason: reason, force: force)
     }
 
     private func launchSshSession(readFd: inout Int32, writeFd: inout Int32) -> Bool {

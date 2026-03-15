@@ -203,6 +203,19 @@ struct global_confirm {
 TAILQ_HEAD(global_confirms, global_confirm);
 static PSCAL_SSH_THREAD_LOCAL struct global_confirms global_confirms;
 
+static void
+pscal_clientloop_clear_global_confirms(void)
+{
+	struct global_confirm *gc;
+
+	while ((gc = TAILQ_FIRST(&global_confirms)) != NULL) {
+		TAILQ_REMOVE(&global_confirms, gc, entry);
+		freezero(gc, sizeof(*gc));
+	}
+	global_confirms.tqh_first = NULL;
+	global_confirms.tqh_last = &global_confirms.tqh_first;
+}
+
 #ifdef PSCAL_TARGET_IOS
 void
 pscal_clientloop_register_cleanup(void)
@@ -230,8 +243,7 @@ pscal_clientloop_reset_hostkeys(void)
 	received_window_change_signal = 0;
 	siginfo_received = 0;
 	received_signal = 0;
-	global_confirms.tqh_first = NULL;
-	global_confirms.tqh_last = &global_confirms.tqh_first;
+	pscal_clientloop_clear_global_confirms();
 }
 #endif
 
@@ -2917,6 +2929,7 @@ static void
 pscal_clientloop_cleanup(int i)
 {
 	(void)i;
+	pscal_clientloop_clear_global_confirms();
 	leave_raw_mode(options.request_tty == REQUEST_TTY_FORCE);
 	if (options.control_path != NULL && muxserver_sock != -1)
 		unlink(options.control_path);
