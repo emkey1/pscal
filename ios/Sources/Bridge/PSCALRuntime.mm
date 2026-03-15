@@ -19,7 +19,9 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/icmp6.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -152,31 +154,77 @@ static void PSCALRuntimePingAppendf(std::string &buffer, const char *format, ...
 }
 
 static bool PSCALRuntimePingDecodeReply(const unsigned char *buf, size_t len,
-                                        uint16_t ident, uint16_t seq,
+                                        sa_family_t family,
+                                        uint16_t seq,
+                                        uint64_t payload_token,
                                         size_t *out_reply_len) {
-    const struct icmp *icmp_hdr = NULL;
     size_t reply_len = len;
+    const unsigned char *payload = NULL;
 
-    if (len >= sizeof(struct ip)) {
-        const struct ip *ip_hdr = (const struct ip *)buf;
-        if (ip_hdr->ip_v == 4) {
-            size_t ip_len = (size_t)ip_hdr->ip_hl << 2;
-            if (ip_len >= sizeof(struct ip) && len >= ip_len + ICMP_MINLEN) {
-                icmp_hdr = (const struct icmp *)(buf + ip_len);
-                reply_len = len - ip_len;
+    if (family == AF_INET) {
+        const struct icmp *icmp_hdr = NULL;
+        if (len >= sizeof(struct ip)) {
+            const struct ip *ip_hdr = (const struct ip *)buf;
+            if (ip_hdr->ip_v == 4) {
+                size_t ip_len = (size_t)ip_hdr->ip_hl << 2;
+                if (ip_len >= sizeof(struct ip) && len >= ip_len + ICMP_MINLEN) {
+                    icmp_hdr = (const struct icmp *)(buf + ip_len);
+                    reply_len = len - ip_len;
+                }
             }
         }
-    }
-    if (!icmp_hdr && len >= ICMP_MINLEN) {
-        icmp_hdr = (const struct icmp *)buf;
-    }
-    if (!icmp_hdr) {
+        if (!icmp_hdr && len >= ICMP_MINLEN) {
+            icmp_hdr = (const struct icmp *)buf;
+        }
+        if (!icmp_hdr) {
+            errno = EPROTO;
+            return false;
+        }
+        if (icmp_hdr->icmp_type != ICMP_ECHOREPLY ||
+            ntohs((uint16_t)icmp_hdr->icmp_seq) != seq) {
+            errno = EPROTO;
+            return false;
+        }
+        if (reply_len < ICMP_MINLEN + sizeof(payload_token)) {
+            errno = EPROTO;
+            return false;
+        }
+        payload = ((const unsigned char *)icmp_hdr) + ICMP_MINLEN;
+    } else if (family == AF_INET6) {
+        const struct icmp6_hdr *icmp6_hdr = NULL;
+        if (len >= sizeof(struct ip6_hdr)) {
+            const struct ip6_hdr *ip6_hdr = (const struct ip6_hdr *)buf;
+            if ((ip6_hdr->ip6_vfc >> 4) == 6 &&
+                len >= sizeof(struct ip6_hdr) + sizeof(struct icmp6_hdr)) {
+                icmp6_hdr = (const struct icmp6_hdr *)(buf + sizeof(struct ip6_hdr));
+                reply_len = len - sizeof(struct ip6_hdr);
+            }
+        }
+        if (!icmp6_hdr && len >= sizeof(struct icmp6_hdr)) {
+            icmp6_hdr = (const struct icmp6_hdr *)buf;
+        }
+        if (!icmp6_hdr) {
+            errno = EPROTO;
+            return false;
+        }
+        if (icmp6_hdr->icmp6_type != ICMP6_ECHO_REPLY ||
+            ntohs(icmp6_hdr->icmp6_seq) != seq) {
+            errno = EPROTO;
+            return false;
+        }
+        if (reply_len < sizeof(struct icmp6_hdr) + sizeof(payload_token)) {
+            errno = EPROTO;
+            return false;
+        }
+        payload = ((const unsigned char *)icmp6_hdr) + sizeof(struct icmp6_hdr);
+    } else {
         errno = EPROTO;
         return false;
     }
-    (void)ident;
-    if (icmp_hdr->icmp_type != ICMP_ECHOREPLY ||
-        ntohs((uint16_t)icmp_hdr->icmp_seq) != seq) {
+
+    uint64_t echoed_token = 0;
+    memcpy(&echoed_token, payload, sizeof(echoed_token));
+    if (echoed_token != payload_token) {
         errno = EPROTO;
         return false;
     }
@@ -190,9 +238,12 @@ typedef struct {
     CFSocketRef socket_ref;
     CFRunLoopSourceRef run_loop_source;
     CFRunLoopRef run_loop;
-    struct sockaddr_in target_addr;
+    struct sockaddr_storage target_addr;
+    socklen_t target_len;
+    sa_family_t family;
     uint16_t ident;
     uint16_t expected_seq;
+    uint64_t payload_token;
     size_t reply_len;
     bool got_reply;
     int last_errno;
@@ -232,7 +283,7 @@ static void PSCALRuntimePingSocketCallback(CFSocketRef s,
     }
 
     uint8_t buffer[1500];
-    struct sockaddr_in from_addr;
+    struct sockaddr_storage from_addr;
     socklen_t from_len = (socklen_t)sizeof(from_addr);
     ssize_t received = recvfrom(CFSocketGetNative(s),
                                 buffer,
@@ -248,8 +299,9 @@ static void PSCALRuntimePingSocketCallback(CFSocketRef s,
     size_t reply_len = 0;
     if (!PSCALRuntimePingDecodeReply(buffer,
                                      (size_t)received,
-                                     session->ident,
+                                     session->family,
                                      session->expected_seq,
+                                     session->payload_token,
                                      &reply_len)) {
         session->last_errno = errno;
         return;
@@ -266,10 +318,12 @@ static void PSCALRuntimePingSocketCallback(CFSocketRef s,
     }
 }
 
-static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
+static int PSCALRuntimePingAttempt(const struct sockaddr *target_addr,
+                                   socklen_t target_len,
                                    int timeout_ms,
                                    uint16_t ident,
                                    uint16_t seq,
+                                   uint64_t payload_token,
                                    double *out_ms,
                                    size_t *out_reply_len) {
     if (!target_addr) {
@@ -279,17 +333,20 @@ static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
 
     PSCALRuntimePingSession session;
     memset(&session, 0, sizeof(session));
-    session.target_addr = *target_addr;
+    memcpy(&session.target_addr, target_addr, (size_t)target_len);
+    session.target_len = target_len;
+    session.family = target_addr->sa_family;
     session.ident = ident;
     session.expected_seq = seq;
+    session.payload_token = payload_token;
     session.last_errno = EAGAIN;
 
     CFSocketContext context = {};
     context.info = &session;
     session.socket_ref = CFSocketCreate(kCFAllocatorDefault,
-                                        AF_INET,
+                                        session.family,
                                         SOCK_DGRAM,
-                                        IPPROTO_ICMP,
+                                        (session.family == AF_INET6) ? IPPROTO_ICMPV6 : IPPROTO_ICMP,
                                         kCFSocketReadCallBack,
                                         PSCALRuntimePingSocketCallback,
                                         &context);
@@ -306,18 +363,37 @@ static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
     }
     CFRunLoopAddSource(session.run_loop, session.run_loop_source, kCFRunLoopDefaultMode);
 
-    unsigned char packet[ICMP_MINLEN + PSCAL_SIMPLEPING_PAYLOAD_SIZE];
+    unsigned char packet[sizeof(struct icmp6_hdr) + PSCAL_SIMPLEPING_PAYLOAD_SIZE];
     memset(packet, 0, sizeof(packet));
-    struct icmp *icmp_hdr = (struct icmp *)packet;
-    icmp_hdr->icmp_type = ICMP_ECHO;
-    icmp_hdr->icmp_code = 0;
-    icmp_hdr->icmp_id = htons(ident);
-    icmp_hdr->icmp_seq = htons(seq);
-    for (size_t i = ICMP_MINLEN; i < sizeof(packet); ++i) {
-        packet[i] = (unsigned char)(i & 0xffu);
+    size_t packet_len = 0;
+    unsigned char *payload = NULL;
+    if (session.family == AF_INET6) {
+        struct icmp6_hdr *icmp6_hdr = (struct icmp6_hdr *)packet;
+        icmp6_hdr->icmp6_type = ICMP6_ECHO_REQUEST;
+        icmp6_hdr->icmp6_code = 0;
+        icmp6_hdr->icmp6_id = htons(ident);
+        icmp6_hdr->icmp6_seq = htons(seq);
+        packet_len = sizeof(struct icmp6_hdr) + PSCAL_SIMPLEPING_PAYLOAD_SIZE;
+        payload = packet + sizeof(struct icmp6_hdr);
+    } else {
+        struct icmp *icmp_hdr = (struct icmp *)packet;
+        icmp_hdr->icmp_type = ICMP_ECHO;
+        icmp_hdr->icmp_code = 0;
+        icmp_hdr->icmp_id = htons(ident);
+        icmp_hdr->icmp_seq = htons(seq);
+        packet_len = ICMP_MINLEN + PSCAL_SIMPLEPING_PAYLOAD_SIZE;
+        payload = packet + ICMP_MINLEN;
     }
-    icmp_hdr->icmp_cksum = 0;
-    icmp_hdr->icmp_cksum = PSCALRuntimePingChecksum(packet, sizeof(packet));
+
+    memcpy(payload, &payload_token, sizeof(payload_token));
+    for (size_t i = sizeof(payload_token); i < PSCAL_SIMPLEPING_PAYLOAD_SIZE; ++i) {
+        payload[i] = (unsigned char)(i & 0xffu);
+    }
+    if (session.family == AF_INET) {
+        struct icmp *icmp_hdr = (struct icmp *)packet;
+        icmp_hdr->icmp_cksum = 0;
+        icmp_hdr->icmp_cksum = PSCALRuntimePingChecksum(packet, packet_len);
+    }
 
     struct timespec start;
     if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
@@ -327,11 +403,11 @@ static int PSCALRuntimePingAttempt(const struct sockaddr_in *target_addr,
 
     ssize_t sent = sendto(CFSocketGetNative(session.socket_ref),
                           packet,
-                          sizeof(packet),
+                          packet_len,
                           0,
-                          (const struct sockaddr *)target_addr,
-                          (socklen_t)sizeof(*target_addr));
-    if (sent != (ssize_t)sizeof(packet)) {
+                          (const struct sockaddr *)&session.target_addr,
+                          session.target_len);
+    if (sent != (ssize_t)packet_len) {
         if (sent >= 0) {
             errno = EIO;
         }
@@ -389,22 +465,27 @@ static int PSCALRuntimePingHostBypassed(const char *host,
 
     struct addrinfo *selected = NULL;
     for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
-        if (ai->ai_family == AF_INET && ai->ai_addrlen >= (socklen_t)sizeof(struct sockaddr_in)) {
+        if ((ai->ai_family == AF_INET &&
+             ai->ai_addrlen >= (socklen_t)sizeof(struct sockaddr_in)) ||
+            (ai->ai_family == AF_INET6 &&
+             ai->ai_addrlen >= (socklen_t)sizeof(struct sockaddr_in6))) {
             selected = ai;
             break;
         }
     }
     if (!selected) {
-        PSCALRuntimePingAppendf(output, "ping: %s: no IPv4 ICMP address resolved\n", host);
+        PSCALRuntimePingAppendf(output, "ping: %s: no ICMP-capable address resolved\n", host);
         pscalHostsFreeAddrInfo(res);
         return 1;
     }
 
-    struct sockaddr_in target_addr;
-    memcpy(&target_addr, selected->ai_addr, sizeof(target_addr));
+    struct sockaddr_storage target_addr;
+    memset(&target_addr, 0, sizeof(target_addr));
+    memcpy(&target_addr, selected->ai_addr, (size_t)selected->ai_addrlen);
+    socklen_t target_len = (socklen_t)selected->ai_addrlen;
 
     char addrbuf[NI_MAXHOST];
-    if (getnameinfo((const struct sockaddr *)&target_addr, sizeof(target_addr),
+    if (getnameinfo((const struct sockaddr *)&target_addr, target_len,
                     addrbuf, sizeof(addrbuf), NULL, 0, NI_NUMERICHOST) != 0) {
         strncpy(addrbuf, "unknown", sizeof(addrbuf));
         addrbuf[sizeof(addrbuf) - 1] = '\0';
@@ -422,7 +503,13 @@ static int PSCALRuntimePingHostBypassed(const char *host,
     for (int i = 0; i < count; ++i) {
         double elapsed_ms = 0.0;
         size_t reply_len = 0;
-        int rc = PSCALRuntimePingAttempt(&target_addr, timeout_ms, ident, (uint16_t)(i + 1),
+        uint64_t payload_token = (((uint64_t)arc4random()) << 32) | (uint64_t)arc4random();
+        int rc = PSCALRuntimePingAttempt((const struct sockaddr *)&target_addr,
+                                         target_len,
+                                         timeout_ms,
+                                         ident,
+                                         (uint16_t)(i + 1),
+                                         payload_token,
                                          &elapsed_ms, &reply_len);
         if (rc == 0) {
             successes++;
