@@ -985,6 +985,7 @@ private struct TerminalTabBar: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("New Shell Tab")
+                .accessibilityHint("Opens a new local shell session in a new tab")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -1048,6 +1049,7 @@ private struct SdlTabView: View {
                     .padding(.vertical, 8)
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityLabel("Return to Shell")
             .accessibilityHint("Closes the SDL tab and returns you to a shell prompt")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
