@@ -134,6 +134,11 @@ endif()
 
 set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall)
+
+if(UNIX AND NOT APPLE)
+    add_compile_definitions(_GNU_SOURCE _POSIX_C_SOURCE=200809L)
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(
     PROGRAM_VERSION="${PROGRAM_VERSION_STRING}"
