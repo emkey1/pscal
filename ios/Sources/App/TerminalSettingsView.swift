@@ -100,6 +100,7 @@ struct TerminalSettingsView: View {
                             }
                         )
                     )
+                    .accessibilityHint("Applies the saved tab name when the app starts")
 
                     Text("Used for this tab profile. Enable restore to apply the saved name when the app starts.")
                         .font(.footnote)
@@ -169,6 +170,7 @@ struct TerminalSettingsView: View {
                             set: { settings.updatePathTruncationEnabled($0) }
                         )
                     )
+                    .accessibilityHint("Maps absolute paths to the truncation path. Requires restarting the app.")
 
                     Text("Requires restarting PSCAL to take effect.")
                         .font(.footnote)
@@ -213,6 +215,7 @@ struct TerminalSettingsView: View {
                             set: { settings.updateLocationDeviceEnabled($0) }
                         )
                     )
+                    .accessibilityHint("Exposes a live location feed to shell sessions")
 
                     Text("Expose a live location feed to shell sessions.")
                         .font(.footnote)
@@ -245,6 +248,7 @@ struct TerminalSettingsView: View {
                             set: { settings.updateRunInitAsPid1OnFirstTab($0) }
                         )
                     )
+                    .accessibilityHint("Starts the first tab with init in service mode. Requires restarting the app.")
 
                     Text("When enabled, PSCAL starts tab 1 with init --service-mode as the first process.")
                         .font(.footnote)
