@@ -431,6 +431,38 @@ bool pscalRuntimeVmIsSharedFileStream(FILE* stream) {
 #endif
 
 #if !defined(PSCAL_TARGET_IOS)
+static bool vmFdMatchesFileIdentity(int fd, int other_fd) {
+    if (fd < 0 || other_fd < 0) {
+        return false;
+    }
+    struct stat fd_st;
+    struct stat other_st;
+    if (fstat(fd, &fd_st) != 0 || fstat(other_fd, &other_st) != 0) {
+        return false;
+    }
+    return fd_st.st_dev == other_st.st_dev && fd_st.st_ino == other_st.st_ino;
+}
+
+static bool vmStreamTargetsSharedStdin(FILE *stream) {
+    if (!stream) {
+        return false;
+    }
+    if (stream == stdin) {
+        return true;
+    }
+    if (pscalRuntimeVmIsSharedFileStream(stream)) {
+        return true;
+    }
+    int fd = fileno(stream);
+    if (fd < 0) {
+        return false;
+    }
+    if (vmFdMatchesFileIdentity(fd, STDIN_FILENO)) {
+        return true;
+    }
+    return false;
+}
+
 FILE* pscalRuntimeVmStdin(void) {
     return stdin;
 }
@@ -4036,8 +4068,8 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         return false;
     }
     int fd = fileno(stream);
-#if defined(PSCAL_TARGET_IOS)
     bool is_stdin_stream = vmStreamTargetsSharedStdin(stream);
+#if defined(PSCAL_TARGET_IOS)
     bool is_shared_stdin_stream = is_stdin_stream;
     bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
     if (is_shared_stdin_stream) {
@@ -4046,7 +4078,6 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         fd = STDIN_FILENO;
     }
 #else
-    bool is_stdin_stream = vmStreamTargetsSharedStdin(stream);
     bool tool_dbg = false;
 #endif
     if (fd < 0) {
