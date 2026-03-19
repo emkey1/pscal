@@ -145,9 +145,13 @@ struct TerminalSettingsView: View {
 
                     Button {
                         _ = tabManager.copyFirstTabColors(tabId: tabId)
-                        copiedColors = true
+                        withAnimation {
+                            copiedColors = true
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            copiedColors = false
+                            withAnimation {
+                                copiedColors = false
+                            }
                         }
                     } label: {
                         HStack {

@@ -21,3 +21,7 @@
 ## 2025-02-21 - Missing Accessibility Hints on SwiftUI Toggles with External Explanatory Text
 **Learning:** Many SwiftUI `Toggle` elements in settings screens have standard labels but rely on trailing or underlying `Text` views (e.g., footnotes) for explanation. Screen reader users who navigate directly to the toggle via swipe or rotor might hear the label ("Restore on app start") but miss the critical context provided visually below it ("Used for this tab profile. Enable restore to apply...").
 **Action:** Always append `.accessibilityHint("Brief description of what enabling/disabling this does")` to `Toggle` components when their implications are not immediately obvious from the label alone, effectively embedding the visual footnote text into the screen reader's announcement for that interactive element.
+
+## 2025-03-10 - Lack of Animation for Transient UI Feedback
+**Learning:** Transient UI feedback states (like "Copied!" text appearing for a few seconds) can feel abrupt and unpolished if they simply snap into existence and snap away. SwiftUI makes it extremely easy to add standard transitions and animations by wrapping state changes in `withAnimation`.
+**Action:** When adding transient text, icons, or visual feedback to buttons or other UI elements, always wrap the boolean state toggles in `withAnimation {}` to provide a graceful transition (fade/slide) instead of a harsh pop-in/pop-out.
