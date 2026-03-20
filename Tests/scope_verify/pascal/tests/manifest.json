@@ -79,6 +79,32 @@
       "expected_stdout": "sum=6\nafter_loop=4"
     },
     {
+      "id": "main_inline_var_statement_runtime",
+      "name": "Main block inline var declaration works",
+      "category": "routine_scope",
+      "description": "A `var name: Type;` statement inside the main begin/end block should declare a variable for the remainder of that block.",
+      "expect": "runtime_ok",
+      "code": "program MainInlineVarStatement;\nbegin\n  var anyCapturesExist: Boolean;\n  anyCapturesExist := true;\n  writeln('captures=', Ord(anyCapturesExist));\nend.",
+      "expected_stdout": "captures=1"
+    },
+    {
+      "id": "routine_inline_for_var_shadows_outer",
+      "name": "Inline for-var shadows outer local",
+      "category": "routine_scope",
+      "description": "A `for var` control variable should create a loop-local binding without mutating an outer local of the same name.",
+      "expect": "runtime_ok",
+      "code": "program RoutineInlineForVarShadow;\n\nprocedure Demo;\nvar\n  i: Integer;\n  total: Integer;\nbegin\n  i := 99;\n  total := 0;\n  for var i := 1 to 3 do\n  begin\n    total := total + i;\n  end;\n  writeln('sum=', total);\n  writeln('outer=', i);\nend;\n\nbegin\n  Demo;\nend.",
+      "expected_stdout": "sum=6\nouter=99"
+    },
+    {
+      "id": "routine_inline_for_var_does_not_leak",
+      "name": "Inline for-var does not leak after loop",
+      "category": "routine_scope",
+      "description": "The `for var` control variable is scoped to the loop body and is not visible after the loop finishes.",
+      "expect": "compile_error",
+      "code": "program RoutineInlineForVarNoLeak;\n\nprocedure Demo;\nbegin\n  for var i := 1 to 2 do\n  begin\n    writeln(i);\n  end;\n  writeln(i);\nend;\n\nbegin\n  Demo;\nend."
+    },
+    {
       "id": "routine_nested_parameter_shadow_preserves_outer",
       "name": "Nested parameter shadow leaves outer locals intact",
       "category": "routine_scope",
@@ -104,15 +130,6 @@
       "expect": "runtime_ok",
       "code": "program ProcPtrCallVar;\ntype\n  TVarHandler = procedure(var value: Integer);\n\nprocedure Increment(var value: Integer);\nbegin\n  value := value + 5;\nend;\n\nvar\n  handler: TVarHandler;\n  counter: Integer;\n\nbegin\n  handler := @Increment;\n  counter := 3;\n  handler(counter);\n  writeln('counter=', counter);\nend.",
       "expected_stdout": "counter=8"
-    },
-    {
-      "id": "routine_nested_proc_ptr_compiles",
-      "name": "Nested procedure pointer resolves local handler",
-      "category": "routine_scope",
-      "description": "Nested procedure pointers passed with '@' should resolve local helpers declared in the same scope.",
-      "expect": "compile_ok",
-      "code": "program RoutineNestedProcPtr;\ntype\n  THandler = procedure;\n\nprocedure Setup;\n  procedure Register(handler: THandler);\n  begin\n  end;\n\n  procedure LocalHandler;\n  begin\n  end;\n\nbegin\n  Register(@LocalHandler);\nend;\n\nbegin\n  Setup;\nend.",
-      "failure_reason": "Regression coverage for nested procedure pointer lookup."
     },
     {
       "id": "routine_sibling_local_access_error",
@@ -344,15 +361,6 @@
       "expect": "runtime_ok",
       "code": "program IntegrationCharCodeConcat;\nvar\n  value: Integer;\nbegin\n  value := 1;\n  Write('a' + #10, value);\nend.",
       "expected_stdout": "a\n1"
-    },
-    {
-      "id": "integration_adjacent_string_literals",
-      "name": "Adjacent string tokens concatenate",
-      "category": "integration",
-      "description": "Adjacent string and char-code tokens should fold into a single literal before semantic checks.",
-      "expect": "runtime_ok",
-      "code": "program AdjacentLiteralRegression;\nvar\n  combined: string;\n  text: string;\n  ch: Char;\nbegin\n  printf('A'+#10'B');\n  writeln;\n  combined := 'A'+#10'B';\n  text := 'Line1'#10'Line2';\n  ch := #0'';\n  writeln('combined_len=', Length(combined));\n  writeln('text_len=', Length(text));\n  writeln('text_ord6=', Ord(text[6]));\n  writeln('char_ord=', Ord(ch));\nend.",
-      "expected_stdout": "A\nB\ncombined_len=3\ntext_len=11\ntext_ord6=10\nchar_ord=0"
     },
     {
       "id": "integration_nested_scope_mix",

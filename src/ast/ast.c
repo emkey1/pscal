@@ -612,6 +612,7 @@ static int declarationLine(AST* decl) {
 }
 
 static AST* matchVarDecl(AST* varDeclGroup, const char* varName);
+static AST* matchSiblingDeclaration(AST* node, const char* varName);
 
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
     if (!currentScopeNode || !varName || !referenceNode) return NULL;
@@ -632,11 +633,9 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
                 AST* sibling = parent->children[i];
                 if (sibling == node) break;
                 if (!sibling) continue;
-                if (sibling->type == AST_VAR_DECL) {
-                    AST* found = matchVarDecl(sibling, varName);
-                    if (found) return found;
-                } else if (constDeclMatches(sibling, varName)) {
-                    return sibling;
+                AST* found = matchSiblingDeclaration(sibling, varName);
+                if (found) {
+                    return found;
                 }
             }
         }
@@ -730,6 +729,54 @@ static AST* matchVarDecl(AST* varDeclGroup, const char* varName) {
     return NULL;
 }
 
+static AST* matchSiblingDeclaration(AST* node, const char* varName) {
+    if (!node) {
+        return NULL;
+    }
+
+    if (node->type == AST_VAR_DECL) {
+        return matchVarDecl(node, varName);
+    }
+
+    if (constDeclMatches(node, varName)) {
+        return node;
+    }
+
+    if (node->type == AST_COMPOUND && node->token && node->token->type == TOKEN_VAR) {
+        for (int i = 0; i < node->child_count; i++) {
+            AST *child = node->children[i];
+            if (!child) {
+                continue;
+            }
+            AST *match = matchSiblingDeclaration(child, varName);
+            if (match) {
+                return match;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static AST* findInlineForDeclaration(const char* varName, AST* referenceNode) {
+    AST* node = referenceNode;
+    while (node) {
+        AST* parent = node->parent;
+        if (parent &&
+            (parent->type == AST_FOR_TO || parent->type == AST_FOR_DOWNTO) &&
+            parent->extra == node &&
+            parent->child_count > 1) {
+            AST* inlineDecl = parent->children[1];
+            if (inlineDecl && inlineDecl->type == AST_VAR_DECL &&
+                matchVarDecl(inlineDecl, varName)) {
+                return inlineDecl;
+            }
+        }
+        node = parent;
+    }
+    return NULL;
+}
+
 static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentScopeNode, AST* referenceNode, AST* globalProgramNode) {
      if (!varName) return NULL;
      AST* foundDecl = NULL;
@@ -785,41 +832,41 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
         foundDecl = findDeclarationInScope(varName, currentScopeNode, referenceNode ? referenceNode : currentScopeNode);
         }
 
-        // As an additional fallback (handles languages where declarations and
-        // statements are interleaved inside a single COMPOUND), walk up to the
-        // nearest COMPOUND ancestor of the reference node and scan all earlier
-        // and later siblings for a matching VAR_DECL.
         if (!foundDecl && referenceNode) {
-            AST* ancestor = referenceNode->parent;
-            while (ancestor && ancestor != currentScopeNode) {
-                if (ancestor->type == AST_COMPOUND) {
-                    for (int i = 0; i < ancestor->child_count && !foundDecl; i++) {
-                        AST* sibling = ancestor->children[i];
-                        if (!sibling) continue;
-                        if (sibling->type == AST_VAR_DECL) {
-                            AST* m = matchVarDecl(sibling, varName);
-                            if (m) {
-                                if (referenceLine > 0) {
-                                    int declLine = declarationLine(sibling);
-                                    if (declLine > referenceLine) continue;
-                                }
-                                foundDecl = sibling; break;
-                            }
-                        } else if (constDeclMatches(sibling, varName)) {
-                            if (referenceLine > 0) {
-                                int declLine = declarationLine(sibling);
-                                if (declLine > referenceLine) continue;
-                            }
-                            foundDecl = sibling;
-                            break;
-                        }
-                    }
-                }
-                if (foundDecl) break;
-                ancestor = ancestor->parent;
-            }
+            foundDecl = findInlineForDeclaration(varName, referenceNode);
         }
 
+    }
+
+    // As an additional fallback (handles languages where declarations and
+    // statements are interleaved inside a single COMPOUND), walk up the
+    // nearest COMPOUND ancestors of the reference node and scan earlier
+    // siblings for a matching declaration. This also covers the main program
+    // block, where currentScopeNode is NULL.
+    if (!foundDecl && referenceNode) {
+        AST* ancestor = referenceNode->parent;
+        while (ancestor && ancestor != currentScopeNode) {
+            if (ancestor->type == AST_COMPOUND) {
+                for (int i = 0; i < ancestor->child_count && !foundDecl; i++) {
+                    AST* sibling = ancestor->children[i];
+                    if (sibling == referenceNode) {
+                        break;
+                    }
+                    if (!sibling) continue;
+                    AST* m = matchSiblingDeclaration(sibling, varName);
+                    if (m) {
+                        if (referenceLine > 0) {
+                            int declLine = declarationLine(m);
+                            if (declLine > referenceLine) continue;
+                        }
+                        foundDecl = m;
+                        break;
+                    }
+                }
+            }
+            if (foundDecl) break;
+            ancestor = ancestor->parent;
+        }
     }
 
     // If not found, walk outward and search enclosing procedure/function scopes.
@@ -1605,6 +1652,7 @@ VarType getBuiltinReturnType(const char* name) {
     /* Character and ordinal helpers */
     if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
     if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "odd")  == 0) return TYPE_BOOLEAN;
     if (strcasecmp(name, "pollkey") == 0) return TYPE_INTEGER;
 
     /* CLike-style cast helpers */

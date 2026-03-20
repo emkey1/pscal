@@ -278,6 +278,83 @@ add({
 })
 
 add({
+    "id": "main_inline_var_statement_runtime",
+    "name": "Main block inline var declaration works",
+    "category": "routine_scope",
+    "description": "A `var name: Type;` statement inside the main begin/end block should declare a variable for the remainder of that block.",
+    "expect": "runtime_ok",
+    "code": """
+        program MainInlineVarStatement;
+        begin
+          var anyCapturesExist: Boolean;
+          anyCapturesExist := true;
+          writeln('captures=', Ord(anyCapturesExist));
+        end.
+    """,
+    "expected_stdout": """
+        captures=1
+    """,
+})
+
+add({
+    "id": "routine_inline_for_var_shadows_outer",
+    "name": "Inline for-var shadows outer local",
+    "category": "routine_scope",
+    "description": "A `for var` control variable should create a loop-local binding without mutating an outer local of the same name.",
+    "expect": "runtime_ok",
+    "code": """
+        program RoutineInlineForVarShadow;
+
+        procedure Demo;
+        var
+          i: Integer;
+          total: Integer;
+        begin
+          i := 99;
+          total := 0;
+          for var i := 1 to 3 do
+          begin
+            total := total + i;
+          end;
+          writeln('sum=', total);
+          writeln('outer=', i);
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stdout": """
+        sum=6
+        outer=99
+    """,
+})
+
+add({
+    "id": "routine_inline_for_var_does_not_leak",
+    "name": "Inline for-var does not leak after loop",
+    "category": "routine_scope",
+    "description": "The `for var` control variable is scoped to the loop body and is not visible after the loop finishes.",
+    "expect": "compile_error",
+    "code": """
+        program RoutineInlineForVarNoLeak;
+
+        procedure Demo;
+        begin
+          for var i := 1 to 2 do
+          begin
+            writeln(i);
+          end;
+          writeln(i);
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+})
+
+add({
     "id": "routine_nested_parameter_shadow_preserves_outer",
     "name": "Nested parameter shadow leaves outer locals intact",
     "category": "routine_scope",

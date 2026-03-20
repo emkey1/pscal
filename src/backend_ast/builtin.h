@@ -57,6 +57,7 @@ Value vmBuiltinLength(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSizeof(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinAbs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRound(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinOdd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHalt(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDelay(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinNew(struct VM_s* vm, int arg_count, Value* args);

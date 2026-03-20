@@ -1738,6 +1738,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"gldepthfunc", NULL},
     {"fflush", vmBuiltinFflush},
     {"socketpeeraddr", vmBuiltinSocketPeerAddr},
+    {"odd", vmBuiltinOdd},
     {"to be filled", NULL}
 };
 
@@ -8342,6 +8343,18 @@ Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
+Value vmBuiltinOdd(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "Odd expects 1 integer-compatible argument.");
+        return makeBoolean(false);
+    }
+    if (!IS_INTLIKE(args[0])) {
+        runtimeError(vm, "Odd expects an integer-compatible argument.");
+        return makeBoolean(false);
+    }
+    return makeBoolean((AS_INTEGER(args[0]) & 1LL) != 0);
+}
+
 Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
     long long code = 0;
     if (arg_count == 0) {
@@ -9871,6 +9884,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("New", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("NormalColors", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Ord", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Odd", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ParamCount", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ParamStr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("PopScreen", AST_PROCEDURE_DECL, NULL);

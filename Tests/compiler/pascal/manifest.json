@@ -23,6 +23,18 @@
       "path": "Tests/compiler/pascal/cases/closure_capturing_proc_store.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: capturing procedure closure stored and invoked"
+    },
+    {
+      "id": "try_except_catches_raise",
+      "path": "Tests/compiler/pascal/cases/try_except_catches_raise.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: Pascal try/except catches raised errors"
+    },
+    {
+      "id": "odd_builtin_condition",
+      "path": "Tests/compiler/pascal/cases/odd_builtin_condition.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: odd builtin"
     }
   ]
 }

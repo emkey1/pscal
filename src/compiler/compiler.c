@@ -6637,9 +6637,20 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         case AST_FOR_DOWNTO: {
             bool is_downto = node->type == AST_FOR_DOWNTO;
             AST* var_node = node->children[0];
+            AST* inline_decl = node->child_count > 1 ? node->children[1] : NULL;
             AST* start_node = node->left;
             AST* end_node = node->right;
             AST* body_node = node->extra;
+            bool enters_scope = inline_decl && current_function_compiler != NULL;
+            SymbolEnvSnapshot scope_snapshot;
+            int starting_local = -1;
+
+            if (enters_scope) {
+                compilerBeginScope(current_function_compiler);
+                starting_local = current_function_compiler->local_count;
+                saveLocalEnv(&scope_snapshot);
+                compileNode(inline_decl, chunk, getLine(inline_decl));
+            }
 
             int var_slot = -1;
             int var_name_idx = -1;
@@ -6740,6 +6751,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // 8. Patch any 'break' statements that occurred inside the loop body.
             patchBreaks(chunk);
             endLoop();
+
+            if (enters_scope) {
+                for (int i = current_function_compiler->local_count - 1; i >= starting_local; i--) {
+                    if (current_function_compiler->locals[i].name) {
+                        free(current_function_compiler->locals[i].name);
+                        current_function_compiler->locals[i].name = NULL;
+                    }
+                }
+                current_function_compiler->local_count = starting_local;
+                compilerEndScope(current_function_compiler);
+                restoreLocalEnv(&scope_snapshot);
+            }
             
             break;
         }

@@ -33,11 +33,13 @@ The following are reserved keywords and cannot be used as identifiers:
 * `mod`, `nil`, `not`
 * `of`, `or`, `out`
 * `procedure`, `program`
-* `read`, `readln`, `record`, `repeat`
+* `raise`, `read`, `readln`, `record`, `repeat`
 * `set`, `shl`, `shr`, `spawn`, `xor`
 * `then`, `to`, `true`, `type`
+* `try`
 * `unit`, `until`, `uses`
 * `var`, `while`, `write`, `writeln`
+* `except`
 
 #### **Identifiers**
 
@@ -125,6 +127,14 @@ respectively; both forms require a numeric left-hand side.
 
 * **Assignment Statement:** `variable := expression;`
 * **Compound Statements:** A sequence of statements enclosed between `begin` and `end`.
+    The front end also accepts inline local declarations as statements inside a
+    compound block:
+    ```pascal
+    begin
+      var ready: boolean;
+      ready := true;
+    end;
+    ```
 * **`if` Statements:**
     ```pascal
     if condition then
@@ -145,6 +155,14 @@ respectively; both forms require a numeric left-hand side.
     for loop_variable := start_value downto end_value do
       statement;
     ```
+    The front end also supports Delphi-style inline loop variables inside
+    procedures and functions:
+    ```pascal
+    for var i := 0 to High(values) do
+      statement;
+    ```
+    In this form, the loop variable is scoped to the loop and does not remain
+    visible after the loop finishes.
 * **`repeat` Loops:**
     ```pascal
     repeat
@@ -161,9 +179,48 @@ respectively; both forms require a numeric left-hand side.
       statement;
     end;
     ```
+* **`try` / `except`:**
+    ```pascal
+    try
+      statement;
+      ...
+    except
+      statement;
+      ...
+    end;
+    ```
+* **`raise`:** Signals an exception for the innermost enclosing `try` block.
 * **`break`:** Exits the current loop.
 * **Label declarations:** `label StartPoint, Retry1;` — must appear before the first statement inside a routine or block.
 * **`goto` Statements:** `goto StartPoint;` jumps to a label declared in the current routine.
+
+#### Exceptions
+
+The Pascal front end supports structured exception handling with `try` / `except`
+and `raise`.
+
+```pascal
+function HasAnyMove(b: BoardType; player: ShortInt): Boolean;
+begin
+  try
+    HasAnyMove := (GetAllMoves(b, player) <> nil);
+  except
+    HasAnyMove := false;
+  end;
+end;
+```
+
+Current semantics:
+
+* `raise;` and `raise <expr>;` are accepted. The expression is currently treated
+  as informational only; `except` does not bind or inspect an exception value yet.
+* `try` handlers catch exceptions raised with Pascal `raise` in the same routine
+  or in callees reached from the protected block.
+* The current syntax is `try ... except ... end;`. `finally`, typed handlers,
+  and `except on E: ... do ...` forms are not implemented.
+* `try` / `except` is language-level control flow. It should not be treated as a
+  general catch-all for arbitrary VM/runtime faults such as every nil dereference
+  or host-side runtime error.
 
 #### Labels and `goto`
 
@@ -212,6 +269,21 @@ boundaries.
       MyFunction := return_value; // or result := return_value
     end;
     ```
+
+Functions may assign to either the function name or `Result`. `Exit;` is also
+supported for early return from the current routine.
+
+```pascal
+function ParseOrDefault(const s: String): Integer;
+begin
+  if s = '' then
+  begin
+    Result := 0;
+    Exit;
+  end;
+  ParseOrDefault := 42;
+end;
+```
 
 ### **User-Defined Types**
 
@@ -352,12 +424,20 @@ The Pascal front end exposes the PSCAL VM's built-ins, including:
 
 - File I/O: `Assign`, `Reset`, `Rewrite`, `Read`, `ReadLn`, `Write`, `WriteLn`, `Close`, `EOF`, `IOResult`, etc.
 - String operations: `Length`, `Copy`, `Pos`, `Concat`, `UpCase`, `ReadKey`, conversions (`IntToStr`, `RealToStr`).
-- Math: `Sin`, `Cos`, `Tan`, `Sqrt`, `Ln`, `Exp`, `Abs`, `Round`, `Trunc`, `Random`.
+- Math: `Sin`, `Cos`, `Tan`, `Sqrt`, `Ln`, `Exp`, `Abs`, `Odd`, `Round`, `Trunc`, `Random`.
 - Memory: `New`, `Dispose`.
 - Console/text: `GotoXY`, `TextColor`, `TextBackground`, `ClrScr`, `WhereX`, `WhereY`.
 - Concurrency (see below): `spawn`, `join`, `mutex`, `rcmutex`, `lock`, `unlock`, `destroy`.
 - SDL-based graphics/sound (when built with `-DSDL=ON`): e.g., `InitGraph`, `InitGraph3D`, `CloseGraph`, `CloseGraph3D`, `UpdateScreen`, `GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLColor4f`, `GLVertex3f`, `GLNormal3f`, `GLLineWidth`, `GLDepthMask`, `GLDepthFunc`, `GLEnable`, `GLDisable`, `GLCullFace`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, `GLBlendFunc`, `GLViewport`, `GLDepthTest`, `GLSwapWindow`, `GLSetSwapInterval`, `SetRGBColor`, `DrawLine`, `FillRect`, `FillCircle`, `CreateTexture`, `UpdateTexture`, `DestroyTexture`, text helpers like `InitTextSystem(FontFileName, FontSize)`, `OutTextXY`, and audio: `InitSoundSystem`, `LoadSound`, `PlaySound`, `IsSoundPlaying`, `FreeSound`, `QuitSoundSystem`.
 Note: SDL built-ins are available only in SDL-enabled builds. Headless CI typically skips these routines.
+
+`Odd(x)` returns `True` when an integer-compatible value is odd and `False`
+when it is even. Example:
+
+```pascal
+if Odd(r + c) then
+  WriteLn('checkerboard square');
+```
 
 ### **Threading and Synchronization**
 

@@ -260,6 +260,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
     parser.current_token = getNextToken(&lexer);
     parser.current_unit_name_context = NULL;
     parser.dependency_paths = createList();
+    parser.routine_depth = 0;
     GlobalAST = buildProgramAST(&parser, &chunk);
     if (parser.current_token) { freeToken(parser.current_token); parser.current_token = NULL; }
 

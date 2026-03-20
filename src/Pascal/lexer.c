@@ -154,6 +154,7 @@ static Keyword keywords[] = {
     {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
     {"pointer", TOKEN_POINTER},
     {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
+    {"raise", TOKEN_RAISE},
     {"read", TOKEN_READ}, {"readln", TOKEN_READLN},
     {"record", TOKEN_RECORD}, {"repeat", TOKEN_REPEAT},
     {"set", TOKEN_SET}, // <--- ADD THIS LINE (alphabetical position)
@@ -161,10 +162,12 @@ static Keyword keywords[] = {
     {"shr", TOKEN_SHR}, // Added SHR
     {"spawn", TOKEN_SPAWN},
     {"then", TOKEN_THEN},
+    {"try", TOKEN_TRY},
     {"to", TOKEN_TO}, {"true", TOKEN_TRUE}, {"type", TOKEN_TYPE},
     {"unit", TOKEN_UNIT}, {"until", TOKEN_UNTIL}, {"uses", TOKEN_USES},
     {"var", TOKEN_VAR}, {"while", TOKEN_WHILE}, {"write", TOKEN_WRITE},
-    {"writeln", TOKEN_WRITELN}, {"xor", TOKEN_XOR}
+    {"writeln", TOKEN_WRITELN}, {"xor", TOKEN_XOR},
+    {"except", TOKEN_EXCEPT}
 };
 
 #define NUM_KEYWORDS (sizeof(keywords)/sizeof(Keyword))

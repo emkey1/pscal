@@ -13,6 +13,7 @@ typedef struct {
     Token *current_token;
     const char *current_unit_name_context;
     List *dependency_paths;
+    int routine_depth;
 } Parser;
 
 AST *parsePointerType(Parser *parser);

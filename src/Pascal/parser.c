@@ -71,6 +71,11 @@ static void registerRecordMethods(Parser *parser, const char *recordName, AST *r
 static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
+static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName);
+static AST *tryStatement(Parser *parser);
+static AST *raiseStatement(Parser *parser);
+static AST *cloneBuiltinTypeNode(VarType type, int line);
+static AST *inferInlineForVarType(AST *expr, int line);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -89,6 +94,79 @@ static void appendDependencyPath(Parser *parser, const char *path) {
 
     listAppend(parser->dependency_paths, to_store);
     if (canonical) free(canonical);
+}
+
+static AST *cloneBuiltinTypeNode(VarType type, int line) {
+    const char *type_name = NULL;
+
+    if (type == TYPE_INTEGER || type == TYPE_INT32) {
+        type_name = "integer";
+    } else if (type == TYPE_INT16) {
+        type_name = "smallint";
+    } else if (type == TYPE_INT8) {
+        type_name = "shortint";
+    } else if (type == TYPE_INT64) {
+        type_name = "int64";
+    } else if (type == TYPE_UINT32) {
+        type_name = "cardinal";
+    } else if (type == TYPE_UINT64) {
+        type_name = "uint64";
+    } else if (type == TYPE_FLOAT) {
+        type_name = "single";
+    } else if (type == TYPE_DOUBLE || type == TYPE_REAL) {
+        type_name = "double";
+    } else if (type == TYPE_LONG_DOUBLE) {
+        type_name = "extended";
+    } else if (type == TYPE_BOOLEAN) {
+        type_name = "boolean";
+    } else if (type == TYPE_STRING) {
+        type_name = "string";
+    } else if (type == TYPE_CHAR) {
+        type_name = "char";
+    } else if (type == TYPE_BYTE) {
+        type_name = "byte";
+    } else if (type == TYPE_WORD) {
+        type_name = "word";
+    }
+
+    if (!type_name) {
+        return NULL;
+    }
+
+    Token *type_tok = newToken(TOKEN_IDENTIFIER, type_name, line, 0);
+    if (!type_tok) {
+        EXIT_FAILURE_HANDLER();
+    }
+    AST *type_node = newASTNode(AST_TYPE_IDENTIFIER, type_tok);
+    if (!type_node) {
+        freeToken(type_tok);
+        EXIT_FAILURE_HANDLER();
+    }
+    setTypeAST(type_node, type);
+    freeToken(type_tok);
+    return type_node;
+}
+
+static AST *inferInlineForVarType(AST *expr, int line) {
+    if (!expr) {
+        return cloneBuiltinTypeNode(TYPE_INTEGER, line);
+    }
+
+    if (expr->type_def) {
+        AST *copy = copyAST(expr->type_def);
+        if (copy) {
+            return copy;
+        }
+    }
+
+    if (expr->var_type != TYPE_UNKNOWN && expr->var_type != TYPE_VOID) {
+        AST *builtin = cloneBuiltinTypeNode(expr->var_type, line);
+        if (builtin) {
+            return builtin;
+        }
+    }
+
+    return cloneBuiltinTypeNode(TYPE_INTEGER, line);
 }
 
 static bool tokenTypeIsIdentifierLike(TokenType type) {
@@ -1043,6 +1121,8 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             nested_parser_instance.lexer = &nested_lexer;
             nested_parser_instance.current_token = getNextToken(&nested_lexer);
             nested_parser_instance.dependency_paths = parser_for_this_unit->dependency_paths;
+            nested_parser_instance.current_unit_name_context = NULL;
+            nested_parser_instance.routine_depth = 0;
             
             // --- MODIFICATION: Pass the chunk recursively ---
             AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name, chunk);
@@ -1444,6 +1524,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 nested_parser_instance.lexer = &nested_lexer;
                 nested_parser_instance.current_token = getNextToken(&nested_lexer);
                 nested_parser_instance.dependency_paths = main_parser->dependency_paths;
+                nested_parser_instance.current_unit_name_context = NULL;
+                nested_parser_instance.routine_depth = 0;
 
                 // --- MODIFICATION: Pass the chunk recursively ---
                 AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
@@ -1496,6 +1578,7 @@ static bool tokenTerminatesStatement(TokenType type) {
         case TOKEN_SEMICOLON:
         case TOKEN_END:
         case TOKEN_ELSE:
+        case TOKEN_EXCEPT:
         case TOKEN_UNTIL:
         case TOKEN_EOF:
         case TOKEN_PERIOD:
@@ -1607,8 +1690,10 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
+        parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
+        parser->routine_depth--;
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
         addChild(blockNode, compound_body);
@@ -2471,9 +2556,10 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
-
+        parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
+        parser->routine_depth--;
 
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
@@ -2681,6 +2767,117 @@ AST* compoundStatement(Parser *parser) {
     return node;
 }
 
+static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName) {
+    AST *node = newASTNode(AST_COMPOUND, NULL);
+    if (!node) {
+        return NULL;
+    }
+
+    while (1) {
+        if (!parser->current_token) {
+            char error_msg[160];
+            snprintf(error_msg, sizeof(error_msg), "Unexpected EOF while parsing %s block", contextName ? contextName : "statement");
+            errorParser(parser, error_msg);
+            break;
+        }
+
+        while (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        }
+
+        if (!parser->current_token || parser->current_token->type == terminator) {
+            break;
+        }
+        if (parser->current_token->type == TOKEN_EOF || parser->current_token->type == TOKEN_PERIOD) {
+            char error_msg[160];
+            snprintf(error_msg, sizeof(error_msg), "Expected %s to terminate %s block",
+                     tokenTypeToString(terminator),
+                     contextName ? contextName : "statement");
+            errorParser(parser, error_msg);
+            break;
+        }
+
+        AST *stmt = statement(parser);
+        if (!stmt) {
+            break;
+        }
+        addChild(node, stmt);
+
+        if (!parser->current_token || parser->current_token->type == terminator) {
+            break;
+        }
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        char error_msg[192];
+        snprintf(error_msg, sizeof(error_msg),
+                 "Expected semicolon or %s after statement in %s block (found token: %s)",
+                 tokenTypeToString(terminator),
+                 contextName ? contextName : "statement",
+                 tokenTypeToString(parser->current_token->type));
+        errorParser(parser, error_msg);
+        break;
+    }
+
+    return node;
+}
+
+static AST *tryStatement(Parser *parser) {
+    eat(parser, TOKEN_TRY);
+
+    AST *tryBlock = parseStatementListUntil(parser, TOKEN_EXCEPT, "TRY");
+    if (!parser->current_token || parser->current_token->type != TOKEN_EXCEPT) {
+        errorParser(parser, "Expected EXCEPT in TRY statement");
+        if (tryBlock) {
+            freeAST(tryBlock);
+        }
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_EXCEPT);
+
+    AST *exceptBlock = parseStatementListUntil(parser, TOKEN_END, "EXCEPT");
+    if (!parser->current_token || parser->current_token->type != TOKEN_END) {
+        errorParser(parser, "Expected END to close TRY/EXCEPT statement");
+        if (tryBlock) {
+            freeAST(tryBlock);
+        }
+        if (exceptBlock) {
+            freeAST(exceptBlock);
+        }
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_END);
+
+    AST *catchNode = newASTNode(AST_CATCH, NULL);
+    setRight(catchNode, exceptBlock);
+
+    AST *tryNode = newASTNode(AST_TRY, NULL);
+    setLeft(tryNode, tryBlock);
+    setRight(tryNode, catchNode);
+    return tryNode;
+}
+
+static AST *raiseStatement(Parser *parser) {
+    Token *raiseToken = copyToken(parser->current_token);
+    int line = raiseToken ? raiseToken->line : (parser->lexer ? parser->lexer->line : 0);
+    eat(parser, TOKEN_RAISE);
+
+    AST *raiseExpr = NULL;
+    if (parser->current_token && !tokenTerminatesStatement(parser->current_token->type)) {
+        raiseExpr = expression(parser);
+    }
+
+    AST *node = newASTNode(AST_THROW, raiseToken);
+    if (raiseToken) {
+        freeToken(raiseToken);
+    }
+    node->i_val = line;
+    setLeft(node, raiseExpr);
+    return node;
+}
+
 AST *statement(Parser *parser) {
     if (!parser || !parser->current_token) {
         return newASTNode(AST_NOOP, NULL);
@@ -2720,6 +2917,20 @@ AST *statement(Parser *parser) {
     AST *node = NULL; // Initialize node
 
     switch (parser->current_token->type) {
+        case TOKEN_VAR: {
+            Token *var_tok = copyToken(parser->current_token);
+            eat(parser, TOKEN_VAR);
+            node = varDeclaration(parser, parser->current_unit_name_context == NULL);
+            if (node && node->type == AST_COMPOUND && var_tok) {
+                node->token = copyToken(var_tok);
+                node->is_global_scope = true; // Transparent declaration wrapper; do not open a nested runtime scope.
+            }
+            if (var_tok) {
+                freeToken(var_tok);
+            }
+            break;
+        }
+
         case TOKEN_BEGIN:
             // Compound statement (BEGIN ... END)
             node = compoundStatement(parser);
@@ -2902,6 +3113,12 @@ AST *statement(Parser *parser) {
         case TOKEN_REPEAT:
             node = repeatStatement(parser);
             // REPEAT handles its structure internally.
+            break;
+        case TOKEN_TRY:
+            node = tryStatement(parser);
+            break;
+        case TOKEN_RAISE:
+            node = raiseStatement(parser);
             break;
         case TOKEN_CASE:
             node = caseStatement(parser);
@@ -3148,11 +3365,42 @@ AST *repeatStatement(Parser *parser) {
 }
 
 AST *forStatement(Parser *parser) {
-    eat(parser,TOKEN_FOR); Token* lvt=copyToken(parser->current_token); if(!lvt||lvt->type!=TOKEN_IDENTIFIER){errorParser(parser,"Exp loop var"); return NULL;} eat(parser,TOKEN_IDENTIFIER);
-    AST* lvn=newASTNode(AST_VARIABLE,lvt); // Loop var node created with copy
-    if(!parser->current_token||parser->current_token->type!=TOKEN_ASSIGN){errorParser(parser,"Exp :="); freeToken(lvt); freeAST(lvn); return NULL;} eat(parser,TOKEN_ASSIGN);
-    AST* se=expression(parser); // <<< Use expression() for start
-    if(!se || se->type == AST_NOOP){errorParser(parser,"Exp start expr"); freeToken(lvt); freeAST(lvn); return NULL;}
+    eat(parser,TOKEN_FOR);
+
+    bool declares_inline_var = false;
+    if (parser->current_token && parser->current_token->type == TOKEN_VAR) {
+        if (parser->routine_depth <= 0) {
+            errorParser(parser, "FOR VAR loop variables are only supported inside procedures and functions");
+            return NULL;
+        }
+        declares_inline_var = true;
+        eat(parser, TOKEN_VAR);
+    }
+
+    Token* lvt = copyToken(parser->current_token);
+    if (!lvt || lvt->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Exp loop var");
+        if (lvt) freeToken(lvt);
+        return NULL;
+    }
+    eat(parser, TOKEN_IDENTIFIER);
+
+    AST* lvn = newASTNode(AST_VARIABLE, lvt); // Loop var node created with copy
+    if (!parser->current_token || parser->current_token->type != TOKEN_ASSIGN) {
+        errorParser(parser, "Exp :=");
+        freeToken(lvt);
+        freeAST(lvn);
+        return NULL;
+    }
+    eat(parser, TOKEN_ASSIGN);
+
+    AST* se = expression(parser); // <<< Use expression() for start
+    if (!se || se->type == AST_NOOP) {
+        errorParser(parser, "Exp start expr");
+        freeToken(lvt);
+        freeAST(lvn);
+        return NULL;
+    }
     TokenType dir=parser->current_token? parser->current_token->type : TOKEN_UNKNOWN; // Check NULL
     if(dir!=TOKEN_TO && dir!=TOKEN_DOWNTO){errorParser(parser,"Exp TO/DOWNTO"); freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;} eat(parser,dir);
     AST* ee=expression(parser); // <<< Use expression() for end
@@ -3162,6 +3410,26 @@ AST *forStatement(Parser *parser) {
     ASTNodeType ft=(dir==TOKEN_TO)?AST_FOR_TO:AST_FOR_DOWNTO; AST* n=newASTNode(ft,NULL);
     setLeft(n,se); setRight(n,ee); setExtra(n,bd); addChild(n,lvn); // Loop var is child[0]
     freeToken(lvt); // Free the original copy used for lvn
+
+    if (!declares_inline_var) {
+        return n;
+    }
+
+    int decl_line = (se && se->token) ? se->token->line : (lvn->token ? lvn->token->line : 0);
+    AST *decl_name = newASTNode(AST_VARIABLE, lvn->token);
+    AST *decl_type = inferInlineForVarType(se, decl_line);
+    if (!decl_name || !decl_type) {
+        freeAST(decl_name);
+        freeAST(decl_type);
+        freeAST(n);
+        return NULL;
+    }
+
+    AST *decl = newASTNode(AST_VAR_DECL, NULL);
+    addChild(decl, decl_name);
+    setRight(decl, decl_type);
+    decl->var_type = decl_type->var_type;
+    addChild(n, decl);
     return n;
 }
 
