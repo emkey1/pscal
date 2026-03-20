@@ -338,6 +338,76 @@ add({
 })
 
 add({
+    "id": "main_ternary_expression_runtime",
+    "name": "Main block ternary expression works",
+    "category": "routine_scope",
+    "description": "The Pascal front end accepts the `condition ? thenExpr : elseExpr` expression form as an extension.",
+    "expect": "runtime_ok",
+    "code": """
+        program MainTernaryExpression;
+        var
+          a: Integer;
+          b: Integer;
+        begin
+          a := 7;
+          b := (a > 5) ? 10 : 20;
+          writeln('b=', b);
+        end.
+    """,
+    "expected_stdout": """
+        b=10
+    """,
+})
+
+add({
+    "id": "function_exit_value_runtime",
+    "name": "Function Exit(value) returns early",
+    "category": "routine_scope",
+    "description": "A function may use `Exit(value)` to set the return value and leave the routine immediately.",
+    "expect": "runtime_ok",
+    "code": """
+        program FunctionExitValue;
+
+        function PickValue(flag: Boolean): Integer;
+        begin
+          if flag then
+            Exit(11);
+          Exit(22);
+        end;
+
+        begin
+          writeln('a=', PickValue(true));
+          writeln('b=', PickValue(false));
+        end.
+    """,
+    "expected_stdout": """
+        a=11
+        b=22
+    """,
+})
+
+add({
+    "id": "procedure_exit_value_compile_error",
+    "name": "Procedure Exit(value) is rejected",
+    "category": "routine_scope",
+    "description": "The `Exit(value)` shorthand is only valid for functions that return a value.",
+    "expect": "compile_error",
+    "code": """
+        program ProcedureExitValueError;
+
+        procedure StopNow;
+        begin
+          Exit(1);
+        end;
+
+        begin
+          StopNow;
+        end.
+    """,
+    "expected_stderr_substring": "Exit(value) is only valid inside functions that return a value.",
+})
+
+add({
     "id": "routine_inline_for_var_shadows_outer",
     "name": "Inline for-var shadows outer local",
     "category": "routine_scope",

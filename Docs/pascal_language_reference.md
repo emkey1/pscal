@@ -118,10 +118,22 @@ The language supports a standard set of operators with Pascal-like precedence.
 | 2 | `*`, `/`, `div`, `mod`, `and`, `shl`, `shr` | Multiplicative operators |
 | 3 | `+`, `-`, `or`, `xor` | Additive operators |
 | 4 | `=`, `<>`, `<`, `<=`, `>`, `>=`, `in` | Relational operators |
+| 5 | `?:` | Ternary conditional operator extension |
 
 Compound assignments combine arithmetic with assignment. The parser recognises
 `+=` and `-=` and lowers them to `lhs := lhs + rhs` and `lhs := lhs - rhs`
 respectively; both forms require a numeric left-hand side.
+
+The front end also supports a C-style ternary conditional expression as an
+extension:
+
+```pascal
+result := score > 0 ? 'win' : 'loss';
+```
+
+This is not standard Pascal syntax, but it is accepted by the current front
+end. The condition is evaluated first, followed by either the `then` or `else`
+expression.
 
 ### **Statements**
 
@@ -282,15 +294,16 @@ boundaries.
     ```
 
 Functions may assign to either the function name or `Result`. `Exit;` is also
-supported for early return from the current routine.
+supported for early return from the current routine, and `Exit(value);` may be
+used inside functions as shorthand for assigning the return value and leaving
+the routine immediately.
 
 ```pascal
 function ParseOrDefault(const s: String): Integer;
 begin
   if s = '' then
   begin
-    Result := 0;
-    Exit;
+    Exit(0);
   end;
   ParseOrDefault := 42;
 end;

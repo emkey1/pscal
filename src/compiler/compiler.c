@@ -7521,16 +7521,41 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             if (callee_is_builtin) {
                 if (strcasecmp(calleeName, "exit") == 0) {
-                    if (node->child_count > 0) {
-                        fprintf(stderr, "L%d: exit does not take arguments.\n", line);
+                    if (node->child_count > 1) {
+                        fprintf(stderr, "L%d: Exit accepts at most one argument.\n", line);
                         compiler_had_error = true;
+                        for (int i = 0; i < node->child_count; i++) {
+                            writeBytecodeChunk(chunk, POP, line);
+                        }
+                        break;
                     }
 
                     int slot = -1;
                     if (current_function_compiler) {
                         slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     }
-                    if (slot != -1) {
+
+                    if (node->child_count == 1) {
+                        if (!current_function_compiler || !current_function_compiler->returns_value || slot == -1) {
+                            fprintf(stderr, "L%d: Exit(value) is only valid inside functions that return a value.\n", line);
+                            compiler_had_error = true;
+                            writeBytecodeChunk(chunk, POP, line);
+                            break;
+                        }
+
+                        AST* func_decl = current_function_compiler->function_symbol
+                                             ? current_function_compiler->function_symbol->type_def
+                                             : NULL;
+                        AST* return_type = NULL;
+                        if (func_decl && func_decl->type == AST_FUNCTION_DECL) {
+                            return_type = func_decl->right;
+                        }
+                        maybeAutoBoxInterfaceForType(return_type, node->children[0], chunk, getLine(node->children[0]), true, false);
+                        writeBytecodeChunk(chunk, DUP, line);
+                        noteLocalSlotUse(current_function_compiler, slot);
+                        writeBytecodeChunk(chunk, SET_LOCAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+                    } else if (slot != -1) {
                         noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, GET_LOCAL, line);
                         writeBytecodeChunk(chunk, (uint8_t)slot, line);
