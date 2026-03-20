@@ -249,7 +249,7 @@ struct TerminalSettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Section(header: Text("Init (Service Mode)")) {
+                Section(header: Text("Init (Run Services)")) {
                     Toggle(
                         "Run init in first tab",
                         isOn: Binding(
