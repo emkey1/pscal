@@ -67,6 +67,9 @@ struct TerminalSettingsView: View {
                         in: Double(appearanceSettings.minimumPointSize)...Double(appearanceSettings.maximumPointSize),
                         step: 1
                     )
+                    .accessibilityLabel("Font Size")
+                    .accessibilityValue("\(Int(appearanceSettings.pointSize)) points")
+                    .accessibilityHint("Adjusts the size of the terminal font")
 
                     HStack {
                         Text("Current")
@@ -74,6 +77,7 @@ struct TerminalSettingsView: View {
                         Text("\(Int(appearanceSettings.pointSize)) pt")
                             .font(.system(.body, design: .monospaced))
                     }
+                    .accessibilityHidden(true)
                 }
 
                 Section(header: Text("Tab Name")) {
@@ -238,6 +242,7 @@ struct TerminalSettingsView: View {
                         Text("Five").tag(5)
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityHint("Opens the chosen number of shell tabs when PSCAL starts.")
 
                     Text("Opens the chosen number of shell tabs when PSCAL starts.")
                         .font(.footnote)
