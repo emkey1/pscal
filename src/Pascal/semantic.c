@@ -15,6 +15,8 @@ static AST *gProgramRoot = NULL;
 static ClosureCaptureRegistry gClosureRegistry;
 static bool gRegistryInitialized = false;
 static AST *desugarNode(AST *node, VarType currentFunctionType);
+static AST *resolveTypeAliasLocal(AST *type_node);
+static AST *findRecordMethod(AST *recordType, const char *name);
 
 static int nodeLine(AST *node) {
     if (!node) {
@@ -347,6 +349,183 @@ static void appendGuardedTryStatements(AST *target, AST *block) {
     addChild(target, createPendingBreakNode(nodeLine(block)));
 }
 
+static AST *resolveRecordTypeForWithTarget(AST *target) {
+    if (!target) {
+        return NULL;
+    }
+
+    AST *typeNode = target->type_def;
+    if (!typeNode && target->var_type == TYPE_RECORD) {
+        typeNode = target;
+    }
+    if (!typeNode) {
+        return NULL;
+    }
+
+    AST *resolved = resolveTypeAliasLocal(typeNode);
+    if (resolved && resolved->type == AST_TYPE_DECL && resolved->left) {
+        resolved = resolveTypeAliasLocal(resolved->left);
+    }
+    return resolved;
+}
+
+static AST *findRecordFieldDecl(AST *recordType, const char *name) {
+    AST *resolved = resolveTypeAliasLocal(recordType);
+    while (resolved && resolved->type == AST_TYPE_DECL && resolved->left) {
+        resolved = resolveTypeAliasLocal(resolved->left);
+    }
+
+    while (resolved && resolved->type == AST_RECORD_TYPE) {
+        for (int i = 0; i < resolved->child_count; i++) {
+            AST *child = resolved->children[i];
+            if (!child || child->type != AST_VAR_DECL) {
+                continue;
+            }
+            for (int j = 0; j < child->child_count; j++) {
+                AST *field = child->children[j];
+                if (!field || !field->token || !field->token->value) {
+                    continue;
+                }
+                if (strcasecmp(field->token->value, name) == 0) {
+                    return child;
+                }
+            }
+        }
+
+        AST *parentType = resolveTypeAliasLocal(resolved->extra);
+        if (!parentType || parentType == resolved) {
+            break;
+        }
+        resolved = parentType;
+    }
+
+    return NULL;
+}
+
+static AST *rewriteWithFieldReferences(AST *node, AST *recordExpr, AST *recordType) {
+    if (!node) {
+        return NULL;
+    }
+
+    if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL || node->type == AST_WITH) {
+        return node;
+    }
+
+    if (node->type == AST_PROCEDURE_CALL && !node->left && node->token && node->token->value) {
+        Symbol *sym = resolveProcedureSymbolInScope(node->token->value, node, gProgramRoot);
+        if (!sym && findRecordMethod(recordType, node->token->value)) {
+            setLeft(node, copyAST(recordExpr));
+        }
+    }
+
+    if (node->type == AST_VARIABLE && node->token && node->token->value) {
+        AST *decl = findStaticDeclarationInAST(node->token->value, node, gProgramRoot);
+        if (!decl) {
+            AST *fieldDecl = findRecordFieldDecl(recordType, node->token->value);
+            if (fieldDecl) {
+                AST *fieldAccess = newASTNode(AST_FIELD_ACCESS, node->token);
+                setLeft(fieldAccess, copyAST(recordExpr));
+                setTypeAST(fieldAccess, fieldDecl->var_type);
+                fieldAccess->type_def = fieldDecl->right;
+                freeAST(node);
+                return fieldAccess;
+            }
+        }
+    }
+
+    if (node->type == AST_VAR_DECL) {
+        if (node->left) {
+            AST *newLeft = rewriteWithFieldReferences(node->left, recordExpr, recordType);
+            if (newLeft != node->left) {
+                setLeft(node, newLeft);
+            }
+        }
+        return node;
+    }
+
+    if (node->type == AST_FOR_TO || node->type == AST_FOR_DOWNTO) {
+        if (node->left) {
+            AST *newLeft = rewriteWithFieldReferences(node->left, recordExpr, recordType);
+            if (newLeft != node->left) {
+                setLeft(node, newLeft);
+            }
+        }
+        if (node->right) {
+            AST *newRight = rewriteWithFieldReferences(node->right, recordExpr, recordType);
+            if (newRight != node->right) {
+                setRight(node, newRight);
+            }
+        }
+        if (node->extra) {
+            AST *newExtra = rewriteWithFieldReferences(node->extra, recordExpr, recordType);
+            if (newExtra != node->extra) {
+                setExtra(node, newExtra);
+            }
+        }
+        return node;
+    }
+
+    if (node->left) {
+        AST *newLeft = rewriteWithFieldReferences(node->left, recordExpr, recordType);
+        if (newLeft != node->left) {
+            setLeft(node, newLeft);
+        }
+    }
+    if (node->right) {
+        AST *newRight = rewriteWithFieldReferences(node->right, recordExpr, recordType);
+        if (newRight != node->right) {
+            setRight(node, newRight);
+        }
+    }
+    if (node->extra) {
+        AST *newExtra = rewriteWithFieldReferences(node->extra, recordExpr, recordType);
+        if (newExtra != node->extra) {
+            setExtra(node, newExtra);
+        }
+    }
+    for (int i = 0; i < node->child_count; i++) {
+        AST *child = node->children[i];
+        if (!child) {
+            continue;
+        }
+        AST *newChild = rewriteWithFieldReferences(child, recordExpr, recordType);
+        if (newChild != child) {
+            node->children[i] = newChild;
+            if (newChild) {
+                newChild->parent = node;
+            }
+        }
+    }
+
+    return node;
+}
+
+static AST *desugarWithNode(AST *node) {
+    if (!node) {
+        return NULL;
+    }
+
+    AST *target = node->left;
+    AST *body = node->right;
+    node->left = NULL;
+    node->right = NULL;
+
+    AST *recordType = resolveRecordTypeForWithTarget(target);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        fprintf(stderr, "Type error: WITH target must be a record expression.\n");
+        pascal_semantic_error_count++;
+    } else if (body) {
+        AST *rewritten = rewriteWithFieldReferences(body, target, recordType);
+        if (rewritten != body) {
+            body = rewritten;
+        }
+    }
+
+    freeAST(target);
+    free(node);
+    return body ? body : newASTNode(AST_NOOP, NULL);
+}
+
 static AST *desugarTryNode(AST *node, VarType currentFunctionType) {
     AST *tryBlock = node->left;
     AST *catchNode = node->right;
@@ -510,6 +689,10 @@ static AST *desugarNode(AST *node, VarType currentFunctionType) {
                 newChild->parent = node;
             }
         }
+    }
+
+    if (node->type == AST_WITH) {
+        return desugarWithNode(node);
     }
 
     return node;
@@ -1005,6 +1188,7 @@ void pascalPerformSemanticAnalysis(AST *root) {
     ensureRegistry();
     ensureExceptionGlobals(root);
     gProgramRoot = desugarNode(root, TYPE_VOID);
+    annotateTypes(gProgramRoot, NULL, gProgramRoot);
 
     markVirtualMethodsForInterfaces();
 

@@ -74,6 +74,7 @@ static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
 static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName);
 static AST *tryStatement(Parser *parser);
 static AST *raiseStatement(Parser *parser);
+static AST *withStatement(Parser *parser);
 static AST *cloneBuiltinTypeNode(VarType type, int line);
 static AST *inferInlineForVarType(AST *expr, int line);
 
@@ -2878,6 +2879,60 @@ static AST *raiseStatement(Parser *parser) {
     return node;
 }
 
+static AST *withStatement(Parser *parser) {
+    eat(parser, TOKEN_WITH);
+
+    AST *with_list = newASTNode(AST_COMPOUND, NULL);
+    if (!with_list) {
+        return NULL;
+    }
+
+    do {
+        AST *target = expression(parser);
+        if (!target || target->type == AST_NOOP) {
+            errorParser(parser, "Expected record expression after WITH");
+            freeAST(with_list);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        AST *with_node = newASTNode(AST_WITH, NULL);
+        setLeft(with_node, target);
+        addChild(with_list, with_node);
+
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
+    } while (1);
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_DO) {
+        errorParser(parser, "Expected DO after WITH expression");
+        freeAST(with_list);
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_DO);
+
+    AST *body = statement(parser);
+    if (!body || body->type == AST_NOOP) {
+        errorParser(parser, "Expected statement after WITH ... DO");
+        freeAST(with_list);
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    AST *result = body;
+    for (int i = with_list->child_count - 1; i >= 0; i--) {
+        AST *with_node = with_list->children[i];
+        with_list->children[i] = NULL;
+        setRight(with_node, result);
+        result = with_node;
+    }
+
+    with_list->child_count = 0;
+    freeAST(with_list);
+    return result;
+}
+
 AST *statement(Parser *parser) {
     if (!parser || !parser->current_token) {
         return newASTNode(AST_NOOP, NULL);
@@ -3119,6 +3174,9 @@ AST *statement(Parser *parser) {
             break;
         case TOKEN_RAISE:
             node = raiseStatement(parser);
+            break;
+        case TOKEN_WITH:
+            node = withStatement(parser);
             break;
         case TOKEN_CASE:
             node = caseStatement(parser);

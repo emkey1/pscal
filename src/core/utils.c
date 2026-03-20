@@ -155,6 +155,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_TRY:          return "TRY";
         case TOKEN_EXCEPT:       return "EXCEPT";
         case TOKEN_RAISE:        return "RAISE";
+        case TOKEN_WITH:         return "WITH";
         case TOKEN_AT:           return "AT";
         case TOKEN_LABEL:        return "LABEL";
         case TOKEN_GOTO:         return "GOTO";
@@ -236,6 +237,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_TRY:            return "TRY";
         case AST_CATCH:          return "CATCH";
         case AST_THROW:          return "THROW";
+        case AST_WITH:           return "WITH";
         case AST_LABEL_DECL:     return "LABEL_DECL";
         case AST_LABEL:          return "LABEL";
         case AST_GOTO:           return "GOTO";

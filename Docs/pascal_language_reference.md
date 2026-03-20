@@ -135,6 +135,17 @@ respectively; both forms require a numeric left-hand side.
       ready := true;
     end;
     ```
+* **`with` Statements:** Standard Pascal-style record-field shorthand.
+    ```pascal
+    with moves[idx] do
+    begin
+      fromRow := r;
+      toRow := tr;
+    end;
+    ```
+    Inside the `with` body, unresolved identifiers that match fields of the
+    target record are treated as field accesses on that record expression.
+    Record methods may also be called without repeating the target expression.
 * **`if` Statements:**
     ```pascal
     if condition then

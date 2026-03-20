@@ -88,6 +88,15 @@
       "expected_stdout": "captures=1"
     },
     {
+      "id": "main_with_record_array_element_runtime",
+      "name": "Main block with statement binds record fields",
+      "category": "routine_scope",
+      "description": "A `with recordExpr do` block should allow unqualified access to the target record's fields.",
+      "expect": "runtime_ok",
+      "code": "program MainWithRecordArrayElement;\ntype\n  MoveType = record\n    fromRow: Integer;\n    fromCol: Integer;\n    toRow: Integer;\n    toCol: Integer;\n    capturedRow: Integer;\n    capturedCol: Integer;\n  end;\nvar\n  moves: array[0..0] of MoveType;\n  idx: Integer;\nbegin\n  idx := 0;\n  with moves[idx] do\n  begin\n    fromRow := 2;\n    fromCol := 3;\n    toRow := 4;\n    toCol := 5;\n    capturedRow := 0;\n    capturedCol := 0;\n  end;\n  writeln('from=', moves[0].fromRow);\n  writeln('to=', moves[0].toCol);\nend.",
+      "expected_stdout": "from=2\nto=5"
+    },
+    {
       "id": "routine_inline_for_var_shadows_outer",
       "name": "Inline for-var shadows outer local",
       "category": "routine_scope",
