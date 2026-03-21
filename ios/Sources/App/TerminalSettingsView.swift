@@ -37,6 +37,7 @@ struct TerminalSettingsView: View {
                             Text(option.displayName).tag(option.id)
                         }
                     }
+                    .accessibilityHint("Select the font family for the terminal")
 
                     let previewFont = appearanceSettings.font(forPointSize: 16)
                     HStack {
@@ -93,6 +94,7 @@ struct TerminalSettingsView: View {
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
+                    .accessibilityHint("Sets the custom name for this tab")
 
                     Toggle(
                         "Restore on app start",
@@ -124,6 +126,7 @@ struct TerminalSettingsView: View {
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
+                    .accessibilityHint("Command to execute automatically when this tab launches")
 
                     Text("Runs once each time this tab profile launches. Leave empty to disable.")
                         .font(.footnote)
@@ -138,6 +141,7 @@ struct TerminalSettingsView: View {
                             set: { appearanceSettings.updateBackgroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
+                    .accessibilityHint("Select the background color for this tab")
 
                     ColorPicker(
                         "Foreground",
@@ -146,6 +150,7 @@ struct TerminalSettingsView: View {
                             set: { appearanceSettings.updateForegroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
+                    .accessibilityHint("Select the text color for this tab")
 
                     Button {
                         _ = tabManager.copyFirstTabColors(tabId: tabId)
@@ -195,6 +200,7 @@ struct TerminalSettingsView: View {
                     .autocorrectionDisabled(true)
                     .font(.system(.body, design: .monospaced))
                     .disabled(!settings.pathTruncationEnabled)
+                    .accessibilityHint("Enter the path to be used as the root for path truncation")
 
                     Button("Use Documents root") {
                         settings.useDocumentsPathForTruncation()
