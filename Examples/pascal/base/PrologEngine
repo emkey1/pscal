@@ -1,17 +1,15 @@
 #!/usr/bin/env pascal
 program PrologEngine;
 
-{
-  PrologEngine demonstrates a compact Prolog-style inference engine in PSCAL.
-
-  It shows:
-  - recursive unification over atoms, variables, and compound terms
-  - backtracking search driven by dynamic arrays of goals and clauses
-  - closure-style binding storage, where each recursive solve step carries its
-    own binding array snapshot forward
-  - clause freshening, so rule variables are renamed before each use
-  - classic untagged Pascal variant-record syntax via `case Byte of`
-}
+// PrologEngine demonstrates a compact Prolog-style inference engine in PSCAL.
+//
+// It shows:
+// - recursive unification over atoms, variables, and compound terms
+// - backtracking search driven by dynamic arrays of goals and clauses
+// - closure-style binding storage, where each recursive solve step carries its
+//   own binding array snapshot forward
+// - clause freshening, so rule variables are renamed before each use
+// - classic untagged Pascal variant-record syntax via `case Byte of`
 
 type
   TermType = (VarTerm, AtomTerm, CompoundTerm);
@@ -38,8 +36,8 @@ type
   end;
   RenameArray = array of RenameEntry;
 
-  { Variables use `variableId`; atoms and compound terms share `name`, and
-    compound terms additionally use `argList`. }
+  // Variables use `variableId`; atoms and compound terms share `name`, and
+  // compound terms additionally use `argList`.
   Term = record
     tt: TermType;
     case Byte of
@@ -193,8 +191,8 @@ begin
   bindings[High(bindings)].value := value;
 end;
 
-{ Follow variable-to-term bindings recursively until a concrete term, or an
-  unbound variable, is reached. }
+// Follow variable-to-term bindings recursively until a concrete term, or an
+// unbound variable, is reached.
 function Deref(const t: TermPtr; const bindings: BindingArray): TermPtr;
 var
   boundValue: TermPtr;
@@ -209,8 +207,8 @@ begin
   Deref := Deref(boundValue, bindings);
 end;
 
-{ Unification mutates the binding array passed by reference, letting recursive
-  calls accumulate substitutions in a simple closure-like environment. }
+// Unification mutates the binding array passed by reference, letting recursive
+// calls accumulate substitutions in a simple closure-like environment.
 function Unify(const leftTerm, rightTerm: TermPtr; var bindings: BindingArray): Boolean;
 var
   leftCanon, rightCanon: TermPtr;
@@ -274,8 +272,8 @@ begin
   FindRenamedVar := renames[High(renames)].newId;
 end;
 
-{ Each clause application gets its own renamed variable IDs so recursive rule
-  expansion cannot accidentally capture bindings from earlier uses. }
+// Each clause application gets its own renamed variable IDs so recursive rule
+// expansion cannot accidentally capture bindings from earlier uses.
 function FreshenTerm(const t: TermPtr; var renames: RenameArray): TermPtr;
 var
   i, newVarId: Integer;
@@ -346,8 +344,8 @@ begin
   end;
 end;
 
-{ Depth-first search with backtracking. Each branch works on a cloned binding
-  array, so failed branches discard their substitutions automatically. }
+// Depth-first search with backtracking. Each branch works on a cloned binding
+// array, so failed branches discard their substitutions automatically.
 function ResolveGoals(const goals: TermArray; const incomingBindings: BindingArray; depth: Integer): Boolean;
 var
   i: Integer;
@@ -430,12 +428,12 @@ procedure AddFamilyFacts;
 var
   X, Y, Z: TermPtr;
 begin
-  { Facts }
+  // Facts
   AddFact(NewCompound('parent', MakeTermArray2(NewAtom('tom'), NewAtom('bob'))));
   AddFact(NewCompound('parent', MakeTermArray2(NewAtom('bob'), NewAtom('ann'))));
   AddFact(NewCompound('parent', MakeTermArray2(NewAtom('ann'), NewAtom('liz'))));
 
-  { ancestor(X, Y) :- parent(X, Y). }
+  // ancestor(X, Y) :- parent(X, Y).
   X := NewVar;
   Y := NewVar;
   AddRule1(
@@ -443,7 +441,7 @@ begin
     NewCompound('parent', MakeTermArray2(CloneTerm(X), CloneTerm(Y)))
   );
 
-  { ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y). }
+  // ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
   X := NewVar;
   Y := NewVar;
   Z := NewVar;
