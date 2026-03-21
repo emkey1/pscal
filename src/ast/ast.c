@@ -26,11 +26,23 @@ bool isNodeInTypeTable(AST* nodeToFind) {
 
 // Resolve type references to their concrete definitions.
 static AST* resolveTypeAlias(AST* type_node) {
-    while (type_node && type_node->type == AST_TYPE_REFERENCE &&
-           type_node->token && type_node->token->value) {
-        AST* looked = lookupType(type_node->token->value);
-        if (!looked || looked == type_node) break;
-        type_node = looked;
+    AST* last = NULL;
+    while (type_node && type_node != last) {
+        last = type_node;
+        if ((type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+            type_node->token && type_node->token->value) {
+            AST* looked = lookupType(type_node->token->value);
+            if (!looked || looked == type_node) {
+                break;
+            }
+            type_node = looked;
+            continue;
+        }
+        if (type_node->type == AST_TYPE_DECL && type_node->left) {
+            type_node = type_node->left;
+            continue;
+        }
+        break;
     }
     return type_node;
 }

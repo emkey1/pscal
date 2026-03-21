@@ -531,6 +531,32 @@ static void emitRoutineResultSlotInit(AST* type_specifier_node,
         writeBytecodeChunk(chunk, (uint8_t)slot, line);
         writeBytecodeChunk(chunk, (uint8_t)TYPE_VOID, line);
         emitConstantIndex16(chunk, addStringConstant(chunk, ""), line);
+        return;
+    }
+
+    if (actual_type_def_node->var_type == TYPE_POINTER) {
+        noteLocalSlotUse(current_function_compiler, slot);
+        writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, line);
+        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+
+        const char* type_name = "";
+        AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
+        if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE) {
+            AST* base = ptr_ast->right;
+            if (base && base->token && base->token->value) {
+                type_name = base->token->value;
+            } else if (ptr_ast->token && ptr_ast->token->value) {
+                type_name = ptr_ast->token->value;
+            }
+        }
+        if (type_name[0] == '\0') {
+            if (type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
+                type_name = type_specifier_node->token->value;
+            } else if (actual_type_def_node->token && actual_type_def_node->token->value) {
+                type_name = actual_type_def_node->token->value;
+            }
+        }
+        emitConstantIndex16(chunk, addStringConstant(chunk, type_name ? type_name : ""), line);
     }
 }
 
@@ -1787,12 +1813,23 @@ static const char* ensureSerializableTypeName(AST* type_node) {
 
 // Resolve type references to their concrete definitions.
 static AST* resolveTypeAlias(AST* type_node) {
-    while (type_node &&
-           (type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
-           type_node->token && type_node->token->value) {
-        AST* looked = lookupType(type_node->token->value);
-        if (!looked || looked == type_node) break;
-        type_node = looked;
+    AST* last = NULL;
+    while (type_node && type_node != last) {
+        last = type_node;
+        if ((type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+            type_node->token && type_node->token->value) {
+            AST* looked = lookupType(type_node->token->value);
+            if (!looked || looked == type_node) {
+                break;
+            }
+            type_node = looked;
+            continue;
+        }
+        if (type_node->type == AST_TYPE_DECL && type_node->left) {
+            type_node = type_node->left;
+            continue;
+        }
+        break;
     }
     return type_node;
 }
@@ -2868,9 +2905,28 @@ static AST* getRecordTypeFromExpr(AST* expr) {
         if (ptr_type && ptr_type->type == AST_POINTER_TYPE) {
             return resolveTypeAlias(ptr_type->right);
         }
+        if (expr->left) {
+            AST* inferred = getRecordTypeFromExpr(expr->left);
+            if (inferred) {
+                return inferred;
+            }
+        }
         return NULL;
     }
     AST* t = resolveTypeAlias(expr->type_def);
+    if (!t && current_function_compiler && current_function_compiler->returns_value &&
+        expr->type == AST_VARIABLE && expr->token && expr->token->value) {
+        const char* varName = expr->token->value;
+        if (isCurrentFunctionResultIdentifier(current_function_compiler, varName) &&
+            current_function_compiler->function_symbol &&
+            current_function_compiler->function_symbol->type_def &&
+            current_function_compiler->function_symbol->type_def->type == AST_FUNCTION_DECL) {
+            AST* returnDecl = current_function_compiler->function_symbol->type_def->right;
+            if (returnDecl) {
+                t = resolveTypeAlias(returnDecl);
+            }
+        }
+    }
     if (!t && expr->token && expr->token->value && gCurrentProgramRoot) {
         AST* decl = findStaticDeclarationInAST(expr->token->value, expr, gCurrentProgramRoot);
         if (decl && decl->right) {

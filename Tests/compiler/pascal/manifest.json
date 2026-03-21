@@ -95,6 +95,12 @@
       "path": "Tests/compiler/pascal/cases/variant_record_overlap.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: variant overlap"
+    },
+    {
+      "id": "variant_record_result_pointer_fields",
+      "path": "Tests/compiler/pascal/cases/variant_record_result_pointer_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: variant result pointer fields"
     }
   ]
 }
