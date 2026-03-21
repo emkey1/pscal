@@ -1,0 +1,206 @@
+#!/usr/bin/env pascal
+program WebCrawler;
+
+const
+  MaxWorkers = 4;
+
+type
+  PInteger = ^Integer;
+
+  CrawlResult = record
+    url: String;
+    content: String;
+  end;
+
+  UrlQueue = record
+    urls: array of String;
+    mutexId: Integer;
+  end;
+
+var
+  queue: UrlQueue;
+  results: array of CrawlResult;
+
+function HasResultUrlUnlocked(const url: String): Boolean;
+var
+  i: Integer;
+begin
+  HasResultUrlUnlocked := false;
+  for i := 0 to High(results) do
+    if results[i].url = url then
+      begin
+        HasResultUrlUnlocked := true;
+        exit;
+      end;
+end;
+
+function HasQueuedUrlUnlocked(const url: String): Boolean;
+var
+  i: Integer;
+begin
+  HasQueuedUrlUnlocked := false;
+  for i := 0 to High(queue.urls) do
+    if queue.urls[i] = url then
+      begin
+        HasQueuedUrlUnlocked := true;
+        exit;
+      end;
+end;
+
+procedure EnqueueUrl(const url: String);
+begin
+  lock(queue.mutexId);
+
+  if HasResultUrlUnlocked(url) or HasQueuedUrlUnlocked(url) then
+    begin
+      unlock(queue.mutexId);
+      exit;
+    end;
+
+  SetLength(queue.urls, Length(queue.urls) + 1);
+  queue.urls[High(queue.urls)] := url;
+
+  unlock(queue.mutexId);
+end;
+
+function DequeueUrl(var url: String): Boolean;
+var
+  i: Integer;
+begin
+  lock(queue.mutexId);
+
+  if Length(queue.urls) = 0 then
+    begin
+      unlock(queue.mutexId);
+      DequeueUrl := false;
+      exit;
+    end;
+
+  url := queue.urls[0];
+
+  for i := 1 to High(queue.urls) do
+    queue.urls[i - 1] := queue.urls[i];
+
+  SetLength(queue.urls, Length(queue.urls) - 1);
+
+  unlock(queue.mutexId);
+  DequeueUrl := true;
+end;
+
+procedure AddResult(const url: String; const content: String);
+begin
+  lock(queue.mutexId);
+
+  if not HasResultUrlUnlocked(url) then
+    begin
+      SetLength(results, Length(results) + 1);
+      results[High(results)].url := url;
+      results[High(results)].content := content;
+    end;
+
+  unlock(queue.mutexId);
+end;
+
+procedure DiscoverLinks(const url: String);
+begin
+  if url = 'http://example.com' then
+    begin
+      EnqueueUrl('http://example.com/link1');
+      EnqueueUrl('http://example.com/link2');
+    end
+  else if url = 'http://example.com/link1' then
+    EnqueueUrl('http://example.com/about')
+  else if url = 'http://example.com/link2' then
+    EnqueueUrl('http://example.com/contact');
+end;
+
+function SimulateFetch(const url: String): String;
+begin
+  if url = 'http://example.com' then
+    SimulateFetch := '<html><body>Example Domain <a href="/link1">Link 1</a> <a href="/link2">Link 2</a></body></html>'
+  else if url = 'http://example.com/link1' then
+    SimulateFetch := '<html><body>Link 1 <a href="/about">About</a></body></html>'
+  else if url = 'http://example.com/link2' then
+    SimulateFetch := '<html><body>Link 2 <a href="/contact">Contact</a></body></html>'
+  else if url = 'http://example.com/about' then
+    SimulateFetch := '<html><body>About Example Domain</body></html>'
+  else if url = 'http://example.com/contact' then
+    SimulateFetch := '<html><body>Contact Example Domain</body></html>'
+  else
+    SimulateFetch := '';
+end;
+
+procedure CrawlWorker(arg: PInteger);
+var
+  workerId: Integer;
+  url: String;
+  content: String;
+begin
+  if arg <> nil then
+    workerId := arg^
+  else
+    workerId := 0;
+
+  while DequeueUrl(url) do
+    begin
+      Delay(Random(250) + 50);
+      content := SimulateFetch(url);
+      AddResult(url, content);
+      DiscoverLinks(url);
+      Writeln('Worker ', workerId, ' crawled: ', url);
+    end;
+end;
+
+procedure StartCrawl(const seedUrl: String; numWorkers: Integer);
+var
+  workerHandles: array[0..MaxWorkers - 1] of Integer;
+  workerIds: array[0..MaxWorkers - 1] of Integer;
+  i, workerCount: Integer;
+begin
+  if numWorkers < 1 then
+    numWorkers := 1;
+  if numWorkers > MaxWorkers then
+    numWorkers := MaxWorkers;
+
+  workerCount := numWorkers;
+  queue.mutexId := mutex();
+  SetLength(queue.urls, 0);
+  SetLength(results, 0);
+
+  EnqueueUrl(seedUrl);
+
+  for i := 0 to workerCount - 1 do
+    begin
+      workerIds[i] := i + 1;
+      workerHandles[i] := CreateThread(@CrawlWorker, @workerIds[i]);
+    end;
+
+  for i := 0 to workerCount - 1 do
+    if workerHandles[i] >= 0 then
+      WaitForThread(workerHandles[i]);
+
+  destroy(queue.mutexId);
+
+  Writeln;
+  Writeln('Crawl complete. Found ', Length(results), ' page(s).');
+end;
+
+var
+  i: Integer;
+begin
+  Randomize;
+
+  Writeln('Starting web crawler...');
+  Writeln('Seed URL: http://example.com');
+  Writeln;
+
+  StartCrawl('http://example.com', 3);
+
+  Writeln;
+  for i := 0 to High(results) do
+    begin
+      Writeln('URL: ', results[i].url);
+      Writeln('Content preview: ', Copy(results[i].content, 1, 48), '...');
+      Writeln;
+    end;
+end.
