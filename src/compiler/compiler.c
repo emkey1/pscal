@@ -4416,7 +4416,7 @@ static bool constIsClassMember(AST* node) {
     return false;
 }
 
-static bool pushFieldBaseAndResolveOffset(AST* node, BytecodeChunk* chunk, int line, int* outFieldOffset) {
+static bool pushFieldBaseAndResolveOffset(AST* node, BytecodeChunk* chunk, int line, int* outFieldOffset, AST** outRecordType) {
     if (!node || node->type != AST_FIELD_ACCESS) {
         fprintf(stderr, "L%d: Compiler error: Invalid field access expression.\n", line);
         compiler_had_error = true;
@@ -4512,6 +4512,7 @@ static bool pushFieldBaseAndResolveOffset(AST* node, BytecodeChunk* chunk, int l
     }
 
     if (outFieldOffset) *outFieldOffset = fieldOffset;
+    if (outRecordType) *outRecordType = recType;
     return true;
 }
 
@@ -4644,16 +4645,23 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             int fieldOffset = -1;
-            if (!pushFieldBaseAndResolveOffset(node, chunk, line, &fieldOffset)) {
+            AST* fieldRecordType = NULL;
+            if (!pushFieldBaseAndResolveOffset(node, chunk, line, &fieldOffset, &fieldRecordType)) {
                 break;
             }
 
-            if (fieldOffset <= 0xFF) {
-                writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
-                writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+            if (fieldRecordType && recordUsesExplicitFieldSlots(fieldRecordType) &&
+                node->token && node->token->value) {
+                int nameIndex = addStringConstant(chunk, node->token->value);
+                emitGlobalNameIdx(chunk, GET_FIELD_ADDRESS, GET_FIELD_ADDRESS16, nameIndex, line);
             } else {
-                writeBytecodeChunk(chunk, GET_FIELD_OFFSET16, line);
-                emitShort(chunk, (uint16_t)fieldOffset, line);
+                if (fieldOffset <= 0xFF) {
+                    writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                    writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+                } else {
+                    writeBytecodeChunk(chunk, GET_FIELD_OFFSET16, line);
+                    emitShort(chunk, (uint16_t)fieldOffset, line);
+                }
             }
             break;
         }
@@ -8658,16 +8666,24 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
             int fieldOffset = -1;
-            if (!pushFieldBaseAndResolveOffset(node, chunk, line, &fieldOffset)) {
+            AST* fieldRecordType = NULL;
+            if (!pushFieldBaseAndResolveOffset(node, chunk, line, &fieldOffset, &fieldRecordType)) {
                 break;
             }
 
-            if (fieldOffset <= 0xFF) {
-                writeBytecodeChunk(chunk, LOAD_FIELD_VALUE, line);
-                writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+            if (fieldRecordType && recordUsesExplicitFieldSlots(fieldRecordType) &&
+                node->token && node->token->value) {
+                int nameIndex = addStringConstant(chunk, node->token->value);
+                emitGlobalNameIdx(chunk, LOAD_FIELD_VALUE_BY_NAME, LOAD_FIELD_VALUE_BY_NAME16,
+                                   nameIndex, line);
             } else {
-                writeBytecodeChunk(chunk, LOAD_FIELD_VALUE16, line);
-                emitShort(chunk, (uint16_t)fieldOffset, line);
+                if (fieldOffset <= 0xFF) {
+                    writeBytecodeChunk(chunk, LOAD_FIELD_VALUE, line);
+                    writeBytecodeChunk(chunk, (uint8_t)fieldOffset, line);
+                } else {
+                    writeBytecodeChunk(chunk, LOAD_FIELD_VALUE16, line);
+                    emitShort(chunk, (uint16_t)fieldOffset, line);
+                }
             }
             break;
         }

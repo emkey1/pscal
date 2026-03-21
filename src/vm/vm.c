@@ -634,6 +634,72 @@ static Value* resolveRecordForField(VM* vm, Value* base_val_ptr) {
     return record_struct_ptr;
 }
 
+static AST* vmResolveTypeAlias(AST* type_node) {
+    AST* last = NULL;
+    while (type_node && type_node != last) {
+        last = type_node;
+        if ((type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+            type_node->token && type_node->token->value) {
+            AST* looked = lookupType(type_node->token->value);
+            if (!looked || looked == type_node) {
+                break;
+            }
+            type_node = looked;
+            continue;
+        }
+        if (type_node->type == AST_TYPE_DECL && type_node->left) {
+            type_node = type_node->left;
+            continue;
+        }
+        break;
+    }
+    return type_node;
+}
+
+static VarType vmDeclaredVarType(AST* type_node) {
+    type_node = vmResolveTypeAlias(type_node);
+    if (!type_node) {
+        return TYPE_VOID;
+    }
+    if (type_node->var_type != TYPE_VOID && type_node->var_type != TYPE_UNKNOWN) {
+        return type_node->var_type;
+    }
+
+    switch (type_node->type) {
+        case AST_RECORD_TYPE:
+            return TYPE_RECORD;
+        case AST_ARRAY_TYPE:
+            return TYPE_ARRAY;
+        case AST_ENUM_TYPE:
+            return TYPE_ENUM;
+        case AST_POINTER_TYPE:
+        case AST_PROC_PTR_TYPE:
+            return TYPE_POINTER;
+        case AST_INTERFACE:
+            return TYPE_INTERFACE;
+        case AST_VARIABLE:
+        case AST_TYPE_IDENTIFIER:
+            if (type_node->token && type_node->token->value) {
+                const char* tn = type_node->token->value;
+                if (strcasecmp(tn, "integer") == 0 || strcasecmp(tn, "int") == 0) return TYPE_INT32;
+                if (strcasecmp(tn, "longint") == 0 || strcasecmp(tn, "int64") == 0) return TYPE_INT64;
+                if (strcasecmp(tn, "cardinal") == 0) return TYPE_UINT32;
+                if (strcasecmp(tn, "char") == 0) return TYPE_CHAR;
+                if (strcasecmp(tn, "string") == 0) return TYPE_STRING;
+                if (strcasecmp(tn, "boolean") == 0 || strcasecmp(tn, "bool") == 0) return TYPE_BOOLEAN;
+                if (strcasecmp(tn, "byte") == 0) return TYPE_BYTE;
+                if (strcasecmp(tn, "word") == 0) return TYPE_WORD;
+                if (strcasecmp(tn, "single") == 0 || strcasecmp(tn, "float") == 0) return TYPE_FLOAT;
+                if (strcasecmp(tn, "double") == 0 || strcasecmp(tn, "real") == 0) return TYPE_DOUBLE;
+            }
+            break;
+        default:
+            break;
+    }
+
+    return TYPE_VOID;
+}
+
 static FieldValue* findRecordFieldBySlot(Value* record_struct_ptr, uint16_t field_index) {
     if (!record_struct_ptr || record_struct_ptr->type != TYPE_RECORD) {
         return NULL;
@@ -6438,7 +6504,7 @@ comparison_error_label:
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(fieldValueStorage(current), NULL));
+                push(vm, makePointer(fieldValueStorage(current), current->type_def));
                 break;
             }
             case GET_FIELD_OFFSET16: {
@@ -6467,7 +6533,7 @@ comparison_error_label:
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(fieldValueStorage(current), NULL));
+                push(vm, makePointer(fieldValueStorage(current), current->type_def));
                 break;
             }
             case LOAD_FIELD_VALUE: {
@@ -6510,7 +6576,7 @@ comparison_error_label:
                     if (strcmp(current->name, field_name) == 0) {
                         Value popped_base_val = pop(vm);
                         freeValue(&popped_base_val);
-                        push(vm, makePointer(fieldValueStorage(current), NULL));
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
                         goto next_instruction;
                     }
                     current = current->next;
@@ -6543,7 +6609,7 @@ comparison_error_label:
                     if (strcmp(current->name, field_name) == 0) {
                         Value popped_base_val = pop(vm);
                         freeValue(&popped_base_val);
-                        push(vm, makePointer(fieldValueStorage(current), NULL));
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
                         goto next_instruction;
                     }
                     current = current->next;
@@ -7259,6 +7325,35 @@ comparison_error_label:
                         freeValue(&value_to_set);
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    AST* declaredTypeNode = pointer_to_lvalue.base_type_node;
+                    VarType declaredType = vmDeclaredVarType(declaredTypeNode);
+                    AST* resolvedDeclaredType = vmResolveTypeAlias(declaredTypeNode);
+                    if (declaredType != TYPE_VOID) {
+                        bool needs_reset = false;
+                        if (declaredType == TYPE_POINTER) {
+                            if (target_lvalue_ptr->type != TYPE_POINTER) {
+                                needs_reset = true;
+                            }
+                        } else if (declaredType == TYPE_RECORD || declaredType == TYPE_ARRAY ||
+                                   declaredType == TYPE_STRING || declaredType == TYPE_ENUM ||
+                                   declaredType == TYPE_INTERFACE) {
+                            if (target_lvalue_ptr->type != declaredType) {
+                                needs_reset = true;
+                            }
+                        } else if (target_lvalue_ptr->type != declaredType) {
+                            needs_reset = true;
+                        }
+
+                        if (needs_reset) {
+                            freeValue(target_lvalue_ptr);
+                            *target_lvalue_ptr = makeValueForType(declaredType, resolvedDeclaredType, NULL);
+                        } else if (declaredType == TYPE_POINTER && resolvedDeclaredType &&
+                                   resolvedDeclaredType->type == AST_POINTER_TYPE &&
+                                   resolvedDeclaredType->right) {
+                            target_lvalue_ptr->base_type_node = resolvedDeclaredType->right;
+                        }
                     }
 
                     // (Your existing logic for handling fixed-length strings, pointers, reals, etc. goes here)

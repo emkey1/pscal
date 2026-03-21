@@ -608,6 +608,8 @@ begin
                 end;
               'E': 
                 begin
+                  Writeln();
+                  Writeln();
                   Writeln('Edit mode: enter coordinates (e.g., A5)');
                   Write('Cell: ');
                   Readln(cellStr);

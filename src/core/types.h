@@ -172,6 +172,8 @@ typedef struct FieldValue {
     char *name;
     struct ValueStruct value;
     struct ValueStruct *storage;
+    struct AST *type_def;
+    VarType declared_type;
     int slot_index;
     bool owns_storage;
     struct FieldValue *next;

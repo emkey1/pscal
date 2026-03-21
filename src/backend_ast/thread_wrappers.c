@@ -30,6 +30,8 @@ static bool appendField(FieldValue** head, FieldValue** tail, const char* name, 
     }
     node->value = value;
     node->storage = &node->value;
+    node->type_def = NULL;
+    node->declared_type = value.type;
     node->slot_index = *tail ? ((*tail)->slot_index + 1) : 0;
     node->owns_storage = true;
     node->next = NULL;

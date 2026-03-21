@@ -8652,6 +8652,8 @@ static bool appendThreadField(FieldValue** head, FieldValue** tail, const char* 
     }
     field->value = value;
     field->storage = &field->value;
+    field->type_def = NULL;
+    field->declared_type = value.type;
     field->slot_index = (*tail) ? ((*tail)->slot_index + 1) : 0;
     field->owns_storage = true;
     field->next = NULL;

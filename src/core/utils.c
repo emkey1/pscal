@@ -500,6 +500,8 @@ FieldValue *copyRecord(FieldValue *orig) {
         }
 
         new_field->slot_index = curr->slot_index;
+        new_field->type_def = curr->type_def;
+        new_field->declared_type = curr->declared_type;
         new_field->owns_storage = curr->owns_storage;
         new_field->next = NULL;
 
@@ -824,6 +826,8 @@ FieldValue *createEmptyRecord(AST *recordType) {
         }
         vtableField->value = makeNil();
         vtableField->storage = &vtableField->value;
+        vtableField->type_def = NULL;
+        vtableField->declared_type = TYPE_POINTER;
         vtableField->slot_index = 0;
         vtableField->owns_storage = true;
         vtableField->next = NULL;
@@ -886,6 +890,8 @@ FieldValue *createEmptyRecord(AST *recordType) {
             bool usesExplicitSlots = (recordType->i_val > 0);
             int slotIndex = usesExplicitSlots ? (varNode->i_val + slotBias) : sequentialSlot++;
             fv->slot_index = slotIndex;
+            fv->type_def = fieldTypeDef;
+            fv->declared_type = fieldType;
             fv->next = NULL; // Initialize next pointer
 
             if (slotIndex >= 0) {
