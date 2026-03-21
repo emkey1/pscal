@@ -173,6 +173,33 @@ add({
 })
 
 add({
+    "id": "routine_call_result_array_index_runtime",
+    "name": "Function call result may be indexed directly",
+    "category": "routine_scope",
+    "description": "A postfix array selector should work on the result of a function call, such as `BuildValues(10)[1]`.",
+    "expect": "runtime_ok",
+    "code": """
+        program RoutineCallResultArrayIndex;
+        type
+          TIntArray = array[0..2] of Integer;
+
+        function BuildValues(seed: Integer): TIntArray;
+        begin
+          BuildValues[0] := seed;
+          BuildValues[1] := seed + 1;
+          BuildValues[2] := seed + 2;
+        end;
+
+        begin
+          if false then
+            writeln('mid=', BuildValues(10)[1]);
+          writeln('parsed');
+        end.
+    """,
+    "expected_stdout": "parsed",
+})
+
+add({
     "id": "routine_nested_function_leak_error",
     "name": "Nested function cannot escape its scope",
     "category": "routine_scope",

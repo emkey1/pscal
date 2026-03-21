@@ -413,6 +413,8 @@ The usual helpers work with dynamic arrays:
 * `Low(arr)` is `0` when the array has elements and remains `0` for empty arrays.
 * `High(arr)` evaluates to `Length(arr) - 1` for populated arrays and `-1` when
   the array is empty.
+* Array selectors may be applied directly to function-call results, for example
+  `BuildValues(10)[1]`.
 
 These intrinsics also operate on alias references so appending via
 `SetLength(alias, Length(alias) + 1)` keeps `Low/High` in sync with the primary

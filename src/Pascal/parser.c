@@ -75,6 +75,7 @@ static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const 
 static AST *tryStatement(Parser *parser);
 static AST *raiseStatement(Parser *parser);
 static AST *withStatement(Parser *parser);
+static AST *parsePostfixSelectors(Parser *parser, AST *node);
 static AST *cloneBuiltinTypeNode(VarType type, int line);
 static AST *inferInlineForVarType(AST *expr, int line);
 
@@ -443,21 +444,11 @@ AST *parseWriteArguments(Parser *parser) {
     return argList;
 }
 
-// lvalue: Parses variable.field[index] etc. Calls expression for index.
-AST *lvalue(Parser *parser) {
-    Token *ident_token_snapshot = parser->current_token; // Snapshot the first token
-
-    if (!tokenIsIdentifierLike(ident_token_snapshot)) {
-        errorParser(parser, "Expected identifier at start of lvalue");
-        return newASTNode(AST_NOOP, NULL); // Return a NOOP node on error
+static AST *parsePostfixSelectors(Parser *parser, AST *node) {
+    if (!parser || !node) {
+        return node;
     }
 
-    // Create the base variable node.
-    // newASTNode should make its own copy of the token if it needs to persist it.
-    AST *node = newASTNode(AST_VARIABLE, ident_token_snapshot);
-    eat(parser, ident_token_snapshot->type); // Consume the first identifier-like token
-
-    // Loop for subsequent field access '.', array '[]', or pointer '^'
     while (parser->current_token &&
            (parser->current_token->type == TOKEN_PERIOD ||
             parser->current_token->type == TOKEN_LBRACKET ||
@@ -519,7 +510,24 @@ AST *lvalue(Parser *parser) {
             node = deref_node; // The dereference_node is now the current 'node'
         }
     }
-    return node; // Return the fully constructed lvalue AST
+    return node;
+}
+
+// lvalue: Parses variable.field[index] etc. Calls expression for index.
+AST *lvalue(Parser *parser) {
+    Token *ident_token_snapshot = parser->current_token; // Snapshot the first token
+
+    if (!tokenIsIdentifierLike(ident_token_snapshot)) {
+        errorParser(parser, "Expected identifier at start of lvalue");
+        return newASTNode(AST_NOOP, NULL); // Return a NOOP node on error
+    }
+
+    // Create the base variable node.
+    // newASTNode should make its own copy of the token if it needs to persist it.
+    AST *node = newASTNode(AST_VARIABLE, ident_token_snapshot);
+    eat(parser, ident_token_snapshot->type); // Consume the first identifier-like token
+
+    return parsePostfixSelectors(parser, node); // Return the fully constructed lvalue AST
 }
 // parseArrayType: Calls expression for bounds
 AST *parseArrayType(Parser *parser) {
@@ -4266,6 +4274,11 @@ AST *factor(Parser *parser) {
     // If node is still NULL after all checks, something went wrong internally
     if (!node) {
         errorParser(parser, "Internal error: factor resulted in NULL node");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    node = parsePostfixSelectors(parser, node);
+    if (!node || node->type == AST_NOOP) {
         return newASTNode(AST_NOOP, NULL);
     }
 

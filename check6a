@@ -326,13 +326,14 @@ var
       ExecuteMove(tempBoard, childMoves[idx2]);
       
       value := MinimaxRec(tempBoard, d - 1, -p, l_alpha, l_beta);
-      
-      if (p > 0) then
+
+      if p > 0 then
+      begin
         if value > bestVal then
           bestVal := value;
-      else
-        if value < bestVal then
-          bestVal := value;
+      end
+      else if value < bestVal then
+        bestVal := value;
 
       { Alpha-beta pruning }
       if (p > 0) then

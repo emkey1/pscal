@@ -40,6 +40,15 @@
       "expected_stdout": "result=17\nglobal=7"
     },
     {
+      "id": "routine_call_result_array_index_runtime",
+      "name": "Function call result may be indexed directly",
+      "category": "routine_scope",
+      "description": "A postfix array selector should work on the result of a function call, such as `BuildValues(10)[1]`.",
+      "expect": "runtime_ok",
+      "code": "program RoutineCallResultArrayIndex;\ntype\n  TIntArray = array[0..2] of Integer;\n\nfunction BuildValues(seed: Integer): TIntArray;\nbegin\n  BuildValues[0] := seed;\n  BuildValues[1] := seed + 1;\n  BuildValues[2] := seed + 2;\nend;\n\nbegin\n  if false then\n    writeln('mid=', BuildValues(10)[1]);\n  writeln('parsed');\nend.",
+      "expected_stdout": "parsed"
+    },
+    {
       "id": "routine_nested_function_leak_error",
       "name": "Nested function cannot escape its scope",
       "category": "routine_scope",
