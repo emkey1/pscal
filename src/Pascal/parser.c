@@ -72,8 +72,9 @@ static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
 static AST *parseRecordFieldDecl(Parser *parser);
-static bool parseVariantRecordSection(Parser *parser, AST *recordNode);
-static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator);
+static void assignRecordFieldSlots(AST *fieldDecl, int baseSlot);
+static bool parseVariantRecordSection(Parser *parser, AST *recordNode, int *slotCursor);
+static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator, int *slotCursor);
 static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName);
 static AST *tryStatement(Parser *parser);
 static AST *raiseStatement(Parser *parser);
@@ -923,7 +924,23 @@ static AST *parseRecordFieldDecl(Parser *parser) {
     return fieldDecl;
 }
 
-static bool parseVariantRecordSection(Parser *parser, AST *recordNode) {
+static void assignRecordFieldSlots(AST *fieldDecl, int baseSlot) {
+    if (!fieldDecl || fieldDecl->type != AST_VAR_DECL) {
+        return;
+    }
+
+    for (int i = 0; i < fieldDecl->child_count; i++) {
+        AST *varNode = fieldDecl->children[i];
+        if (varNode) {
+            varNode->i_val = baseSlot + i;
+        }
+    }
+}
+
+static bool parseVariantRecordSection(Parser *parser, AST *recordNode, int *slotCursor) {
+    int variantBaseSlot = slotCursor ? *slotCursor : 0;
+    int maxVariantSlot = variantBaseSlot;
+
     eat(parser, TOKEN_CASE);
 
     if (currentTokenIsIdentifierLike(parser)) {
@@ -938,7 +955,13 @@ static bool parseVariantRecordSection(Parser *parser, AST *recordNode) {
             if (!tagDecl) {
                 return false;
             }
+            assignRecordFieldSlots(tagDecl, variantBaseSlot);
             addChild(recordNode, tagDecl);
+            variantBaseSlot += tagDecl->child_count;
+            maxVariantSlot = variantBaseSlot;
+            if (slotCursor) {
+                *slotCursor = variantBaseSlot;
+            }
         }
     }
 
@@ -985,8 +1008,12 @@ static bool parseVariantRecordSection(Parser *parser, AST *recordNode) {
         }
         eat(parser, TOKEN_LPAREN);
 
-        if (!parseRecordMembers(parser, recordNode, TOKEN_RPAREN)) {
+        int armSlotCursor = variantBaseSlot;
+        if (!parseRecordMembers(parser, recordNode, TOKEN_RPAREN, &armSlotCursor)) {
             return false;
+        }
+        if (armSlotCursor > maxVariantSlot) {
+            maxVariantSlot = armSlotCursor;
         }
 
         if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
@@ -1000,10 +1027,14 @@ static bool parseVariantRecordSection(Parser *parser, AST *recordNode) {
         }
     }
 
+    if (slotCursor) {
+        *slotCursor = maxVariantSlot;
+    }
+
     return true;
 }
 
-static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator) {
+static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator, int *slotCursor) {
     while (parser->current_token && parser->current_token->type != terminator) {
         if (parser->current_token->type == TOKEN_SEMICOLON) {
             eat(parser, TOKEN_SEMICOLON);
@@ -1022,7 +1053,7 @@ static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType termin
         }
 
         if (parser->current_token->type == TOKEN_CASE) {
-            if (!parseVariantRecordSection(parser, recordNode)) {
+            if (!parseVariantRecordSection(parser, recordNode, slotCursor)) {
                 return false;
             }
             continue;
@@ -1032,6 +1063,10 @@ static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType termin
             AST *fieldDecl = parseRecordFieldDecl(parser);
             if (!fieldDecl) {
                 return false;
+            }
+            if (slotCursor) {
+                assignRecordFieldSlots(fieldDecl, *slotCursor);
+                *slotCursor += fieldDecl->child_count;
             }
             addChild(recordNode, fieldDecl);
             if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
@@ -2064,8 +2099,9 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         // Use the initialToken captured at the start
         node = newASTNode(AST_RECORD_TYPE, initialToken);
         eat(parser, TOKEN_RECORD); // Consume the RECORD keyword itself
+        int recordSlotCursor = 0;
 
-        if (!parseRecordMembers(parser, node, TOKEN_END)) {
+        if (!parseRecordMembers(parser, node, TOKEN_END, &recordSlotCursor)) {
             freeAST(node);
             return NULL;
         }
@@ -2077,6 +2113,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         }
         eat(parser, TOKEN_END);
         setTypeAST(node, TYPE_RECORD);
+        node->i_val = recordSlotCursor;
         // Flow continues to the end, return node
 
     } else if (initialTokenType == TOKEN_INTERFACE) {

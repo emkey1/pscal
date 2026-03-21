@@ -171,6 +171,9 @@ typedef struct ValueStruct {
 typedef struct FieldValue {
     char *name;
     struct ValueStruct value;
+    struct ValueStruct *storage;
+    int slot_index;
+    bool owns_storage;
     struct FieldValue *next;
 } FieldValue;
 

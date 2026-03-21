@@ -337,9 +337,9 @@ Types are defined in a `type` block.
       end;
     ```
 
-    PSCAL currently flattens variant arms into ordinary record fields for code
-    generation, so the syntax is supported but classic Pascal overlapping
-    storage semantics are not modeled.
+    Variant arms share overlapping storage slots, so fields from different arms
+    refer to the same underlying record storage just as they do in classic
+    Pascal variant records.
 
     > **Note:** Traditional Turbo/Delphi `object`/`class` syntax is deliberately
     > omitted.  PSCAL Pascal achieves polymorphism with plain `record`s that may

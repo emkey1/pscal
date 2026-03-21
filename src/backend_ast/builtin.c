@@ -952,10 +952,26 @@ static bool computeValueSizeBytesInternal(const Value *value, long long *out_byt
         }
         case TYPE_RECORD: {
             long long total = 0;
+            const Value* seen_storage[128];
+            int seen_count = 0;
             for (FieldValue *field = value->record_val; field; field = field->next) {
+                const Value *fieldValue = fieldValueStorageConst(field);
+                bool already_counted = false;
+                for (int i = 0; i < seen_count; i++) {
+                    if (seen_storage[i] == fieldValue) {
+                        already_counted = true;
+                        break;
+                    }
+                }
+                if (already_counted) {
+                    continue;
+                }
                 long long field_size = 0;
-                if (!computeValueSizeBytesInternal(&field->value, &field_size, depth + 1)) {
+                if (!computeValueSizeBytesInternal(fieldValue, &field_size, depth + 1)) {
                     return false;
+                }
+                if (seen_count < (int)(sizeof(seen_storage) / sizeof(seen_storage[0]))) {
+                    seen_storage[seen_count++] = fieldValue;
                 }
                 total += field_size;
             }
@@ -8595,9 +8611,10 @@ static bool parseThreadRequestOptionsValue(const Value* value, ThreadRequestOpti
         if (!field->name) {
             continue;
         }
+        const Value *fieldValue = fieldValueStorageConst(field);
         if (strcasecmp(field->name, "name") == 0) {
             recognized = true;
-            const char* requested = builtinValueToCString(&field->value);
+            const char* requested = builtinValueToCString(fieldValue);
             if (requested) {
                 strncpy(options->name, requested, sizeof(options->name) - 1);
                 options->name[sizeof(options->name) - 1] = '\0';
@@ -8609,7 +8626,7 @@ static bool parseThreadRequestOptionsValue(const Value* value, ThreadRequestOpti
                    strcasecmp(field->name, "queue") == 0) {
             recognized = true;
             bool flag = false;
-            if (parseBooleanValue(&field->value, &flag)) {
+            if (parseBooleanValue(fieldValue, &flag)) {
                 options->submitOnly = flag;
             }
         }
@@ -8634,6 +8651,9 @@ static bool appendThreadField(FieldValue** head, FieldValue** tail, const char* 
         return false;
     }
     field->value = value;
+    field->storage = &field->value;
+    field->slot_index = (*tail) ? ((*tail)->slot_index + 1) : 0;
+    field->owns_storage = true;
     field->next = NULL;
     if (!*head) {
         *head = field;
@@ -8940,7 +8960,7 @@ static bool jsonAppendRecord(JsonBuffer *buffer, const FieldValue *field) {
         if (!jsonBufferAppendFormat(buffer, ": ")) {
             return false;
         }
-        if (!jsonAppendValue(buffer, &field->value)) {
+        if (!jsonAppendValue(buffer, fieldValueStorageConst(field))) {
             return false;
         }
         first = false;

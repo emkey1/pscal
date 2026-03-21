@@ -634,22 +634,44 @@ static Value* resolveRecordForField(VM* vm, Value* base_val_ptr) {
     return record_struct_ptr;
 }
 
+static FieldValue* findRecordFieldBySlot(Value* record_struct_ptr, uint16_t field_index) {
+    if (!record_struct_ptr || record_struct_ptr->type != TYPE_RECORD) {
+        return NULL;
+    }
+
+    bool sawExplicitSlots = false;
+    FieldValue* fallback = record_struct_ptr->record_val;
+    for (uint16_t ordinal = 0; fallback; fallback = fallback->next, ordinal++) {
+        if (fallback->slot_index >= 0) {
+            sawExplicitSlots = true;
+            if ((uint16_t)fallback->slot_index == field_index) {
+                return fallback;
+            }
+        } else if (!sawExplicitSlots && ordinal == field_index) {
+            return fallback;
+        }
+    }
+
+    if (!sawExplicitSlots) {
+        return NULL;
+    }
+
+    return NULL;
+}
+
 static bool pushFieldValueByOffset(VM* vm, Value* base_val_ptr, uint16_t field_index) {
     Value* record_struct_ptr = resolveRecordForField(vm, base_val_ptr);
     if (!record_struct_ptr) {
         return false;
     }
 
-    FieldValue* current = record_struct_ptr->record_val;
-    for (uint16_t i = 0; i < field_index && current; i++) {
-        current = current->next;
-    }
+    FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
     if (!current) {
         runtimeError(vm, "VM Error: Field index out of range.");
         return false;
     }
 
-    push(vm, copyValueForStack(&current->value));
+    push(vm, copyValueForStack(fieldValueStorage(current)));
     return true;
 }
 
@@ -667,7 +689,7 @@ static bool pushFieldValueByName(VM* vm, Value* base_val_ptr, const char* field_
     FieldValue* current = record_struct_ptr->record_val;
     while (current) {
         if (current->name && strcmp(current->name, field_name) == 0) {
-            push(vm, copyValueForStack(&current->value));
+            push(vm, copyValueForStack(fieldValueStorage(current)));
             return true;
         }
         current = current->next;
@@ -3827,7 +3849,7 @@ static Value vmHostBoxInterface(VM* vm) {
         if (!invalid_type && existingRecord && existingRecord->type == TYPE_RECORD) {
             FieldValue* hiddenField = existingRecord->record_val;
             if (hiddenField) {
-                tableSlotPtr = &hiddenField->value;
+                tableSlotPtr = fieldValueStorage(hiddenField);
                 tableValuePtr = tableSlotPtr;
                 if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
                     tableValuePtr = (Value*)tableValuePtr->ptr_val;
@@ -3869,7 +3891,7 @@ static Value vmHostBoxInterface(VM* vm) {
             runtimeError(vm, "VM Error: Cloned receiver lacks vtable storage.");
             return makeNil();
         }
-        tableSlotPtr = &hiddenField->value;
+        tableSlotPtr = fieldValueStorage(hiddenField);
         tableValuePtr = tableSlotPtr;
         if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
             tableValuePtr = (Value*)tableValuePtr->ptr_val;
@@ -6343,6 +6365,9 @@ comparison_error_label:
                     }
                     field->name = NULL;
                     field->value = makeNil();
+                    field->storage = &field->value;
+                    field->slot_index = (int)i;
+                    field->owns_storage = true;
                     field->next = NULL;
                     *next_ptr = field;
                     next_ptr = &field->next;
@@ -6370,6 +6395,9 @@ comparison_error_label:
                     }
                     field->name = NULL;
                     field->value = makeNil();
+                    field->storage = &field->value;
+                    field->slot_index = (int)i;
+                    field->owns_storage = true;
                     field->next = NULL;
                     *next_ptr = field;
                     next_ptr = &field->next;
@@ -6403,17 +6431,14 @@ comparison_error_label:
                 }
 
 
-                FieldValue* current = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && current; i++) {
-                    current = current->next;
-                }
+                FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
                 if (!current) {
                     runtimeError(vm, "VM Error: Field index out of range.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(&current->value, NULL));
+                push(vm, makePointer(fieldValueStorage(current), NULL));
                 break;
             }
             case GET_FIELD_OFFSET16: {
@@ -6434,10 +6459,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* current = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && current; i++) {
-                    current = current->next;
-                }
+                FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
                 if (!current) {
                     runtimeError(vm, "VM Error: Field index out of range.");
 
@@ -6445,7 +6467,7 @@ comparison_error_label:
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(&current->value, NULL));
+                push(vm, makePointer(fieldValueStorage(current), NULL));
                 break;
             }
             case LOAD_FIELD_VALUE: {
@@ -6488,7 +6510,7 @@ comparison_error_label:
                     if (strcmp(current->name, field_name) == 0) {
                         Value popped_base_val = pop(vm);
                         freeValue(&popped_base_val);
-                        push(vm, makePointer(&current->value, NULL));
+                        push(vm, makePointer(fieldValueStorage(current), NULL));
                         goto next_instruction;
                     }
                     current = current->next;
@@ -6521,7 +6543,7 @@ comparison_error_label:
                     if (strcmp(current->name, field_name) == 0) {
                         Value popped_base_val = pop(vm);
                         freeValue(&popped_base_val);
-                        push(vm, makePointer(&current->value, NULL));
+                        push(vm, makePointer(fieldValueStorage(current), NULL));
                         goto next_instruction;
                     }
                     current = current->next;
@@ -8192,17 +8214,15 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* current = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && current; i++) {
-                    current = current->next;
-                }
+                FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
                 if (!current) {
                     runtimeError(vm, "VM Error: Field index out of range for INIT_FIELD_ARRAY.");
                     freeValue(&array_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                freeValue(&current->value);
-                current->value = array_val;
+                Value* fieldCell = fieldValueStorage(current);
+                freeValue(fieldCell);
+                *fieldCell = array_val;
                 break;
             }
             case INIT_LOCAL_FILE: {
@@ -8950,8 +8970,9 @@ comparison_error_label:
                 Value* vtable_arr = NULL;
                 while (current) {
                     if (strcmp(current->name, "__vtable") == 0) {
-                        if (current->value.type == TYPE_ARRAY) {
-                            vtable_arr = current->value.array_val;
+                        const Value *fieldValue = fieldValueStorageConst(current);
+                        if (fieldValue->type == TYPE_ARRAY) {
+                            vtable_arr = fieldValue->array_val;
                         }
                         break;
                     }

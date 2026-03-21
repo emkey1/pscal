@@ -445,33 +445,116 @@ void releaseMStream(MStream* ms) {
     }
 }
 
+static bool ensureFieldSlotCapacity(FieldValue*** slotOwners, int* capacity, int requiredSlots) {
+    if (!slotOwners || !capacity || requiredSlots <= *capacity) {
+        return true;
+    }
+
+    int newCapacity = (*capacity > 0) ? *capacity : 4;
+    while (newCapacity < requiredSlots) {
+        newCapacity *= 2;
+    }
+
+    FieldValue** resized = realloc(*slotOwners, sizeof(FieldValue*) * newCapacity);
+    if (!resized) {
+        return false;
+    }
+    memset(resized + *capacity, 0, sizeof(FieldValue*) * (newCapacity - *capacity));
+    *slotOwners = resized;
+    *capacity = newCapacity;
+    return true;
+}
+
 FieldValue *copyRecord(FieldValue *orig) {
     if (!orig) return NULL;
-    FieldValue *new_head = NULL, **ptr = &new_head;
+
+    FieldValue *new_head = NULL;
+    FieldValue **tail_next = &new_head;
+    const Value **oldStorages = NULL;
+    Value **newStorages = NULL;
+    int storageCount = 0;
+    int storageCapacity = 0;
+
     for (FieldValue *curr = orig; curr != NULL; curr = curr->next) {
-        FieldValue *new_field = malloc(sizeof(FieldValue));
+        FieldValue *new_field = (FieldValue*)calloc(1, sizeof(FieldValue));
         if (!new_field) {
             fprintf(stderr, "Memory allocation error in copyRecord for new_field\n");
-            freeFieldValue(new_head); // Free any previously allocated nodes
-            EXIT_FAILURE_HANDLER();
-            return NULL; // In case EXIT_FAILURE_HANDLER returns
-        }
-        new_field->name = strdup(curr->name);
-        if (!new_field->name) {
-            fprintf(stderr, "Memory allocation error in copyRecord for new_field->name\n");
-            free(new_field);
+            free(oldStorages);
+            free(newStorages);
             freeFieldValue(new_head);
             EXIT_FAILURE_HANDLER();
             return NULL;
         }
 
-        // --- Recursively copy the field's value ---
-        new_field->value = makeCopyOfValue(&curr->value); // Use makeCopyOfValue
+        if (curr->name) {
+            new_field->name = strdup(curr->name);
+            if (!new_field->name) {
+                fprintf(stderr, "Memory allocation error in copyRecord for new_field->name\n");
+                free(new_field);
+                free(oldStorages);
+                free(newStorages);
+                freeFieldValue(new_head);
+                EXIT_FAILURE_HANDLER();
+                return NULL;
+            }
+        }
 
+        new_field->slot_index = curr->slot_index;
+        new_field->owns_storage = curr->owns_storage;
         new_field->next = NULL;
-        *ptr = new_field;
-        ptr = &new_field->next;
+
+        const Value *oldStorage = fieldValueStorageConst(curr);
+        Value *mappedStorage = NULL;
+        for (int i = 0; i < storageCount; i++) {
+            if (oldStorages[i] == oldStorage) {
+                mappedStorage = newStorages[i];
+                break;
+            }
+        }
+
+        if (curr->owns_storage || !mappedStorage) {
+            new_field->value = makeCopyOfValue(oldStorage);
+            new_field->storage = &new_field->value;
+
+            if (storageCount == storageCapacity) {
+                int newCapacity = (storageCapacity > 0) ? storageCapacity * 2 : 4;
+                const Value **resizedOld = realloc(oldStorages, sizeof(Value*) * newCapacity);
+                if (!resizedOld) {
+                    free(oldStorages);
+                    freeFieldValue(new_head);
+                    freeFieldValue(new_field);
+                    EXIT_FAILURE_HANDLER();
+                    return NULL;
+                }
+                Value **resizedNew = realloc(newStorages, sizeof(Value*) * newCapacity);
+                if (!resizedNew) {
+                    free(resizedOld);
+                    free(newStorages);
+                    freeFieldValue(new_head);
+                    freeFieldValue(new_field);
+                    EXIT_FAILURE_HANDLER();
+                    return NULL;
+                }
+                oldStorages = resizedOld;
+                newStorages = resizedNew;
+                storageCapacity = newCapacity;
+            }
+            oldStorages[storageCount] = oldStorage;
+            newStorages[storageCount] = new_field->storage;
+            storageCount++;
+        } else {
+            memset(&new_field->value, 0, sizeof(new_field->value));
+            new_field->value.type = TYPE_VOID;
+            new_field->storage = mappedStorage;
+            new_field->owns_storage = false;
+        }
+
+        *tail_next = new_field;
+        tail_next = &new_field->next;
     }
+
+    free(oldStorages);
+    free(newStorages);
     return new_head;
 }
 
@@ -713,9 +796,22 @@ FieldValue *createEmptyRecord(AST *recordType) {
     FieldValue *head = NULL, **ptr = &head; // Use pointer-to-pointer for easy list building
 
     bool needsVTableSlot = recordTypeNeedsVTableSlot(recordType);
+    int slotBias = needsVTableSlot ? 1 : 0;
+    int slotOwnerCapacity = (recordType->i_val > 0) ? (recordType->i_val + slotBias) : 0;
+    FieldValue **slotOwners = NULL;
+    if (slotOwnerCapacity > 0) {
+        slotOwners = calloc((size_t)slotOwnerCapacity, sizeof(FieldValue*));
+        if (!slotOwners) {
+            fprintf(stderr, "FATAL: calloc failed for record slot owner table in createEmptyRecord.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+    }
+    int sequentialSlot = slotBias;
+
     if (needsVTableSlot) {
-        FieldValue *vtableField = malloc(sizeof(FieldValue));
+        FieldValue *vtableField = calloc(1, sizeof(FieldValue));
         if (!vtableField) {
+             free(slotOwners);
              fprintf(stderr, "FATAL: malloc failed for hidden vtable field in createEmptyRecord.\n");
              EXIT_FAILURE_HANDLER();
         }
@@ -723,9 +819,13 @@ FieldValue *createEmptyRecord(AST *recordType) {
         if (!vtableField->name) {
              fprintf(stderr, "FATAL: strdup failed for hidden vtable field name in createEmptyRecord.\n");
              free(vtableField);
+             free(slotOwners);
              EXIT_FAILURE_HANDLER();
         }
         vtableField->value = makeNil();
+        vtableField->storage = &vtableField->value;
+        vtableField->slot_index = 0;
+        vtableField->owns_storage = true;
         vtableField->next = NULL;
         *ptr = vtableField;
         ptr = &vtableField->next;
@@ -765,9 +865,10 @@ FieldValue *createEmptyRecord(AST *recordType) {
             // ---
 
             // Allocate memory for the FieldValue struct (holds name + value)
-            FieldValue *fv = malloc(sizeof(FieldValue));
+            FieldValue *fv = calloc(1, sizeof(FieldValue));
             if (!fv) {
                  fprintf(stderr, "FATAL: malloc failed for FieldValue in createEmptyRecord for field '%s'\n", varNode->token->value);
+                 free(slotOwners);
                  freeFieldValue(head); // Free any partially built list
                  EXIT_FAILURE_HANDLER();
             }
@@ -777,19 +878,47 @@ FieldValue *createEmptyRecord(AST *recordType) {
             if (!fv->name) {
                  fprintf(stderr, "FATAL: strdup failed for FieldValue name in createEmptyRecord for field '%s'\n", varNode->token->value);
                  free(fv); // Free the FieldValue struct itself
+                 free(slotOwners);
                  freeFieldValue(head);
                  EXIT_FAILURE_HANDLER();
             }
 
-            // Recursively create the default value for this field's type
-            fv->value = makeValueForType(fieldType, fieldTypeDef, NULL); // Relies on makeValueForType checks
+            bool usesExplicitSlots = (recordType->i_val > 0);
+            int slotIndex = usesExplicitSlots ? (varNode->i_val + slotBias) : sequentialSlot++;
+            fv->slot_index = slotIndex;
             fv->next = NULL; // Initialize next pointer
+
+            if (slotIndex >= 0) {
+                if (!ensureFieldSlotCapacity(&slotOwners, &slotOwnerCapacity, slotIndex + 1)) {
+                    fprintf(stderr, "FATAL: realloc failed for record slot owner table in createEmptyRecord.\n");
+                    free(slotOwners);
+                    freeFieldValue(head);
+                    freeFieldValue(fv);
+                    EXIT_FAILURE_HANDLER();
+                }
+            }
+
+            if (slotIndex >= 0 && slotOwners && slotOwners[slotIndex]) {
+                fv->storage = fieldValueStorage(slotOwners[slotIndex]);
+                fv->owns_storage = false;
+                memset(&fv->value, 0, sizeof(fv->value));
+                fv->value.type = TYPE_VOID;
+            } else {
+                // Recursively create the default value for this field's type
+                fv->value = makeValueForType(fieldType, fieldTypeDef, NULL); // Relies on makeValueForType checks
+                fv->storage = &fv->value;
+                fv->owns_storage = true;
+                if (slotIndex >= 0 && slotOwners) {
+                    slotOwners[slotIndex] = fv;
+                }
+            }
 
             // Link this new FieldValue struct into the list
             *ptr = fv;
             ptr = &fv->next; // Advance the tail pointer
         }
     }
+    free(slotOwners);
     return head; // Return the head of the linked list of fields
 }
 
@@ -801,8 +930,10 @@ void freeFieldValue(FieldValue *fv) {
         if (current->name) {
             free(current->name); // Free the duplicated field name
         }
-        // Recursively free the value stored in the field
-        freeValue(&current->value);
+        if (current->owns_storage) {
+            // Recursively free the value stored in the field.
+            freeValue(fieldValueStorage(current));
+        }
         // Free the FieldValue struct itself
         free(current);
         current = next; // Move to the next node
@@ -1809,18 +1940,7 @@ void freeValue(Value *v) {
             fprintf(stderr, "[DEBUG]   Processing record fields for Value* at %p (record_val=%p)\n", (void*)v, (void*)f);
             fflush(stderr);
 #endif
-            while (f) {
-                FieldValue *next = f->next;
-#ifdef DEBUG
-                fprintf(stderr, "[DEBUG]     Freeing FieldValue* at %p (name='%s' @ %p) within Value* %p\n",
-                        (void*)f, f->name ? f->name : "NULL", (void*)f->name, (void*)v);
-                fflush(stderr);
-#endif
-                if (f->name) free(f->name);
-                freeValue(&f->value); // Recursive call
-                free(f);              // Free the FieldValue struct itself
-                f = next;
-            }
+            freeFieldValue(f);
             v->record_val = NULL;
             break;
         }
@@ -1991,11 +2111,12 @@ void dumpSymbol(Symbol *sym) {
                 printf("Record { ");
                 FieldValue *fv = sym->value->record_val;
                 while (fv) {
-                    printf("%s: %s", fv->name, varTypeToString(fv->value.type));
-                    if (fv->value.type == TYPE_ENUM) {
-                        printf(" ('%s', Ordinal: %d)", fv->value.enum_val.enum_name, fv->value.enum_val.ordinal);
-                    } else if (fv->value.type == TYPE_STRING) {
-                        printf(" (\"%s\")", fv->value.s_val ? fv->value.s_val : "(null)");
+                    const Value *fieldValue = fieldValueStorageConst(fv);
+                    printf("%s: %s", fv->name, varTypeToString(fieldValue->type));
+                    if (fieldValue->type == TYPE_ENUM) {
+                        printf(" ('%s', Ordinal: %d)", fieldValue->enum_val.enum_name, fieldValue->enum_val.ordinal);
+                    } else if (fieldValue->type == TYPE_STRING) {
+                        printf(" (\"%s\")", fieldValue->s_val ? fieldValue->s_val : "(null)");
                     }
                     fv = fv->next;
                     if (fv) {
@@ -2740,7 +2861,7 @@ void printValueToStream(Value v, FILE *stream) {
                     fprintf(stream, "; ");
                 }
                 fprintf(stream, "%s: ", field->name ? field->name : "?");
-                printValueToStream(field->value, stream);
+                printValueToStream(*fieldValueStorage(field), stream);
                 first_field = false;
                 field = field->next;
             }
@@ -2868,19 +2989,7 @@ Value makeCopyOfValue(const Value *src) {
             }
             break;
         case TYPE_RECORD: {
-            FieldValue *head = NULL, *tail = NULL;
-            for (FieldValue *cur = src->record_val; cur; cur = cur->next) {
-                FieldValue *copy = malloc(sizeof(FieldValue));
-                copy->name = strdup(cur->name);
-                copy->value = makeCopyOfValue(&cur->value);
-                copy->next = NULL;
-                if (tail)
-                    tail->next = copy;
-                else
-                    head = copy;
-                tail = copy;
-            }
-            v.record_val = head;
+            v.record_val = copyRecord(src->record_val);
             break;
         }
         case TYPE_ARRAY: {

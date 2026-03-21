@@ -89,6 +89,12 @@
       "path": "Tests/compiler/pascal/cases/variant_record_basic.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: variant record"
+    },
+    {
+      "id": "variant_record_overlap",
+      "path": "Tests/compiler/pascal/cases/variant_record_overlap.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: variant overlap"
     }
   ]
 }

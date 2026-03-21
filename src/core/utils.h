@@ -200,6 +200,20 @@ FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);
 void freeFieldValue(FieldValue *fv);
 
+static inline Value *fieldValueStorage(FieldValue *field) {
+    if (!field) {
+        return NULL;
+    }
+    return field->storage ? field->storage : &field->value;
+}
+
+static inline const Value *fieldValueStorageConst(const FieldValue *field) {
+    if (!field) {
+        return NULL;
+    }
+    return field->storage ? field->storage : &field->value;
+}
+
 // Value constructors
 Value makeInt(long long val);
 Value makeReal(long double val);

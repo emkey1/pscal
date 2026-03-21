@@ -2667,10 +2667,18 @@ static int ensureInterfaceMethodSlot(AST* interfaceType, const char* methodName)
 
 // --- Object layout helpers -------------------------------------------------
 
-// Recursively count fields in a record, including inherited ones.
-static int getRecordFieldCount(AST* recordType) {
+static bool recordUsesExplicitFieldSlots(AST* recordType) {
+    recordType = resolveTypeAlias(recordType);
+    return recordType && recordType->type == AST_RECORD_TYPE && recordType->i_val > 0;
+}
+
+static int getLocalRecordFieldCount(AST* recordType) {
     recordType = resolveTypeAlias(recordType);
     if (!recordType || recordType->type != AST_RECORD_TYPE) return 0;
+
+    if (recordUsesExplicitFieldSlots(recordType)) {
+        return recordType->i_val;
+    }
 
     int count = 0;
     for (int i = 0; i < recordType->child_count; i++) {
@@ -2684,6 +2692,15 @@ static int getRecordFieldCount(AST* recordType) {
         }
     }
 
+    return count;
+}
+
+// Recursively count physical storage slots in a record, including inherited ones.
+static int getRecordFieldCount(AST* recordType) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return 0;
+
+    int count = getLocalRecordFieldCount(recordType);
     if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
         AST* parent = lookupType(recordType->extra->token->value);
         count += getRecordFieldCount(parent);
@@ -2705,6 +2722,7 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
     }
 
     int offset = parentCount;
+    bool useExplicitSlots = recordUsesExplicitFieldSlots(recordType);
     for (int i = 0; i < recordType->child_count; i++) {
         AST* decl = recordType->children[i];
         if (!decl) continue;
@@ -2712,9 +2730,11 @@ static int getRecordFieldOffset(AST* recordType, const char* fieldName) {
             for (int j = 0; j < decl->child_count; j++) {
                 AST* var = decl->children[j];
                 if (var && var->token && strcmp(var->token->value, fieldName) == 0) {
-                    return offset;
+                    return useExplicitSlots ? (parentCount + var->i_val) : offset;
                 }
-                offset++;
+                if (!useExplicitSlots) {
+                    offset++;
+                }
             }
         } else if (decl->token && decl->type != AST_PROCEDURE_DECL && decl->type != AST_FUNCTION_DECL) {
             if (strcmp(decl->token->value, fieldName) == 0) {
