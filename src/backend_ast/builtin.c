@@ -1692,6 +1692,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
     {"str", vmBuiltinStr},
+    {"stringofchar", vmBuiltinStringOfChar},
     {"succ", vmBuiltinSucc},
     {"tan", vmBuiltinTan},
     {"tanh", vmBuiltinTanh},
@@ -2729,6 +2730,45 @@ Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
 
     Value result = makeString(new_str);
     free(new_str);
+    return result;
+}
+
+Value vmBuiltinStringOfChar(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[1])) {
+        runtimeError(vm, "StringOfChar expects (Char/String, Integer).");
+        return makeString("");
+    }
+
+    int fill = 0;
+    if (args[0].type == TYPE_CHAR) {
+        fill = (unsigned char)AS_CHAR(args[0]);
+    } else if (args[0].type == TYPE_STRING) {
+        const char *source = AS_STRING(args[0]);
+        fill = (source && source[0]) ? (unsigned char)source[0] : 0;
+    } else if (IS_INTLIKE(args[0])) {
+        fill = (unsigned char)AS_INTEGER(args[0]);
+    } else {
+        runtimeError(vm, "StringOfChar expects a character-like first argument.");
+        return makeString("");
+    }
+
+    long long count = AS_INTEGER(args[1]);
+    if (count <= 0) {
+        return makeString("");
+    }
+
+    size_t len = (size_t)count;
+    char *buffer = (char*)malloc(len + 1);
+    if (!buffer) {
+        runtimeError(vm, "StringOfChar: memory allocation failed.");
+        return makeString("");
+    }
+
+    memset(buffer, fill, len);
+    buffer[len] = '\0';
+
+    Value result = makeString(buffer);
+    free(buffer);
     return result;
 }
 
@@ -9992,6 +10032,7 @@ static void populateBuiltinRegistry(void) {
     registerVmBuiltin("tobool",   vmBuiltinToBool,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("mstreamfromstring", vmBuiltinMstreamFromString, BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("stringofchar", vmBuiltinStringOfChar, BUILTIN_TYPE_FUNCTION, NULL);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
 void registerAllBuiltins(void) {

@@ -1722,6 +1722,7 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "realtostr") == 0 ||
         strcasecmp(name, "paramstr")  == 0 ||
         strcasecmp(name, "copy")      == 0 ||
+        strcasecmp(name, "stringofchar") == 0 ||
         strcasecmp(name, "mstreambuffer") == 0) {
         return TYPE_STRING;
     }

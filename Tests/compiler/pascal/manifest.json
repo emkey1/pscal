@@ -35,6 +35,12 @@
       "path": "Tests/compiler/pascal/cases/odd_builtin_condition.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: odd builtin"
+    },
+    {
+      "id": "stringofchar_builtin",
+      "path": "Tests/compiler/pascal/cases/stringofchar_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: stringofchar builtin"
     }
   ]
 }

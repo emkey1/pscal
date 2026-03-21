@@ -449,7 +449,7 @@ The language supports modular programming through **units**. A unit is a separat
 The Pascal front end exposes the PSCAL VM's built-ins, including:
 
 - File I/O: `Assign`, `Reset`, `Rewrite`, `Read`, `ReadLn`, `Write`, `WriteLn`, `Close`, `EOF`, `IOResult`, etc.
-- String operations: `Length`, `Copy`, `Pos`, `Concat`, `UpCase`, `ReadKey`, conversions (`IntToStr`, `RealToStr`).
+- String operations: `Length`, `Copy`, `Pos`, `StringOfChar`, `Concat`, `UpCase`, `ReadKey`, conversions (`IntToStr`, `RealToStr`).
 - Math: `Sin`, `Cos`, `Tan`, `Sqrt`, `Ln`, `Exp`, `Abs`, `Odd`, `Round`, `Trunc`, `Random`.
 - Memory: `New`, `Dispose`.
 - Console/text: `GotoXY`, `TextColor`, `TextBackground`, `ClrScr`, `WhereX`, `WhereY`.
