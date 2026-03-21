@@ -188,7 +188,7 @@ static bool compareProcPointerParams(AST* lhsParams, AST* rhsParams, const char*
     return true;
 }
 
-static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char* procName) {
+static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char* procName, bool emitError) {
     if (!lhsProcPtr || lhsProcPtr->type != AST_PROC_PTR_TYPE || !decl) {
         return true;
     }
@@ -197,10 +197,12 @@ static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char*
     int lhsCount = lhsParams ? lhsParams->child_count : 0;
     int declCount = decl->child_count;
     if (lhsCount != declCount) {
-        fprintf(stderr,
-                "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
-                procName, lhsCount, declCount);
-        pascal_semantic_error_count++;
+        if (emitError) {
+            fprintf(stderr,
+                    "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
+                    procName, lhsCount, declCount);
+            pascal_semantic_error_count++;
+        }
         return false;
     }
 
@@ -213,23 +215,27 @@ static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char*
         bool lhsByRef = procPointerParamByRef(lhsParam);
         bool declByRef = procPointerParamByRef(declParam);
         if (lhsByRef != declByRef) {
-            fprintf(stderr,
-                    "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
-                    (long long)i + 1, procName,
-                    lhsByRef ? "VAR/OUT" : "value",
-                    declByRef ? "VAR/OUT" : "value");
-            pascal_semantic_error_count++;
+            if (emitError) {
+                fprintf(stderr,
+                        "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
+                        (long long)i + 1, procName,
+                        lhsByRef ? "VAR/OUT" : "value",
+                        declByRef ? "VAR/OUT" : "value");
+                pascal_semantic_error_count++;
+            }
             return false;
         }
         VarType lhsType = procPointerParamType(lhsParam);
         VarType declType = procPointerParamType(declParam);
         if (lhsType != declType) {
-            fprintf(stderr,
-                    "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
-                    (long long)i + 1, procName,
-                    varTypeToString(lhsType),
-                    varTypeToString(declType));
-            pascal_semantic_error_count++;
+            if (emitError) {
+                fprintf(stderr,
+                        "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
+                        (long long)i + 1, procName,
+                        varTypeToString(lhsType),
+                        varTypeToString(declType));
+                pascal_semantic_error_count++;
+            }
             return false;
         }
     }
@@ -239,12 +245,14 @@ static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char*
     VarType lhsRetType = lhsRet ? lhsRet->var_type : TYPE_VOID;
     VarType declRetType = declRet ? declRet->var_type : TYPE_VOID;
     if (lhsRetType != declRetType) {
-        fprintf(stderr,
-                "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
-                procName,
-                varTypeToString(lhsRetType),
-                varTypeToString(declRetType));
-        pascal_semantic_error_count++;
+        if (emitError) {
+            fprintf(stderr,
+                    "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
+                    procName,
+                    varTypeToString(lhsRetType),
+                    varTypeToString(declRetType));
+            pascal_semantic_error_count++;
+        }
         return false;
     }
     return true;
@@ -1564,10 +1572,12 @@ resolved_field: ;
                             Symbol* psym = resolveProcedureSymbolInScope(pname, node, globalProgramNode);
                             if (psym && psym->type_def) {
                                 rhsIsProcPointer = true;
-                                verifyProcPointerAgainstDecl(lhsType, psym->type_def, pname);
+                                verifyProcPointerAgainstDecl(lhsType, psym->type_def, pname, node->var_type == TYPE_UNKNOWN);
                             } else {
-                                fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
-                                pascal_semantic_error_count++;
+                                if (node->var_type == TYPE_UNKNOWN) {
+                                    fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
+                                    pascal_semantic_error_count++;
+                                }
                             }
                         } else {
                             AST* rhsType = resolveTypeAlias(rhs->type_def);
@@ -1590,7 +1600,7 @@ resolved_field: ;
                                             resolvedReturnType->type == AST_PROC_PTR_TYPE;
 
                                     if (!returnIsProcPointer) {
-                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
+                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName, node->var_type == TYPE_UNKNOWN);
                                     }
 
                                     if (returnIsProcPointer) {

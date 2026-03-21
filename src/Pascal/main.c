@@ -265,6 +265,11 @@ int runProgram(const char *source, const char *programName, const char *frontend
     if (parser.current_token) { freeToken(parser.current_token); parser.current_token = NULL; }
 
     if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
+        annotateTypes(GlobalAST, NULL, GlobalAST);
+        // Reset semantic error count so we don't double-count the same errors from the initial annotation pass
+        // when they are re-checked in the second annotation pass inside pascalPerformSemanticAnalysis
+        pascal_semantic_error_count = 0;
+
         int semantic_errors_before = pascal_semantic_error_count;
         pascalPerformSemanticAnalysis(GlobalAST);
         bool semantic_errors_increased = pascal_semantic_error_count > semantic_errors_before;
