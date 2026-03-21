@@ -339,6 +339,16 @@ Types are defined in a `type` block.
       end;
     ```
 
+    Both tagged and untagged classic Pascal forms are accepted:
+    ```pascal
+    type
+      Cell = record
+        case Byte of
+          0: (name: string);
+          1: (value: integer);
+      end;
+    ```
+
     Variant arms share overlapping storage slots, so fields from different arms
     refer to the same underlying record storage just as they do in classic
     Pascal variant records.

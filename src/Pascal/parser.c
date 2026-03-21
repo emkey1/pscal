@@ -966,6 +966,18 @@ static bool parseVariantRecordSection(Parser *parser, AST *recordNode, int *slot
         }
     }
 
+    if (parser->current_token && parser->current_token->type != TOKEN_OF) {
+        AST *variantType = typeSpecifier(parser, 1);
+        if (!variantType || variantType->type == AST_NOOP) {
+            errorParser(parser, "Expected discriminant type in variant record");
+            if (variantType) {
+                freeAST(variantType);
+            }
+            return false;
+        }
+        freeAST(variantType);
+    }
+
     if (!parser->current_token || parser->current_token->type != TOKEN_OF) {
         errorParser(parser, "Expected OF in variant record");
         return false;

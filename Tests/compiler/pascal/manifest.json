@@ -125,6 +125,12 @@
       "path": "Tests/compiler/pascal/cases/continue_statement_loops.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: continue statement loops"
+    },
+    {
+      "id": "variant_record_untagged",
+      "path": "Tests/compiler/pascal/cases/variant_record_untagged.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: untagged variant record"
     }
   ]
 }
