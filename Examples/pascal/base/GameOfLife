@@ -253,13 +253,29 @@ begin
           begin
             Writeln('Filename? ');
             Readln(filename);
-            // Implementation omitted for brevity 
+            try
+              SavePatternToFile(filename, grid);
+              Writeln('Saved pattern to ', filename);
+            except
+              on E: Exception do
+                Writeln('Save failed: ', E.Message);
+            end;
+            Delay(1000);
           end;
         '0': // Load 
           begin
             Writeln('Filename? ');
             Readln(filename);
-            // Implementation omitted for brevity 
+            try
+              LoadPatternFromFile(filename, grid);
+              generation := 0;
+              paused := true;
+              Writeln('Loaded pattern from ', filename);
+            except
+              on E: Exception do
+                Writeln('Load failed: ', E.Message);
+            end;
+            Delay(1000);
           end;
         'E': 
           begin
@@ -340,6 +356,82 @@ begin
       if a[i, j] <> b[i, j] then Exit(false);
 
   Result := true;
+end;
+
+procedure SavePatternToFile(const filename: String; const g: GridType);
+var
+  f: Text;
+  i, j: Integer;
+  line: String;
+begin
+  Assign(f, filename);
+  Rewrite(f);
+  Writeln(f, Length(g));
+  Writeln(f, cols);
+
+  for i := 0 to High(g) do
+    begin
+      line := '';
+      for j := 0 to cols - 1 do
+        if g[i, j] = Alive then
+          line := line + '#'
+        else
+          line := line + '.';
+      Writeln(f, line);
+    end;
+
+  Close(f);
+end;
+
+procedure LoadPatternFromFile(const filename: String; var g: GridType);
+var
+  f: Text;
+  rowCount, colCount: Integer;
+  code: Integer;
+  i, j: Integer;
+  line: String;
+  cellCh: Char;
+begin
+  Assign(f, filename);
+  Reset(f);
+
+  Readln(f, line);
+  Val(line, rowCount, code);
+  if code <> 0 then
+    raise 'Invalid row count in pattern file.';
+
+  Readln(f, line);
+  Val(line, colCount, code);
+  if code <> 0 then
+    raise 'Invalid column count in pattern file.';
+
+  if (rowCount <= 0) or (colCount <= 0) then
+    raise 'Pattern dimensions must be positive.';
+
+  rows := rowCount;
+  cols := colCount;
+  InitializeGrid(g, rows, cols);
+
+  for i := 0 to rows - 1 do
+    begin
+      if EOF(f) then
+        break;
+      Readln(f, line);
+      for j := 0 to cols - 1 do
+        begin
+          if j + 1 <= Length(line) then
+            cellCh := line[j + 1]
+          else
+            cellCh := '.';
+
+          if (cellCh <> '.') and (cellCh <> ' ') and (cellCh <> '0') then
+            g[i, j] := Alive
+          else
+            g[i, j] := Dead;
+        end;
+    end;
+
+  Close(f);
 end;
 
 function ParseCoordinate(coordStr: String; var r, c: Integer): Boolean;
@@ -485,9 +577,32 @@ begin
                 end;
               '7': if speed > 50 then Dec(speed, 50);
               '8': if speed < 2000 then Inc(speed, 50);
-              '9', '0': 
+              '9':
                 begin
-                  Writeln('Feature not implemented in this demo.');
+                  Write(#13#10, 'Filename? ');
+                  Readln(cellStr);
+                  try
+                    SavePatternToFile(cellStr, grid);
+                    Write(#13#10, 'Saved pattern to ', cellStr);
+                  except
+                    on E: Exception do
+                      Write(#13#10, 'Save failed: ', E.Message);
+                  end;
+                  Delay(1000);
+                end;
+              '0':
+                begin
+                  Write(#13#10, 'Filename? ');
+                  Readln(cellStr);
+                  try
+                    LoadPatternFromFile(cellStr, grid);
+                    generation := 0;
+                    paused := true;
+                    Write(#13#10, 'Loaded pattern from ', cellStr);
+                  except
+                    on E: Exception do
+                      Write(#13#10, 'Load failed: ', E.Message);
+                  end;
                   Delay(1000);
                 end;
               'E': 

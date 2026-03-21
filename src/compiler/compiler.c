@@ -13,6 +13,7 @@
 #include "core/utils.h"
 #include "core/types.h"
 #include "Pascal/globals.h"
+#include "Pascal/type_registry.h"
 #include "common/frontend_kind.h"
 #include "ast/ast.h"
 #include "symbol/symbol.h" // For access to the main global symbol table, if needed,
@@ -34,6 +35,7 @@ static AST* gCurrentProgramRoot = NULL;
 static HashTable* current_class_const_table = NULL;
 static AST* current_class_record_type = NULL;
 static int compiler_dynamic_locals = 0;
+static int anonymous_type_name_counter = 1;
 
 typedef struct {
     int constant_index;
@@ -391,6 +393,8 @@ static FunctionCompilerState* current_function_compiler = NULL;
 static int addStringConstant(BytecodeChunk* chunk, const char* str);
 static int addIntConstant(BytecodeChunk* chunk, long long intValue);
 static void noteLocalSlotUse(FunctionCompilerState* fc, int slot);
+static AST* resolveTypeAlias(AST* type_node);
+static const char* ensureSerializableTypeName(AST* type_node);
 
 static bool isCurrentFunctionResultIdentifier(const FunctionCompilerState* fc, const char* name) {
     if (!fc || !fc->returns_value || !name) {
@@ -1397,7 +1401,7 @@ static void emitGlobalVarDefinition(AST* var_decl,
 
         AST* elem_type = actual_type_def_node ? actual_type_def_node->right : NULL;
         writeBytecodeChunk(chunk, (uint8_t)(elem_type ? elem_type->var_type : TYPE_VOID), line);
-        const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+        const char* elem_type_name = ensureSerializableTypeName(elem_type);
         emitConstantIndex16(chunk, addStringConstant(chunk, elem_type_name), line);
     } else {
         const char* type_name = "";
@@ -1740,6 +1744,45 @@ static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
 // Helper to emit DEFINE_GLOBAL or DEFINE_GLOBAL16 depending on index size.
 static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line) {
     emitGlobalNameIdx(chunk, DEFINE_GLOBAL, DEFINE_GLOBAL16, name_idx, line);
+}
+
+static const char* ensureSerializableTypeName(AST* type_node) {
+    AST* actual = resolveTypeAlias(type_node);
+    if (actual && actual->type == AST_TYPE_DECL && actual->left) {
+        actual = resolveTypeAlias(actual->left);
+    }
+
+    if (!actual) {
+        return "";
+    }
+
+    if (actual->token && actual->token->value && actual->token->value[0] != '\0') {
+        return actual->token->value;
+    }
+
+    const char* prefix = "__pscal_anon_type";
+    switch (actual->type) {
+        case AST_ARRAY_TYPE:
+            prefix = "__pscal_anon_array";
+            break;
+        case AST_RECORD_TYPE:
+            prefix = "__pscal_anon_record";
+            break;
+        case AST_ENUM_TYPE:
+            prefix = "__pscal_anon_enum";
+            break;
+        default:
+            break;
+    }
+
+    char generated[64];
+    do {
+        snprintf(generated, sizeof(generated), "%s_%d", prefix, anonymous_type_name_counter++);
+    } while (lookupType(generated) != NULL);
+
+    insertType(generated, actual);
+    TypeEntry* entry = findTypeEntry(generated);
+    return (entry && entry->name) ? entry->name : "";
 }
 
 // Resolve type references to their concrete definitions.
@@ -2761,7 +2804,7 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
                 AST* elem_type = actual_type->right;
                 VarType elem_var_type = elem_type->var_type;
                 writeBytecodeChunk(chunk, (uint8_t)elem_var_type, line);
-                const char* elem_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                const char* elem_name = ensureSerializableTypeName(elem_type);
                 emitConstantIndex16(chunk, addStringConstant(chunk, elem_name), line);
             }
         }
@@ -5583,7 +5626,7 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
 
                         AST* elem_type = actual_type_def_node->right;
                         writeBytecodeChunk(chunk, (uint8_t)elem_type->var_type, getLine(varNameNode));
-                        const char* elem_type_name = (elem_type && elem_type->token) ? elem_type->token->value : "";
+                        const char* elem_type_name = ensureSerializableTypeName(elem_type);
                         emitConstantIndex16(chunk,
                                             addStringConstant(chunk, elem_type_name),
                                             getLine(varNameNode));
@@ -5682,6 +5725,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             }
                         }
                         emitConstantIndex16(chunk, addStringConstant(chunk, type_name), getLine(varNameNode));
+                    } else {
+                        Value local_init = makeValueForType(node->var_type, actual_type_def_node, NULL);
+                        int const_idx = addConstantToChunk(chunk, &local_init);
+                        freeValue(&local_init);
+                        emitConstant(chunk, const_idx, getLine(varNameNode));
+                        noteLocalSlotUse(current_function_compiler, slot);
+                        writeBytecodeChunk(chunk, SET_LOCAL, getLine(varNameNode));
+                        writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
                     }
 
                     // Handle optional initializer for local variables
@@ -7734,6 +7785,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 else if (calleeName && (
                     (param_index == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
                     (strcasecmp(calleeName, "readln") == 0 && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) ||
+                    ((strcasecmp(calleeName, "val") == 0 || strcasecmp(calleeName, "valreal") == 0) && param_index >= 1) ||
                     (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
                     (strcasecmp(calleeName, "getscreensize") == 0 && param_index <= 1) || // First two parameters are VAR
                     (strcasecmp(calleeName, "gettextsize") == 0 && param_index > 0) || // Width and Height are VAR

@@ -71,6 +71,12 @@
       "path": "Tests/compiler/pascal/cases/inc_longint_builtin.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: inc/dec longint"
+    },
+    {
+      "id": "val_builtin_var_args",
+      "path": "Tests/compiler/pascal/cases/val_builtin_var_args.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: val builtin var args"
     }
   ]
 }
