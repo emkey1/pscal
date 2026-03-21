@@ -121,7 +121,9 @@ void registerShellFrontendBuiltins(void) {
     registerShellBuiltin(category, command_group, "pscalasm", vmBuiltinShellPscalasm);
 #endif
     registerShellBuiltin(category, command_group, "resize", vmBuiltinShellResize);
+#ifndef PSCAL_TARGET_IOS
     registerShellBuiltin(category, command_group, "gwin", vmBuiltinShellGwin);
+#endif
     registerShellBuiltin(category, command_group, "ps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "lps", vmBuiltinShellPs);
     registerShellBuiltin(category, command_group, "sh", vmBuiltinShellExshTool);

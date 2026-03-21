@@ -100,6 +100,14 @@ static void vmProcUnregister(VM* vm) {
     pthread_mutex_unlock(&gVmProcRegistryLock);
 }
 
+static bool vmProcRegistryIsEmpty(void) {
+    bool empty = false;
+    pthread_mutex_lock(&gVmProcRegistryLock);
+    empty = (gVmProcRegistryCount == 0);
+    pthread_mutex_unlock(&gVmProcRegistryLock);
+    return empty;
+}
+
 static void vmProcFillSnapshot(const VM* vm, VMProcSnapshot* out) {
     if (!vm || !out) {
         return;
@@ -386,6 +394,8 @@ static bool vmRequestHardSuspendCurrentVproc(void) {
     X(GET_UPVALUE_ADDRESS) \
     X(GET_FIELD_ADDRESS) \
     X(GET_FIELD_ADDRESS16) \
+    X(GET_FIELD_ADDRESS_KEEP) \
+    X(GET_FIELD_ADDRESS_KEEP16) \
     X(LOAD_FIELD_VALUE_BY_NAME) \
     X(LOAD_FIELD_VALUE_BY_NAME16) \
     X(GET_ELEMENT_ADDRESS) \
@@ -491,6 +501,18 @@ static void vmOpcodeProfileAtExit(void) {
         gVmOpcodeProfileStream = NULL;
         gVmOpcodeProfileStreamOwned = false;
     }
+}
+
+static void vmFreeShellBuiltinProfiles(void) {
+    for (size_t i = 0; i < gVmShellBuiltinProfileCount; ++i) {
+        free(gVmShellBuiltinProfiles[i].name);
+        gVmShellBuiltinProfiles[i].name = NULL;
+        gVmShellBuiltinProfiles[i].count = 0;
+    }
+    free(gVmShellBuiltinProfiles);
+    gVmShellBuiltinProfiles = NULL;
+    gVmShellBuiltinProfileCount = 0;
+    gVmShellBuiltinProfileCapacity = 0;
 }
 
 static void vmOpcodeProfileRecord(uint8_t opcode) {
@@ -614,22 +636,110 @@ static Value* resolveRecordForField(VM* vm, Value* base_val_ptr) {
     return record_struct_ptr;
 }
 
+static AST* vmResolveTypeAlias(AST* type_node) {
+    AST* last = NULL;
+    while (type_node && type_node != last) {
+        last = type_node;
+        if ((type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+            type_node->token && type_node->token->value) {
+            AST* looked = lookupType(type_node->token->value);
+            if (!looked || looked == type_node) {
+                break;
+            }
+            type_node = looked;
+            continue;
+        }
+        if (type_node->type == AST_TYPE_DECL && type_node->left) {
+            type_node = type_node->left;
+            continue;
+        }
+        break;
+    }
+    return type_node;
+}
+
+static VarType vmDeclaredVarType(AST* type_node) {
+    type_node = vmResolveTypeAlias(type_node);
+    if (!type_node) {
+        return TYPE_VOID;
+    }
+    if (type_node->var_type != TYPE_VOID && type_node->var_type != TYPE_UNKNOWN) {
+        return type_node->var_type;
+    }
+
+    switch (type_node->type) {
+        case AST_RECORD_TYPE:
+            return TYPE_RECORD;
+        case AST_ARRAY_TYPE:
+            return TYPE_ARRAY;
+        case AST_ENUM_TYPE:
+            return TYPE_ENUM;
+        case AST_POINTER_TYPE:
+        case AST_PROC_PTR_TYPE:
+            return TYPE_POINTER;
+        case AST_INTERFACE:
+            return TYPE_INTERFACE;
+        case AST_VARIABLE:
+        case AST_TYPE_IDENTIFIER:
+            if (type_node->token && type_node->token->value) {
+                const char* tn = type_node->token->value;
+                if (strcasecmp(tn, "integer") == 0 || strcasecmp(tn, "int") == 0) return TYPE_INT32;
+                if (strcasecmp(tn, "longint") == 0 || strcasecmp(tn, "int64") == 0) return TYPE_INT64;
+                if (strcasecmp(tn, "cardinal") == 0) return TYPE_UINT32;
+                if (strcasecmp(tn, "char") == 0) return TYPE_CHAR;
+                if (strcasecmp(tn, "string") == 0) return TYPE_STRING;
+                if (strcasecmp(tn, "boolean") == 0 || strcasecmp(tn, "bool") == 0) return TYPE_BOOLEAN;
+                if (strcasecmp(tn, "byte") == 0) return TYPE_BYTE;
+                if (strcasecmp(tn, "word") == 0) return TYPE_WORD;
+                if (strcasecmp(tn, "single") == 0 || strcasecmp(tn, "float") == 0) return TYPE_FLOAT;
+                if (strcasecmp(tn, "double") == 0 || strcasecmp(tn, "real") == 0) return TYPE_DOUBLE;
+            }
+            break;
+        default:
+            break;
+    }
+
+    return TYPE_VOID;
+}
+
+static FieldValue* findRecordFieldBySlot(Value* record_struct_ptr, uint16_t field_index) {
+    if (!record_struct_ptr || record_struct_ptr->type != TYPE_RECORD) {
+        return NULL;
+    }
+
+    bool sawExplicitSlots = false;
+    FieldValue* fallback = record_struct_ptr->record_val;
+    for (uint16_t ordinal = 0; fallback; fallback = fallback->next, ordinal++) {
+        if (fallback->slot_index >= 0) {
+            sawExplicitSlots = true;
+            if ((uint16_t)fallback->slot_index == field_index) {
+                return fallback;
+            }
+        } else if (!sawExplicitSlots && ordinal == field_index) {
+            return fallback;
+        }
+    }
+
+    if (!sawExplicitSlots) {
+        return NULL;
+    }
+
+    return NULL;
+}
+
 static bool pushFieldValueByOffset(VM* vm, Value* base_val_ptr, uint16_t field_index) {
     Value* record_struct_ptr = resolveRecordForField(vm, base_val_ptr);
     if (!record_struct_ptr) {
         return false;
     }
 
-    FieldValue* current = record_struct_ptr->record_val;
-    for (uint16_t i = 0; i < field_index && current; i++) {
-        current = current->next;
-    }
+    FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
     if (!current) {
         runtimeError(vm, "VM Error: Field index out of range.");
         return false;
     }
 
-    push(vm, copyValueForStack(&current->value));
+    push(vm, copyValueForStack(fieldValueStorage(current)));
     return true;
 }
 
@@ -647,7 +757,7 @@ static bool pushFieldValueByName(VM* vm, Value* base_val_ptr, const char* field_
     FieldValue* current = record_struct_ptr->record_val;
     while (current) {
         if (current->name && strcmp(current->name, field_name) == 0) {
-            push(vm, copyValueForStack(&current->value));
+            push(vm, copyValueForStack(fieldValueStorage(current)));
             return true;
         }
         current = current->next;
@@ -3531,6 +3641,29 @@ static RuntimeVTableEntry* createRuntimeVTableEntry(const char* classNameLower) 
     return entry;
 }
 
+static void vmFreeRuntimeVTables(void) {
+    RuntimeVTableEntry* entry = runtimeVTables;
+    while (entry) {
+        RuntimeVTableEntry* next = entry->next;
+        free(entry->className);
+        if (entry->table) {
+            freeValue(entry->table);
+            free(entry->table);
+        }
+        free(entry);
+        entry = next;
+    }
+    runtimeVTables = NULL;
+}
+
+static void vmCleanupGlobalCachesIfIdle(void) {
+    if (!vmProcRegistryIsEmpty()) {
+        return;
+    }
+    vmFreeRuntimeVTables();
+    vmFreeShellBuiltinProfiles();
+}
+
 static bool ensureRuntimeClassVTable(VM* vm, const char* className, Value* tableValue) {
     if (!vm || !className || !tableValue) {
         return false;
@@ -3784,7 +3917,7 @@ static Value vmHostBoxInterface(VM* vm) {
         if (!invalid_type && existingRecord && existingRecord->type == TYPE_RECORD) {
             FieldValue* hiddenField = existingRecord->record_val;
             if (hiddenField) {
-                tableSlotPtr = &hiddenField->value;
+                tableSlotPtr = fieldValueStorage(hiddenField);
                 tableValuePtr = tableSlotPtr;
                 if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
                     tableValuePtr = (Value*)tableValuePtr->ptr_val;
@@ -3826,7 +3959,7 @@ static Value vmHostBoxInterface(VM* vm) {
             runtimeError(vm, "VM Error: Cloned receiver lacks vtable storage.");
             return makeNil();
         }
-        tableSlotPtr = &hiddenField->value;
+        tableSlotPtr = fieldValueStorage(hiddenField);
         tableValuePtr = tableSlotPtr;
         if (tableValuePtr && tableValuePtr->type == TYPE_POINTER && tableValuePtr->ptr_val) {
             tableValuePtr = (Value*)tableValuePtr->ptr_val;
@@ -4404,28 +4537,14 @@ static Value vmHostShellLoopIsReadyHost(VM* vm) {
     return vmHostShellLoopIsReady(vm);
 }
 
-// --- Host Function Registration ---
-bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
-    if (!vm) return false;
-    if (id >= HOST_FN_COUNT || id < 0) {
-        fprintf(stderr, "VM Error: HostFunctionID %d out of bounds during registration.\n", id);
-        return false;
-    }
-    vm->host_functions[id] = fn;
-    return true;
-}
-
-// --- VM Initialization and Cleanup ---
-void vmResetExecutionState(VM* vm) {
+static void vmReleaseExecutionResources(VM* vm) {
     if (!vm) return;
 
-    // Free any lingering values on the operand stack before clearing it.
     for (Value* slot = vm->stack; slot < vm->stackTop; ++slot) {
         freeValue(slot);
     }
     resetStack(vm);
 
-    // Release resources held by call frames from prior executions.
     for (int i = 0; i < vm->frameCount; ++i) {
         CallFrame* frame = &vm->frames[i];
         if (frame->closureEnv) {
@@ -4446,6 +4565,24 @@ void vmResetExecutionState(VM* vm) {
         frame->vtable = NULL;
     }
     vm->frameCount = 0;
+}
+
+// --- Host Function Registration ---
+bool registerHostFunction(VM* vm, HostFunctionID id, HostFn fn) {
+    if (!vm) return false;
+    if (id >= HOST_FN_COUNT || id < 0) {
+        fprintf(stderr, "VM Error: HostFunctionID %d out of bounds during registration.\n", id);
+        return false;
+    }
+    vm->host_functions[id] = fn;
+    return true;
+}
+
+// --- VM Initialization and Cleanup ---
+void vmResetExecutionState(VM* vm) {
+    if (!vm) return;
+
+    vmReleaseExecutionResources(vm);
 
     vm->chunk = NULL;
     vm->ip = NULL;
@@ -4598,6 +4735,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
 void freeVM(VM* vm) {
     if (!vm) return;
     vmProcUnregister(vm);
+    vmReleaseExecutionResources(vm);
     // The VM holds references to global symbol tables that are owned and
     // managed by the caller (e.g. vm_main.c). Freeing them here would lead to
     // double-free errors when the caller performs its own cleanup. Simply
@@ -4661,6 +4799,7 @@ void freeVM(VM* vm) {
         vmThreadDestroySlot(&vm->threads[i]);
     }
     pthread_mutex_destroy(&vm->mutexRegistryLock);
+    vmCleanupGlobalCachesIfIdle();
     // No explicit freeing of vm->host_functions array itself as it's part of
     // the VM struct. If HostFn entries allocated memory, that would require
     // additional handling.
@@ -5157,21 +5296,46 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
     bool opcode_profile_enabled = vmOpcodeProfileIsEnabled();
     const volatile bool *pending_exit_flag = shellRuntimePendingExitFlag();
 
-    // Initialize default file variables if present but not yet opened.
+    // Initialize stream globals lazily. These are shared symbols, so avoid
+    // per-run/per-thread rebinding that can race across concurrent VMs.
     if (vm->vmGlobalSymbols) {
+        FILE* runtime_stdin = pscalRuntimeVmStdin();
+        FILE* runtime_stdout = pscalRuntimeVmStdout();
+        FILE* runtime_stderr = pscalRuntimeVmStderr();
         pthread_mutex_lock(&globals_mutex);
+        Symbol* stdinSym = hashTableLookup(vm->vmGlobalSymbols, "stdin");
+        if (stdinSym && stdinSym->value &&
+            stdinSym->value->type == TYPE_FILE &&
+            stdinSym->value->f_val == NULL) {
+            stdinSym->value->f_val = runtime_stdin;
+        }
+
+        Symbol* stdoutSym = hashTableLookup(vm->vmGlobalSymbols, "stdout");
+        if (stdoutSym && stdoutSym->value &&
+            stdoutSym->value->type == TYPE_FILE &&
+            stdoutSym->value->f_val == NULL) {
+            stdoutSym->value->f_val = runtime_stdout;
+        }
+
+        Symbol* stderrSym = hashTableLookup(vm->vmGlobalSymbols, "stderr");
+        if (stderrSym && stderrSym->value &&
+            stderrSym->value->type == TYPE_FILE &&
+            stderrSym->value->f_val == NULL) {
+            stderrSym->value->f_val = runtime_stderr;
+        }
+
         Symbol* inputSym = hashTableLookup(vm->vmGlobalSymbols, "input");
         if (inputSym && inputSym->value &&
             inputSym->value->type == TYPE_FILE &&
             inputSym->value->f_val == NULL) {
-            inputSym->value->f_val = stdin;
+            inputSym->value->f_val = runtime_stdin;
         }
 
         Symbol* outputSym = hashTableLookup(vm->vmGlobalSymbols, "output");
         if (outputSym && outputSym->value &&
             outputSym->value->type == TYPE_FILE &&
             outputSym->value->f_val == NULL) {
-            outputSym->value->f_val = stdout;
+            outputSym->value->f_val = runtime_stdout;
         }
         pthread_mutex_unlock(&globals_mutex);
     }
@@ -5757,7 +5921,17 @@ dispatch_switch:
                 Value a_val = pop(vm);
                 Value result_val;
 
-                if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    long long ia = a_val.i_val;
+                    long long ib = b_val.i_val;
+                    if (instruction_val == AND) {
+                        result_val = makeInt(ia & ib);
+                    } else if (instruction_val == OR) {
+                        result_val = makeInt(ia | ib);
+                    } else {
+                        result_val = makeInt(ia ^ ib);
+                    }
+                } else if (IS_BOOLEAN(a_val) && IS_BOOLEAN(b_val)) {
                     bool ba = AS_BOOLEAN(a_val);
                     bool bb = AS_BOOLEAN(b_val);
                     if (instruction_val == AND) {
@@ -5791,7 +5965,20 @@ dispatch_switch:
             case INT_DIV: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    int32_t ia = (int32_t)a_val.i_val;
+                    int32_t ib = (int32_t)b_val.i_val;
+                    if (ib == 0) {
+                        runtimeError(vm, "Runtime Error: Integer division by zero.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (ia == INT32_MIN && ib == -1) {
+                        // Prevent x86 hardware trap and preserve 64-bit promotion semantics
+                        push(vm, makeInt(2147483648LL));
+                    } else {
+                        push(vm, makeInt((long long)(ia / ib)));
+                    }
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
@@ -5818,7 +6005,20 @@ dispatch_switch:
             case MOD: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    int32_t ia = (int32_t)a_val.i_val;
+                    int32_t ib = (int32_t)b_val.i_val;
+                    if (ib == 0) {
+                        runtimeError(vm, "Runtime Error: Modulo by zero.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (ia == INT32_MIN && ib == -1) {
+                        // For mod, division by -1 is always exactly representable, modulo is 0
+                        push(vm, makeInt(0));
+                    } else {
+                        push(vm, makeInt((long long)(ia % ib)));
+                    }
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib == 0) {
@@ -5841,7 +6041,19 @@ dispatch_switch:
             case SHR: {
                 Value b_val = pop(vm);
                 Value a_val = pop(vm);
-                if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    long long ia = a_val.i_val;
+                    long long ib = b_val.i_val;
+                    if (ib < 0) {
+                        runtimeError(vm, "Runtime Error: Shift amount cannot be negative.");
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    if (instruction_val == SHL) {
+                        push(vm, makeInt(ia << ib));
+                    } else {
+                        push(vm, makeInt(ia >> ib));
+                    }
+                } else if (IS_INTLIKE(a_val) && IS_INTLIKE(b_val)) {
                     long long ia = AS_INTEGER(a_val);
                     long long ib = AS_INTEGER(b_val);
                     if (ib < 0) {
@@ -5877,6 +6089,24 @@ dispatch_switch:
 
                 // Handle explicit NIL-to-NIL comparisons first.  Pointer/NIL
                 // comparisons are handled in the pointer block below.
+
+                // Optimization: Fast path for TYPE_INT32 comparisons.
+                // Bypasses the overhead of IS_NUMERIC and asI64 type resolution switches
+                // which provides significant performance gains in hot loops.
+                if (a_val.type == TYPE_INT32 && b_val.type == TYPE_INT32) {
+                    long long ia = a_val.i_val;
+                    long long ib = b_val.i_val;
+                    switch (instruction_val) {
+                        case EQUAL:         result_val = makeBoolean(ia == ib); break;
+                        case NOT_EQUAL:     result_val = makeBoolean(ia != ib); break;
+                        case GREATER:       result_val = makeBoolean(ia >  ib); break;
+                        case GREATER_EQUAL: result_val = makeBoolean(ia >= ib); break;
+                        case LESS:          result_val = makeBoolean(ia <  ib); break;
+                        case LESS_EQUAL:    result_val = makeBoolean(ia <= ib); break;
+                        default: goto comparison_error_label;
+                    }
+                    comparison_succeeded = true;
+                } else
                 if (a_val.type == TYPE_NIL && b_val.type == TYPE_NIL) {
                     if (instruction_val == EQUAL) {
                         result_val = makeBoolean(true);
@@ -6203,6 +6433,9 @@ comparison_error_label:
                     }
                     field->name = NULL;
                     field->value = makeNil();
+                    field->storage = &field->value;
+                    field->slot_index = (int)i;
+                    field->owns_storage = true;
                     field->next = NULL;
                     *next_ptr = field;
                     next_ptr = &field->next;
@@ -6230,6 +6463,9 @@ comparison_error_label:
                     }
                     field->name = NULL;
                     field->value = makeNil();
+                    field->storage = &field->value;
+                    field->slot_index = (int)i;
+                    field->owns_storage = true;
                     field->next = NULL;
                     *next_ptr = field;
                     next_ptr = &field->next;
@@ -6263,17 +6499,14 @@ comparison_error_label:
                 }
 
 
-                FieldValue* current = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && current; i++) {
-                    current = current->next;
-                }
+                FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
                 if (!current) {
                     runtimeError(vm, "VM Error: Field index out of range.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(&current->value, NULL));
+                push(vm, makePointer(fieldValueStorage(current), current->type_def));
                 break;
             }
             case GET_FIELD_OFFSET16: {
@@ -6294,10 +6527,7 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* current = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && current; i++) {
-                    current = current->next;
-                }
+                FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
                 if (!current) {
                     runtimeError(vm, "VM Error: Field index out of range.");
 
@@ -6305,7 +6535,7 @@ comparison_error_label:
                 }
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
-                push(vm, makePointer(&current->value, NULL));
+                push(vm, makePointer(fieldValueStorage(current), current->type_def));
                 break;
             }
             case LOAD_FIELD_VALUE: {
@@ -6348,7 +6578,7 @@ comparison_error_label:
                     if (strcmp(current->name, field_name) == 0) {
                         Value popped_base_val = pop(vm);
                         freeValue(&popped_base_val);
-                        push(vm, makePointer(&current->value, NULL));
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
                         goto next_instruction;
                     }
                     current = current->next;
@@ -6381,7 +6611,69 @@ comparison_error_label:
                     if (strcmp(current->name, field_name) == 0) {
                         Value popped_base_val = pop(vm);
                         freeValue(&popped_base_val);
-                        push(vm, makePointer(&current->value, NULL));
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            case GET_FIELD_ADDRESS_KEEP: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value* base_val_ptr = vm->stackTop - 1;
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_struct_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            case GET_FIELD_ADDRESS_KEEP16: {
+                uint16_t field_name_idx = READ_SHORT(vm);
+                Value* base_val_ptr = vm->stackTop - 1;
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_struct_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
                         goto next_instruction;
                     }
                     current = current->next;
@@ -6556,6 +6848,13 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                AST* element_base_type = NULL;
+                if (array_val_ptr->element_type_def) {
+                    element_base_type = array_val_ptr->element_type_def;
+                } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                    element_base_type = operand.base_type_node->right;
+                }
+
                 if (array_val_ptr->array_is_packed) {
                     if (!array_val_ptr->array_raw) {
                         runtimeError(vm, "VM Error: Packed array storage missing.");
@@ -6568,7 +6867,7 @@ comparison_error_label:
                     }
                     push(vm, makePointer(&array_val_ptr->array_raw[offset], BYTE_ARRAY_PTR_SENTINEL));
                 } else {
-                    push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
+                    push(vm, makePointer(&array_val_ptr->array_val[offset], element_base_type));
                 }
 
                 if (operand.type == TYPE_POINTER) {
@@ -6677,6 +6976,13 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                AST* element_base_type = NULL;
+                if (array_val_ptr->element_type_def) {
+                    element_base_type = array_val_ptr->element_type_def;
+                } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                    element_base_type = operand.base_type_node->right;
+                }
+
                 if (array_val_ptr->array_is_packed) {
                     if (!array_val_ptr->array_raw) {
                         runtimeError(vm, "VM Error: Packed array storage missing.");
@@ -6689,7 +6995,7 @@ comparison_error_label:
                     }
                     push(vm, makePointer(&array_val_ptr->array_raw[flat_offset], BYTE_ARRAY_PTR_SENTINEL));
                 } else {
-                    push(vm, makePointer(&array_val_ptr->array_val[flat_offset], NULL));
+                    push(vm, makePointer(&array_val_ptr->array_val[flat_offset], element_base_type));
                 }
 
                 if (operand.type == TYPE_POINTER) {
@@ -7083,6 +7389,35 @@ comparison_error_label:
                         freeValue(&value_to_set);
                         freeValue(&pointer_to_lvalue);
                         return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    AST* declaredTypeNode = pointer_to_lvalue.base_type_node;
+                    VarType declaredType = vmDeclaredVarType(declaredTypeNode);
+                    AST* resolvedDeclaredType = vmResolveTypeAlias(declaredTypeNode);
+                    if (declaredType != TYPE_VOID) {
+                        bool needs_reset = false;
+                        if (declaredType == TYPE_POINTER) {
+                            if (target_lvalue_ptr->type != TYPE_POINTER) {
+                                needs_reset = true;
+                            }
+                        } else if (declaredType == TYPE_RECORD || declaredType == TYPE_ARRAY ||
+                                   declaredType == TYPE_STRING || declaredType == TYPE_ENUM ||
+                                   declaredType == TYPE_INTERFACE) {
+                            if (target_lvalue_ptr->type != declaredType) {
+                                needs_reset = true;
+                            }
+                        } else if (target_lvalue_ptr->type != declaredType) {
+                            needs_reset = true;
+                        }
+
+                        if (needs_reset) {
+                            freeValue(target_lvalue_ptr);
+                            *target_lvalue_ptr = makeValueForType(declaredType, resolvedDeclaredType, NULL);
+                        } else if (declaredType == TYPE_POINTER && resolvedDeclaredType &&
+                                   resolvedDeclaredType->type == AST_POINTER_TYPE &&
+                                   resolvedDeclaredType->right) {
+                            target_lvalue_ptr->base_type_node = resolvedDeclaredType->right;
+                        }
                     }
 
                     // (Your existing logic for handling fixed-length strings, pointers, reals, etc. goes here)
@@ -8038,17 +8373,15 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
-                FieldValue* current = record_struct_ptr->record_val;
-                for (uint16_t i = 0; i < field_index && current; i++) {
-                    current = current->next;
-                }
+                FieldValue* current = findRecordFieldBySlot(record_struct_ptr, field_index);
                 if (!current) {
                     runtimeError(vm, "VM Error: Field index out of range for INIT_FIELD_ARRAY.");
                     freeValue(&array_val);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                freeValue(&current->value);
-                current->value = array_val;
+                Value* fieldCell = fieldValueStorage(current);
+                freeValue(fieldCell);
+                *fieldCell = array_val;
                 break;
             }
             case INIT_LOCAL_FILE: {
@@ -8242,7 +8575,7 @@ comparison_error_label:
                     }
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type == TYPE_POINTER) {
+                        if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                             continue;
                         }
                         freeValue(&args[i]);
@@ -8276,7 +8609,7 @@ comparison_error_label:
 
                 vm->stackTop -= arg_count;
                 for (int i = 0; i < arg_count; i++) {
-                    if (args[i].type == TYPE_POINTER) {
+                    if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                         continue;
                     }
                     freeValue(&args[i]);
@@ -8370,7 +8703,7 @@ comparison_error_label:
 
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type == TYPE_POINTER) {
+                        if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                             continue;
                         }
                         freeValue(&args[i]);
@@ -8391,7 +8724,7 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Unimplemented or unknown built-in '%s' called.", builtin_name_original_case);
                     vm->stackTop -= arg_count;
                     for (int i = 0; i < arg_count; i++) {
-                        if (args[i].type == TYPE_POINTER) {
+                        if (args[i].type == TYPE_POINTER || args[i].type == TYPE_FILE) {
                             continue;
                         }
                         freeValue(&args[i]);
@@ -8796,8 +9129,9 @@ comparison_error_label:
                 Value* vtable_arr = NULL;
                 while (current) {
                     if (strcmp(current->name, "__vtable") == 0) {
-                        if (current->value.type == TYPE_ARRAY) {
-                            vtable_arr = current->value.array_val;
+                        const Value *fieldValue = fieldValueStorageConst(current);
+                        if (fieldValue->type == TYPE_ARRAY) {
+                            vtable_arr = fieldValue->array_val;
                         }
                         break;
                     }

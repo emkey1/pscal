@@ -1,0 +1,47 @@
+#!/usr/bin/env exsh
+
+if [ "${RUN_IOS_TIME_TESTS:-0}" != "1" ]; then
+    exit 77
+fi
+
+tmp=".tmp-time-frontend-$$"
+rm -rf "$tmp"
+mkdir "$tmp" || exit 1
+
+out="$(time ./Examples/clike/base/hello 2>&1)"
+status=$?
+
+rm -rf "$tmp"
+
+if [ "$status" -eq 0 ]; then
+    echo "time-frontend-status:ok"
+else
+    echo "time-frontend-status:fail"
+fi
+
+case "$out" in
+    *"command not found"*)
+        echo "time-frontend-resolve:fail"
+        ;;
+    *)
+        echo "time-frontend-resolve:ok"
+        ;;
+esac
+
+case "$out" in
+    *"Hello World!"*)
+        echo "time-frontend-output:ok"
+        ;;
+    *)
+        echo "time-frontend-output:fail"
+        ;;
+esac
+
+case "$out" in
+    *real*user*sys*)
+        echo "time-frontend-metrics:ok"
+        ;;
+    *)
+        echo "time-frontend-metrics:fail"
+        ;;
+esac

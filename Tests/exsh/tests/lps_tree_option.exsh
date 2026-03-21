@@ -21,7 +21,7 @@ found_shell=0
 
 while IFS= read -r line; do
     case "$line" in
-        ("PID "*"PPID "*"SID "*) found_header=1 ;;
+        (*"PID"*"PPID"*"SID "*) found_header=1 ;;
     esac
     case "$line" in
         (*" shell") found_shell=1 ;;

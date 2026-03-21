@@ -2006,10 +2006,12 @@ PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinDrawpolygon) {
         FieldValue* fieldX = recordValue.record_val;
         FieldValue* fieldY = fieldX ? fieldX->next : NULL;
 
-        if (fieldX && strcasecmp(fieldX->name, "x") == 0 && isIntlikeType(fieldX->value.type) &&
-            fieldY && strcasecmp(fieldY->name, "y") == 0 && isIntlikeType(fieldY->value.type)) {
-            sdlPoints[i].x = (int)AS_INTEGER(fieldX->value);
-            sdlPoints[i].y = (int)AS_INTEGER(fieldY->value);
+        const Value *xVal = fieldValueStorageConst(fieldX);
+        const Value *yVal = fieldValueStorageConst(fieldY);
+        if (fieldX && strcasecmp(fieldX->name, "x") == 0 && xVal && isIntlikeType(xVal->type) &&
+            fieldY && strcasecmp(fieldY->name, "y") == 0 && yVal && isIntlikeType(yVal->type)) {
+            sdlPoints[i].x = (int)AS_INTEGER(*xVal);
+            sdlPoints[i].y = (int)AS_INTEGER(*yVal);
         } else { runtimeError(vm, "PointRecord does not have correct X,Y integer fields."); free(sdlPoints); return makeVoid(); }
     }
 

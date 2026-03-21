@@ -28,16 +28,19 @@ The following are reserved keywords and cannot be used as identifiers:
 
 * `and`, `array`, `begin`, `break`
 * `case`, `const`, `do`, `div`, `downto`
+* `continue`
 * `else`, `end`, `enum`, `false`, `for`, `function`, `goto`
 * `if`, `implementation`, `in`, `inline`, `initialization`, `interface`, `join`, `label`
 * `mod`, `nil`, `not`
 * `of`, `or`, `out`
 * `procedure`, `program`
-* `read`, `readln`, `record`, `repeat`
+* `raise`, `read`, `readln`, `record`, `repeat`
 * `set`, `shl`, `shr`, `spawn`, `xor`
 * `then`, `to`, `true`, `type`
+* `try`
 * `unit`, `until`, `uses`
 * `var`, `while`, `write`, `writeln`
+* `except`
 
 #### **Identifiers**
 
@@ -116,15 +119,46 @@ The language supports a standard set of operators with Pascal-like precedence.
 | 2 | `*`, `/`, `div`, `mod`, `and`, `shl`, `shr` | Multiplicative operators |
 | 3 | `+`, `-`, `or`, `xor` | Additive operators |
 | 4 | `=`, `<>`, `<`, `<=`, `>`, `>=`, `in` | Relational operators |
+| 5 | `?:` | Ternary conditional operator extension |
 
 Compound assignments combine arithmetic with assignment. The parser recognises
 `+=` and `-=` and lowers them to `lhs := lhs + rhs` and `lhs := lhs - rhs`
 respectively; both forms require a numeric left-hand side.
 
+The front end also supports a C-style ternary conditional expression as an
+extension:
+
+```pascal
+result := score > 0 ? 'win' : 'loss';
+```
+
+This is not standard Pascal syntax, but it is accepted by the current front
+end. The condition is evaluated first, followed by either the `then` or `else`
+expression.
+
 ### **Statements**
 
 * **Assignment Statement:** `variable := expression;`
 * **Compound Statements:** A sequence of statements enclosed between `begin` and `end`.
+    The front end also accepts inline local declarations as statements inside a
+    compound block:
+    ```pascal
+    begin
+      var ready: boolean;
+      ready := true;
+    end;
+    ```
+* **`with` Statements:** Standard Pascal-style record-field shorthand.
+    ```pascal
+    with moves[idx] do
+    begin
+      fromRow := r;
+      toRow := tr;
+    end;
+    ```
+    Inside the `with` body, unresolved identifiers that match fields of the
+    target record are treated as field accesses on that record expression.
+    Record methods may also be called without repeating the target expression.
 * **`if` Statements:**
     ```pascal
     if condition then
@@ -145,6 +179,14 @@ respectively; both forms require a numeric left-hand side.
     for loop_variable := start_value downto end_value do
       statement;
     ```
+    The front end also supports Delphi-style inline loop variables inside
+    procedures and functions:
+    ```pascal
+    for var i := 0 to High(values) do
+      statement;
+    ```
+    In this form, the loop variable is scoped to the loop and does not remain
+    visible after the loop finishes.
 * **`repeat` Loops:**
     ```pascal
     repeat
@@ -161,9 +203,54 @@ respectively; both forms require a numeric left-hand side.
       statement;
     end;
     ```
+* **`try` / `except`:**
+    ```pascal
+    try
+      statement;
+      ...
+    except
+      statement;
+      ...
+    end;
+    ```
+* **`raise`:** Signals an exception for the innermost enclosing `try` block.
 * **`break`:** Exits the current loop.
+* **`continue`:** Skips the remainder of the current iteration and proceeds to the next loop iteration.
 * **Label declarations:** `label StartPoint, Retry1;` — must appear before the first statement inside a routine or block.
 * **`goto` Statements:** `goto StartPoint;` jumps to a label declared in the current routine.
+
+#### Exceptions
+
+The Pascal front end supports structured exception handling with `try` / `except`
+and `raise`.
+
+```pascal
+function HasAnyMove(b: BoardType; player: ShortInt): Boolean;
+begin
+  try
+    HasAnyMove := (GetAllMoves(b, player) <> nil);
+  except
+    HasAnyMove := false;
+  end;
+end;
+```
+
+Current semantics:
+
+* `raise;` and `raise <expr>;` are accepted. When `<expr>` is a string literal,
+  a matching `except on E: Exception do ...` handler can read it back as
+  `E.Message`.
+* `try` handlers catch exceptions raised with Pascal `raise` in the same routine
+  or in callees reached from the protected block.
+* The current syntax supports both `try ... except ... end;` and a single
+  handler form `try ... except on E: Exception do ... end;`.
+* In a typed handler, `E.Message` is available for string-literal payloads
+  raised with `raise '...';`. Full exception-object semantics are not
+  implemented.
+* `finally` blocks and multi-handler typed dispatch are not implemented.
+* `try` / `except` is language-level control flow. It should not be treated as a
+  general catch-all for arbitrary VM/runtime faults such as every nil dereference
+  or host-side runtime error.
 
 #### Labels and `goto`
 
@@ -213,6 +300,22 @@ boundaries.
     end;
     ```
 
+Functions may assign to either the function name or `Result`. `Exit;` is also
+supported for early return from the current routine, and `Exit(value);` may be
+used inside functions as shorthand for assigning the return value and leaving
+the routine immediately.
+
+```pascal
+function ParseOrDefault(const s: String): Integer;
+begin
+  if s = '' then
+  begin
+    Exit(0);
+  end;
+  ParseOrDefault := 42;
+end;
+```
+
 ### **User-Defined Types**
 
 Types are defined in a `type` block.
@@ -225,6 +328,43 @@ Types are defined in a `type` block.
         field2: string;
       end;
     ```
+
+    Variant records are also accepted:
+    ```pascal
+    type
+      Expr = record
+        case kind: integer of
+          0: (name: char);
+          1: (left, right: ^Expr);
+      end;
+    ```
+
+    Both tagged and untagged classic Pascal forms are accepted:
+    ```pascal
+    type
+      Cell = record
+        case Byte of
+          0: (name: string);
+          1: (value: integer);
+      end;
+    ```
+
+    Variant arms share overlapping storage slots, so fields from different arms
+    refer to the same underlying record storage just as they do in classic
+    Pascal variant records.
+
+    Delphi-style named record constructors are also accepted as an extension in
+    expression context when the target record type is known from the assignment
+    or formal parameter:
+    ```pascal
+    rule := (currentState: 1;
+             readSymbol: 0;
+             moveCmd: (direction: Right);
+             newState: 2);
+    ```
+
+    This constructor syntax is not standard Pascal. PSCAL uses the surrounding
+    type context to decide which record type the field names belong to.
 
     > **Note:** Traditional Turbo/Delphi `object`/`class` syntax is deliberately
     > omitted.  PSCAL Pascal achieves polymorphism with plain `record`s that may
@@ -317,6 +457,8 @@ The usual helpers work with dynamic arrays:
 * `Low(arr)` is `0` when the array has elements and remains `0` for empty arrays.
 * `High(arr)` evaluates to `Length(arr) - 1` for populated arrays and `-1` when
   the array is empty.
+* Array selectors may be applied directly to function-call results, for example
+  `BuildValues(10)[1]`.
 
 These intrinsics also operate on alias references so appending via
 `SetLength(alias, Length(alias) + 1)` keeps `Low/High` in sync with the primary
@@ -351,13 +493,21 @@ The language supports modular programming through **units**. A unit is a separat
 The Pascal front end exposes the PSCAL VM's built-ins, including:
 
 - File I/O: `Assign`, `Reset`, `Rewrite`, `Read`, `ReadLn`, `Write`, `WriteLn`, `Close`, `EOF`, `IOResult`, etc.
-- String operations: `Length`, `Copy`, `Pos`, `Concat`, `UpCase`, `ReadKey`, conversions (`IntToStr`, `RealToStr`).
-- Math: `Sin`, `Cos`, `Tan`, `Sqrt`, `Ln`, `Exp`, `Abs`, `Round`, `Trunc`, `Random`.
+- String operations: `Length`, `Copy`, `Pos`, `StringOfChar`, `Concat`, `UpCase`, `ReadKey`, conversions (`IntToStr`, `RealToStr`).
+- Math: `Sin`, `Cos`, `Tan`, `Sqrt`, `Ln`, `Exp`, `Abs`, `Odd`, `Round`, `Trunc`, `Random`.
 - Memory: `New`, `Dispose`.
 - Console/text: `GotoXY`, `TextColor`, `TextBackground`, `ClrScr`, `WhereX`, `WhereY`.
 - Concurrency (see below): `spawn`, `join`, `mutex`, `rcmutex`, `lock`, `unlock`, `destroy`.
 - SDL-based graphics/sound (when built with `-DSDL=ON`): e.g., `InitGraph`, `InitGraph3D`, `CloseGraph`, `CloseGraph3D`, `UpdateScreen`, `GLClearColor`, `GLClear`, `GLClearDepth`, `GLMatrixMode`, `GLLoadIdentity`, `GLTranslatef`, `GLRotatef`, `GLScalef`, `GLBegin`/`GLEnd`, `GLColor3f`, `GLColor4f`, `GLVertex3f`, `GLNormal3f`, `GLLineWidth`, `GLDepthMask`, `GLDepthFunc`, `GLEnable`, `GLDisable`, `GLCullFace`, `GLShadeModel`, `GLLightfv`, `GLMaterialfv`, `GLMaterialf`, `GLColorMaterial`, `GLBlendFunc`, `GLViewport`, `GLDepthTest`, `GLSwapWindow`, `GLSetSwapInterval`, `SetRGBColor`, `DrawLine`, `FillRect`, `FillCircle`, `CreateTexture`, `UpdateTexture`, `DestroyTexture`, text helpers like `InitTextSystem(FontFileName, FontSize)`, `OutTextXY`, and audio: `InitSoundSystem`, `LoadSound`, `PlaySound`, `IsSoundPlaying`, `FreeSound`, `QuitSoundSystem`.
 Note: SDL built-ins are available only in SDL-enabled builds. Headless CI typically skips these routines.
+
+`Odd(x)` returns `True` when an integer-compatible value is odd and `False`
+when it is even. Example:
+
+```pascal
+if Odd(r + c) then
+  WriteLn('checkerboard square');
+```
 
 ### **Threading and Synchronization**
 

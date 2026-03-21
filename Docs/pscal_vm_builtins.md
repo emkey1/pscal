@@ -30,6 +30,7 @@ VM. For instructions on adding your own routines, see
 | upcase | (ch: Char or String) | Char | Convert character or first character of string to uppercase. Alias: `toupper`. |
 | pos | (sub: String or Char, s: String) | Integer | Position of substring. |
 | copy | (s: String or Char, index: Integer, count: Integer) | String | Copy substring. |
+| stringofchar | (ch: Char or String, count: Integer) | String | Produce a string made of the given character repeated `count` times. |
 | paramcount | () | Integer | Number of command line parameters. |
 | paramstr | (index: Integer) | String | Command line parameter by index. |
 | quitrequested | () | Boolean | True if window close requested. |

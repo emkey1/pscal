@@ -18,7 +18,178 @@
 #include <unistd.h>    // For STDOUT_FILENO
 #include <sys/stat.h>  // For stat
 #include <limits.h>    // For PATH_MAX
+#ifdef __linux__
+#include <linux/limits.h>
+#endif
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 #include "pscal_paths.h"
+
+static const uint16_t kCp437ToUnicode[128] = {
+    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+    0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+    0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+    0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+    0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+    0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+    0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+    0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+    0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+    0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+    0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+    0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+    0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+    0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0
+};
+
+size_t encodeUtf8Codepoint(uint32_t codepoint, char out[5]) {
+    if (!out) {
+        return 0;
+    }
+    if (codepoint > UNICODE_MAX || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+        codepoint = 0xFFFD;
+    }
+
+    if (codepoint <= 0x7F) {
+        out[0] = (char)codepoint;
+        out[1] = '\0';
+        return 1;
+    }
+    if (codepoint <= 0x7FF) {
+        out[0] = (char)(0xC0 | (codepoint >> 6));
+        out[1] = (char)(0x80 | (codepoint & 0x3F));
+        out[2] = '\0';
+        return 2;
+    }
+    if (codepoint <= 0xFFFF) {
+        out[0] = (char)(0xE0 | (codepoint >> 12));
+        out[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (codepoint & 0x3F));
+        out[3] = '\0';
+        return 3;
+    }
+
+    out[0] = (char)(0xF0 | (codepoint >> 18));
+    out[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (codepoint & 0x3F));
+    out[4] = '\0';
+    return 4;
+}
+
+size_t encodePascalCharUtf8(int value, char out[5]) {
+    uint32_t codepoint = 0;
+    if (value < 0) {
+        codepoint = 0xFFFD;
+    } else if (value <= 0x7F) {
+        codepoint = (uint32_t)value;
+    } else if (value <= 0xFF) {
+        codepoint = kCp437ToUnicode[(unsigned int)value - 0x80u];
+    } else {
+        codepoint = 0xFFFD;
+    }
+    return encodeUtf8Codepoint(codepoint, out);
+}
+
+bool isValidUtf8Bytes(const char *text, size_t len) {
+    size_t i = 0;
+    if (!text) {
+        return true;
+    }
+    while (i < len) {
+        unsigned char c = (unsigned char)text[i];
+        size_t remaining = len - i;
+        if (c <= 0x7F) {
+            i++;
+            continue;
+        }
+
+        if (c >= 0xC2 && c <= 0xDF) {
+            if (remaining < 2) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            i += 2;
+            continue;
+        }
+
+        if (c == 0xE0) {
+            if (remaining < 3) return false;
+            if ((unsigned char)text[i + 1] < 0xA0 || (unsigned char)text[i + 1] > 0xBF) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c >= 0xE1 && c <= 0xEC) {
+            if (remaining < 3) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c == 0xED) {
+            if (remaining < 3) return false;
+            if ((unsigned char)text[i + 1] < 0x80 || (unsigned char)text[i + 1] > 0x9F) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c >= 0xEE && c <= 0xEF) {
+            if (remaining < 3) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+
+        if (c == 0xF0) {
+            if (remaining < 4) return false;
+            if ((unsigned char)text[i + 1] < 0x90 || (unsigned char)text[i + 1] > 0xBF) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 3] & 0xC0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+        if (c >= 0xF1 && c <= 0xF3) {
+            if (remaining < 4) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 3] & 0xC0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+        if (c == 0xF4) {
+            if (remaining < 4) return false;
+            if ((unsigned char)text[i + 1] < 0x80 || (unsigned char)text[i + 1] > 0x8F) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 3] & 0xC0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+
+        return false;
+    }
+    return true;
+}
+
+void writePascalText(FILE *stream, const char *text, size_t len) {
+    if (!stream || !text || len == 0) {
+        return;
+    }
+
+    if (isValidUtf8Bytes(text, len)) {
+        fwrite(text, 1, len, stream);
+        return;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char byte = (unsigned char)text[i];
+        char utf8[5];
+        size_t utf8_len = encodePascalCharUtf8((int)byte, utf8);
+        fwrite(utf8, 1, utf8_len, stream);
+    }
+}
 
 
 const char *varTypeToString(VarType type) {
@@ -146,6 +317,11 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_FORWARD:      return "FORWARD";
         case TOKEN_SPAWN:        return "SPAWN";
         case TOKEN_JOIN:         return "JOIN";
+        case TOKEN_TRY:          return "TRY";
+        case TOKEN_EXCEPT:       return "EXCEPT";
+        case TOKEN_ON:           return "ON";
+        case TOKEN_RAISE:        return "RAISE";
+        case TOKEN_WITH:         return "WITH";
         case TOKEN_AT:           return "AT";
         case TOKEN_LABEL:        return "LABEL";
         case TOKEN_GOTO:         return "GOTO";
@@ -191,6 +367,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_CASE:           return "CASE";
         case AST_CASE_BRANCH:    return "CASE_BRANCH";
         case AST_RECORD_TYPE:    return "RECORD_TYPE";
+        case AST_RECORD_LITERAL: return "RECORD_LITERAL";
         case AST_FIELD_ACCESS:   return "FIELD_ACCESS";
         case AST_ARRAY_TYPE:     return "ARRAY_TYPE";
         case AST_ARRAY_ACCESS:   return "ARRAY_ACCESS";
@@ -227,6 +404,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_TRY:            return "TRY";
         case AST_CATCH:          return "CATCH";
         case AST_THROW:          return "THROW";
+        case AST_WITH:           return "WITH";
         case AST_LABEL_DECL:     return "LABEL_DECL";
         case AST_LABEL:          return "LABEL";
         case AST_GOTO:           return "GOTO";
@@ -268,33 +446,118 @@ void releaseMStream(MStream* ms) {
     }
 }
 
+static bool ensureFieldSlotCapacity(FieldValue*** slotOwners, int* capacity, int requiredSlots) {
+    if (!slotOwners || !capacity || requiredSlots <= *capacity) {
+        return true;
+    }
+
+    int newCapacity = (*capacity > 0) ? *capacity : 4;
+    while (newCapacity < requiredSlots) {
+        newCapacity *= 2;
+    }
+
+    FieldValue** resized = realloc(*slotOwners, sizeof(FieldValue*) * newCapacity);
+    if (!resized) {
+        return false;
+    }
+    memset(resized + *capacity, 0, sizeof(FieldValue*) * (newCapacity - *capacity));
+    *slotOwners = resized;
+    *capacity = newCapacity;
+    return true;
+}
+
 FieldValue *copyRecord(FieldValue *orig) {
     if (!orig) return NULL;
-    FieldValue *new_head = NULL, **ptr = &new_head;
+
+    FieldValue *new_head = NULL;
+    FieldValue **tail_next = &new_head;
+    const Value **oldStorages = NULL;
+    Value **newStorages = NULL;
+    int storageCount = 0;
+    int storageCapacity = 0;
+
     for (FieldValue *curr = orig; curr != NULL; curr = curr->next) {
-        FieldValue *new_field = malloc(sizeof(FieldValue));
+        FieldValue *new_field = (FieldValue*)calloc(1, sizeof(FieldValue));
         if (!new_field) {
             fprintf(stderr, "Memory allocation error in copyRecord for new_field\n");
-            freeFieldValue(new_head); // Free any previously allocated nodes
-            EXIT_FAILURE_HANDLER();
-            return NULL; // In case EXIT_FAILURE_HANDLER returns
-        }
-        new_field->name = strdup(curr->name);
-        if (!new_field->name) {
-            fprintf(stderr, "Memory allocation error in copyRecord for new_field->name\n");
-            free(new_field);
+            free(oldStorages);
+            free(newStorages);
             freeFieldValue(new_head);
             EXIT_FAILURE_HANDLER();
             return NULL;
         }
 
-        // --- Recursively copy the field's value ---
-        new_field->value = makeCopyOfValue(&curr->value); // Use makeCopyOfValue
+        if (curr->name) {
+            new_field->name = strdup(curr->name);
+            if (!new_field->name) {
+                fprintf(stderr, "Memory allocation error in copyRecord for new_field->name\n");
+                free(new_field);
+                free(oldStorages);
+                free(newStorages);
+                freeFieldValue(new_head);
+                EXIT_FAILURE_HANDLER();
+                return NULL;
+            }
+        }
 
+        new_field->slot_index = curr->slot_index;
+        new_field->type_def = curr->type_def;
+        new_field->declared_type = curr->declared_type;
+        new_field->owns_storage = curr->owns_storage;
         new_field->next = NULL;
-        *ptr = new_field;
-        ptr = &new_field->next;
+
+        const Value *oldStorage = fieldValueStorageConst(curr);
+        Value *mappedStorage = NULL;
+        for (int i = 0; i < storageCount; i++) {
+            if (oldStorages[i] == oldStorage) {
+                mappedStorage = newStorages[i];
+                break;
+            }
+        }
+
+        if (curr->owns_storage || !mappedStorage) {
+            new_field->value = makeCopyOfValue(oldStorage);
+            new_field->storage = &new_field->value;
+
+            if (storageCount == storageCapacity) {
+                int newCapacity = (storageCapacity > 0) ? storageCapacity * 2 : 4;
+                const Value **resizedOld = realloc(oldStorages, sizeof(Value*) * newCapacity);
+                if (!resizedOld) {
+                    free(oldStorages);
+                    freeFieldValue(new_head);
+                    freeFieldValue(new_field);
+                    EXIT_FAILURE_HANDLER();
+                    return NULL;
+                }
+                Value **resizedNew = realloc(newStorages, sizeof(Value*) * newCapacity);
+                if (!resizedNew) {
+                    free(resizedOld);
+                    free(newStorages);
+                    freeFieldValue(new_head);
+                    freeFieldValue(new_field);
+                    EXIT_FAILURE_HANDLER();
+                    return NULL;
+                }
+                oldStorages = resizedOld;
+                newStorages = resizedNew;
+                storageCapacity = newCapacity;
+            }
+            oldStorages[storageCount] = oldStorage;
+            newStorages[storageCount] = new_field->storage;
+            storageCount++;
+        } else {
+            memset(&new_field->value, 0, sizeof(new_field->value));
+            new_field->value.type = TYPE_VOID;
+            new_field->storage = mappedStorage;
+            new_field->owns_storage = false;
+        }
+
+        *tail_next = new_field;
+        tail_next = &new_field->next;
     }
+
+    free(oldStorages);
+    free(newStorages);
     return new_head;
 }
 
@@ -515,16 +778,7 @@ static bool pascalVarTypeSize(VarType type, long long *out_bytes) {
 }
 
 FieldValue *createEmptyRecord(AST *recordType) {
-    // Resolve type references if necessary
-    if (recordType && recordType->type == AST_TYPE_REFERENCE) {
-        // Look up the referenced type definition
-        AST* resolvedType = lookupType(recordType->token->value);
-        if (!resolvedType) {
-             fprintf(stderr, "Error in createEmptyRecord: Could not resolve type reference '%s'.\n", recordType->token->value);
-             return NULL;
-        }
-        recordType = resolvedType; // Use the resolved definition node
-    }
+    recordType = resolveTypeAliasForRecord(recordType);
 
     // Check if we have a valid RECORD_TYPE node
     if (!recordType || recordType->type != AST_RECORD_TYPE) {
@@ -536,9 +790,22 @@ FieldValue *createEmptyRecord(AST *recordType) {
     FieldValue *head = NULL, **ptr = &head; // Use pointer-to-pointer for easy list building
 
     bool needsVTableSlot = recordTypeNeedsVTableSlot(recordType);
+    int slotBias = needsVTableSlot ? 1 : 0;
+    int slotOwnerCapacity = (recordType->i_val > 0) ? (recordType->i_val + slotBias) : 0;
+    FieldValue **slotOwners = NULL;
+    if (slotOwnerCapacity > 0) {
+        slotOwners = calloc((size_t)slotOwnerCapacity, sizeof(FieldValue*));
+        if (!slotOwners) {
+            fprintf(stderr, "FATAL: calloc failed for record slot owner table in createEmptyRecord.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+    }
+    int sequentialSlot = slotBias;
+
     if (needsVTableSlot) {
-        FieldValue *vtableField = malloc(sizeof(FieldValue));
+        FieldValue *vtableField = calloc(1, sizeof(FieldValue));
         if (!vtableField) {
+             free(slotOwners);
              fprintf(stderr, "FATAL: malloc failed for hidden vtable field in createEmptyRecord.\n");
              EXIT_FAILURE_HANDLER();
         }
@@ -546,9 +813,15 @@ FieldValue *createEmptyRecord(AST *recordType) {
         if (!vtableField->name) {
              fprintf(stderr, "FATAL: strdup failed for hidden vtable field name in createEmptyRecord.\n");
              free(vtableField);
+             free(slotOwners);
              EXIT_FAILURE_HANDLER();
         }
         vtableField->value = makeNil();
+        vtableField->storage = &vtableField->value;
+        vtableField->type_def = NULL;
+        vtableField->declared_type = TYPE_POINTER;
+        vtableField->slot_index = 0;
+        vtableField->owns_storage = true;
         vtableField->next = NULL;
         *ptr = vtableField;
         ptr = &vtableField->next;
@@ -588,9 +861,10 @@ FieldValue *createEmptyRecord(AST *recordType) {
             // ---
 
             // Allocate memory for the FieldValue struct (holds name + value)
-            FieldValue *fv = malloc(sizeof(FieldValue));
+            FieldValue *fv = calloc(1, sizeof(FieldValue));
             if (!fv) {
                  fprintf(stderr, "FATAL: malloc failed for FieldValue in createEmptyRecord for field '%s'\n", varNode->token->value);
+                 free(slotOwners);
                  freeFieldValue(head); // Free any partially built list
                  EXIT_FAILURE_HANDLER();
             }
@@ -600,19 +874,49 @@ FieldValue *createEmptyRecord(AST *recordType) {
             if (!fv->name) {
                  fprintf(stderr, "FATAL: strdup failed for FieldValue name in createEmptyRecord for field '%s'\n", varNode->token->value);
                  free(fv); // Free the FieldValue struct itself
+                 free(slotOwners);
                  freeFieldValue(head);
                  EXIT_FAILURE_HANDLER();
             }
 
-            // Recursively create the default value for this field's type
-            fv->value = makeValueForType(fieldType, fieldTypeDef, NULL); // Relies on makeValueForType checks
+            bool usesExplicitSlots = (recordType->i_val > 0);
+            int slotIndex = usesExplicitSlots ? (varNode->i_val + slotBias) : sequentialSlot++;
+            fv->slot_index = slotIndex;
+            fv->type_def = fieldTypeDef;
+            fv->declared_type = fieldType;
             fv->next = NULL; // Initialize next pointer
+
+            if (slotIndex >= 0) {
+                if (!ensureFieldSlotCapacity(&slotOwners, &slotOwnerCapacity, slotIndex + 1)) {
+                    fprintf(stderr, "FATAL: realloc failed for record slot owner table in createEmptyRecord.\n");
+                    free(slotOwners);
+                    freeFieldValue(head);
+                    freeFieldValue(fv);
+                    EXIT_FAILURE_HANDLER();
+                }
+            }
+
+            if (slotIndex >= 0 && slotOwners && slotOwners[slotIndex]) {
+                fv->storage = fieldValueStorage(slotOwners[slotIndex]);
+                fv->owns_storage = false;
+                memset(&fv->value, 0, sizeof(fv->value));
+                fv->value.type = TYPE_VOID;
+            } else {
+                // Recursively create the default value for this field's type
+                fv->value = makeValueForType(fieldType, fieldTypeDef, NULL); // Relies on makeValueForType checks
+                fv->storage = &fv->value;
+                fv->owns_storage = true;
+                if (slotIndex >= 0 && slotOwners) {
+                    slotOwners[slotIndex] = fv;
+                }
+            }
 
             // Link this new FieldValue struct into the list
             *ptr = fv;
             ptr = &fv->next; // Advance the tail pointer
         }
     }
+    free(slotOwners);
     return head; // Return the head of the linked list of fields
 }
 
@@ -624,8 +928,10 @@ void freeFieldValue(FieldValue *fv) {
         if (current->name) {
             free(current->name); // Free the duplicated field name
         }
-        // Recursively free the value stored in the field
-        freeValue(&current->value);
+        if (current->owns_storage) {
+            // Recursively free the value stored in the field.
+            freeValue(fieldValueStorage(current));
+        }
         // Free the FieldValue struct itself
         free(current);
         current = next; // Move to the next node
@@ -983,12 +1289,23 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
     if (!node_to_inspect && context_symbol) {
         node_to_inspect = context_symbol->type_def;
     }
-    if (node_to_inspect && node_to_inspect->type == AST_TYPE_REFERENCE && node_to_inspect->right) {
-        node_to_inspect = node_to_inspect->right;
-    }
+    node_to_inspect = resolveTypeAliasForRecord(node_to_inspect);
     // --- END MODIFICATION ---
 
     AST* actual_type_def = node_to_inspect;
+
+    if ((type == TYPE_UNKNOWN || type == TYPE_VOID) && node_to_inspect) {
+        AST* inferred_node = node_to_inspect;
+        VarType inferred_type = resolveValueTypeNode(&inferred_node);
+        if (inferred_type != TYPE_UNKNOWN && inferred_type != TYPE_VOID) {
+            type = inferred_type;
+            v.type = inferred_type;
+            if (inferred_node) {
+                node_to_inspect = inferred_node;
+                actual_type_def = inferred_node;
+            }
+        }
+    }
 
     // If the resolved type definition is an enum, ensure the value type reflects that
     // and remember the enum's definition node for later metadata access.
@@ -1196,7 +1513,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
 
                  if(elemTypeDefNode) {
                      elemType = elemTypeDefNode->var_type;
-                       if (elemType == TYPE_VOID) {
+                       if (elemType == TYPE_VOID || elemType == TYPE_UNKNOWN) {
                              if (elemTypeDefNode->type == AST_VARIABLE && elemTypeDefNode->token) {
                                  const char *tn = elemTypeDefNode->token->value;
                                  if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INT32;
@@ -1225,7 +1542,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                                                 ? elemType
                                                 : TYPE_UNKNOWN;
                      v = makeEmptyArray(initElemType, elemTypeDefNode);
-                 } else if (dims > 0 && elemType != TYPE_VOID) {
+                 } else if (dims > 0 && elemType != TYPE_VOID && elemType != TYPE_UNKNOWN) {
                      int *lbs = (int*)malloc(sizeof(int) * dims);
                      int *ubs = (int*)malloc(sizeof(int) * dims);
                      if (!lbs || !ubs) {
@@ -1619,18 +1936,7 @@ void freeValue(Value *v) {
             fprintf(stderr, "[DEBUG]   Processing record fields for Value* at %p (record_val=%p)\n", (void*)v, (void*)f);
             fflush(stderr);
 #endif
-            while (f) {
-                FieldValue *next = f->next;
-#ifdef DEBUG
-                fprintf(stderr, "[DEBUG]     Freeing FieldValue* at %p (name='%s' @ %p) within Value* %p\n",
-                        (void*)f, f->name ? f->name : "NULL", (void*)f->name, (void*)v);
-                fflush(stderr);
-#endif
-                if (f->name) free(f->name);
-                freeValue(&f->value); // Recursive call
-                free(f);              // Free the FieldValue struct itself
-                f = next;
-            }
+            freeFieldValue(f);
             v->record_val = NULL;
             break;
         }
@@ -1686,9 +1992,13 @@ void freeValue(Value *v) {
         }
         case TYPE_FILE:
             if (v->f_val) {
-                // This is a file handle. Close it if it's not NULL.
-                fclose(v->f_val);
-                // Set the pointer to NULL after closing to prevent accidental reuse.
+                // Runtime-owned stdio wrappers must not be fclose()'d by generic
+                // value cleanup; they are owned by the active runtime context.
+                if (!pscalRuntimeVmIsSharedFileStream(v->f_val)) {
+                    fclose(v->f_val);
+                } else {
+                    fflush(v->f_val);
+                }
                 v->f_val = NULL;
             }
             break; // Break from the switch statement
@@ -1797,11 +2107,12 @@ void dumpSymbol(Symbol *sym) {
                 printf("Record { ");
                 FieldValue *fv = sym->value->record_val;
                 while (fv) {
-                    printf("%s: %s", fv->name, varTypeToString(fv->value.type));
-                    if (fv->value.type == TYPE_ENUM) {
-                        printf(" ('%s', Ordinal: %d)", fv->value.enum_val.enum_name, fv->value.enum_val.ordinal);
-                    } else if (fv->value.type == TYPE_STRING) {
-                        printf(" (\"%s\")", fv->value.s_val ? fv->value.s_val : "(null)");
+                    const Value *fieldValue = fieldValueStorageConst(fv);
+                    printf("%s: %s", fv->name, varTypeToString(fieldValue->type));
+                    if (fieldValue->type == TYPE_ENUM) {
+                        printf(" ('%s', Ordinal: %d)", fieldValue->enum_val.enum_name, fieldValue->enum_val.ordinal);
+                    } else if (fieldValue->type == TYPE_STRING) {
+                        printf(" (\"%s\")", fieldValue->s_val ? fieldValue->s_val : "(null)");
                     }
                     fv = fv->next;
                     if (fv) {
@@ -2495,11 +2806,15 @@ void printValueToStream(Value v, FILE *stream) {
             }
             break;
         case TYPE_CHAR:
-            fprintf(stream, "%c", v.c_val); // Assuming c_val is 'char' or int holding char ASCII
+        {
+            char utf8[5];
+            size_t len = encodePascalCharUtf8(v.c_val, utf8);
+            fwrite(utf8, 1, len, stream);
             break;
+        }
         case TYPE_STRING:
             if (v.s_val) {
-                fprintf(stream, "%s", v.s_val);
+                writePascalText(stream, v.s_val, strlen(v.s_val));
             } else {
                 fprintf(stream, "(null string)");
             }
@@ -2542,7 +2857,7 @@ void printValueToStream(Value v, FILE *stream) {
                     fprintf(stream, "; ");
                 }
                 fprintf(stream, "%s: ", field->name ? field->name : "?");
-                printValueToStream(field->value, stream);
+                printValueToStream(*fieldValueStorage(field), stream);
                 first_field = false;
                 field = field->next;
             }
@@ -2670,19 +2985,7 @@ Value makeCopyOfValue(const Value *src) {
             }
             break;
         case TYPE_RECORD: {
-            FieldValue *head = NULL, *tail = NULL;
-            for (FieldValue *cur = src->record_val; cur; cur = cur->next) {
-                FieldValue *copy = malloc(sizeof(FieldValue));
-                copy->name = strdup(cur->name);
-                copy->value = makeCopyOfValue(&cur->value);
-                copy->next = NULL;
-                if (tail)
-                    tail->next = copy;
-                else
-                    head = copy;
-                tail = copy;
-            }
-            v.record_val = head;
+            v.record_val = copyRecord(src->record_val);
             break;
         }
         case TYPE_ARRAY: {

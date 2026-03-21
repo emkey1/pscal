@@ -43,6 +43,7 @@
 		5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */; };
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
+		5FFFD0123FFAA00000AAA001 /* TerminalSessionMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -86,6 +87,7 @@
 		5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsView.swift; sourceTree = "<group>"; };
 		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
 		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
+		5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionMetrics.swift; sourceTree = "<group>"; };
 		DEAD00012C0FF00D00DEAD00 /* src */ = {isa = PBXFileReference; lastKnownFileType = folder; name = src; path = ../src; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -166,6 +168,7 @@
 				5FFFD00B3FFAA00000AAA001 /* TerminalSettingsView.swift */,
 				5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */,
 				5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */,
+				5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */,
 				14F2C4F72BE1B12300DE9FD9 /* TerminalInputBridge.swift */,
 				14A5C5F32BE13E6500CEF0B9 /* TerminalBuffer.swift */,
 				14E9F2202BE2B9A300A1E3C0 /* RuntimeAssetInstaller.swift */,
@@ -364,6 +367,7 @@
 				5FFFD00C3FFAA00000AAA001 /* TerminalSettingsView.swift in Sources */,
 				5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */,
 				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
+				5FFFD0123FFAA00000AAA001 /* TerminalSessionMetrics.swift in Sources */,
 				5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -469,6 +473,7 @@
 							"-lz",
 						"-lsqlite3",
 						"-lresolv",
+						"-lcurses",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -523,6 +528,7 @@
 							"-lz",
 						"-lsqlite3",
 						"-lresolv",
+						"-lcurses",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -577,6 +583,7 @@
 						"-lz",
 					"-lsqlite3",
 						"-lresolv",
+					"-lcurses",
 					"-lcurl",
 					"-lssl",
 					"-lcrypto",
@@ -715,6 +722,7 @@
 							"-lz",
 						"-lsqlite3",
 						"-lresolv",
+						"-lcurses",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-device/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -769,6 +777,7 @@
 							"-lz",
 						"-lsqlite3",
 						"-lresolv",
+						"-lcurses",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
 						"$(PROJECT_DIR)/../build/ios-simulator/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
@@ -821,6 +830,7 @@
 						"-lz",
 					"-lsqlite3",
 						"-lresolv",
+					"-lcurses",
 					"-lcurl",
 					"-lssl",
 					"-lcrypto",

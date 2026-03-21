@@ -18,6 +18,14 @@ echo "Running iOS/iPadOS release sanity suite..."
 
 run_step "Vproc/TTY shim unit checks" \
   bash "${TESTS_DIR}/run_ios_port_tests.sh"
+if [ "${RUN_DVTM_SANITY:-0}" = "1" ]; then
+  run_step "dvtm iOS compile sanity" \
+    bash "${TESTS_DIR}/run_ios_dvtm_sanity.sh"
+else
+  echo
+  echo "==> dvtm iOS compile sanity"
+  echo "Skipped (RUN_DVTM_SANITY=0)"
+fi
 run_step "Extended builtin inventory parity (incl. SDL/3D entries)" \
   bash "${TESTS_DIR}/run_ios_ext_builtin_sanity.sh"
 run_step "SCP prompt unit regression" \

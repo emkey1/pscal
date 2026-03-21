@@ -1,50 +1,50 @@
-int xleft;			/* the first visible column */
-int xquit;			/* exit if positive, force quit if negative */
-int xvis;			/* visual mode */
-int xai = 1;			/* autoindent option */
-int xic = 1;			/* ignorecase option */
-int xhl = 1;			/* syntax highlight option */
-int xhll;			/* highlight current line */
-int xhlw;			/* highlight current word */
-int xhlp;			/* highlight {}[]() pair */
-int xhlr;			/* highlight text in reverse direction */
-int xled = 1;			/* use the line editor */
-int xtd = +1;			/* current text direction */
-int xshape = 1;			/* perform letter shaping */
-int xorder = 1;			/* change the order of characters */
-int xtbs = 8;			/* number of spaces for tab */
-int xish;			/* interactive shell */
-int xgrp;			/* regex search group */
-int xpac;			/* print autocomplete options */
-int xmpt;			/* whether to prompt after printing > 1 lines in vi */
-int xpr;			/* ex_cprint register */
-int xsep = ':';			/* ex command separator */
-int xlim = -1;			/* rendering cutoff for non cursor lines */
-int xseq = 1;			/* undo/redo sequence */
+NEXTVI_TLS int xleft;			/* the first visible column */
+NEXTVI_TLS int xquit;			/* exit if positive, force quit if negative */
+NEXTVI_TLS int xvis;			/* visual mode */
+NEXTVI_TLS int xai = 1;			/* autoindent option */
+NEXTVI_TLS int xic = 1;			/* ignorecase option */
+NEXTVI_TLS int xhl = 1;			/* syntax highlight option */
+NEXTVI_TLS int xhll;			/* highlight current line */
+NEXTVI_TLS int xhlw;			/* highlight current word */
+NEXTVI_TLS int xhlp;			/* highlight {}[]() pair */
+NEXTVI_TLS int xhlr;			/* highlight text in reverse direction */
+NEXTVI_TLS int xled = 1;			/* use the line editor */
+NEXTVI_TLS int xtd = +1;			/* current text direction */
+NEXTVI_TLS int xshape = 1;			/* perform letter shaping */
+NEXTVI_TLS int xorder = 1;			/* change the order of characters */
+NEXTVI_TLS int xtbs = 8;			/* number of spaces for tab */
+NEXTVI_TLS int xish;			/* interactive shell */
+NEXTVI_TLS int xgrp;			/* regex search group */
+NEXTVI_TLS int xpac;			/* print autocomplete options */
+NEXTVI_TLS int xmpt;			/* whether to prompt after printing > 1 lines in vi */
+NEXTVI_TLS int xpr;			/* ex_cprint register */
+NEXTVI_TLS int xsep = ':';			/* ex command separator */
+NEXTVI_TLS int xlim = -1;			/* rendering cutoff for non cursor lines */
+NEXTVI_TLS int xseq = 1;			/* undo/redo sequence */
 
-int xrow, xoff, xtop;		/* current row, column, and top row */
-int xbufcur;			/* number of active buffers */
-int xgrec;			/* global vi/ex recursion depth */
-int xkmap;			/* the current keymap */
-int xkmap_alt = 1;		/* the alternate keymap */
-int xkwddir;			/* the last search direction */
-int xkwdcnt;			/* number of search kwd changes */
-sbuf *xacreg;			/* autocomplete db filter regex */
-rset *xkwdrs;			/* the last searched keyword rset */
-sbuf *xregs[256];		/* string registers */
-struct buf *bufs;		/* main buffers */
-struct buf tempbufs[2];		/* temporary buffers, for internal use */
-struct buf *ex_buf;		/* current buffer */
-struct buf *ex_pbuf;		/* prev buffer */
-static struct buf *ex_tpbuf;	/* temp prev buffer */
-static int xbufsmax;		/* number of buffers */
-static int xbufsalloc = 10;	/* initial number of buffers */
-static int xgdep;		/* global command recursion depth */
+NEXTVI_TLS int xrow, xoff, xtop;		/* current row, column, and top row */
+NEXTVI_TLS int xbufcur;			/* number of active buffers */
+NEXTVI_TLS int xgrec;			/* global vi/ex recursion depth */
+NEXTVI_TLS int xkmap;			/* the current keymap */
+NEXTVI_TLS int xkmap_alt = 1;		/* the alternate keymap */
+NEXTVI_TLS int xkwddir;			/* the last search direction */
+NEXTVI_TLS int xkwdcnt;			/* number of search kwd changes */
+NEXTVI_TLS sbuf *xacreg;			/* autocomplete db filter regex */
+NEXTVI_TLS rset *xkwdrs;			/* the last searched keyword rset */
+NEXTVI_TLS sbuf *xregs[256];		/* string registers */
+NEXTVI_TLS struct buf *bufs;		/* main buffers */
+NEXTVI_TLS struct buf tempbufs[2];		/* temporary buffers, for internal use */
+NEXTVI_TLS struct buf *ex_buf;		/* current buffer */
+NEXTVI_TLS struct buf *ex_pbuf;		/* prev buffer */
+static NEXTVI_TLS struct buf *ex_tpbuf;	/* temp prev buffer */
+static NEXTVI_TLS int xbufsmax;		/* number of buffers */
+static NEXTVI_TLS int xbufsalloc = 10;	/* initial number of buffers */
+static NEXTVI_TLS int xgdep;		/* global command recursion depth */
 static char xuerr[] = "unreported error";
 static char xserr[] = "syntax error";
 static char xirerr[] = "invalid range";
 static char xsrerr[] = "range not found";
-static char *xrerr;
+static NEXTVI_TLS char *xrerr;
 
 extern void pscalRuntimeDebugLog(const char *message);
 #if defined(PSCAL_TARGET_IOS)
@@ -53,8 +53,8 @@ extern int pscalRuntimeOpenShellTab(void) __attribute__((weak));
 
 static int ex_write_debug_enabled(void)
 {
-	static int checked = 0;
-	static int enabled = 0;
+	static NEXTVI_TLS int checked = 0;
+	static NEXTVI_TLS int enabled = 0;
 	const char *env = NULL;
 	if (!enabled) {
 		env = getenv("PSCALI_DEBUG_EDITOR");
@@ -722,11 +722,67 @@ static int ex_write_buffer(int fd, int beg, int end, int o1, int o2)
 	return lbuf_wr(xb, fd, beg, end);
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static int exResolveHostPathForAtomicWrite(const char *input, char *out, size_t out_sz)
+{
+	if (!input || !input[0] || !out || out_sz == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	out[0] = '\0';
+	if (pathTruncateExpand(input, out, out_sz) && out[0] == '/') {
+		return 0;
+	}
+	if (input[0] == '/') {
+		if (snprintf(out, out_sz, "%s", input) >= (int)out_sz) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+		return 0;
+	}
+	char cwd_virtual[PATH_MAX];
+	if (!getcwd(cwd_virtual, sizeof(cwd_virtual)) || cwd_virtual[0] != '/') {
+		return -1;
+	}
+	char joined[PATH_MAX];
+	if (!strcmp(cwd_virtual, "/")) {
+		if (snprintf(joined, sizeof(joined), "/%s", input) >= (int)sizeof(joined)) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+	} else {
+		if (snprintf(joined, sizeof(joined), "%s/%s", cwd_virtual, input) >= (int)sizeof(joined)) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+	}
+	if (pathTruncateExpand(joined, out, out_sz) && out[0]) {
+		return 0;
+	}
+	if (snprintf(out, out_sz, "%s", joined) >= (int)out_sz) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	return 0;
+}
+#endif
+
+#if defined(NEXTVI_REGRESSION_TEST_HOOKS) && defined(PSCAL_TARGET_IOS)
+int nextviTestResolveHostPathForAtomicWrite(const char *input, char *out, size_t out_sz)
+{
+	return exResolveHostPathForAtomicWrite(input, out, out_sz);
+}
+
+const char *nextviTestVisiblePath(const char *path, char *buf, size_t buf_len)
+{
+	return ex_visible_path(path, buf, buf_len);
+}
+#endif
+
 static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 {
 	char tmp[PATH_MAX];
 #if defined(PSCAL_TARGET_IOS)
-	char tmp_real[PATH_MAX];
 	char path_real[PATH_MAX];
 #endif
 	struct stat st;
@@ -739,7 +795,7 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 	if (!path || !path[0])
 		return -1;
 #if defined(PSCAL_TARGET_IOS)
-	if (pathTruncateExpand(path, path_real, sizeof(path_real))) {
+	if (exResolveHostPathForAtomicWrite(path, path_real, sizeof(path_real)) == 0) {
 		target = path_real;
 		expanded = 1;
 	}
@@ -750,13 +806,8 @@ static int ex_write_atomic(const char *path, int beg, int end, int o1, int o2)
 		return -1;
 #if defined(PSCAL_TARGET_IOS)
 	char *mkstemp_path = tmp;
-	int tmp_expanded = 0;
-	if (pathTruncateExpand(tmp, tmp_real, sizeof(tmp_real))) {
-		mkstemp_path = tmp_real;
-		tmp_expanded = 1;
-	}
 	ex_write_debugf("[nextvi-write] mkstemp template=%s expanded=%d",
-		mkstemp_path, tmp_expanded);
+		mkstemp_path, 1);
 	fd = exMkstempTracked(mkstemp_path);
 #else
 	fd = mkstemp(tmp);
@@ -1375,7 +1426,7 @@ static void *ec_while(char *loc, char *cmd, char *arg)
 {
 	int beg = 1, addr = 0, skip[3] = {0, 1, 1};
 	void *ret = NULL;
-	static int _skip[3];
+	static NEXTVI_TLS int _skip[3];
 	for (; *loc && addr < 3; addr++) {
 		if (*loc == ',')
 			loc++;
@@ -1494,7 +1545,7 @@ static void *ec_setbufsmax(char *loc, char *cmd, char *arg)
 
 static void *ec_regprint(char *loc, char *cmd, char *arg)
 {
-	static char buf[5] = "  ";
+	static NEXTVI_TLS char buf[5] = "  ";
 	preserve(int, xtd, xtd = 2;)
 	for (int i = 1; i < LEN(xregs); i++) {
 		if (xregs[i] && i != xpr) {

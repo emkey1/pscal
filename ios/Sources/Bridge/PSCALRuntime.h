@@ -28,6 +28,10 @@ void PSCALRuntimeSetCurrentRuntimeContext(PSCALRuntimeContext *ctx);
 PSCALRuntimeContext *PSCALRuntimeGetCurrentRuntimeContext(void);
 /// Returns the active session id for the current runtime context (0 if none).
 uint64_t PSCALRuntimeCurrentSessionId(void);
+/// Returns the active session id from the calling thread's vproc stdio (0 if none).
+uint64_t PSCALRuntimeCurrentThreadSessionId(void);
+/// Returns the runtime context currently associated with a session id (or NULL).
+PSCALRuntimeContext *PSCALRuntimeGetRuntimeContextForSession(uint64_t session_id);
 /// Returns the VProc session stdio stored in the current runtime context.
 VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void);
 /// Sets the VProc session stdio for the current runtime context.
@@ -138,6 +142,13 @@ int PSCALRuntimeCreateSshSession(int argc,
                                  int *out_read_fd,
                                  int *out_write_fd);
 
+/// Runs an ICMP echo ping through the native iOS networking stack.
+/// On success, returns a malloc-allocated UTF-8 transcript in out_output.
+int PSCALRuntimePingHost(const char *host,
+                         int count,
+                         int timeout_ms,
+                         char **out_output);
+
 /// Launches an exsh shell session backed by a kernel-managed virtual TTY.
 /// Returns 0 on success and provides UI read/write fds.
 int PSCALRuntimeCreateShellSession(int argc,
@@ -164,6 +175,9 @@ void PSCALRuntimeUpdateSessionWindowSize(uint64_t session_id, int columns, int r
 
 /// Requests the UI to open an additional shell tab (iOS only).
 int pscalRuntimeOpenShellTab(void);
+/// Opens an interactive iOS folder picker and returns a malloc-allocated path.
+/// Caller must free() the returned string; NULL indicates cancel/error with errno set.
+char *pscalRuntimePickMountSourceDirectory(void);
 
 /// Notifies the UI that an SDL window/session became active (iOS only).
 void pscalRuntimeSdlDidOpen(void);

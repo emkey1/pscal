@@ -37,6 +37,7 @@ struct TerminalSettingsView: View {
                             Text(option.displayName).tag(option.id)
                         }
                     }
+                    .accessibilityHint("Select the font family for the terminal")
 
                     let previewFont = appearanceSettings.font(forPointSize: 16)
                     HStack {
@@ -67,6 +68,9 @@ struct TerminalSettingsView: View {
                         in: Double(appearanceSettings.minimumPointSize)...Double(appearanceSettings.maximumPointSize),
                         step: 1
                     )
+                    .accessibilityLabel("Font Size")
+                    .accessibilityValue("\(Int(appearanceSettings.pointSize)) points")
+                    .accessibilityHint("Adjusts the size of the terminal font")
 
                     HStack {
                         Text("Current")
@@ -74,6 +78,7 @@ struct TerminalSettingsView: View {
                         Text("\(Int(appearanceSettings.pointSize)) pt")
                             .font(.system(.body, design: .monospaced))
                     }
+                    .accessibilityHidden(true)
                 }
 
                 Section(header: Text("Tab Name")) {
@@ -89,6 +94,7 @@ struct TerminalSettingsView: View {
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
+                    .accessibilityHint("Sets the custom name for this tab")
 
                     Toggle(
                         "Restore on app start",
@@ -100,6 +106,7 @@ struct TerminalSettingsView: View {
                             }
                         )
                     )
+                    .accessibilityHint("Applies the saved tab name when the app starts")
 
                     Text("Used for this tab profile. Enable restore to apply the saved name when the app starts.")
                         .font(.footnote)
@@ -119,6 +126,7 @@ struct TerminalSettingsView: View {
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
+                    .accessibilityHint("Command to execute automatically when this tab launches")
 
                     Text("Runs once each time this tab profile launches. Leave empty to disable.")
                         .font(.footnote)
@@ -133,6 +141,7 @@ struct TerminalSettingsView: View {
                             set: { appearanceSettings.updateBackgroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
+                    .accessibilityHint("Select the background color for this tab")
 
                     ColorPicker(
                         "Foreground",
@@ -141,12 +150,17 @@ struct TerminalSettingsView: View {
                             set: { appearanceSettings.updateForegroundColor(UIColor(swiftUIColor: $0)) }
                         )
                     )
+                    .accessibilityHint("Select the text color for this tab")
 
                     Button {
                         _ = tabManager.copyFirstTabColors(tabId: tabId)
-                        copiedColors = true
+                        withAnimation {
+                            copiedColors = true
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            copiedColors = false
+                            withAnimation {
+                                copiedColors = false
+                            }
                         }
                     } label: {
                         HStack {
@@ -157,6 +171,8 @@ struct TerminalSettingsView: View {
                             }
                         }
                     }
+                    .accessibilityLabel(copiedColors ? "Copied first tab colors" : "Copy first tab colors")
+                    .accessibilityHint("Copies background and foreground colors from the first tab to the current tab")
                 }
 
                 Section(header: Text("Filesystem Paths")) {
@@ -167,6 +183,7 @@ struct TerminalSettingsView: View {
                             set: { settings.updatePathTruncationEnabled($0) }
                         )
                     )
+                    .accessibilityHint("Maps absolute paths to the truncation path. Requires restarting the app.")
 
                     Text("Requires restarting PSCAL to take effect.")
                         .font(.footnote)
@@ -183,11 +200,13 @@ struct TerminalSettingsView: View {
                     .autocorrectionDisabled(true)
                     .font(.system(.body, design: .monospaced))
                     .disabled(!settings.pathTruncationEnabled)
+                    .accessibilityHint("Enter the path to be used as the root for path truncation")
 
                     Button("Use Documents root") {
                         settings.useDocumentsPathForTruncation()
                     }
                     .disabled(!settings.pathTruncationEnabled)
+                    .accessibilityHint("Resets the path truncation to the default Documents directory")
 
                     Text(
                         settings.pathTruncationEnabled
@@ -210,6 +229,7 @@ struct TerminalSettingsView: View {
                             set: { settings.updateLocationDeviceEnabled($0) }
                         )
                     )
+                    .accessibilityHint("Exposes a live location feed to shell sessions")
 
                     Text("Expose a live location feed to shell sessions.")
                         .font(.footnote)
@@ -228,13 +248,14 @@ struct TerminalSettingsView: View {
                         Text("Five").tag(5)
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityHint("Opens the chosen number of shell tabs when PSCAL starts.")
 
                     Text("Opens the chosen number of shell tabs when PSCAL starts.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
 
-                Section(header: Text("Init (Service Mode)")) {
+                Section(header: Text("Init (Run Services)")) {
                     Toggle(
                         "Run init in first tab",
                         isOn: Binding(
@@ -242,6 +263,7 @@ struct TerminalSettingsView: View {
                             set: { settings.updateRunInitAsPid1OnFirstTab($0) }
                         )
                     )
+                    .accessibilityHint("Starts the first tab with init in service mode. Requires restarting the app.")
 
                     Text("When enabled, PSCAL starts tab 1 with init --service-mode as the first process.")
                         .font(.footnote)

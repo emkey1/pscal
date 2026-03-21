@@ -43,6 +43,12 @@ typedef struct {
     int rows;
 } VProcWinsize;
 
+typedef enum {
+    VPROC_ISOLATION_DOMAIN_NEXTVI = 0,
+    VPROC_ISOLATION_DOMAIN_MICRO,
+    VPROC_ISOLATION_DOMAIN_COUNT
+} VProcIsolationDomain;
+
 typedef struct {
     int pid;
     pthread_t tid;
@@ -139,6 +145,9 @@ int vprocPthreadCreateShim(pthread_t *thread,
                            const pthread_attr_t *attr,
                            void *(*start_routine)(void *),
                            void *arg);
+int vprocIsolationEnter(VProcIsolationDomain domain);
+int vprocIsolationTryEnter(VProcIsolationDomain domain);
+void vprocIsolationLeave(VProcIsolationDomain domain);
 int vprocOpenAt(VProc *vp, const char *path, int flags, int mode);
 int vprocSetWinsize(VProc *vp, int cols, int rows);
 int vprocGetWinsize(VProc *vp, VProcWinsize *out);
@@ -207,6 +216,8 @@ int vprocChmodShim(const char *path, mode_t mode);
 int vprocChownShim(const char *path, uid_t uid, gid_t gid);
 int vprocFchmodShim(int fd, mode_t mode);
 int vprocFchownShim(int fd, uid_t uid, gid_t gid);
+int vprocUtimesShim(const char *path, const struct timeval times[2]);
+int vprocFutimesShim(int fd, const struct timeval times[2]);
 int vprocMkdirShim(const char *path, mode_t mode);
 int vprocRmdirShim(const char *path);
 int vprocUnlinkShim(const char *path);
@@ -247,6 +258,9 @@ int vprocGetSessionKernelPid(void);
 void vprocSetSessionKernelPid(int pid);
 /* Ensure a shared kernel vproc exists and return its pid. */
 int vprocEnsureKernelPid(void);
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+void vprocResetStartupFstabStateForTests(void);
+#endif
 
 /* Per-session stdio ownership: duplicated host fds that define the
  * controlling stdio for a given shell window/session. */
@@ -396,6 +410,10 @@ int vprocSigsuspendShim(const sigset_t *mask);
 int vprocPthreadSigmaskShim(int how, const sigset_t *set, sigset_t *oldset);
 int vprocRaiseShim(int sig);
 VProcSigHandler vprocSignalShim(int sig, VProcSigHandler handler);
+unsigned int vprocAlarmShim(unsigned int seconds);
+useconds_t vprocUalarmShim(useconds_t useconds, useconds_t interval_useconds);
+int vprocSetitimerShim(int which, const struct itimerval *new_value, struct itimerval *old_value);
+int vprocGetitimerShim(int which, struct itimerval *curr_value);
 /* Indicates when it is safe for interposed libc calls to enter vproc shims. */
 int vprocInterposeReady(void);
 /* True when the thread has been registered as part of a vproc task. */
@@ -499,6 +517,9 @@ static inline int vprocHostPthreadCreate(pthread_t *thread,
 }
 static inline int vprocAdoptHostFd(VProc *vp, int host_fd) { (void)vp; return host_fd; }
 static inline int vprocPthreadCreateShim(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *arg) { return pthread_create(t, a, fn, arg); }
+static inline int vprocIsolationEnter(VProcIsolationDomain domain) { (void)domain; return 0; }
+static inline int vprocIsolationTryEnter(VProcIsolationDomain domain) { (void)domain; return 0; }
+static inline void vprocIsolationLeave(VProcIsolationDomain domain) { (void)domain; }
 static inline int vprocOpenAt(VProc *vp, const char *path, int flags, int mode) { (void)vp; return open(path, flags, mode); }
 static inline int vprocSetWinsize(VProc *vp, int cols, int rows) { (void)vp; (void)cols; (void)rows; return 0; }
 static inline int vprocGetWinsize(VProc *vp, VProcWinsize *out) { if (out) { out->cols = 80; out->rows = 24; } return 0; }
@@ -549,6 +570,8 @@ static inline int vprocChmodShim(const char *path, mode_t mode) { return chmod(p
 static inline int vprocChownShim(const char *path, uid_t uid, gid_t gid) { return chown(path, uid, gid); }
 static inline int vprocFchmodShim(int fd, mode_t mode) { return fchmod(fd, mode); }
 static inline int vprocFchownShim(int fd, uid_t uid, gid_t gid) { return fchown(fd, uid, gid); }
+static inline int vprocUtimesShim(const char *path, const struct timeval times[2]) { return utimes(path, times); }
+static inline int vprocFutimesShim(int fd, const struct timeval times[2]) { return futimes(fd, times); }
 static inline int vprocMkdirShim(const char *path, mode_t mode) { return mkdir(path, mode); }
 static inline int vprocRmdirShim(const char *path) { return rmdir(path); }
 static inline int vprocUnlinkShim(const char *path) { return unlink(path); }
@@ -699,6 +722,18 @@ static inline int vprocSigtimedwait(int pid, const sigset_t *set, const struct t
     }
     return (rc == -1) ? errno : rc;
 #endif
+}
+static inline unsigned int vprocAlarmShim(unsigned int seconds) {
+    return alarm(seconds);
+}
+static inline useconds_t vprocUalarmShim(useconds_t useconds, useconds_t interval_useconds) {
+    return ualarm(useconds, interval_useconds);
+}
+static inline int vprocSetitimerShim(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+    return setitimer(which, new_value, old_value);
+}
+static inline int vprocGetitimerShim(int which, struct itimerval *curr_value) {
+    return getitimer(which, curr_value);
 }
 static inline void vprocSetJobId(int pid, int job_id) { (void)pid; (void)job_id; }
 static inline int vprocGetJobId(int pid) { (void)pid; return 0; }

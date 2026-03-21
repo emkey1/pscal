@@ -1,0 +1,21 @@
+#!/usr/bin/env exsh
+
+# This regression targets iOS/iPadOS shell builds where smallclue applets are
+# exposed as shell commands.
+if help -l | grep -q '^smallclue-help'; then
+  :
+else
+  exit 77
+fi
+
+status=0
+for cmd in rsync git micro tadd tabadd; do
+  if help "$cmd" | grep -q "^$cmd[[:space:]]*-"; then
+    echo "help-$cmd:ok"
+  else
+    echo "help-$cmd:missing"
+    status=1
+  fi
+done
+
+exit "$status"

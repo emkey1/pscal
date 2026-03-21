@@ -26,3 +26,10 @@ ios/PSCAL.xcodeproj/xcshareddata/xcdebugger/*
 foo.pbc
 Tests/examples/__pycache__/
 output/
+.tmp-mkdir-repro-check/
+.tmp-mkdir-repro-final/
+.tmp-mkdir-repro-status/
+.tmp-mkdir-repro/
+build-dvtm/
+/(
+/)

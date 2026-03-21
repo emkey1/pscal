@@ -1,0 +1,482 @@
+#!/usr/bin/env pascal
+program PrologEngine;
+
+// PrologEngine demonstrates a compact Prolog-style inference engine in PSCAL.
+//
+// It shows:
+// - recursive unification over atoms, variables, and compound terms
+// - backtracking search driven by dynamic arrays of goals and clauses
+// - closure-style binding storage, where each recursive solve step carries its
+//   own binding array snapshot forward
+// - clause freshening, so rule variables are renamed before each use
+// - classic untagged Pascal variant-record syntax via `case Byte of`
+
+type
+  TermType = (VarTerm, AtomTerm, CompoundTerm);
+
+  TermPtr = ^Term;
+  TermArray = array of TermPtr;
+
+  Binding = record
+    varId: Integer;
+    value: TermPtr;
+  end;
+  BindingArray = array of Binding;
+
+  Clause = record
+    head: TermPtr;
+    body: TermArray;
+  end;
+
+  ClauseArray = array of Clause;
+
+  RenameEntry = record
+    oldId: Integer;
+    newId: Integer;
+  end;
+  RenameArray = array of RenameEntry;
+
+  // Variables use `variableId`; atoms and compound terms share `name`, and
+  // compound terms additionally use `argList`.
+  Term = record
+    tt: TermType;
+    case Byte of
+      0: (variableId: Integer);
+      1: (name: String; argList: TermArray);
+  end;
+
+var
+  clauses: ClauseArray;
+  variableCounter: Integer;
+
+function MakeTermArray0: TermArray;
+begin
+  SetLength(Result, 0);
+end;
+
+function MakeTermArray1(a: TermPtr): TermArray;
+begin
+  SetLength(Result, 1);
+  Result[0] := a;
+end;
+
+function MakeTermArray2(a, b: TermPtr): TermArray;
+begin
+  SetLength(Result, 2);
+  Result[0] := a;
+  Result[1] := b;
+end;
+
+function CloneTermArray(const arr: TermArray): TermArray;
+var
+  i: Integer;
+begin
+  SetLength(Result, Length(arr));
+  for i := 0 to High(arr) do
+    Result[i] := arr[i];
+end;
+
+function TailTerms(const arr: TermArray): TermArray;
+var
+  i: Integer;
+begin
+  if Length(arr) <= 1 then
+    Exit(MakeTermArray0);
+
+  SetLength(Result, Length(arr) - 1);
+  for i := 1 to High(arr) do
+    Result[i - 1] := arr[i];
+end;
+
+function ConcatTerms(const leftArr, rightArr: TermArray): TermArray;
+var
+  i, offset: Integer;
+begin
+  SetLength(Result, Length(leftArr) + Length(rightArr));
+  offset := 0;
+  for i := 0 to High(leftArr) do
+  begin
+    Result[offset] := leftArr[i];
+    Inc(offset);
+  end;
+  for i := 0 to High(rightArr) do
+  begin
+    Result[offset] := rightArr[i];
+    Inc(offset);
+  end;
+end;
+
+function NewVar: TermPtr;
+begin
+  New(Result);
+  Result^.tt := VarTerm;
+  Result^.variableId := variableCounter;
+  Inc(variableCounter);
+end;
+
+function NewAtom(name: String): TermPtr;
+begin
+  New(Result);
+  Result^.tt := AtomTerm;
+  Result^.name := name;
+  SetLength(Result^.argList, 0);
+end;
+
+function NewCompound(name: String; const args: TermArray): TermPtr;
+var
+  i: Integer;
+begin
+  New(Result);
+  Result^.tt := CompoundTerm;
+  Result^.name := name;
+
+  SetLength(Result^.argList, Length(args));
+  for i := 0 to High(args) do
+    Result^.argList[i] := args[i];
+end;
+
+function CloneTerm(const t: TermPtr): TermPtr;
+var
+  i: Integer;
+begin
+  if t = nil then
+    Exit(nil);
+
+  New(Result);
+  Result^.tt := t^.tt;
+
+  case t^.tt of
+    VarTerm:
+      Result^.variableId := t^.variableId;
+
+    AtomTerm:
+      begin
+        Result^.name := t^.name;
+        SetLength(Result^.argList, 0);
+      end;
+
+    CompoundTerm:
+      begin
+        Result^.name := t^.name;
+        SetLength(Result^.argList, Length(t^.argList));
+        for i := 0 to High(t^.argList) do
+          Result^.argList[i] := CloneTerm(t^.argList[i]);
+      end;
+  end;
+end;
+
+function CloneBindings(const bindings: BindingArray): BindingArray;
+var
+  i: Integer;
+begin
+  SetLength(Result, Length(bindings));
+  for i := 0 to High(bindings) do
+    Result[i] := bindings[i];
+end;
+
+function FindBinding(const bindings: BindingArray; varId: Integer): TermPtr;
+var
+  i: Integer;
+begin
+  for i := 0 to High(bindings) do
+    if bindings[i].varId = varId then
+      Exit(bindings[i].value);
+  FindBinding := nil;
+end;
+
+procedure AddBinding(var bindings: BindingArray; varId: Integer; value: TermPtr);
+begin
+  SetLength(bindings, Length(bindings) + 1);
+  bindings[High(bindings)].varId := varId;
+  bindings[High(bindings)].value := value;
+end;
+
+// Follow variable-to-term bindings recursively until a concrete term, or an
+// unbound variable, is reached.
+function Deref(const t: TermPtr; const bindings: BindingArray): TermPtr;
+var
+  boundValue: TermPtr;
+begin
+  if (t = nil) or (t^.tt <> VarTerm) then
+    Exit(t);
+
+  boundValue := FindBinding(bindings, t^.variableId);
+  if boundValue = nil then
+    Exit(t);
+
+  Deref := Deref(boundValue, bindings);
+end;
+
+// Unification mutates the binding array passed by reference, letting recursive
+// calls accumulate substitutions in a simple closure-like environment.
+function Unify(const leftTerm, rightTerm: TermPtr; var bindings: BindingArray): Boolean;
+var
+  leftCanon, rightCanon: TermPtr;
+  i: Integer;
+begin
+  leftCanon := Deref(leftTerm, bindings);
+  rightCanon := Deref(rightTerm, bindings);
+
+  if leftCanon = rightCanon then
+    Exit(true);
+
+  if leftCanon^.tt = VarTerm then
+  begin
+    AddBinding(bindings, leftCanon^.variableId, rightCanon);
+    Exit(true);
+  end;
+
+  if rightCanon^.tt = VarTerm then
+  begin
+    AddBinding(bindings, rightCanon^.variableId, leftCanon);
+    Exit(true);
+  end;
+
+  if leftCanon^.tt <> rightCanon^.tt then
+    Exit(false);
+
+  case leftCanon^.tt of
+    AtomTerm:
+      Exit(leftCanon^.name = rightCanon^.name);
+
+    CompoundTerm:
+      begin
+        if leftCanon^.name <> rightCanon^.name then
+          Exit(false);
+        if Length(leftCanon^.argList) <> Length(rightCanon^.argList) then
+          Exit(false);
+
+        for i := 0 to High(leftCanon^.argList) do
+          if not Unify(leftCanon^.argList[i], rightCanon^.argList[i], bindings) then
+            Exit(false);
+
+        Exit(true);
+      end;
+  end;
+
+  Unify := false;
+end;
+
+function FindRenamedVar(var renames: RenameArray; oldId: Integer): Integer;
+var
+  i: Integer;
+begin
+  for i := 0 to High(renames) do
+    if renames[i].oldId = oldId then
+      Exit(renames[i].newId);
+
+  SetLength(renames, Length(renames) + 1);
+  renames[High(renames)].oldId := oldId;
+  renames[High(renames)].newId := variableCounter;
+  Inc(variableCounter);
+  FindRenamedVar := renames[High(renames)].newId;
+end;
+
+// Each clause application gets its own renamed variable IDs so recursive rule
+// expansion cannot accidentally capture bindings from earlier uses.
+function FreshenTerm(const t: TermPtr; var renames: RenameArray): TermPtr;
+var
+  i, newVarId: Integer;
+  freshArgs: TermArray;
+begin
+  if t = nil then
+    Exit(nil);
+
+  case t^.tt of
+    VarTerm:
+      begin
+        newVarId := FindRenamedVar(renames, t^.variableId);
+        New(Result);
+        Result^.tt := VarTerm;
+        Result^.variableId := newVarId;
+      end;
+
+    AtomTerm:
+      Result := NewAtom(t^.name);
+
+    CompoundTerm:
+      begin
+        SetLength(freshArgs, Length(t^.argList));
+        for i := 0 to High(t^.argList) do
+          freshArgs[i] := FreshenTerm(t^.argList[i], renames);
+        Result := NewCompound(t^.name, freshArgs);
+      end;
+  end;
+end;
+
+function FreshenClause(const c: Clause): Clause;
+var
+  i: Integer;
+  renames: RenameArray;
+begin
+  SetLength(renames, 0);
+  Result.head := FreshenTerm(c.head, renames);
+  SetLength(Result.body, Length(c.body));
+  for i := 0 to High(c.body) do
+    Result.body[i] := FreshenTerm(c.body[i], renames);
+end;
+
+function TermToString(const t: TermPtr): String;
+var
+  i: Integer;
+begin
+  if t = nil then
+    Exit('<nil>');
+
+  case t^.tt of
+    VarTerm:
+      TermToString := 'V' + IntToStr(t^.variableId);
+
+    AtomTerm:
+      TermToString := t^.name;
+
+    CompoundTerm:
+      begin
+        TermToString := t^.name + '(';
+        for i := 0 to High(t^.argList) do
+        begin
+          if i > 0 then
+            TermToString := TermToString + ', ';
+          TermToString := TermToString + TermToString(t^.argList[i]);
+        end;
+        TermToString := TermToString + ')';
+      end;
+  end;
+end;
+
+// Depth-first search with backtracking. Each branch works on a cloned binding
+// array, so failed branches discard their substitutions automatically.
+function ResolveGoals(const goals: TermArray; const incomingBindings: BindingArray; depth: Integer): Boolean;
+var
+  i: Integer;
+  freshClause: Clause;
+  localBindings: BindingArray;
+  remainingGoals: TermArray;
+  nextGoals: TermArray;
+begin
+  if Length(goals) = 0 then
+    Exit(true);
+
+  if depth > 32 then
+    Exit(false);
+
+  remainingGoals := TailTerms(goals);
+
+  for i := 0 to High(clauses) do
+  begin
+    freshClause := FreshenClause(clauses[i]);
+    localBindings := CloneBindings(incomingBindings);
+
+    if Unify(goals[0], freshClause.head, localBindings) then
+    begin
+      nextGoals := ConcatTerms(freshClause.body, remainingGoals);
+      if ResolveGoals(nextGoals, localBindings, depth + 1) then
+        Exit(true);
+    end;
+  end;
+
+  ResolveGoals := false;
+end;
+
+function Solve(goal: TermPtr): Boolean;
+var
+  bindings: BindingArray;
+begin
+  SetLength(bindings, 0);
+  Solve := ResolveGoals(MakeTermArray1(goal), bindings, 0);
+end;
+
+procedure AddClause(head: TermPtr; const body: TermArray);
+var
+  i: Integer;
+begin
+  SetLength(clauses, Length(clauses) + 1);
+  clauses[High(clauses)].head := head;
+  SetLength(clauses[High(clauses)].body, Length(body));
+  for i := 0 to High(body) do
+    clauses[High(clauses)].body[i] := body[i];
+end;
+
+procedure AddFact(head: TermPtr);
+var
+  body: TermArray;
+begin
+  SetLength(body, 0);
+  AddClause(head, body);
+end;
+
+procedure AddRule1(head, goal1: TermPtr);
+var
+  body: TermArray;
+begin
+  SetLength(body, 1);
+  body[0] := goal1;
+  AddClause(head, body);
+end;
+
+procedure AddRule2(head, goal1, goal2: TermPtr);
+var
+  body: TermArray;
+begin
+  SetLength(body, 2);
+  body[0] := goal1;
+  body[1] := goal2;
+  AddClause(head, body);
+end;
+
+procedure AddFamilyFacts;
+var
+  X, Y, Z: TermPtr;
+begin
+  // Facts
+  AddFact(NewCompound('parent', MakeTermArray2(NewAtom('tom'), NewAtom('bob'))));
+  AddFact(NewCompound('parent', MakeTermArray2(NewAtom('bob'), NewAtom('ann'))));
+  AddFact(NewCompound('parent', MakeTermArray2(NewAtom('ann'), NewAtom('liz'))));
+
+  // ancestor(X, Y) :- parent(X, Y).
+  X := NewVar;
+  Y := NewVar;
+  AddRule1(
+    NewCompound('ancestor', MakeTermArray2(X, Y)),
+    NewCompound('parent', MakeTermArray2(CloneTerm(X), CloneTerm(Y)))
+  );
+
+  // ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
+  X := NewVar;
+  Y := NewVar;
+  Z := NewVar;
+  AddRule2(
+    NewCompound('ancestor', MakeTermArray2(X, Y)),
+    NewCompound('parent', MakeTermArray2(CloneTerm(X), CloneTerm(Z))),
+    NewCompound('ancestor', MakeTermArray2(CloneTerm(Z), CloneTerm(Y)))
+  );
+end;
+
+procedure RunQuery(name: String; goal: TermPtr);
+begin
+  Writeln('Query: ', name, ' = ', TermToString(goal));
+  if Solve(goal) then
+    Writeln('  yes')
+  else
+    Writeln('  no');
+  Writeln;
+end;
+
+begin
+  variableCounter := 1;
+  SetLength(clauses, 0);
+
+  AddFamilyFacts;
+
+  Writeln('Prolog Engine Demo');
+  Writeln('==================');
+  Writeln('Loaded clauses: ', Length(clauses));
+  Writeln;
+
+  RunQuery('ancestor(tom, ann)',
+           NewCompound('ancestor', MakeTermArray2(NewAtom('tom'), NewAtom('ann'))));
+  RunQuery('ancestor(tom, liz)',
+           NewCompound('ancestor', MakeTermArray2(NewAtom('tom'), NewAtom('liz'))));
+  RunQuery('ancestor(bob, tom)',
+           NewCompound('ancestor', MakeTermArray2(NewAtom('bob'), NewAtom('tom'))));
+end.

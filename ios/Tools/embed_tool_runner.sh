@@ -64,6 +64,7 @@ fi
 /bin/cp -f "${PROJECT_DIR}/../third-party/nextvi/LICENSE" "${license_dest}/nextvi_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/micro/LICENSE" "${license_dest}/micro_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/openssh-10.2p1/LICENCE" "${license_dest}/openssh_LICENSE.txt" || true
+/bin/cp -f "${PROJECT_DIR}/../third-party/libgit2/COPYING" "${license_dest}/libgit2_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../src/third_party/yyjson/LICENSE" "${license_dest}/yyjson_LICENSE.txt" || true
 /bin/cp -f "${PROJECT_DIR}/../third-party/hterm/LICENSE" "${license_dest}/hterm_LICENSE.txt" || true
 

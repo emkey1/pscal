@@ -146,6 +146,16 @@ pscal_sftp_transport_uses_tool_runner(const char *program)
 	return base != NULL && strcmp(base, "pscal_tool_runner") == 0;
 }
 
+static char *
+pscal_sftp_default_transport_program(void)
+{
+	/*
+	 * iOS won't execute staged binaries from writable app data paths
+	 * (Documents/...), so always use in-process ssh transport here.
+	 */
+	return xstrdup("ssh");
+}
+
 static int
 pscal_sftp_stdin_is_interactive(void)
 {
@@ -829,7 +839,7 @@ process_get(struct sftp_conn *conn, const char *src, const char *dst,
 		if (sftp_globpath_is_dir(g.gl_pathv[i]) &&
 		    (rflag || global_rflag)) {
 			if (sftp_download_dir(conn, g.gl_pathv[i], abs_dst,
-			    NULL, pflag || global_pflag, 1, resume,
+			    NULL, pflag || global_pflag, SFTP_PROGRESS_ONLY, resume,
 			    fflag || global_fflag, 0, 0) == -1)
 				err = -1;
 		} else {
@@ -926,7 +936,7 @@ process_put(struct sftp_conn *conn, const char *src, const char *dst,
 		if (sftp_globpath_is_dir(g.gl_pathv[i]) &&
 		    (rflag || global_rflag)) {
 			if (sftp_upload_dir(conn, g.gl_pathv[i], abs_dst,
-			    pflag || global_pflag, 1, resume,
+			    pflag || global_pflag, SFTP_PROGRESS_ONLY, resume,
 			    fflag || global_fflag, 0, 0) == -1)
 				err = -1;
 		} else {
@@ -1527,6 +1537,16 @@ parse_args(const char **cpp, int *ignore_errors, int *disable_echo, int *aflag,
 		if ((optidx = parse_getput_flags(cmd, argv, argc,
 		    aflag, fflag, pflag, rflag)) == -1)
 			return -1;
+		/*
+		 * iOS/iPadOS users frequently use mget/mput with globs to sync
+		 * directory trees. Upstream requires -R for directory matches;
+		 * default mget/mput to recursive to avoid silently skipping
+		 * directory entries as "not a regular file".
+		 */
+		if (*rflag == 0 && cmd != NULL &&
+		    (strcasecmp(cmd, "mget") == 0 || strcasecmp(cmd, "mput") == 0)) {
+			*rflag = 1;
+		}
 		/* Get first pathname (mandatory) */
 		if (argc - optidx < 1) {
 			error("You must specify at least one path after a "
@@ -2556,6 +2576,63 @@ connect_to_server(char *path, char **args, int *in, int *out)
 #endif
 #endif /* USE_PIPES */
 
+#if defined(PSCAL_TARGET_IOS)
+	if (pscal_sftp_transport_uses_tool_runner(path)) {
+		posix_spawn_file_actions_t actions;
+		posix_spawnattr_t attr;
+		sigset_t emptyset, sigdef;
+		int spawn_rc;
+		pid_t child = -1;
+
+		if (posix_spawn_file_actions_init(&actions) != 0)
+			fatal("posix_spawn_file_actions_init: %s", strerror(errno));
+		posix_spawn_file_actions_adddup2(&actions, c_in, STDIN_FILENO);
+		posix_spawn_file_actions_adddup2(&actions, c_out, STDOUT_FILENO);
+#ifdef USE_PIPES
+		posix_spawn_file_actions_addclose(&actions, pin_parent[1]);
+		posix_spawn_file_actions_addclose(&actions, pout_parent[0]);
+		posix_spawn_file_actions_addclose(&actions, pin_parent[0]);
+		posix_spawn_file_actions_addclose(&actions, pout_parent[1]);
+#else
+		posix_spawn_file_actions_addclose(&actions, inout_parent[1]);
+		posix_spawn_file_actions_addclose(&actions, inout_parent[0]);
+#endif
+
+		if (posix_spawnattr_init(&attr) != 0) {
+			posix_spawn_file_actions_destroy(&actions);
+			fatal("posix_spawnattr_init: %s", strerror(errno));
+		}
+		sigemptyset(&emptyset);
+		posix_spawnattr_setsigmask(&attr, &emptyset);
+		sigemptyset(&sigdef);
+		posix_spawnattr_setsigdefault(&attr, &sigdef);
+		posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK |
+		    POSIX_SPAWN_SETSIGDEF);
+
+		if (strchr(path, '/') != NULL)
+			spawn_rc = posix_spawn(&child, path, &actions, &attr,
+			    args, environ);
+		else
+			spawn_rc = posix_spawnp(&child, path, &actions, &attr,
+			    args, environ);
+		posix_spawn_file_actions_destroy(&actions);
+		posix_spawnattr_destroy(&attr);
+		if (spawn_rc != 0) {
+			errno = spawn_rc;
+#ifdef USE_PIPES
+			if (pin_parent[0] >= 0) close(pin_parent[0]);
+			if (pin_parent[1] >= 0) close(pin_parent[1]);
+			if (pout_parent[0] >= 0) close(pout_parent[0]);
+			if (pout_parent[1] >= 0) close(pout_parent[1]);
+#else
+			if (inout_parent[0] >= 0) close(inout_parent[0]);
+			if (inout_parent[1] >= 0) close(inout_parent[1]);
+#endif
+			fatal("spawn: %s", strerror(errno));
+		}
+		sshpid = child;
+	} else
+#endif
 	if ((sshpid = fork()) == -1) {
 #ifdef USE_PIPES
 #if defined(PSCAL_TARGET_IOS)
@@ -2717,6 +2794,13 @@ main(int argc, char **argv)
 	sftp_reset();
 	optreset = 1;
 	optind = 1;
+#ifdef PSCAL_TARGET_IOS
+	if (ssh_program == _PATH_SSH_PROGRAM) {
+		ssh_program = pscal_sftp_default_transport_program();
+		if (ssh_program == NULL)
+			fatal("xstrdup failed");
+	}
+#endif
 
 	__progname = ssh_get_progname(argv[0]);
 	memset(&args, '\0', sizeof(args));
@@ -2866,7 +2950,15 @@ main(int argc, char **argv)
 	/* Do this last because we want the user to be able to override it */
 	addargs(&args, "-oForwardAgent no");
 
+	/*
+	 * The meter renders to stdout via progressmeter.c.
+	 * On iOS/iPadOS, stderr may not be tty-backed even when stdout is.
+	 */
+#if defined(PSCAL_TARGET_IOS)
+	if (!isatty(STDOUT_FILENO))
+#else
 	if (!isatty(STDERR_FILENO))
+#endif
 		showprogress = 0;
 
 	if (noisy)

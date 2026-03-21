@@ -26,13 +26,106 @@ bool isNodeInTypeTable(AST* nodeToFind) {
 
 // Resolve type references to their concrete definitions.
 static AST* resolveTypeAlias(AST* type_node) {
-    while (type_node && type_node->type == AST_TYPE_REFERENCE &&
-           type_node->token && type_node->token->value) {
-        AST* looked = lookupType(type_node->token->value);
-        if (!looked || looked == type_node) break;
-        type_node = looked;
+    AST* last = NULL;
+    while (type_node && type_node != last) {
+        last = type_node;
+        if ((type_node->type == AST_TYPE_REFERENCE || type_node->type == AST_VARIABLE) &&
+            type_node->token && type_node->token->value) {
+            AST* looked = lookupType(type_node->token->value);
+            if (!looked || looked == type_node) {
+                break;
+            }
+            type_node = looked;
+            continue;
+        }
+        if (type_node->type == AST_TYPE_DECL && type_node->left) {
+            type_node = type_node->left;
+            continue;
+        }
+        break;
     }
     return type_node;
+}
+
+static AST* findRecordFieldDecl(AST* recordType, const char* fieldName) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || !fieldName) {
+        return NULL;
+    }
+
+    if (recordType->type == AST_TYPE_DECL && recordType->left) {
+        recordType = resolveTypeAlias(recordType->left);
+    }
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        return NULL;
+    }
+
+    if (recordType->extra) {
+        AST *parent = resolveTypeAlias(recordType->extra);
+        if (!parent && recordType->extra->token && recordType->extra->token->value) {
+            parent = resolveTypeAlias(lookupType(recordType->extra->token->value));
+        }
+        AST *parentField = findRecordFieldDecl(parent, fieldName);
+        if (parentField) {
+            return parentField;
+        }
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST *fieldDecl = recordType->children[i];
+        if (!fieldDecl || fieldDecl->type != AST_VAR_DECL) {
+            continue;
+        }
+        for (int j = 0; j < fieldDecl->child_count; j++) {
+            AST *fieldNameNode = fieldDecl->children[j];
+            if (fieldNameNode && fieldNameNode->token && fieldNameNode->token->value &&
+                strcasecmp(fieldNameNode->token->value, fieldName) == 0) {
+                return fieldDecl;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static void applyRecordLiteralType(AST *literal, AST *recordType) {
+    AST *resolvedRecord = resolveTypeAlias(recordType);
+    if (resolvedRecord && resolvedRecord->type == AST_TYPE_DECL && resolvedRecord->left) {
+        resolvedRecord = resolveTypeAlias(resolvedRecord->left);
+    }
+
+    literal->var_type = TYPE_RECORD;
+    literal->type_def = resolvedRecord ? resolvedRecord : recordType;
+
+    if (!resolvedRecord || resolvedRecord->type != AST_RECORD_TYPE) {
+        return;
+    }
+
+    for (int i = 0; i < literal->child_count; i++) {
+        AST *fieldAssign = literal->children[i];
+        if (!fieldAssign || fieldAssign->type != AST_ASSIGN ||
+            !fieldAssign->left || !fieldAssign->right ||
+            !fieldAssign->left->token || !fieldAssign->left->token->value) {
+            continue;
+        }
+
+        AST *fieldDecl = findRecordFieldDecl(resolvedRecord, fieldAssign->left->token->value);
+        if (!fieldDecl) {
+            fprintf(stderr, "Type error: unknown record-constructor field '%s'.\n",
+                    fieldAssign->left->token->value);
+            pascal_semantic_error_count++;
+            continue;
+        }
+
+        fieldAssign->var_type = fieldDecl->var_type;
+        fieldAssign->type_def = fieldDecl->right;
+        fieldAssign->left->var_type = fieldDecl->var_type;
+        fieldAssign->left->type_def = fieldDecl->right;
+
+        if (fieldAssign->right->type == AST_RECORD_LITERAL) {
+            applyRecordLiteralType(fieldAssign->right, fieldDecl->right);
+        }
+    }
 }
 
 static Symbol *lookupProcedureInAncestors(const char *loweredName, AST *scope) {
@@ -188,7 +281,7 @@ static bool compareProcPointerParams(AST* lhsParams, AST* rhsParams, const char*
     return true;
 }
 
-static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char* procName) {
+static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char* procName, bool emitError) {
     if (!lhsProcPtr || lhsProcPtr->type != AST_PROC_PTR_TYPE || !decl) {
         return true;
     }
@@ -197,10 +290,12 @@ static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char*
     int lhsCount = lhsParams ? lhsParams->child_count : 0;
     int declCount = decl->child_count;
     if (lhsCount != declCount) {
-        fprintf(stderr,
-                "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
-                procName, lhsCount, declCount);
-        pascal_semantic_error_count++;
+        if (emitError) {
+            fprintf(stderr,
+                    "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
+                    procName, lhsCount, declCount);
+            pascal_semantic_error_count++;
+        }
         return false;
     }
 
@@ -213,23 +308,27 @@ static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char*
         bool lhsByRef = procPointerParamByRef(lhsParam);
         bool declByRef = procPointerParamByRef(declParam);
         if (lhsByRef != declByRef) {
-            fprintf(stderr,
-                    "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
-                    (long long)i + 1, procName,
-                    lhsByRef ? "VAR/OUT" : "value",
-                    declByRef ? "VAR/OUT" : "value");
-            pascal_semantic_error_count++;
+            if (emitError) {
+                fprintf(stderr,
+                        "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
+                        (long long)i + 1, procName,
+                        lhsByRef ? "VAR/OUT" : "value",
+                        declByRef ? "VAR/OUT" : "value");
+                pascal_semantic_error_count++;
+            }
             return false;
         }
         VarType lhsType = procPointerParamType(lhsParam);
         VarType declType = procPointerParamType(declParam);
         if (lhsType != declType) {
-            fprintf(stderr,
-                    "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
-                    (long long)i + 1, procName,
-                    varTypeToString(lhsType),
-                    varTypeToString(declType));
-            pascal_semantic_error_count++;
+            if (emitError) {
+                fprintf(stderr,
+                        "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
+                        (long long)i + 1, procName,
+                        varTypeToString(lhsType),
+                        varTypeToString(declType));
+                pascal_semantic_error_count++;
+            }
             return false;
         }
     }
@@ -239,12 +338,14 @@ static bool verifyProcPointerAgainstDecl(AST* lhsProcPtr, AST* decl, const char*
     VarType lhsRetType = lhsRet ? lhsRet->var_type : TYPE_VOID;
     VarType declRetType = declRet ? declRet->var_type : TYPE_VOID;
     if (lhsRetType != declRetType) {
-        fprintf(stderr,
-                "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
-                procName,
-                varTypeToString(lhsRetType),
-                varTypeToString(declRetType));
-        pascal_semantic_error_count++;
+        if (emitError) {
+            fprintf(stderr,
+                    "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
+                    procName,
+                    varTypeToString(lhsRetType),
+                    varTypeToString(declRetType));
+            pascal_semantic_error_count++;
+        }
         return false;
     }
     return true;
@@ -612,6 +713,7 @@ static int declarationLine(AST* decl) {
 }
 
 static AST* matchVarDecl(AST* varDeclGroup, const char* varName);
+static AST* matchSiblingDeclaration(AST* node, const char* varName);
 
 AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* referenceNode) {
     if (!currentScopeNode || !varName || !referenceNode) return NULL;
@@ -632,11 +734,9 @@ AST* findDeclarationInScope(const char* varName, AST* currentScopeNode, AST* ref
                 AST* sibling = parent->children[i];
                 if (sibling == node) break;
                 if (!sibling) continue;
-                if (sibling->type == AST_VAR_DECL) {
-                    AST* found = matchVarDecl(sibling, varName);
-                    if (found) return found;
-                } else if (constDeclMatches(sibling, varName)) {
-                    return sibling;
+                AST* found = matchSiblingDeclaration(sibling, varName);
+                if (found) {
+                    return found;
                 }
             }
         }
@@ -730,6 +830,54 @@ static AST* matchVarDecl(AST* varDeclGroup, const char* varName) {
     return NULL;
 }
 
+static AST* matchSiblingDeclaration(AST* node, const char* varName) {
+    if (!node) {
+        return NULL;
+    }
+
+    if (node->type == AST_VAR_DECL) {
+        return matchVarDecl(node, varName);
+    }
+
+    if (constDeclMatches(node, varName)) {
+        return node;
+    }
+
+    if (node->type == AST_COMPOUND && node->token && node->token->type == TOKEN_VAR) {
+        for (int i = 0; i < node->child_count; i++) {
+            AST *child = node->children[i];
+            if (!child) {
+                continue;
+            }
+            AST *match = matchSiblingDeclaration(child, varName);
+            if (match) {
+                return match;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static AST* findInlineForDeclaration(const char* varName, AST* referenceNode) {
+    AST* node = referenceNode;
+    while (node) {
+        AST* parent = node->parent;
+        if (parent &&
+            (parent->type == AST_FOR_TO || parent->type == AST_FOR_DOWNTO) &&
+            parent->extra == node &&
+            parent->child_count > 1) {
+            AST* inlineDecl = parent->children[1];
+            if (inlineDecl && inlineDecl->type == AST_VAR_DECL &&
+                matchVarDecl(inlineDecl, varName)) {
+                return inlineDecl;
+            }
+        }
+        node = parent;
+    }
+    return NULL;
+}
+
 static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentScopeNode, AST* referenceNode, AST* globalProgramNode) {
      if (!varName) return NULL;
      AST* foundDecl = NULL;
@@ -785,41 +933,41 @@ static AST* findStaticDeclarationInASTWithRef(const char* varName, AST* currentS
         foundDecl = findDeclarationInScope(varName, currentScopeNode, referenceNode ? referenceNode : currentScopeNode);
         }
 
-        // As an additional fallback (handles languages where declarations and
-        // statements are interleaved inside a single COMPOUND), walk up to the
-        // nearest COMPOUND ancestor of the reference node and scan all earlier
-        // and later siblings for a matching VAR_DECL.
         if (!foundDecl && referenceNode) {
-            AST* ancestor = referenceNode->parent;
-            while (ancestor && ancestor != currentScopeNode) {
-                if (ancestor->type == AST_COMPOUND) {
-                    for (int i = 0; i < ancestor->child_count && !foundDecl; i++) {
-                        AST* sibling = ancestor->children[i];
-                        if (!sibling) continue;
-                        if (sibling->type == AST_VAR_DECL) {
-                            AST* m = matchVarDecl(sibling, varName);
-                            if (m) {
-                                if (referenceLine > 0) {
-                                    int declLine = declarationLine(sibling);
-                                    if (declLine > referenceLine) continue;
-                                }
-                                foundDecl = sibling; break;
-                            }
-                        } else if (constDeclMatches(sibling, varName)) {
-                            if (referenceLine > 0) {
-                                int declLine = declarationLine(sibling);
-                                if (declLine > referenceLine) continue;
-                            }
-                            foundDecl = sibling;
-                            break;
-                        }
-                    }
-                }
-                if (foundDecl) break;
-                ancestor = ancestor->parent;
-            }
+            foundDecl = findInlineForDeclaration(varName, referenceNode);
         }
 
+    }
+
+    // As an additional fallback (handles languages where declarations and
+    // statements are interleaved inside a single COMPOUND), walk up the
+    // nearest COMPOUND ancestors of the reference node and scan earlier
+    // siblings for a matching declaration. This also covers the main program
+    // block, where currentScopeNode is NULL.
+    if (!foundDecl && referenceNode) {
+        AST* ancestor = referenceNode->parent;
+        while (ancestor && ancestor != currentScopeNode) {
+            if (ancestor->type == AST_COMPOUND) {
+                for (int i = 0; i < ancestor->child_count && !foundDecl; i++) {
+                    AST* sibling = ancestor->children[i];
+                    if (sibling == referenceNode) {
+                        break;
+                    }
+                    if (!sibling) continue;
+                    AST* m = matchSiblingDeclaration(sibling, varName);
+                    if (m) {
+                        if (referenceLine > 0) {
+                            int declLine = declarationLine(m);
+                            if (declLine > referenceLine) continue;
+                        }
+                        foundDecl = m;
+                        break;
+                    }
+                }
+            }
+            if (foundDecl) break;
+            ancestor = ancestor->parent;
+        }
     }
 
     // If not found, walk outward and search enclosing procedure/function scopes.
@@ -1267,6 +1415,16 @@ resolved_field: ;
                      AST* decl = procSymbol->type_def; // PROCEDURE_DECL or FUNCTION_DECL
                      int expected = decl->child_count;
                      int given = node->child_count;
+                     for (int i = 0; i < expected && i < given; ++i) {
+                         AST *formal = decl->children[i];
+                         AST *actual = node->children[i];
+                         if (formal && actual && actual->type == AST_RECORD_LITERAL) {
+                             AST *formalType = formal->right ? resolveTypeAlias(formal->right) : NULL;
+                             if (formalType && formalType->type == AST_RECORD_TYPE) {
+                                 applyRecordLiteralType(actual, formal->right);
+                             }
+                         }
+                     }
                      if (given >= expected) {
                          for (int i = 0; i < expected; ++i) {
                              AST* formal = decl->children[i];
@@ -1341,7 +1499,13 @@ resolved_field: ;
                             resolved = arg->type_def;
                         }
                         resolved = resolveTypeAlias(resolved);
-                        if (resolved) {
+                        if ((strcasecmp(builtin_name, "low") == 0 ||
+                             strcasecmp(builtin_name, "high") == 0) &&
+                            (arg->var_type == TYPE_STRING ||
+                             (resolved && resolved->type == AST_ARRAY_TYPE))) {
+                            node->var_type = TYPE_INTEGER;
+                            node->type_def = lookupType("integer");
+                        } else if (resolved) {
                             node->var_type = resolved->var_type;
                             node->type_def = resolved;
                         } else if (arg->token && arg->token->value) {
@@ -1367,6 +1531,13 @@ resolved_field: ;
                 }
                 break;
             }
+            case AST_RECORD_LITERAL:
+                if (node->type_def) {
+                    applyRecordLiteralType(node, node->type_def);
+                } else {
+                    node->var_type = TYPE_RECORD;
+                }
+                break;
             case AST_FIELD_ACCESS: {
                 node->var_type = TYPE_VOID;
                 if (node->left && node->left->var_type == TYPE_RECORD && node->left->type_def) {
@@ -1498,11 +1669,17 @@ resolved_field: ;
                 node->var_type = TYPE_NIL; // Or TYPE_POINTER if nil is a generic pointer type
                 break;
             case AST_ASSIGN: {
-                // Minimal semantic check: procedure-pointer assignment
                 if (node->left && node->right) {
                     AST* lhs = node->left;
                     AST* rhs = node->right;
                     AST* lhsType = resolveTypeAlias(lhs->type_def);
+                    if (rhs->type == AST_RECORD_LITERAL && lhsType && lhsType->type == AST_RECORD_TYPE) {
+                        applyRecordLiteralType(rhs, lhs->type_def ? lhs->type_def : lhsType);
+                    }
+                    node->var_type = lhs->var_type;
+                    node->type_def = lhs->type_def;
+
+                    // Minimal semantic check: procedure-pointer assignment
                     if (!lhsType && lhs->token && lhs->token->value) {
                         Symbol *lhsProc = resolveProcedureSymbolInScope(lhs->token->value, node, globalProgramNode);
                         if (lhsProc && lhsProc->type_def) {
@@ -1517,10 +1694,12 @@ resolved_field: ;
                             Symbol* psym = resolveProcedureSymbolInScope(pname, node, globalProgramNode);
                             if (psym && psym->type_def) {
                                 rhsIsProcPointer = true;
-                                verifyProcPointerAgainstDecl(lhsType, psym->type_def, pname);
+                                verifyProcPointerAgainstDecl(lhsType, psym->type_def, pname, node->var_type == TYPE_UNKNOWN);
                             } else {
-                                fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
-                                pascal_semantic_error_count++;
+                                if (node->var_type == TYPE_UNKNOWN) {
+                                    fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
+                                    pascal_semantic_error_count++;
+                                }
                             }
                         } else {
                             AST* rhsType = resolveTypeAlias(rhs->type_def);
@@ -1543,7 +1722,7 @@ resolved_field: ;
                                             resolvedReturnType->type == AST_PROC_PTR_TYPE;
 
                                     if (!returnIsProcPointer) {
-                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName);
+                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName, node->var_type == TYPE_UNKNOWN);
                                     }
 
                                     if (returnIsProcPointer) {
@@ -1605,6 +1784,7 @@ VarType getBuiltinReturnType(const char* name) {
     /* Character and ordinal helpers */
     if (strcasecmp(name, "chr")  == 0) return TYPE_CHAR;
     if (strcasecmp(name, "ord")  == 0) return TYPE_INTEGER;
+    if (strcasecmp(name, "odd")  == 0) return TYPE_BOOLEAN;
     if (strcasecmp(name, "pollkey") == 0) return TYPE_INTEGER;
 
     /* CLike-style cast helpers */
@@ -1674,6 +1854,7 @@ VarType getBuiltinReturnType(const char* name) {
         strcasecmp(name, "realtostr") == 0 ||
         strcasecmp(name, "paramstr")  == 0 ||
         strcasecmp(name, "copy")      == 0 ||
+        strcasecmp(name, "stringofchar") == 0 ||
         strcasecmp(name, "mstreambuffer") == 0) {
         return TYPE_STRING;
     }

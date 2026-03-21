@@ -10,3 +10,9 @@
 [submodule "third-party/dvtm"]
 	path = third-party/dvtm
 	url = https://github.com/emkey1/dvtm.git
+[submodule "third-party/libgit2"]
+	path = third-party/libgit2
+	url = https://github.com/libgit2/libgit2.git
+[submodule "third-party/openrsync"]
+	path = third-party/openrsync
+	url = https://github.com/emkey1/openrsync.git

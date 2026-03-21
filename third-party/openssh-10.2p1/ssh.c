@@ -156,6 +156,19 @@ pscalSshDebugLog(const char *fmt, ...)
 /* Saves a copy of argv for setproctitle emulation */
 #ifndef HAVE_SETPROCTITLE
 static PSCAL_SSH_THREAD_LOCAL char **saved_av;
+
+static void
+pscal_ssh_free_saved_av(void)
+{
+	int i;
+
+	if (saved_av == NULL)
+		return;
+	for (i = 0; saved_av[i] != NULL; i++)
+		free(saved_av[i]);
+	free(saved_av);
+	saved_av = NULL;
+}
 #endif
 
 /* Flag indicating whether debug mode is on.  May be set on the command line. */
@@ -735,6 +748,7 @@ ssh_reset(void)
 	otty_flag = 0;
 	orequest_tty = 0;
 	ofork_after_authentication = 0;
+	free_options(&options);
 	memset(&options, 0, sizeof(options));
 	config = NULL;
 	free(host);
@@ -758,7 +772,7 @@ ssh_reset(void)
 	muxserver_sock = -1;
 	muxclient_command = 0;
 #ifndef HAVE_SETPROCTITLE
-	saved_av = NULL;
+	pscal_ssh_free_saved_av();
 #endif
 }
 
@@ -773,6 +787,7 @@ main(int ac, char **av)
 	if (setjmp(ctx.env) != 0) {
 		int exit_code = ctx.exit_code;
 		pscal_openssh_pop_exit_context(&ctx);
+		ssh_reset();
 		return exit_code;
 	}
 	pscal_openssh_push_exit_context(&ctx);

@@ -461,6 +461,84 @@ def scenario_ctrl_c_interrupts_watch_top(shell: PtyShell) -> tuple[bool, str]:
     return True, "watch -n 3 top interrupted by Ctrl-C"
 
 
+def scenario_ctrl_c_interrupts_simple_web_frontend(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    marker = _new_marker_path("ctrlc-simple-web")
+    _unlink_if_exists(marker)
+    shell.send_line("Examples/clike/base/simple_web_server")
+    shell.wait_for_substring("Waiting for connections", timeout=2.5)
+    shell._pump(0.20)
+    shell.send(b"\x03")
+    shell._pump(0.35)
+    shell.send_line(f"touch {_shell_path(marker)}")
+    if not shell.wait_for_path(marker, timeout=2.5):
+        return False, "Ctrl-C did not return control to shell during simple_web_server"
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.20)
+    _unlink_if_exists(marker)
+    return True, "simple_web_server interrupted by Ctrl-C"
+
+
+def scenario_bg_simple_web_prompt_and_redirect(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    marker_prompt = _new_marker_path("bg-simple-web-prompt")
+    marker_after_kill = _new_marker_path("bg-simple-web-after-kill")
+    log_file = _new_marker_path("bg-simple-web-log")
+    log_file = log_file.with_suffix(".log")
+    _unlink_if_exists(marker_prompt)
+    _unlink_if_exists(marker_after_kill)
+    _unlink_if_exists(log_file)
+
+    shell.send_line(
+        f"Examples/clike/base/simple_web_server > {_shell_path(log_file)} 2>&1 &"
+    )
+    shell._pump(0.50)
+
+    shell.send_line(f"touch {_shell_path(marker_prompt)}")
+    if not shell.wait_for_path(marker_prompt, timeout=1.5):
+        return False, "Prompt did not return after background simple_web_server launch"
+
+    deadline = time.monotonic() + 2.5
+    saw_output = False
+    while time.monotonic() < deadline:
+        shell._pump(0.05)
+        if log_file.exists() and log_file.stat().st_size > 0:
+            saw_output = True
+            break
+    if not saw_output:
+        return False, "Background simple_web_server redirection file remained empty"
+
+    shell.send_line("kill %1 >/dev/null 2>&1 || true")
+    shell._pump(0.50)
+    shell.send_line(f"touch {_shell_path(marker_after_kill)}")
+    if not shell.wait_for_path(marker_after_kill, timeout=1.5):
+        return False, "Shell became unresponsive after killing background simple_web_server"
+
+    _unlink_if_exists(marker_prompt)
+    _unlink_if_exists(marker_after_kill)
+    _unlink_if_exists(log_file)
+    return True, "Background simple_web_server kept prompt responsive and redirected output"
+
+
+def scenario_bg_simple_web_prompt_and_redirect_pipe_debug(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    shell.send_line("export PSCALI_PIPE_DEBUG=1")
+    shell._pump(0.20)
+    passed, detail = scenario_bg_simple_web_prompt_and_redirect(shell)
+    shell.send_line("unset PSCALI_PIPE_DEBUG")
+    shell._pump(0.20)
+    if passed:
+        return True, "Background simple_web_server stayed responsive with PSCALI_PIPE_DEBUG=1"
+    return False, f"{detail} (with PSCALI_PIPE_DEBUG=1)"
+
+
 def scenario_ctrl_c_interrupts_pascal_readkey_frontend(shell: PtyShell) -> tuple[bool, str]:
     ok, reason = _wait_for_prompt(shell)
     if not ok:
@@ -593,12 +671,99 @@ def scenario_ctrl_c_at_prompt_keeps_shell_alive(shell: PtyShell) -> tuple[bool, 
     _unlink_if_exists(marker)
     return True, "prompt-level Ctrl-C preserved shell responsiveness"
 
+def scenario_backtick_export_hostname_restores_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+    prompt_before = _prompt_count(shell)
+    marker = _new_marker_path("backtick-export-hostname")
+    _unlink_if_exists(marker)
+
+    shell.send_line("export HOST=`hostname`")
+    shell._pump(0.30)
+    end = time.monotonic() + 2.5
+    while time.monotonic() < end:
+        shell._pump(0.10)
+        if _prompt_count(shell) > prompt_before:
+            break
+    if _prompt_count(shell) <= prompt_before:
+        return False, "backtick export did not return prompt"
+
+    shell.send_line("export HOST=`echo hostsub`")
+    shell._pump(0.20)
+    shell.send_line(f"printf '__HOST__%s\\n' \"$HOST\"; touch {_shell_path(marker)}")
+    if not shell.wait_for_path(marker, timeout=1.5):
+        return False, "shell stayed unresponsive after backtick export"
+    _unlink_if_exists(marker)
+    if "__HOST__hostsub" not in shell.tail():
+        return False, "did not observe HOST assignment after backtick export"
+    return True, "backtick export returned prompt and preserved HOST assignment"
+
+
+def scenario_time_findprimes_returns_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    shell.send_line("time ./Examples/pascal/base/FindPrimes")
+    if not shell.wait_for_substring("Find all prime numbers up to:", timeout=2.0):
+        return False, "FindPrimes prompt did not appear"
+
+    shell.send_line("10")
+    if not shell.wait_for_substring("Done.", timeout=10.0):
+        return False, "time FindPrimes did not finish after stdin input"
+    if not shell.wait_for_substring("real\t", timeout=3.0):
+        return False, "time FindPrimes did not print timing output"
+    if not shell.wait_for_substring("PROMPT> ", timeout=3.0):
+        return False, "time FindPrimes did not return the shell prompt after input"
+
+    output = shell.output
+    if "Prime numbers found up to 10:" not in output or "2 3 5 7" not in output:
+        return False, "time FindPrimes did not print the expected primes"
+    return True, "time FindPrimes returned prompt and produced expected output"
+
+
+def scenario_findprimes_returns_prompt(shell: PtyShell) -> tuple[bool, str]:
+    ok, reason = _wait_for_prompt(shell)
+    if not ok:
+        return False, reason
+
+    shell.send_line("./Examples/pascal/base/FindPrimes")
+    if not shell.wait_for_substring("Find all prime numbers up to:", timeout=2.0):
+        return False, "FindPrimes prompt did not appear"
+
+    shell.send_line("10")
+    if not shell.wait_for_substring("Done.", timeout=10.0):
+        return False, "FindPrimes did not finish after stdin input"
+    if not shell.wait_for_substring("PROMPT> ", timeout=3.0):
+        return False, "FindPrimes did not return the shell prompt after input"
+
+    output = shell.output
+    if "Prime numbers found up to 10:" not in output or "2 3 5 7" not in output:
+        return False, "FindPrimes did not print the expected primes"
+    return True, "FindPrimes returned prompt and produced expected output"
+
 
 SCENARIOS: List[Scenario] = [
     Scenario(
         test_id="interactive_ctrl_c_prompt",
         name="Ctrl-C at prompt keeps shell responsive",
         run=scenario_ctrl_c_at_prompt_keeps_shell_alive,
+    ),
+    Scenario(
+        test_id="interactive_backtick_export_hostname_prompt",
+        name="backtick export hostname returns prompt",
+        run=scenario_backtick_export_hostname_restores_prompt,
+    ),
+    Scenario(
+        test_id="interactive_time_findprimes_prompt",
+        name="time FindPrimes returns prompt after stdin input",
+        run=scenario_time_findprimes_returns_prompt,
+    ),
+    Scenario(
+        test_id="interactive_findprimes_prompt",
+        name="FindPrimes returns prompt after stdin input",
+        run=scenario_findprimes_returns_prompt,
     ),
     Scenario(
         test_id="interactive_ctrl_c_sleep",
@@ -634,6 +799,21 @@ SCENARIOS: List[Scenario] = [
         test_id="interactive_ctrl_c_watch_top",
         name="Ctrl-C interrupts foreground watch -n 3 top",
         run=scenario_ctrl_c_interrupts_watch_top,
+    ),
+    Scenario(
+        test_id="interactive_ctrl_c_simple_web_frontend",
+        name="Ctrl-C interrupts foreground simple_web_server",
+        run=scenario_ctrl_c_interrupts_simple_web_frontend,
+    ),
+    Scenario(
+        test_id="interactive_bg_simple_web_prompt_and_redirect",
+        name="Background simple_web_server keeps prompt and redirects output",
+        run=scenario_bg_simple_web_prompt_and_redirect,
+    ),
+    Scenario(
+        test_id="interactive_bg_simple_web_prompt_and_redirect_pipe_debug",
+        name="Background simple_web_server keeps prompt and redirects output (PSCALI_PIPE_DEBUG=1)",
+        run=scenario_bg_simple_web_prompt_and_redirect_pipe_debug,
     ),
     Scenario(
         test_id="interactive_ctrl_c_pascal_readkey_frontend",

@@ -9,15 +9,7 @@
 #include <string.h>
 
 static void freeFieldValueList(FieldValue* head) {
-    while (head) {
-        FieldValue* next = head->next;
-        if (head->name) {
-            free(head->name);
-        }
-        freeValue(&head->value);
-        free(head);
-        head = next;
-    }
+    freeFieldValue(head);
 }
 
 static bool appendField(FieldValue** head, FieldValue** tail, const char* name, Value value) {
@@ -37,6 +29,11 @@ static bool appendField(FieldValue** head, FieldValue** tail, const char* name, 
         return false;
     }
     node->value = value;
+    node->storage = &node->value;
+    node->type_def = NULL;
+    node->declared_type = value.type;
+    node->slot_index = *tail ? ((*tail)->slot_index + 1) : 0;
+    node->owns_storage = true;
     node->next = NULL;
     if (!*head) {
         *head = node;

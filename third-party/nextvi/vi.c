@@ -33,30 +33,30 @@
 #include "term.c"
 #include "uc.c"
 
-int vi_hidch;		/* show hidden chars */
-int vi_insmov;		/* moving in insert outside of insertion sbuf */
-int vi_lncol;		/* line numbers cursor offset */
-char vi_msg[512];	/* current message */
-static int vi_lnnum;	/* line numbers */
-static int vi_mod;	/* screen should be redrawn -
+NEXTVI_TLS int vi_hidch;		/* show hidden chars */
+NEXTVI_TLS int vi_insmov;		/* moving in insert outside of insertion sbuf */
+NEXTVI_TLS int vi_lncol;		/* line numbers cursor offset */
+NEXTVI_TLS char vi_msg[512];	/* current message */
+static NEXTVI_TLS int vi_lnnum;	/* line numbers */
+static NEXTVI_TLS int vi_mod;	/* screen should be redrawn -
 			bit 1: whole screen, bit 2: current line, bit 3: update vi_col) */
 static char vi_word_m[] = "\0leEwW";	/* line word navigation */
-static char *vi_word = vi_word_m;
-static char *_vi_word = vi_word_m;
-static int vi_wsel = 1;
-static int vi_rshift;			/* row shift for vi_word */
-static int vi_arg;			/* numeric argument */
-static char vi_charlast[5];		/* the last character searched via f, t, F, or T */
-static int vi_charcmd;			/* the character finding command */
-static int vi_ybuf;			/* current yank buffer */
-static int vi_col;			/* the column requested by | command */
-static int vi_scrollud;			/* scroll amount for ^u and ^d */
-static int vi_scrolley;			/* scroll amount for ^e and ^y */
-static int vi_cndir = 1;		/* ^n direction */
-static int vi_status;			/* always show status */
-static int vi_tsm;			/* type of the status message */
-static int vi_joinmode = 1;		/* 1: insert extra space for pad 0: raw line join */
-static int vi_nlword;			/* new line mode for eEwWbB */
+static NEXTVI_TLS char *vi_word = vi_word_m;
+static NEXTVI_TLS char *_vi_word = vi_word_m;
+static NEXTVI_TLS int vi_wsel = 1;
+static NEXTVI_TLS int vi_rshift;			/* row shift for vi_word */
+static NEXTVI_TLS int vi_arg;			/* numeric argument */
+static NEXTVI_TLS char vi_charlast[5];		/* the last character searched via f, t, F, or T */
+static NEXTVI_TLS int vi_charcmd;			/* the character finding command */
+static NEXTVI_TLS int vi_ybuf;			/* current yank buffer */
+static NEXTVI_TLS int vi_col;			/* the column requested by | command */
+static NEXTVI_TLS int vi_scrollud;			/* scroll amount for ^u and ^d */
+static NEXTVI_TLS int vi_scrolley;			/* scroll amount for ^e and ^y */
+static NEXTVI_TLS int vi_cndir = 1;		/* ^n direction */
+static NEXTVI_TLS int vi_status;			/* always show status */
+static NEXTVI_TLS int vi_tsm;			/* type of the status message */
+static NEXTVI_TLS int vi_joinmode = 1;		/* 1: insert extra space for pad 0: raw line join */
+static NEXTVI_TLS int vi_nlword;			/* new line mode for eEwWbB */
 
 #if defined(PSCAL_TARGET_IOS)
 extern void pscalRuntimeDebugLog(const char *message) __attribute__((weak));
@@ -86,6 +86,7 @@ void nextvi_reset_state(void)
 {
 	/* Avoid double-free across repeated invocations; just reset pointers. */
 	term_sbuf = NULL;
+	rstate = rstates;
 	ibuf = NULL;
 	ibuf_sz = 128;
 	ibuf_pos = 0;
@@ -264,7 +265,7 @@ static void vi_drawrow(int row)
 {
 	int l1, i, i1, lnnum = vi_lnnum;
 	char *c, *s;
-	static char ch[5] = "~";
+	static NEXTVI_TLS char ch[5] = "~";
 	if (*vi_word) {
 		int noff, nrow, ret;
 		s = lbuf_get(xb, row - vi_rshift);
@@ -604,10 +605,10 @@ static void vi_regput(int c, const char *s, int lnmode)
 	ex_regput(tolower(c), s, isupper(c));
 }
 
-rset *fsincl;
-char *fs_exdir;
-static int fspos;
-static int fsdir;
+NEXTVI_TLS rset *fsincl;
+NEXTVI_TLS char *fs_exdir;
+static NEXTVI_TLS int fspos;
+static NEXTVI_TLS int fsdir;
 
 void dir_calc(char *path)
 {
@@ -734,9 +735,9 @@ static void vc_status(int type)
 /* read a motion */
 static int vi_motion(int vc, int *row, int *off)
 {
-	static sbuf *savepath[10];
-	static int srow[10], soff[10], lkwdcnt;
-	static int cadir = 1;
+	static NEXTVI_TLS sbuf *savepath[10];
+	static NEXTVI_TLS int srow[10], soff[10], lkwdcnt;
+	static NEXTVI_TLS int cadir = 1;
 	char *cs;
 	int cnt = vi_arg ? vi_arg : 1;
 	int mv, i, dir, mark;
@@ -1334,9 +1335,9 @@ static int vc_replace(void)
 	return cs[0] == '\n' ? 1 : 2;
 }
 
-static char rep_cmd[sizeof(icmd)];	/* the last command */
-static int rep_len;
-static int rep_skip_capture;
+static NEXTVI_TLS char rep_cmd[sizeof(icmd)];	/* the last command */
+static NEXTVI_TLS int rep_len;
+static NEXTVI_TLS int rep_skip_capture;
 
 static int rep_find_byte(const char *buf, int len, unsigned char byte)
 {
@@ -1436,7 +1437,7 @@ static void vc_repeat(void)
 
 static void vc_execute(int cmd)
 {
-	static int exec_buf = -1;
+	static NEXTVI_TLS int exec_buf = -1;
 	int c = term_read(), i, n = MAX(1, vi_arg);
 	sbuf *buf = NULL;
 	if (TK_INT(c))
@@ -1470,7 +1471,7 @@ void vi(int init)
 	int mv, n, k, c;
 	xgrec++;
 		if (init) {
-			static int marker_logged = 0;
+			static NEXTVI_TLS int marker_logged = 0;
 			if (!marker_logged) {
 				viRepeatDebugLog("[nextvi-marker] vi.c active repeat_patch_rev=2026-02-06c");
 				marker_logged = 1;
@@ -1635,7 +1636,7 @@ void vi(int init)
 				vi_mod |= 1;
 				break;
 			case TK_CTL('k'):;
-				static struct lbuf *writexb;
+				static NEXTVI_TLS struct lbuf *writexb;
 				if ((cs = ex_exec("w")) && xb == writexb)
 					cs = ex_exec("mpt0:w!");
 				writexb = cs ? xb : NULL;
@@ -2022,7 +2023,7 @@ void vi(int init)
 		n = led_pos(ln, ren_cursor(ln, vi_col));
 		vi_wait();
 		if (xhlw) {
-			static char *word;
+			static NEXTVI_TLS char *word;
 			if ((cs = vi_curword(xb, xrow, xoff, xhlw))) {
 				if (!word || strcmp(word, cs)) {
 					syn_reloadft(syn_addhl(cs, 1));
@@ -2089,8 +2090,8 @@ void vi(int init)
 	xgrec--;
 }
 
-static volatile sig_atomic_t vi_sigwinch_pending;
-static volatile sig_atomic_t vi_sigwinch_handling;
+static NEXTVI_TLS volatile sig_atomic_t vi_sigwinch_pending;
+static NEXTVI_TLS volatile sig_atomic_t vi_sigwinch_handling;
 
 int vi_sigwinch_pending_poll(void)
 {

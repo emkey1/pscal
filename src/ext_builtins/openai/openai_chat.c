@@ -192,6 +192,18 @@ static char *openaiBuildUrl(const char *base_url) {
     return url;
 }
 
+static bool openaiAppendHeader(struct curl_slist **headers, const char *value) {
+    if (!headers || !value) {
+        return false;
+    }
+    struct curl_slist *next = curl_slist_append(*headers, value);
+    if (!next) {
+        return false;
+    }
+    *headers = next;
+    return true;
+}
+
 static Value vmBuiltinOpenAIChatCompletions(struct VM_s *vm, int arg_count,
                                             Value *args) {
     if (arg_count < 2 || arg_count > 5) {
@@ -256,9 +268,17 @@ static Value vmBuiltinOpenAIChatCompletions(struct VM_s *vm, int arg_count,
     }
 
     struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "Accept: application/json");
-    headers = curl_slist_append(headers, auth_header);
+    if (!openaiAppendHeader(&headers, "Content-Type: application/json") ||
+        !openaiAppendHeader(&headers, "Accept: application/json") ||
+        !openaiAppendHeader(&headers, auth_header)) {
+        runtimeError(vm, "OpenAIChatCompletions failed to build request headers.");
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        free(body);
+        free(url);
+        free(auth_header);
+        return makeString("");
+    }
 
     OpenAIBuffer buffer = {0};
     curl_easy_setopt(curl, CURLOPT_URL, url);

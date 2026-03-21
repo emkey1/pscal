@@ -198,8 +198,17 @@ static bool pathVirtualizedGetCwd(char *buffer, size_t size) {
     }
     buffer[0] = '\0';
 #if defined(PSCAL_TARGET_IOS)
-    if (vprocGetcwdShim(buffer, size) && buffer[0] != '\0') {
-        return true;
+    bool prefer_vproc_cwd = false;
+    VProc *vp = vprocCurrent();
+    if (vp != NULL) {
+        prefer_vproc_cwd = true;
+    } else if (vprocSessionStdioCurrent() != NULL) {
+        prefer_vproc_cwd = true;
+    }
+    if (prefer_vproc_cwd) {
+        if (vprocGetcwdShim(buffer, size) && buffer[0] != '\0') {
+            return true;
+        }
     }
 #endif
     const char *pwd = getenv("PWD");
@@ -209,6 +218,11 @@ static bool pathVirtualizedGetCwd(char *buffer, size_t size) {
             return true;
         }
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (vprocGetcwdShim(buffer, size) && buffer[0] != '\0') {
+        return true;
+    }
+#endif
     if (getcwd(buffer, size) && buffer[0] != '\0') {
         return true;
     }

@@ -124,6 +124,13 @@ final class TerminalBuffer {
         case escape
         case csi
         case osc
+        case designateG0CharacterSet
+        case designateG1CharacterSet
+    }
+
+    private enum TerminalCharacterSet {
+        case ascii
+        case decSpecialGraphics
     }
     
     enum MouseMode {
@@ -166,6 +173,9 @@ final class TerminalBuffer {
     private var utf8ContinuationBytes: Int = 0
     private var utf8Codepoint: UInt32 = 0
     private var utf8ReplayByte: UInt8? = nil
+    private var g0CharacterSet: TerminalCharacterSet = .ascii
+    private var g1CharacterSet: TerminalCharacterSet = .ascii
+    private var shiftOutActive: Bool = false
     
     private(set) var bracketedPasteEnabled: Bool = false
     private(set) var insertMode: Bool = false
@@ -199,6 +209,9 @@ final class TerminalBuffer {
         var scrollRegionBottom: Int
         var columns: Int
         var rows: Int
+        var g0CharacterSet: TerminalCharacterSet
+        var g1CharacterSet: TerminalCharacterSet
+        var shiftOutActive: Bool
     }
     private var savedPrimaryScreen: ScreenState?
     
@@ -225,6 +238,8 @@ final class TerminalBuffer {
         let cursor: Cursor?
         let defaultBackground: UIColor
         let visibleRows: Int
+        let usingAlternateScreen: Bool
+        let autoWrapMode: Bool
         
         var lineCount: Int {
             return lines.count
@@ -244,6 +259,15 @@ final class TerminalBuffer {
             guard row >= 0 && row < lines.count else { return 0 }
             return TerminalBuffer.utf16Offset(in: lines[row], column: column)
         }
+    }
+
+    struct BufferMetrics {
+        let columns: Int
+        let rows: Int
+        let scrollbackRows: Int
+        let bufferedInputBytes: Int
+        let usingAlternateScreen: Bool
+        let estimatedStorageBytes: Int
     }
     
     init(columns: Int,
@@ -419,7 +443,30 @@ final class TerminalBuffer {
             return TerminalSnapshot(lines: lines,
                                     cursor: cursorInfo,
                                     defaultBackground: backgroundColor,
-                                    visibleRows: visibleRows)
+                                    visibleRows: visibleRows,
+                                    usingAlternateScreen: usingAlternateScreen,
+                                    autoWrapMode: autoWrapMode)
+        }
+    }
+
+    func vt100SnapshotData(includeScrollback: Bool = false) -> Data {
+        let snapshot = snapshot(includeScrollback: includeScrollback)
+        return TerminalBuffer.makeVT100SnapshotData(from: snapshot)
+    }
+
+    func metrics() -> BufferMetrics {
+        let bufferedInputBytes = inputQueue.sync(flags: .barrier) {
+            bufferedInput.count
+        }
+        return syncQueue.sync {
+            let totalRows = grid.count + scrollback.count
+            let estimatedStorageBytes = totalRows * columns * MemoryLayout<TerminalCell>.stride
+            return BufferMetrics(columns: columns,
+                                 rows: rows,
+                                 scrollbackRows: scrollback.count,
+                                 bufferedInputBytes: bufferedInputBytes,
+                                 usingAlternateScreen: usingAlternateScreen,
+                                 estimatedStorageBytes: estimatedStorageBytes)
         }
     }
     
@@ -444,6 +491,9 @@ final class TerminalBuffer {
             bracketedPasteEnabled = false
             insertMode = false
             autoWrapMode = true
+            g0CharacterSet = .ascii
+            g1CharacterSet = .ascii
+            shiftOutActive = false
             mouseMode = .none
             mouseEncoding = .normal
             wrapPending = false
@@ -474,6 +524,132 @@ final class TerminalBuffer {
             rendered = Array(rendered.suffix(desiredRows))
         }
         return rendered
+    }
+
+    private static func makeVT100SnapshotData(from snapshot: TerminalSnapshot) -> Data {
+        if snapshot.usingAlternateScreen {
+            return makeAlternateScreenSnapshotData(from: snapshot)
+        }
+        guard !snapshot.lines.isEmpty else {
+            return Data("\u{1B}[?25l".utf8)
+        }
+        let defaultAttributes = TerminalAttributes()
+        let visibleRows = max(snapshot.visibleRows, 1)
+        let visibleStart = max(0, snapshot.lineCount - visibleRows)
+        var output = String()
+        output.reserveCapacity(snapshot.lineCount * 80)
+        var currentAttributes = defaultAttributes
+
+        for (rowIndex, row) in snapshot.lines.enumerated() {
+            for cell in row {
+                if cell.attributes != currentAttributes {
+                    output.append(Self.sgrSequence(for: cell.attributes))
+                    currentAttributes = cell.attributes
+                }
+                if cell.character.unicodeScalars.allSatisfy({ $0.value >= 0x20 }) {
+                    output.append(cell.character)
+                } else {
+                    output.append(" ")
+                }
+            }
+            if rowIndex < snapshot.lines.count - 1 {
+                if currentAttributes != defaultAttributes {
+                    output.append("\u{1B}[0m")
+                    currentAttributes = defaultAttributes
+                }
+                output.append("\r\n")
+            }
+        }
+
+        if currentAttributes != defaultAttributes {
+            output.append("\u{1B}[0m")
+        }
+
+        if let cursor = snapshot.cursor {
+            let screenRow = max(0, min(visibleRows - 1, cursor.row - visibleStart))
+            output.append("\u{1B}[?25h")
+            output.append("\u{1B}[\(screenRow + 1);\(cursor.col + 1)H")
+        } else {
+            output.append("\u{1B}[?25l")
+        }
+
+        return Data(output.utf8)
+    }
+
+    private static func makeAlternateScreenSnapshotData(from snapshot: TerminalSnapshot) -> Data {
+        guard !snapshot.lines.isEmpty else {
+            return Data("\u{1B}[?1049h\u{1B}[H\u{1B}[2J\u{1B}[?25l".utf8)
+        }
+        let defaultAttributes = TerminalAttributes()
+        var output = "\u{1B}[0m\u{1B}[?1049h\u{1B}[?25l\u{1B}[?7l\u{1B}[H\u{1B}[2J"
+        output.reserveCapacity(snapshot.lineCount * 96)
+        var currentAttributes = defaultAttributes
+
+        for (rowIndex, row) in snapshot.lines.enumerated() {
+            output.append("\u{1B}[\(rowIndex + 1);1H")
+            output.append("\u{1B}[2K")
+            for cell in row {
+                if cell.attributes != currentAttributes {
+                    output.append(Self.sgrSequence(for: cell.attributes))
+                    currentAttributes = cell.attributes
+                }
+                if cell.character.unicodeScalars.allSatisfy({ $0.value >= 0x20 }) {
+                    output.append(cell.character)
+                } else {
+                    output.append(" ")
+                }
+            }
+            if currentAttributes != defaultAttributes {
+                output.append("\u{1B}[0m")
+                currentAttributes = defaultAttributes
+            }
+        }
+
+        output.append(snapshot.autoWrapMode ? "\u{1B}[?7h" : "\u{1B}[?7l")
+        if let cursor = snapshot.cursor {
+            output.append("\u{1B}[?25h")
+            output.append("\u{1B}[\(cursor.row + 1);\(cursor.col + 1)H")
+        } else {
+            output.append("\u{1B}[?25l")
+        }
+        return Data(output.utf8)
+    }
+
+    private static func sgrSequence(for attributes: TerminalAttributes) -> String {
+        var parameters: [String] = ["0"]
+        if attributes.bold {
+            parameters.append("1")
+        }
+        if attributes.underline {
+            parameters.append("4")
+        }
+        if attributes.inverse {
+            parameters.append("7")
+        }
+        parameters.append(contentsOf: colorParameters(for: attributes.foreground, isForeground: true))
+        parameters.append(contentsOf: colorParameters(for: attributes.background, isForeground: false))
+        return "\u{1B}[\(parameters.joined(separator: ";"))m"
+    }
+
+    private static func colorParameters(for color: TerminalColor, isForeground: Bool) -> [String] {
+        switch color {
+        case .defaultForeground where isForeground:
+            return ["39"]
+        case .defaultBackground where !isForeground:
+            return ["49"]
+        case .ansi(let index):
+            let base = isForeground ? 30 : 40
+            if index < 8 {
+                return ["\(base + max(index, 0))"]
+            }
+            return ["\((isForeground ? 90 : 100) + min(index - 8, 7))"]
+        case .extended(let index):
+            return [isForeground ? "38" : "48", "5", "\(max(index, 0))"]
+        case .rgb(let r, let g, let b):
+            return [isForeground ? "38" : "48", "2", "\(r)", "\(g)", "\(b)"]
+        case .defaultForeground, .defaultBackground:
+            return [isForeground ? "39" : "49"]
+        }
     }
     
     private func process(byte: UInt8, fromEcho: Bool = false) {
@@ -508,7 +684,12 @@ final class TerminalBuffer {
                     wrapPending = false
                     resetUTF8Decoder()
                     cursorCol = nextTabStop(after: cursorCol)
-                    
+                case 0x0E: // SO
+                    resetUTF8Decoder()
+                    shiftOutActive = true
+                case 0x0F: // SI
+                    resetUTF8Decoder()
+                    shiftOutActive = false
                 case 0x1B: // ESC
                     resetUTF8Decoder()
                     parserState = .escape
@@ -517,11 +698,11 @@ final class TerminalBuffer {
                     break
                 default:
                     if byte >= 0x20 {
-                        if let scalar = decodeUTF8Byte(byte) {
+                        if let scalar = decodeDisplayScalar(byte) {
                             insertCharacter(Character(scalar))
                             if let replay = utf8ReplayByte {
                                 utf8ReplayByte = nil
-                                if let replayScalar = decodeUTF8Byte(replay) {
+                                if let replayScalar = decodeDisplayScalar(replay) {
                                     insertCharacter(Character(replayScalar))
                                 }
                             }
@@ -538,6 +719,12 @@ final class TerminalBuffer {
                 } else if byte == 0x1B {
                     parserState = .normal
                 }
+            case .designateG0CharacterSet:
+                designateCharacterSet(byte, slot: 0)
+                parserState = .normal
+            case .designateG1CharacterSet:
+                designateCharacterSet(byte, slot: 1)
+                parserState = .normal
             }
         }
 
@@ -545,6 +732,92 @@ final class TerminalBuffer {
             utf8ContinuationBytes = 0
             utf8Codepoint = 0
             utf8ReplayByte = nil
+        }
+
+        private func decodeDisplayScalar(_ byte: UInt8) -> UnicodeScalar? {
+            if byte < 0x80, let scalar = translateVTCharacterSet(byte) {
+                resetUTF8Decoder()
+                return scalar
+            }
+            return decodeUTF8Byte(byte)
+        }
+
+        private func activeCharacterSet() -> TerminalCharacterSet {
+            shiftOutActive ? g1CharacterSet : g0CharacterSet
+        }
+
+        private func translateVTCharacterSet(_ byte: UInt8) -> UnicodeScalar? {
+            guard activeCharacterSet() == .decSpecialGraphics else {
+                return nil
+            }
+            switch byte {
+            case 0x5F:
+                return UnicodeScalar(0x20)
+            case 0x60:
+                return UnicodeScalar(0x25C6)
+            case 0x61:
+                return UnicodeScalar(0x2592)
+            case 0x62:
+                return UnicodeScalar(0x2409)
+            case 0x63:
+                return UnicodeScalar(0x240C)
+            case 0x64:
+                return UnicodeScalar(0x240D)
+            case 0x65:
+                return UnicodeScalar(0x240A)
+            case 0x66:
+                return UnicodeScalar(0x00B0)
+            case 0x67:
+                return UnicodeScalar(0x00B1)
+            case 0x68:
+                return UnicodeScalar(0x2424)
+            case 0x69:
+                return UnicodeScalar(0x240B)
+            case 0x6A:
+                return UnicodeScalar(0x2518)
+            case 0x6B:
+                return UnicodeScalar(0x2510)
+            case 0x6C:
+                return UnicodeScalar(0x250C)
+            case 0x6D:
+                return UnicodeScalar(0x2514)
+            case 0x6E:
+                return UnicodeScalar(0x253C)
+            case 0x6F:
+                return UnicodeScalar(0x23BA)
+            case 0x70:
+                return UnicodeScalar(0x23BB)
+            case 0x71:
+                return UnicodeScalar(0x2500)
+            case 0x72:
+                return UnicodeScalar(0x23BC)
+            case 0x73:
+                return UnicodeScalar(0x23BD)
+            case 0x74:
+                return UnicodeScalar(0x251C)
+            case 0x75:
+                return UnicodeScalar(0x2524)
+            case 0x76:
+                return UnicodeScalar(0x2534)
+            case 0x77:
+                return UnicodeScalar(0x252C)
+            case 0x78:
+                return UnicodeScalar(0x2502)
+            case 0x79:
+                return UnicodeScalar(0x2264)
+            case 0x7A:
+                return UnicodeScalar(0x2265)
+            case 0x7B:
+                return UnicodeScalar(0x03C0)
+            case 0x7C:
+                return UnicodeScalar(0x2260)
+            case 0x7D:
+                return UnicodeScalar(0x00A3)
+            case 0x7E:
+                return UnicodeScalar(0x00B7)
+            default:
+                return nil
+            }
         }
 
         private func decodeUTF8Byte(_ byte: UInt8) -> UnicodeScalar? {
@@ -597,6 +870,10 @@ final class TerminalBuffer {
                 csiPrivateMode = false
             case 0x5D: // ']'
                 parserState = .osc
+            case 0x28: // '('
+                parserState = .designateG0CharacterSet
+            case 0x29: // ')'
+                parserState = .designateG1CharacterSet
             case 0x44: // 'D' index
                 newLine(resetColumn: false)
                 parserState = .normal
@@ -623,6 +900,23 @@ final class TerminalBuffer {
                 parserState = .normal
             default:
                 parserState = .normal
+            }
+        }
+
+        private func designateCharacterSet(_ byte: UInt8, slot: Int) {
+            let characterSet: TerminalCharacterSet
+            switch byte {
+            case 0x30:
+                characterSet = .decSpecialGraphics
+            case 0x42:
+                characterSet = .ascii
+            default:
+                return
+            }
+            if slot == 0 {
+                g0CharacterSet = characterSet
+            } else {
+                g1CharacterSet = characterSet
             }
         }
 
@@ -857,7 +1151,10 @@ final class TerminalBuffer {
                 scrollRegionTop: scrollRegionTop,
                 scrollRegionBottom: scrollRegionBottom,
                 columns: columns,
-                rows: rows
+                rows: rows,
+                g0CharacterSet: g0CharacterSet,
+                g1CharacterSet: g1CharacterSet,
+                shiftOutActive: shiftOutActive
             )
         }
 
@@ -878,6 +1175,9 @@ final class TerminalBuffer {
             scrollRegionBottom = state.scrollRegionBottom
             columns = state.columns
             rows = state.rows
+            g0CharacterSet = state.g0CharacterSet
+            g1CharacterSet = state.g1CharacterSet
+            shiftOutActive = state.shiftOutActive
             clampScrollRegionBounds()
             if columns != targetColumns {
                 adjustColumnCount(to: targetColumns)
@@ -1345,6 +1645,9 @@ final class TerminalBuffer {
             bracketedPasteEnabled = false
             insertMode = false
             autoWrapMode = true
+            g0CharacterSet = .ascii
+            g1CharacterSet = .ascii
+            shiftOutActive = false
             mouseMode = .none
             mouseEncoding = .normal
             wrapPending = false

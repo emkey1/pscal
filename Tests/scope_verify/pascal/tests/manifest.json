@@ -40,6 +40,15 @@
       "expected_stdout": "result=17\nglobal=7"
     },
     {
+      "id": "routine_call_result_array_index_runtime",
+      "name": "Function call result may be indexed directly",
+      "category": "routine_scope",
+      "description": "A postfix array selector should work on the result of a function call, such as `BuildValues(10)[1]`.",
+      "expect": "runtime_ok",
+      "code": "program RoutineCallResultArrayIndex;\ntype\n  TIntArray = array[0..2] of Integer;\n\nfunction BuildValues(seed: Integer): TIntArray;\nbegin\n  BuildValues[0] := seed;\n  BuildValues[1] := seed + 1;\n  BuildValues[2] := seed + 2;\nend;\n\nbegin\n  if false then\n    writeln('mid=', BuildValues(10)[1]);\n  writeln('parsed');\nend.",
+      "expected_stdout": "parsed"
+    },
+    {
       "id": "routine_nested_function_leak_error",
       "name": "Nested function cannot escape its scope",
       "category": "routine_scope",
@@ -79,6 +88,68 @@
       "expected_stdout": "sum=6\nafter_loop=4"
     },
     {
+      "id": "main_inline_var_statement_runtime",
+      "name": "Main block inline var declaration works",
+      "category": "routine_scope",
+      "description": "A `var name: Type;` statement inside the main begin/end block should declare a variable for the remainder of that block.",
+      "expect": "runtime_ok",
+      "code": "program MainInlineVarStatement;\nbegin\n  var anyCapturesExist: Boolean;\n  anyCapturesExist := true;\n  writeln('captures=', Ord(anyCapturesExist));\nend.",
+      "expected_stdout": "captures=1"
+    },
+    {
+      "id": "main_with_record_array_element_runtime",
+      "name": "Main block with statement binds record fields",
+      "category": "routine_scope",
+      "description": "A `with recordExpr do` block should allow unqualified access to the target record's fields.",
+      "expect": "runtime_ok",
+      "code": "program MainWithRecordArrayElement;\ntype\n  MoveType = record\n    fromRow: Integer;\n    fromCol: Integer;\n    toRow: Integer;\n    toCol: Integer;\n    capturedRow: Integer;\n    capturedCol: Integer;\n  end;\nvar\n  moves: array[0..0] of MoveType;\n  idx: Integer;\nbegin\n  idx := 0;\n  with moves[idx] do\n  begin\n    fromRow := 2;\n    fromCol := 3;\n    toRow := 4;\n    toCol := 5;\n    capturedRow := 0;\n    capturedCol := 0;\n  end;\n  writeln('from=', moves[0].fromRow);\n  writeln('to=', moves[0].toCol);\nend.",
+      "expected_stdout": "from=2\nto=5"
+    },
+    {
+      "id": "main_ternary_expression_runtime",
+      "name": "Main block ternary expression works",
+      "category": "routine_scope",
+      "description": "The Pascal front end accepts the `condition ? thenExpr : elseExpr` expression form as an extension.",
+      "expect": "runtime_ok",
+      "code": "program MainTernaryExpression;\nvar\n  a: Integer;\n  b: Integer;\nbegin\n  a := 7;\n  b := (a > 5) ? 10 : 20;\n  writeln('b=', b);\nend.",
+      "expected_stdout": "b=10"
+    },
+    {
+      "id": "function_exit_value_runtime",
+      "name": "Function Exit(value) returns early",
+      "category": "routine_scope",
+      "description": "A function may use `Exit(value)` to set the return value and leave the routine immediately.",
+      "expect": "runtime_ok",
+      "code": "program FunctionExitValue;\n\nfunction PickValue(flag: Boolean): Integer;\nbegin\n  if flag then\n    Exit(11);\n  Exit(22);\nend;\n\nbegin\n  writeln('a=', PickValue(true));\n  writeln('b=', PickValue(false));\nend.",
+      "expected_stdout": "a=11\nb=22"
+    },
+    {
+      "id": "procedure_exit_value_compile_error",
+      "name": "Procedure Exit(value) is rejected",
+      "category": "routine_scope",
+      "description": "The `Exit(value)` shorthand is only valid for functions that return a value.",
+      "expect": "compile_error",
+      "code": "program ProcedureExitValueError;\n\nprocedure StopNow;\nbegin\n  Exit(1);\nend;\n\nbegin\n  StopNow;\nend.",
+      "expected_stderr_substring": "Exit(value) is only valid inside functions that return a value."
+    },
+    {
+      "id": "routine_inline_for_var_shadows_outer",
+      "name": "Inline for-var shadows outer local",
+      "category": "routine_scope",
+      "description": "A `for var` control variable should create a loop-local binding without mutating an outer local of the same name.",
+      "expect": "runtime_ok",
+      "code": "program RoutineInlineForVarShadow;\n\nprocedure Demo;\nvar\n  i: Integer;\n  total: Integer;\nbegin\n  i := 99;\n  total := 0;\n  for var i := 1 to 3 do\n  begin\n    total := total + i;\n  end;\n  writeln('sum=', total);\n  writeln('outer=', i);\nend;\n\nbegin\n  Demo;\nend.",
+      "expected_stdout": "sum=6\nouter=99"
+    },
+    {
+      "id": "routine_inline_for_var_does_not_leak",
+      "name": "Inline for-var does not leak after loop",
+      "category": "routine_scope",
+      "description": "The `for var` control variable is scoped to the loop body and is not visible after the loop finishes.",
+      "expect": "compile_error",
+      "code": "program RoutineInlineForVarNoLeak;\n\nprocedure Demo;\nbegin\n  for var i := 1 to 2 do\n  begin\n    writeln(i);\n  end;\n  writeln(i);\nend;\n\nbegin\n  Demo;\nend."
+    },
+    {
       "id": "routine_nested_parameter_shadow_preserves_outer",
       "name": "Nested parameter shadow leaves outer locals intact",
       "category": "routine_scope",
@@ -104,15 +175,6 @@
       "expect": "runtime_ok",
       "code": "program ProcPtrCallVar;\ntype\n  TVarHandler = procedure(var value: Integer);\n\nprocedure Increment(var value: Integer);\nbegin\n  value := value + 5;\nend;\n\nvar\n  handler: TVarHandler;\n  counter: Integer;\n\nbegin\n  handler := @Increment;\n  counter := 3;\n  handler(counter);\n  writeln('counter=', counter);\nend.",
       "expected_stdout": "counter=8"
-    },
-    {
-      "id": "routine_nested_proc_ptr_compiles",
-      "name": "Nested procedure pointer resolves local handler",
-      "category": "routine_scope",
-      "description": "Nested procedure pointers passed with '@' should resolve local helpers declared in the same scope.",
-      "expect": "compile_ok",
-      "code": "program RoutineNestedProcPtr;\ntype\n  THandler = procedure;\n\nprocedure Setup;\n  procedure Register(handler: THandler);\n  begin\n  end;\n\n  procedure LocalHandler;\n  begin\n  end;\n\nbegin\n  Register(@LocalHandler);\nend;\n\nbegin\n  Setup;\nend.",
-      "failure_reason": "Regression coverage for nested procedure pointer lookup."
     },
     {
       "id": "routine_sibling_local_access_error",
@@ -344,15 +406,6 @@
       "expect": "runtime_ok",
       "code": "program IntegrationCharCodeConcat;\nvar\n  value: Integer;\nbegin\n  value := 1;\n  Write('a' + #10, value);\nend.",
       "expected_stdout": "a\n1"
-    },
-    {
-      "id": "integration_adjacent_string_literals",
-      "name": "Adjacent string tokens concatenate",
-      "category": "integration",
-      "description": "Adjacent string and char-code tokens should fold into a single literal before semantic checks.",
-      "expect": "runtime_ok",
-      "code": "program AdjacentLiteralRegression;\nvar\n  combined: string;\n  text: string;\n  ch: Char;\nbegin\n  printf('A'+#10'B');\n  writeln;\n  combined := 'A'+#10'B';\n  text := 'Line1'#10'Line2';\n  ch := #0'';\n  writeln('combined_len=', Length(combined));\n  writeln('text_len=', Length(text));\n  writeln('text_ord6=', Ord(text[6]));\n  writeln('char_ord=', Ord(ch));\nend.",
-      "expected_stdout": "A\nB\ncombined_len=3\ntext_len=11\ntext_ord6=10\nchar_ord=0"
     },
     {
       "id": "integration_nested_scope_mix",

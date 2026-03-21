@@ -23,6 +23,114 @@
       "path": "Tests/compiler/pascal/cases/closure_capturing_proc_store.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: capturing procedure closure stored and invoked"
+    },
+    {
+      "id": "try_except_catches_raise",
+      "path": "Tests/compiler/pascal/cases/try_except_catches_raise.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: Pascal try/except catches raised errors"
+    },
+    {
+      "id": "odd_builtin_condition",
+      "path": "Tests/compiler/pascal/cases/odd_builtin_condition.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: odd builtin"
+    },
+    {
+      "id": "stringofchar_builtin",
+      "path": "Tests/compiler/pascal/cases/stringofchar_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: stringofchar builtin"
+    },
+    {
+      "id": "record_function_result",
+      "path": "Tests/compiler/pascal/cases/record_function_result.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: record function result"
+    },
+    {
+      "id": "inline_param_shadowing",
+      "path": "Tests/compiler/pascal/cases/inline_param_shadowing.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: inline parameter shadowing"
+    },
+    {
+      "id": "except_on_exception_message",
+      "path": "Tests/compiler/pascal/cases/except_on_exception_message.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: except on message = boom"
+    },
+    {
+      "id": "nested_dynamic_array_comma_index",
+      "path": "Tests/compiler/pascal/cases/nested_dynamic_array_comma_index.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: nested dynamic array comma index"
+    },
+    {
+      "id": "inc_longint_builtin",
+      "path": "Tests/compiler/pascal/cases/inc_longint_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: inc/dec longint"
+    },
+    {
+      "id": "val_builtin_var_args",
+      "path": "Tests/compiler/pascal/cases/val_builtin_var_args.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: val builtin var args"
+    },
+    {
+      "id": "unicode_write_output",
+      "path": "Tests/compiler/pascal/cases/unicode_write_output.pas",
+      "expect": "compile_success",
+      "stdout_substring": "snow=\u96ea\nblock=\u2588\nblocks=\u2588\u2588"
+    },
+    {
+      "id": "variant_record_basic",
+      "path": "Tests/compiler/pascal/cases/variant_record_basic.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: variant record"
+    },
+    {
+      "id": "variant_record_overlap",
+      "path": "Tests/compiler/pascal/cases/variant_record_overlap.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: variant overlap"
+    },
+    {
+      "id": "variant_record_result_pointer_fields",
+      "path": "Tests/compiler/pascal/cases/variant_record_result_pointer_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: variant result pointer fields"
+    },
+    {
+      "id": "global_byte_array_initializer",
+      "path": "Tests/compiler/pascal/cases/global_byte_array_initializer.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: global byte array = 1 2 3 0"
+    },
+    {
+      "id": "dynamic_record_array_fields",
+      "path": "Tests/compiler/pascal/cases/dynamic_record_array_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: dynamic record array fields = 42"
+    },
+    {
+      "id": "record_constructor_named_fields",
+      "path": "Tests/compiler/pascal/cases/record_constructor_named_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: record constructor named fields"
+    },
+    {
+      "id": "continue_statement_loops",
+      "path": "Tests/compiler/pascal/cases/continue_statement_loops.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: continue statement loops"
+    },
+    {
+      "id": "variant_record_untagged",
+      "path": "Tests/compiler/pascal/cases/variant_record_untagged.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: untagged variant record"
     }
   ]
 }

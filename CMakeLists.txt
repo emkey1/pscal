@@ -90,6 +90,9 @@ endif()
 
 if(PSCAL_PLATFORM_IOS AND NOT TARGET pscal_common_frontend_shim)
     add_library(pscal_common_frontend_shim STATIC src/ios/common_frontend_shim.c)
+    # This target is declared before the global C standard is set below, so
+    # force C11 explicitly to keep inline/va_copy available in shim headers.
+    target_compile_features(pscal_common_frontend_shim PRIVATE c_std_11)
 endif()
 
 # ---- Version Generation Logic ----
@@ -131,6 +134,11 @@ endif()
 
 set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall)
+
+if(UNIX AND NOT APPLE)
+    add_compile_definitions(_GNU_SOURCE _POSIX_C_SOURCE=200809L)
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_compile_definitions(
     PROGRAM_VERSION="${PROGRAM_VERSION_STRING}"
@@ -303,6 +311,9 @@ file(WRITE "${CMAKE_BINARY_DIR}/pscal_install_root.txt" "${PSCAL_INSTALL_ROOT}\n
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openssh")
 configure_file(third-party/openssh-10.2p1/config_pscal_ios.h
     "${CMAKE_BINARY_DIR}/generated/openssh/config.h" COPYONLY)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated/openrsync")
+configure_file(third-party/openrsync/config_pscal.h
+    "${CMAKE_BINARY_DIR}/generated/openrsync/config.h" COPYONLY)
 set(PSCAL_OPENSSH_RPC_TYPES_INCLUDE_DIR "")
 if(NOT PSCAL_PLATFORM_IOS)
     file(READ "${CMAKE_BINARY_DIR}/generated/openssh/config.h" _pscal_openssh_config_h)
@@ -1003,6 +1014,80 @@ if(ENABLE_EXT_BUILTIN_OPENAI)
     add_compile_definitions(ENABLE_EXT_BUILTIN_OPENAI)
 endif()
 
+set(PSCAL_HAS_LIBGIT2 OFF)
+set(PSCAL_LIBGIT2_TARGET "")
+set(_PSCAL_DEFAULT_BUNDLED_LIBGIT2 OFF)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third-party/libgit2/CMakeLists.txt")
+    set(_PSCAL_DEFAULT_BUNDLED_LIBGIT2 ON)
+endif()
+option(PSCAL_USE_BUNDLED_LIBGIT2 "Build libgit2 from third-party/libgit2" ${_PSCAL_DEFAULT_BUNDLED_LIBGIT2})
+if(PSCAL_USE_BUNDLED_LIBGIT2)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third-party/libgit2/CMakeLists.txt")
+        message(FATAL_ERROR "PSCAL_USE_BUNDLED_LIBGIT2=ON but third-party/libgit2 is missing.")
+    endif()
+    message(STATUS "libgit2: building bundled libgit2 from third-party/libgit2")
+    # Keep the bundled build lean and deterministic across iOS/host/chroot.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+    set(BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
+    set(BUILD_BENCHMARKS OFF CACHE BOOL "Build benchmarks" FORCE)
+    set(BUILD_CLI OFF CACHE BOOL "Build libgit2 CLI" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "Build examples" FORCE)
+    set(BUILD_FUZZERS OFF CACHE BOOL "Build fuzzers" FORCE)
+    set(USE_THREADS ON CACHE STRING "libgit2 threading backend" FORCE)
+    set(USE_SSH OFF CACHE STRING "libgit2 SSH backend" FORCE)
+    # HTTPS must be enabled so `git clone https://...` works in PSCAL.
+    # Use provider auto-selection (OpenSSL/SecureTransport/etc depending on platform/toolchain).
+    set(USE_HTTPS ON CACHE STRING "libgit2 HTTPS backend" FORCE)
+    if(PSCAL_PLATFORM_IOS)
+        set(USE_SHA1 builtin CACHE STRING "libgit2 SHA1 backend" FORCE)
+        set(USE_SHA256 builtin CACHE STRING "libgit2 SHA256 backend" FORCE)
+    else()
+        set(USE_SHA1 OpenSSL CACHE STRING "libgit2 SHA1 backend" FORCE)
+        set(USE_SHA256 OpenSSL CACHE STRING "libgit2 SHA256 backend" FORCE)
+    endif()
+    set(USE_HTTP_PARSER builtin CACHE STRING "libgit2 HTTP parser backend" FORCE)
+    set(USE_AUTH_NTLM OFF CACHE STRING "libgit2 NTLM auth backend" FORCE)
+    set(USE_AUTH_NEGOTIATE OFF CACHE STRING "libgit2 Negotiate auth backend" FORCE)
+    set(USE_REGEX builtin CACHE STRING "libgit2 regex backend" FORCE)
+    set(USE_COMPRESSION builtin CACHE STRING "libgit2 compression backend" FORCE)
+    set(USE_I18N OFF CACHE STRING "libgit2 i18n backend" FORCE)
+    set(ENABLE_WERROR OFF CACHE BOOL "Enable -Werror in libgit2" FORCE)
+    # libgit2's own sources include short header names (eg: "util.h", "errors.h").
+    # Keep PSCAL's global include dirs/defines from leaking into libgit2 or it may
+    # resolve the wrong headers and fail to compile.
+    get_directory_property(_pscal_saved_compile_definitions COMPILE_DEFINITIONS)
+    get_directory_property(_pscal_saved_include_directories INCLUDE_DIRECTORIES)
+    get_directory_property(_pscal_saved_compile_options COMPILE_OPTIONS)
+    if(_pscal_saved_compile_definitions STREQUAL "NOTFOUND")
+        set(_pscal_saved_compile_definitions "")
+    endif()
+    if(_pscal_saved_include_directories STREQUAL "NOTFOUND")
+        set(_pscal_saved_include_directories "")
+    endif()
+    if(_pscal_saved_compile_options STREQUAL "NOTFOUND")
+        set(_pscal_saved_compile_options "")
+    endif()
+    set_property(DIRECTORY PROPERTY COMPILE_DEFINITIONS "")
+    set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
+    set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "")
+    add_subdirectory(third-party/libgit2 EXCLUDE_FROM_ALL)
+    set_property(DIRECTORY PROPERTY COMPILE_DEFINITIONS "${_pscal_saved_compile_definitions}")
+    set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "${_pscal_saved_include_directories}")
+    set_property(DIRECTORY PROPERTY COMPILE_OPTIONS "${_pscal_saved_compile_options}")
+    unset(_pscal_saved_compile_definitions)
+    unset(_pscal_saved_include_directories)
+    unset(_pscal_saved_compile_options)
+    if(TARGET libgit2package)
+        set(PSCAL_HAS_LIBGIT2 ON)
+        set(PSCAL_LIBGIT2_TARGET libgit2package)
+    else()
+        message(FATAL_ERROR "Bundled libgit2 target 'libgit2package' not found after configuration.")
+    endif()
+endif()
+if(PSCAL_HAS_LIBGIT2)
+    add_compile_definitions(PSCAL_HAS_LIBGIT2)
+endif()
+
 if(PSCAL_PLATFORM_IOS)
     foreach(_pscal_ext_opt
             ENABLE_EXT_BUILTIN_MATH
@@ -1044,6 +1129,7 @@ set(PSCAL_CORE_SOURCES
     src/common/runtime_params.c
     src/common/runtime_tty.c
     src/common/runtime_clipboard.c
+    src/common/env_snapshot.c
     src/common/pscal_hosts.c
     src/common/path_truncate.c
     src/common/path_virtualization.c
@@ -1062,12 +1148,14 @@ set(PSCAL_CORE_SOURCES
 
 set(SMALLCLUE_SOURCES
     src/smallclue/src/core.c
+    src/smallclue/src/git_app.c
     src/smallclue/src/integration.c
     src/smallclue/src/dvtm_app.c
     src/smallclue/src/micro_app.c
     src/smallclue/src/micro_main_stub.c
     src/smallclue/src/nextvi_app.c
     src/smallclue/src/openssh_app.c
+    src/smallclue/src/openrsync_app.c
     src/smallclue/src/vproc_test_app.c
 )
 
@@ -1311,6 +1399,66 @@ set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/sftp.c
     APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_sftp_main)
 set_property(SOURCE ${PSCAL_OPENSSH_ROOT}/ssh-keygen.c
     APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openssh_ssh_keygen_main)
+
+set(PSCAL_OPENRSYNC_ROOT third-party/openrsync)
+set(PSCAL_OPENRSYNC_SOURCES
+    ${PSCAL_OPENRSYNC_ROOT}/blocks.c
+    ${PSCAL_OPENRSYNC_ROOT}/client.c
+    ${PSCAL_OPENRSYNC_ROOT}/compats.c
+    ${PSCAL_OPENRSYNC_ROOT}/copy.c
+    ${PSCAL_OPENRSYNC_ROOT}/downloader.c
+    ${PSCAL_OPENRSYNC_ROOT}/fargs.c
+    ${PSCAL_OPENRSYNC_ROOT}/flist.c
+    ${PSCAL_OPENRSYNC_ROOT}/hash.c
+    ${PSCAL_OPENRSYNC_ROOT}/ids.c
+    ${PSCAL_OPENRSYNC_ROOT}/io.c
+    ${PSCAL_OPENRSYNC_ROOT}/log.c
+    ${PSCAL_OPENRSYNC_ROOT}/main.c
+    ${PSCAL_OPENRSYNC_ROOT}/md4.c
+    ${PSCAL_OPENRSYNC_ROOT}/misc.c
+    ${PSCAL_OPENRSYNC_ROOT}/mkpath.c
+    ${PSCAL_OPENRSYNC_ROOT}/mktemp.c
+    ${PSCAL_OPENRSYNC_ROOT}/receiver.c
+    ${PSCAL_OPENRSYNC_ROOT}/rmatch.c
+    ${PSCAL_OPENRSYNC_ROOT}/rules.c
+    ${PSCAL_OPENRSYNC_ROOT}/sender.c
+    ${PSCAL_OPENRSYNC_ROOT}/server.c
+    ${PSCAL_OPENRSYNC_ROOT}/session.c
+    ${PSCAL_OPENRSYNC_ROOT}/socket.c
+    ${PSCAL_OPENRSYNC_ROOT}/symlinks.c
+    ${PSCAL_OPENRSYNC_ROOT}/uploader.c
+)
+
+if(PSCAL_PLATFORM_IOS OR APPLE)
+    list(APPEND PSCAL_CORE_SOURCES ${PSCAL_OPENRSYNC_SOURCES})
+endif()
+
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY INCLUDE_DIRECTORIES
+    "${CMAKE_BINARY_DIR}/generated/openrsync"
+    "${CMAKE_SOURCE_DIR}/third-party/openrsync"
+    "${CMAKE_SOURCE_DIR}/third-party/openssh-10.2p1")
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY COMPILE_OPTIONS
+    "-include${CMAKE_BINARY_DIR}/generated/openrsync/config.h"
+    "-include${CMAKE_SOURCE_DIR}/src/smallclue/src/openrsync_hooks.h")
+if(PSCAL_PLATFORM_IOS)
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY COMPILE_OPTIONS
+    "-include${CMAKE_SOURCE_DIR}/src/smallclue/src/openrsync_ios_shim.h")
+endif()
+set_property(SOURCE ${PSCAL_OPENRSYNC_SOURCES}
+    APPEND PROPERTY COMPILE_DEFINITIONS
+    err=pscal_openrsync_err
+    errc=pscal_openrsync_errc
+    errx=pscal_openrsync_errx
+    warn=pscal_openrsync_warn
+    warnc=pscal_openrsync_warnc
+    warnx=pscal_openrsync_warnx
+    exit=pscal_openrsync_request_exit
+    getprogname=pscal_openrsync_getprogname)
+set_property(SOURCE ${PSCAL_OPENRSYNC_ROOT}/main.c
+    APPEND PROPERTY COMPILE_DEFINITIONS main=pscal_openrsync_main)
 # --- Conditionally add SDL source files ---
 if(SDL)
     list(APPEND PSCAL_CORE_SOURCES
@@ -1337,48 +1485,114 @@ set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_DEFINITIONS 
 set_property(SOURCE third-party/nextvi/vi.c APPEND PROPERTY COMPILE_OPTIONS -Wno-gnu-folding-constant)
 
 option(SMALLCLUE_WITH_DVTM "Enable the dvtm front end as the smallclue 'dvtm' applet (host builds)." OFF)
+if(PSCAL_PLATFORM_IOS)
+    if(SMALLCLUE_WITH_DVTM)
+        message(STATUS "PSCAL_PLATFORM_IOS=ON: forcing SMALLCLUE_WITH_DVTM=OFF")
+    endif()
+    set(SMALLCLUE_WITH_DVTM OFF)
+endif()
 set(PSCAL_DVTM_ENABLED OFF)
 if(SMALLCLUE_WITH_DVTM)
-    if(PSCAL_PLATFORM_IOS)
-        message(WARNING "SMALLCLUE_WITH_DVTM is currently unsupported on iOS targets; disabling.")
-        set(SMALLCLUE_WITH_DVTM OFF CACHE BOOL "Enable the dvtm front end as the smallclue 'dvtm' applet (host builds)." FORCE)
+    set(_pscal_dvtm_extra_include_dir "")
+    if(PSCAL_PLATFORM_IOS AND PSCAL_REAL_IOS)
+        set(_pscal_dvtm_curses_lib "")
+        set(_pscal_ios_sdk_root "")
+        if(CMAKE_OSX_SYSROOT)
+            if(IS_ABSOLUTE "${CMAKE_OSX_SYSROOT}")
+                set(_pscal_ios_sdk_root "${CMAKE_OSX_SYSROOT}")
+            else()
+                execute_process(
+                    COMMAND xcrun --sdk "${CMAKE_OSX_SYSROOT}" --show-sdk-path
+                    OUTPUT_VARIABLE _pscal_ios_sdk_root
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET
+                )
+            endif()
+        endif()
+        if(NOT _pscal_ios_sdk_root)
+            execute_process(
+                COMMAND xcrun --sdk iphoneos --show-sdk-path
+                OUTPUT_VARIABLE _pscal_ios_sdk_root
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+        endif()
+        if(APPLE)
+            execute_process(
+                COMMAND xcrun --sdk macosx --show-sdk-path
+                OUTPUT_VARIABLE _pscal_macosx_sdk
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+            if(_pscal_macosx_sdk AND EXISTS "${_pscal_macosx_sdk}/usr/include/curses.h")
+                set(_pscal_dvtm_extra_include_dir "${_pscal_macosx_sdk}/usr/include")
+            endif()
+        endif()
+        if(NOT _pscal_dvtm_extra_include_dir)
+            message(FATAL_ERROR
+                "SMALLCLUE_WITH_DVTM requires curses headers on iOS builds. "
+                "Unable to locate macOS SDK curses headers via xcrun.")
+        endif()
+        if(_pscal_ios_sdk_root AND EXISTS "${_pscal_ios_sdk_root}/usr/lib/libcurses.tbd")
+            set(_pscal_dvtm_curses_lib "${_pscal_ios_sdk_root}/usr/lib/libcurses.tbd")
+        elseif(_pscal_ios_sdk_root AND EXISTS "${_pscal_ios_sdk_root}/usr/lib/libncurses.tbd")
+            set(_pscal_dvtm_curses_lib "${_pscal_ios_sdk_root}/usr/lib/libncurses.tbd")
+        else()
+            find_library(_pscal_dvtm_curses_lib NAMES curses ncurses
+                PATHS "${_pscal_ios_sdk_root}/usr/lib"
+                NO_DEFAULT_PATH)
+        endif()
+        if(NOT _pscal_dvtm_curses_lib)
+            message(FATAL_ERROR
+                "SMALLCLUE_WITH_DVTM requires lib(curses|ncurses) when PSCAL_PLATFORM_IOS is enabled.")
+        endif()
+        set(CURSES_LIBRARIES "${_pscal_dvtm_curses_lib}")
     else()
         find_package(Curses REQUIRED)
-        set(_pscal_dvtm_config_dir "${CMAKE_BINARY_DIR}/third-party/dvtm")
-        file(MAKE_DIRECTORY "${_pscal_dvtm_config_dir}")
-        configure_file(
-            "${CMAKE_SOURCE_DIR}/third-party/dvtm/config.def.h"
-            "${_pscal_dvtm_config_dir}/config.h"
-            COPYONLY
-        )
-        add_library(pscal_dvtm_static STATIC
-            third-party/dvtm/dvtm.c
-            third-party/dvtm/vt.c
-        )
-        set_property(SOURCE third-party/dvtm/dvtm.c APPEND PROPERTY COMPILE_DEFINITIONS "main=dvtm_main_entry")
-        target_compile_features(pscal_dvtm_static PRIVATE c_std_99)
-        target_compile_definitions(pscal_dvtm_static PRIVATE
-            _POSIX_C_SOURCE=200809L
-            _XOPEN_SOURCE=700
-            _XOPEN_SOURCE_EXTENDED
-            VERSION="0.16-pscal"
-        )
-        if(APPLE)
-            target_compile_definitions(pscal_dvtm_static PRIVATE _DARWIN_C_SOURCE)
-        endif()
-        target_include_directories(pscal_dvtm_static PRIVATE
-            "${_pscal_dvtm_config_dir}"
-            "${CMAKE_SOURCE_DIR}/third-party/dvtm"
-        )
-        if(CURSES_LIBRARIES)
-            target_link_libraries(pscal_dvtm_static PRIVATE ${CURSES_LIBRARIES})
-        endif()
-        find_library(PSCAL_LIB_UTIL util)
-        if(PSCAL_LIB_UTIL)
-            target_link_libraries(pscal_dvtm_static PRIVATE ${PSCAL_LIB_UTIL})
-        endif()
-        set(PSCAL_DVTM_ENABLED ON)
     endif()
+
+    set(_pscal_dvtm_config_dir "${CMAKE_BINARY_DIR}/third-party/dvtm")
+    file(MAKE_DIRECTORY "${_pscal_dvtm_config_dir}")
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/third-party/dvtm/config.def.h"
+        "${_pscal_dvtm_config_dir}/config.h"
+        COPYONLY
+    )
+    add_library(pscal_dvtm_static STATIC
+        third-party/dvtm/dvtm.c
+        third-party/dvtm/vt.c
+    )
+    set_property(SOURCE third-party/dvtm/dvtm.c APPEND PROPERTY COMPILE_DEFINITIONS "main=dvtm_main_entry")
+    target_compile_features(pscal_dvtm_static PRIVATE c_std_99)
+    target_compile_definitions(pscal_dvtm_static PRIVATE
+        _POSIX_C_SOURCE=200809L
+        _XOPEN_SOURCE=700
+        _XOPEN_SOURCE_EXTENDED
+        VERSION="0.16-pscal"
+        exit=pscalDvtmRequestExit
+    )
+    if(APPLE)
+        target_compile_definitions(pscal_dvtm_static PRIVATE _DARWIN_C_SOURCE)
+    endif()
+    target_include_directories(pscal_dvtm_static PRIVATE
+        "${_pscal_dvtm_config_dir}"
+        "${CMAKE_SOURCE_DIR}/third-party/dvtm"
+        "${CMAKE_SOURCE_DIR}/src/smallclue/src"
+    )
+    target_compile_options(pscal_dvtm_static PRIVATE
+        "-include${CMAKE_SOURCE_DIR}/src/smallclue/src/dvtm_runtime_hooks.h"
+    )
+    if(_pscal_dvtm_extra_include_dir)
+        target_include_directories(pscal_dvtm_static PRIVATE "${_pscal_dvtm_extra_include_dir}")
+    endif()
+    if(CURSES_LIBRARIES)
+        target_link_libraries(pscal_dvtm_static PRIVATE ${CURSES_LIBRARIES})
+    endif()
+    find_library(PSCAL_LIB_UTIL util)
+    if(PSCAL_LIB_UTIL)
+        target_link_libraries(pscal_dvtm_static PRIVATE ${PSCAL_LIB_UTIL})
+    endif()
+    set(PSCAL_DVTM_ENABLED ON)
 endif()
 
 if(PSCAL_PLATFORM_IOS)
@@ -1454,6 +1668,10 @@ if(PSCAL_PLATFORM_IOS)
 
         set(_pscal_micro_embed_lib "${CMAKE_BINARY_DIR}/libpscal_micro_embed.a")
         set(_pscal_micro_embed_hdr "${CMAKE_BINARY_DIR}/libpscal_micro_embed.h")
+        file(GLOB_RECURSE _pscal_micro_embed_go_sources CONFIGURE_DEPENDS
+            "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/*.go"
+            "${CMAKE_SOURCE_DIR}/third-party/micro/internal/*.go"
+        )
         add_custom_command(
             OUTPUT "${_pscal_micro_embed_lib}" "${_pscal_micro_embed_hdr}"
             COMMAND /bin/bash "${CMAKE_SOURCE_DIR}/ios/Tools/build_micro_embed_archive.sh"
@@ -1470,8 +1688,7 @@ if(PSCAL_PLATFORM_IOS)
                 "${CMAKE_SOURCE_DIR}/ios/Tools/go_patches/tcell_tscreen_unix_darwin.go"
                 "${CMAKE_SOURCE_DIR}/third-party/micro/go.mod"
                 "${CMAKE_SOURCE_DIR}/third-party/micro/go.sum"
-                "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/micro.go"
-                "${CMAKE_SOURCE_DIR}/third-party/micro/cmd/micro/pscal_embed.go"
+                ${_pscal_micro_embed_go_sources}
             VERBATIM
             COMMENT "Building embedded micro archive for ${_pscal_micro_sdk}/${_pscal_micro_arch}"
         )
@@ -1575,12 +1792,19 @@ pscal_apply_common_compilation_settings(pscal_core_static)
 if(PSCAL_HAS_LIBCURL AND CURL_INCLUDE_DIRS)
     target_include_directories(pscal_core_static PRIVATE ${CURL_INCLUDE_DIRS})
 endif()
+if(PSCAL_HAS_LIBGIT2)
+    target_include_directories(pscal_core_static PRIVATE
+        "${CMAKE_SOURCE_DIR}/third-party/libgit2/include")
+endif()
 if(PSCAL_HAS_LIBCURL)
     if(TARGET CURL::libcurl)
         target_link_libraries(pscal_core_static PUBLIC CURL::libcurl)
     elseif(CURL_LIBRARIES)
         target_link_libraries(pscal_core_static PUBLIC ${CURL_LIBRARIES})
     endif()
+endif()
+if(PSCAL_HAS_LIBGIT2 AND PSCAL_LIBGIT2_TARGET)
+    target_link_libraries(pscal_core_static PUBLIC ${PSCAL_LIBGIT2_TARGET})
 endif()
 target_compile_definitions(pscal_core_static PRIVATE PSCAL_NO_CLI_ENTRYPOINTS)
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
@@ -1608,6 +1832,16 @@ if(PSCAL_PLATFORM_IOS)
         "$<TARGET_FILE:pscal_core_static>"
         "$<TARGET_FILE:pscal_micro_embed>"
     )
+    if(PSCAL_DVTM_ENABLED)
+        list(APPEND _pscal_core_embed_archives
+            "$<TARGET_FILE:pscal_dvtm_static>"
+        )
+    endif()
+    if(PSCAL_HAS_LIBGIT2 AND PSCAL_LIBGIT2_TARGET)
+        list(APPEND _pscal_core_embed_archives
+            "$<TARGET_FILE:${PSCAL_LIBGIT2_TARGET}>"
+        )
+    endif()
     if(PSCAL_REAL_IOS)
         target_compile_definitions(pscal_core_static PRIVATE __progname=pscal_progname __progname_full=pscal_progname_full)
         list(APPEND _pscal_core_embed_archives
@@ -1637,6 +1871,7 @@ target_include_directories(pscal_core_static BEFORE PRIVATE
     third-party/nextvi
 )
 if(PSCAL_DVTM_ENABLED)
+    add_dependencies(pscal_core_static pscal_dvtm_static)
     target_include_directories(pscal_core_static BEFORE PRIVATE
         third-party/dvtm
         "${_pscal_dvtm_config_dir}"
@@ -1652,7 +1887,9 @@ if(PSCAL_DVTM_ENABLED)
 endif()
 if(PSCAL_PLATFORM_IOS)
     target_link_libraries(pscal_core_static PUBLIC pscal_common_frontend_shim)
-    target_link_libraries(pscal_core_static PUBLIC pscal_micro_embed)
+    # pscal_micro_embed is merged into libpscal_core_static.a via libtool above.
+    # Keep linkage private to avoid duplicate symbols when exsh links both.
+    target_link_libraries(pscal_core_static PRIVATE pscal_micro_embed)
     target_link_libraries(pscal_core_static PUBLIC "-framework CoreFoundation" "-framework Security")
 endif()
 

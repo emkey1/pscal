@@ -49,6 +49,11 @@ bash ./run_exsh_tests.sh
 echo "exsh Tests End"
 echo
 echo "====================================="
+echo "Running exsh Environment Snapshot Tests"
+bash ./run_exsh_env_snapshot_tests.sh
+echo "exsh Environment Snapshot Tests End"
+echo
+echo "====================================="
 echo "Running Rea Tests"
 bash ./run_rea_tests.sh
 echo "Rea Tests End"
@@ -94,6 +99,11 @@ echo "====================================="
 echo "Running submodule checker tool tests"
 bash ./tools/test_check_submodule_refs.sh
 echo "Submodule checker tool tests End"
+
+echo "====================================="
+echo "Running Smallclue git clone regression tests"
+python3 ./smallclue/run_git_clone_regressions.py
+echo "Smallclue git clone regression tests End"
 
 echo "====================================="
 echo "Running workflow example path validation"

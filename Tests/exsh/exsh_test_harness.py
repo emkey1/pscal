@@ -119,7 +119,9 @@ def run_exsh(executable: Path, case: TestCase, extra_args: Optional[List[str]] =
     cmd = [str(executable)]
     if extra_args:
         cmd.extend(extra_args)
-    cmd.append(str(case.script))
+    # Keep path presentation aligned with bash parity references.
+    script_arg = str(case.script)
+    cmd.append(script_arg)
     env = os.environ.copy()
     env.update(case.env)
     # Ensure exsh tests exercise tool binaries built from this workspace.

@@ -89,6 +89,8 @@ typedef enum {
 
     GET_FIELD_ADDRESS,
     GET_FIELD_ADDRESS16,
+    GET_FIELD_ADDRESS_KEEP,
+    GET_FIELD_ADDRESS_KEEP16,
     LOAD_FIELD_VALUE_BY_NAME,   // Pops base record/pointer, looks up field by name (1-byte const index) and pushes its value
     LOAD_FIELD_VALUE_BY_NAME16, // Pops base record/pointer, looks up field by name (2-byte const index) and pushes its value
     GET_ELEMENT_ADDRESS,

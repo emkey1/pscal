@@ -1,4 +1,5 @@
 /* Auto-generated include: command assembly helpers and metadata parsing. Included from shell.c. */
+#include "common/env_snapshot.h"
 #include "shell/runner.h"
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +7,7 @@
 #include "common/path_virtualization.h"
 #include "common/path_truncate.h"
 #include "ios/vproc.h"
+#include "ios/tty/pscal_fd.h"
 extern void pscalRuntimeDebugLog(const char *message);
 #endif
 
@@ -288,69 +290,6 @@ typedef struct {
     int error;
 } ShellCommandSubReadContext;
 
-static char **shellCommandSubSnapshotEnv(void) {
-    extern char **environ;
-    size_t count = 0;
-    for (char **cursor = environ; cursor && *cursor; ++cursor) {
-        count++;
-    }
-    char **copy = (char **)calloc(count + 1, sizeof(char *));
-    if (!copy) {
-        return NULL;
-    }
-    size_t written = 0;
-    for (char **cursor = environ; cursor && *cursor; ++cursor) {
-        copy[written] = strdup(*cursor);
-        if (!copy[written]) {
-            for (size_t i = 0; i < written; ++i) {
-                free(copy[i]);
-            }
-            free(copy);
-            return NULL;
-        }
-        written++;
-    }
-    copy[written] = NULL;
-    return copy;
-}
-
-static void shellCommandSubRestoreEnv(char **snapshot) {
-    if (!snapshot) {
-        return;
-    }
-    /* Clear current environment; emulate clearenv for platforms that do not expose it. */
-    extern char **environ;
-    if (environ) {
-        for (char **cursor = environ; *cursor; ++cursor) {
-            const char *entry = *cursor;
-            const char *eq = entry ? strchr(entry, '=') : NULL;
-            if (!eq || entry == eq) {
-                continue;
-            }
-            size_t name_len = (size_t)(eq - entry);
-            char *name = (char *)malloc(name_len + 1);
-            if (!name) {
-                continue;
-            }
-            memcpy(name, entry, name_len);
-            name[name_len] = '\0';
-            unsetenv(name);
-            free(name);
-        }
-    }
-    for (char **cursor = snapshot; *cursor; ++cursor) {
-        /* putenv takes ownership of the provided string; duplicate so we can free the snapshot. */
-        char *dup = strdup(*cursor);
-        if (dup) {
-            putenv(dup);
-        }
-    }
-    for (char **cursor = snapshot; *cursor; ++cursor) {
-        free(*cursor);
-    }
-    free(snapshot);
-}
-
 static void shellCommandSubstitutionDrain(ShellCommandSubReadContext *ctx) {
     if (!ctx || ctx->fd < 0) {
         return;
@@ -434,9 +373,8 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool stdout_redirected = false;
     bool mapped_stdout_redirected = false;
 #if defined(PSCAL_TARGET_IOS)
-    VProcSessionStdio *prev_session_stdio = NULL;
-    VProcSessionStdio *cmdsub_session_stdio = NULL;
-    bool cmdsub_session_activated = false;
+    VProc *active_vp = NULL;
+    struct pscal_fd *saved_stdout_pscal = NULL;
 #endif
 
     ShellRunOptions opts;
@@ -448,9 +386,22 @@ static char *shellRunCommandSubstitution(const char *command) {
     bool local_scope_pushed = false;
     bool previous_local_scope_flag = gShellRuntime.local_scope_active;
     bool previous_pipeline_flag = gShellRuntime.pipeline_subshell_active;
-    char **env_snapshot = NULL;
+    PscalEnvSnapshot env_snapshot = {0};
+    bool runtime_state_overridden = false;
+    bool saved_exit_requested = gShellExitRequested;
+    bool saved_break_requested = gShellRuntime.break_requested;
+    int saved_break_levels = gShellRuntime.break_requested_levels;
+    bool saved_continue_requested = gShellRuntime.continue_requested;
+    int saved_continue_levels = gShellRuntime.continue_requested_levels;
+    bool saved_errexit_pending = gShellRuntime.errexit_pending;
+    bool saved_errexit_defer_active = gShellRuntime.errexit_defer_active;
+    VM *saved_vm = gShellCurrentVm;
+    bool saved_vm_exit = saved_vm ? saved_vm->exit_requested : false;
+    bool saved_vm_abort = saved_vm ? saved_vm->abort_requested : false;
+    const char *saved_vm_builtin = saved_vm ? saved_vm->current_builtin_name : NULL;
 
-    if (*source) {
+    bool allow_scalar_cache = (gShellScriptDepth <= 1);
+    if (*source && allow_scalar_cache) {
         cached_entry = shellScalarCacheFind(source);
         if (cached_entry && cached_entry->result) {
             from_cache = true;
@@ -486,9 +437,9 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
 #if defined(PSCAL_TARGET_IOS)
-    VProc *active_vp = vprocCurrent();
-    prev_session_stdio = vprocSessionStdioCurrent();
+    active_vp = vprocCurrent();
     if (active_vp) {
+        saved_stdout_pscal = vprocGetPscalFd(active_vp, STDOUT_FILENO);
         int translated = vprocTranslateFd(active_vp, STDOUT_FILENO);
         if (translated >= 0 && translated != STDOUT_FILENO) {
             mapped_stdout_fd = translated;
@@ -524,12 +475,29 @@ static char *shellRunCommandSubstitution(const char *command) {
         goto substitution_finish;
     }
     stdout_redirected = true;
+#if defined(PSCAL_TARGET_IOS)
+    if (active_vp) {
+        /* Keep shimmed writes (vproc fd table) aligned with host fd 1. */
+        (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, STDOUT_FILENO);
+    }
+#endif
 
 #if defined(PSCAL_TARGET_IOS)
     if (mapped_stdout_fd >= 0) {
         if (vprocHostDup2(pipes[1], mapped_stdout_fd) < 0) {
             int err = errno;
             vprocHostDup2(saved_stdout, STDOUT_FILENO);
+#if defined(PSCAL_TARGET_IOS)
+            if (active_vp) {
+                if (saved_stdout_pscal) {
+                    /* Restore original PSCAL-backed stdout mapping. */
+                    (void)vprocAdoptPscalFd(active_vp, STDOUT_FILENO, saved_stdout_pscal);
+                } else {
+                    /* Restore shim stdout from the now-restored host fd 1. */
+                    (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, STDOUT_FILENO);
+                }
+            }
+#endif
             vprocHostClose(saved_stdout);
             saved_stdout = -1;
             vprocHostClose(pipes[0]);
@@ -551,30 +519,6 @@ static char *shellRunCommandSubstitution(const char *command) {
     pipes[1] = -1;
 
     reader.fd = pipes[0];
-
-#if defined(PSCAL_TARGET_IOS)
-    cmdsub_session_stdio = vprocSessionStdioCreate();
-    if (cmdsub_session_stdio) {
-        int session_kernel_pid = prev_session_stdio ? prev_session_stdio->kernel_pid : vprocGetKernelPid();
-        int session_stdin = (prev_session_stdio && prev_session_stdio->stdin_host_fd >= 0)
-            ? prev_session_stdio->stdin_host_fd
-            : STDIN_FILENO;
-        int session_stderr = (prev_session_stdio && prev_session_stdio->stderr_host_fd >= 0)
-            ? prev_session_stdio->stderr_host_fd
-            : STDERR_FILENO;
-        vprocSessionStdioInitWithFds(cmdsub_session_stdio,
-                                     session_stdin,
-                                     STDOUT_FILENO,
-                                     session_stderr,
-                                     session_kernel_pid);
-        if (prev_session_stdio) {
-            cmdsub_session_stdio->shell_pid = prev_session_stdio->shell_pid;
-            cmdsub_session_stdio->session_id = prev_session_stdio->session_id;
-        }
-        vprocSessionStdioActivate(cmdsub_session_stdio);
-        cmdsub_session_activated = true;
-    }
-#endif
 
     memset(&opts, 0, sizeof(opts));
     opts.no_cache = 1;
@@ -606,7 +550,21 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
 
     if (can_run) {
-        env_snapshot = shellCommandSubSnapshotEnv();
+        /* Command substitution must not leak flow-control state into caller. */
+        gShellExitRequested = false;
+        gShellRuntime.break_requested = false;
+        gShellRuntime.break_requested_levels = 0;
+        gShellRuntime.continue_requested = false;
+        gShellRuntime.continue_requested_levels = 0;
+        gShellRuntime.errexit_pending = false;
+        gShellRuntime.errexit_defer_active = false;
+        if (saved_vm) {
+            saved_vm->exit_requested = false;
+            saved_vm->abort_requested = false;
+            saved_vm->current_builtin_name = NULL;
+        }
+        runtime_state_overridden = true;
+        (void)pscalEnvSnapshotTake(&env_snapshot);
         status = shellRunSource(source, "<command-substitution>", &opts, &exit_requested);
     }
 
@@ -619,6 +577,20 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
     gShellRuntime.local_scope_active = previous_local_scope_flag;
     gShellRuntime.pipeline_subshell_active = previous_pipeline_flag;
+    if (runtime_state_overridden) {
+        gShellExitRequested = saved_exit_requested;
+        gShellRuntime.break_requested = saved_break_requested;
+        gShellRuntime.break_requested_levels = saved_break_levels;
+        gShellRuntime.continue_requested = saved_continue_requested;
+        gShellRuntime.continue_requested_levels = saved_continue_levels;
+        gShellRuntime.errexit_pending = saved_errexit_pending;
+        gShellRuntime.errexit_defer_active = saved_errexit_defer_active;
+        if (saved_vm) {
+            saved_vm->exit_requested = saved_vm_exit;
+            saved_vm->abort_requested = saved_vm_abort;
+            saved_vm->current_builtin_name = saved_vm_builtin;
+        }
+    }
 
     shellFlushStandardStreams();
 
@@ -632,6 +604,15 @@ static char *shellRunCommandSubstitution(const char *command) {
     }
     if (stdout_redirected) {
         vprocHostDup2(saved_stdout, STDOUT_FILENO);
+#if defined(PSCAL_TARGET_IOS)
+        if (active_vp) {
+            if (saved_stdout_pscal) {
+                (void)vprocAdoptPscalFd(active_vp, STDOUT_FILENO, saved_stdout_pscal);
+            } else {
+                (void)vprocRestoreHostFd(active_vp, STDOUT_FILENO, STDOUT_FILENO);
+            }
+        }
+#endif
         stdout_redirected = false;
     }
     if (saved_stdout >= 0) {
@@ -650,6 +631,12 @@ static char *shellRunCommandSubstitution(const char *command) {
         vprocHostClose(pipes[0]);
         pipes[0] = -1;
     }
+#if defined(PSCAL_TARGET_IOS)
+    if (saved_stdout_pscal) {
+        pscal_fd_close(saved_stdout_pscal);
+        saved_stdout_pscal = NULL;
+    }
+#endif
 
     int final_status = shellRuntimeLastStatus();
     if (!exit_requested && status != EXIT_SUCCESS) {
@@ -671,7 +658,7 @@ static char *shellRunCommandSubstitution(const char *command) {
     result = output;
     result_length = length;
 
-    if (*source) {
+    if (*source && allow_scalar_cache) {
         stored_entry = shellScalarCacheStore(source, result, result_length);
         if (stored_entry) {
             gShellRuntime.scalar_cache_stores++;
@@ -680,13 +667,9 @@ static char *shellRunCommandSubstitution(const char *command) {
 
 substitution_finish:
 #if defined(PSCAL_TARGET_IOS)
-    if (cmdsub_session_activated) {
-        vprocSessionStdioActivate(prev_session_stdio);
-        cmdsub_session_activated = false;
-    }
-    if (cmdsub_session_stdio) {
-        vprocSessionStdioDestroy(cmdsub_session_stdio);
-        cmdsub_session_stdio = NULL;
+    if (saved_stdout_pscal) {
+        pscal_fd_close(saved_stdout_pscal);
+        saved_stdout_pscal = NULL;
     }
 #endif
     if (reader.error && !exit_requested) {
@@ -715,10 +698,7 @@ substitution_finish:
         shellCaptureStackPop();
     }
 
-    if (env_snapshot) {
-        shellCommandSubRestoreEnv(env_snapshot);
-        env_snapshot = NULL;
-    }
+    (void)pscalEnvSnapshotRestore(&env_snapshot);
 
     if (!result) {
         result = strdup("");

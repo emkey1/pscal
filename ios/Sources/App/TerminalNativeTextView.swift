@@ -99,6 +99,31 @@ final class NativeTerminalView: UITextView {
             btn.setTitleColor(.white, for: .normal)
             btn.backgroundColor = UIColor(white: 0.3, alpha: 1.0)
             btn.layer.cornerRadius = 6
+
+            // Add accessibility labels for VoiceOver
+            switch key {
+            case "Esc":
+                btn.accessibilityLabel = "Escape"
+                btn.accessibilityHint = "Sends an Escape character"
+            case "Tab":
+                btn.accessibilityLabel = "Tab"
+                btn.accessibilityHint = "Inserts a tab character"
+            case "Ctrl":
+                btn.accessibilityLabel = "Control"
+                btn.accessibilityHint = "Toggles the control modifier for the next key press"
+            case "/":
+                btn.accessibilityLabel = "Forward Slash"
+                btn.accessibilityHint = "Inserts a forward slash character"
+            case "-":
+                btn.accessibilityLabel = "Minus"
+                btn.accessibilityHint = "Inserts a minus character"
+            case "⚙️":
+                btn.accessibilityLabel = "Settings"
+                btn.accessibilityHint = "Configure appearance and behavior"
+            default:
+                btn.accessibilityLabel = key
+            }
+
             btn.addTarget(self, action: #selector(keyTapped(_:)), for: .touchUpInside)
             keysStack.addArrangedSubview(btn)
         }
@@ -121,10 +146,14 @@ final class NativeTerminalView: UITextView {
         sizeSlider.maximumValue = 24
         sizeSlider.tintColor = .gray
         sizeSlider.translatesAutoresizingMaskIntoConstraints = false
+        sizeSlider.accessibilityLabel = "Font Size"
+        sizeSlider.accessibilityHint = "Adjusts the size of the terminal font"
         sizeSlider.addTarget(self, action: #selector(settingsChanged), for: .valueChanged)
 
         colorSegmentedControl.selectedSegmentIndex = 0
         colorSegmentedControl.translatesAutoresizingMaskIntoConstraints = false
+        colorSegmentedControl.accessibilityLabel = "Text Color"
+        colorSegmentedControl.accessibilityHint = "Selects the terminal text color"
         colorSegmentedControl.addTarget(self, action: #selector(settingsChanged), for: .valueChanged)
 
         settingsContainer.addSubview(sizeLabel)

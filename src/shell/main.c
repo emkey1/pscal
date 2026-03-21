@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #include <wchar.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -1653,6 +1654,77 @@ static bool interactiveInsertText(char **buffer,
     return true;
 }
 
+static bool interactiveMapMacOptionComposedRune(wchar_t wc, unsigned char *out_key) {
+    if (!out_key) {
+        return false;
+    }
+    switch ((uint32_t)wc) {
+        case 0x0192: /* ƒ (Option+f) */
+            *out_key = 'f';
+            return true;
+        case 0x222B: /* ∫ (Option+b) */
+            *out_key = 'b';
+            return true;
+        case 0x2202: /* ∂ (Option+d) */
+            *out_key = 'd';
+            return true;
+        case 0x2020: /* † (Option+t) */
+            *out_key = 't';
+            return true;
+        case 0x2265: /* ≥ (Option+.) */
+            *out_key = '.';
+            return true;
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool interactiveReadUtf8Codepoint(unsigned char first,
+                                         wchar_t *out_wc,
+                                         char *bytes,
+                                         size_t *out_len) {
+    if (!out_wc || !bytes || !out_len) {
+        return false;
+    }
+    if (first < 0x80) {
+        bytes[0] = (char)first;
+        *out_len = 1;
+        *out_wc = (wchar_t)first;
+        return true;
+    }
+
+    size_t expected = 0;
+    if ((first & 0xE0) == 0xC0) {
+        expected = 2;
+    } else if ((first & 0xF0) == 0xE0) {
+        expected = 3;
+    } else if ((first & 0xF8) == 0xF0) {
+        expected = 4;
+    } else {
+        return false;
+    }
+
+    bytes[0] = (char)first;
+    for (size_t i = 1; i < expected; ++i) {
+        unsigned char next = 0;
+        ssize_t count = shellReadFd(STDIN_FILENO, &next, 1);
+        if (count <= 0 || (next & 0xC0) != 0x80) {
+            return false;
+        }
+        bytes[i] = (char)next;
+    }
+
+    mbstate_t st;
+    memset(&st, 0, sizeof(st));
+    size_t consumed = mbrtowc(out_wc, bytes, expected, &st);
+    if (consumed == (size_t)-1 || consumed == (size_t)-2 || consumed == 0) {
+        return false;
+    }
+    *out_len = consumed;
+    return true;
+}
+
 static bool interactiveHistoryNavigateUp(const char *prompt,
                                          char **buffer,
                                          size_t *length,
@@ -2064,11 +2136,14 @@ static size_t interactiveNextWord(const char *buffer, size_t length, size_t curs
     return pos;
 }
 
-static size_t interactiveFindWordStart(const char *buffer, size_t length) {
+static size_t interactiveFindWordStart(const char *buffer, size_t length, size_t cursor) {
     if (!buffer || length == 0) {
         return length;
     }
-    size_t index = length;
+    if (cursor > length) {
+        cursor = length;
+    }
+    size_t index = cursor;
     while (index > 0) {
         unsigned char c = (unsigned char)buffer[index - 1];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
@@ -2194,6 +2269,25 @@ typedef struct {
     size_t *capacity;
 } InteractiveCompletionContext;
 
+static bool __attribute__((unused)) interactivePathHasShebang(const char *path) {
+    if (!path || !*path) {
+        return false;
+    }
+    int fd =
+#if defined(PSCAL_TARGET_IOS)
+        pscalPathVirtualized_open(path, O_RDONLY);
+#else
+        open(path, O_RDONLY);
+#endif
+    if (fd < 0) {
+        return false;
+    }
+    char header[2];
+    ssize_t n = read(fd, header, sizeof(header));
+    close(fd);
+    return n == 2 && header[0] == '#' && header[1] == '!';
+}
+
 static bool interactiveAddCompletionMatch(const char *name,
                                           const char *prefix,
                                           size_t prefix_len,
@@ -2267,7 +2361,12 @@ static bool interactiveCollectPathExecutables(const char *prefix,
     char *dir = strtok_r(copy, ":", &saveptr);
     while (ok && dir) {
         const char *real_dir = (*dir == '\0') ? "." : dir;
-        DIR *d = opendir(real_dir);
+        DIR *d =
+#if defined(PSCAL_TARGET_IOS)
+            pscalPathVirtualized_opendir(real_dir);
+#else
+            opendir(real_dir);
+#endif
         if (d) {
             struct dirent *ent = NULL;
             while (ok && (ent = readdir(d)) != NULL) {
@@ -2290,13 +2389,36 @@ static bool interactiveCollectPathExecutables(const char *prefix,
                 }
                 memcpy(full + dir_len, ent->d_name, name_len + 1);
                 struct stat st;
-                if (stat(full, &st) != 0) {
+                if (
+#if defined(PSCAL_TARGET_IOS)
+                    pscalPathVirtualized_stat(full, &st)
+#else
+                    stat(full, &st)
+#endif
+                    != 0) {
                     continue;
                 }
                 if (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
                     continue;
                 }
-                if (access(full, X_OK) != 0) {
+                bool runnable = (
+#if defined(PSCAL_TARGET_IOS)
+                    pscalPathVirtualized_access(full, X_OK)
+#else
+                    access(full, X_OK)
+#endif
+                    == 0);
+#if defined(PSCAL_TARGET_IOS)
+                if (!runnable && (st.st_mode & 0111) != 0) {
+                    runnable = true;
+                }
+                if (!runnable &&
+                    pscalPathVirtualized_access(full, R_OK) == 0 &&
+                    interactivePathHasShebang(full)) {
+                    runnable = true;
+                }
+#endif
+                if (!runnable) {
                     continue;
                 }
                 if (!interactiveAddCompletionMatch(ent->d_name,
@@ -2313,6 +2435,69 @@ static bool interactiveCollectPathExecutables(const char *prefix,
         }
         dir = strtok_r(NULL, ":", &saveptr);
     }
+
+#if defined(PSCAL_TARGET_IOS)
+    if (ok) {
+        const char *fallback_dirs[] = { "/bin", "/Documents/bin" };
+        for (size_t i = 0; ok && i < sizeof(fallback_dirs) / sizeof(fallback_dirs[0]); ++i) {
+            const char *real_dir = fallback_dirs[i];
+            DIR *d = pscalPathVirtualized_opendir(real_dir);
+            if (!d) {
+                continue;
+            }
+            struct dirent *ent = NULL;
+            while (ok && (ent = readdir(d)) != NULL) {
+                if (ent->d_name[0] == '\0') {
+                    continue;
+                }
+                if (ent->d_name[0] == '.' && prefix_len == 0) {
+                    continue;
+                }
+                char full[PATH_MAX];
+                size_t dir_len = strlen(real_dir);
+                size_t name_len = strlen(ent->d_name);
+                if (dir_len + 1 + name_len + 1 >= sizeof(full)) {
+                    continue;
+                }
+                memcpy(full, real_dir, dir_len);
+                if (dir_len > 0 && real_dir[dir_len - 1] != '/') {
+                    full[dir_len] = '/';
+                    dir_len += 1;
+                }
+                memcpy(full + dir_len, ent->d_name, name_len + 1);
+                struct stat st;
+                if (pscalPathVirtualized_stat(full, &st) != 0) {
+                    continue;
+                }
+                if (!S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode)) {
+                    continue;
+                }
+                bool runnable = (pscalPathVirtualized_access(full, X_OK) == 0);
+                if (!runnable && (st.st_mode & 0111) != 0) {
+                    runnable = true;
+                }
+                if (!runnable &&
+                    pscalPathVirtualized_access(full, R_OK) == 0 &&
+                    interactivePathHasShebang(full)) {
+                    runnable = true;
+                }
+                if (!runnable) {
+                    continue;
+                }
+                if (!interactiveAddCompletionMatch(ent->d_name,
+                                                   prefix,
+                                                   prefix_len,
+                                                   matches,
+                                                   count,
+                                                   capacity)) {
+                    ok = false;
+                    break;
+                }
+            }
+            closedir(d);
+        }
+    }
+#endif
 
     free(copy);
     return ok;
@@ -2411,12 +2596,14 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     if (!buffer || !*buffer || !length || !capacity || !cursor) {
         return false;
     }
-    if (*cursor != *length) {
-        return false;
+    size_t insertion_point = *cursor;
+    if (insertion_point > *length) {
+        insertion_point = *length;
     }
-    size_t word_start = interactiveFindWordStart(*buffer, *length);
+    size_t suffix_len = *length - insertion_point;
+    size_t word_start = interactiveFindWordStart(*buffer, *length, insertion_point);
     char *word = *buffer + word_start;
-    size_t word_len = *length - word_start;
+    size_t word_len = insertion_point - word_start;
     if (interactiveWordLooksDynamic(word)) {
         return false;
     }
@@ -2438,7 +2625,7 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     bool completing_command = false;
     bool command_is_cd = false;
     if (interactiveExtractCommandToken(*buffer,
-                                       *length,
+                                       insertion_point,
                                        word_start,
                                        &command_start,
                                        &command_len)) {
@@ -2475,7 +2662,6 @@ static bool interactiveHandleTabCompletion(const char *prompt,
                     interactivePrintMatchesInColumns(matches, match_count);
                     interactiveFreeMatches(matches, match_count);
 
-                    *cursor = *length;
                     redrawInteractiveLine(prompt,
                                           *buffer,
                                           *length,
@@ -2489,21 +2675,25 @@ static bool interactiveHandleTabCompletion(const char *prompt,
                 }
             }
 
-            size_t total_len = word_start + replacement_len + (append_space ? 1 : 0);
+            size_t inserted_len = replacement_len + (append_space ? 1 : 0);
+            size_t total_len = word_start + inserted_len + suffix_len;
             if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
                 interactiveFreeMatches(matches, match_count);
                 return false;
             }
 
+            memmove(*buffer + word_start + inserted_len,
+                    *buffer + insertion_point,
+                    suffix_len + 1);
             memcpy(*buffer + word_start, matches[0], replacement_len);
             if (append_space) {
                 (*buffer)[word_start + replacement_len] = ' ';
                 replacement_len += 1;
             }
-            *length = word_start + replacement_len;
+            *length = word_start + replacement_len + suffix_len;
             (*buffer)[*length] = '\0';
 
-            *cursor = *length;
+            *cursor = word_start + replacement_len;
             redrawInteractiveLine(prompt,
                                   *buffer,
                                   *length,
@@ -2617,7 +2807,6 @@ static bool interactiveHandleTabCompletion(const char *prompt,
             interactivePrintMatchesInColumns(results.gl_pathv, results.gl_pathc);
             globfree(&results);
 
-            *cursor = *length;
             redrawInteractiveLine(prompt,
                                   *buffer,
                                   *length,
@@ -2645,12 +2834,16 @@ static bool interactiveHandleTabCompletion(const char *prompt,
     }
 #endif
 
-    size_t total_len = word_start + replacement_len + (append_slash ? 1 : 0) + (append_space ? 1 : 0);
+    size_t inserted_len = replacement_len + (append_slash ? 1 : 0) + (append_space ? 1 : 0);
+    size_t total_len = word_start + inserted_len + suffix_len;
     if (!interactiveEnsureCapacity(buffer, capacity, total_len + 1)) {
         globfree(&results);
         return false;
     }
 
+    memmove(*buffer + word_start + inserted_len,
+            *buffer + insertion_point,
+            suffix_len + 1);
     memcpy(*buffer + word_start, results.gl_pathv[0], replacement_len);
     if (append_slash) {
         (*buffer)[word_start + replacement_len] = '/';
@@ -2660,11 +2853,11 @@ static bool interactiveHandleTabCompletion(const char *prompt,
         (*buffer)[word_start + replacement_len] = ' ';
         replacement_len += 1;
     }
-    *length = word_start + replacement_len;
+    *length = word_start + replacement_len + suffix_len;
     (*buffer)[*length] = '\0';
     globfree(&results);
 
-    *cursor = *length;
+    *cursor = word_start + replacement_len;
     redrawInteractiveLine(prompt,
                           *buffer,
                           *length,
@@ -2883,6 +3076,207 @@ copy_char:
 
     out[out_len] = '\0';
     return out;
+}
+
+static bool interactiveHandleAltShortcut(unsigned char key,
+                                         const char *prompt,
+                                         char **buffer,
+                                         size_t *length,
+                                         size_t *cursor,
+                                         size_t *capacity,
+                                         size_t *displayed_length,
+                                         size_t *displayed_prompt_lines,
+                                         size_t *history_index,
+                                         char **scratch,
+                                         char **kill_buffer,
+                                         size_t *alt_dot_offset,
+                                         bool *alt_dot_active) {
+    if (!prompt || !buffer || !*buffer || !length || !cursor || !capacity ||
+        !displayed_length || !displayed_prompt_lines || !history_index ||
+        !scratch || !kill_buffer || !alt_dot_offset || !alt_dot_active) {
+        return false;
+    }
+
+    if (key == 'f' || key == 'F') { /* Alt+F */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        size_t next = interactiveNextWord(*buffer, *length, *cursor);
+        if (next != *cursor) {
+            *cursor = next;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == 'b' || key == 'B') { /* Alt+B */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        size_t prev = interactivePreviousWord(*buffer, *length, *cursor);
+        if (prev != *cursor) {
+            *cursor = prev;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == 'd' || key == 'D') { /* Alt+D */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        size_t next = interactiveNextWord(*buffer, *length, *cursor);
+        if (next > *cursor) {
+            size_t removed_len = next - *cursor;
+            if (!interactiveSetKillBuffer(kill_buffer, *buffer + *cursor, removed_len)) {
+                shellWriteStdoutChar('\a');
+                return true;
+            }
+            memmove(*buffer + *cursor, *buffer + next, *length - next + 1);
+            *length -= removed_len;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            *history_index = 0;
+            interactiveUpdateScratch(scratch, *buffer, *length);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == 't' || key == 'T') { /* Alt+T */
+        *alt_dot_active = false;
+        *alt_dot_offset = 0;
+        if (*length > 0 && *cursor > 0) {
+            size_t current_start = *cursor;
+            if (current_start > 0 && isspace((unsigned char)(*buffer)[current_start])) {
+                while (current_start < *length &&
+                       isspace((unsigned char)(*buffer)[current_start])) {
+                    current_start++;
+                }
+                if (current_start >= *length) {
+                    shellWriteStdoutChar('\a');
+                    return true;
+                }
+            } else {
+                while (current_start > 0 &&
+                       !isspace((unsigned char)(*buffer)[current_start - 1])) {
+                    current_start--;
+                }
+            }
+            size_t current_end = current_start;
+            while (current_end < *length &&
+                   !isspace((unsigned char)(*buffer)[current_end])) {
+                current_end++;
+            }
+            size_t prev_end = current_start;
+            while (prev_end > 0 && isspace((unsigned char)(*buffer)[prev_end - 1])) {
+                prev_end--;
+            }
+            if (prev_end == 0) {
+                shellWriteStdoutChar('\a');
+                return true;
+            }
+            size_t prev_start = prev_end;
+            while (prev_start > 0 &&
+                   !isspace((unsigned char)(*buffer)[prev_start - 1])) {
+                prev_start--;
+            }
+            size_t word1_len = prev_end - prev_start;
+            size_t middle_len = current_start - prev_end;
+            size_t word2_len = current_end - current_start;
+            char *temp = (char *)malloc(*length + 1);
+            if (!temp) {
+                shellWriteStdoutChar('\a');
+                return true;
+            }
+            memcpy(temp, *buffer, prev_start);
+            size_t offset = prev_start;
+            memcpy(temp + offset, *buffer + current_start, word2_len);
+            offset += word2_len;
+            memcpy(temp + offset, *buffer + prev_end, middle_len);
+            offset += middle_len;
+            memcpy(temp + offset, *buffer + prev_start, word1_len);
+            offset += word1_len;
+            memcpy(temp + offset, *buffer + current_end, *length - current_end + 1);
+            memcpy(*buffer, temp, *length + 1);
+            free(temp);
+            *cursor = prev_start + word2_len + middle_len + word1_len;
+            redrawInteractiveLine(prompt,
+                                  *buffer,
+                                  *length,
+                                  *cursor,
+                                  displayed_length,
+                                  displayed_prompt_lines);
+            *history_index = 0;
+            interactiveUpdateScratch(scratch, *buffer, *length);
+        } else {
+            shellWriteStdoutChar('\a');
+        }
+        return true;
+    }
+
+    if (key == '.') { /* Alt+. */
+        if (!*alt_dot_active) {
+            *alt_dot_offset = 0;
+        } else {
+            (*alt_dot_offset)++;
+        }
+        char *argument = NULL;
+        if (!interactiveExtractLastArgument(*alt_dot_offset, &argument)) {
+            shellWriteStdoutChar('\a');
+            *alt_dot_active = false;
+            *alt_dot_offset = 0;
+            return true;
+        }
+        if (!argument) {
+            shellWriteStdoutChar('\a');
+            *alt_dot_active = false;
+            *alt_dot_offset = 0;
+            return true;
+        }
+        size_t arg_len = strlen(argument);
+        if (!interactiveInsertText(buffer,
+                                   length,
+                                   capacity,
+                                   cursor,
+                                   argument,
+                                   arg_len)) {
+            shellWriteStdoutChar('\a');
+            free(argument);
+            *alt_dot_active = false;
+            *alt_dot_offset = 0;
+            return true;
+        }
+        free(argument);
+        redrawInteractiveLine(prompt,
+                              *buffer,
+                              *length,
+                              *cursor,
+                              displayed_length,
+                              displayed_prompt_lines);
+        *history_index = 0;
+        interactiveUpdateScratch(scratch, *buffer, *length);
+        *alt_dot_active = true;
+        return true;
+    }
+
+    return false;
 }
 
 static char *readInteractiveLine(const char *prompt,
@@ -3588,170 +3982,20 @@ static char *readInteractiveLine(const char *prompt,
                     continue;
                 }
                 continue;
-            } else if (seq[0] == 'f' || seq[0] == 'F') { /* Alt+F */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                size_t next = interactiveNextWord(buffer, length, cursor);
-                if (next != cursor) {
-                    cursor = next;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == 'b' || seq[0] == 'B') { /* Alt+B */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                size_t prev = interactivePreviousWord(buffer, length, cursor);
-                if (prev != cursor) {
-                    cursor = prev;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == 'd' || seq[0] == 'D') { /* Alt+D */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                size_t next = interactiveNextWord(buffer, length, cursor);
-                if (next > cursor) {
-                    size_t removed_len = next - cursor;
-                    if (!interactiveSetKillBuffer(&kill_buffer, buffer + cursor, removed_len)) {
-                        shellWriteStdoutChar('\a');
-                        continue;
-                    }
-                    memmove(buffer + cursor, buffer + next, length - next + 1);
-                    length -= removed_len;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                    history_index = 0;
-                    interactiveUpdateScratch(&scratch, buffer, length);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == 't' || seq[0] == 'T') { /* Alt+T */
-                alt_dot_active = false;
-                alt_dot_offset = 0;
-                if (length > 0 && cursor > 0) {
-                    size_t current_start = cursor;
-                    if (current_start > 0 && isspace((unsigned char)buffer[current_start])) {
-                        while (current_start < length && isspace((unsigned char)buffer[current_start])) {
-                            current_start++;
-                        }
-                        if (current_start >= length) {
-                            shellWriteStdoutChar('\a');
-                            continue;
-                        }
-                    } else {
-                        while (current_start > 0 && !isspace((unsigned char)buffer[current_start - 1])) {
-                            current_start--;
-                        }
-                    }
-                    size_t current_end = current_start;
-                    while (current_end < length && !isspace((unsigned char)buffer[current_end])) {
-                        current_end++;
-                    }
-                    size_t prev_end = current_start;
-                    while (prev_end > 0 && isspace((unsigned char)buffer[prev_end - 1])) {
-                        prev_end--;
-                    }
-                    if (prev_end == 0) {
-                        shellWriteStdoutChar('\a');
-                        continue;
-                    }
-                    size_t prev_start = prev_end;
-                    while (prev_start > 0 && !isspace((unsigned char)buffer[prev_start - 1])) {
-                        prev_start--;
-                    }
-                    size_t word1_len = prev_end - prev_start;
-                    size_t middle_len = current_start - prev_end;
-                    size_t word2_len = current_end - current_start;
-                    char *temp = (char *)malloc(length + 1);
-                    if (!temp) {
-                        shellWriteStdoutChar('\a');
-                        continue;
-                    }
-                    memcpy(temp, buffer, prev_start);
-                    size_t offset = prev_start;
-                    memcpy(temp + offset, buffer + current_start, word2_len);
-                    offset += word2_len;
-                    memcpy(temp + offset, buffer + prev_end, middle_len);
-                    offset += middle_len;
-                    memcpy(temp + offset, buffer + prev_start, word1_len);
-                    offset += word1_len;
-                    memcpy(temp + offset, buffer + current_end, length - current_end + 1);
-                    memcpy(buffer, temp, length + 1);
-                    free(temp);
-                    cursor = prev_start + word2_len + middle_len + word1_len;
-                    redrawInteractiveLine(prompt,
-                                          buffer,
-                                          length,
-                                          cursor,
-                                          &displayed_length,
-                                          &displayed_prompt_lines);
-                    history_index = 0;
-                    interactiveUpdateScratch(&scratch, buffer, length);
-                } else {
-                    shellWriteStdoutChar('\a');
-                }
-                continue;
-            } else if (seq[0] == '.') { /* Alt+. */
-                if (!alt_dot_active) {
-                    alt_dot_offset = 0;
-                } else {
-                    alt_dot_offset++;
-                }
-                char *argument = NULL;
-                if (!interactiveExtractLastArgument(alt_dot_offset, &argument)) {
-                    shellWriteStdoutChar('\a');
-                    alt_dot_active = false;
-                    alt_dot_offset = 0;
-                    continue;
-                }
-                if (!argument) {
-                    shellWriteStdoutChar('\a');
-                    alt_dot_active = false;
-                    alt_dot_offset = 0;
-                    continue;
-                }
-                size_t arg_len = strlen(argument);
-                if (!interactiveInsertText(&buffer,
-                                           &length,
-                                           &capacity,
-                                           &cursor,
-                                           argument,
-                                           arg_len)) {
-                    shellWriteStdoutChar('\a');
-                    free(argument);
-                    alt_dot_active = false;
-                    alt_dot_offset = 0;
-                    continue;
-                }
-                free(argument);
-                redrawInteractiveLine(prompt,
-                                      buffer,
-                                      length,
-                                      cursor,
-                                      &displayed_length,
-                                      &displayed_prompt_lines);
-                history_index = 0;
-                interactiveUpdateScratch(&scratch, buffer, length);
-                alt_dot_active = true;
+            }
+            if (interactiveHandleAltShortcut(seq[0],
+                                             prompt,
+                                             &buffer,
+                                             &length,
+                                             &cursor,
+                                             &capacity,
+                                             &displayed_length,
+                                             &displayed_prompt_lines,
+                                             &history_index,
+                                             &scratch,
+                                             &kill_buffer,
+                                             &alt_dot_offset,
+                                             &alt_dot_active)) {
                 continue;
             }
             alt_dot_active = false;
@@ -3778,6 +4022,29 @@ static char *readInteractiveLine(const char *prompt,
         }
 
         if (!isprint(ch)) {
+            if (ch >= 0x80) {
+                wchar_t option_wc = 0;
+                char utf8_bytes[4];
+                size_t utf8_len = 0;
+                unsigned char alt_key = 0;
+                if (interactiveReadUtf8Codepoint(ch, &option_wc, utf8_bytes, &utf8_len) &&
+                    interactiveMapMacOptionComposedRune(option_wc, &alt_key) &&
+                    interactiveHandleAltShortcut(alt_key,
+                                                 prompt,
+                                                 &buffer,
+                                                 &length,
+                                                 &cursor,
+                                                 &capacity,
+                                                 &displayed_length,
+                                                 &displayed_prompt_lines,
+                                                 &history_index,
+                                                 &scratch,
+                                                 &kill_buffer,
+                                                 &alt_dot_offset,
+                                                 &alt_dot_active)) {
+                    continue;
+                }
+            }
             alt_dot_active = false;
             alt_dot_offset = 0;
             shellWriteStdoutChar('\a');
@@ -4409,11 +4676,13 @@ static void *shellRunSessionThread(void *arg) {
         return NULL;
     }
     PSCALRuntimeContext *prev_runtime_ctx = NULL;
+    bool runtime_ctx_swapped = false;
     if (PSCALRuntimeGetCurrentRuntimeContext) {
         prev_runtime_ctx = PSCALRuntimeGetCurrentRuntimeContext();
     }
     if (PSCALRuntimeSetCurrentRuntimeContext && ctx->runtime_ctx) {
         PSCALRuntimeSetCurrentRuntimeContext(ctx->runtime_ctx);
+        runtime_ctx_swapped = true;
         if (getenv("PSCALI_VPROC_DEBUG")) {
             shellDebugLogf("[session] id=%llu runtime_ctx=%p\n",
                            (unsigned long long)ctx->session_id,
@@ -4428,7 +4697,7 @@ static void *shellRunSessionThread(void *arg) {
         shellSessionNotifyExit(ctx->session_id, status);
         shellFreeArgv(ctx->argv, ctx->argc);
         free(ctx);
-        if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+        if (runtime_ctx_swapped && PSCALRuntimeSetCurrentRuntimeContext) {
             PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
         }
         return NULL;
@@ -4443,6 +4712,9 @@ static void *shellRunSessionThread(void *arg) {
         shellSessionNotifyExit(ctx->session_id, status);
         shellFreeArgv(ctx->argv, ctx->argc);
         free(ctx);
+        if (runtime_ctx_swapped && PSCALRuntimeSetCurrentRuntimeContext) {
+            PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
+        }
         return NULL;
     }
     vprocSessionStdioActivate(session_stdio);
@@ -4498,7 +4770,7 @@ static void *shellRunSessionThread(void *arg) {
     shellSessionNotifyExit(ctx->session_id, status);
     shellFreeArgv(ctx->argv, ctx->argc);
     free(ctx);
-    if (PSCALRuntimeSetCurrentRuntimeContext && prev_runtime_ctx) {
+    if (runtime_ctx_swapped && PSCALRuntimeSetCurrentRuntimeContext) {
         PSCALRuntimeSetCurrentRuntimeContext(prev_runtime_ctx);
     }
     return NULL;

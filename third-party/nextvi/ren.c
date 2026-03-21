@@ -1,8 +1,8 @@
 /* rendering strings */
 
-static rset *dir_rslr;	/* pattern of marks for left-to-right strings */
-static rset *dir_rsrl;	/* pattern of marks for right-to-left strings */
-static rset *dir_rsctx;	/* direction context patterns */
+static NEXTVI_TLS rset *dir_rslr;	/* pattern of marks for left-to-right strings */
+static NEXTVI_TLS rset *dir_rsrl;	/* pattern of marks for right-to-left strings */
+static NEXTVI_TLS rset *dir_rsctx;	/* direction context patterns */
 
 static void dir_reverse(int *ord, int beg, int end)
 {
@@ -88,12 +88,14 @@ static int ren_cwid(char *s, int pos)
 	return uc_wid(c);
 }
 
-ren_state rstates[3]; /* 0 = current line, 1 = all other lines, 2 = aux rendering */
-ren_state *rstate = rstates;
+NEXTVI_TLS ren_state rstates[3]; /* 0 = current line, 1 = all other lines, 2 = aux rendering */
+NEXTVI_TLS ren_state *rstate;
 
 /* specify the screen position of the characters in s */
 ren_state *ren_position(char *s)
 {
+	if (!rstate)
+		rstate = rstates;
 	if (rstate->s == s)
 		return rstate;
 	else if (rstate->col) {
@@ -227,7 +229,7 @@ char *ren_translate(char *s, char *ln)
 	if (l == 1)
 		return NULL;
 	if (uc_acomb(c)) {
-		static char buf[16] = "ـ";
+		static NEXTVI_TLS char buf[16] = "ـ";
 		*((char*)memcpy(buf+2, s, l)+l) = '\0';
 		return buf;
 	}
@@ -237,18 +239,18 @@ char *ren_translate(char *s, char *ln)
 }
 
 /* mapping filetypes to regular expression sets */
-static struct ftmap {
+static NEXTVI_TLS struct ftmap {
 	int setbidx;
 	int seteidx;
 	char *ft;
 	rset *rs;
 } ftmap[100];
-static int ftmidx;
-static int ftidx;
-static rset *syn_ftrs;
-static int last_scdir;
-static int blockatt;
-int syn_blockhl;
+static NEXTVI_TLS int ftmidx;
+static NEXTVI_TLS int ftidx;
+static NEXTVI_TLS rset *syn_ftrs;
+static NEXTVI_TLS int last_scdir;
+static NEXTVI_TLS int blockatt;
+NEXTVI_TLS int syn_blockhl;
 
 static int syn_initft(int fti, int n, char *name)
 {

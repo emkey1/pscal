@@ -96,6 +96,7 @@ struct TerminalView: View {
                     .background(.ultraThinMaterial, in: Circle())
             }
             .accessibilityLabel("Terminal Settings")
+            .accessibilityHint("Configure appearance and behavior")
             
 //            Button {
 //                runtime.forceExshRestart()

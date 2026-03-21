@@ -71,6 +71,18 @@ static void registerRecordMethods(Parser *parser, const char *recordName, AST *r
 static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
+static AST *parseRecordFieldDecl(Parser *parser);
+static void assignRecordFieldSlots(AST *fieldDecl, int baseSlot);
+static bool parseVariantRecordSection(Parser *parser, AST *recordNode, int *slotCursor);
+static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator, int *slotCursor);
+static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName);
+static AST *tryStatement(Parser *parser);
+static AST *raiseStatement(Parser *parser);
+static AST *withStatement(Parser *parser);
+static AST *parsePostfixSelectors(Parser *parser, AST *node);
+static AST *parseRecordConstructor(Parser *parser);
+static AST *cloneBuiltinTypeNode(VarType type, int line);
+static AST *inferInlineForVarType(AST *expr, int line);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -89,6 +101,79 @@ static void appendDependencyPath(Parser *parser, const char *path) {
 
     listAppend(parser->dependency_paths, to_store);
     if (canonical) free(canonical);
+}
+
+static AST *cloneBuiltinTypeNode(VarType type, int line) {
+    const char *type_name = NULL;
+
+    if (type == TYPE_INTEGER || type == TYPE_INT32) {
+        type_name = "integer";
+    } else if (type == TYPE_INT16) {
+        type_name = "smallint";
+    } else if (type == TYPE_INT8) {
+        type_name = "shortint";
+    } else if (type == TYPE_INT64) {
+        type_name = "int64";
+    } else if (type == TYPE_UINT32) {
+        type_name = "cardinal";
+    } else if (type == TYPE_UINT64) {
+        type_name = "uint64";
+    } else if (type == TYPE_FLOAT) {
+        type_name = "single";
+    } else if (type == TYPE_DOUBLE || type == TYPE_REAL) {
+        type_name = "double";
+    } else if (type == TYPE_LONG_DOUBLE) {
+        type_name = "extended";
+    } else if (type == TYPE_BOOLEAN) {
+        type_name = "boolean";
+    } else if (type == TYPE_STRING) {
+        type_name = "string";
+    } else if (type == TYPE_CHAR) {
+        type_name = "char";
+    } else if (type == TYPE_BYTE) {
+        type_name = "byte";
+    } else if (type == TYPE_WORD) {
+        type_name = "word";
+    }
+
+    if (!type_name) {
+        return NULL;
+    }
+
+    Token *type_tok = newToken(TOKEN_IDENTIFIER, type_name, line, 0);
+    if (!type_tok) {
+        EXIT_FAILURE_HANDLER();
+    }
+    AST *type_node = newASTNode(AST_TYPE_IDENTIFIER, type_tok);
+    if (!type_node) {
+        freeToken(type_tok);
+        EXIT_FAILURE_HANDLER();
+    }
+    setTypeAST(type_node, type);
+    freeToken(type_tok);
+    return type_node;
+}
+
+static AST *inferInlineForVarType(AST *expr, int line) {
+    if (!expr) {
+        return cloneBuiltinTypeNode(TYPE_INTEGER, line);
+    }
+
+    if (expr->type_def) {
+        AST *copy = copyAST(expr->type_def);
+        if (copy) {
+            return copy;
+        }
+    }
+
+    if (expr->var_type != TYPE_UNKNOWN && expr->var_type != TYPE_VOID) {
+        AST *builtin = cloneBuiltinTypeNode(expr->var_type, line);
+        if (builtin) {
+            return builtin;
+        }
+    }
+
+    return cloneBuiltinTypeNode(TYPE_INTEGER, line);
 }
 
 static bool tokenTypeIsIdentifierLike(TokenType type) {
@@ -364,21 +449,11 @@ AST *parseWriteArguments(Parser *parser) {
     return argList;
 }
 
-// lvalue: Parses variable.field[index] etc. Calls expression for index.
-AST *lvalue(Parser *parser) {
-    Token *ident_token_snapshot = parser->current_token; // Snapshot the first token
-
-    if (!tokenIsIdentifierLike(ident_token_snapshot)) {
-        errorParser(parser, "Expected identifier at start of lvalue");
-        return newASTNode(AST_NOOP, NULL); // Return a NOOP node on error
+static AST *parsePostfixSelectors(Parser *parser, AST *node) {
+    if (!parser || !node) {
+        return node;
     }
 
-    // Create the base variable node.
-    // newASTNode should make its own copy of the token if it needs to persist it.
-    AST *node = newASTNode(AST_VARIABLE, ident_token_snapshot);
-    eat(parser, ident_token_snapshot->type); // Consume the first identifier-like token
-
-    // Loop for subsequent field access '.', array '[]', or pointer '^'
     while (parser->current_token &&
            (parser->current_token->type == TOKEN_PERIOD ||
             parser->current_token->type == TOKEN_LBRACKET ||
@@ -440,7 +515,24 @@ AST *lvalue(Parser *parser) {
             node = deref_node; // The dereference_node is now the current 'node'
         }
     }
-    return node; // Return the fully constructed lvalue AST
+    return node;
+}
+
+// lvalue: Parses variable.field[index] etc. Calls expression for index.
+AST *lvalue(Parser *parser) {
+    Token *ident_token_snapshot = parser->current_token; // Snapshot the first token
+
+    if (!tokenIsIdentifierLike(ident_token_snapshot)) {
+        errorParser(parser, "Expected identifier at start of lvalue");
+        return newASTNode(AST_NOOP, NULL); // Return a NOOP node on error
+    }
+
+    // Create the base variable node.
+    // newASTNode should make its own copy of the token if it needs to persist it.
+    AST *node = newASTNode(AST_VARIABLE, ident_token_snapshot);
+    eat(parser, ident_token_snapshot->type); // Consume the first identifier-like token
+
+    return parsePostfixSelectors(parser, node); // Return the fully constructed lvalue AST
 }
 // parseArrayType: Calls expression for bounds
 AST *parseArrayType(Parser *parser) {
@@ -790,6 +882,219 @@ static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
     return routine;
 }
 
+static AST *parseRecordFieldDecl(Parser *parser) {
+    AST *fieldDecl = newASTNode(AST_VAR_DECL, NULL);
+    if (!fieldDecl) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    while (1) {
+        if (!currentTokenIsIdentifierLike(parser)) {
+            errorParser(parser, "Expected field identifier");
+            freeAST(fieldDecl);
+            return NULL;
+        }
+
+        AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
+        eat(parser, parser->current_token->type);
+        addChild(fieldDecl, varNode);
+
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+        errorParser(parser, "Expected :");
+        freeAST(fieldDecl);
+        return NULL;
+    }
+    eat(parser, TOKEN_COLON);
+
+    AST *fieldType = typeSpecifier(parser, 1);
+    if (!fieldType || fieldType->type == AST_NOOP) {
+        errorParser(parser, "Bad field type");
+        freeAST(fieldDecl);
+        return NULL;
+    }
+
+    setTypeAST(fieldDecl, fieldType->var_type);
+    setRight(fieldDecl, fieldType);
+    return fieldDecl;
+}
+
+static void assignRecordFieldSlots(AST *fieldDecl, int baseSlot) {
+    if (!fieldDecl || fieldDecl->type != AST_VAR_DECL) {
+        return;
+    }
+
+    for (int i = 0; i < fieldDecl->child_count; i++) {
+        AST *varNode = fieldDecl->children[i];
+        if (varNode) {
+            varNode->i_val = baseSlot + i;
+        }
+    }
+}
+
+static bool parseVariantRecordSection(Parser *parser, AST *recordNode, int *slotCursor) {
+    int variantBaseSlot = slotCursor ? *slotCursor : 0;
+    int maxVariantSlot = variantBaseSlot;
+
+    eat(parser, TOKEN_CASE);
+
+    if (currentTokenIsIdentifierLike(parser)) {
+        Token *lookahead = peekToken(parser);
+        bool has_discriminant = lookahead && lookahead->type == TOKEN_COLON;
+        if (lookahead) {
+            freeToken(lookahead);
+        }
+
+        if (has_discriminant) {
+            AST *tagDecl = parseRecordFieldDecl(parser);
+            if (!tagDecl) {
+                return false;
+            }
+            assignRecordFieldSlots(tagDecl, variantBaseSlot);
+            addChild(recordNode, tagDecl);
+            variantBaseSlot += tagDecl->child_count;
+            maxVariantSlot = variantBaseSlot;
+            if (slotCursor) {
+                *slotCursor = variantBaseSlot;
+            }
+        }
+    }
+
+    if (parser->current_token && parser->current_token->type != TOKEN_OF) {
+        AST *variantType = typeSpecifier(parser, 1);
+        if (!variantType || variantType->type == AST_NOOP) {
+            errorParser(parser, "Expected discriminant type in variant record");
+            if (variantType) {
+                freeAST(variantType);
+            }
+            return false;
+        }
+        freeAST(variantType);
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_OF) {
+        errorParser(parser, "Expected OF in variant record");
+        return false;
+    }
+    eat(parser, TOKEN_OF);
+
+    while (parser->current_token &&
+           parser->current_token->type != TOKEN_END &&
+           parser->current_token->type != TOKEN_RPAREN) {
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        AST *labelExpr = expression(parser);
+        if (!labelExpr) {
+            errorParser(parser, "Expected variant label");
+            return false;
+        }
+        freeAST(labelExpr);
+
+        while (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+            labelExpr = expression(parser);
+            if (!labelExpr) {
+                errorParser(parser, "Expected variant label after ','");
+                return false;
+            }
+            freeAST(labelExpr);
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' after variant label");
+            return false;
+        }
+        eat(parser, TOKEN_COLON);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_LPAREN) {
+            errorParser(parser, "Expected '(' to open variant fields");
+            return false;
+        }
+        eat(parser, TOKEN_LPAREN);
+
+        int armSlotCursor = variantBaseSlot;
+        if (!parseRecordMembers(parser, recordNode, TOKEN_RPAREN, &armSlotCursor)) {
+            return false;
+        }
+        if (armSlotCursor > maxVariantSlot) {
+            maxVariantSlot = armSlotCursor;
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ')' to close variant fields");
+            return false;
+        }
+        eat(parser, TOKEN_RPAREN);
+
+        if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        }
+    }
+
+    if (slotCursor) {
+        *slotCursor = maxVariantSlot;
+    }
+
+    return true;
+}
+
+static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator, int *slotCursor) {
+    while (parser->current_token && parser->current_token->type != terminator) {
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        if (parser->current_token->type == TOKEN_PROCEDURE ||
+            parser->current_token->type == TOKEN_FUNCTION) {
+            bool isFunction = parser->current_token->type == TOKEN_FUNCTION;
+            AST *method = parseInterfaceMethod(parser, isFunction);
+            if (!method) {
+                return false;
+            }
+            addChild(recordNode, method);
+            continue;
+        }
+
+        if (parser->current_token->type == TOKEN_CASE) {
+            if (!parseVariantRecordSection(parser, recordNode, slotCursor)) {
+                return false;
+            }
+            continue;
+        }
+
+        if (currentTokenIsIdentifierLike(parser)) {
+            AST *fieldDecl = parseRecordFieldDecl(parser);
+            if (!fieldDecl) {
+                return false;
+            }
+            if (slotCursor) {
+                assignRecordFieldSlots(fieldDecl, *slotCursor);
+                *slotCursor += fieldDecl->child_count;
+            }
+            addChild(recordNode, fieldDecl);
+            if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+                eat(parser, TOKEN_SEMICOLON);
+            }
+            continue;
+        }
+
+        errorParser(parser, "Expected field or method declaration in record");
+        return false;
+    }
+
+    return true;
+}
+
 static void registerRecordMethodPrototype(Parser *parser, const char *recordName, AST *method) {
     if (!parser || !recordName || !method || !method->token || !method->token->value) {
         return;
@@ -1043,6 +1348,8 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             nested_parser_instance.lexer = &nested_lexer;
             nested_parser_instance.current_token = getNextToken(&nested_lexer);
             nested_parser_instance.dependency_paths = parser_for_this_unit->dependency_paths;
+            nested_parser_instance.current_unit_name_context = NULL;
+            nested_parser_instance.routine_depth = 0;
             
             // --- MODIFICATION: Pass the chunk recursively ---
             AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name, chunk);
@@ -1444,6 +1751,8 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 nested_parser_instance.lexer = &nested_lexer;
                 nested_parser_instance.current_token = getNextToken(&nested_lexer);
                 nested_parser_instance.dependency_paths = main_parser->dependency_paths;
+                nested_parser_instance.current_unit_name_context = NULL;
+                nested_parser_instance.routine_depth = 0;
 
                 // --- MODIFICATION: Pass the chunk recursively ---
                 AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
@@ -1496,6 +1805,7 @@ static bool tokenTerminatesStatement(TokenType type) {
         case TOKEN_SEMICOLON:
         case TOKEN_END:
         case TOKEN_ELSE:
+        case TOKEN_EXCEPT:
         case TOKEN_UNTIL:
         case TOKEN_EOF:
         case TOKEN_PERIOD:
@@ -1607,8 +1917,10 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
+        parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
+        parser->routine_depth--;
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
         addChild(blockNode, compound_body);
@@ -1800,67 +2112,9 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         // Use the initialToken captured at the start
         node = newASTNode(AST_RECORD_TYPE, initialToken);
         eat(parser, TOKEN_RECORD); // Consume the RECORD keyword itself
+        int recordSlotCursor = 0;
 
-        while (parser->current_token && parser->current_token->type != TOKEN_END) {
-            if (parser->current_token->type == TOKEN_SEMICOLON) {
-                eat(parser, TOKEN_SEMICOLON);
-                continue;
-            }
-
-            if (parser->current_token->type == TOKEN_PROCEDURE ||
-                parser->current_token->type == TOKEN_FUNCTION) {
-                bool isFunction = parser->current_token->type == TOKEN_FUNCTION;
-                AST *method = parseInterfaceMethod(parser, isFunction);
-                if (!method) {
-                    freeAST(node);
-                    return NULL;
-                }
-                addChild(node, method);
-                continue;
-            }
-
-            if (currentTokenIsIdentifierLike(parser)) {
-                AST *fieldDecl = newASTNode(AST_VAR_DECL, NULL);
-                while (1) {
-                    if (!currentTokenIsIdentifierLike(parser)) {
-                        errorParser(parser, "Expected field identifier");
-                        freeAST(fieldDecl);
-                        freeAST(node);
-                        return NULL;
-                    }
-                    AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
-                    eat(parser, parser->current_token->type);
-                    addChild(fieldDecl, varNode);
-                    if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
-                        eat(parser, TOKEN_COMMA);
-                    } else {
-                        break;
-                    }
-                }
-                if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
-                    errorParser(parser, "Expected :");
-                    freeAST(fieldDecl);
-                    freeAST(node);
-                    return NULL;
-                }
-                eat(parser, TOKEN_COLON);
-                AST *fieldType = typeSpecifier(parser, 1);
-                if (!fieldType || fieldType->type == AST_NOOP) {
-                    errorParser(parser, "Bad field type");
-                    freeAST(fieldDecl);
-                    freeAST(node);
-                    return NULL;
-                }
-                setTypeAST(fieldDecl, fieldType->var_type);
-                setRight(fieldDecl, fieldType);
-                addChild(node, fieldDecl);
-                if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
-                    eat(parser, TOKEN_SEMICOLON);
-                }
-                continue;
-            }
-
-            errorParser(parser, "Expected field or method declaration in record");
+        if (!parseRecordMembers(parser, node, TOKEN_END, &recordSlotCursor)) {
             freeAST(node);
             return NULL;
         }
@@ -1872,6 +2126,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         }
         eat(parser, TOKEN_END);
         setTypeAST(node, TYPE_RECORD);
+        node->i_val = recordSlotCursor;
         // Flow continues to the end, return node
 
     } else if (initialTokenType == TOKEN_INTERFACE) {
@@ -2471,9 +2726,10 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
-
+        parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
         AST *compound_body = compoundStatement(parser);
+        parser->routine_depth--;
 
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
@@ -2681,6 +2937,242 @@ AST* compoundStatement(Parser *parser) {
     return node;
 }
 
+static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName) {
+    AST *node = newASTNode(AST_COMPOUND, NULL);
+    if (!node) {
+        return NULL;
+    }
+
+    while (1) {
+        if (!parser->current_token) {
+            char error_msg[160];
+            snprintf(error_msg, sizeof(error_msg), "Unexpected EOF while parsing %s block", contextName ? contextName : "statement");
+            errorParser(parser, error_msg);
+            break;
+        }
+
+        while (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        }
+
+        if (!parser->current_token || parser->current_token->type == terminator) {
+            break;
+        }
+        if (parser->current_token->type == TOKEN_EOF || parser->current_token->type == TOKEN_PERIOD) {
+            char error_msg[160];
+            snprintf(error_msg, sizeof(error_msg), "Expected %s to terminate %s block",
+                     tokenTypeToString(terminator),
+                     contextName ? contextName : "statement");
+            errorParser(parser, error_msg);
+            break;
+        }
+
+        AST *stmt = statement(parser);
+        if (!stmt) {
+            break;
+        }
+        addChild(node, stmt);
+
+        if (!parser->current_token || parser->current_token->type == terminator) {
+            break;
+        }
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        char error_msg[192];
+        snprintf(error_msg, sizeof(error_msg),
+                 "Expected semicolon or %s after statement in %s block (found token: %s)",
+                 tokenTypeToString(terminator),
+                 contextName ? contextName : "statement",
+                 tokenTypeToString(parser->current_token->type));
+        errorParser(parser, error_msg);
+        break;
+    }
+
+    return node;
+}
+
+static AST *tryStatement(Parser *parser) {
+    eat(parser, TOKEN_TRY);
+
+    AST *tryBlock = parseStatementListUntil(parser, TOKEN_EXCEPT, "TRY");
+    if (!parser->current_token || parser->current_token->type != TOKEN_EXCEPT) {
+        errorParser(parser, "Expected EXCEPT in TRY statement");
+        if (tryBlock) {
+            freeAST(tryBlock);
+        }
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_EXCEPT);
+
+    AST *catchNode = newASTNode(AST_CATCH, NULL);
+    AST *exceptBlock = NULL;
+
+    if (parser->current_token && parser->current_token->type == TOKEN_ON) {
+        eat(parser, TOKEN_ON);
+
+        Token *handlerVarTok = copyToken(parser->current_token);
+        if (!handlerVarTok || parser->current_token->type != TOKEN_IDENTIFIER) {
+            errorParser(parser, "Expected exception variable name after ON");
+            if (handlerVarTok) {
+                freeToken(handlerVarTok);
+            }
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_IDENTIFIER);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' after exception variable name");
+            freeToken(handlerVarTok);
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_COLON);
+
+        Token *handlerTypeTok = copyToken(parser->current_token);
+        if (!handlerTypeTok || parser->current_token->type != TOKEN_IDENTIFIER) {
+            errorParser(parser, "Expected exception type name after ':' in handler");
+            if (handlerTypeTok) {
+                freeToken(handlerTypeTok);
+            }
+            freeToken(handlerVarTok);
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_IDENTIFIER);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_DO) {
+            errorParser(parser, "Expected DO in exception handler");
+            freeToken(handlerTypeTok);
+            freeToken(handlerVarTok);
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_DO);
+
+        AST *handlerVar = newASTNode(AST_VARIABLE, handlerVarTok);
+        setLeft(catchNode, handlerVar);
+        if (handlerVarTok) {
+            freeToken(handlerVarTok);
+        }
+
+        if (catchNode->token) {
+            freeToken(catchNode->token);
+            catchNode->token = NULL;
+        }
+        if (handlerTypeTok) {
+            catchNode->token = copyToken(handlerTypeTok);
+            freeToken(handlerTypeTok);
+        }
+
+        exceptBlock = statement(parser);
+        if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        }
+    } else {
+        exceptBlock = parseStatementListUntil(parser, TOKEN_END, "EXCEPT");
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_END) {
+        errorParser(parser, "Expected END to close TRY/EXCEPT statement");
+        if (tryBlock) {
+            freeAST(tryBlock);
+        }
+        if (exceptBlock) {
+            freeAST(exceptBlock);
+        }
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_END);
+
+    setRight(catchNode, exceptBlock);
+
+    AST *tryNode = newASTNode(AST_TRY, NULL);
+    setLeft(tryNode, tryBlock);
+    setRight(tryNode, catchNode);
+    return tryNode;
+}
+
+static AST *raiseStatement(Parser *parser) {
+    Token *raiseToken = copyToken(parser->current_token);
+    int line = raiseToken ? raiseToken->line : (parser->lexer ? parser->lexer->line : 0);
+    eat(parser, TOKEN_RAISE);
+
+    AST *raiseExpr = NULL;
+    if (parser->current_token && !tokenTerminatesStatement(parser->current_token->type)) {
+        raiseExpr = expression(parser);
+    }
+
+    AST *node = newASTNode(AST_THROW, raiseToken);
+    if (raiseToken) {
+        freeToken(raiseToken);
+    }
+    node->i_val = line;
+    setLeft(node, raiseExpr);
+    return node;
+}
+
+static AST *withStatement(Parser *parser) {
+    eat(parser, TOKEN_WITH);
+
+    AST *with_list = newASTNode(AST_COMPOUND, NULL);
+    if (!with_list) {
+        return NULL;
+    }
+
+    do {
+        AST *target = expression(parser);
+        if (!target || target->type == AST_NOOP) {
+            errorParser(parser, "Expected record expression after WITH");
+            freeAST(with_list);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        AST *with_node = newASTNode(AST_WITH, NULL);
+        setLeft(with_node, target);
+        addChild(with_list, with_node);
+
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
+    } while (1);
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_DO) {
+        errorParser(parser, "Expected DO after WITH expression");
+        freeAST(with_list);
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_DO);
+
+    AST *body = statement(parser);
+    if (!body || body->type == AST_NOOP) {
+        errorParser(parser, "Expected statement after WITH ... DO");
+        freeAST(with_list);
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    AST *result = body;
+    for (int i = with_list->child_count - 1; i >= 0; i--) {
+        AST *with_node = with_list->children[i];
+        with_list->children[i] = NULL;
+        setRight(with_node, result);
+        result = with_node;
+    }
+
+    with_list->child_count = 0;
+    freeAST(with_list);
+    return result;
+}
+
 AST *statement(Parser *parser) {
     if (!parser || !parser->current_token) {
         return newASTNode(AST_NOOP, NULL);
@@ -2720,6 +3212,20 @@ AST *statement(Parser *parser) {
     AST *node = NULL; // Initialize node
 
     switch (parser->current_token->type) {
+        case TOKEN_VAR: {
+            Token *var_tok = copyToken(parser->current_token);
+            eat(parser, TOKEN_VAR);
+            node = varDeclaration(parser, parser->current_unit_name_context == NULL);
+            if (node && node->type == AST_COMPOUND && var_tok) {
+                node->token = copyToken(var_tok);
+                node->is_global_scope = true; // Transparent declaration wrapper; do not open a nested runtime scope.
+            }
+            if (var_tok) {
+                freeToken(var_tok);
+            }
+            break;
+        }
+
         case TOKEN_BEGIN:
             // Compound statement (BEGIN ... END)
             node = compoundStatement(parser);
@@ -2903,6 +3409,15 @@ AST *statement(Parser *parser) {
             node = repeatStatement(parser);
             // REPEAT handles its structure internally.
             break;
+        case TOKEN_TRY:
+            node = tryStatement(parser);
+            break;
+        case TOKEN_RAISE:
+            node = raiseStatement(parser);
+            break;
+        case TOKEN_WITH:
+            node = withStatement(parser);
+            break;
         case TOKEN_CASE:
             node = caseStatement(parser);
             // CASE handles its structure internally.
@@ -2951,6 +3466,11 @@ AST *statement(Parser *parser) {
             eat(parser, TOKEN_BREAK); // Consume BREAK keyword
             node = newASTNode(AST_BREAK, NULL);
             // *** Semicolon check REMOVED from here ***
+            break;
+
+        case TOKEN_CONTINUE:
+            eat(parser, TOKEN_CONTINUE);
+            node = newASTNode(AST_CONTINUE, NULL);
             break;
 
         case TOKEN_SEMICOLON: // Empty statement ';'
@@ -3148,11 +3668,42 @@ AST *repeatStatement(Parser *parser) {
 }
 
 AST *forStatement(Parser *parser) {
-    eat(parser,TOKEN_FOR); Token* lvt=copyToken(parser->current_token); if(!lvt||lvt->type!=TOKEN_IDENTIFIER){errorParser(parser,"Exp loop var"); return NULL;} eat(parser,TOKEN_IDENTIFIER);
-    AST* lvn=newASTNode(AST_VARIABLE,lvt); // Loop var node created with copy
-    if(!parser->current_token||parser->current_token->type!=TOKEN_ASSIGN){errorParser(parser,"Exp :="); freeToken(lvt); freeAST(lvn); return NULL;} eat(parser,TOKEN_ASSIGN);
-    AST* se=expression(parser); // <<< Use expression() for start
-    if(!se || se->type == AST_NOOP){errorParser(parser,"Exp start expr"); freeToken(lvt); freeAST(lvn); return NULL;}
+    eat(parser,TOKEN_FOR);
+
+    bool declares_inline_var = false;
+    if (parser->current_token && parser->current_token->type == TOKEN_VAR) {
+        if (parser->routine_depth <= 0) {
+            errorParser(parser, "FOR VAR loop variables are only supported inside procedures and functions");
+            return NULL;
+        }
+        declares_inline_var = true;
+        eat(parser, TOKEN_VAR);
+    }
+
+    Token* lvt = copyToken(parser->current_token);
+    if (!lvt || lvt->type != TOKEN_IDENTIFIER) {
+        errorParser(parser, "Exp loop var");
+        if (lvt) freeToken(lvt);
+        return NULL;
+    }
+    eat(parser, TOKEN_IDENTIFIER);
+
+    AST* lvn = newASTNode(AST_VARIABLE, lvt); // Loop var node created with copy
+    if (!parser->current_token || parser->current_token->type != TOKEN_ASSIGN) {
+        errorParser(parser, "Exp :=");
+        freeToken(lvt);
+        freeAST(lvn);
+        return NULL;
+    }
+    eat(parser, TOKEN_ASSIGN);
+
+    AST* se = expression(parser); // <<< Use expression() for start
+    if (!se || se->type == AST_NOOP) {
+        errorParser(parser, "Exp start expr");
+        freeToken(lvt);
+        freeAST(lvn);
+        return NULL;
+    }
     TokenType dir=parser->current_token? parser->current_token->type : TOKEN_UNKNOWN; // Check NULL
     if(dir!=TOKEN_TO && dir!=TOKEN_DOWNTO){errorParser(parser,"Exp TO/DOWNTO"); freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;} eat(parser,dir);
     AST* ee=expression(parser); // <<< Use expression() for end
@@ -3162,6 +3713,26 @@ AST *forStatement(Parser *parser) {
     ASTNodeType ft=(dir==TOKEN_TO)?AST_FOR_TO:AST_FOR_DOWNTO; AST* n=newASTNode(ft,NULL);
     setLeft(n,se); setRight(n,ee); setExtra(n,bd); addChild(n,lvn); // Loop var is child[0]
     freeToken(lvt); // Free the original copy used for lvn
+
+    if (!declares_inline_var) {
+        return n;
+    }
+
+    int decl_line = (se && se->token) ? se->token->line : (lvn->token ? lvn->token->line : 0);
+    AST *decl_name = newASTNode(AST_VARIABLE, lvn->token);
+    AST *decl_type = inferInlineForVarType(se, decl_line);
+    if (!decl_name || !decl_type) {
+        freeAST(decl_name);
+        freeAST(decl_type);
+        freeAST(n);
+        return NULL;
+    }
+
+    AST *decl = newASTNode(AST_VAR_DECL, NULL);
+    addChild(decl, decl_name);
+    setRight(decl, decl_type);
+    decl->var_type = decl_type->var_type;
+    addChild(n, decl);
     return n;
 }
 
@@ -3419,6 +3990,73 @@ AST *parseArrayInitializer(Parser *parser) {
         }
     }
     if(!parser->current_token || parser->current_token->type!=TOKEN_RPAREN){errorParser(parser,"Exp )"); return n;} eat(parser,TOKEN_RPAREN); return n;
+}
+
+static AST *parseRecordConstructor(Parser *parser) {
+    AST *recordLiteral = newASTNode(AST_RECORD_LITERAL, parser->current_token);
+    bool sawField = false;
+
+    while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+        if (!currentTokenIsIdentifierLike(parser)) {
+            errorParser(parser, "Expected field name in record constructor");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        TokenType fieldTokenType = parser->current_token->type;
+        Token *fieldToken = copyToken(parser->current_token);
+        AST *fieldName = newASTNode(AST_VARIABLE, fieldToken);
+        if (fieldToken) {
+            freeToken(fieldToken);
+        }
+        eat(parser, fieldTokenType);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' after record constructor field name");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_COLON);
+
+        AST *fieldValue = expression(parser);
+        if (!fieldValue || fieldValue->type == AST_NOOP) {
+            errorParser(parser, "Expected expression after record constructor field name");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        AST *fieldAssign = newASTNode(AST_ASSIGN, NULL);
+        setLeft(fieldAssign, fieldName);
+        setRight(fieldAssign, fieldValue);
+        addChild(recordLiteral, fieldAssign);
+        sawField = true;
+
+        if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ';' or ')' after record constructor field");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+        errorParser(parser, "Expected ')' after record constructor");
+        freeAST(recordLiteral);
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_RPAREN);
+
+    if (!sawField) {
+        errorParser(parser, "Record constructor must initialize at least one field");
+        freeAST(recordLiteral);
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    return recordLiteral;
 }
 
 Token *peekToken(Parser *parser) {
@@ -3914,15 +4552,30 @@ AST *factor(Parser *parser) {
 
     } else if (initialTokenType == TOKEN_LPAREN) {
         eat(parser, TOKEN_LPAREN); // Eat '('
-        node = expression(parser); // Parse sub-expression
-        if (!node || node->type == AST_NOOP) { return newASTNode(AST_NOOP, NULL); }
-        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
-            errorParser(parser,"Expected )");
-            // If error, free the parsed sub-expression?
-            freeAST(node);
-            return newASTNode(AST_NOOP, NULL);
+        bool isRecordConstructor = false;
+        if (currentTokenIsIdentifierLike(parser)) {
+            Token *lookahead = peekToken(parser);
+            isRecordConstructor = (lookahead && lookahead->type == TOKEN_COLON);
+            if (lookahead) {
+                freeToken(lookahead);
+            }
         }
-        eat(parser, TOKEN_RPAREN); // Eat ')'
+
+        if (isRecordConstructor) {
+            node = parseRecordConstructor(parser);
+            if (!node || node->type == AST_NOOP) {
+                return newASTNode(AST_NOOP, NULL);
+            }
+        } else {
+            node = expression(parser); // Parse sub-expression
+            if (!node || node->type == AST_NOOP) { return newASTNode(AST_NOOP, NULL); }
+            if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+                errorParser(parser,"Expected )");
+                freeAST(node);
+                return newASTNode(AST_NOOP, NULL);
+            }
+            eat(parser, TOKEN_RPAREN); // Eat ')'
+        }
         // Flow continues to end, return node
 
     } else if (initialTokenType == TOKEN_LBRACKET) {
@@ -3940,6 +4593,11 @@ AST *factor(Parser *parser) {
     // If node is still NULL after all checks, something went wrong internally
     if (!node) {
         errorParser(parser, "Internal error: factor resulted in NULL node");
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    node = parsePostfixSelectors(parser, node);
+    if (!node || node->type == AST_NOOP) {
         return newASTNode(AST_NOOP, NULL);
     }
 

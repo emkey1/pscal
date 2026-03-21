@@ -27,6 +27,16 @@
 typedef int (*system_getaddrinfo_fn)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 typedef void (*system_freeaddrinfo_fn)(struct addrinfo *);
 
+static void pscalHostsFreeAddrInfoChain(struct addrinfo *ai) {
+    while (ai) {
+        struct addrinfo *next = ai->ai_next;
+        free(ai->ai_canonname);
+        free(ai->ai_addr);
+        free(ai);
+        ai = next;
+    }
+}
+
 static system_getaddrinfo_fn resolve_system_getaddrinfo(void) {
     static system_getaddrinfo_fn fn = NULL;
     if (!fn) {
@@ -125,7 +135,9 @@ static FILE *openHostsFile(const char **out_path) {
     return NULL;
 }
 
-static bool parseServicePort(const char *service, int *out_port) {
+static bool resolveServicePort(const char *service,
+                               const struct addrinfo *hints,
+                               int *out_port) {
     if (!service || !*service) {
         *out_port = 0;
         return true;
@@ -137,8 +149,52 @@ static bool parseServicePort(const char *service, int *out_port) {
         *out_port = (int)val;
         return true;
     }
-    // Non-numeric services are left to the system resolver.
-    return false;
+    system_getaddrinfo_fn sys = resolve_system_getaddrinfo();
+    system_freeaddrinfo_fn sys_free = resolve_system_freeaddrinfo();
+    if (!sys || !sys_free) {
+        return false;
+    }
+
+    struct addrinfo service_hints;
+    memset(&service_hints, 0, sizeof(service_hints));
+    if (hints) {
+        service_hints = *hints;
+    }
+    service_hints.ai_flags &= ~(AI_NUMERICHOST | AI_CANONNAME);
+
+    struct addrinfo *tmp = NULL;
+    int rc = sys(NULL, service, &service_hints, &tmp);
+    if (rc != 0 || !tmp) {
+        if (tmp) {
+            sys_free(tmp);
+        }
+        return false;
+    }
+
+    bool resolved = false;
+    for (const struct addrinfo *ai = tmp; ai; ai = ai->ai_next) {
+        if (!ai->ai_addr) {
+            continue;
+        }
+        if (ai->ai_family == AF_INET &&
+            ai->ai_addrlen >= (socklen_t)sizeof(struct sockaddr_in)) {
+            const struct sockaddr_in *sa =
+                (const struct sockaddr_in *)ai->ai_addr;
+            *out_port = (int)ntohs(sa->sin_port);
+            resolved = true;
+            break;
+        }
+        if (ai->ai_family == AF_INET6 &&
+            ai->ai_addrlen >= (socklen_t)sizeof(struct sockaddr_in6)) {
+            const struct sockaddr_in6 *sa =
+                (const struct sockaddr_in6 *)ai->ai_addr;
+            *out_port = (int)ntohs(sa->sin6_port);
+            resolved = true;
+            break;
+        }
+    }
+    sys_free(tmp);
+    return resolved;
 }
 
 static struct addrinfo *makeAddrinfoV4(const struct addrinfo *hints,
@@ -206,6 +262,37 @@ static void appendAddrinfo(struct addrinfo **head, struct addrinfo *node) {
     tail->ai_next = node;
 }
 
+static struct addrinfo *cloneAddrinfoChain(const struct addrinfo *src) {
+    struct addrinfo *head = NULL;
+    const struct addrinfo *it = src;
+    while (it) {
+        struct addrinfo *copy = (struct addrinfo *)calloc(1, sizeof(struct addrinfo));
+        if (!copy) {
+            pscalHostsFreeAddrInfoChain(head);
+            return NULL;
+        }
+        memcpy(copy, it, sizeof(struct addrinfo));
+        if (it->ai_addr && it->ai_addrlen > 0) {
+            struct sockaddr *addr = (struct sockaddr *)malloc(it->ai_addrlen);
+            if (!addr) {
+                free(copy);
+                pscalHostsFreeAddrInfoChain(head);
+                return NULL;
+            }
+            memcpy(addr, it->ai_addr, it->ai_addrlen);
+            copy->ai_addr = addr;
+            copy->ai_addrlen = it->ai_addrlen;
+        }
+        if (it->ai_canonname) {
+            copy->ai_canonname = strdup(it->ai_canonname);
+        }
+        copy->ai_next = NULL;
+        appendAddrinfo(&head, copy);
+        it = it->ai_next;
+    }
+    return head;
+}
+
 static bool hostsLookup(const char *node, const char *service,
                         const struct addrinfo *hints,
                         struct addrinfo **out_res) {
@@ -215,7 +302,7 @@ static bool hostsLookup(const char *node, const char *service,
         return false;
     }
     int port = 0;
-    if (!parseServicePort(service, &port)) {
+    if (!resolveServicePort(service, hints, &port)) {
         fclose(fp);
         return false;
     }
@@ -268,33 +355,47 @@ int pscalHostsGetAddrInfo(const char *node, const char *service,
                           const struct addrinfo *hints, struct addrinfo **res) {
     if (!node) {
         system_getaddrinfo_fn sys = resolve_system_getaddrinfo();
-        if (sys) return sys(node, service, hints, res);
-        return EAI_FAIL;
+        system_freeaddrinfo_fn sys_free = resolve_system_freeaddrinfo();
+        if (!sys || !sys_free) {
+            return EAI_FAIL;
+        }
+        struct addrinfo *tmp = NULL;
+        int rc = sys(node, service, hints, &tmp);
+        if (rc != 0) {
+            return rc;
+        }
+        struct addrinfo *cloned = cloneAddrinfoChain(tmp);
+        sys_free(tmp);
+        if (!cloned) {
+            return EAI_MEMORY;
+        }
+        *res = cloned;
+        return 0;
     }
     if (hostsLookup(node, service, hints, res)) {
         return 0;
     }
     system_getaddrinfo_fn sys = resolve_system_getaddrinfo();
-    if (sys) {
-        return sys(node, service, hints, res);
+    system_freeaddrinfo_fn sys_free = resolve_system_freeaddrinfo();
+    if (!sys || !sys_free) {
+        return EAI_FAIL;
     }
-    return EAI_FAIL;
+    struct addrinfo *tmp = NULL;
+    int rc = sys(node, service, hints, &tmp);
+    if (rc != 0) {
+        return rc;
+    }
+    struct addrinfo *cloned = cloneAddrinfoChain(tmp);
+    sys_free(tmp);
+    if (!cloned) {
+        return EAI_MEMORY;
+    }
+    *res = cloned;
+    return 0;
 }
 
 void pscalHostsFreeAddrInfo(struct addrinfo *ai) {
-    system_freeaddrinfo_fn sys_free = resolve_system_freeaddrinfo();
-    if (sys_free) {
-        sys_free(ai);
-        return;
-    }
-    // Fallback manual free if dlsym fails
-    while (ai) {
-        struct addrinfo *next = ai->ai_next;
-        free(ai->ai_canonname);
-        free(ai->ai_addr);
-        free(ai);
-        ai = next;
-    }
+    pscalHostsFreeAddrInfoChain(ai);
 }
 
 // Exported shims so any library calls (e.g., OpenSSH) also honour the container hosts file.

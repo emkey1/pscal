@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include <glob.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -20,6 +21,7 @@
 #include <stdlib.h>
 #include <time.h>
 #define PATH_VIRTUALIZATION_NO_MACROS 1
+#include "common/path_truncate.h"
 #include "common/path_virtualization.h"
 #include "ios/tty/pscal_pty.h"
 
@@ -1798,6 +1800,121 @@ static void assert_sigtimedwait_rejects_invalid_timeout(void) {
     vprocDestroy(vp);
 }
 
+static void assert_itimer_real_pending_when_blocked(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    vprocRegisterThread(vp, pthread_self());
+    int pid = vprocPid(vp);
+
+    sigset_t block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGALRM);
+    assert(vprocSigprocmask(pid, SIG_BLOCK, &block, NULL) == 0);
+
+    struct itimerval timer;
+    memset(&timer, 0, sizeof(timer));
+    timer.it_value.tv_usec = 50000; /* 50ms */
+    assert(vprocSetitimerShim(ITIMER_REAL, &timer, NULL) == 0);
+
+    bool saw_pending = false;
+    for (int i = 0; i < 50; ++i) {
+        sigset_t pending;
+        sigemptyset(&pending);
+        assert(vprocSigpending(pid, &pending) == 0);
+        if (sigismember(&pending, SIGALRM) == 1) {
+            saw_pending = true;
+            break;
+        }
+        usleep(5000);
+    }
+    assert(saw_pending);
+
+    struct itimerval now;
+    memset(&now, 0, sizeof(now));
+    assert(vprocGetitimerShim(ITIMER_REAL, &now) == 0);
+    assert(now.it_value.tv_sec == 0);
+    assert(now.it_value.tv_usec == 0);
+
+    sigset_t waitset;
+    sigemptyset(&waitset);
+    sigaddset(&waitset, SIGALRM);
+    int got = 0;
+    assert(vprocSigwait(pid, &waitset, &got) == 0);
+    assert(got == SIGALRM);
+
+    sigset_t pending_after;
+    sigemptyset(&pending_after);
+    assert(vprocSigpending(pid, &pending_after) == 0);
+    assert(sigismember(&pending_after, SIGALRM) == 0);
+
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_sigwait_wakes_for_itimer_real(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    vprocRegisterThread(vp, pthread_self());
+    int pid = vprocPid(vp);
+
+    sigset_t waitset;
+    sigemptyset(&waitset);
+    sigaddset(&waitset, SIGALRM);
+    assert(vprocSigprocmask(pid, SIG_BLOCK, &waitset, NULL) == 0);
+
+    struct itimerval timer;
+    memset(&timer, 0, sizeof(timer));
+    timer.it_value.tv_usec = 30000; /* 30ms */
+    assert(vprocSetitimerShim(ITIMER_REAL, &timer, NULL) == 0);
+
+    int got = 0;
+    assert(vprocSigwait(pid, &waitset, &got) == 0);
+    assert(got == SIGALRM);
+
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
+static void assert_alarm_cancel_returns_remaining(void) {
+    VProc *vp = vprocCreate(NULL);
+    assert(vp);
+    vprocActivate(vp);
+    vprocRegisterThread(vp, pthread_self());
+    int pid = vprocPid(vp);
+
+    unsigned int old = vprocAlarmShim(2);
+    assert(old == 0);
+    usleep(200000); /* 200ms */
+    old = vprocAlarmShim(0);
+    assert(old >= 1);
+    assert(old <= 2);
+
+    struct itimerval now;
+    memset(&now, 0, sizeof(now));
+    assert(vprocGetitimerShim(ITIMER_REAL, &now) == 0);
+    assert(now.it_value.tv_sec == 0);
+    assert(now.it_value.tv_usec == 0);
+
+    sigset_t pending;
+    sigemptyset(&pending);
+    assert(vprocSigpending(pid, &pending) == 0);
+    assert(sigismember(&pending, SIGALRM) == 0);
+
+    vprocMarkExit(vp, 0);
+    int status = 0;
+    (void)vprocWaitPidShim(pid, &status, 0);
+    vprocDeactivate();
+    vprocDestroy(vp);
+}
+
 static void assert_signal_handler_invoked(void) {
     g_handler_hits = 0;
     g_handler_sig = 0;
@@ -2058,6 +2175,227 @@ static ssize_t read_virtual_file(const char *path, char *buffer, size_t buffer_s
     buffer[n] = '\0';
     close(fd);
     return n;
+}
+
+static void assert_path_truncate_mount_rewrites_virtual_paths(void) {
+    char source_templ[] = "/tmp/vproc-mount-src-XXXXXX";
+    char *source_root = mkdtemp(source_templ);
+    assert(source_root);
+    char root_templ[] = "/tmp/vproc-mount-root-XXXXXX";
+    char *root = mkdtemp(root_templ);
+    assert(root);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/mnt", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt/ext", 0700) == 0 || errno == EEXIST);
+
+    char source_file[PATH_MAX];
+    snprintf(source_file, sizeof(source_file), "%s/hello.txt", source_root);
+    int source_fd = open(source_file, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(source_fd >= 0);
+    assert(write(source_fd, "mounted", 7) == 7);
+    close(source_fd);
+
+    assert(pathTruncateMountAdd(source_root, "/mnt/ext", "bind", "rw", 0));
+
+    char expanded[PATH_MAX];
+    assert(pathTruncateExpand("/mnt/ext/hello.txt", expanded, sizeof(expanded)));
+    assert(strcmp(expanded, source_file) == 0);
+
+    int fd = pscalPathVirtualized_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+    assert(fd >= 0);
+    char buf[16] = {0};
+    assert(read(fd, buf, sizeof(buf)) == 7);
+    assert(strncmp(buf, "mounted", 7) == 0);
+    close(fd);
+
+    char stripped[PATH_MAX];
+    assert(pathTruncateStrip(source_file, stripped, sizeof(stripped)));
+    assert(strcmp(stripped, "/mnt/ext/hello.txt") == 0);
+
+    pathTruncateMountClearAll();
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX * 2 + 32];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_path_truncate_mount_remove_unmaps_virtual_paths(void) {
+    char source_templ[] = "/tmp/vproc-umount-src-XXXXXX";
+    char *source_root = mkdtemp(source_templ);
+    assert(source_root);
+    char root_templ[] = "/tmp/vproc-umount-root-XXXXXX";
+    char *root = mkdtemp(root_templ);
+    assert(root);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    assert(pscalPathVirtualized_mkdir("/mnt", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt/ext", 0700) == 0 || errno == EEXIST);
+
+    char source_file[PATH_MAX];
+    snprintf(source_file, sizeof(source_file), "%s/hello.txt", source_root);
+    int source_fd = open(source_file, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(source_fd >= 0);
+    assert(write(source_fd, "mounted", 7) == 7);
+    close(source_fd);
+
+    assert(pathTruncateMountAdd(source_root, "/mnt/ext", "bind", "rw", 0));
+
+    int fd = pscalPathVirtualized_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+    assert(fd >= 0);
+    close(fd);
+
+    assert(pathTruncateMountRemove("/mnt/ext"));
+    assert(!pathTruncateMountRemove("/mnt/ext"));
+    assert(errno == ENOENT);
+
+    char expanded[PATH_MAX];
+    assert(pathTruncateExpand("/mnt/ext/hello.txt", expanded, sizeof(expanded)));
+    assert(strcmp(expanded, source_file) != 0);
+    assert(strstr(expanded, "/mnt/ext/hello.txt") != NULL);
+
+    errno = 0;
+    fd = pscalPathVirtualized_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+    assert(fd < 0);
+    assert(errno == ENOENT);
+
+    char mounts_buf[8192];
+    assert(read_virtual_file("/proc/mounts", mounts_buf, sizeof(mounts_buf)) > 0);
+    assert(strstr(mounts_buf, " /mnt/ext ") == NULL);
+
+    pathTruncateMountClearAll();
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX * 2 + 32];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
+    (void)system(cleanup_cmd);
+}
+
+static void assert_proc_mount_files_include_virtual_mounts(void) {
+    char source_templ[] = "/tmp/vproc-proc-mount-src-XXXXXX";
+    char *source_root = mkdtemp(source_templ);
+    assert(source_root);
+    char root_templ[] = "/tmp/vproc-proc-mount-root-XXXXXX";
+    char *root = mkdtemp(root_templ);
+    assert(root);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+    assert(pscalPathVirtualized_mkdir("/mnt", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt/ext", 0700) == 0 || errno == EEXIST);
+
+    assert(pathTruncateMountAdd(source_root, "/mnt/ext", "bind", "ro,nodev", 0));
+
+    char buf[8192];
+    assert(read_virtual_file("/proc/mounts", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, source_root) != NULL);
+    assert(strstr(buf, " /mnt/ext ") != NULL);
+    assert(strstr(buf, " bind ") != NULL);
+
+    assert(read_virtual_file("/proc/mountinfo", buf, sizeof(buf)) > 0);
+    assert(strstr(buf, source_root) != NULL);
+    assert(strstr(buf, " /mnt/ext ") != NULL);
+
+    pathTruncateMountClearAll();
+    unsetenv("PATH_TRUNCATE");
+    char cleanup_cmd[PATH_MAX + 32];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
+    (void)system(cleanup_cmd);
+}
+
+static bool testEncodeFstabField(const char *input, char *out, size_t out_size) {
+    if (!input || !out || out_size == 0) {
+        return false;
+    }
+    size_t out_len = 0;
+    for (size_t i = 0; input[i] != '\0'; ++i) {
+        unsigned char ch = (unsigned char)input[i];
+        if (ch == '\\' || isspace(ch) || ch == '#') {
+            if (out_len + 4 >= out_size) {
+                return false;
+            }
+            out[out_len++] = '\\';
+            out[out_len++] = (char)('0' + ((ch >> 6) & 0x07));
+            out[out_len++] = (char)('0' + ((ch >> 3) & 0x07));
+            out[out_len++] = (char)('0' + (ch & 0x07));
+            continue;
+        }
+        if (out_len + 1 >= out_size) {
+            return false;
+        }
+        out[out_len++] = (char)ch;
+    }
+    out[out_len] = '\0';
+    return true;
+}
+
+static void assert_kernel_mounts_from_fstab_at_startup(void) {
+    char source_templ[] = "/tmp/vproc-fstab-src-XXXXXX";
+    char *source_root = mkdtemp(source_templ);
+    assert(source_root);
+    char root_templ[] = "/tmp/vproc-fstab-root-XXXXXX";
+    char *root = mkdtemp(root_templ);
+    assert(root);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", root, 1);
+    assert(chdir(root) == 0);
+
+    char etc_path[PATH_MAX];
+    snprintf(etc_path, sizeof(etc_path), "%s/etc", root);
+    assert(mkdir(etc_path, 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt", 0700) == 0 || errno == EEXIST);
+    assert(pscalPathVirtualized_mkdir("/mnt/ext", 0700) == 0 || errno == EEXIST);
+
+    char source_file[PATH_MAX];
+    char source_with_space[PATH_MAX];
+    snprintf(source_with_space, sizeof(source_with_space), "%s/dir with space", source_root);
+    assert(mkdir(source_with_space, 0700) == 0 || errno == EEXIST);
+    snprintf(source_file, sizeof(source_file), "%s/hello.txt", source_with_space);
+    int source_fd = open(source_file, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+    assert(source_fd >= 0);
+    assert(write(source_fd, "fstab-mounted", 13) == 13);
+    close(source_fd);
+
+    char fstab_path[PATH_MAX];
+    snprintf(fstab_path, sizeof(fstab_path), "%s/etc/fstab", root);
+    FILE *fstab = fopen(fstab_path, "w");
+    assert(fstab);
+    char source_escaped[PATH_MAX * 4];
+    assert(testEncodeFstabField(source_with_space, source_escaped, sizeof(source_escaped)));
+    assert(fprintf(fstab, "# test mount\n%s /mnt/ext bind rw 0 0\n", source_escaped) > 0);
+    assert(fclose(fstab) == 0);
+
+    vprocResetStartupFstabStateForTests();
+    assert(vprocEnsureKernelPid() > 0);
+
+    char expanded[PATH_MAX];
+    assert(pathTruncateExpand("/mnt/ext/hello.txt", expanded, sizeof(expanded)));
+    assert(strstr(expanded, "/hello.txt") != NULL);
+
+    int mounted_fd = pscalPathVirtualized_open("/mnt/ext/hello.txt", O_RDONLY, 0);
+    assert(mounted_fd >= 0);
+    char buf[32] = {0};
+    assert(read(mounted_fd, buf, sizeof(buf)) == 13);
+    assert(strncmp(buf, "fstab-mounted", 13) == 0);
+    close(mounted_fd);
+
+    char mounts_buf[8192];
+    assert(read_virtual_file("/proc/mounts", mounts_buf, sizeof(mounts_buf)) > 0);
+    assert(strstr(mounts_buf, source_root) != NULL);
+    assert(strstr(mounts_buf, " /mnt/ext ") != NULL);
+
+    pathTruncateMountClearAll();
+    setenv("PATH_TRUNCATE", "/tmp", 1);
+    char cleanup_cmd[PATH_MAX + 32];
+    snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf %s %s", root, source_root);
+    (void)system(cleanup_cmd);
 }
 
 static long long monotonic_ms(void) {
@@ -6644,6 +6982,12 @@ int main(void) {
     assert_sigtimedwait_timeout_and_drains();
     fprintf(stderr, "TEST sigtimedwait_rejects_invalid_timeout\n");
     assert_sigtimedwait_rejects_invalid_timeout();
+    fprintf(stderr, "TEST itimer_real_pending_when_blocked\n");
+    assert_itimer_real_pending_when_blocked();
+    fprintf(stderr, "TEST sigwait_wakes_for_itimer_real\n");
+    assert_sigwait_wakes_for_itimer_real();
+    fprintf(stderr, "TEST alarm_cancel_returns_remaining\n");
+    assert_alarm_cancel_returns_remaining();
     fprintf(stderr, "TEST signal_handler_invoked\n");
     assert_signal_handler_invoked();
     fprintf(stderr, "TEST siginfo_handler_invoked\n");
@@ -6678,6 +7022,12 @@ int main(void) {
     assert_setpgid_zero_defaults_to_pid();
     fprintf(stderr, "TEST path_truncate_maps_to_sandbox\n");
     assert_path_truncate_maps_to_sandbox();
+    fprintf(stderr, "TEST path_truncate_mount_rewrites_virtual_paths\n");
+    assert_path_truncate_mount_rewrites_virtual_paths();
+    fprintf(stderr, "TEST path_truncate_mount_remove_unmaps_virtual_paths\n");
+    assert_path_truncate_mount_remove_unmaps_virtual_paths();
+    fprintf(stderr, "TEST proc_mount_files_include_virtual_mounts\n");
+    assert_proc_mount_files_include_virtual_mounts();
     fprintf(stderr, "TEST proc_vm_files_present_and_stable\n");
     assert_proc_vm_files_present_and_stable();
     fprintf(stderr, "TEST proc_core_and_net_entries_present\n");
@@ -6808,6 +7158,8 @@ int main(void) {
     assert_stop_unsupported_sigtstp_queues_pending_signal();
     fprintf(stderr, "TEST sigint_non_shell_same_tid_does_not_request_runtime_interrupt\n");
     assert_sigint_non_shell_same_tid_does_not_request_runtime_interrupt();
+    fprintf(stderr, "TEST kernel_mounts_from_fstab_at_startup\n");
+    assert_kernel_mounts_from_fstab_at_startup();
 #if defined(PSCAL_TARGET_IOS)
     /* Ensure path virtualization macros remain visible even when vproc shim is included. */
     int (*fn)(const char *) = chdir;

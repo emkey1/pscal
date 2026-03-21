@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <pthread.h>
@@ -40,10 +41,13 @@ int pscal_ios_tcgetattr(int fd, struct termios *termios_p);
 int pscal_ios_tcsetattr(int fd, int optional_actions,
     const struct termios *termios_p);
 int pscal_ios_isatty(int fd);
+int pscal_ios_fstat(int fd, struct stat *buf);
 int pscal_ios_stat(const char *path, struct stat *buf);
 int pscal_ios_lstat(const char *path, struct stat *buf);
 int pscal_ios_access(const char *path, int mode);
 int pscal_ios_faccessat(int fd, const char *path, int mode, int flag);
+int pscal_ios_utimes(const char *path, const struct timeval times[2]);
+int pscal_ios_futimes(int fd, const struct timeval times[2]);
 FILE *pscal_ios_fopen(const char *path, const char *mode);
 DIR *pscal_ios_opendir(const char *path);
 int pscal_ios_mkdir(const char *path, mode_t mode);
@@ -92,11 +96,17 @@ int pscal_ios_execlp(const char *file, const char *arg, ...);
 # define tcsetattr(fd, opt, termios_p) \
     pscal_ios_tcsetattr((fd), (opt), (termios_p))
 # define isatty(fd) pscal_ios_isatty((fd))
+# undef fstat
+# define fstat(fd, buf) pscal_ios_fstat((fd), (buf))
 # define stat(path, buf) pscal_ios_stat((path), (buf))
 # define lstat(path, buf) pscal_ios_lstat((path), (buf))
 # define access(path, mode) pscal_ios_access((path), (mode))
 # define faccessat(fd, path, mode, flag) \
     pscal_ios_faccessat((fd), (path), (mode), (flag))
+# define utimes(path, times) pscal_ios_utimes((path), (times))
+# define futimes(fd, times) pscal_ios_futimes((fd), (times))
+# define chdir(path) vprocChdirShim((path))
+# define getcwd(buffer, size) vprocGetcwdShim((buffer), (size))
 # define fopen(path, mode) pscal_ios_fopen((path), (mode))
 # define opendir(path) pscal_ios_opendir((path))
 # define mkdir(path, mode) pscal_ios_mkdir((path), (mode))

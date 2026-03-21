@@ -78,7 +78,107 @@
         },
         "expected_stdout": "pipeline-bg-pipe-redirect:start\nhistory     Print the interactive history list.\npipeline-bg-pipe-redirect:end"
   },
-        {
+  {
+    "id": "pipeline_bg_tool_redirect_ios",
+    "name": "Background tool redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background shebang tool output stays redirected to file",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-redirect:start\npipeline-bg-tool-redirect:file-ok\npipeline-bg-tool-redirect:end"
+  },
+  {
+    "id": "pipeline_bg_tool_dual_stream_ios",
+    "name": "Background tool stdout+stderr redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background shebang tool writes both stdout and stderr into redirected file",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_dual_stream_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-dual-stream:start\npipeline-bg-tool-dual-stream:file-ok\npipeline-bg-tool-dual-stream:end"
+  },
+  {
+    "id": "pipeline_bg_tool_dual_stream_shell_vproc_ios",
+    "name": "Background tool stdout+stderr redirection with shell vproc (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background shebang tool redirection remains stable with PSCALI_SHELL_VPROC enabled",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_dual_stream_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_SHELL_VPROC": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-dual-stream:start\npipeline-bg-tool-dual-stream:file-ok\npipeline-bg-tool-dual-stream:end"
+  },
+  {
+    "id": "pipeline_bg_tool_abs_log_redirect_ios",
+    "name": "Background tool absolute-path redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background tool output redirected to an absolute path should be written to the target file.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_abs_log_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-abs-log:start\npipeline-bg-tool-abs-log:file-ok\npipeline-bg-tool-abs-log:end"
+  },
+  {
+    "id": "pipeline_bg_tool_abs_log_redirect_shell_vproc_ios",
+    "name": "Background tool absolute-path redirection with shell vproc (iOS)",
+    "category": "pipeline_ios",
+    "description": "Absolute-path redirection should remain stable when PSCALI_SHELL_VPROC is enabled.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_abs_log_redirect_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_SHELL_VPROC": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-abs-log:start\npipeline-bg-tool-abs-log:file-ok\npipeline-bg-tool-abs-log:end"
+  },
+  {
+    "id": "pipeline_bg_tool_simple_web_redirect_ios",
+    "name": "Background simple_web_server redirection (iOS)",
+    "category": "pipeline_ios",
+    "description": "Background simple_web_server startup diagnostics should be captured in redirected output.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_kill_cleanup_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-simple-web:start\npipeline-bg-tool-simple-web:file-ok\npipeline-bg-tool-simple-web:end"
+  },
+  {
+    "id": "pipeline_bg_tool_simple_web_redirect_pipe_debug_ios",
+    "name": "Background simple_web_server redirection with PSCALI_PIPE_DEBUG (iOS)",
+    "category": "pipeline_ios",
+    "description": "simple_web_server redirection should remain stable when pipeline debug logging is enabled.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_kill_cleanup_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_PIPE_DEBUG": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-simple-web:start\npipeline-bg-tool-simple-web:file-ok\npipeline-bg-tool-simple-web:end"
+  },
+  {
+    "id": "pipeline_bg_tool_simple_web_redirect_shell_vproc_ios",
+    "name": "Background simple_web_server redirection with shell vproc (iOS)",
+    "category": "pipeline_ios",
+    "description": "simple_web_server redirection should remain stable with PSCALI_SHELL_VPROC enabled.",
+    "script": "Tests/exsh/tests/pipeline_bg_tool_kill_cleanup_ios.exsh",
+    "expect": "runtime_ok",
+    "env": {
+      "RUN_VPROC_TESTS": "1",
+      "PSCALI_SHELL_VPROC": "1"
+    },
+    "expected_stdout": "pipeline-bg-tool-simple-web:start\npipeline-bg-tool-simple-web:file-ok\npipeline-bg-tool-simple-web:end"
+  },
+  {
             "id": "conditionals_loop",
             "name": "Conditionals execute matching branches",
             "category": "control",
@@ -241,6 +341,15 @@
             "expected_stdout": "help-builtin-present\n"
         },
         {
+            "id": "help_smallclue_applets",
+            "name": "help resolves smallclue applets",
+            "category": "builtins",
+            "description": "help <name> should describe smallclue applets exposed as shell commands.",
+            "script": "Tests/exsh/tests/help_smallclue_applets.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "help-rsync:ok\nhelp-git:ok\nhelp-micro:ok\nhelp-tadd:ok\nhelp-tabadd:ok\n"
+        },
+        {
             "id": "jobs_disown",
             "name": "disown removes jobs from listings",
             "category": "builtins",
@@ -348,6 +457,15 @@
             "expected_stdout": "cmdsub-retain:start\ncmdsub:func:outer inside:outer after:inner\nfunc:outer\nafter-var:outer\ncmdsub-retain:end"
         },
         {
+            "id": "command_substitution_env_restore",
+            "name": "Command substitution restores the parent environment",
+            "category": "expansion",
+            "description": "Variables exported inside $(...) do not leak into the caller environment.",
+            "script": "Tests/exsh/tests/command_substitution_env_restore.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "result:ok\nAA:1\nBB:1\nCC:unset\nDD:unset"
+        },
+        {
             "id": "repeated_command_execution",
             "name": "Command substitution loops reuse builtins",
             "category": "expansion",
@@ -363,7 +481,7 @@
             "description": "Backtick command substitution trims trailing newlines and honors escapes.",
             "script": "Tests/exsh/tests/backtick_substitution.exsh",
             "expect": "runtime_ok",
-            "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nassign:alpha beta\nplain:foo\nbacktick:end"
+            "expected_stdout": "backtick:start\nname:one\nlegacy:XY\ncombo:z1\n2z\nassign:alpha beta\nexported:ipp\nplain:foo\nbacktick:end"
         },
         {
             "id": "parameter_default",
@@ -828,6 +946,35 @@
             "expected_stdout": "shebang-fixture"
         },
         {
+            "id": "time_frontend_example",
+            "name": "time runs frontend example scripts",
+            "category": "runtime",
+            "description": "The smallclue time applet should execute frontend shebang programs such as the CLike hello example instead of rejecting them as missing commands.",
+            "script": "Tests/exsh/tests/time_frontend_example.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "time-frontend-status:ok\ntime-frontend-resolve:ok\ntime-frontend-output:ok\ntime-frontend-metrics:ok"
+        },
+        {
+            "id": "frontend_stdin_findprimes_direct",
+            "name": "frontend shebang programs read stdin on iOS",
+            "category": "runtime",
+            "description": "Frontend programs dispatched through the iOS shell path should read stdin correctly during direct execution.",
+            "script": "Tests/exsh/tests/frontend_stdin_findprimes_direct.exsh",
+            "expect": "runtime_ok",
+            "stdin": "10\n",
+            "expected_stdout": "frontend-stdin-direct-status:ok\nfrontend-stdin-direct-output:ok"
+        },
+        {
+            "id": "frontend_stdin_findprimes_time",
+            "name": "time forwards stdin to frontend shebang programs on iOS",
+            "category": "runtime",
+            "description": "The smallclue time applet should preserve stdin when running frontend programs through the iOS shell path.",
+            "script": "Tests/exsh/tests/frontend_stdin_findprimes_time.exsh",
+            "expect": "runtime_ok",
+            "stdin": "10\n",
+            "expected_stdout": "frontend-stdin-time-status:ok\nfrontend-stdin-time-output:ok"
+        },
+        {
             "id": "times_builtin",
             "name": "times reports CPU usage lines",
             "category": "builtins",
@@ -835,6 +982,18 @@
             "script": "Tests/exsh/tests/times_builtin.exsh",
             "expect": "runtime_ok",
             "expected_stdout": "status:0\nline_count:2\nfirst_format:ok\nsecond_format:ok\n"
+        },
+        {
+            "id": "watch_local_script_path_ios",
+            "name": "watch resolves local scripts (vproc)",
+            "category": "jobs",
+            "description": "On iOS/vproc, watch should resolve local scripts for both foo and ./foo forms instead of returning command-not-found.",
+            "script": "Tests/exsh/tests/watch_local_script_path_ios.exsh",
+            "expect": "runtime_ok",
+            "env": {
+                "RUN_VPROC_TESTS": "1"
+            },
+            "expected_stdout": "watch-local:foo-resolve:ok\nwatch-local:dot-resolve:ok\nwatch-local:foo-status:ok\nwatch-local:dot-status:ok"
         },
         {
             "id": "watch_top_vproc",

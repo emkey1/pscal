@@ -6,6 +6,7 @@
 #include "Pascal/globals.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -44,12 +45,19 @@ void registerVmBuiltin(const char *vm_name, VmBuiltinFn handler,
  * definition in builtin.c does nothing unless overridden. */
 void registerExtendedBuiltins(void);
 
+/* Runtime stdio stream accessors used by VM startup stream binding. */
+FILE* pscalRuntimeVmStdin(void);
+FILE* pscalRuntimeVmStdout(void);
+FILE* pscalRuntimeVmStderr(void);
+bool pscalRuntimeVmIsSharedFileStream(FILE* stream);
+
 /* VM-native general built-ins */
 Value vmBuiltinInttostr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinLength(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSizeof(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinAbs(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRound(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinOdd(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinHalt(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinDelay(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinNew(struct VM_s* vm, int arg_count, Value* args);
@@ -75,6 +83,7 @@ Value vmBuiltinFopen(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFclose(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFilesize(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinCopy(struct VM_s* vm, int arg_count, Value* args);
+Value vmBuiltinStringOfChar(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinSetlength(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinRealtostr(struct VM_s* vm, int arg_count, Value* args);
 Value vmBuiltinFormatfloat(struct VM_s* vm, int arg_count, Value* args);

@@ -1,0 +1,636 @@
+#!/usr/bin/env pascal
+program GameOfLife;
+
+// Conway's Game of Life - PSCAL Pascal Variant 
+
+type
+  CellState = (Dead, Alive);
+
+  GridType = array of array of CellState;
+
+  PatternType = record
+    name: String;
+    cells: array of array of Byte; // 1=alive, 0=dead 
+    offsetX, offsetY: Integer;
+  end;
+
+  // For pattern definitions 
+  Point = record
+    x, y: Integer;
+  end;
+
+var
+  grid: GridType;
+  rows, cols: Integer;
+  generation: LongInt;
+  speed: Word; // in ms 
+  autoPause: Boolean;
+  paused, running: Boolean;
+
+procedure InitializeGrid(var g: GridType; r, c: Integer);
+var
+  i, j: Integer;
+begin
+  SetLength(g, r);
+  for i := 0 to High(g) do
+    SetLength(g[i], c);
+
+  // Initialize all cells dead 
+  for i := 0 to High(g) do
+    for j := 0 to c - 1 do
+      g[i, j] := Dead;
+end;
+
+procedure ClearGrid(var g: GridType);
+var
+  i, j: Integer;
+begin
+  for i := 0 to High(g) do
+    for j := 0 to cols - 1 do
+      g[i, j] := Dead;
+end;
+
+function CountNeighbors(const g: GridType; r, c: Integer): Byte;
+var
+  count: Byte;
+  dr, dc: ShortInt;
+  nr, nc: Integer;
+begin
+  count := 0;
+
+  for dr := -1 to 1 do
+    for dc := -1 to 1 do
+      if (dr <> 0) or (dc <> 0) then
+      begin
+        nr := r + dr;
+        nc := c + dc;
+
+        // Wrapping edges 
+        if nr < 0 then nr := High(g);
+        if nr > High(g) then nr := 0;
+        if nc < 0 then nc := cols - 1;
+        if nc > cols - 1 then nc := 0;
+
+        if g[nr, nc] = Alive then
+          Inc(count);
+      end;
+
+  CountNeighbors := count;
+end;
+
+procedure NextGeneration(var g: GridType);
+var
+  newGen: GridType;
+  i, j: Integer;
+  neighbors: Byte;
+
+begin
+  // Create new generation grid 
+  SetLength(newGen, Length(g));
+  for i := 0 to High(newGen) do
+    SetLength(newGen[i], cols);
+
+  // Apply rules 
+  for i := 0 to High(g) do
+    for j := 0 to cols - 1 do
+      begin
+        neighbors := CountNeighbors(g, i, j);
+
+        case g[i, j] of
+          Dead:
+            if neighbors = 3 then newGen[i, j] := Alive else newGen[i, j] := Dead;
+          Alive:
+            if (neighbors < 2) or (neighbors > 3) then newGen[i, j] := Dead else newGen[i, j] := Alive;
+        end;
+      end;
+
+  // Replace grid 
+  g := newGen;
+end;
+
+procedure DrawGrid(const g: GridType);
+var
+  i, j: Integer;
+begin
+  Writeln(#13#10'Generation: ', generation, '  Speed: ', speed, 'ms');
+  Writeln('+', StringOfChar('-', cols), '+');
+
+  for i := 0 to High(g) do
+    begin
+      Write('|');
+      for j := 0 to cols - 1 do
+        if g[i, j] = Alive then
+         write(Chr(219))
+           //Write('*') // This is the UTF-8 sequence for █
+        else
+          Write(' ');
+      Writeln('|');
+    end;
+
+  Writeln('+', StringOfChar('-', cols), '+');
+end;
+
+procedure ToggleCell(var g: GridType; r, c: Integer);
+begin
+  if (r >= 0) and (r <= High(g)) and (c >= 0) and (c < cols) then
+    if g[r, c] = Dead then
+      g[r, c] := Alive
+    else
+      g[r, c] := Dead;
+end;
+
+procedure DrawMenu;
+begin
+  Write(#13#10, ' [1] Start/Pause         [2] Next Step');
+  Write(#13#10, ' [3] Clear Grid          [4] Randomize');
+  Write(#13#10, ' [5] Glider              [6] Gosper Gun');
+  Write(#13#10, ' [7] Speed Up            [8] Slow Down');
+  Write(#13#10, ' [9] Save Pattern        [0] Load Pattern');
+  Write(#13#10, ' [E] Edit Mode           [Q] Quit');
+end;
+
+procedure RunSimulation;
+var
+  key: Char;
+  startTick, elapsed: LongInt;
+  i, j: Integer;
+  r, c: Integer;
+  filename, cellStr: String;
+
+begin
+  running := true;
+  autoPause := false;
+
+  while running do
+    begin
+      ClrScr;
+      GotoXY(1, 1);
+      DrawGrid(grid);
+      DrawMenu;
+      
+      if not paused then
+        begin
+          startTick := GetTickCount; // Platform-specific, fallback to random for portability 
+          
+          NextGeneration(grid);
+          Inc(generation);
+
+          elapsed := GetTickCount - startTick;
+          if speed > elapsed then
+            Delay(speed - elapsed);
+        end;
+
+      key := UpCase(ReadKey);
+
+      case key of
+        '1': paused := not paused;
+        '2':
+          begin
+            NextGeneration(grid);
+            Inc(generation);
+          end;
+        '3': 
+          begin
+            ClearGrid(grid);
+            generation := 0;
+          end;
+        '4': 
+          begin
+            ClearGrid(grid);
+            for i := 0 to High(grid) do
+              for j := 0 to cols - 1 do
+                if Random(10) < 2 then grid[i, j] := Alive;
+          end;
+        '5': // Glider 
+          begin
+            ClearGrid(grid);
+            grid[1, 2] := Alive;
+            grid[2, 3] := Alive;
+            grid[3, 1] := Alive;
+            grid[3, 2] := Alive;
+            grid[3, 3] := Alive;
+          end;
+        '6': // Gosper Glider Gun 
+          begin
+            ClearGrid(grid);
+            grid[0, 24] := Alive;
+            grid[1, 22] := Alive;
+            grid[1, 24] := Alive;
+            grid[2, 12] := Alive;
+            grid[2, 13] := Alive;
+            grid[2, 20] := Alive;
+            grid[2, 21] := Alive;
+            grid[2, 34] := Alive;
+            grid[2, 35] := Alive;
+            grid[3, 11] := Alive;
+            grid[3, 15] := Alive;
+            grid[3, 20] := Alive;
+            grid[3, 21] := Alive;
+            grid[3, 34] := Alive;
+            grid[3, 35] := Alive;
+            grid[4, 0] := Alive;
+            grid[4, 1] := Alive;
+            grid[4, 10] := Alive;
+            grid[4, 16] := Alive;
+            grid[4, 20] := Alive;
+            grid[4, 21] := Alive;
+            grid[5, 0] := Alive;
+            grid[5, 1] := Alive;
+            grid[5, 10] := Alive;
+            grid[5, 14] := Alive;
+            grid[5, 16] := Alive;
+            grid[5, 17] := Alive;
+            grid[5, 22] := Alive;
+            grid[5, 24] := Alive;
+            grid[6, 10] := Alive;
+            grid[6, 16] := Alive;
+            grid[7, 11] := Alive;
+            grid[7, 15] := Alive;
+            grid[8, 12] := Alive;
+            grid[8, 13] := Alive;
+          end;
+        '7': if speed > 50 then Dec(speed, 50);
+        '8': if speed < 2000 then Inc(speed, 50);
+        '9': // Save 
+          begin
+            Writeln('Filename? ');
+            Readln(filename);
+            try
+              SavePatternToFile(filename, grid);
+              Writeln('Saved pattern to ', filename);
+            except
+              on E: Exception do
+                Writeln('Save failed: ', E.Message);
+            end;
+            Delay(1000);
+          end;
+        '0': // Load 
+          begin
+            Writeln('Filename? ');
+            Readln(filename);
+            try
+              LoadPatternFromFile(filename, grid);
+              generation := 0;
+              paused := true;
+              Writeln('Loaded pattern from ', filename);
+            except
+              on E: Exception do
+                Writeln('Load failed: ', E.Message);
+            end;
+            Delay(1000);
+          end;
+        'E': 
+          begin
+            Writeln('Edit mode: click coordinates (e.g., A5)');
+            Write('Cell: ');
+            Readln(cellStr);
+            if ParseCoordinate(cellStr, r, c) then
+              ToggleCell(grid, r, c);
+          end;
+        'Q': running := false;
+      end;
+
+      Delay(10); // Prevent console flicker 
+    end;
+end;
+
+procedure FindOscillators(const g: GridType; maxGen: LongInt);
+var
+  history: array of GridType;
+  i, j, k, gen: LongInt;
+  found: Boolean;
+
+begin
+  Writeln('Analyzing for oscillators up to generation ', maxGen);
+  
+  // Store current state
+  SetLength(history, 1);
+  history[0] := CloneGrid(g);
+
+  for gen := 1 to maxGen do
+    begin
+      NextGeneration(grid);
+      
+      // Compare current grid with all store 
+      found := false;
+      for k := 0 to High(history) do
+        begin
+          if CompareGrids(grid, history[k]) then
+            begin
+              Writeln('Found oscillator of period ', gen - k, ' at generation ', gen);
+              found := true;
+              break;
+            end;
+        end;
+
+      if not found then
+        begin
+          j := Length(history);
+          SetLength(history, j + 1);
+          history[j] := CloneGrid(grid);
+        end;
+    end;
+
+  Writeln('Analysis complete.');
+end;
+
+function CloneGrid(const src: GridType): GridType;
+var
+  i: Integer;
+begin
+  SetLength(Result, Length(src));
+  for i := 0 to High(src) do
+    begin
+      SetLength(Result[i], cols);
+      Move(src[i][0], Result[i][0], cols * SizeOf(CellState));
+    end;
+end;
+
+function CompareGrids(const a, b: GridType): Boolean;
+var
+  i, j: Integer;
+begin
+  Result := (Length(a) = Length(b));
+  if not Result then Exit;
+
+  for i := 0 to High(a) do
+    for j := 0 to cols - 1 do
+      if a[i, j] <> b[i, j] then Exit(false);
+
+  Result := true;
+end;
+
+procedure SavePatternToFile(const filename: String; const g: GridType);
+var
+  f: Text;
+  i, j: Integer;
+  line: String;
+begin
+  Assign(f, filename);
+  Rewrite(f);
+  Writeln(f, Length(g));
+  Writeln(f, cols);
+
+  for i := 0 to High(g) do
+    begin
+      line := '';
+      for j := 0 to cols - 1 do
+        if g[i, j] = Alive then
+          line := line + '#'
+        else
+          line := line + '.';
+      Writeln(f, line);
+    end;
+
+  Close(f);
+end;
+
+procedure LoadPatternFromFile(const filename: String; var g: GridType);
+var
+  f: Text;
+  rowCount, colCount: Integer;
+  code: Integer;
+  i, j: Integer;
+  line: String;
+  cellCh: Char;
+begin
+  Assign(f, filename);
+  Reset(f);
+
+  Readln(f, line);
+  Val(line, rowCount, code);
+  if code <> 0 then
+    raise 'Invalid row count in pattern file.';
+
+  Readln(f, line);
+  Val(line, colCount, code);
+  if code <> 0 then
+    raise 'Invalid column count in pattern file.';
+
+  if (rowCount <= 0) or (colCount <= 0) then
+    raise 'Pattern dimensions must be positive.';
+
+  rows := rowCount;
+  cols := colCount;
+  InitializeGrid(g, rows, cols);
+
+  for i := 0 to rows - 1 do
+    begin
+      if EOF(f) then
+        break;
+      Readln(f, line);
+      for j := 0 to cols - 1 do
+        begin
+          if j + 1 <= Length(line) then
+            cellCh := line[j + 1]
+          else
+            cellCh := '.';
+
+          if (cellCh <> '.') and (cellCh <> ' ') and (cellCh <> '0') then
+            g[i, j] := Alive
+          else
+            g[i, j] := Dead;
+        end;
+    end;
+
+  Close(f);
+end;
+
+function ParseCoordinate(coordStr: String; var r, c: Integer): Boolean;
+var
+  ch: Char;
+  code: Integer;
+begin
+  ParseCoordinate := false;
+
+  if Length(coordStr) < 2 then Exit(false);
+
+  ch := UpCase(coordStr[1]);
+  if (ch < 'A') or (ch > 'Z') then Exit(false);
+  
+  r := ord(ch) - ord('A');
+
+  Val(Copy(coordStr, 2, Length(coordStr) - 1), c, code);
+  ParseCoordinate := (code = 0) and (c >= 0) and (c < cols);
+end;
+
+procedure ShowIntro;
+begin
+  Writeln(' Conway''s Game of Life');
+  Writeln('=========================');
+  Writeln('Rules:');
+  Writeln('  - Any live cell with <2 neighbors dies (underpopulation)');
+  Writeln('  - Any live cell with 2-3 neighbors lives');
+  Writeln('  - Any live cell with >3 neighbors dies (overpopulation)');
+  Writeln('  - Any dead cell with exactly 3 neighbors becomes alive');
+  Writeln;
+end;
+
+begin
+  var ch: Char;
+  var i, j: Integer;
+  var r, c: Integer;
+  var cellStr: String;
+  try
+    randomize;
+    ShowIntro;
+    
+    // Initialize grid 
+    rows := 20; cols := 40; speed := 100;
+    InitializeGrid(grid, rows, cols);
+
+    // Create default Glider
+    grid[1, 2] := Alive;
+    grid[2, 3] := Alive;
+    grid[3, 1] := Alive;
+    grid[3, 2] := Alive;
+    grid[3, 3] := Alive;
+
+    // Main loop 
+    paused := false;
+    running := true;
+    
+    while running do
+      begin
+        ClrScr;
+        GotoXY(1, 1);
+        DrawGrid(grid);
+        DrawMenu;
+
+        if not paused then
+          begin
+            NextGeneration(grid);
+            Inc(generation);
+
+            Delay(speed);
+          end;
+
+        // Process input 
+        if KeyPressed then
+          begin
+            ch := UpCase(ReadKey);
+            
+            case ch of
+              '1': paused := not paused;
+              '2':
+                begin
+                  NextGeneration(grid);
+                  Inc(generation);
+                end;
+              '3': 
+                begin
+                  ClearGrid(grid);
+                  generation := 0;
+                end;
+              '4': 
+                begin
+                  ClearGrid(grid);
+                  for i := 0 to High(grid) do
+                    for j := 0 to cols - 1 do
+                      if Random(10) < 2 then grid[i, j] := Alive;
+                end;
+              '5': // Glider
+                begin
+                  ClearGrid(grid);
+                  grid[1, 2] := Alive;
+                  grid[2, 3] := Alive;
+                  grid[3, 1] := Alive;
+                  grid[3, 2] := Alive;
+                  grid[3, 3] := Alive;
+                end;
+              '6': // Gosper Glider Gun 
+                begin
+                  ClearGrid(grid);
+                  grid[0, 24] := Alive;
+                  grid[1, 22] := Alive;
+                  grid[1, 24] := Alive;
+                  grid[2, 12] := Alive;
+                  grid[2, 13] := Alive;
+                  grid[2, 20] := Alive;
+                  grid[2, 21] := Alive;
+                  grid[2, 34] := Alive;
+                  grid[2, 35] := Alive;
+                  grid[3, 11] := Alive;
+                  grid[3, 15] := Alive;
+                  grid[3, 20] := Alive;
+                  grid[3, 21] := Alive;
+                  grid[3, 34] := Alive;
+                  grid[3, 35] := Alive;
+                  grid[4, 0] := Alive;
+                  grid[4, 1] := Alive;
+                  grid[4, 10] := Alive;
+                  grid[4, 16] := Alive;
+                  grid[4, 20] := Alive;
+                  grid[4, 21] := Alive;
+                  grid[5, 0] := Alive;
+                  grid[5, 1] := Alive;
+                  grid[5, 10] := Alive;
+                  grid[5, 14] := Alive;
+                  grid[5, 16] := Alive;
+                  grid[5, 17] := Alive;
+                  grid[5, 22] := Alive;
+                  grid[5, 24] := Alive;
+                  grid[6, 10] := Alive;
+                  grid[6, 16] := Alive;
+                  grid[7, 11] := Alive;
+                  grid[7, 15] := Alive;
+                  grid[8, 12] := Alive;
+                  grid[8, 13] := Alive;
+                end;
+              '7': if speed > 50 then Dec(speed, 50);
+              '8': if speed < 2000 then Inc(speed, 50);
+              '9':
+                begin
+                  Write(#13#10, 'Filename? ');
+                  Readln(cellStr);
+                  try
+                    SavePatternToFile(cellStr, grid);
+                    Write(#13#10, 'Saved pattern to ', cellStr);
+                  except
+                    on E: Exception do
+                      Write(#13#10, 'Save failed: ', E.Message);
+                  end;
+                  Delay(1000);
+                end;
+              '0':
+                begin
+                  Write(#13#10, 'Filename? ');
+                  Readln(cellStr);
+                  try
+                    LoadPatternFromFile(cellStr, grid);
+                    generation := 0;
+                    paused := true;
+                    Write(#13#10, 'Loaded pattern from ', cellStr);
+                  except
+                    on E: Exception do
+                      Write(#13#10, 'Load failed: ', E.Message);
+                  end;
+                  Delay(1000);
+                end;
+              'E': 
+                begin
+                  Writeln();
+                  Writeln();
+                  Writeln('Edit mode: enter coordinates (e.g., A5)');
+                  Write('Cell: ');
+                  Readln(cellStr);
+                  if ParseCoordinate(cellStr, r, c) then
+                    ToggleCell(grid, r, c);
+                end;
+              'Q': running := false;
+            end;
+          end;
+
+        Delay(10); // Prevent console flicker 
+      end;
+
+    Writeln(#13#10'Thanks for playing Conway''s Game of Life!');
+    
+  except
+    on E: Exception do 
+      begin
+        Writeln('Error: ', E.Message);
+        Halt(1);
+      end;
+  end;
+end.

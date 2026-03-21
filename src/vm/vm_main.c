@@ -20,6 +20,7 @@ static void initSymbolSystem(void) {
         fprintf(stderr, "FATAL: Failed to create global symbol hash table.\n");
         EXIT_FAILURE_HANDLER();
     }
+    insertStandardStreamSymbols();
 
     constGlobalSymbols = createHashTable();
     if (!constGlobalSymbols) {

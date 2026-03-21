@@ -40,8 +40,19 @@
 #include <signal.h>
 #include <fcntl.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((weak))
+#endif
+bool shellRuntimeIsSharedFileStream(FILE *stream) {
+    (void)stream;
+    return false;
+}
+
 #if defined(PSCAL_TARGET_IOS)
 #include "ios/vproc.h"
+#define PATH_VIRTUALIZATION_NO_MACROS 1
+#include "common/path_virtualization.h"
+#undef PATH_VIRTUALIZATION_NO_MACROS
 #if defined(__APPLE__)
 extern VProcSessionStdio *PSCALRuntimeGetCurrentRuntimeStdio(void) __attribute__((weak_import));
 #else
@@ -51,6 +62,9 @@ typedef struct {
     FILE *fp;
     int host_fd;
     int std_fd;
+    dev_t host_dev;
+    ino_t host_ino;
+    bool host_identity_valid;
 } VmVprocStream;
 
 typedef struct {
@@ -59,9 +73,61 @@ typedef struct {
     bool can_write;
 } VmVprocShimCookie;
 
+typedef struct VmShimCookieNode {
+    void *cookie;
+    struct VmShimCookieNode *next;
+} VmShimCookieNode;
+
 static __thread VmVprocStream gVmVprocStdout = { NULL, -1, STDOUT_FILENO };
 static __thread VmVprocStream gVmVprocStderr = { NULL, -1, STDERR_FILENO };
 static __thread VmVprocStream gVmVprocStdin = { NULL, -1, STDIN_FILENO };
+static VmVprocStream gVmStdoutSharedShim = { NULL, -1, STDOUT_FILENO };
+static VmVprocStream gVmStderrSharedShim = { NULL, -1, STDERR_FILENO };
+static VmVprocStream gVmStdinSharedShim = { NULL, -1, STDIN_FILENO };
+static pthread_mutex_t gVmSharedShimLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t gVmShimCookieLock = PTHREAD_MUTEX_INITIALIZER;
+static VmShimCookieNode *gVmShimCookieHead = NULL;
+
+static void vmShimCookieTrackAdd(void *cookie) {
+    if (!cookie) {
+        return;
+    }
+    VmShimCookieNode *node = (VmShimCookieNode *)calloc(1, sizeof(VmShimCookieNode));
+    if (!node) {
+        return;
+    }
+    node->cookie = cookie;
+    pthread_mutex_lock(&gVmShimCookieLock);
+    node->next = gVmShimCookieHead;
+    gVmShimCookieHead = node;
+    pthread_mutex_unlock(&gVmShimCookieLock);
+}
+
+static bool vmShimCookieTrackRemove(void *cookie) {
+    if (!cookie) {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&gVmShimCookieLock);
+    VmShimCookieNode *prev = NULL;
+    VmShimCookieNode *cur = gVmShimCookieHead;
+    while (cur) {
+        if (cur->cookie == cookie) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                gVmShimCookieHead = cur->next;
+            }
+            free(cur);
+            found = true;
+            break;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    pthread_mutex_unlock(&gVmShimCookieLock);
+    return found;
+}
 
 static FILE *vmVprocStreamFallback(int std_fd) {
     if (std_fd == STDIN_FILENO) {
@@ -106,6 +172,9 @@ static int vmVprocShimWrite(void *cookie, const char *buf, int len) {
 }
 
 static int vmVprocShimClose(void *cookie) {
+    if (!vmShimCookieTrackRemove(cookie)) {
+        return 0;
+    }
     free(cookie);
     return 0;
 }
@@ -128,6 +197,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
         cache->fp = NULL;
     }
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
 
     VmVprocShimCookie *cookie = (VmVprocShimCookie *)calloc(1, sizeof(VmVprocShimCookie));
     if (!cookie) {
@@ -136,6 +206,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
     cookie->std_fd = std_fd;
     cookie->can_read = strchr(mode, 'r') != NULL;
     cookie->can_write = (strchr(mode, 'w') != NULL) || (strchr(mode, 'a') != NULL);
+    vmShimCookieTrackAdd(cookie);
 
     FILE *fp = funopen(cookie,
                        cookie->can_read ? vmVprocShimRead : NULL,
@@ -143,6 +214,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
                        NULL,
                        vmVprocShimClose);
     if (!fp) {
+        (void)vmShimCookieTrackRemove(cookie);
         free(cookie);
         return vmVprocStreamFallback(std_fd);
     }
@@ -151,6 +223,7 @@ static FILE *vmVprocStreamOpenShim(int std_fd,
     }
     cache->fp = fp;
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
     return fp;
 }
 
@@ -188,7 +261,15 @@ static FILE *vmVprocStreamOpen(int std_fd,
     }
 
     if (cache->fp && cache->host_fd == host_fd) {
-        return cache->fp;
+        if (!cache->host_identity_valid) {
+            return cache->fp;
+        }
+        struct stat current_st;
+        if (fstat(host_fd, &current_st) == 0 &&
+            current_st.st_dev == cache->host_dev &&
+            current_st.st_ino == cache->host_ino) {
+            return cache->fp;
+        }
     }
 
     if (cache->fp) {
@@ -197,6 +278,7 @@ static FILE *vmVprocStreamOpen(int std_fd,
         cache->fp = NULL;
     }
     cache->host_fd = -1;
+    cache->host_identity_valid = false;
 
     int dup_fd = -1;
 #ifdef F_DUPFD_CLOEXEC
@@ -222,6 +304,12 @@ static FILE *vmVprocStreamOpen(int std_fd,
     }
     cache->fp = fp;
     cache->host_fd = host_fd;
+    struct stat host_st;
+    if (fstat(host_fd, &host_st) == 0) {
+        cache->host_dev = host_st.st_dev;
+        cache->host_ino = host_st.st_ino;
+        cache->host_identity_valid = true;
+    }
     return fp;
 }
 
@@ -238,6 +326,102 @@ static FILE *vmVprocStdin(void) {
     return vmVprocStreamOpen(STDIN_FILENO, &gVmVprocStdin, "r", -1);
 }
 
+static bool vmFdMatchesFileIdentity(int fd, int other_fd) {
+    if (fd < 0 || other_fd < 0) {
+        return false;
+    }
+    struct stat fd_st;
+    struct stat other_st;
+    if (fstat(fd, &fd_st) != 0 || fstat(other_fd, &other_st) != 0) {
+        return false;
+    }
+    return fd_st.st_dev == other_st.st_dev && fd_st.st_ino == other_st.st_ino;
+}
+
+static bool vmStreamTargetsSharedStdin(FILE *stream) {
+    if (!stream) {
+        return false;
+    }
+    if (stream == stdin) {
+        return true;
+    }
+    if (pscalRuntimeVmIsSharedFileStream(stream)) {
+        return true;
+    }
+    int fd = fileno(stream);
+    if (fd < 0) {
+        return false;
+    }
+    if (vmFdMatchesFileIdentity(fd, STDIN_FILENO)) {
+        return true;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    VProc *vp = vprocCurrent();
+    if (vp) {
+        int translated = vprocTranslateFd(vp, STDIN_FILENO);
+        if (translated >= 0 && vmFdMatchesFileIdentity(fd, translated)) {
+            return true;
+        }
+    }
+    VProcSessionStdio *session = vprocSessionStdioCurrent();
+    if (session && !vprocSessionStdioIsDefault(session) &&
+        session->stdin_host_fd >= 0 &&
+        vmFdMatchesFileIdentity(fd, session->stdin_host_fd)) {
+        return true;
+    }
+#endif
+    return false;
+}
+
+static FILE *vmVprocSharedShimStream(int std_fd,
+                                     VmVprocStream *cache,
+                                     const char *mode,
+                                     int buf_mode) {
+    FILE *fp = NULL;
+    pthread_mutex_lock(&gVmSharedShimLock);
+    fp = vmVprocStreamOpenShim(std_fd, cache, mode, buf_mode);
+    pthread_mutex_unlock(&gVmSharedShimLock);
+    return fp;
+}
+
+FILE* pscalRuntimeVmStdin(void) {
+    return vmVprocSharedShimStream(STDIN_FILENO, &gVmStdinSharedShim, "r", -1);
+}
+
+FILE* pscalRuntimeVmStdout(void) {
+    return vmVprocSharedShimStream(STDOUT_FILENO, &gVmStdoutSharedShim, "w", _IONBF);
+}
+
+FILE* pscalRuntimeVmStderr(void) {
+    return vmVprocSharedShimStream(STDERR_FILENO, &gVmStderrSharedShim, "w", _IONBF);
+}
+
+bool pscalRuntimeVmIsSharedFileStream(FILE* stream) {
+    if (!stream) {
+        return false;
+    }
+#if defined(PSCAL_TARGET_IOS)
+    if (stream == stdin || stream == stdout || stream == stderr) {
+        return true;
+    }
+    if (stream == gVmVprocStdin.fp || stream == gVmVprocStdout.fp || stream == gVmVprocStderr.fp) {
+        return true;
+    }
+    if (stream == gVmStdinSharedShim.fp || stream == gVmStdoutSharedShim.fp || stream == gVmStderrSharedShim.fp) {
+        return true;
+    }
+    if (shellRuntimeIsSharedFileStream && shellRuntimeIsSharedFileStream(stream)) {
+        return true;
+    }
+    return false;
+#else
+    if (shellRuntimeIsSharedFileStream && shellRuntimeIsSharedFileStream(stream)) {
+        return true;
+    }
+    return stream == stdin || stream == stdout || stream == stderr;
+#endif
+}
+
 #undef stdin
 #undef stdout
 #undef stderr
@@ -245,6 +429,75 @@ static FILE *vmVprocStdin(void) {
 #define stdout vmVprocStdout()
 #define stderr vmVprocStderr()
 #endif
+
+#if !defined(PSCAL_TARGET_IOS)
+static bool vmFdMatchesFileIdentity(int fd, int other_fd) {
+    if (fd < 0 || other_fd < 0) {
+        return false;
+    }
+    struct stat fd_st;
+    struct stat other_st;
+    if (fstat(fd, &fd_st) != 0 || fstat(other_fd, &other_st) != 0) {
+        return false;
+    }
+    return fd_st.st_dev == other_st.st_dev && fd_st.st_ino == other_st.st_ino;
+}
+
+static bool vmStreamTargetsSharedStdin(FILE *stream) {
+    if (!stream) {
+        return false;
+    }
+    if (stream == stdin) {
+        return true;
+    }
+    if (pscalRuntimeVmIsSharedFileStream(stream)) {
+        return true;
+    }
+    int fd = fileno(stream);
+    if (fd < 0) {
+        return false;
+    }
+    if (vmFdMatchesFileIdentity(fd, STDIN_FILENO)) {
+        return true;
+    }
+    return false;
+}
+
+FILE* pscalRuntimeVmStdin(void) {
+    return stdin;
+}
+
+FILE* pscalRuntimeVmStdout(void) {
+    return stdout;
+}
+
+FILE* pscalRuntimeVmStderr(void) {
+    return stderr;
+}
+
+bool pscalRuntimeVmIsSharedFileStream(FILE* stream) {
+    if (!stream) {
+        return false;
+    }
+    if (shellRuntimeIsSharedFileStream && shellRuntimeIsSharedFileStream(stream)) {
+        return true;
+    }
+    return stream == stdin || stream == stdout || stream == stderr;
+}
+#endif
+
+static void vmMaybeCloseFileValue(Value *file_value) {
+    if (!file_value || file_value->type != TYPE_FILE || !file_value->f_val) {
+        return;
+    }
+    FILE *fp = file_value->f_val;
+    if (pscalRuntimeVmIsSharedFileStream(fp)) {
+        fflush(fp);
+    } else {
+        fclose(fp);
+    }
+    file_value->f_val = NULL;
+}
 
 #if defined(__APPLE__)
 extern void shellRuntimeSetLastStatus(int status) __attribute__((weak_import));
@@ -699,10 +952,26 @@ static bool computeValueSizeBytesInternal(const Value *value, long long *out_byt
         }
         case TYPE_RECORD: {
             long long total = 0;
+            const Value* seen_storage[128];
+            int seen_count = 0;
             for (FieldValue *field = value->record_val; field; field = field->next) {
+                const Value *fieldValue = fieldValueStorageConst(field);
+                bool already_counted = false;
+                for (int i = 0; i < seen_count; i++) {
+                    if (seen_storage[i] == fieldValue) {
+                        already_counted = true;
+                        break;
+                    }
+                }
+                if (already_counted) {
+                    continue;
+                }
                 long long field_size = 0;
-                if (!computeValueSizeBytesInternal(&field->value, &field_size, depth + 1)) {
+                if (!computeValueSizeBytesInternal(fieldValue, &field_size, depth + 1)) {
                     return false;
+                }
+                if (seen_count < (int)(sizeof(seen_storage) / sizeof(seen_storage[0]))) {
+                    seen_storage[seen_count++] = fieldValue;
                 }
                 total += field_size;
             }
@@ -1439,6 +1708,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"sqr", vmBuiltinSqr},
     {"sqrt", vmBuiltinSqrt},
     {"str", vmBuiltinStr},
+    {"stringofchar", vmBuiltinStringOfChar},
     {"succ", vmBuiltinSucc},
     {"tan", vmBuiltinTan},
     {"tanh", vmBuiltinTanh},
@@ -1485,6 +1755,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"gldepthfunc", NULL},
     {"fflush", vmBuiltinFflush},
     {"socketpeeraddr", vmBuiltinSocketPeerAddr},
+    {"odd", vmBuiltinOdd},
     {"to be filled", NULL}
 };
 
@@ -2426,13 +2697,13 @@ Value vmBuiltinFclose(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "fclose expects (file).");
         return makeVoid();
     }
-    const Value* farg = &args[0];
-    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (const Value*)farg->ptr_val;
+    Value* farg = (Value*)&args[0];
+    if (farg->type == TYPE_POINTER && farg->ptr_val) farg = (Value*)farg->ptr_val;
     if (farg->type != TYPE_FILE || !farg->f_val) {
         runtimeError(vm, "fclose requires a valid file argument.");
         return makeVoid();
     }
-    fclose(farg->f_val);
+    vmMaybeCloseFileValue(farg);
     return makeVoid();
 }
 
@@ -2475,6 +2746,45 @@ Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
 
     Value result = makeString(new_str);
     free(new_str);
+    return result;
+}
+
+Value vmBuiltinStringOfChar(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[1])) {
+        runtimeError(vm, "StringOfChar expects (Char/String, Integer).");
+        return makeString("");
+    }
+
+    int fill = 0;
+    if (args[0].type == TYPE_CHAR) {
+        fill = (unsigned char)AS_CHAR(args[0]);
+    } else if (args[0].type == TYPE_STRING) {
+        const char *source = AS_STRING(args[0]);
+        fill = (source && source[0]) ? (unsigned char)source[0] : 0;
+    } else if (IS_INTLIKE(args[0])) {
+        fill = (unsigned char)AS_INTEGER(args[0]);
+    } else {
+        runtimeError(vm, "StringOfChar expects a character-like first argument.");
+        return makeString("");
+    }
+
+    long long count = AS_INTEGER(args[1]);
+    if (count <= 0) {
+        return makeString("");
+    }
+
+    size_t len = (size_t)count;
+    char *buffer = (char*)malloc(len + 1);
+    if (!buffer) {
+        runtimeError(vm, "StringOfChar: memory allocation failed.");
+        return makeString("");
+    }
+
+    memset(buffer, fill, len);
+    buffer[len] = '\0';
+
+    Value result = makeString(buffer);
+    free(buffer);
     return result;
 }
 
@@ -2782,6 +3092,22 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
         target->s_val = new_buf;
         target->max_length = -1;
         return makeVoid();
+    }
+
+    if ((target->element_type == TYPE_UNKNOWN || target->element_type == TYPE_VOID ||
+         target->element_type_def == NULL) &&
+        args[0].base_type_node != NULL) {
+        Value typed_template = makeValueForType(TYPE_ARRAY, args[0].base_type_node, NULL);
+        if (typed_template.type == TYPE_ARRAY) {
+            if (target->element_type == TYPE_UNKNOWN || target->element_type == TYPE_VOID) {
+                target->element_type = typed_template.element_type;
+            }
+            if (target->element_type_def == NULL) {
+                target->element_type_def = typed_template.element_type_def;
+            }
+            target->array_is_packed = typed_template.array_is_packed;
+        }
+        freeValue(&typed_template);
     }
 
     int dimension_count = arg_count - 1;
@@ -3815,15 +4141,16 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
         return false;
     }
     int fd = fileno(stream);
+    bool is_stdin_stream = vmStreamTargetsSharedStdin(stream);
 #if defined(PSCAL_TARGET_IOS)
-    FILE *stdin_stream = stdin;
-    bool is_stdin_stream = (stream == stdin_stream);
+    bool is_shared_stdin_stream = is_stdin_stream;
     bool tool_dbg = getenv("PSCALI_TOOL_DEBUG") != NULL;
-    if (fd < 0 && is_stdin_stream) {
+    if (is_shared_stdin_stream) {
+        fd = STDIN_FILENO;
+    } else if (fd < 0 && is_stdin_stream) {
         fd = STDIN_FILENO;
     }
 #else
-    bool is_stdin_stream = (stream == stdin);
     bool tool_dbg = false;
 #endif
     if (fd < 0) {
@@ -3849,10 +4176,26 @@ static bool vmReadLineInterruptible(VM *vm, FILE *stream, char *buffer, size_t b
                 vprocSessionStdioActivate(session_stdio);
             }
         }
-        if (session_stdio && !vprocSessionStdioIsDefault(session_stdio)) {
+        if (session_stdio) {
             bool has_host_stdin = (session_stdio->stdin_host_fd >= 0);
             bool has_pscal_stdin = (session_stdio->stdin_pscal_fd != NULL);
-            if (has_host_stdin && !has_pscal_stdin) {
+            bool has_session_input = (session_stdio->input != NULL);
+            bool session_backed_input = has_host_stdin || has_pscal_stdin || has_session_input;
+            /* Shared stdin streams in the iOS runtime should consume input
+             * from the per-session buffer when they are attached to a real
+             * runtime session, even if isatty(0) is false on the current
+             * worker thread. Frontend tools launched from applets like time
+             * inherit the runtime context but may not present fd 0 as a tty
+             * through the active VProc mapping, which leaves ReadLn blocked in
+             * select/poll after the user has already typed a line. */
+            if (is_shared_stdin_stream &&
+                session_backed_input &&
+                (!vprocSessionStdioIsDefault(session_stdio) ||
+                 pscalRuntimeStdinIsInteractive())) {
+                use_session_read = true;
+            } else if (!vprocSessionStdioIsDefault(session_stdio) &&
+                       has_host_stdin &&
+                       !has_pscal_stdin) {
                 use_session_read = true;
             }
         }
@@ -5261,7 +5604,7 @@ Value vmBuiltinRewrite(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Rewrite must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rewrite."); return makeVoid(); }
-    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+    vmMaybeCloseFileValue(fileVarLValue);
 
     bool has_record_size_arg = (arg_count == 2);
     int new_record_size = fileVarLValue->record_size;
@@ -5554,7 +5897,46 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
     }
 
     switch (target->type) {
+        case TYPE_INT8: {
+            long long next = target->i_val + delta;
+            if (next < INT8_MIN || next > INT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing INT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int8_t)next);
+            break;
+        }
+
+        case TYPE_UINT8: {
+            long long next = target->i_val + delta;
+            if (next < 0 || next > UINT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing UINT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint8_t)next);
+            break;
+        }
+
+        case TYPE_INT16: {
+            long long next = target->i_val + delta;
+            if (next < INT16_MIN || next > INT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing INT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int16_t)next);
+            break;
+        }
+
+        case TYPE_UINT16: {
+            long long next = target->i_val + delta;
+            if (next < 0 || next > UINT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing UINT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint16_t)next);
+            break;
+        }
+
         case TYPE_INTEGER:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
             SET_INT_VALUE(target, target->i_val + delta);
             break;
 
@@ -5620,7 +6002,46 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
     }
 
     switch (target->type) {
+        case TYPE_INT8: {
+            long long next = target->i_val - delta;
+            if (next < INT8_MIN || next > INT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing INT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int8_t)next);
+            break;
+        }
+
+        case TYPE_UINT8: {
+            long long next = target->i_val - delta;
+            if (next < 0 || next > UINT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing UINT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint8_t)next);
+            break;
+        }
+
+        case TYPE_INT16: {
+            long long next = target->i_val - delta;
+            if (next < INT16_MIN || next > INT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing INT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int16_t)next);
+            break;
+        }
+
+        case TYPE_UINT16: {
+            long long next = target->i_val - delta;
+            if (next < 0 || next > UINT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing UINT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint16_t)next);
+            break;
+        }
+
         case TYPE_INTEGER:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
             SET_INT_VALUE(target, target->i_val - delta);
             break;
 
@@ -6046,7 +6467,7 @@ Value vmBuiltinReset(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Reset must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Reset."); return makeVoid(); }
-    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+    vmMaybeCloseFileValue(fileVarLValue);
 
     bool has_record_size_arg = (arg_count == 2);
     int new_record_size = fileVarLValue->record_size;
@@ -6093,7 +6514,7 @@ Value vmBuiltinAppend(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Append must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Append."); return makeVoid(); }
-    if (fileVarLValue->f_val) fclose(fileVarLValue->f_val);
+    vmMaybeCloseFileValue(fileVarLValue);
 
     FILE* f = fopen(fileVarLValue->filename, "a");
     if (f == NULL) {
@@ -6115,10 +6536,7 @@ Value vmBuiltinClose(VM* vm, int arg_count, Value* args) {
     Value* fileVarLValue = (Value*)args[0].ptr_val; // Dereference the pointer
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Close must be a file variable."); return makeVoid(); }
-    if (fileVarLValue->f_val) {
-        fclose(fileVarLValue->f_val);
-        fileVarLValue->f_val = NULL;
-    }
+    vmMaybeCloseFileValue(fileVarLValue);
     // Standard Pascal does not de-assign the filename on Close.
     return makeVoid();
 }
@@ -6135,7 +6553,7 @@ Value vmBuiltinRename(VM* vm, int arg_count, Value* args) {
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First argument to Rename must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rename."); return makeVoid(); }
     if (args[1].type != TYPE_STRING) { runtimeError(vm, "Second argument to Rename must be a string."); return makeVoid(); }
-    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+    vmMaybeCloseFileValue(fileVarLValue);
 
     int res = rename(fileVarLValue->filename, args[1].s_val);
     if (res != 0) {
@@ -6162,7 +6580,7 @@ Value vmBuiltinErase(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "Argument to Erase must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Erase."); return makeVoid(); }
-    if (fileVarLValue->f_val) { fclose(fileVarLValue->f_val); fileVarLValue->f_val = NULL; }
+    vmMaybeCloseFileValue(fileVarLValue);
 
     int res = remove(fileVarLValue->filename);
     if (res != 0) {
@@ -7216,14 +7634,12 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         if (suppress_spacing_flag && val.type == TYPE_BOOLEAN) {
             fputs(val.i_val ? "1" : "0", output_stream);
         } else if (val.type == TYPE_STRING) {
-            if (output_stream == stdout) {
-                fputs(val.s_val ? val.s_val : "", output_stream);
-            } else {
-                size_t len = val.s_val ? strlen(val.s_val) : 0;
-                fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
-            }
+            const char *text = val.s_val ? val.s_val : "";
+            writePascalText(output_stream, text, strlen(text));
         } else if (val.type == TYPE_CHAR) {
-            fputc(val.c_val, output_stream);
+            char utf8[5];
+            size_t utf8_len = encodePascalCharUtf8(val.c_val, utf8);
+            fwrite(utf8, 1, utf8_len, output_stream);
         } else {
             printValueToStream(val, output_stream);
         }
@@ -7445,14 +7861,22 @@ static int dosMkdirParents(const char *path) {
     for (; *p; p++) {
         if (*p != '/') continue;
         *p = '\0';
+#if defined(PSCAL_TARGET_IOS)
+        if (pscalPathVirtualized_mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#else
         if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#endif
             rc = -1;
             break;
         }
         *p = '/';
     }
     if (rc == 0) {
+#if defined(PSCAL_TARGET_IOS)
+        if (pscalPathVirtualized_mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#else
         if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
+#endif
             rc = -1;
         }
     }
@@ -7487,7 +7911,16 @@ Value vmBuiltinDosMkdir(VM* vm, int arg_count, Value* args) {
         }
         const char *path = AS_STRING(args[i]);
         any = true;
-        int rc = parents ? dosMkdirParents(path) : mkdir(path, 0777);
+        int rc = -1;
+        if (parents) {
+            rc = dosMkdirParents(path);
+        } else {
+#if defined(PSCAL_TARGET_IOS)
+            rc = pscalPathVirtualized_mkdir(path, 0777);
+#else
+            rc = mkdir(path, 0777);
+#endif
+        }
         if (rc != 0 && errno != EEXIST) {
             last_err = errno ? errno : EIO;
         }
@@ -7504,7 +7937,12 @@ Value vmBuiltinDosRmdir(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "dosRmdir expects 1 string argument.");
         return makeInt(errno);
     }
-    int rc = rmdir(AS_STRING(args[0]));
+    int rc = -1;
+#if defined(PSCAL_TARGET_IOS)
+    rc = pscalPathVirtualized_rmdir(AS_STRING(args[0]));
+#else
+    rc = rmdir(AS_STRING(args[0]));
+#endif
     return makeInt(rc == 0 ? 0 : errno);
 }
 
@@ -8053,6 +8491,18 @@ Value vmBuiltinRound(VM* vm, int arg_count, Value* args) {
     return makeInt(0);
 }
 
+Value vmBuiltinOdd(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1) {
+        runtimeError(vm, "Odd expects 1 integer-compatible argument.");
+        return makeBoolean(false);
+    }
+    if (!IS_INTLIKE(args[0])) {
+        runtimeError(vm, "Odd expects an integer-compatible argument.");
+        return makeBoolean(false);
+    }
+    return makeBoolean((AS_INTEGER(args[0]) & 1LL) != 0);
+}
+
 Value vmBuiltinHalt(VM* vm, int arg_count, Value* args) {
     long long code = 0;
     if (arg_count == 0) {
@@ -8161,9 +8611,10 @@ static bool parseThreadRequestOptionsValue(const Value* value, ThreadRequestOpti
         if (!field->name) {
             continue;
         }
+        const Value *fieldValue = fieldValueStorageConst(field);
         if (strcasecmp(field->name, "name") == 0) {
             recognized = true;
-            const char* requested = builtinValueToCString(&field->value);
+            const char* requested = builtinValueToCString(fieldValue);
             if (requested) {
                 strncpy(options->name, requested, sizeof(options->name) - 1);
                 options->name[sizeof(options->name) - 1] = '\0';
@@ -8175,7 +8626,7 @@ static bool parseThreadRequestOptionsValue(const Value* value, ThreadRequestOpti
                    strcasecmp(field->name, "queue") == 0) {
             recognized = true;
             bool flag = false;
-            if (parseBooleanValue(&field->value, &flag)) {
+            if (parseBooleanValue(fieldValue, &flag)) {
                 options->submitOnly = flag;
             }
         }
@@ -8200,6 +8651,11 @@ static bool appendThreadField(FieldValue** head, FieldValue** tail, const char* 
         return false;
     }
     field->value = value;
+    field->storage = &field->value;
+    field->type_def = NULL;
+    field->declared_type = value.type;
+    field->slot_index = (*tail) ? ((*tail)->slot_index + 1) : 0;
+    field->owns_storage = true;
     field->next = NULL;
     if (!*head) {
         *head = field;
@@ -8506,7 +8962,7 @@ static bool jsonAppendRecord(JsonBuffer *buffer, const FieldValue *field) {
         if (!jsonBufferAppendFormat(buffer, ": ")) {
             return false;
         }
-        if (!jsonAppendValue(buffer, &field->value)) {
+        if (!jsonAppendValue(buffer, fieldValueStorageConst(field))) {
             return false;
         }
         first = false;
@@ -9582,6 +10038,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("New", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("NormalColors", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Ord", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Odd", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ParamCount", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ParamStr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("PopScreen", AST_PROCEDURE_DECL, NULL);
@@ -9689,6 +10146,7 @@ static void populateBuiltinRegistry(void) {
     registerVmBuiltin("tobool",   vmBuiltinToBool,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("mstreamfromstring", vmBuiltinMstreamFromString, BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("stringofchar", vmBuiltinStringOfChar, BUILTIN_TYPE_FUNCTION, NULL);
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
 void registerAllBuiltins(void) {

@@ -173,6 +173,33 @@ add({
 })
 
 add({
+    "id": "routine_call_result_array_index_runtime",
+    "name": "Function call result may be indexed directly",
+    "category": "routine_scope",
+    "description": "A postfix array selector should work on the result of a function call, such as `BuildValues(10)[1]`.",
+    "expect": "runtime_ok",
+    "code": """
+        program RoutineCallResultArrayIndex;
+        type
+          TIntArray = array[0..2] of Integer;
+
+        function BuildValues(seed: Integer): TIntArray;
+        begin
+          BuildValues[0] := seed;
+          BuildValues[1] := seed + 1;
+          BuildValues[2] := seed + 2;
+        end;
+
+        begin
+          if false then
+            writeln('mid=', BuildValues(10)[1]);
+          writeln('parsed');
+        end.
+    """,
+    "expected_stdout": "parsed",
+})
+
+add({
     "id": "routine_nested_function_leak_error",
     "name": "Nested function cannot escape its scope",
     "category": "routine_scope",
@@ -274,6 +301,194 @@ add({
     "expected_stdout": """
         sum=6
         after_loop=4
+    """,
+})
+
+add({
+    "id": "main_inline_var_statement_runtime",
+    "name": "Main block inline var declaration works",
+    "category": "routine_scope",
+    "description": "A `var name: Type;` statement inside the main begin/end block should declare a variable for the remainder of that block.",
+    "expect": "runtime_ok",
+    "code": """
+        program MainInlineVarStatement;
+        begin
+          var anyCapturesExist: Boolean;
+          anyCapturesExist := true;
+          writeln('captures=', Ord(anyCapturesExist));
+        end.
+    """,
+    "expected_stdout": """
+        captures=1
+    """,
+})
+
+add({
+    "id": "main_with_record_array_element_runtime",
+    "name": "Main block with statement binds record fields",
+    "category": "routine_scope",
+    "description": "A `with recordExpr do` block should allow unqualified access to the target record's fields.",
+    "expect": "runtime_ok",
+    "code": """
+        program MainWithRecordArrayElement;
+        type
+          MoveType = record
+            fromRow: Integer;
+            fromCol: Integer;
+            toRow: Integer;
+            toCol: Integer;
+            capturedRow: Integer;
+            capturedCol: Integer;
+          end;
+        var
+          moves: array[0..0] of MoveType;
+          idx: Integer;
+        begin
+          idx := 0;
+          with moves[idx] do
+          begin
+            fromRow := 2;
+            fromCol := 3;
+            toRow := 4;
+            toCol := 5;
+            capturedRow := 0;
+            capturedCol := 0;
+          end;
+          writeln('from=', moves[0].fromRow);
+          writeln('to=', moves[0].toCol);
+        end.
+    """,
+    "expected_stdout": """
+        from=2
+        to=5
+    """,
+})
+
+add({
+    "id": "main_ternary_expression_runtime",
+    "name": "Main block ternary expression works",
+    "category": "routine_scope",
+    "description": "The Pascal front end accepts the `condition ? thenExpr : elseExpr` expression form as an extension.",
+    "expect": "runtime_ok",
+    "code": """
+        program MainTernaryExpression;
+        var
+          a: Integer;
+          b: Integer;
+        begin
+          a := 7;
+          b := (a > 5) ? 10 : 20;
+          writeln('b=', b);
+        end.
+    """,
+    "expected_stdout": """
+        b=10
+    """,
+})
+
+add({
+    "id": "function_exit_value_runtime",
+    "name": "Function Exit(value) returns early",
+    "category": "routine_scope",
+    "description": "A function may use `Exit(value)` to set the return value and leave the routine immediately.",
+    "expect": "runtime_ok",
+    "code": """
+        program FunctionExitValue;
+
+        function PickValue(flag: Boolean): Integer;
+        begin
+          if flag then
+            Exit(11);
+          Exit(22);
+        end;
+
+        begin
+          writeln('a=', PickValue(true));
+          writeln('b=', PickValue(false));
+        end.
+    """,
+    "expected_stdout": """
+        a=11
+        b=22
+    """,
+})
+
+add({
+    "id": "procedure_exit_value_compile_error",
+    "name": "Procedure Exit(value) is rejected",
+    "category": "routine_scope",
+    "description": "The `Exit(value)` shorthand is only valid for functions that return a value.",
+    "expect": "compile_error",
+    "code": """
+        program ProcedureExitValueError;
+
+        procedure StopNow;
+        begin
+          Exit(1);
+        end;
+
+        begin
+          StopNow;
+        end.
+    """,
+    "expected_stderr_substring": "Exit(value) is only valid inside functions that return a value.",
+})
+
+add({
+    "id": "routine_inline_for_var_shadows_outer",
+    "name": "Inline for-var shadows outer local",
+    "category": "routine_scope",
+    "description": "A `for var` control variable should create a loop-local binding without mutating an outer local of the same name.",
+    "expect": "runtime_ok",
+    "code": """
+        program RoutineInlineForVarShadow;
+
+        procedure Demo;
+        var
+          i: Integer;
+          total: Integer;
+        begin
+          i := 99;
+          total := 0;
+          for var i := 1 to 3 do
+          begin
+            total := total + i;
+          end;
+          writeln('sum=', total);
+          writeln('outer=', i);
+        end;
+
+        begin
+          Demo;
+        end.
+    """,
+    "expected_stdout": """
+        sum=6
+        outer=99
+    """,
+})
+
+add({
+    "id": "routine_inline_for_var_does_not_leak",
+    "name": "Inline for-var does not leak after loop",
+    "category": "routine_scope",
+    "description": "The `for var` control variable is scoped to the loop body and is not visible after the loop finishes.",
+    "expect": "compile_error",
+    "code": """
+        program RoutineInlineForVarNoLeak;
+
+        procedure Demo;
+        begin
+          for var i := 1 to 2 do
+          begin
+            writeln(i);
+          end;
+          writeln(i);
+        end;
+
+        begin
+          Demo;
+        end.
     """,
 })
 

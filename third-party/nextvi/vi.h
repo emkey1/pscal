@@ -27,6 +27,12 @@ value \
 #define restore(name) \
 name = tmp##name; \
 
+#if defined(PSCAL_TARGET_IOS)
+#define NEXTVI_TLS _Thread_local
+#else
+#define NEXTVI_TLS
+#endif
+
 /* utility funcs */
 void *emalloc(size_t size);
 void *erealloc(void *p, size_t size);
@@ -212,8 +218,8 @@ typedef struct {
 	int holelen;
 	char nullhole[4];
 } ren_state;
-extern ren_state rstates[3];
-extern ren_state *rstate;
+extern NEXTVI_TLS ren_state rstates[3];
+extern NEXTVI_TLS ren_state *rstate;
 #define RS(n, func) { rstate = rstates+n; rstate->s = NULL; func; rstate -= n; }
 ren_state *ren_position(char *s);
 int ren_next(char *s, int p, int dir);
@@ -253,7 +259,7 @@ void dir_init(void);
 #define SYN_SATTSET(a)	(a & SYN_SATT)
 #define SYN_EATTSET(a)	(a & SYN_EATT)
 #define SYN_ATTSET(a)	(a & SYN_ATT)
-extern int syn_blockhl;
+extern NEXTVI_TLS int syn_blockhl;
 char *syn_setft(char *ft);
 void syn_scdir(int scdir);
 void syn_highlight(int *att, char *s, int n);
@@ -266,8 +272,8 @@ void syn_init(void);
 
 /* uc.c utf-8 helper functions */
 extern unsigned char utf8_length[256];
-extern int zwlen, def_zwlen;
-extern int bclen, def_bclen;
+extern NEXTVI_TLS int zwlen, def_zwlen;
+extern NEXTVI_TLS int bclen, def_bclen;
 /* return the length of a utf-8 character */
 #define uc_len(s) utf8_length[(unsigned char)s[0]]
 /* the unicode codepoint of the given utf-8 character */
@@ -305,12 +311,12 @@ char *uc_beg(char *beg, char *s);
 char *uc_shape(char *beg, char *s, int c);
 
 /* term.c managing the terminal */
-extern sbuf *term_sbuf;
-extern int term_record;
-extern int xrows, xcols;
-extern unsigned int ibuf_pos, ibuf_cnt, ibuf_sz, icmd_pos;
-extern unsigned char *ibuf, icmd[4096];
-extern unsigned int texec, tn;
+extern NEXTVI_TLS sbuf *term_sbuf;
+extern NEXTVI_TLS int term_record;
+extern NEXTVI_TLS int xrows, xcols;
+extern NEXTVI_TLS unsigned int ibuf_pos, ibuf_cnt, ibuf_sz, icmd_pos;
+extern NEXTVI_TLS unsigned char *ibuf, icmd[4096];
+extern NEXTVI_TLS unsigned int texec, tn;
 #define term_write(s, n) if (xled) write(1, s, n);
 void term_init(void);
 void term_updatewinsize(void);
@@ -322,6 +328,7 @@ void term_pos(int r, int c);
 void term_kill(void);
 void term_room(int n);
 int term_read(void);
+int term_bracketed_paste_active(void);
 void term_commit(void);
 char *term_att(int att);
 void term_push(char *s, unsigned int n);
@@ -368,7 +375,7 @@ typedef struct {
 	int off;
 	int att;
 } led_att;
-extern sbuf *led_attsb;
+extern NEXTVI_TLS sbuf *led_attsb;
 void led_modeswap(void);
 void led_prompt(sbuf *sb, char *insert, int *kmap, int *key, int ps, int hist);
 void led_input(sbuf *sb, char **post, int postn, int row, int lsh);
@@ -400,44 +407,44 @@ struct buf {
 	signed char td;			/* text direction */
 };
 /* ex options */
-extern int xleft;
-extern int xquit;
-extern int xvis;
-extern int xai;
-extern int xic;
-extern int xhl;
-extern int xhll;
-extern int xhlw;
-extern int xhlp;
-extern int xhlr;
-extern int xled;
-extern int xtd;
-extern int xshape;
-extern int xorder;
-extern int xtbs;
-extern int xish;
-extern int xgrp;
-extern int xpac;
-extern int xmpt;
-extern int xpr;
-extern int xsep;
-extern int xlim;
-extern int xseq;
+extern NEXTVI_TLS int xleft;
+extern NEXTVI_TLS int xquit;
+extern NEXTVI_TLS int xvis;
+extern NEXTVI_TLS int xai;
+extern NEXTVI_TLS int xic;
+extern NEXTVI_TLS int xhl;
+extern NEXTVI_TLS int xhll;
+extern NEXTVI_TLS int xhlw;
+extern NEXTVI_TLS int xhlp;
+extern NEXTVI_TLS int xhlr;
+extern NEXTVI_TLS int xled;
+extern NEXTVI_TLS int xtd;
+extern NEXTVI_TLS int xshape;
+extern NEXTVI_TLS int xorder;
+extern NEXTVI_TLS int xtbs;
+extern NEXTVI_TLS int xish;
+extern NEXTVI_TLS int xgrp;
+extern NEXTVI_TLS int xpac;
+extern NEXTVI_TLS int xmpt;
+extern NEXTVI_TLS int xpr;
+extern NEXTVI_TLS int xsep;
+extern NEXTVI_TLS int xlim;
+extern NEXTVI_TLS int xseq;
 /* global variables */
-extern int xrow, xoff, xtop;
-extern int xbufcur;
-extern int xgrec;
-extern int xkmap;
-extern int xkmap_alt;
-extern int xkwddir;
-extern int xkwdcnt;
-extern sbuf *xacreg;
-extern rset *xkwdrs;
-extern sbuf *xregs[256];
-extern struct buf *bufs;
-extern struct buf tempbufs[2];
-extern struct buf *ex_buf;
-extern struct buf *ex_pbuf;
+extern NEXTVI_TLS int xrow, xoff, xtop;
+extern NEXTVI_TLS int xbufcur;
+extern NEXTVI_TLS int xgrec;
+extern NEXTVI_TLS int xkmap;
+extern NEXTVI_TLS int xkmap_alt;
+extern NEXTVI_TLS int xkwddir;
+extern NEXTVI_TLS int xkwdcnt;
+extern NEXTVI_TLS sbuf *xacreg;
+extern NEXTVI_TLS rset *xkwdrs;
+extern NEXTVI_TLS sbuf *xregs[256];
+extern NEXTVI_TLS struct buf *bufs;
+extern NEXTVI_TLS struct buf tempbufs[2];
+extern NEXTVI_TLS struct buf *ex_buf;
+extern NEXTVI_TLS struct buf *ex_pbuf;
 #define istempbuf(buf) (buf - bufs < 0 || buf - bufs >= xbufcur)
 #define xb_path ex_buf->path
 #define xb_ft ex_buf->ft
@@ -523,11 +530,11 @@ int conf_kmapfind(char *name);
 char *conf_digraph(int c1, int c2);
 
 /* vi.c */
-extern int vi_hidch;
-extern int vi_insmov;
-extern int vi_lncol;
-extern char vi_msg[512];
+extern NEXTVI_TLS int vi_hidch;
+extern NEXTVI_TLS int vi_insmov;
+extern NEXTVI_TLS int vi_lncol;
+extern NEXTVI_TLS char vi_msg[512];
 /* file system */
-extern rset *fsincl;
-extern char *fs_exdir;
+extern NEXTVI_TLS rset *fsincl;
+extern NEXTVI_TLS char *fs_exdir;
 void dir_calc(char *path);

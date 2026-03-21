@@ -1299,6 +1299,66 @@ static int vprocHostFchownRaw(int fd, uid_t uid, gid_t gid) {
     return -1;
 }
 
+static int vprocHostUtimesRaw(const char *path, const struct timeval times[2]) {
+    static int (*fn)(const char *, const struct timeval *) = NULL;
+    if (!fn) {
+        fn = (int (*)(const char *, const struct timeval *))vprocResolveSymbol("utimes");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(path, times);
+        vprocInterposeBypassExit();
+        return res;
+    }
+#if defined(AT_FDCWD)
+    struct timespec ts[2];
+    struct timespec *tsp = NULL;
+    if (times) {
+        ts[0].tv_sec = times[0].tv_sec;
+        ts[0].tv_nsec = (long)times[0].tv_usec * 1000L;
+        ts[1].tv_sec = times[1].tv_sec;
+        ts[1].tv_nsec = (long)times[1].tv_usec * 1000L;
+        tsp = ts;
+    }
+    vprocInterposeBypassEnter();
+    int res = utimensat(AT_FDCWD, path, tsp, 0);
+    vprocInterposeBypassExit();
+    return res;
+#endif
+    errno = ENOSYS;
+    return -1;
+}
+
+static int vprocHostFutimesRaw(int fd, const struct timeval times[2]) {
+    static int (*fn)(int, const struct timeval *) = NULL;
+    if (!fn) {
+        fn = (int (*)(int, const struct timeval *))vprocResolveSymbol("futimes");
+    }
+    if (fn) {
+        vprocInterposeBypassEnter();
+        int res = fn(fd, times);
+        vprocInterposeBypassExit();
+        return res;
+    }
+#if defined(HAVE_FUTIMENS) || defined(__APPLE__)
+    struct timespec ts[2];
+    struct timespec *tsp = NULL;
+    if (times) {
+        ts[0].tv_sec = times[0].tv_sec;
+        ts[0].tv_nsec = (long)times[0].tv_usec * 1000L;
+        ts[1].tv_sec = times[1].tv_sec;
+        ts[1].tv_nsec = (long)times[1].tv_usec * 1000L;
+        tsp = ts;
+    }
+    vprocInterposeBypassEnter();
+    int res = futimens(fd, tsp);
+    vprocInterposeBypassExit();
+    return res;
+#endif
+    errno = ENOSYS;
+    return -1;
+}
+
 static int vprocHostMkdirRaw(const char *path, mode_t mode) {
     static int (*fn)(const char *, mode_t) = NULL;
     if (!fn) {
@@ -2007,6 +2067,8 @@ static VProcInterposeBypassRegistry gVProcInterposeBypassRegistry = {
 };
 static pthread_mutex_t gPathTruncateMu = PTHREAD_MUTEX_INITIALIZER;
 static bool gPathTruncateInit = false;
+static pthread_mutex_t gFstabMountsMu = PTHREAD_MUTEX_INITIALIZER;
+static bool gFstabMountsLoaded = false;
 static VProc *gKernelVproc = NULL;
 static pthread_mutex_t gKernelVprocMu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t gKernelThread;
@@ -2054,6 +2116,33 @@ static VProcSessionStdio gSessionStdioDefault = {
 };
 static pthread_once_t gSessionStdioDefaultOnce = PTHREAD_ONCE_INIT;
 static _Thread_local VProcSessionStdio *gSessionStdioTls = NULL;
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    pthread_t owner;
+    bool owner_valid;
+    unsigned int depth;
+    const char *name;
+} VProcIsolationLock;
+
+static VProcIsolationLock gVProcIsolationLocks[VPROC_ISOLATION_DOMAIN_COUNT] = {
+    [VPROC_ISOLATION_DOMAIN_NEXTVI] = {
+        .mu = PTHREAD_MUTEX_INITIALIZER,
+        .cv = PTHREAD_COND_INITIALIZER,
+        .owner = (pthread_t)0,
+        .owner_valid = false,
+        .depth = 0,
+        .name = "nextvi",
+    },
+    [VPROC_ISOLATION_DOMAIN_MICRO] = {
+        .mu = PTHREAD_MUTEX_INITIALIZER,
+        .cv = PTHREAD_COND_INITIALIZER,
+        .owner = (pthread_t)0,
+        .owner_valid = false,
+        .depth = 0,
+        .name = "micro",
+    },
+};
 static pthread_mutex_t gSessionInputInitMu = PTHREAD_MUTEX_INITIALIZER;
 static const char *kLocationDevicePath = "/dev/location";
 static const char *kLegacyGpsDevicePath = "/dev/gps";
@@ -2183,6 +2272,20 @@ static bool vprocOwnsHostFdLocked(VProc *vp, int host_fd) {
         return true;
     }
     return vprocResourceContainsLocked(vp, host_fd);
+}
+
+static bool vprocAllowRealFdFallback(VProc *vp, int fd) {
+    if (!vp || fd < 0) {
+        return false;
+    }
+    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        return true;
+    }
+    bool allow = false;
+    pthread_mutex_lock(&vp->mu);
+    allow = vprocOwnsHostFdLocked(vp, fd);
+    pthread_mutex_unlock(&vp->mu);
+    return allow;
 }
 
 static void vprocResourceCloseAllLocked(VProc *vp) {
@@ -2769,6 +2872,11 @@ static void vprocSessionPtyRemoveAtLocked(size_t idx) {
     gVProcSessionPtyHintIndex = 0;
     gVProcSessionPtyTlsHintId = 0;
     gVProcSessionPtyTlsHintIndex = 0;
+    if (gVProcSessionPtys.count == 0) {
+        free(gVProcSessionPtys.items);
+        gVProcSessionPtys.items = NULL;
+        gVProcSessionPtys.capacity = 0;
+    }
 }
 
 static VProcSessionPtyEntry *vprocSessionPtyEnsureLocked(uint64_t session_id) {
@@ -2915,6 +3023,12 @@ static void vprocRegistryRemove(VProc *vp) {
             if (gVProcRegistryHint == vp) {
                 gVProcRegistryHint = (gVProcRegistryCount > 0) ? gVProcRegistry[0] : NULL;
             }
+            if (gVProcRegistryCount == 0) {
+                free(gVProcRegistry);
+                gVProcRegistry = NULL;
+                gVProcRegistryCapacity = 0;
+                gVProcRegistryHint = NULL;
+            }
             __atomic_add_fetch(&gVProcRegistryVersion, 1, __ATOMIC_RELEASE);
             break;
         }
@@ -3015,6 +3129,9 @@ typedef struct {
     int pending_counts[32];
     int fg_override_pgid;
     struct sigaction actions[32];
+    bool real_timer_active;
+    uint64_t real_timer_deadline_ns;
+    uint64_t real_timer_interval_ns;
     uint64_t start_mono_ns;
 } VProcTaskEntry;
 
@@ -3036,6 +3153,7 @@ typedef struct {
     void *(*start_routine)(void *);
     void *arg;
     VProc *vp;
+    int vp_pid;
     VProcSessionStdio *session_stdio;
     int shell_self_pid;
     int kernel_pid;
@@ -3049,12 +3167,15 @@ typedef struct {
 static VProcTaskEntry *vprocTaskFindLocked(int pid);
 static VProcTaskEntry *vprocTaskEnsureSlotLocked(int pid);
 static void vprocClearEntryLocked(VProcTaskEntry *entry);
+static void vprocQueuePendingSignalLocked(VProcTaskEntry *entry, int sig);
 static void vprocCancelListAdd(pthread_t **list, size_t *count, size_t *capacity, pthread_t tid);
 static void vprocTaskTableRepairLocked(void);
 static int vprocPtyNumForPid(int pid);
 static int vprocSetForegroundPgidInternal(int sid, int fg_pgid, bool sync_tty);
 static void vprocSyncForegroundPgidToSessionTty(int sid, int fg_pgid);
 static struct pscal_fd *vprocSessionPscalFdForStd(int fd);
+static void vprocUnregisterThreadByPid(int pid, pthread_t tid);
+static void vprocScratchTlsCleanupCurrentThread(void);
 static __thread bool gVprocPipelineStage = false;
 typedef void (*VprocStopWaitHookFn)(void);
 static __thread VprocStopWaitHookFn gVprocStopWaitBeforeHook = NULL;
@@ -3578,6 +3699,248 @@ static uint64_t vprocNowMonoNs(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (uint64_t)tv.tv_sec * 1000000000ull + (uint64_t)tv.tv_usec * 1000ull;
+}
+
+static int vprocTimespecCmp(const struct timespec *a, const struct timespec *b) {
+    if (!a || !b) {
+        return 0;
+    }
+    if (a->tv_sec < b->tv_sec) {
+        return -1;
+    }
+    if (a->tv_sec > b->tv_sec) {
+        return 1;
+    }
+    if (a->tv_nsec < b->tv_nsec) {
+        return -1;
+    }
+    if (a->tv_nsec > b->tv_nsec) {
+        return 1;
+    }
+    return 0;
+}
+
+static bool vprocRealtimeDeadlineFromMonoNs(uint64_t mono_deadline_ns, struct timespec *out_abs_rt) {
+    if (!out_abs_rt) {
+        return false;
+    }
+    struct timespec mono_now;
+    struct timespec real_now;
+    if (clock_gettime(CLOCK_MONOTONIC, &mono_now) != 0) {
+        return false;
+    }
+    if (clock_gettime(CLOCK_REALTIME, &real_now) != 0) {
+        return false;
+    }
+    uint64_t mono_now_ns = (uint64_t)mono_now.tv_sec * 1000000000ull + (uint64_t)mono_now.tv_nsec;
+    uint64_t delta_ns = 0;
+    if (mono_deadline_ns > mono_now_ns) {
+        delta_ns = mono_deadline_ns - mono_now_ns;
+    }
+    uint64_t sec_add = delta_ns / 1000000000ull;
+    uint64_t nsec_add = delta_ns % 1000000000ull;
+    time_t sec = real_now.tv_sec;
+    long nsec = real_now.tv_nsec;
+    if (sec_add > (uint64_t)LONG_MAX) {
+        sec = (time_t)LONG_MAX;
+        nsec = 999999999L;
+    } else {
+        sec = (time_t)(sec + (time_t)sec_add);
+        nsec = nsec + (long)nsec_add;
+        if (nsec >= 1000000000L) {
+            sec += 1;
+            nsec -= 1000000000L;
+        }
+    }
+    out_abs_rt->tv_sec = sec;
+    out_abs_rt->tv_nsec = nsec;
+    return true;
+}
+
+static bool vprocTimevalValid(const struct timeval *tv) {
+    if (!tv) {
+        return false;
+    }
+    if (tv->tv_sec < 0) {
+        return false;
+    }
+    if (tv->tv_usec < 0 || tv->tv_usec >= 1000000) {
+        return false;
+    }
+    return true;
+}
+
+static uint64_t vprocTimevalToNs(const struct timeval *tv) {
+    if (!tv) {
+        return 0;
+    }
+    return (uint64_t)tv->tv_sec * 1000000000ull + (uint64_t)tv->tv_usec * 1000ull;
+}
+
+static void vprocNsToTimeval(uint64_t ns, struct timeval *tv) {
+    if (!tv) {
+        return;
+    }
+    tv->tv_sec = (time_t)(ns / 1000000000ull);
+    tv->tv_usec = (suseconds_t)((ns % 1000000000ull) / 1000ull);
+}
+
+static unsigned int vprocNsToSecondsCeil(uint64_t ns) {
+    if (ns == 0) {
+        return 0;
+    }
+    uint64_t seconds = (ns + 1000000000ull - 1ull) / 1000000000ull;
+    if (seconds > (uint64_t)UINT_MAX) {
+        return UINT_MAX;
+    }
+    return (unsigned int)seconds;
+}
+
+static uint64_t vprocTaskRealTimerRemainingNsLocked(const VProcTaskEntry *entry, uint64_t now_ns) {
+    if (!entry || !entry->real_timer_active || entry->real_timer_deadline_ns == 0) {
+        return 0;
+    }
+    if (entry->real_timer_deadline_ns <= now_ns) {
+        return 0;
+    }
+    return entry->real_timer_deadline_ns - now_ns;
+}
+
+static bool vprocTaskExpireRealTimerLocked(VProcTaskEntry *entry, uint64_t now_ns) {
+    if (!entry || !entry->real_timer_active || entry->real_timer_deadline_ns == 0) {
+        return false;
+    }
+    if (entry->real_timer_deadline_ns > now_ns) {
+        return false;
+    }
+    vprocQueuePendingSignalLocked(entry, SIGALRM);
+    if (entry->real_timer_interval_ns > 0) {
+        uint64_t interval = entry->real_timer_interval_ns;
+        uint64_t elapsed = now_ns - entry->real_timer_deadline_ns;
+        uint64_t ticks = (elapsed / interval) + 1u;
+        uint64_t advance = interval;
+        if (ticks > 1u) {
+            if (ticks > UINT64_MAX / interval) {
+                advance = interval;
+            } else {
+                advance = ticks * interval;
+            }
+        }
+        if (UINT64_MAX - entry->real_timer_deadline_ns < advance) {
+            entry->real_timer_deadline_ns = now_ns + interval;
+        } else {
+            entry->real_timer_deadline_ns += advance;
+        }
+    } else {
+        entry->real_timer_active = false;
+        entry->real_timer_deadline_ns = 0;
+        entry->real_timer_interval_ns = 0;
+    }
+    return true;
+}
+
+static void vprocTaskFillRealTimerLocked(const VProcTaskEntry *entry, uint64_t now_ns, struct itimerval *out_timer) {
+    if (!out_timer) {
+        return;
+    }
+    memset(out_timer, 0, sizeof(*out_timer));
+    if (!entry || !entry->real_timer_active) {
+        return;
+    }
+    uint64_t remain_ns = vprocTaskRealTimerRemainingNsLocked(entry, now_ns);
+    vprocNsToTimeval(remain_ns, &out_timer->it_value);
+    vprocNsToTimeval(entry->real_timer_interval_ns, &out_timer->it_interval);
+}
+
+static void vprocTaskSetRealTimerLocked(VProcTaskEntry *entry, const struct itimerval *new_timer, uint64_t now_ns) {
+    if (!entry || !new_timer) {
+        return;
+    }
+    uint64_t interval_ns = vprocTimevalToNs(&new_timer->it_interval);
+    uint64_t value_ns = vprocTimevalToNs(&new_timer->it_value);
+    if (value_ns == 0) {
+        entry->real_timer_active = false;
+        entry->real_timer_deadline_ns = 0;
+        entry->real_timer_interval_ns = interval_ns;
+        return;
+    }
+    entry->real_timer_active = true;
+    entry->real_timer_interval_ns = interval_ns;
+    if (UINT64_MAX - now_ns < value_ns) {
+        entry->real_timer_deadline_ns = UINT64_MAX;
+    } else {
+        entry->real_timer_deadline_ns = now_ns + value_ns;
+    }
+}
+
+static int vprocClampTimeoutByCurrentRealTimer(VProc *vp, int timeout_ms, bool *timer_limited) {
+    if (timer_limited) {
+        *timer_limited = false;
+    }
+    if (!vp || timeout_ms == 0) {
+        return timeout_ms;
+    }
+    int pid = vprocPid(vp);
+    if (pid <= 0) {
+        return timeout_ms;
+    }
+    uint64_t remain_ns = 0;
+    bool has_timer = false;
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (entry && entry->real_timer_active && entry->real_timer_deadline_ns > 0) {
+        uint64_t now_ns = vprocNowMonoNs();
+        remain_ns = vprocTaskRealTimerRemainingNsLocked(entry, now_ns);
+        has_timer = true;
+    }
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    if (!has_timer) {
+        return timeout_ms;
+    }
+    int timer_ms = 0;
+    if (remain_ns > 0) {
+        uint64_t rounded_ms = (remain_ns + 1000000ull - 1ull) / 1000000ull;
+        if (rounded_ms == 0) {
+            rounded_ms = 1;
+        }
+        if (rounded_ms > (uint64_t)INT_MAX) {
+            timer_ms = INT_MAX;
+        } else {
+            timer_ms = (int)rounded_ms;
+        }
+    }
+    if (timeout_ms < 0 || timer_ms < timeout_ms) {
+        if (timer_limited) {
+            *timer_limited = true;
+        }
+        return timer_ms;
+    }
+    return timeout_ms;
+}
+
+static int vprocWaitUntilTimerOrSignalLocked(VProcTaskEntry *entry,
+                                             const struct timespec *abs_deadline_rt,
+                                             bool *timeout_hit) {
+    if (timeout_hit) {
+        *timeout_hit = false;
+    }
+    struct timespec timer_deadline_rt;
+    const struct timespec *wait_abs = abs_deadline_rt;
+    if (entry && entry->real_timer_active && entry->real_timer_deadline_ns > 0) {
+        if (vprocRealtimeDeadlineFromMonoNs(entry->real_timer_deadline_ns, &timer_deadline_rt)) {
+            if (!wait_abs || vprocTimespecCmp(&timer_deadline_rt, wait_abs) < 0) {
+                wait_abs = &timer_deadline_rt;
+            }
+        }
+    }
+    if (!wait_abs) {
+        return pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+    }
+    int rc = pthread_cond_timedwait(&gVProcTasks.cv, &gVProcTasks.mu, wait_abs);
+    if (rc == ETIMEDOUT && timeout_hit) {
+        *timeout_hit = true;
+    }
+    return rc;
 }
 
 static inline bool vprocSigIndexValid(int sig) {
@@ -7670,8 +8033,14 @@ static void *vprocThreadTrampoline(void *arg) {
     }
 
     VProc *vp = ctx ? ctx->vp : NULL;
+    int vp_pid = (ctx && ctx->vp_pid > 0) ? ctx->vp_pid : 0;
+    bool vp_activated = false;
     if (vp) {
+        if (vp_pid <= 0) {
+            vp_pid = vp->pid;
+        }
         vprocActivate(vp);
+        vp_activated = true;
         vprocRegisterThread(vp, pthread_self());
     }
 
@@ -7680,10 +8049,10 @@ static void *vprocThreadTrampoline(void *arg) {
         res = ctx->start_routine(ctx->arg);
     }
 
-    if (vp) {
+    if (vp_activated) {
         /* Threads share the owning vproc; do not mark the process as exited on
          * thread teardown. */
-        vprocUnregisterThread(vp, pthread_self());
+        vprocUnregisterThreadByPid(vp_pid, pthread_self());
         vprocDeactivate();
     }
 
@@ -7697,6 +8066,7 @@ static void *vprocThreadTrampoline(void *arg) {
     }
 #endif
 
+    vprocScratchTlsCleanupCurrentThread();
     free(ctx);
     return res;
 }
@@ -7722,6 +8092,7 @@ int vprocPthreadCreateShim(pthread_t *thread,
     ctx->start_routine = start_routine;
     ctx->arg = arg;
     ctx->vp = vprocCurrent();
+    ctx->vp_pid = (ctx->vp && ctx->vp->pid > 0) ? ctx->vp->pid : 0;
     ctx->session_stdio = vprocSessionStdioCurrent();
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
@@ -7744,6 +8115,79 @@ int vprocPthreadCreateShim(pthread_t *thread,
         errno = rc;
     }
     return rc;
+}
+
+int vprocIsolationEnter(VProcIsolationDomain domain) {
+    if (domain < 0 || domain >= VPROC_ISOLATION_DOMAIN_COUNT) {
+        errno = EINVAL;
+        return -1;
+    }
+    VProcIsolationLock *lock = &gVProcIsolationLocks[domain];
+    pthread_t self = pthread_self();
+
+    pthread_mutex_lock(&lock->mu);
+    while (lock->depth > 0 &&
+           (!lock->owner_valid || !pthread_equal(lock->owner, self))) {
+        pthread_cond_wait(&lock->cv, &lock->mu);
+    }
+    if (lock->depth == 0) {
+        lock->owner = self;
+        lock->owner_valid = true;
+    }
+    lock->depth++;
+    pthread_mutex_unlock(&lock->mu);
+    return 0;
+}
+
+int vprocIsolationTryEnter(VProcIsolationDomain domain) {
+    if (domain < 0 || domain >= VPROC_ISOLATION_DOMAIN_COUNT) {
+        errno = EINVAL;
+        return -1;
+    }
+    VProcIsolationLock *lock = &gVProcIsolationLocks[domain];
+    pthread_t self = pthread_self();
+
+    pthread_mutex_lock(&lock->mu);
+    if (lock->depth > 0 &&
+        (!lock->owner_valid || !pthread_equal(lock->owner, self))) {
+        pthread_mutex_unlock(&lock->mu);
+        errno = EBUSY;
+        return -1;
+    }
+    if (lock->depth == 0) {
+        lock->owner = self;
+        lock->owner_valid = true;
+    }
+    lock->depth++;
+    pthread_mutex_unlock(&lock->mu);
+    return 0;
+}
+
+void vprocIsolationLeave(VProcIsolationDomain domain) {
+    if (domain < 0 || domain >= VPROC_ISOLATION_DOMAIN_COUNT) {
+        return;
+    }
+    VProcIsolationLock *lock = &gVProcIsolationLocks[domain];
+    pthread_t self = pthread_self();
+
+    pthread_mutex_lock(&lock->mu);
+    if (lock->depth == 0 ||
+        !lock->owner_valid ||
+        !pthread_equal(lock->owner, self)) {
+        pthread_mutex_unlock(&lock->mu);
+        return;
+    }
+    lock->depth--;
+    if (lock->depth == 0) {
+        if (vprocToolDebugEnabled()) {
+            vprocDebugLogf("[vproc-isolation] release domain=%s\n",
+                           lock->name ? lock->name : "unknown");
+        }
+        lock->owner = (pthread_t)0;
+        lock->owner_valid = false;
+        pthread_cond_broadcast(&lock->cv);
+    }
+    pthread_mutex_unlock(&lock->mu);
 }
 
 int vprocTranslateFd(VProc *vp, int fd) {
@@ -7962,6 +8406,18 @@ int vprocDup(VProc *vp, int fd) {
 
 int vprocDup2(VProc *vp, int fd, int target) {
     if (!vp || target < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    if (fd == target) {
+        struct pscal_fd *same_pscal = vprocGetPscalFd(vp, fd);
+        if (same_pscal) {
+            pscal_fd_close(same_pscal);
+            return target;
+        }
+        if (vprocTranslateFd(vp, fd) >= 0) {
+            return target;
+        }
         errno = EBADF;
         return -1;
     }
@@ -8351,12 +8807,12 @@ int vprocRegisterThread(VProc *vp, pthread_t tid) {
     return vp->pid;
 }
 
-void vprocUnregisterThread(VProc *vp, pthread_t tid) {
-    if (!vp || vp->pid <= 0) {
+static void vprocUnregisterThreadByPid(int pid, pthread_t tid) {
+    if (pid <= 0) {
         return;
     }
     pthread_mutex_lock(&gVProcTasks.mu);
-    VProcTaskEntry *entry = vprocTaskFindLocked(vp->pid);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
         bool cleared_primary = false;
         if (entry->tid && pthread_equal(entry->tid, tid)) {
@@ -8379,6 +8835,13 @@ void vprocUnregisterThread(VProc *vp, pthread_t tid) {
     pthread_mutex_unlock(&gVProcTasks.mu);
 }
 
+void vprocUnregisterThread(VProc *vp, pthread_t tid) {
+    if (!vp || vp->pid <= 0) {
+        return;
+    }
+    vprocUnregisterThreadByPid(vp->pid, tid);
+}
+
 int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthread_t *thread_out) {
     if (!vp || !start_routine) {
         errno = EINVAL;
@@ -8392,6 +8855,7 @@ int vprocSpawnThread(VProc *vp, void *(*start_routine)(void *), void *arg, pthre
     ctx->start_routine = start_routine;
     ctx->arg = arg;
     ctx->vp = vp;
+    ctx->vp_pid = vp->pid;
     ctx->session_stdio = vprocSessionStdioCurrent();
     ctx->shell_self_pid = vprocGetShellSelfPid();
     ctx->kernel_pid = vprocGetKernelPid();
@@ -8445,6 +8909,9 @@ void vprocMarkExit(VProc *vp, int status) {
         entry->continued = false;
         entry->stop_signo = 0;
         entry->zombie = true;
+        entry->real_timer_active = false;
+        entry->real_timer_deadline_ns = 0;
+        entry->real_timer_interval_ns = 0;
         int adopt_parent = vprocAdoptiveParentPidLocked(entry);
         vprocReparentChildrenLocked(vp->pid, adopt_parent);
 
@@ -8493,6 +8960,9 @@ void vprocMarkGroupExit(int pid, int status) {
             peer->group_exit_code = status;
             peer->exited = true;
             peer->zombie = true;
+            peer->real_timer_active = false;
+            peer->real_timer_deadline_ns = 0;
+            peer->real_timer_interval_ns = 0;
             vprocNotifyParentSigchldLocked(peer, VPROC_SIGCHLD_EVENT_EXIT);
         }
         pthread_cond_broadcast(&gVProcTasks.cv);
@@ -8936,6 +9406,9 @@ static void vprocClearEntryLocked(VProcTaskEntry *entry) {
         entry->actions[i].sa_handler = SIG_DFL;
         entry->actions[i].sa_flags = 0;
     }
+    entry->real_timer_active = false;
+    entry->real_timer_deadline_ns = 0;
+    entry->real_timer_interval_ns = 0;
     entry->child_capacity = 0;
     entry->child_count = 0;
     entry->start_mono_ns = 0;
@@ -9348,10 +9821,12 @@ static bool vprocKillDeliverEntryLocked(VProcTaskEntry *entry,
         return true;
     }
 
-    if (active_entry_thread && requested_pid < 0 && (sig == SIGINT || sig == SIGTSTP)) {
+    if (active_entry_thread && requested_pid < 0 &&
+        (sig == SIGINT || (sig == SIGTSTP && entry->stop_unsupported))) {
         /* Cooperative in-process frontends run on this same thread. Queue the
-         * signal so their polling paths (sigpending/sigwait/runtime checks)
-         * can observe Ctrl-C/Z without tearing down the thread immediately. */
+         * signal so polling paths can observe Ctrl-C/Z without tearing down
+         * the thread immediately. Only keep SIGTSTP cooperative for entries
+         * that explicitly opted out of hard-stop semantics. */
 #if defined(PSCAL_TARGET_IOS)
         if (sig == SIGINT && request_runtime_sigint) {
             *request_runtime_sigint = true;
@@ -9745,8 +10220,25 @@ static bool vprocSimForkCloneFdTable(VProc *child, VProc *parent) {
         }
         int duped = vprocCloneFd(clone_entries[i].source_host_fd);
         if (duped < 0) {
-            vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
-            return false;
+            int saved_errno = (errno != 0) ? errno : EIO;
+            /*
+             * Some host descriptors owned by UIKit/WebKit/runtime threads are
+             * not safely duplicable inside the app sandbox. Dropping those
+             * non-stdio descriptors keeps fork-compatible applets (rsync/scp)
+             * functional while preserving required stdin/stdout/stderr wiring.
+             */
+            if (i <= (size_t)STDERR_FILENO) {
+                vprocSimForkFdCloneCleanup(clone_entries, parent_cap, true);
+                errno = saved_errno;
+                return false;
+            }
+            clone_entries[i].kind = VPROC_FD_NONE;
+            clone_entries[i].source_host_fd = -1;
+            if (vprocSimForkDebugEnabled()) {
+                vprocSimForkLog("[vproc-fork] skip unclonable fd=%zu errno=%d",
+                                i, saved_errno);
+            }
+            continue;
         }
         clone_entries[i].cloned_host_fd = duped;
         if (getenv("PSCALI_TOOL_DEBUG") != NULL && i < 8) {
@@ -9947,6 +10439,8 @@ pid_t vprocSimulatedForkParentResume(void) {
     return (pid_t)pid;
 }
 
+void vprocSetCommandLabel(int pid, const char *label);
+
 int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
     VProcSimForkState *state = &gVProcSimForkState;
     vprocSimForkLog("[vproc-fork] exec entry=%p active=%d in_child=%d child_vp=%p child_pid=%d",
@@ -9966,6 +10460,14 @@ int vprocSimulatedExec(VProcExecEntryFn entry, char *const argv[]) {
         errno = ENOENT;
         vprocSimForkLog("[vproc-fork] exec missing entry");
         return -1;
+    }
+    if (state->child_pid > 0 && argv && argv[0] && argv[0][0]) {
+        const char *label = argv[0];
+        const char *slash = strrchr(label, '/');
+        if (slash && slash[1] != '\0') {
+            label = slash + 1;
+        }
+        vprocSetCommandLabel(state->child_pid, label);
     }
     if (vprocSimSpawnChild(state->child_vp, entry, argv) != 0) {
         if (errno == 0) {
@@ -10497,6 +10999,11 @@ void vprocUnregisterInterposeBypassThread(pthread_t tid) {
         gVProcInterposeBypassRegistry.hint_valid = false;
         gVProcInterposeBypassRegistry.hint_tid = 0;
         gVProcInterposeBypassRegistry.hint_index = 0;
+        if (gVProcInterposeBypassRegistry.count == 0) {
+            free(gVProcInterposeBypassRegistry.items);
+            gVProcInterposeBypassRegistry.items = NULL;
+            gVProcInterposeBypassRegistry.capacity = 0;
+        }
     }
     pthread_mutex_unlock(&gVProcInterposeBypassRegistry.mu);
 }
@@ -10550,6 +11057,383 @@ void vprocProtectKqueueCloseExit(void) {
 int vprocProtectKqueueCloseActive(void) {
     return __atomic_load_n(&gVProcProtectKqueueCloseDepth, __ATOMIC_RELAXED) > 0;
 }
+
+enum {
+    VPROC_FSTAB_MOUNT_RDONLY = 1ul << 0,
+    VPROC_FSTAB_MOUNT_NOSUID = 1ul << 1,
+    VPROC_FSTAB_MOUNT_NODEV = 1ul << 2,
+    VPROC_FSTAB_MOUNT_NOEXEC = 1ul << 3,
+    VPROC_FSTAB_MOUNT_REMOUNT = 1ul << 4,
+    VPROC_FSTAB_MOUNT_BIND = 1ul << 5
+};
+
+static unsigned long vprocParseFstabMountFlags(const char *options) {
+    unsigned long flags = 0;
+    if (!options || options[0] == '\0') {
+        return flags;
+    }
+    char *copy = strdup(options);
+    if (!copy) {
+        return flags;
+    }
+    char *saveptr = NULL;
+    for (char *token = strtok_r(copy, ",", &saveptr);
+         token;
+         token = strtok_r(NULL, ",", &saveptr)) {
+        while (*token && isspace((unsigned char)*token)) {
+            token++;
+        }
+        size_t len = strlen(token);
+        while (len > 0 && isspace((unsigned char)token[len - 1])) {
+            token[--len] = '\0';
+        }
+        if (strcmp(token, "ro") == 0) flags |= VPROC_FSTAB_MOUNT_RDONLY;
+        else if (strcmp(token, "rw") == 0) flags &= ~VPROC_FSTAB_MOUNT_RDONLY;
+        else if (strcmp(token, "nosuid") == 0) flags |= VPROC_FSTAB_MOUNT_NOSUID;
+        else if (strcmp(token, "suid") == 0) flags &= ~VPROC_FSTAB_MOUNT_NOSUID;
+        else if (strcmp(token, "nodev") == 0) flags |= VPROC_FSTAB_MOUNT_NODEV;
+        else if (strcmp(token, "dev") == 0) flags &= ~VPROC_FSTAB_MOUNT_NODEV;
+        else if (strcmp(token, "noexec") == 0) flags |= VPROC_FSTAB_MOUNT_NOEXEC;
+        else if (strcmp(token, "exec") == 0) flags &= ~VPROC_FSTAB_MOUNT_NOEXEC;
+        else if (strcmp(token, "remount") == 0) flags |= VPROC_FSTAB_MOUNT_REMOUNT;
+        else if (strcmp(token, "bind") == 0) flags |= VPROC_FSTAB_MOUNT_BIND;
+    }
+    free(copy);
+    return flags;
+}
+
+static bool vprocDecodeFstabField(const char *input, char *out, size_t out_size) {
+    if (!input || !out || out_size == 0) {
+        errno = EINVAL;
+        return false;
+    }
+    size_t out_len = 0;
+    for (size_t i = 0; input[i] != '\0'; ++i) {
+        unsigned char ch = (unsigned char)input[i];
+        if (ch == '\\') {
+            unsigned char next = (unsigned char)input[i + 1];
+            if (next == '\0') {
+                ch = '\\';
+            } else if (next >= '0' && next <= '7') {
+                int value = (int)(next - '0');
+                i++;
+                for (int digits = 1; digits < 3; ++digits) {
+                    unsigned char oct = (unsigned char)input[i + 1];
+                    if (oct < '0' || oct > '7') {
+                        break;
+                    }
+                    i++;
+                    value = (value * 8) + (int)(oct - '0');
+                }
+                ch = (unsigned char)value;
+            } else {
+                i++;
+                switch (next) {
+                    case 'n': ch = '\n'; break;
+                    case 'r': ch = '\r'; break;
+                    case 't': ch = '\t'; break;
+                    default: ch = next; break;
+                }
+            }
+        }
+        if (out_len + 1 >= out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        out[out_len++] = (char)ch;
+    }
+    out[out_len] = '\0';
+    return true;
+}
+
+#if defined(PSCAL_TARGET_IOS)
+static int vprocEnsureMountSourceAccessFromRuntime(const char *path) {
+    typedef int (*VprocEnsureMountSourceAccessFn)(const char *path);
+    static VprocEnsureMountSourceAccessFn fn = NULL;
+    static bool looked_up = false;
+    if (!looked_up) {
+        looked_up = true;
+        fn = (VprocEnsureMountSourceAccessFn)dlsym(RTLD_DEFAULT, "pscalRuntimeEnsureMountSourceAccess");
+    }
+    if (!fn) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return fn(path);
+}
+#endif
+
+static bool vprocResolveFstabSourceDir(const char *source, char *source_real, size_t source_real_size) {
+    if (!source || source[0] != '/' || !source_real || source_real_size == 0) {
+        errno = EINVAL;
+        return false;
+    }
+    char expanded[PATH_MAX];
+    const char *candidates[2] = { source, NULL };
+    if (pathTruncateExpand(source, expanded, sizeof(expanded))) {
+        candidates[1] = expanded;
+    }
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        const char *candidate = candidates[i];
+        if (!candidate) {
+            continue;
+        }
+#if defined(PSCAL_TARGET_IOS)
+        (void)vprocEnsureMountSourceAccessFromRuntime(candidate);
+#endif
+        char real_buf[PATH_MAX];
+        if (!vprocHostRealpathRaw(candidate, real_buf)) {
+            continue;
+        }
+        struct stat st;
+        if (vprocHostStatRaw(real_buf, &st) != 0) {
+            continue;
+        }
+        if (!S_ISDIR(st.st_mode)) {
+            errno = ENOTDIR;
+            continue;
+        }
+        size_t len = strlen(real_buf);
+        if (len >= source_real_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        memcpy(source_real, real_buf, len + 1);
+        return true;
+    }
+    if (errno == 0) {
+        errno = ENOENT;
+    }
+    return false;
+}
+
+static bool vprocResolveFstabTargetDir(const char *target, char *target_virtual, size_t target_virtual_size) {
+    if (!target || target[0] != '/' || !target_virtual || target_virtual_size == 0) {
+        errno = EINVAL;
+        return false;
+    }
+    char expanded[PATH_MAX];
+    if (!pathTruncateExpand(target, expanded, sizeof(expanded))) {
+        return false;
+    }
+    char target_real[PATH_MAX];
+    if (!vprocHostRealpathRaw(expanded, target_real)) {
+        return false;
+    }
+    struct stat st;
+    if (vprocHostStatRaw(target_real, &st) != 0) {
+        return false;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        errno = ENOTDIR;
+        return false;
+    }
+    if (!pathTruncateStrip(target_real, target_virtual, target_virtual_size)) {
+        return false;
+    }
+    if (target_virtual[0] != '/') {
+        errno = EINVAL;
+        return false;
+    }
+    return true;
+}
+
+static bool vprocApplyFstabMountLine(char *line, size_t line_no) {
+    if (!line) {
+        return false;
+    }
+    char *comment = strchr(line, '#');
+    if (comment) {
+        *comment = '\0';
+    }
+
+    char *cursor = line;
+    while (*cursor && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (*cursor == '\0') {
+        return true;
+    }
+
+    char *fields[6] = {0};
+    size_t field_count = 0;
+    char *saveptr = NULL;
+    for (char *token = strtok_r(cursor, " \t\r\n", &saveptr);
+         token;
+         token = strtok_r(NULL, " \t\r\n", &saveptr)) {
+        if (field_count < sizeof(fields) / sizeof(fields[0])) {
+            fields[field_count++] = token;
+        }
+    }
+
+    if (field_count < 2) {
+        vprocDebugLogf("[vproc-fstab] line %zu ignored (needs source and target)", line_no);
+        return false;
+    }
+
+    char source_field[PATH_MAX];
+    char target_field[PATH_MAX];
+    char type_field[sizeof(((PathTruncateMountEntry *)0)->type)];
+    char options_field[sizeof(((PathTruncateMountEntry *)0)->options)];
+
+    if (!vprocDecodeFstabField(fields[0], source_field, sizeof(source_field)) ||
+        !vprocDecodeFstabField(fields[1], target_field, sizeof(target_field))) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu field decode failed: %s",
+                       line_no,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    if (field_count >= 3 && fields[2][0] != '\0' && strcmp(fields[2], "-") != 0) {
+        if (!vprocDecodeFstabField(fields[2], type_field, sizeof(type_field))) {
+            int saved_errno = errno;
+            vprocDebugLogf("[vproc-fstab] line %zu type decode failed: %s",
+                           line_no,
+                           strerror(saved_errno ? saved_errno : EINVAL));
+            errno = saved_errno;
+            return false;
+        }
+    } else {
+        strlcpy(type_field, "bind", sizeof(type_field));
+    }
+
+    if (field_count >= 4 && fields[3][0] != '\0' && strcmp(fields[3], "-") != 0) {
+        if (!vprocDecodeFstabField(fields[3], options_field, sizeof(options_field))) {
+            int saved_errno = errno;
+            vprocDebugLogf("[vproc-fstab] line %zu options decode failed: %s",
+                           line_no,
+                           strerror(saved_errno ? saved_errno : EINVAL));
+            errno = saved_errno;
+            return false;
+        }
+    } else {
+        strlcpy(options_field, "rw", sizeof(options_field));
+    }
+
+    const char *source = source_field;
+    const char *target = target_field;
+    const char *type = type_field;
+    const char *options = options_field;
+    if (type[0] == '\0' || strcmp(type, "-") == 0) {
+        type = "bind";
+    }
+    if (options[0] == '\0' || strcmp(options, "-") == 0) {
+        options = "rw";
+    }
+
+    unsigned long flags = vprocParseFstabMountFlags(options);
+    if (strcmp(type, "bind") == 0) {
+        flags |= VPROC_FSTAB_MOUNT_BIND;
+    }
+
+    char source_real[PATH_MAX];
+    if (!vprocResolveFstabSourceDir(source, source_real, sizeof(source_real))) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu source %s rejected: %s",
+                       line_no,
+                       source,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    char target_virtual[PATH_MAX];
+    if (!vprocResolveFstabTargetDir(target, target_virtual, sizeof(target_virtual))) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu target %s rejected: %s",
+                       line_no,
+                       target,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    if (!pathTruncateMountAdd(source_real, target_virtual, type, options, flags)) {
+        int saved_errno = errno;
+        vprocDebugLogf("[vproc-fstab] line %zu mount %s -> %s failed: %s",
+                       line_no,
+                       source_real,
+                       target_virtual,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        errno = saved_errno;
+        return false;
+    }
+
+    return true;
+}
+
+static void vprocEnsureStartupFstabMounts(void) {
+    if (__atomic_load_n(&gFstabMountsLoaded, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+
+    pthread_mutex_lock(&gFstabMountsMu);
+    if (gFstabMountsLoaded) {
+        pthread_mutex_unlock(&gFstabMountsMu);
+        return;
+    }
+
+    int fd = -1;
+    char fstab_path[PATH_MAX] = "/etc/fstab";
+    char root_path[PATH_MAX];
+    if (pathTruncateExpand("/", root_path, sizeof(root_path))) {
+        char candidate[PATH_MAX];
+        int n = snprintf(candidate, sizeof(candidate), "%s/etc/fstab", root_path);
+        if (n > 0 && n < (int)sizeof(candidate)) {
+            fd = vprocHostOpenRawInternal(candidate, O_RDONLY, 0, false);
+            if (fd >= 0) {
+                strlcpy(fstab_path, candidate, sizeof(fstab_path));
+            }
+        }
+    }
+    if (fd < 0) {
+        fd = vprocHostOpenVirtualized("/etc/fstab", O_RDONLY, 0);
+    }
+    if (fd < 0) {
+        if (errno != ENOENT && errno != ENOTDIR) {
+            vprocDebugLogf("[vproc-fstab] open %s failed: %s", fstab_path, strerror(errno));
+        }
+        __atomic_store_n(&gFstabMountsLoaded, true, __ATOMIC_RELEASE);
+        pthread_mutex_unlock(&gFstabMountsMu);
+        return;
+    }
+
+    FILE *fp = fdopen(fd, "r");
+    if (!fp) {
+        int saved_errno = errno;
+        close(fd);
+        vprocDebugLogf("[vproc-fstab] fdopen %s failed: %s",
+                       fstab_path,
+                       strerror(saved_errno ? saved_errno : EINVAL));
+        __atomic_store_n(&gFstabMountsLoaded, true, __ATOMIC_RELEASE);
+        pthread_mutex_unlock(&gFstabMountsMu);
+        return;
+    }
+
+    char *line = NULL;
+    size_t cap = 0;
+    size_t line_no = 0;
+    while (getline(&line, &cap, fp) != -1) {
+        line_no++;
+        (void)vprocApplyFstabMountLine(line, line_no);
+    }
+    free(line);
+    fclose(fp);
+
+    __atomic_store_n(&gFstabMountsLoaded, true, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&gFstabMountsMu);
+}
+
+#if defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+void vprocResetStartupFstabStateForTests(void) {
+    pthread_mutex_lock(&gFstabMountsMu);
+    __atomic_store_n(&gFstabMountsLoaded, false, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&gFstabMountsMu);
+}
+#endif
 
 static void vprocEnsurePathTruncationDefault(void) {
     if (__atomic_load_n(&gPathTruncateInit, __ATOMIC_ACQUIRE)) {
@@ -10966,6 +11850,7 @@ int vprocEnsureKernelPid(void) {
     if (pid > 0) {
         pthread_mutex_unlock(&gKernelVprocMu);
         vprocEnsureKernelThread(pid);
+        vprocEnsureStartupFstabMounts();
         return pid;
     }
 
@@ -11007,6 +11892,9 @@ int vprocEnsureKernelPid(void) {
             }
         }
         pthread_mutex_unlock(&gVProcTasks.mu);
+    }
+    if (pid > 0) {
+        vprocEnsureStartupFstabMounts();
     }
     return pid;
 }
@@ -11780,6 +12668,9 @@ static void vprocDeliverPendingSignalsForCurrent(void) {
     VProcTaskEntry *entry = vprocTaskFindLocked(vprocPid(vp));
     bool exit_current = false;
     if (entry) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         exit_current = vprocDeliverPendingSignalsLocked(entry);
     }
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -11797,6 +12688,9 @@ int vprocSigpending(int pid, sigset_t *set) {
     pthread_mutex_lock(&gVProcTasks.mu);
     VProcTaskEntry *entry = vprocTaskFindLocked(pid);
     if (entry) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         uint32_t pending = entry->pending_signals;
         for (int sig = 1; sig < 32; ++sig) {
             if ((pending & vprocSigMask(sig)) || entry->pending_counts[sig] > 0) {
@@ -11830,12 +12724,15 @@ int vprocSigsuspend(int pid, const sigset_t *mask) {
         }
     }
     while (true) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         uint32_t orig_pending = entry->pending_signals;
         vprocDeliverPendingSignalsLocked(entry);
         if (orig_pending != 0) {
             break;
         }
-        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        (void)vprocWaitUntilTimerOrSignalLocked(entry, NULL, NULL);
     }
     entry->blocked_signals = original_blocked;
     pthread_mutex_unlock(&gVProcTasks.mu);
@@ -11900,6 +12797,9 @@ int vprocSigwait(int pid, const sigset_t *set, int *sig) {
         return -1;
     }
     while (true) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         for (int s = 1; s < 32; ++s) {
             if (!sigismember(set, s)) continue;
             uint32_t bit = vprocSigMask(s);
@@ -11916,7 +12816,7 @@ int vprocSigwait(int pid, const sigset_t *set, int *sig) {
                 return 0;
             }
         }
-        pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        (void)vprocWaitUntilTimerOrSignalLocked(entry, NULL, NULL);
     }
 }
 
@@ -11951,6 +12851,9 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
         return -1;
     }
     while (true) {
+        if (vprocTaskExpireRealTimerLocked(entry, vprocNowMonoNs())) {
+            pthread_cond_broadcast(&gVProcTasks.cv);
+        }
         for (int s = 1; s < 32; ++s) {
             if (!sigismember(set, s)) continue;
             uint32_t bit = vprocSigMask(s);
@@ -11968,17 +12871,24 @@ int vprocSigtimedwait(int pid, const sigset_t *set, const struct timespec *timeo
             }
         }
         if (timeout) {
-            struct timespec now;
-            clock_gettime(CLOCK_REALTIME, &now);
-            if (now.tv_sec > deadline.tv_sec ||
-                (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+            struct timespec now_rt;
+            if (clock_gettime(CLOCK_REALTIME, &now_rt) == 0 &&
+                vprocTimespecCmp(&now_rt, &deadline) >= 0) {
                 pthread_mutex_unlock(&gVProcTasks.mu);
                 errno = EAGAIN;
                 return -1;
             }
-            pthread_cond_timedwait(&gVProcTasks.cv, &gVProcTasks.mu, &deadline);
-        } else {
-            pthread_cond_wait(&gVProcTasks.cv, &gVProcTasks.mu);
+        }
+        bool timeout_hit = false;
+        (void)vprocWaitUntilTimerOrSignalLocked(entry, timeout ? &deadline : NULL, &timeout_hit);
+        if (timeout_hit && timeout) {
+            struct timespec now_rt;
+            if (clock_gettime(CLOCK_REALTIME, &now_rt) == 0 &&
+                vprocTimespecCmp(&now_rt, &deadline) >= 0) {
+                pthread_mutex_unlock(&gVProcTasks.mu);
+                errno = EAGAIN;
+                return -1;
+            }
         }
     }
 }
@@ -12007,7 +12917,8 @@ static int vprocResolveFdForShim(VProc *vp, int fd, int allow_real, struct pscal
         pthread_mutex_unlock(&vp->mu);
     }
 
-    if (host < 0 && allow_real && fd >= 0) {
+    if (host < 0 && allow_real && fd >= 0 &&
+        (vp == NULL || vprocAllowRealFdFallback(vp, fd))) {
         struct stat st;
         if (vprocHostFstatRaw(fd, &st) == 0) {
             return fd;
@@ -12863,6 +13774,10 @@ int vprocFchmodShim(int fd, mode_t mode) {
     }
     int host_fd = vprocTranslateFd(vp, fd);
     if (host_fd < 0) {
+        struct stat st;
+        if (vprocHostFstatRaw(fd, &st) == 0) {
+            return vprocHostFchmodRaw(fd, mode);
+        }
         return -1;
     }
     return vprocHostFchmodRaw(host_fd, mode);
@@ -12884,9 +13799,45 @@ int vprocFchownShim(int fd, uid_t uid, gid_t gid) {
     }
     int host_fd = vprocTranslateFd(vp, fd);
     if (host_fd < 0) {
+        struct stat st;
+        if (vprocHostFstatRaw(fd, &st) == 0) {
+            return vprocHostFchownRaw(fd, uid, gid);
+        }
         return -1;
     }
     return vprocHostFchownRaw(host_fd, uid, gid);
+}
+
+int vprocUtimesShim(const char *path, const struct timeval times[2]) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostUtimesRaw(path, times);
+    }
+    char expanded[PATH_MAX];
+    const char *target = vprocPathExpandForShim(path, expanded, sizeof(expanded));
+    return vprocHostUtimesRaw(target ? target : path, times);
+}
+
+int vprocFutimesShim(int fd, const struct timeval times[2]) {
+    VProc *vp = vprocForThread();
+    if (!vp) {
+        return vprocHostFutimesRaw(fd, times);
+    }
+    struct pscal_fd *pscal_fd = vprocGetPscalFd(vp, fd);
+    if (pscal_fd) {
+        pscal_fd_close(pscal_fd);
+        errno = EBADF;
+        return -1;
+    }
+    int host_fd = vprocTranslateFd(vp, fd);
+    if (host_fd < 0) {
+        struct stat st;
+        if (vprocHostFstatRaw(fd, &st) == 0) {
+            return vprocHostFutimesRaw(fd, times);
+        }
+        return -1;
+    }
+    return vprocHostFutimesRaw(host_fd, times);
 }
 
 int vprocMkdirShim(const char *path, mode_t mode) {
@@ -13612,8 +14563,49 @@ typedef struct {
 
 static __thread VProcPollScratch gVProcPollScratch = {0};
 static __thread VProcSelectScratch gVProcSelectScratch = {0};
+static pthread_key_t gVProcScratchTlsKey;
+static pthread_once_t gVProcScratchTlsKeyOnce = PTHREAD_ONCE_INIT;
+static bool gVProcScratchTlsKeyReady = false;
+
+static void vprocScratchTlsCleanupCurrentThread(void) {
+    free(gVProcPollScratch.pscal_fds);
+    free(gVProcPollScratch.host_index);
+    free(gVProcPollScratch.host_fds);
+    gVProcPollScratch.pscal_fds = NULL;
+    gVProcPollScratch.host_index = NULL;
+    gVProcPollScratch.host_fds = NULL;
+    gVProcPollScratch.capacity = 0;
+
+    free(gVProcSelectScratch.pfds);
+    free(gVProcSelectScratch.fd_map);
+    gVProcSelectScratch.pfds = NULL;
+    gVProcSelectScratch.fd_map = NULL;
+    gVProcSelectScratch.capacity = 0;
+}
+
+static void vprocScratchTlsDestructor(void *value) {
+    (void)value;
+    if (gVProcScratchTlsKeyReady) {
+        (void)pthread_setspecific(gVProcScratchTlsKey, NULL);
+    }
+    vprocScratchTlsCleanupCurrentThread();
+}
+
+static void vprocScratchTlsKeyInit(void) {
+    if (pthread_key_create(&gVProcScratchTlsKey, vprocScratchTlsDestructor) == 0) {
+        gVProcScratchTlsKeyReady = true;
+    }
+}
+
+static inline void vprocScratchTlsMarkThread(void) {
+    pthread_once(&gVProcScratchTlsKeyOnce, vprocScratchTlsKeyInit);
+    if (gVProcScratchTlsKeyReady) {
+        (void)pthread_setspecific(gVProcScratchTlsKey, (void *)1);
+    }
+}
 
 static bool vprocPollScratchEnsure(size_t needed) {
+    vprocScratchTlsMarkThread();
     if (needed <= gVProcPollScratch.capacity) {
         return true;
     }
@@ -13654,6 +14646,7 @@ static bool vprocPollScratchEnsure(size_t needed) {
 }
 
 static bool vprocSelectScratchEnsure(size_t needed) {
+    vprocScratchTlsMarkThread();
     if (needed <= gVProcSelectScratch.capacity) {
         return true;
     }
@@ -13747,7 +14740,13 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         return vprocHostPollRaw(fds, nfds, timeout);
     }
     if (!fds || nfds == 0) {
-        return vprocHostPollRaw(fds, nfds, timeout);
+        bool timer_limited = false;
+        int wait_timeout = vprocClampTimeoutByCurrentRealTimer(vp, timeout, &timer_limited);
+        int rc = vprocHostPollRaw(fds, nfds, wait_timeout);
+        if (timer_limited && rc == 0) {
+            vprocDeliverPendingSignalsForCurrent();
+        }
+        return rc;
     }
     if (nfds > (nfds_t)(INT_MAX - 1)) {
         errno = EINVAL;
@@ -13827,7 +14826,8 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
         }
 
         int host_fd = host_index[i];
-        if (host_fd < 0) {
+        if (host_fd < 0 &&
+            (vp == NULL || vprocAllowRealFdFallback(vp, fds[i].fd))) {
             struct stat st;
             if (vprocHostFstatRaw(fds[i].fd, &st) == 0) {
                 host_fd = fds[i].fd;
@@ -13874,12 +14874,14 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
                 host_poll_count++;
             }
 
+            bool timer_limited = false;
+            int effective_wait = vprocClampTimeoutByCurrentRealTimer(vp, wait_timeout, &timer_limited);
             int host_ready = 0;
             if (host_poll_count > 0) {
-                host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_poll_count, wait_timeout);
+                host_ready = vprocHostPollRaw(host_fds, (nfds_t)host_poll_count, effective_wait);
                 if (host_ready < 0) {
                     if (errno == EINTR) {
-                        if (wait_timeout == 0) {
+                        if (effective_wait == 0) {
                             break;
                         }
                         goto vproc_poll_update_timeout;
@@ -13891,10 +14893,17 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
                     }
                     return -1;
                 }
-            } else if (wait_timeout > 0) {
-                usleep((useconds_t)wait_timeout * 1000u);
-            } else if (wait_timeout < 0) {
+            } else if (effective_wait > 0) {
+                usleep((useconds_t)effective_wait * 1000u);
+            } else if (effective_wait < 0) {
                 usleep(1000u);
+            }
+            if (timer_limited && host_ready == 0) {
+                vprocDeliverPendingSignalsForCurrent();
+                if (wait_timeout < 0) {
+                    ready_count = 0;
+                    break;
+                }
             }
 
             int host_ready_count = 0;
@@ -13935,7 +14944,7 @@ int vprocPollShim(struct pollfd *fds, nfds_t nfds, int timeout) {
             }
 
             ready_count = host_ready_count + pscal_ready;
-            if (ready_count > 0 || wait_timeout == 0) {
+            if (ready_count > 0 || effective_wait == 0) {
                 break;
             }
 
@@ -14005,9 +15014,14 @@ int vprocSelectShim(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptf
     }
 
     if (count == 0) {
-        int res = vprocHostPollRaw(NULL, 0, timeout_ms);
+        bool timer_limited = false;
+        int wait_timeout = vprocClampTimeoutByCurrentRealTimer(vp, timeout_ms, &timer_limited);
+        int res = vprocHostPollRaw(NULL, 0, wait_timeout);
         if (res < 0) {
             return -1;
+        }
+        if (timer_limited && res == 0) {
+            vprocDeliverPendingSignalsForCurrent();
         }
         if (readfds) FD_ZERO(readfds);
         if (writefds) FD_ZERO(writefds);
@@ -14369,6 +15383,109 @@ int vprocPthreadSigmaskShim(int how, const sigset_t *set, sigset_t *oldset) {
         return 0;
     }
     return errno ? errno : EINVAL;
+}
+
+int vprocGetitimerShim(int which, struct itimerval *curr_value) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return getitimer(which, curr_value);
+    }
+    if (!curr_value) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (which != ITIMER_REAL) {
+        errno = ENOTSUP;
+        return -1;
+    }
+    int pid = vprocPid(vp);
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    uint64_t now_ns = vprocNowMonoNs();
+    if (vprocTaskExpireRealTimerLocked(entry, now_ns)) {
+        pthread_cond_broadcast(&gVProcTasks.cv);
+    }
+    vprocTaskFillRealTimerLocked(entry, now_ns, curr_value);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return 0;
+}
+
+int vprocSetitimerShim(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return setitimer(which, new_value, old_value);
+    }
+    if (which != ITIMER_REAL) {
+        errno = ENOTSUP;
+        return -1;
+    }
+    if (!new_value || !vprocTimevalValid(&new_value->it_value) || !vprocTimevalValid(&new_value->it_interval)) {
+        errno = EINVAL;
+        return -1;
+    }
+    int pid = vprocPid(vp);
+    pthread_mutex_lock(&gVProcTasks.mu);
+    VProcTaskEntry *entry = vprocTaskFindLocked(pid);
+    if (!entry) {
+        pthread_mutex_unlock(&gVProcTasks.mu);
+        errno = ESRCH;
+        return -1;
+    }
+    uint64_t now_ns = vprocNowMonoNs();
+    if (vprocTaskExpireRealTimerLocked(entry, now_ns)) {
+        pthread_cond_broadcast(&gVProcTasks.cv);
+    }
+    if (old_value) {
+        vprocTaskFillRealTimerLocked(entry, now_ns, old_value);
+    }
+    vprocTaskSetRealTimerLocked(entry, new_value, now_ns);
+    pthread_mutex_unlock(&gVProcTasks.mu);
+    return 0;
+}
+
+unsigned int vprocAlarmShim(unsigned int seconds) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return alarm(seconds);
+    }
+    struct itimerval old_timer;
+    struct itimerval new_timer;
+    memset(&old_timer, 0, sizeof(old_timer));
+    memset(&new_timer, 0, sizeof(new_timer));
+    new_timer.it_value.tv_sec = (time_t)seconds;
+    if (vprocSetitimerShim(ITIMER_REAL, &new_timer, &old_timer) != 0) {
+        return 0;
+    }
+    uint64_t old_ns = vprocTimevalToNs(&old_timer.it_value);
+    return vprocNsToSecondsCeil(old_ns);
+}
+
+useconds_t vprocUalarmShim(useconds_t useconds, useconds_t interval_useconds) {
+    VProc *vp = vprocCurrent();
+    if (!vp) {
+        return ualarm(useconds, interval_useconds);
+    }
+    struct itimerval old_timer;
+    struct itimerval new_timer;
+    memset(&old_timer, 0, sizeof(old_timer));
+    memset(&new_timer, 0, sizeof(new_timer));
+    new_timer.it_value.tv_sec = (time_t)(useconds / 1000000u);
+    new_timer.it_value.tv_usec = (suseconds_t)(useconds % 1000000u);
+    new_timer.it_interval.tv_sec = (time_t)(interval_useconds / 1000000u);
+    new_timer.it_interval.tv_usec = (suseconds_t)(interval_useconds % 1000000u);
+    if (vprocSetitimerShim(ITIMER_REAL, &new_timer, &old_timer) != 0) {
+        return (useconds_t)-1;
+    }
+    uint64_t old_us = (uint64_t)old_timer.it_value.tv_sec * 1000000ull + (uint64_t)old_timer.it_value.tv_usec;
+    if (old_us > (uint64_t)UINT_MAX) {
+        return (useconds_t)UINT_MAX;
+    }
+    return (useconds_t)old_us;
 }
 
 int vprocRaiseShim(int sig) {

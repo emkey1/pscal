@@ -29,11 +29,9 @@
 #include "types.h"
 
 // Pascal traditionally models the CHAR type as an 8-bit ordinal with a
-// maximum value of 255.  The VM previously exposed the full Unicode range,
-// which caused functions such as High(char) and Ord(High(char)) to report a
-// maximum of 0x10FFFF.  This broke expectations of legacy Pascal code and the
-// regression test suite.  Define an explicit maximum for Pascal CHAR values so
-// the runtime can enforce classic 0..255 semantics.
+// maximum value of 255.  Text output can still render those 8-bit values as
+// UTF-8 (for example by mapping the classic CP437 graphics range), but the
+// language-level CHAR ordinal range remains 0..255 for compatibility.
 #define UNICODE_MAX 0x10FFFF
 #define PASCAL_CHAR_MAX 255
 // Bytecode related stuff
@@ -202,6 +200,20 @@ FieldValue *copyRecord(FieldValue *orig);
 FieldValue *createEmptyRecord(AST *recordType);
 void freeFieldValue(FieldValue *fv);
 
+static inline Value *fieldValueStorage(FieldValue *field) {
+    if (!field) {
+        return NULL;
+    }
+    return field->storage ? field->storage : &field->value;
+}
+
+static inline const Value *fieldValueStorageConst(const FieldValue *field) {
+    if (!field) {
+        return NULL;
+    }
+    return field->storage ? field->storage : &field->value;
+}
+
 // Value constructors
 Value makeInt(long long val);
 Value makeReal(long double val);
@@ -251,6 +263,10 @@ void debugASTFile(AST *node);
 Value makeEnum(const char *enum_name, int ordinal);
 void freeValue(Value *v);
 void printValueToStream(Value v, FILE *stream);
+size_t encodeUtf8Codepoint(uint32_t codepoint, char out[5]);
+size_t encodePascalCharUtf8(int value, char out[5]);
+bool isValidUtf8Bytes(const char *text, size_t len);
+void writePascalText(FILE *stream, const char *text, size_t len);
 int calculateArrayTotalSize(const Value* array_val);
 
 // Unit Stuff

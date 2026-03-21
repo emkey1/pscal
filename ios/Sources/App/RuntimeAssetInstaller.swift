@@ -323,7 +323,7 @@ final class RuntimeAssetInstaller {
         }
         if sources.isEmpty {
             // Fallback: look for flat license files in the bundle root.
-            let fallbackNames = ["pscal_LICENSE.txt", "openssl_LICENSE.txt", "curl_LICENSE.txt", "sdl_LICENSE.txt", "nextvi_LICENSE.txt", "micro_LICENSE.txt", "openssh_LICENSE.txt", "yyjson_LICENSE.txt", "hterm_LICENSE.txt"]
+            let fallbackNames = ["pscal_LICENSE.txt", "openssl_LICENSE.txt", "curl_LICENSE.txt", "sdl_LICENSE.txt", "nextvi_LICENSE.txt", "micro_LICENSE.txt", "openssh_LICENSE.txt", "libgit2_LICENSE.txt", "yyjson_LICENSE.txt", "hterm_LICENSE.txt"]
             for name in fallbackNames {
                 let candidate = bundleRoot.appendingPathComponent(name)
                 if fileManager.fileExists(atPath: candidate.path) {
@@ -376,6 +376,7 @@ final class RuntimeAssetInstaller {
         ensureEtcFileNamed("passwd", bundleRoot: bundleRoot)
         ensureEtcFileNamed("group", bundleRoot: bundleRoot)
         ensureEtcFileNamed("hosts", bundleRoot: bundleRoot)
+        ensureEtcFileNamed("fstab", bundleRoot: bundleRoot)
         // Ensure word lists are always present even if workspace/etc already exists.
         ensureEtcFileNamed("words", bundleRoot: bundleRoot)
         ensureEtcFileNamed("words.short", bundleRoot: bundleRoot)

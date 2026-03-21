@@ -30,6 +30,8 @@
 #undef chown
 #undef fchmod
 #undef fchown
+#undef utimes
+#undef futimes
 #undef ioctl
 #undef lseek
 #undef isatty
@@ -72,6 +74,8 @@
 #define chown(path, uid, gid) vprocChownShim((path), (uid), (gid))
 #define fchmod(fd, mode) vprocFchmodShim((fd), (mode))
 #define fchown(fd, uid, gid) vprocFchownShim((fd), (uid), (gid))
+#define utimes(path, times) vprocUtimesShim((path), (times))
+#define futimes(fd, times) vprocFutimesShim((fd), (times))
 #define ioctl vprocIoctlShim
 #define lseek vprocLseekShim
 #define isatty vprocIsattyShim
@@ -99,6 +103,10 @@
 #define signal(sig, handler) vprocSignalShim((sig), (handler))
 #define raise(sig) vprocRaiseShim((sig))
 #define pthread_sigmask(how, set, oldset) vprocPthreadSigmaskShim((how), (set), (oldset))
+#define alarm(seconds) vprocAlarmShim((seconds))
+#define ualarm(useconds, interval_useconds) vprocUalarmShim((useconds), (interval_useconds))
+#define setitimer(which, new_value, old_value) vprocSetitimerShim((which), (new_value), (old_value))
+#define getitimer(which, curr_value) vprocGetitimerShim((which), (curr_value))
 
 #endif /* !PSCAL_IOS_SHIM_H */
 

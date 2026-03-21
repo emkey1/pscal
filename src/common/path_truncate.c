@@ -37,11 +37,15 @@
 #include <time.h>
 #include <pthread.h>
 #include "vm/vm.h"
+#include "ios/vproc.h"
 
 static char g_pathTruncatePrimary[PATH_MAX];
 static size_t g_pathTruncatePrimaryLen = 0;
 static char g_pathTruncateAlias[PATH_MAX];
 static size_t g_pathTruncateAliasLen = 0;
+enum { PATH_TRUNCATE_MAX_MOUNTS = 64 };
+static PathTruncateMountEntry g_pathTruncateMounts[PATH_TRUNCATE_MAX_MOUNTS];
+static size_t g_pathTruncateMountCount = 0;
 static _Thread_local int g_pathTruncateResolving = 0;
 static pthread_mutex_t g_pathTruncateMutex = PTHREAD_MUTEX_INITIALIZER;
 static time_t g_procBootTime = 0;
@@ -60,6 +64,16 @@ static inline void pathTruncateLock(void)   { pthread_mutex_lock(&g_pathTruncate
 static inline void pathTruncateUnlock(void) { pthread_mutex_unlock(&g_pathTruncateMutex); }
 static void pathTruncateEnsureDir(const char *path);
 static void pathTruncateProvisionUsrBin(const char *prefix);
+static bool pathTruncateNormalizeAbsolute(const char *input, char *out, size_t out_size);
+static bool pathTruncatePrefixMatch(const char *path, const char *prefix, size_t prefix_len);
+static int pathTruncateMountCompareByTargetLength(const void *lhs, const void *rhs);
+static void pathTruncateMountSortLocked(void);
+static bool pathTruncateResolveMountedPathLocked(const char *virtual_path,
+                                                 char *out,
+                                                 size_t out_size);
+static bool pathTruncateStripMountedPathLocked(const char *host_path,
+                                               char *out,
+                                               size_t out_size);
 
 typedef struct PathTruncateSmallclueApplet {
     const char *name;
@@ -1746,6 +1760,43 @@ typedef struct {
 } PathTruncateDeviceProcSnapshot;
 
 static size_t pathTruncateSnapshotVProcState(PathTruncateVProcSnapshot *out, size_t capacity) {
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    if (!out || capacity == 0) {
+        return vprocSnapshot(NULL, 0);
+    }
+
+    VProcSnapshot *snapshots = (VProcSnapshot *)calloc(capacity, sizeof(VProcSnapshot));
+    if (!snapshots) {
+        return 0;
+    }
+
+    size_t count = vprocSnapshot(snapshots, capacity);
+    size_t copy_count = count < capacity ? count : capacity;
+    for (size_t i = 0; i < copy_count; ++i) {
+        out[i].pid = snapshots[i].pid;
+        out[i].tid = snapshots[i].tid;
+        out[i].parent_pid = snapshots[i].parent_pid;
+        out[i].pgid = snapshots[i].pgid;
+        out[i].sid = snapshots[i].sid;
+        out[i].exited = snapshots[i].exited;
+        out[i].stopped = snapshots[i].stopped;
+        out[i].continued = snapshots[i].continued;
+        out[i].zombie = snapshots[i].zombie;
+        out[i].exit_signal = snapshots[i].exit_signal;
+        out[i].status = snapshots[i].status;
+        out[i].stop_signo = snapshots[i].stop_signo;
+        out[i].sigchld_pending = snapshots[i].sigchld_pending;
+        out[i].rusage_utime = snapshots[i].rusage_utime;
+        out[i].rusage_stime = snapshots[i].rusage_stime;
+        out[i].fg_pgid = snapshots[i].fg_pgid;
+        out[i].job_id = snapshots[i].job_id;
+        snprintf(out[i].comm, sizeof(out[i].comm), "%s", snapshots[i].comm);
+        snprintf(out[i].command, sizeof(out[i].command), "%s", snapshots[i].command);
+    }
+
+    free(snapshots);
+    return copy_count;
+#else
     typedef size_t (*SnapshotFn)(PathTruncateVProcSnapshot *, size_t);
     static SnapshotFn snapshot_fn = NULL;
     static bool resolved = false;
@@ -1757,9 +1808,17 @@ static size_t pathTruncateSnapshotVProcState(PathTruncateVProcSnapshot *out, siz
         return 0;
     }
     return snapshot_fn(out, capacity);
+#endif
 }
 
 static int pathTruncateCurrentVProcPid(void) {
+#if defined(PSCAL_TARGET_IOS) || defined(VPROC_ENABLE_STUBS_FOR_TESTS)
+    pid_t pid = vprocGetPidShim();
+    if (pid <= 0) {
+        return -1;
+    }
+    return (int)pid;
+#else
     typedef pid_t (*GetPidFn)(void);
     static GetPidFn getpid_fn = NULL;
     static bool resolved = false;
@@ -1775,6 +1834,7 @@ static int pathTruncateCurrentVProcPid(void) {
         return -1;
     }
     return (int)pid;
+#endif
 }
 
 static size_t pathTruncateSnapshotDeviceProcesses(PathTruncateDeviceProcSnapshot *out,
@@ -3082,6 +3142,16 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         FILE *f = fopen(mounts_path, "w");
         if (f) {
             fprintf(f, "%s / %s rw 0 0\n", mnt_from, fs_type);
+            for (size_t i = 0; i < g_pathTruncateMountCount; ++i) {
+                const PathTruncateMountEntry *entry = &g_pathTruncateMounts[i];
+                const char *entry_type = entry->type[0] ? entry->type : "auto";
+                const char *entry_opts = entry->options[0] ? entry->options : "rw";
+                fprintf(f, "%s %s %s %s 0 0\n",
+                        entry->source,
+                        entry->target,
+                        entry_type,
+                        entry_opts);
+            }
             fclose(f);
         }
     }
@@ -3089,6 +3159,21 @@ static void pathTruncateRefreshProc(const char *prefix, const char *request_path
         FILE *f = fopen(mountinfo_path, "w");
         if (f) {
             fprintf(f, "1 0 0:1 / / rw - %s %s rw\n", fs_type, mnt_from);
+            for (size_t i = 0; i < g_pathTruncateMountCount; ++i) {
+                const PathTruncateMountEntry *entry = &g_pathTruncateMounts[i];
+                const char *entry_type = entry->type[0] ? entry->type : "auto";
+                const char *entry_opts = entry->options[0] ? entry->options : "rw";
+                unsigned long mount_id = (unsigned long)(i + 2);
+                fprintf(f,
+                        "%lu 1 0:%lu / %s %s - %s %s %s\n",
+                        mount_id,
+                        mount_id,
+                        entry->target,
+                        entry_opts,
+                        entry_type,
+                        entry->source,
+                        entry_opts);
+            }
             fclose(f);
         }
     }
@@ -3738,7 +3823,6 @@ static bool pathTruncateNormalizeAbsolute(const char *input, char *out, size_t o
         size_t anchor = (segment_start_pos > 1) ? (segment_start_pos - 1) : 1;
         anchors[depth++] = anchor;
     }
-
     return true;
 }
 
@@ -3894,6 +3978,144 @@ static bool pathTruncateCopyString(const char *input, char *out, size_t out_size
     return true;
 }
 
+bool pathTruncateMountAdd(const char *source_path,
+                          const char *target_path,
+                          const char *type,
+                          const char *options,
+                          unsigned long flags) {
+    pathTruncateLock();
+    char normalized_source[PATH_MAX];
+    char normalized_target[PATH_MAX];
+    if (!source_path || source_path[0] != '/' ||
+        !target_path || target_path[0] != '/') {
+        pathTruncateUnlock();
+        errno = EINVAL;
+        return false;
+    }
+    if (!pathTruncateNormalizeAbsolute(source_path,
+                                       normalized_source,
+                                       sizeof(normalized_source)) ||
+        !pathTruncateNormalizeAbsolute(target_path,
+                                       normalized_target,
+                                       sizeof(normalized_target))) {
+        pathTruncateUnlock();
+        return false;
+    }
+
+    const char *entry_type = (type && *type) ? type : "auto";
+    const char *entry_options = (options && *options) ? options : "rw";
+
+    size_t slot = g_pathTruncateMountCount;
+    for (size_t i = 0; i < g_pathTruncateMountCount; ++i) {
+        if (strcmp(g_pathTruncateMounts[i].target, normalized_target) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == g_pathTruncateMountCount) {
+        if (g_pathTruncateMountCount >= PATH_TRUNCATE_MAX_MOUNTS) {
+            pathTruncateUnlock();
+            errno = ENOSPC;
+            return false;
+        }
+        g_pathTruncateMountCount++;
+    }
+
+    PathTruncateMountEntry *entry = &g_pathTruncateMounts[slot];
+    int written = snprintf(entry->source, sizeof(entry->source), "%s", normalized_source);
+    if (written < 0 || (size_t)written >= sizeof(entry->source)) {
+        pathTruncateUnlock();
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    written = snprintf(entry->target, sizeof(entry->target), "%s", normalized_target);
+    if (written < 0 || (size_t)written >= sizeof(entry->target)) {
+        pathTruncateUnlock();
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    written = snprintf(entry->type, sizeof(entry->type), "%s", entry_type);
+    if (written < 0 || (size_t)written >= sizeof(entry->type)) {
+        pathTruncateUnlock();
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    written = snprintf(entry->options, sizeof(entry->options), "%s", entry_options);
+    if (written < 0 || (size_t)written >= sizeof(entry->options)) {
+        pathTruncateUnlock();
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    entry->flags = flags;
+
+    pathTruncateMountSortLocked();
+    g_procRefreshLastFullMs = 0;
+
+    pathTruncateUnlock();
+    return true;
+}
+
+bool pathTruncateMountRemove(const char *target_path) {
+    pathTruncateLock();
+    if (!target_path || target_path[0] != '/') {
+        pathTruncateUnlock();
+        errno = EINVAL;
+        return false;
+    }
+
+    char normalized_target[PATH_MAX];
+    if (!pathTruncateNormalizeAbsolute(target_path,
+                                       normalized_target,
+                                       sizeof(normalized_target))) {
+        pathTruncateUnlock();
+        return false;
+    }
+
+    size_t slot = g_pathTruncateMountCount;
+    for (size_t i = 0; i < g_pathTruncateMountCount; ++i) {
+        if (strcmp(g_pathTruncateMounts[i].target, normalized_target) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == g_pathTruncateMountCount) {
+        pathTruncateUnlock();
+        errno = ENOENT;
+        return false;
+    }
+
+    if (slot + 1 < g_pathTruncateMountCount) {
+        memmove(&g_pathTruncateMounts[slot],
+                &g_pathTruncateMounts[slot + 1],
+                (g_pathTruncateMountCount - slot - 1) * sizeof(g_pathTruncateMounts[0]));
+    }
+    g_pathTruncateMountCount--;
+    memset(&g_pathTruncateMounts[g_pathTruncateMountCount], 0, sizeof(g_pathTruncateMounts[0]));
+    g_procRefreshLastFullMs = 0;
+
+    pathTruncateUnlock();
+    return true;
+}
+
+size_t pathTruncateMountSnapshot(PathTruncateMountEntry *out, size_t out_capacity) {
+    pathTruncateLock();
+    size_t count = g_pathTruncateMountCount;
+    if (out && out_capacity > 0) {
+        size_t copy_count = (count < out_capacity) ? count : out_capacity;
+        memcpy(out, g_pathTruncateMounts, copy_count * sizeof(g_pathTruncateMounts[0]));
+    }
+    pathTruncateUnlock();
+    return count;
+}
+
+void pathTruncateMountClearAll(void) {
+    pathTruncateLock();
+    g_pathTruncateMountCount = 0;
+    memset(g_pathTruncateMounts, 0, sizeof(g_pathTruncateMounts));
+    g_procRefreshLastFullMs = 0;
+    pathTruncateUnlock();
+}
+
 bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size) {
     pathTruncateLock();
     if (!out || out_size == 0) {
@@ -3906,19 +4128,24 @@ bool pathTruncateStrip(const char *absolute_path, char *out, size_t out_size) {
         pathTruncateUnlock();
         return res;
     }
-    const char *prefix = NULL;
-    size_t prefix_len = 0;
-    if (!pathTruncateFetchPrefix(&prefix, &prefix_len)) {
-        bool res = pathTruncateCopyString(absolute_path, out, out_size);
-        pathTruncateUnlock();
-        return res;
-    }
-
     const char *source_path = absolute_path;
     char normalized[PATH_MAX];
     if (absolute_path[0] == '/' &&
         pathTruncateNormalizeAbsolute(absolute_path, normalized, sizeof(normalized))) {
         source_path = normalized;
+    }
+
+    if (pathTruncateStripMountedPathLocked(source_path, out, out_size)) {
+        pathTruncateUnlock();
+        return true;
+    }
+
+    const char *prefix = NULL;
+    size_t prefix_len = 0;
+    if (!pathTruncateFetchPrefix(&prefix, &prefix_len)) {
+        bool res = pathTruncateCopyString(source_path, out, out_size);
+        pathTruncateUnlock();
+        return res;
     }
 
     size_t source_len = strlen(source_path);
@@ -4032,6 +4259,127 @@ static const char *pathTruncateSkipLeadingSlashes(const char *input) {
         cursor++;
     }
     return cursor;
+}
+
+static int pathTruncateMountCompareByTargetLength(const void *lhs, const void *rhs) {
+    const PathTruncateMountEntry *a = (const PathTruncateMountEntry *)lhs;
+    const PathTruncateMountEntry *b = (const PathTruncateMountEntry *)rhs;
+    size_t a_len = strlen(a->target);
+    size_t b_len = strlen(b->target);
+    if (a_len == b_len) {
+        return strcmp(a->target, b->target);
+    }
+    return (a_len < b_len) ? 1 : -1;
+}
+
+static void pathTruncateMountSortLocked(void) {
+    if (g_pathTruncateMountCount <= 1) {
+        return;
+    }
+    qsort(g_pathTruncateMounts,
+          g_pathTruncateMountCount,
+          sizeof(g_pathTruncateMounts[0]),
+          pathTruncateMountCompareByTargetLength);
+}
+
+static bool pathTruncateResolveMountedPathLocked(const char *virtual_path,
+                                                 char *out,
+                                                 size_t out_size) {
+    if (!virtual_path || !out || out_size == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < g_pathTruncateMountCount; ++i) {
+        const PathTruncateMountEntry *entry = &g_pathTruncateMounts[i];
+        size_t target_len = strlen(entry->target);
+        if (!pathTruncatePrefixMatch(virtual_path, entry->target, target_len)) {
+            continue;
+        }
+        const char *suffix = virtual_path + target_len;
+        if (entry->source[0] == '/' && entry->source[1] == '\0') {
+            if (*suffix == '\0') {
+                if (snprintf(out, out_size, "/") >= (int)out_size) {
+                    errno = ENAMETOOLONG;
+                    return false;
+                }
+                return true;
+            }
+            if (snprintf(out, out_size, "%s", suffix) >= (int)out_size) {
+                errno = ENAMETOOLONG;
+                return false;
+            }
+            return true;
+        }
+        if (*suffix == '\0') {
+            if (snprintf(out, out_size, "%s", entry->source) >= (int)out_size) {
+                errno = ENAMETOOLONG;
+                return false;
+            }
+            return true;
+        }
+        int written = snprintf(out, out_size, "%s%s", entry->source, suffix);
+        if (written < 0 || (size_t)written >= out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool pathTruncateStripMountedPathLocked(const char *host_path,
+                                               char *out,
+                                               size_t out_size) {
+    if (!host_path || !out || out_size == 0) {
+        return false;
+    }
+    size_t best_index = SIZE_MAX;
+    size_t best_len = 0;
+    for (size_t i = 0; i < g_pathTruncateMountCount; ++i) {
+        const PathTruncateMountEntry *entry = &g_pathTruncateMounts[i];
+        size_t source_len = strlen(entry->source);
+        if (!pathTruncatePrefixMatch(host_path, entry->source, source_len)) {
+            continue;
+        }
+        if (source_len > best_len) {
+            best_len = source_len;
+            best_index = i;
+        }
+    }
+    if (best_index == SIZE_MAX) {
+        return false;
+    }
+
+    const PathTruncateMountEntry *entry = &g_pathTruncateMounts[best_index];
+    size_t target_len = strlen(entry->target);
+    const char *suffix = host_path + best_len;
+    if (entry->target[0] == '/' && entry->target[1] == '\0') {
+        if (*suffix == '\0') {
+            if (snprintf(out, out_size, "/") >= (int)out_size) {
+                errno = ENAMETOOLONG;
+                return false;
+            }
+            return true;
+        }
+        if (snprintf(out, out_size, "%s", suffix) >= (int)out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        return true;
+    }
+    if (*suffix == '\0') {
+        if (snprintf(out, out_size, "%s", entry->target) >= (int)out_size) {
+            errno = ENAMETOOLONG;
+            return false;
+        }
+        return true;
+    }
+    if (target_len + strlen(suffix) + 1 > out_size) {
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    memcpy(out, entry->target, target_len);
+    strcpy(out + target_len, suffix);
+    return true;
 }
 
 static bool pathTruncatePrefixMatch(const char *path, const char *prefix, size_t prefix_len) {
@@ -4190,6 +4538,11 @@ bool pathTruncateExpand(const char *input_path, char *out, size_t out_size) {
             pathTruncateUnlock();
             return false;
         }
+    }
+
+    if (pathTruncateResolveMountedPathLocked(source_path, out, out_size)) {
+        pathTruncateUnlock();
+        return true;
     }
 
     size_t source_len = strlen(source_path);

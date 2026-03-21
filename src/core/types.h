@@ -171,6 +171,11 @@ typedef struct ValueStruct {
 typedef struct FieldValue {
     char *name;
     struct ValueStruct value;
+    struct ValueStruct *storage;
+    struct AST *type_def;
+    VarType declared_type;
+    int slot_index;
+    bool owns_storage;
     struct FieldValue *next;
 } FieldValue;
 
@@ -189,9 +194,9 @@ typedef enum {
     TOKEN_AND, TOKEN_OR, TOKEN_TRUE, TOKEN_FALSE, TOKEN_NOT, TOKEN_CASE,
     TOKEN_USES, TOKEN_EOF, TOKEN_HEX_CONST, TOKEN_UNKNOWN, TOKEN_UNIT,
     TOKEN_INTERFACE, TOKEN_IMPLEMENTATION, TOKEN_INITIALIZATION, TOKEN_ENUM,
-    TOKEN_IN, TOKEN_IS, TOKEN_XOR, TOKEN_BREAK, TOKEN_RETURN, TOKEN_OUT, TOKEN_SHL, TOKEN_SHR,
+    TOKEN_IN, TOKEN_IS, TOKEN_XOR, TOKEN_BREAK, TOKEN_CONTINUE, TOKEN_RETURN, TOKEN_OUT, TOKEN_SHL, TOKEN_SHR,
     TOKEN_SET, TOKEN_POINTER, TOKEN_CARET, TOKEN_NIL, TOKEN_INLINE, TOKEN_FORWARD, TOKEN_SPAWN, TOKEN_JOIN,
-    TOKEN_AT, TOKEN_LABEL, TOKEN_GOTO
+    TOKEN_TRY, TOKEN_EXCEPT, TOKEN_ON, TOKEN_RAISE, TOKEN_WITH, TOKEN_AT, TOKEN_LABEL, TOKEN_GOTO
 } TokenType;
 
 typedef struct {
@@ -238,6 +243,7 @@ typedef enum {
     AST_CASE,
     AST_CASE_BRANCH,
     AST_RECORD_TYPE,
+    AST_RECORD_LITERAL,
     AST_FIELD_ACCESS,
     AST_ARRAY_TYPE,
     AST_ARRAY_ACCESS,
@@ -275,6 +281,7 @@ typedef enum {
     AST_TRY,
     AST_CATCH,
     AST_THROW,
+    AST_WITH,
     AST_LABEL_DECL,
     AST_LABEL,
     AST_GOTO

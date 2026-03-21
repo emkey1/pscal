@@ -143,6 +143,7 @@ static Keyword keywords[] = {
     {"and", TOKEN_AND}, {"array", TOKEN_ARRAY}, {"as", TOKEN_AS}, {"begin", TOKEN_BEGIN},
     {"break", TOKEN_BREAK}, // Added break here alphabetically
     {"case", TOKEN_CASE}, {"const", TOKEN_CONST}, {"do", TOKEN_DO},
+    {"continue", TOKEN_CONTINUE},
     {"div", TOKEN_INT_DIV}, {"downto", TOKEN_DOWNTO}, {"else", TOKEN_ELSE},
     {"end", TOKEN_END}, {"enum", TOKEN_ENUM}, // Added enum
     {"false", TOKEN_FALSE}, {"for", TOKEN_FOR},
@@ -151,9 +152,10 @@ static Keyword keywords[] = {
     {"inline", TOKEN_INLINE}, // Added inline directive keyword
     {"initialization", TOKEN_INITIALIZATION},
     {"interface", TOKEN_INTERFACE}, {"is", TOKEN_IS}, {"join", TOKEN_JOIN}, {"label", TOKEN_LABEL}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
-    {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
+    {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"on", TOKEN_ON}, {"or", TOKEN_OR},
     {"pointer", TOKEN_POINTER},
     {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
+    {"raise", TOKEN_RAISE},
     {"read", TOKEN_READ}, {"readln", TOKEN_READLN},
     {"record", TOKEN_RECORD}, {"repeat", TOKEN_REPEAT},
     {"set", TOKEN_SET}, // <--- ADD THIS LINE (alphabetical position)
@@ -161,10 +163,12 @@ static Keyword keywords[] = {
     {"shr", TOKEN_SHR}, // Added SHR
     {"spawn", TOKEN_SPAWN},
     {"then", TOKEN_THEN},
+    {"try", TOKEN_TRY},
     {"to", TOKEN_TO}, {"true", TOKEN_TRUE}, {"type", TOKEN_TYPE},
     {"unit", TOKEN_UNIT}, {"until", TOKEN_UNTIL}, {"uses", TOKEN_USES},
     {"var", TOKEN_VAR}, {"while", TOKEN_WHILE}, {"write", TOKEN_WRITE},
-    {"writeln", TOKEN_WRITELN}, {"xor", TOKEN_XOR}
+    {"with", TOKEN_WITH}, {"writeln", TOKEN_WRITELN}, {"xor", TOKEN_XOR},
+    {"except", TOKEN_EXCEPT}
 };
 
 #define NUM_KEYWORDS (sizeof(keywords)/sizeof(Keyword))

@@ -8,6 +8,14 @@ not assume every exsh convenience is available. This guide collects the
 conventions that apply across languages and shells so script authors can plan
 thread names, size the pool, and interpret the metrics exposed by `ThreadStats`.
 
+## Default policy
+
+Concurrency is the default expectation across PSCAL runtime/front-end code.
+When fixing cross-session bugs, prefer per-instance/per-session isolation (TLS,
+session-scoped state, VM-context routing) over broad serialization locks.
+Global single-instance locks should be treated as temporary diagnostics only,
+unless a command explicitly documents single-instance behavior as a hard requirement.
+
 ## Thread naming conventions
 
 Each worker keeps a printable identifier capped at `THREAD_NAME_MAX` (64)

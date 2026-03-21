@@ -3190,6 +3190,13 @@ Value vmBuiltinShellResize(VM *vm, int arg_count, Value *args) {
 }
 
 Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
+#ifdef PSCAL_TARGET_IOS
+    (void)arg_count;
+    (void)args;
+    runtimeError(vm, "gwin: unavailable on iOS/iPadOS");
+    shellUpdateStatus(1);
+    return makeVoid();
+#else
     char *piped_message = NULL;
     if (!pscalRuntimeStdinIsInteractive()) {
         size_t cap = 1024;
@@ -3240,6 +3247,7 @@ Value vmBuiltinShellGwin(VM *vm, int arg_count, Value *args) {
         free(piped_message);
     }
     return makeVoid();
+#endif
 }
 
 Value vmBuiltinShellEditorDump(VM *vm, int arg_count, Value *args) {
@@ -10001,6 +10009,23 @@ static void shellHelpPrintTopic(const ShellHelpTopic *topic) {
     }
 }
 
+#if defined(PSCAL_TARGET_IOS)
+static void shellHelpPrintSmallclueAppletTopic(const SmallclueApplet *applet) {
+    if (!applet || !applet->name || !*applet->name) {
+        return;
+    }
+    printf("%s - %s\n",
+           applet->name,
+           (applet->description && *applet->description) ? applet->description : "smallclue applet");
+    const char *usage = smallclueLookupAppletUsage(applet->name);
+    if (usage && *usage) {
+        printf("Usage: %s\n", usage);
+    } else {
+        printf("Usage: smallclue-help %s\n", applet->name);
+    }
+}
+#endif
+
 Value vmBuiltinShellHelp(VM *vm, int arg_count, Value *args) {
     if (arg_count == 0) {
         shellHelpPrintOverview();
@@ -10030,6 +10055,17 @@ Value vmBuiltinShellHelp(VM *vm, int arg_count, Value *args) {
     const char *canonical = shellBuiltinCanonicalName(requested);
     const ShellHelpTopic *topic = shellHelpFindTopic(canonical);
     if (!topic) {
+#if defined(PSCAL_TARGET_IOS)
+        const SmallclueApplet *applet = smallclueFindApplet(requested);
+        if (!applet && canonical && *canonical) {
+            applet = smallclueFindApplet(canonical);
+        }
+        if (applet) {
+            shellHelpPrintSmallclueAppletTopic(applet);
+            shellUpdateStatus(0);
+            return makeVoid();
+        }
+#endif
         runtimeError(vm, "help: unknown builtin '%s'", requested);
         shellUpdateStatus(1);
         return makeVoid();

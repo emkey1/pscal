@@ -164,6 +164,12 @@ final class TerminalKeyInputView: UITextView {
         }
     }
     private weak var ctrlButton: UIButton?
+    private var optionLatch: Bool = false {
+        didSet {
+            updateOptionButtonAppearance()
+        }
+    }
+    private weak var optionButton: UIButton?
 
     // MARK: - FIXED ACCESSORY BAR
     private let accessoryBar: UIInputView
@@ -189,10 +195,13 @@ final class TerminalKeyInputView: UITextView {
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        func makeButton(_ title: String, action: Selector, label: String? = nil) -> UIButton {
+        func makeButton(_ title: String, action: Selector, label: String? = nil, hint: String? = nil) -> UIButton {
             let button = UIButton(type: .system)
             if let label {
                 button.accessibilityLabel = label
+            }
+            if let hint {
+                button.accessibilityHint = hint
             }
             var config = UIButton.Configuration.filled()
             config.cornerStyle = .medium
@@ -212,25 +221,28 @@ final class TerminalKeyInputView: UITextView {
             return button
         }
 
-        let esc = makeButton("\u{238B}", action: #selector(handleEsc), label: "Escape")
-        let ctrl = makeButton("^", action: #selector(handleCtrlToggle), label: "Control")
+        let esc = makeButton("\u{238B}", action: #selector(handleEsc), label: "Escape", hint: "Sends an Escape character to the terminal")
+        let option = makeButton("⌥", action: #selector(handleAltToggle), label: "Option", hint: "Toggles the Option modifier for the next key press")
+        optionButton = option
+        updateOptionButtonAppearance()
+        let ctrl = makeButton("^", action: #selector(handleCtrlToggle), label: "Control", hint: "Toggles the control modifier for the next key press")
         ctrlButton = ctrl
         updateCtrlButtonAppearance()
-        let up = makeButton("↑", action: #selector(handleUp), label: "Up Arrow")
-        let down = makeButton("↓", action: #selector(handleDown), label: "Down Arrow")
-        let left = makeButton("←", action: #selector(handleLeft), label: "Left Arrow")
-        let right = makeButton("→", action: #selector(handleRight), label: "Right Arrow")
-        let fslash = makeButton("/", action: #selector(handleFSlash), label: "Slash")
-        let dot = makeButton(".", action: #selector(handleDot), label: "Period")
-        let minus = makeButton("-", action: #selector(handleMinus), label: "Hyphen")
-        let pipe = makeButton("|", action: #selector(handlePipe), label: "Pipe")
+        let up = makeButton("↑", action: #selector(handleUp), label: "Up Arrow", hint: "Moves the cursor up or navigates history")
+        let down = makeButton("↓", action: #selector(handleDown), label: "Down Arrow", hint: "Moves the cursor down or navigates history")
+        let left = makeButton("←", action: #selector(handleLeft), label: "Left Arrow", hint: "Moves the cursor left")
+        let right = makeButton("→", action: #selector(handleRight), label: "Right Arrow", hint: "Moves the cursor right")
+        let fslash = makeButton("/", action: #selector(handleFSlash), label: "Slash", hint: "Inserts a forward slash character")
+        let dot = makeButton(".", action: #selector(handleDot), label: "Period", hint: "Inserts a period character")
+        let minus = makeButton("-", action: #selector(handleMinus), label: "Hyphen", hint: "Inserts a hyphen character")
+        let pipe = makeButton("|", action: #selector(handlePipe), label: "Pipe", hint: "Inserts a pipe character")
 
         if UIDevice.current.userInterfaceIdiom == .phone {
             // Replaced "Tab" with the Unicode symbol \u{21E5}
-            let tab = makeButton("\u{21E5}", action: #selector(handleTab), label: "Tab")
-            [esc, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+            let tab = makeButton("\u{21E5}", action: #selector(handleTab), label: "Tab", hint: "Inserts a tab character or triggers autocomplete")
+            [esc, option, ctrl, tab, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         } else {
-            [esc, ctrl, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
+            [esc, option, ctrl, dot, fslash, pipe, minus, up, down, left, right].forEach(stack.addArrangedSubview)
         }
 
         accessoryBar.addSubview(stack)
@@ -283,6 +295,7 @@ final class TerminalKeyInputView: UITextView {
 
     override func resignFirstResponder() -> Bool {
         controlLatch = false
+        optionLatch = false
         let resigned = super.resignFirstResponder()
         if resigned {
             onFocusChange?(false)
@@ -365,6 +378,23 @@ final class TerminalKeyInputView: UITextView {
                 return
             }
         }
+        if optionLatch {
+            optionLatch = false
+            let normalizedText = text.replacingOccurrences(of: "\n", with: "\r")
+            if normalizedText.unicodeScalars.count == 1,
+               let scalar = normalizedText.unicodeScalars.first {
+                if let optionSequence = optionComposedFallbackSequence(for: scalar) {
+                    onInput?(optionSequence)
+                    return
+                }
+                if scalar.isASCII {
+                    onInput?("\u{1B}" + String(scalar))
+                    return
+                }
+            }
+            onInput?("\u{1B}" + normalizedText)
+            return
+        }
         if text.unicodeScalars.count == 1,
            let scalar = text.unicodeScalars.first,
            signalScalarForRawControlCode(scalar) != nil {
@@ -372,6 +402,12 @@ final class TerminalKeyInputView: UITextView {
             if handled {
                 return
             }
+        }
+        if text.unicodeScalars.count == 1,
+           let scalar = text.unicodeScalars.first,
+           let optionSequence = optionComposedFallbackSequence(for: scalar) {
+            onInput?(optionSequence)
+            return
         }
         let normalized = text.replacingOccurrences(of: "\n", with: "\r")
         onInput?(normalized)
@@ -381,8 +417,18 @@ final class TerminalKeyInputView: UITextView {
         onInput?("\u{7F}")
     }
 
+    private func clearLatchedModifiersForPaste() {
+        if controlLatch {
+            controlLatch = false
+        }
+        if optionLatch {
+            optionLatch = false
+        }
+    }
+
     override func paste(_ sender: Any?) {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        clearLatchedModifiersForPaste()
         onPaste?(text)
     }
 
@@ -525,13 +571,27 @@ final class TerminalKeyInputView: UITextView {
 
     private func handle(press: UIPress, eventModifierFlags: UIKeyModifierFlags?) -> Bool {
         guard let key = press.key else { return false }
-        let modifierFlags = key.modifierFlags.union(eventModifierFlags ?? [])
+        let latchedControl = controlLatch
+        let latchedOption = optionLatch
+        var modifierFlags = key.modifierFlags.union(eventModifierFlags ?? [])
+        if latchedControl {
+            modifierFlags.insert(.control)
+        }
+        if latchedOption {
+            modifierFlags.insert(.alternate)
+        }
 
         if key.keyCode == .keyboardTab {
             if modifierFlags.contains(.shift) {
                 onInput?("\u{1B}[Z")
             } else {
                 onInput?("\t")
+            }
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
             }
             return true
         }
@@ -541,6 +601,9 @@ final class TerminalKeyInputView: UITextView {
            !modifierFlags.contains(.command),
            let optionSequence = optionModifiedSequence(for: key, modifierFlags: modifierFlags) {
             onInput?(optionSequence)
+            if latchedOption {
+                optionLatch = false
+            }
             return true
         }
 
@@ -551,6 +614,12 @@ final class TerminalKeyInputView: UITextView {
                 if !handled {
                     onInput?(control)
                 }
+                if latchedControl {
+                    controlLatch = false
+                }
+                if latchedOption {
+                    optionLatch = false
+                }
                 return true
             }
             if signalScalarForRawControlCode(scalar) != nil {
@@ -558,16 +627,40 @@ final class TerminalKeyInputView: UITextView {
                 if !handled {
                     onInput?(String(scalar))
                 }
+                if latchedControl {
+                    controlLatch = false
+                }
+                if latchedOption {
+                    optionLatch = false
+                }
                 return true
             }
         }
 
         switch key.keyCode {
         case .keyboardReturnOrEnter:
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
+            }
             onInput?("\r"); return true
         case .keyboardDeleteForward:
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
+            }
             onInput?("\u{1B}[3~"); return true
         case .keyboardEscape:
+            if latchedControl {
+                controlLatch = false
+            }
+            if latchedOption {
+                optionLatch = false
+            }
             onInput?("\u{1B}"); return true
         default:
             break
@@ -643,6 +736,56 @@ final class TerminalKeyInputView: UITextView {
             return nil
         }
         return UnicodeScalar(shift ? (base - 0x20) : base)
+    }
+
+    private func optionComposedFallbackSequence(for scalar: UnicodeScalar) -> String? {
+        let mapped: UnicodeScalar
+        switch scalar {
+        case "å", "Å": mapped = "a"
+        case "∫": mapped = "b"
+        case "ç", "Ç": mapped = "c"
+        case "∂": mapped = "d"
+        case "´", "É": mapped = "e"
+        case "ƒ": mapped = "f"
+        case "©": mapped = "g"
+        case "˙": mapped = "h"
+        case "ˆ": mapped = "i"
+        case "∆": mapped = "j"
+        case "˚": mapped = "k"
+        case "¬": mapped = "l"
+        case "µ": mapped = "m"
+        case "˜", "ı": mapped = "n"
+        case "ø", "Ø": mapped = "o"
+        case "π", "∏": mapped = "p"
+        case "œ", "Œ": mapped = "q"
+        case "®": mapped = "r"
+        case "ß": mapped = "s"
+        case "†": mapped = "t"
+        case "¨": mapped = "u"
+        case "√": mapped = "v"
+        case "∑": mapped = "w"
+        case "≈": mapped = "x"
+        case "¥": mapped = "y"
+        case "Ω": mapped = "z"
+        case "¡": mapped = "1"
+        case "™": mapped = "2"
+        case "£": mapped = "3"
+        case "¢": mapped = "4"
+        case "∞": mapped = "5"
+        case "§": mapped = "6"
+        case "¶": mapped = "7"
+        case "•": mapped = "8"
+        case "ª": mapped = "9"
+        case "º": mapped = "0"
+        case "≤": mapped = ","
+        case "≥": mapped = "."
+        case "÷": mapped = "/"
+        case "–": mapped = "-"
+        case "≠": mapped = "="
+        default:
+            return nil
+        }
+        return "\u{1B}" + String(mapped)
     }
 
     @objc private func handleEscapeKey() {
@@ -761,6 +904,10 @@ final class TerminalKeyInputView: UITextView {
         controlLatch.toggle()
     }
 
+    @objc private func handleAltToggle(_ sender: UIButton) {
+        optionLatch.toggle()
+    }
+
     @objc private func handleUp() {
         onInput?(arrowSequence("A"))
     }
@@ -795,6 +942,7 @@ final class TerminalKeyInputView: UITextView {
     
     @objc private func handlePasteCommand() {
         guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        clearLatchedModifiersForPaste()
         onPaste?(text)
     }
 
@@ -884,5 +1032,26 @@ final class TerminalKeyInputView: UITextView {
             ? UIColor.systemBlue.withAlphaComponent(0.8)
             : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
         button.configuration = config
+
+        if controlLatch {
+            button.accessibilityTraits.insert(.selected)
+        } else {
+            button.accessibilityTraits.remove(.selected)
+        }
+    }
+
+    private func updateOptionButtonAppearance() {
+        guard let button = optionButton else { return }
+        var config = button.configuration ?? UIButton.Configuration.filled()
+        config.baseBackgroundColor = optionLatch
+            ? UIColor.systemBlue.withAlphaComponent(0.8)
+            : UIColor.secondarySystemBackground.withAlphaComponent(0.8)
+        button.configuration = config
+
+        if optionLatch {
+            button.accessibilityTraits.insert(.selected)
+        } else {
+            button.accessibilityTraits.remove(.selected)
+        }
     }
 }

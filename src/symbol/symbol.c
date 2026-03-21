@@ -14,6 +14,8 @@
 #include <assert.h>
 #include "core/list.h"
 #include "ast/ast.h"
+#include "backend_ast/builtin.h"
+#include "Pascal/type_registry.h"
 
 static bool symbolTypeIsUnsignedInt(VarType type) {
     switch (type) {
@@ -27,6 +29,84 @@ static bool symbolTypeIsUnsignedInt(VarType type) {
         default:
             return false;
     }
+}
+
+static VarType deduceLocalSymbolTypeFromName(const char *name) {
+    if (!name) {
+        return TYPE_UNKNOWN;
+    }
+    if (strcasecmp(name, "integer") == 0) return TYPE_INT32;
+    if (strcasecmp(name, "longint") == 0) return TYPE_INT64;
+    if (strcasecmp(name, "cardinal") == 0) return TYPE_UINT32;
+    if (strcasecmp(name, "shortint") == 0) return TYPE_INT8;
+    if (strcasecmp(name, "smallint") == 0) return TYPE_INT16;
+    if (strcasecmp(name, "int64") == 0) return TYPE_INT64;
+    if (strcasecmp(name, "uint64") == 0) return TYPE_UINT64;
+    if (strcasecmp(name, "qword") == 0) return TYPE_UINT64;
+    if (strcasecmp(name, "single") == 0) return TYPE_FLOAT;
+    if (strcasecmp(name, "double") == 0) return TYPE_DOUBLE;
+    if (strcasecmp(name, "extended") == 0) return TYPE_LONG_DOUBLE;
+    if (strcasecmp(name, "real") == 0) return TYPE_DOUBLE;
+    if (strcasecmp(name, "char") == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "byte") == 0) return TYPE_BYTE;
+    if (strcasecmp(name, "word") == 0) return TYPE_WORD;
+    if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
+    if (strcasecmp(name, "string") == 0) return TYPE_STRING;
+    if (strcasecmp(name, "file") == 0 || strcasecmp(name, "text") == 0) return TYPE_FILE;
+    if (strcasecmp(name, "mstream") == 0) return TYPE_MEMORYSTREAM;
+    return TYPE_UNKNOWN;
+}
+
+static VarType inferLocalSymbolType(AST *type_def) {
+    AST *node = type_def;
+
+    while (node && node->type == AST_TYPE_DECL && node->left) {
+        node = node->left;
+    }
+
+    if (node && node->type == AST_TYPE_REFERENCE) {
+        if (node->right) {
+            node = node->right;
+        } else if (node->token && node->token->value) {
+            AST *looked = lookupType(node->token->value);
+            if (looked && looked != node) {
+                node = looked;
+                while (node && node->type == AST_TYPE_DECL && node->left) {
+                    node = node->left;
+                }
+            }
+        }
+    }
+
+    if (!node) {
+        return TYPE_UNKNOWN;
+    }
+
+    if (node->var_type != TYPE_VOID && node->var_type != TYPE_UNKNOWN) {
+        return node->var_type;
+    }
+
+    switch (node->type) {
+        case AST_ARRAY_TYPE:
+            return TYPE_ARRAY;
+        case AST_RECORD_TYPE:
+            return TYPE_RECORD;
+        case AST_ENUM_TYPE:
+            return TYPE_ENUM;
+        case AST_POINTER_TYPE:
+            return TYPE_POINTER;
+        case AST_PROC_PTR_TYPE:
+            return TYPE_POINTER;
+        case AST_VARIABLE:
+            if (node->token && node->token->value) {
+                return deduceLocalSymbolTypeFromName(node->token->value);
+            }
+            break;
+        default:
+            break;
+    }
+
+    return TYPE_UNKNOWN;
 }
 
 // --- Hash Table Implementation ---
@@ -411,6 +491,43 @@ void insertGlobalAlias(const char *name, Symbol *target) {
     hashTableInsert(globalSymbols, alias);
 }
 
+void insertStandardStreamSymbols(void) {
+    if (!ensureGlobalSymbolsTable()) {
+        return;
+    }
+
+    static const char *const streamNames[] = { "stdin", "stdout", "stderr" };
+    for (size_t i = 0; i < sizeof(streamNames) / sizeof(streamNames[0]); ++i) {
+        const char *name = streamNames[i];
+        Symbol *sym = lookupGlobalSymbol(name);
+        if (!sym) {
+            insertGlobalSymbol(name, TYPE_FILE, NULL);
+            sym = lookupGlobalSymbol(name);
+        }
+        if (!sym) {
+            continue;
+        }
+
+        sym = resolveSymbolAlias(sym);
+        if (!sym) {
+            continue;
+        }
+
+        sym->type = TYPE_FILE;
+        if (!sym->value) {
+            sym->value = malloc(sizeof(Value));
+            if (!sym->value) {
+                fprintf(stderr, "Memory allocation error in insertStandardStreamSymbols\n");
+                EXIT_FAILURE_HANDLER();
+            }
+            *(sym->value) = makeValueForType(TYPE_FILE, NULL, sym);
+        } else if (sym->value->type != TYPE_FILE) {
+            freeValue(sym->value);
+            *(sym->value) = makeValueForType(TYPE_FILE, NULL, sym);
+        }
+    }
+}
+
 // Insert a constant symbol into constGlobalSymbols.
 // Stores a copy of the provided Value and marks the symbol as const.
 void insertConstGlobalSymbol(const char *name, Value val) {
@@ -592,6 +709,12 @@ Symbol *insertLocalSymbol(const char *name, VarType type, AST* type_def, bool is
     toLowerString(sym->name);
 
     // Assign type information
+    if ((type == TYPE_UNKNOWN || type == TYPE_VOID) && type_def) {
+        VarType inferred = inferLocalSymbolType(type_def);
+        if (inferred != TYPE_UNKNOWN && inferred != TYPE_VOID) {
+            type = inferred;
+        }
+    }
     sym->type = type;
     sym->type_def = type_def; // Store link to the AST type definition node
 
@@ -1121,7 +1244,13 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
 
         case TYPE_FILE:
             if (val.type == TYPE_FILE) {
-                if (sym->value->f_val) fclose(sym->value->f_val);
+                if (sym->value->f_val) {
+                    if (!pscalRuntimeVmIsSharedFileStream(sym->value->f_val)) {
+                        fclose(sym->value->f_val);
+                    } else {
+                        fflush(sym->value->f_val);
+                    }
+                }
                 sym->value->f_val = val.f_val;
                 if (sym->value->filename) free(sym->value->filename);
                 sym->value->filename = val.filename ? strdup(val.filename) : NULL;

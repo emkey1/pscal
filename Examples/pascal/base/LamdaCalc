@@ -1,0 +1,242 @@
+#!/usr/bin/env pascal
+program LambdaCalculus;
+
+type
+  ExprType = (VarExpr, AbsExpr, AppExpr);
+  
+  ExprPtr = ^Expression;
+  Expression = record
+    case et: ExprType of
+      VarExpr: (name: Char);
+      AbsExpr: (param: Char; body: ExprPtr);
+      AppExpr: (func, arg: ExprPtr);
+  end;
+
+function NewVar(name: Char): ExprPtr;
+begin
+  New(Result);
+  Result^.et := VarExpr;
+  Result^.name := name;
+end;
+
+function NewAbs(param: Char; body: ExprPtr): ExprPtr;
+begin
+  New(Result);
+  Result^.et := AbsExpr;
+  Result^.param := param;
+  Result^.body := body;
+end;
+
+function NewApp(func, arg: ExprPtr): ExprPtr;
+begin
+  New(Result);
+  Result^.et := AppExpr;
+  Result^.func := func;
+  Result^.arg := arg;
+end;
+
+function HasVar(const s: String; c: Char): Boolean;
+var
+  i: Integer;
+begin
+  HasVar := false;
+  for i := 1 to Length(s) do
+    if s[i] = c then
+    begin
+      HasVar := true;
+      Exit;
+    end;
+end;
+
+function Clone(e: ExprPtr): ExprPtr;
+begin
+  if e = nil then
+    Clone := nil
+  else
+    case e^.et of
+      VarExpr:
+        Clone := NewVar(e^.name);
+      AbsExpr:
+        Clone := NewAbs(e^.param, Clone(e^.body));
+      AppExpr:
+        Clone := NewApp(Clone(e^.func), Clone(e^.arg));
+    end;
+end;
+
+function FreeVars(const e: ExprPtr): String;
+var
+  i, j: Integer;
+  bodyVars: String;
+
+begin
+  case e^.et of
+    VarExpr: 
+      FreeVars := e^.name;
+      
+    AbsExpr: 
+      begin
+        bodyVars := FreeVars(e^.body);
+        FreeVars := '';
+        for i := 1 to Length(bodyVars) do
+          if bodyVars[i] <> e^.param then
+            FreeVars := FreeVars + bodyVars[i];
+      end;
+      
+    AppExpr: 
+      begin
+        FreeVars := FreeVars(e^.func) + FreeVars(e^.arg);
+        
+        { Remove duplicates }
+        for i := 1 to Length(FreeVars) do
+          for j := i + 1 to Length(FreeVars) do
+            if FreeVars[i] = FreeVars[j] then 
+              Delete(FreeVars, j, 1);
+      end;
+  end;
+end;
+
+function Substitute(e: ExprPtr; varName: Char; replacement: ExprPtr): ExprPtr;
+var
+  resultExpr: ExprPtr;
+  newBody: ExprPtr;
+  newParam: Char;
+
+begin
+  case e^.et of
+    VarExpr:
+      if e^.name = varName then 
+        resultExpr := Clone(replacement)
+      else 
+        resultExpr := Clone(e);
+        
+    AbsExpr:
+      if e^.param = varName then 
+        resultExpr := Clone(e)
+      else if not HasVar(FreeVars(replacement), e^.param) then
+        begin
+          resultExpr := NewAbs(e^.param, Substitute(e^.body, varName, replacement));
+        end
+      else 
+        begin { Alpha conversion needed }
+          newParam := 'a';
+          while HasVar(FreeVars(e^.body), newParam) do 
+            Inc(newParam);
+            
+          newBody := Substitute(Clone(e^.body), e^.param, NewVar(newParam));
+          resultExpr := NewAbs(newParam, Substitute(newBody, varName, replacement));
+        end;
+        
+    AppExpr:
+      resultExpr := NewApp(Substitute(e^.func, varName, replacement),
+                           Substitute(e^.arg, varName, replacement));
+  end;
+  
+  Substitute := resultExpr;
+end;
+
+function BetaReduce(e: ExprPtr): ExprPtr;
+var
+  func, arg, resultExpr: ExprPtr;
+
+begin
+  case e^.et of
+    AppExpr:
+      if e^.func^.et = AbsExpr then 
+        begin
+          BetaReduce := Substitute(e^.func^.body, e^.func^.param, e^.arg);
+          exit;
+        end
+      else 
+        begin
+          func := BetaReduce(e^.func);
+          if func <> e^.func then 
+            resultExpr := NewApp(func, e^.arg)
+          else 
+            begin
+              arg := BetaReduce(e^.arg);
+              if arg <> e^.arg then 
+                resultExpr := NewApp(func, arg)
+              else 
+                resultExpr := e;
+            end;
+        end;
+        
+    AbsExpr:
+      if e^.body^.et = AppExpr then 
+        resultExpr := NewAbs(e^.param, BetaReduce(e^.body))
+      else 
+        resultExpr := e;
+        
+    VarExpr: resultExpr := e;
+  end;
+
+  BetaReduce := resultExpr;
+end;
+
+function SameExpr(a, b: ExprPtr): Boolean;
+begin
+  if a = b then
+    SameExpr := true
+  else if (a = nil) or (b = nil) then
+    SameExpr := false
+  else if a^.et <> b^.et then
+    SameExpr := false
+  else
+    case a^.et of
+      VarExpr:
+        SameExpr := a^.name = b^.name;
+      AbsExpr:
+        SameExpr := (a^.param = b^.param) and SameExpr(a^.body, b^.body);
+      AppExpr:
+        SameExpr := SameExpr(a^.func, b^.func) and SameExpr(a^.arg, b^.arg);
+    end;
+end;
+
+function Normalize(e: ExprPtr): String;
+var
+  newE: ExprPtr;
+begin
+  repeat
+    newE := BetaReduce(Clone(e));
+    if SameExpr(newE, e) then break;
+    Dispose(e);
+    e := newE;
+  until false;
+
+  case e^.et of
+    VarExpr: Normalize := e^.name;
+    
+    AbsExpr: 
+      Normalize := '(λ' + e^.param + '.' + Normalize(e^.body) + ')';
+      
+    AppExpr: 
+      Normalize := '(' + Normalize(e^.func) + ' ' + Normalize(e^.arg) + ')';
+  end;
+end;
+
+var
+  id, selfApp: ExprPtr;
+
+begin
+  { λx.x }
+  id := NewAbs('x', NewVar('x'));
+
+  { (λx.xx)(λx.xx) }
+  selfApp := NewApp(NewAbs('x', NewApp(NewVar('x'), NewVar('x'))),
+                    NewAbs('x', NewApp(NewVar('x'), NewVar('x'))));
+
+  Writeln('Identity: ', Normalize(id));
+  
+  { Try reducing self-application with timeout }
+  try
+    Writeln('Self-applying (may loop):');
+    { Reduce once for demo }
+    Writeln('After 1 step: ', Normalize(BetaReduce(Clone(selfApp))));
+  except
+    Writeln('Evaluation halted (infinite loop detected)');
+  end;
+  
+  { Church numeral example }
+  Writeln('λf.λx.f(f(x)) = ', Normalize(NewAbs('f', NewAbs('x', 
+    NewApp(NewVar('f'), NewApp(NewVar('f'), NewVar('x')))))));
+end.
