@@ -265,7 +265,6 @@ int runProgram(const char *source, const char *programName, const char *frontend
     if (parser.current_token) { freeToken(parser.current_token); parser.current_token = NULL; }
 
     if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
-        annotateTypes(GlobalAST, NULL, GlobalAST);
         int semantic_errors_before = pascal_semantic_error_count;
         pascalPerformSemanticAnalysis(GlobalAST);
         bool semantic_errors_increased = pascal_semantic_error_count > semantic_errors_before;
