@@ -154,6 +154,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_JOIN:         return "JOIN";
         case TOKEN_TRY:          return "TRY";
         case TOKEN_EXCEPT:       return "EXCEPT";
+        case TOKEN_ON:           return "ON";
         case TOKEN_RAISE:        return "RAISE";
         case TOKEN_WITH:         return "WITH";
         case TOKEN_AT:           return "AT";
@@ -1001,6 +1002,19 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
 
     AST* actual_type_def = node_to_inspect;
 
+    if ((type == TYPE_UNKNOWN || type == TYPE_VOID) && node_to_inspect) {
+        AST* inferred_node = node_to_inspect;
+        VarType inferred_type = resolveValueTypeNode(&inferred_node);
+        if (inferred_type != TYPE_UNKNOWN && inferred_type != TYPE_VOID) {
+            type = inferred_type;
+            v.type = inferred_type;
+            if (inferred_node) {
+                node_to_inspect = inferred_node;
+                actual_type_def = inferred_node;
+            }
+        }
+    }
+
     // If the resolved type definition is an enum, ensure the value type reflects that
     // and remember the enum's definition node for later metadata access.
     if (actual_type_def && actual_type_def->type == AST_ENUM_TYPE) {
@@ -1207,7 +1221,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
 
                  if(elemTypeDefNode) {
                      elemType = elemTypeDefNode->var_type;
-                       if (elemType == TYPE_VOID) {
+                       if (elemType == TYPE_VOID || elemType == TYPE_UNKNOWN) {
                              if (elemTypeDefNode->type == AST_VARIABLE && elemTypeDefNode->token) {
                                  const char *tn = elemTypeDefNode->token->value;
                                  if (strcasecmp(tn, "integer") == 0) elemType = TYPE_INT32;
@@ -1236,7 +1250,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                                                 ? elemType
                                                 : TYPE_UNKNOWN;
                      v = makeEmptyArray(initElemType, elemTypeDefNode);
-                 } else if (dims > 0 && elemType != TYPE_VOID) {
+                 } else if (dims > 0 && elemType != TYPE_VOID && elemType != TYPE_UNKNOWN) {
                      int *lbs = (int*)malloc(sizeof(int) * dims);
                      int *ubs = (int*)malloc(sizeof(int) * dims);
                      if (!lbs || !ubs) {

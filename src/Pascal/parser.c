@@ -2846,7 +2846,79 @@ static AST *tryStatement(Parser *parser) {
     }
     eat(parser, TOKEN_EXCEPT);
 
-    AST *exceptBlock = parseStatementListUntil(parser, TOKEN_END, "EXCEPT");
+    AST *catchNode = newASTNode(AST_CATCH, NULL);
+    AST *exceptBlock = NULL;
+
+    if (parser->current_token && parser->current_token->type == TOKEN_ON) {
+        eat(parser, TOKEN_ON);
+
+        Token *handlerVarTok = copyToken(parser->current_token);
+        if (!handlerVarTok || parser->current_token->type != TOKEN_IDENTIFIER) {
+            errorParser(parser, "Expected exception variable name after ON");
+            if (handlerVarTok) {
+                freeToken(handlerVarTok);
+            }
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_IDENTIFIER);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' after exception variable name");
+            freeToken(handlerVarTok);
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_COLON);
+
+        Token *handlerTypeTok = copyToken(parser->current_token);
+        if (!handlerTypeTok || parser->current_token->type != TOKEN_IDENTIFIER) {
+            errorParser(parser, "Expected exception type name after ':' in handler");
+            if (handlerTypeTok) {
+                freeToken(handlerTypeTok);
+            }
+            freeToken(handlerVarTok);
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_IDENTIFIER);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_DO) {
+            errorParser(parser, "Expected DO in exception handler");
+            freeToken(handlerTypeTok);
+            freeToken(handlerVarTok);
+            freeAST(tryBlock);
+            freeAST(catchNode);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_DO);
+
+        AST *handlerVar = newASTNode(AST_VARIABLE, handlerVarTok);
+        setLeft(catchNode, handlerVar);
+        if (handlerVarTok) {
+            freeToken(handlerVarTok);
+        }
+
+        if (catchNode->token) {
+            freeToken(catchNode->token);
+            catchNode->token = NULL;
+        }
+        if (handlerTypeTok) {
+            catchNode->token = copyToken(handlerTypeTok);
+            freeToken(handlerTypeTok);
+        }
+
+        exceptBlock = statement(parser);
+        if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        }
+    } else {
+        exceptBlock = parseStatementListUntil(parser, TOKEN_END, "EXCEPT");
+    }
+
     if (!parser->current_token || parser->current_token->type != TOKEN_END) {
         errorParser(parser, "Expected END to close TRY/EXCEPT statement");
         if (tryBlock) {
@@ -2859,7 +2931,6 @@ static AST *tryStatement(Parser *parser) {
     }
     eat(parser, TOKEN_END);
 
-    AST *catchNode = newASTNode(AST_CATCH, NULL);
     setRight(catchNode, exceptBlock);
 
     AST *tryNode = newASTNode(AST_TRY, NULL);

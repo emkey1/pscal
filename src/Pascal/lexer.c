@@ -151,7 +151,7 @@ static Keyword keywords[] = {
     {"inline", TOKEN_INLINE}, // Added inline directive keyword
     {"initialization", TOKEN_INITIALIZATION},
     {"interface", TOKEN_INTERFACE}, {"is", TOKEN_IS}, {"join", TOKEN_JOIN}, {"label", TOKEN_LABEL}, {"mod", TOKEN_MOD}, {"nil", TOKEN_NIL},
-    {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"or", TOKEN_OR},
+    {"not", TOKEN_NOT}, {"of", TOKEN_OF}, {"on", TOKEN_ON}, {"or", TOKEN_OR},
     {"pointer", TOKEN_POINTER},
     {"procedure", TOKEN_PROCEDURE}, {"program", TOKEN_PROGRAM},
     {"raise", TOKEN_RAISE},

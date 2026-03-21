@@ -4044,7 +4044,110 @@ static AST* resolveArrayTypeForExpression(AST* expr) {
         type_node = resolveTypeAlias(type_node->right);
     }
 
+    while (type_node && type_node->type == AST_TYPE_DECL && type_node->left) {
+        type_node = resolveTypeAlias(type_node->left);
+        while (type_node && type_node->type == AST_POINTER_TYPE) {
+            type_node = resolveTypeAlias(type_node->right);
+        }
+    }
+
     return type_node;
+}
+
+static AST* buildNestedArrayAccessChain(AST* node) {
+    if (!node || node->type != AST_ARRAY_ACCESS || !node->left || node->child_count <= 1) {
+        return NULL;
+    }
+
+    AST* current_array_type = resolveArrayTypeForExpression(node->left);
+    if (!current_array_type || current_array_type->type != AST_ARRAY_TYPE) {
+        return NULL;
+    }
+
+    int initial_direct_dims = current_array_type->child_count > 0 ? current_array_type->child_count : 1;
+    if (initial_direct_dims >= node->child_count) {
+        return NULL;
+    }
+
+    AST* current_base = copyAST(node->left);
+    if (!current_base) {
+        return NULL;
+    }
+
+    AST* root = NULL;
+    int consumed = 0;
+
+    while (consumed < node->child_count) {
+        AST* array_type = resolveTypeAlias(current_array_type);
+        if (!array_type || array_type->type != AST_ARRAY_TYPE) {
+            if (current_base) {
+                freeAST(current_base);
+            }
+            return NULL;
+        }
+
+        int direct_dims = array_type->child_count > 0 ? array_type->child_count : 1;
+        int remaining = node->child_count - consumed;
+        int use_dims = (remaining < direct_dims) ? remaining : direct_dims;
+
+        AST* segment = newASTNode(AST_ARRAY_ACCESS, node->token);
+        setLeft(segment, current_base);
+        current_base = NULL;
+
+        for (int i = 0; i < use_dims; ++i) {
+            addChild(segment, copyAST(node->children[consumed + i]));
+        }
+
+        AST* element_type = array_type->right ? resolveTypeAlias(array_type->right) : NULL;
+        if (element_type) {
+            segment->type_def = copyAST(element_type);
+            segment->var_type = element_type->var_type;
+        }
+
+        consumed += use_dims;
+
+        if (consumed >= node->child_count) {
+            root = segment;
+            break;
+        }
+
+        if (use_dims != direct_dims || !element_type || element_type->type != AST_ARRAY_TYPE) {
+            freeAST(segment);
+            return NULL;
+        }
+
+        current_base = segment;
+        current_array_type = element_type;
+    }
+
+    return root;
+}
+
+static bool shouldDereferenceByRefArrayArgument(AST* node) {
+    if (!node || node->type != AST_VARIABLE || node->var_type != TYPE_ARRAY ||
+        !node->token || !node->token->value || !current_function_compiler) {
+        return false;
+    }
+
+    const char* varName = node->token->value;
+    int local_slot = resolveLocal(current_function_compiler, varName);
+    if (local_slot != -1) {
+        return current_function_compiler->locals[local_slot].is_ref;
+    }
+
+    int upvalue_slot = resolveUpvalue(current_function_compiler, varName);
+    if (upvalue_slot != -1) {
+        return current_function_compiler->upvalues[upvalue_slot].is_ref;
+    }
+
+    return false;
+}
+
+static void compileCallArgumentRValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
+    compileRValue(node, chunk, current_line_approx);
+    if (shouldDereferenceByRefArrayArgument(node)) {
+        writeBytecodeChunk(chunk, GET_INDIRECT, getLine(node) > 0 ? getLine(node) : current_line_approx);
+    }
 }
 
 static bool appendConstArrayDim(ConstArrayDimInfo** dims, int* count, int* capacity,
@@ -4436,6 +4539,13 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ARRAY_ACCESS: {
+            AST* nested_access = buildNestedArrayAccessChain(node);
+            if (nested_access) {
+                compileLValue(nested_access, chunk, line);
+                freeAST(nested_access);
+                break;
+            }
+
             // Check if the base is a string for special handling
             if (node->left && node->left->var_type == TYPE_STRING) {
                 // This is an L-Value access for assignment, like s[i] := 'c'.
@@ -6208,7 +6318,7 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
             if (by_ref) {
                 compileLValue(arg_node, chunk, getLine(arg_node));
             } else {
-                compileRValue(arg_node, chunk, getLine(arg_node));
+                compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
             }
             if (!pname) continue;
             bindings[binding_count].name = pname;
@@ -7475,7 +7585,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     if (is_var_param) {
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
-                        compileRValue(arg_node, chunk, getLine(arg_node));
+                        compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
                     }
                     writeBytecodeChunk(chunk, SWAP, line);
                 }
@@ -7588,7 +7698,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     if (is_var_param) {
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
-                        compileRValue(arg_node, chunk, getLine(arg_node));
+                        compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
                         maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                     }
                     writeBytecodeChunk(chunk, SWAP, line);
@@ -7673,7 +7783,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 if (is_var_param) {
                     compileLValue(arg_node, chunk, getLine(arg_node));
                 } else {
-                    compileRValue(arg_node, chunk, getLine(arg_node));
+                    compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
                     maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                 }
             }
@@ -8434,6 +8544,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_ARRAY_ACCESS: {
+            AST* nested_access = buildNestedArrayAccessChain(node);
+            if (nested_access) {
+                compileRValue(nested_access, chunk, line);
+                freeAST(nested_access);
+                break;
+            }
+
             // This logic correctly distinguishes between accessing a string/char vs. a regular array.
             if (node->left && (node->left->var_type == TYPE_STRING || node->left->var_type == TYPE_CHAR)) {
                 compileRValue(node->left, chunk, getLine(node->left));      // Push the string or char
@@ -9003,7 +9120,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         if (is_var_param) {
                             compileLValue(arg_node, chunk, getLine(arg_node));
                         } else {
-                            compileRValue(arg_node, chunk, getLine(arg_node));
+                            compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
                         }
                         writeBytecodeChunk(chunk, SWAP, line);
                     }
@@ -9075,7 +9192,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     if (is_var_param) {
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
-                        compileRValue(arg_node, chunk, getLine(arg_node));
+                        compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
                         maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                     }
                     writeBytecodeChunk(chunk, SWAP, line);
@@ -9210,7 +9327,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     if (is_var_param) {
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
-                        compileRValue(arg_node, chunk, getLine(arg_node));
+                        compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
                         maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
                     }
                 }

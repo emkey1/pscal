@@ -235,12 +235,17 @@ end;
 
 Current semantics:
 
-* `raise;` and `raise <expr>;` are accepted. The expression is currently treated
-  as informational only; `except` does not bind or inspect an exception value yet.
+* `raise;` and `raise <expr>;` are accepted. When `<expr>` is a string literal,
+  a matching `except on E: Exception do ...` handler can read it back as
+  `E.Message`.
 * `try` handlers catch exceptions raised with Pascal `raise` in the same routine
   or in callees reached from the protected block.
-* The current syntax is `try ... except ... end;`. `finally`, typed handlers,
-  and `except on E: ... do ...` forms are not implemented.
+* The current syntax supports both `try ... except ... end;` and a single
+  handler form `try ... except on E: Exception do ... end;`.
+* In a typed handler, `E.Message` is available for string-literal payloads
+  raised with `raise '...';`. Full exception-object semantics are not
+  implemented.
+* `finally` blocks and multi-handler typed dispatch are not implemented.
 * `try` / `except` is language-level control flow. It should not be treated as a
   general catch-all for arbitrary VM/runtime faults such as every nil dereference
   or host-side runtime error.

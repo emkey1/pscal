@@ -6696,6 +6696,13 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                AST* element_base_type = NULL;
+                if (array_val_ptr->element_type_def) {
+                    element_base_type = array_val_ptr->element_type_def;
+                } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                    element_base_type = operand.base_type_node->right;
+                }
+
                 if (array_val_ptr->array_is_packed) {
                     if (!array_val_ptr->array_raw) {
                         runtimeError(vm, "VM Error: Packed array storage missing.");
@@ -6708,7 +6715,7 @@ comparison_error_label:
                     }
                     push(vm, makePointer(&array_val_ptr->array_raw[offset], BYTE_ARRAY_PTR_SENTINEL));
                 } else {
-                    push(vm, makePointer(&array_val_ptr->array_val[offset], NULL));
+                    push(vm, makePointer(&array_val_ptr->array_val[offset], element_base_type));
                 }
 
                 if (operand.type == TYPE_POINTER) {
@@ -6817,6 +6824,13 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
+                AST* element_base_type = NULL;
+                if (array_val_ptr->element_type_def) {
+                    element_base_type = array_val_ptr->element_type_def;
+                } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
+                    element_base_type = operand.base_type_node->right;
+                }
+
                 if (array_val_ptr->array_is_packed) {
                     if (!array_val_ptr->array_raw) {
                         runtimeError(vm, "VM Error: Packed array storage missing.");
@@ -6829,7 +6843,7 @@ comparison_error_label:
                     }
                     push(vm, makePointer(&array_val_ptr->array_raw[flat_offset], BYTE_ARRAY_PTR_SENTINEL));
                 } else {
-                    push(vm, makePointer(&array_val_ptr->array_val[flat_offset], NULL));
+                    push(vm, makePointer(&array_val_ptr->array_val[flat_offset], element_base_type));
                 }
 
                 if (operand.type == TYPE_POINTER) {

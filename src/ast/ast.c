@@ -1388,7 +1388,13 @@ resolved_field: ;
                             resolved = arg->type_def;
                         }
                         resolved = resolveTypeAlias(resolved);
-                        if (resolved) {
+                        if ((strcasecmp(builtin_name, "low") == 0 ||
+                             strcasecmp(builtin_name, "high") == 0) &&
+                            (arg->var_type == TYPE_STRING ||
+                             (resolved && resolved->type == AST_ARRAY_TYPE))) {
+                            node->var_type = TYPE_INTEGER;
+                            node->type_def = lookupType("integer");
+                        } else if (resolved) {
                             node->var_type = resolved->var_type;
                             node->type_def = resolved;
                         } else if (arg->token && arg->token->value) {

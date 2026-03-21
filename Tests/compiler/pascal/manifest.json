@@ -53,6 +53,24 @@
       "path": "Tests/compiler/pascal/cases/inline_param_shadowing.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: inline parameter shadowing"
+    },
+    {
+      "id": "except_on_exception_message",
+      "path": "Tests/compiler/pascal/cases/except_on_exception_message.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: except on message = boom"
+    },
+    {
+      "id": "nested_dynamic_array_comma_index",
+      "path": "Tests/compiler/pascal/cases/nested_dynamic_array_comma_index.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: nested dynamic array comma index"
+    },
+    {
+      "id": "inc_longint_builtin",
+      "path": "Tests/compiler/pascal/cases/inc_longint_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: inc/dec longint"
     }
   ]
 }

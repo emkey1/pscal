@@ -3078,6 +3078,22 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
+    if ((target->element_type == TYPE_UNKNOWN || target->element_type == TYPE_VOID ||
+         target->element_type_def == NULL) &&
+        args[0].base_type_node != NULL) {
+        Value typed_template = makeValueForType(TYPE_ARRAY, args[0].base_type_node, NULL);
+        if (typed_template.type == TYPE_ARRAY) {
+            if (target->element_type == TYPE_UNKNOWN || target->element_type == TYPE_VOID) {
+                target->element_type = typed_template.element_type;
+            }
+            if (target->element_type_def == NULL) {
+                target->element_type_def = typed_template.element_type_def;
+            }
+            target->array_is_packed = typed_template.array_is_packed;
+        }
+        freeValue(&typed_template);
+    }
+
     int dimension_count = arg_count - 1;
     long long* lengths = (long long*)malloc(sizeof(long long) * (size_t)dimension_count);
     if (!lengths) {
@@ -5865,7 +5881,46 @@ Value vmBuiltinInc(VM* vm, int arg_count, Value* args) {
     }
 
     switch (target->type) {
+        case TYPE_INT8: {
+            long long next = target->i_val + delta;
+            if (next < INT8_MIN || next > INT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing INT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int8_t)next);
+            break;
+        }
+
+        case TYPE_UINT8: {
+            long long next = target->i_val + delta;
+            if (next < 0 || next > UINT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing UINT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint8_t)next);
+            break;
+        }
+
+        case TYPE_INT16: {
+            long long next = target->i_val + delta;
+            if (next < INT16_MIN || next > INT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing INT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int16_t)next);
+            break;
+        }
+
+        case TYPE_UINT16: {
+            long long next = target->i_val + delta;
+            if (next < 0 || next > UINT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error incrementing UINT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint16_t)next);
+            break;
+        }
+
         case TYPE_INTEGER:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
             SET_INT_VALUE(target, target->i_val + delta);
             break;
 
@@ -5931,7 +5986,46 @@ Value vmBuiltinDec(VM* vm, int arg_count, Value* args) {
     }
 
     switch (target->type) {
+        case TYPE_INT8: {
+            long long next = target->i_val - delta;
+            if (next < INT8_MIN || next > INT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing INT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int8_t)next);
+            break;
+        }
+
+        case TYPE_UINT8: {
+            long long next = target->i_val - delta;
+            if (next < 0 || next > UINT8_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing UINT8 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint8_t)next);
+            break;
+        }
+
+        case TYPE_INT16: {
+            long long next = target->i_val - delta;
+            if (next < INT16_MIN || next > INT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing INT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (int16_t)next);
+            break;
+        }
+
+        case TYPE_UINT16: {
+            long long next = target->i_val - delta;
+            if (next < 0 || next > UINT16_MAX) {
+                runtimeWarning(vm, "Warning: Range check error decrementing UINT16 to %lld.", next);
+            }
+            SET_INT_VALUE(target, (uint16_t)next);
+            break;
+        }
+
         case TYPE_INTEGER:
+        case TYPE_UINT32:
+        case TYPE_INT64:
+        case TYPE_UINT64:
             SET_INT_VALUE(target, target->i_val - delta);
             break;
 

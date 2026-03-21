@@ -17,6 +17,7 @@ static bool gRegistryInitialized = false;
 static AST *desugarNode(AST *node, VarType currentFunctionType);
 static AST *resolveTypeAliasLocal(AST *type_node);
 static AST *findRecordMethod(AST *recordType, const char *name);
+static void appendStatementsFromBlock(AST *target, AST *block);
 
 static int nodeLine(AST *node) {
     if (!node) {
@@ -181,13 +182,85 @@ static AST *createPendingBreakNode(int line) {
     return ifNode;
 }
 
-static AST *createThrowBreakBlock(int line) {
+static AST *takeThrowMessageExpr(AST *throwNode, int line) {
+    if (!throwNode) {
+        return createStringLiteral("", TYPE_STRING, line);
+    }
+
+    AST *expr = throwNode->left;
+    throwNode->left = NULL;
+    if (expr && expr->type == AST_STRING) {
+        return expr;
+    }
+    if (expr) {
+        freeAST(expr);
+    }
+    return createStringLiteral("", TYPE_STRING, line);
+}
+
+static AST *createThrowBreakBlock(AST *messageExpr, int line) {
     AST *block = newASTNode(AST_COMPOUND, NULL);
+    addChild(block, createAssignment(createVarRef("__pas_exc_message", TYPE_STRING, NULL, line),
+                                     messageExpr ? messageExpr : createStringLiteral("", TYPE_STRING, line),
+                                     line));
     addChild(block, createAssignment(createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, line),
                                      createBooleanLiteral(true, line),
                                      line));
     addChild(block, newASTNode(AST_BREAK, NULL));
     return block;
+}
+
+static AST *rewriteExceptionMessageReferences(AST *node, const char *handlerName) {
+    if (!node || !handlerName) {
+        return node;
+    }
+
+    if (node->type == AST_FIELD_ACCESS &&
+        node->token && node->token->value &&
+        strcasecmp(node->token->value, "Message") == 0 &&
+        node->left &&
+        node->left->type == AST_VARIABLE &&
+        node->left->token && node->left->token->value &&
+        strcasecmp(node->left->token->value, handlerName) == 0) {
+        int line = nodeLine(node);
+        AST *replacement = createVarRef("__pas_exc_message", TYPE_STRING, NULL, line);
+        freeAST(node);
+        return replacement;
+    }
+
+    if (node->left) {
+        AST *newLeft = rewriteExceptionMessageReferences(node->left, handlerName);
+        if (newLeft != node->left) {
+            setLeft(node, newLeft);
+        }
+    }
+    if (node->right) {
+        AST *newRight = rewriteExceptionMessageReferences(node->right, handlerName);
+        if (newRight != node->right) {
+            setRight(node, newRight);
+        }
+    }
+    if (node->extra) {
+        AST *newExtra = rewriteExceptionMessageReferences(node->extra, handlerName);
+        if (newExtra != node->extra) {
+            setExtra(node, newExtra);
+        }
+    }
+    for (int i = 0; i < node->child_count; i++) {
+        AST *child = node->children[i];
+        if (!child) {
+            continue;
+        }
+        AST *newChild = rewriteExceptionMessageReferences(child, handlerName);
+        if (newChild != child) {
+            node->children[i] = newChild;
+            if (newChild) {
+                newChild->parent = node;
+            }
+        }
+    }
+
+    return node;
 }
 
 static void appendStatementsFromBlock(AST *target, AST *block) {
@@ -277,9 +350,10 @@ static void rewriteThrowsForTry(AST *node) {
         if (node->left->type == AST_THROW) {
             AST *throwNode = node->left;
             int line = throwNode->i_val;
+            AST *messageExpr = takeThrowMessageExpr(throwNode, line);
             node->left = NULL;
             freeAST(throwNode);
-            setLeft(node, createThrowBreakBlock(line));
+            setLeft(node, createThrowBreakBlock(messageExpr, line));
         } else {
             rewriteThrowsForTry(node->left);
         }
@@ -289,9 +363,10 @@ static void rewriteThrowsForTry(AST *node) {
         if (node->right->type == AST_THROW) {
             AST *throwNode = node->right;
             int line = throwNode->i_val;
+            AST *messageExpr = takeThrowMessageExpr(throwNode, line);
             node->right = NULL;
             freeAST(throwNode);
-            setRight(node, createThrowBreakBlock(line));
+            setRight(node, createThrowBreakBlock(messageExpr, line));
         } else {
             rewriteThrowsForTry(node->right);
         }
@@ -301,9 +376,10 @@ static void rewriteThrowsForTry(AST *node) {
         if (node->extra->type == AST_THROW) {
             AST *throwNode = node->extra;
             int line = throwNode->i_val;
+            AST *messageExpr = takeThrowMessageExpr(throwNode, line);
             node->extra = NULL;
             freeAST(throwNode);
-            setExtra(node, createThrowBreakBlock(line));
+            setExtra(node, createThrowBreakBlock(messageExpr, line));
         } else {
             rewriteThrowsForTry(node->extra);
         }
@@ -316,8 +392,9 @@ static void rewriteThrowsForTry(AST *node) {
         }
         if (child->type == AST_THROW) {
             int line = child->i_val;
+            AST *messageExpr = takeThrowMessageExpr(child, line);
             freeAST(child);
-            node->children[i] = createThrowBreakBlock(line);
+            node->children[i] = createThrowBreakBlock(messageExpr, line);
             node->children[i]->parent = node;
         } else {
             rewriteThrowsForTry(child);
@@ -530,6 +607,7 @@ static AST *desugarTryNode(AST *node, VarType currentFunctionType) {
     AST *tryBlock = node->left;
     AST *catchNode = node->right;
     AST *catchBody = NULL;
+    AST *handlerVar = NULL;
     int labelLine = 0;
 
     node->left = NULL;
@@ -542,6 +620,8 @@ static AST *desugarTryNode(AST *node, VarType currentFunctionType) {
     }
 
     if (catchNode) {
+        handlerVar = catchNode->left;
+        catchNode->left = NULL;
         catchBody = catchNode->right;
         catchNode->right = NULL;
         freeAST(catchNode);
@@ -549,10 +629,19 @@ static AST *desugarTryNode(AST *node, VarType currentFunctionType) {
     if (catchBody) {
         catchBody = desugarNode(catchBody, currentFunctionType);
     }
+    if (handlerVar && handlerVar->token && handlerVar->token->value && catchBody) {
+        catchBody = rewriteExceptionMessageReferences(catchBody, handlerVar->token->value);
+    }
+    if (handlerVar) {
+        freeAST(handlerVar);
+    }
 
     AST *result = newASTNode(AST_COMPOUND, NULL);
     addChild(result, createAssignment(createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, labelLine),
                                       createBooleanLiteral(false, labelLine),
+                                      labelLine));
+    addChild(result, createAssignment(createVarRef("__pas_exc_message", TYPE_STRING, NULL, labelLine),
+                                      createStringLiteral("", TYPE_STRING, labelLine),
                                       labelLine));
 
     AST *loopBody = newASTNode(AST_COMPOUND, NULL);
@@ -584,12 +673,23 @@ static AST *desugarThrowNode(AST *node, VarType currentFunctionType) {
 
     int line = node->i_val;
     AST *expr = node->left;
+    AST *messageExpr = NULL;
     node->left = NULL;
+    if (expr && expr->type == AST_STRING) {
+        messageExpr = expr;
+        expr = NULL;
+    }
     if (expr) {
         freeAST(expr);
     }
+    if (!messageExpr) {
+        messageExpr = createStringLiteral("", TYPE_STRING, line);
+    }
 
     AST *result = newASTNode(AST_COMPOUND, NULL);
+    addChild(result, createAssignment(createVarRef("__pas_exc_message", TYPE_STRING, NULL, line),
+                                      messageExpr,
+                                      line));
     addChild(result, createAssignment(createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, line),
                                       createBooleanLiteral(true, line),
                                       line));
@@ -709,6 +809,7 @@ static void ensureExceptionGlobals(AST *root) {
     }
 
     bool hasPending = false;
+    bool hasMessage = false;
     for (int i = 0; i < decls->child_count; i++) {
         AST *child = decls->children[i];
         if (!child || child->type != AST_VAR_DECL) {
@@ -721,6 +822,8 @@ static void ensureExceptionGlobals(AST *root) {
             }
             if (strcasecmp(varNode->token->value, "__pas_exc_pending") == 0) {
                 hasPending = true;
+            } else if (strcasecmp(varNode->token->value, "__pas_exc_message") == 0) {
+                hasMessage = true;
             }
         }
     }
@@ -735,6 +838,18 @@ static void ensureExceptionGlobals(AST *root) {
         setTypeAST(pendingDecl, TYPE_BOOLEAN);
         setLeft(pendingDecl, createBooleanLiteral(false, 0));
         addChild(decls, pendingDecl);
+    }
+
+    if (!hasMessage) {
+        AST *messageDecl = newASTNode(AST_VAR_DECL, NULL);
+        Token *messageTok = newToken(TOKEN_IDENTIFIER, "__pas_exc_message", 0, 0);
+        AST *messageVar = newASTNode(AST_VARIABLE, messageTok);
+        setTypeAST(messageVar, TYPE_STRING);
+        addChild(messageDecl, messageVar);
+        setRight(messageDecl, cloneTypeForVar(TYPE_STRING, NULL, 0));
+        setTypeAST(messageDecl, TYPE_STRING);
+        setLeft(messageDecl, createStringLiteral("", TYPE_STRING, 0));
+        addChild(decls, messageDecl);
     }
 }
 
