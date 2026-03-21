@@ -327,6 +327,20 @@ Types are defined in a `type` block.
       end;
     ```
 
+    Variant records are also accepted:
+    ```pascal
+    type
+      Expr = record
+        case kind: integer of
+          0: (name: char);
+          1: (left, right: ^Expr);
+      end;
+    ```
+
+    PSCAL currently flattens variant arms into ordinary record fields for code
+    generation, so the syntax is supported but classic Pascal overlapping
+    storage semantics are not modeled.
+
     > **Note:** Traditional Turbo/Delphi `object`/`class` syntax is deliberately
     > omitted.  PSCAL Pascal achieves polymorphism with plain `record`s that may
     > declare `virtual` methods, closures, and Go-style interface boxing (see

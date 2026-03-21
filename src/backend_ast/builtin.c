@@ -7618,14 +7618,12 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
         if (suppress_spacing_flag && val.type == TYPE_BOOLEAN) {
             fputs(val.i_val ? "1" : "0", output_stream);
         } else if (val.type == TYPE_STRING) {
-            if (output_stream == stdout) {
-                fputs(val.s_val ? val.s_val : "", output_stream);
-            } else {
-                size_t len = val.s_val ? strlen(val.s_val) : 0;
-                fwrite(val.s_val ? val.s_val : "", 1, len, output_stream);
-            }
+            const char *text = val.s_val ? val.s_val : "";
+            writePascalText(output_stream, text, strlen(text));
         } else if (val.type == TYPE_CHAR) {
-            fputc(val.c_val, output_stream);
+            char utf8[5];
+            size_t utf8_len = encodePascalCharUtf8(val.c_val, utf8);
+            fwrite(utf8, 1, utf8_len, output_stream);
         } else {
             printValueToStream(val, output_stream);
         }

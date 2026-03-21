@@ -71,6 +71,9 @@ static void registerRecordMethods(Parser *parser, const char *recordName, AST *r
 static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
+static AST *parseRecordFieldDecl(Parser *parser);
+static bool parseVariantRecordSection(Parser *parser, AST *recordNode);
+static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator);
 static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName);
 static AST *tryStatement(Parser *parser);
 static AST *raiseStatement(Parser *parser);
@@ -875,6 +878,173 @@ static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
     }
 
     return routine;
+}
+
+static AST *parseRecordFieldDecl(Parser *parser) {
+    AST *fieldDecl = newASTNode(AST_VAR_DECL, NULL);
+    if (!fieldDecl) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    while (1) {
+        if (!currentTokenIsIdentifierLike(parser)) {
+            errorParser(parser, "Expected field identifier");
+            freeAST(fieldDecl);
+            return NULL;
+        }
+
+        AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
+        eat(parser, parser->current_token->type);
+        addChild(fieldDecl, varNode);
+
+        if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+        } else {
+            break;
+        }
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+        errorParser(parser, "Expected :");
+        freeAST(fieldDecl);
+        return NULL;
+    }
+    eat(parser, TOKEN_COLON);
+
+    AST *fieldType = typeSpecifier(parser, 1);
+    if (!fieldType || fieldType->type == AST_NOOP) {
+        errorParser(parser, "Bad field type");
+        freeAST(fieldDecl);
+        return NULL;
+    }
+
+    setTypeAST(fieldDecl, fieldType->var_type);
+    setRight(fieldDecl, fieldType);
+    return fieldDecl;
+}
+
+static bool parseVariantRecordSection(Parser *parser, AST *recordNode) {
+    eat(parser, TOKEN_CASE);
+
+    if (currentTokenIsIdentifierLike(parser)) {
+        Token *lookahead = peekToken(parser);
+        bool has_discriminant = lookahead && lookahead->type == TOKEN_COLON;
+        if (lookahead) {
+            freeToken(lookahead);
+        }
+
+        if (has_discriminant) {
+            AST *tagDecl = parseRecordFieldDecl(parser);
+            if (!tagDecl) {
+                return false;
+            }
+            addChild(recordNode, tagDecl);
+        }
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_OF) {
+        errorParser(parser, "Expected OF in variant record");
+        return false;
+    }
+    eat(parser, TOKEN_OF);
+
+    while (parser->current_token &&
+           parser->current_token->type != TOKEN_END &&
+           parser->current_token->type != TOKEN_RPAREN) {
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        AST *labelExpr = expression(parser);
+        if (!labelExpr) {
+            errorParser(parser, "Expected variant label");
+            return false;
+        }
+        freeAST(labelExpr);
+
+        while (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
+            eat(parser, TOKEN_COMMA);
+            labelExpr = expression(parser);
+            if (!labelExpr) {
+                errorParser(parser, "Expected variant label after ','");
+                return false;
+            }
+            freeAST(labelExpr);
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' after variant label");
+            return false;
+        }
+        eat(parser, TOKEN_COLON);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_LPAREN) {
+            errorParser(parser, "Expected '(' to open variant fields");
+            return false;
+        }
+        eat(parser, TOKEN_LPAREN);
+
+        if (!parseRecordMembers(parser, recordNode, TOKEN_RPAREN)) {
+            return false;
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ')' to close variant fields");
+            return false;
+        }
+        eat(parser, TOKEN_RPAREN);
+
+        if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        }
+    }
+
+    return true;
+}
+
+static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator) {
+    while (parser->current_token && parser->current_token->type != terminator) {
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        if (parser->current_token->type == TOKEN_PROCEDURE ||
+            parser->current_token->type == TOKEN_FUNCTION) {
+            bool isFunction = parser->current_token->type == TOKEN_FUNCTION;
+            AST *method = parseInterfaceMethod(parser, isFunction);
+            if (!method) {
+                return false;
+            }
+            addChild(recordNode, method);
+            continue;
+        }
+
+        if (parser->current_token->type == TOKEN_CASE) {
+            if (!parseVariantRecordSection(parser, recordNode)) {
+                return false;
+            }
+            continue;
+        }
+
+        if (currentTokenIsIdentifierLike(parser)) {
+            AST *fieldDecl = parseRecordFieldDecl(parser);
+            if (!fieldDecl) {
+                return false;
+            }
+            addChild(recordNode, fieldDecl);
+            if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+                eat(parser, TOKEN_SEMICOLON);
+            }
+            continue;
+        }
+
+        errorParser(parser, "Expected field or method declaration in record");
+        return false;
+    }
+
+    return true;
 }
 
 static void registerRecordMethodPrototype(Parser *parser, const char *recordName, AST *method) {
@@ -1895,66 +2065,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         node = newASTNode(AST_RECORD_TYPE, initialToken);
         eat(parser, TOKEN_RECORD); // Consume the RECORD keyword itself
 
-        while (parser->current_token && parser->current_token->type != TOKEN_END) {
-            if (parser->current_token->type == TOKEN_SEMICOLON) {
-                eat(parser, TOKEN_SEMICOLON);
-                continue;
-            }
-
-            if (parser->current_token->type == TOKEN_PROCEDURE ||
-                parser->current_token->type == TOKEN_FUNCTION) {
-                bool isFunction = parser->current_token->type == TOKEN_FUNCTION;
-                AST *method = parseInterfaceMethod(parser, isFunction);
-                if (!method) {
-                    freeAST(node);
-                    return NULL;
-                }
-                addChild(node, method);
-                continue;
-            }
-
-            if (currentTokenIsIdentifierLike(parser)) {
-                AST *fieldDecl = newASTNode(AST_VAR_DECL, NULL);
-                while (1) {
-                    if (!currentTokenIsIdentifierLike(parser)) {
-                        errorParser(parser, "Expected field identifier");
-                        freeAST(fieldDecl);
-                        freeAST(node);
-                        return NULL;
-                    }
-                    AST *varNode = newASTNode(AST_VARIABLE, parser->current_token);
-                    eat(parser, parser->current_token->type);
-                    addChild(fieldDecl, varNode);
-                    if (parser->current_token && parser->current_token->type == TOKEN_COMMA) {
-                        eat(parser, TOKEN_COMMA);
-                    } else {
-                        break;
-                    }
-                }
-                if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
-                    errorParser(parser, "Expected :");
-                    freeAST(fieldDecl);
-                    freeAST(node);
-                    return NULL;
-                }
-                eat(parser, TOKEN_COLON);
-                AST *fieldType = typeSpecifier(parser, 1);
-                if (!fieldType || fieldType->type == AST_NOOP) {
-                    errorParser(parser, "Bad field type");
-                    freeAST(fieldDecl);
-                    freeAST(node);
-                    return NULL;
-                }
-                setTypeAST(fieldDecl, fieldType->var_type);
-                setRight(fieldDecl, fieldType);
-                addChild(node, fieldDecl);
-                if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
-                    eat(parser, TOKEN_SEMICOLON);
-                }
-                continue;
-            }
-
-            errorParser(parser, "Expected field or method declaration in record");
+        if (!parseRecordMembers(parser, node, TOKEN_END)) {
             freeAST(node);
             return NULL;
         }

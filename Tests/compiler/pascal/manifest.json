@@ -77,6 +77,18 @@
       "path": "Tests/compiler/pascal/cases/val_builtin_var_args.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: val builtin var args"
+    },
+    {
+      "id": "unicode_write_output",
+      "path": "Tests/compiler/pascal/cases/unicode_write_output.pas",
+      "expect": "compile_success",
+      "stdout_substring": "snow=雪\nblock=█\nblocks=██"
+    },
+    {
+      "id": "variant_record_basic",
+      "path": "Tests/compiler/pascal/cases/variant_record_basic.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: variant record"
     }
   ]
 }

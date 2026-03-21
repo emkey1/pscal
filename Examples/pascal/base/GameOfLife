@@ -119,7 +119,8 @@ begin
       Write('|');
       for j := 0 to cols - 1 do
         if g[i, j] = Alive then
-          Write(#219)  // Solid block 
+         write(Chr(219))
+           //Write('*') // This is the UTF-8 sequence for █
         else
           Write(' ');
       Writeln('|');

@@ -26,6 +26,171 @@
 #endif
 #include "pscal_paths.h"
 
+static const uint16_t kCp437ToUnicode[128] = {
+    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+    0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+    0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+    0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+    0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+    0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+    0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+    0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+    0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+    0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+    0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+    0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+    0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+    0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0
+};
+
+size_t encodeUtf8Codepoint(uint32_t codepoint, char out[5]) {
+    if (!out) {
+        return 0;
+    }
+    if (codepoint > UNICODE_MAX || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+        codepoint = 0xFFFD;
+    }
+
+    if (codepoint <= 0x7F) {
+        out[0] = (char)codepoint;
+        out[1] = '\0';
+        return 1;
+    }
+    if (codepoint <= 0x7FF) {
+        out[0] = (char)(0xC0 | (codepoint >> 6));
+        out[1] = (char)(0x80 | (codepoint & 0x3F));
+        out[2] = '\0';
+        return 2;
+    }
+    if (codepoint <= 0xFFFF) {
+        out[0] = (char)(0xE0 | (codepoint >> 12));
+        out[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (codepoint & 0x3F));
+        out[3] = '\0';
+        return 3;
+    }
+
+    out[0] = (char)(0xF0 | (codepoint >> 18));
+    out[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (codepoint & 0x3F));
+    out[4] = '\0';
+    return 4;
+}
+
+size_t encodePascalCharUtf8(int value, char out[5]) {
+    uint32_t codepoint = 0;
+    if (value < 0) {
+        codepoint = 0xFFFD;
+    } else if (value <= 0x7F) {
+        codepoint = (uint32_t)value;
+    } else if (value <= 0xFF) {
+        codepoint = kCp437ToUnicode[(unsigned int)value - 0x80u];
+    } else {
+        codepoint = 0xFFFD;
+    }
+    return encodeUtf8Codepoint(codepoint, out);
+}
+
+bool isValidUtf8Bytes(const char *text, size_t len) {
+    size_t i = 0;
+    if (!text) {
+        return true;
+    }
+    while (i < len) {
+        unsigned char c = (unsigned char)text[i];
+        size_t remaining = len - i;
+        if (c <= 0x7F) {
+            i++;
+            continue;
+        }
+
+        if (c >= 0xC2 && c <= 0xDF) {
+            if (remaining < 2) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            i += 2;
+            continue;
+        }
+
+        if (c == 0xE0) {
+            if (remaining < 3) return false;
+            if ((unsigned char)text[i + 1] < 0xA0 || (unsigned char)text[i + 1] > 0xBF) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c >= 0xE1 && c <= 0xEC) {
+            if (remaining < 3) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c == 0xED) {
+            if (remaining < 3) return false;
+            if ((unsigned char)text[i + 1] < 0x80 || (unsigned char)text[i + 1] > 0x9F) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c >= 0xEE && c <= 0xEF) {
+            if (remaining < 3) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+
+        if (c == 0xF0) {
+            if (remaining < 4) return false;
+            if ((unsigned char)text[i + 1] < 0x90 || (unsigned char)text[i + 1] > 0xBF) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 3] & 0xC0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+        if (c >= 0xF1 && c <= 0xF3) {
+            if (remaining < 4) return false;
+            if (((unsigned char)text[i + 1] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 3] & 0xC0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+        if (c == 0xF4) {
+            if (remaining < 4) return false;
+            if ((unsigned char)text[i + 1] < 0x80 || (unsigned char)text[i + 1] > 0x8F) return false;
+            if (((unsigned char)text[i + 2] & 0xC0) != 0x80) return false;
+            if (((unsigned char)text[i + 3] & 0xC0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+
+        return false;
+    }
+    return true;
+}
+
+void writePascalText(FILE *stream, const char *text, size_t len) {
+    if (!stream || !text || len == 0) {
+        return;
+    }
+
+    if (isValidUtf8Bytes(text, len)) {
+        fwrite(text, 1, len, stream);
+        return;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char byte = (unsigned char)text[i];
+        char utf8[5];
+        size_t utf8_len = encodePascalCharUtf8((int)byte, utf8);
+        fwrite(utf8, 1, utf8_len, stream);
+    }
+}
+
 
 const char *varTypeToString(VarType type) {
     switch (type) {
@@ -2524,11 +2689,15 @@ void printValueToStream(Value v, FILE *stream) {
             }
             break;
         case TYPE_CHAR:
-            fprintf(stream, "%c", v.c_val); // Assuming c_val is 'char' or int holding char ASCII
+        {
+            char utf8[5];
+            size_t len = encodePascalCharUtf8(v.c_val, utf8);
+            fwrite(utf8, 1, len, stream);
             break;
+        }
         case TYPE_STRING:
             if (v.s_val) {
-                fprintf(stream, "%s", v.s_val);
+                writePascalText(stream, v.s_val, strlen(v.s_val));
             } else {
                 fprintf(stream, "(null string)");
             }
