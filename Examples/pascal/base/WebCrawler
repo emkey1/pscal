@@ -2,172 +2,733 @@
 program WebCrawler;
 
 const
-  MaxWorkers = 4;
+  MaxWorkers = 8;
+  DefaultMaxPages = 12;
+  DefaultMaxDepth = 2;
+  DefaultWorkers = 3;
 
 type
   PInteger = ^Integer;
 
+  CrawlTask = record
+    url: String;
+    depth: Integer;
+  end;
+
   CrawlResult = record
     url: String;
-    content: String;
+    depth: Integer;
+    statusCode: Integer;
+    contentType: String;
+    title: String;
+    preview: String;
+    linksFound: Integer;
   end;
 
-  UrlQueue = record
-    urls: array of String;
+  CrawlQueue = record
+    tasks: array of CrawlTask;
+    seenUrls: array of String;
     mutexId: Integer;
+    activeWorkers: Integer;
   end;
 
 var
-  queue: UrlQueue;
+  queue: CrawlQueue;
   results: array of CrawlResult;
+  crawlRoot: String;
+  maxPages: Integer;
+  maxDepth: Integer;
 
-function HasResultUrlUnlocked(const url: String): Boolean;
+function TrimSpaces(const s: String): String;
 var
-  i: Integer;
+  leftPos, rightPos: Integer;
 begin
-  HasResultUrlUnlocked := false;
-  for i := 0 to High(results) do
-    if results[i].url = url then
-      begin
-        HasResultUrlUnlocked := true;
-        exit;
-      end;
-end;
+  leftPos := 1;
+  while (leftPos <= Length(s)) and ((s[leftPos] = ' ') or (s[leftPos] = #9)) do
+    Inc(leftPos);
 
-function HasQueuedUrlUnlocked(const url: String): Boolean;
-var
-  i: Integer;
-begin
-  HasQueuedUrlUnlocked := false;
-  for i := 0 to High(queue.urls) do
-    if queue.urls[i] = url then
-      begin
-        HasQueuedUrlUnlocked := true;
-        exit;
-      end;
-end;
+  rightPos := Length(s);
+  while (rightPos >= leftPos) and ((s[rightPos] = ' ') or (s[rightPos] = #9)) do
+    Dec(rightPos);
 
-procedure EnqueueUrl(const url: String);
-begin
-  lock(queue.mutexId);
-
-  if HasResultUrlUnlocked(url) or HasQueuedUrlUnlocked(url) then
-    begin
-      unlock(queue.mutexId);
-      exit;
-    end;
-
-  SetLength(queue.urls, Length(queue.urls) + 1);
-  queue.urls[High(queue.urls)] := url;
-
-  unlock(queue.mutexId);
-end;
-
-function DequeueUrl(var url: String): Boolean;
-var
-  i: Integer;
-begin
-  lock(queue.mutexId);
-
-  if Length(queue.urls) = 0 then
-    begin
-      unlock(queue.mutexId);
-      DequeueUrl := false;
-      exit;
-    end;
-
-  url := queue.urls[0];
-
-  for i := 1 to High(queue.urls) do
-    queue.urls[i - 1] := queue.urls[i];
-
-  SetLength(queue.urls, Length(queue.urls) - 1);
-
-  unlock(queue.mutexId);
-  DequeueUrl := true;
-end;
-
-procedure AddResult(const url: String; const content: String);
-begin
-  lock(queue.mutexId);
-
-  if not HasResultUrlUnlocked(url) then
-    begin
-      SetLength(results, Length(results) + 1);
-      results[High(results)].url := url;
-      results[High(results)].content := content;
-    end;
-
-  unlock(queue.mutexId);
-end;
-
-procedure DiscoverLinks(const url: String);
-begin
-  if url = 'http://example.com' then
-    begin
-      EnqueueUrl('http://example.com/link1');
-      EnqueueUrl('http://example.com/link2');
-    end
-  else if url = 'http://example.com/link1' then
-    EnqueueUrl('http://example.com/about')
-  else if url = 'http://example.com/link2' then
-    EnqueueUrl('http://example.com/contact');
-end;
-
-function SimulateFetch(const url: String): String;
-begin
-  if url = 'http://example.com' then
-    SimulateFetch := '<html><body>Example Domain <a href="/link1">Link 1</a> <a href="/link2">Link 2</a></body></html>'
-  else if url = 'http://example.com/link1' then
-    SimulateFetch := '<html><body>Link 1 <a href="/about">About</a></body></html>'
-  else if url = 'http://example.com/link2' then
-    SimulateFetch := '<html><body>Link 2 <a href="/contact">Contact</a></body></html>'
-  else if url = 'http://example.com/about' then
-    SimulateFetch := '<html><body>About Example Domain</body></html>'
-  else if url = 'http://example.com/contact' then
-    SimulateFetch := '<html><body>Contact Example Domain</body></html>'
+  if rightPos < leftPos then
+    TrimSpaces := ''
   else
-    SimulateFetch := '';
+    TrimSpaces := Copy(s, leftPos, rightPos - leftPos + 1);
+end;
+
+function ToLowerText(const s: String): String;
+var
+  i: Integer;
+  ch: Char;
+begin
+  ToLowerText := '';
+  for i := 1 to Length(s) do
+    begin
+      ch := s[i];
+      if (ch >= 'A') and (ch <= 'Z') then
+        ToLowerText := ToLowerText + Chr(Ord(ch) - Ord('A') + Ord('a'))
+      else
+        ToLowerText := ToLowerText + ch;
+    end;
+end;
+
+function StartsWithText(const s: String; const prefix: String): Boolean;
+begin
+  StartsWithText := (Length(s) >= Length(prefix)) and
+                    (Copy(s, 1, Length(prefix)) = prefix);
+end;
+
+function EndsWithText(const s: String; const suffix: String): Boolean;
+begin
+  EndsWithText := (Length(s) >= Length(suffix)) and
+                  (Copy(s, Length(s) - Length(suffix) + 1, Length(suffix)) = suffix);
+end;
+
+function StripFragment(const url: String): String;
+var
+  p: Integer;
+begin
+  p := Pos('#', url);
+  if p > 0 then
+    StripFragment := Copy(url, 1, p - 1)
+  else
+    StripFragment := url;
+end;
+
+function StripQueryAndFragment(const url: String): String;
+var
+  p: Integer;
+  tmp: String;
+begin
+  tmp := StripFragment(url);
+  p := Pos('?', tmp);
+  if p > 0 then
+    StripQueryAndFragment := Copy(tmp, 1, p - 1)
+  else
+    StripQueryAndFragment := tmp;
+end;
+
+function UrlScheme(const url: String): String;
+var
+  lowerUrl: String;
+begin
+  lowerUrl := ToLowerText(url);
+  if StartsWithText(lowerUrl, 'https://') then
+    UrlScheme := 'https://'
+  else if StartsWithText(lowerUrl, 'http://') then
+    UrlScheme := 'http://'
+  else if StartsWithText(lowerUrl, 'file://') then
+    UrlScheme := 'file://'
+  else
+    UrlScheme := '';
+end;
+
+function UrlOrigin(const url: String): String;
+var
+  scheme: String;
+  startPos, slashPos: Integer;
+  cleanUrl: String;
+begin
+  cleanUrl := StripQueryAndFragment(url);
+  scheme := UrlScheme(cleanUrl);
+  if scheme = '' then
+    begin
+      UrlOrigin := '';
+      exit;
+    end;
+
+  if scheme = 'file://' then
+    begin
+      UrlOrigin := 'file://';
+      exit;
+    end;
+
+  startPos := Length(scheme) + 1;
+  slashPos := startPos;
+  while (slashPos <= Length(cleanUrl)) and (cleanUrl[slashPos] <> '/') do
+    Inc(slashPos);
+
+  if slashPos > Length(cleanUrl) then
+    UrlOrigin := cleanUrl
+  else
+    UrlOrigin := Copy(cleanUrl, 1, slashPos - 1);
+end;
+
+function UrlDirectory(const url: String): String;
+var
+  cleanUrl: String;
+  i: Integer;
+begin
+  cleanUrl := StripQueryAndFragment(url);
+  for i := Length(cleanUrl) downto 1 do
+    if cleanUrl[i] = '/' then
+      begin
+        UrlDirectory := Copy(cleanUrl, 1, i);
+        exit;
+      end;
+  UrlDirectory := cleanUrl;
+end;
+
+function NormalizePathSegments(const path: String): String;
+var
+  segments: array of String;
+  token, res: String;
+  i, startPos, slashPos: Integer;
+  absolutePath: Boolean;
+begin
+  absolutePath := StartsWithText(path, '/');
+  SetLength(segments, 0);
+  startPos := 1;
+
+  while startPos <= Length(path) + 1 do
+    begin
+      slashPos := startPos;
+      while (slashPos <= Length(path)) and (path[slashPos] <> '/') do
+        Inc(slashPos);
+
+      token := Copy(path, startPos, slashPos - startPos);
+      if (token = '') or (token = '.') then
+        begin
+        end
+      else if token = '..' then
+        begin
+          if Length(segments) > 0 then
+            SetLength(segments, Length(segments) - 1);
+        end
+      else
+        begin
+          SetLength(segments, Length(segments) + 1);
+          segments[High(segments)] := token;
+        end;
+
+      startPos := slashPos + 1;
+      if slashPos > Length(path) then
+        break;
+    end;
+
+  if absolutePath then
+    res := '/'
+  else
+    res := '';
+
+  for i := 0 to High(segments) do
+    begin
+      if i > 0 then
+        res := res + '/';
+      res := res + segments[i];
+    end;
+
+  if absolutePath and (Length(segments) = 0) then
+    res := '/';
+
+  if EndsWithText(path, '/') and not EndsWithText(res, '/') then
+    res := res + '/';
+
+  NormalizePathSegments := res;
+end;
+
+function NormalizeResolvedUrl(const url: String): String;
+var
+  cleanUrl, scheme, originPart, restPart, pathPart, queryPart: String;
+  queryPos, pathStart: Integer;
+begin
+  cleanUrl := StripFragment(url);
+  scheme := UrlScheme(cleanUrl);
+  if scheme = '' then
+    begin
+      NormalizeResolvedUrl := cleanUrl;
+      exit;
+    end;
+
+  if scheme = 'file://' then
+    begin
+      restPart := Copy(cleanUrl, Length(scheme) + 1, Length(cleanUrl) - Length(scheme));
+      queryPos := Pos('?', restPart);
+      if queryPos > 0 then
+        begin
+          pathPart := Copy(restPart, 1, queryPos - 1);
+          queryPart := Copy(restPart, queryPos, Length(restPart) - queryPos + 1);
+        end
+      else
+        begin
+          pathPart := restPart;
+          queryPart := '';
+        end;
+      NormalizeResolvedUrl := scheme + NormalizePathSegments(pathPart) + queryPart;
+      exit;
+    end;
+
+  originPart := UrlOrigin(cleanUrl);
+  pathStart := Length(originPart) + 1;
+  if pathStart > Length(cleanUrl) then
+    begin
+      NormalizeResolvedUrl := cleanUrl;
+      exit;
+    end;
+
+  restPart := Copy(cleanUrl, pathStart, Length(cleanUrl) - pathStart + 1);
+  queryPos := Pos('?', restPart);
+  if queryPos > 0 then
+    begin
+      pathPart := Copy(restPart, 1, queryPos - 1);
+      queryPart := Copy(restPart, queryPos, Length(restPart) - queryPos + 1);
+    end
+  else
+    begin
+      pathPart := restPart;
+      queryPart := '';
+    end;
+
+  NormalizeResolvedUrl := originPart + NormalizePathSegments(pathPart) + queryPart;
+end;
+
+function ResolveUrl(const baseUrl: String; const target: String): String;
+var
+  trimmedTarget, lowerTarget, scheme, baseDir, rootPrefix: String;
+begin
+  trimmedTarget := TrimSpaces(target);
+  if trimmedTarget = '' then
+    begin
+      ResolveUrl := '';
+      exit;
+    end;
+
+  trimmedTarget := StripFragment(trimmedTarget);
+  if trimmedTarget = '' then
+    begin
+      ResolveUrl := '';
+      exit;
+    end;
+
+  lowerTarget := ToLowerText(trimmedTarget);
+  if StartsWithText(lowerTarget, 'javascript:') or
+     StartsWithText(lowerTarget, 'mailto:') or
+     StartsWithText(lowerTarget, 'tel:') or
+     StartsWithText(lowerTarget, 'data:') then
+    begin
+      ResolveUrl := '';
+      exit;
+    end;
+
+  if (UrlScheme(trimmedTarget) <> '') then
+    begin
+      ResolveUrl := NormalizeResolvedUrl(trimmedTarget);
+      exit;
+    end;
+
+  scheme := UrlScheme(baseUrl);
+  if StartsWithText(trimmedTarget, '//') then
+    begin
+      ResolveUrl := NormalizeResolvedUrl(Copy(scheme, 1, Length(scheme) - 3) + trimmedTarget);
+      exit;
+    end;
+
+  if trimmedTarget[1] = '/' then
+    begin
+      if scheme = 'file://' then
+        begin
+          ResolveUrl := '';
+          exit;
+        end;
+      rootPrefix := UrlOrigin(baseUrl);
+      ResolveUrl := NormalizeResolvedUrl(rootPrefix + trimmedTarget);
+      exit;
+    end;
+
+  baseDir := UrlDirectory(baseUrl);
+  ResolveUrl := NormalizeResolvedUrl(baseDir + trimmedTarget);
+end;
+
+function IsWithinCrawlRoot(const url: String): Boolean;
+var
+  lowerUrl, lowerRoot: String;
+begin
+  lowerUrl := ToLowerText(url);
+  lowerRoot := ToLowerText(crawlRoot);
+  IsWithinCrawlRoot := StartsWithText(lowerUrl, lowerRoot);
+end;
+
+function HasSeenUrlUnlocked(const url: String): Boolean;
+var
+  i: Integer;
+begin
+  HasSeenUrlUnlocked := false;
+  for i := 0 to High(queue.seenUrls) do
+    if queue.seenUrls[i] = url then
+      begin
+        HasSeenUrlUnlocked := true;
+        exit;
+      end;
+end;
+
+function EnqueueUrl(const url: String; depth: Integer): Boolean;
+var
+  normalizedUrl: String;
+begin
+  EnqueueUrl := false;
+  normalizedUrl := NormalizeResolvedUrl(url);
+  if normalizedUrl = '' then Exit;
+  if depth > maxDepth then Exit;
+  if not IsWithinCrawlRoot(normalizedUrl) then Exit;
+
+  lock(queue.mutexId);
+
+  if (Length(queue.seenUrls) >= maxPages) or HasSeenUrlUnlocked(normalizedUrl) then
+    begin
+      unlock(queue.mutexId);
+      exit;
+    end;
+
+  SetLength(queue.seenUrls, Length(queue.seenUrls) + 1);
+  queue.seenUrls[High(queue.seenUrls)] := normalizedUrl;
+
+  SetLength(queue.tasks, Length(queue.tasks) + 1);
+  queue.tasks[High(queue.tasks)].url := normalizedUrl;
+  queue.tasks[High(queue.tasks)].depth := depth;
+
+  unlock(queue.mutexId);
+  EnqueueUrl := true;
+end;
+
+function TryDequeueTask(var task: CrawlTask): Boolean;
+var
+  i: Integer;
+begin
+  lock(queue.mutexId);
+
+  if Length(queue.tasks) = 0 then
+    begin
+      unlock(queue.mutexId);
+      TryDequeueTask := false;
+      exit;
+    end;
+
+  task := queue.tasks[0];
+  for i := 1 to High(queue.tasks) do
+    queue.tasks[i - 1] := queue.tasks[i];
+  SetLength(queue.tasks, Length(queue.tasks) - 1);
+  Inc(queue.activeWorkers);
+
+  unlock(queue.mutexId);
+  TryDequeueTask := true;
+end;
+
+procedure FinishTask;
+begin
+  lock(queue.mutexId);
+  if queue.activeWorkers > 0 then
+    Dec(queue.activeWorkers);
+  unlock(queue.mutexId);
+end;
+
+function CrawlIsDone: Boolean;
+begin
+  lock(queue.mutexId);
+  CrawlIsDone := (Length(queue.tasks) = 0) and (queue.activeWorkers = 0);
+  unlock(queue.mutexId);
+end;
+
+procedure AddResult(const url: String;
+                    depth: Integer;
+                    statusCode: Integer;
+                    const contentType: String;
+                    const title: String;
+                    const preview: String;
+                    linksFound: Integer);
+begin
+  lock(queue.mutexId);
+  SetLength(results, Length(results) + 1);
+  results[High(results)].url := url;
+  results[High(results)].depth := depth;
+  results[High(results)].statusCode := statusCode;
+  results[High(results)].contentType := contentType;
+  results[High(results)].title := title;
+  results[High(results)].preview := preview;
+  results[High(results)].linksFound := linksFound;
+  unlock(queue.mutexId);
+end;
+
+function CollapseWhitespace(const s: String): String;
+var
+  i: Integer;
+  ch: Char;
+  lastWasSpace: Boolean;
+begin
+  CollapseWhitespace := '';
+  lastWasSpace := false;
+  for i := 1 to Length(s) do
+    begin
+      ch := s[i];
+      if (ch = ' ') or (ch = #9) or (ch = #10) or (ch = #13) then
+        begin
+          if not lastWasSpace then
+            begin
+              CollapseWhitespace := CollapseWhitespace + ' ';
+              lastWasSpace := true;
+            end;
+        end
+      else
+        begin
+          CollapseWhitespace := CollapseWhitespace + ch;
+          lastWasSpace := false;
+        end;
+    end;
+  CollapseWhitespace := TrimSpaces(CollapseWhitespace);
+end;
+
+function StripTags(const html: String): String;
+var
+  i: Integer;
+  inTag: Boolean;
+begin
+  StripTags := '';
+  inTag := false;
+  for i := 1 to Length(html) do
+    begin
+      if html[i] = '<' then
+        inTag := true
+      else if html[i] = '>' then
+        inTag := false
+      else if not inTag then
+        StripTags := StripTags + html[i];
+    end;
+end;
+
+function ExtractTitle(const html: String): String;
+var
+  lowerHtml: String;
+  startPos, endPos: Integer;
+begin
+  lowerHtml := ToLowerText(html);
+  startPos := Pos('<title>', lowerHtml);
+  if startPos = 0 then
+    begin
+      ExtractTitle := '';
+      exit;
+    end;
+
+  startPos := startPos + Length('<title>');
+  endPos := Pos('</title>', lowerHtml);
+  if (endPos = 0) or (endPos <= startPos) then
+    begin
+      ExtractTitle := '';
+      exit;
+    end;
+
+  ExtractTitle := CollapseWhitespace(Copy(html, startPos, endPos - startPos));
+end;
+
+function MakePreview(const html: String): String;
+var
+  textOnly: String;
+begin
+  textOnly := CollapseWhitespace(StripTags(html));
+  if Length(textOnly) > 96 then
+    MakePreview := Copy(textOnly, 1, 96) + '...'
+  else
+    MakePreview := textOnly;
+end;
+
+function LooksLikeHtml(const url: String; const contentType: String; const body: String): Boolean;
+var
+  lowerType, lowerBody, cleanUrl: String;
+begin
+  lowerType := ToLowerText(contentType);
+  lowerBody := ToLowerText(Copy(body, 1, 512));
+  cleanUrl := ToLowerText(StripQueryAndFragment(url));
+  LooksLikeHtml := (Pos('html', lowerType) > 0) or
+                   (Pos('<html', lowerBody) > 0) or
+                   (Pos('<a ', lowerBody) > 0) or
+                   EndsWithText(cleanUrl, '.html') or
+                   EndsWithText(cleanUrl, '.htm');
+end;
+
+procedure ExtractLinks(const baseUrl: String; const html: String; nextDepth: Integer; var addedCount: Integer);
+var
+  lowerHtml: String;
+  i, startPos, endPos: Integer;
+  quoteChar: Char;
+  target, resolvedUrl: String;
+begin
+  addedCount := 0;
+  lowerHtml := ToLowerText(html);
+  i := 1;
+
+  while i <= Length(lowerHtml) - 4 do
+    begin
+      if Copy(lowerHtml, i, 5) = 'href=' then
+        begin
+          startPos := i + 5;
+          while (startPos <= Length(html)) and ((html[startPos] = ' ') or (html[startPos] = #9)) do
+            Inc(startPos);
+
+          if startPos > Length(html) then
+            break;
+
+          quoteChar := html[startPos];
+          if (quoteChar = '"') or (quoteChar = '''') then
+            begin
+              Inc(startPos);
+              endPos := startPos;
+              while (endPos <= Length(html)) and (html[endPos] <> quoteChar) do
+                Inc(endPos);
+              target := Copy(html, startPos, endPos - startPos);
+              i := endPos + 1;
+            end
+          else
+            begin
+              endPos := startPos;
+              while (endPos <= Length(html)) and
+                    (html[endPos] <> ' ') and
+                    (html[endPos] <> #9) and
+                    (html[endPos] <> '>') do
+                Inc(endPos);
+              target := Copy(html, startPos, endPos - startPos);
+              i := endPos + 1;
+            end;
+
+          resolvedUrl := ResolveUrl(baseUrl, target);
+          if (resolvedUrl <> '') and EnqueueUrl(resolvedUrl, nextDepth) then
+            Inc(addedCount);
+        end
+      else
+        Inc(i);
+    end;
+end;
+
+function ParseIntOrDefault(const s: String; fallback: Integer): Integer;
+var
+  code, value: Integer;
+begin
+  Val(s, value, code);
+  if code = 0 then
+    ParseIntOrDefault := value
+  else
+    ParseIntOrDefault := fallback;
 end;
 
 procedure CrawlWorker(arg: PInteger);
 var
   workerId: Integer;
-  url: String;
-  content: String;
+  sessionId: Integer;
+  task: CrawlTask;
+  ms: mstream;
+  statusCode: Integer;
+  body, contentType, titleText, previewText: String;
+  discoveredLinks: Integer;
 begin
   if arg <> nil then
     workerId := arg^
   else
     workerId := 0;
 
-  while DequeueUrl(url) do
+  sessionId := -1;
+  try
+    sessionId := HttpSession();
+    HttpSetOption(sessionId, 'timeout_ms', 8000);
+    HttpSetHeader(sessionId, 'User-Agent', 'PSCAL-WebCrawler/1.0');
+    HttpSetHeader(sessionId, 'Accept', 'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.2');
+  except
+    Writeln('Worker ', workerId, ': networking unavailable in this build.');
+    exit;
+  end;
+
+  while true do
     begin
-      Delay(Random(250) + 50);
-      content := SimulateFetch(url);
-      AddResult(url, content);
-      DiscoverLinks(url);
-      Writeln('Worker ', workerId, ' crawled: ', url);
+      if not TryDequeueTask(task) then
+        begin
+          if CrawlIsDone then
+            break;
+          Delay(50);
+        end
+      else
+        begin
+          ms := mstreamcreate();
+          statusCode := 0;
+          body := '';
+          contentType := '';
+          titleText := '';
+          previewText := '';
+          discoveredLinks := 0;
+
+          try
+            statusCode := HttpRequest(sessionId, 'GET', task.url, nil, ms);
+            body := mstreambuffer(ms);
+            contentType := HttpGetHeader(sessionId, 'Content-Type');
+          except
+            statusCode := 0;
+            previewText := 'Request failed or networking is unavailable.';
+          end;
+
+          if previewText = '' then
+            begin
+              titleText := ExtractTitle(body);
+              previewText := MakePreview(body);
+
+              if (statusCode >= 200) and (statusCode < 400) and
+                 (task.depth < maxDepth) and
+                 LooksLikeHtml(task.url, contentType, body) then
+                ExtractLinks(task.url, body, task.depth + 1, discoveredLinks);
+            end;
+
+          AddResult(task.url, task.depth, statusCode, contentType, titleText, previewText, discoveredLinks);
+          Writeln('Worker ', workerId, ' fetched [', task.depth, ']: ', task.url, '  status=', statusCode);
+
+          mstreamfree(ms);
+          FinishTask;
+        end;
     end;
+
+  if sessionId >= 0 then
+    HttpClose(sessionId);
 end;
 
-procedure StartCrawl(const seedUrl: String; numWorkers: Integer);
+procedure PrintUsage;
+begin
+  Writeln('Usage: WebCrawler [seedUrl] [maxPages] [maxDepth] [workers]');
+  Writeln('Example: WebCrawler https://example.com 12 2 3');
+  Writeln('Also works well with local file:// trees for testing.');
+end;
+
+procedure StartCrawl(const seedUrl: String; workerCount: Integer);
 var
   workerHandles: array[0..MaxWorkers - 1] of Integer;
   workerIds: array[0..MaxWorkers - 1] of Integer;
-  i, workerCount: Integer;
+  i: Integer;
 begin
-  if numWorkers < 1 then
-    numWorkers := 1;
-  if numWorkers > MaxWorkers then
-    numWorkers := MaxWorkers;
+  if workerCount < 1 then
+    workerCount := 1;
+  if workerCount > MaxWorkers then
+    workerCount := MaxWorkers;
 
-  workerCount := numWorkers;
   queue.mutexId := mutex();
-  SetLength(queue.urls, 0);
+  queue.activeWorkers := 0;
+  SetLength(queue.tasks, 0);
+  SetLength(queue.seenUrls, 0);
   SetLength(results, 0);
 
-  EnqueueUrl(seedUrl);
+  if UrlScheme(seedUrl) = 'file://' then
+    crawlRoot := UrlDirectory(seedUrl)
+  else
+    crawlRoot := UrlOrigin(seedUrl);
+
+  if not EndsWithText(crawlRoot, '/') and (UrlScheme(seedUrl) = 'file://') then
+    crawlRoot := crawlRoot + '/';
+
+  Writeln('Seed URL  : ', seedUrl);
+  Writeln('Crawl root: ', crawlRoot);
+  Writeln('Max pages : ', maxPages);
+  Writeln('Max depth : ', maxDepth);
+  Writeln('Workers   : ', workerCount);
+  Writeln;
+
+  if not EnqueueUrl(seedUrl, 0) then
+    begin
+      Writeln('Could not enqueue the seed URL.');
+      destroy(queue.mutexId);
+      exit;
+    end;
 
   for i := 0 to workerCount - 1 do
     begin
@@ -180,27 +741,64 @@ begin
       WaitForThread(workerHandles[i]);
 
   destroy(queue.mutexId);
-
-  Writeln;
-  Writeln('Crawl complete. Found ', Length(results), ' page(s).');
 end;
 
+procedure PrintSummary;
 var
   i: Integer;
 begin
-  Randomize;
-
-  Writeln('Starting web crawler...');
-  Writeln('Seed URL: http://example.com');
+  Writeln;
+  Writeln('Crawl complete. Fetched ', Length(results), ' page(s).');
   Writeln;
 
-  StartCrawl('http://example.com', 3);
-
-  Writeln;
   for i := 0 to High(results) do
     begin
-      Writeln('URL: ', results[i].url);
-      Writeln('Content preview: ', Copy(results[i].content, 1, 48), '...');
+      Writeln('[', i + 1, '] depth=', results[i].depth,
+              ' status=', results[i].statusCode,
+              ' links=', results[i].linksFound);
+      Writeln('    URL   : ', results[i].url);
+      if results[i].contentType <> '' then
+        Writeln('    Type  : ', results[i].contentType);
+      if results[i].title <> '' then
+        Writeln('    Title : ', results[i].title);
+      if results[i].preview <> '' then
+        Writeln('    Preview: ', results[i].preview);
       Writeln;
     end;
+end;
+
+var
+  seedUrl: String;
+  workerCount: Integer;
+begin
+  if (ParamCount >= 1) and
+     ((ParamStr(1) = '--help') or (ParamStr(1) = '-h')) then
+    begin
+      PrintUsage;
+      halt(0);
+    end;
+
+  if ParamCount >= 1 then
+    seedUrl := ParamStr(1)
+  else
+    seedUrl := 'https://example.com';
+
+  if ParamCount >= 2 then
+    maxPages := ParseIntOrDefault(ParamStr(2), DefaultMaxPages)
+  else
+    maxPages := DefaultMaxPages;
+
+  if ParamCount >= 3 then
+    maxDepth := ParseIntOrDefault(ParamStr(3), DefaultMaxDepth)
+  else
+    maxDepth := DefaultMaxDepth;
+
+  if ParamCount >= 4 then
+    workerCount := ParseIntOrDefault(ParamStr(4), DefaultWorkers)
+  else
+    workerCount := DefaultWorkers;
+
+  Writeln('Starting web crawler...');
+  StartCrawl(seedUrl, workerCount);
+  PrintSummary;
 end.

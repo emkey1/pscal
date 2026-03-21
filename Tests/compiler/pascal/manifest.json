@@ -82,7 +82,7 @@
       "id": "unicode_write_output",
       "path": "Tests/compiler/pascal/cases/unicode_write_output.pas",
       "expect": "compile_success",
-      "stdout_substring": "snow=雪\nblock=█\nblocks=██"
+      "stdout_substring": "snow=\u96ea\nblock=\u2588\nblocks=\u2588\u2588"
     },
     {
       "id": "variant_record_basic",
@@ -119,6 +119,12 @@
       "path": "Tests/compiler/pascal/cases/record_constructor_named_fields.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: record constructor named fields"
+    },
+    {
+      "id": "continue_statement_loops",
+      "path": "Tests/compiler/pascal/cases/continue_statement_loops.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: continue statement loops"
     }
   ]
 }

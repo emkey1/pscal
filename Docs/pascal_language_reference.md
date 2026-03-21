@@ -28,6 +28,7 @@ The following are reserved keywords and cannot be used as identifiers:
 
 * `and`, `array`, `begin`, `break`
 * `case`, `const`, `do`, `div`, `downto`
+* `continue`
 * `else`, `end`, `enum`, `false`, `for`, `function`, `goto`
 * `if`, `implementation`, `in`, `inline`, `initialization`, `interface`, `join`, `label`
 * `mod`, `nil`, `not`
@@ -214,6 +215,7 @@ expression.
     ```
 * **`raise`:** Signals an exception for the innermost enclosing `try` block.
 * **`break`:** Exits the current loop.
+* **`continue`:** Skips the remainder of the current iteration and proceeds to the next loop iteration.
 * **Label declarations:** `label StartPoint, Retry1;` — must appear before the first statement inside a routine or block.
 * **`goto` Statements:** `goto StartPoint;` jumps to a label declared in the current routine.
 

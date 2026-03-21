@@ -3456,6 +3456,11 @@ AST *statement(Parser *parser) {
             // *** Semicolon check REMOVED from here ***
             break;
 
+        case TOKEN_CONTINUE:
+            eat(parser, TOKEN_CONTINUE);
+            node = newASTNode(AST_CONTINUE, NULL);
+            break;
+
         case TOKEN_SEMICOLON: // Empty statement ';'
             eat(parser, TOKEN_SEMICOLON);
             node = newASTNode(AST_NOOP, NULL); // Represent as NOOP

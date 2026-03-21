@@ -143,6 +143,7 @@ static Keyword keywords[] = {
     {"and", TOKEN_AND}, {"array", TOKEN_ARRAY}, {"as", TOKEN_AS}, {"begin", TOKEN_BEGIN},
     {"break", TOKEN_BREAK}, // Added break here alphabetically
     {"case", TOKEN_CASE}, {"const", TOKEN_CONST}, {"do", TOKEN_DO},
+    {"continue", TOKEN_CONTINUE},
     {"div", TOKEN_INT_DIV}, {"downto", TOKEN_DOWNTO}, {"else", TOKEN_ELSE},
     {"end", TOKEN_END}, {"enum", TOKEN_ENUM}, // Added enum
     {"false", TOKEN_FALSE}, {"for", TOKEN_FOR},
