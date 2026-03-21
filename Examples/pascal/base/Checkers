@@ -5,14 +5,16 @@ program Checkers;
 type
   BoardType = array[1..8, 1..8] of ShortInt;
   MoveType = record
-    fromRow, fromCol, toRow, toCol: Byte;
-    capturedRow, capturedCol: Byte; { For multi-jump tracking }
+    fromRow, fromCol, toRow, toCol: Integer;
+    capturedRow, capturedCol: Integer; { For multi-jump tracking }
   end;
+  BoardStateHistory = array[1..512] of Integer;
 
 var
   board: BoardType;
   gameOver, humanVsComputer: Boolean;
   moveCount: Integer;
+  mainChoice: String;
 
 procedure ClearScreen; inline;
 begin
@@ -22,6 +24,16 @@ end;
 function IsOdd(x: Integer): Boolean; inline;
 begin
   IsOdd := Odd(x);
+end;
+
+function EmptyMove: MoveType; inline;
+begin
+  EmptyMove.fromRow := 0;
+  EmptyMove.fromCol := 0;
+  EmptyMove.toRow := 0;
+  EmptyMove.toCol := 0;
+  EmptyMove.capturedRow := 0;
+  EmptyMove.capturedCol := 0;
 end;
 
 procedure InitializeBoard(var b: BoardType);
@@ -54,18 +66,64 @@ begin
   end;
 end;
 
+function BoardStateHash(var b: BoardType; playerToMove: ShortInt): Integer;
+const
+  BoardHashMod = 400000003;
+var
+  r, c: Integer;
+  hashValue: Integer;
+begin
+  if playerToMove = 1 then
+    hashValue := 1
+  else
+    hashValue := 2;
+
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      hashValue := (hashValue * 5 + b[r, c] + 3) mod BoardHashMod;
+
+  BoardStateHash := hashValue;
+end;
+
+procedure RememberBoardState(var history: BoardStateHistory; var historyCount: Integer;
+                             stateHash: Integer);
+var
+  i: Integer;
+begin
+  if historyCount < 512 then
+    Inc(historyCount)
+  else
+  begin
+    for i := 1 to 511 do
+      history[i] := history[i + 1];
+  end;
+
+  history[historyCount] := stateHash;
+end;
+
+function CountBoardState(var history: BoardStateHistory; historyCount: Integer;
+                         stateHash: Integer): Integer;
+var
+  i: Integer;
+begin
+  CountBoardState := 0;
+  for i := 1 to historyCount do
+    if history[i] = stateHash then
+      Inc(CountBoardState);
+end;
+
 procedure DrawBoard(const b: BoardType);
 var
   r, c: Integer;
 begin
   ClearScreen;
 
-  Write('   ');
+  Write('  ');
   for c := 1 to 8 do
-    Write(c:3);
+    Write(c:4);
   Writeln;
   
-  Writeln('  +', StringOfChar('-', 8 * 4 - 1), '+');
+  Writeln('   +', StringOfChar('-', 8 * 4 - 1), '+');
 
   for r := 1 to 8 do
   begin
@@ -76,10 +134,10 @@ begin
       
     Writeln;
     if r < 8 then
-      Writeln('  +', StringOfChar('-', 8 * 4 - 1), '+');
+      Writeln('   +', StringOfChar('-', 8 * 4 - 1), '+');
   end;
 
-  Writeln('  +', StringOfChar('-', 8 * 4 - 1), '+');
+  Writeln('   +', StringOfChar('-', 8 * 4 - 1), '+');
 end;
 
 function IsValidPos(r, c: Integer): Boolean; inline;
@@ -103,9 +161,9 @@ procedure CreateKing(var b: BoardType; r, c: Integer);
 begin
   if not IsValidPos(r, c) then Exit;
   
-  if (r = 1) and (b[r, c] = 1) then
+  if (r = 8) and (b[r, c] = 1) then
     b[r, c] := 2  { Player1 becomes king }
-  else if (r = 8) and (b[r, c] = -1) then
+  else if (r = 1) and (b[r, c] = -1) then
     b[r, c] := -2 { Player2 becomes king }
 end;
 
@@ -116,9 +174,13 @@ begin
   if not (IsValidPos(fromR, fromC) and IsValidPos(toR, toC)) then Exit;
   
   tempPiece := b[fromR, fromC];
-  CreateKing(b, toR, toC);
-  
   b[toR, toC] := tempPiece;
+
+  if (toR = 8) and (tempPiece = 1) then
+    b[toR, toC] := 2
+  else if (toR = 1) and (tempPiece = -1) then
+    b[toR, toC] := -2;
+
   b[fromR, fromC] := 0;
 end;
 
@@ -131,100 +193,108 @@ end;
 type
   MoveArray = array of MoveType; { Dynamic array per spec }
 
-function CloneBoard(const src: BoardType): BoardType;
+procedure CloneBoard(var src: BoardType; var dest: BoardType);
 var
   r, c: Integer;
 begin
   for r := 1 to 8 do
     for c := 1 to 8 do
-      CloneBoard[r, c] := src[r, c];
+      dest[r, c] := src[r, c];
 end;
 
-function GetAllMoves(const b: BoardType; player: ShortInt): MoveArray;
+function GetAllMoves(var b: BoardType; player: ShortInt): MoveArray;
 var
   moves: MoveArray;
   idx: Integer;
-
-  function HasCapture(playerVal: ShortInt): Boolean;
-  var r, c, dr, dc, mr, mc, tr, tc: Integer;
-  begin
-    for r := 1 to 8 do
-      for c := 1 to 8 do
-        if b[r, c] * playerVal > 0 then
-          for dr := -1 to 1 do
-            for dc := -1 to 1 do
-            begin
-              if (dr = 0) and (dc = 0) then continue;
-              
-              mr := r + dr; mc := c + dc;
-              tr := r + 2 * dr; tc := c + 2 * dc;
-              
-              if IsValidPos(mr, mc) and IsValidPos(tr, tc) then
-                if (b[mr, mc] * playerVal < 0) and (b[tr, tc] = 0) then
-                begin
-                  HasCapture := true;
-                  exit;
-                end;
-            end;
-    HasCapture := false;
-  end;
-
+  r, c, dr, dc, mr, mc, tr, tc, tr2, tc2: Integer;
+  pieceVal: ShortInt;
+  isKingPiece: Boolean;
 var
   hasCaptures: Boolean;
 begin
   SetLength(moves, 0);
   
-  hasCaptures := HasCapture(player);
+  hasCaptures := false;
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      if (not hasCaptures) and (b[r, c] * player > 0) then
+      begin
+        pieceVal := b[r, c];
+        isKingPiece := Abs(pieceVal) > 1;
+        for dr := -1 to 1 do
+          for dc := -1 to 1 do
+            if (not hasCaptures) and (dr <> 0) and (dc <> 0) and
+               (isKingPiece or
+                ((pieceVal > 0) and (dr = 1)) or
+                ((pieceVal < 0) and (dr = -1))) then
+            begin
+              mr := r + dr; mc := c + dc;
+              tr2 := r + 2 * dr; tc2 := c + 2 * dc;
+
+              if IsValidPos(mr, mc) and IsValidPos(tr2, tc2) then
+                if (b[mr, mc] * player < 0) and (b[tr2, tc2] = 0) then
+                  hasCaptures := true;
+            end;
+      end;
 
   for r := 1 to 8 do
     for c := 1 to 8 do
       if b[r, c] * player > 0 then
+      begin
+        pieceVal := b[r, c];
+        isKingPiece := Abs(pieceVal) > 1;
         for dr := -1 to 1 do
           for dc := -1 to 1 do
-          begin
-            if (dr = 0) and (dc = 0) then continue;
-            
-            tr := r + dr; tc := c + dc;
-            
-            if IsValidPos(tr, tc) then
+            if (dr <> 0) and (dc <> 0) and
+               (isKingPiece or
+                ((pieceVal > 0) and (dr = 1)) or
+                ((pieceVal < 0) and (dr = -1))) then
             begin
-              if b[tr, tc] = 0 then
+              tr := r + dr;
+              tc := c + dc;
+              
+              if IsValidPos(tr, tc) then
               begin
-                { Simple move }
-                if hasCaptures then continue;
-                
-                idx := Length(moves);
-                SetLength(moves, idx + 1);
-                with moves[idx] do
+                if b[tr, tc] = 0 then
                 begin
-                  fromRow := r; 
-                  fromCol := c;
-                  toRow := tr; 
-                  toCol := tc;
-                  capturedRow := 0; 
-                  capturedCol := 0;
-                end;
-              end
-              else if (b[tr, tc] * player < 0) then
-              begin
-                tr := r + 2 * dr; tc := c + 2 * dc;
-                if IsValidPos(tr, tc) and (b[tr, tc] = 0) then
-                begin
-                  idx := Length(moves);
-                  SetLength(moves, idx + 1);
-                  with moves[idx] do
+                  { Simple move }
+                  if not hasCaptures then
                   begin
-                    fromRow := r; 
-                    fromCol := c;
-                    toRow := tr; 
-                    toCol := tc;
-                    capturedRow := r + dr; 
-                    capturedCol := c + dc;
+                    idx := Length(moves);
+                    SetLength(moves, idx + 1);
+                    with moves[idx] do
+                    begin
+                      fromRow := r; 
+                      fromCol := c;
+                      toRow := tr; 
+                      toCol := tc;
+                      capturedRow := 0; 
+                      capturedCol := 0;
+                    end;
+                  end;
+                end
+                else if (b[tr, tc] * player < 0) then
+                begin
+                  tr := r + 2 * dr;
+                  tc := c + 2 * dc;
+                  if IsValidPos(tr, tc) and (b[tr, tc] = 0) then
+                  begin
+                    idx := Length(moves);
+                    SetLength(moves, idx + 1);
+                    with moves[idx] do
+                    begin
+                      fromRow := r; 
+                      fromCol := c;
+                      toRow := tr; 
+                      toCol := tc;
+                      capturedRow := r + dr; 
+                      capturedCol := c + dc;
+                    end;
                   end;
                 end;
               end;
             end;
-          end;
+      end;
 
   GetAllMoves := moves;
 end;
@@ -250,7 +320,7 @@ begin
   IsCaptureMove := (m.capturedRow > 0) and (m.capturedCol > 0);
 end;
 
-function HasAnyMove(b: BoardType; player: ShortInt): Boolean;
+function HasAnyMove(var b: BoardType; player: ShortInt): Boolean;
 var
   moves: MoveArray;
 begin
@@ -262,7 +332,7 @@ begin
   end;
 end;
 
-function EvaluateBoard(const b: BoardType; player: ShortInt): Integer;
+function EvaluateBoard(var b: BoardType; player: ShortInt): Integer;
 var
   r, c: Integer;
 begin
@@ -289,7 +359,7 @@ var
   i: Integer;
   tempBoard: BoardType;
 
-  function MinimaxRec(b2: BoardType; d: Byte; p: ShortInt;
+  function MinimaxRec(var b2: BoardType; d: Byte; p: ShortInt;
                       l_alpha, l_beta: Integer): Integer;
   var
     bestVal: Integer;
@@ -311,9 +381,9 @@ var
 
     for idx2 := 0 to High(childMoves) do
     begin
-      tempBoard := CloneBoard(b2);
+      CloneBoard(b2, tempBoard);
       ExecuteMove(tempBoard, childMoves[idx2]);
-
+      
       value := MinimaxRec(tempBoard, d - 1, -p, l_alpha, l_beta);
 
       if p > 0 then
@@ -329,7 +399,7 @@ var
         l_alpha := Max(l_alpha, bestVal)
       else
         l_beta := Min(l_beta, bestVal);
-
+        
       if l_beta <= l_alpha then Break;
     end;
 
@@ -349,7 +419,7 @@ begin
 
     for i := 0 to High(moves) do
     begin
-      tempBoard := CloneBoard(b);
+      CloneBoard(b, tempBoard);
       ExecuteMove(tempBoard, moves[i]);
       
       value := MinimaxRec(tempBoard, depth - 1, -player, alpha, beta);
@@ -364,12 +434,11 @@ begin
 
     MinimaxAlphaBeta := best;
   except
-    on E: Exception do 
-      Exit(EvaluateBoard(b, player));
+    Exit(EvaluateBoard(b, player));
   end;
 end;
 
-function GetBestMove(const b: BoardType; player: ShortInt; depth: Byte): MoveType;
+function GetBestMove(var b: BoardType; player: ShortInt; depth: Byte): MoveType;
 var
   moves: MoveArray;
   bestValue, value: Integer;
@@ -381,14 +450,14 @@ begin
     moves := GetAllMoves(b, player);
     
     if (Length(moves) = 0) then
-      Exit(nil); { Empty move }
+      Exit(EmptyMove); { Empty move }
 
     bestValue := (player > 0) ? -10000 : 10000;
     bestIdx := -1;
 
     for i := 0 to High(moves) do
     begin
-      tempBoard := CloneBoard(b);
+      CloneBoard(b, tempBoard);
       ExecuteMove(tempBoard, moves[i]);
       
       value := MinimaxAlphaBeta(tempBoard, depth - 1, -player, 
@@ -419,9 +488,11 @@ begin
     try
       moves := GetAllMoves(b, player);
       if (Length(moves) > 0) then
-        GetBestMove := moves[0];
+        GetBestMove := moves[0]
+      else
+        GetBestMove := EmptyMove;
     except
-      SetLength(GetBestMove, 0);
+      GetBestMove := EmptyMove;
     end;
   end;
 end;
@@ -438,17 +509,18 @@ begin
     Exit(false);
 
   r := ord(ch) - ord('A') + 1;
-  
-  try
-    val(coordStr[2], c);
-    ParseCoordinate := (c >= 1) and (c <= 8);
-  except
-    on E: Exception do 
-      ParseCoordinate := false;
+
+  ch := coordStr[2];
+  if (ch < '1') or (ch > '8') then
+    ParseCoordinate := false
+  else
+  begin
+    c := ord(ch) - ord('0');
+    ParseCoordinate := true;
   end;
 end;
 
-function CheckWin(const b: BoardType): Integer; { returns winner (1=player1, -1=player2) }
+function CheckWin(var b: BoardType): ShortInt; { returns winner (1=player1, -1=player2) }
 var
   p1Pieces, p2Pieces: Integer;
   r, c: Integer;
@@ -489,111 +561,136 @@ end;
 procedure PlayGame(humanVsComputer: Boolean);
 var
   currentPlayer, winner: ShortInt;
-  m: MoveType;
+  m, tempMove: MoveType;
+  validMoves: MoveArray;
   moveStr1, moveStr2: String;
+  boardHistory: BoardStateHistory;
+  stateHash: Integer;
+  openingIdx: Integer;
   fromR, fromC, toR, toC: Integer;
+  historyCount, i: Integer;
+  drawByRepetition: Boolean;
 
 begin
+  Randomize;
   currentPlayer := 1;
-  
+  winner := 0;
+  historyCount := 0;
+  drawByRepetition := false;
+
   InitializeBoard(board);
   moveCount := 0;
   
   repeat
     DrawBoard(board);
+
+    if not humanVsComputer then
+    begin
+      stateHash := BoardStateHash(board, currentPlayer);
+      RememberBoardState(boardHistory, historyCount, stateHash);
+      if CountBoardState(boardHistory, historyCount, stateHash) >= 3 then
+      begin
+        drawByRepetition := true;
+        break;
+      end;
+    end;
     
     if currentPlayer = 1 then
       Writeln(#10, 'Turn: Player O (lowercase o/O)')
     else
       Writeln(#10, 'Turn: Player X (lowercase x/X)');
     
-    if humanVsComputer and (currentPlayer = -1) then
+    if (not humanVsComputer) or (currentPlayer = -1) then
     begin
       PauseForComputerTurn;
       
-      m := GetBestMove(board, currentPlayer, 4); { Increased depth for better AI }
+      if humanVsComputer then
+        m := GetBestMove(board, currentPlayer, 4) { Increased depth for better AI }
+      else if moveCount < 2 then
+      begin
+        validMoves := GetAllMoves(board, currentPlayer);
+        if Length(validMoves) > 0 then
+        begin
+          openingIdx := (Random(Length(validMoves)) + GetTicks()) mod Length(validMoves);
+          m := validMoves[openingIdx];
+        end
+        else
+          m := EmptyMove;
+      end
+      else
+        m := GetBestMove(board, currentPlayer, 3);
       
-      if (Length(m) = 0) then
+      if (m.fromRow = 0) then
         break;
         
-      Writeln('Computer move: ', 
-              Chr(ord('A') + m.fromRow - 1), m.fromCol, ' -> ',
-              Chr(ord('A') + m.toRow - 1), m.toCol);
+      if currentPlayer = 1 then
+        Writeln('Computer O move: ',
+                Chr(ord('A') + m.fromRow - 1), m.fromCol, ' -> ',
+                Chr(ord('A') + m.toRow - 1), m.toCol)
+      else
+        Writeln('Computer X move: ',
+                Chr(ord('A') + m.fromRow - 1), m.fromCol, ' -> ',
+                Chr(ord('A') + m.toRow - 1), m.toCol);
               
       ExecuteMove(board, m);
       
       if IsCaptureMove(m) then
-        Writeln('Computer made a capture!');
-        
-    end
-    else if not humanVsComputer and (currentPlayer = -1) then
-    begin
-      PauseForComputerTurn;
-      
-      m := GetBestMove(board, currentPlayer, 3);
-      
-      if (Length(m) = 0) then
-        break;
-        
-      Writeln('Computer X move: ', 
-              Chr(ord('A') + m.fromRow - 1), m.fromCol, ' -> ',
-              Chr(ord('A') + m.toRow - 1), m.toCol);
-              
-      ExecuteMove(board, m);
-      
-      if IsCaptureMove(m) then
-        Writeln('Computer X made a capture!');
+        if currentPlayer = 1 then
+          Writeln('Computer O made a capture!')
+        else
+          Writeln('Computer X made a capture!');
     end
     else if (currentPlayer = 1) then
     begin
       repeat
-        Write('Enter move from (e.g., A3, or Q to quit): ');
-        Readln(moveStr1);
-        
-        if UpCase(moveStr1[1]) = 'Q' then
-          Exit;
-          
-      until ParseCoordinate(moveStr1, fromR, fromC);
+        repeat
+          Write('Enter move from (e.g., A3, or Q to quit): ');
+          Readln(moveStr1);
+          if moveStr1 = '' then moveStr1 := ' ';
+          if UpCase(moveStr1[1]) = 'Q' then
+            Exit;
+            
+        until ParseCoordinate(moveStr1, fromR, fromC);
 
-      repeat
-        Write('To (e.g., B4, or Q to quit): ');
-        Readln(moveStr2);
-        
-        if UpCase(moveStr2[1]) = 'Q' then
-          Exit;
-          
-      until ParseCoordinate(moveStr2, toR, toC);
+        repeat
+          Write('To (e.g., B4, or Q to quit): ');
+          Readln(moveStr2);
+          if moveStr2 = '' then moveStr2 := ' ';
+          if UpCase(moveStr2[1]) = 'Q' then
+            Exit;
+            
+        until ParseCoordinate(moveStr2, toR, toC);
 
-      { Validate and execute move }
-      try
-        for i := 0 to High(GetAllMoves(board, currentPlayer)) do
-        begin
-          tempMove := GetAllMoves(board, currentPlayer)[i];
-          
-          if (tempMove.fromRow = fromR) and 
-             (tempMove.fromCol = fromC) and
-             (tempMove.toRow = toR) and 
-             (tempMove.toCol = toC) then
+        { Validate and execute move }
+        try
+          m := EmptyMove;
+          validMoves := GetAllMoves(board, currentPlayer);
+          for i := 0 to High(validMoves) do
           begin
-            m := tempMove;
-            break;
+            tempMove := validMoves[i];
+            
+            if (tempMove.fromRow = fromR) and 
+               (tempMove.fromCol = fromC) and
+               (tempMove.toRow = toR) and 
+               (tempMove.toCol = toC) then
+            begin
+              m := tempMove;
+              break;
+            end;
           end;
+
+          if (m.fromRow = 0) then
+            raise 'Invalid move';
+
+          ExecuteMove(board, m);
+          
+          if IsCaptureMove(m) then
+            Writeln('You made a capture!');
+        except
+          Writeln('Invalid move. Please try again.');
+          m := EmptyMove;
         end;
-
-        if (Length(m) = 0) then
-          raise Exception.Create('Invalid move');
-
-        ExecuteMove(board, m);
-        
-        if IsCaptureMove(m) then
-          Writeln('You made a capture!');
-      except
-        on E: Exception do 
-          begin
-            Writeln('Invalid move: ', E.Message);
-            continue;
-          end;
-      end;
+      until m.fromRow <> 0;
     end;
 
     winner := CheckWin(board);
@@ -611,6 +708,8 @@ begin
     Writeln(#10, 'Player O (lowercase o/O) wins!')
   else if winner = -1 then
     Writeln(#10, 'Player X (lowercase x/X) wins!')
+  else if drawByRepetition then
+    Writeln(#10, 'Draw by repetition!')
   else 
     Writeln(#10, 'Game Over!');
 end;
@@ -629,10 +728,10 @@ begin
     
     Write('Choose an option (1-2 or Q): ');
     Readln(choice);
-    
-  until (choice in ['1', '2', 'Q']);
+    if choice = '' then choice := ' ';
+  until (UpCase(choice[1]) in ['1', '2', 'Q']);
 
-  case choice of
+  case UpCase(choice[1]) of
     '1': PlayGame(true);
     '2': PlayGame(false);
   end;
@@ -643,8 +742,9 @@ begin
     ShowMenu;
     
     Write('Play again? (Y/N): ');
-    Readln(choice);
-  until UpCase(choice[1]) = 'N';
+    Readln(mainChoice);
+    if mainChoice = '' then mainChoice := ' ';
+  until UpCase(mainChoice[1]) = 'N';
   
   Writeln('Thanks for playing Checkers!');
 end.

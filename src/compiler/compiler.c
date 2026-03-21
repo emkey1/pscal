@@ -388,6 +388,10 @@ typedef struct FunctionCompilerState {
 
 static FunctionCompilerState* current_function_compiler = NULL;
 
+static int addStringConstant(BytecodeChunk* chunk, const char* str);
+static int addIntConstant(BytecodeChunk* chunk, long long intValue);
+static void noteLocalSlotUse(FunctionCompilerState* fc, int slot);
+
 static bool isCurrentFunctionResultIdentifier(const FunctionCompilerState* fc, const char* name) {
     if (!fc || !fc->returns_value || !name) {
         return false;
@@ -412,6 +416,118 @@ static bool isCurrentFunctionResultIdentifier(const FunctionCompilerState* fc, c
     }
 
     return false;
+}
+
+static void emitRoutineResultSlotInit(AST* type_specifier_node,
+                                      int slot,
+                                      BytecodeChunk* chunk,
+                                      int line) {
+    if (slot < 0 || !type_specifier_node || !current_function_compiler) {
+        return;
+    }
+
+    AST* actual_type_def_node = resolveTypeAlias(type_specifier_node);
+    if (actual_type_def_node && actual_type_def_node->type == AST_TYPE_DECL &&
+        actual_type_def_node->left) {
+        actual_type_def_node = resolveTypeAlias(actual_type_def_node->left);
+    }
+    if (!actual_type_def_node) {
+        return;
+    }
+
+    if (actual_type_def_node->var_type == TYPE_ARRAY) {
+        int dimension_count = actual_type_def_node->child_count;
+        if (dimension_count > 255) {
+            fprintf(stderr, "L%d: Compiler error: Maximum array dimensions (255) exceeded.\n", line);
+            compiler_had_error = true;
+            return;
+        }
+
+        noteLocalSlotUse(current_function_compiler, slot);
+        writeBytecodeChunk(chunk, INIT_LOCAL_ARRAY, line);
+        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+        writeBytecodeChunk(chunk, (uint8_t)dimension_count, line);
+
+        for (int dim = 0; dim < dimension_count; dim++) {
+            AST* subrange = actual_type_def_node->children[dim];
+            if (subrange && subrange->type == AST_SUBRANGE) {
+                Value lower_b = evaluateCompileTimeValue(subrange->left);
+                Value upper_b = evaluateCompileTimeValue(subrange->right);
+
+                if (IS_INTLIKE(lower_b)) {
+                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(lower_b)), line);
+                } else {
+                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", line);
+                    compiler_had_error = true;
+                }
+                freeValue(&lower_b);
+
+                if (IS_INTLIKE(upper_b)) {
+                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(upper_b)), line);
+                } else {
+                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", line);
+                    compiler_had_error = true;
+                }
+                freeValue(&upper_b);
+            } else {
+                fprintf(stderr, "L%d: Compiler error: Malformed array return type.\n", line);
+                compiler_had_error = true;
+                emitShort(chunk, 0, line);
+                emitShort(chunk, 0, line);
+            }
+        }
+
+        AST* elem_type = actual_type_def_node->right;
+        writeBytecodeChunk(chunk, (uint8_t)(elem_type ? elem_type->var_type : TYPE_VOID), line);
+        emitConstantIndex16(chunk,
+                            addStringConstant(chunk, (elem_type && elem_type->token) ? elem_type->token->value : ""),
+                            line);
+        return;
+    }
+
+    if (actual_type_def_node->type == AST_RECORD_TYPE) {
+        Value record_init = makeValueForType(TYPE_RECORD, actual_type_def_node, NULL);
+        int const_idx = addConstantToChunk(chunk, &record_init);
+        freeValue(&record_init);
+        emitConstant(chunk, const_idx, line);
+        noteLocalSlotUse(current_function_compiler, slot);
+        writeBytecodeChunk(chunk, SET_LOCAL, line);
+        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+        return;
+    }
+
+    if (actual_type_def_node->var_type == TYPE_STRING) {
+        int len = 0;
+        if (actual_type_def_node->right) {
+            Value len_val = evaluateCompileTimeValue(actual_type_def_node->right);
+            if (len_val.type == TYPE_INTEGER) {
+                len = (int)len_val.i_val;
+                if (len < 0 || len > 255) {
+                    fprintf(stderr, "L%d: Compiler error: Fixed string length out of range (0-255).\n", line);
+                    compiler_had_error = true;
+                    len = 0;
+                }
+            } else {
+                fprintf(stderr, "L%d: Compiler error: String length did not evaluate to a constant integer.\n", line);
+                compiler_had_error = true;
+            }
+            freeValue(&len_val);
+        }
+
+        noteLocalSlotUse(current_function_compiler, slot);
+        writeBytecodeChunk(chunk, INIT_LOCAL_STRING, line);
+        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+        writeBytecodeChunk(chunk, (uint8_t)len, line);
+        return;
+    }
+
+    if (actual_type_def_node->var_type == TYPE_FILE) {
+        noteLocalSlotUse(current_function_compiler, slot);
+        writeBytecodeChunk(chunk, INIT_LOCAL_FILE, line);
+        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+        writeBytecodeChunk(chunk, (uint8_t)TYPE_VOID, line);
+        emitConstantIndex16(chunk, addStringConstant(chunk, ""), line);
+    }
 }
 
 // Track global objects created with NEW so their hidden
@@ -5822,6 +5938,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     if (func_decl_node->type == AST_FUNCTION_DECL) {
         addLocal(&fc, func_name, line, false);
         return_value_slot = fc.local_count - 1;
+        emitRoutineResultSlotInit(func_decl_node->right, return_value_slot, chunk, line);
 
         addLocal(&fc, "result", line, false);
     }
@@ -6053,28 +6170,70 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
 
     int starting_local_count = current_function_compiler->local_count;
 
-    // Map arguments to parameters
+    // Evaluate arguments before introducing inline parameter locals so
+    // caller names like `r`/`c` do not get shadowed during argument binding.
+    typedef struct {
+        const char* name;
+        bool by_ref;
+    } InlineBinding;
+
+    InlineBinding* bindings = NULL;
+    int* binding_slots = NULL;
+    int binding_capacity = call_node->child_count > 0 ? call_node->child_count : 1;
+    if (call_node->child_count > 0) {
+        bindings = (InlineBinding*)calloc((size_t)binding_capacity, sizeof(InlineBinding));
+        binding_slots = (int*)calloc((size_t)binding_capacity, sizeof(int));
+        if (!bindings || !binding_slots) {
+            free(bindings);
+            free(binding_slots);
+            current_function_compiler->returns_value = saved_returns_value;
+            if (!saved_fc) {
+                current_function_compiler = NULL;
+            } else {
+                current_function_compiler = saved_fc;
+            }
+            return;
+        }
+    }
+
     int arg_index = 0;
+    int binding_count = 0;
     for (int i = 0; i < decl->child_count && arg_index < call_node->child_count; i++) {
         AST* param_group = decl->children[i];
         bool by_ref = param_group->by_ref;
         for (int j = 0; j < param_group->child_count && arg_index < call_node->child_count; j++, arg_index++) {
             AST* param_name_node = param_group->children[j];
             const char* pname = param_name_node->token ? param_name_node->token->value : NULL;
-            if (!pname) continue;
-            addLocal(current_function_compiler, pname, line, by_ref);
-            int slot = current_function_compiler->local_count - 1;
             AST* arg_node = call_node->children[arg_index];
             if (by_ref) {
                 compileLValue(arg_node, chunk, getLine(arg_node));
             } else {
                 compileRValue(arg_node, chunk, getLine(arg_node));
             }
-            noteLocalSlotUse(current_function_compiler, slot);
-            writeBytecodeChunk(chunk, SET_LOCAL, line);
-            writeBytecodeChunk(chunk, (uint8_t)slot, line);
+            if (!pname) continue;
+            bindings[binding_count].name = pname;
+            bindings[binding_count].by_ref = by_ref;
+            binding_count++;
         }
     }
+
+    for (int i = 0; i < binding_count; i++) {
+        addLocal(current_function_compiler, bindings[i].name, line, bindings[i].by_ref);
+        binding_slots[i] = current_function_compiler->local_count - 1;
+    }
+
+    for (int i = binding_count - 1; i >= 0; i--) {
+        int slot = binding_slots[i];
+        if (slot < 0) {
+            continue;
+        }
+        noteLocalSlotUse(current_function_compiler, slot);
+        writeBytecodeChunk(chunk, SET_LOCAL, line);
+        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+    }
+
+    free(bindings);
+    free(binding_slots);
 
     int result_slot = -1;
     if (decl->type == AST_FUNCTION_DECL) {
@@ -6082,6 +6241,7 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
         // function name will target this slot.
         addLocal(current_function_compiler, decl->token->value, line, false);
         result_slot = current_function_compiler->local_count - 1;
+        emitRoutineResultSlotInit(decl->right, result_slot, chunk, line);
     }
 
     LabelTableState inline_labels;

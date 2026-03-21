@@ -41,6 +41,18 @@
       "path": "Tests/compiler/pascal/cases/stringofchar_builtin.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: stringofchar builtin"
+    },
+    {
+      "id": "record_function_result",
+      "path": "Tests/compiler/pascal/cases/record_function_result.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: record function result"
+    },
+    {
+      "id": "inline_param_shadowing",
+      "path": "Tests/compiler/pascal/cases/inline_param_shadowing.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: inline parameter shadowing"
     }
   ]
 }
