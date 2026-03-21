@@ -342,6 +342,7 @@ static void emitGlobalVarDefinition(AST* var_decl,
                                     BytecodeChunk* chunk,
                                     bool emit_initializer);
 static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, int line);
+static bool valueToOrdinal(const Value* value, long long* out);
 
 typedef struct {
     char* name;
@@ -1278,6 +1279,36 @@ static void queueDeferredGlobalInitializer(AST* var_decl) {
     deferred_global_initializers[deferred_global_initializer_count++] = var_decl;
 }
 
+static bool populateCompileTimeArrayLiteral(Value* arr_val, AST* array_literal, int line) {
+    if (!arr_val || arr_val->type != TYPE_ARRAY || !array_literal ||
+        array_literal->type != AST_ARRAY_LITERAL) {
+        return false;
+    }
+
+    int total = calculateArrayTotalSize(arr_val);
+    for (int j = 0; j < total && j < array_literal->child_count; j++) {
+        Value ev = evaluateCompileTimeValue(array_literal->children[j]);
+        if (arr_val->array_is_packed) {
+            long long ordinal = 0;
+            if (!valueToOrdinal(&ev, &ordinal)) {
+                fprintf(stderr,
+                        "L%d: Compiler error: Packed byte array initializer element must be ordinal.\n",
+                        line);
+                compiler_had_error = true;
+                freeValue(&ev);
+                return false;
+            }
+            arr_val->array_raw[j] = (uint8_t)ordinal;
+        } else {
+            freeValue(&arr_val->array_val[j]);
+            arr_val->array_val[j] = makeCopyOfValue(&ev);
+        }
+        freeValue(&ev);
+    }
+
+    return true;
+}
+
 static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
                                        AST* actual_type_def_node,
                                        BytecodeChunk* chunk) {
@@ -1305,12 +1336,9 @@ static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
             AST* elem_type_node = array_type->right;
             VarType elem_type = elem_type_node ? elem_type_node->var_type : TYPE_VOID;
             Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
-            int total = calculateArrayTotalSize(&arr_val);
-            for (int j = 0; j < total && j < initializer->child_count; j++) {
-                Value ev = evaluateCompileTimeValue(initializer->children[j]);
-                freeValue(&arr_val.array_val[j]);
-                arr_val.array_val[j] = makeCopyOfValue(&ev);
-                freeValue(&ev);
+            if (!populateCompileTimeArrayLiteral(&arr_val, initializer, getLine(initializer))) {
+                freeValue(&arr_val);
+                return;
             }
             int constIdx = addConstantToChunk(chunk, &arr_val);
             freeValue(&arr_val);
@@ -1773,6 +1801,14 @@ static void emitDefineGlobal(BytecodeChunk* chunk, int name_idx, int line) {
 }
 
 static const char* ensureSerializableTypeName(AST* type_node) {
+    if (type_node && type_node->token && type_node->token->value &&
+        type_node->token->value[0] != '\0' &&
+        (type_node->type == AST_TYPE_DECL ||
+         type_node->type == AST_TYPE_REFERENCE ||
+         type_node->type == AST_VARIABLE)) {
+        return type_node->token->value;
+    }
+
     AST* actual = resolveTypeAlias(type_node);
     if (actual && actual->type == AST_TYPE_DECL && actual->left) {
         actual = resolveTypeAlias(actual->left);
@@ -5836,12 +5872,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 AST* elem_type_node = array_type->right;
                                 VarType elem_type = elem_type_node->var_type;
                                 Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
-                                int total = calculateArrayTotalSize(&arr_val);
-                                for (int j = 0; j < total && j < node->left->child_count; j++) {
-                                    Value ev = evaluateCompileTimeValue(node->left->children[j]);
-                                    freeValue(&arr_val.array_val[j]);
-                                    arr_val.array_val[j] = makeCopyOfValue(&ev);
-                                    freeValue(&ev);
+                                if (!populateCompileTimeArrayLiteral(&arr_val, node->left, getLine(node->left))) {
+                                    freeValue(&arr_val);
+                                    break;
                                 }
                                 int constIdx = addConstantToChunk(chunk, &arr_val);
                                 freeValue(&arr_val);
@@ -5891,12 +5924,9 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         AST* elem_type_node = actual_type_def_node->right;
                         VarType elem_type = elem_type_node ? elem_type_node->var_type : TYPE_UNKNOWN;
                         Value arr_val = makeArrayND(1, lb, ub, elem_type, elem_type_node);
-                        int total = calculateArrayTotalSize(&arr_val);
-                        for (int j = 0; j < total && j < node->left->child_count; j++) {
-                            Value ev = evaluateCompileTimeValue(node->left->children[j]);
-                            freeValue(&arr_val.array_val[j]);
-                            arr_val.array_val[j] = makeCopyOfValue(&ev);
-                            freeValue(&ev);
+                        if (!populateCompileTimeArrayLiteral(&arr_val, node->left, getLine(node->left))) {
+                            freeValue(&arr_val);
+                            break;
                         }
                         const_val = arr_val;
                     } else {
@@ -8389,6 +8419,37 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             freeValue(&set_const_val);
 
             emitConstant(chunk, constIndex, line);
+            break;
+        }
+        case AST_RECORD_LITERAL: {
+            AST *recordType = resolveTypeAlias(node->type_def);
+            if (!recordType || recordType->type != AST_RECORD_TYPE) {
+                fprintf(stderr, "L%d: Compiler error: record constructor is missing a target record type.\n", line);
+                compiler_had_error = true;
+                emitConstant(chunk, addNilConstant(chunk), line);
+                break;
+            }
+
+            Value recordInit = makeValueForType(TYPE_RECORD, recordType, NULL);
+            int constIndex = addConstantToChunk(chunk, &recordInit);
+            freeValue(&recordInit);
+            emitConstant(chunk, constIndex, line);
+
+            for (int i = 0; i < node->child_count; i++) {
+                AST *fieldAssign = node->children[i];
+                if (!fieldAssign || fieldAssign->type != AST_ASSIGN ||
+                    !fieldAssign->left || !fieldAssign->right ||
+                    !fieldAssign->left->token || !fieldAssign->left->token->value) {
+                    fprintf(stderr, "L%d: Compiler error: malformed record constructor field.\n", line);
+                    compiler_had_error = true;
+                    continue;
+                }
+
+                int nameIndex = addStringConstant(chunk, fieldAssign->left->token->value);
+                emitGlobalNameIdx(chunk, GET_FIELD_ADDRESS_KEEP, GET_FIELD_ADDRESS_KEEP16, nameIndex, line);
+                compileRValue(fieldAssign->right, chunk, getLine(fieldAssign->right));
+                writeBytecodeChunk(chunk, SET_INDIRECT, line);
+            }
             break;
         }
         case AST_NUMBER: {

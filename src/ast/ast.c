@@ -47,6 +47,87 @@ static AST* resolveTypeAlias(AST* type_node) {
     return type_node;
 }
 
+static AST* findRecordFieldDecl(AST* recordType, const char* fieldName) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || !fieldName) {
+        return NULL;
+    }
+
+    if (recordType->type == AST_TYPE_DECL && recordType->left) {
+        recordType = resolveTypeAlias(recordType->left);
+    }
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        return NULL;
+    }
+
+    if (recordType->extra) {
+        AST *parent = resolveTypeAlias(recordType->extra);
+        if (!parent && recordType->extra->token && recordType->extra->token->value) {
+            parent = resolveTypeAlias(lookupType(recordType->extra->token->value));
+        }
+        AST *parentField = findRecordFieldDecl(parent, fieldName);
+        if (parentField) {
+            return parentField;
+        }
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST *fieldDecl = recordType->children[i];
+        if (!fieldDecl || fieldDecl->type != AST_VAR_DECL) {
+            continue;
+        }
+        for (int j = 0; j < fieldDecl->child_count; j++) {
+            AST *fieldNameNode = fieldDecl->children[j];
+            if (fieldNameNode && fieldNameNode->token && fieldNameNode->token->value &&
+                strcasecmp(fieldNameNode->token->value, fieldName) == 0) {
+                return fieldDecl;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static void applyRecordLiteralType(AST *literal, AST *recordType) {
+    AST *resolvedRecord = resolveTypeAlias(recordType);
+    if (resolvedRecord && resolvedRecord->type == AST_TYPE_DECL && resolvedRecord->left) {
+        resolvedRecord = resolveTypeAlias(resolvedRecord->left);
+    }
+
+    literal->var_type = TYPE_RECORD;
+    literal->type_def = resolvedRecord ? resolvedRecord : recordType;
+
+    if (!resolvedRecord || resolvedRecord->type != AST_RECORD_TYPE) {
+        return;
+    }
+
+    for (int i = 0; i < literal->child_count; i++) {
+        AST *fieldAssign = literal->children[i];
+        if (!fieldAssign || fieldAssign->type != AST_ASSIGN ||
+            !fieldAssign->left || !fieldAssign->right ||
+            !fieldAssign->left->token || !fieldAssign->left->token->value) {
+            continue;
+        }
+
+        AST *fieldDecl = findRecordFieldDecl(resolvedRecord, fieldAssign->left->token->value);
+        if (!fieldDecl) {
+            fprintf(stderr, "Type error: unknown record-constructor field '%s'.\n",
+                    fieldAssign->left->token->value);
+            pascal_semantic_error_count++;
+            continue;
+        }
+
+        fieldAssign->var_type = fieldDecl->var_type;
+        fieldAssign->type_def = fieldDecl->right;
+        fieldAssign->left->var_type = fieldDecl->var_type;
+        fieldAssign->left->type_def = fieldDecl->right;
+
+        if (fieldAssign->right->type == AST_RECORD_LITERAL) {
+            applyRecordLiteralType(fieldAssign->right, fieldDecl->right);
+        }
+    }
+}
+
 static Symbol *lookupProcedureInAncestors(const char *loweredName, AST *scope) {
     for (AST *curr = scope; curr; curr = curr->parent) {
         if (!curr->symbol_table) {
@@ -1334,6 +1415,16 @@ resolved_field: ;
                      AST* decl = procSymbol->type_def; // PROCEDURE_DECL or FUNCTION_DECL
                      int expected = decl->child_count;
                      int given = node->child_count;
+                     for (int i = 0; i < expected && i < given; ++i) {
+                         AST *formal = decl->children[i];
+                         AST *actual = node->children[i];
+                         if (formal && actual && actual->type == AST_RECORD_LITERAL) {
+                             AST *formalType = formal->right ? resolveTypeAlias(formal->right) : NULL;
+                             if (formalType && formalType->type == AST_RECORD_TYPE) {
+                                 applyRecordLiteralType(actual, formal->right);
+                             }
+                         }
+                     }
                      if (given >= expected) {
                          for (int i = 0; i < expected; ++i) {
                              AST* formal = decl->children[i];
@@ -1440,6 +1531,13 @@ resolved_field: ;
                 }
                 break;
             }
+            case AST_RECORD_LITERAL:
+                if (node->type_def) {
+                    applyRecordLiteralType(node, node->type_def);
+                } else {
+                    node->var_type = TYPE_RECORD;
+                }
+                break;
             case AST_FIELD_ACCESS: {
                 node->var_type = TYPE_VOID;
                 if (node->left && node->left->var_type == TYPE_RECORD && node->left->type_def) {
@@ -1571,11 +1669,17 @@ resolved_field: ;
                 node->var_type = TYPE_NIL; // Or TYPE_POINTER if nil is a generic pointer type
                 break;
             case AST_ASSIGN: {
-                // Minimal semantic check: procedure-pointer assignment
                 if (node->left && node->right) {
                     AST* lhs = node->left;
                     AST* rhs = node->right;
                     AST* lhsType = resolveTypeAlias(lhs->type_def);
+                    if (rhs->type == AST_RECORD_LITERAL && lhsType && lhsType->type == AST_RECORD_TYPE) {
+                        applyRecordLiteralType(rhs, lhs->type_def ? lhs->type_def : lhsType);
+                    }
+                    node->var_type = lhs->var_type;
+                    node->type_def = lhs->type_def;
+
+                    // Minimal semantic check: procedure-pointer assignment
                     if (!lhsType && lhs->token && lhs->token->value) {
                         Symbol *lhsProc = resolveProcedureSymbolInScope(lhs->token->value, node, globalProgramNode);
                         if (lhsProc && lhsProc->type_def) {

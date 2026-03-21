@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program Checkers;
 
 { PSCAL Pascal variant - Turbo Pascal compatible + dynamic arrays/exceptions }

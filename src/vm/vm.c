@@ -394,6 +394,8 @@ static bool vmRequestHardSuspendCurrentVproc(void) {
     X(GET_UPVALUE_ADDRESS) \
     X(GET_FIELD_ADDRESS) \
     X(GET_FIELD_ADDRESS16) \
+    X(GET_FIELD_ADDRESS_KEEP) \
+    X(GET_FIELD_ADDRESS_KEEP16) \
     X(LOAD_FIELD_VALUE_BY_NAME) \
     X(LOAD_FIELD_VALUE_BY_NAME16) \
     X(GET_ELEMENT_ADDRESS) \
@@ -6609,6 +6611,68 @@ comparison_error_label:
                     if (strcmp(current->name, field_name) == 0) {
                         Value popped_base_val = pop(vm);
                         freeValue(&popped_base_val);
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            case GET_FIELD_ADDRESS_KEEP: {
+                uint8_t field_name_idx = READ_BYTE();
+                Value* base_val_ptr = vm->stackTop - 1;
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_struct_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
+                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                        goto next_instruction;
+                    }
+                    current = current->next;
+                }
+
+                runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            case GET_FIELD_ADDRESS_KEEP16: {
+                uint16_t field_name_idx = READ_SHORT(vm);
+                Value* base_val_ptr = vm->stackTop - 1;
+                bool invalid_type = false;
+                Value* record_struct_ptr = resolveRecord(base_val_ptr, &invalid_type);
+                if (invalid_type) {
+                    runtimeError(vm, "VM Error: Cannot access field on a non-record/non-pointer type.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr == NULL) {
+                    runtimeError(vm, "VM Error: Cannot access field on a nil pointer.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                if (record_struct_ptr->type != TYPE_RECORD) {
+                    runtimeError(vm, "VM Error: Internal - expected to resolve to a record for field access.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+
+                const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
+                FieldValue* current = record_struct_ptr->record_val;
+                while (current) {
+                    if (strcmp(current->name, field_name) == 0) {
                         push(vm, makePointer(fieldValueStorage(current), current->type_def));
                         goto next_instruction;
                     }

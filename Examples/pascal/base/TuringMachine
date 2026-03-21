@@ -1,0 +1,706 @@
+#!/usr/bin/env pascal
+program TuringMachine;
+
+const
+  TapePadding = 12;
+  TapeWindow = 18;
+  DefaultMaxSteps = 64;
+
+type
+  TapeDirection = (Left, Right, Stay);
+  HeadStartMode = (HeadAtStart, HeadAtCenter, HeadAtEnd);
+
+  MoveCommand = record
+    direction: TapeDirection;
+  end;
+
+  TransitionRule = record
+    currentState: Integer;
+    readSymbol: Integer;
+    writeSymbol: Integer;
+    moveCmd: MoveCommand;
+    newState: Integer;
+  end;
+
+var
+  tape: array of Integer;
+  rules: array of TransitionRule;
+  currentState, startState, blankSymbol: Integer;
+  headPos, configuredMaxSteps, currentStep: LongInt;
+  currentMachineName, currentTapeSeed: String;
+  startMode: HeadStartMode;
+
+function StateName(state: Integer): String;
+begin
+  if state = 0 then
+    StateName := 'HALT'
+  else if state <= 26 then
+    StateName := Chr(Ord('A') + state - 1)
+  else
+    StateName := '?';
+end;
+
+function MoveName(dir: TapeDirection): String;
+begin
+  case dir of
+    Left: MoveName := 'L';
+    Right: MoveName := 'R';
+    Stay: MoveName := 'S';
+  end;
+end;
+
+function HeadModeName(mode: HeadStartMode): String;
+begin
+  case mode of
+    HeadAtStart: HeadModeName := 'start';
+    HeadAtCenter: HeadModeName := 'center';
+    HeadAtEnd: HeadModeName := 'end';
+  end;
+end;
+
+function ByteToSymbol(value: Integer): Char;
+begin
+  if value = blankSymbol then
+    ByteToSymbol := '.'
+  else
+    ByteToSymbol := Chr(Ord('0') + value);
+end;
+
+function TrimSpaces(const s: String): String;
+var
+  leftPos, rightPos: Integer;
+begin
+  leftPos := 1;
+  while (leftPos <= Length(s)) and ((s[leftPos] = ' ') or (s[leftPos] = #9)) do
+    Inc(leftPos);
+
+  rightPos := Length(s);
+  while (rightPos >= leftPos) and ((s[rightPos] = ' ') or (s[rightPos] = #9)) do
+    Dec(rightPos);
+
+  if rightPos < leftPos then
+    TrimSpaces := ''
+  else
+    TrimSpaces := Copy(s, leftPos, rightPos - leftPos + 1);
+end;
+
+function UpperText(const s: String): String;
+var
+  i: Integer;
+begin
+  UpperText := '';
+  for i := 1 to Length(s) do
+    UpperText := UpperText + UpCase(s[i]);
+end;
+
+function NormalizeWhitespace(const s: String): String;
+var
+  i: Integer;
+  ch: Char;
+  pendingSpace: Boolean;
+begin
+  NormalizeWhitespace := '';
+  pendingSpace := false;
+
+  for i := 1 to Length(s) do
+    begin
+      ch := s[i];
+      if (ch = ' ') or (ch = #9) then
+        pendingSpace := true
+      else
+        begin
+          if pendingSpace and (Length(NormalizeWhitespace) > 0) then
+            NormalizeWhitespace := NormalizeWhitespace + ' ';
+          NormalizeWhitespace := NormalizeWhitespace + ch;
+          pendingSpace := false;
+        end;
+    end;
+end;
+
+function StripComment(const s: String): String;
+var
+  posHash: Integer;
+begin
+  posHash := Pos('#', s);
+  if posHash > 0 then
+    StripComment := Copy(s, 1, posHash - 1)
+  else
+    StripComment := s;
+end;
+
+function NextToken(var s: String): String;
+var
+  splitPos: Integer;
+begin
+  s := TrimSpaces(s);
+  if s = '' then
+    begin
+      NextToken := '';
+      exit;
+    end;
+
+  splitPos := Pos(' ', s);
+  if splitPos = 0 then
+    begin
+      NextToken := s;
+      s := '';
+      exit;
+    end;
+
+  NextToken := Copy(s, 1, splitPos - 1);
+  if splitPos < Length(s) then
+    s := Copy(s, splitPos + 1, Length(s) - splitPos)
+  else
+    s := '';
+  s := TrimSpaces(s);
+end;
+
+function ParseStateToken(token: String): Integer;
+begin
+  token := UpperText(TrimSpaces(token));
+
+  if token = 'HALT' then
+    ParseStateToken := 0
+  else if (Length(token) = 1) and (token[1] >= 'A') and (token[1] <= 'Z') then
+    ParseStateToken := Ord(token[1]) - Ord('A') + 1
+  else
+    ParseStateToken := 0;
+end;
+
+function ParseDirectionToken(token: String): TapeDirection;
+begin
+  token := UpperText(TrimSpaces(token));
+
+  if (token = 'L') or (token = 'LEFT') then
+    ParseDirectionToken := Left
+  else if (token = 'R') or (token = 'RIGHT') then
+    ParseDirectionToken := Right
+  else
+    ParseDirectionToken := Stay;
+end;
+
+function ParseSymbolToken(token: String): Integer;
+begin
+  token := TrimSpaces(token);
+  if token = '' then
+    begin
+      ParseSymbolToken := blankSymbol;
+      exit;
+    end;
+
+  if token[1] = '.' then
+    ParseSymbolToken := blankSymbol
+  else if (token[1] >= '0') and (token[1] <= '9') then
+    ParseSymbolToken := Ord(token[1]) - Ord('0')
+  else
+    ParseSymbolToken := blankSymbol;
+end;
+
+procedure SetRuleCount(count: Integer);
+begin
+  SetLength(rules, count);
+end;
+
+procedure AddRuleAt(index: Integer; currentId, readId, writeId: Integer;
+                    dir: TapeDirection; nextId: Integer);
+begin
+  rules[index] := (currentState: currentId;
+                   readSymbol: readId;
+                   writeSymbol: writeId;
+                   moveCmd: (direction: dir);
+                   newState: nextId);
+end;
+
+procedure EnsureTapeCanAccess(index: Integer);
+var
+  newTape: array of Integer;
+  i, shift, oldLen, newLen: Integer;
+begin
+  if Length(tape) = 0 then
+    begin
+      SetLength(tape, 1);
+      tape[0] := blankSymbol;
+    end;
+
+  if index < 0 then
+    begin
+      shift := -index + TapePadding;
+      oldLen := Length(tape);
+      newLen := oldLen + shift;
+      SetLength(newTape, newLen);
+      for i := 0 to High(newTape) do
+        newTape[i] := blankSymbol;
+      for i := 0 to oldLen - 1 do
+        newTape[i + shift] := tape[i];
+      tape := newTape;
+      headPos := headPos + shift;
+    end
+  else if index > High(tape) then
+    begin
+      oldLen := Length(tape);
+      newLen := index + TapePadding + 1;
+      SetLength(newTape, newLen);
+      for i := 0 to High(newTape) do
+        newTape[i] := blankSymbol;
+      for i := 0 to oldLen - 1 do
+        newTape[i] := tape[i];
+      tape := newTape;
+    end;
+end;
+
+procedure InitializeTapeFromSeed(seed: String; mode: HeadStartMode);
+var
+  i, anchor, tapeLen: Integer;
+begin
+  tapeLen := Length(seed) + (TapePadding * 2) + 1;
+  if tapeLen < 40 then
+    tapeLen := 40;
+
+  SetLength(tape, tapeLen);
+  for i := 0 to High(tape) do
+    tape[i] := blankSymbol;
+
+  if Length(seed) = 0 then
+    anchor := tapeLen div 2
+  else if mode = HeadAtCenter then
+    anchor := (tapeLen - Length(seed)) div 2
+  else
+    anchor := TapePadding;
+
+  if anchor < 0 then
+    anchor := 0;
+
+  for i := 1 to Length(seed) do
+    tape[anchor + i - 1] := ParseSymbolToken(seed[i]);
+
+  if Length(seed) = 0 then
+    headPos := tapeLen div 2
+  else if mode = HeadAtEnd then
+    headPos := anchor + Length(seed) - 1
+  else
+    headPos := anchor;
+
+  currentState := startState;
+  currentStep := 0;
+end;
+
+function ReadTape: Integer;
+begin
+  EnsureTapeCanAccess(headPos);
+  ReadTape := tape[headPos];
+end;
+
+procedure WriteTape(symbol: Integer);
+begin
+  EnsureTapeCanAccess(headPos);
+  tape[headPos] := symbol;
+end;
+
+procedure MoveHead(dir: TapeDirection);
+begin
+  case dir of
+    Left: Dec(headPos);
+    Right: Inc(headPos);
+    Stay: headPos := headPos;
+  end;
+end;
+
+procedure DrawTape;
+var
+  i: Integer;
+begin
+  Writeln;
+  Writeln('Machine: ', currentMachineName);
+  Writeln('State: ', StateName(currentState), '  Step: ', currentStep,
+          '  Head: ', headPos, '  Blank: ', ByteToSymbol(blankSymbol),
+          '  Rules: ', Length(rules));
+
+  for i := Max(0, headPos - TapeWindow) to Min(High(tape), headPos + TapeWindow) do
+    begin
+      if i = headPos then
+        Write('[')
+      else
+        Write(' ');
+
+      Write(ByteToSymbol(tape[i]));
+
+      if i = headPos then
+        Write(']')
+      else
+        Write(' ');
+    end;
+  Writeln;
+end;
+
+procedure PrintRuleTable;
+var
+  i: Integer;
+begin
+  Writeln;
+  Writeln('Transition table:');
+  Writeln('  State  Read  Write  Move  Next');
+  for i := 0 to High(rules) do
+    Writeln('  ',
+            StateName(rules[i].currentState):5, '  ',
+            ByteToSymbol(rules[i].readSymbol):4, '  ',
+            ByteToSymbol(rules[i].writeSymbol):5, '  ',
+            MoveName(rules[i].moveCmd.direction):4, '  ',
+            StateName(rules[i].newState));
+end;
+
+function ApplyStep: Boolean;
+var
+  i: Integer;
+  scanned: Integer;
+begin
+  if currentState = 0 then
+    begin
+      ApplyStep := false;
+      exit;
+    end;
+
+  scanned := ReadTape;
+
+  for i := 0 to High(rules) do
+    if (rules[i].currentState = currentState) and (rules[i].readSymbol = scanned) then
+      begin
+        Inc(currentStep);
+        Writeln;
+        Writeln('Step ', currentStep, ': ',
+                StateName(rules[i].currentState), ' / ', ByteToSymbol(scanned),
+                ' -> ', ByteToSymbol(rules[i].writeSymbol), ', ',
+                MoveName(rules[i].moveCmd.direction), ', ',
+                StateName(rules[i].newState));
+        WriteTape(rules[i].writeSymbol);
+        MoveHead(rules[i].moveCmd.direction);
+        currentState := rules[i].newState;
+        DrawTape;
+        ApplyStep := true;
+        exit;
+      end;
+
+  Writeln;
+  Writeln('No rule for state ', StateName(currentState),
+          ' reading ', ByteToSymbol(scanned), '. Halting.');
+  currentState := 0;
+  ApplyStep := false;
+end;
+
+procedure RunUntilStop;
+begin
+  while (currentState <> 0) and (currentStep < configuredMaxSteps) do
+    begin
+      if not ApplyStep then
+        break;
+    end;
+
+  if currentState = 0 then
+    Writeln('Machine halted after ', currentStep, ' step(s).')
+  else if currentStep >= configuredMaxSteps then
+    Writeln('Stopped at max-step limit (', configuredMaxSteps, ').');
+end;
+
+procedure InstallBusyBeaver2;
+begin
+  currentMachineName := '2-State Busy Beaver';
+  blankSymbol := 0;
+  startState := 1;
+  startMode := HeadAtCenter;
+  configuredMaxSteps := 16;
+  currentTapeSeed := '0';
+  SetRuleCount(4);
+
+  AddRuleAt(0, 1, 0, 1, Right, 2);
+  AddRuleAt(1, 1, 1, 1, Left, 2);
+  AddRuleAt(2, 2, 0, 1, Left, 1);
+  AddRuleAt(3, 2, 1, 1, Stay, 0);
+end;
+
+procedure InstallBusyBeaver3;
+begin
+  currentMachineName := '3-State Busy Beaver';
+  blankSymbol := 0;
+  startState := 1;
+  startMode := HeadAtCenter;
+  configuredMaxSteps := 32;
+  currentTapeSeed := '0';
+  SetRuleCount(6);
+
+  AddRuleAt(0, 1, 0, 1, Right, 2);
+  AddRuleAt(1, 1, 1, 1, Left, 3);
+  AddRuleAt(2, 2, 0, 1, Left, 1);
+  AddRuleAt(3, 2, 1, 1, Right, 2);
+  AddRuleAt(4, 3, 0, 1, Left, 2);
+  AddRuleAt(5, 3, 1, 1, Stay, 0);
+end;
+
+procedure InstallUnaryIncrement;
+begin
+  currentMachineName := 'Unary Increment';
+  blankSymbol := 0;
+  startState := 1;
+  startMode := HeadAtStart;
+  configuredMaxSteps := 24;
+  currentTapeSeed := '1111';
+  SetRuleCount(2);
+
+  AddRuleAt(0, 1, 1, 1, Right, 1);
+  AddRuleAt(1, 1, 0, 1, Stay, 0);
+end;
+
+procedure InstallBinaryIncrement;
+begin
+  currentMachineName := 'Binary Increment';
+  blankSymbol := 0;
+  startState := 1;
+  startMode := HeadAtEnd;
+  configuredMaxSteps := 24;
+  currentTapeSeed := '1011';
+  SetRuleCount(2);
+
+  AddRuleAt(0, 1, 1, 0, Left, 1);
+  AddRuleAt(1, 1, 0, 1, Stay, 0);
+end;
+
+procedure PrintHelp;
+begin
+  Writeln;
+  Writeln('This simulator runs small single-tape deterministic Turing machines.');
+  Writeln('Built-in machines:');
+  Writeln('  1. 2-State Busy Beaver');
+  Writeln('  2. 3-State Busy Beaver');
+  Writeln('  3. Unary Increment');
+  Writeln('  4. Binary Increment');
+  Writeln('  5. Load machine from a text file');
+  Writeln;
+  Writeln('Interactive commands after loading a machine:');
+  Writeln('  Enter or S : execute one step');
+  Writeln('  R          : run until halt or max-step limit');
+  Writeln('  T          : print the transition table');
+  Writeln('  X          : reset machine to its initial tape/state');
+  Writeln('  Q          : return to the main menu');
+  Writeln;
+  Writeln('Tape symbols use digits and ''.'' for blank. States use A-Z or HALT.');
+end;
+
+function ParseHeadMode(token: String): HeadStartMode;
+begin
+  token := UpperText(TrimSpaces(token));
+  if (token = 'END') or (token = 'RIGHT') then
+    ParseHeadMode := HeadAtEnd
+  else if (token = 'CENTER') or (token = 'CENTRE') then
+    ParseHeadMode := HeadAtCenter
+  else
+    ParseHeadMode := HeadAtStart;
+end;
+
+function LoadMachineFromFile(fileName: String): Boolean;
+var
+  f: Text;
+  line, normalized, rest: String;
+  keyword, a, b, c, d, e: String;
+  code, status, ruleCount: Integer;
+begin
+  LoadMachineFromFile := false;
+
+  currentMachineName := 'Loaded Machine';
+  blankSymbol := 0;
+  startState := 1;
+  startMode := HeadAtCenter;
+  configuredMaxSteps := DefaultMaxSteps;
+  currentTapeSeed := '0';
+  SetRuleCount(0);
+  ruleCount := 0;
+
+  assign(f, fileName);
+  {$I-} reset(f); {$I+}
+  status := IOResult;
+  if status <> 0 then
+    begin
+      Writeln('Unable to open machine file: ', fileName);
+      exit;
+    end;
+
+  while not eof(f) do
+    begin
+      readln(f, line);
+      normalized := TrimSpaces(NormalizeWhitespace(StripComment(line)));
+      if normalized = '' then
+        begin
+        end
+      else
+        begin
+          rest := normalized;
+          keyword := UpperText(NextToken(rest));
+
+          if keyword = 'NAME' then
+            currentMachineName := rest
+          else if keyword = 'BLANK' then
+            blankSymbol := ParseSymbolToken(NextToken(rest))
+          else if keyword = 'START' then
+            startState := ParseStateToken(NextToken(rest))
+          else if keyword = 'HEAD' then
+            startMode := ParseHeadMode(NextToken(rest))
+          else if keyword = 'MAXSTEPS' then
+            begin
+              Val(NextToken(rest), configuredMaxSteps, code);
+              if code <> 0 then
+                configuredMaxSteps := DefaultMaxSteps;
+            end
+          else if keyword = 'TAPE' then
+            currentTapeSeed := rest
+          else
+            begin
+              if keyword = 'RULE' then
+                begin
+                  a := NextToken(rest);
+                  b := NextToken(rest);
+                  c := NextToken(rest);
+                  d := NextToken(rest);
+                  e := NextToken(rest);
+                end
+              else
+                begin
+                  a := keyword;
+                  b := NextToken(rest);
+                  c := NextToken(rest);
+                  d := NextToken(rest);
+                  e := NextToken(rest);
+                end;
+
+              if (a <> '') and (b <> '') and (c <> '') and (d <> '') and (e <> '') then
+                begin
+                  SetLength(rules, ruleCount + 1);
+                  AddRuleAt(ruleCount,
+                            ParseStateToken(a),
+                            ParseSymbolToken(b),
+                            ParseSymbolToken(c),
+                            ParseDirectionToken(d),
+                            ParseStateToken(e));
+                  Inc(ruleCount);
+                end;
+            end;
+        end;
+    end;
+
+  close(f);
+
+  if Length(rules) = 0 then
+    begin
+      Writeln('Machine file contained no rules.');
+      exit;
+    end;
+
+  LoadMachineFromFile := true;
+end;
+
+procedure ResetCurrentMachine;
+begin
+  InitializeTapeFromSeed(currentTapeSeed, startMode);
+end;
+
+procedure RunInteractiveMachine;
+var
+  command: String;
+begin
+  ResetCurrentMachine;
+  PrintRuleTable;
+  DrawTape;
+
+  repeat
+    if currentState = 0 then
+      Writeln('Current state is HALT.');
+
+    Writeln;
+    Write('[Enter/S]tep  [R]un  [T]able  [X]reset  [Q]uit: ');
+    readln(command);
+    command := UpperText(TrimSpaces(command));
+
+    if command = '' then
+      command := 'S';
+
+    if command = 'S' then
+      begin
+        if currentState = 0 then
+          Writeln('Machine is already halted.')
+        else
+          ApplyStep;
+      end
+    else if command = 'R' then
+      begin
+        if currentState = 0 then
+          Writeln('Machine is already halted.')
+        else
+          RunUntilStop;
+      end
+    else if command = 'T' then
+      PrintRuleTable
+    else if command = 'X' then
+      begin
+        ResetCurrentMachine;
+        DrawTape;
+      end;
+  until command = 'Q';
+end;
+
+procedure ShowMainMenu;
+begin
+  Writeln;
+  Writeln('Turing Machine Simulator');
+  Writeln('========================');
+  Writeln('1. 2-State Busy Beaver');
+  Writeln('2. 3-State Busy Beaver');
+  Writeln('3. Unary Increment');
+  Writeln('4. Binary Increment');
+  Writeln('5. Load machine from file');
+  Writeln('H. Help');
+  Writeln('Q. Quit');
+end;
+
+var
+  choice, fileName: String;
+  done: Boolean;
+
+begin
+  done := false;
+
+  while not done do
+    begin
+      ShowMainMenu;
+      Write('Choose an option: ');
+      readln(choice);
+      choice := UpperText(TrimSpaces(choice));
+
+      if choice = '1' then
+        begin
+          InstallBusyBeaver2;
+          RunInteractiveMachine;
+        end
+      else if choice = '2' then
+        begin
+          InstallBusyBeaver3;
+          RunInteractiveMachine;
+        end
+      else if choice = '3' then
+        begin
+          InstallUnaryIncrement;
+          RunInteractiveMachine;
+        end
+      else if choice = '4' then
+        begin
+          InstallBinaryIncrement;
+          RunInteractiveMachine;
+        end
+      else if choice = '5' then
+        begin
+          Write('Enter machine file path: ');
+          readln(fileName);
+          if LoadMachineFromFile(TrimSpaces(fileName)) then
+            RunInteractiveMachine;
+        end
+      else if choice = 'H' then
+        PrintHelp
+      else if choice = 'Q' then
+        done := true;
+    end;
+end.

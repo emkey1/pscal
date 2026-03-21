@@ -101,6 +101,24 @@
       "path": "Tests/compiler/pascal/cases/variant_record_result_pointer_fields.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: variant result pointer fields"
+    },
+    {
+      "id": "global_byte_array_initializer",
+      "path": "Tests/compiler/pascal/cases/global_byte_array_initializer.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: global byte array = 1 2 3 0"
+    },
+    {
+      "id": "dynamic_record_array_fields",
+      "path": "Tests/compiler/pascal/cases/dynamic_record_array_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: dynamic record array fields = 42"
+    },
+    {
+      "id": "record_constructor_named_fields",
+      "path": "Tests/compiler/pascal/cases/record_constructor_named_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: record constructor named fields"
     }
   ]
 }

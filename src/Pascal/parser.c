@@ -80,6 +80,7 @@ static AST *tryStatement(Parser *parser);
 static AST *raiseStatement(Parser *parser);
 static AST *withStatement(Parser *parser);
 static AST *parsePostfixSelectors(Parser *parser, AST *node);
+static AST *parseRecordConstructor(Parser *parser);
 static AST *cloneBuiltinTypeNode(VarType type, int line);
 static AST *inferInlineForVarType(AST *expr, int line);
 
@@ -3974,6 +3975,73 @@ AST *parseArrayInitializer(Parser *parser) {
     if(!parser->current_token || parser->current_token->type!=TOKEN_RPAREN){errorParser(parser,"Exp )"); return n;} eat(parser,TOKEN_RPAREN); return n;
 }
 
+static AST *parseRecordConstructor(Parser *parser) {
+    AST *recordLiteral = newASTNode(AST_RECORD_LITERAL, parser->current_token);
+    bool sawField = false;
+
+    while (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+        if (!currentTokenIsIdentifierLike(parser)) {
+            errorParser(parser, "Expected field name in record constructor");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        TokenType fieldTokenType = parser->current_token->type;
+        Token *fieldToken = copyToken(parser->current_token);
+        AST *fieldName = newASTNode(AST_VARIABLE, fieldToken);
+        if (fieldToken) {
+            freeToken(fieldToken);
+        }
+        eat(parser, fieldTokenType);
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' after record constructor field name");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_COLON);
+
+        AST *fieldValue = expression(parser);
+        if (!fieldValue || fieldValue->type == AST_NOOP) {
+            errorParser(parser, "Expected expression after record constructor field name");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        AST *fieldAssign = newASTNode(AST_ASSIGN, NULL);
+        setLeft(fieldAssign, fieldName);
+        setRight(fieldAssign, fieldValue);
+        addChild(recordLiteral, fieldAssign);
+        sawField = true;
+
+        if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ';' or ')' after record constructor field");
+            freeAST(recordLiteral);
+            return newASTNode(AST_NOOP, NULL);
+        }
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+        errorParser(parser, "Expected ')' after record constructor");
+        freeAST(recordLiteral);
+        return newASTNode(AST_NOOP, NULL);
+    }
+    eat(parser, TOKEN_RPAREN);
+
+    if (!sawField) {
+        errorParser(parser, "Record constructor must initialize at least one field");
+        freeAST(recordLiteral);
+        return newASTNode(AST_NOOP, NULL);
+    }
+
+    return recordLiteral;
+}
+
 Token *peekToken(Parser *parser) {
     // 1. Save the current lexer state
     Lexer backupLexerState = *(parser->lexer);
@@ -4467,15 +4535,30 @@ AST *factor(Parser *parser) {
 
     } else if (initialTokenType == TOKEN_LPAREN) {
         eat(parser, TOKEN_LPAREN); // Eat '('
-        node = expression(parser); // Parse sub-expression
-        if (!node || node->type == AST_NOOP) { return newASTNode(AST_NOOP, NULL); }
-        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
-            errorParser(parser,"Expected )");
-            // If error, free the parsed sub-expression?
-            freeAST(node);
-            return newASTNode(AST_NOOP, NULL);
+        bool isRecordConstructor = false;
+        if (currentTokenIsIdentifierLike(parser)) {
+            Token *lookahead = peekToken(parser);
+            isRecordConstructor = (lookahead && lookahead->type == TOKEN_COLON);
+            if (lookahead) {
+                freeToken(lookahead);
+            }
         }
-        eat(parser, TOKEN_RPAREN); // Eat ')'
+
+        if (isRecordConstructor) {
+            node = parseRecordConstructor(parser);
+            if (!node || node->type == AST_NOOP) {
+                return newASTNode(AST_NOOP, NULL);
+            }
+        } else {
+            node = expression(parser); // Parse sub-expression
+            if (!node || node->type == AST_NOOP) { return newASTNode(AST_NOOP, NULL); }
+            if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+                errorParser(parser,"Expected )");
+                freeAST(node);
+                return newASTNode(AST_NOOP, NULL);
+            }
+            eat(parser, TOKEN_RPAREN); // Eat ')'
+        }
         // Flow continues to end, return node
 
     } else if (initialTokenType == TOKEN_LBRACKET) {

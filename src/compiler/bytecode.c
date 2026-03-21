@@ -281,6 +281,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case SET_GLOBAL_CACHED:
             return 2 + GLOBAL_INLINE_CACHE_SLOT_SIZE;
         case GET_FIELD_ADDRESS:
+        case GET_FIELD_ADDRESS_KEEP:
         case GET_FIELD_OFFSET:
         case LOAD_FIELD_VALUE:
         case LOAD_FIELD_VALUE_BY_NAME:
@@ -320,6 +321,7 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         }
         case CONSTANT16:
         case GET_FIELD_ADDRESS16:
+        case GET_FIELD_ADDRESS_KEEP16:
         case GET_FIELD_OFFSET16:
         case LOAD_FIELD_VALUE16:
         case LOAD_FIELD_VALUE_BY_NAME16:
@@ -984,10 +986,33 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             return offset + 2;
         }
+        case GET_FIELD_ADDRESS_KEEP: {
+            uint8_t const_idx = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d ", "GET_FIELD_ADDRESS_KEEP", const_idx);
+            if (const_idx < chunk->constants_count &&
+                chunk->constants[const_idx].type == TYPE_STRING) {
+                fprintf(stderr, "'%s'\n", AS_STRING(chunk->constants[const_idx]));
+            } else {
+                fprintf(stderr, "<INVALID FIELD CONST>\n");
+            }
+            return offset + 2;
+        }
         case GET_FIELD_ADDRESS16: {
             uint16_t const_idx = (uint16_t)(chunk->code[offset + 1] << 8) |
                                  chunk->code[offset + 2];
             fprintf(stderr, "%-16s %4d ", "GET_FIELD_ADDRESS16", const_idx);
+            if (const_idx < chunk->constants_count &&
+                chunk->constants[const_idx].type == TYPE_STRING) {
+                fprintf(stderr, "'%s'\n", AS_STRING(chunk->constants[const_idx]));
+            } else {
+                fprintf(stderr, "<INVALID FIELD CONST>\n");
+            }
+            return offset + 3;
+        }
+        case GET_FIELD_ADDRESS_KEEP16: {
+            uint16_t const_idx = (uint16_t)(chunk->code[offset + 1] << 8) |
+                                 chunk->code[offset + 2];
+            fprintf(stderr, "%-16s %4d ", "GET_FIELD_ADDRESS_KEEP16", const_idx);
             if (const_idx < chunk->constants_count &&
                 chunk->constants[const_idx].type == TYPE_STRING) {
                 fprintf(stderr, "'%s'\n", AS_STRING(chunk->constants[const_idx]));

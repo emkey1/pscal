@@ -1,3 +1,4 @@
+#!/usr/bin/env pascal
 program GameOfLife;
 
 // Conway's Game of Life - PSCAL Pascal Variant 
@@ -449,7 +450,7 @@ begin
   
   r := ord(ch) - ord('A');
 
-  Val(Copy(coordStr, 2), c, code);
+  Val(Copy(coordStr, 2, Length(coordStr) - 1), c, code);
   ParseCoordinate := (code = 0) and (c >= 0) and (c < cols);
 end;
 

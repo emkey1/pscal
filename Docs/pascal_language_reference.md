@@ -341,6 +341,19 @@ Types are defined in a `type` block.
     refer to the same underlying record storage just as they do in classic
     Pascal variant records.
 
+    Delphi-style named record constructors are also accepted as an extension in
+    expression context when the target record type is known from the assignment
+    or formal parameter:
+    ```pascal
+    rule := (currentState: 1;
+             readSymbol: 0;
+             moveCmd: (direction: Right);
+             newState: 2);
+    ```
+
+    This constructor syntax is not standard Pascal. PSCAL uses the surrounding
+    type context to decide which record type the field names belong to.
+
     > **Note:** Traditional Turbo/Delphi `object`/`class` syntax is deliberately
     > omitted.  PSCAL Pascal achieves polymorphism with plain `record`s that may
     > declare `virtual` methods, closures, and Go-style interface boxing (see

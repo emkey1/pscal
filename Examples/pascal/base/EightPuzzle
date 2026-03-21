@@ -1,0 +1,364 @@
+#!/usr/bin/env pascal
+program EightPuzzle;
+
+type
+  State = array[0..8] of Byte;
+  
+  MoveDir = (Up, Down, Left, Right);
+
+  PuzzleNode = record
+    state: State;
+    blankPos: Byte;
+    depth: Integer;
+    parentIndex: Integer;
+    moveTaken: MoveDir;
+  end;
+
+var
+  goalState: State = (1,2,3,4,5,6,7,8,0);
+  searchInfinity: Integer = 1000000;
+
+function ManhattanDistance(const s: State): Integer;
+var
+  i, val, r1, c1, r2, c2: Integer;
+begin
+  ManhattanDistance := 0;
+  
+  for i := 0 to 8 do
+    begin
+      val := s[i];
+      if val <> 0 then
+        begin
+          r1 := i div 3;
+          c1 := i mod 3;
+          r2 := (val - 1) div 3;
+          c2 := (val - 1) mod 3;
+          
+          ManhattanDistance := ManhattanDistance + Abs(r1 - r2) + Abs(c1 - c2);
+        end;
+    end;
+end;
+
+function SameState(const a, b: State): Boolean;
+var
+  i: Integer;
+begin
+  SameState := true;
+  for i := 0 to 8 do
+    if a[i] <> b[i] then
+      begin
+        SameState := false;
+        exit;
+      end;
+end;
+
+function FindBlankPos(const s: State): Byte;
+var
+  i: Byte;
+begin
+  FindBlankPos := 0;
+  for i := 0 to 8 do
+    if s[i] = 0 then
+      begin
+        FindBlankPos := i;
+        exit;
+      end;
+end;
+
+function MoveName(dir: MoveDir): String;
+begin
+  case dir of
+    Up: MoveName := 'Up';
+    Down: MoveName := 'Down';
+    Left: MoveName := 'Left';
+    Right: MoveName := 'Right';
+  end;
+end;
+
+function IsOppositeMove(a, b: MoveDir): Boolean;
+begin
+  IsOppositeMove :=
+    ((a = Up) and (b = Down)) or
+    ((a = Down) and (b = Up)) or
+    ((a = Left) and (b = Right)) or
+    ((a = Right) and (b = Left));
+end;
+
+procedure PrintState(const s: State);
+var
+  row, col, idx: Integer;
+begin
+  Writeln('+---+---+---+');
+  for row := 0 to 2 do
+    begin
+      for col := 0 to 2 do
+        begin
+          idx := row * 3 + col;
+          Write('| ');
+          if s[idx] = 0 then
+            Write(' ')
+          else
+            Write(s[idx]);
+          Write(' ');
+        end;
+      Writeln('|');
+      Writeln('+---+---+---+');
+    end;
+end;
+
+function ScrambleState(steps: Integer): State;
+var
+  current: State;
+  moves: array of MoveDir;
+  blankPos: Byte;
+  i, choiceIdx, tickSalt: Integer;
+  lastMove: MoveDir;
+  hasLastMove: Boolean;
+begin
+  current := goalState;
+  blankPos := FindBlankPos(current);
+  hasLastMove := false;
+  tickSalt := Trunc((RealTimeClock - Trunc(RealTimeClock)) * 1000000.0) + GetTicks();
+
+  for i := 1 to steps do
+    begin
+      moves := GetMoves(current, blankPos);
+      choiceIdx := (Random(Length(moves)) +
+                    ((tickSalt + i + blankPos) mod Length(moves))) mod Length(moves);
+      if hasLastMove and (Length(moves) > 1) then
+        while IsOppositeMove(moves[choiceIdx], lastMove) do
+          choiceIdx := (choiceIdx + 1) mod Length(moves);
+
+      current := ApplyMove(current, blankPos, moves[choiceIdx]);
+      blankPos := FindBlankPos(current);
+      lastMove := moves[choiceIdx];
+      hasLastMove := true;
+      tickSalt := tickSalt +
+                  Trunc((RealTimeClock - Trunc(RealTimeClock)) * 1000000.0) +
+                  choiceIdx + i;
+    end;
+
+  ScrambleState := current;
+end;
+
+procedure PrintSolutionPath(start: State; goalNode: PuzzleNode; const closedList: array of PuzzleNode);
+var
+  path: array of MoveDir;
+  currentState: State;
+  currentBlank: Byte;
+  traceNode: PuzzleNode;
+  writeIdx, i: Integer;
+begin
+  SetLength(path, goalNode.depth);
+  traceNode := goalNode;
+  writeIdx := goalNode.depth - 1;
+
+  while traceNode.parentIndex >= 0 do
+    begin
+      path[writeIdx] := traceNode.moveTaken;
+      traceNode := closedList[traceNode.parentIndex];
+      writeIdx := writeIdx - 1;
+    end;
+
+  if Length(path) = 0 then
+    begin
+      Writeln('Already at the goal state.');
+      PrintState(start);
+      exit;
+    end;
+
+  Writeln('Moves:');
+  for i := 0 to High(path) do
+    Writeln('  ', i + 1, '. ', MoveName(path[i]));
+
+  Writeln;
+  Writeln('Replay:');
+  currentState := start;
+  currentBlank := FindBlankPos(currentState);
+  Writeln('Start:');
+  PrintState(currentState);
+
+  for i := 0 to High(path) do
+    begin
+      currentState := ApplyMove(currentState, currentBlank, path[i]);
+      currentBlank := FindBlankPos(currentState);
+      Writeln('Move ', i + 1, ': ', MoveName(path[i]));
+      PrintState(currentState);
+    end;
+end;
+
+function GetMoves(const s: State; blankPos: Byte): array of MoveDir;
+var
+  moves: array of MoveDir;
+  idx, r, c: Integer;
+begin
+  SetLength(moves, 0);
+  
+  r := blankPos div 3;
+  c := blankPos mod 3;
+
+  if r > 0 then 
+    begin
+      idx := Length(moves);
+      SetLength(moves, idx + 1);
+      moves[idx] := Up;
+    end;
+
+  if r < 2 then 
+    begin
+      idx := Length(moves);
+      SetLength(moves, idx + 1);
+      moves[idx] := Down;
+    end;
+
+  if c > 0 then 
+    begin
+      idx := Length(moves);
+      SetLength(moves, idx + 1);
+      moves[idx] := Left;
+    end;
+
+  if c < 2 then 
+    begin
+      idx := Length(moves);
+      SetLength(moves, idx + 1);
+      moves[idx] := Right;
+    end;
+
+  GetMoves := moves;
+end;
+
+function ApplyMove(const s: State; blankPos: Byte; dir: MoveDir): State;
+var
+  i, newBlank, tmp: Integer;
+begin
+  if dir = Up then newBlank := blankPos - 3
+  else if dir = Down then newBlank := blankPos + 3
+  else if dir = Left then newBlank := blankPos - 1
+  else newBlank := blankPos + 1;
+
+  for i := 0 to 8 do
+    Result[i] := s[i];
+  
+  tmp := Result[blankPos];
+  Result[blankPos] := Result[newBlank];
+  Result[newBlank] := tmp;
+end;
+
+function SolveAStar(start: State): Boolean;
+var
+  openList, closedList: array of PuzzleNode;
+  tryMoves: array of MoveDir;
+  current: PuzzleNode;
+  newState: State;
+  bestIdx, i, j, k, currentClosedIndex, expandedNodes: Integer;
+  bestScore, currentScore: Integer;
+  found: Boolean;
+  dir: MoveDir;
+
+begin
+  SetLength(openList, 1);
+  openList[0].state := start;
+  openList[0].blankPos := FindBlankPos(start);
+  openList[0].depth := 0;
+  openList[0].parentIndex := -1;
+  openList[0].moveTaken := Up;
+  expandedNodes := 0;
+
+  while Length(openList) > 0 do
+    begin
+      { Find best node }
+      bestScore := searchInfinity;
+      bestIdx := 0;
+
+      for i := 0 to High(openList) do
+        begin
+          currentScore := openList[i].depth + ManhattanDistance(openList[i].state);
+          if currentScore < bestScore then
+            begin
+              bestScore := currentScore;
+              bestIdx := i;
+            end;
+        end;
+
+      { Check goal }
+      current := openList[bestIdx];
+
+      if SameState(current.state, goalState) then
+        begin
+          Writeln('Solved in ', current.depth, ' moves!');
+          Writeln('Expanded nodes: ', expandedNodes);
+          PrintSolutionPath(start, current, closedList);
+          SolveAStar := true;
+          exit;
+        end;
+
+      { Move to closed }
+      SetLength(closedList, Length(closedList) + 1);
+      closedList[High(closedList)] := current;
+      currentClosedIndex := High(closedList);
+      expandedNodes := expandedNodes + 1;
+      
+      { Remove from open }
+      for j := bestIdx to High(openList) - 1 do
+        openList[j] := openList[j+1];
+      SetLength(openList, High(openList));
+
+      { Generate successors }
+      tryMoves := GetMoves(current.state, current.blankPos);
+      for i := 0 to High(tryMoves) do
+        begin
+          dir := tryMoves[i];
+          newState := ApplyMove(current.state, current.blankPos, dir);
+          
+          { Skip if in closed or already queued }
+          found := false;
+          for k := 0 to High(closedList) do
+            if SameState(closedList[k].state, newState) then
+              found := true;
+          if not found then
+            for k := 0 to High(openList) do
+              if SameState(openList[k].state, newState) then
+                found := true;
+
+          if not found then
+            begin
+              j := Length(openList);
+              SetLength(openList, j + 1);
+              
+                with openList[j] do
+                begin
+                  state := newState;
+                  blankPos := FindBlankPos(newState);
+                  depth := current.depth + 1;
+                  parentIndex := currentClosedIndex;
+                  moveTaken := dir;
+                end;
+            end;
+        end;
+    end;
+
+  SolveAStar := false;
+end;
+
+var
+  startState: State;
+  scrambleSteps: Integer;
+
+begin
+  Randomize;
+  scrambleSteps := 12 + Random(6);
+  startState := ScrambleState(scrambleSteps);
+
+  Writeln('Eight Puzzle');
+  Writeln('============');
+  Writeln('Scramble depth: ', scrambleSteps);
+  Writeln('Start state:');
+  PrintState(startState);
+  Writeln('Solving...');
+
+  if SolveAStar(startState) then
+    Writeln('Solution found!')
+  else 
+    Writeln('No solution found.');
+end.

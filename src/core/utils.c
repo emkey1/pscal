@@ -367,6 +367,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_CASE:           return "CASE";
         case AST_CASE_BRANCH:    return "CASE_BRANCH";
         case AST_RECORD_TYPE:    return "RECORD_TYPE";
+        case AST_RECORD_LITERAL: return "RECORD_LITERAL";
         case AST_FIELD_ACCESS:   return "FIELD_ACCESS";
         case AST_ARRAY_TYPE:     return "ARRAY_TYPE";
         case AST_ARRAY_ACCESS:   return "ARRAY_ACCESS";
@@ -777,16 +778,7 @@ static bool pascalVarTypeSize(VarType type, long long *out_bytes) {
 }
 
 FieldValue *createEmptyRecord(AST *recordType) {
-    // Resolve type references if necessary
-    if (recordType && recordType->type == AST_TYPE_REFERENCE) {
-        // Look up the referenced type definition
-        AST* resolvedType = lookupType(recordType->token->value);
-        if (!resolvedType) {
-             fprintf(stderr, "Error in createEmptyRecord: Could not resolve type reference '%s'.\n", recordType->token->value);
-             return NULL;
-        }
-        recordType = resolvedType; // Use the resolved definition node
-    }
+    recordType = resolveTypeAliasForRecord(recordType);
 
     // Check if we have a valid RECORD_TYPE node
     if (!recordType || recordType->type != AST_RECORD_TYPE) {
@@ -1297,9 +1289,7 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
     if (!node_to_inspect && context_symbol) {
         node_to_inspect = context_symbol->type_def;
     }
-    if (node_to_inspect && node_to_inspect->type == AST_TYPE_REFERENCE && node_to_inspect->right) {
-        node_to_inspect = node_to_inspect->right;
-    }
+    node_to_inspect = resolveTypeAliasForRecord(node_to_inspect);
     // --- END MODIFICATION ---
 
     AST* actual_type_def = node_to_inspect;
