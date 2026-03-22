@@ -431,7 +431,8 @@ static bool vmRequestHardSuspendCurrentVproc(void) {
     X(RCMUTEX_CREATE) \
     X(MUTEX_LOCK) \
     X(MUTEX_UNLOCK) \
-    X(MUTEX_DESTROY)
+    X(MUTEX_DESTROY) \
+    X(RESET_LOCAL)
 
 static unsigned long long gVmOpcodeCounts[OPCODE_COUNT];
 static bool gVmOpcodeProfileEnabled = false;
@@ -7294,7 +7295,6 @@ comparison_error_label:
             case SET_INDIRECT: {
                 Value value_to_set = pop(vm);
                 Value pointer_to_lvalue = pop(vm);
-
                 if (pointer_to_lvalue.type != TYPE_POINTER) {
                     runtimeError(vm, "VM Error: SET_INDIRECT requires an address on the stack.");
                     freeValue(&value_to_set);
@@ -7952,6 +7952,22 @@ comparison_error_label:
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(vm, copyValueForStack(&frame->slots[slot]));
+                break;
+            }
+            case RESET_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                CallFrame* frame = &vm->frames[vm->frameCount - 1];
+                size_t declared_window = frame->slotCount;
+                size_t live_window = (size_t)(vm->stackTop - frame->slots);
+                size_t frame_window = declared_window ? declared_window : live_window;
+                if (slot >= frame_window) {
+                    runtimeError(vm, "VM Error: Local slot index %u out of range (declared window=%zu, live window=%zu).",
+                                 slot, declared_window, live_window);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value* target_slot = &frame->slots[slot];
+                freeValue(target_slot);
+                *target_slot = makeNil();
                 break;
             }
             case SET_LOCAL: {
@@ -8787,7 +8803,6 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Procedure '%s' not found for CALL_USER_PROC.", proc_name);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-
                 if (!proc_symbol->is_defined || proc_symbol->bytecode_address < 0) {
                     runtimeError(vm, "VM Error: Procedure '%s' has no compiled body.",
                                  proc_symbol->name ? proc_symbol->name : proc_name);

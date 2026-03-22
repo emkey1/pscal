@@ -131,6 +131,42 @@
       "path": "Tests/compiler/pascal/cases/variant_record_untagged.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: untagged variant record"
+    },
+    {
+      "id": "empty_uses_ignored",
+      "path": "Tests/compiler/pascal/cases/empty_uses_ignored.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: empty uses ignored"
+    },
+    {
+      "id": "case_char_code_label_multiline",
+      "path": "Tests/compiler/pascal/cases/case_char_code_label_multiline.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: case char code label multiline"
+    },
+    {
+      "id": "var_record_result_param",
+      "path": "Tests/compiler/pascal/cases/var_record_result_param.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: var record result param"
+    },
+    {
+      "id": "anonymous_record_global_fields",
+      "path": "Tests/compiler/pascal/cases/anonymous_record_global_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: anonymous record global fields"
+    },
+    {
+      "id": "inline_exit_in_nested_helper",
+      "path": "Tests/compiler/pascal/cases/inline_exit_in_nested_helper.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: inline exit = 42 / 7"
+    },
+    {
+      "id": "inline_record_value_param",
+      "path": "Tests/compiler/pascal/cases/inline_record_value_param.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: 30 31"
     }
   ]
 }

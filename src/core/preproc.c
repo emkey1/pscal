@@ -12,6 +12,20 @@ typedef struct {
     bool branch_taken;
 } IfState;
 
+static bool isPreprocDirectiveName(const char *directive) {
+    if (!directive || !*directive) {
+        return false;
+    }
+
+    return strcmp(directive, "ifdef") == 0 ||
+           strcmp(directive, "ifndef") == 0 ||
+           strcmp(directive, "elif") == 0 ||
+           strcmp(directive, "elseif") == 0 ||
+           strcmp(directive, "else") == 0 ||
+           strcmp(directive, "endif") == 0 ||
+           strcmp(directive, "import") == 0;
+}
+
 static bool isDefinedSimple(const char *name, const char **defines, int count) {
     if (!name || !*name || !defines) {
         return false;
@@ -184,6 +198,15 @@ char *preprocessConditionals(const char *source, const char **defines, int defin
             memcpy(directive, word_start, wlen);
             directive[wlen] = '\0';
 
+            if (!isPreprocDirectiveName(directive)) {
+                if (emit) {
+                    size_t copy_len = (size_t)(line_end - line_start);
+                    memcpy(out + out_pos, line_start, copy_len);
+                    out_pos += copy_len;
+                }
+                goto line_done;
+            }
+
             while (trim < line_end && isspace((unsigned char)*trim)) {
                 trim++;
             }
@@ -257,6 +280,7 @@ char *preprocessConditionals(const char *source, const char **defines, int defin
             }
         }
 
+line_done:
         if (has_newline) {
             out[out_pos++] = '\n';
             p++;
