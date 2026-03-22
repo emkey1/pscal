@@ -650,6 +650,18 @@ begin
   RunRecursiveMath := total;
 end;
 
+function ElapsedMillis(startTime: real): longint;
+var
+  finishTime: real;
+  elapsed: longint;
+begin
+  finishTime := RealTimeClock;
+  elapsed := Trunc((finishTime - startTime) * 1000.0);
+  if elapsed < 0 then
+    elapsed := 0;
+  ElapsedMillis := elapsed;
+end;
+
 var
   matrixA, matrixB, matrixC: TMatrix;
   numbers: TIntArray;
@@ -668,30 +680,55 @@ var
   initialSeed: longint;
   filePath: string;
   cleanupFile: text;
+  benchmarkStart, stageStart: real;
+  matrixMs, sortMs, recordMs, stringMs, setMs: longint;
+  primeMs, recursiveMs, listMs, fileMs, totalMs: longint;
 begin
   writeln('--- PSCAL VM Performance Benchmark ---');
   initialSeed := 12345;
   InitializeRng(initialSeed);
+  benchmarkStart := RealTimeClock;
 
+  stageStart := RealTimeClock;
   FillMatrix(matrixA, 0.75);
   FillMatrix(matrixB, 1.25);
   matrixScore := RunMatrixBenchmark(matrixA, matrixB, matrixC);
+  matrixMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   FillNumbers(numbers);
   sortChecksum := RunSortingBenchmark(numbers);
+  sortMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   BuildPeople(people);
   recordScore := ProcessPeople(people);
+  recordMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   stringScore := ManipulateStrings(STRING_ITERATIONS);
+  stringMs := ElapsedMillis(stageStart);
+
+  stageStart := RealTimeClock;
   setScore := RunSetBenchmark(SET_ITERATIONS);
+  setMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   RunPrimeSieve(PRIME_LIMIT, primeCount, primeChecksum);
-  fibScore := RunRecursiveMath;
+  primeMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
+  fibScore := RunRecursiveMath;
+  recursiveMs := ElapsedMillis(stageStart);
+
+  stageStart := RealTimeClock;
   listChecksum := RunLinkedList(LIST_SIZE);
+  listMs := ElapsedMillis(stageStart);
+
+  stageStart := RealTimeClock;
   filePath := ResolveTempPath(DATASET_BASENAME);
   fileChecksum := RunFileIOBenchmark(filePath, numbers);
+  fileMs := ElapsedMillis(stageStart);
 
   if FileExists(filePath) then
   begin
@@ -701,15 +738,26 @@ begin
 
   combined := matrixScore + recordScore + setScore + primeCount + primeChecksum +
               fibScore + listChecksum + fileChecksum + stringScore + sortChecksum;
+  totalMs := ElapsedMillis(benchmarkStart);
 
   writeln('Matrix checksum: ', matrixScore:0:4);
+  writeln('Matrix elapsed ms: ', matrixMs);
   writeln('Sorting checksum: ', sortChecksum);
+  writeln('Sorting elapsed ms: ', sortMs);
   writeln('String workload checksum: ', stringScore);
+  writeln('String elapsed ms: ', stringMs);
   writeln('Set operations score: ', setScore);
+  writeln('Set elapsed ms: ', setMs);
   writeln('Prime count: ', primeCount, ' checksum: ', primeChecksum);
+  writeln('Prime sieve elapsed ms: ', primeMs);
   writeln('Record processing metric: ', recordScore:0:4);
+  writeln('Record elapsed ms: ', recordMs);
   writeln('Recursive workload checksum: ', fibScore);
+  writeln('Recursive elapsed ms: ', recursiveMs);
   writeln('Linked list checksum: ', listChecksum);
+  writeln('Linked list elapsed ms: ', listMs);
   writeln('File I/O checksum: ', fileChecksum);
+  writeln('File I/O elapsed ms: ', fileMs);
   writeln('Combined benchmark digest: ', combined:0:4);
+  writeln('Total elapsed ms: ', totalMs);
 end.

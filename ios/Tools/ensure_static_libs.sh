@@ -4,9 +4,19 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 sdk_name="${SDK_NAME:-}"
+configuration="${CONFIGURATION:-Debug}"
+config_variant="$(printf '%s' "${configuration}" | /usr/bin/tr '[:upper:]' '[:lower:]')"
 preset=""
 build_dir=""
 arch=""
+
+case "${config_variant}" in
+    debug|release)
+        ;;
+    *)
+        config_variant="debug"
+        ;;
+esac
 
 cmake_bin=""
 cmake_candidates=()
@@ -42,12 +52,12 @@ fi
 
 case "${sdk_name}" in
     iphoneos*)
-        preset="ios-device"
-        build_dir="${root_dir}/build/ios-device"
+        preset="ios-device-${config_variant}"
+        build_dir="${root_dir}/build/${preset}"
         ;;
     iphonesimulator*)
-        preset="ios-simulator"
-        build_dir="${root_dir}/build/ios-simulator"
+        preset="ios-simulator-${config_variant}"
+        build_dir="${root_dir}/build/${preset}"
         ;;
     macosx*)
         arch="${NATIVE_ARCH_ACTUAL:-${CURRENT_ARCH:-}}"
