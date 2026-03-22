@@ -1,0 +1,1729 @@
+#!/usr/bin/env pascal
+program SDLCheckers3D;
+
+{ 3D Checkers using PSCAL's SDL/OpenGL built-ins }
+
+{$IFDEF FPC}
+  {$mode objfpc}{$H+}
+{$ENDIF}
+
+uses
+  { SDL built-ins }
+
+const
+  WINDOW_WIDTH = 1280;
+  WINDOW_HEIGHT = 860;
+  BOARD_SIZE = 8;
+  MAX_SEARCH_PATH = 12;
+  VIEW_FOV = 52.0;
+  NEAR_CLIP = 0.1;
+  FAR_CLIP = 80.0;
+  BOARD_YAW_DEFAULT = -28.0;
+  BOARD_PITCH = 50.0;
+  CAMERA_DISTANCE = 15.0;
+  CAMERA_HEIGHT = -0.55;
+  SCENE_OFFSET_X = 1.15;
+  SCENE_OFFSET_Y = -0.20;
+  SCENE_OFFSET_Z = -0.55;
+  BOARD_ROTATE_STEP = 18.0;
+  TILE_SIZE = 1.08;
+  TILE_HALF = 0.52;
+  TILE_HEIGHT = 0.10;
+  BOARD_BASE_HEIGHT = 0.38;
+  PIECE_RADIUS = 0.34;
+  PIECE_HEIGHT = 0.18;
+  KING_HEIGHT = 0.12;
+  PIECE_SLICES = 20;
+
+  { AI Optimizations }
+  TT_SIZE = 65536;
+
+type
+  BoardType = array[1..8, 1..8] of ShortInt;
+  
+  MoveType = record
+    fromRow, fromCol, toRow, toCol: Integer;
+    capturedRow, capturedCol: Integer; { For multi-jump tracking }
+  end;
+
+  SearchMoveType = record
+    isJump: Boolean;
+    stepCount: Integer;
+    captureCount: Integer;
+    pathRows: array[1..MAX_SEARCH_PATH] of Integer;
+    pathCols: array[1..MAX_SEARCH_PATH] of Integer;
+    capturedRows: array[1..MAX_SEARCH_PATH] of Integer;
+    capturedCols: array[1..MAX_SEARCH_PATH] of Integer;
+  end;
+
+  TTEntry = record
+    hash: Integer;
+    depth: Byte;
+    score: Integer;
+  end;
+
+var
+  board: BoardType;
+  gameOver, humanVsComputer, running: Boolean;
+  exitProgramRequested: Boolean;
+  forcedCapturesEnabled: Boolean;
+  moveCount: Integer;
+  searchNodesVisited: Integer;
+  searchNodeBudget: Integer;
+  cursorRow, cursorCol: Integer;
+  boardYawAngle: Real;
+  TransTable: array[0..TT_SIZE-1] of TTEntry;
+  selectedPiece: record
+    row, col: Integer;
+    validMoves: array of MoveType;
+  end;
+
+procedure InitializeBoard(var b: BoardType);
+var
+  r, c: Integer;
+begin
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      b[r, c] := 0;
+
+  for r := 1 to 3 do
+    for c := 1 to 8 do
+      if Odd(r + c) then
+        b[r, c] := 1; { PLAYER1 }
+
+  for r := 6 to 8 do
+    for c := 1 to 8 do
+      if Odd(r + c) then
+        b[r, c] := -1; { PLAYER2 }
+end;
+
+function GetPieceChar(piece: ShortInt): Char;
+begin
+  case piece of
+    1:     GetPieceChar := 'o';
+   -1:     GetPieceChar := 'x';
+    2:     GetPieceChar := 'O';
+   -2:     GetPieceChar := 'X';
+    else  GetPieceChar := '.';
+  end;
+end;
+
+function PlayerLabel(player: ShortInt): String;
+begin
+  if player > 0 then
+    PlayerLabel := 'O'
+  else
+    PlayerLabel := 'X';
+end;
+
+function SquareName(row, col: Integer): String;
+begin
+  SquareName := Chr(Ord('A') + col - 1) + IntToStr(row);
+end;
+
+procedure AppendHumanTurnMove(var turnLog: String; m: MoveType);
+var
+  sep: String;
+begin
+  if IsCaptureMove(m) then
+    sep := 'x'
+  else
+    sep := '-';
+
+  if Length(turnLog) = 0 then
+    turnLog := SquareName(m.fromRow, m.fromCol) + sep + SquareName(m.toRow, m.toCol)
+  else
+    turnLog := turnLog + sep + SquareName(m.toRow, m.toCol);
+end;
+
+function SearchMoveToText(m: SearchMoveType): String;
+var
+  i: Integer;
+  sep: String;
+begin
+  SearchMoveToText := '';
+  if not HasSearchMove(m) then
+    Exit;
+
+  if m.isJump then
+    sep := 'x'
+  else
+    sep := '-';
+
+  SearchMoveToText := SquareName(m.pathRows[1], m.pathCols[1]);
+  for i := 2 to m.stepCount do
+    SearchMoveToText := SearchMoveToText + sep + SquareName(m.pathRows[i], m.pathCols[i]);
+end;
+
+procedure LogTurnMove(player: ShortInt; moveText: String);
+begin
+  if Length(moveText) > 0 then
+    Writeln('Player ', PlayerLabel(player), ': ', moveText);
+end;
+
+function BoardWorldX(col: Integer): Real;
+begin
+  BoardWorldX := (col - 4.5) * TILE_SIZE;
+end;
+
+function BoardWorldZ(row: Integer): Real;
+begin
+  BoardWorldZ := (row - 4.5) * TILE_SIZE;
+end;
+
+function IsValidDestination(row, col: Integer): Boolean;
+var
+  i: Integer;
+begin
+  IsValidDestination := false;
+  for i := 0 to High(selectedPiece.validMoves) do
+    if (selectedPiece.validMoves[i].toRow = row) and
+       (selectedPiece.validMoves[i].toCol = col) then
+    begin
+      IsValidDestination := true;
+      Exit;
+    end;
+end;
+
+procedure SetShadeColor(red, green, blue, shade: Real);
+begin
+  GLColor3f(red * shade, green * shade, blue * shade);
+end;
+
+procedure DrawUnitCube(red, green, blue: Real);
+begin
+  GLBegin('quads');
+    SetShadeColor(red, green, blue, 1.10);
+    GLVertex3f(-0.5, -0.5,  0.5);
+    GLVertex3f( 0.5, -0.5,  0.5);
+    GLVertex3f( 0.5,  0.5,  0.5);
+    GLVertex3f(-0.5,  0.5,  0.5);
+
+    SetShadeColor(red, green, blue, 0.70);
+    GLVertex3f(-0.5, -0.5, -0.5);
+    GLVertex3f(-0.5,  0.5, -0.5);
+    GLVertex3f( 0.5,  0.5, -0.5);
+    GLVertex3f( 0.5, -0.5, -0.5);
+
+    SetShadeColor(red, green, blue, 0.82);
+    GLVertex3f(-0.5, -0.5, -0.5);
+    GLVertex3f(-0.5, -0.5,  0.5);
+    GLVertex3f(-0.5,  0.5,  0.5);
+    GLVertex3f(-0.5,  0.5, -0.5);
+
+    SetShadeColor(red, green, blue, 0.92);
+    GLVertex3f( 0.5, -0.5, -0.5);
+    GLVertex3f( 0.5,  0.5, -0.5);
+    GLVertex3f( 0.5,  0.5,  0.5);
+    GLVertex3f( 0.5, -0.5,  0.5);
+
+    SetShadeColor(red, green, blue, 1.18);
+    GLVertex3f(-0.5,  0.5, -0.5);
+    GLVertex3f(-0.5,  0.5,  0.5);
+    GLVertex3f( 0.5,  0.5,  0.5);
+    GLVertex3f( 0.5,  0.5, -0.5);
+
+    SetShadeColor(red, green, blue, 0.60);
+    GLVertex3f(-0.5, -0.5, -0.5);
+    GLVertex3f( 0.5, -0.5, -0.5);
+    GLVertex3f( 0.5, -0.5,  0.5);
+    GLVertex3f(-0.5, -0.5,  0.5);
+  GLEnd();
+end;
+
+procedure DrawBox(x, y, z, sx, sy, sz, red, green, blue: Real);
+begin
+  GLPushMatrix();
+  GLTranslatef(x, y, z);
+  GLScalef(sx, sy, sz);
+  DrawUnitCube(red, green, blue);
+  GLPopMatrix();
+end;
+
+procedure DrawCylinder(red, green, blue, radius, height: Real);
+var
+  i: Integer;
+  angle, px, pz: Real;
+begin
+  GLBegin('quad_strip');
+  for i := 0 to PIECE_SLICES do
+  begin
+    angle := (2.0 * 3.14159265358979323846 * i) / PIECE_SLICES;
+    px := cos(angle) * radius;
+    pz := sin(angle) * radius;
+    SetShadeColor(red, green, blue, 0.72 + 0.20 * ((sin(angle) + 1.0) * 0.5));
+    GLVertex3f(px, -height * 0.5, pz);
+    GLVertex3f(px,  height * 0.5, pz);
+  end;
+  GLEnd();
+
+  SetShadeColor(red, green, blue, 1.05);
+  GLBegin('triangle_fan');
+    GLVertex3f(0.0, height * 0.5, 0.0);
+    for i := 0 to PIECE_SLICES do
+    begin
+      angle := (2.0 * 3.14159265358979323846 * i) / PIECE_SLICES;
+      GLVertex3f(cos(angle) * radius, height * 0.5, sin(angle) * radius);
+    end;
+  GLEnd();
+
+  SetShadeColor(red, green, blue, 0.48);
+  GLBegin('triangle_fan');
+    GLVertex3f(0.0, -height * 0.5, 0.0);
+    for i := PIECE_SLICES downto 0 do
+    begin
+      angle := (2.0 * 3.14159265358979323846 * i) / PIECE_SLICES;
+      GLVertex3f(cos(angle) * radius, -height * 0.5, sin(angle) * radius);
+    end;
+  GLEnd();
+end;
+
+procedure DrawMarkerDisk(radius, y, red, green, blue: Real);
+var
+  i: Integer;
+  angle: Real;
+begin
+  GLBegin('triangle_fan');
+    SetShadeColor(red, green, blue, 0.95);
+    GLVertex3f(0.0, y, 0.0);
+    for i := 0 to 32 do
+    begin
+      angle := (2.0 * 3.14159265358979323846 * i) / 32.0;
+      SetShadeColor(red, green, blue, 0.72);
+      GLVertex3f(cos(angle) * radius, y, sin(angle) * radius);
+    end;
+  GLEnd();
+
+  GLLineWidth(2.0);
+  GLBegin('line_loop');
+  for i := 0 to 31 do
+  begin
+    angle := (2.0 * 3.14159265358979323846 * i) / 32.0;
+    SetShadeColor(red, green, blue, 1.20);
+    GLVertex3f(cos(angle) * radius, y, sin(angle) * radius);
+  end;
+  GLEnd();
+  GLLineWidth(1.0);
+end;
+
+procedure DrawBoard;
+var
+  r, c: Integer;
+  worldX, worldZ: Real;
+  squareRed, squareGreen, squareBlue: Real;
+  pieceRed, pieceGreen, pieceBlue: Real;
+begin
+  GLClearColor(0.03, 0.04, 0.08, 1.0);
+  GLClear();
+
+  GLMatrixMode('modelview');
+  GLLoadIdentity();
+  GLTranslatef(0.0, CAMERA_HEIGHT, -CAMERA_DISTANCE);
+  GLRotatef(BOARD_PITCH, 1.0, 0.0, 0.0);
+  GLRotatef(boardYawAngle, 0.0, 1.0, 0.0);
+  GLTranslatef(SCENE_OFFSET_X, SCENE_OFFSET_Y, SCENE_OFFSET_Z);
+
+  DrawBox(0.0, -BOARD_BASE_HEIGHT * 0.5 - 0.07, 0.0,
+          TILE_SIZE * 8.6, BOARD_BASE_HEIGHT, TILE_SIZE * 8.6,
+          0.18, 0.09, 0.03);
+
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+    begin
+      worldX := BoardWorldX(c);
+      worldZ := BoardWorldZ(r);
+
+      if Odd(r + c) then
+      begin
+        squareRed := 0.71;
+        squareGreen := 0.53;
+        squareBlue := 0.39;
+      end
+      else
+      begin
+        squareRed := 0.94;
+        squareGreen := 0.85;
+        squareBlue := 0.71;
+      end;
+
+      if (selectedPiece.row = r) and (selectedPiece.col = c) then
+      begin
+        squareRed := 0.98;
+        squareGreen := 0.82;
+        squareBlue := 0.18;
+      end
+      else if (cursorRow = r) and (cursorCol = c) then
+      begin
+        squareRed := squareRed * 0.75 + 0.25 * 0.35;
+        squareGreen := squareGreen * 0.75 + 0.25 * 0.85;
+        squareBlue := squareBlue * 0.75 + 0.25 * 1.00;
+      end;
+
+      DrawBox(worldX, 0.0, worldZ, TILE_SIZE * 0.98, TILE_HEIGHT, TILE_SIZE * 0.98,
+              squareRed, squareGreen, squareBlue);
+
+      if IsValidDestination(r, c) then
+      begin
+        GLPushMatrix();
+        GLTranslatef(worldX, TILE_HEIGHT + 0.025, worldZ);
+        DrawMarkerDisk(0.18, 0.0, 0.25, 1.0, 0.35);
+        GLPopMatrix();
+      end;
+
+      if board[r, c] <> 0 then
+      begin
+        if board[r, c] > 0 then
+        begin
+          pieceRed := 0.72;
+          pieceGreen := 0.10;
+          pieceBlue := 0.10;
+        end
+        else
+        begin
+          pieceRed := 0.10;
+          pieceGreen := 0.18;
+          pieceBlue := 0.82;
+        end;
+
+        GLPushMatrix();
+        GLTranslatef(worldX, TILE_HEIGHT + PIECE_HEIGHT * 0.5, worldZ);
+        DrawCylinder(pieceRed, pieceGreen, pieceBlue, PIECE_RADIUS, PIECE_HEIGHT);
+        if Abs(board[r, c]) > 1 then
+        begin
+          GLTranslatef(0.0, PIECE_HEIGHT * 0.45 + KING_HEIGHT * 0.5, 0.0);
+          DrawCylinder(0.96, 0.82, 0.12, PIECE_RADIUS * 0.68, KING_HEIGHT);
+        end;
+        GLPopMatrix();
+      end;
+    end;
+
+  if (cursorRow >= 1) and (cursorRow <= 8) and
+     (cursorCol >= 1) and (cursorCol <= 8) then
+  begin
+    GLPushMatrix();
+    GLTranslatef(BoardWorldX(cursorCol), TILE_HEIGHT + 0.03, BoardWorldZ(cursorRow));
+    DrawMarkerDisk(0.28, 0.0, 0.35, 0.95, 1.0);
+    GLPopMatrix();
+  end;
+
+  GLSwapWindow();
+end;
+
+function IsValidPos(r, c: Integer): Boolean; inline;
+begin
+  IsValidPos := (r >= 1) and (r <= 8) and (c >= 1) and (c <= 8);
+end;
+
+function IsPiece(b: BoardType; r, c: Integer): Boolean; inline;
+begin
+  if not IsValidPos(r, c) then Exit(false);
+  IsPiece := (b[r, c] <> 0);
+end;
+
+function IsKing(b: BoardType; r, c: Integer): Boolean; inline;
+begin
+  if not IsValidPos(r, c) then Exit(false);
+  IsKing := (Abs(b[r, c]) > 1);
+end;
+
+function AllowsForwardDelta(pieceVal: ShortInt; dr: Integer): Boolean; inline;
+begin
+  if Abs(pieceVal) > 1 then
+    Exit(true);
+
+  if pieceVal > 0 then
+    AllowsForwardDelta := (dr > 0)
+  else
+    AllowsForwardDelta := (dr < 0);
+end;
+
+procedure CreateKing(var b: BoardType; r, c: Integer);
+begin
+  if not IsValidPos(r, c) then Exit;
+  
+  if (r = 8) and (b[r, c] = 1) then
+    b[r, c] := 2  { Player1 becomes king }
+  else if (r = 1) and (b[r, c] = -1) then
+    b[r, c] := -2 { Player2 becomes king }
+end;
+
+procedure MovePiece(var b: BoardType; fromR, fromC, toR, toC: Integer);
+var
+  tempPiece: ShortInt;
+begin
+  if not (IsValidPos(fromR, fromC) and IsValidPos(toR, toC)) then Exit;
+  
+  tempPiece := b[fromR, fromC];
+  b[toR, toC] := tempPiece;
+
+  CreateKing(b, toR, toC);
+  
+  b[fromR, fromC] := 0;
+end;
+
+procedure RemovePiece(var b: BoardType; r, c: Integer);
+begin
+  if IsValidPos(r, c) then 
+    b[r, c] := 0;
+end;
+
+type
+  MoveArray = array of MoveType;
+  SearchMoveArray = array of SearchMoveType;
+
+procedure CloneBoard(var src: BoardType; var dest: BoardType);
+var
+  r, c: Integer;
+begin
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      dest[r, c] := src[r, c];
+end;
+
+function WouldPromote(pieceVal: ShortInt; destRow: Integer): Boolean; inline;
+begin
+  if pieceVal > 0 then
+    WouldPromote := (pieceVal = 1) and (destRow = 8)
+  else
+    WouldPromote := (pieceVal = -1) and (destRow = 1);
+end;
+
+procedure ClearSearchMove(var m: SearchMoveType);
+var
+  i: Integer;
+begin
+  m.isJump := false;
+  m.stepCount := 0;
+  m.captureCount := 0;
+  for i := 1 to MAX_SEARCH_PATH do
+  begin
+    m.pathRows[i] := 0;
+    m.pathCols[i] := 0;
+    m.capturedRows[i] := 0;
+    m.capturedCols[i] := 0;
+  end;
+end;
+
+procedure AppendSearchMove(var moves: SearchMoveArray; m: SearchMoveType);
+var
+  idx: Integer;
+begin
+  idx := Length(moves);
+  SetLength(moves, idx + 1);
+  moves[idx] := m;
+end;
+
+procedure AppendSearchMoveArray(var dest: SearchMoveArray; src: SearchMoveArray);
+var
+  i: Integer;
+begin
+  for i := 0 to High(src) do
+    AppendSearchMove(dest, src[i]);
+end;
+
+procedure AppendMove(var moves: MoveArray; m: MoveType);
+var
+  idx: Integer;
+begin
+  idx := Length(moves);
+  SetLength(moves, idx + 1);
+  moves[idx] := m;
+end;
+
+procedure AppendMoveArray(var dest: MoveArray; src: MoveArray);
+var
+  i: Integer;
+begin
+  for i := 0 to High(src) do
+    AppendMove(dest, src[i]);
+end;
+
+function HasSearchMove(m: SearchMoveType): Boolean; inline;
+begin
+  HasSearchMove := m.stepCount >= 2;
+end;
+
+function SearchMoveStartRow(m: SearchMoveType): Integer; inline;
+begin
+  SearchMoveStartRow := m.pathRows[1];
+end;
+
+function SearchMoveStartCol(m: SearchMoveType): Integer; inline;
+begin
+  SearchMoveStartCol := m.pathCols[1];
+end;
+
+function SearchMoveEndRow(m: SearchMoveType): Integer; inline;
+begin
+  SearchMoveEndRow := m.pathRows[m.stepCount];
+end;
+
+function SearchMoveEndCol(m: SearchMoveType): Integer; inline;
+begin
+  SearchMoveEndCol := m.pathCols[m.stepCount];
+end;
+
+function SearchMoveFromBasicMove(m: MoveType): SearchMoveType;
+begin
+  ClearSearchMove(SearchMoveFromBasicMove);
+  SearchMoveFromBasicMove.stepCount := 2;
+  SearchMoveFromBasicMove.pathRows[1] := m.fromRow;
+  SearchMoveFromBasicMove.pathCols[1] := m.fromCol;
+  SearchMoveFromBasicMove.pathRows[2] := m.toRow;
+  SearchMoveFromBasicMove.pathCols[2] := m.toCol;
+  SearchMoveFromBasicMove.isJump := (m.capturedRow > 0) and (m.capturedCol > 0);
+  if SearchMoveFromBasicMove.isJump then
+  begin
+    SearchMoveFromBasicMove.captureCount := 1;
+    SearchMoveFromBasicMove.capturedRows[1] := m.capturedRow;
+    SearchMoveFromBasicMove.capturedCols[1] := m.capturedCol;
+  end;
+end;
+
+function GetRawMovesForPiece(var b: BoardType; player: ShortInt;
+                             targetRow, targetCol: Integer;
+                             capturesOnly: Boolean): MoveArray;
+var
+  moves: MoveArray;
+  moveItem: MoveType;
+  dr, dc, tr, tc: Integer;
+  pieceVal: ShortInt;
+begin
+  SetLength(moves, 0);
+
+  if not IsValidPos(targetRow, targetCol) then
+  begin
+    GetRawMovesForPiece := moves;
+    Exit;
+  end;
+
+  pieceVal := b[targetRow, targetCol];
+  if pieceVal * player <= 0 then
+  begin
+    GetRawMovesForPiece := moves;
+    Exit;
+  end;
+
+  for dr := -1 to 1 do
+    for dc := -1 to 1 do
+      if (dr <> 0) and (dc <> 0) and AllowsForwardDelta(pieceVal, dr) then
+      begin
+        tr := targetRow + dr;
+        tc := targetCol + dc;
+
+        if IsValidPos(tr, tc) then
+        begin
+          if (not capturesOnly) and (b[tr, tc] = 0) then
+          begin
+            moveItem.fromRow := targetRow;
+            moveItem.fromCol := targetCol;
+            moveItem.toRow := tr;
+            moveItem.toCol := tc;
+            moveItem.capturedRow := 0;
+            moveItem.capturedCol := 0;
+            AppendMove(moves, moveItem);
+          end
+          else if b[tr, tc] * player < 0 then
+          begin
+            tr := targetRow + 2 * dr;
+            tc := targetCol + 2 * dc;
+            if IsValidPos(tr, tc) and (b[tr, tc] = 0) then
+            begin
+              moveItem.fromRow := targetRow;
+              moveItem.fromCol := targetCol;
+              moveItem.toRow := tr;
+              moveItem.toCol := tc;
+              moveItem.capturedRow := targetRow + dr;
+              moveItem.capturedCol := targetCol + dc;
+              AppendMove(moves, moveItem);
+            end;
+          end;
+        end;
+      end;
+
+  GetRawMovesForPiece := moves;
+end;
+
+function GetAllMoves(var b: BoardType; player: ShortInt): MoveArray;
+var
+  simpleMoves, captureMoves, pieceMoves, combinedMoves: MoveArray;
+  r, c, i: Integer;
+begin
+  SetLength(simpleMoves, 0);
+  SetLength(captureMoves, 0);
+
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      if b[r, c] * player > 0 then
+      begin
+        pieceMoves := GetRawMovesForPiece(b, player, r, c, false);
+        for i := 0 to High(pieceMoves) do
+          if (pieceMoves[i].capturedRow > 0) and (pieceMoves[i].capturedCol > 0) then
+            AppendMove(captureMoves, pieceMoves[i])
+          else
+            AppendMove(simpleMoves, pieceMoves[i]);
+      end;
+
+  if forcedCapturesEnabled and (Length(captureMoves) > 0) then
+    GetAllMoves := captureMoves
+  else
+  begin
+    SetLength(combinedMoves, 0);
+    AppendMoveArray(combinedMoves, captureMoves);
+    AppendMoveArray(combinedMoves, simpleMoves);
+    GetAllMoves := combinedMoves;
+  end;
+end;
+
+function GetMovesForPiece(var b: BoardType; player: ShortInt;
+                          targetRow, targetCol: Integer;
+                          capturesOnly: Boolean): MoveArray;
+var
+  allMoves: MoveArray;
+  pieceMoves: MoveArray;
+  i, idx: Integer;
+begin
+  allMoves := GetAllMoves(b, player);
+  SetLength(pieceMoves, 0);
+
+  for i := 0 to High(allMoves) do
+    if (allMoves[i].fromRow = targetRow) and (allMoves[i].fromCol = targetCol) then
+      if (not capturesOnly) or IsCaptureMove(allMoves[i]) then
+      begin
+        idx := Length(pieceMoves);
+        SetLength(pieceMoves, idx + 1);
+        pieceMoves[idx] := allMoves[i];
+      end;
+
+  GetMovesForPiece := pieceMoves;
+end;
+
+function IsLegalMoveOnBoard(var b: BoardType; m: MoveType): Boolean;
+var
+  pieceVal: ShortInt;
+  dr, dc: Integer;
+  midRow, midCol: Integer;
+begin
+  IsLegalMoveOnBoard := false;
+
+  if (m.fromRow < 1) or (m.fromRow > 8) or
+     (m.fromCol < 1) or (m.fromCol > 8) or
+     (m.toRow < 1) or (m.toRow > 8) or
+     (m.toCol < 1) or (m.toCol > 8) then
+    Exit;
+
+  pieceVal := b[m.fromRow, m.fromCol];
+  if pieceVal = 0 then
+    Exit;
+
+  if b[m.toRow, m.toCol] <> 0 then
+    Exit;
+
+  dr := m.toRow - m.fromRow;
+  dc := m.toCol - m.fromCol;
+
+  if Abs(dr) <> Abs(dc) then
+    Exit;
+
+  if Abs(dr) = 1 then
+  begin
+    if not AllowsForwardDelta(pieceVal, dr) then
+      Exit;
+    if (m.capturedRow <> 0) or (m.capturedCol <> 0) then
+      Exit;
+    IsLegalMoveOnBoard := true;
+    Exit;
+  end;
+
+  if Abs(dr) = 2 then
+  begin
+    if not AllowsForwardDelta(pieceVal, dr div 2) then
+      Exit;
+
+    midRow := m.fromRow + (dr div 2);
+    midCol := m.fromCol + (dc div 2);
+
+    if (m.capturedRow <> midRow) or (m.capturedCol <> midCol) then
+      Exit;
+
+    if b[midRow, midCol] * pieceVal >= 0 then
+      Exit;
+
+    IsLegalMoveOnBoard := true;
+    Exit;
+  end;
+end;
+
+function ExecuteMove(var b: BoardType; m: MoveType): Boolean;
+begin
+  if not IsLegalMoveOnBoard(b, m) then
+    Exit(false);
+    
+  MovePiece(b, m.fromRow, m.fromCol, m.toRow, m.toCol);
+
+  if (m.capturedRow > 0) and (m.capturedCol > 0) then
+    RemovePiece(b, m.capturedRow, m.capturedCol);
+
+  ExecuteMove := true;
+end;
+
+function IsCaptureMove(m: MoveType): Boolean; inline;
+begin
+  IsCaptureMove := (m.capturedRow > 0) and (m.capturedCol > 0);
+end;
+
+function HasMove(m: MoveType): Boolean; inline;
+begin
+  HasMove := (m.fromRow > 0) and (m.fromCol > 0) and
+             (m.toRow > 0) and (m.toCol > 0);
+end;
+
+procedure ClearMove(var m: MoveType); inline;
+begin
+  m.fromRow := 0;
+  m.fromCol := 0;
+  m.toRow := 0;
+  m.toCol := 0;
+  m.capturedRow := 0;
+  m.capturedCol := 0;
+end;
+
+function GetContinuationMoves(var b: BoardType; player: ShortInt;
+                              pieceRow, pieceCol: Integer): MoveArray;
+begin
+  GetContinuationMoves := GetRawMovesForPiece(b, player, pieceRow, pieceCol, true);
+end;
+
+function ContinueCaptureIfNeeded(var b: BoardType; player: ShortInt;
+                                 pieceRow, pieceCol: Integer): Boolean;
+var
+  followUps: MoveArray;
+begin
+  ContinueCaptureIfNeeded := false;
+
+  followUps := GetContinuationMoves(b, player, pieceRow, pieceCol);
+  if Length(followUps) > 0 then
+  begin
+    selectedPiece.row := pieceRow;
+    selectedPiece.col := pieceCol;
+    selectedPiece.validMoves := followUps;
+    ContinueCaptureIfNeeded := true;
+  end;
+end;
+
+function HasAnyMove(var b: BoardType; player: ShortInt): Boolean;
+var
+  r, c, dr, dc, tr, tc: Integer;
+  pieceVal: ShortInt;
+begin
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      if b[r, c] * player > 0 then
+      begin
+        pieceVal := b[r, c];
+        for dr := -1 to 1 do
+          for dc := -1 to 1 do
+            if (dr <> 0) and (dc <> 0) and AllowsForwardDelta(pieceVal, dr) then
+            begin
+              tr := r + dr;
+              tc := c + dc;
+              if IsValidPos(tr, tc) then
+              begin
+                if b[tr, tc] = 0 then
+                begin
+                  HasAnyMove := true;
+                  Exit;
+                end;
+                if b[tr, tc] * player < 0 then
+                begin
+                  tr := r + 2 * dr;
+                  tc := c + 2 * dc;
+                  if IsValidPos(tr, tc) and (b[tr, tc] = 0) then
+                  begin
+                    HasAnyMove := true;
+                    Exit;
+                  end;
+                end;
+              end;
+            end;
+      end;
+
+  HasAnyMove := false;
+end;
+
+procedure CollectJumpSequences(var b: BoardType; player: ShortInt;
+                               currentRow, currentCol: Integer;
+                               currentMove: SearchMoveType;
+                               var jumpMoves: SearchMoveArray);
+var
+  immediateJumps: MoveArray;
+  tempBoard: BoardType;
+  nextMove: SearchMoveType;
+  pieceVal: ShortInt;
+  i: Integer;
+begin
+  immediateJumps := GetRawMovesForPiece(b, player, currentRow, currentCol, true);
+  if Length(immediateJumps) = 0 then
+  begin
+    if currentMove.captureCount > 0 then
+      AppendSearchMove(jumpMoves, currentMove);
+    Exit;
+  end;
+
+  pieceVal := b[currentRow, currentCol];
+  for i := 0 to High(immediateJumps) do
+  begin
+    nextMove := currentMove;
+    nextMove.isJump := true;
+    Inc(nextMove.stepCount);
+    nextMove.pathRows[nextMove.stepCount] := immediateJumps[i].toRow;
+    nextMove.pathCols[nextMove.stepCount] := immediateJumps[i].toCol;
+    Inc(nextMove.captureCount);
+    nextMove.capturedRows[nextMove.captureCount] := immediateJumps[i].capturedRow;
+    nextMove.capturedCols[nextMove.captureCount] := immediateJumps[i].capturedCol;
+
+    CloneBoard(b, tempBoard);
+    ExecuteMove(tempBoard, immediateJumps[i]);
+
+    if WouldPromote(pieceVal, immediateJumps[i].toRow) then
+      AppendSearchMove(jumpMoves, nextMove)
+    else
+      CollectJumpSequences(tempBoard, player,
+                           immediateJumps[i].toRow, immediateJumps[i].toCol,
+                           nextMove, jumpMoves);
+  end;
+end;
+
+function GenerateAllSearchMoves(var b: BoardType; player: ShortInt): SearchMoveArray;
+var
+  jumpMoves, simpleMoves: SearchMoveArray;
+  rawMoves: MoveArray;
+  currentMove: SearchMoveType;
+  simpleSearchMove: SearchMoveType;
+  r, c, i: Integer;
+begin
+  SetLength(jumpMoves, 0);
+  SetLength(simpleMoves, 0);
+
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      if b[r, c] * player > 0 then
+      begin
+        ClearSearchMove(currentMove);
+        currentMove.stepCount := 1;
+        currentMove.pathRows[1] := r;
+        currentMove.pathCols[1] := c;
+        CollectJumpSequences(b, player, r, c, currentMove, jumpMoves);
+
+        rawMoves := GetRawMovesForPiece(b, player, r, c, false);
+        for i := 0 to High(rawMoves) do
+          if (rawMoves[i].capturedRow = 0) or (rawMoves[i].capturedCol = 0) then
+          begin
+            simpleSearchMove := SearchMoveFromBasicMove(rawMoves[i]);
+            AppendSearchMove(simpleMoves, simpleSearchMove);
+          end;
+      end;
+
+  if forcedCapturesEnabled and (Length(jumpMoves) > 0) then
+    GenerateAllSearchMoves := jumpMoves
+  else
+  begin
+    SetLength(GenerateAllSearchMoves, 0);
+    AppendSearchMoveArray(GenerateAllSearchMoves, jumpMoves);
+    AppendSearchMoveArray(GenerateAllSearchMoves, simpleMoves);
+  end;
+end;
+
+procedure ApplySearchMove(var src: BoardType; m: SearchMoveType; var dest: BoardType);
+var
+  pieceVal: ShortInt;
+  startRow, startCol, endRow, endCol: Integer;
+  i: Integer;
+begin
+  CloneBoard(src, dest);
+
+  startRow := SearchMoveStartRow(m);
+  startCol := SearchMoveStartCol(m);
+  endRow := SearchMoveEndRow(m);
+  endCol := SearchMoveEndCol(m);
+  pieceVal := dest[startRow, startCol];
+
+  dest[startRow, startCol] := 0;
+  for i := 1 to m.captureCount do
+    dest[m.capturedRows[i], m.capturedCols[i]] := 0;
+  dest[endRow, endCol] := pieceVal;
+  CreateKing(dest, endRow, endCol);
+end;
+
+function SearchMovePromotes(var b: BoardType; m: SearchMoveType): Boolean;
+var
+  pieceVal: ShortInt;
+begin
+  if not HasSearchMove(m) then
+    Exit(false);
+
+  pieceVal := b[SearchMoveStartRow(m), SearchMoveStartCol(m)];
+  SearchMovePromotes := WouldPromote(pieceVal, SearchMoveEndRow(m));
+end;
+
+function SearchMoveTacticalBonus(var b: BoardType; m: SearchMoveType): Integer;
+var
+  capturedPiece: ShortInt;
+  i: Integer;
+begin
+  SearchMoveTacticalBonus := 0;
+
+  for i := 1 to m.captureCount do
+  begin
+    capturedPiece := b[m.capturedRows[i], m.capturedCols[i]];
+    if Abs(capturedPiece) > 1 then
+      SearchMoveTacticalBonus := SearchMoveTacticalBonus + 95
+    else
+      SearchMoveTacticalBonus := SearchMoveTacticalBonus + 60;
+  end;
+
+  if SearchMovePromotes(b, m) then
+    SearchMoveTacticalBonus := SearchMoveTacticalBonus + 40;
+end;
+
+procedure BeginSearch(depth: Byte);
+begin
+  searchNodesVisited := 0;
+  if depth >= 4 then
+    searchNodeBudget := 80000
+  else
+    searchNodeBudget := 50000;
+end;
+
+function SearchCanContinue: Boolean;
+begin
+  Inc(searchNodesVisited);
+
+  if (searchNodesVisited mod 256) = 0 then
+  begin
+    GraphLoop(0);
+    if QuitRequested then
+    begin
+      exitProgramRequested := true;
+      Exit(false);
+    end;
+  end;
+
+  SearchCanContinue := searchNodesVisited <= searchNodeBudget;
+end;
+
+function CountMoves(var b: BoardType; player: ShortInt): Integer;
+var
+  moves: SearchMoveArray;
+begin
+  moves := GenerateAllSearchMoves(b, player);
+  CountMoves := Length(moves);
+end;
+
+function CountImmediatePromotionMoves(var b: BoardType; player: ShortInt): Integer;
+var
+  moves: SearchMoveArray;
+  i: Integer;
+begin
+  CountImmediatePromotionMoves := 0;
+  moves := GenerateAllSearchMoves(b, player);
+
+  for i := 0 to High(moves) do
+    if SearchMovePromotes(b, moves[i]) then
+      Inc(CountImmediatePromotionMoves);
+end;
+
+{ --- EXPERT EVALUATION --- }
+function EvaluateBoard(var b: BoardType): Integer;
+var
+  r, c: Integer;
+  pieceVal: ShortInt;
+  myMoves, oppMoves: Integer;
+  myPromoMoves, oppPromoMoves: Integer;
+  score: Integer;
+begin
+  score := 0;
+  
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+    begin
+      pieceVal := b[r, c];
+      if pieceVal = 0 then Continue;
+
+      { 1. Material Weighting }
+      if Abs(pieceVal) = 1 then
+      begin
+        if pieceVal > 0 then score := score + 100
+        else score := score - 100;
+      end
+      else
+      begin
+        if pieceVal > 0 then score := score + 175
+        else score := score - 175;
+      end;
+
+      { 2. Center Control Bonus }
+      if (r >= 3) and (r <= 6) and (c >= 3) and (c <= 6) then
+      begin
+        if pieceVal > 0 then score := score + 20
+        else score := score - 20;
+      end;
+
+      { 3. Advancement Bias }
+      if pieceVal = 1 then score := score + (r * 5)
+      else if pieceVal = -1 then score := score - ((9 - r) * 5);
+
+      { 4. Edge Penalty }
+      if (c = 1) or (c = 8) then
+      begin
+        if pieceVal > 0 then score := score - 10
+        else score := score + 10;
+      end;
+    end;
+
+  { 5. Bridge Defense (Back Row) }
+  for c := 1 to 8 do
+  begin
+    if b[1, c] = 1 then score := score + 50;
+    if b[8, c] = -1 then score := score - 50;
+  end;
+
+  { 6. Keep Original Mobility/Promotion bonuses }
+  myPromoMoves := CountImmediatePromotionMoves(b, 1);
+  oppPromoMoves := CountImmediatePromotionMoves(b, -1);
+  score := score + myPromoMoves * 35 - oppPromoMoves * 35;
+
+  myMoves := CountMoves(b, 1);
+  oppMoves := CountMoves(b, -1);
+  score := score + (myMoves - oppMoves) * 2;
+
+  EvaluateBoard := score;
+end;
+
+function HashBoardState(var b: BoardType; playerToMove: ShortInt): Integer;
+var
+  r, c: Integer;
+  h: Integer;
+begin
+  h := 146959;
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      h := ((h * 131) + b[r, c] + 7) mod 2147483629;
+
+  h := ((h * 131) + playerToMove + 7) mod 2147483629;
+  HashBoardState := h;
+end;
+
+function CountStateRepetitions(stateHash: Integer;
+                               boardHistory: array[1..512] of Integer;
+                               historyCount: Integer): Integer;
+var
+  i: Integer;
+begin
+  CountStateRepetitions := 0;
+  for i := 1 to historyCount do
+    if boardHistory[i] = stateHash then
+      Inc(CountStateRepetitions);
+end;
+
+procedure RecordBoardState(var b: BoardType; playerToMove: ShortInt;
+                           var boardHistory: array[1..512] of Integer;
+                           var historyCount: Integer;
+                           var stateHash: Integer;
+                           var drawByRepetition: Boolean);
+begin
+  stateHash := HashBoardState(b, playerToMove);
+  if historyCount < 512 then
+  begin
+    Inc(historyCount);
+    boardHistory[historyCount] := stateHash;
+  end;
+
+  drawByRepetition := CountStateRepetitions(stateHash, boardHistory, historyCount) >= 3;
+end;
+
+{ --- MOVE ORDERING --- }
+procedure SortSearchMoves(var b: BoardType; var moves: SearchMoveArray);
+var
+  i, j: Integer;
+  temp: SearchMoveType;
+  scoreI, scoreJ: Integer;
+begin
+  if Length(moves) < 2 then Exit;
+
+  for i := 0 to High(moves) - 1 do
+    for j := i + 1 to High(moves) do
+    begin
+      scoreI := moves[i].captureCount * 100 + SearchMoveTacticalBonus(b, moves[i]);
+      scoreJ := moves[j].captureCount * 100 + SearchMoveTacticalBonus(b, moves[j]);
+      
+      if scoreJ > scoreI then
+      begin
+        temp := moves[i];
+        moves[i] := moves[j];
+        moves[j] := temp;
+      end;
+    end;
+end;
+
+function SearchPosition(var b: BoardType; depth: Byte; player: ShortInt;
+                        alpha, beta: Integer): Integer;
+var
+  moves: SearchMoveArray;
+  tempBoard: BoardType;
+  bestValue, value: Integer;
+  i, currentHash, ttIndex: Integer;
+begin
+  if not SearchCanContinue then
+    Exit(EvaluateBoard(b));
+
+  if depth = 0 then
+    Exit(EvaluateBoard(b));
+
+  { Transposition Table Lookup }
+  currentHash := HashBoardState(b, player);
+  ttIndex := Abs(currentHash) mod TT_SIZE;
+  if (TransTable[ttIndex].hash = currentHash) and (TransTable[ttIndex].depth >= depth) then
+    Exit(TransTable[ttIndex].score);
+
+  moves := GenerateAllSearchMoves(b, player);
+
+  if Length(moves) = 0 then
+  begin
+    if player > 0 then
+      Exit(-200000 - depth)
+    else
+      Exit(200000 + depth);
+  end;
+
+  { Apply Move Ordering }
+  SortSearchMoves(b, moves);
+
+  if player > 0 then
+    bestValue := -1000000
+  else
+    bestValue := 1000000;
+
+  for i := 0 to High(moves) do
+  begin
+    ApplySearchMove(b, moves[i], tempBoard);
+    value := SearchPosition(tempBoard, depth - 1, -player, alpha, beta);
+
+    if player > 0 then
+      value := value + SearchMoveTacticalBonus(b, moves[i])
+    else
+      value := value - SearchMoveTacticalBonus(b, moves[i]);
+
+    if player > 0 then
+    begin
+      if value > bestValue then
+        bestValue := value;
+      alpha := Max(alpha, bestValue);
+    end
+    else
+    begin
+      if value < bestValue then
+        bestValue := value;
+      beta := Min(beta, bestValue);
+    end;
+
+    if beta <= alpha then
+      Break;
+  end;
+
+  { Transposition Table Store }
+  TransTable[ttIndex].hash := currentHash;
+  TransTable[ttIndex].depth := depth;
+  TransTable[ttIndex].score := bestValue;
+
+  SearchPosition := bestValue;
+end;
+
+function MinimaxAlphaBeta(var b: BoardType; depth: Byte; player: ShortInt;
+                          alpha, beta: Integer): Integer;
+begin
+  MinimaxAlphaBeta := SearchPosition(b, depth, player, alpha, beta);
+end;
+
+function GetBestMove(var b: BoardType; player: ShortInt; depth: Byte): SearchMoveType;
+var
+  moves: SearchMoveArray;
+  bestValue, value: Integer;
+  i, bestIdx: Integer;
+  bestIsCapture, bestPromotes: Boolean;
+  moveIsCapture, movePromotes: Boolean;
+  tempBoard: BoardType;
+  chooseMove: Boolean;
+
+begin
+  try
+    moves := GenerateAllSearchMoves(b, player);
+    if Length(moves) = 0 then
+    begin
+      ClearSearchMove(GetBestMove);
+      Exit;
+    end;
+    
+    SortSearchMoves(b, moves); { Apply Top Level Move Ordering }
+
+    BeginSearch(depth);
+
+    if player > 0 then
+      bestValue := -1000000
+    else
+      bestValue := 1000000;
+    bestIdx := -1;
+    bestIsCapture := false;
+    bestPromotes := false;
+
+    for i := 0 to High(moves) do
+    begin
+      if exitProgramRequested then
+        Break;
+
+      ApplySearchMove(b, moves[i], tempBoard);
+      value := SearchPosition(tempBoard, depth - 1, -player, -1000000, 1000000);
+      if player > 0 then
+        value := value + SearchMoveTacticalBonus(b, moves[i])
+      else
+        value := value - SearchMoveTacticalBonus(b, moves[i]);
+
+      moveIsCapture := moves[i].isJump;
+      movePromotes := SearchMovePromotes(b, moves[i]);
+
+      chooseMove := false;
+      if bestIdx < 0 then
+        chooseMove := true
+      else if (player > 0) and (value > bestValue) then
+        chooseMove := true
+      else if (player < 0) and (value < bestValue) then
+        chooseMove := true
+      else if value = bestValue then
+      begin
+        if moves[i].captureCount > moves[bestIdx].captureCount then
+          chooseMove := true
+        else if moveIsCapture and not bestIsCapture then
+          chooseMove := true
+        else if (moveIsCapture = bestIsCapture) and movePromotes and not bestPromotes then
+          chooseMove := true;
+      end;
+
+      if chooseMove then
+      begin
+        bestValue := value;
+        bestIdx := i;
+        bestIsCapture := moveIsCapture;
+        bestPromotes := movePromotes;
+      end;
+    end;
+
+    if (bestIdx >= 0) then
+      GetBestMove := moves[bestIdx]
+    else 
+      GetBestMove := moves[0];
+      
+  except
+    { Fallback: return first available move }
+    try
+      moves := GenerateAllSearchMoves(b, player);
+      if Length(moves) > 0 then
+      begin
+        GetBestMove := moves[0]
+      end
+      else
+        ClearSearchMove(GetBestMove);
+    except
+      ClearSearchMove(GetBestMove);
+    end;
+  end;
+end;
+
+function ParseCoordinate(coordStr: String; var r, c: Integer): Boolean;
+var
+  ch: Char;
+begin
+  if Length(coordStr) <> 2 then
+    Exit(false);
+
+  ch := UpCase(coordStr[1]);
+  if (ch < 'A') or (ch > 'H') then
+    Exit(false);
+
+  r := ord(ch) - ord('A') + 1;
+
+  ch := coordStr[2];
+  if (ch < '1') or (ch > '8') then
+    ParseCoordinate := false
+  else
+  begin
+    c := ord(ch) - ord('0');
+    ParseCoordinate := true;
+  end;
+end;
+
+function CheckWin(var b: BoardType): ShortInt; { returns winner (1=player1, -1=player2) }
+var
+  p1Pieces, p2Pieces: Integer;
+  r, c: Integer;
+
+begin
+  p1Pieces := 0; 
+  p2Pieces := 0;
+  
+  for r := 1 to 8 do
+    for c := 1 to 8 do
+      if b[r, c] > 0 then 
+        Inc(p1Pieces)
+      else if b[r, c] < 0 then
+        Inc(p2Pieces);
+
+  if (p1Pieces = 0) or not HasAnyMove(b, 1) then
+    Exit(-1); { Player2 wins }
+    
+  if (p2Pieces = 0) or not HasAnyMove(b, -1) then
+    Exit(1); { Player1 wins }
+    
+  Exit(0);
+end;
+
+procedure DrawMessage(const msg: String; x, y: Integer);
+begin
+  { No 2D HUD in the 3D version; status is shown through board state and terminal logs. }
+end;
+
+procedure InitFonts;
+begin
+end;
+
+procedure ResetSelection;
+begin
+  selectedPiece.row := 0;
+  selectedPiece.col := 0;
+  SetLength(selectedPiece.validMoves, 0);
+end;
+
+procedure SetupProjection(width, height: Integer);
+var
+  aspect: Real;
+begin
+  if height = 0 then
+    height := 1;
+  aspect := width / height;
+  GLViewport(0, 0, width, height);
+  GLMatrixMode('projection');
+  GLLoadIdentity();
+  GLPerspective(VIEW_FOV, aspect, NEAR_CLIP, FAR_CLIP);
+  GLMatrixMode('modelview');
+  GLClearDepth(1.0);
+  GLDepthTest(true);
+  GLDisable('lighting');
+  GLDisable('cull_face');
+end;
+
+procedure PrintControls(humanMode: Boolean);
+begin
+  Writeln;
+  Writeln('3D Checkers Controls');
+  Writeln('--------------------');
+  Writeln('I/J/K/L : move board cursor');
+  Writeln('Enter/Space: select piece or confirm destination');
+  Writeln('C : cancel current selection');
+  Writeln('Z/X : rotate board');
+  Writeln('Q : quit current game');
+  if not humanMode then
+    Writeln('AI vs AI: use Z/X to orbit and Q to quit.');
+  Writeln;
+end;
+
+procedure PlayGame(humanVsComputer: Boolean);
+var
+  currentPlayer, winner: ShortInt;
+  m: MoveType;
+  aiMove: SearchMoveType;
+  aiMoves: SearchMoveArray;
+  boardHistory: array[1..512] of Integer;
+  stateHash, historyCount: Integer;
+  drawByRepetition: Boolean;
+  i: Integer;
+  aiDepth: Integer;
+  keyCode: Integer;
+  humanTurnLog: String;
+  pieceBeforeMove: ShortInt;
+  nextBoard: BoardType;
+  foundMove: Boolean;
+
+  procedure ActivateCursorSquare;
+  var
+    moveIndex: Integer;
+  begin
+    foundMove := false;
+
+    if board[cursorRow, cursorCol] * currentPlayer > 0 then
+    begin
+      selectedPiece.row := cursorRow;
+      selectedPiece.col := cursorCol;
+      selectedPiece.validMoves := GetMovesForPiece(board, currentPlayer, cursorRow, cursorCol, false);
+      Exit;
+    end;
+
+    if selectedPiece.row <= 0 then
+      Exit;
+
+    for moveIndex := 0 to High(selectedPiece.validMoves) do
+      if (selectedPiece.validMoves[moveIndex].toRow = cursorRow) and
+         (selectedPiece.validMoves[moveIndex].toCol = cursorCol) then
+      begin
+        m := selectedPiece.validMoves[moveIndex];
+        foundMove := true;
+        Break;
+      end;
+
+    if not foundMove then
+      Exit;
+
+    pieceBeforeMove := board[m.fromRow, m.fromCol];
+    if ExecuteMove(board, m) then
+      AppendHumanTurnMove(humanTurnLog, m)
+    else
+    begin
+      ClearMove(m);
+      Exit;
+    end;
+
+    Inc(moveCount);
+
+    cursorRow := m.toRow;
+    cursorCol := m.toCol;
+
+    if HasMove(m) and
+       (WouldPromote(pieceBeforeMove, m.toRow) or
+        (not IsCaptureMove(m)) or
+        (not ContinueCaptureIfNeeded(board, currentPlayer, m.toRow, m.toCol))) then
+    begin
+      LogTurnMove(currentPlayer, humanTurnLog);
+      humanTurnLog := '';
+      currentPlayer := -currentPlayer;
+      RecordBoardState(board, currentPlayer, boardHistory, historyCount, stateHash, drawByRepetition);
+      ResetSelection;
+    end;
+  end;
+
+begin
+  Randomize;
+  currentPlayer := 1;
+  winner := 0;
+  historyCount := 0;
+  drawByRepetition := false;
+  
+  { Initialize the Transposition Table }
+  for i := 0 to TT_SIZE - 1 do
+  begin
+    TransTable[i].hash := 0;
+    TransTable[i].depth := 0;
+    TransTable[i].score := 0;
+  end;
+
+  InitializeBoard(board);
+  moveCount := 0;
+  humanTurnLog := '';
+  cursorRow := 6;
+  cursorCol := 1;
+  boardYawAngle := BOARD_YAW_DEFAULT;
+  ResetSelection;
+  RecordBoardState(board, currentPlayer, boardHistory, historyCount, stateHash, drawByRepetition);
+  
+  InitGraph(WINDOW_WIDTH, WINDOW_HEIGHT, 'SDL Checkers 3D');
+  SetupProjection(WINDOW_WIDTH, WINDOW_HEIGHT);
+  InitFonts;
+  PrintControls(humanVsComputer);
+  
+  running := true;
+  
+  repeat
+    GraphLoop(0);
+    if QuitRequested then
+    begin
+      exitProgramRequested := true;
+      break;
+    end;
+
+    DrawBoard();
+
+    keyCode := PollKeyAny();
+    while keyCode <> 0 do
+    begin
+      case keyCode of
+        27, Ord('q'), Ord('Q'):
+          running := false;
+        Ord('z'), Ord('Z'):
+          boardYawAngle := boardYawAngle - BOARD_ROTATE_STEP;
+        Ord('x'), Ord('X'):
+          boardYawAngle := boardYawAngle + BOARD_ROTATE_STEP;
+      end;
+
+      if humanVsComputer and (currentPlayer = 1) then
+      begin
+        case keyCode of
+          Ord('i'), Ord('I'):
+            if cursorRow > 1 then Dec(cursorRow);
+          Ord('k'), Ord('K'):
+            if cursorRow < 8 then Inc(cursorRow);
+          Ord('j'), Ord('J'):
+            if cursorCol > 1 then Dec(cursorCol);
+          Ord('l'), Ord('L'):
+            if cursorCol < 8 then Inc(cursorCol);
+          Ord('c'), Ord('C'):
+            begin
+              humanTurnLog := '';
+              ResetSelection;
+            end;
+          13, 32:
+            ActivateCursorSquare;
+        end;
+      end;
+
+      keyCode := PollKeyAny();
+    end;
+
+    { Computer opponent }
+    if (not humanVsComputer) or (currentPlayer = -1) then
+      begin
+        GraphLoop(500);
+        if QuitRequested then
+        begin
+          exitProgramRequested := true;
+          break;
+        end;
+
+        if humanVsComputer then
+          aiDepth := 4
+        else if moveCount < 2 then
+          aiDepth := 0
+        else
+          aiDepth := 3;
+        if humanVsComputer then
+          aiMove := GetBestMove(board, currentPlayer, 4)
+        else if moveCount < 2 then
+          begin
+            aiMoves := GenerateAllSearchMoves(board, currentPlayer);
+            if Length(aiMoves) > 0 then
+              aiMove := aiMoves[(Random(Length(aiMoves)) + GetTicks()) mod Length(aiMoves)]
+            else
+              ClearSearchMove(aiMove);
+          end
+        else
+          aiMove := GetBestMove(board, currentPlayer, 3);
+        
+        if HasSearchMove(aiMove) then
+          begin
+            ApplySearchMove(board, aiMove, nextBoard);
+            CloneBoard(nextBoard, board);
+
+            Inc(moveCount);
+            cursorRow := SearchMoveEndRow(aiMove);
+            cursorCol := SearchMoveEndCol(aiMove);
+            ResetSelection;
+
+            LogTurnMove(currentPlayer, SearchMoveToText(aiMove));
+            currentPlayer := -currentPlayer;
+            RecordBoardState(board, currentPlayer, boardHistory, historyCount, stateHash, drawByRepetition);
+          end
+        else
+          break;
+      end;
+
+    { Check win condition }
+    winner := CheckWin(board);
+    
+    if (winner <> 0) then
+      begin
+        DrawBoard();
+        if winner = 1 then
+          Writeln('Player O wins!')
+        else
+          Writeln('Player X wins!');
+          
+          GraphLoop(3000);
+          if QuitRequested then
+            exitProgramRequested := true;
+          break;
+      end;
+
+    if drawByRepetition then
+      begin
+        DrawBoard();
+        Writeln('Draw by repetition!');
+        GraphLoop(3000);
+        if QuitRequested then
+          exitProgramRequested := true;
+        break;
+      end;
+
+    { Check for draw }
+    if not HasAnyMove(board, currentPlayer) then
+      begin
+        DrawBoard();
+        Writeln('No moves left - draw!');
+        
+        GraphLoop(3000);
+        if QuitRequested then
+          exitProgramRequested := true;
+        break;
+      end;
+
+    { Continue loop }
+    GraphLoop(16);
+
+  until not running;
+
+  CloseGraph();
+end;
+
+procedure ShowMenu;
+var
+  choice: String;
+
+begin
+  repeat
+    ClrScr();
+    
+    Writeln('CHECKERS - 3D SDL EDITION');
+    Writeln('=========================');
+    Writeln('1. Human vs Computer');
+    Writeln('2. AI vs AI (Computer Battle)');
+    if forcedCapturesEnabled then
+      Writeln('3. Forced Captures: ON')
+    else
+      Writeln('3. Forced Captures: OFF');
+    Writeln('Q. Quit');
+    
+    Write('Choose an option: ');
+    Readln(choice);
+    if choice = '' then choice := ' ';
+    if choice[1] = '3' then
+      forcedCapturesEnabled := not forcedCapturesEnabled;
+  until (UpCase(choice[1]) in ['1', '2', 'Q']);
+
+  case UpCase(choice[1]) of
+    '1': PlayGame(true);
+    '2': PlayGame(false);
+    'Q': exitProgramRequested := true;
+  end;
+end;
+
+begin
+  var mainChoice: String;
+  forcedCapturesEnabled := false;
+  exitProgramRequested := false;
+  repeat
+    ShowMenu();
+    if exitProgramRequested then
+      break;
+    
+    Write('Play again? (Y/N): ');
+    Readln(mainChoice);
+    if mainChoice = '' then mainChoice := ' ';
+  until UpCase(mainChoice[1]) = 'N';
+  
+  Writeln('Thanks for playing 3D Checkers!');
+end.
