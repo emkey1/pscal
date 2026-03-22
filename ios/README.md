@@ -31,8 +31,8 @@ to the relevant commits.
 1. Configure and build the iOS static archives (plus the standalone tool
    runner) via CMake. For example:
    ```sh
-   cmake --preset ios-simulator
-   cmake --build --preset ios-simulator --target \
+   cmake --preset ios-simulator-release
+   cmake --build --preset ios-simulator-release --target \
        pscal_core_static \
        pscal_exsh_static \
        pscal_pascal_static \
@@ -44,16 +44,17 @@ to the relevant commits.
        pscal_pscald_static \
        pscal_tool_runner
    ```
-   Repeat with `--preset ios-device` for real hardware.
+   Repeat with `--preset ios-device-release` for real hardware. The legacy
+   `ios-simulator` / `ios-device` presets remain available for debug builds.
 2. Open `ios/PscalApp.xcodeproj` in Xcode. The target automatically adds
-   `$(PROJECT_DIR)/../build/ios-simulator` and `../build/ios-device` to the
+   configuration-matched iOS build directories (debug or release) to the
    library/header search paths so it can find the CMake-produced archives and
    generated headers. Link `libpscal_core_static.a` along with the frontend
    archives (`libpscal_exsh_static.a`, `libpscal_pascal_static.a`, etc.) so the
    shared runtime is available at link time. The `Embed Tool Runner` build phase
-   copies `pscal_tool_runner` from the corresponding CMake build directory into
-   the app bundle so the shell can launch the non-exsh frontends in a separate
-   process.
+   copies `pscal_tool_runner` from the corresponding configuration-matched
+   CMake build directory into the app bundle so the shell can launch the
+   non-exsh frontends in a separate process.
 3. Select the desired destination (e.g., "My Mac (Designed for iPad)" or an
    iPad simulator) and build/run. The app links against `libpscal_exsh_static.a`
    and starts `exsh_main` through the bridge.

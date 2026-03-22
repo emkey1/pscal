@@ -103,7 +103,8 @@
     X(RCMUTEX_CREATE) \
     X(MUTEX_LOCK) \
     X(MUTEX_UNLOCK) \
-    X(MUTEX_DESTROY)
+    X(MUTEX_DESTROY) \
+    X(RESET_LOCAL)
 
 #define OPCODE_NAME_ENTRY(op) #op,
 static const char* kOpcodeNames[] = {

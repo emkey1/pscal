@@ -301,6 +301,8 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
             return 3; // opcode + slot + length
         case INIT_LOCAL_POINTER:
             return 4; // opcode + slot byte + 2-byte type name index
+        case RESET_LOCAL:
+            return 2; // opcode + slot byte
         case INIT_FIELD_ARRAY: {
             int current_pos = offset + 1; // after opcode
             current_pos++; // field index
@@ -969,6 +971,11 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             }
             fprintf(stderr, "\n");
             return offset + 4;
+        }
+        case RESET_LOCAL: {
+            uint8_t slot = chunk->code[offset + 1];
+            fprintf(stderr, "%-16s %4d (slot)\n", "RESET_LOCAL", slot);
+            return offset + 2;
         }
         case GET_LOCAL_ADDRESS: {
             uint8_t slot = chunk->code[offset + 1];

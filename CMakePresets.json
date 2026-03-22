@@ -16,9 +16,19 @@
       }
     },
     {
-      "name": "ios-simulator",
-      "displayName": "iOS (Simulator)",
-      "description": "Build PSCAL static libs targeting the iOS simulator",
+      "name": "base-release",
+      "hidden": true,
+      "inherits": [
+        "base"
+      ],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ios-simulator-debug",
+      "displayName": "iOS (Simulator, Debug)",
+      "description": "Build PSCAL static libs targeting the iOS simulator with debug settings",
       "inherits": [
         "base"
       ],
@@ -33,11 +43,61 @@
       }
     },
     {
+      "name": "ios-simulator",
+      "displayName": "iOS (Simulator)",
+      "description": "Build PSCAL static libs targeting the iOS simulator",
+      "inherits": [
+        "ios-simulator-debug"
+      ]
+    },
+    {
+      "name": "ios-simulator-release",
+      "displayName": "iOS (Simulator, Release)",
+      "description": "Build PSCAL static libs targeting the iOS simulator with release optimization",
+      "inherits": [
+        "base-release"
+      ],
+      "toolchainFile": "cmake/toolchains/ios.cmake",
+      "cacheVariables": {
+        "PSCALI_IOS_PLATFORM": "SIMULATOR",
+        "SDL": "ON",
+        "ENABLE_EXT_BUILTIN_3D": "ON",
+        "PSCAL_BUILD_STATIC_LIBS": "ON",
+        "PSCAL_USE_BREW_CURL": "ON",
+        "BUILD_DASCAL": "ON"
+      }
+    },
+    {
+      "name": "ios-device-debug",
+      "displayName": "iOS (Device, Debug)",
+      "description": "Build PSCAL static libs targeting iOS devices with debug settings",
+      "inherits": [
+        "base"
+      ],
+      "toolchainFile": "cmake/toolchains/ios.cmake",
+      "cacheVariables": {
+        "PSCALI_IOS_PLATFORM": "DEVICE",
+        "SDL": "ON",
+        "ENABLE_EXT_BUILTIN_3D": "ON",
+        "PSCAL_BUILD_STATIC_LIBS": "ON",
+        "PSCAL_USE_BREW_CURL": "ON",
+        "BUILD_DASCAL": "ON"
+      }
+    },
+    {
       "name": "ios-device",
       "displayName": "iOS (Device)",
       "description": "Build PSCAL static libs targeting iOS devices",
       "inherits": [
-        "base"
+        "ios-device-debug"
+      ]
+    },
+    {
+      "name": "ios-device-release",
+      "displayName": "iOS (Device, Release)",
+      "description": "Build PSCAL static libs targeting iOS devices with release optimization",
+      "inherits": [
+        "base-release"
       ],
       "toolchainFile": "cmake/toolchains/ios.cmake",
       "cacheVariables": {
@@ -52,12 +112,28 @@
   ],
   "buildPresets": [
     {
+      "name": "ios-simulator-debug",
+      "configurePreset": "ios-simulator-debug"
+    },
+    {
       "name": "ios-simulator",
       "configurePreset": "ios-simulator"
     },
     {
+      "name": "ios-simulator-release",
+      "configurePreset": "ios-simulator-release"
+    },
+    {
+      "name": "ios-device-debug",
+      "configurePreset": "ios-device-debug"
+    },
+    {
       "name": "ios-device",
       "configurePreset": "ios-device"
+    },
+    {
+      "name": "ios-device-release",
+      "configurePreset": "ios-device-release"
     }
   ]
 }

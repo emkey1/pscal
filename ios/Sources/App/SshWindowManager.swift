@@ -251,7 +251,10 @@ final class TerminalTabManager: ObservableObject {
     func openSshSession(argv: [String]) -> Int32 {
         tabInitLog("openSshSession request thread=\(Thread.isMainThread ? "main" : "bg") tabs=\(tabs.count)")
         let sessionId = PSCALRuntimeNextSessionId()
-        let session = ShellRuntimeSession(sessionId: sessionId, argv: argv, program: .ssh)
+        let session = ShellRuntimeSession(sessionId: sessionId,
+                                          argv: argv,
+                                          program: .ssh,
+                                          managedByTabManager: true)
         let defaultTitle = TerminalTabManager.sanitizeTitle(sshTitle(argv: argv))
         let profileID = "ssh.1"
         let title = Self.startupTabTitle(
@@ -904,6 +907,7 @@ final class TerminalTabManager: ObservableObject {
 
 struct TerminalTabsRootView: View {
     @ObservedObject private var manager = TerminalTabManager.shared
+    @State private var showingDiagnostics = false
 
     var body: some View {
         if TerminalDebugFlags.printChanges {
@@ -911,7 +915,9 @@ struct TerminalTabsRootView: View {
             traceViewChanges("TerminalTabsRootView body")
         }
         return VStack(spacing: 0) {
-            TerminalTabBar(tabs: manager.tabs, selectedId: $manager.selectedId)
+            TerminalTabBar(tabs: manager.tabs,
+                           selectedId: $manager.selectedId,
+                           onShowDiagnostics: { showingDiagnostics = true })
             ZStack {
                 let tab = manager.selectedTab
                 tabContent(for: tab, isSelected: true)
@@ -923,6 +929,9 @@ struct TerminalTabsRootView: View {
                 return
             }
             NotificationCenter.default.post(name: .terminalInputFocusRequested, object: nil)
+        }
+        .sheet(isPresented: $showingDiagnostics) {
+            AppDiagnosticsView()
         }
     }
 
@@ -958,6 +967,7 @@ struct TerminalTabsRootView: View {
 private struct TerminalTabBar: View {
     let tabs: [TerminalTabManager.Tab]
     @Binding var selectedId: UInt64
+    let onShowDiagnostics: () -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -986,6 +996,21 @@ private struct TerminalTabBar: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("New Shell Tab")
                 .accessibilityHint("Opens a new local shell session in a new tab")
+
+                Button(action: onShowDiagnostics) {
+                    Image(systemName: "stethoscope")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("App Diagnostics")
+                .accessibilityHint("Runs local diagnostics for the iOS and iPadOS app")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -1452,6 +1477,9 @@ func pscalRuntimeSshSessionExited(_ sessionId: UInt64, _ status: Int32) {
 
 @_cdecl("pscalRuntimeShellSessionExited")
 func pscalRuntimeShellSessionExited(_ sessionId: UInt64, _ status: Int32) {
+    if ShellRuntimeSession.handleStandaloneSessionExit(sessionId: sessionId, status: status) {
+        return
+    }
     Task { @MainActor in
         TerminalTabManager.shared.handleSessionExit(sessionId: sessionId, status: status)
     }

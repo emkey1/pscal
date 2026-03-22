@@ -33,3 +33,5 @@ output/
 build-dvtm/
 /(
 /)
+Examples/pascal/sdl/BoxDemo
+Examples/pascal/base/PuzzleSolver

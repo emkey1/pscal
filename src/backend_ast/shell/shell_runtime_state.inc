@@ -4709,14 +4709,14 @@ typedef struct {
     bool from_cache;
 } ShellScalarCaptureFrame;
 
-static ShellScalarCacheEntry *gShellScalarCache = NULL;
-static size_t gShellScalarCacheCount = 0;
-static size_t gShellScalarCacheCapacity = 0;
-static size_t gShellScalarCacheGeneration = 0;
+static __thread ShellScalarCacheEntry *gShellScalarCache = NULL;
+static __thread size_t gShellScalarCacheCount = 0;
+static __thread size_t gShellScalarCacheCapacity = 0;
+static __thread size_t gShellScalarCacheGeneration = 0;
 
-static ShellScalarCaptureFrame *gShellScalarCaptureStack = NULL;
-static size_t gShellScalarCaptureDepth = 0;
-static size_t gShellScalarCaptureCapacity = 0;
+static __thread ShellScalarCaptureFrame *gShellScalarCaptureStack = NULL;
+static __thread size_t gShellScalarCaptureDepth = 0;
+static __thread size_t gShellScalarCaptureCapacity = 0;
 
 SHELL_STATIC_UNUSED void shellScalarCacheEntryDispose(ShellScalarCacheEntry *entry) {
     if (!entry) {

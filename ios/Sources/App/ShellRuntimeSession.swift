@@ -3,6 +3,14 @@ import UIKit
 import Darwin
 
 final class ShellRuntimeSession: ObservableObject {
+    private final class WeakSessionRef {
+        weak var value: ShellRuntimeSession?
+
+        init(_ value: ShellRuntimeSession) {
+            self.value = value
+        }
+    }
+
     enum SessionProgram {
         case shell
         case ssh
@@ -45,6 +53,36 @@ final class ShellRuntimeSession: ObservableObject {
         }
         return false
     }()
+    private static let standaloneRegistryLock = NSLock()
+    private static var standaloneSessions: [UInt64: WeakSessionRef] = [:]
+
+    static func handleStandaloneSessionExit(sessionId: UInt64, status: Int32) -> Bool {
+        standaloneRegistryLock.lock()
+        let ref = standaloneSessions[sessionId]
+        let session = ref?.value
+        if ref != nil && session == nil {
+            standaloneSessions.removeValue(forKey: sessionId)
+        }
+        standaloneRegistryLock.unlock()
+        guard let session else {
+            return false
+        }
+        session.markExited(status: status)
+        return true
+    }
+
+    private static func registerStandaloneSession(_ session: ShellRuntimeSession) {
+        standaloneRegistryLock.lock()
+        standaloneSessions[session.sessionId] = WeakSessionRef(session)
+        standaloneRegistryLock.unlock()
+    }
+
+    private static func unregisterStandaloneSession(sessionId: UInt64) {
+        standaloneRegistryLock.lock()
+        standaloneSessions.removeValue(forKey: sessionId)
+        standaloneRegistryLock.unlock()
+    }
+
     private static func logHterm(_ message: String) {
         guard htermDebugEnabled else { return }
         if let data = (message + "\n").data(using: .utf8) {
@@ -62,6 +100,7 @@ final class ShellRuntimeSession: ObservableObject {
     private let argv: [String]
     private let sessionProgram: SessionProgram
     private let sessionLogLabel: String
+    private let managedByTabManager: Bool
     private lazy var terminalBuffer: TerminalBuffer = {
         let buffer = TerminalBuffer(columns: pendingColumns,
                                     rows: pendingRows,
@@ -124,12 +163,16 @@ final class ShellRuntimeSession: ObservableObject {
         session.outputHandlerGroup.leave()
     }
 
-    init(sessionId: UInt64, argv: [String], program: SessionProgram = .shell) {
+    init(sessionId: UInt64,
+         argv: [String],
+         program: SessionProgram = .shell,
+         managedByTabManager: Bool = false) {
         self.sessionId = sessionId
         self.argv = argv
         self.sessionProgram = program
         self.sessionDisplayName = program.displayName
         self.sessionLogLabel = program.launchLabel
+        self.managedByTabManager = managedByTabManager
         self.runtimeContext = PSCALRuntimeCreateRuntimeContext()
         let metrics = PscalRuntimeBootstrap.defaultGeometryMetrics()
         self.pendingColumns = metrics.columns
@@ -138,9 +181,15 @@ final class ShellRuntimeSession: ObservableObject {
         self.htermController = HtermTerminalController.makeOnMainThread()
         self.metricsLogger = TerminalSessionMetricsLogger(sessionKind: sessionLogLabel, sessionId: sessionId)
         _ = terminalBuffer
+        if !managedByTabManager {
+            Self.registerStandaloneSession(self)
+        }
     }
 
     deinit {
+        if !managedByTabManager {
+            Self.unregisterStandaloneSession(sessionId: sessionId)
+        }
         if let runtimeContext = runtimeContext {
             PSCALRuntimeDestroyRuntimeContext(runtimeContext)
         }
@@ -315,6 +364,12 @@ final class ShellRuntimeSession: ObservableObject {
         }
     }
 
+    func terminalBufferMetrics() -> TerminalBuffer.BufferMetrics {
+        return outputQueue.sync {
+            terminalBuffer.metrics()
+        }
+    }
+
     func markExited(status: Int32?) {
         let shouldUpdate = stateQueue.sync { () -> Bool in
             guard !didExit else { return false }
@@ -322,6 +377,9 @@ final class ShellRuntimeSession: ObservableObject {
             return true
         }
         guard shouldUpdate else { return }
+        if !managedByTabManager {
+            Self.unregisterStandaloneSession(sessionId: sessionId)
+        }
         stopOutputHandler()
         withRuntimeContext {
             PSCALRuntimeUnregisterSessionContext(sessionId)

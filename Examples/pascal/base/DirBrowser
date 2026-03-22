@@ -1,0 +1,203 @@
+#!/usr/bin/env pascal
+program DirBrowser;
+
+type
+  FileLister = record
+    path: String;
+    pasOnly: Boolean;
+  end;
+
+function EndsWithText(const s, suffix: String): Boolean;
+var
+  ls, lf: Integer;
+begin
+  ls := Length(s);
+  lf := Length(suffix);
+  if lf > ls then
+    Exit(false);
+
+  EndsWithText := Copy(s, ls - lf + 1, lf) = suffix;
+end;
+
+function TrimSpaces(const s: String): String;
+var
+  startIdx, endIdx: Integer;
+begin
+  startIdx := 1;
+  endIdx := Length(s);
+
+  while (startIdx <= endIdx) and (s[startIdx] <= ' ') do
+    Inc(startIdx);
+  while (endIdx >= startIdx) and (s[endIdx] <= ' ') do
+    Dec(endIdx);
+
+  if startIdx > endIdx then
+    TrimSpaces := ''
+  else
+    TrimSpaces := Copy(s, startIdx, endIdx - startIdx + 1);
+end;
+
+function UpperCaseText(const s: String): String;
+var
+  i: Integer;
+  outText: String;
+begin
+  outText := '';
+  for i := 1 to Length(s) do
+    outText := outText + UpCase(s[i]);
+  UpperCaseText := outText;
+end;
+
+function EnsureTrailingSlash(const path: String): String;
+begin
+  if path = '' then
+    Exit('./');
+
+  if path[Length(path)] = '/' then
+    EnsureTrailingSlash := path
+  else
+    EnsureTrailingSlash := path + '/';
+end;
+
+function TrimTrailingSlash(const path: String): String;
+var
+  cleaned: String;
+begin
+  cleaned := path;
+  while (Length(cleaned) > 1) and (cleaned[Length(cleaned)] = '/') do
+    cleaned := Copy(cleaned, 1, Length(cleaned) - 1);
+
+  TrimTrailingSlash := cleaned;
+end;
+
+function ParentDir(const path: String): String;
+var
+  cleaned: String;
+  i: Integer;
+begin
+  cleaned := TrimTrailingSlash(path);
+  if cleaned = '' then
+    Exit('.');
+
+  i := Length(cleaned);
+  while (i > 1) and (cleaned[i] <> '/') do
+    Dec(i);
+
+  if i <= 1 then
+  begin
+    if (Length(cleaned) > 0) and (cleaned[1] = '/') then
+      ParentDir := '/'
+    else
+      ParentDir := '.';
+    Exit;
+  end;
+
+  ParentDir := Copy(cleaned, 1, i - 1);
+end;
+
+function IsDirectory(const path: String): Boolean;
+var
+  attr: Integer;
+begin
+  attr := getfattr(TrimTrailingSlash(path));
+  IsDirectory := ((attr and 16) <> 0);
+end;
+
+function MatchesFilter(const lister: FileLister; const name: String): Boolean;
+begin
+  if (name = '.') or (name = '..') then
+    Exit(false);
+
+  if lister.pasOnly and not EndsWithText(name, '.pas') then
+    Exit(false);
+
+  MatchesFilter := true;
+end;
+
+procedure ListDirectory(var lister: FileLister);
+var
+  name: String;
+  count: Integer;
+begin
+  writeln('Listing ', EnsureTrailingSlash(lister.path), ':');
+  name := findfirst(lister.path);
+  count := 0;
+
+  while name <> '' do
+  begin
+    if MatchesFilter(lister, name) then
+    begin
+      writeln('  ', name);
+      Inc(count);
+    end;
+    name := findnext();
+  end;
+
+  if count = 0 then
+    writeln('  (no matching entries)');
+end;
+
+procedure RunInteractiveBrowser;
+var
+  dir, input, newDir: String;
+  lister: FileLister;
+begin
+  dir := getenv('PWD');
+  if dir = '' then
+    dir := '.';
+
+  lister.pasOnly := false;
+
+  repeat
+    writeln;
+    writeln('Current: ', EnsureTrailingSlash(dir));
+    if lister.pasOnly then
+      writeln('Filter : *.pas')
+    else
+      writeln('Filter : all entries');
+    writeln('[L]ist  [P]as-only toggle  [C]hange dir  [U]p one level  [Q]uit');
+    write('> ');
+
+    readln(input);
+    input := UpperCaseText(TrimSpaces(input));
+    if input = '' then
+      Continue;
+
+    case input[1] of
+      'L':
+        begin
+          lister.path := dir;
+          ListDirectory(lister);
+        end;
+
+      'P':
+        begin
+          lister.pasOnly := not lister.pasOnly;
+        end;
+
+      'C':
+        begin
+          write('Directory: ');
+          readln(newDir);
+          newDir := TrimSpaces(newDir);
+          if newDir = '' then
+            Continue;
+
+          if IsDirectory(newDir) then
+            dir := TrimTrailingSlash(newDir)
+          else
+            writeln('Invalid directory: ', newDir);
+        end;
+
+      'U':
+        begin
+          dir := ParentDir(dir);
+        end;
+    end;
+  until input = 'Q';
+end;
+
+begin
+  RunInteractiveBrowser();
+  writeln('Goodbye!');
+end.

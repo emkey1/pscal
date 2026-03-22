@@ -80,6 +80,7 @@ static InterfaceBoxingResult maybeAutoBoxInterfaceForType(AST* interfaceType,
                                                           int line,
                                                           bool recoverWithNil,
                                                           bool strictRecord);
+static const char* getSerializablePointerBaseTypeName(AST* type_node);
 static bool emitImplicitMyselfFieldValue(BytecodeChunk* chunk, int line, const char* fieldName);
 static BytecodeChunk* tracked_vtable_chunk = NULL;
 static char** emitted_vtable_classes = NULL;
@@ -390,12 +391,36 @@ typedef struct FunctionCompilerState {
 } FunctionCompilerState;
 
 static FunctionCompilerState* current_function_compiler = NULL;
+static bool inline_routine_active = false;
+static int inline_routine_result_slot = -1;
+static int* inline_routine_exit_jumps = NULL;
+static int inline_routine_exit_count = 0;
+static int inline_routine_exit_capacity = 0;
 
 static int addStringConstant(BytecodeChunk* chunk, const char* str);
 static int addIntConstant(BytecodeChunk* chunk, long long intValue);
 static void noteLocalSlotUse(FunctionCompilerState* fc, int slot);
 static AST* resolveTypeAlias(AST* type_node);
 static const char* ensureSerializableTypeName(AST* type_node);
+static void recordInlineRoutineExitJump(int jump_opcode_offset);
+
+static void recordInlineRoutineExitJump(int jump_opcode_offset) {
+    if (!inline_routine_active) {
+        return;
+    }
+    if (inline_routine_exit_count >= inline_routine_exit_capacity) {
+        int new_capacity = inline_routine_exit_capacity > 0 ? inline_routine_exit_capacity * 2 : 8;
+        int* grown = (int*)realloc(inline_routine_exit_jumps, sizeof(int) * (size_t)new_capacity);
+        if (!grown) {
+            fprintf(stderr, "Compiler error: failed to grow inline exit jump list.\n");
+            compiler_had_error = true;
+            return;
+        }
+        inline_routine_exit_jumps = grown;
+        inline_routine_exit_capacity = new_capacity;
+    }
+    inline_routine_exit_jumps[inline_routine_exit_count++] = jump_opcode_offset;
+}
 
 static bool isCurrentFunctionResultIdentifier(const FunctionCompilerState* fc, const char* name) {
     if (!fc || !fc->returns_value || !name) {
@@ -559,6 +584,27 @@ static void emitRoutineResultSlotInit(AST* type_specifier_node,
         }
         emitConstantIndex16(chunk, addStringConstant(chunk, type_name ? type_name : ""), line);
     }
+}
+
+static void emitInlineParamSlotInit(AST* type_specifier_node,
+                                    int slot,
+                                    bool by_ref,
+                                    BytecodeChunk* chunk,
+                                    int line) {
+    if (!current_function_compiler || slot < 0) {
+        return;
+    }
+
+    if (by_ref) {
+        const char* type_name = ensureSerializableTypeName(type_specifier_node);
+        noteLocalSlotUse(current_function_compiler, slot);
+        writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, line);
+        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+        emitConstantIndex16(chunk, addStringConstant(chunk, type_name ? type_name : ""), line);
+        return;
+    }
+
+    emitRoutineResultSlotInit(type_specifier_node, slot, chunk, line);
 }
 
 // Track global objects created with NEW so their hidden
@@ -1460,14 +1506,12 @@ static void emitGlobalVarDefinition(AST* var_decl,
     } else {
         const char* type_name = "";
         if (var_decl->var_type == TYPE_POINTER) {
-            AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
-            if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE) {
-                if (ptr_ast->right && ptr_ast->right->token) {
-                    type_name = ptr_ast->right->token->value;
-                } else if (ptr_ast->token && ptr_ast->token->value) {
-                    type_name = ptr_ast->token->value;
-                }
-            }
+            type_name = getSerializablePointerBaseTypeName(type_specifier_node ? type_specifier_node
+                                                                               : actual_type_def_node);
+        }
+        if (type_name[0] == '\0' && var_decl->var_type != TYPE_STRING && var_decl->var_type != TYPE_FILE) {
+            AST* serializable = type_specifier_node ? type_specifier_node : actual_type_def_node;
+            type_name = ensureSerializableTypeName(serializable);
         }
         if (type_name[0] == '\0' && type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
             type_name = type_specifier_node->token->value;
@@ -1818,7 +1862,10 @@ static const char* ensureSerializableTypeName(AST* type_node) {
         return "";
     }
 
-    if (actual->token && actual->token->value && actual->token->value[0] != '\0') {
+    if (actual->token && actual->token->value && actual->token->value[0] != '\0' &&
+        (actual->type == AST_TYPE_DECL ||
+         actual->type == AST_TYPE_REFERENCE ||
+         actual->type == AST_VARIABLE)) {
         return actual->token->value;
     }
 
@@ -1845,6 +1892,17 @@ static const char* ensureSerializableTypeName(AST* type_node) {
     insertType(generated, actual);
     TypeEntry* entry = findTypeEntry(generated);
     return (entry && entry->name) ? entry->name : "";
+}
+
+static const char* getSerializablePointerBaseTypeName(AST* type_node) {
+    AST* ptr_ast = resolveTypeAlias(type_node);
+    if (ptr_ast && ptr_ast->type == AST_TYPE_DECL && ptr_ast->left) {
+        ptr_ast = resolveTypeAlias(ptr_ast->left);
+    }
+    if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE && ptr_ast->right) {
+        return ensureSerializableTypeName(ptr_ast->right);
+    }
+    return "";
 }
 
 // Resolve type references to their concrete definitions.
@@ -3198,6 +3256,25 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     AST* arg_actual = resolveTypeAlias(arg_node->type_def);
     VarType arg_vt = arg_actual ? arg_actual->var_type : arg_node->var_type;
 
+    if (!arg_actual && arg_node->type == AST_VARIABLE && arg_node->token && arg_node->token->value &&
+        gCurrentProgramRoot) {
+        AST* decl = findStaticDeclarationInAST(arg_node->token->value, arg_node, gCurrentProgramRoot);
+        if (decl) {
+            AST* decl_type = NULL;
+            if (decl->type == AST_FUNCTION_DECL && decl->right) {
+                decl_type = resolveTypeAlias(decl->right);
+            } else if (decl->type == AST_VAR_DECL && decl->right) {
+                decl_type = resolveTypeAlias(decl->right);
+            } else if (decl->type_def) {
+                decl_type = resolveTypeAlias(decl->type_def);
+            }
+            if (decl_type) {
+                arg_actual = decl_type;
+                arg_vt = decl_type->var_type;
+            }
+        }
+    }
+
     if (arg_node->type == AST_PROCEDURE_CALL && arg_node->token && arg_node->token->value) {
         const char* callee = arg_node->token->value;
         if (strcasecmp(callee, "low") == 0 || strcasecmp(callee, "high") == 0) {
@@ -3413,6 +3490,102 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     }
 
     return param_actual->var_type == arg_vt;
+}
+
+static VarType compilerProcPointerParamType(AST* param) {
+    if (!param) {
+        return TYPE_VOID;
+    }
+    if (param->type == AST_VAR_DECL) {
+        if (param->type_def && param->type_def->var_type != TYPE_VOID) {
+            return param->type_def->var_type;
+        }
+        if (param->right && param->right->var_type != TYPE_VOID) {
+            return param->right->var_type;
+        }
+    }
+    return param->var_type;
+}
+
+static bool compilerProcPointerParamByRef(AST* param) {
+    return param ? (param->by_ref != 0) : false;
+}
+
+static bool validateCompilerProcPointerArgument(AST* expectedProcPtr, AST* arg_node) {
+    if (!expectedProcPtr || expectedProcPtr->type != AST_PROC_PTR_TYPE || !arg_node) {
+        return true;
+    }
+
+    if (arg_node->type != AST_ADDR_OF || !arg_node->left || !arg_node->left->token || !arg_node->left->token->value) {
+        fprintf(stderr, "Type error: expected '@proc' for procedure pointer argument.\n");
+        compiler_had_error = true;
+        return false;
+    }
+
+    const char* aname = arg_node->left->token->value;
+    Symbol* as = resolveProcedureSymbolInScope(aname, arg_node, gCurrentProgramRoot);
+    if (!as || !as->type_def) {
+        fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", aname);
+        compiler_had_error = true;
+        return false;
+    }
+
+    AST* actualDecl = as->type_def;
+    AST* expectedParams = (expectedProcPtr->child_count > 0) ? expectedProcPtr->children[0] : NULL;
+    int expectedCount = expectedParams ? expectedParams->child_count : 0;
+    int actualCount = actualDecl->child_count;
+    if (expectedCount != actualCount) {
+        fprintf(stderr, "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
+                aname, expectedCount, actualCount);
+        compiler_had_error = true;
+        return false;
+    }
+
+    for (int j = 0; j < expectedCount; ++j) {
+        AST* expectedParam = expectedParams->children[j];
+        AST* actualParam = actualDecl->children[j];
+        if (!expectedParam || !actualParam) {
+            continue;
+        }
+        bool expectedByRef = compilerProcPointerParamByRef(expectedParam);
+        bool actualByRef = compilerProcPointerParamByRef(actualParam);
+        if (expectedByRef != actualByRef) {
+            fprintf(stderr,
+                    "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
+                    (long long)j + 1, aname,
+                    expectedByRef ? "VAR/OUT" : "value",
+                    actualByRef ? "VAR/OUT" : "value");
+            compiler_had_error = true;
+            return false;
+        }
+        VarType expectedType = compilerProcPointerParamType(expectedParam);
+        VarType actualType = compilerProcPointerParamType(actualParam);
+        if (expectedType != actualType) {
+            fprintf(stderr,
+                    "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
+                    (long long)j + 1, aname,
+                    varTypeToString(expectedType),
+                    varTypeToString(actualType));
+            compiler_had_error = true;
+            return false;
+        }
+    }
+
+    AST* expectedRet = expectedProcPtr->right;
+    AST* actualRet = actualDecl->right;
+    VarType expectedRetType = expectedRet ? expectedRet->var_type : TYPE_VOID;
+    VarType actualRetType = actualRet ? actualRet->var_type : TYPE_VOID;
+    if (expectedRetType != actualRetType) {
+        fprintf(stderr,
+                "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
+                aname,
+                varTypeToString(expectedRetType),
+                varTypeToString(actualRetType));
+        compiler_had_error = true;
+        return false;
+    }
+
+    return true;
 }
 
 // --- Forward Declarations for Recursive Compilation ---
@@ -5826,17 +5999,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         writeBytecodeChunk(chunk, INIT_LOCAL_POINTER, getLine(varNameNode));
                         writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
 
-                        const char* type_name = "";
-                        // Prefer the base type name for pointer types so the VM can resolve it.
-                        AST* ptr_ast = type_specifier_node ? type_specifier_node : actual_type_def_node;
-                        if (ptr_ast && ptr_ast->type == AST_POINTER_TYPE) {
-                            AST* base = ptr_ast->right;
-                            if (base && base->token && base->token->value) {
-                                type_name = base->token->value;
-                            } else if (ptr_ast->token && ptr_ast->token->value) {
-                                type_name = ptr_ast->token->value;
-                            }
-                        }
+                        const char* type_name = getSerializablePointerBaseTypeName(type_specifier_node ? type_specifier_node
+                                                                                                       : actual_type_def_node);
                         if (type_name[0] == '\0') {
                             if (type_specifier_node && type_specifier_node->token && type_specifier_node->token->value) {
                                 type_name = type_specifier_node->token->value;
@@ -6379,7 +6543,6 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
         effective_locals = 0;
     }
     proc_symbol->locals_count = (uint16_t)effective_locals;
-
     // Step 5: Emit the return instruction.
     if (func_decl_node->type == AST_FUNCTION_DECL) {
         noteLocalSlotUse(&fc, return_value_slot);
@@ -6434,12 +6597,36 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
         temp_fc.function_symbol = proc_symbol;
     }
     bool saved_returns_value = current_function_compiler->returns_value;
-    if (decl->type == AST_FUNCTION_DECL) {
-        current_function_compiler->returns_value = true;
-    }
+    const char* saved_name = current_function_compiler->name;
+    Symbol* saved_function_symbol = current_function_compiler->function_symbol;
+    bool saved_inline_active = inline_routine_active;
+    int saved_inline_result_slot = inline_routine_result_slot;
+    int* saved_inline_exit_jumps = inline_routine_exit_jumps;
+    int saved_inline_exit_count = inline_routine_exit_count;
+    int saved_inline_exit_capacity = inline_routine_exit_capacity;
+    inline_routine_active = true;
+    inline_routine_result_slot = -1;
+    inline_routine_exit_jumps = NULL;
+    inline_routine_exit_count = 0;
+    inline_routine_exit_capacity = 0;
+    current_function_compiler->name = proc_symbol->name ? proc_symbol->name :
+                                      (decl->token ? decl->token->value : current_function_compiler->name);
+    current_function_compiler->function_symbol = proc_symbol;
+    current_function_compiler->returns_value = (decl->type == AST_FUNCTION_DECL);
+    SymbolEnvSnapshot inline_env_snapshot;
+    saveLocalEnv(&inline_env_snapshot);
     AST* blockNode = (decl->type == AST_PROCEDURE_DECL) ? decl->right : decl->extra;
     if (!blockNode) {
         current_function_compiler->returns_value = saved_returns_value;
+        current_function_compiler->name = saved_name;
+        current_function_compiler->function_symbol = saved_function_symbol;
+        restoreLocalEnv(&inline_env_snapshot);
+        free(inline_routine_exit_jumps);
+        inline_routine_active = saved_inline_active;
+        inline_routine_result_slot = saved_inline_result_slot;
+        inline_routine_exit_jumps = saved_inline_exit_jumps;
+        inline_routine_exit_count = saved_inline_exit_count;
+        inline_routine_exit_capacity = saved_inline_exit_capacity;
         return;
     }
 
@@ -6450,6 +6637,9 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     typedef struct {
         const char* name;
         bool by_ref;
+        VarType var_type;
+        AST* type_node;
+        AST* decl_node;
     } InlineBinding;
 
     InlineBinding* bindings = NULL;
@@ -6462,6 +6652,15 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
             free(bindings);
             free(binding_slots);
             current_function_compiler->returns_value = saved_returns_value;
+            current_function_compiler->name = saved_name;
+            current_function_compiler->function_symbol = saved_function_symbol;
+            restoreLocalEnv(&inline_env_snapshot);
+            free(inline_routine_exit_jumps);
+            inline_routine_active = saved_inline_active;
+            inline_routine_result_slot = saved_inline_result_slot;
+            inline_routine_exit_jumps = saved_inline_exit_jumps;
+            inline_routine_exit_count = saved_inline_exit_count;
+            inline_routine_exit_capacity = saved_inline_exit_capacity;
             if (!saved_fc) {
                 current_function_compiler = NULL;
             } else {
@@ -6476,6 +6675,8 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     for (int i = 0; i < decl->child_count && arg_index < call_node->child_count; i++) {
         AST* param_group = decl->children[i];
         bool by_ref = param_group->by_ref;
+        AST* param_type_node = param_group->right ? param_group->right : param_group->type_def;
+        VarType param_var_type = param_type_node ? param_type_node->var_type : TYPE_UNKNOWN;
         for (int j = 0; j < param_group->child_count && arg_index < call_node->child_count; j++, arg_index++) {
             AST* param_name_node = param_group->children[j];
             const char* pname = param_name_node->token ? param_name_node->token->value : NULL;
@@ -6488,6 +6689,9 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
             if (!pname) continue;
             bindings[binding_count].name = pname;
             bindings[binding_count].by_ref = by_ref;
+            bindings[binding_count].var_type = param_var_type;
+            bindings[binding_count].type_node = param_type_node;
+            bindings[binding_count].decl_node = param_group;
             binding_count++;
         }
     }
@@ -6495,6 +6699,15 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     for (int i = 0; i < binding_count; i++) {
         addLocal(current_function_compiler, bindings[i].name, line, bindings[i].by_ref);
         binding_slots[i] = current_function_compiler->local_count - 1;
+        current_function_compiler->locals[binding_slots[i]].decl_node = bindings[i].decl_node;
+        noteLocalSlotUse(current_function_compiler, binding_slots[i]);
+        writeBytecodeChunk(chunk, RESET_LOCAL, line);
+        writeBytecodeChunk(chunk, (uint8_t)binding_slots[i], line);
+        emitInlineParamSlotInit(bindings[i].type_node, binding_slots[i], bindings[i].by_ref, chunk, line);
+        insertLocalSymbol(bindings[i].name,
+                          bindings[i].var_type,
+                          bindings[i].type_node,
+                          true);
     }
 
     for (int i = binding_count - 1; i >= 0; i--) {
@@ -6516,7 +6729,19 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
         // function name will target this slot.
         addLocal(current_function_compiler, decl->token->value, line, false);
         result_slot = current_function_compiler->local_count - 1;
+        inline_routine_result_slot = result_slot;
+        noteLocalSlotUse(current_function_compiler, result_slot);
+        writeBytecodeChunk(chunk, RESET_LOCAL, line);
+        writeBytecodeChunk(chunk, (uint8_t)result_slot, line);
         emitRoutineResultSlotInit(decl->right, result_slot, chunk, line);
+        insertLocalSymbol(decl->token->value,
+                          decl->right ? decl->right->var_type : TYPE_UNKNOWN,
+                          decl->right,
+                          true);
+        insertLocalSymbol("result",
+                          decl->right ? decl->right->var_type : TYPE_UNKNOWN,
+                          decl->right,
+                          true);
     }
 
     LabelTableState inline_labels;
@@ -6528,6 +6753,10 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     }
     compileNode(blockNode, chunk, getLine(blockNode));
     current_procedure_table = saved_table;
+
+    for (int i = 0; i < inline_routine_exit_count; i++) {
+        patchShort(chunk, inline_routine_exit_jumps[i] + 1, chunk->count - (inline_routine_exit_jumps[i] + 3));
+    }
 
     finalizeLabelTable(&inline_labels, proc_symbol->name ? proc_symbol->name : "inline routine");
 
@@ -6542,6 +6771,15 @@ static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeCh
     }
 
     current_function_compiler->returns_value = saved_returns_value;
+    current_function_compiler->name = saved_name;
+    current_function_compiler->function_symbol = saved_function_symbol;
+    restoreLocalEnv(&inline_env_snapshot);
+    free(inline_routine_exit_jumps);
+    inline_routine_active = saved_inline_active;
+    inline_routine_result_slot = saved_inline_result_slot;
+    inline_routine_exit_jumps = saved_inline_exit_jumps;
+    inline_routine_exit_count = saved_inline_exit_count;
+    inline_routine_exit_capacity = saved_inline_exit_capacity;
 
     // Clean up locals added during inlining
     for (int i = current_function_compiler->local_count - 1; i >= starting_local_count; i--) {
@@ -6637,6 +6875,31 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         case AST_NOOP:
             break;
         case AST_RETURN: {
+            if (inline_routine_active) {
+                if (node->left) {
+                    compileRValue(node->left, chunk, getLine(node->left));
+                    AST* func_decl = (current_function_compiler && current_function_compiler->function_symbol)
+                                         ? current_function_compiler->function_symbol->type_def
+                                         : NULL;
+                    AST* return_type = NULL;
+                    if (func_decl && func_decl->type == AST_FUNCTION_DECL) {
+                        return_type = func_decl->right;
+                    }
+                    maybeAutoBoxInterfaceForType(return_type, node->left, chunk, getLine(node->left), true, false);
+                    if (inline_routine_result_slot != -1) {
+                        noteLocalSlotUse(current_function_compiler, inline_routine_result_slot);
+                        writeBytecodeChunk(chunk, SET_LOCAL, line);
+                        writeBytecodeChunk(chunk, (uint8_t)inline_routine_result_slot, line);
+                    } else {
+                        writeBytecodeChunk(chunk, POP, line);
+                    }
+                }
+                int jump_to_end = chunk->count;
+                writeBytecodeChunk(chunk, JUMP, line);
+                emitShort(chunk, 0xFFFF, line);
+                recordInlineRoutineExitJump(jump_to_end);
+                break;
+            }
             if (node->left) {
                 compileRValue(node->left, chunk, getLine(node->left));
                 AST* func_decl = (current_function_compiler && current_function_compiler->function_symbol)
@@ -7532,6 +7795,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         }
 
                         AST* param_type = getParameterTypeAST(param_node);
+                        AST* param_actual = resolveTypeAlias(param_type);
+                        if (param_actual && param_actual->type == AST_PROC_PTR_TYPE) {
+                            if (!validateCompilerProcPointerArgument(param_actual, arg_node)) {
+                                param_mismatch = true;
+                                break;
+                            }
+                        }
                         if (isInterfaceParameterNode(param_node, param_type)) {
                             continue;
                         }
@@ -7540,7 +7810,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                             if (getInterfaceASTForParam(param_node, param_type)) {
                                 continue;
                             }
-                            AST* param_actual = resolveTypeAlias(param_type);
+                            param_actual = resolveTypeAlias(param_type);
                             AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
                             if (param_actual && param_actual->var_type == TYPE_INTERFACE) {
                                 continue;
@@ -7651,6 +7921,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
                     AST* param_type = getParameterTypeAST(param_node);
+                    AST* param_actual = resolveTypeAlias(param_type);
+                    if (param_actual && param_actual->type == AST_PROC_PTR_TYPE) {
+                        if (!validateCompilerProcPointerArgument(param_actual, arg_node)) {
+                            param_mismatch = true;
+                            break;
+                        }
+                    }
                     if (isInterfaceParameterNode(param_node, param_type)) {
                         continue;
                     }
@@ -7659,7 +7936,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         if (getInterfaceASTForParam(param_node, param_type)) {
                             continue;
                         }
-                        AST* param_actual = resolveTypeAlias(param_type);
+                        param_actual = resolveTypeAlias(param_type);
                         AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
                             if (param_actual && param_actual->var_type == TYPE_INTERFACE) {
                                 continue;
@@ -7966,8 +8243,8 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         break;
                     }
 
-                    int slot = -1;
-                    if (current_function_compiler) {
+                    int slot = inline_routine_active ? inline_routine_result_slot : -1;
+                    if (!inline_routine_active && current_function_compiler) {
                         slot = resolveLocal(current_function_compiler, current_function_compiler->name);
                     }
 
@@ -7987,16 +8264,29 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                             return_type = func_decl->right;
                         }
                         maybeAutoBoxInterfaceForType(return_type, node->children[0], chunk, getLine(node->children[0]), true, false);
-                        writeBytecodeChunk(chunk, DUP, line);
                         noteLocalSlotUse(current_function_compiler, slot);
                         writeBytecodeChunk(chunk, SET_LOCAL, line);
                         writeBytecodeChunk(chunk, (uint8_t)slot, line);
+                        if (!inline_routine_active) {
+                            noteLocalSlotUse(current_function_compiler, slot);
+                            writeBytecodeChunk(chunk, GET_LOCAL, line);
+                            writeBytecodeChunk(chunk, (uint8_t)slot, line);
+                        }
                     } else if (slot != -1) {
-                        noteLocalSlotUse(current_function_compiler, slot);
-                        writeBytecodeChunk(chunk, GET_LOCAL, line);
-                        writeBytecodeChunk(chunk, (uint8_t)slot, line);
+                        if (!inline_routine_active) {
+                            noteLocalSlotUse(current_function_compiler, slot);
+                            writeBytecodeChunk(chunk, GET_LOCAL, line);
+                            writeBytecodeChunk(chunk, (uint8_t)slot, line);
+                        }
                     }
-                    writeBytecodeChunk(chunk, EXIT, line);
+                    if (inline_routine_active) {
+                        int jump_to_end = chunk->count;
+                        writeBytecodeChunk(chunk, JUMP, line);
+                        emitShort(chunk, 0xFFFF, line);
+                        recordInlineRoutineExitJump(jump_to_end);
+                    } else {
+                        writeBytecodeChunk(chunk, EXIT, line);
+                    }
                 } else {
                     BuiltinRoutineType type = getBuiltinType(calleeName);
                     if (type == BUILTIN_TYPE_PROCEDURE) {

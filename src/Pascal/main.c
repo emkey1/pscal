@@ -266,6 +266,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
 
     if (GlobalAST && GlobalAST->type == AST_PROGRAM) {
         annotateTypes(GlobalAST, NULL, GlobalAST);
+        bool initial_annotation_had_errors = pascal_semantic_error_count > 0;
         // Reset semantic error count so we don't double-count the same errors from the initial annotation pass
         // when they are re-checked in the second annotation pass inside pascalPerformSemanticAnalysis
         pascal_semantic_error_count = 0;
@@ -273,7 +274,10 @@ int runProgram(const char *source, const char *programName, const char *frontend
         int semantic_errors_before = pascal_semantic_error_count;
         pascalPerformSemanticAnalysis(GlobalAST);
         bool semantic_errors_increased = pascal_semantic_error_count > semantic_errors_before;
-        if ((pascal_semantic_error_count > 0 || pascal_parser_error_count > 0 || semantic_errors_increased) &&
+        if ((initial_annotation_had_errors ||
+             pascal_semantic_error_count > 0 ||
+             pascal_parser_error_count > 0 ||
+             semantic_errors_increased) &&
             !dump_ast_json_flag) {
             fprintf(stderr, "Compilation failed with errors.\n");
             overall_success_status = false;

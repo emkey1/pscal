@@ -1294,10 +1294,29 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
                 break;
             }
         }
-        eat(parser_for_this_unit, TOKEN_SEMICOLON);
-        uses_clause->unit_list = unit_list_for_this_unit;
+        if (listSize(unit_list_for_this_unit) == 0) {
+            if (parser_for_this_unit->current_token &&
+                parser_for_this_unit->current_token->type == TOKEN_SEMICOLON) {
+                eat(parser_for_this_unit, TOKEN_SEMICOLON);
+            } else if (!(parser_for_this_unit->current_token &&
+                         (parser_for_this_unit->current_token->type == TOKEN_CONST ||
+                          parser_for_this_unit->current_token->type == TOKEN_TYPE ||
+                          parser_for_this_unit->current_token->type == TOKEN_VAR ||
+                          parser_for_this_unit->current_token->type == TOKEN_BEGIN ||
+                          parser_for_this_unit->current_token->type == TOKEN_PROCEDURE ||
+                          parser_for_this_unit->current_token->type == TOKEN_FUNCTION ||
+                          parser_for_this_unit->current_token->type == TOKEN_IMPLEMENTATION))) {
+                eat(parser_for_this_unit, TOKEN_SEMICOLON);
+            }
+            freeAST(uses_clause);
+            uses_clause = NULL;
+            freeList(unit_list_for_this_unit);
+            unit_list_for_this_unit = NULL;
+        } else {
+            eat(parser_for_this_unit, TOKEN_SEMICOLON);
+            uses_clause->unit_list = unit_list_for_this_unit;
         
-        for (int i = 0; i < listSize(unit_list_for_this_unit); i++) {
+            for (int i = 0; i < listSize(unit_list_for_this_unit); i++) {
             char *nested_unit_name = listGet(unit_list_for_this_unit, i);
 
             char lower_nested_name[MAX_SYMBOL_LENGTH];
@@ -1368,6 +1387,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
                 linkUnit(parsed_nested_unit_ast, recursion_depth + 1);
                 freeAST(parsed_nested_unit_ast);
             }
+        }
         }
     }
     if(uses_clause) addChild(unit_node, uses_clause);
@@ -1693,14 +1713,32 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 break;
             }
         }
-        eat(main_parser, TOKEN_SEMICOLON);
+        if (listSize(unit_list) == 0) {
+            if (main_parser->current_token &&
+                main_parser->current_token->type == TOKEN_SEMICOLON) {
+                eat(main_parser, TOKEN_SEMICOLON);
+            } else if (!(main_parser->current_token &&
+                         (main_parser->current_token->type == TOKEN_CONST ||
+                          main_parser->current_token->type == TOKEN_TYPE ||
+                          main_parser->current_token->type == TOKEN_VAR ||
+                          main_parser->current_token->type == TOKEN_BEGIN ||
+                          main_parser->current_token->type == TOKEN_PROCEDURE ||
+                          main_parser->current_token->type == TOKEN_FUNCTION))) {
+                eat(main_parser, TOKEN_SEMICOLON);
+            }
+            freeAST(uses_clause);
+            uses_clause = NULL;
+            freeList(unit_list);
+            unit_list = NULL;
+        } else {
+            eat(main_parser, TOKEN_SEMICOLON);
 
-        if (uses_clause) {
-            uses_clause->unit_list = unit_list;
-        }
+            if (uses_clause) {
+                uses_clause->unit_list = unit_list;
+            }
 
-        if (unit_list) {
-            for (int i = 0; i < listSize(unit_list); i++) {
+            if (unit_list) {
+                for (int i = 0; i < listSize(unit_list); i++) {
                 char *used_unit_name_str_from_list = listGet(unit_list, i);
                 
                 char lower_used_unit_name[MAX_SYMBOL_LENGTH];
@@ -1771,6 +1809,7 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                     // The temporary AST is no longer needed once linked.
                     freeAST(parsed_unit_ast);
                 }
+            }
             }
         }
     }

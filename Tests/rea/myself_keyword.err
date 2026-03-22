@@ -4,58 +4,61 @@ Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
 0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
-0007    3 JUMP               21 (to 0031)
+0007    3 JUMP               24 (to 0034)
 
 --- Procedure dummy.test (at 0010) ---
-0010    4 GET_LOCAL           0 (slot)
-0012    | LOAD_FIELD_VALUE    2 (index)
-0014    | CONST_0
-0015    | EQUAL
-0016    | SET_LOCAL           1 (slot)
-0018    5 GET_LOCAL           1 (slot)
-0020    | JUMP_IF_FALSE       7 (to 0030)
-0023    | CONST_1
-0024    | GET_LOCAL           0 (slot)
-0026    | GET_FIELD_OFFSET    2 (index)
-0028    | SWAP
-0029    | SET_INDIRECT
-0030    3 RETURN
-0031    0 CONSTANT            5 'Value type ARRAY'
-0033    | DEFINE_GLOBAL    NameIdx:6   'dummy_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
-0044    | SET_GLOBAL          6 'dummy_vtable' cache=0x0
-0054    8 DEFINE_GLOBAL    NameIdx:8   'd' Type:POINTER ('Dummy')
-0059    | ALLOC_OBJECT        3 (fields)
-0061    | DUP
-0062    | GET_FIELD_OFFSET    0 (index)
-0064    | GET_GLOBAL_ADDRESS    6 'dummy_vtable'
-0066    | SET_INDIRECT
-0067    | SET_GLOBAL          8 'd' cache=0x0
-0077    0 GET_GLOBAL          8 'd' cache=0x0
-0087    | DUP
-0088    | GET_FIELD_OFFSET    0 (index)
-0090    | GET_GLOBAL_ADDRESS    6 'dummy_vtable'
-0092    | SET_INDIRECT
-0093    | POP
-0094    9 GET_GLOBAL          8 'd' cache=0x0
-0104    | DUP
-0105    | GET_FIELD_OFFSET    0 (index)
-0107    | GET_INDIRECT
-0108    | CONST_0
-0109    | SWAP
-0110    | GET_ELEMENT_ADDRESS    1 (dims)
-0112    | GET_INDIRECT
-0113    | PROC_CALL_INDIRECT (args=1)
-0115    0 HALT
+0010    4 CONST_FALSE
+0011    | SET_LOCAL           1 (slot)
+0013    | GET_LOCAL           0 (slot)
+0015    | LOAD_FIELD_VALUE    2 (index)
+0017    | CONST_0
+0018    | EQUAL
+0019    | SET_LOCAL           1 (slot)
+0021    5 GET_LOCAL           1 (slot)
+0023    | JUMP_IF_FALSE       7 (to 0033)
+0026    | CONST_1
+0027    | GET_LOCAL           0 (slot)
+0029    | GET_FIELD_OFFSET    2 (index)
+0031    | SWAP
+0032    | SET_INDIRECT
+0033    3 RETURN
+0034    0 CONSTANT            6 'Value type ARRAY'
+0036    | DEFINE_GLOBAL    NameIdx:7   'dummy_vtable' Type:ARRAY Dims:1 [0..0] of INTEGER ('integer')
+0047    | SET_GLOBAL          7 'dummy_vtable' cache=0x0
+0057    8 DEFINE_GLOBAL    NameIdx:9   'd' Type:POINTER ('Dummy')
+0062    | ALLOC_OBJECT        3 (fields)
+0064    | DUP
+0065    | GET_FIELD_OFFSET    0 (index)
+0067    | GET_GLOBAL_ADDRESS    7 'dummy_vtable'
+0069    | SET_INDIRECT
+0070    | SET_GLOBAL          9 'd' cache=0x0
+0080    0 GET_GLOBAL          9 'd' cache=0x0
+0090    | DUP
+0091    | GET_FIELD_OFFSET    0 (index)
+0093    | GET_GLOBAL_ADDRESS    7 'dummy_vtable'
+0095    | SET_INDIRECT
+0096    | POP
+0097    9 GET_GLOBAL          9 'd' cache=0x0
+0107    | DUP
+0108    | GET_FIELD_OFFSET    0 (index)
+0110    | GET_INDIRECT
+0111    | CONST_0
+0112    | SWAP
+0113    | GET_ELEMENT_ADDRESS    1 (dims)
+0115    | GET_INDIRECT
+0116    | PROC_CALL_INDIRECT (args=1)
+0118    0 HALT
 == End Disassembly: rea/myself_keyword.rea ==
 
-Constants (10):\n  0000: STR   "myself"
+Constants (11):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
-  0003: INT   0
-  0004: INT   1
-  0005: Value type ARRAY
-  0006: STR   "dummy_vtable"
-  0007: STR   "integer"
-  0008: STR   "d"
-  0009: STR   "Dummy"
+  0003: BOOL  false
+  0004: INT   0
+  0005: INT   1
+  0006: Value type ARRAY
+  0007: STR   "dummy_vtable"
+  0008: STR   "integer"
+  0009: STR   "d"
+  0010: STR   "Dummy"
 

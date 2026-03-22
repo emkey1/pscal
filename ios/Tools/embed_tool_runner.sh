@@ -3,6 +3,8 @@ set -euo pipefail
 
 bundle_root="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
 /bin/mkdir -p "${bundle_root}"
+configuration="${CONFIGURATION:-Debug}"
+config_variant="$(printf '%s' "${configuration}" | /usr/bin/tr '[:upper:]' '[:lower:]')"
 
 raw_dest="${bundle_root}/pscal_tool_runner"
 compressed_dest="${bundle_root}/pscal_tool_runner.deflate"
@@ -11,8 +13,8 @@ license_dest="${bundle_root}/Docs/Licenses"
 runner_src=""
 case "${PLATFORM_NAME:-}" in
     iphoneos*)
-        for candidate in "${PROJECT_DIR}/../build/ios-device/bin/pscal_tool_runner.app/pscal_tool_runner" \
-                         "${PROJECT_DIR}/../build/ios-device/bin/pscal_tool_runner"; do
+        for candidate in "${PROJECT_DIR}/../build/ios-device-${config_variant}/bin/pscal_tool_runner.app/pscal_tool_runner" \
+                         "${PROJECT_DIR}/../build/ios-device-${config_variant}/bin/pscal_tool_runner"; do
             if [ -f "${candidate}" ]; then
                 runner_src="${candidate}"
                 break
@@ -20,8 +22,8 @@ case "${PLATFORM_NAME:-}" in
         done
         ;;
     iphonesimulator*)
-        for candidate in "${PROJECT_DIR}/../build/ios-simulator/bin/pscal_tool_runner.app/pscal_tool_runner" \
-                         "${PROJECT_DIR}/../build/ios-simulator/bin/pscal_tool_runner"; do
+        for candidate in "${PROJECT_DIR}/../build/ios-simulator-${config_variant}/bin/pscal_tool_runner.app/pscal_tool_runner" \
+                         "${PROJECT_DIR}/../build/ios-simulator-${config_variant}/bin/pscal_tool_runner"; do
             if [ -f "${candidate}" ]; then
                 runner_src="${candidate}"
                 break

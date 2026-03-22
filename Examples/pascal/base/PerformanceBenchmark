@@ -60,6 +60,7 @@ const
   // Workload sizes tuned to exercise the VM for a noticeably longer duration.
   MATRIX_SIZE = 64;
   MATRIX_ROUNDS = 16;
+  MATRIX_TARGET_MAX_ABS = 1.0;
   SORT_SIZE = 8000;
   STRING_ITERATIONS = 12000;
   RECORD_COUNT = 1600;
@@ -181,6 +182,24 @@ begin
       m[i, j] := m[i, j] * factor;
 end;
 
+procedure NormalizeMatrix(var m: TMatrix);
+var
+  i, j: integer;
+  maxAbsValue, entryAbs: real;
+begin
+  maxAbsValue := 0.0;
+  for i := 1 to MATRIX_SIZE do
+    for j := 1 to MATRIX_SIZE do
+    begin
+      entryAbs := abs(m[i, j]);
+      if entryAbs > maxAbsValue then
+        maxAbsValue := entryAbs;
+    end;
+
+  if maxAbsValue > 0.0 then
+    ScaleMatrix(m, MATRIX_TARGET_MAX_ABS / maxAbsValue);
+end;
+
 function RunMatrixBenchmark(var a, b, c: TMatrix): real;
 var
   round, i, j: integer;
@@ -190,11 +209,11 @@ begin
   for round := 1 to MATRIX_ROUNDS do
   begin
     MultiplyMatrices(a, b, c);
-    ScaleMatrix(c, 0.5);
+    NormalizeMatrix(c);
     MultiplyMatrices(c, a, b);
-    ScaleMatrix(b, 0.5);
+    NormalizeMatrix(b);
     MultiplyMatrices(b, c, a);
-    ScaleMatrix(a, 0.5);
+    NormalizeMatrix(a);
   end;
 
   for i := 1 to MATRIX_SIZE do
@@ -631,6 +650,18 @@ begin
   RunRecursiveMath := total;
 end;
 
+function ElapsedMillis(startTime: real): longint;
+var
+  finishTime: real;
+  elapsed: longint;
+begin
+  finishTime := RealTimeClock;
+  elapsed := Trunc((finishTime - startTime) * 1000.0);
+  if elapsed < 0 then
+    elapsed := 0;
+  ElapsedMillis := elapsed;
+end;
+
 var
   matrixA, matrixB, matrixC: TMatrix;
   numbers: TIntArray;
@@ -649,30 +680,55 @@ var
   initialSeed: longint;
   filePath: string;
   cleanupFile: text;
+  benchmarkStart, stageStart: real;
+  matrixMs, sortMs, recordMs, stringMs, setMs: longint;
+  primeMs, recursiveMs, listMs, fileMs, totalMs: longint;
 begin
   writeln('--- PSCAL VM Performance Benchmark ---');
   initialSeed := 12345;
   InitializeRng(initialSeed);
+  benchmarkStart := RealTimeClock;
 
+  stageStart := RealTimeClock;
   FillMatrix(matrixA, 0.75);
   FillMatrix(matrixB, 1.25);
   matrixScore := RunMatrixBenchmark(matrixA, matrixB, matrixC);
+  matrixMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   FillNumbers(numbers);
   sortChecksum := RunSortingBenchmark(numbers);
+  sortMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   BuildPeople(people);
   recordScore := ProcessPeople(people);
+  recordMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   stringScore := ManipulateStrings(STRING_ITERATIONS);
+  stringMs := ElapsedMillis(stageStart);
+
+  stageStart := RealTimeClock;
   setScore := RunSetBenchmark(SET_ITERATIONS);
+  setMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
   RunPrimeSieve(PRIME_LIMIT, primeCount, primeChecksum);
-  fibScore := RunRecursiveMath;
+  primeMs := ElapsedMillis(stageStart);
 
+  stageStart := RealTimeClock;
+  fibScore := RunRecursiveMath;
+  recursiveMs := ElapsedMillis(stageStart);
+
+  stageStart := RealTimeClock;
   listChecksum := RunLinkedList(LIST_SIZE);
+  listMs := ElapsedMillis(stageStart);
+
+  stageStart := RealTimeClock;
   filePath := ResolveTempPath(DATASET_BASENAME);
   fileChecksum := RunFileIOBenchmark(filePath, numbers);
+  fileMs := ElapsedMillis(stageStart);
 
   if FileExists(filePath) then
   begin
@@ -682,15 +738,26 @@ begin
 
   combined := matrixScore + recordScore + setScore + primeCount + primeChecksum +
               fibScore + listChecksum + fileChecksum + stringScore + sortChecksum;
+  totalMs := ElapsedMillis(benchmarkStart);
 
   writeln('Matrix checksum: ', matrixScore:0:4);
+  writeln('Matrix elapsed ms: ', matrixMs);
   writeln('Sorting checksum: ', sortChecksum);
+  writeln('Sorting elapsed ms: ', sortMs);
   writeln('String workload checksum: ', stringScore);
+  writeln('String elapsed ms: ', stringMs);
   writeln('Set operations score: ', setScore);
+  writeln('Set elapsed ms: ', setMs);
   writeln('Prime count: ', primeCount, ' checksum: ', primeChecksum);
+  writeln('Prime sieve elapsed ms: ', primeMs);
   writeln('Record processing metric: ', recordScore:0:4);
+  writeln('Record elapsed ms: ', recordMs);
   writeln('Recursive workload checksum: ', fibScore);
+  writeln('Recursive elapsed ms: ', recursiveMs);
   writeln('Linked list checksum: ', listChecksum);
+  writeln('Linked list elapsed ms: ', listMs);
   writeln('File I/O checksum: ', fileChecksum);
+  writeln('File I/O elapsed ms: ', fileMs);
   writeln('Combined benchmark digest: ', combined:0:4);
+  writeln('Total elapsed ms: ', totalMs);
 end.

@@ -95,7 +95,7 @@
               "type": "ASSIGN",
               "value": "="
           },
-          "var_type_annotated": "UNKNOWN_VAR_TYPE",
+          "var_type_annotated": "INT64",
           "left": 
           {
 
