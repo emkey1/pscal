@@ -3665,8 +3665,106 @@ static void vmCleanupGlobalCachesIfIdle(void) {
     vmFreeShellBuiltinProfiles();
 }
 
-static bool ensureRuntimeClassVTable(VM* vm, const char* className, Value* tableValue) {
-    if (!vm || !className || !tableValue) {
+static AST* vmResolveInterfaceAST(AST* interfaceType) {
+    AST* current = interfaceType;
+    int depth = 0;
+    while (current && depth < 16) {
+        if (current->type == AST_TYPE_DECL && current->left) {
+            current = current->left;
+            depth++;
+            continue;
+        }
+        if (current->type == AST_TYPE_REFERENCE && current->token && current->token->value) {
+            AST* looked = lookupType(current->token->value);
+            if (!looked || looked == current) {
+                break;
+            }
+            current = looked;
+            depth++;
+            continue;
+        }
+        break;
+    }
+    return current;
+}
+
+static bool runtimeAddInterfaceMethod(AST*** methods, int* count, int* capacity, AST* method) {
+    if (!methods || !count || !capacity || !method || !method->token || !method->token->value) {
+        return false;
+    }
+
+    for (int i = 0; i < *count; i++) {
+        AST* existing = (*methods)[i];
+        if (existing && existing->token && existing->token->value &&
+            strcasecmp(existing->token->value, method->token->value) == 0) {
+            return true;
+        }
+    }
+
+    if (*count == *capacity) {
+        int newCapacity = (*capacity == 0) ? 4 : (*capacity * 2);
+        AST** resized = (AST**)realloc(*methods, sizeof(AST*) * (size_t)newCapacity);
+        if (!resized) {
+            return false;
+        }
+        *methods = resized;
+        *capacity = newCapacity;
+    }
+
+    (*methods)[(*count)++] = method;
+    return true;
+}
+
+static bool collectRuntimeInterfaceMethods(AST* interfaceType,
+                                           AST*** methods,
+                                           int* count,
+                                           int* capacity,
+                                           int depth) {
+    if (depth > 32) {
+        return false;
+    }
+
+    interfaceType = vmResolveInterfaceAST(interfaceType);
+    if (!interfaceType || interfaceType->type != AST_INTERFACE) {
+        return false;
+    }
+
+    AST* baseList = interfaceType->extra;
+    if (baseList) {
+        if (baseList->type == AST_LIST) {
+            for (int i = 0; i < baseList->child_count; i++) {
+                if (!collectRuntimeInterfaceMethods(baseList->children[i], methods, count, capacity, depth + 1)) {
+                    return false;
+                }
+            }
+        } else {
+            if (!collectRuntimeInterfaceMethods(baseList, methods, count, capacity, depth + 1)) {
+                return false;
+            }
+        }
+    }
+
+    for (int i = 0; i < interfaceType->child_count; i++) {
+        AST* method = interfaceType->children[i];
+        if (!method) {
+            continue;
+        }
+        if (method->type != AST_PROCEDURE_DECL && method->type != AST_FUNCTION_DECL) {
+            continue;
+        }
+        if (!runtimeAddInterfaceMethod(methods, count, capacity, method)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool ensureRuntimeInterfaceVTable(VM* vm,
+                                         const char* className,
+                                         AST* interfaceType,
+                                         Value* tableValue) {
+    if (!vm || !className || !interfaceType || !tableValue) {
         return false;
     }
 
@@ -3683,8 +3781,18 @@ static bool ensureRuntimeClassVTable(VM* vm, const char* className, Value* table
     class_lower[sizeof(class_lower) - 1] = '\0';
     toLowerString(class_lower);
 
-    size_t class_len = strlen(class_lower);
-    RuntimeVTableEntry* entry = findRuntimeVTableEntry(class_lower);
+    char interface_lower[MAX_SYMBOL_LENGTH];
+    const char* interface_name = (interfaceType->token && interfaceType->token->value)
+                                     ? interfaceType->token->value
+                                     : "<anonymous_interface>";
+    strncpy(interface_lower, interface_name, sizeof(interface_lower) - 1);
+    interface_lower[sizeof(interface_lower) - 1] = '\0';
+    toLowerString(interface_lower);
+
+    char cache_key[(MAX_SYMBOL_LENGTH * 2) + 4];
+    snprintf(cache_key, sizeof(cache_key), "%s|%s", class_lower, interface_lower);
+
+    RuntimeVTableEntry* entry = findRuntimeVTableEntry(cache_key);
     bool need_build = true;
     if (entry && entry->table && entry->table->type == TYPE_ARRAY && entry->table->array_val) {
         need_build = false;
@@ -3695,114 +3803,78 @@ static bool ensureRuntimeClassVTable(VM* vm, const char* className, Value* table
     int* addrs = NULL;
 
     if (need_build) {
-        for (int bucket = 0; bucket < HASHTABLE_SIZE; bucket++) {
-            Symbol* sym = vm->procedureTable->buckets[bucket];
-            while (sym) {
-                Symbol* base = sym->is_alias ? sym->real_symbol : sym;
-                if (!base || !base->name || !base->type_def) {
-                    sym = sym->next;
-                    continue;
+        AST** methods = NULL;
+        int collected_count = 0;
+        int collected_capacity = 0;
+        if (!collectRuntimeInterfaceMethods(interfaceType,
+                                            &methods,
+                                            &collected_count,
+                                            &collected_capacity,
+                                            0)) {
+            free(methods);
+            return false;
+        }
+
+        for (int i = 0; i < collected_count; i++) {
+            AST* method = methods[i];
+            const char* method_name = (method && method->token) ? method->token->value : NULL;
+            if (!method_name) {
+                free(methods);
+                free(addrs);
+                return false;
+            }
+
+            int slot = method->i_val >= 0 ? method->i_val : i;
+            if (slot >= method_capacity) {
+                int new_capacity = method_capacity < 4 ? 4 : method_capacity * 2;
+                while (new_capacity <= slot) {
+                    new_capacity *= 2;
                 }
-                if (strncasecmp(base->name, class_lower, class_len) == 0 && base->name[class_len] == '.') {
-                    int slot = base->type_def->i_val;
-                    if (slot < 0) {
-                        slot = method_count;
-                        base->type_def->i_val = slot;
-                    }
-                    if (slot >= method_capacity) {
-                        int new_capacity = method_capacity < 4 ? 4 : method_capacity * 2;
-                        while (new_capacity <= slot) {
-                            new_capacity *= 2;
-                        }
-                        int* resized = (int*)realloc(addrs, (size_t)new_capacity * sizeof(int));
-                        if (!resized) {
-                            free(addrs);
-                            return false;
-                        }
-                        for (int i = method_capacity; i < new_capacity; i++) {
-                            resized[i] = -1;
-                        }
-                        addrs = resized;
-                        method_capacity = new_capacity;
-                    }
-                    addrs[slot] = base->bytecode_address;
-                    if (slot + 1 > method_count) {
-                        method_count = slot + 1;
-                    }
+                int* resized = (int*)realloc(addrs, (size_t)new_capacity * sizeof(int));
+                if (!resized) {
+                    free(methods);
+                    free(addrs);
+                    return false;
                 }
-                sym = sym->next;
+                for (int j = method_capacity; j < new_capacity; j++) {
+                    resized[j] = -1;
+                }
+                addrs = resized;
+                method_capacity = new_capacity;
+            }
+
+            char method_lower[MAX_SYMBOL_LENGTH];
+            strncpy(method_lower, method_name, sizeof(method_lower) - 1);
+            method_lower[sizeof(method_lower) - 1] = '\0';
+            toLowerString(method_lower);
+
+            char qualified[MAX_SYMBOL_LENGTH * 2 + 2];
+            snprintf(qualified, sizeof(qualified), "%s.%s", class_lower, method_lower);
+            Symbol* sym = lookupProcedure(qualified);
+            if (!sym) {
+                snprintf(qualified, sizeof(qualified), "%s.%s", className, method_name);
+                sym = lookupProcedure(qualified);
+            }
+            if (!sym) {
+                free(methods);
+                free(addrs);
+                return false;
+            }
+
+            Symbol* base = sym->is_alias ? sym->real_symbol : sym;
+            if (!base) {
+                free(methods);
+                free(addrs);
+                return false;
+            }
+
+            addrs[slot] = base->bytecode_address;
+            if (slot + 1 > method_count) {
+                method_count = slot + 1;
             }
         }
 
-        if (method_count == 0) {
-            AST* classType = lookupType(className);
-            if (!classType) {
-                classType = lookupType(class_lower);
-            }
-            if (classType && classType->type == AST_TYPE_DECL && classType->left) {
-                classType = classType->left;
-            }
-            while (classType && classType->type == AST_TYPE_REFERENCE && classType->right) {
-                classType = classType->right;
-            }
-            if (classType && classType->type == AST_RECORD_TYPE) {
-                for (int i = 0; i < classType->child_count; i++) {
-                    AST* member = classType->children[i];
-                    if (!member || !member->token || !member->token->value) {
-                        continue;
-                    }
-                    if (member->type != AST_PROCEDURE_DECL && member->type != AST_FUNCTION_DECL) {
-                        continue;
-                    }
-                    char method_lower[MAX_SYMBOL_LENGTH];
-                    strncpy(method_lower, member->token->value, sizeof(method_lower) - 1);
-                    method_lower[sizeof(method_lower) - 1] = '\0';
-                    toLowerString(method_lower);
-
-                    char qualified[MAX_SYMBOL_LENGTH * 2 + 2];
-                    snprintf(qualified, sizeof(qualified), "%s.%s", class_lower, method_lower);
-                    Symbol* sym = lookupProcedure(qualified);
-                    if (!sym) {
-                        snprintf(qualified, sizeof(qualified), "%s.%s", className, member->token->value);
-                        sym = lookupProcedure(qualified);
-                    }
-                    if (!sym) {
-                        continue;
-                    }
-                    Symbol* base = sym->is_alias ? sym->real_symbol : sym;
-                    if (!base) {
-                        continue;
-                    }
-                    int slot = base->type_def ? base->type_def->i_val : -1;
-                    if (slot < 0) {
-                        slot = method_count;
-                        if (base->type_def) {
-                            base->type_def->i_val = slot;
-                        }
-                    }
-                    if (slot >= method_capacity) {
-                        int new_capacity = method_capacity < 4 ? 4 : method_capacity * 2;
-                        while (new_capacity <= slot) {
-                            new_capacity *= 2;
-                        }
-                        int* resized = (int*)realloc(addrs, (size_t)new_capacity * sizeof(int));
-                        if (!resized) {
-                            free(addrs);
-                            return false;
-                        }
-                        for (int j = method_capacity; j < new_capacity; j++) {
-                            resized[j] = -1;
-                        }
-                        addrs = resized;
-                        method_capacity = new_capacity;
-                    }
-                    addrs[slot] = base->bytecode_address;
-                    if (slot + 1 > method_count) {
-                        method_count = slot + 1;
-                    }
-                }
-            }
-        }
+        free(methods);
 
         if (method_count == 0) {
             free(addrs);
@@ -3824,7 +3896,7 @@ static bool ensureRuntimeClassVTable(VM* vm, const char* className, Value* table
         free(addrs);
 
         if (!entry) {
-            entry = createRuntimeVTableEntry(class_lower);
+            entry = createRuntimeVTableEntry(cache_key);
             if (!entry) {
                 freeValue(&arr);
                 return false;
@@ -3970,8 +4042,8 @@ static Value vmHostBoxInterface(VM* vm) {
     const char* class_name_str = (classNameVal.type == TYPE_STRING && classNameVal.s_val)
                                      ? classNameVal.s_val
                                      : NULL;
-    if (!tableValuePtr || !ensureRuntimeClassVTable(vm, class_name_str, tableValuePtr)) {
-        runtimeError(vm, "VM Error: Unable to initialise vtable for class '%s'.",
+    if (!tableValuePtr || !ensureRuntimeInterfaceVTable(vm, class_name_str, interfaceType, tableValuePtr)) {
+        runtimeError(vm, "VM Error: Unable to initialise interface table for class '%s'.",
                      class_name_str ? class_name_str : "<unknown>");
         freeValue(&classNameVal);
         freeValue(&typeNameVal);

@@ -167,6 +167,12 @@
       "path": "Tests/compiler/pascal/cases/inline_record_value_param.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: 30 31"
+    },
+    {
+      "id": "interface_virtual_slot_order",
+      "path": "Tests/compiler/pascal/cases/interface_virtual_slot_order.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: interface describe=12"
     }
   ]
 }
