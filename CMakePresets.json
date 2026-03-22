@@ -26,9 +26,9 @@
       }
     },
     {
-      "name": "ios-simulator",
-      "displayName": "iOS (Simulator)",
-      "description": "Build PSCAL static libs targeting the iOS simulator",
+      "name": "ios-simulator-debug",
+      "displayName": "iOS (Simulator, Debug)",
+      "description": "Build PSCAL static libs targeting the iOS simulator with debug settings",
       "inherits": [
         "base"
       ],
@@ -41,6 +41,14 @@
         "PSCAL_USE_BREW_CURL": "ON",
         "BUILD_DASCAL": "ON"
       }
+    },
+    {
+      "name": "ios-simulator",
+      "displayName": "iOS (Simulator)",
+      "description": "Build PSCAL static libs targeting the iOS simulator",
+      "inherits": [
+        "ios-simulator-debug"
+      ]
     },
     {
       "name": "ios-simulator-release",
@@ -60,9 +68,9 @@
       }
     },
     {
-      "name": "ios-device",
-      "displayName": "iOS (Device)",
-      "description": "Build PSCAL static libs targeting iOS devices",
+      "name": "ios-device-debug",
+      "displayName": "iOS (Device, Debug)",
+      "description": "Build PSCAL static libs targeting iOS devices with debug settings",
       "inherits": [
         "base"
       ],
@@ -75,6 +83,14 @@
         "PSCAL_USE_BREW_CURL": "ON",
         "BUILD_DASCAL": "ON"
       }
+    },
+    {
+      "name": "ios-device",
+      "displayName": "iOS (Device)",
+      "description": "Build PSCAL static libs targeting iOS devices",
+      "inherits": [
+        "ios-device-debug"
+      ]
     },
     {
       "name": "ios-device-release",
@@ -96,12 +112,20 @@
   ],
   "buildPresets": [
     {
+      "name": "ios-simulator-debug",
+      "configurePreset": "ios-simulator-debug"
+    },
+    {
       "name": "ios-simulator",
       "configurePreset": "ios-simulator"
     },
     {
       "name": "ios-simulator-release",
       "configurePreset": "ios-simulator-release"
+    },
+    {
+      "name": "ios-device-debug",
+      "configurePreset": "ios-device-debug"
     },
     {
       "name": "ios-device",

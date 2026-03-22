@@ -35,7 +35,6 @@
 		5F73F4B32FCA5B9A00EFC123 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */; };
 		5F9A00252F00000100ABC001 /* TerminalWeb in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00152F00000100ABC001 /* TerminalWeb */; };
 		5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9A00312F00000100ABC001 /* HtermTerminalView.swift */; };
-		6A0D10023A00000100ABC001 /* AppDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */; };
 		5FFFD0023FFAA00000AAA001 /* PathTruncation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */; };
 		5FFFD0043FFAA00000AAA001 /* TerminalFontSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */; };
 		5FFFD0063FFAA00000AAA001 /* TerminalGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */; };
@@ -45,6 +44,7 @@
 		5FFFD00E3FFAA00000AAA001 /* TerminalUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */; };
 		5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */; };
 		5FFFD0123FFAA00000AAA001 /* TerminalSessionMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */; };
+		6A0D10023A00000100ABC001 /* AppDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -80,7 +80,6 @@
 		5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerminalGeometryHelper.swift; sourceTree = "<group>"; };
 		5F9A00152F00000100ABC001 /* TerminalWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; path = TerminalWeb; sourceTree = "<group>"; };
 		5F9A00312F00000100ABC001 /* HtermTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HtermTerminalView.swift; sourceTree = "<group>"; };
-		6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDiagnosticsView.swift; sourceTree = "<group>"; };
 		5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathTruncation.swift; sourceTree = "<group>"; };
 		5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontSettings.swift; sourceTree = "<group>"; };
 		5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalGeometry.swift; sourceTree = "<group>"; };
@@ -90,6 +89,7 @@
 		5FFFD00D3FFAA00000AAA001 /* TerminalUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalUtils.swift; sourceTree = "<group>"; };
 		5FFFD00F3FFAA00000AAA001 /* TerminalRootViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalRootViewController.swift; sourceTree = "<group>"; };
 		5FFFD0113FFAA00000AAA001 /* TerminalSessionMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionMetrics.swift; sourceTree = "<group>"; };
+		6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDiagnosticsView.swift; sourceTree = "<group>"; };
 		DEAD00012C0FF00D00DEAD00 /* src */ = {isa = PBXFileReference; lastKnownFileType = folder; name = src; path = ../src; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -270,15 +270,15 @@
 			buildActionMask = 2147483647;
 			files = (
 			);
-						inputPaths = (
-							"$(PROJECT_DIR)/Tools/embed_tool_runner.sh",
-						"$(PSCAL_IOS_DEVICE_BUILD_DIR)/bin/pscal_tool_runner.app/pscal_tool_runner",
-						"$(PSCAL_IOS_DEVICE_BUILD_DIR)/bin/pscal_tool_runner",
-						"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/bin/pscal_tool_runner.app/pscal_tool_runner",
-						"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/bin/pscal_tool_runner",
-						"$(PROJECT_DIR)/../build/ios-maccatalyst-arm64/bin/pscal_tool_runner",
-						"$(PROJECT_DIR)/../build/ios-maccatalyst/bin/pscal_tool_runner",
-					);
+			inputPaths = (
+				"$(PROJECT_DIR)/Tools/embed_tool_runner.sh",
+				"$(PSCAL_IOS_DEVICE_BUILD_DIR)/bin/pscal_tool_runner.app/pscal_tool_runner",
+				"$(PSCAL_IOS_DEVICE_BUILD_DIR)/bin/pscal_tool_runner",
+				"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/bin/pscal_tool_runner.app/pscal_tool_runner",
+				"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/bin/pscal_tool_runner",
+				"$(PROJECT_DIR)/../build/ios-maccatalyst-arm64/bin/pscal_tool_runner",
+				"$(PROJECT_DIR)/../build/ios-maccatalyst/bin/pscal_tool_runner",
+			);
 			name = "Embed Tool Runner";
 			outputPaths = (
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/pscal_tool_runner.deflate",
@@ -286,7 +286,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-				shellScript = "/bin/sh \"${PROJECT_DIR}/Tools/embed_tool_runner.sh\"\n";
+			shellScript = "/bin/sh \"${PROJECT_DIR}/Tools/embed_tool_runner.sh\"\n";
 		};
 		5DFF9BA02EC3E8CC004DFE5B /* Fix Tool Runner Permissions */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -303,12 +303,12 @@
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\n\nrunner=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/pscal_tool_runner\"\nif [ -f \"${runner}\" ]; then\n    /bin/rm -f \"${runner}\" || true\nfi\nstamp=\"${DERIVED_FILE_DIR}/fix_tool_runner_permissions.stamp\"\n/bin/mkdir -p \"${DERIVED_FILE_DIR}\"\ntouch \"${stamp}\"\n";
 		};
-			5DFF9BA22EC3E8CC004DFE5D /* Ensure PSCAL Static Libs */ = {
-				isa = PBXShellScriptBuildPhase;
-				alwaysOutOfDate = 1;
-				buildActionMask = 2147483647;
-				files = (
-				);
+		5DFF9BA22EC3E8CC004DFE5D /* Ensure PSCAL Static Libs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
 			inputPaths = (
 				"$(PROJECT_DIR)/Tools/ensure_static_libs.sh",
 			);
@@ -431,13 +431,13 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-					HEADER_SEARCH_PATHS = (
-						"$(PROJECT_DIR)/../src",
-						"$(PROJECT_DIR)/../third-party/nextvi",
-						"$(PROJECT_DIR)/Sources/Bridge",
-						"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/generated",
-						"$(PSCAL_IOS_DEVICE_BUILD_DIR)/generated",
-					);
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../src",
+					"$(PROJECT_DIR)/../third-party/nextvi",
+					"$(PROJECT_DIR)/Sources/Bridge",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/generated",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/generated",
+				);
 				"HEADER_SEARCH_PATHS[sdk=macosx*]" = (
 					"$(PROJECT_DIR)/../src",
 					"$(PROJECT_DIR)/../third-party/nextvi",
@@ -449,12 +449,12 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-					LIBRARY_SEARCH_PATHS = (
-						"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)",
-						"$(PSCAL_IOS_DEVICE_BUILD_DIR)",
-					);
-					"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "$(PSCAL_IOS_DEVICE_BUILD_DIR)";
-					"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(PSCAL_IOS_SIMULATOR_BUILD_DIR)";
+				LIBRARY_SEARCH_PATHS = (
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "$(PSCAL_IOS_DEVICE_BUILD_DIR)";
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(PSCAL_IOS_SIMULATOR_BUILD_DIR)";
 				"LIBRARY_SEARCH_PATHS[sdk=macosx*]" = (
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)",
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/third-party/openssl/install/lib",
@@ -463,62 +463,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = "$(inherited)";
-					"OTHER_LDFLAGS[sdk=iphoneos*]" = (
-						"$(inherited)",
-						"-lpscal_core_static",
-						"-lpscal_exsh_static",
-						"-lpscal_pascal_static",
-						"-lpscal_clike_static",
-						"-lpscal_rea_static",
-						"-lpscal_vm_static",
-							"-lpscal_json2bc_static",
-							"-lpscal_pscald_static",
-							"-lpscal_pscalasm_static",
-							"-lz",
-						"-lsqlite3",
-						"-lresolv",
-						"-lcurses",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
-						"-framework",
-						ImageIO,
-					"-framework",
-					MobileCoreServices,
-					"-framework",
-					AVFoundation,
-					"-framework",
-					AudioToolbox,
-					"-framework",
-					CoreAudio,
-					"-framework",
-					CoreBluetooth,
-					"-framework",
-					CoreGraphics,
-					"-framework",
-					CoreMotion,
-					"-framework",
-					Foundation,
-					"-framework",
-					GameController,
-					"-framework",
-					Metal,
-					"-framework",
-					OpenGLES,
-					"-framework",
-					QuartzCore,
-						"-framework",
-						UIKit,
-						"-framework",
-						CoreHaptics,
-						"-lm",
-						"-lpthread",
-						"-Wl,-ignore_auto_link_library,SwiftUICore",
-						"-Wl,-ignore_auto_link_library,UIUtilities",
-					);
-					"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
 					"-lpscal_exsh_static",
@@ -526,20 +471,20 @@
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-						"-lpscal_json2bc_static",
-							"-lpscal_pscald_static",
-							"-lpscal_pscalasm_static",
-							"-lz",
-						"-lsqlite3",
-						"-lresolv",
-						"-lcurses",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
-						"-framework",
-						ImageIO,
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lpscal_pscalasm_static",
+					"-lz",
+					"-lsqlite3",
+					"-lresolv",
+					"-lcurses",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
+					"-framework",
+					ImageIO,
 					"-framework",
 					MobileCoreServices,
 					"-framework",
@@ -564,15 +509,70 @@
 					OpenGLES,
 					"-framework",
 					QuartzCore,
-						"-framework",
-						UIKit,
-						"-framework",
-						CoreHaptics,
-						"-lm",
-						"-lpthread",
-						"-Wl,-ignore_auto_link_library,SwiftUICore",
-						"-Wl,-ignore_auto_link_library,UIUtilities",
-					);
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-lm",
+					"-lpthread",
+					"-Wl,-ignore_auto_link_library,SwiftUICore",
+					"-Wl,-ignore_auto_link_library,UIUtilities",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lpscal_pscalasm_static",
+					"-lz",
+					"-lsqlite3",
+					"-lresolv",
+					"-lcurses",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					OpenGLES,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-lm",
+					"-lpthread",
+					"-Wl,-ignore_auto_link_library,SwiftUICore",
+					"-Wl,-ignore_auto_link_library,UIUtilities",
+				);
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
@@ -581,12 +581,12 @@
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-						"-lpscal_json2bc_static",
-						"-lpscal_pscald_static",
-						"-lpscal_pscalasm_static",
-						"-lz",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lpscal_pscalasm_static",
+					"-lz",
 					"-lsqlite3",
-						"-lresolv",
+					"-lresolv",
 					"-lcurses",
 					"-lcurl",
 					"-lssl",
@@ -622,12 +622,12 @@
 					"-Wl,-ignore_auto_link_library,SwiftUICore",
 					"-Wl,-ignore_auto_link_library,UIUtilities",
 				);
-					OTHER_SWIFT_FLAGS = "$(inherited) -Xlinker -ignore_auto_link_library -Xlinker SwiftUICore -Xlinker -ignore_auto_link_library -Xlinker UIUtilities";
-					PSCAL_IOS_DEVICE_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-device-debug";
-					PSCAL_IOS_SIMULATOR_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-simulator-debug";
-					PSCAL_SDL_LIB_SUFFIX = d;
-					PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalApp;
+				OTHER_SWIFT_FLAGS = "$(inherited) -Xlinker -ignore_auto_link_library -Xlinker SwiftUICore -Xlinker -ignore_auto_link_library -Xlinker UIUtilities";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PSCAL_IOS_DEVICE_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-device-debug";
+				PSCAL_IOS_SIMULATOR_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-simulator-debug";
+				PSCAL_SDL_LIB_SUFFIX = d;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -684,13 +684,13 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-					HEADER_SEARCH_PATHS = (
-						"$(PROJECT_DIR)/../src",
-						"$(PROJECT_DIR)/../third-party/nextvi",
-						"$(PROJECT_DIR)/Sources/Bridge",
-						"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/generated",
-						"$(PSCAL_IOS_DEVICE_BUILD_DIR)/generated",
-					);
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../src",
+					"$(PROJECT_DIR)/../third-party/nextvi",
+					"$(PROJECT_DIR)/Sources/Bridge",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/generated",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/generated",
+				);
 				"HEADER_SEARCH_PATHS[sdk=macosx*]" = (
 					"$(PROJECT_DIR)/../src",
 					"$(PROJECT_DIR)/../third-party/nextvi",
@@ -702,74 +702,19 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-					LIBRARY_SEARCH_PATHS = (
-						"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)",
-						"$(PSCAL_IOS_DEVICE_BUILD_DIR)",
-					);
-					"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "$(PSCAL_IOS_DEVICE_BUILD_DIR)";
-					"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(PSCAL_IOS_SIMULATOR_BUILD_DIR)";
+				LIBRARY_SEARCH_PATHS = (
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" = "$(PSCAL_IOS_DEVICE_BUILD_DIR)";
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = "$(PSCAL_IOS_SIMULATOR_BUILD_DIR)";
 				"LIBRARY_SEARCH_PATHS[sdk=macosx*]" = (
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)",
 					"$(PROJECT_DIR)/../build/ios-maccatalyst-$(NATIVE_ARCH_ACTUAL)/third-party/openssl/install/lib",
 					"$(SDKROOT)/usr/lib",
 				);
 				OTHER_LDFLAGS = "$(inherited)";
-					"OTHER_LDFLAGS[sdk=iphoneos*]" = (
-						"$(inherited)",
-						"-lpscal_core_static",
-						"-lpscal_exsh_static",
-					"-lpscal_pascal_static",
-					"-lpscal_clike_static",
-					"-lpscal_rea_static",
-					"-lpscal_vm_static",
-						"-lpscal_json2bc_static",
-							"-lpscal_pscald_static",
-							"-lpscal_pscalasm_static",
-							"-lz",
-						"-lsqlite3",
-						"-lresolv",
-						"-lcurses",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
-						"-framework",
-						ImageIO,
-					"-framework",
-					MobileCoreServices,
-					"-framework",
-					AVFoundation,
-					"-framework",
-					AudioToolbox,
-					"-framework",
-					CoreAudio,
-					"-framework",
-					CoreBluetooth,
-					"-framework",
-					CoreGraphics,
-					"-framework",
-					CoreMotion,
-					"-framework",
-					Foundation,
-					"-framework",
-					GameController,
-					"-framework",
-					Metal,
-					"-framework",
-					OpenGLES,
-					"-framework",
-					QuartzCore,
-						"-framework",
-						UIKit,
-						"-framework",
-						CoreHaptics,
-						"-lm",
-						"-lpthread",
-						"-Wl,-ignore_auto_link_library,SwiftUICore",
-						"-Wl,-ignore_auto_link_library,UIUtilities",
-					);
-					"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
 					"-lpscal_exsh_static",
@@ -777,20 +722,20 @@
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-						"-lpscal_json2bc_static",
-							"-lpscal_pscald_static",
-							"-lpscal_pscalasm_static",
-							"-lz",
-						"-lsqlite3",
-						"-lresolv",
-						"-lcurses",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
-							"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
-						"-framework",
-						ImageIO,
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lpscal_pscalasm_static",
+					"-lz",
+					"-lsqlite3",
+					"-lresolv",
+					"-lcurses",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_DEVICE_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
+					"-framework",
+					ImageIO,
 					"-framework",
 					MobileCoreServices,
 					"-framework",
@@ -815,13 +760,68 @@
 					OpenGLES,
 					"-framework",
 					QuartzCore,
-						"-framework",
-						UIKit,
-						"-framework",
-						CoreHaptics,
-						"-lm",
-						"-lpthread",
-					);
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-lm",
+					"-lpthread",
+					"-Wl,-ignore_auto_link_library,SwiftUICore",
+					"-Wl,-ignore_auto_link_library,UIUtilities",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"-lpscal_core_static",
+					"-lpscal_exsh_static",
+					"-lpscal_pascal_static",
+					"-lpscal_clike_static",
+					"-lpscal_rea_static",
+					"-lpscal_vm_static",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lpscal_pscalasm_static",
+					"-lz",
+					"-lsqlite3",
+					"-lresolv",
+					"-lcurses",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2/libSDL2$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_image/libSDL2_image$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_mixer/libSDL2_mixer$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/libSDL2_ttf$(PSCAL_SDL_LIB_SUFFIX).a",
+					"$(PSCAL_IOS_SIMULATOR_BUILD_DIR)/third-party/SDL2_ttf/external/freetype/libfreetype$(PSCAL_SDL_LIB_SUFFIX).a",
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					AVFoundation,
+					"-framework",
+					AudioToolbox,
+					"-framework",
+					CoreAudio,
+					"-framework",
+					CoreBluetooth,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreMotion,
+					"-framework",
+					Foundation,
+					"-framework",
+					GameController,
+					"-framework",
+					Metal,
+					"-framework",
+					OpenGLES,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					UIKit,
+					"-framework",
+					CoreHaptics,
+					"-lm",
+					"-lpthread",
+				);
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"$(inherited)",
 					"-lpscal_core_static",
@@ -830,12 +830,12 @@
 					"-lpscal_clike_static",
 					"-lpscal_rea_static",
 					"-lpscal_vm_static",
-						"-lpscal_json2bc_static",
-						"-lpscal_pscald_static",
-						"-lpscal_pscalasm_static",
-						"-lz",
+					"-lpscal_json2bc_static",
+					"-lpscal_pscald_static",
+					"-lpscal_pscalasm_static",
+					"-lz",
 					"-lsqlite3",
-						"-lresolv",
+					"-lresolv",
 					"-lcurses",
 					"-lcurl",
 					"-lssl",
@@ -869,12 +869,12 @@
 					"-framework",
 					CoreHaptics,
 				);
-						OTHER_SWIFT_FLAGS = "$(inherited) -Xlinker -ignore_auto_link_library -Xlinker SwiftUICore -Xlinker -ignore_auto_link_library -Xlinker UIUtilities";
-						PSCAL_IOS_DEVICE_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-device-release";
-						PSCAL_IOS_SIMULATOR_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-simulator-release";
-						PSCAL_SDL_LIB_SUFFIX = "";
+				OTHER_SWIFT_FLAGS = "$(inherited) -Xlinker -ignore_auto_link_library -Xlinker SwiftUICore -Xlinker -ignore_auto_link_library -Xlinker UIUtilities";
 				PRODUCT_BUNDLE_IDENTIFIER = com.pscal.PscalApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PSCAL_IOS_DEVICE_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-device-release";
+				PSCAL_IOS_SIMULATOR_BUILD_DIR = "$(PROJECT_DIR)/../build/ios-simulator-release";
+				PSCAL_SDL_LIB_SUFFIX = "";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -889,7 +889,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/App/PSCAL.maccatalyst.entitlements;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 28;
 				DEVELOPMENT_TEAM = UYU5FM4LQ4;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -914,7 +914,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/App/PSCAL.maccatalyst.entitlements;
-				CURRENT_PROJECT_VERSION = 1;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CURRENT_PROJECT_VERSION = 28;
 				DEVELOPMENT_TEAM = UYU5FM4LQ4;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
