@@ -191,6 +191,7 @@ final class TerminalBuffer {
     private var currentParameter = ""
     private var csiPrivateMode = false
     private let syncQueue = DispatchQueue(label: "com.pscal.terminal.buffer", qos: .userInitiated)
+    private let syncQueueKey = DispatchSpecificKey<UInt8>()
     private var usingAlternateScreen: Bool = false
     private struct ScreenState {
         var grid: [[TerminalCell]]
@@ -285,8 +286,16 @@ final class TerminalBuffer {
         self.grid = Array(repeating: TerminalBuffer.makeBlankRow(width: self.columns), count: self.rows)
         self.scrollRegionTop = 0
         self.scrollRegionBottom = self.rows - 1
+        self.syncQueue.setSpecific(key: syncQueueKey, value: 1)
         
         resetTabStops()
+    }
+
+    private func withSyncQueue<T>(_ body: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: syncQueueKey) != nil {
+            return body()
+        }
+        return syncQueue.sync(execute: body)
     }
     
     func setResizeHandler(_ handler: ((Int, Int) -> Void)?) {
@@ -302,7 +311,7 @@ final class TerminalBuffer {
         var didChange = false
         let clampedColumns = max(10, newColumns)
         let clampedRows = max(4, newRows)
-        syncQueue.sync {
+        withSyncQueue {
             let wasFullScrollRegion = (scrollRegionTop == 0 && scrollRegionBottom == rows - 1)
             var mutated = false
             if clampedColumns != columns {
@@ -326,7 +335,7 @@ final class TerminalBuffer {
     }
     
     func geometry() -> (columns: Int, rows: Int) {
-        return syncQueue.sync { (columns, rows) }
+        return withSyncQueue { (columns, rows) }
     }
     
     func append(data: Data, onProcessed: (() -> Void)? = nil) {
@@ -396,7 +405,7 @@ final class TerminalBuffer {
     }
     
     func snapshot(includeScrollback: Bool = false) -> TerminalSnapshot {
-        return syncQueue.sync {
+        return withSyncQueue {
             let retainedScrollback = Array(scrollback.suffix(maxScrollback))
             let combinedLines = retainedScrollback + grid
             let totalLines = combinedLines.count
@@ -458,7 +467,7 @@ final class TerminalBuffer {
         let bufferedInputBytes = inputQueue.sync(flags: .barrier) {
             bufferedInput.count
         }
-        return syncQueue.sync {
+        return withSyncQueue {
             let totalRows = grid.count + scrollback.count
             let estimatedStorageBytes = totalRows * columns * MemoryLayout<TerminalCell>.stride
             return BufferMetrics(columns: columns,
@@ -472,7 +481,7 @@ final class TerminalBuffer {
     
     func reset() {
         var handler: (() -> Void)?
-        syncQueue.sync {
+        withSyncQueue {
             currentAttributes.reset()
             scrollback.removeAll()
             grid = Array(repeating: makeBlankRow(), count: rows)
@@ -507,7 +516,7 @@ final class TerminalBuffer {
     
     func echoUserInput(_ text: String) {
         guard !text.isEmpty else { return }
-        syncQueue.sync {
+        withSyncQueue {
             for scalar in text.unicodeScalars {
                 handleEchoScalar(scalar)
             }

@@ -35,6 +35,7 @@
 		5F73F4B32FCA5B9A00EFC123 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5F73F4B22FCA5B9A00EFC123 /* Assets.xcassets */; };
 		5F9A00252F00000100ABC001 /* TerminalWeb in Resources */ = {isa = PBXBuildFile; fileRef = 5F9A00152F00000100ABC001 /* TerminalWeb */; };
 		5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F9A00312F00000100ABC001 /* HtermTerminalView.swift */; };
+		6A0D10023A00000100ABC001 /* AppDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */; };
 		5FFFD0023FFAA00000AAA001 /* PathTruncation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */; };
 		5FFFD0043FFAA00000AAA001 /* TerminalFontSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */; };
 		5FFFD0063FFAA00000AAA001 /* TerminalGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */; };
@@ -79,6 +80,7 @@
 		5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerminalGeometryHelper.swift; sourceTree = "<group>"; };
 		5F9A00152F00000100ABC001 /* TerminalWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; path = TerminalWeb; sourceTree = "<group>"; };
 		5F9A00312F00000100ABC001 /* HtermTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HtermTerminalView.swift; sourceTree = "<group>"; };
+		6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDiagnosticsView.swift; sourceTree = "<group>"; };
 		5FFFD0013FFAA00000AAA001 /* PathTruncation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathTruncation.swift; sourceTree = "<group>"; };
 		5FFFD0033FFAA00000AAA001 /* TerminalFontSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalFontSettings.swift; sourceTree = "<group>"; };
 		5FFFD0053FFAA00000AAA001 /* TerminalGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalGeometry.swift; sourceTree = "<group>"; };
@@ -148,6 +150,7 @@
 			isa = PBXGroup;
 			children = (
 				145F4FC62BE071D600603B3F /* PscalApp.swift */,
+				6A0D10013A00000100ABC001 /* AppDiagnosticsView.swift */,
 				145F4FC82BE071D600603B3F /* TerminalView.swift */,
 				145F4FCA2BE071F400603B3F /* PscalRuntimeBootstrap.swift */,
 				5F73F4C32FCA700000EFC123 /* TerminalGeometryHelper.swift */,
@@ -369,6 +372,7 @@
 				5FFFD0103FFAA00000AAA001 /* TerminalRootViewController.swift in Sources */,
 				5FFFD0123FFAA00000AAA001 /* TerminalSessionMetrics.swift in Sources */,
 				5F9A00322F00000100ABC001 /* HtermTerminalView.swift in Sources */,
+				6A0D10023A00000100ABC001 /* AppDiagnosticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

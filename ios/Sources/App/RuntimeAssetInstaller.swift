@@ -204,14 +204,8 @@ final class RuntimeAssetInstaller {
             }
         }
 
-        guard let bundledRunner = Bundle.main.url(forResource: "pscal_tool_runner", withExtension: nil),
-              fileManager.fileExists(atPath: bundledRunner.path) else {
-            //NSLog("PSCAL iOS: missing pscal_tool_runner in bundle; tool builtins will be unavailable.")
-            cachedToolRunnerPath = nil
-            return nil
-        }
-
         let deflated = Bundle.main.url(forResource: "pscal_tool_runner", withExtension: "deflate")
+        let bundledRunner = Bundle.main.url(forResource: "pscal_tool_runner", withExtension: nil)
         let stagedRunner = RuntimePaths.stagedToolRunner
 
         let stageRunner: (Data) -> String? = { payload in
@@ -240,7 +234,8 @@ final class RuntimeAssetInstaller {
         }
 
         // Fallback: if an old-style raw runner is present in the bundle, stage it.
-        if fileManager.isExecutableFile(atPath: bundledRunner.path),
+        if let bundledRunner,
+           fileManager.isExecutableFile(atPath: bundledRunner.path),
            let rawData = try? Data(contentsOf: bundledRunner) {
             return stageRunner(rawData)
         }

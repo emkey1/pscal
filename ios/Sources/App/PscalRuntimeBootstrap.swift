@@ -678,9 +678,7 @@ final class PscalRuntimeBootstrap: ObservableObject, @unchecked Sendable {
             RuntimeLogger.runtime.resetSession()
             self.purgeTransientState()
             RuntimeAssetInstaller.shared.prepareWorkspace()
-            if let runnerPath = RuntimeAssetInstaller.shared.ensureToolRunnerExecutable() {
-                setenv("PSCALI_TOOL_RUNNER_PATH", runnerPath, 1)
-            }
+            unsetenv("PSCALI_TOOL_RUNNER_PATH")
             unsetenv("PSCALI_MICRO_PATH")
             let containerRoot = (NSHomeDirectory() as NSString).standardizingPath
             setenv("PSCALI_CONTAINER_ROOT", containerRoot, 1)
