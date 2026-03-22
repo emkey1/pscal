@@ -62,6 +62,15 @@ def first_stderr_line(text: str) -> str:
     return ""
 
 
+def smallclue_git_clone_supported(smallclue: Path) -> bool:
+    with tempfile.TemporaryDirectory(prefix="pscal_git_clone_probe_") as td:
+        result = run_cmd([str(smallclue), "git", "clone"], cwd=Path(td), env=build_env())
+    stderr = (result.stderr or "").lower()
+    stdout = (result.stdout or "").lower()
+    unsupported = "libgit2 support is not enabled in this build"
+    return unsupported not in stderr and unsupported not in stdout
+
+
 def case_clone_scp_implicit_dest(smallclue: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="pscal_git_clone_dest_") as td:
         root = Path(td).resolve()
@@ -228,6 +237,10 @@ def main() -> int:
     if not smallclue.exists():
         print(f"smallclue executable not found: {smallclue}", file=sys.stderr)
         return 2
+
+    if not smallclue_git_clone_supported(smallclue):
+        print("[SKIP] git clone regressions: smallclue git applet built without libgit2 support")
+        return 0
 
     cases = [
         ("clone_scp_implicit_dest", lambda: case_clone_scp_implicit_dest(smallclue)),

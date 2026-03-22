@@ -3492,6 +3492,102 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
     return param_actual->var_type == arg_vt;
 }
 
+static VarType compilerProcPointerParamType(AST* param) {
+    if (!param) {
+        return TYPE_VOID;
+    }
+    if (param->type == AST_VAR_DECL) {
+        if (param->type_def && param->type_def->var_type != TYPE_VOID) {
+            return param->type_def->var_type;
+        }
+        if (param->right && param->right->var_type != TYPE_VOID) {
+            return param->right->var_type;
+        }
+    }
+    return param->var_type;
+}
+
+static bool compilerProcPointerParamByRef(AST* param) {
+    return param ? (param->by_ref != 0) : false;
+}
+
+static bool validateCompilerProcPointerArgument(AST* expectedProcPtr, AST* arg_node) {
+    if (!expectedProcPtr || expectedProcPtr->type != AST_PROC_PTR_TYPE || !arg_node) {
+        return true;
+    }
+
+    if (arg_node->type != AST_ADDR_OF || !arg_node->left || !arg_node->left->token || !arg_node->left->token->value) {
+        fprintf(stderr, "Type error: expected '@proc' for procedure pointer argument.\n");
+        compiler_had_error = true;
+        return false;
+    }
+
+    const char* aname = arg_node->left->token->value;
+    Symbol* as = resolveProcedureSymbolInScope(aname, arg_node, gCurrentProgramRoot);
+    if (!as || !as->type_def) {
+        fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", aname);
+        compiler_had_error = true;
+        return false;
+    }
+
+    AST* actualDecl = as->type_def;
+    AST* expectedParams = (expectedProcPtr->child_count > 0) ? expectedProcPtr->children[0] : NULL;
+    int expectedCount = expectedParams ? expectedParams->child_count : 0;
+    int actualCount = actualDecl->child_count;
+    if (expectedCount != actualCount) {
+        fprintf(stderr, "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n",
+                aname, expectedCount, actualCount);
+        compiler_had_error = true;
+        return false;
+    }
+
+    for (int j = 0; j < expectedCount; ++j) {
+        AST* expectedParam = expectedParams->children[j];
+        AST* actualParam = actualDecl->children[j];
+        if (!expectedParam || !actualParam) {
+            continue;
+        }
+        bool expectedByRef = compilerProcPointerParamByRef(expectedParam);
+        bool actualByRef = compilerProcPointerParamByRef(actualParam);
+        if (expectedByRef != actualByRef) {
+            fprintf(stderr,
+                    "Type error: proc pointer param %lld passing convention mismatch for '%s' (expected %s, got %s).\n",
+                    (long long)j + 1, aname,
+                    expectedByRef ? "VAR/OUT" : "value",
+                    actualByRef ? "VAR/OUT" : "value");
+            compiler_had_error = true;
+            return false;
+        }
+        VarType expectedType = compilerProcPointerParamType(expectedParam);
+        VarType actualType = compilerProcPointerParamType(actualParam);
+        if (expectedType != actualType) {
+            fprintf(stderr,
+                    "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
+                    (long long)j + 1, aname,
+                    varTypeToString(expectedType),
+                    varTypeToString(actualType));
+            compiler_had_error = true;
+            return false;
+        }
+    }
+
+    AST* expectedRet = expectedProcPtr->right;
+    AST* actualRet = actualDecl->right;
+    VarType expectedRetType = expectedRet ? expectedRet->var_type : TYPE_VOID;
+    VarType actualRetType = actualRet ? actualRet->var_type : TYPE_VOID;
+    if (expectedRetType != actualRetType) {
+        fprintf(stderr,
+                "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n",
+                aname,
+                varTypeToString(expectedRetType),
+                varTypeToString(actualRetType));
+        compiler_had_error = true;
+        return false;
+    }
+
+    return true;
+}
+
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -7699,6 +7795,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         }
 
                         AST* param_type = getParameterTypeAST(param_node);
+                        AST* param_actual = resolveTypeAlias(param_type);
+                        if (param_actual && param_actual->type == AST_PROC_PTR_TYPE) {
+                            if (!validateCompilerProcPointerArgument(param_actual, arg_node)) {
+                                param_mismatch = true;
+                                break;
+                            }
+                        }
                         if (isInterfaceParameterNode(param_node, param_type)) {
                             continue;
                         }
@@ -7707,7 +7810,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                             if (getInterfaceASTForParam(param_node, param_type)) {
                                 continue;
                             }
-                            AST* param_actual = resolveTypeAlias(param_type);
+                            param_actual = resolveTypeAlias(param_type);
                             AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
                             if (param_actual && param_actual->var_type == TYPE_INTERFACE) {
                                 continue;
@@ -7818,6 +7921,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         // VAR parameters preserve their full TYPE_ARRAY node so that
                         // structural comparisons (like array bounds) remain possible.
                     AST* param_type = getParameterTypeAST(param_node);
+                    AST* param_actual = resolveTypeAlias(param_type);
+                    if (param_actual && param_actual->type == AST_PROC_PTR_TYPE) {
+                        if (!validateCompilerProcPointerArgument(param_actual, arg_node)) {
+                            param_mismatch = true;
+                            break;
+                        }
+                    }
                     if (isInterfaceParameterNode(param_node, param_type)) {
                         continue;
                     }
@@ -7826,7 +7936,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         if (getInterfaceASTForParam(param_node, param_type)) {
                             continue;
                         }
-                        AST* param_actual = resolveTypeAlias(param_type);
+                        param_actual = resolveTypeAlias(param_type);
                         AST* arg_actual   = resolveTypeAlias(arg_node->type_def);
                             if (param_actual && param_actual->var_type == TYPE_INTERFACE) {
                                 continue;

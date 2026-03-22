@@ -1298,6 +1298,15 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             if (parser_for_this_unit->current_token &&
                 parser_for_this_unit->current_token->type == TOKEN_SEMICOLON) {
                 eat(parser_for_this_unit, TOKEN_SEMICOLON);
+            } else if (!(parser_for_this_unit->current_token &&
+                         (parser_for_this_unit->current_token->type == TOKEN_CONST ||
+                          parser_for_this_unit->current_token->type == TOKEN_TYPE ||
+                          parser_for_this_unit->current_token->type == TOKEN_VAR ||
+                          parser_for_this_unit->current_token->type == TOKEN_BEGIN ||
+                          parser_for_this_unit->current_token->type == TOKEN_PROCEDURE ||
+                          parser_for_this_unit->current_token->type == TOKEN_FUNCTION ||
+                          parser_for_this_unit->current_token->type == TOKEN_IMPLEMENTATION))) {
+                eat(parser_for_this_unit, TOKEN_SEMICOLON);
             }
             freeAST(uses_clause);
             uses_clause = NULL;
@@ -1707,6 +1716,14 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
         if (listSize(unit_list) == 0) {
             if (main_parser->current_token &&
                 main_parser->current_token->type == TOKEN_SEMICOLON) {
+                eat(main_parser, TOKEN_SEMICOLON);
+            } else if (!(main_parser->current_token &&
+                         (main_parser->current_token->type == TOKEN_CONST ||
+                          main_parser->current_token->type == TOKEN_TYPE ||
+                          main_parser->current_token->type == TOKEN_VAR ||
+                          main_parser->current_token->type == TOKEN_BEGIN ||
+                          main_parser->current_token->type == TOKEN_PROCEDURE ||
+                          main_parser->current_token->type == TOKEN_FUNCTION))) {
                 eat(main_parser, TOKEN_SEMICOLON);
             }
             freeAST(uses_clause);

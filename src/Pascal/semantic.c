@@ -1303,7 +1303,9 @@ void pascalPerformSemanticAnalysis(AST *root) {
     ensureRegistry();
     ensureExceptionGlobals(root);
     gProgramRoot = desugarNode(root, TYPE_VOID);
+    pascal_semantic_pass_active = 1;
     annotateTypes(gProgramRoot, NULL, gProgramRoot);
+    pascal_semantic_pass_active = 0;
 
     markVirtualMethodsForInterfaces();
 

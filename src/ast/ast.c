@@ -1410,7 +1410,9 @@ resolved_field: ;
                           node->var_type = TYPE_VOID;
                      }
                  }
-                // Minimal argument checking for procedure-pointer parameters
+                // Apply record-literal typing for call arguments here. Procedure-
+                // pointer compatibility diagnostics only run during the main
+                // Pascal semantic pass to avoid duplicate first/second-pass errors.
                  if (procSymbol && procSymbol->type_def && node->child_count > 0) {
                      AST* decl = procSymbol->type_def; // PROCEDURE_DECL or FUNCTION_DECL
                      int expected = decl->child_count;
@@ -1425,57 +1427,29 @@ resolved_field: ;
                              }
                          }
                      }
-                     if (given >= expected) {
+                     if (pascal_semantic_pass_active && given >= expected) {
                          for (int i = 0; i < expected; ++i) {
                              AST* formal = decl->children[i];
                              AST* actual = node->children[i];
                              if (!formal || !actual) continue;
-                             AST* ftype = resolveTypeAlias(formal->right); // type node
+                             AST* ftype = resolveTypeAlias(formal->right);
                              if (ftype && ftype->type == AST_PROC_PTR_TYPE) {
                                  if (actual->type == AST_ADDR_OF && actual->left && actual->left->token) {
                                      const char* aname = actual->left->token->value;
                                      Symbol* as = resolveProcedureSymbolInScope(aname, node, globalProgramNode);
                                      if (as && as->type_def) {
-                                         AST* adecl = as->type_def;
-                                         AST* fparams = (ftype->child_count > 0) ? ftype->children[0] : NULL;
-                                         int fpc = fparams ? fparams->child_count : 0;
-                                         int apc = adecl->child_count;
-                                         if (fpc != apc) {
-                                             fprintf(stderr, "Type error: proc pointer arity mismatch for '%s' (expected %d, got %d).\n", aname, fpc, apc);
-                                             pascal_semantic_error_count++;
-                                         } else {
-                                             for (int j = 0; j < fpc; ++j) {
-                                                 AST* ft = fparams->children[j];
-                                                 AST* at = adecl->children[j];
-                                                 if (ft && at && ft->var_type != at->var_type) {
-                                                    fprintf(stderr, "Type error: proc pointer param %lld type mismatch for '%s' (expected %s, got %s).\n",
-                                                            (long long)j + 1, aname,
-                                                            varTypeToString(ft->var_type),
-                                                            varTypeToString(at->var_type));
-                                                     pascal_semantic_error_count++;
-                                                     break;
-                                                 }
-                                             }
-                                         }
-                                         AST* fret = ftype->right; // may be NULL for procedure
-                                         AST* aret = adecl->right; // may be NULL for procedure
-                                         VarType fRT = fret ? fret->var_type : TYPE_VOID;
-                                         VarType aRT = aret ? aret->var_type : TYPE_VOID;
-                                         if (fRT != aRT) {
-                                             fprintf(stderr, "Type error: proc pointer return type mismatch for '%s' (expected %s, got %s).\n", aname, varTypeToString(fRT), varTypeToString(aRT));
-                                             pascal_semantic_error_count++;
-                                         }
-                                      } else {
+                                         verifyProcPointerAgainstDecl(ftype, as->type_def, aname, true);
+                                     } else {
                                          fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", aname);
                                          pascal_semantic_error_count++;
-                                      }
-                                  } else {
+                                     }
+                                 } else {
                                      fprintf(stderr, "Type error: expected '@proc' for procedure pointer argument.\n");
                                      pascal_semantic_error_count++;
-                                  }
-                              }
-                          }
-                      }
+                                 }
+                             }
+                         }
+                     }
                  }
                 // Note: language-specific frontends may handle receiver typing separately.
                 /*
@@ -1694,12 +1668,10 @@ resolved_field: ;
                             Symbol* psym = resolveProcedureSymbolInScope(pname, node, globalProgramNode);
                             if (psym && psym->type_def) {
                                 rhsIsProcPointer = true;
-                                verifyProcPointerAgainstDecl(lhsType, psym->type_def, pname, node->var_type == TYPE_UNKNOWN);
+                                verifyProcPointerAgainstDecl(lhsType, psym->type_def, pname, true);
                             } else {
-                                if (node->var_type == TYPE_UNKNOWN) {
-                                    fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
-                                    pascal_semantic_error_count++;
-                                }
+                                fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", pname);
+                                pascal_semantic_error_count++;
                             }
                         } else {
                             AST* rhsType = resolveTypeAlias(rhs->type_def);
@@ -1722,7 +1694,7 @@ resolved_field: ;
                                             resolvedReturnType->type == AST_PROC_PTR_TYPE;
 
                                     if (!returnIsProcPointer) {
-                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName, node->var_type == TYPE_UNKNOWN);
+                                        verifyProcPointerAgainstDecl(lhsType, rhsProc->type_def, callName, true);
                                     }
 
                                     if (returnIsProcPointer) {

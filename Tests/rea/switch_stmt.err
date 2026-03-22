@@ -4,7 +4,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 ------ ---- ---------------- -------- --------------------------
 0000    0 CONSTANT            1 'nil'
 0002    | DEFINE_GLOBAL    NameIdx:0   'myself' Type:POINTER ('')
-0007    1 DEFINE_GLOBAL    NameIdx:3   'x' Type:INT64 ('int')
+0007    1 DEFINE_GLOBAL    NameIdx:3   'x' Type:INT64 ('__pscal_anon_type_1')
 0012    | PUSH_IMM_I8         2
 0014    | SET_GLOBAL          3 'x' cache=0x0
 0024    2 GET_GLOBAL          3 'x' cache=0x0
@@ -37,7 +37,7 @@ Constants (9):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: STR   "x"
-  0004: STR   "int"
+  0004: STR   "__pscal_anon_type_1"
   0005: INT   2
   0006: INT   1
   0007: STR   "write"

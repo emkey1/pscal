@@ -24,7 +24,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0037    | RETURN
 0038    6 GET_LOCAL           0 (slot)
 0040    | RETURN
-0041   23 DEFINE_GLOBAL    NameIdx:9   'r0' Type:BOOLEAN ('bool')
+0041   23 DEFINE_GLOBAL    NameIdx:9   'r0' Type:BOOLEAN ('__pscal_anon_type_1')
 0046    | CONST_FALSE
 0047    | JUMP_IF_FALSE       8 (to 0058)
 0050    | CALL_USER_PROC      12 'rhs_true' @0010 (0 args)
@@ -32,7 +32,7 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0055    | JUMP                1 (to 0059)
 0058    | CONST_FALSE
 0059    | SET_GLOBAL          9 'r0' cache=0x0
-0069   24 DEFINE_GLOBAL    NameIdx:14  'r1' Type:BOOLEAN ('bool')
+0069   24 DEFINE_GLOBAL    NameIdx:14  'r1' Type:BOOLEAN ('__pscal_anon_type_2')
 0074    | CONST_TRUE
 0075    | JUMP_IF_FALSE       4 (to 0082)
 0078    | CONST_TRUE
@@ -40,30 +40,30 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0082    | CALL_USER_PROC      12 'rhs_true' @0010 (0 args)
 0086    | TO_BOOL
 0087    | SET_GLOBAL         14 'r1' cache=0x0
-0097   25 DEFINE_GLOBAL    NameIdx:17  'r2' Type:BOOLEAN ('bool')
+0097   25 DEFINE_GLOBAL    NameIdx:18  'r2' Type:BOOLEAN ('__pscal_anon_type_3')
 0102    | CONST_TRUE
 0103    | JUMP_IF_FALSE       8 (to 0114)
 0106    | CALL_USER_PROC      12 'rhs_true' @0010 (0 args)
 0110    | TO_BOOL
 0111    | JUMP                1 (to 0115)
 0114    | CONST_FALSE
-0115    | SET_GLOBAL         17 'r2' cache=0x0
-0125   26 DEFINE_GLOBAL    NameIdx:20  'r3' Type:BOOLEAN ('bool')
+0115    | SET_GLOBAL         18 'r2' cache=0x0
+0125   26 DEFINE_GLOBAL    NameIdx:22  'r3' Type:BOOLEAN ('__pscal_anon_type_4')
 0130    | CONST_FALSE
 0131    | JUMP_IF_FALSE       4 (to 0138)
 0134    | CONST_TRUE
 0135    | JUMP                5 (to 0143)
-0138    | CALL_USER_PROC      23 'rhs_false' @0027 (0 args)
+0138    | CALL_USER_PROC      26 'rhs_false' @0027 (0 args)
 0142    | TO_BOOL
-0143    | SET_GLOBAL         20 'r3' cache=0x0
-0153   27 DEFINE_GLOBAL    NameIdx:24  'r4' Type:BOOLEAN ('bool')
+0143    | SET_GLOBAL         22 'r3' cache=0x0
+0153   27 DEFINE_GLOBAL    NameIdx:27  'r4' Type:BOOLEAN ('__pscal_anon_type_5')
 0158    | CONST_FALSE
 0159    | JUMP_IF_FALSE       4 (to 0166)
 0162    | CONST_TRUE
 0163    | JUMP                5 (to 0171)
 0166    | CALL_USER_PROC      12 'rhs_true' @0010 (0 args)
 0170    | TO_BOOL
-0171    | SET_GLOBAL         24 'r4' cache=0x0
+0171    | SET_GLOBAL         27 'r4' cache=0x0
 0181   11 CONST_FALSE
 0182    | JUMP_IF_FALSE       8 (to 0193)
 0185    | CALL_USER_PROC      12 'rhs_true' @0010 (0 args)
@@ -72,11 +72,11 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0193    | CONST_FALSE
 0194    | JUMP_IF_FALSE      12 (to 0209)
 0197   12 CONST_1
-0198    | CONSTANT           29 'A hit'
+0198    | CONSTANT           33 'A hit'
 0200    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0206   11 JUMP                9 (to 0218)
 0209   14 CONST_1
-0210    | CONSTANT           30 'A skip'
+0210    | CONSTANT           34 'A skip'
 0212    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0218   17 CONST_TRUE
 0219    | JUMP_IF_FALSE       4 (to 0226)
@@ -86,28 +86,28 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0230    | TO_BOOL
 0231    | JUMP_IF_FALSE      12 (to 0246)
 0234   18 CONST_1
-0235    | CONSTANT           33 'B hit'
+0235    | CONSTANT           37 'B hit'
 0237    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0243   17 JUMP                9 (to 0255)
 0246   20 CONST_1
-0247    | CONSTANT           34 'B skip'
+0247    | CONSTANT           38 'B skip'
 0249    | CALL_BUILTIN_PROC   177 'write' (2 args)
 0255   29 CONST_1
-0256    | CONSTANT           35 'vals:'
+0256    | CONSTANT           39 'vals:'
 0258    | GET_GLOBAL          9 'r0' cache=0x0
-0268    | CONSTANT           36 ' '
+0268    | CONSTANT           40 ' '
 0270    | GET_GLOBAL         14 'r1' cache=0x0
-0280    | CONSTANT           36 ' '
-0282    | GET_GLOBAL         17 'r2' cache=0x0
-0292    | CONSTANT           36 ' '
-0294    | GET_GLOBAL         20 'r3' cache=0x0
-0304    | CONSTANT           36 ' '
-0306    | GET_GLOBAL         24 'r4' cache=0x0
+0280    | CONSTANT           40 ' '
+0282    | GET_GLOBAL         18 'r2' cache=0x0
+0292    | CONSTANT           40 ' '
+0294    | GET_GLOBAL         22 'r3' cache=0x0
+0304    | CONSTANT           40 ' '
+0306    | GET_GLOBAL         27 'r4' cache=0x0
 0316    | CALL_BUILTIN_PROC   177 'write' (11 args)
 0322    0 HALT
 == End Disassembly: rea/short_circuit.rea ==
 
-Constants (37):\n  0000: STR   "myself"
+Constants (41):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: INT   1
@@ -117,31 +117,35 @@ Constants (37):\n  0000: STR   "myself"
   0007: STR   "R0"
   0008: BOOL  false
   0009: STR   "r0"
-  0010: STR   "bool"
+  0010: STR   "__pscal_anon_type_1"
   0011: BOOL  false
   0012: STR   "rhs_true"
   0013: BOOL  false
   0014: STR   "r1"
-  0015: BOOL  true
+  0015: STR   "__pscal_anon_type_2"
   0016: BOOL  true
-  0017: STR   "r2"
-  0018: BOOL  true
-  0019: BOOL  false
-  0020: STR   "r3"
+  0017: BOOL  true
+  0018: STR   "r2"
+  0019: STR   "__pscal_anon_type_3"
+  0020: BOOL  true
   0021: BOOL  false
-  0022: BOOL  true
-  0023: STR   "rhs_false"
-  0024: STR   "r4"
-  0025: BOOL  false
-  0026: BOOL  true
-  0027: BOOL  false
-  0028: BOOL  false
-  0029: STR   "A hit"
-  0030: STR   "A skip"
-  0031: BOOL  true
-  0032: BOOL  true
-  0033: STR   "B hit"
-  0034: STR   "B skip"
-  0035: STR   "vals:"
-  0036: CHAR  ' '
+  0022: STR   "r3"
+  0023: STR   "__pscal_anon_type_4"
+  0024: BOOL  false
+  0025: BOOL  true
+  0026: STR   "rhs_false"
+  0027: STR   "r4"
+  0028: STR   "__pscal_anon_type_5"
+  0029: BOOL  false
+  0030: BOOL  true
+  0031: BOOL  false
+  0032: BOOL  false
+  0033: STR   "A hit"
+  0034: STR   "A skip"
+  0035: BOOL  true
+  0036: BOOL  true
+  0037: STR   "B hit"
+  0038: STR   "B skip"
+  0039: STR   "vals:"
+  0040: CHAR  ' '
 

@@ -97,6 +97,9 @@ void pascalPopGlobalState(PascalGlobalState *state) {
         return;
     }
 
+    int accumulated_semantic_errors = pascal_semantic_error_count;
+    int accumulated_parser_errors = pascal_parser_error_count;
+
     restoreHashTable(&globalSymbols, state->globalSymbols);
     restoreHashTable(&constGlobalSymbols, state->constGlobalSymbols);
     restoreHashTable(&localSymbols, state->localSymbols);
@@ -129,8 +132,8 @@ void pascalPopGlobalState(PascalGlobalState *state) {
     typeWarn = state->typeWarn;
     gSuppressWriteSpacing = state->gSuppressWriteSpacing;
     gUppercaseBooleans = state->gUppercaseBooleans;
-    pascal_semantic_error_count = state->pascal_semantic_error_count;
-    pascal_parser_error_count = state->pascal_parser_error_count;
+    pascal_semantic_error_count = state->pascal_semantic_error_count + accumulated_semantic_errors;
+    pascal_parser_error_count = state->pascal_parser_error_count + accumulated_parser_errors;
     atomic_store(&break_requested, state->break_requested_value);
     exit_requested = state->exit_requested_value;
 

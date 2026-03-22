@@ -60,6 +60,7 @@ atomic_int break_requested = 0;
 int exit_requested = 0;
 int gSuppressWriteSpacing = 0;
 int gUppercaseBooleans = 0;
+int pascal_semantic_pass_active = 0;
 // Semantic/type error counter for the Pascal front end
 int pascal_semantic_error_count = 0;
 int pascal_parser_error_count = 0;
