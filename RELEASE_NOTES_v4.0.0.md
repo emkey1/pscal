@@ -3,12 +3,19 @@
 Date: 2026-03-22
 
 ## Highlights
+- **PSCAL now has an iOS/iPadOS host app** – v4.0 adds a real SwiftUI-based mobile port that embeds the PSCAL toolchain, exposes the language front ends as in-app shell builtins, stages examples/runtime assets into the app sandbox, and supports both simulator and device builds through dedicated CMake/Xcode flows.
 - **Pascal grows into a much broader modern dialect** – The Pascal front end now supports a substantial set of Delphi-style conveniences and PSCAL-specific extensions, including inline `var`, `for var`, `with`, `try/except`, `raise`, `Exit(value)`, `continue`, record constructors, richer variant records, and selector chains on call results.
 - **Pascal runtime and VM behavior are significantly stronger** – Function-result handling for records/pointers is safer, `StringOfChar` and Unicode-friendly `Write`/`Writeln` support land, inline-closure and inline-parameter lowering is hardened, and interface dispatch now builds interface-specific method tables so virtual calls resolve correctly even when non-interface methods appear earlier on the record.
 - **Examples are now a major strength of the tree** – The Pascal suite adds or substantially upgrades checkers, 3D checkers, Game of Life, Eight Puzzle, Turing Machine, Web Crawler, Prolog, Lambda Calculus, directory browsing, and puzzle-solving demos.
 - **SDL and documentation quality both improve** – The SDL checkers demos were overhauled for correctness and usability, while Smallclue’s Markdown rendering and multiple Pascal-language/reference documents were updated to match the larger feature set.
 
 ## New
+- Added an iOS/iPadOS port with:
+  - dedicated `ios-simulator` and `ios-device` CMake presets for PSCAL static libraries
+  - a SwiftUI host app (`ios/PscalApp.xcodeproj`) that launches the embedded PSCAL shell/runtime
+  - PTY-backed terminal rendering with VT100 parsing and direct keyboard input bridging
+  - bundled examples, runtime docs, libraries, fonts, and related assets staged into the app sandbox
+  - in-app PSCAL toolchain builtins including `pascal`, `dascal`, `clike`, `rea`, `pscalvm`, `pscaljson2bc`, and `pscald`
 - Added Pascal support for:
   - inline `var` declarations in compound blocks and the main program body
   - `for var ... := ... do` loop-local variables
@@ -44,6 +51,8 @@ Date: 2026-03-22
   - `Examples/pascal/sdl/Checkers3D`
 
 ## Improvements
+- The new iOS/iPadOS host now has a documented build/bootstrap path in [Docs/ios_build.md](Docs/ios_build.md) and [ios/README.md](ios/README.md), including simulator/device static-lib builds, Xcode integration, runtime asset staging, and shell/tool-runner packaging.
+- The mobile runtime now ships the stock `Examples/` tree and PSCAL runtime payload inside the app bundle, then installs them into `~/Documents`/`~/Documents/pscal_runtime` on first launch so the sandboxed environment behaves much more like the desktop toolchain.
 - Pascal interface dispatch now builds method tables per interface at boxing time, preventing non-interface methods from corrupting interface slot order.
 - Variant-record storage and field aliasing were strengthened so overlapping fields share storage correctly and function-result field access works through pointers.
 - The Pascal front end better supports modern sample style: loop-local variables, inline declarations, nested closures, richer exception flow, and more expressive statement forms now compose reliably.
@@ -55,6 +64,7 @@ Date: 2026-03-22
 - Smallclue’s Markdown reader now respects terminal width better and no longer misclassifies wrapped prose as selector noise in documents such as the Turing Machine guide.
 
 ## Fixed
+- Fixed interface dispatch in the Pascal runtime so record/interface method calls now resolve against interface-specific slot order instead of a class-wide method table.
 - Fixed Pascal inline-routine lowering bugs that could corrupt locals or mishandle `Exit(...)` inside inlined helpers.
 - Fixed Pascal global anonymous-record metadata so field lookups on globals work at runtime.
 - Fixed record-result initialization so record and pointer function results can be populated safely before return.
@@ -73,6 +83,7 @@ Date: 2026-03-22
 ## Upgrade Notes
 - Rebuild with `cmake -S . -B build -DRELEASE_BUILD=ON` and `cmake --build build` for release packaging, or use `-Drelease=ON` if you want the PSCAL release profile enabled.
 - The current VM bytecode cache version is `PSCAL_VM_VERSION = 9`. Cached bytecode built against older VM/interface metadata should be considered stale and recompiled.
+- For iOS/iPadOS packaging, use `cmake --preset ios-simulator` / `cmake --preset ios-device` to produce the embeddable static archives, then build `ios/PscalApp.xcodeproj` in Xcode against those outputs.
 - Pascal developers should review the updated language reference for the expanded dialect surface, especially around exception handling, inline declarations, record constructors, variant records, and `with`.
 - Several Pascal examples now rely on SDL or other optional runtime capabilities; enable those dependencies before performing full release validation of the example suite.
 
@@ -81,12 +92,16 @@ Date: 2026-03-22
 2. `Tests/run_all_tests`  
    Optional: export `RUN_SDL=1` and `RUN_NET_TESTS=1` for broader release sweeps.
 3. `python3 Tests/compiler/pascal/run_compiler_tests.py`
-4. Spot-check key Pascal examples:
+4. Optional iOS/iPadOS release checks:
+   - `cmake --preset ios-simulator && cmake --build --preset ios-simulator`
+   - `cmake --preset ios-device && cmake --build --preset ios-device`
+   - `Tests/run_ios_release_sanity.sh`
+5. Spot-check key Pascal examples:
    - `build/bin/pascal Examples/pascal/base/GameOfLife`
    - `build/bin/pascal Examples/pascal/base/TuringMachine`
    - `build/bin/pascal Examples/pascal/base/EightPuzzle`
    - `build/bin/pascal Examples/pascal/base/WebCrawler`
    - `build/bin/pascal Examples/pascal/base/PrologEngine`
-5. Spot-check SDL demos when SDL is enabled:
+6. Spot-check SDL demos when SDL is enabled:
    - `build/bin/pascal Examples/pascal/sdl/CheckersSDL`
    - `build/bin/pascal Examples/pascal/sdl/Checkers3D`
