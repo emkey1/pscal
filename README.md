@@ -13,10 +13,14 @@ The code base is written in C and consists of a hand‑written lexer and parser,
 
 Optional SDL2/SDL3 support adds graphics and audio capabilities, and there is built‑in support for CURL, yyjson and SQLite with others easily added.
 
+PSCAL also now ships with an iOS/iPadOS host app built in SwiftUI. The mobile app embeds the PSCAL toolchain, stages examples and runtime assets into the app sandbox, and is available for external testing through TestFlight.
+
 The PSCAL suite is extensible through extended builtins.  Check the Docs directory for additional details on this.
 
-## Forum
-- (Discord) https://discord.gg/AZM6D22CCs
+## Community
+
+- Discord server: [https://discord.gg/jZV6UHUyBS](https://discord.gg/jZV6UHUyBS)
+- iOS/iPadOS TestFlight info: [https://discord.com/channels/1412663740419280928/1412664012193271940/1449783416076632218](https://discord.com/channels/1412663740419280928/1412664012193271940/1449783416076632218)
 
 ## Requirements
 
@@ -95,15 +99,24 @@ cmake -S . -B build -DSDL=OFF
 cmake --build build -j
 ```
 
-For iOS presets:
+For iOS/iPadOS static-library presets:
 
 ```sh
-cmake --preset ios-simulator
-cmake --build --preset ios-simulator
+cmake --preset ios-simulator-debug
+cmake --build --preset ios-simulator-debug
 
-cmake --preset ios-device
-cmake --build --preset ios-device
+cmake --preset ios-device-debug
+cmake --build --preset ios-device-debug
+
+cmake --preset ios-simulator-release
+cmake --build --preset ios-simulator-release
+
+cmake --preset ios-device-release
+cmake --build --preset ios-device-release
 ```
+
+The iOS/iPadOS host app lives in `ios/PSCAL.xcodeproj`. For a full walkthrough,
+see `ios/README.md` and `Docs/ios_build.md`.
 
 ## Repository layout (git)
 
