@@ -43,6 +43,12 @@
       "stdout_substring": "PASS: stringofchar builtin"
     },
     {
+      "id": "trim_builtin",
+      "path": "Tests/compiler/pascal/cases/trim_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: trim builtin"
+    },
+    {
       "id": "record_function_result",
       "path": "Tests/compiler/pascal/cases/record_function_result.pas",
       "expect": "compile_success",

@@ -1716,6 +1716,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"textbackgrounde", vmBuiltinTextbackgrounde},
     {"textcolor", vmBuiltinTextcolor},
     {"textcolore", vmBuiltinTextcolore},
+    {"trim", vmBuiltinTrim},
     {"trunc", vmBuiltinTrunc},
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
@@ -2747,6 +2748,31 @@ Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
     Value result = makeString(new_str);
     free(new_str);
     return result;
+}
+
+Value vmBuiltinTrim(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !builtinValueIsStringLike(&args[0])) {
+        runtimeError(vm, "Trim expects 1 string argument.");
+        return makeString("");
+    }
+
+    const char *source = builtinValueToCString(&args[0]);
+    if (!source) {
+        runtimeError(vm, "Trim expects a valid string argument.");
+        return makeString("");
+    }
+
+    const unsigned char *start = (const unsigned char *)source;
+    while (*start != '\0' && isspace(*start)) {
+        start++;
+    }
+
+    const unsigned char *end = (const unsigned char *)source + strlen(source);
+    while (end > start && isspace(end[-1])) {
+        end--;
+    }
+
+    return makeStringLen((const char *)start, (size_t)(end - start));
 }
 
 Value vmBuiltinStringOfChar(VM* vm, int arg_count, Value* args) {
@@ -10134,6 +10160,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("DeLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("JsonGet", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ToUpper", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Trim", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("toupper", AST_FUNCTION_DECL, NULL);
 
     /* Allow externally linked modules to add more builtins. */
