@@ -83,6 +83,8 @@ static AST *parsePostfixSelectors(Parser *parser, AST *node);
 static AST *parseRecordConstructor(Parser *parser);
 static AST *cloneBuiltinTypeNode(VarType type, int line);
 static AST *inferInlineForVarType(AST *expr, int line);
+static bool routineDeclGroupHasName(AST *declGroup, const char *name);
+static bool parserCurrentRoutineShadowsBuiltin(Parser *parser, const char *name);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -174,6 +176,75 @@ static AST *inferInlineForVarType(AST *expr, int line) {
     }
 
     return cloneBuiltinTypeNode(TYPE_INTEGER, line);
+}
+
+static bool routineDeclGroupHasName(AST *declGroup, const char *name) {
+    if (!declGroup || !name) {
+        return false;
+    }
+
+    if (declGroup->type == AST_VAR_DECL) {
+        for (int i = 0; i < declGroup->child_count; ++i) {
+            AST *child = declGroup->children[i];
+            if (!child) {
+                continue;
+            }
+            if (child->type == AST_VARIABLE && child->token && child->token->value &&
+                strcasecmp(child->token->value, name) == 0) {
+                return true;
+            }
+            if (child->type == AST_ASSIGN && child->left &&
+                child->left->type == AST_VARIABLE &&
+                child->left->token && child->left->token->value &&
+                strcasecmp(child->left->token->value, name) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return declGroup->type == AST_CONST_DECL &&
+           declGroup->token && declGroup->token->value &&
+           strcasecmp(declGroup->token->value, name) == 0;
+}
+
+static bool parserCurrentRoutineShadowsBuiltin(Parser *parser, const char *name) {
+    if (!parser || !parser->current_routine || !name) {
+        return false;
+    }
+
+    AST *routine = parser->current_routine;
+
+    for (int i = 0; i < routine->child_count; ++i) {
+        if (routineDeclGroupHasName(routine->children[i], name)) {
+            return true;
+        }
+    }
+
+    if (routine->type == AST_FUNCTION_DECL && routine->token && routine->token->value) {
+        if (strcasecmp(routine->token->value, name) == 0 ||
+            strcasecmp("result", name) == 0) {
+            return true;
+        }
+    }
+
+    AST *blockNode = (routine->type == AST_PROCEDURE_DECL) ? routine->right : routine->extra;
+    if (!blockNode || blockNode->type != AST_BLOCK || blockNode->child_count <= 0) {
+        return false;
+    }
+
+    AST *declarationsNode = blockNode->children[0];
+    if (!declarationsNode || declarationsNode->type != AST_COMPOUND) {
+        return false;
+    }
+
+    for (int i = 0; i < declarationsNode->child_count; ++i) {
+        if (routineDeclGroupHasName(declarationsNode->children[i], name)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool tokenTypeIsIdentifierLike(TokenType type) {
@@ -1242,6 +1313,7 @@ static AST *parseInterfaceType(Parser *parser) {
 }
 AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* unit_name_being_parsed, BytecodeChunk* chunk) {
     if (recursion_depth > MAX_RECURSION_DEPTH) { /* error */ EXIT_FAILURE_HANDLER(); }
+    parser_for_this_unit->current_routine = NULL;
 
     Token* unit_keyword_token_copy = copyToken(parser_for_this_unit->current_token);
     eat(parser_for_this_unit, TOKEN_UNIT);
@@ -1369,6 +1441,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             nested_parser_instance.dependency_paths = parser_for_this_unit->dependency_paths;
             nested_parser_instance.current_unit_name_context = NULL;
             nested_parser_instance.routine_depth = 0;
+            nested_parser_instance.current_routine = NULL;
             
             // --- MODIFICATION: Pass the chunk recursively ---
             AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name, chunk);
@@ -1630,6 +1703,7 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
 
 AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
     main_parser->current_unit_name_context = NULL;
+    main_parser->current_routine = NULL;
     resetCompilerConstants();
     Token *copiedProgToken = copyToken(main_parser->current_token);
     if (!copiedProgToken && main_parser->current_token) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
@@ -1791,6 +1865,7 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 nested_parser_instance.dependency_paths = main_parser->dependency_paths;
                 nested_parser_instance.current_unit_name_context = NULL;
                 nested_parser_instance.routine_depth = 0;
+                nested_parser_instance.current_routine = NULL;
 
                 // --- MODIFICATION: Pass the chunk recursively ---
                 AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
@@ -1956,15 +2031,18 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
+        AST *saved_routine = parser->current_routine;
+        parser->current_routine = node;
         parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
-        AST *compound_body = compoundStatement(parser);
-        parser->routine_depth--;
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
-        addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setRight(node, blockNode);
+        AST *compound_body = compoundStatement(parser);
+        addChild(blockNode, compound_body);
+        parser->routine_depth--;
+        parser->current_routine = saved_routine;
         node->symbol_table = (Symbol*)my_table;
         popProcedureTable(false);
     }
@@ -2765,16 +2843,19 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
+        AST *saved_routine = parser->current_routine;
+        parser->current_routine = node;
         parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
-        AST *compound_body = compoundStatement(parser);
-        parser->routine_depth--;
 
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
-        addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setExtra(node, blockNode);
+        AST *compound_body = compoundStatement(parser);
+        addChild(blockNode, compound_body);
+        parser->routine_depth--;
+        parser->current_routine = saved_routine;
         node->symbol_table = (Symbol*)my_table;
         popProcedureTable(false);
     }
@@ -4522,7 +4603,10 @@ AST *factor(Parser *parser) {
         else if (node->type == AST_VARIABLE) {
                 // <<<< MODIFICATION START >>>>
                 // Check for built-in functions FIRST, as they are a special case.
-                if (node->token && isBuiltin(node->token->value) && getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION) {
+                if (node->token &&
+                    isBuiltin(node->token->value) &&
+                    getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION &&
+                    !parserCurrentRoutineShadowsBuiltin(parser, node->token->value)) {
                     
                     #ifdef DEBUG
                     fprintf(stderr, "[DEBUG factor] IDENTIFIER '%s' is a built-in FUNCTION. Converting to AST_PROCEDURE_CALL.\n", node->token->value);

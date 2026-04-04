@@ -49,6 +49,18 @@
       "stdout_substring": "PASS: trim builtin"
     },
     {
+      "id": "flush_builtin",
+      "path": "Tests/compiler/pascal/cases/flush_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: flush builtin"
+    },
+    {
+      "id": "local_builtin_shadow_reference",
+      "path": "Tests/compiler/pascal/cases/local_builtin_shadow_reference.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: local builtin shadow reference"
+    },
+    {
       "id": "receiver_method_expression_call",
       "path": "Tests/compiler/pascal/cases/receiver_method_expression_call.pas",
       "expect": "compile_success",
