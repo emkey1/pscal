@@ -4465,13 +4465,22 @@ AST *factor(Parser *parser) {
         // IDENTIFIER case: call lvalue, which handles ., [], ^ and eats tokens internally
         node = lvalue(parser); // lvalue consumes the identifier and potential subsequent tokens
         if (!node || node->type == AST_NOOP) return newASTNode(AST_NOOP, NULL);
-
-        // Check if it's a function call (lvalue doesn't handle the LPAREN)
-        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN && node->type == AST_VARIABLE) {
-             // It's a function call. Create a NEW procedure call node.
-             AST* funcCallNode = newASTNode(AST_PROCEDURE_CALL, node->token);
-             freeAST(node); // Free the original AST_VARIABLE node.
-             node = funcCallNode; // The new procedure call node is now our main node.
+        // Check if it's a function call (lvalue doesn't handle the LPAREN).
+        // Expression parsing previously only accepted plain identifiers here,
+        // which rejected qualified calls like Unit.Func(...) or Obj.Method(...).
+        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN &&
+            (node->type == AST_VARIABLE || node->type == AST_FIELD_ACCESS)) {
+             if (node->type == AST_VARIABLE) {
+                 // Plain identifier call: replace the temporary variable node
+                 // with a procedure-call node that owns the copied token.
+                 AST* funcCallNode = newASTNode(AST_PROCEDURE_CALL, node->token);
+                 freeAST(node); // Free the original AST_VARIABLE node.
+                 node = funcCallNode; // The new procedure call node is now our main node.
+             } else {
+                 // Qualified call: preserve the selector/receiver carried in the
+                 // AST_FIELD_ACCESS node and just retag it as a call node.
+                 node->type = AST_PROCEDURE_CALL;
+             }
 
              eat(parser, TOKEN_LPAREN);      // Eat '('
              bool isStrCall = (node->token && node->token->value && strcasecmp(node->token->value, "str") == 0);

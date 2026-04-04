@@ -3,9 +3,11 @@ program RPNCalc;
 const
     MAX_STACK = 1024;
     MAX_TOKENS = 256;
+    PI_VALUE = 3.141592653589793;
 
 type
-    TStack = array[0..MAX_STACK-1] of integer;
+    TNumber = double;
+    TStack = array[0..MAX_STACK-1] of TNumber;
     TString = string;
     TTokens = array[0..MAX_TOKENS-1] of TString;
 
@@ -16,8 +18,7 @@ var
     tokens: TTokens;
     tokenCount: integer;
     i: integer;
-    tok: TString;
-    a, b: integer;
+    a, b: TNumber;
 
 procedure InitStack;
 begin
@@ -26,30 +27,14 @@ end;
 
 function IsNumber(const s: TString): boolean;
 var
-    v: integer;
+    v: TNumber;
+    code: integer;
 begin
-    result := false;
-    if length(s) = 0 then
-        exit;
-    if s[1] = '-' then
-    begin
-        if length(s) = 1 then
-            exit;
-        v := 2
-    end
-    else
-        v := 1;
-
-    while v <= length(s) do
-    begin
-        if not (s[v] in ['0'..'9']) then
-            exit;
-        inc(v);
-    end;
-    result := true;
+    Val(s, v, code);
+    result := code = 0;
 end;
 
-procedure Push(x: integer);
+procedure Push(x: TNumber);
 begin
     if sp >= MAX_STACK then
     begin
@@ -60,7 +45,7 @@ begin
     inc(sp);
 end;
 
-function Pop: integer;
+function Pop: TNumber;
 begin
     if sp = 0 then
     begin
@@ -71,23 +56,72 @@ begin
     result := stack[sp];
 end;
 
-procedure DupTop;
-var
-    v: integer;
+function Peek: TNumber;
 begin
-    v := Pop;
-    Push(v);
-    Push(v);
+    if sp = 0 then
+    begin
+        writeln('Error: stack underflow');
+        halt(1);
+    end;
+    result := stack[sp - 1];
+end;
+
+procedure DupTop;
+begin
+    Push(Peek);
 end;
 
 procedure SwapTop;
 var
-    a, b: integer;
+    x, y: TNumber;
 begin
-    a := Pop;
-    b := Pop;
-    Push(a);
-    Push(b);
+    x := Pop;
+    y := Pop;
+    Push(x);
+    Push(y);
+end;
+
+procedure OverTop;
+begin
+    if sp < 2 then
+    begin
+        writeln('Error: stack underflow');
+        halt(1);
+    end;
+    Push(stack[sp - 2]);
+end;
+
+procedure RotTop;
+var
+    x, y, z: TNumber;
+begin
+    if sp < 3 then
+    begin
+        writeln('Error: stack underflow');
+        halt(1);
+    end;
+    z := Pop;
+    y := Pop;
+    x := Pop;
+    Push(y);
+    Push(z);
+    Push(x);
+end;
+
+function NumMin(x, y: TNumber): TNumber;
+begin
+    if x < y then
+        result := x
+    else
+        result := y;
+end;
+
+function NumMax(x, y: TNumber): TNumber;
+begin
+    if x > y then
+        result := x
+    else
+        result := y;
 end;
 
 procedure Tokenize(const src: TString; var toks: TTokens; out cnt: integer);
@@ -108,20 +142,24 @@ begin
         start := p;
         while (p <= len) and (src[p] <> ' ') do
             inc(p);
-        toks[cnt] := copy(src, start, p - start);
-        inc(cnt);
+
         if cnt >= MAX_TOKENS then
         begin
             writeln('Error: too many tokens on line');
             halt(1);
         end;
+
+        toks[cnt] := copy(src, start, p - start);
+        inc(cnt);
     end;
 end;
 
 procedure ExecuteToken(const t: TString);
 var
-    v, i, pow, base: integer;
+    v: TNumber;
     code: integer;
+    n: integer;
+    r: int64;
 begin
     if IsNumber(t) then
     begin
@@ -133,6 +171,10 @@ begin
         end;
         Push(v);
     end
+    else if t = 'pi' then
+        Push(PI_VALUE)
+    else if t = 'e' then
+        Push(Exp(1.0))
     else if t = '+' then
     begin
         b := Pop;
@@ -155,45 +197,183 @@ begin
     begin
         b := Pop;
         a := Pop;
-        if b = 0 then
+        if b = 0.0 then
         begin
             writeln('Error: divide by zero');
             halt(1);
         end;
-        Push(a div b);
+        Push(a / b);
     end
     else if t = '%' then
     begin
         b := Pop;
         a := Pop;
-        if b = 0 then
+        if b = 0.0 then
         begin
             writeln('Error: mod by zero');
             halt(1);
         end;
-        Push(a mod b);
+        Push(a - Int(a / b) * b);
     end
     else if t = '^' then
     begin
         b := Pop;
         a := Pop;
-        if b < 0 then
+        Push(Power(a, b));
+    end
+    else if t = 'abs' then
+    begin
+        a := Pop;
+        Push(Abs(a));
+    end
+    else if t = 'neg' then
+    begin
+        a := Pop;
+        Push(-a);
+    end
+    else if t = 'inc' then
+    begin
+        a := Pop;
+        Push(a + 1.0);
+    end
+    else if t = 'dec' then
+    begin
+        a := Pop;
+        Push(a - 1.0);
+    end
+    else if t = 'sq' then
+    begin
+        a := Pop;
+        Push(a * a);
+    end
+    else if t = 'sqrt' then
+    begin
+        a := Pop;
+        if a < 0.0 then
         begin
-            writeln('Error: negative exponent');
+            writeln('Error: sqrt of negative number');
             halt(1);
         end;
-        pow := 1;
-        base := a;
-        for i := 1 to b do
-            pow := pow * base;
-        Push(pow);
+        Push(Sqrt(a));
+    end
+    else if t = 'sin' then
+    begin
+        a := Pop;
+        Push(Sin(a));
+    end
+    else if t = 'cos' then
+    begin
+        a := Pop;
+        Push(Cos(a));
+    end
+    else if t = 'tan' then
+    begin
+        a := Pop;
+        Push(Tan(a));
+    end
+    else if t = 'asin' then
+    begin
+        a := Pop;
+        if (a < -1.0) or (a > 1.0) then
+        begin
+            writeln('Error: asin domain is [-1, 1]');
+            halt(1);
+        end;
+        Push(ArcSin(a));
+    end
+    else if t = 'acos' then
+    begin
+        a := Pop;
+        if (a < -1.0) or (a > 1.0) then
+        begin
+            writeln('Error: acos domain is [-1, 1]');
+            halt(1);
+        end;
+        Push(ArcCos(a));
+    end
+    else if t = 'atan' then
+    begin
+        a := Pop;
+        Push(ArcTan(a));
+    end
+    else if t = 'ln' then
+    begin
+        a := Pop;
+        if a <= 0.0 then
+        begin
+            writeln('Error: ln domain is x > 0');
+            halt(1);
+        end;
+        Push(Ln(a));
+    end
+    else if t = 'log10' then
+    begin
+        a := Pop;
+        if a <= 0.0 then
+        begin
+            writeln('Error: log10 domain is x > 0');
+            halt(1);
+        end;
+        Push(Log10(a));
+    end
+    else if t = 'exp' then
+    begin
+        a := Pop;
+        Push(Exp(a));
+    end
+    else if t = 'floor' then
+    begin
+        a := Pop;
+        Push(Floor(a));
+    end
+    else if t = 'ceil' then
+    begin
+        a := Pop;
+        Push(Ceil(a));
+    end
+    else if t = 'round' then
+    begin
+        a := Pop;
+        r := Round(a);
+        Push(r);
+    end
+    else if t = 'trunc' then
+    begin
+        a := Pop;
+        Push(Trunc(a));
+    end
+    else if t = 'min' then
+    begin
+        b := Pop;
+        a := Pop;
+        Push(NumMin(a, b));
+    end
+    else if t = 'max' then
+    begin
+        b := Pop;
+        a := Pop;
+        Push(NumMax(a, b));
+    end
+    else if t = 'deg' then
+    begin
+        a := Pop;
+        Push(a * 180.0 / PI_VALUE);
+    end
+    else if t = 'rad' then
+    begin
+        a := Pop;
+        Push(a * PI_VALUE / 180.0);
     end
     else if t = 'dup' then
         DupTop
     else if t = 'swap' then
         SwapTop
+    else if t = 'over' then
+        OverTop
+    else if t = 'rot' then
+        RotTop
     else if t = 'drop' then
-        Pop
+        a := Pop
     else
     begin
         writeln('Error: unknown token "', t, '"');
@@ -210,10 +390,11 @@ begin
         writeln('(empty)');
         exit;
     end;
+
     write('Stack [bottom -> top]: ');
     for i := 0 to sp - 1 do
     begin
-        write(stack[i]);
+        write(stack[i]:0:10);
         if i < sp - 1 then
             write(' ');
     end;
@@ -223,14 +404,20 @@ end;
 begin
     InitStack;
     writeln('RPN Calculator - enter space-separated tokens.');
-    writeln('Press Enter to evaluate the current line; blank line exits.');
+    writeln('Blank line exits.');
+    writeln('Trig uses radians. Use "rad" to convert degrees to radians.');
+    writeln('Operators/constants:');
+    writeln('+ - * / % ^ abs neg inc dec sq sqrt');
+    writeln('sin cos tan asin acos atan ln log10 exp');
+    writeln('floor ceil round trunc min max');
+    writeln('pi e deg rad dup swap over rot drop');
+
     while true do
     begin
         readln(line);
         if length(trim(line)) = 0 then
-        begin
             break;
-        end;
+
         Tokenize(line, tokens, tokenCount);
         for i := 0 to tokenCount - 1 do
             ExecuteToken(tokens[i]);

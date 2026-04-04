@@ -49,6 +49,12 @@
       "stdout_substring": "PASS: trim builtin"
     },
     {
+      "id": "receiver_method_expression_call",
+      "path": "Tests/compiler/pascal/cases/receiver_method_expression_call.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: receiver method expression call"
+    },
+    {
       "id": "record_function_result",
       "path": "Tests/compiler/pascal/cases/record_function_result.pas",
       "expect": "compile_success",

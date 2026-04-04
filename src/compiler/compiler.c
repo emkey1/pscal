@@ -1256,6 +1256,7 @@ oom_cleanup:
 
 static int getLine(AST* node);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
+static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 
 static bool emitClosureLiteral(Symbol *psym, BytecodeChunk *chunk, int line) {
     if (!psym) {
@@ -3065,6 +3066,53 @@ static const char* getTypeNameFromAST(AST* typeAst) {
         if (entry->typeAST == typeAst) return entry->name;
     }
     return NULL;
+}
+
+static bool buildReceiverMethodName(AST* receiverExpr, const char* memberName,
+                                    char* outName, size_t outSize) {
+    if (!receiverExpr || !memberName || !outName || outSize == 0) {
+        return false;
+    }
+
+    AST* recordType = getRecordTypeFromExpr(receiverExpr);
+    recordType = resolveTypeAlias(recordType);
+    if (recordType && recordType->type == AST_TYPE_DECL && recordType->left) {
+        recordType = resolveTypeAlias(recordType->left);
+    }
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        return false;
+    }
+
+    const char* typeName = getTypeNameFromAST(recordType);
+    if (!typeName || !typeName[0]) {
+        return false;
+    }
+
+    int written = snprintf(outName, outSize, "%s.%s", typeName, memberName);
+    if (written < 0 || written >= (int)outSize) {
+        return false;
+    }
+
+    toLowerString(outName);
+    return true;
+}
+
+static void compileMethodReceiverReference(AST* receiverExpr, BytecodeChunk* chunk, int line) {
+    if (!receiverExpr || !chunk) {
+        return;
+    }
+
+    AST* receiverType = resolveTypeAlias(receiverExpr->type_def);
+    if (receiverType && receiverType->type == AST_TYPE_DECL && receiverType->left) {
+        receiverType = resolveTypeAlias(receiverType->left);
+    }
+
+    if (receiverExpr->var_type == TYPE_POINTER ||
+        (receiverType && receiverType->type == AST_POINTER_TYPE)) {
+        compileRValue(receiverExpr, chunk, getLine(receiverExpr) > 0 ? getLine(receiverExpr) : line);
+    } else {
+        compileLValue(receiverExpr, chunk, getLine(receiverExpr) > 0 ? getLine(receiverExpr) : line);
+    }
 }
 
 // Check if a record type defines methods and therefore reserves a vtable slot.
@@ -7523,6 +7571,18 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             bool isCallQualified = (node->left && node->token && node->token->value &&
                                     node->token->type == TOKEN_IDENTIFIER);
             bool usesReceiverGlobal = false;
+            AST* callReceiver = isCallQualified ? node->left : NULL;
+            bool receiverIsArgument = false;
+            char receiverMethodName[MAX_SYMBOL_LENGTH * 2 + 2];
+            receiverMethodName[0] = '\0';
+            if (!callReceiver && isCallQualified && node->child_count > 0) {
+                callReceiver = node->children[0];
+                receiverIsArgument = true;
+            }
+            if (callReceiver && node->token && node->token->value) {
+                buildReceiverMethodName(callReceiver, node->token->value,
+                                        receiverMethodName, sizeof(receiverMethodName));
+            }
 
             // --- NEW, MORE ROBUST LOOKUP LOGIC ---
             Symbol* proc_symbol_lookup = NULL;
@@ -7546,6 +7606,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 snprintf(qualified_name_lower, sizeof(qualified_name_lower), "%s.%s", current_compilation_unit_name, callee_lower);
                 toLowerString(qualified_name_lower);
                 proc_symbol_lookup = lookupProcedure(qualified_name_lower);
+            }
+            if (!proc_symbol_lookup && receiverMethodName[0] != '\0') {
+                proc_symbol_lookup = lookupProcedure(receiverMethodName);
             }
             
             // This is the variable that will hold the symbol we actually work with.
@@ -7582,6 +7645,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                 }
             }
+
+            bool isReceiverStyleMethod = (callReceiver && receiverMethodName[0] != '\0' &&
+                                          proc_symbol && proc_symbol->name &&
+                                          strcasecmp(proc_symbol->name, receiverMethodName) == 0);
 
             if (!calleeName) {
                 calleeName = "";
@@ -7630,13 +7697,16 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
             }
 
-            bool isVirtualMethod = (isCallQualified && node->child_count > 0 && node->i_val == 0 &&
+            bool isVirtualMethod = (isCallQualified && callReceiver && node->i_val == 0 &&
                                     proc_symbol && proc_symbol->type_def &&
                                     proc_symbol->type_def->is_virtual &&
                                     interfaceReceiver == NULL);
             bool isInterfaceDispatch = (isCallQualified && interfaceReceiver != NULL);
+            if (isReceiverStyleMethod && !isVirtualMethod && !isInterfaceDispatch) {
+                usesReceiverGlobal = true;
+            }
 
-            int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
+            int receiver_offset = (usesReceiverGlobal && receiverIsArgument && node->child_count > 0) ? 1 : 0;
 
             if (frontendIsRea() && !proc_symbol && node->child_count > 0 && node->children[0]) {
                 AST* recv = node->children[0];
@@ -8014,14 +8084,16 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             if (isVirtualMethod) {
-                AST* recv = node->children[0];
+                AST* recv = callReceiver;
                 compileRValue(recv, chunk, getLine(recv));
                 writeBytecodeChunk(chunk, DUP, line);
-                for (int i = 1; i < node->child_count; i++) {
+                int arg_start_index = receiverIsArgument ? 1 : 0;
+                for (int i = arg_start_index; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
-                    if (proc_symbol->type_def && i < proc_symbol->type_def->child_count) {
-                        AST* param_node = proc_symbol->type_def->children[i];
+                    int param_index = i - arg_start_index;
+                    if (proc_symbol->type_def && param_index < proc_symbol->type_def->child_count) {
+                        AST* param_node = proc_symbol->type_def->children[param_index];
                         if (param_node && param_node->by_ref) is_var_param = true;
                     }
                     if (is_var_param) {
@@ -8040,7 +8112,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 writeBytecodeChunk(chunk, (uint8_t)1, line);
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);
                 writeBytecodeChunk(chunk, PROC_CALL_INDIRECT, line);
-                writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                int virtual_arg_count = node->child_count - arg_start_index + 1;
+                if (virtual_arg_count < 1) virtual_arg_count = 1;
+                writeBytecodeChunk(chunk, (uint8_t)virtual_arg_count, line);
                 break;
             }
 
@@ -8158,10 +8232,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             }
 
             // (Argument compilation logic remains the same...)
-            if (usesReceiverGlobal && node->child_count > 0) {
+            if (usesReceiverGlobal && callReceiver) {
                 int myself_idx = ensureMyselfGlobalNameIndex(chunk);
-                AST* recv_node = node->children[0];
-                compileRValue(recv_node, chunk, getLine(recv_node));
+                AST* recv_node = callReceiver;
+                compileMethodReceiverReference(recv_node, chunk, line);
                 emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
             }
 
@@ -9377,12 +9451,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             const char* methodIdentifier = NULL;
             bool isCallQualified = false;
             bool usesReceiverGlobal = false;
+            AST* callReceiver = NULL;
+            bool receiverIsArgument = false;
+            char receiverMethodName[MAX_SYMBOL_LENGTH * 2 + 2];
+            receiverMethodName[0] = '\0';
 
             if (node->left &&
                 node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
                 methodIdentifier = node->token->value;
                 isCallQualified = true;
+                callReceiver = node->left;
             } else if (node->token && node->token->value && node->token->type == TOKEN_IDENTIFIER) {
                 functionName = node->token->value;
                 methodIdentifier = node->token->value;
@@ -9394,37 +9473,17 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
-            // If this is a qualified call like receiver.method(...), attempt to
-            // mangle to ClassName.method by inspecting the receiver's static type.
-            char mangled_name_buf[MAX_SYMBOL_LENGTH * 2 + 2];
-            if (isCallQualified && node->left && functionName) {
-                const char* cls_name = NULL;
-                AST* type_ref = node->left->type_def;
-                if (type_ref) {
-                    // Resolve possible type alias to get to TYPE_REFERENCE
-                    while (type_ref && type_ref->type == AST_TYPE_REFERENCE && type_ref->right) {
-                        type_ref = type_ref->right;
-                    }
-                    if (node->left->type_def && node->left->type_def->token && node->left->type_def->token->value) {
-                        cls_name = node->left->type_def->token->value;
-                    } else if (type_ref && type_ref->token && type_ref->token->value) {
-                        cls_name = type_ref->token->value;
-                    }
-                }
-                if (cls_name) {
-                    size_t cls_len = strlen(cls_name);
-                    size_t fn_len = strlen(functionName);
-                    bool alreadyQualified = false;
-                    if (fn_len > cls_len &&
-                        strncasecmp(functionName, cls_name, cls_len) == 0 &&
-                        functionName[cls_len] == '.') {
-                        alreadyQualified = true;
-                    }
-                    if (!alreadyQualified) {
-                        snprintf(mangled_name_buf, sizeof(mangled_name_buf), "%s.%s", cls_name, functionName);
-                        functionName = mangled_name_buf;
-                    }
-                }
+            if (!callReceiver && isCallQualified && node->child_count > 0) {
+                callReceiver = node->children[0];
+                receiverIsArgument = true;
+            }
+            if (callReceiver && node->token && node->token->value) {
+                buildReceiverMethodName(callReceiver, node->token->value,
+                                        receiverMethodName, sizeof(receiverMethodName));
+            }
+
+            if (receiverMethodName[0] != '\0') {
+                functionName = receiverMethodName;
             }
 
             if (strcasecmp(functionName, "printf") == 0) {
@@ -9553,6 +9612,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 }
             }
 
+            bool isReceiverStyleMethod = (callReceiver && receiverMethodName[0] != '\0' &&
+                                          func_symbol && func_symbol->name &&
+                                          strcasecmp(func_symbol->name, receiverMethodName) == 0);
+
             AST* interfaceReceiver = NULL;
             AST* interfaceType = NULL;
             int interfaceArgStart = 0;
@@ -9590,8 +9653,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                                    node->i_val == 0 && func_symbol && func_symbol->type_def &&
                                    func_symbol->type_def->is_virtual;
             bool isInterfaceDispatch = isCallQualified && interfaceReceiver != NULL;
+            if (isReceiverStyleMethod && !isVirtualMethod && !isInterfaceDispatch) {
+                usesReceiverGlobal = true;
+            }
 
-            int receiver_offset = (usesReceiverGlobal && node->child_count > 0) ? 1 : 0;
+            int receiver_offset = (usesReceiverGlobal && receiverIsArgument && node->child_count > 0) ? 1 : 0;
 
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
@@ -9600,16 +9666,18 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             if (isVirtualMethod) {
-                if (node->child_count > 0) {
+                if (callReceiver) {
                     // Compile receiver and keep duplicate on top
-                    AST* recv = node->children[0];
+                    AST* recv = callReceiver;
                     compileRValue(recv, chunk, getLine(recv));
                     writeBytecodeChunk(chunk, DUP, line);
-                    for (int i = 1; i < node->child_count; i++) {
+                    int arg_start_index = receiverIsArgument ? 1 : 0;
+                    for (int i = arg_start_index; i < node->child_count; i++) {
                         AST* arg_node = node->children[i];
                         bool is_var_param = false;
-                        if (func_symbol->type_def && i < func_symbol->type_def->child_count) {
-                            AST* param_node = func_symbol->type_def->children[i];
+                        int param_index = i - arg_start_index;
+                        if (func_symbol->type_def && param_index < func_symbol->type_def->child_count) {
+                            AST* param_node = func_symbol->type_def->children[param_index];
                             if (param_node && param_node->by_ref) is_var_param = true;
                         }
                         if (is_var_param) {
@@ -9628,7 +9696,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     writeBytecodeChunk(chunk, (uint8_t)1, line);
                     writeBytecodeChunk(chunk, GET_INDIRECT, line);
                     writeBytecodeChunk(chunk, CALL_INDIRECT, line);
-                    writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
+                    int virtual_arg_count = node->child_count - arg_start_index + 1;
+                    if (virtual_arg_count < 1) virtual_arg_count = 1;
+                    writeBytecodeChunk(chunk, (uint8_t)virtual_arg_count, line);
                     break;
                 }
             }
@@ -9831,10 +9901,10 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             int call_arg_count = node->child_count - receiver_offset;
             if (call_arg_count < 0) call_arg_count = 0;
 
-            if (usesReceiverGlobal && node->child_count > 0) {
+            if (usesReceiverGlobal && callReceiver) {
                 int myself_idx = ensureMyselfGlobalNameIndex(chunk);
-                AST* recv_node = node->children[0];
-                compileRValue(recv_node, chunk, getLine(recv_node));
+                AST* recv_node = callReceiver;
+                compileMethodReceiverReference(recv_node, chunk, line);
                 emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
             }
 
