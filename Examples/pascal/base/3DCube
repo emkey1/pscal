@@ -1,0 +1,175 @@
+#!/usr/bin/env pascal
+program Pascal3DCube;
+
+uses crt;
+
+const
+  MIN_WIDTH = 28;
+  MIN_HEIGHT = 14;
+
+type
+  TPoint3D = record
+    x, y, z: Double;
+  end;
+
+  TScreenRow = array of Char;
+  TScreen = array of TScreenRow;
+
+var
+  points: array[0..7] of TPoint3D;
+  edges: array[0..11, 0..1] of Integer;
+  angleX, angleY, angleZ: Double;
+  termWidth, termHeight, scale: Integer;
+  i, j: Integer;
+
+procedure InitCube;
+begin
+  points[0].x := -1; points[0].y := -1; points[0].z :=  1;
+  points[1].x :=  1; points[1].y := -1; points[1].z :=  1;
+  points[2].x :=  1; points[2].y :=  1; points[2].z :=  1;
+  points[3].x := -1; points[3].y :=  1; points[3].z :=  1;
+  points[4].x := -1; points[4].y := -1; points[4].z := -1;
+  points[5].x :=  1; points[5].y := -1; points[5].z := -1;
+  points[6].x :=  1; points[6].y :=  1; points[6].z := -1;
+  points[7].x := -1; points[7].y :=  1; points[7].z := -1;
+
+  edges[0,0] := 0; edges[0,1] := 1; edges[1,0] := 1; edges[1,1] := 2;
+  edges[2,0] := 2; edges[2,1] := 3; edges[3,0] := 3; edges[3,1] := 0;
+  edges[4,0] := 4; edges[4,1] := 5; edges[5,0] := 5; edges[5,1] := 6;
+  edges[6,0] := 6; edges[6,1] := 7; edges[7,0] := 7; edges[7,1] := 4;
+  edges[8,0] := 0; edges[8,1] := 4; edges[9,0] := 1; edges[9,1] := 5;
+  edges[10,0] := 2; edges[10,1] := 6; edges[11,0] := 3; edges[11,1] := 7;
+end;
+
+procedure ClearScreenBuffer(var screen: TScreen);
+var
+  x, y: Integer;
+begin
+  SetLength(screen, termWidth);
+  for x := 0 to termWidth - 1 do
+  begin
+    SetLength(screen[x], termHeight);
+    for y := 0 to termHeight - 1 do
+      screen[x, y] := ' ';
+  end;
+end;
+
+procedure Plot(var screen: TScreen; x, y: Integer; ch: Char);
+begin
+  if (x >= 0) and (x < termWidth) and (y >= 0) and (y < termHeight) then
+    screen[x, y] := ch;
+end;
+
+procedure PlotLine(var screen: TScreen; x1, y1, x2, y2: Integer; ch: Char);
+var
+  dx, dy, sx, sy, err, twiceErr: Integer;
+begin
+  dx := Abs(x2 - x1);
+  dy := Abs(y2 - y1);
+
+  if x1 < x2 then
+    sx := 1
+  else
+    sx := -1;
+
+  if y1 < y2 then
+    sy := 1
+  else
+    sy := -1;
+
+  err := dx - dy;
+
+  while True do
+  begin
+    Plot(screen, x1, y1, ch);
+
+    if (x1 = x2) and (y1 = y2) then
+      Exit;
+
+    twiceErr := err * 2;
+
+    if twiceErr > -dy then
+    begin
+      err := err - dy;
+      x1 := x1 + sx;
+    end;
+
+    if twiceErr < dx then
+    begin
+      err := err + dx;
+      y1 := y1 + sy;
+    end;
+  end;
+end;
+
+procedure DrawCube;
+var
+  rotX, rotY, rotZ: array[0..7] of TPoint3D;
+  projX, projY: array[0..7] of Integer;
+  screen: TScreen;
+begin
+  termWidth := ScreenCols;
+  termHeight := ScreenRows;
+  if termWidth < MIN_WIDTH then
+    termWidth := MIN_WIDTH;
+  if termHeight < MIN_HEIGHT then
+    termHeight := MIN_HEIGHT;
+
+  scale := termHeight div 2;
+  if termWidth div 4 < scale then
+    scale := termWidth div 4;
+  if scale < 4 then
+    scale := 4;
+
+  ClearScreenBuffer(screen);
+
+  for i := 0 to 7 do
+  begin
+    rotX[i].y := points[i].y * cos(angleX) - points[i].z * sin(angleX);
+    rotX[i].z := points[i].y * sin(angleX) + points[i].z * cos(angleX);
+    rotX[i].x := points[i].x;
+
+    rotY[i].x := rotX[i].x * cos(angleY) + rotX[i].z * sin(angleY);
+    rotY[i].z := -rotX[i].x * sin(angleY) + rotX[i].z * cos(angleY);
+    rotY[i].y := rotX[i].y;
+
+    rotZ[i].x := rotY[i].x * cos(angleZ) - rotY[i].y * sin(angleZ);
+    rotZ[i].y := rotY[i].x * sin(angleZ) + rotY[i].y * cos(angleZ);
+    rotZ[i].z := rotY[i].z;
+
+    projX[i] := termWidth div 2 + Round((rotZ[i].x * scale * 2) / (rotZ[i].z + 4));
+    projY[i] := termHeight div 2 + Round((rotZ[i].y * scale) / (rotZ[i].z + 4));
+  end;
+
+  for i := 0 to 11 do
+    PlotLine(
+      screen,
+      projX[edges[i, 0]], projY[edges[i, 0]],
+      projX[edges[i, 1]], projY[edges[i, 1]],
+      '#'
+    );
+
+  ClrScr;
+  for j := 0 to termHeight - 1 do
+  begin
+    for i := 0 to termWidth - 1 do
+      write(screen[i, j]);
+    writeln;
+  end;
+end;
+
+begin
+  InitCube;
+  angleX := 0;
+  angleY := 0;
+  angleZ := 0;
+
+  while not KeyPressed do
+  begin
+    DrawCube;
+    angleX := angleX + 0.05;
+    angleY := angleY + 0.07;
+    angleZ := angleZ + 0.03;
+    Delay(30);
+  end;
+end.

@@ -85,6 +85,9 @@ static AST *cloneBuiltinTypeNode(VarType type, int line);
 static AST *inferInlineForVarType(AST *expr, int line);
 static bool routineDeclGroupHasName(AST *declGroup, const char *name);
 static bool parserCurrentRoutineShadowsBuiltin(Parser *parser, const char *name);
+static bool tokenCanStartSubrangeType(TokenType type);
+static AST *parseSubrangeType(Parser *parser);
+static bool validateSubrangeBounds(Parser *parser, const Value *lower, const Value *upper, VarType *resolvedType);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -176,6 +179,127 @@ static AST *inferInlineForVarType(AST *expr, int line) {
     }
 
     return cloneBuiltinTypeNode(TYPE_INTEGER, line);
+}
+
+static bool tokenCanStartSubrangeType(TokenType type) {
+    return type == TOKEN_INTEGER_CONST ||
+           type == TOKEN_HEX_CONST ||
+           type == TOKEN_STRING_CONST ||
+           type == TOKEN_TRUE ||
+           type == TOKEN_FALSE ||
+           type == TOKEN_PLUS ||
+           type == TOKEN_MINUS;
+}
+
+static bool validateSubrangeBounds(Parser *parser, const Value *lower, const Value *upper, VarType *resolvedType) {
+    if (!lower || !upper || !resolvedType) {
+        return false;
+    }
+
+    if (!isOrdinalType(lower->type) || !isOrdinalType(upper->type)) {
+        errorParser(parser, "Subrange bounds must be ordinal constant expressions");
+        return false;
+    }
+
+    if (lower->type == TYPE_ENUM || upper->type == TYPE_ENUM) {
+        if (lower->type != TYPE_ENUM || upper->type != TYPE_ENUM) {
+            errorParser(parser, "Subrange bounds must use the same ordinal type");
+            return false;
+        }
+        if (!lower->enum_val.enum_name || !upper->enum_val.enum_name ||
+            strcmp(lower->enum_val.enum_name, upper->enum_val.enum_name) != 0) {
+            errorParser(parser, "Subrange enum bounds must belong to the same enum type");
+            return false;
+        }
+        if (lower->enum_val.ordinal > upper->enum_val.ordinal) {
+            errorParser(parser, "Subrange lower bound exceeds upper bound");
+            return false;
+        }
+        *resolvedType = TYPE_ENUM;
+        return true;
+    }
+
+    if (lower->type == TYPE_CHAR || upper->type == TYPE_CHAR) {
+        if (lower->type != TYPE_CHAR || upper->type != TYPE_CHAR) {
+            errorParser(parser, "Subrange bounds must use the same ordinal type");
+            return false;
+        }
+        if (lower->c_val > upper->c_val) {
+            errorParser(parser, "Subrange lower bound exceeds upper bound");
+            return false;
+        }
+        *resolvedType = TYPE_CHAR;
+        return true;
+    }
+
+    if (lower->type == TYPE_BOOLEAN || upper->type == TYPE_BOOLEAN) {
+        if (lower->type != TYPE_BOOLEAN || upper->type != TYPE_BOOLEAN) {
+            errorParser(parser, "Subrange bounds must use the same ordinal type");
+            return false;
+        }
+        if ((lower->i_val ? 1 : 0) > (upper->i_val ? 1 : 0)) {
+            errorParser(parser, "Subrange lower bound exceeds upper bound");
+            return false;
+        }
+        *resolvedType = TYPE_BOOLEAN;
+        return true;
+    }
+
+    if (!isIntlikeType(lower->type) || !isIntlikeType(upper->type)) {
+        errorParser(parser, "Subrange bounds must use the same ordinal type");
+        return false;
+    }
+
+    if (coerceToI64(lower, NULL, "subrange lower bound") >
+        coerceToI64(upper, NULL, "subrange upper bound")) {
+        errorParser(parser, "Subrange lower bound exceeds upper bound");
+        return false;
+    }
+
+    *resolvedType = TYPE_INTEGER;
+    return true;
+}
+
+static AST *parseSubrangeType(Parser *parser) {
+    AST *lower = expression(parser);
+    if (!lower || lower->type == AST_NOOP) {
+        errorParser(parser, "Invalid lower bound expression for subrange type");
+        if (lower) freeAST(lower);
+        return NULL;
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_DOTDOT) {
+        errorParser(parser, "Expected '..' in subrange type");
+        freeAST(lower);
+        return NULL;
+    }
+    eat(parser, TOKEN_DOTDOT);
+
+    AST *upper = expression(parser);
+    if (!upper || upper->type == AST_NOOP) {
+        errorParser(parser, "Invalid upper bound expression for subrange type");
+        freeAST(lower);
+        if (upper) freeAST(upper);
+        return NULL;
+    }
+
+    Value lowerValue = evaluateCompileTimeValue(lower);
+    Value upperValue = evaluateCompileTimeValue(upper);
+    VarType resolvedType = TYPE_UNKNOWN;
+    bool ok = validateSubrangeBounds(parser, &lowerValue, &upperValue, &resolvedType);
+    freeValue(&lowerValue);
+    freeValue(&upperValue);
+    if (!ok) {
+        freeAST(lower);
+        freeAST(upper);
+        return NULL;
+    }
+
+    AST *range = newASTNode(AST_SUBRANGE, NULL);
+    setLeft(range, lower);
+    setRight(range, upper);
+    setTypeAST(range, resolvedType);
+    return range;
 }
 
 static bool routineDeclGroupHasName(AST *declGroup, const char *name) {
@@ -2206,6 +2330,29 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
     fprintf(stderr, "[DEBUG typeSpecifier] Entry: Token Type=%s, Value='%s'\n",
             tokenTypeToString(initialTokenType), initialToken->value ? initialToken->value : "NULL");
     #endif
+
+    if (tokenCanStartSubrangeType(initialTokenType)) {
+        node = parseSubrangeType(parser);
+        if (!node) {
+            return NULL;
+        }
+        return node;
+    }
+
+    if (tokenTypeIsIdentifierLike(initialTokenType)) {
+        Token *nextTok = peekToken(parser);
+        bool isSubrange = (nextTok && nextTok->type == TOKEN_DOTDOT);
+        if (nextTok) {
+            freeToken(nextTok);
+        }
+        if (isSubrange) {
+            node = parseSubrangeType(parser);
+            if (!node) {
+                return NULL;
+            }
+            return node;
+        }
+    }
 
     // --- Check based on the initial token's type ---
     if (initialTokenType == TOKEN_CARET) {

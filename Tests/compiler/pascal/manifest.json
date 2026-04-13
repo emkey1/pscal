@@ -145,6 +145,12 @@
       "stdout_substring": "PASS: record constructor named fields"
     },
     {
+      "id": "subrange_type_alias",
+      "path": "Tests/compiler/pascal/cases/subrange_type_alias.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: subrange type alias idx=3"
+    },
+    {
       "id": "continue_statement_loops",
       "path": "Tests/compiler/pascal/cases/continue_statement_loops.pas",
       "expect": "compile_success",
