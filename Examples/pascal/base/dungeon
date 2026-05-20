@@ -1,0 +1,918 @@
+#!/usr/bin/env pascal
+{
+  PASCAL  DUNGEON CRAWLER
+  ---------------------------------
+  This program creates a random dungeon, allows movement, combat, and item pickup.
+  It uses standard CRT graphics and text mode.
+
+  Controls:
+    HJKL YUBN         : Move
+    G                 : Get item
+    A                 : Attack (if enemy adjacent)
+    P                 : Use Potion
+    R                 : Load
+    Q                 : Quit
+}
+
+PROGRAM DungeonCrawler;
+
+USES CRT, DOS;
+
+CONST
+  MaxWidth = 80;
+  MaxHeight = 25;
+  HUDLines = 2;
+  ControlsRow = 22;
+  MessageTop = 23;
+  MessageLines = 3;
+  MapTop = 3;
+  MapHeightView = 19;
+  MaxRooms = 15;
+  MaxEnemies = 20;
+  MaxItems = 10;
+  MaxInventory = 10;
+  
+  TileWall = '#';
+  TileFloor = '.';
+  TileDoor = '+';
+  TilePlayer = '@';
+  TileEnemy = 'E';
+  TileGold = '$';
+  TilePotion = '!';
+  TileStairs = '>';
+  TileFog = ' ';
+  SaveFileName = 'dungeon.sav';
+
+TYPE
+  TCoord = RECORD
+    X, Y: Integer;
+  END;
+
+  TEnemy = RECORD
+    X, Y: Integer;
+    HP: Integer;
+    MaxHP: Integer;
+    Damage: Integer;
+    Name: String[15];
+    Active: Boolean;
+  END;
+
+  TItem = RECORD
+    X, Y: Integer;
+    TypeChar: Char;
+    Value: Integer;
+    Active: Boolean;
+  END;
+
+  TPlayer = RECORD
+    X, Y: Integer;
+    HP: Integer;
+    MaxHP: Integer;
+    Attack: Integer;
+    Defense: Integer;
+    Gold: Integer;
+    Level: Integer;
+    XP: Integer;
+    Potions: Integer;
+  END;
+
+  TMap = ARRAY[1..MaxHeight, 1..MaxWidth] OF Char;
+
+
+VAR
+  Map: TMap;
+  SeenMap: TMap; { Fog of War tracking }
+  Enemies: ARRAY[1..MaxEnemies] OF TEnemy;
+  Items: ARRAY[1..MaxItems] OF TItem;
+  Player: TPlayer;
+  
+  GameOver: Boolean;
+  Depth: Integer;
+  
+  Key: Char;
+  MoveX, MoveY: Integer;
+  I: Integer;
+  MessageLog: ARRAY[1..MessageLines] OF String[79];
+
+{ --- Forward declarations --- }
+PROCEDURE CombatRound(EnemyIdx: Integer); FORWARD;
+PROCEDURE CheckLevelUp; FORWARD;
+PROCEDURE NextLevel; FORWARD;
+PROCEDURE SaveGame; FORWARD;
+PROCEDURE LoadGame; FORWARD;
+FUNCTION SaveExists: Boolean; FORWARD;
+
+{ --- Helper Procedures --- }
+
+PROCEDURE ClearScreen;
+BEGIN
+  ClrScr;
+END;
+
+FUNCTION FitLine(S: String): String;
+BEGIN
+  IF Length(S) > 79 THEN
+    S := Copy(S, 1, 79);
+  WHILE Length(S) < 79 DO
+    S := S + ' ';
+  FitLine := S;
+END;
+
+PROCEDURE WriteScreenLine(Y: Integer; S: String);
+BEGIN
+  GotoXY(1, Y);
+  Write(FitLine(S));
+END;
+
+PROCEDURE ClearMessageLog;
+VAR
+  I: Integer;
+BEGIN
+  FOR I := 1 TO MessageLines DO
+    MessageLog[I] := '';
+END;
+
+PROCEDURE ClearSeenMap;
+VAR
+  I, J: Integer;
+BEGIN
+  FOR I := 1 TO MaxHeight DO
+    FOR J := 1 TO MaxWidth DO
+      SeenMap[I, J] := TileFog;
+END;
+
+PROCEDURE AddMessage(S: String);
+VAR
+  I: Integer;
+BEGIN
+  FOR I := 1 TO MessageLines - 1 DO
+    MessageLog[I] := MessageLog[I + 1];
+  MessageLog[MessageLines] := S;
+END;
+
+PROCEDURE DrawMessages;
+VAR
+  I: Integer;
+BEGIN
+  FOR I := 1 TO MessageLines DO
+    WriteScreenLine(MessageTop + I - 1, MessageLog[I]);
+END;
+
+PROCEDURE GotoXYSafe(X, Y: Integer);
+BEGIN
+  IF (X >= 1) AND (X <= MaxWidth) AND (Y >= 1) AND (Y <= MaxHeight) THEN
+    GotoXY(X, Y);
+END;
+
+PROCEDURE WriteCharSafe(X, Y: Integer; C: Char);
+BEGIN
+  IF (X >= 1) AND (X <= MaxWidth) AND (Y >= 1) AND (Y <= MaxHeight) THEN
+  BEGIN
+    GotoXY(X, Y);
+    Write(C);
+  END;
+END;
+
+PROCEDURE ColorText(X, Y: Integer; C: Char; FGColor: Byte);
+BEGIN
+  IF (X >= 1) AND (X <= MaxWidth) AND (Y >= 1) AND (Y <= MaxHeight) THEN
+  BEGIN
+    GotoXY(X, Y);
+    TextColor(FGColor);
+    Write(C);
+    TextColor(White); { Reset to white }
+  END;
+END;
+
+{ --- Map Generation --- }
+
+PROCEDURE InitMap;
+VAR
+  I, J: Integer;
+BEGIN
+  FOR I := 1 TO MaxHeight DO
+    FOR J := 1 TO MaxWidth DO
+      Map[I, J] := TileWall;
+END;
+
+PROCEDURE PlaceRoom(X, Y, W, H: Integer);
+VAR
+  I, J: Integer;
+BEGIN
+  FOR I := Y TO Y + H - 1 DO
+    FOR J := X TO X + W - 1 DO
+      IF (I >= 1) AND (I <= MaxHeight) AND (J >= 1) AND (J <= MaxWidth) THEN
+        Map[I, J] := TileFloor;
+END;
+
+PROCEDURE ConnectRooms(X1, Y1, X2, Y2: Integer);
+VAR
+  X, Y: Integer;
+BEGIN
+  { Horizontal corridor }
+  X := X1;
+  WHILE X <> X2 DO
+  BEGIN
+    IF (Y1 >= 1) AND (Y1 <= MaxHeight) AND (X >= 1) AND (X <= MaxWidth) THEN
+      Map[Y1, X] := TileFloor;
+    IF X < X2 THEN INC(X) ELSE DEC(X);
+  END;
+  
+  { Vertical corridor }
+  Y := Y1;
+  WHILE Y <> Y2 DO
+  BEGIN
+    IF (Y >= 1) AND (Y <= MaxHeight) AND (X2 >= 1) AND (X2 <= MaxWidth) THEN
+      Map[Y, X2] := TileFloor;
+    IF Y < Y2 THEN INC(Y) ELSE DEC(Y);
+  END;
+END;
+
+PROCEDURE GenerateDungeon;
+VAR
+  Rooms: ARRAY[1..MaxRooms] OF RECORD X, Y, W, H: Integer; END;
+  I, J, K: Integer;
+  RX, RY, RW, RH: Integer;
+  Connected: Boolean;
+BEGIN
+  InitMap;
+  
+  { Generate Random Rooms }
+  FOR I := 1 TO MaxRooms DO
+  BEGIN
+    REPEAT
+      RW := 4 + Random(6); { Width 4-9 }
+      RH := 4 + Random(6); { Height 4-9 }
+      RX := 2 + Random(MaxWidth - RW - 2);
+      RY := 2 + Random(MaxHeight - RH - 2);
+      Connected := False;
+      
+      { Check overlap with existing rooms }
+      FOR J := 1 TO I - 1 DO
+      BEGIN
+        IF (RX < Rooms[J].X + Rooms[J].W + 1) AND
+           (RX + RW + 1 > Rooms[J].X) AND
+           (RY < Rooms[J].Y + Rooms[J].H + 1) AND
+           (RY + RH + 1 > Rooms[J].Y) THEN
+          Connected := True;
+      END;
+    UNTIL NOT Connected;
+    
+    Rooms[I].X := RX;
+    Rooms[I].Y := RY;
+    Rooms[I].W := RW;
+    Rooms[I].H := RH;
+    
+    PlaceRoom(RX, RY, RW, RH);
+  END;
+  
+  { Connect Rooms }
+  FOR I := 1 TO MaxRooms - 1 DO
+  BEGIN
+    ConnectRooms(
+      Rooms[I].X + (Rooms[I].W DIV 2), 
+      Rooms[I].Y + (Rooms[I].H DIV 2),
+      Rooms[I+1].X + (Rooms[I+1].W DIV 2), 
+      Rooms[I+1].Y + (Rooms[I+1].H DIV 2)
+    );
+  END;
+END;
+
+{ --- Entity Management --- }
+
+FUNCTION IsWall(X, Y: Integer): Boolean;
+BEGIN
+  IF (X < 1) OR (X > MaxWidth) OR (Y < 1) OR (Y > MaxHeight) THEN
+    IsWall := True
+  ELSE
+    IsWall := (Map[Y, X] = TileWall);
+END;
+
+FUNCTION GetEnemyAt(X, Y: Integer): Integer;
+VAR
+  I: Integer;
+BEGIN
+  GetEnemyAt := 0;
+  FOR I := 1 TO MaxEnemies DO
+    IF Enemies[I].Active AND (Enemies[I].X = X) AND (Enemies[I].Y = Y) THEN
+    BEGIN
+      GetEnemyAt := I;
+      EXIT;
+    END;
+END;
+
+FUNCTION GetItemAt(X, Y: Integer): Integer;
+VAR
+  I: Integer;
+BEGIN
+  GetItemAt := 0;
+  FOR I := 1 TO MaxItems DO
+    IF Items[I].Active AND (Items[I].X = X) AND (Items[I].Y = Y) THEN
+    BEGIN
+      GetItemAt := I;
+      EXIT;
+    END;
+END;
+
+PROCEDURE SpawnEnemies;
+VAR
+  I, X, Y, Count: Integer;
+  Names: ARRAY[1..5] OF String[15];
+BEGIN
+  Names[1] := 'Rat';
+  Names[2] := 'Goblin';
+  Names[3] := 'Skeleton';
+  Names[4] := 'Orc';
+  Names[5] := 'Dragon';
+  
+  Count := 0;
+  FOR I := 1 TO MaxEnemies DO
+    Enemies[I].Active := False;
+    
+  WHILE Count < (5 + Depth * 2) DO
+  BEGIN
+    X := 2 + Random(MaxWidth - 4);
+    Y := 2 + Random(MaxHeight - 4);
+    
+    IF (Map[Y, X] = TileFloor) AND NOT IsWall(X, Y) THEN
+    BEGIN
+      { Don't spawn on player }
+      IF (X <> Player.X) OR (Y <> Player.Y) THEN
+      BEGIN
+        INC(Count);
+        Enemies[Count].X := X;
+        Enemies[Count].Y := Y;
+        Enemies[Count].Active := True;
+        
+        { Scale difficulty with depth }
+        CASE Depth OF
+          1: BEGIN
+               Enemies[Count].Name := Names[1];
+               Enemies[Count].MaxHP := 10;
+               Enemies[Count].Damage := 2;
+             END;
+          2: BEGIN
+               Enemies[Count].Name := Names[2];
+               Enemies[Count].MaxHP := 20;
+               Enemies[Count].Damage := 4;
+             END;
+          3: BEGIN
+               Enemies[Count].Name := Names[3];
+               Enemies[Count].MaxHP := 30;
+               Enemies[Count].Damage := 6;
+             END;
+          ELSE
+            BEGIN
+              Enemies[Count].Name := Names[5];
+              Enemies[Count].MaxHP := 50 + Depth * 5;
+              Enemies[Count].Damage := 10 + Depth;
+            END;
+        END;
+        
+        Enemies[Count].HP := Enemies[Count].MaxHP;
+      END;
+    END;
+  END;
+END;
+
+PROCEDURE SpawnItems;
+VAR
+  I, X, Y, Count: Integer;
+BEGIN
+  Count := 0;
+  FOR I := 1 TO MaxItems DO
+    Items[I].Active := False;
+    
+  { Spawn Gold }
+  WHILE Count < 5 DO
+  BEGIN
+    X := 2 + Random(MaxWidth - 4);
+    Y := 2 + Random(MaxHeight - 4);
+    IF (Map[Y, X] = TileFloor) AND NOT IsWall(X, Y) THEN
+    BEGIN
+      INC(Count);
+      Items[Count].X := X;
+      Items[Count].Y := Y;
+      Items[Count].TypeChar := TileGold;
+      Items[Count].Value := 10 + Random(20);
+      Items[Count].Active := True;
+    END;
+  END;
+  
+  { Spawn Potions }
+  WHILE Count < 8 DO
+  BEGIN
+    X := 2 + Random(MaxWidth - 4);
+    Y := 2 + Random(MaxHeight - 4);
+    IF (Map[Y, X] = TileFloor) AND NOT IsWall(X, Y) THEN
+    BEGIN
+      INC(Count);
+      Items[Count].X := X;
+      Items[Count].Y := Y;
+      Items[Count].TypeChar := TilePotion;
+      Items[Count].Value := 10;
+      Items[Count].Active := True;
+    END;
+  END;
+  
+  { Spawn Stairs }
+  X := 2 + Random(MaxWidth - 4);
+  Y := 2 + Random(MaxHeight - 4);
+  Items[Count + 1].X := X;
+  Items[Count + 1].Y := Y;
+  Items[Count + 1].TypeChar := TileStairs;
+  Items[Count + 1].Active := True;
+END;
+
+{ --- Rendering --- }
+
+PROCEDURE RenderMap;
+VAR
+  I, J: Integer;
+  Ex, Ey: Integer;
+  Dist: Integer;
+  ViewTop: Integer;
+  MapY: Integer;
+  ScreenY: Integer;
+BEGIN
+  ViewTop := Player.Y - (MapHeightView DIV 2);
+  IF ViewTop < 1 THEN
+    ViewTop := 1;
+  IF ViewTop > MaxHeight - MapHeightView + 1 THEN
+    ViewTop := MaxHeight - MapHeightView + 1;
+
+  FOR ScreenY := MapTop TO MapTop + MapHeightView - 1 DO
+  BEGIN
+    MapY := ViewTop + (ScreenY - MapTop);
+    FOR J := 1 TO MaxWidth DO
+    BEGIN
+      { Calculate Distance from Player }
+      Ex := J - Player.X;
+      Ey := MapY - Player.Y;
+      Dist := Abs(Ex) + Abs(Ey);
+      
+      { Update Seen Map (Fog of War) }
+      IF Dist <= 4 THEN
+        SeenMap[MapY, J] := Map[MapY, J];
+        
+      { Draw Tile }
+      IF (J = Player.X) AND (MapY = Player.Y) THEN
+      BEGIN
+        ColorText(J, ScreenY, TilePlayer, LightGreen);
+      END
+      ELSE IF SeenMap[MapY, J] <> TileFog THEN
+      BEGIN
+        CASE SeenMap[MapY, J] OF
+          TileWall: ColorText(J, ScreenY, TileWall, DarkGray);
+          TileFloor: ColorText(J, ScreenY, TileFloor, DarkGray);
+          TileStairs: ColorText(J, ScreenY, TileStairs, Yellow);
+          ELSE
+            ColorText(J, ScreenY, SeenMap[MapY, J], White);
+        END;
+      END
+      ELSE
+      BEGIN
+        { Unseen area: keep black or clear }
+        GotoXY(J, ScreenY);
+        Write(' ');
+      END;
+    END;
+  END;
+    
+  { Draw Enemies and Items on top of map if visible }
+  FOR I := 1 TO MaxEnemies DO
+    IF Enemies[I].Active THEN
+    BEGIN
+      Ex := Enemies[I].X - Player.X;
+      Ey := Enemies[I].Y - Player.Y;
+      ScreenY := MapTop + (Enemies[I].Y - ViewTop);
+      IF (Abs(Ex) <= 4) AND (Abs(Ey) <= 4) AND
+         (ScreenY >= MapTop) AND (ScreenY < MapTop + MapHeightView) THEN
+        ColorText(Enemies[I].X, ScreenY, TileEnemy, LightRed);
+    END;
+        
+  FOR I := 1 TO MaxItems DO
+    IF Items[I].Active THEN
+    BEGIN
+      Ex := Items[I].X - Player.X;
+      Ey := Items[I].Y - Player.Y;
+      ScreenY := MapTop + (Items[I].Y - ViewTop);
+      IF (Abs(Ex) <= 4) AND (Abs(Ey) <= 4) AND
+         (ScreenY >= MapTop) AND (ScreenY < MapTop + MapHeightView) THEN
+        ColorText(Items[I].X, ScreenY, Items[I].TypeChar, Yellow);
+    END;
+END;
+
+PROCEDURE DrawHUD;
+VAR
+  Line1, Line2: String[79];
+BEGIN
+  Line1 := 'DEPTH: ' + IntToStr(Depth) +
+           '  HP: ' + IntToStr(Player.HP) + '/' + IntToStr(Player.MaxHP) +
+           '  LVL: ' + IntToStr(Player.Level) +
+           '  GOLD: ' + IntToStr(Player.Gold);
+  Line2 := 'Potions: ' + IntToStr(Player.Potions) + '  XP: ' + IntToStr(Player.XP);
+  WriteScreenLine(1, Line1);
+  WriteScreenLine(2, Line2);
+  WriteScreenLine(ControlsRow, 'Controls: HJKL+YUBN=Move, G=Get, A=Attack, P=Potion, S=Save, R=Load, Q=Quit');
+END;
+
+{ --- Game Logic --- }
+
+PROCEDURE PlayerMove(NewX, NewY: Integer);
+VAR
+  EnemyIdx: Integer;
+  ItemIdx: Integer;
+BEGIN
+  IF IsWall(NewX, NewY) THEN EXIT;
+  
+  EnemyIdx := GetEnemyAt(NewX, NewY);
+  IF EnemyIdx > 0 THEN
+  BEGIN
+    { Attack Enemy }
+    CombatRound(EnemyIdx);
+    EXIT;
+  END;
+  
+  ItemIdx := GetItemAt(NewX, NewY);
+  IF ItemIdx > 0 THEN
+  BEGIN
+    { Auto-pickup logic can be here, or wait for 'G' }
+    { Let's make it auto-pickup gold, require 'G' for potions/items }
+    IF Items[ItemIdx].TypeChar = TileGold THEN
+    BEGIN
+      Player.Gold := Player.Gold + Items[ItemIdx].Value;
+      Items[ItemIdx].Active := False;
+      AddMessage('You picked up ' + IntToStr(Items[ItemIdx].Value) + ' gold.');
+    END;
+  END;
+  
+  Player.X := NewX;
+  Player.Y := NewY;
+  
+  { Check for Stairs }
+  ItemIdx := GetItemAt(Player.X, Player.Y);
+  IF (ItemIdx > 0) AND (Items[ItemIdx].TypeChar = TileStairs) THEN
+  BEGIN
+    NextLevel;
+  END;
+END;
+
+PROCEDURE CombatRound(EnemyIdx: Integer);
+VAR
+  PlayerDmg, EnemyDmg: Integer;
+BEGIN
+  { Player attacks }
+  PlayerDmg := Player.Attack + Random(3);
+  Enemies[EnemyIdx].HP := Enemies[EnemyIdx].HP - PlayerDmg;
+  AddMessage('You hit ' + Enemies[EnemyIdx].Name + ' for ' + IntToStr(PlayerDmg) + ' damage.');
+  
+  IF Enemies[EnemyIdx].HP <= 0 THEN
+  BEGIN
+    AddMessage(Enemies[EnemyIdx].Name + ' dies!');
+    Enemies[EnemyIdx].Active := False;
+    Player.XP := Player.XP + 10;
+    CheckLevelUp;
+  END
+  ELSE
+  BEGIN
+    { Enemy attacks back }
+    EnemyDmg := Enemies[EnemyIdx].Damage - (Player.Defense DIV 2);
+    IF EnemyDmg < 1 THEN EnemyDmg := 1;
+    Player.HP := Player.HP - EnemyDmg;
+    AddMessage(Enemies[EnemyIdx].Name + ' hits you for ' + IntToStr(EnemyDmg) + ' damage.');
+    
+    IF Player.HP <= 0 THEN
+    BEGIN
+      GameOver := True;
+      AddMessage('YOU HAVE DIED.');
+    END;
+  END;
+END;
+
+PROCEDURE CheckLevelUp;
+BEGIN
+  IF Player.XP >= Player.Level * 50 THEN
+  BEGIN
+    INC(Player.Level);
+    Player.MaxHP := Player.MaxHP + 10;
+    Player.HP := Player.MaxHP;
+    Player.Attack := Player.Attack + 2;
+    Player.Defense := Player.Defense + 1;
+    AddMessage('LEVEL UP! You are now level ' + IntToStr(Player.Level) + '.');
+  END;
+END;
+
+PROCEDURE NextLevel;
+BEGIN
+  ClearScreen;
+  INC(Depth);
+  AddMessage('You descend deeper into the dungeon...');
+  Delay(1000);
+  GenerateDungeon;
+  ClearSeenMap;
+  SpawnEnemies;
+  SpawnItems;
+  
+  { Place player in first room }
+  Player.X := 2;
+  Player.Y := 2;
+  { Ensure start pos is floor }
+  WHILE Map[Player.Y, Player.X] <> TileFloor DO
+  BEGIN
+    INC(Player.Y);
+    IF Player.Y > MaxHeight THEN
+    BEGIN
+      Player.Y := 2;
+      INC(Player.X);
+    END;
+  END;
+END;
+
+FUNCTION SaveExists: Boolean;
+VAR
+  F: Text;
+BEGIN
+  Assign(F, SaveFileName);
+  {$I-}
+  Reset(F);
+  {$I+}
+  IF IOResult = 0 THEN
+  BEGIN
+    Close(F);
+    SaveExists := True;
+  END
+  ELSE
+    SaveExists := False;
+END;
+
+PROCEDURE SaveGame;
+VAR
+  F: Text;
+  R, C: Integer;
+  Row: String[80];
+BEGIN
+  Assign(F, SaveFileName);
+  Rewrite(F);
+
+  WriteLn(F, 'DUNGEON_SAVE_V1');
+  WriteLn(F, Depth);
+  WriteLn(F, Player.X, ' ', Player.Y, ' ', Player.HP, ' ', Player.MaxHP, ' ',
+             Player.Attack, ' ', Player.Defense, ' ', Player.Gold, ' ',
+             Player.Level, ' ', Player.XP, ' ', Player.Potions);
+  WriteLn(F, Ord(GameOver));
+
+  FOR R := 1 TO MaxHeight DO
+  BEGIN
+    Row := '';
+    FOR C := 1 TO MaxWidth DO
+      Row := Row + Map[R, C];
+    WriteLn(F, Row);
+  END;
+
+  FOR R := 1 TO MaxHeight DO
+  BEGIN
+    Row := '';
+    FOR C := 1 TO MaxWidth DO
+      Row := Row + SeenMap[R, C];
+    WriteLn(F, Row);
+  END;
+
+  FOR R := 1 TO MaxEnemies DO
+    WriteLn(F, Enemies[R].X, ' ', Enemies[R].Y, ' ', Enemies[R].HP, ' ',
+               Enemies[R].MaxHP, ' ', Enemies[R].Damage, ' ',
+               Ord(Enemies[R].Active), ' ', Enemies[R].Name);
+
+  FOR R := 1 TO MaxItems DO
+    WriteLn(F, Items[R].X, ' ', Items[R].Y, ' ', Items[R].TypeChar, ' ',
+               Items[R].Value, ' ', Ord(Items[R].Active));
+
+  Close(F);
+  AddMessage('Game saved to ' + SaveFileName + '.');
+END;
+
+PROCEDURE LoadGame;
+VAR
+  F: Text;
+  R, C: Integer;
+  Row: String[80];
+  Magic: String;
+  ActiveFlag: Integer;
+BEGIN
+  IF NOT SaveExists THEN
+  BEGIN
+    AddMessage('No save file found.');
+    EXIT;
+  END;
+
+  Assign(F, SaveFileName);
+  Reset(F);
+
+  ReadLn(F, Magic);
+  IF Magic <> 'DUNGEON_SAVE_V1' THEN
+  BEGIN
+    Close(F);
+    AddMessage('Save file format not recognized.');
+    EXIT;
+  END;
+
+  ReadLn(F, Depth);
+  ReadLn(F, Player.X, Player.Y, Player.HP, Player.MaxHP, Player.Attack,
+         Player.Defense, Player.Gold, Player.Level, Player.XP, Player.Potions);
+  ReadLn(F, ActiveFlag);
+  GameOver := ActiveFlag <> 0;
+
+  FOR R := 1 TO MaxHeight DO
+  BEGIN
+    ReadLn(F, Row);
+    FOR C := 1 TO MaxWidth DO
+      IF C <= Length(Row) THEN
+        Map[R, C] := Row[C]
+      ELSE
+        Map[R, C] := TileWall;
+  END;
+
+  FOR R := 1 TO MaxHeight DO
+  BEGIN
+    ReadLn(F, Row);
+    FOR C := 1 TO MaxWidth DO
+      IF C <= Length(Row) THEN
+        SeenMap[R, C] := Row[C]
+      ELSE
+        SeenMap[R, C] := TileFog;
+  END;
+
+  FOR R := 1 TO MaxEnemies DO
+  BEGIN
+    ReadLn(F, Enemies[R].X, Enemies[R].Y, Enemies[R].HP, Enemies[R].MaxHP,
+           Enemies[R].Damage, ActiveFlag, Enemies[R].Name);
+    Enemies[R].Active := ActiveFlag <> 0;
+  END;
+
+  FOR R := 1 TO MaxItems DO
+  BEGIN
+    ReadLn(F, Items[R].X, Items[R].Y, Items[R].TypeChar, Items[R].Value, ActiveFlag);
+    Items[R].Active := ActiveFlag <> 0;
+  END;
+
+  Close(F);
+  ClearScreen;
+  AddMessage('Game loaded from ' + SaveFileName + '.');
+END;
+
+PROCEDURE UsePotion;
+BEGIN
+  IF Player.Potions > 0 THEN
+  BEGIN
+    IF Player.HP >= Player.MaxHP THEN
+    BEGIN
+      AddMessage('You are already at full health.');
+    END
+    ELSE
+    BEGIN
+      DEC(Player.Potions);
+      Player.HP := Player.MaxHP;
+      AddMessage('You drink a potion and feel refreshed.');
+    END;
+  END
+  ELSE
+  BEGIN
+    AddMessage('You have no potions!');
+  END;
+END;
+
+PROCEDURE GetItem;
+VAR
+  ItemIdx: Integer;
+BEGIN
+  ItemIdx := GetItemAt(Player.X, Player.Y);
+  IF ItemIdx > 0 THEN
+  BEGIN
+    IF Items[ItemIdx].TypeChar = TilePotion THEN
+    BEGIN
+      IF Player.Potions < MaxInventory THEN
+      BEGIN
+        INC(Player.Potions);
+        Items[ItemIdx].Active := False;
+        AddMessage('You picked up a potion.');
+      END
+      ELSE
+      BEGIN
+        AddMessage('Inventory full.');
+      END;
+    END
+    ELSE
+    BEGIN
+      AddMessage('Nothing else to pick up here.');
+    END;
+  END
+  ELSE
+  BEGIN
+    AddMessage('Nothing here to pick up.');
+  END;
+END;
+
+{ --- Main Loop --- }
+
+PROCEDURE InitGame;
+VAR
+  I, J: Integer;
+BEGIN
+  Randomize;
+  Depth := 1;
+  GameOver := False;
+  ClearMessageLog;
+
+  ClearSeenMap;
+  
+  { Init Player }
+  Player.X := 1;
+  Player.Y := 1;
+  Player.HP := 50;
+  Player.MaxHP := 50;
+  Player.Attack := 5;
+  Player.Defense := 2;
+  Player.Gold := 0;
+  Player.Level := 1;
+  Player.XP := 0;
+  Player.Potions := 2;
+  
+  GenerateDungeon;
+  SpawnEnemies;
+  SpawnItems;
+  
+  { Find a valid start position }
+  WHILE Map[Player.Y, Player.X] <> TileFloor DO
+  BEGIN
+    INC(Player.Y);
+    IF Player.Y > MaxHeight THEN
+    BEGIN
+      Player.Y := 2;
+      INC(Player.X);
+    END;
+  END;
+  
+  ClearScreen;
+  WriteLn('Welcome to the Dungeon!');
+  WriteLn('Find the stairs (>) to descend.');
+  IF SaveExists THEN
+    WriteLn('Press R now to load ', SaveFileName, '.');
+  WriteLn('Press any key to start...');
+  Key := ReadKey;
+  IF UpCase(Key) = 'R' THEN
+    LoadGame;
+END;
+
+BEGIN
+  InitGame;
+  
+  WHILE NOT GameOver DO
+  BEGIN
+    RenderMap;
+    DrawHUD;
+    DrawMessages;
+    
+    { Wait for key }
+    IF KeyPressed THEN
+    BEGIN
+      Key := ReadKey;
+      
+      CASE UpCase(Key) OF
+        'Y': PlayerMove(Player.X - 1, Player.Y - 1);
+        'U': PlayerMove(Player.X + 1, Player.Y - 1);
+        'H': PlayerMove(Player.X - 1, Player.Y);
+        'J': PlayerMove(Player.X, Player.Y + 1);
+        'K': PlayerMove(Player.X, Player.Y - 1);
+        'L': PlayerMove(Player.X + 1, Player.Y);
+        'B': PlayerMove(Player.X - 1, Player.Y + 1);
+        'N': PlayerMove(Player.X + 1, Player.Y + 1);
+        'G': GetItem;
+        'A':
+          BEGIN
+            { Attack adjacent enemy }
+            FOR I := 1 TO MaxEnemies DO
+              IF Enemies[I].Active THEN
+                IF (Abs(Enemies[I].X - Player.X) + Abs(Enemies[I].Y - Player.Y)) = 1 THEN
+                BEGIN
+                  CombatRound(I);
+                  BREAK;
+                END;
+          END;
+        'P': UsePotion;
+        'S': SaveGame;
+        'R': LoadGame;
+        'Q': GameOver := True;
+      END;
+    END
+    ELSE
+    BEGIN
+      { Small delay to prevent 100% CPU usage }
+      Delay(100);
+    END;
+  END;
+  
+  WriteLn;
+  WriteLn('Game Over. Final Score: ', Player.Gold);
+  WriteLn('Press any key to exit.');
+  ReadKey;
+END.
