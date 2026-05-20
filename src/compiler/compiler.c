@@ -7572,12 +7572,10 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                     node->token->type == TOKEN_IDENTIFIER);
             bool usesReceiverGlobal = false;
             AST* callReceiver = isCallQualified ? node->left : NULL;
-            bool receiverIsArgument = false;
             char receiverMethodName[MAX_SYMBOL_LENGTH * 2 + 2];
             receiverMethodName[0] = '\0';
             if (!callReceiver && isCallQualified && node->child_count > 0) {
                 callReceiver = node->children[0];
-                receiverIsArgument = true;
             }
             if (callReceiver && node->token && node->token->value) {
                 buildReceiverMethodName(callReceiver, node->token->value,
@@ -7706,7 +7704,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 usesReceiverGlobal = true;
             }
 
-            int receiver_offset = (usesReceiverGlobal && receiverIsArgument && node->child_count > 0) ? 1 : 0;
+            bool receiverInFirstChild = (callReceiver && node->child_count > 0 &&
+                                         node->children[0] == callReceiver);
+            int receiver_offset = (usesReceiverGlobal && receiverInFirstChild) ? 1 : 0;
 
             if (frontendIsRea() && !proc_symbol && node->child_count > 0 && node->children[0]) {
                 AST* recv = node->children[0];
@@ -8087,7 +8087,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 AST* recv = callReceiver;
                 compileRValue(recv, chunk, getLine(recv));
                 writeBytecodeChunk(chunk, DUP, line);
-                int arg_start_index = receiverIsArgument ? 1 : 0;
+                int arg_start_index = receiverInFirstChild ? 1 : 0;
                 for (int i = arg_start_index; i < node->child_count; i++) {
                     AST* arg_node = node->children[i];
                     bool is_var_param = false;
@@ -9452,7 +9452,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             bool isCallQualified = false;
             bool usesReceiverGlobal = false;
             AST* callReceiver = NULL;
-            bool receiverIsArgument = false;
             char receiverMethodName[MAX_SYMBOL_LENGTH * 2 + 2];
             receiverMethodName[0] = '\0';
 
@@ -9475,7 +9474,6 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             if (!callReceiver && isCallQualified && node->child_count > 0) {
                 callReceiver = node->children[0];
-                receiverIsArgument = true;
             }
             if (callReceiver && node->token && node->token->value) {
                 buildReceiverMethodName(callReceiver, node->token->value,
@@ -9657,7 +9655,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 usesReceiverGlobal = true;
             }
 
-            int receiver_offset = (usesReceiverGlobal && receiverIsArgument && node->child_count > 0) ? 1 : 0;
+            bool receiverInFirstChild = (callReceiver && node->child_count > 0 &&
+                                         node->children[0] == callReceiver);
+            int receiver_offset = (usesReceiverGlobal && receiverInFirstChild) ? 1 : 0;
 
             // Inline function calls directly when marked inline.
             if (func_symbol && func_symbol->type_def && func_symbol->type_def->is_inline) {
@@ -9671,7 +9671,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     AST* recv = callReceiver;
                     compileRValue(recv, chunk, getLine(recv));
                     writeBytecodeChunk(chunk, DUP, line);
-                    int arg_start_index = receiverIsArgument ? 1 : 0;
+                    int arg_start_index = receiverInFirstChild ? 1 : 0;
                     for (int i = arg_start_index; i < node->child_count; i++) {
                         AST* arg_node = node->children[i];
                         bool is_var_param = false;

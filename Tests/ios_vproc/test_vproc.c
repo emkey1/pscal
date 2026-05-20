@@ -309,7 +309,7 @@ static void assert_socket_closed_on_destroy(void) {
     assert(vp);
     vprocActivate(vp);
 
-    int s = socket(AF_INET, SOCK_STREAM, 0);
+    int s = vprocSocketShim(AF_INET, SOCK_STREAM, 0);
     assert(s >= 0);
     int reuse = 1;
     assert(setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == 0);

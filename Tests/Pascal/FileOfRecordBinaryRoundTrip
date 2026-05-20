@@ -1,0 +1,65 @@
+program FileOfRecordBinaryRoundTrip;
+
+type
+  TStats = record
+    Gold: Integer;
+    Potions: Integer;
+  end;
+
+  TPlayer = record
+    X, Y: Integer;
+    HP: Integer;
+    Name: String[15];
+    Stats: TStats;
+  end;
+
+var
+  f: file;
+  saved, loaded: TPlayer;
+
+procedure AssertEqualInt(expected, actual: integer; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then writeln('PASS')
+  else writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+procedure AssertEqualStr(expected, actual: string; testName: string);
+begin
+  write('START: ', testName, ': ');
+  if expected = actual then writeln('PASS')
+  else writeln('FAIL (expected: ', expected, ', got: ', actual, ')');
+end;
+
+begin
+  saved.X := 11;
+  saved.Y := 7;
+  saved.HP := 42;
+  saved.Name := 'Hero';
+  saved.Stats.Gold := 123;
+  saved.Stats.Potions := 4;
+
+  assign(f, '/tmp/pscal_file_of_record_roundtrip.dat');
+  rewrite(f);
+  write(f, saved);
+  close(f);
+
+  loaded.X := 0;
+  loaded.Y := 0;
+  loaded.HP := 0;
+  loaded.Name := '';
+  loaded.Stats.Gold := 0;
+  loaded.Stats.Potions := 0;
+
+  assign(f, '/tmp/pscal_file_of_record_roundtrip.dat');
+  reset(f);
+  read(f, loaded);
+  close(f);
+
+  AssertEqualInt(11, loaded.X, 'Record field X');
+  AssertEqualInt(7, loaded.Y, 'Record field Y');
+  AssertEqualInt(42, loaded.HP, 'Record field HP');
+  AssertEqualStr('Hero', loaded.Name, 'Record field Name');
+  AssertEqualInt(123, loaded.Stats.Gold, 'Nested record Gold');
+  AssertEqualInt(4, loaded.Stats.Potions, 'Nested record Potions');
+end.

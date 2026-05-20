@@ -57,6 +57,33 @@ if(NOT DEFINED PSCAL_USE_HOST_OPENSSL)
 endif()
 
 if(NOT PSCAL_PLATFORM_IOS OR PSCAL_USE_HOST_OPENSSL)
+    if(APPLE)
+        set(_pscal_homebrew_openssl_root "/opt/homebrew/opt/openssl@3")
+        if(EXISTS "${_pscal_homebrew_openssl_root}/lib/libssl.dylib" AND
+           EXISTS "${_pscal_homebrew_openssl_root}/lib/libcrypto.dylib")
+            if(DEFINED OpenSSL_DIR AND OpenSSL_DIR AND NOT EXISTS "${OpenSSL_DIR}")
+                set(OpenSSL_DIR "${_pscal_homebrew_openssl_root}/lib/cmake/OpenSSL"
+                    CACHE PATH "OpenSSL CMake package directory" FORCE)
+            endif()
+            if(DEFINED OPENSSL_INCLUDE_DIR AND OPENSSL_INCLUDE_DIR AND NOT EXISTS "${OPENSSL_INCLUDE_DIR}")
+                set(OPENSSL_INCLUDE_DIR "${_pscal_homebrew_openssl_root}/include"
+                    CACHE PATH "OpenSSL include directory" FORCE)
+            endif()
+            if(DEFINED OPENSSL_SSL_LIBRARY AND OPENSSL_SSL_LIBRARY AND NOT EXISTS "${OPENSSL_SSL_LIBRARY}")
+                set(OPENSSL_SSL_LIBRARY "${_pscal_homebrew_openssl_root}/lib/libssl.dylib"
+                    CACHE FILEPATH "OpenSSL SSL library" FORCE)
+            endif()
+            if(DEFINED OPENSSL_CRYPTO_LIBRARY AND OPENSSL_CRYPTO_LIBRARY AND NOT EXISTS "${OPENSSL_CRYPTO_LIBRARY}")
+                set(OPENSSL_CRYPTO_LIBRARY "${_pscal_homebrew_openssl_root}/lib/libcrypto.dylib"
+                    CACHE FILEPATH "OpenSSL Crypto library" FORCE)
+            endif()
+            if((NOT DEFINED OPENSSL_ROOT_DIR OR OPENSSL_ROOT_DIR STREQUAL "") OR
+               (DEFINED OPENSSL_ROOT_DIR AND OPENSSL_ROOT_DIR AND NOT EXISTS "${OPENSSL_ROOT_DIR}/include"))
+                set(OPENSSL_ROOT_DIR "${_pscal_homebrew_openssl_root}"
+                    CACHE PATH "OpenSSL root directory" FORCE)
+            endif()
+        endif()
+    endif()
     find_package(OpenSSL REQUIRED)
     # CMake's FindOpenSSL should provide imported targets, but some environments
     # (notably newer Homebrew/OpenSSL combos) occasionally omit them. Fall back
