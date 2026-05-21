@@ -4111,6 +4111,16 @@ int vmExitWithCleanup(int status) {
 }
 
 static void vmEnableRawMode(void) {
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (session_stdio && vprocSessionStdioIsDefault(session_stdio) &&
+        PSCALRuntimeGetCurrentRuntimeStdio) {
+        VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+        if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio)) {
+            vprocSessionStdioActivate(runtime_stdio);
+        }
+    }
+#endif
     vmSetupTermHandlers();
     pthread_mutex_lock(&vm_term_mutex);
     if (vm_raw_mode) {
@@ -5297,6 +5307,12 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         {
             vmEnableRawMode();
             c = readKeyFetchConsoleByte();
+        }
+
+        if (c == 0) {
+            struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+            (void)poll(&pfd, 1, 10);
+            continue;
         }
 
         if (gReadKeyPendingCaretControl) {

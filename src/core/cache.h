@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include "compiler/bytecode.h"
+#include "symbol/symbol.h"
 
 bool loadBytecodeFromCache(const char* source_path,
                            const char* compiler_id,
@@ -17,5 +18,9 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk);
 // Build the canonical path for the cache file corresponding to a source path.
 // Caller is responsible for freeing the returned string.
 char* buildCachePath(const char* source_path, const char* compiler_id);
+
+// Rebuild constructor aliases in procedure tables so fresh-compile and
+// cache-loaded execution paths share identical callable symbol aliases.
+void restoreProcedureConstructorAliases(HashTable* table);
 
 #endif // PSCAL_CACHE_H

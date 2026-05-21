@@ -744,6 +744,31 @@ static bool pushFieldValueByOffset(VM* vm, Value* base_val_ptr, uint16_t field_i
     return true;
 }
 
+static FieldValue* findRecordFieldByName(Value* record_struct_ptr, const char* field_name) {
+    FieldValue* current = NULL;
+    if (!record_struct_ptr || record_struct_ptr->type != TYPE_RECORD || !field_name) {
+        return NULL;
+    }
+
+    current = record_struct_ptr->record_val;
+    while (current) {
+        if (current->name && strcmp(current->name, field_name) == 0) {
+            return current;
+        }
+        current = current->next;
+    }
+
+    current = record_struct_ptr->record_val;
+    while (current) {
+        if (current->name && strcasecmp(current->name, field_name) == 0) {
+            return current;
+        }
+        current = current->next;
+    }
+
+    return NULL;
+}
+
 static bool pushFieldValueByName(VM* vm, Value* base_val_ptr, const char* field_name) {
     if (!field_name) {
         runtimeError(vm, "VM Error: Field name constant is invalid or NULL.");
@@ -755,13 +780,10 @@ static bool pushFieldValueByName(VM* vm, Value* base_val_ptr, const char* field_
         return false;
     }
 
-    FieldValue* current = record_struct_ptr->record_val;
-    while (current) {
-        if (current->name && strcmp(current->name, field_name) == 0) {
-            push(vm, copyValueForStack(fieldValueStorage(current)));
-            return true;
-        }
-        current = current->next;
+    FieldValue* current = findRecordFieldByName(record_struct_ptr, field_name);
+    if (current) {
+        push(vm, copyValueForStack(fieldValueStorage(current)));
+        return true;
     }
 
     runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
@@ -6646,15 +6668,12 @@ comparison_error_label:
                 }
 
                 const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
-                FieldValue* current = record_struct_ptr->record_val;
-                while (current) {
-                    if (strcmp(current->name, field_name) == 0) {
-                        Value popped_base_val = pop(vm);
-                        freeValue(&popped_base_val);
-                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
-                        goto next_instruction;
-                    }
-                    current = current->next;
+                FieldValue* current = findRecordFieldByName(record_struct_ptr, field_name);
+                if (current) {
+                    Value popped_base_val = pop(vm);
+                    freeValue(&popped_base_val);
+                    push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                    goto next_instruction;
                 }
 
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
@@ -6679,15 +6698,12 @@ comparison_error_label:
                 }
 
                 const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
-                FieldValue* current = record_struct_ptr->record_val;
-                while (current) {
-                    if (strcmp(current->name, field_name) == 0) {
-                        Value popped_base_val = pop(vm);
-                        freeValue(&popped_base_val);
-                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
-                        goto next_instruction;
-                    }
-                    current = current->next;
+                FieldValue* current = findRecordFieldByName(record_struct_ptr, field_name);
+                if (current) {
+                    Value popped_base_val = pop(vm);
+                    freeValue(&popped_base_val);
+                    push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                    goto next_instruction;
                 }
 
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
@@ -6712,13 +6728,10 @@ comparison_error_label:
                 }
 
                 const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
-                FieldValue* current = record_struct_ptr->record_val;
-                while (current) {
-                    if (strcmp(current->name, field_name) == 0) {
-                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
-                        goto next_instruction;
-                    }
-                    current = current->next;
+                FieldValue* current = findRecordFieldByName(record_struct_ptr, field_name);
+                if (current) {
+                    push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                    goto next_instruction;
                 }
 
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);
@@ -6743,13 +6756,10 @@ comparison_error_label:
                 }
 
                 const char* field_name = AS_STRING(vm->chunk->constants[field_name_idx]);
-                FieldValue* current = record_struct_ptr->record_val;
-                while (current) {
-                    if (strcmp(current->name, field_name) == 0) {
-                        push(vm, makePointer(fieldValueStorage(current), current->type_def));
-                        goto next_instruction;
-                    }
-                    current = current->next;
+                FieldValue* current = findRecordFieldByName(record_struct_ptr, field_name);
+                if (current) {
+                    push(vm, makePointer(fieldValueStorage(current), current->type_def));
+                    goto next_instruction;
                 }
 
                 runtimeError(vm, "VM Error: Field '%s' not found in record.", field_name);

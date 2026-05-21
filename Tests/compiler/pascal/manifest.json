@@ -203,6 +203,12 @@
       "path": "Tests/compiler/pascal/cases/interface_virtual_slot_order.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: interface describe=12"
+    },
+    {
+      "id": "nested_record_array_field_name_access",
+      "path": "Tests/compiler/pascal/cases/nested_record_array_field_name_access.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: nested record-array field name access"
     }
   ]
 }
