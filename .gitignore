@@ -35,3 +35,10 @@ build-dvtm/
 /)
 Examples/pascal/sdl/BoxDemo
 Examples/pascal/base/PuzzleSolver
+.tmp*
+*.swp
+Tests/write_many_args_test.sav
+Tests/write_many_nested_fields.sav
+ios/Archives/
+ios/DerivedData_Archive_R29/
+ios/DerivedData_R29_SIM/

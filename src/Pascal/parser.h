@@ -14,6 +14,7 @@ typedef struct {
     const char *current_unit_name_context;
     List *dependency_paths;
     int routine_depth;
+    AST *current_routine;
 } Parser;
 
 AST *parsePointerType(Parser *parser);

@@ -43,6 +43,30 @@
       "stdout_substring": "PASS: stringofchar builtin"
     },
     {
+      "id": "trim_builtin",
+      "path": "Tests/compiler/pascal/cases/trim_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: trim builtin"
+    },
+    {
+      "id": "flush_builtin",
+      "path": "Tests/compiler/pascal/cases/flush_builtin.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: flush builtin"
+    },
+    {
+      "id": "local_builtin_shadow_reference",
+      "path": "Tests/compiler/pascal/cases/local_builtin_shadow_reference.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: local builtin shadow reference"
+    },
+    {
+      "id": "receiver_method_expression_call",
+      "path": "Tests/compiler/pascal/cases/receiver_method_expression_call.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: receiver method expression call"
+    },
+    {
       "id": "record_function_result",
       "path": "Tests/compiler/pascal/cases/record_function_result.pas",
       "expect": "compile_success",
@@ -121,6 +145,12 @@
       "stdout_substring": "PASS: record constructor named fields"
     },
     {
+      "id": "subrange_type_alias",
+      "path": "Tests/compiler/pascal/cases/subrange_type_alias.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: subrange type alias idx=3"
+    },
+    {
       "id": "continue_statement_loops",
       "path": "Tests/compiler/pascal/cases/continue_statement_loops.pas",
       "expect": "compile_success",
@@ -173,6 +203,12 @@
       "path": "Tests/compiler/pascal/cases/interface_virtual_slot_order.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: interface describe=12"
+    },
+    {
+      "id": "nested_record_array_field_name_access",
+      "path": "Tests/compiler/pascal/cases/nested_record_array_field_name_access.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: nested record-array field name access"
     }
   ]
 }

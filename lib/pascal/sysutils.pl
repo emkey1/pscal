@@ -9,6 +9,7 @@ type
 // --- String Manipulation ---
 function UpperCase(S: string): string;
 function LowerCase(S: string): string;
+{override builtin: Trim}
 function Trim(S: string): string;
 function TrimLeft(S: string): string;
 function TrimRight(S: string): string;
@@ -122,6 +123,7 @@ begin
     TrimRight := Copy(S, 1, Last);
 end;
 
+{override builtin: Trim}
 function Trim(S: string): string;
 var
   First, Last, Len: Integer;

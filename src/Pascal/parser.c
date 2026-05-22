@@ -83,6 +83,11 @@ static AST *parsePostfixSelectors(Parser *parser, AST *node);
 static AST *parseRecordConstructor(Parser *parser);
 static AST *cloneBuiltinTypeNode(VarType type, int line);
 static AST *inferInlineForVarType(AST *expr, int line);
+static bool routineDeclGroupHasName(AST *declGroup, const char *name);
+static bool parserCurrentRoutineShadowsBuiltin(Parser *parser, const char *name);
+static bool tokenCanStartSubrangeType(TokenType type);
+static AST *parseSubrangeType(Parser *parser);
+static bool validateSubrangeBounds(Parser *parser, const Value *lower, const Value *upper, VarType *resolvedType);
 
 static void appendDependencyPath(Parser *parser, const char *path) {
     if (!parser || !parser->dependency_paths || !path || !*path) {
@@ -174,6 +179,196 @@ static AST *inferInlineForVarType(AST *expr, int line) {
     }
 
     return cloneBuiltinTypeNode(TYPE_INTEGER, line);
+}
+
+static bool tokenCanStartSubrangeType(TokenType type) {
+    return type == TOKEN_INTEGER_CONST ||
+           type == TOKEN_HEX_CONST ||
+           type == TOKEN_STRING_CONST ||
+           type == TOKEN_TRUE ||
+           type == TOKEN_FALSE ||
+           type == TOKEN_PLUS ||
+           type == TOKEN_MINUS;
+}
+
+static bool validateSubrangeBounds(Parser *parser, const Value *lower, const Value *upper, VarType *resolvedType) {
+    if (!lower || !upper || !resolvedType) {
+        return false;
+    }
+
+    if (!isOrdinalType(lower->type) || !isOrdinalType(upper->type)) {
+        errorParser(parser, "Subrange bounds must be ordinal constant expressions");
+        return false;
+    }
+
+    if (lower->type == TYPE_ENUM || upper->type == TYPE_ENUM) {
+        if (lower->type != TYPE_ENUM || upper->type != TYPE_ENUM) {
+            errorParser(parser, "Subrange bounds must use the same ordinal type");
+            return false;
+        }
+        if (!lower->enum_val.enum_name || !upper->enum_val.enum_name ||
+            strcmp(lower->enum_val.enum_name, upper->enum_val.enum_name) != 0) {
+            errorParser(parser, "Subrange enum bounds must belong to the same enum type");
+            return false;
+        }
+        if (lower->enum_val.ordinal > upper->enum_val.ordinal) {
+            errorParser(parser, "Subrange lower bound exceeds upper bound");
+            return false;
+        }
+        *resolvedType = TYPE_ENUM;
+        return true;
+    }
+
+    if (lower->type == TYPE_CHAR || upper->type == TYPE_CHAR) {
+        if (lower->type != TYPE_CHAR || upper->type != TYPE_CHAR) {
+            errorParser(parser, "Subrange bounds must use the same ordinal type");
+            return false;
+        }
+        if (lower->c_val > upper->c_val) {
+            errorParser(parser, "Subrange lower bound exceeds upper bound");
+            return false;
+        }
+        *resolvedType = TYPE_CHAR;
+        return true;
+    }
+
+    if (lower->type == TYPE_BOOLEAN || upper->type == TYPE_BOOLEAN) {
+        if (lower->type != TYPE_BOOLEAN || upper->type != TYPE_BOOLEAN) {
+            errorParser(parser, "Subrange bounds must use the same ordinal type");
+            return false;
+        }
+        if ((lower->i_val ? 1 : 0) > (upper->i_val ? 1 : 0)) {
+            errorParser(parser, "Subrange lower bound exceeds upper bound");
+            return false;
+        }
+        *resolvedType = TYPE_BOOLEAN;
+        return true;
+    }
+
+    if (!isIntlikeType(lower->type) || !isIntlikeType(upper->type)) {
+        errorParser(parser, "Subrange bounds must use the same ordinal type");
+        return false;
+    }
+
+    if (coerceToI64(lower, NULL, "subrange lower bound") >
+        coerceToI64(upper, NULL, "subrange upper bound")) {
+        errorParser(parser, "Subrange lower bound exceeds upper bound");
+        return false;
+    }
+
+    *resolvedType = TYPE_INTEGER;
+    return true;
+}
+
+static AST *parseSubrangeType(Parser *parser) {
+    AST *lower = expression(parser);
+    if (!lower || lower->type == AST_NOOP) {
+        errorParser(parser, "Invalid lower bound expression for subrange type");
+        if (lower) freeAST(lower);
+        return NULL;
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_DOTDOT) {
+        errorParser(parser, "Expected '..' in subrange type");
+        freeAST(lower);
+        return NULL;
+    }
+    eat(parser, TOKEN_DOTDOT);
+
+    AST *upper = expression(parser);
+    if (!upper || upper->type == AST_NOOP) {
+        errorParser(parser, "Invalid upper bound expression for subrange type");
+        freeAST(lower);
+        if (upper) freeAST(upper);
+        return NULL;
+    }
+
+    Value lowerValue = evaluateCompileTimeValue(lower);
+    Value upperValue = evaluateCompileTimeValue(upper);
+    VarType resolvedType = TYPE_UNKNOWN;
+    bool ok = validateSubrangeBounds(parser, &lowerValue, &upperValue, &resolvedType);
+    freeValue(&lowerValue);
+    freeValue(&upperValue);
+    if (!ok) {
+        freeAST(lower);
+        freeAST(upper);
+        return NULL;
+    }
+
+    AST *range = newASTNode(AST_SUBRANGE, NULL);
+    setLeft(range, lower);
+    setRight(range, upper);
+    setTypeAST(range, resolvedType);
+    return range;
+}
+
+static bool routineDeclGroupHasName(AST *declGroup, const char *name) {
+    if (!declGroup || !name) {
+        return false;
+    }
+
+    if (declGroup->type == AST_VAR_DECL) {
+        for (int i = 0; i < declGroup->child_count; ++i) {
+            AST *child = declGroup->children[i];
+            if (!child) {
+                continue;
+            }
+            if (child->type == AST_VARIABLE && child->token && child->token->value &&
+                strcasecmp(child->token->value, name) == 0) {
+                return true;
+            }
+            if (child->type == AST_ASSIGN && child->left &&
+                child->left->type == AST_VARIABLE &&
+                child->left->token && child->left->token->value &&
+                strcasecmp(child->left->token->value, name) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return declGroup->type == AST_CONST_DECL &&
+           declGroup->token && declGroup->token->value &&
+           strcasecmp(declGroup->token->value, name) == 0;
+}
+
+static bool parserCurrentRoutineShadowsBuiltin(Parser *parser, const char *name) {
+    if (!parser || !parser->current_routine || !name) {
+        return false;
+    }
+
+    AST *routine = parser->current_routine;
+
+    for (int i = 0; i < routine->child_count; ++i) {
+        if (routineDeclGroupHasName(routine->children[i], name)) {
+            return true;
+        }
+    }
+
+    if (routine->type == AST_FUNCTION_DECL && routine->token && routine->token->value) {
+        if (strcasecmp(routine->token->value, name) == 0 ||
+            strcasecmp("result", name) == 0) {
+            return true;
+        }
+    }
+
+    AST *blockNode = (routine->type == AST_PROCEDURE_DECL) ? routine->right : routine->extra;
+    if (!blockNode || blockNode->type != AST_BLOCK || blockNode->child_count <= 0) {
+        return false;
+    }
+
+    AST *declarationsNode = blockNode->children[0];
+    if (!declarationsNode || declarationsNode->type != AST_COMPOUND) {
+        return false;
+    }
+
+    for (int i = 0; i < declarationsNode->child_count; ++i) {
+        if (routineDeclGroupHasName(declarationsNode->children[i], name)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool tokenTypeIsIdentifierLike(TokenType type) {
@@ -1242,6 +1437,7 @@ static AST *parseInterfaceType(Parser *parser) {
 }
 AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* unit_name_being_parsed, BytecodeChunk* chunk) {
     if (recursion_depth > MAX_RECURSION_DEPTH) { /* error */ EXIT_FAILURE_HANDLER(); }
+    parser_for_this_unit->current_routine = NULL;
 
     Token* unit_keyword_token_copy = copyToken(parser_for_this_unit->current_token);
     eat(parser_for_this_unit, TOKEN_UNIT);
@@ -1369,6 +1565,7 @@ AST *unitParser(Parser *parser_for_this_unit, int recursion_depth, const char* u
             nested_parser_instance.dependency_paths = parser_for_this_unit->dependency_paths;
             nested_parser_instance.current_unit_name_context = NULL;
             nested_parser_instance.routine_depth = 0;
+            nested_parser_instance.current_routine = NULL;
             
             // --- MODIFICATION: Pass the chunk recursively ---
             AST *parsed_nested_unit_ast = unitParser(&nested_parser_instance, recursion_depth + 1, nested_unit_name, chunk);
@@ -1630,6 +1827,7 @@ void addProcedure(Parser *parser, AST *proc_decl_ast_original, const char* unit_
 
 AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
     main_parser->current_unit_name_context = NULL;
+    main_parser->current_routine = NULL;
     resetCompilerConstants();
     Token *copiedProgToken = copyToken(main_parser->current_token);
     if (!copiedProgToken && main_parser->current_token) { /* Malloc error check */ EXIT_FAILURE_HANDLER(); }
@@ -1791,6 +1989,7 @@ AST *buildProgramAST(Parser *main_parser, BytecodeChunk* chunk) {
                 nested_parser_instance.dependency_paths = main_parser->dependency_paths;
                 nested_parser_instance.current_unit_name_context = NULL;
                 nested_parser_instance.routine_depth = 0;
+                nested_parser_instance.current_routine = NULL;
 
                 // --- MODIFICATION: Pass the chunk recursively ---
                 AST *parsed_unit_ast = unitParser(&nested_parser_instance, 1, lower_used_unit_name, chunk);
@@ -1956,15 +2155,18 @@ AST *procedureDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
+        AST *saved_routine = parser->current_routine;
+        parser->current_routine = node;
         parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
-        AST *compound_body = compoundStatement(parser);
-        parser->routine_depth--;
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
-        addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setRight(node, blockNode);
+        AST *compound_body = compoundStatement(parser);
+        addChild(blockNode, compound_body);
+        parser->routine_depth--;
+        parser->current_routine = saved_routine;
         node->symbol_table = (Symbol*)my_table;
         popProcedureTable(false);
     }
@@ -2128,6 +2330,29 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
     fprintf(stderr, "[DEBUG typeSpecifier] Entry: Token Type=%s, Value='%s'\n",
             tokenTypeToString(initialTokenType), initialToken->value ? initialToken->value : "NULL");
     #endif
+
+    if (tokenCanStartSubrangeType(initialTokenType)) {
+        node = parseSubrangeType(parser);
+        if (!node) {
+            return NULL;
+        }
+        return node;
+    }
+
+    if (tokenTypeIsIdentifierLike(initialTokenType)) {
+        Token *nextTok = peekToken(parser);
+        bool isSubrange = (nextTok && nextTok->type == TOKEN_DOTDOT);
+        if (nextTok) {
+            freeToken(nextTok);
+        }
+        if (isSubrange) {
+            node = parseSubrangeType(parser);
+            if (!node) {
+                return NULL;
+            }
+            return node;
+        }
+    }
 
     // --- Check based on the initial token's type ---
     if (initialTokenType == TOKEN_CARET) {
@@ -2765,16 +2990,19 @@ AST *functionDeclaration(Parser *parser, bool in_interface) {
 
     if (!node->is_forward_decl) {
         my_table = pushProcedureTable();
+        AST *saved_routine = parser->current_routine;
+        parser->current_routine = node;
         parser->routine_depth++;
         AST *local_declarations = declarations(parser, false);
-        AST *compound_body = compoundStatement(parser);
-        parser->routine_depth--;
 
         AST *blockNode = newASTNode(AST_BLOCK, NULL);
         addChild(blockNode, local_declarations);
-        addChild(blockNode, compound_body);
         blockNode->is_global_scope = false;
         setExtra(node, blockNode);
+        AST *compound_body = compoundStatement(parser);
+        addChild(blockNode, compound_body);
+        parser->routine_depth--;
+        parser->current_routine = saved_routine;
         node->symbol_table = (Symbol*)my_table;
         popProcedureTable(false);
     }
@@ -4465,13 +4693,22 @@ AST *factor(Parser *parser) {
         // IDENTIFIER case: call lvalue, which handles ., [], ^ and eats tokens internally
         node = lvalue(parser); // lvalue consumes the identifier and potential subsequent tokens
         if (!node || node->type == AST_NOOP) return newASTNode(AST_NOOP, NULL);
-
-        // Check if it's a function call (lvalue doesn't handle the LPAREN)
-        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN && node->type == AST_VARIABLE) {
-             // It's a function call. Create a NEW procedure call node.
-             AST* funcCallNode = newASTNode(AST_PROCEDURE_CALL, node->token);
-             freeAST(node); // Free the original AST_VARIABLE node.
-             node = funcCallNode; // The new procedure call node is now our main node.
+        // Check if it's a function call (lvalue doesn't handle the LPAREN).
+        // Expression parsing previously only accepted plain identifiers here,
+        // which rejected qualified calls like Unit.Func(...) or Obj.Method(...).
+        if (parser->current_token && parser->current_token->type == TOKEN_LPAREN &&
+            (node->type == AST_VARIABLE || node->type == AST_FIELD_ACCESS)) {
+             if (node->type == AST_VARIABLE) {
+                 // Plain identifier call: replace the temporary variable node
+                 // with a procedure-call node that owns the copied token.
+                 AST* funcCallNode = newASTNode(AST_PROCEDURE_CALL, node->token);
+                 freeAST(node); // Free the original AST_VARIABLE node.
+                 node = funcCallNode; // The new procedure call node is now our main node.
+             } else {
+                 // Qualified call: preserve the selector/receiver carried in the
+                 // AST_FIELD_ACCESS node and just retag it as a call node.
+                 node->type = AST_PROCEDURE_CALL;
+             }
 
              eat(parser, TOKEN_LPAREN);      // Eat '('
              bool isStrCall = (node->token && node->token->value && strcasecmp(node->token->value, "str") == 0);
@@ -4513,7 +4750,10 @@ AST *factor(Parser *parser) {
         else if (node->type == AST_VARIABLE) {
                 // <<<< MODIFICATION START >>>>
                 // Check for built-in functions FIRST, as they are a special case.
-                if (node->token && isBuiltin(node->token->value) && getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION) {
+                if (node->token &&
+                    isBuiltin(node->token->value) &&
+                    getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION &&
+                    !parserCurrentRoutineShadowsBuiltin(parser, node->token->value)) {
                     
                     #ifdef DEBUG
                     fprintf(stderr, "[DEBUG factor] IDENTIFIER '%s' is a built-in FUNCTION. Converting to AST_PROCEDURE_CALL.\n", node->token->value);

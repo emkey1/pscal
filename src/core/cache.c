@@ -1802,7 +1802,7 @@ static void ensureProcedureAlias(HashTable* table, const char* alias_name, Symbo
     hashTableInsert(table, alias);
 }
 
-static void restoreConstructorAliases(HashTable* table) {
+static void restoreConstructorAliasesImpl(HashTable* table) {
     if (!table) {
         return;
     }
@@ -1854,6 +1854,10 @@ static void restoreConstructorAliases(HashTable* table) {
             }
         }
     }
+}
+
+void restoreProcedureConstructorAliases(HashTable* table) {
+    restoreConstructorAliasesImpl(table);
 }
 
 static bool loadProceduresFromStream(FILE* f, int proc_count, uint32_t chunk_version) {
@@ -2218,7 +2222,7 @@ bool loadBytecodeFromCache(const char* source_path,
 
         fclose(f);
 
-        restoreConstructorAliases(procedure_table);
+        restoreProcedureConstructorAliases(procedure_table);
 
         ok = true;
     }
@@ -2398,7 +2402,7 @@ bool loadBytecodeFromFile(const char* file_path, BytecodeChunk* chunk) {
     g_astCacheVersion = prev_ast_version;
 
     if (ok) {
-        restoreConstructorAliases(procedure_table);
+        restoreProcedureConstructorAliases(procedure_table);
     }
 
     if (!ok) {

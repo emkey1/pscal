@@ -741,6 +741,198 @@ static bool writeBinaryElement(FILE* stream, const Value* rawValue, VarType elem
     return true;
 }
 
+static bool readToken(FILE* stream, char* buffer, size_t bufferSize) {
+    if (!stream || !buffer || bufferSize == 0) {
+        return false;
+    }
+    return fscanf(stream, "%1023s", buffer) == 1;
+}
+
+static bool writeStructuredValue(FILE* stream, const Value* value);
+static bool readStructuredValue(FILE* stream, Value* value);
+
+static bool writeStructuredValue(FILE* stream, const Value* rawValue) {
+    if (!stream || !rawValue) {
+        return false;
+    }
+
+    const Value* value = rawValue;
+    if (value->type == TYPE_POINTER && value->ptr_val) {
+        value = (const Value*)value->ptr_val;
+    }
+
+    switch (value->type) {
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT32:
+        case TYPE_INT64:
+        case TYPE_UINT8:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_UINT64:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_ENUM:
+            return fprintf(stream, "%lld ", (long long)AS_INTEGER(*value)) > 0;
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE:
+            return fprintf(stream, "%.17Lg ", (long double)AS_REAL(*value)) > 0;
+        case TYPE_CHAR:
+            return fprintf(stream, "%u ", (unsigned int)(unsigned char)value->c_val) > 0;
+        case TYPE_STRING: {
+            const char* text = value->s_val ? value->s_val : "";
+            return fprintf(stream, "%s ", text) > 0;
+        }
+        case TYPE_ARRAY: {
+            int total = calculateArrayTotalSize(value);
+            if (total < 0 || !value->array_val) {
+                return false;
+            }
+            for (int i = 0; i < total; ++i) {
+                if (!writeStructuredValue(stream, &value->array_val[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        case TYPE_RECORD: {
+            const Value* seen_storage[128];
+            int seen_count = 0;
+            for (FieldValue* field = value->record_val; field; field = field->next) {
+                const Value* fieldValue = fieldValueStorageConst(field);
+                bool already_seen = false;
+                for (int i = 0; i < seen_count; ++i) {
+                    if (seen_storage[i] == fieldValue) {
+                        already_seen = true;
+                        break;
+                    }
+                }
+                if (already_seen) {
+                    continue;
+                }
+                if (seen_count < (int)(sizeof(seen_storage) / sizeof(seen_storage[0]))) {
+                    seen_storage[seen_count++] = fieldValue;
+                }
+                if (!writeStructuredValue(stream, fieldValue)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+static bool readStructuredValue(FILE* stream, Value* rawValue) {
+    if (!stream || !rawValue) {
+        return false;
+    }
+
+    Value* value = rawValue;
+    if (value->type == TYPE_POINTER && value->ptr_val) {
+        value = (Value*)value->ptr_val;
+    }
+
+    char token[1024];
+    switch (value->type) {
+        case TYPE_INT8:
+        case TYPE_INT16:
+        case TYPE_INT32:
+        case TYPE_INT64:
+        case TYPE_UINT8:
+        case TYPE_UINT16:
+        case TYPE_UINT32:
+        case TYPE_UINT64:
+        case TYPE_WORD:
+        case TYPE_BYTE:
+        case TYPE_BOOLEAN:
+        case TYPE_ENUM: {
+            if (!readToken(stream, token, sizeof(token))) return false;
+            errno = 0;
+            char* endp = NULL;
+            long long parsed = strtoll(token, &endp, 10);
+            if (endp == token || errno == ERANGE) return false;
+            SET_INT_VALUE(value, parsed);
+            return true;
+        }
+        case TYPE_FLOAT:
+        case TYPE_DOUBLE:
+        case TYPE_LONG_DOUBLE: {
+            if (!readToken(stream, token, sizeof(token))) return false;
+            errno = 0;
+            char* endp = NULL;
+            long double parsed = strtold(token, &endp);
+            if (endp == token || errno == ERANGE) return false;
+            SET_REAL_VALUE(value, parsed);
+            return true;
+        }
+        case TYPE_CHAR: {
+            if (!readToken(stream, token, sizeof(token))) return false;
+            errno = 0;
+            char* endp = NULL;
+            long long parsed = strtoll(token, &endp, 10);
+            if (endp != token && errno != ERANGE) {
+                value->c_val = (unsigned char)parsed;
+                SET_INT_VALUE(value, value->c_val);
+                return true;
+            }
+            value->c_val = (unsigned char)token[0];
+            SET_INT_VALUE(value, value->c_val);
+            return true;
+        }
+        case TYPE_STRING: {
+            if (!readToken(stream, token, sizeof(token))) return false;
+            if (value->s_val) {
+                free(value->s_val);
+                value->s_val = NULL;
+            }
+            value->s_val = strdup(token);
+            return value->s_val != NULL;
+        }
+        case TYPE_ARRAY: {
+            int total = calculateArrayTotalSize(value);
+            if (total < 0 || !value->array_val) {
+                return false;
+            }
+            for (int i = 0; i < total; ++i) {
+                if (!readStructuredValue(stream, &value->array_val[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        case TYPE_RECORD: {
+            Value* seen_storage[128];
+            int seen_count = 0;
+            for (FieldValue* field = value->record_val; field; field = field->next) {
+                Value* fieldValue = fieldValueStorage(field);
+                bool already_seen = false;
+                for (int i = 0; i < seen_count; ++i) {
+                    if (seen_storage[i] == fieldValue) {
+                        already_seen = true;
+                        break;
+                    }
+                }
+                if (already_seen) {
+                    continue;
+                }
+                if (seen_count < (int)(sizeof(seen_storage) / sizeof(seen_storage[0]))) {
+                    seen_storage[seen_count++] = fieldValue;
+                }
+                if (!readStructuredValue(stream, fieldValue)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
 static void assignByteToValue(Value* target, unsigned char byte) {
     if (!target) {
         return;
@@ -1716,6 +1908,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"textbackgrounde", vmBuiltinTextbackgrounde},
     {"textcolor", vmBuiltinTextcolor},
     {"textcolore", vmBuiltinTextcolore},
+    {"trim", vmBuiltinTrim},
     {"trunc", vmBuiltinTrunc},
     {"underlinetext", vmBuiltinUnderlinetext},
     {"upcase", vmBuiltinUpcase},
@@ -2747,6 +2940,31 @@ Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
     Value result = makeString(new_str);
     free(new_str);
     return result;
+}
+
+Value vmBuiltinTrim(VM* vm, int arg_count, Value* args) {
+    if (arg_count != 1 || !builtinValueIsStringLike(&args[0])) {
+        runtimeError(vm, "Trim expects 1 string argument.");
+        return makeString("");
+    }
+
+    const char *source = builtinValueToCString(&args[0]);
+    if (!source) {
+        runtimeError(vm, "Trim expects a valid string argument.");
+        return makeString("");
+    }
+
+    const unsigned char *start = (const unsigned char *)source;
+    while (*start != '\0' && isspace(*start)) {
+        start++;
+    }
+
+    const unsigned char *end = (const unsigned char *)source + strlen(source);
+    while (end > start && isspace(end[-1])) {
+        end--;
+    }
+
+    return makeStringLen((const char *)start, (size_t)(end - start));
 }
 
 Value vmBuiltinStringOfChar(VM* vm, int arg_count, Value* args) {
@@ -3893,6 +4111,16 @@ int vmExitWithCleanup(int status) {
 }
 
 static void vmEnableRawMode(void) {
+#if defined(PSCAL_TARGET_IOS)
+    VProcSessionStdio *session_stdio = vprocSessionStdioCurrent();
+    if (session_stdio && vprocSessionStdioIsDefault(session_stdio) &&
+        PSCALRuntimeGetCurrentRuntimeStdio) {
+        VProcSessionStdio *runtime_stdio = PSCALRuntimeGetCurrentRuntimeStdio();
+        if (runtime_stdio && !vprocSessionStdioIsDefault(runtime_stdio)) {
+            vprocSessionStdioActivate(runtime_stdio);
+        }
+    }
+#endif
     vmSetupTermHandlers();
     pthread_mutex_lock(&vm_term_mutex);
     if (vm_raw_mode) {
@@ -5079,6 +5307,12 @@ Value vmBuiltinReadkey(VM* vm, int arg_count, Value* args) {
         {
             vmEnableRawMode();
             c = readKeyFetchConsoleByte();
+        }
+
+        if (c == 0) {
+            struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN, .revents = 0 };
+            (void)poll(&pfd, 1, 10);
+            continue;
         }
 
         if (gReadKeyPendingCaretControl) {
@@ -7202,6 +7436,13 @@ Value vmBuiltinRead(VM* vm, int arg_count, Value* args) {
             SET_INT_VALUE(dst, dst->c_val);
             continue;
         }
+        if (dst->type == TYPE_RECORD || dst->type == TYPE_ARRAY) {
+            if (!readStructuredValue(input_stream, dst)) {
+                io_error = 1;
+                break;
+            }
+            continue;
+        }
 
         char buffer[1024];
         if (fscanf(input_stream, "%1023s", buffer) != 1) {
@@ -7640,6 +7881,12 @@ Value vmBuiltinWrite(VM* vm, int arg_count, Value* args) {
             char utf8[5];
             size_t utf8_len = encodePascalCharUtf8(val.c_val, utf8);
             fwrite(utf8, 1, utf8_len, output_stream);
+        } else if (output_stream != stdout && (val.type == TYPE_RECORD || val.type == TYPE_ARRAY)) {
+            if (!writeStructuredValue(output_stream, &val)) {
+                runtimeError(vm, "Cannot write structured value to file.");
+                last_io_error = 1;
+                break;
+            }
         } else {
             printValueToStream(val, output_stream);
         }
@@ -10134,6 +10381,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("DeLine", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("JsonGet", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("ToUpper", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Trim", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("toupper", AST_FUNCTION_DECL, NULL);
 
     /* Allow externally linked modules to add more builtins. */
@@ -10147,6 +10395,7 @@ static void populateBuiltinRegistry(void) {
     registerVmBuiltin("tobyte",   vmBuiltinToByte,   BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("mstreamfromstring", vmBuiltinMstreamFromString, BUILTIN_TYPE_FUNCTION, NULL);
     registerVmBuiltin("stringofchar", vmBuiltinStringOfChar, BUILTIN_TYPE_FUNCTION, NULL);
+    registerVmBuiltin("flush", vmBuiltinFflush, BUILTIN_TYPE_PROCEDURE, "Flush");
     pthread_mutex_unlock(&builtin_registry_mutex);
 }
 void registerAllBuiltins(void) {

@@ -93,6 +93,8 @@ static void pascalApplyBgRedirectionFromEnv(void) {
     }
 }
 #endif
+
+#if defined(PSCAL_TARGET_IOS)
 static VM *s_sigint_vm = NULL;
 
 static void pascalHandleSigint(int signo) {
@@ -116,6 +118,7 @@ static void pascalInstallSigint(VM *vm) {
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
 }
+#endif
 
 typedef struct {
     size_t partial_match_len;
@@ -261,6 +264,7 @@ int runProgram(const char *source, const char *programName, const char *frontend
     parser.current_unit_name_context = NULL;
     parser.dependency_paths = createList();
     parser.routine_depth = 0;
+    parser.current_routine = NULL;
     GlobalAST = buildProgramAST(&parser, &chunk);
     if (parser.current_token) { freeToken(parser.current_token); parser.current_token = NULL; }
 
@@ -351,6 +355,15 @@ int runProgram(const char *source, const char *programName, const char *frontend
             }
 
             if (compilation_ok_for_vm) {
+                restoreProcedureConstructorAliases(procedure_table);
+                if (chunk.global_symbol_cache && chunk.constants_capacity > 0) {
+                    for (int cache_i = 0; cache_i < chunk.constants_capacity; ++cache_i) {
+                        chunk.global_symbol_cache[cache_i] = NULL;
+                    }
+                }
+            }
+
+            if (compilation_ok_for_vm) {
                 if (dump_bytecode_only_flag) {
                     overall_success_status = true;
                 } else {
@@ -360,13 +373,16 @@ int runProgram(const char *source, const char *programName, const char *frontend
                         overall_success_status = false;
                     } else {
                         initVM(vm);
+                        vmInitTerminalState();
                         vmSetVerboseErrors(true);
                         if (s_vm_trace_head > 0) {
                             vm->trace_head_instructions = s_vm_trace_head;
                         } else if (source && strstr(source, "trace on")) {
                             vm->trace_head_instructions = 16;
                         }
+#if defined(PSCAL_TARGET_IOS)
                         pascalInstallSigint(vm);
+#endif
                         InterpretResult result_vm =
                             interpretBytecode(vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
                         if (result_vm == INTERPRET_OK) {
@@ -377,7 +393,9 @@ int runProgram(const char *source, const char *programName, const char *frontend
                             overall_success_status = false;
                             vmDumpStackInfo(vm);
                         }
+#if defined(PSCAL_TARGET_IOS)
                         s_sigint_vm = NULL;
+#endif
                         freeVM(vm);
                         free(vm);
                         globalSymbols = NULL;
@@ -493,8 +511,6 @@ int PSCAL_PASCAL_ENTRY_SYMBOL(int argc, char *argv[]) {
     pascalInvalidateGlobalState();
 
     FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_PASCAL);
-    const char* initTerm = getenv("PSCAL_INIT_TERM");
-    if (initTerm && *initTerm && *initTerm != '0') vmInitTerminalState();
     int dump_ast_json_flag = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
