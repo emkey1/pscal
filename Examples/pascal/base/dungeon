@@ -41,6 +41,8 @@ CONST
   TileWall = '#';
   TileFloor = '.';
   TileDoor = '+';
+  TileLockedDoor = '*';
+  TileSecretDoor = ':';
   TilePlayer = '@';
   TileEnemy = 'E';
   TileGold = '$';
@@ -49,10 +51,26 @@ CONST
   TileArmor = '[';
   TileScroll = '?';
   TileAmulet = '"';
+  TileKey = '=';
   TileStairsDown = '>';
   TileStairsUp = '<';
   TileFog = ' ';
   SaveFileName = 'dungeon.sav';
+  ThemeCrypt = 1;
+  ThemeCaves = 2;
+  ThemeRuins = 3;
+  GlyphWall = '▓';
+  GlyphFloor = '·';
+  GlyphPlayer = '☺';
+  GlyphDoor = '╬';
+  GlyphLockedDoor = '✦';
+  GlyphStairsDown = '▼';
+  GlyphStairsUp = '▲';
+  GlyphWeapon = '⚔';
+  GlyphArmor = '⛨';
+  GlyphScroll = '§';
+  GlyphAmulet = '☼';
+  GlyphKey = '⌂';
 
 TYPE
   TCoord = RECORD
@@ -69,6 +87,8 @@ TYPE
     Speed: Integer; { 100 is normal speed }
     Energy: Integer;
     Color: Byte;
+    ResistPhysical: Integer; { 0..90 percent }
+    ResistMagic: Integer;    { 0..90 percent }
     Active: Boolean;
   END;
 
@@ -89,10 +109,26 @@ TYPE
     Level: Integer;
     XP: Integer;
     Potions: Integer;
+    ScrollHeal: Integer;
+    ScrollMap: Integer;
+    ScrollTeleport: Integer;
+    Keys: Integer;
     WeaponBonus: Integer;
     ArmorBonus: Integer;
     WeaponName: String[20];
     ArmorName: String[20];
+    SpareWeaponBonus: Integer;
+    SpareArmorBonus: Integer;
+    SpareWeaponName: String[20];
+    SpareArmorName: String[20];
+    Mana: Integer;
+    MaxMana: Integer;
+    PoisonTurns: Integer;
+    SlowTurns: Integer;
+    HasteTurns: Integer;
+    ConfuseTurns: Integer;
+    BlindTurns: Integer;
+    DetectTurns: Integer;
   END;
 
   TMap = ARRAY[1..MaxHeight, 1..MaxWidth] OF Char;
@@ -105,6 +141,8 @@ TYPE
     Items: ARRAY[1..MaxItems] OF TItem;
     EntryX, EntryY: Integer;
     DownX, DownY: Integer;
+    SpawnBudget: Integer;
+    SpawnCooldown: Integer;
   END;
 
 
@@ -129,6 +167,8 @@ VAR
   RunIgnoreItemY: Integer;
   MessageLog: ARRAY[1..MessageLines] OF String[255];
   Levels: ARRAY[1..MaxDungeonDepth] OF TLevelState;
+  SpawnBudget: Integer;
+  SpawnCooldown: Integer;
 
 { --- Forward declarations --- }
 PROCEDURE CombatRound(EnemyIdx: Integer); FORWARD;
@@ -140,7 +180,17 @@ FUNCTION SaveExists: Boolean; FORWARD;
 PROCEDURE EndPlayerTurn; FORWARD;
 PROCEDURE MonstersTakeTurn; FORWARD;
 PROCEDURE ShowEquipment; FORWARD;
+PROCEDURE SwapEquipment; FORWARD;
 PROCEDURE RunDirection(DX, DY: Integer); FORWARD;
+PROCEDURE ShowInventory; FORWARD;
+PROCEDURE DropItem; FORWARD;
+PROCEDURE UseScroll; FORWARD;
+PROCEDURE CastSpell; FORWARD;
+PROCEDURE TeleportPlayerToFloor; FORWARD;
+PROCEDURE ShowHelp; FORWARD;
+PROCEDURE RestUntilSafe; FORWARD;
+PROCEDURE AutoExplore; FORWARD;
+PROCEDURE SearchNearby; FORWARD;
 PROCEDURE SaveCurrentLevelState; FORWARD;
 PROCEDURE LoadLevelState(LevelNum: Integer); FORWARD;
 PROCEDURE EnterLevel(NewDepth, EntryX, EntryY: Integer); FORWARD;
@@ -190,6 +240,15 @@ BEGIN
   FOR I := 1 TO MaxHeight DO
     FOR J := 1 TO MaxWidth DO
       SeenMap[I, J] := TileFog;
+END;
+
+PROCEDURE RevealCurrentMap;
+VAR
+  R, C: Integer;
+BEGIN
+  FOR R := 1 TO MaxHeight DO
+    FOR C := 1 TO MaxWidth DO
+      SeenMap[R, C] := Map[R, C];
 END;
 
 PROCEDURE CopyMap(VAR Dest: TMap; VAR Src: TMap);
@@ -256,6 +315,55 @@ BEGIN
     GenRand := NextGenRandInt MOD MaxN;
 END;
 
+FUNCTION GetThemeByDepth(LevelDepth: Integer): Integer;
+BEGIN
+  IF LevelDepth <= 4 THEN
+    GetThemeByDepth := ThemeCaves
+  ELSE IF LevelDepth <= 8 THEN
+    GetThemeByDepth := ThemeRuins
+  ELSE
+    GetThemeByDepth := ThemeCrypt;
+END;
+
+FUNCTION GetThemeName(LevelDepth: Integer): String;
+VAR
+  Theme: Integer;
+BEGIN
+  Theme := GetThemeByDepth(LevelDepth);
+  IF Theme = ThemeCaves THEN
+    GetThemeName := 'Caves'
+  ELSE IF Theme = ThemeRuins THEN
+    GetThemeName := 'Ruins'
+  ELSE
+    GetThemeName := 'Crypt';
+END;
+
+PROCEDURE AddStatusSuffix(VAR S: String; LabelText: String; Turns: Integer);
+BEGIN
+  IF Turns > 0 THEN
+    S := S + ' ' + LabelText + ':' + IntToStr(Turns);
+END;
+
+PROCEDURE TickPlayerStatus;
+BEGIN
+  IF Player.PoisonTurns > 0 THEN
+  BEGIN
+    DEC(Player.PoisonTurns);
+    DEC(Player.HP);
+    IF Player.HP <= 0 THEN
+    BEGIN
+      GameOver := True;
+      AddMessage('You succumb to poison.');
+      EXIT;
+    END;
+  END;
+  IF Player.SlowTurns > 0 THEN DEC(Player.SlowTurns);
+  IF Player.HasteTurns > 0 THEN DEC(Player.HasteTurns);
+  IF Player.ConfuseTurns > 0 THEN DEC(Player.ConfuseTurns);
+  IF Player.BlindTurns > 0 THEN DEC(Player.BlindTurns);
+  IF Player.DetectTurns > 0 THEN DEC(Player.DetectTurns);
+END;
+
 PROCEDURE AddMessage(S: String);
 VAR
   I: Integer;
@@ -296,6 +404,17 @@ BEGIN
     TextColor(FGColor);
     Write(C);
     TextColor(White); { Reset to white }
+  END;
+END;
+
+PROCEDURE ColorTextGlyph(X, Y: Integer; S: String; FGColor: Byte);
+BEGIN
+  IF (X >= 1) AND (X <= ViewWidth) AND (Y >= 1) AND (Y <= ScreenHeight) THEN
+  BEGIN
+    GotoXY(X, Y);
+    TextColor(FGColor);
+    Write(S);
+    TextColor(White);
   END;
 END;
 
@@ -343,6 +462,139 @@ BEGIN
   END;
 END;
 
+PROCEDURE PlaceVaultWithSecretDoor;
+VAR
+  Tries: Integer;
+  DoorX, DoorY: Integer;
+  InX, InY: Integer;
+  VX, VY, VW, VH: Integer;
+  R, C: Integer;
+  Overlap: Boolean;
+BEGIN
+  Tries := 0;
+  WHILE Tries < 120 DO
+  BEGIN
+    INC(Tries);
+    DoorX := 3 + GenRand(MaxWidth - 6);
+    DoorY := 3 + GenRand(MaxHeight - 6);
+
+    IF Map[DoorY, DoorX] <> TileWall THEN
+      CONTINUE;
+
+    { Look for a wall tile separating reachable floor from solid rock. }
+    IF (Map[DoorY, DoorX - 1] = TileFloor) AND (Map[DoorY, DoorX + 1] = TileWall) THEN
+    BEGIN
+      InX := DoorX + 1; InY := DoorY;
+      VW := 3 + GenRand(3); VH := 3 + GenRand(3);
+      VX := InX; VY := InY - (VH DIV 2);
+    END
+    ELSE IF (Map[DoorY, DoorX + 1] = TileFloor) AND (Map[DoorY, DoorX - 1] = TileWall) THEN
+    BEGIN
+      InX := DoorX - 1; InY := DoorY;
+      VW := 3 + GenRand(3); VH := 3 + GenRand(3);
+      VX := InX - VW + 1; VY := InY - (VH DIV 2);
+    END
+    ELSE IF (Map[DoorY - 1, DoorX] = TileFloor) AND (Map[DoorY + 1, DoorX] = TileWall) THEN
+    BEGIN
+      InX := DoorX; InY := DoorY + 1;
+      VW := 3 + GenRand(3); VH := 3 + GenRand(3);
+      VX := InX - (VW DIV 2); VY := InY;
+    END
+    ELSE IF (Map[DoorY + 1, DoorX] = TileFloor) AND (Map[DoorY - 1, DoorX] = TileWall) THEN
+    BEGIN
+      InX := DoorX; InY := DoorY - 1;
+      VW := 3 + GenRand(3); VH := 3 + GenRand(3);
+      VX := InX - (VW DIV 2); VY := InY - VH + 1;
+    END
+    ELSE
+      CONTINUE;
+
+    IF (VX < 2) OR (VY < 2) OR (VX + VW - 1 > MaxWidth - 1) OR (VY + VH - 1 > MaxHeight - 1) THEN
+      CONTINUE;
+
+    Overlap := False;
+    FOR R := VY TO VY + VH - 1 DO
+      FOR C := VX TO VX + VW - 1 DO
+        IF Map[R, C] = TileFloor THEN
+          Overlap := True;
+    IF Overlap THEN
+      CONTINUE;
+
+    PlaceRoom(VX, VY, VW, VH);
+    IF GenRand(100) < 45 THEN
+      Map[DoorY, DoorX] := TileLockedDoor
+    ELSE
+      Map[DoorY, DoorX] := TileSecretDoor;
+    EXIT;
+  END;
+END;
+
+PROCEDURE DecorateRoom(X, Y, W, H, Theme: Integer);
+VAR
+  Style: Integer;
+  R, C: Integer;
+  MidX, MidY: Integer;
+BEGIN
+  IF (W < 5) OR (H < 5) THEN
+    EXIT;
+  Style := GenRand(4);
+  MidX := X + (W DIV 2);
+  MidY := Y + (H DIV 2);
+
+  CASE Style OF
+    0:
+      BEGIN
+        { Pillars with a different feel by theme. }
+        FOR R := Y + 1 TO Y + H - 2 DO
+          FOR C := X + 1 TO X + W - 2 DO
+            IF ((R - Y) MOD 2 = 0) AND ((C - X) MOD 3 = 0) THEN
+            BEGIN
+              IF Theme = ThemeRuins THEN
+                Map[R, C] := TileDoor
+              ELSE
+                Map[R, C] := TileWall;
+            END;
+      END;
+    1:
+      BEGIN
+        { Cross hall room. }
+        FOR C := X + 1 TO X + W - 2 DO
+          Map[MidY, C] := TileFloor;
+        FOR R := Y + 1 TO Y + H - 2 DO
+          Map[R, MidX] := TileFloor;
+      END;
+    2:
+      BEGIN
+        { Inner ring with four openings. }
+        FOR C := X + 1 TO X + W - 2 DO
+        BEGIN
+          Map[Y + 1, C] := TileWall;
+          Map[Y + H - 2, C] := TileWall;
+        END;
+        FOR R := Y + 1 TO Y + H - 2 DO
+        BEGIN
+          Map[R, X + 1] := TileWall;
+          Map[R, X + W - 2] := TileWall;
+        END;
+        Map[Y + 1, MidX] := TileFloor;
+        Map[Y + H - 2, MidX] := TileFloor;
+        Map[MidY, X + 1] := TileFloor;
+        Map[MidY, X + W - 2] := TileFloor;
+      END;
+    3:
+      BEGIN
+        { Diagonal rubble strip. }
+        C := X + 1;
+        FOR R := Y + 1 TO Y + H - 2 DO
+        BEGIN
+          IF (C >= X + 1) AND (C <= X + W - 2) THEN
+            Map[R, C] := TileWall;
+          INC(C);
+        END;
+      END;
+  END;
+END;
+
 PROCEDURE GenerateDungeon;
 VAR
   Rooms: ARRAY[1..MaxRooms] OF RECORD X, Y, W, H: Integer; END;
@@ -379,6 +631,7 @@ BEGIN
     Rooms[I].H := RH;
     
     PlaceRoom(RX, RY, RW, RH);
+    DecorateRoom(RX, RY, RW, RH, GetThemeByDepth(Depth));
   END;
   
   { Connect Rooms }
@@ -391,6 +644,10 @@ BEGIN
       Rooms[I+1].Y + (Rooms[I+1].H DIV 2)
     );
   END;
+
+  { Add optional side vaults sealed by secret doors. }
+  FOR I := 1 TO 1 + (Depth DIV 6) DO
+    PlaceVaultWithSecretDoor;
 END;
 
 { --- Entity Management --- }
@@ -400,7 +657,7 @@ BEGIN
   IF (X < 1) OR (X > MaxWidth) OR (Y < 1) OR (Y > MaxHeight) THEN
     IsWall := True
   ELSE
-    IsWall := (Map[Y, X] = TileWall);
+    IsWall := (Map[Y, X] = TileWall) OR (Map[Y, X] = TileSecretDoor) OR (Map[Y, X] = TileLockedDoor);
 END;
 
 FUNCTION IsDoor(X, Y: Integer): Boolean;
@@ -408,7 +665,21 @@ BEGIN
   IF (X < 1) OR (X > MaxWidth) OR (Y < 1) OR (Y > MaxHeight) THEN
     IsDoor := False
   ELSE
-    IsDoor := (Map[Y, X] = TileDoor);
+    IsDoor := (Map[Y, X] = TileDoor) OR (Map[Y, X] = TileLockedDoor);
+END;
+
+FUNCTION HasLockedDoorOnMap: Boolean;
+VAR
+  R, C: Integer;
+BEGIN
+  FOR R := 1 TO MaxHeight DO
+    FOR C := 1 TO MaxWidth DO
+      IF Map[R, C] = TileLockedDoor THEN
+      BEGIN
+        HasLockedDoorOnMap := True;
+        EXIT;
+      END;
+  HasLockedDoorOnMap := False;
 END;
 
 FUNCTION HasLineOfSight(X1, Y1, X2, Y2: Integer): Boolean;
@@ -499,24 +770,116 @@ BEGIN
     END;
 END;
 
+FUNCTION IsAdjacentToSecretDoor(X, Y: Integer): Boolean;
+BEGIN
+  IsAdjacentToSecretDoor := False;
+  IF (X > 1) AND (Map[Y, X - 1] = TileSecretDoor) THEN IsAdjacentToSecretDoor := True;
+  IF (X < MaxWidth) AND (Map[Y, X + 1] = TileSecretDoor) THEN IsAdjacentToSecretDoor := True;
+  IF (Y > 1) AND (Map[Y - 1, X] = TileSecretDoor) THEN IsAdjacentToSecretDoor := True;
+  IF (Y < MaxHeight) AND (Map[Y + 1, X] = TileSecretDoor) THEN IsAdjacentToSecretDoor := True;
+END;
+
+FUNCTION CountActiveEnemies: Integer;
+VAR
+  K: Integer;
+BEGIN
+  CountActiveEnemies := 0;
+  FOR K := 1 TO MaxEnemies DO
+    IF Enemies[K].Active THEN
+      INC(CountActiveEnemies);
+END;
+
+FUNCTION IsDangerVisible: Boolean;
+VAR
+  K, Dist, SightRange: Integer;
+BEGIN
+  IF Player.BlindTurns > 0 THEN
+    SightRange := 2
+  ELSE
+    SightRange := 8;
+  FOR K := 1 TO MaxEnemies DO
+    IF Enemies[K].Active THEN
+    BEGIN
+      Dist := Abs(Enemies[K].X - Player.X) + Abs(Enemies[K].Y - Player.Y);
+      IF (Dist <= SightRange) AND HasLineOfSight(Player.X, Player.Y, Enemies[K].X, Enemies[K].Y) THEN
+      BEGIN
+        IsDangerVisible := True;
+        EXIT;
+      END;
+    END;
+  IsDangerVisible := False;
+END;
+
+FUNCTION IsInterestingVisible: Boolean;
+VAR
+  K, Dist, SightRange: Integer;
+BEGIN
+  IF IsDangerVisible THEN
+  BEGIN
+    IsInterestingVisible := True;
+    EXIT;
+  END;
+  IF Player.BlindTurns > 0 THEN
+    SightRange := 2
+  ELSE
+    SightRange := 8;
+  FOR K := 1 TO MaxItems DO
+    IF Items[K].Active THEN
+    BEGIN
+      Dist := Abs(Items[K].X - Player.X) + Abs(Items[K].Y - Player.Y);
+      IF (Dist <= SightRange) AND HasLineOfSight(Player.X, Player.Y, Items[K].X, Items[K].Y) THEN
+      BEGIN
+        IsInterestingVisible := True;
+        EXIT;
+      END;
+    END;
+  IsInterestingVisible := IsStairsDownAt(Player.X, Player.Y) OR IsStairsUpAt(Player.X, Player.Y);
+END;
+
 PROCEDURE SpawnEnemies;
 VAR
-  I, X, Y, Count: Integer;
+  I, X, Y, Count, Theme: Integer;
   TargetCount: Integer;
-  Tier: Integer;
+  Tier, ThemeRoll: Integer;
   Names: ARRAY[1..8] OF String[15];
 BEGIN
-  Names[1] := 'Rat';
-  Names[2] := 'Goblin';
-  Names[3] := 'Skeleton';
-  Names[4] := 'Orc';
-  Names[5] := 'Troll';
-  Names[6] := 'Wraith';
-  Names[7] := 'Vampire';
-  Names[8] := 'Dragon';
+  Theme := GetThemeByDepth(Depth);
+  IF Theme = ThemeCaves THEN
+  BEGIN
+    Names[1] := 'Bat';
+    Names[2] := 'Rat';
+    Names[3] := 'Goblin';
+    Names[4] := 'Orc';
+    Names[5] := 'Troll';
+    Names[6] := 'Warg';
+    Names[7] := 'Ogre';
+    Names[8] := 'Wyvern';
+  END
+  ELSE IF Theme = ThemeRuins THEN
+  BEGIN
+    Names[1] := 'Bandit';
+    Names[2] := 'Goblin';
+    Names[3] := 'Orc';
+    Names[4] := 'Adept';
+    Names[5] := 'Troll';
+    Names[6] := 'Sentinel';
+    Names[7] := 'Vampire';
+    Names[8] := 'Dragon';
+  END
+  ELSE
+  BEGIN
+    Names[1] := 'Rat';
+    Names[2] := 'Skeleton';
+    Names[3] := 'Ghoul';
+    Names[4] := 'Wraith';
+    Names[5] := 'Vampire';
+    Names[6] := 'Lich';
+    Names[7] := 'Dread';
+    Names[8] := 'Ancient';
+  END;
   
   Count := 0;
-  TargetCount := 5 + Depth * 2;
+  TargetCount := 8 + Depth * 3;
   IF TargetCount > MaxEnemies THEN
     TargetCount := MaxEnemies;
   FOR I := 1 TO MaxEnemies DO
@@ -537,75 +900,119 @@ BEGIN
         Enemies[Count].Y := Y;
         Enemies[Count].Active := True;
         
-        { Depth-biased tiering with some variety. }
+        { Depth and theme-biased tiering with some variety. }
         Tier := Depth + GenRand(3) - 1;
+        ThemeRoll := GenRand(100);
+        IF Theme = ThemeCaves THEN
+        BEGIN
+          IF ThemeRoll < 25 THEN DEC(Tier);
+        END
+        ELSE IF Theme = ThemeCrypt THEN
+        BEGIN
+          IF ThemeRoll > 65 THEN INC(Tier);
+        END;
         IF Tier < 1 THEN Tier := 1;
         IF Tier > 8 THEN Tier := 8;
         CASE Tier OF
           1: BEGIN
                Enemies[Count].Name := Names[1];
-               Enemies[Count].Glyph := 'r';
+               IF Theme = ThemeCaves THEN Enemies[Count].Glyph := 'b'
+               ELSE IF Theme = ThemeRuins THEN Enemies[Count].Glyph := 'b'
+               ELSE Enemies[Count].Glyph := 'r';
                Enemies[Count].MaxHP := 10;
                Enemies[Count].Damage := 2;
                Enemies[Count].Speed := 125;
-               Enemies[Count].Color := Brown;
+               IF Theme = ThemeCrypt THEN Enemies[Count].Color := DarkGray
+               ELSE Enemies[Count].Color := Brown;
+               Enemies[Count].ResistPhysical := 0;
+               Enemies[Count].ResistMagic := 0;
              END;
           2: BEGIN
                Enemies[Count].Name := Names[2];
-               Enemies[Count].Glyph := 'g';
+               IF Theme = ThemeCrypt THEN Enemies[Count].Glyph := 's'
+               ELSE Enemies[Count].Glyph := 'g';
                Enemies[Count].MaxHP := 18;
                Enemies[Count].Damage := 4;
                Enemies[Count].Speed := 105;
-               Enemies[Count].Color := LightGreen;
+               IF Theme = ThemeCrypt THEN Enemies[Count].Color := LightGray
+               ELSE Enemies[Count].Color := LightGreen;
+               Enemies[Count].ResistPhysical := 5;
+               Enemies[Count].ResistMagic := 0;
              END;
           3: BEGIN
                Enemies[Count].Name := Names[3];
-               Enemies[Count].Glyph := 's';
+               IF Theme = ThemeRuins THEN Enemies[Count].Glyph := 'o'
+               ELSE Enemies[Count].Glyph := 's';
                Enemies[Count].MaxHP := 28;
                Enemies[Count].Damage := 6;
                Enemies[Count].Speed := 90;
-               Enemies[Count].Color := White;
+               IF Theme = ThemeCaves THEN Enemies[Count].Color := LightGreen
+               ELSE Enemies[Count].Color := White;
+               Enemies[Count].ResistPhysical := 15;
+               Enemies[Count].ResistMagic := 10;
              END;
           4: BEGIN
                Enemies[Count].Name := Names[4];
-               Enemies[Count].Glyph := 'o';
+               IF Theme = ThemeRuins THEN Enemies[Count].Glyph := 'A'
+               ELSE IF Theme = ThemeCrypt THEN Enemies[Count].Glyph := 'W'
+               ELSE Enemies[Count].Glyph := 'o';
                Enemies[Count].MaxHP := 36;
                Enemies[Count].Damage := 7;
                Enemies[Count].Speed := 100;
-               Enemies[Count].Color := LightRed;
+               IF Theme = ThemeCrypt THEN Enemies[Count].Color := LightGray
+               ELSE Enemies[Count].Color := LightRed;
+               Enemies[Count].ResistPhysical := 10;
+               Enemies[Count].ResistMagic := 15;
              END;
           5: BEGIN
                Enemies[Count].Name := Names[5];
-               Enemies[Count].Glyph := 'T';
+               IF Theme = ThemeCrypt THEN Enemies[Count].Glyph := 'V'
+               ELSE Enemies[Count].Glyph := 'T';
                Enemies[Count].MaxHP := 48;
                Enemies[Count].Damage := 9;
                Enemies[Count].Speed := 85;
-               Enemies[Count].Color := Green;
+               IF Theme = ThemeCrypt THEN Enemies[Count].Color := Magenta
+               ELSE Enemies[Count].Color := Green;
+               Enemies[Count].ResistPhysical := 20;
+               Enemies[Count].ResistMagic := 10;
              END;
           6: BEGIN
                Enemies[Count].Name := Names[6];
-               Enemies[Count].Glyph := 'W';
+               IF Theme = ThemeCaves THEN Enemies[Count].Glyph := 'w'
+               ELSE IF Theme = ThemeRuins THEN Enemies[Count].Glyph := 'S'
+               ELSE Enemies[Count].Glyph := 'L';
                Enemies[Count].MaxHP := 44;
                Enemies[Count].Damage := 10;
                Enemies[Count].Speed := 115;
-               Enemies[Count].Color := LightGray;
+               IF Theme = ThemeCaves THEN Enemies[Count].Color := Brown
+               ELSE Enemies[Count].Color := LightGray;
+               Enemies[Count].ResistPhysical := 10;
+               Enemies[Count].ResistMagic := 30;
              END;
           7: BEGIN
                Enemies[Count].Name := Names[7];
-               Enemies[Count].Glyph := 'V';
+               IF Theme = ThemeCrypt THEN Enemies[Count].Glyph := 'D'
+               ELSE Enemies[Count].Glyph := 'V';
                Enemies[Count].MaxHP := 58;
                Enemies[Count].Damage := 12;
                Enemies[Count].Speed := 110;
-               Enemies[Count].Color := Magenta;
+               IF Theme = ThemeCrypt THEN Enemies[Count].Color := LightMagenta
+               ELSE Enemies[Count].Color := Magenta;
+               Enemies[Count].ResistPhysical := 20;
+               Enemies[Count].ResistMagic := 35;
              END;
           ELSE
             BEGIN
               Enemies[Count].Name := Names[8];
-              Enemies[Count].Glyph := 'D';
+              IF Theme = ThemeCrypt THEN Enemies[Count].Glyph := 'A'
+              ELSE Enemies[Count].Glyph := 'D';
               Enemies[Count].MaxHP := 70 + Depth * 4;
               Enemies[Count].Damage := 14 + (Depth DIV 2);
               Enemies[Count].Speed := 95;
-              Enemies[Count].Color := LightRed;
+              IF Theme = ThemeCrypt THEN Enemies[Count].Color := LightCyan
+              ELSE Enemies[Count].Color := LightRed;
+              Enemies[Count].ResistPhysical := 30;
+              Enemies[Count].ResistMagic := 40;
             END;
         END;
         
@@ -618,11 +1025,41 @@ END;
 
 PROCEDURE SpawnItems;
 VAR
-  I, X, Y, Count: Integer;
+  I, X, Y, Count, Theme: Integer;
+  ScrollCap, AmuletCap: Integer;
+  BonusTries: Integer;
 BEGIN
+  Theme := GetThemeByDepth(Depth);
+  ScrollCap := 14;
+  AmuletCap := 15;
+  IF Theme = ThemeRuins THEN
+    ScrollCap := 15
+  ELSE IF Theme = ThemeCrypt THEN
+    ScrollCap := 13;
+  IF Theme = ThemeCrypt THEN
+    AmuletCap := 16;
+
   Count := 0;
   FOR I := 1 TO MaxItems DO
     Items[I].Active := False;
+
+  { Guarantee at least one key when this level has locked doors. }
+  IF HasLockedDoorOnMap THEN
+  BEGIN
+    X := 2 + GenRand(MaxWidth - 4);
+    Y := 2 + GenRand(MaxHeight - 4);
+    WHILE NOT ((Map[Y, X] = TileFloor) AND NOT IsWall(X, Y) AND NOT IsItemBlockedCell(X, Y)) DO
+    BEGIN
+      X := 2 + GenRand(MaxWidth - 4);
+      Y := 2 + GenRand(MaxHeight - 4);
+    END;
+    INC(Count);
+    Items[Count].X := X;
+    Items[Count].Y := Y;
+    Items[Count].TypeChar := TileKey;
+    Items[Count].Value := 1;
+    Items[Count].Active := True;
+  END;
     
   { Spawn Gold }
   WHILE Count < 5 DO
@@ -667,7 +1104,10 @@ BEGIN
       Items[Count].X := X;
       Items[Count].Y := Y;
       Items[Count].TypeChar := TileWeapon;
-      Items[Count].Value := 1 + Random(3) + (Depth DIV 2);
+      IF Theme = ThemeCaves THEN
+        Items[Count].Value := 1 + GenRand(2) + (Depth DIV 3)
+      ELSE
+        Items[Count].Value := 1 + GenRand(3) + (Depth DIV 2);
       Items[Count].Active := True;
     END;
   END;
@@ -683,13 +1123,18 @@ BEGIN
       Items[Count].X := X;
       Items[Count].Y := Y;
       Items[Count].TypeChar := TileArmor;
-      Items[Count].Value := 1 + Random(3) + (Depth DIV 2);
+      IF Theme = ThemeCaves THEN
+        Items[Count].Value := 1 + GenRand(3) + (Depth DIV 2)
+      ELSE IF Theme = ThemeCrypt THEN
+        Items[Count].Value := 2 + GenRand(3) + (Depth DIV 2)
+      ELSE
+        Items[Count].Value := 1 + GenRand(2) + (Depth DIV 3);
       Items[Count].Active := True;
     END;
   END;
 
   { Spawn Scrolls (Value as subtype: 1=Healing, 2=Mapping, 3=Teleport) }
-  WHILE Count < 14 DO
+  WHILE Count < ScrollCap DO
   BEGIN
     X := 2 + GenRand(MaxWidth - 4);
     Y := 2 + GenRand(MaxHeight - 4);
@@ -699,13 +1144,16 @@ BEGIN
       Items[Count].X := X;
       Items[Count].Y := Y;
       Items[Count].TypeChar := TileScroll;
-      Items[Count].Value := 1 + GenRand(3);
+      IF Theme = ThemeCaves THEN
+        Items[Count].Value := 1 + GenRand(2) { less teleport in caves }
+      ELSE
+        Items[Count].Value := 1 + GenRand(3);
       Items[Count].Active := True;
     END;
   END;
 
   { Spawn Amulets (small permanent bonuses) }
-  WHILE Count < 15 DO
+  WHILE Count < AmuletCap DO
   BEGIN
     X := 2 + GenRand(MaxWidth - 4);
     Y := 2 + GenRand(MaxHeight - 4);
@@ -715,11 +1163,47 @@ BEGIN
       Items[Count].X := X;
       Items[Count].Y := Y;
       Items[Count].TypeChar := TileAmulet;
-      Items[Count].Value := 1 + GenRand(2);
+      IF Theme = ThemeCrypt THEN
+        Items[Count].Value := 2 + GenRand(2)
+      ELSE
+        Items[Count].Value := 1 + GenRand(2);
       Items[Count].Active := True;
     END;
   END;
-  
+
+  { Vault reward bias: secret side rooms tend to have one extra premium drop. }
+  BonusTries := 0;
+  WHILE (Count < MaxItems) AND (BonusTries < 80) DO
+  BEGIN
+    INC(BonusTries);
+    X := 2 + GenRand(MaxWidth - 4);
+    Y := 2 + GenRand(MaxHeight - 4);
+    IF (Map[Y, X] = TileFloor) AND IsAdjacentToSecretDoor(X, Y) AND
+       (GetItemAt(X, Y) = 0) AND (GetEnemyAt(X, Y) = 0) THEN
+    BEGIN
+      INC(Count);
+      Items[Count].X := X;
+      Items[Count].Y := Y;
+      IF GenRand(100) < 45 THEN
+      BEGIN
+        Items[Count].TypeChar := TileScroll;
+        Items[Count].Value := 1 + GenRand(3); { heal/map/tele }
+      END
+      ELSE IF GenRand(100) < 70 THEN
+      BEGIN
+        Items[Count].TypeChar := TileWeapon;
+        Items[Count].Value := 2 + GenRand(4) + (Depth DIV 2);
+      END
+      ELSE
+      BEGIN
+        Items[Count].TypeChar := TileArmor;
+        Items[Count].Value := 2 + GenRand(4) + (Depth DIV 2);
+      END;
+      Items[Count].Active := True;
+      BREAK;
+    END;
+  END;
+
 END;
 
 FUNCTION Sign(Value: Integer): Integer;
@@ -735,6 +1219,48 @@ END;
 FUNCTION IsPassable(X, Y: Integer): Boolean;
 BEGIN
   IsPassable := NOT IsWall(X, Y);
+END;
+
+FUNCTION ShouldStopRunAtCrossCorridor(X, Y, DX, DY: Integer): Boolean;
+VAR
+  Side1Open, Side2Open: Boolean;
+BEGIN
+  ShouldStopRunAtCrossCorridor := False;
+
+  { Cardinal running: stop when a perpendicular branch is immediately adjacent. }
+  IF (DX <> 0) AND (DY = 0) THEN
+  BEGIN
+    Side1Open := IsPassable(X, Y - 1);
+    Side2Open := IsPassable(X, Y + 1);
+    ShouldStopRunAtCrossCorridor := Side1Open OR Side2Open;
+    EXIT;
+  END;
+  IF (DY <> 0) AND (DX = 0) THEN
+  BEGIN
+    Side1Open := IsPassable(X - 1, Y);
+    Side2Open := IsPassable(X + 1, Y);
+    ShouldStopRunAtCrossCorridor := Side1Open OR Side2Open;
+    EXIT;
+  END;
+END;
+
+FUNCTION IsNarrowCorridorTileForRun(X, Y, DX, DY: Integer): Boolean;
+BEGIN
+  IsNarrowCorridorTileForRun := False;
+  IF (DX <> 0) AND (DY = 0) THEN
+  BEGIN
+    { Horizontal corridor: side walls present, path continues left/right. }
+    IF (NOT IsPassable(X, Y - 1)) AND (NOT IsPassable(X, Y + 1)) AND
+       (IsPassable(X - 1, Y) OR IsPassable(X + 1, Y)) THEN
+      IsNarrowCorridorTileForRun := True;
+  END
+  ELSE IF (DY <> 0) AND (DX = 0) THEN
+  BEGIN
+    { Vertical corridor: side walls present, path continues up/down. }
+    IF (NOT IsPassable(X - 1, Y)) AND (NOT IsPassable(X + 1, Y)) AND
+       (IsPassable(X, Y - 1) OR IsPassable(X, Y + 1)) THEN
+      IsNarrowCorridorTileForRun := True;
+  END;
 END;
 
 FUNCTION CanEnemyMoveTo(EnemyIdx, NewX, NewY: Integer): Boolean;
@@ -756,11 +1282,78 @@ END;
 PROCEDURE EnemyAttackPlayer(EnemyIdx: Integer);
 VAR
   EnemyDmg: Integer;
+  HitChance: Integer;
+  HitRoll: Integer;
+  CritRoll: Integer;
 BEGIN
+  HitChance := 72 + (Depth DIV 2) - (Player.Defense + Player.ArmorBonus);
+  IF HitChance < 35 THEN HitChance := 35;
+  IF HitChance > 95 THEN HitChance := 95;
+  HitRoll := GenRand(100);
+  IF HitRoll >= HitChance THEN
+  BEGIN
+    AddMessage(Enemies[EnemyIdx].Name + ' misses you [melee].');
+    EXIT;
+  END;
+
   EnemyDmg := Enemies[EnemyIdx].Damage - ((Player.Defense + Player.ArmorBonus) DIV 2);
   IF EnemyDmg < 1 THEN EnemyDmg := 1;
+  CritRoll := GenRand(100);
+  IF CritRoll < 8 THEN
+  BEGIN
+    EnemyDmg := EnemyDmg + (EnemyDmg DIV 2) + 1;
+    AddMessage(Enemies[EnemyIdx].Name + ' lands a critical hit [melee]!');
+  END;
   Player.HP := Player.HP - EnemyDmg;
-  AddMessage(Enemies[EnemyIdx].Name + ' hits you for ' + IntToStr(EnemyDmg) + ' damage.');
+  AddMessage(Enemies[EnemyIdx].Name + ' hits you for ' + IntToStr(EnemyDmg) + ' [physical].');
+  IF Enemies[EnemyIdx].Glyph = 'W' THEN
+  BEGIN
+    IF GenRand(100) < 20 THEN
+    BEGIN
+      Player.BlindTurns := Player.BlindTurns + 4;
+      AddMessage('Darkness blinds you!');
+    END;
+  END
+  ELSE IF (Enemies[EnemyIdx].Glyph = 'V') OR (Enemies[EnemyIdx].Glyph = 'D') THEN
+  BEGIN
+    IF GenRand(100) < 20 THEN
+    BEGIN
+      Player.ConfuseTurns := Player.ConfuseTurns + 4;
+      AddMessage('Your mind reels in confusion!');
+    END;
+  END
+  ELSE IF (Enemies[EnemyIdx].Glyph = 's') OR (Enemies[EnemyIdx].Glyph = 'L') THEN
+  BEGIN
+    IF GenRand(100) < 20 THEN
+    BEGIN
+      Player.SlowTurns := Player.SlowTurns + 4;
+      AddMessage('You feel sluggish.');
+    END;
+  END
+  ELSE IF (Enemies[EnemyIdx].Glyph = 'g') OR (Enemies[EnemyIdx].Glyph = 'o') THEN
+  BEGIN
+    IF GenRand(100) < 15 THEN
+    BEGIN
+      Player.PoisonTurns := Player.PoisonTurns + 5;
+      AddMessage('You are poisoned!');
+    END;
+  END;
+  IF Player.HP <= 0 THEN
+  BEGIN
+    GameOver := True;
+    AddMessage('YOU HAVE DIED.');
+  END;
+END;
+
+PROCEDURE EnemyCastSpellAtPlayer(EnemyIdx: Integer);
+VAR
+  SpellDmg: Integer;
+BEGIN
+  SpellDmg := 3 + (Depth DIV 2) + GenRand(4);
+  SpellDmg := SpellDmg - ((Player.Defense + Player.ArmorBonus) DIV 4);
+  IF SpellDmg < 1 THEN SpellDmg := 1;
+  Player.HP := Player.HP - SpellDmg;
+  AddMessage(Enemies[EnemyIdx].Name + ' casts a bolt for ' + IntToStr(SpellDmg) + ' [arcane].');
   IF Player.HP <= 0 THEN
   BEGIN
     GameOver := True;
@@ -771,11 +1364,17 @@ END;
 PROCEDURE MonstersTakeTurn;
 VAR
   EnemyIdx: Integer;
+  AllyIdx: Integer;
   Actions: Integer;
   DX, DY: Integer;
   StepX, StepY: Integer;
   Dist: Integer;
   TryX, TryY: Integer;
+  AllyDist: Integer;
+  EngageRange: Integer;
+  PackAssist: Boolean;
+  Fleeing: Boolean;
+  IsCaster: Boolean;
 BEGIN
   FOR EnemyIdx := 1 TO MaxEnemies DO
   BEGIN
@@ -793,6 +1392,25 @@ BEGIN
       DX := Player.X - Enemies[EnemyIdx].X;
       DY := Player.Y - Enemies[EnemyIdx].Y;
       Dist := Abs(DX) + Abs(DY);
+      EngageRange := 8;
+      PackAssist := False;
+      Fleeing := (Enemies[EnemyIdx].HP * 100 <= Enemies[EnemyIdx].MaxHP * 35);
+      IsCaster := (Enemies[EnemyIdx].Glyph = 'A') OR (Enemies[EnemyIdx].Glyph = 'L') OR
+                  (Enemies[EnemyIdx].Glyph = 'V') OR (Enemies[EnemyIdx].Glyph = 'D');
+
+      { Pack behavior: if an ally is already near the player, this enemy joins. }
+      FOR AllyIdx := 1 TO MaxEnemies DO
+        IF Enemies[AllyIdx].Active AND (AllyIdx <> EnemyIdx) THEN
+        BEGIN
+          AllyDist := Abs(Enemies[AllyIdx].X - Player.X) + Abs(Enemies[AllyIdx].Y - Player.Y);
+          IF AllyDist <= 4 THEN
+          BEGIN
+            PackAssist := True;
+            BREAK;
+          END;
+        END;
+      IF PackAssist THEN
+        EngageRange := 12;
 
       IF Dist <= 1 THEN
       BEGIN
@@ -801,8 +1419,59 @@ BEGIN
         CONTINUE;
       END;
 
+      IF IsCaster AND
+         (Dist <= 6) AND HasLineOfSight(Enemies[EnemyIdx].X, Enemies[EnemyIdx].Y, Player.X, Player.Y) AND
+         (GenRand(100) < 45) THEN
+      BEGIN
+        EnemyCastSpellAtPlayer(EnemyIdx);
+        IF GameOver THEN EXIT;
+        CONTINUE;
+      END;
+
+      IF IsCaster AND (Dist <= 2) THEN
+      BEGIN
+        { Casters prefer spacing: kite when a melee threat is too close. }
+        StepX := -Sign(DX);
+        StepY := -Sign(DY);
+        TryX := Enemies[EnemyIdx].X + StepX;
+        TryY := Enemies[EnemyIdx].Y + StepY;
+        IF CanEnemyMoveTo(EnemyIdx, TryX, TryY) THEN
+        BEGIN
+          Enemies[EnemyIdx].X := TryX;
+          Enemies[EnemyIdx].Y := TryY;
+          CONTINUE;
+        END;
+      END;
+
+      IF Fleeing THEN
+      BEGIN
+        { Wounded enemies try to open distance instead of closing in. }
+        StepX := -Sign(DX);
+        StepY := -Sign(DY);
+        TryX := Enemies[EnemyIdx].X + StepX;
+        TryY := Enemies[EnemyIdx].Y + StepY;
+        IF CanEnemyMoveTo(EnemyIdx, TryX, TryY) THEN
+        BEGIN
+          Enemies[EnemyIdx].X := TryX;
+          Enemies[EnemyIdx].Y := TryY;
+        END
+        ELSE
+        BEGIN
+          TryX := Enemies[EnemyIdx].X - Sign(DX);
+          TryY := Enemies[EnemyIdx].Y;
+          IF CanEnemyMoveTo(EnemyIdx, TryX, TryY) THEN
+            Enemies[EnemyIdx].X := TryX
+          ELSE
+          BEGIN
+            TryX := Enemies[EnemyIdx].X;
+            TryY := Enemies[EnemyIdx].Y - Sign(DY);
+            IF CanEnemyMoveTo(EnemyIdx, TryX, TryY) THEN
+              Enemies[EnemyIdx].Y := TryY;
+          END;
+        END;
+      END
       { Angband-like behavior: nearby monsters pursue, distant monsters may wander. }
-      IF Dist <= 8 THEN
+      ELSE IF Dist <= EngageRange THEN
       BEGIN
         StepX := Sign(DX);
         StepY := Sign(DY);
@@ -831,10 +1500,10 @@ BEGIN
       END
       ELSE
       BEGIN
-        IF Random(100) < 30 THEN
+        IF GenRand(100) < 30 THEN
         BEGIN
-          TryX := Enemies[EnemyIdx].X + (Random(3) - 1);
-          TryY := Enemies[EnemyIdx].Y + (Random(3) - 1);
+          TryX := Enemies[EnemyIdx].X + (GenRand(3) - 1);
+          TryY := Enemies[EnemyIdx].Y + (GenRand(3) - 1);
           IF CanEnemyMoveTo(EnemyIdx, TryX, TryY) THEN
           BEGIN
             Enemies[EnemyIdx].X := TryX;
@@ -846,14 +1515,90 @@ BEGIN
   END;
 END;
 
+PROCEDURE TrySpawnMonster;
+VAR
+  Slot, X, Y, TryCount, Theme, Tier: Integer;
+BEGIN
+  IF SpawnBudget <= 0 THEN EXIT;
+  IF SpawnCooldown > 0 THEN EXIT;
+  IF CountActiveEnemies >= MaxEnemies THEN EXIT;
+
+  Slot := 0;
+  FOR X := 1 TO MaxEnemies DO
+    IF NOT Enemies[X].Active THEN
+    BEGIN
+      Slot := X;
+      BREAK;
+    END;
+  IF Slot = 0 THEN EXIT;
+
+  TryCount := 0;
+  REPEAT
+    X := 2 + GenRand(MaxWidth - 4);
+    Y := 2 + GenRand(MaxHeight - 4);
+    INC(TryCount);
+  UNTIL ((Map[Y, X] = TileFloor) AND (GetEnemyAt(X, Y) = 0) AND (GetItemAt(X, Y) = 0) AND
+         ((Abs(X - Player.X) + Abs(Y - Player.Y)) >= 10)) OR (TryCount > 80);
+  IF TryCount > 80 THEN EXIT;
+
+  Theme := GetThemeByDepth(Depth);
+  Tier := Depth + GenRand(2);
+  IF Tier < 1 THEN Tier := 1;
+  IF Tier > 8 THEN Tier := 8;
+
+  Enemies[Slot].Active := True;
+  Enemies[Slot].X := X;
+  Enemies[Slot].Y := Y;
+  Enemies[Slot].Energy := 0;
+
+  CASE Tier OF
+    1: BEGIN Enemies[Slot].Name := 'Rat'; Enemies[Slot].Glyph := 'r'; Enemies[Slot].MaxHP := 12; Enemies[Slot].Damage := 3; Enemies[Slot].Speed := 110; Enemies[Slot].Color := Brown; Enemies[Slot].ResistPhysical := 0; Enemies[Slot].ResistMagic := 0; END;
+    2: BEGIN Enemies[Slot].Name := 'Goblin'; Enemies[Slot].Glyph := 'g'; Enemies[Slot].MaxHP := 20; Enemies[Slot].Damage := 4; Enemies[Slot].Speed := 105; Enemies[Slot].Color := LightGreen; Enemies[Slot].ResistPhysical := 5; Enemies[Slot].ResistMagic := 0; END;
+    3: BEGIN Enemies[Slot].Name := 'Skeleton'; Enemies[Slot].Glyph := 's'; Enemies[Slot].MaxHP := 30; Enemies[Slot].Damage := 6; Enemies[Slot].Speed := 95; Enemies[Slot].Color := White; Enemies[Slot].ResistPhysical := 15; Enemies[Slot].ResistMagic := 10; END;
+    4: BEGIN Enemies[Slot].Name := 'Orc'; Enemies[Slot].Glyph := 'o'; Enemies[Slot].MaxHP := 40; Enemies[Slot].Damage := 7; Enemies[Slot].Speed := 100; Enemies[Slot].Color := LightRed; Enemies[Slot].ResistPhysical := 10; Enemies[Slot].ResistMagic := 15; END;
+    5: BEGIN Enemies[Slot].Name := 'Troll'; Enemies[Slot].Glyph := 'T'; Enemies[Slot].MaxHP := 50; Enemies[Slot].Damage := 9; Enemies[Slot].Speed := 85; Enemies[Slot].Color := Green; Enemies[Slot].ResistPhysical := 20; Enemies[Slot].ResistMagic := 10; END;
+    6: BEGIN Enemies[Slot].Name := 'Wraith'; Enemies[Slot].Glyph := 'W'; Enemies[Slot].MaxHP := 52; Enemies[Slot].Damage := 10; Enemies[Slot].Speed := 115; Enemies[Slot].Color := LightGray; Enemies[Slot].ResistPhysical := 10; Enemies[Slot].ResistMagic := 30; END;
+    7: BEGIN Enemies[Slot].Name := 'Vampire'; Enemies[Slot].Glyph := 'V'; Enemies[Slot].MaxHP := 62; Enemies[Slot].Damage := 12; Enemies[Slot].Speed := 110; Enemies[Slot].Color := Magenta; Enemies[Slot].ResistPhysical := 20; Enemies[Slot].ResistMagic := 35; END;
+  ELSE
+    BEGIN Enemies[Slot].Name := 'Dragon'; Enemies[Slot].Glyph := 'D'; Enemies[Slot].MaxHP := 74; Enemies[Slot].Damage := 15; Enemies[Slot].Speed := 95; Enemies[Slot].Color := LightRed; Enemies[Slot].ResistPhysical := 30; Enemies[Slot].ResistMagic := 40; END;
+  END;
+  IF Theme = ThemeCrypt THEN
+    Enemies[Slot].Color := LightGray;
+  Enemies[Slot].HP := Enemies[Slot].MaxHP;
+
+  DEC(SpawnBudget);
+  SpawnCooldown := 8 + GenRand(7);
+  AddMessage('You hear distant footsteps...');
+END;
+
 PROCEDURE EndPlayerTurn;
+VAR
+  MonsterTurns: Integer;
 BEGIN
   INC(TurnCount);
-  MonstersTakeTurn;
+  TickPlayerStatus;
+  IF GameOver THEN EXIT;
+
+  MonsterTurns := 1;
+  IF Player.SlowTurns > 0 THEN
+    MonsterTurns := 2
+  ELSE IF (Player.HasteTurns > 0) AND ((TurnCount MOD 2) = 1) THEN
+    MonsterTurns := 0;
+
+  WHILE MonsterTurns > 0 DO
+  BEGIN
+    MonstersTakeTurn;
+    DEC(MonsterTurns);
+    IF GameOver THEN EXIT;
+  END;
+  IF SpawnCooldown > 0 THEN DEC(SpawnCooldown);
+  TrySpawnMonster;
 
   { Slow passive regeneration gives a roguelike resting rhythm. }
   IF (TurnCount MOD 8 = 0) AND (Player.HP < Player.MaxHP) THEN
     INC(Player.HP);
+  IF (TurnCount MOD 6 = 0) AND (Player.Mana < Player.MaxMana) THEN
+    INC(Player.Mana);
 END;
 
 FUNCTION IsStairsDownAt(X, Y: Integer): Boolean;
@@ -877,6 +1622,8 @@ BEGIN
   CopyMap(Levels[Depth].SeenMap, SeenMap);
   CopyEnemiesToLevel(Depth);
   CopyItemsToLevel(Depth);
+  Levels[Depth].SpawnBudget := SpawnBudget;
+  Levels[Depth].SpawnCooldown := SpawnCooldown;
 END;
 
 PROCEDURE LoadLevelState(LevelNum: Integer);
@@ -885,6 +1632,8 @@ BEGIN
   CopyMap(SeenMap, Levels[LevelNum].SeenMap);
   CopyEnemiesFromLevel(LevelNum);
   CopyItemsFromLevel(LevelNum);
+  SpawnBudget := Levels[LevelNum].SpawnBudget;
+  SpawnCooldown := Levels[LevelNum].SpawnCooldown;
 END;
 
 PROCEDURE PlaceStairsDownForCurrentLevel;
@@ -913,7 +1662,9 @@ BEGIN
   Depth := NewDepth;
 
   IF Levels[Depth].Generated THEN
+  BEGIN
     LoadLevelState(Depth)
+  END
   ELSE
   BEGIN
     SetGenSeed(GameSeed + (Depth * 8191));
@@ -927,8 +1678,12 @@ BEGIN
        (Map[EntryY, EntryX] <> TileWall) THEN
       Map[EntryY, EntryX] := TileStairsUp;
     PlaceStairsDownForCurrentLevel;
+    SpawnBudget := 6 + (Depth DIV 2);
+    IF SpawnBudget > 20 THEN SpawnBudget := 20;
+    SpawnCooldown := 6 + GenRand(6);
     Levels[Depth].Generated := True;
     SaveCurrentLevelState;
+    AddMessage('You enter the ' + GetThemeName(Depth) + '.');
   END;
 
   Player.X := EntryX;
@@ -963,7 +1718,12 @@ VAR
   MapX: Integer;
   ScreenY: Integer;
   ScreenX: Integer;
+  SightRange: Integer;
 BEGIN
+  IF Player.BlindTurns > 0 THEN
+    SightRange := 2
+  ELSE
+    SightRange := 8;
   ViewLeft := Player.X - (ViewWidth DIV 2);
   IF ViewLeft < 1 THEN
     ViewLeft := 1;
@@ -988,25 +1748,29 @@ BEGIN
       Dist := Abs(Ex) + Abs(Ey);
       
       { Update Seen Map (Fog of War) }
-      IF (Dist <= 8) AND HasLineOfSight(Player.X, Player.Y, MapX, MapY) THEN
+      IF (Dist <= SightRange) AND HasLineOfSight(Player.X, Player.Y, MapX, MapY) THEN
         SeenMap[MapY, MapX] := Map[MapY, MapX];
         
       { Draw Tile }
       IF (MapX = Player.X) AND (MapY = Player.Y) THEN
       BEGIN
-        ColorText(ScreenX, ScreenY, TilePlayer, LightGreen);
+        ColorTextGlyph(ScreenX, ScreenY, GlyphPlayer, LightGreen);
       END
       ELSE IF SeenMap[MapY, MapX] <> TileFog THEN
       BEGIN
         CASE SeenMap[MapY, MapX] OF
-          TileWall: ColorText(ScreenX, ScreenY, TileWall, DarkGray);
-          TileFloor: ColorText(ScreenX, ScreenY, TileFloor, DarkGray);
-          TileStairsDown: ColorText(ScreenX, ScreenY, TileStairsDown, Yellow);
-          TileStairsUp: ColorText(ScreenX, ScreenY, TileStairsUp, LightCyan);
-          TileWeapon: ColorText(ScreenX, ScreenY, TileWeapon, LightCyan);
-          TileArmor: ColorText(ScreenX, ScreenY, TileArmor, LightBlue);
-          TileScroll: ColorText(ScreenX, ScreenY, TileScroll, LightMagenta);
-          TileAmulet: ColorText(ScreenX, ScreenY, TileAmulet, LightGreen);
+          TileWall: ColorTextGlyph(ScreenX, ScreenY, GlyphWall, DarkGray);
+          TileSecretDoor: ColorTextGlyph(ScreenX, ScreenY, GlyphWall, DarkGray);
+          TileDoor: ColorTextGlyph(ScreenX, ScreenY, GlyphDoor, Brown);
+          TileLockedDoor: ColorTextGlyph(ScreenX, ScreenY, GlyphLockedDoor, LightRed);
+          TileFloor: ColorTextGlyph(ScreenX, ScreenY, GlyphFloor, DarkGray);
+          TileStairsDown: ColorTextGlyph(ScreenX, ScreenY, GlyphStairsDown, Yellow);
+          TileStairsUp: ColorTextGlyph(ScreenX, ScreenY, GlyphStairsUp, LightCyan);
+          TileWeapon: ColorTextGlyph(ScreenX, ScreenY, GlyphWeapon, LightCyan);
+          TileArmor: ColorTextGlyph(ScreenX, ScreenY, GlyphArmor, LightBlue);
+          TileScroll: ColorTextGlyph(ScreenX, ScreenY, GlyphScroll, LightMagenta);
+          TileAmulet: ColorTextGlyph(ScreenX, ScreenY, GlyphAmulet, LightGreen);
+          TileKey: ColorTextGlyph(ScreenX, ScreenY, GlyphKey, Yellow);
           ELSE
             ColorText(ScreenX, ScreenY, SeenMap[MapY, MapX], White);
         END;
@@ -1028,11 +1792,19 @@ BEGIN
       Ey := Enemies[I].Y - Player.Y;
       ScreenY := MapTop + (Enemies[I].Y - ViewTop);
       ScreenX := Enemies[I].X - ViewLeft + 1;
-      IF (Abs(Ex) <= 8) AND (Abs(Ey) <= 8) AND
+      IF (Abs(Ex) <= SightRange) AND (Abs(Ey) <= SightRange) AND
          HasLineOfSight(Player.X, Player.Y, Enemies[I].X, Enemies[I].Y) AND
          (ScreenX >= 1) AND (ScreenX <= ViewWidth) AND
          (ScreenY >= MapTop) AND (ScreenY < MapTop + MapHeightView) THEN
         ColorText(ScreenX, ScreenY, Enemies[I].Glyph, Enemies[I].Color);
+      IF (Player.DetectTurns > 0) AND
+         (ScreenX >= 1) AND (ScreenX <= ViewWidth) AND
+         (ScreenY >= MapTop) AND (ScreenY < MapTop + MapHeightView) THEN
+      BEGIN
+        IF NOT ((Abs(Ex) <= SightRange) AND (Abs(Ey) <= SightRange) AND
+                HasLineOfSight(Player.X, Player.Y, Enemies[I].X, Enemies[I].Y)) THEN
+          ColorText(ScreenX, ScreenY, Enemies[I].Glyph, LightMagenta);
+      END;
     END;
         
   FOR I := 1 TO MaxItems DO
@@ -1042,19 +1814,22 @@ BEGIN
       Ey := Items[I].Y - Player.Y;
       ScreenY := MapTop + (Items[I].Y - ViewTop);
       ScreenX := Items[I].X - ViewLeft + 1;
-      IF (Abs(Ex) <= 8) AND (Abs(Ey) <= 8) AND
+      IF (Abs(Ex) <= SightRange) AND (Abs(Ey) <= SightRange) AND
          HasLineOfSight(Player.X, Player.Y, Items[I].X, Items[I].Y) AND
+         ((Items[I].X <> Player.X) OR (Items[I].Y <> Player.Y)) AND
+         (GetEnemyAt(Items[I].X, Items[I].Y) = 0) AND
          (ScreenX >= 1) AND (ScreenX <= ViewWidth) AND
          (ScreenY >= MapTop) AND (ScreenY < MapTop + MapHeightView) THEN
       BEGIN
         CASE Items[I].TypeChar OF
           TileGold: ColorText(ScreenX, ScreenY, Items[I].TypeChar, Yellow);
           TilePotion: ColorText(ScreenX, ScreenY, Items[I].TypeChar, LightMagenta);
-          TileWeapon: ColorText(ScreenX, ScreenY, Items[I].TypeChar, LightCyan);
-          TileArmor: ColorText(ScreenX, ScreenY, Items[I].TypeChar, LightBlue);
-          TileScroll: ColorText(ScreenX, ScreenY, Items[I].TypeChar, LightMagenta);
-          TileAmulet: ColorText(ScreenX, ScreenY, Items[I].TypeChar, LightGreen);
-          TileStairsDown: ColorText(ScreenX, ScreenY, Items[I].TypeChar, Yellow);
+          TileWeapon: ColorTextGlyph(ScreenX, ScreenY, GlyphWeapon, LightCyan);
+          TileArmor: ColorTextGlyph(ScreenX, ScreenY, GlyphArmor, LightBlue);
+          TileScroll: ColorTextGlyph(ScreenX, ScreenY, GlyphScroll, LightMagenta);
+          TileAmulet: ColorTextGlyph(ScreenX, ScreenY, GlyphAmulet, LightGreen);
+          TileKey: ColorTextGlyph(ScreenX, ScreenY, GlyphKey, Yellow);
+          TileStairsDown: ColorTextGlyph(ScreenX, ScreenY, GlyphStairsDown, Yellow);
           ELSE
             ColorText(ScreenX, ScreenY, Items[I].TypeChar, White);
         END;
@@ -1069,14 +1844,24 @@ BEGIN
   Line1 := 'DEPTH: ' + IntToStr(Depth) +
            '  HP: ' + IntToStr(Player.HP) + '/' + IntToStr(Player.MaxHP) +
            '  LVL: ' + IntToStr(Player.Level) +
-           '  GOLD: ' + IntToStr(Player.Gold);
+           '  GOLD: ' + IntToStr(Player.Gold) +
+           '  THEME: ' + GetThemeName(Depth);
   Line2 := 'Potions: ' + IntToStr(Player.Potions) + '  XP: ' + IntToStr(Player.XP) +
+           '  Scr: ' + IntToStr(Player.ScrollHeal + Player.ScrollMap + Player.ScrollTeleport) +
+           '  Key: ' + IntToStr(Player.Keys) +
            '  ATK: ' + IntToStr(Player.Attack + Player.WeaponBonus) +
-           '  AC: ' + IntToStr(Player.Defense + Player.ArmorBonus) +
+           '  AR: ' + IntToStr(Player.Defense + Player.ArmorBonus) +
+           '  MP: ' + IntToStr(Player.Mana) + '/' + IntToStr(Player.MaxMana) +
            '  TURN: ' + IntToStr(TurnCount);
+  AddStatusSuffix(Line2, 'Poi', Player.PoisonTurns);
+  AddStatusSuffix(Line2, 'Slo', Player.SlowTurns);
+  AddStatusSuffix(Line2, 'Has', Player.HasteTurns);
+  AddStatusSuffix(Line2, 'Con', Player.ConfuseTurns);
+  AddStatusSuffix(Line2, 'Bli', Player.BlindTurns);
+  AddStatusSuffix(Line2, 'Det', Player.DetectTurns);
   WriteScreenLine(1, Line1);
   WriteScreenLine(2, Line2);
-  WriteScreenLine(ControlsRow, 'Controls: hjkl+yubn=move HJKL+YUBN=run .=Wait G/,=Get </> Stairs E A P S R Q');
+  WriteScreenLine(ControlsRow, 'Controls: hjkl+yubn move, HJKL+YUBN run, v rest, x explore, ? help');
 END;
 
 { --- Game Logic --- }
@@ -1086,6 +1871,13 @@ VAR
   EnemyIdx: Integer;
   ItemIdx: Integer;
 BEGIN
+  IF (Player.ConfuseTurns > 0) AND (GenRand(100) < 50) THEN
+  BEGIN
+    NewX := Player.X + (GenRand(3) - 1);
+    NewY := Player.Y + (GenRand(3) - 1);
+    AddMessage('You stumble in confusion.');
+  END;
+
   ItemIdx := GetItemAt(NewX, NewY);
   IF IsWall(NewX, NewY) THEN
   BEGIN
@@ -1123,6 +1915,7 @@ VAR
   NextX, NextY: Integer;
   EnemyIdx, ItemIdx: Integer;
   Dist: Integer;
+  CorridorWatch: Boolean;
 BEGIN
   IF Depth <> RunIgnoreDepth THEN
   BEGIN
@@ -1130,9 +1923,13 @@ BEGIN
     RunIgnoreItemX := 0;
     RunIgnoreItemY := 0;
   END;
+  CorridorWatch := IsNarrowCorridorTileForRun(Player.X, Player.Y, DX, DY);
 
   WHILE NOT GameOver DO
   BEGIN
+    IF CorridorWatch AND ShouldStopRunAtCrossCorridor(Player.X, Player.Y, DX, DY) THEN
+      EXIT;
+
     { Stop running if anything interesting becomes visible nearby. }
     FOR EnemyIdx := 1 TO MaxEnemies DO
       IF Enemies[EnemyIdx].Active THEN
@@ -1192,6 +1989,7 @@ BEGIN
       RunIgnoreItemX := 0;
       RunIgnoreItemY := 0;
     END;
+    CorridorWatch := IsNarrowCorridorTileForRun(Player.X, Player.Y, DX, DY);
     RenderMap;
     DrawHUD;
     DrawMessages;
@@ -1201,11 +1999,47 @@ END;
 PROCEDURE CombatRound(EnemyIdx: Integer);
 VAR
   PlayerDmg, EnemyDmg: Integer;
+  HitChance: Integer;
+  HitRoll: Integer;
+  CritRoll: Integer;
+  ResistPct: Integer;
 BEGIN
   { Player attacks }
+  IF (Player.BlindTurns > 0) AND (GenRand(100) < 35) THEN
+  BEGIN
+    AddMessage('You miss in the darkness.');
+    EXIT;
+  END;
+  IF (Player.ConfuseTurns > 0) AND (GenRand(100) < 30) THEN
+  BEGIN
+    AddMessage('You swing wildly and miss.');
+    EXIT;
+  END;
+  HitChance := 75 + (Player.Level * 2) + (Player.WeaponBonus * 2) - Depth;
+  IF HitChance < 40 THEN HitChance := 40;
+  IF HitChance > 97 THEN HitChance := 97;
+  HitRoll := GenRand(100);
+  IF HitRoll >= HitChance THEN
+  BEGIN
+    AddMessage('You miss ' + Enemies[EnemyIdx].Name + ' [physical].');
+    EXIT;
+  END;
   PlayerDmg := Player.Attack + Player.WeaponBonus + Random(3);
+  CritRoll := GenRand(100);
+  IF CritRoll < 12 THEN
+  BEGIN
+    PlayerDmg := PlayerDmg + (PlayerDmg DIV 2) + 1;
+    AddMessage('Critical hit [physical]!');
+  END;
+  ResistPct := Enemies[EnemyIdx].ResistPhysical;
+  IF ResistPct > 0 THEN
+  BEGIN
+    PlayerDmg := (PlayerDmg * (100 - ResistPct)) DIV 100;
+    IF PlayerDmg < 1 THEN PlayerDmg := 1;
+    AddMessage(Enemies[EnemyIdx].Name + ' resists physical damage.');
+  END;
   Enemies[EnemyIdx].HP := Enemies[EnemyIdx].HP - PlayerDmg;
-  AddMessage('You hit ' + Enemies[EnemyIdx].Name + ' for ' + IntToStr(PlayerDmg) + ' damage.');
+  AddMessage('You hit ' + Enemies[EnemyIdx].Name + ' for ' + IntToStr(PlayerDmg) + ' [physical].');
   
   IF Enemies[EnemyIdx].HP <= 0 THEN
   BEGIN
@@ -1220,7 +2054,7 @@ BEGIN
     EnemyDmg := Enemies[EnemyIdx].Damage - ((Player.Defense + Player.ArmorBonus) DIV 2);
     IF EnemyDmg < 1 THEN EnemyDmg := 1;
     Player.HP := Player.HP - EnemyDmg;
-    AddMessage(Enemies[EnemyIdx].Name + ' hits you for ' + IntToStr(EnemyDmg) + ' damage.');
+    AddMessage(Enemies[EnemyIdx].Name + ' hits you for ' + IntToStr(EnemyDmg) + ' [physical].');
     
     IF Player.HP <= 0 THEN
     BEGIN
@@ -1232,13 +2066,15 @@ END;
 
 PROCEDURE CheckLevelUp;
 BEGIN
-  IF Player.XP >= Player.Level * 50 THEN
+  IF Player.XP >= Player.Level * 100 THEN
   BEGIN
     INC(Player.Level);
     Player.MaxHP := Player.MaxHP + 10;
     Player.HP := Player.MaxHP;
     Player.Attack := Player.Attack + 2;
     Player.Defense := Player.Defense + 1;
+    Player.MaxMana := Player.MaxMana + 3;
+    Player.Mana := Player.MaxMana;
     AddMessage('LEVEL UP! You are now level ' + IntToStr(Player.Level) + '.');
   END;
 END;
@@ -1273,12 +2109,13 @@ VAR
   F: Text;
   L, R, C: Integer;
   Row: String[255];
+  EnemyNameOut: String[15];
 BEGIN
   SaveCurrentLevelState;
   Assign(F, SaveFileName);
   Rewrite(F);
 
-  WriteLn(F, 'DUNGEON_SAVE_V4');
+  WriteLn(F, 'DUNGEON_SAVE_V12');
   WriteLn(F, MaxWidth, ' ', MaxHeight);
   WriteLn(F, GameSeed);
   WriteLn(F, Depth);
@@ -1286,15 +2123,22 @@ BEGIN
   WriteLn(F, Player.X, ' ', Player.Y, ' ', Player.HP, ' ', Player.MaxHP, ' ',
              Player.Attack, ' ', Player.Defense, ' ', Player.Gold, ' ',
              Player.Level, ' ', Player.XP, ' ', Player.Potions);
-  WriteLn(F, Player.WeaponBonus, ' ', Player.ArmorBonus);
+  WriteLn(F, Player.Mana, ' ', Player.MaxMana);
+  WriteLn(F, Player.ScrollHeal, ' ', Player.ScrollMap, ' ', Player.ScrollTeleport, ' ', Player.Keys);
+  WriteLn(F, Player.PoisonTurns, ' ', Player.SlowTurns, ' ', Player.HasteTurns, ' ',
+             Player.ConfuseTurns, ' ', Player.BlindTurns, ' ', Player.DetectTurns);
+  WriteLn(F, Player.WeaponBonus, ' ', Player.ArmorBonus, ' ',
+             Player.SpareWeaponBonus, ' ', Player.SpareArmorBonus);
   WriteLn(F, Player.WeaponName);
   WriteLn(F, Player.ArmorName);
+  WriteLn(F, Player.SpareWeaponName);
+  WriteLn(F, Player.SpareArmorName);
   WriteLn(F, Ord(GameOver));
 
   FOR L := 1 TO MaxDungeonDepth DO
   BEGIN
     WriteLn(F, Ord(Levels[L].Generated), ' ', Levels[L].EntryX, ' ', Levels[L].EntryY, ' ',
-               Levels[L].DownX, ' ', Levels[L].DownY);
+               Levels[L].DownX, ' ', Levels[L].DownY, ' ', Levels[L].SpawnBudget, ' ', Levels[L].SpawnCooldown);
     IF Levels[L].Generated THEN
     BEGIN
       FOR R := 1 TO MaxHeight DO
@@ -1314,12 +2158,19 @@ BEGIN
       END;
 
       FOR R := 1 TO MaxEnemies DO
+      BEGIN
+        EnemyNameOut := Levels[L].Enemies[R].Name;
+        IF Length(EnemyNameOut) = 0 THEN
+          EnemyNameOut := '-';
         WriteLn(F, Levels[L].Enemies[R].X, ' ', Levels[L].Enemies[R].Y, ' ',
                    Levels[L].Enemies[R].HP, ' ', Levels[L].Enemies[R].MaxHP, ' ',
                    Levels[L].Enemies[R].Damage, ' ', Levels[L].Enemies[R].Glyph, ' ',
                    Levels[L].Enemies[R].Speed, ' ', Levels[L].Enemies[R].Energy, ' ',
-                   Levels[L].Enemies[R].Color, ' ', Ord(Levels[L].Enemies[R].Active), ' ',
-                   Levels[L].Enemies[R].Name);
+                   Levels[L].Enemies[R].Color, ' ',
+                   Levels[L].Enemies[R].ResistPhysical, ' ', Levels[L].Enemies[R].ResistMagic, ' ',
+                   Ord(Levels[L].Enemies[R].Active), ' ',
+                   EnemyNameOut);
+      END;
 
       FOR R := 1 TO MaxItems DO
         WriteLn(F, Levels[L].Items[R].X, ' ', Levels[L].Items[R].Y, ' ',
@@ -1338,6 +2189,7 @@ VAR
   L, R, C: Integer;
   Row: String[255];
   Magic: String;
+  SaveVersion: Integer;
   SaveWidth, SaveHeight: Integer;
   ActiveFlag: Integer;
 BEGIN
@@ -1351,10 +2203,14 @@ BEGIN
   Reset(F);
 
   ReadLn(F, Magic);
-  IF (Magic <> 'DUNGEON_SAVE_V4') THEN
+  SaveVersion := 0;
+  IF Magic = 'DUNGEON_SAVE_V12' THEN
+    SaveVersion := 12;
+
+  IF SaveVersion = 0 THEN
   BEGIN
     Close(F);
-    AddMessage('Old save format is incompatible. Save again with this version.');
+    AddMessage('Unsupported save version. Supported: V12.');
     EXIT;
   END;
 
@@ -1371,15 +2227,22 @@ BEGIN
   ReadLn(F, TurnCount);
   ReadLn(F, Player.X, Player.Y, Player.HP, Player.MaxHP, Player.Attack,
          Player.Defense, Player.Gold, Player.Level, Player.XP, Player.Potions);
-  ReadLn(F, Player.WeaponBonus, Player.ArmorBonus);
+  ReadLn(F, Player.Mana, Player.MaxMana);
+  ReadLn(F, Player.ScrollHeal, Player.ScrollMap, Player.ScrollTeleport, Player.Keys);
+  ReadLn(F, Player.PoisonTurns, Player.SlowTurns, Player.HasteTurns,
+         Player.ConfuseTurns, Player.BlindTurns, Player.DetectTurns);
+  ReadLn(F, Player.WeaponBonus, Player.ArmorBonus, Player.SpareWeaponBonus, Player.SpareArmorBonus);
   ReadLn(F, Player.WeaponName);
   ReadLn(F, Player.ArmorName);
+  ReadLn(F, Player.SpareWeaponName);
+  ReadLn(F, Player.SpareArmorName);
   ReadLn(F, ActiveFlag);
   GameOver := ActiveFlag <> 0;
 
   FOR L := 1 TO MaxDungeonDepth DO
   BEGIN
-    ReadLn(F, ActiveFlag, Levels[L].EntryX, Levels[L].EntryY, Levels[L].DownX, Levels[L].DownY);
+    ReadLn(F, ActiveFlag, Levels[L].EntryX, Levels[L].EntryY, Levels[L].DownX, Levels[L].DownY,
+           Levels[L].SpawnBudget, Levels[L].SpawnCooldown);
     Levels[L].Generated := ActiveFlag <> 0;
     IF Levels[L].Generated THEN
     BEGIN
@@ -1408,7 +2271,10 @@ BEGIN
         ReadLn(F, Levels[L].Enemies[R].X, Levels[L].Enemies[R].Y, Levels[L].Enemies[R].HP,
                Levels[L].Enemies[R].MaxHP, Levels[L].Enemies[R].Damage, Levels[L].Enemies[R].Glyph,
                Levels[L].Enemies[R].Speed, Levels[L].Enemies[R].Energy, Levels[L].Enemies[R].Color,
+               Levels[L].Enemies[R].ResistPhysical, Levels[L].Enemies[R].ResistMagic,
                ActiveFlag, Levels[L].Enemies[R].Name);
+        IF Levels[L].Enemies[R].Name = '-' THEN
+          Levels[L].Enemies[R].Name := '';
         Levels[L].Enemies[R].Active := ActiveFlag <> 0;
       END;
 
@@ -1440,6 +2306,9 @@ BEGIN
     BEGIN
       DEC(Player.Potions);
       Player.HP := Player.MaxHP;
+      Player.PoisonTurns := 0;
+      Player.ConfuseTurns := 0;
+      Player.BlindTurns := 0;
       AddMessage('You drink a potion and feel refreshed.');
     END;
   END
@@ -1449,10 +2318,574 @@ BEGIN
   END;
 END;
 
+PROCEDURE UseScroll;
+VAR
+  K: Char;
+BEGIN
+  AddMessage('Use scroll: H=Heal M=Map T=Teleport');
+  RenderMap;
+  DrawHUD;
+  DrawMessages;
+  K := UpCase(ReadKey);
+  CASE K OF
+    'H':
+      BEGIN
+        IF Player.ScrollHeal <= 0 THEN
+          AddMessage('No healing scrolls.')
+        ELSE
+        BEGIN
+          DEC(Player.ScrollHeal);
+          IF Player.HP < Player.MaxHP THEN
+          BEGIN
+            Player.HP := Player.HP + 20;
+            IF Player.HP > Player.MaxHP THEN Player.HP := Player.MaxHP;
+          END;
+          AddMessage('You read a Scroll of Healing.');
+          EndPlayerTurn;
+        END;
+      END;
+    'M':
+      BEGIN
+        IF Player.ScrollMap <= 0 THEN
+          AddMessage('No mapping scrolls.')
+        ELSE
+        BEGIN
+          DEC(Player.ScrollMap);
+          RevealCurrentMap;
+          AddMessage('You read a Scroll of Mapping.');
+          EndPlayerTurn;
+        END;
+      END;
+    'T':
+      BEGIN
+        IF Player.ScrollTeleport <= 0 THEN
+          AddMessage('No teleport scrolls.')
+        ELSE
+        BEGIN
+          DEC(Player.ScrollTeleport);
+          TeleportPlayerToFloor;
+          Player.HasteTurns := Player.HasteTurns + 4;
+          AddMessage('You read a Scroll of Teleport.');
+          EndPlayerTurn;
+        END;
+      END;
+  ELSE
+    AddMessage('Never mind.');
+  END;
+END;
+
+PROCEDURE CastSpell;
+VAR
+  K: Char;
+  Cost: Integer;
+  EnemyIdx, KIdx: Integer;
+  BestDist, Dist: Integer;
+  Dmg: Integer;
+  ResistPct: Integer;
+BEGIN
+  AddMessage('Cast: B=Bolt(3) H=Heal(4) D=Detect(2) P=Phase(5) C=Cure(4) S=Haste(4)');
+  RenderMap;
+  DrawHUD;
+  DrawMessages;
+  K := UpCase(ReadKey);
+
+  IF K = 'B' THEN Cost := 3
+  ELSE IF K = 'H' THEN Cost := 4
+  ELSE IF K = 'D' THEN Cost := 2
+  ELSE IF K = 'P' THEN Cost := 5
+  ELSE IF K = 'C' THEN Cost := 4
+  ELSE IF K = 'S' THEN Cost := 4
+  ELSE
+  BEGIN
+    AddMessage('Never mind.');
+    EXIT;
+  END;
+
+  IF Player.Mana < Cost THEN
+  BEGIN
+    AddMessage('Not enough mana.');
+    EXIT;
+  END;
+
+  IF K = 'B' THEN
+  BEGIN
+    EnemyIdx := 0;
+    BestDist := 9999;
+    FOR KIdx := 1 TO MaxEnemies DO
+      IF Enemies[KIdx].Active THEN
+      BEGIN
+        Dist := Abs(Enemies[KIdx].X - Player.X) + Abs(Enemies[KIdx].Y - Player.Y);
+        IF (Dist <= 7) AND HasLineOfSight(Player.X, Player.Y, Enemies[KIdx].X, Enemies[KIdx].Y) THEN
+          IF Dist < BestDist THEN
+          BEGIN
+            BestDist := Dist;
+            EnemyIdx := KIdx;
+          END;
+      END;
+    IF EnemyIdx = 0 THEN
+    BEGIN
+      AddMessage('No target in sight for Magic Bolt.');
+      EXIT;
+    END;
+    DEC(Player.Mana, Cost);
+    Dmg := 6 + (Player.Level DIV 2) + GenRand(6);
+    ResistPct := Enemies[EnemyIdx].ResistMagic;
+    IF ResistPct > 0 THEN
+    BEGIN
+      Dmg := (Dmg * (100 - ResistPct)) DIV 100;
+      IF Dmg < 1 THEN Dmg := 1;
+      AddMessage(Enemies[EnemyIdx].Name + ' resists magic.');
+    END;
+    Enemies[EnemyIdx].HP := Enemies[EnemyIdx].HP - Dmg;
+    AddMessage('Magic Bolt hits ' + Enemies[EnemyIdx].Name + ' for ' + IntToStr(Dmg) + ' [arcane].');
+    IF Enemies[EnemyIdx].HP <= 0 THEN
+    BEGIN
+      Enemies[EnemyIdx].Active := False;
+      Player.XP := Player.XP + 12;
+      AddMessage(Enemies[EnemyIdx].Name + ' is destroyed.');
+      CheckLevelUp;
+    END;
+    EndPlayerTurn;
+    EXIT;
+  END;
+
+  IF K = 'H' THEN
+  BEGIN
+    DEC(Player.Mana, Cost);
+    Dmg := 12 + GenRand(10) + Player.Level;
+    Player.HP := Player.HP + Dmg;
+    IF Player.HP > Player.MaxHP THEN Player.HP := Player.MaxHP;
+    AddMessage('You cast Heal and recover ' + IntToStr(Dmg) + ' HP [holy].');
+    EndPlayerTurn;
+    EXIT;
+  END;
+
+  IF K = 'D' THEN
+  BEGIN
+    DEC(Player.Mana, Cost);
+    Player.DetectTurns := 24;
+    AddMessage('You sense hostile minds nearby.');
+    EndPlayerTurn;
+    EXIT;
+  END;
+
+  IF K = 'P' THEN
+  BEGIN
+    DEC(Player.Mana, Cost);
+    TeleportPlayerToFloor;
+    AddMessage('You bend space and step through.');
+    EndPlayerTurn;
+    EXIT;
+  END;
+
+  IF K = 'C' THEN
+  BEGIN
+    DEC(Player.Mana, Cost);
+    Player.PoisonTurns := 0;
+    Player.SlowTurns := 0;
+    Player.ConfuseTurns := 0;
+    Player.BlindTurns := 0;
+    AddMessage('You cast Cure and purge afflictions.');
+    EndPlayerTurn;
+    EXIT;
+  END;
+
+  IF K = 'S' THEN
+  BEGIN
+    DEC(Player.Mana, Cost);
+    Player.SlowTurns := 0;
+    Player.HasteTurns := Player.HasteTurns + 10;
+    AddMessage('You cast Haste and quicken your step.');
+    EndPlayerTurn;
+    EXIT;
+  END;
+END;
+
 PROCEDURE ShowEquipment;
 BEGIN
   AddMessage('Weapon: ' + Player.WeaponName + ' (+' + IntToStr(Player.WeaponBonus) + ')');
   AddMessage('Armor: ' + Player.ArmorName + ' (+' + IntToStr(Player.ArmorBonus) + ')');
+  AddMessage('Spare weapon: ' + Player.SpareWeaponName + ' (+' + IntToStr(Player.SpareWeaponBonus) + ')');
+  AddMessage('Spare armor: ' + Player.SpareArmorName + ' (+' + IntToStr(Player.SpareArmorBonus) + ')');
+  AddMessage('Base ATK/AR: ' + IntToStr(Player.Attack) + '/' + IntToStr(Player.Defense) +
+             '  Total: ' + IntToStr(Player.Attack + Player.WeaponBonus) + '/' +
+             IntToStr(Player.Defense + Player.ArmorBonus));
+END;
+
+PROCEDURE ShowInventory;
+BEGIN
+  AddMessage('Inventory: Potions=' + IntToStr(Player.Potions) +
+             ' Heal=' + IntToStr(Player.ScrollHeal) +
+             ' Map=' + IntToStr(Player.ScrollMap) +
+             ' Tele=' + IntToStr(Player.ScrollTeleport) +
+             ' Keys=' + IntToStr(Player.Keys));
+  AddMessage('Mana: ' + IntToStr(Player.Mana) + '/' + IntToStr(Player.MaxMana));
+  AddMessage('Equipment: ' + Player.WeaponName + ' / ' + Player.ArmorName);
+  AddMessage('Spares: ' + Player.SpareWeaponName + ' / ' + Player.SpareArmorName);
+END;
+
+PROCEDURE SwapEquipment;
+VAR
+  TmpBonus: Integer;
+  TmpName: String[20];
+BEGIN
+  TmpBonus := Player.WeaponBonus;
+  TmpName := Player.WeaponName;
+  Player.WeaponBonus := Player.SpareWeaponBonus;
+  Player.WeaponName := Player.SpareWeaponName;
+  Player.SpareWeaponBonus := TmpBonus;
+  Player.SpareWeaponName := TmpName;
+
+  TmpBonus := Player.ArmorBonus;
+  TmpName := Player.ArmorName;
+  Player.ArmorBonus := Player.SpareArmorBonus;
+  Player.ArmorName := Player.SpareArmorName;
+  Player.SpareArmorBonus := TmpBonus;
+  Player.SpareArmorName := TmpName;
+  AddMessage('You swap equipped and spare gear.');
+END;
+
+PROCEDURE ShowHelp;
+BEGIN
+  AddMessage('Move: hjkl+yubn  Run: HJKL+YUBN  Wait: .');
+  AddMessage('Get: g/,  Drop: d  Inv: i  Equip: e  Swap: w');
+  AddMessage('Use: p potion, z scroll, </> stairs, o open, c close/unlock');
+  AddMessage('Search: f (find nearby secret doors)');
+  AddMessage('Magic: m cast (Bolt/Heal/Detect/Phase/Cure/Haste)');
+  AddMessage('Other: a attack, v rest, x explore, s save, r load, q quit');
+END;
+
+PROCEDURE SearchNearby;
+VAR
+  DX, DY: Integer;
+  Found: Boolean;
+BEGIN
+  Found := False;
+  FOR DY := -1 TO 1 DO
+    FOR DX := -1 TO 1 DO
+      IF NOT ((DX = 0) AND (DY = 0)) THEN
+        IF (Player.X + DX >= 1) AND (Player.X + DX <= MaxWidth) AND
+           (Player.Y + DY >= 1) AND (Player.Y + DY <= MaxHeight) THEN
+          IF Map[Player.Y + DY, Player.X + DX] = TileSecretDoor THEN
+          BEGIN
+            Map[Player.Y + DY, Player.X + DX] := TileDoor;
+            SeenMap[Player.Y + DY, Player.X + DX] := TileDoor;
+            Found := True;
+          END;
+  IF Found THEN
+    AddMessage('You found a secret door!')
+  ELSE
+    AddMessage('You find nothing unusual.');
+END;
+
+PROCEDURE OpenDoor;
+VAR
+  DX, DY: Integer;
+  TX, TY: Integer;
+BEGIN
+  FOR DY := -1 TO 1 DO
+    FOR DX := -1 TO 1 DO
+      IF ((Abs(DX) + Abs(DY)) = 1) THEN
+      BEGIN
+        TX := Player.X + DX;
+        TY := Player.Y + DY;
+        IF (TX >= 1) AND (TX <= MaxWidth) AND (TY >= 1) AND (TY <= MaxHeight) THEN
+        BEGIN
+          IF Map[TY, TX] = TileSecretDoor THEN
+          BEGIN
+            Map[TY, TX] := TileDoor;
+            SeenMap[TY, TX] := TileDoor;
+            AddMessage('You open a hidden door.');
+            EXIT;
+          END;
+          IF Map[TY, TX] = TileLockedDoor THEN
+          BEGIN
+            IF Player.Keys > 0 THEN
+            BEGIN
+              DEC(Player.Keys);
+              Map[TY, TX] := TileDoor;
+              SeenMap[TY, TX] := TileDoor;
+              AddMessage('You unlock the door.');
+            END
+            ELSE
+              AddMessage('Door is locked. You need a key.');
+            EXIT;
+          END;
+        END;
+      END;
+  AddMessage('No door to open nearby.');
+END;
+
+PROCEDURE CloseDoor;
+VAR
+  DX, DY: Integer;
+  TX, TY: Integer;
+BEGIN
+  FOR DY := -1 TO 1 DO
+    FOR DX := -1 TO 1 DO
+      IF ((Abs(DX) + Abs(DY)) = 1) THEN
+      BEGIN
+        TX := Player.X + DX;
+        TY := Player.Y + DY;
+        IF (TX >= 1) AND (TX <= MaxWidth) AND (TY >= 1) AND (TY <= MaxHeight) THEN
+        BEGIN
+          IF Map[TY, TX] = TileDoor THEN
+          BEGIN
+            Map[TY, TX] := TileSecretDoor;
+            SeenMap[TY, TX] := TileWall;
+            AddMessage('You close the door.');
+            EXIT;
+          END;
+        END;
+      END;
+  AddMessage('No door to close nearby.');
+END;
+
+PROCEDURE RestUntilSafe;
+VAR
+  Steps: Integer;
+BEGIN
+  Steps := 0;
+  WHILE (NOT GameOver) AND (Steps < 80) DO
+  BEGIN
+    IF IsDangerVisible THEN
+    BEGIN
+      AddMessage('Rest interrupted by danger.');
+      EXIT;
+    END;
+    IF (Player.HP >= Player.MaxHP) AND
+       (Player.PoisonTurns = 0) AND (Player.SlowTurns = 0) AND
+       (Player.ConfuseTurns = 0) AND (Player.BlindTurns = 0) THEN
+    BEGIN
+      AddMessage('You feel rested.');
+      EXIT;
+    END;
+    EndPlayerTurn;
+    IF Player.Mana < Player.MaxMana THEN
+      INC(Player.Mana); { Resting while safe accelerates mana recovery. }
+    INC(Steps);
+    RenderMap;
+    DrawHUD;
+    DrawMessages;
+  END;
+END;
+
+FUNCTION ConfirmQuit: Boolean;
+VAR
+  K: Char;
+BEGIN
+  AddMessage('Quit game? Y=Yes N=No');
+  RenderMap;
+  DrawHUD;
+  DrawMessages;
+  K := UpCase(ReadKey);
+  ConfirmQuit := (K = 'Y');
+  IF NOT ConfirmQuit THEN
+    AddMessage('Quit cancelled.');
+END;
+
+PROCEDURE AutoExplore;
+VAR
+  Dist: ARRAY[1..MaxHeight, 1..MaxWidth] OF Integer;
+  PrevX: ARRAY[1..MaxHeight, 1..MaxWidth] OF Integer;
+  PrevY: ARRAY[1..MaxHeight, 1..MaxWidth] OF Integer;
+  QX: ARRAY[1..(MaxWidth * MaxHeight)] OF Integer;
+  QY: ARRAY[1..(MaxWidth * MaxHeight)] OF Integer;
+  Head, Tail: Integer;
+  R, C, NX, NY, DX, DY: Integer;
+  TX, TY: Integer;
+  CurX, CurY: Integer;
+  Found: Boolean;
+  ExploreSteps: Integer;
+BEGIN
+  ExploreSteps := 0;
+  WHILE (ExploreSteps < 40) AND (NOT GameOver) DO
+  BEGIN
+    IF IsInterestingVisible THEN
+    BEGIN
+      AddMessage('Auto-explore halted: nearby point of interest.');
+      EXIT;
+    END;
+
+    FOR R := 1 TO MaxHeight DO
+      FOR C := 1 TO MaxWidth DO
+      BEGIN
+        Dist[R, C] := -1;
+        PrevX[R, C] := 0;
+        PrevY[R, C] := 0;
+      END;
+
+    Head := 1;
+    Tail := 1;
+    QX[1] := Player.X;
+    QY[1] := Player.Y;
+    Dist[Player.Y, Player.X] := 0;
+    TX := 0;
+    TY := 0;
+    Found := False;
+
+    WHILE Head <= Tail DO
+    BEGIN
+      CurX := QX[Head];
+      CurY := QY[Head];
+      INC(Head);
+
+      IF (SeenMap[CurY, CurX] = TileFog) AND (Map[CurY, CurX] <> TileWall) THEN
+      BEGIN
+        TX := CurX;
+        TY := CurY;
+        Found := True;
+        BREAK;
+      END;
+
+      FOR DY := -1 TO 1 DO
+        FOR DX := -1 TO 1 DO
+          IF NOT ((DX = 0) AND (DY = 0)) THEN
+          BEGIN
+            NX := CurX + DX;
+            NY := CurY + DY;
+            IF (NX >= 1) AND (NX <= MaxWidth) AND (NY >= 1) AND (NY <= MaxHeight) THEN
+              IF (Dist[NY, NX] = -1) AND (Map[NY, NX] <> TileWall) THEN
+              BEGIN
+                Dist[NY, NX] := Dist[CurY, CurX] + 1;
+                PrevX[NY, NX] := CurX;
+                PrevY[NY, NX] := CurY;
+                INC(Tail);
+                QX[Tail] := NX;
+                QY[Tail] := NY;
+              END;
+          END;
+    END;
+
+    IF NOT Found THEN
+    BEGIN
+      IF ExploreSteps = 0 THEN
+        AddMessage('No unexplored reachable area.');
+      EXIT;
+    END;
+
+    CurX := TX;
+    CurY := TY;
+    WHILE NOT ((PrevX[CurY, CurX] = Player.X) AND (PrevY[CurY, CurX] = Player.Y)) DO
+    BEGIN
+      NX := PrevX[CurY, CurX];
+      NY := PrevY[CurY, CurX];
+      IF (NX = 0) OR (NY = 0) THEN BREAK;
+      CurX := NX;
+      CurY := NY;
+    END;
+
+    PlayerMove(CurX, CurY);
+    EndPlayerTurn;
+    INC(ExploreSteps);
+    RenderMap;
+    DrawHUD;
+    DrawMessages;
+  END;
+END;
+
+PROCEDURE DropItem;
+VAR
+  K: Char;
+  ItemIdx: Integer;
+BEGIN
+  IF GetItemAt(Player.X, Player.Y) > 0 THEN
+  BEGIN
+    AddMessage('Something is already on this tile.');
+    EXIT;
+  END;
+  IF IsStairsDownAt(Player.X, Player.Y) OR IsStairsUpAt(Player.X, Player.Y) THEN
+  BEGIN
+    AddMessage('Cannot drop items on stairs.');
+    EXIT;
+  END;
+
+  AddMessage('Drop: P=Potion H=Heal M=Map T=Teleport');
+  RenderMap;
+  DrawHUD;
+  DrawMessages;
+  K := UpCase(ReadKey);
+
+  ItemIdx := 0;
+  WHILE (ItemIdx < MaxItems) DO
+  BEGIN
+    INC(ItemIdx);
+    IF NOT Items[ItemIdx].Active THEN BREAK;
+  END;
+  IF (ItemIdx < 1) OR (ItemIdx > MaxItems) OR Items[ItemIdx].Active THEN
+  BEGIN
+    AddMessage('No room to drop items on this floor.');
+    EXIT;
+  END;
+
+  CASE K OF
+    'P':
+      BEGIN
+        IF Player.Potions <= 0 THEN
+          AddMessage('No potions to drop.')
+        ELSE
+        BEGIN
+          DEC(Player.Potions);
+          Items[ItemIdx].X := Player.X;
+          Items[ItemIdx].Y := Player.Y;
+          Items[ItemIdx].TypeChar := TilePotion;
+          Items[ItemIdx].Value := 10;
+          Items[ItemIdx].Active := True;
+          AddMessage('You drop a potion.');
+          EndPlayerTurn;
+        END;
+      END;
+    'H':
+      BEGIN
+        IF Player.ScrollHeal <= 0 THEN
+          AddMessage('No healing scrolls to drop.')
+        ELSE
+        BEGIN
+          DEC(Player.ScrollHeal);
+          Items[ItemIdx].X := Player.X;
+          Items[ItemIdx].Y := Player.Y;
+          Items[ItemIdx].TypeChar := TileScroll;
+          Items[ItemIdx].Value := 1;
+          Items[ItemIdx].Active := True;
+          AddMessage('You drop a healing scroll.');
+          EndPlayerTurn;
+        END;
+      END;
+    'M':
+      BEGIN
+        IF Player.ScrollMap <= 0 THEN
+          AddMessage('No mapping scrolls to drop.')
+        ELSE
+        BEGIN
+          DEC(Player.ScrollMap);
+          Items[ItemIdx].X := Player.X;
+          Items[ItemIdx].Y := Player.Y;
+          Items[ItemIdx].TypeChar := TileScroll;
+          Items[ItemIdx].Value := 2;
+          Items[ItemIdx].Active := True;
+          AddMessage('You drop a mapping scroll.');
+          EndPlayerTurn;
+        END;
+      END;
+    'T':
+      BEGIN
+        IF Player.ScrollTeleport <= 0 THEN
+          AddMessage('No teleport scrolls to drop.')
+        ELSE
+        BEGIN
+          DEC(Player.ScrollTeleport);
+          Items[ItemIdx].X := Player.X;
+          Items[ItemIdx].Y := Player.Y;
+          Items[ItemIdx].TypeChar := TileScroll;
+          Items[ItemIdx].Value := 3;
+          Items[ItemIdx].Active := True;
+          AddMessage('You drop a teleport scroll.');
+          EndPlayerTurn;
+        END;
+      END;
+  ELSE
+    AddMessage('Never mind.');
+  END;
 END;
 
 PROCEDURE TeleportPlayerToFloor;
@@ -1496,9 +2929,17 @@ BEGIN
     BEGIN
       IF Items[ItemIdx].Value > Player.WeaponBonus THEN
       BEGIN
+        Player.SpareWeaponBonus := Player.WeaponBonus;
+        Player.SpareWeaponName := Player.WeaponName;
         Player.WeaponBonus := Items[ItemIdx].Value;
         Player.WeaponName := 'Blade +' + IntToStr(Items[ItemIdx].Value);
         AddMessage('You equip ' + Player.WeaponName + '.');
+      END
+      ELSE IF Items[ItemIdx].Value > Player.SpareWeaponBonus THEN
+      BEGIN
+        Player.SpareWeaponBonus := Items[ItemIdx].Value;
+        Player.SpareWeaponName := 'Blade +' + IntToStr(Items[ItemIdx].Value);
+        AddMessage('You stash ' + Player.SpareWeaponName + '.');
       END
       ELSE
         AddMessage('You leave the weaker weapon.');
@@ -1508,9 +2949,17 @@ BEGIN
     BEGIN
       IF Items[ItemIdx].Value > Player.ArmorBonus THEN
       BEGIN
+        Player.SpareArmorBonus := Player.ArmorBonus;
+        Player.SpareArmorName := Player.ArmorName;
         Player.ArmorBonus := Items[ItemIdx].Value;
         Player.ArmorName := 'Mail +' + IntToStr(Items[ItemIdx].Value);
         AddMessage('You equip ' + Player.ArmorName + '.');
+      END
+      ELSE IF Items[ItemIdx].Value > Player.SpareArmorBonus THEN
+      BEGIN
+        Player.SpareArmorBonus := Items[ItemIdx].Value;
+        Player.SpareArmorName := 'Mail +' + IntToStr(Items[ItemIdx].Value);
+        AddMessage('You stash ' + Player.SpareArmorName + '.');
       END
       ELSE
         AddMessage('You leave the weaker armor.');
@@ -1520,22 +2969,18 @@ BEGIN
     BEGIN
       IF Items[ItemIdx].Value = 1 THEN
       BEGIN
-        IF Player.HP < Player.MaxHP THEN
-        BEGIN
-          Player.HP := Player.HP + 20;
-          IF Player.HP > Player.MaxHP THEN Player.HP := Player.MaxHP;
-        END;
-        AddMessage('You read a Scroll of Healing.');
+        INC(Player.ScrollHeal);
+        AddMessage('You pick up a Scroll of Healing.');
       END
       ELSE IF Items[ItemIdx].Value = 2 THEN
       BEGIN
-        ClearSeenMap;
-        AddMessage('You read a Scroll of Mapping.');
+        INC(Player.ScrollMap);
+        AddMessage('You pick up a Scroll of Mapping.');
       END
       ELSE
       BEGIN
-        TeleportPlayerToFloor;
-        AddMessage('You read a Scroll of Teleport.');
+        INC(Player.ScrollTeleport);
+        AddMessage('You pick up a Scroll of Teleport.');
       END;
       Items[ItemIdx].Active := False;
     END
@@ -1552,6 +2997,12 @@ BEGIN
         AddMessage('Amulet glows! Armor rises.');
       END;
       Items[ItemIdx].Active := False;
+    END
+    ELSE IF Items[ItemIdx].TypeChar = TileKey THEN
+    BEGIN
+      INC(Player.Keys);
+      Items[ItemIdx].Active := False;
+      AddMessage('You pick up a key.');
     END
     ELSE
     BEGIN
@@ -1578,6 +3029,8 @@ BEGIN
   RunIgnoreDepth := 0;
   RunIgnoreItemX := 0;
   RunIgnoreItemY := 0;
+  SpawnBudget := 0;
+  SpawnCooldown := 0;
   ClearMessageLog;
   FOR I := 1 TO MaxDungeonDepth DO
     Levels[I].Generated := False;
@@ -1595,10 +3048,26 @@ BEGIN
   Player.Level := 1;
   Player.XP := 0;
   Player.Potions := 2;
+  Player.Mana := 12;
+  Player.MaxMana := 12;
+  Player.ScrollHeal := 0;
+  Player.ScrollMap := 0;
+  Player.ScrollTeleport := 0;
+  Player.Keys := 0;
+  Player.PoisonTurns := 0;
+  Player.SlowTurns := 0;
+  Player.HasteTurns := 0;
+  Player.ConfuseTurns := 0;
+  Player.BlindTurns := 0;
+  Player.DetectTurns := 0;
   Player.WeaponBonus := 0;
   Player.ArmorBonus := 0;
   Player.WeaponName := 'Fists';
   Player.ArmorName := 'Clothes';
+  Player.SpareWeaponBonus := 0;
+  Player.SpareArmorBonus := 0;
+  Player.SpareWeaponName := 'None';
+  Player.SpareArmorName := 'None';
   
   EnterLevel(1, 2, 2);
   
@@ -1672,6 +3141,13 @@ BEGIN
           ELSE
             AddMessage('No stairs up here.');
         END;
+      'i', 'I': ShowInventory;
+      'w', 'W': SwapEquipment;
+      '?': ShowHelp;
+      'd', 'D': DropItem;
+      'f', 'F': BEGIN SearchNearby; EndPlayerTurn; END;
+      'o', 'O': BEGIN OpenDoor; EndPlayerTurn; END;
+      'c', 'C': BEGIN CloseDoor; EndPlayerTurn; END;
       'e', 'E': ShowEquipment;
       'a', 'A':
         BEGIN
@@ -1686,14 +3162,16 @@ BEGIN
           EndPlayerTurn;
         END;
       'p', 'P': BEGIN UsePotion; EndPlayerTurn; END;
+      'z', 'Z': UseScroll;
+      'm', 'M': CastSpell;
+      'v', 'V': RestUntilSafe;
+      'x', 'X': AutoExplore;
       's', 'S': SaveGame;
       'r', 'R': LoadGame;
-      'q', 'Q': GameOver := True;
+      'q', 'Q': GameOver := ConfirmQuit;
     END;
   END;
   
   WriteLn;
   WriteLn('Game Over. Final Score: ', Player.Gold);
-  WriteLn('Press any key to exit.');
-  ReadKey;
 END.

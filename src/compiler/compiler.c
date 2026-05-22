@@ -7045,14 +7045,45 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_WRITELN: {
             int argCount = node->child_count;
-            Value nl = makeInt(1);
-            int nlidx = addConstantToChunk(chunk, &nl);
-            freeValue(&nl);
-            emitConstant(chunk, nlidx, line);
-            for (int i = 0; i < argCount; i++) {
-                compileRValue(node->children[i], chunk, getLine(node->children[i]));
+            const int kWriteChunk = 12;
+            int hasFileArg = (argCount > 0 && node->children[0] && node->children[0]->var_type == TYPE_FILE) ? 1 : 0;
+            int payloadStart = hasFileArg ? 1 : 0;
+            int payloadCount = argCount - payloadStart;
+
+            if (payloadCount <= kWriteChunk) {
+                Value nl = makeInt(1);
+                int nlidx = addConstantToChunk(chunk, &nl);
+                freeValue(&nl);
+                emitConstant(chunk, nlidx, line);
+                for (int i = 0; i < argCount; i++) {
+                    compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                }
+                emitBuiltinProcedureCall(chunk, "write", (uint8_t)(argCount + 1), line);
+            } else {
+                int emitted = 0;
+                while (emitted < payloadCount) {
+                    int take = payloadCount - emitted;
+                    if (take > kWriteChunk) take = kWriteChunk;
+
+                    Value flags = makeInt((emitted + take >= payloadCount) ? VM_WRITE_FLAG_NEWLINE : 0);
+                    int flidx = addConstantToChunk(chunk, &flags);
+                    freeValue(&flags);
+                    emitConstant(chunk, flidx, line);
+
+                    int callArgs = 1;
+                    if (hasFileArg) {
+                        compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                        callArgs++;
+                    }
+                    for (int i = 0; i < take; i++) {
+                        AST *argNode = node->children[payloadStart + emitted + i];
+                        compileRValue(argNode, chunk, getLine(argNode));
+                        callArgs++;
+                    }
+                    emitBuiltinProcedureCall(chunk, "write", (uint8_t)callArgs, line);
+                    emitted += take;
+                }
             }
-            emitBuiltinProcedureCall(chunk, "write", (uint8_t)(argCount + 1), line);
             break;
         }
         case AST_WHILE: {
@@ -7290,14 +7321,45 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         }
         case AST_WRITE: {
             int argCount = node->child_count;
-            Value nl = makeInt(0);
-            int nlidx = addConstantToChunk(chunk, &nl);
-            freeValue(&nl);
-            emitConstant(chunk, nlidx, line);
-            for (int i = 0; i < argCount; i++) {
-                compileRValue(node->children[i], chunk, getLine(node->children[i]));
+            const int kWriteChunk = 12;
+            int hasFileArg = (argCount > 0 && node->children[0] && node->children[0]->var_type == TYPE_FILE) ? 1 : 0;
+            int payloadStart = hasFileArg ? 1 : 0;
+            int payloadCount = argCount - payloadStart;
+
+            if (payloadCount <= kWriteChunk) {
+                Value nl = makeInt(0);
+                int nlidx = addConstantToChunk(chunk, &nl);
+                freeValue(&nl);
+                emitConstant(chunk, nlidx, line);
+                for (int i = 0; i < argCount; i++) {
+                    compileRValue(node->children[i], chunk, getLine(node->children[i]));
+                }
+                emitBuiltinProcedureCall(chunk, "write", (uint8_t)(argCount + 1), line);
+            } else {
+                int emitted = 0;
+                while (emitted < payloadCount) {
+                    int take = payloadCount - emitted;
+                    if (take > kWriteChunk) take = kWriteChunk;
+
+                    Value flags = makeInt(0);
+                    int flidx = addConstantToChunk(chunk, &flags);
+                    freeValue(&flags);
+                    emitConstant(chunk, flidx, line);
+
+                    int callArgs = 1;
+                    if (hasFileArg) {
+                        compileRValue(node->children[0], chunk, getLine(node->children[0]));
+                        callArgs++;
+                    }
+                    for (int i = 0; i < take; i++) {
+                        AST *argNode = node->children[payloadStart + emitted + i];
+                        compileRValue(argNode, chunk, getLine(argNode));
+                        callArgs++;
+                    }
+                    emitBuiltinProcedureCall(chunk, "write", (uint8_t)callArgs, line);
+                    emitted += take;
+                }
             }
-            emitBuiltinProcedureCall(chunk, "write", (uint8_t)(argCount + 1), line);
             break;
         }
         case AST_ASSIGN: {
