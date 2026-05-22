@@ -59,18 +59,20 @@ CONST
   ThemeCrypt = 1;
   ThemeCaves = 2;
   ThemeRuins = 3;
-  GlyphWall = '▓';
-  GlyphFloor = '·';
-  GlyphPlayer = '☺';
-  GlyphDoor = '╬';
-  GlyphLockedDoor = '✦';
-  GlyphStairsDown = '▼';
-  GlyphStairsUp = '▲';
-  GlyphWeapon = '⚔';
-  GlyphArmor = '⛨';
-  GlyphScroll = '§';
-  GlyphAmulet = '☼';
-  GlyphKey = '⌂';
+  RenderClassic = 1;
+  RenderUnicode = 2;
+  GlyphWall = '█';
+  GlyphFloor = '.';
+  GlyphPlayer = '@';
+  GlyphDoor = '+';
+  GlyphLockedDoor = '*';
+  GlyphStairsDown = '>';
+  GlyphStairsUp = '<';
+  GlyphWeapon = ')';
+  GlyphArmor = '[';
+  GlyphScroll = '?';
+  GlyphAmulet = '"';
+  GlyphKey = '=';
 
 TYPE
   TCoord = RECORD
@@ -169,6 +171,7 @@ VAR
   Levels: ARRAY[1..MaxDungeonDepth] OF TLevelState;
   SpawnBudget: Integer;
   SpawnCooldown: Integer;
+  RenderMode: Integer;
 
 { --- Forward declarations --- }
 PROCEDURE CombatRound(EnemyIdx: Integer); FORWARD;
@@ -188,6 +191,7 @@ PROCEDURE UseScroll; FORWARD;
 PROCEDURE CastSpell; FORWARD;
 PROCEDURE TeleportPlayerToFloor; FORWARD;
 PROCEDURE ShowHelp; FORWARD;
+PROCEDURE ToggleRenderMode; FORWARD;
 PROCEDURE RestUntilSafe; FORWARD;
 PROCEDURE AutoExplore; FORWARD;
 PROCEDURE SearchNearby; FORWARD;
@@ -214,8 +218,8 @@ FUNCTION FitLine(S: String): String;
 BEGIN
   IF Length(S) > ViewWidth THEN
     S := Copy(S, 1, ViewWidth);
-  WHILE Length(S) < ViewWidth DO
-    S := S + ' ';
+  IF Length(S) < ViewWidth THEN
+    S := S + StringOfChar(' ', ViewWidth - Length(S));
   FitLine := S;
 END;
 
@@ -415,6 +419,47 @@ BEGIN
     TextColor(FGColor);
     Write(S);
     TextColor(White);
+  END;
+END;
+
+FUNCTION IsWallLikeTile(T: Char): Boolean;
+BEGIN
+  IsWallLikeTile := (T = TileWall) OR (T = TileSecretDoor) OR (T = TileLockedDoor);
+END;
+
+FUNCTION WallGlyphAt(X, Y: Integer): String;
+BEGIN
+  { Keep wall rendering fixed-width and deterministic in all terminals. }
+  WallGlyphAt := GlyphWall;
+END;
+
+FUNCTION TileGlyph(T: Char; X, Y: Integer): String;
+BEGIN
+  IF RenderMode = RenderClassic THEN
+  BEGIN
+    IF T = TileSecretDoor THEN
+      TileGlyph := '#'
+    ELSE
+      TileGlyph := T;
+    EXIT;
+  END;
+
+  CASE T OF
+    TileWall: TileGlyph := WallGlyphAt(X, Y);
+    TileSecretDoor: TileGlyph := WallGlyphAt(X, Y);
+    TileDoor: TileGlyph := GlyphDoor;
+    TileLockedDoor: TileGlyph := GlyphLockedDoor;
+    TileFloor: TileGlyph := GlyphFloor;
+    TilePlayer: TileGlyph := GlyphPlayer;
+    TileStairsDown: TileGlyph := GlyphStairsDown;
+    TileStairsUp: TileGlyph := GlyphStairsUp;
+    TileWeapon: TileGlyph := GlyphWeapon;
+    TileArmor: TileGlyph := GlyphArmor;
+    TileScroll: TileGlyph := GlyphScroll;
+    TileAmulet: TileGlyph := GlyphAmulet;
+    TileKey: TileGlyph := GlyphKey;
+    ELSE
+      TileGlyph := T;
   END;
 END;
 
@@ -1754,23 +1799,23 @@ BEGIN
       { Draw Tile }
       IF (MapX = Player.X) AND (MapY = Player.Y) THEN
       BEGIN
-        ColorTextGlyph(ScreenX, ScreenY, GlyphPlayer, LightGreen);
+        ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TilePlayer, MapX, MapY), LightGreen);
       END
       ELSE IF SeenMap[MapY, MapX] <> TileFog THEN
       BEGIN
         CASE SeenMap[MapY, MapX] OF
-          TileWall: ColorTextGlyph(ScreenX, ScreenY, GlyphWall, DarkGray);
-          TileSecretDoor: ColorTextGlyph(ScreenX, ScreenY, GlyphWall, DarkGray);
-          TileDoor: ColorTextGlyph(ScreenX, ScreenY, GlyphDoor, Brown);
-          TileLockedDoor: ColorTextGlyph(ScreenX, ScreenY, GlyphLockedDoor, LightRed);
-          TileFloor: ColorTextGlyph(ScreenX, ScreenY, GlyphFloor, DarkGray);
-          TileStairsDown: ColorTextGlyph(ScreenX, ScreenY, GlyphStairsDown, Yellow);
-          TileStairsUp: ColorTextGlyph(ScreenX, ScreenY, GlyphStairsUp, LightCyan);
-          TileWeapon: ColorTextGlyph(ScreenX, ScreenY, GlyphWeapon, LightCyan);
-          TileArmor: ColorTextGlyph(ScreenX, ScreenY, GlyphArmor, LightBlue);
-          TileScroll: ColorTextGlyph(ScreenX, ScreenY, GlyphScroll, LightMagenta);
-          TileAmulet: ColorTextGlyph(ScreenX, ScreenY, GlyphAmulet, LightGreen);
-          TileKey: ColorTextGlyph(ScreenX, ScreenY, GlyphKey, Yellow);
+          TileWall: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileWall, MapX, MapY), DarkGray);
+          TileSecretDoor: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileSecretDoor, MapX, MapY), DarkGray);
+          TileDoor: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileDoor, MapX, MapY), Brown);
+          TileLockedDoor: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileLockedDoor, MapX, MapY), LightRed);
+          TileFloor: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileFloor, MapX, MapY), DarkGray);
+          TileStairsDown: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileStairsDown, MapX, MapY), Yellow);
+          TileStairsUp: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileStairsUp, MapX, MapY), LightCyan);
+          TileWeapon: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileWeapon, MapX, MapY), LightCyan);
+          TileArmor: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileArmor, MapX, MapY), LightBlue);
+          TileScroll: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileScroll, MapX, MapY), LightMagenta);
+          TileAmulet: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileAmulet, MapX, MapY), LightGreen);
+          TileKey: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileKey, MapX, MapY), Yellow);
           ELSE
             ColorText(ScreenX, ScreenY, SeenMap[MapY, MapX], White);
         END;
@@ -1824,12 +1869,12 @@ BEGIN
         CASE Items[I].TypeChar OF
           TileGold: ColorText(ScreenX, ScreenY, Items[I].TypeChar, Yellow);
           TilePotion: ColorText(ScreenX, ScreenY, Items[I].TypeChar, LightMagenta);
-          TileWeapon: ColorTextGlyph(ScreenX, ScreenY, GlyphWeapon, LightCyan);
-          TileArmor: ColorTextGlyph(ScreenX, ScreenY, GlyphArmor, LightBlue);
-          TileScroll: ColorTextGlyph(ScreenX, ScreenY, GlyphScroll, LightMagenta);
-          TileAmulet: ColorTextGlyph(ScreenX, ScreenY, GlyphAmulet, LightGreen);
-          TileKey: ColorTextGlyph(ScreenX, ScreenY, GlyphKey, Yellow);
-          TileStairsDown: ColorTextGlyph(ScreenX, ScreenY, GlyphStairsDown, Yellow);
+          TileWeapon: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileWeapon, Items[I].X, Items[I].Y), LightCyan);
+          TileArmor: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileArmor, Items[I].X, Items[I].Y), LightBlue);
+          TileScroll: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileScroll, Items[I].X, Items[I].Y), LightMagenta);
+          TileAmulet: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileAmulet, Items[I].X, Items[I].Y), LightGreen);
+          TileKey: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileKey, Items[I].X, Items[I].Y), Yellow);
+          TileStairsDown: ColorTextGlyph(ScreenX, ScreenY, TileGlyph(TileStairsDown, Items[I].X, Items[I].Y), Yellow);
           ELSE
             ColorText(ScreenX, ScreenY, Items[I].TypeChar, White);
         END;
@@ -1846,6 +1891,10 @@ BEGIN
            '  LVL: ' + IntToStr(Player.Level) +
            '  GOLD: ' + IntToStr(Player.Gold) +
            '  THEME: ' + GetThemeName(Depth);
+  IF RenderMode = RenderUnicode THEN
+    Line1 := Line1 + '  MODE: Unicode'
+  ELSE
+    Line1 := Line1 + '  MODE: Classic';
   Line2 := 'Potions: ' + IntToStr(Player.Potions) + '  XP: ' + IntToStr(Player.XP) +
            '  Scr: ' + IntToStr(Player.ScrollHeal + Player.ScrollMap + Player.ScrollTeleport) +
            '  Key: ' + IntToStr(Player.Keys) +
@@ -1861,7 +1910,7 @@ BEGIN
   AddStatusSuffix(Line2, 'Det', Player.DetectTurns);
   WriteScreenLine(1, Line1);
   WriteScreenLine(2, Line2);
-  WriteScreenLine(ControlsRow, 'Controls: hjkl+yubn move, HJKL+YUBN run, v rest, x explore, ? help');
+  WriteScreenLine(ControlsRow, 'Controls: hjkl+yubn move, HJKL+YUBN run, t mode, v rest, x explore, ? help');
 END;
 
 { --- Game Logic --- }
@@ -2110,16 +2159,19 @@ VAR
   L, R, C: Integer;
   Row: String[255];
   EnemyNameOut: String[15];
+  E: TEnemy;
+  It: TItem;
 BEGIN
   SaveCurrentLevelState;
   Assign(F, SaveFileName);
   Rewrite(F);
 
-  WriteLn(F, 'DUNGEON_SAVE_V12');
+  WriteLn(F, 'DUNGEON_SAVE_V13');
   WriteLn(F, MaxWidth, ' ', MaxHeight);
   WriteLn(F, GameSeed);
   WriteLn(F, Depth);
   WriteLn(F, TurnCount);
+  WriteLn(F, RenderMode);
   WriteLn(F, Player.X, ' ', Player.Y, ' ', Player.HP, ' ', Player.MaxHP, ' ',
              Player.Attack, ' ', Player.Defense, ' ', Player.Gold, ' ',
              Player.Level, ' ', Player.XP, ' ', Player.Potions);
@@ -2159,23 +2211,21 @@ BEGIN
 
       FOR R := 1 TO MaxEnemies DO
       BEGIN
-        EnemyNameOut := Levels[L].Enemies[R].Name;
+        E := Levels[L].Enemies[R];
+        EnemyNameOut := E.Name;
         IF Length(EnemyNameOut) = 0 THEN
           EnemyNameOut := '-';
-        WriteLn(F, Levels[L].Enemies[R].X, ' ', Levels[L].Enemies[R].Y, ' ',
-                   Levels[L].Enemies[R].HP, ' ', Levels[L].Enemies[R].MaxHP, ' ',
-                   Levels[L].Enemies[R].Damage, ' ', Levels[L].Enemies[R].Glyph, ' ',
-                   Levels[L].Enemies[R].Speed, ' ', Levels[L].Enemies[R].Energy, ' ',
-                   Levels[L].Enemies[R].Color, ' ',
-                   Levels[L].Enemies[R].ResistPhysical, ' ', Levels[L].Enemies[R].ResistMagic, ' ',
-                   Ord(Levels[L].Enemies[R].Active), ' ',
-                   EnemyNameOut);
+        Write(F, E.X, ' ', E.Y, ' ', E.HP, ' ', E.MaxHP, ' ');
+        Write(F, E.Damage, ' ', E.Glyph, ' ', E.Speed, ' ', E.Energy, ' ');
+        Write(F, E.Color, ' ', E.ResistPhysical, ' ', E.ResistMagic, ' ', Ord(E.Active), ' ');
+        WriteLn(F, EnemyNameOut);
       END;
 
       FOR R := 1 TO MaxItems DO
-        WriteLn(F, Levels[L].Items[R].X, ' ', Levels[L].Items[R].Y, ' ',
-                   Levels[L].Items[R].TypeChar, ' ', Levels[L].Items[R].Value, ' ',
-                   Ord(Levels[L].Items[R].Active));
+      BEGIN
+        It := Levels[L].Items[R];
+        WriteLn(F, It.X, ' ', It.Y, ' ', It.TypeChar, ' ', It.Value, ' ', Ord(It.Active));
+      END;
     END;
   END;
 
@@ -2204,13 +2254,13 @@ BEGIN
 
   ReadLn(F, Magic);
   SaveVersion := 0;
-  IF Magic = 'DUNGEON_SAVE_V12' THEN
-    SaveVersion := 12;
+  IF Magic = 'DUNGEON_SAVE_V13' THEN
+    SaveVersion := 13;
 
   IF SaveVersion = 0 THEN
   BEGIN
     Close(F);
-    AddMessage('Unsupported save version. Supported: V12.');
+    AddMessage('Unsupported save version. Supported: V13.');
     EXIT;
   END;
 
@@ -2225,6 +2275,7 @@ BEGIN
   ReadLn(F, GameSeed);
   ReadLn(F, Depth);
   ReadLn(F, TurnCount);
+  ReadLn(F, RenderMode);
   ReadLn(F, Player.X, Player.Y, Player.HP, Player.MaxHP, Player.Attack,
          Player.Defense, Player.Gold, Player.Level, Player.XP, Player.Potions);
   ReadLn(F, Player.Mana, Player.MaxMana);
@@ -2290,6 +2341,13 @@ BEGIN
   Close(F);
   IF (Depth >= 1) AND (Depth <= MaxDungeonDepth) AND Levels[Depth].Generated THEN
     LoadLevelState(Depth);
+  IF (RenderMode <> RenderClassic) AND (RenderMode <> RenderUnicode) THEN
+    RenderMode := RenderClassic;
+  IF RenderMode = RenderUnicode THEN
+  BEGIN
+    RenderMode := RenderClassic;
+    AddMessage('Loaded in Classic mode for terminal compatibility (press u for Unicode).');
+  END;
   ClearScreen;
   AddMessage('Game loaded from ' + SaveFileName + '.');
 END;
@@ -2552,7 +2610,21 @@ BEGIN
   AddMessage('Use: p potion, z scroll, </> stairs, o open, c close/unlock');
   AddMessage('Search: f (find nearby secret doors)');
   AddMessage('Magic: m cast (Bolt/Heal/Detect/Phase/Cure/Haste)');
-  AddMessage('Other: a attack, v rest, x explore, s save, r load, q quit');
+  AddMessage('Other: a attack, t display mode, v rest, x explore, s save, r load, q quit');
+END;
+
+PROCEDURE ToggleRenderMode;
+BEGIN
+  IF RenderMode = RenderUnicode THEN
+  BEGIN
+    RenderMode := RenderClassic;
+    AddMessage('Display mode: Classic ASCII.');
+  END
+  ELSE
+  BEGIN
+    RenderMode := RenderUnicode;
+    AddMessage('Display mode: Unicode.');
+  END;
 END;
 
 PROCEDURE SearchNearby;
@@ -3031,6 +3103,7 @@ BEGIN
   RunIgnoreItemY := 0;
   SpawnBudget := 0;
   SpawnCooldown := 0;
+  RenderMode := RenderClassic;
   ClearMessageLog;
   FOR I := 1 TO MaxDungeonDepth DO
     Levels[I].Generated := False;
@@ -3142,6 +3215,7 @@ BEGIN
             AddMessage('No stairs up here.');
         END;
       'i', 'I': ShowInventory;
+      't', 'T': ToggleRenderMode;
       'w', 'W': SwapEquipment;
       '?': ShowHelp;
       'd', 'D': DropItem;

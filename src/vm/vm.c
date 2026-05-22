@@ -5354,6 +5354,87 @@ static bool builtinUsesGlobalStructures(const char* name) {
     return false;
 }
 
+typedef enum {
+    VM_BUILTIN_CACHE_UNKNOWN = 0,
+    VM_BUILTIN_CACHE_FALSE = 1,
+    VM_BUILTIN_CACHE_TRUE = 2
+} VmBuiltinBoolCacheState;
+
+typedef enum {
+    VM_BUILTIN_TYPE_CACHE_UNKNOWN = 0,
+    VM_BUILTIN_TYPE_CACHE_NONE = 1,
+    VM_BUILTIN_TYPE_CACHE_PROCEDURE = 2,
+    VM_BUILTIN_TYPE_CACHE_FUNCTION = 3
+} VmBuiltinTypeCacheState;
+
+static pthread_mutex_t gVmBuiltinMetadataCacheMutex = PTHREAD_MUTEX_INITIALIZER;
+static uint8_t gVmBuiltinNeedsLockCache[UINT16_MAX + 1];
+static uint8_t gVmBuiltinTypeCache[UINT16_MAX + 1];
+
+static bool vmBuiltinNeedsGlobalLockCached(int builtin_id, const char* fallback_name) {
+    if (builtin_id >= 0 && builtin_id <= UINT16_MAX) {
+        uint8_t cached = gVmBuiltinNeedsLockCache[builtin_id];
+        if (cached == VM_BUILTIN_CACHE_TRUE) {
+            return true;
+        }
+        if (cached == VM_BUILTIN_CACHE_FALSE) {
+            return false;
+        }
+
+        const char* name = getVmBuiltinNameById(builtin_id);
+        if (!name || !*name) {
+            name = fallback_name;
+        }
+        bool needs_lock = builtinUsesGlobalStructures(name);
+
+        pthread_mutex_lock(&gVmBuiltinMetadataCacheMutex);
+        if (gVmBuiltinNeedsLockCache[builtin_id] == VM_BUILTIN_CACHE_UNKNOWN) {
+            gVmBuiltinNeedsLockCache[builtin_id] = needs_lock ? VM_BUILTIN_CACHE_TRUE : VM_BUILTIN_CACHE_FALSE;
+        }
+        pthread_mutex_unlock(&gVmBuiltinMetadataCacheMutex);
+        return needs_lock;
+    }
+
+    return builtinUsesGlobalStructures(fallback_name);
+}
+
+static BuiltinRoutineType vmBuiltinTypeCached(int builtin_id, const char* fallback_name) {
+    if (builtin_id >= 0 && builtin_id <= UINT16_MAX) {
+        uint8_t cached = gVmBuiltinTypeCache[builtin_id];
+        switch (cached) {
+            case VM_BUILTIN_TYPE_CACHE_NONE:
+                return BUILTIN_TYPE_NONE;
+            case VM_BUILTIN_TYPE_CACHE_PROCEDURE:
+                return BUILTIN_TYPE_PROCEDURE;
+            case VM_BUILTIN_TYPE_CACHE_FUNCTION:
+                return BUILTIN_TYPE_FUNCTION;
+            default:
+                break;
+        }
+
+        const char* name = getVmBuiltinNameById(builtin_id);
+        if (!name || !*name) {
+            name = fallback_name;
+        }
+        BuiltinRoutineType builtin_type = name ? getBuiltinType(name) : BUILTIN_TYPE_NONE;
+        uint8_t encoded = VM_BUILTIN_TYPE_CACHE_NONE;
+        if (builtin_type == BUILTIN_TYPE_PROCEDURE) {
+            encoded = VM_BUILTIN_TYPE_CACHE_PROCEDURE;
+        } else if (builtin_type == BUILTIN_TYPE_FUNCTION) {
+            encoded = VM_BUILTIN_TYPE_CACHE_FUNCTION;
+        }
+
+        pthread_mutex_lock(&gVmBuiltinMetadataCacheMutex);
+        if (gVmBuiltinTypeCache[builtin_id] == VM_BUILTIN_TYPE_CACHE_UNKNOWN) {
+            gVmBuiltinTypeCache[builtin_id] = encoded;
+        }
+        pthread_mutex_unlock(&gVmBuiltinMetadataCacheMutex);
+        return builtin_type;
+    }
+
+    return fallback_name ? getBuiltinType(fallback_name) : BUILTIN_TYPE_NONE;
+}
+
 // --- Main Interpretation Loop ---
 InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globals, HashTable* const_globals, HashTable* procedures, uint16_t entry) {
     if (!vm || !chunk) return INTERPRET_RUNTIME_ERROR;
@@ -5518,18 +5599,29 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
                     size_t total_len = len_a + len_b; \
-                    char* temp_concat_buffer = (char*)malloc(total_len + 1); \
-                    if (!temp_concat_buffer) { \
-                        runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
-                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                        return INTERPRET_RUNTIME_ERROR; \
+                    char* temp_concat_buffer = NULL; \
+                    if (final_a == &a_val_popped && a_val_popped.type == TYPE_STRING && a_val_popped.s_val) { \
+                        temp_concat_buffer = (char*)realloc(a_val_popped.s_val, total_len + 1); \
+                        if (!temp_concat_buffer) { \
+                            runtimeError(vm, "Runtime Error: Realloc failed for string concatenation buffer."); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                        } \
+                        memcpy(temp_concat_buffer + len_a, s_b, len_b); \
+                        temp_concat_buffer[total_len] = '\0'; \
+                        a_val_popped.s_val = NULL; \
+                    } else { \
+                        temp_concat_buffer = (char*)malloc(total_len + 1); \
+                        if (!temp_concat_buffer) { \
+                            runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                        } \
+                        memcpy(temp_concat_buffer, s_a, len_a); \
+                        memcpy(temp_concat_buffer + len_a, s_b, len_b); \
+                        temp_concat_buffer[total_len] = '\0'; \
                     } \
-                    memcpy(temp_concat_buffer, s_a, len_a); \
-                    memcpy(temp_concat_buffer + len_a, s_b, len_b); \
-                    temp_concat_buffer[total_len] = '\0'; \
                     result_val = makeOwnedString(temp_concat_buffer, total_len); \
-                    /* Operands are consumed; if they were pointers, they are just dropped. */ \
-                    /* If they were strings (on stack), freeValue handles them. */ \
                     freeValue(&a_val_popped); freeValue(&b_val_popped); \
                     op_is_handled = true; \
                 } else { \
@@ -8685,12 +8777,7 @@ comparison_error_label:
                     gVmBuiltinCallCounts[effective_id]++;
                 }
 
-                bool needs_lock = false;
-                if (canonical_name && *canonical_name) {
-                    needs_lock = builtinUsesGlobalStructures(canonical_name);
-                } else if (encoded_name && *encoded_name) {
-                    needs_lock = builtinUsesGlobalStructures(encoded_name);
-                }
+                bool needs_lock = vmBuiltinNeedsGlobalLockCached(effective_id, effective_name);
                 if (needs_lock) pthread_mutex_lock(&globals_mutex);
 
                 const char* context_name = encoded_name && *encoded_name ? encoded_name : effective_name;
@@ -8713,16 +8800,11 @@ comparison_error_label:
                     freeValue(&args[i]);
                 }
 
-                BuiltinRoutineType builtin_type = effective_name ? getBuiltinType(effective_name) : BUILTIN_TYPE_NONE;
                 if (vm->abort_requested) {
                     freeValue(&result);
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                if (builtin_type == BUILTIN_TYPE_FUNCTION) {
-                    push(vm, result);
-                } else {
-                    freeValue(&result);
-                }
+                freeValue(&result);
 
                 if (vm->exit_requested) {
                     bool suspend_unwind = vm->suspend_unwind_requested && !vm->abort_requested;
@@ -8768,24 +8850,53 @@ comparison_error_label:
                     }
                 }
 
-                VmBuiltinMapping mapping;
+                int mapped_builtin_id = -1;
+                VmBuiltinFn handler = NULL;
+                const char* canonical_name = NULL;
                 bool have_mapping = false;
-                if (builtin_name_lower && builtin_name_lower[0]) {
-                    have_mapping = getVmBuiltinMappingCanonical(builtin_name_lower, &mapping, NULL);
+
+                if (vm->chunk && vm->chunk->builtin_resolved_ids &&
+                    name_const_idx < vm->chunk->constants_count) {
+                    mapped_builtin_id = vm->chunk->builtin_resolved_ids[name_const_idx];
+                    if (mapped_builtin_id >= 0) {
+                        handler = getVmBuiltinHandlerById(mapped_builtin_id);
+                        canonical_name = getVmBuiltinNameById(mapped_builtin_id);
+                        have_mapping = handler != NULL;
+                    } else if (mapped_builtin_id == -1) {
+                        have_mapping = false;
+                    } else {
+                        VmBuiltinMapping mapping;
+                        if (builtin_name_lower && builtin_name_lower[0]) {
+                            have_mapping = getVmBuiltinMappingCanonical(builtin_name_lower, &mapping, &mapped_builtin_id);
+                        }
+                        if (!have_mapping) {
+                            have_mapping = getVmBuiltinMapping(builtin_name_original_case, &mapping, &mapped_builtin_id);
+                        }
+                        if (have_mapping) {
+                            handler = mapping.handler;
+                            canonical_name = mapping.name;
+                        } else {
+                            mapped_builtin_id = -1;
+                        }
+                        vm->chunk->builtin_resolved_ids[name_const_idx] = mapped_builtin_id;
+                    }
+                } else {
+                    VmBuiltinMapping mapping;
+                    if (builtin_name_lower && builtin_name_lower[0]) {
+                        have_mapping = getVmBuiltinMappingCanonical(builtin_name_lower, &mapping, &mapped_builtin_id);
+                    }
+                    if (!have_mapping) {
+                        have_mapping = getVmBuiltinMapping(builtin_name_original_case, &mapping, &mapped_builtin_id);
+                    }
+                    if (have_mapping) {
+                        handler = mapping.handler;
+                        canonical_name = mapping.name;
+                    }
                 }
-                if (!have_mapping) {
-                    have_mapping = getVmBuiltinMapping(builtin_name_original_case, &mapping, NULL);
-                }
-                VmBuiltinFn handler = have_mapping ? mapping.handler : NULL;
-                const char* canonical_name = have_mapping ? mapping.name : NULL;
 
                 if (handler) {
-                    bool needs_lock = false;
-                    if (canonical_name && *canonical_name) {
-                        needs_lock = builtinUsesGlobalStructures(canonical_name);
-                    } else if (builtin_name_original_case && *builtin_name_original_case) {
-                        needs_lock = builtinUsesGlobalStructures(builtin_name_original_case);
-                    }
+                    bool needs_lock = vmBuiltinNeedsGlobalLockCached(mapped_builtin_id,
+                        canonical_name ? canonical_name : builtin_name_original_case);
                     if (needs_lock) pthread_mutex_lock(&globals_mutex);
 
                     const char* context_name = builtin_name_original_case && *builtin_name_original_case
@@ -8813,7 +8924,7 @@ comparison_error_label:
                     }
 
                     const char* type_name = canonical_name ? canonical_name : context_name;
-                    if (type_name && getBuiltinType(type_name) == BUILTIN_TYPE_FUNCTION) {
+                    if (vmBuiltinTypeCached(mapped_builtin_id, type_name) == BUILTIN_TYPE_FUNCTION) {
                         push(vm, result);
                     } else {
                         freeValue(&result);

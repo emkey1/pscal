@@ -26,6 +26,7 @@ void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     chunk->constants_capacity = 0;
     chunk->constants = NULL;
     chunk->builtin_lowercase_indices = NULL;
+    chunk->builtin_resolved_ids = NULL;
     chunk->global_symbol_cache = NULL;
   //  chunk->lines = 0;
 }
@@ -38,6 +39,7 @@ void freeBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     }
     free(chunk->constants);
     free(chunk->builtin_lowercase_indices);
+    free(chunk->builtin_resolved_ids);
     free(chunk->global_symbol_cache);
     initBytecodeChunk(chunk);
 }
@@ -146,11 +148,15 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
         chunk->builtin_lowercase_indices = (int*)reallocate(chunk->builtin_lowercase_indices,
                                                            sizeof(int) * oldCapacity,
                                                            sizeof(int) * chunk->constants_capacity);
+        chunk->builtin_resolved_ids = (int*)reallocate(chunk->builtin_resolved_ids,
+                                                       sizeof(int) * oldCapacity,
+                                                       sizeof(int) * chunk->constants_capacity);
         chunk->global_symbol_cache = (Symbol**)reallocate(chunk->global_symbol_cache,
                                                           sizeof(Symbol*) * oldCapacity,
                                                           sizeof(Symbol*) * chunk->constants_capacity);
         for (int i = oldCapacity; i < chunk->constants_capacity; ++i) {
             chunk->builtin_lowercase_indices[i] = -1;
+            chunk->builtin_resolved_ids[i] = -2;
             chunk->global_symbol_cache[i] = NULL;
         }
     } else if (!chunk->builtin_lowercase_indices && chunk->constants_capacity > 0) {
@@ -159,6 +165,14 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
                                                            sizeof(int) * chunk->constants_capacity);
         for (int i = 0; i < chunk->constants_capacity; ++i) {
             chunk->builtin_lowercase_indices[i] = -1;
+        }
+    }
+    if (!chunk->builtin_resolved_ids && chunk->constants_capacity > 0) {
+        chunk->builtin_resolved_ids = (int*)reallocate(NULL,
+                                                       0,
+                                                       sizeof(int) * chunk->constants_capacity);
+        for (int i = 0; i < chunk->constants_capacity; ++i) {
+            chunk->builtin_resolved_ids[i] = -2;
         }
     }
     if (!chunk->global_symbol_cache && chunk->constants_capacity > 0) {
@@ -175,6 +189,9 @@ int addConstantToChunk(BytecodeChunk* chunk, const Value* value) {
     chunk->constants[index] = makeCopyOfValue(value);
     if (chunk->builtin_lowercase_indices) {
         chunk->builtin_lowercase_indices[index] = -1;
+    }
+    if (chunk->builtin_resolved_ids) {
+        chunk->builtin_resolved_ids[index] = -2;
     }
     if (chunk->global_symbol_cache) {
         chunk->global_symbol_cache[index] = NULL;
