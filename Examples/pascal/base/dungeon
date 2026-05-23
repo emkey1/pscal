@@ -134,6 +134,7 @@ TYPE
   END;
 
   TMap = ARRAY[1..MaxHeight, 1..MaxWidth] OF Char;
+  TVisibleMap = ARRAY[1..MaxHeight, 1..MaxWidth] OF Boolean;
 
   TLevelState = RECORD
     Generated: Boolean;
@@ -151,6 +152,7 @@ TYPE
 VAR
   Map: TMap;
   SeenMap: TMap; { Fog of War tracking }
+  VisibleMap: TVisibleMap;
   Enemies: ARRAY[1..MaxEnemies] OF TEnemy;
   Items: ARRAY[1..MaxItems] OF TItem;
   Player: TPlayer;
@@ -172,6 +174,7 @@ VAR
   SpawnBudget: Integer;
   SpawnCooldown: Integer;
   RenderMode: Integer;
+  VisibilityRange: Integer;
 
 { --- Forward declarations --- }
 PROCEDURE CombatRound(EnemyIdx: Integer); FORWARD;
@@ -246,6 +249,15 @@ BEGIN
       SeenMap[I, J] := TileFog;
 END;
 
+PROCEDURE ClearVisibleMap;
+VAR
+  I, J: Integer;
+BEGIN
+  FOR I := 1 TO MaxHeight DO
+    FOR J := 1 TO MaxWidth DO
+      VisibleMap[I, J] := False;
+END;
+
 PROCEDURE RevealCurrentMap;
 VAR
   R, C: Integer;
@@ -262,6 +274,66 @@ BEGIN
   FOR R := 1 TO MaxHeight DO
     FOR C := 1 TO MaxWidth DO
       Dest[R, C] := Src[R, C];
+END;
+
+FUNCTION InBounds(X, Y: Integer): Boolean;
+BEGIN
+  InBounds := (X >= 1) AND (X <= MaxWidth) AND (Y >= 1) AND (Y <= MaxHeight);
+END;
+
+FUNCTION GetSightRange: Integer;
+BEGIN
+  IF Player.BlindTurns > 0 THEN
+    GetSightRange := 2
+  ELSE
+    GetSightRange := 8;
+END;
+
+FUNCTION BlocksSight(X, Y: Integer): Boolean;
+BEGIN
+  IF NOT InBounds(X, Y) THEN
+    BlocksSight := True
+  ELSE
+    BlocksSight := (Map[Y, X] = TileWall) OR
+                   (Map[Y, X] = TileSecretDoor) OR
+                   (Map[Y, X] = TileLockedDoor);
+END;
+
+PROCEDURE MarkVisible(X, Y: Integer);
+VAR
+  DX, DY: Integer;
+BEGIN
+  IF NOT InBounds(X, Y) THEN
+    EXIT;
+  DX := X - Player.X;
+  DY := Y - Player.Y;
+  IF (DX * DX) + (DY * DY) > (VisibilityRange * VisibilityRange) THEN
+    EXIT;
+  VisibleMap[Y, X] := True;
+  SeenMap[Y, X] := Map[Y, X];
+END;
+
+FUNCTION IsVisible(X, Y: Integer): Boolean;
+BEGIN
+  IF InBounds(X, Y) THEN
+    IsVisible := VisibleMap[Y, X]
+  ELSE
+    IsVisible := False;
+END;
+
+PROCEDURE ComputeViewWindow(VAR ViewLeft, ViewTop: Integer);
+BEGIN
+  ViewLeft := Player.X - (ViewWidth DIV 2);
+  IF ViewLeft < 1 THEN
+    ViewLeft := 1;
+  IF ViewLeft > MaxWidth - ViewWidth + 1 THEN
+    ViewLeft := MaxWidth - ViewWidth + 1;
+
+  ViewTop := Player.Y - (MapHeightView DIV 2);
+  IF ViewTop < 1 THEN
+    ViewTop := 1;
+  IF ViewTop > MaxHeight - MapHeightView + 1 THEN
+    ViewTop := MaxHeight - MapHeightView + 1;
 END;
 
 PROCEDURE CopyEnemiesToLevel(LevelNum: Integer);
@@ -771,6 +843,86 @@ BEGIN
   HasLineOfSight := True;
 END;
 
+PROCEDURE CastLight(Row: Integer; StartSlope, EndSlope: Real; XX, XY, YX, YY: Integer);
+VAR
+  I, DX, DY: Integer;
+  CurrentX, CurrentY: Integer;
+  RadiusSquared, DistanceSquared: Integer;
+  LeftSlope, RightSlope: Real;
+  Blocked: Boolean;
+  NewStart: Real;
+BEGIN
+  IF StartSlope < EndSlope THEN
+    EXIT;
+
+  RadiusSquared := VisibilityRange * VisibilityRange;
+  Blocked := False;
+  NewStart := StartSlope;
+  I := Row;
+  WHILE I <= VisibilityRange DO
+  BEGIN
+    DX := -I;
+    WHILE DX <= 0 DO
+    BEGIN
+      DY := -I;
+      CurrentX := Player.X + DX * XX + DY * XY;
+      CurrentY := Player.Y + DX * YX + DY * YY;
+      LeftSlope := (DX - 0.5) / (DY + 0.5);
+      RightSlope := (DX + 0.5) / (DY - 0.5);
+
+      IF StartSlope < RightSlope THEN
+      BEGIN
+        INC(DX);
+        CONTINUE;
+      END;
+      IF EndSlope > LeftSlope THEN
+        BREAK;
+
+      DistanceSquared := (DX * DX) + (DY * DY);
+      IF InBounds(CurrentX, CurrentY) AND (DistanceSquared <= RadiusSquared) THEN
+        MarkVisible(CurrentX, CurrentY);
+
+      IF Blocked THEN
+      BEGIN
+        IF BlocksSight(CurrentX, CurrentY) THEN
+          NewStart := RightSlope
+        ELSE
+        BEGIN
+          Blocked := False;
+          StartSlope := NewStart;
+        END;
+      END
+      ELSE IF BlocksSight(CurrentX, CurrentY) AND (I < VisibilityRange) THEN
+      BEGIN
+        Blocked := True;
+        CastLight(I + 1, StartSlope, LeftSlope, XX, XY, YX, YY);
+        NewStart := RightSlope;
+      END;
+
+      INC(DX);
+    END;
+
+    IF Blocked THEN
+      BREAK;
+    INC(I);
+  END;
+END;
+
+PROCEDURE UpdateVisibility;
+BEGIN
+  VisibilityRange := GetSightRange;
+  ClearVisibleMap;
+  MarkVisible(Player.X, Player.Y);
+  CastLight(1, 1.0, 0.0, 1, 0, 0, 1);
+  CastLight(1, 1.0, 0.0, 0, 1, 1, 0);
+  CastLight(1, 1.0, 0.0, 0, -1, 1, 0);
+  CastLight(1, 1.0, 0.0, -1, 0, 0, 1);
+  CastLight(1, 1.0, 0.0, -1, 0, 0, -1);
+  CastLight(1, 1.0, 0.0, 0, -1, -1, 0);
+  CastLight(1, 1.0, 0.0, 0, 1, -1, 0);
+  CastLight(1, 1.0, 0.0, 1, 0, 0, -1);
+END;
+
 FUNCTION GetEnemyAt(X, Y: Integer): Integer;
 VAR
   I: Integer;
@@ -836,48 +988,36 @@ END;
 
 FUNCTION IsDangerVisible: Boolean;
 VAR
-  K, Dist, SightRange: Integer;
+  K: Integer;
 BEGIN
-  IF Player.BlindTurns > 0 THEN
-    SightRange := 2
-  ELSE
-    SightRange := 8;
+  UpdateVisibility;
   FOR K := 1 TO MaxEnemies DO
     IF Enemies[K].Active THEN
-    BEGIN
-      Dist := Abs(Enemies[K].X - Player.X) + Abs(Enemies[K].Y - Player.Y);
-      IF (Dist <= SightRange) AND HasLineOfSight(Player.X, Player.Y, Enemies[K].X, Enemies[K].Y) THEN
+      IF IsVisible(Enemies[K].X, Enemies[K].Y) THEN
       BEGIN
         IsDangerVisible := True;
         EXIT;
       END;
-    END;
   IsDangerVisible := False;
 END;
 
 FUNCTION IsInterestingVisible: Boolean;
 VAR
-  K, Dist, SightRange: Integer;
+  K: Integer;
 BEGIN
+  UpdateVisibility;
   IF IsDangerVisible THEN
   BEGIN
     IsInterestingVisible := True;
     EXIT;
   END;
-  IF Player.BlindTurns > 0 THEN
-    SightRange := 2
-  ELSE
-    SightRange := 8;
   FOR K := 1 TO MaxItems DO
     IF Items[K].Active THEN
-    BEGIN
-      Dist := Abs(Items[K].X - Player.X) + Abs(Items[K].Y - Player.Y);
-      IF (Dist <= SightRange) AND HasLineOfSight(Player.X, Player.Y, Items[K].X, Items[K].Y) THEN
+      IF IsVisible(Items[K].X, Items[K].Y) THEN
       BEGIN
         IsInterestingVisible := True;
         EXIT;
       END;
-    END;
   IsInterestingVisible := IsStairsDownAt(Player.X, Player.Y) OR IsStairsUpAt(Player.X, Player.Y);
 END;
 
@@ -1754,32 +1894,16 @@ END;
 
 PROCEDURE RenderMap;
 VAR
-  I, J: Integer;
-  Ex, Ey: Integer;
-  Dist: Integer;
+  I: Integer;
   ViewTop: Integer;
   ViewLeft: Integer;
   MapY: Integer;
   MapX: Integer;
   ScreenY: Integer;
   ScreenX: Integer;
-  SightRange: Integer;
 BEGIN
-  IF Player.BlindTurns > 0 THEN
-    SightRange := 2
-  ELSE
-    SightRange := 8;
-  ViewLeft := Player.X - (ViewWidth DIV 2);
-  IF ViewLeft < 1 THEN
-    ViewLeft := 1;
-  IF ViewLeft > MaxWidth - ViewWidth + 1 THEN
-    ViewLeft := MaxWidth - ViewWidth + 1;
-
-  ViewTop := Player.Y - (MapHeightView DIV 2);
-  IF ViewTop < 1 THEN
-    ViewTop := 1;
-  IF ViewTop > MaxHeight - MapHeightView + 1 THEN
-    ViewTop := MaxHeight - MapHeightView + 1;
+  UpdateVisibility;
+  ComputeViewWindow(ViewLeft, ViewTop);
 
   FOR ScreenY := MapTop TO MapTop + MapHeightView - 1 DO
   BEGIN
@@ -1787,15 +1911,7 @@ BEGIN
     FOR ScreenX := 1 TO ViewWidth DO
     BEGIN
       MapX := ViewLeft + (ScreenX - 1);
-      { Calculate Distance from Player }
-      Ex := MapX - Player.X;
-      Ey := MapY - Player.Y;
-      Dist := Abs(Ex) + Abs(Ey);
-      
-      { Update Seen Map (Fog of War) }
-      IF (Dist <= SightRange) AND HasLineOfSight(Player.X, Player.Y, MapX, MapY) THEN
-        SeenMap[MapY, MapX] := Map[MapY, MapX];
-        
+
       { Draw Tile }
       IF (MapX = Player.X) AND (MapY = Player.Y) THEN
       BEGIN
@@ -1833,12 +1949,9 @@ BEGIN
   FOR I := 1 TO MaxEnemies DO
     IF Enemies[I].Active THEN
     BEGIN
-      Ex := Enemies[I].X - Player.X;
-      Ey := Enemies[I].Y - Player.Y;
       ScreenY := MapTop + (Enemies[I].Y - ViewTop);
       ScreenX := Enemies[I].X - ViewLeft + 1;
-      IF (Abs(Ex) <= SightRange) AND (Abs(Ey) <= SightRange) AND
-         HasLineOfSight(Player.X, Player.Y, Enemies[I].X, Enemies[I].Y) AND
+      IF IsVisible(Enemies[I].X, Enemies[I].Y) AND
          (ScreenX >= 1) AND (ScreenX <= ViewWidth) AND
          (ScreenY >= MapTop) AND (ScreenY < MapTop + MapHeightView) THEN
         ColorText(ScreenX, ScreenY, Enemies[I].Glyph, Enemies[I].Color);
@@ -1846,8 +1959,7 @@ BEGIN
          (ScreenX >= 1) AND (ScreenX <= ViewWidth) AND
          (ScreenY >= MapTop) AND (ScreenY < MapTop + MapHeightView) THEN
       BEGIN
-        IF NOT ((Abs(Ex) <= SightRange) AND (Abs(Ey) <= SightRange) AND
-                HasLineOfSight(Player.X, Player.Y, Enemies[I].X, Enemies[I].Y)) THEN
+        IF NOT IsVisible(Enemies[I].X, Enemies[I].Y) THEN
           ColorText(ScreenX, ScreenY, Enemies[I].Glyph, LightMagenta);
       END;
     END;
@@ -1855,12 +1967,9 @@ BEGIN
   FOR I := 1 TO MaxItems DO
     IF Items[I].Active THEN
     BEGIN
-      Ex := Items[I].X - Player.X;
-      Ey := Items[I].Y - Player.Y;
       ScreenY := MapTop + (Items[I].Y - ViewTop);
       ScreenX := Items[I].X - ViewLeft + 1;
-      IF (Abs(Ex) <= SightRange) AND (Abs(Ey) <= SightRange) AND
-         HasLineOfSight(Player.X, Player.Y, Items[I].X, Items[I].Y) AND
+      IF IsVisible(Items[I].X, Items[I].Y) AND
          ((Items[I].X <> Player.X) OR (Items[I].Y <> Player.Y)) AND
          (GetEnemyAt(Items[I].X, Items[I].Y) = 0) AND
          (ScreenX >= 1) AND (ScreenX <= ViewWidth) AND
@@ -1963,7 +2072,6 @@ PROCEDURE RunDirection(DX, DY: Integer);
 VAR
   NextX, NextY: Integer;
   EnemyIdx, ItemIdx: Integer;
-  Dist: Integer;
   CorridorWatch: Boolean;
 BEGIN
   IF Depth <> RunIgnoreDepth THEN
@@ -1976,22 +2084,18 @@ BEGIN
 
   WHILE NOT GameOver DO
   BEGIN
+    UpdateVisibility;
     IF CorridorWatch AND ShouldStopRunAtCrossCorridor(Player.X, Player.Y, DX, DY) THEN
       EXIT;
 
     { Stop running if anything interesting becomes visible nearby. }
     FOR EnemyIdx := 1 TO MaxEnemies DO
       IF Enemies[EnemyIdx].Active THEN
-      BEGIN
-        Dist := Abs(Enemies[EnemyIdx].X - Player.X) + Abs(Enemies[EnemyIdx].Y - Player.Y);
-        IF (Dist <= 8) AND HasLineOfSight(Player.X, Player.Y, Enemies[EnemyIdx].X, Enemies[EnemyIdx].Y) THEN
+        IF IsVisible(Enemies[EnemyIdx].X, Enemies[EnemyIdx].Y) THEN
           EXIT;
-      END;
     FOR ItemIdx := 1 TO MaxItems DO
       IF Items[ItemIdx].Active THEN
-      BEGIN
-        Dist := Abs(Items[ItemIdx].X - Player.X) + Abs(Items[ItemIdx].Y - Player.Y);
-        IF (Dist <= 8) AND HasLineOfSight(Player.X, Player.Y, Items[ItemIdx].X, Items[ItemIdx].Y) THEN
+        IF IsVisible(Items[ItemIdx].X, Items[ItemIdx].Y) THEN
         BEGIN
           IF NOT ((Depth = RunIgnoreDepth) AND
                   (Items[ItemIdx].X = RunIgnoreItemX) AND
@@ -2003,7 +2107,6 @@ BEGIN
             EXIT;
           END;
         END;
-      END;
     IF IsStairsDownAt(Player.X, Player.Y) OR IsStairsUpAt(Player.X, Player.Y) THEN
       EXIT;
 
@@ -2346,7 +2449,7 @@ BEGIN
   IF RenderMode = RenderUnicode THEN
   BEGIN
     RenderMode := RenderClassic;
-    AddMessage('Loaded in Classic mode for terminal compatibility (press u for Unicode).');
+        AddMessage('Loaded in Classic mode for terminal compatibility (press t for Unicode).');
   END;
   ClearScreen;
   AddMessage('Game loaded from ' + SaveFileName + '.');
@@ -2467,13 +2570,14 @@ BEGIN
 
   IF K = 'B' THEN
   BEGIN
+    UpdateVisibility;
     EnemyIdx := 0;
     BestDist := 9999;
     FOR KIdx := 1 TO MaxEnemies DO
       IF Enemies[KIdx].Active THEN
       BEGIN
         Dist := Abs(Enemies[KIdx].X - Player.X) + Abs(Enemies[KIdx].Y - Player.Y);
-        IF (Dist <= 7) AND HasLineOfSight(Player.X, Player.Y, Enemies[KIdx].X, Enemies[KIdx].Y) THEN
+        IF (Dist <= 7) AND IsVisible(Enemies[KIdx].X, Enemies[KIdx].Y) THEN
           IF Dist < BestDist THEN
           BEGIN
             BestDist := Dist;
@@ -3087,6 +3191,127 @@ BEGIN
   END;
 END;
 
+PROCEDURE DrawFrame;
+BEGIN
+  RenderMap;
+  DrawHUD;
+  DrawMessages;
+END;
+
+PROCEDURE PerformPlayerStep(DX, DY: Integer);
+BEGIN
+  PlayerMove(Player.X + DX, Player.Y + DY);
+  EndPlayerTurn;
+END;
+
+PROCEDURE PerformRunStep(DX, DY: Integer);
+BEGIN
+  RunDirection(DX, DY);
+END;
+
+PROCEDURE AttackAdjacentEnemy;
+BEGIN
+  FOR I := 1 TO MaxEnemies DO
+    IF Enemies[I].Active THEN
+      IF (Abs(Enemies[I].X - Player.X) + Abs(Enemies[I].Y - Player.Y)) = 1 THEN
+      BEGIN
+        CombatRound(I);
+        BREAK;
+      END;
+  EndPlayerTurn;
+END;
+
+PROCEDURE HandleStairsDownCommand;
+BEGIN
+  IF IsStairsDownAt(Player.X, Player.Y) THEN
+  BEGIN
+    NextLevel;
+    EndPlayerTurn;
+  END
+  ELSE
+    AddMessage('No stairs down here.');
+END;
+
+PROCEDURE HandleStairsUpCommand;
+BEGIN
+  IF IsStairsUpAt(Player.X, Player.Y) THEN
+  BEGIN
+    IF Depth > 1 THEN
+    BEGIN
+      EnterLevel(Depth - 1, Levels[Depth].EntryX, Levels[Depth].EntryY);
+      AddMessage('You climb to the previous level.');
+      EndPlayerTurn;
+    END
+    ELSE
+      AddMessage('These stairs lead to the surface.');
+  END
+  ELSE
+    AddMessage('No stairs up here.');
+END;
+
+FUNCTION HandleMovementKey(K: Char): Boolean;
+BEGIN
+  HandleMovementKey := True;
+  CASE K OF
+    'y': PerformPlayerStep(-1, -1);
+    'u': PerformPlayerStep(1, -1);
+    'h': PerformPlayerStep(-1, 0);
+    'j': PerformPlayerStep(0, 1);
+    'k': PerformPlayerStep(0, -1);
+    'l': PerformPlayerStep(1, 0);
+    'b': PerformPlayerStep(-1, 1);
+    'n': PerformPlayerStep(1, 1);
+    'Y': PerformRunStep(-1, -1);
+    'U': PerformRunStep(1, -1);
+    'H': PerformRunStep(-1, 0);
+    'J': PerformRunStep(0, 1);
+    'K': PerformRunStep(0, -1);
+    'L': PerformRunStep(1, 0);
+    'B': PerformRunStep(-1, 1);
+    'N': PerformRunStep(1, 1);
+    ELSE
+      HandleMovementKey := False;
+  END;
+END;
+
+FUNCTION HandleGameplayCommand(K: Char): Boolean;
+BEGIN
+  HandleGameplayCommand := True;
+  CASE K OF
+    '.': BEGIN AddMessage('You wait.'); EndPlayerTurn; END;
+    'g', 'G', ',': BEGIN GetItem; EndPlayerTurn; END;
+    '>': HandleStairsDownCommand;
+    '<': HandleStairsUpCommand;
+    'i', 'I': ShowInventory;
+    't', 'T': ToggleRenderMode;
+    'w', 'W': SwapEquipment;
+    '?': ShowHelp;
+    'd', 'D': DropItem;
+    'f', 'F': BEGIN SearchNearby; EndPlayerTurn; END;
+    'o', 'O': BEGIN OpenDoor; EndPlayerTurn; END;
+    'c', 'C': BEGIN CloseDoor; EndPlayerTurn; END;
+    'e', 'E': ShowEquipment;
+    'a', 'A': AttackAdjacentEnemy;
+    'p', 'P': BEGIN UsePotion; EndPlayerTurn; END;
+    'z', 'Z': UseScroll;
+    'm', 'M': CastSpell;
+    'v', 'V': RestUntilSafe;
+    'x', 'X': AutoExplore;
+    's', 'S': SaveGame;
+    'r', 'R': LoadGame;
+    'q', 'Q': GameOver := ConfirmQuit;
+    ELSE
+      HandleGameplayCommand := False;
+  END;
+END;
+
+PROCEDURE ProcessInputKey(K: Char);
+BEGIN
+  IF HandleMovementKey(K) THEN
+    EXIT;
+  HandleGameplayCommand(K);
+END;
+
 { --- Main Loop --- }
 
 PROCEDURE InitGame;
@@ -3162,88 +3387,11 @@ BEGIN
   
   WHILE NOT GameOver DO
   BEGIN
-    RenderMap;
-    DrawHUD;
-    DrawMessages;
+    DrawFrame;
 
     { Block for input }
     Key := ReadKey;
-
-    CASE Key OF
-      'y': BEGIN PlayerMove(Player.X - 1, Player.Y - 1); EndPlayerTurn; END;
-      'u': BEGIN PlayerMove(Player.X + 1, Player.Y - 1); EndPlayerTurn; END;
-      'h': BEGIN PlayerMove(Player.X - 1, Player.Y); EndPlayerTurn; END;
-      'j': BEGIN PlayerMove(Player.X, Player.Y + 1); EndPlayerTurn; END;
-      'k': BEGIN PlayerMove(Player.X, Player.Y - 1); EndPlayerTurn; END;
-      'l': BEGIN PlayerMove(Player.X + 1, Player.Y); EndPlayerTurn; END;
-      'b': BEGIN PlayerMove(Player.X - 1, Player.Y + 1); EndPlayerTurn; END;
-      'n': BEGIN PlayerMove(Player.X + 1, Player.Y + 1); EndPlayerTurn; END;
-      'Y': RunDirection(-1, -1);
-      'U': RunDirection(1, -1);
-      'H': RunDirection(-1, 0);
-      'J': RunDirection(0, 1);
-      'K': RunDirection(0, -1);
-      'L': RunDirection(1, 0);
-      'B': RunDirection(-1, 1);
-      'N': RunDirection(1, 1);
-      '.': BEGIN AddMessage('You wait.'); EndPlayerTurn; END;
-      'g', 'G', ',': BEGIN GetItem; EndPlayerTurn; END;
-      '>':
-        BEGIN
-          IF IsStairsDownAt(Player.X, Player.Y) THEN
-          BEGIN
-            NextLevel;
-            EndPlayerTurn;
-          END
-          ELSE
-            AddMessage('No stairs down here.');
-        END;
-      '<':
-        BEGIN
-          IF IsStairsUpAt(Player.X, Player.Y) THEN
-          BEGIN
-            IF Depth > 1 THEN
-            BEGIN
-              EnterLevel(Depth - 1, Levels[Depth].EntryX, Levels[Depth].EntryY);
-              AddMessage('You climb to the previous level.');
-              EndPlayerTurn;
-            END
-            ELSE
-              AddMessage('These stairs lead to the surface.');
-          END
-          ELSE
-            AddMessage('No stairs up here.');
-        END;
-      'i', 'I': ShowInventory;
-      't', 'T': ToggleRenderMode;
-      'w', 'W': SwapEquipment;
-      '?': ShowHelp;
-      'd', 'D': DropItem;
-      'f', 'F': BEGIN SearchNearby; EndPlayerTurn; END;
-      'o', 'O': BEGIN OpenDoor; EndPlayerTurn; END;
-      'c', 'C': BEGIN CloseDoor; EndPlayerTurn; END;
-      'e', 'E': ShowEquipment;
-      'a', 'A':
-        BEGIN
-          { Attack adjacent enemy }
-          FOR I := 1 TO MaxEnemies DO
-            IF Enemies[I].Active THEN
-              IF (Abs(Enemies[I].X - Player.X) + Abs(Enemies[I].Y - Player.Y)) = 1 THEN
-              BEGIN
-                CombatRound(I);
-                BREAK;
-              END;
-          EndPlayerTurn;
-        END;
-      'p', 'P': BEGIN UsePotion; EndPlayerTurn; END;
-      'z', 'Z': UseScroll;
-      'm', 'M': CastSpell;
-      'v', 'V': RestUntilSafe;
-      'x', 'X': AutoExplore;
-      's', 'S': SaveGame;
-      'r', 'R': LoadGame;
-      'q', 'Q': GameOver := ConfirmQuit;
-    END;
+    ProcessInputKey(Key);
   END;
   
   WriteLn;
