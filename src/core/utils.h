@@ -120,7 +120,11 @@ static inline bool isOrdinalType(VarType t) {
     return isIntlikeType(t) || t == TYPE_CHAR || t == TYPE_ENUM;
 }
 
-static inline long long coerceToI64(const Value* v, VM* vm, const char* who) {
+static inline bool tryValueToOrdinal(const Value* v, long long* out) {
+    if (!v || !out) {
+        return false;
+    }
+
     switch (v->type) {
         case TYPE_UINT64:
         case TYPE_UINT32:
@@ -128,20 +132,34 @@ static inline long long coerceToI64(const Value* v, VM* vm, const char* who) {
         case TYPE_UINT8:
         case TYPE_WORD:
         case TYPE_BYTE:
-            return (long long)v->u_val;
+            *out = (long long)v->u_val;
+            return true;
         case TYPE_INT64:
         case TYPE_INT32:
         case TYPE_INT16:
         case TYPE_INT8:
         case TYPE_BOOLEAN:
-            return v->i_val;
+            *out = v->i_val;
+            return true;
         case TYPE_CHAR:
-            return v->c_val;
+            *out = (unsigned char)v->c_val;
+            return true;
+        case TYPE_ENUM:
+            *out = v->enum_val.ordinal;
+            return true;
         default:
-            runtimeError(vm, "Argument error: %s delta must be an ordinal, got %s.",
-                         who, varTypeToString(v->type));
-            return 0;
+            return false;
     }
+}
+
+static inline long long coerceToI64(const Value* v, VM* vm, const char* who) {
+    long long ordinal = 0;
+    if (tryValueToOrdinal(v, &ordinal)) {
+        return ordinal;
+    }
+    runtimeError(vm, "Argument error: %s delta must be an ordinal, got %s.",
+                 who, varTypeToString(v->type));
+    return 0;
 }
 
 #define IS_INTLIKE(v) (isIntlikeType((v).type))

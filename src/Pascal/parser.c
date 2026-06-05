@@ -759,7 +759,7 @@ AST *parseArrayType(Parser *parser) {
     AST *indexList = newASTNode(AST_COMPOUND, NULL); // To hold AST_SUBRANGE nodes
 
     while (1) {
-        AST *lower_expr_node = expression(parser); // Parse the lower bound expression
+        AST *lower_expr_node = expression(parser);
         if (!lower_expr_node || lower_expr_node->type == AST_NOOP) {
             errorParser(parser, "Invalid lower bound expression for array");
             freeAST(indexList);
@@ -767,88 +767,42 @@ AST *parseArrayType(Parser *parser) {
         }
 
         Value lower_eval = evaluateCompileTimeValue(lower_expr_node);
-        AST *resolved_lower_ast_node = NULL;
+        VarType resolvedType = TYPE_UNKNOWN;
 
-        if (lower_eval.type == TYPE_INTEGER) {
-            // Create an AST_NUMBER node for the resolved integer value
-            Token temp_token_lower; // Create a temporary token for newASTNode
-            char val_str_lower[32];
-            snprintf(val_str_lower, sizeof(val_str_lower), "%lld", lower_eval.i_val);
-            temp_token_lower.type = TOKEN_INTEGER_CONST;
-            temp_token_lower.value = val_str_lower; // Points to stack, but newASTNode copies
-            temp_token_lower.length = strlen(val_str_lower);
-            temp_token_lower.line = lower_expr_node->token ? lower_expr_node->token->line : parser->lexer->line;
-            temp_token_lower.column = lower_expr_node->token ? lower_expr_node->token->column : parser->lexer->column;
-            
-            resolved_lower_ast_node = newASTNode(AST_NUMBER, &temp_token_lower);
-            setTypeAST(resolved_lower_ast_node, TYPE_INTEGER); // Set type for the new AST_NUMBER node
-            resolved_lower_ast_node->i_val = (int)lower_eval.i_val; // Store the integer value directly if AST_NUMBER supports it
-        }
-        // Add similar handling for TYPE_CHAR, TYPE_BOOLEAN, or other ordinals if evaluateCompileTimeValue supports them
-        // and if your AST_SUBRANGE expects specific AST node types for resolved bounds.
-        // For now, we'll primarily focus on TYPE_INTEGER.
-        else {
-            char err_msg[128];
-            snprintf(err_msg, sizeof(err_msg), "Array lower bound is not a constant integer expression (got type %s)", varTypeToString(lower_eval.type));
-            errorParser(parser, err_msg);
+        if (!parser->current_token || parser->current_token->type != TOKEN_DOTDOT) {
+            errorParser(parser, "Expected '..' in array range");
             freeValue(&lower_eval);
             freeAST(lower_expr_node);
             freeAST(indexList);
             return NULL;
         }
-        freeValue(&lower_eval);    // Free contents of lower_eval if any (none for TYPE_INTEGER)
-        freeAST(lower_expr_node); // Free the original expression AST node
-
-        if (!parser->current_token || parser->current_token->type != TOKEN_DOTDOT) {
-            errorParser(parser, "Expected '..' in array range");
-            freeAST(resolved_lower_ast_node);
-            freeAST(indexList);
-            return NULL;
-        }
         eat(parser, TOKEN_DOTDOT);
 
-        AST *upper_expr_node = expression(parser); // Parse the upper bound expression
+        AST *upper_expr_node = expression(parser);
         if (!upper_expr_node || upper_expr_node->type == AST_NOOP) {
             errorParser(parser, "Invalid upper bound expression for array");
-            freeAST(resolved_lower_ast_node);
+            freeValue(&lower_eval);
+            freeAST(lower_expr_node);
             freeAST(indexList);
             return NULL;
         }
 
         Value upper_eval = evaluateCompileTimeValue(upper_expr_node);
-        AST *resolved_upper_ast_node = NULL;
 
-        if (upper_eval.type == TYPE_INTEGER) {
-            Token temp_token_upper;
-            char val_str_upper[32];
-            snprintf(val_str_upper, sizeof(val_str_upper), "%lld", upper_eval.i_val);
-            temp_token_upper.type = TOKEN_INTEGER_CONST;
-            temp_token_upper.value = val_str_upper;
-            temp_token_upper.length = strlen(val_str_upper);
-            temp_token_upper.line = upper_expr_node->token ? upper_expr_node->token->line : parser->lexer->line;
-            temp_token_upper.column = upper_expr_node->token ? upper_expr_node->token->column : parser->lexer->column;
-
-            resolved_upper_ast_node = newASTNode(AST_NUMBER, &temp_token_upper);
-            setTypeAST(resolved_upper_ast_node, TYPE_INTEGER);
-            resolved_upper_ast_node->i_val = (int)upper_eval.i_val;
-        } else {
-            char err_msg[128];
-            snprintf(err_msg, sizeof(err_msg), "Array upper bound is not a constant integer expression (got type %s)", varTypeToString(upper_eval.type));
-            errorParser(parser, err_msg);
-            freeValue(&upper_eval);
+        bool ok = validateSubrangeBounds(parser, &lower_eval, &upper_eval, &resolvedType);
+        freeValue(&lower_eval);
+        freeValue(&upper_eval);
+        if (!ok) {
+            freeAST(lower_expr_node);
             freeAST(upper_expr_node);
-            freeAST(resolved_lower_ast_node);
             freeAST(indexList);
             return NULL;
         }
-        freeValue(&upper_eval);
-        freeAST(upper_expr_node);
 
         AST *range = newASTNode(AST_SUBRANGE, NULL);
-        setLeft(range, resolved_lower_ast_node);  // Set left to the resolved AST_NUMBER node
-        setRight(range, resolved_upper_ast_node); // Set right to the resolved AST_NUMBER node
-        // You might also want to set range->var_type here if subranges have a type, e.g., TYPE_INTEGER if bounds are int.
-        setTypeAST(range, TYPE_INTEGER); // Assuming subrange of integers for now
+        setLeft(range, lower_expr_node);
+        setRight(range, upper_expr_node);
+        setTypeAST(range, resolvedType);
 
         addChild(indexList, range);
 

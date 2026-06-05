@@ -483,19 +483,21 @@ static void emitRoutineResultSlotInit(AST* type_specifier_node,
             if (subrange && subrange->type == AST_SUBRANGE) {
                 Value lower_b = evaluateCompileTimeValue(subrange->left);
                 Value upper_b = evaluateCompileTimeValue(subrange->right);
+                long long lower_ord = 0;
+                long long upper_ord = 0;
 
-                if (IS_INTLIKE(lower_b)) {
-                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(lower_b)), line);
+                if (valueToOrdinal(&lower_b, &lower_ord)) {
+                    emitConstantIndex16(chunk, addIntConstant(chunk, lower_ord), line);
                 } else {
-                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", line);
+                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant ordinal.\n", line);
                     compiler_had_error = true;
                 }
                 freeValue(&lower_b);
 
-                if (IS_INTLIKE(upper_b)) {
-                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(upper_b)), line);
+                if (valueToOrdinal(&upper_b, &upper_ord)) {
+                    emitConstantIndex16(chunk, addIntConstant(chunk, upper_ord), line);
                 } else {
-                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", line);
+                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant ordinal.\n", line);
                     compiler_had_error = true;
                 }
                 freeValue(&upper_b);
@@ -1464,26 +1466,28 @@ static void emitGlobalVarDefinition(AST* var_decl,
             if (subrange && subrange->type == AST_SUBRANGE) {
                 Value lower_b = evaluateCompileTimeValue(subrange->left);
                 Value upper_b = evaluateCompileTimeValue(subrange->right);
+                long long lower_ord = 0;
+                long long upper_ord = 0;
 
-                if (IS_INTLIKE(lower_b)) {
+                if (valueToOrdinal(&lower_b, &lower_ord)) {
                     emitConstantIndex16(chunk,
-                                        addIntConstant(chunk, AS_INTEGER(lower_b)),
+                                        addIntConstant(chunk, lower_ord),
                                         line);
                 } else {
                     fprintf(stderr,
-                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
+                            "L%d: Compiler error: Array bound did not evaluate to a constant ordinal.\n",
                             line);
                     compiler_had_error = true;
                 }
                 freeValue(&lower_b);
 
-                if (IS_INTLIKE(upper_b)) {
+                if (valueToOrdinal(&upper_b, &upper_ord)) {
                     emitConstantIndex16(chunk,
-                                        addIntConstant(chunk, AS_INTEGER(upper_b)),
+                                        addIntConstant(chunk, upper_ord),
                                         line);
                 } else {
                     fprintf(stderr,
-                            "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n",
+                            "L%d: Compiler error: Array bound did not evaluate to a constant ordinal.\n",
                             line);
                     compiler_had_error = true;
                 }
@@ -5940,19 +5944,21 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                             if (subrange && subrange->type == AST_SUBRANGE) {
                                 Value lower_b = evaluateCompileTimeValue(subrange->left);
                                 Value upper_b = evaluateCompileTimeValue(subrange->right);
+                                long long lower_ord = 0;
+                                long long upper_ord = 0;
 
-                                if (IS_INTLIKE(lower_b)) {
-                                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(lower_b)), getLine(varNameNode));
+                                if (valueToOrdinal(&lower_b, &lower_ord)) {
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, lower_ord), getLine(varNameNode));
                                 } else {
-                                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant ordinal.\n", getLine(varNameNode));
                                     compiler_had_error = true;
                                 }
                                 freeValue(&lower_b);
 
-                                if (IS_INTLIKE(upper_b)) {
-                                    emitConstantIndex16(chunk, addIntConstant(chunk, AS_INTEGER(upper_b)), getLine(varNameNode));
+                                if (valueToOrdinal(&upper_b, &upper_ord)) {
+                                    emitConstantIndex16(chunk, addIntConstant(chunk, upper_ord), getLine(varNameNode));
                                 } else {
-                                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant integer.\n", getLine(varNameNode));
+                                    fprintf(stderr, "L%d: Compiler error: Array bound did not evaluate to a constant ordinal.\n", getLine(varNameNode));
                                     compiler_had_error = true;
                                 }
                                 freeValue(&upper_b);

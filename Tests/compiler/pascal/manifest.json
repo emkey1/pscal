@@ -151,6 +151,12 @@
       "stdout_substring": "PASS: subrange type alias idx=3"
     },
     {
+      "id": "ordinal_array_bounds",
+      "path": "Tests/compiler/pascal/cases/ordinal_array_bounds.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: ordinal array bounds 60 18 10 18"
+    },
+    {
       "id": "continue_statement_loops",
       "path": "Tests/compiler/pascal/cases/continue_statement_loops.pas",
       "expect": "compile_success",

@@ -1,7 +1,6 @@
 program InvalidArrayBounds;
 var
-  a: array['a'..'z'] of integer;  { invalid: char bounds }
+  a: array['a'..26] of integer;  { invalid: mixed ordinal types }
 begin
   writeln('unreachable');
 end.
-

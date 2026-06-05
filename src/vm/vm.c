@@ -17,6 +17,7 @@
 
 #include "vm/vm.h"
 #include "compiler/bytecode.h"
+#include "compiler/compiler.h"
 #include "core/types.h"
 #include "core/utils.h"    // For runtimeError, printValueToStream, makeNil, freeValue, Type helper macros
 #include "symbol/symbol.h" // For HashTable, createHashTable, hashTableLookup, hashTableInsert
@@ -913,6 +914,64 @@ static unsigned long long vmDisplayIndexFromOffset(size_t offset) {
         return (unsigned long long)offset;
     }
     return (unsigned long long)(offset + 1);
+}
+
+static bool vmIndexValueToInt(VM* vm, const Value* index_val, int* out_index) {
+    if (!index_val || !out_index) {
+        runtimeError(vm, "VM Error: Invalid array index conversion request.");
+        return false;
+    }
+
+    long long ordinal = 0;
+    if (tryValueToOrdinal(index_val, &ordinal)) {
+        if (ordinal < INT_MIN || ordinal > INT_MAX) {
+            runtimeError(vm, "VM Error: Array index %lld is outside the supported range.", ordinal);
+            return false;
+        }
+        *out_index = (int)ordinal;
+        return true;
+    }
+
+    if (isRealType(index_val->type)) {
+        long double real_index = AS_REAL(*index_val);
+        if (real_index < (long double)INT_MIN || real_index > (long double)INT_MAX) {
+            runtimeError(vm, "VM Error: Array index %.0Lf is outside the supported range.", real_index);
+            return false;
+        }
+        *out_index = (int)real_index;
+        return true;
+    }
+
+    runtimeError(vm, "VM Error: Array index must be an ordinal value.");
+    return false;
+}
+
+static bool vmResolveArraySubrangeBounds(VM* vm, AST* subrange, int* out_lower, int* out_upper) {
+    if (!subrange || subrange->type != AST_SUBRANGE || !subrange->left || !subrange->right ||
+        !out_lower || !out_upper) {
+        runtimeError(vm, "VM Error: Invalid array subrange metadata.");
+        return false;
+    }
+
+    Value low_val = evaluateCompileTimeValue(subrange->left);
+    Value high_val = evaluateCompileTimeValue(subrange->right);
+    long long low_ord = 0;
+    long long high_ord = 0;
+    bool ok = tryValueToOrdinal(&low_val, &low_ord) &&
+              tryValueToOrdinal(&high_val, &high_ord) &&
+              low_ord >= INT_MIN && low_ord <= INT_MAX &&
+              high_ord >= INT_MIN && high_ord <= INT_MAX;
+    freeValue(&low_val);
+    freeValue(&high_val);
+
+    if (!ok) {
+        runtimeError(vm, "VM Error: Array bounds must be constant ordinal values.");
+        return false;
+    }
+
+    *out_lower = (int)low_ord;
+    *out_upper = (int)high_ord;
+    return true;
 }
 
 static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char* opcode_name) {
@@ -6939,13 +6998,11 @@ comparison_error_label:
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
-                    if (isIntlikeType(index_val.type)) {
-                        indices[dimension_count - 1 - i] = (int)index_val.i_val;
-                    } else if (isRealType(index_val.type)) {
-                        indices[dimension_count - 1 - i] = (int)AS_REAL(index_val);
-                    } else {
-                        runtimeError(vm, "VM Error: Array index must be an integer.");
-                        free(indices); freeValue(&index_val); freeValue(&operand); return INTERPRET_RUNTIME_ERROR;
+                    if (!vmIndexValueToInt(vm, &index_val, &indices[dimension_count - 1 - i])) {
+                        free(indices);
+                        freeValue(&index_val);
+                        freeValue(&operand);
+                        return INTERPRET_RUNTIME_ERROR;
                     }
                     freeValue(&index_val);
                 }
@@ -6985,9 +7042,12 @@ comparison_error_label:
                         for (int i = 0; i < dims; i++) {
                             int lb = 0, ub = -1;
                             AST* sub = arrayType->children[i];
-                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
-                                lb = sub->left->i_val;
-                                ub = sub->right->i_val;
+                            if (sub && !vmResolveArraySubrangeBounds(vm, sub, &lb, &ub)) {
+                                free(temp_wrapper.lower_bounds);
+                                free(temp_wrapper.upper_bounds);
+                                free(indices);
+                                freeValue(&operand);
+                                return INTERPRET_RUNTIME_ERROR;
                             }
                             temp_wrapper.lower_bounds[i] = lb;
                             temp_wrapper.upper_bounds[i] = ub;
@@ -7116,9 +7176,11 @@ comparison_error_label:
                         for (int i = 0; i < dims; i++) {
                             int lb = 0, ub = -1;
                             AST* sub = arrayType->children[i];
-                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
-                                lb = sub->left->i_val;
-                                ub = sub->right->i_val;
+                            if (sub && !vmResolveArraySubrangeBounds(vm, sub, &lb, &ub)) {
+                                free(temp_wrapper.lower_bounds);
+                                free(temp_wrapper.upper_bounds);
+                                freeValue(&operand);
+                                return INTERPRET_RUNTIME_ERROR;
                             }
                             temp_wrapper.lower_bounds[i] = lb;
                             temp_wrapper.upper_bounds[i] = ub;
@@ -7236,12 +7298,7 @@ comparison_error_label:
 
                 for (int i = 0; i < dimension_count; i++) {
                     Value index_val = pop(vm);
-                    if (isIntlikeType(index_val.type)) {
-                        indices[dimension_count - 1 - i] = (int)index_val.i_val;
-                    } else if (isRealType(index_val.type)) {
-                        indices[dimension_count - 1 - i] = (int)AS_REAL(index_val);
-                    } else {
-                        runtimeError(vm, "VM Error: Array index must be an integer.");
+                    if (!vmIndexValueToInt(vm, &index_val, &indices[dimension_count - 1 - i])) {
                         free(indices);
                         freeValue(&index_val);
                         freeValue(&operand);
@@ -7287,9 +7344,12 @@ comparison_error_label:
                         for (int i = 0; i < dims; i++) {
                             int lb = 0, ub = -1;
                             AST* sub = arrayType->children[i];
-                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
-                                lb = sub->left->i_val;
-                                ub = sub->right->i_val;
+                            if (sub && !vmResolveArraySubrangeBounds(vm, sub, &lb, &ub)) {
+                                free(temp_wrapper.lower_bounds);
+                                free(temp_wrapper.upper_bounds);
+                                free(indices);
+                                freeValue(&operand);
+                                return INTERPRET_RUNTIME_ERROR;
                             }
                             temp_wrapper.lower_bounds[i] = lb;
                             temp_wrapper.upper_bounds[i] = ub;
@@ -7410,9 +7470,11 @@ comparison_error_label:
                         for (int i = 0; i < dims; i++) {
                             int lb = 0, ub = -1;
                             AST* sub = arrayType->children[i];
-                            if (sub && sub->type == AST_SUBRANGE && sub->left && sub->right) {
-                                lb = sub->left->i_val;
-                                ub = sub->right->i_val;
+                            if (sub && !vmResolveArraySubrangeBounds(vm, sub, &lb, &ub)) {
+                                free(temp_wrapper.lower_bounds);
+                                free(temp_wrapper.upper_bounds);
+                                freeValue(&operand);
+                                return INTERPRET_RUNTIME_ERROR;
                             }
                             temp_wrapper.lower_bounds[i] = lb;
                             temp_wrapper.upper_bounds[i] = ub;

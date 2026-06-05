@@ -1562,12 +1562,17 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
                          // --- MODIFICATION: Use evaluateCompileTimeValue instead of eval ---
                          Value low_val = evaluateCompileTimeValue(subrange->left);
                          Value high_val = evaluateCompileTimeValue(subrange->right);
+                         long long low_ord = 0;
+                         long long high_ord = 0;
 
-                        if (low_val.type == TYPE_INT32 && high_val.type == TYPE_INT32) {
-                             lbs[i] = (int)low_val.i_val;
-                             ubs[i] = (int)high_val.i_val;
+                         if (tryValueToOrdinal(&low_val, &low_ord) &&
+                             tryValueToOrdinal(&high_val, &high_ord) &&
+                             low_ord >= INT_MIN && low_ord <= INT_MAX &&
+                             high_ord >= INT_MIN && high_ord <= INT_MAX) {
+                             lbs[i] = (int)low_ord;
+                             ubs[i] = (int)high_ord;
                          } else {
-                             fprintf(stderr, "Runtime error: Array bounds must be integer constants for now. Dim %d has types %s..%s\n", i, varTypeToString(low_val.type), varTypeToString(high_val.type));
+                             fprintf(stderr, "Runtime error: Array bounds must be constant ordinal values. Dim %d has types %s..%s\n", i, varTypeToString(low_val.type), varTypeToString(high_val.type));
                              bounds_ok = false;
                          }
                          freeValue(&low_val);

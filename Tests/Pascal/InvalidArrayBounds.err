@@ -1,1 +1,1 @@
-Parser error at line 3, column 17: Array lower bound is not a constant integer expression (got type CHAR) (found token: DOTDOT)
+Parser error at line 3, column 20: Subrange bounds must use the same ordinal type (found token: RBRACKET)
