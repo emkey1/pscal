@@ -111,34 +111,10 @@ static void appendDependencyPath(Parser *parser, const char *path) {
 static AST *cloneBuiltinTypeNode(VarType type, int line) {
     const char *type_name = NULL;
 
-    if (type == TYPE_INTEGER || type == TYPE_INT32) {
-        type_name = "integer";
-    } else if (type == TYPE_INT16) {
-        type_name = "smallint";
-    } else if (type == TYPE_INT8) {
-        type_name = "shortint";
-    } else if (type == TYPE_INT64) {
-        type_name = "int64";
-    } else if (type == TYPE_UINT32) {
-        type_name = "cardinal";
-    } else if (type == TYPE_UINT64) {
-        type_name = "uint64";
-    } else if (type == TYPE_FLOAT) {
-        type_name = "single";
-    } else if (type == TYPE_DOUBLE || type == TYPE_REAL) {
-        type_name = "double";
-    } else if (type == TYPE_LONG_DOUBLE) {
-        type_name = "extended";
-    } else if (type == TYPE_BOOLEAN) {
-        type_name = "boolean";
-    } else if (type == TYPE_STRING) {
-        type_name = "string";
-    } else if (type == TYPE_CHAR) {
-        type_name = "char";
-    } else if (type == TYPE_BYTE) {
-        type_name = "byte";
-    } else if (type == TYPE_WORD) {
-        type_name = "word";
+    if (type == TYPE_INTEGER || type == TYPE_REAL) {
+        type_name = (type == TYPE_INTEGER) ? "integer" : "double";
+    } else {
+        type_name = builtinPascalTypeName(type);
     }
 
     if (!type_name) {
@@ -2533,24 +2509,7 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
         } else {
             VarType basicType = TYPE_VOID;
             // ... (checks for integer, real, char, etc.) ...
-             if (strcasecmp(typeNameCopy, "integer") == 0) basicType = TYPE_INT32;
-             else if (strcasecmp(typeNameCopy, "longint") == 0) basicType = TYPE_INT64;
-             else if (strcasecmp(typeNameCopy, "cardinal") == 0) basicType = TYPE_UINT32;
-             else if (strcasecmp(typeNameCopy, "shortint") == 0) basicType = TYPE_INT8;
-             else if (strcasecmp(typeNameCopy, "smallint") == 0) basicType = TYPE_INT16;
-             else if (strcasecmp(typeNameCopy, "int64") == 0) basicType = TYPE_INT64;
-             else if (strcasecmp(typeNameCopy, "uint64") == 0) basicType = TYPE_UINT64;
-             else if (strcasecmp(typeNameCopy, "qword") == 0) basicType = TYPE_UINT64;
-             else if (strcasecmp(typeNameCopy, "single") == 0) basicType = TYPE_FLOAT;
-             else if (strcasecmp(typeNameCopy, "double") == 0) basicType = TYPE_DOUBLE;
-             else if (strcasecmp(typeNameCopy, "extended") == 0) basicType = TYPE_LONG_DOUBLE;
-             else if (strcasecmp(typeNameCopy, "real") == 0) basicType = TYPE_DOUBLE;
-             else if (strcasecmp(typeNameCopy, "char") == 0) basicType = TYPE_CHAR;
-             else if (strcasecmp(typeNameCopy, "byte") == 0) basicType = TYPE_BYTE;
-             else if (strcasecmp(typeNameCopy, "word") == 0) basicType = TYPE_WORD;
-             else if (strcasecmp(typeNameCopy, "boolean") == 0) basicType = TYPE_BOOLEAN;
-             else if (strcasecmp(typeNameCopy, "file") == 0 || strcasecmp(typeNameCopy, "text") == 0) basicType = TYPE_FILE;
-             else if (strcasecmp(typeNameCopy, "mstream") == 0) basicType = TYPE_MEMORYSTREAM;
+             basicType = lookupBuiltinPascalTypeName(typeNameCopy);
 
             if (basicType != TYPE_VOID) {
                 node = newASTNode(AST_VARIABLE, initialToken); // Use initialToken

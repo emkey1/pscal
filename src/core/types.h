@@ -73,7 +73,9 @@ typedef enum {
     TYPE_FLOAT,
     TYPE_LONG_DOUBLE,
     TYPE_NIL,
-    TYPE_THREAD
+    TYPE_THREAD,
+    TYPE_WIDECHAR,
+    TYPE_UNICODE_STRING
 } VarType;
 
 /*

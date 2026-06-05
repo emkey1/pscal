@@ -16,6 +16,7 @@ void setTypeValue(Value *val, VarType type) {
 
 // Infer the type of a binary operation based on operand types
 VarType inferBinaryOpType(VarType left, VarType right) {
+    if (left == TYPE_UNICODE_STRING || right == TYPE_UNICODE_STRING) return TYPE_UNICODE_STRING;
     if (left == TYPE_STRING || right == TYPE_STRING) return TYPE_STRING;
 
     bool left_real = isRealType(left);
@@ -33,7 +34,10 @@ VarType inferBinaryOpType(VarType left, VarType right) {
     }
     if (left == TYPE_BOOLEAN && right == TYPE_BOOLEAN) return TYPE_BOOLEAN;
     if (left == TYPE_CHAR && right == TYPE_CHAR) return TYPE_STRING; // for '+'
+    if (left == TYPE_WIDECHAR && right == TYPE_WIDECHAR) return TYPE_UNICODE_STRING;
+    if ((left == TYPE_WIDECHAR && right == TYPE_CHAR) || (left == TYPE_CHAR && right == TYPE_WIDECHAR)) {
+        return TYPE_UNICODE_STRING;
+    }
     if (left_int && right_int) return TYPE_INT32;
     return TYPE_VOID; // fallback
 }
-

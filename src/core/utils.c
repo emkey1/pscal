@@ -198,7 +198,9 @@ const char *varTypeToString(VarType type) {
         case TYPE_INT32:        return "INTEGER";
         case TYPE_DOUBLE:       return "REAL";
         case TYPE_STRING:       return "STRING";
+        case TYPE_UNICODE_STRING:return "UNICODESTRING";
         case TYPE_CHAR:         return "CHAR";
+        case TYPE_WIDECHAR:     return "WIDECHAR";
         case TYPE_RECORD:       return "RECORD";
         case TYPE_FILE:         return "FILE";
         case TYPE_BYTE:         return "BYTE";
@@ -223,6 +225,28 @@ const char *varTypeToString(VarType type) {
         case TYPE_NIL:          return "NIL";
         case TYPE_THREAD:       return "THREAD";
         default:                return "UNKNOWN_VAR_TYPE";
+    }
+}
+
+const char *builtinPascalTypeName(VarType type) {
+    switch (type) {
+        case TYPE_INT32:         return "integer";
+        case TYPE_INT16:         return "smallint";
+        case TYPE_INT8:          return "shortint";
+        case TYPE_INT64:         return "int64";
+        case TYPE_UINT32:        return "cardinal";
+        case TYPE_UINT64:        return "uint64";
+        case TYPE_FLOAT:         return "single";
+        case TYPE_DOUBLE:        return "double";
+        case TYPE_LONG_DOUBLE:   return "extended";
+        case TYPE_BOOLEAN:       return "boolean";
+        case TYPE_STRING:        return "string";
+        case TYPE_UNICODE_STRING:return "unicodestring";
+        case TYPE_CHAR:          return "char";
+        case TYPE_WIDECHAR:      return "widechar";
+        case TYPE_BYTE:          return "byte";
+        case TYPE_WORD:          return "word";
+        default:                 return NULL;
     }
 }
 
@@ -652,7 +676,7 @@ static bool recordTypeNeedsVTableSlot(AST* recordType) {
     return false;
 }
 
-static VarType deduceBasicVarType(const char *name) {
+VarType lookupBuiltinPascalTypeName(const char *name) {
     if (!name) {
         return TYPE_VOID;
     }
@@ -670,9 +694,11 @@ static VarType deduceBasicVarType(const char *name) {
     if (strcasecmp(name, "extended") == 0) return TYPE_LONG_DOUBLE;
     if (strcasecmp(name, "real") == 0) return TYPE_DOUBLE;
     if (strcasecmp(name, "char") == 0) return TYPE_CHAR;
+    if (strcasecmp(name, "widechar") == 0) return TYPE_WIDECHAR;
     if (strcasecmp(name, "byte") == 0) return TYPE_BYTE;
     if (strcasecmp(name, "word") == 0) return TYPE_WORD;
     if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
+    if (strcasecmp(name, "unicodestring") == 0) return TYPE_UNICODE_STRING;
     if (strcasecmp(name, "file") == 0 || strcasecmp(name, "text") == 0) return TYPE_FILE;
     if (strcasecmp(name, "mstream") == 0) return TYPE_MEMORYSTREAM;
 
@@ -697,7 +723,7 @@ static VarType resolveValueTypeNode(AST **typeNodeRef) {
         if (node->var_type != TYPE_VOID && node->var_type != TYPE_UNKNOWN) {
             vt = node->var_type;
         } else if (node->type == AST_VARIABLE && node->token && node->token->value) {
-            vt = deduceBasicVarType(node->token->value);
+            vt = lookupBuiltinPascalTypeName(node->token->value);
             if (vt == TYPE_VOID) {
                 AST *looked = lookupType(node->token->value);
                 if (looked && looked != node) {
@@ -706,7 +732,7 @@ static VarType resolveValueTypeNode(AST **typeNodeRef) {
                         if (node->var_type != TYPE_VOID && node->var_type != TYPE_UNKNOWN) {
                             vt = node->var_type;
                         } else if (node->type == AST_VARIABLE && node->token && node->token->value) {
-                            vt = deduceBasicVarType(node->token->value);
+                            vt = lookupBuiltinPascalTypeName(node->token->value);
                         } else if (node->type == AST_RECORD_TYPE) {
                             vt = TYPE_RECORD;
                         } else if (node->type == AST_ARRAY_TYPE) {
@@ -752,6 +778,7 @@ static bool pascalVarTypeSize(VarType type, long long *out_bytes) {
         case TYPE_WORD:
             *out_bytes = 2;
             return true;
+        case TYPE_WIDECHAR:
         case TYPE_INT32:
         case TYPE_UINT32:
             *out_bytes = 4;
@@ -1382,7 +1409,8 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         case TYPE_LONG_DOUBLE:
             SET_REAL_VALUE(&v, 0.0L);
             break;
-        case TYPE_STRING: {
+        case TYPE_STRING:
+        case TYPE_UNICODE_STRING: {
             v.s_val = NULL;
             v.max_length = -1;
             long long parsed_len = -1;
@@ -1439,7 +1467,11 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
             }
             break;
         }
-        case TYPE_CHAR:    v.c_val = '\0'; v.max_length = 1; break;
+        case TYPE_CHAR:
+        case TYPE_WIDECHAR:
+            v.c_val = '\0';
+            v.max_length = 1;
+            break;
         case TYPE_BOOLEAN: v.i_val = 0; break;
         case TYPE_FILE: {
             v.f_val = NULL;
@@ -1866,6 +1898,7 @@ void freeValue(Value *v) {
         case TYPE_DOUBLE:
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
+        case TYPE_WIDECHAR:
         case TYPE_BYTE:
         case TYPE_WORD:
         case TYPE_NIL: // <<<< ADDED TYPE_NIL HERE
@@ -1919,6 +1952,7 @@ void freeValue(Value *v) {
             break;
 
         case TYPE_STRING:
+        case TYPE_UNICODE_STRING:
             if (v->s_val) {
 #ifdef DEBUG
                 fprintf(stderr, "[DEBUG]   Attempting to free string content at %p (value was '%s') for Value* %p\n",
@@ -2080,9 +2114,11 @@ void dumpSymbol(Symbol *sym) {
                 printf("%Lf", sym->value->real.r_val);
                 break;
             case TYPE_STRING:
+            case TYPE_UNICODE_STRING:
                 printf("\"%s\"", sym->value->s_val ? sym->value->s_val : "(null)");
                 break;
             case TYPE_CHAR:
+            case TYPE_WIDECHAR:
                 printf("'%c'", sym->value->c_val);
                 break;
             case TYPE_BOOLEAN:
@@ -2817,7 +2853,15 @@ void printValueToStream(Value v, FILE *stream) {
             fwrite(utf8, 1, len, stream);
             break;
         }
+        case TYPE_WIDECHAR:
+        {
+            char utf8[5];
+            size_t len = encodeUtf8Codepoint((uint32_t)v.c_val, utf8);
+            fwrite(utf8, 1, len, stream);
+            break;
+        }
         case TYPE_STRING:
+        case TYPE_UNICODE_STRING:
             if (v.s_val) {
                 writePascalText(stream, v.s_val, strlen(v.s_val));
             } else {
@@ -2957,6 +3001,7 @@ Value makeCopyOfValue(const Value *src) {
 
     switch (src->type) {
         case TYPE_STRING:
+        case TYPE_UNICODE_STRING:
             if (src->max_length > 0) {
                 v.s_val = malloc(src->max_length + 1);
                 if (!v.s_val) {
@@ -3045,6 +3090,7 @@ Value makeCopyOfValue(const Value *src) {
             break;
         }
         case TYPE_CHAR:
+        case TYPE_WIDECHAR:
             v.c_val = src->c_val;
             v.max_length = 1;
             break;

@@ -44,10 +44,18 @@
 #define AS_INTEGER(value) (asI64(value))
 #define IS_REAL(value)    (isRealType((value).type))
 #define AS_REAL(value)    (asLd(value))
-#define IS_STRING(value)  ((value).type == TYPE_STRING)
+#define IS_STRING(value)  (isPascalStringType((value).type))
 #define AS_STRING(value)  ((value).s_val)
-#define IS_CHAR(value)    ((value).type == TYPE_CHAR)
+#define IS_CHAR(value)    (isPascalCharType((value).type))
 #define AS_CHAR(value)    ((value).c_val)
+
+static inline bool isPascalStringType(VarType t) {
+    return t == TYPE_STRING || t == TYPE_UNICODE_STRING;
+}
+
+static inline bool isPascalCharType(VarType t) {
+    return t == TYPE_CHAR || t == TYPE_WIDECHAR;
+}
 
 // Helper array to map Pscal color codes 0-7 to ANSI base numbers (30-37 or 40-47)
 // Pscal: 0=Black, 1=Blue,  2=Green, 3=Cyan, 4=Red, 5=Magenta, 6=Brown(Yellow), 7=LightGray(White)
@@ -88,6 +96,7 @@ static inline bool isIntlikeType(VarType t) {
     switch (t) {
         case TYPE_BOOLEAN:
         case TYPE_CHAR:
+        case TYPE_WIDECHAR:
         case TYPE_THREAD:
             return true;
         default:
@@ -117,7 +126,7 @@ static inline bool arrayUsesPackedBytes(const Value* v) {
 static inline bool isOrdinalType(VarType t) {
     // Pascal ordinals: integer subranges, enumerations, char, boolean.
     // Treat INTEGER/BYTE/WORD/BOOLEAN/CHAR/ENUM as ordinal.
-    return isIntlikeType(t) || t == TYPE_CHAR || t == TYPE_ENUM;
+    return isIntlikeType(t) || isPascalCharType(t) || t == TYPE_ENUM;
 }
 
 static inline bool tryValueToOrdinal(const Value* v, long long* out) {
@@ -144,6 +153,9 @@ static inline bool tryValueToOrdinal(const Value* v, long long* out) {
         case TYPE_CHAR:
             *out = (unsigned char)v->c_val;
             return true;
+        case TYPE_WIDECHAR:
+            *out = v->c_val;
+            return true;
         case TYPE_ENUM:
             *out = v->enum_val.ordinal;
             return true;
@@ -164,6 +176,9 @@ static inline long long coerceToI64(const Value* v, VM* vm, const char* who) {
 
 #define IS_INTLIKE(v) (isIntlikeType((v).type))
 #define IS_NUMERIC(v) (IS_INTLIKE(v) || isRealType((v).type))
+
+VarType lookupBuiltinPascalTypeName(const char *name);
+const char *builtinPascalTypeName(VarType type);
 
 // Accessors (use your existing Value layout: i_val for INTEGER/BYTE/WORD/BOOLEAN)
 static inline long long asI64(Value v) {

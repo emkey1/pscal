@@ -81,25 +81,7 @@ static AST *cloneTypeForVar(VarType type, AST *typeDef, int line) {
         return copyAST(typeDef);
     }
 
-    const char *name = NULL;
-    switch (type) {
-        case TYPE_INT32:        name = "integer"; break;
-        case TYPE_INT16:        name = "smallint"; break;
-        case TYPE_INT8:         name = "shortint"; break;
-        case TYPE_INT64:        name = "int64"; break;
-        case TYPE_UINT32:       name = "cardinal"; break;
-        case TYPE_UINT64:       name = "uint64"; break;
-        case TYPE_FLOAT:        name = "single"; break;
-        case TYPE_DOUBLE:       name = "double"; break;
-        case TYPE_LONG_DOUBLE:  name = "extended"; break;
-        case TYPE_BOOLEAN:      name = "boolean"; break;
-        case TYPE_STRING:       name = "string"; break;
-        case TYPE_CHAR:         name = "char"; break;
-        case TYPE_BYTE:         name = "byte"; break;
-        case TYPE_WORD:         name = "word"; break;
-        default:
-            break;
-    }
+    const char *name = builtinPascalTypeName(type);
 
     if (name) {
         Token *tok = newToken(TOKEN_IDENTIFIER, name, line, 0);
@@ -327,9 +309,11 @@ static AST *createDefaultReturnValue(VarType type, AST *typeDef, int line) {
         case TYPE_FLOAT:
         case TYPE_ENUM:
         case TYPE_CHAR:
+        case TYPE_WIDECHAR:
             return createNumberLiteral(0, type, line);
         case TYPE_STRING:
-            return createStringLiteral("", TYPE_STRING, line);
+        case TYPE_UNICODE_STRING:
+            return createStringLiteral("", type, line);
         case TYPE_VOID:
             return NULL;
         default:

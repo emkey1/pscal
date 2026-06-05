@@ -44,15 +44,11 @@ typedef struct {
 } AddressConstantEntry;
 
 static VarType resolveOrdinalBuiltinTypeName(const char *name) {
-    if (!name) return TYPE_UNKNOWN;
-
-    if (strcasecmp(name, "integer") == 0) return TYPE_INT32;
-    if (strcasecmp(name, "char") == 0) return TYPE_CHAR;
-    if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
-    if (strcasecmp(name, "byte") == 0) return TYPE_BYTE;
-    if (strcasecmp(name, "word") == 0) return TYPE_WORD;
-
-    return TYPE_UNKNOWN;
+    VarType type = lookupBuiltinPascalTypeName(name);
+    if (!isOrdinalType(type)) {
+        return TYPE_UNKNOWN;
+    }
+    return type;
 }
 
 static AddressConstantEntry* address_constant_entries = NULL;
@@ -3395,8 +3391,8 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
             }
             // Treat CHAR and STRING as interchangeable without requiring
             // coercion.  A CHAR is effectively a single-character STRING.
-            if ((param_actual->var_type == TYPE_STRING && arg_vt == TYPE_CHAR) ||
-                (param_actual->var_type == TYPE_CHAR   && arg_vt == TYPE_STRING)) {
+            if ((isPascalStringType(param_actual->var_type) && isPascalCharType(arg_vt)) ||
+                (isPascalCharType(param_actual->var_type)   && isPascalStringType(arg_vt))) {
                 return true;
             }
             // Allow implicit narrowing from wider ordinal types to BYTE.
@@ -3434,20 +3430,22 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
             case TYPE_INTEGER:
                 return arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
                        arg_vt == TYPE_WORD    || arg_vt == TYPE_ENUM ||
-                       arg_vt == TYPE_CHAR;
+                       isPascalCharType(arg_vt);
             case TYPE_REAL:
                 return arg_vt == TYPE_REAL   || arg_vt == TYPE_INTEGER ||
                        arg_vt == TYPE_BYTE   || arg_vt == TYPE_WORD    ||
-                       arg_vt == TYPE_ENUM   || arg_vt == TYPE_CHAR;
+                       arg_vt == TYPE_ENUM   || isPascalCharType(arg_vt);
             case TYPE_CHAR:
-                return arg_vt == TYPE_CHAR   || arg_vt == TYPE_INTEGER ||
+            case TYPE_WIDECHAR:
+                return isPascalCharType(arg_vt) || arg_vt == TYPE_INTEGER ||
                        arg_vt == TYPE_BYTE   || arg_vt == TYPE_WORD;
             case TYPE_POINTER:
                 if (arg_vt != TYPE_POINTER && arg_vt != TYPE_NIL) return false;
                 // If the parameter specifies no referenced subtype, accept any pointer.
                 return param_actual->right == NULL;
             case TYPE_STRING:
-                return arg_vt == TYPE_STRING || arg_vt == TYPE_CHAR;
+            case TYPE_UNICODE_STRING:
+                return isPascalStringType(arg_vt) || isPascalCharType(arg_vt);
             case TYPE_BOOLEAN:
             case TYPE_BYTE:
             case TYPE_ENUM:
@@ -3457,8 +3455,7 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
                 return param_actual->var_type == arg_vt;
             case TYPE_WORD:
                 return arg_vt == TYPE_WORD || arg_vt == TYPE_INTEGER ||
-                       arg_vt == TYPE_BYTE  || arg_vt == TYPE_ENUM   ||
-                       arg_vt == TYPE_CHAR;
+                       arg_vt == TYPE_BYTE  || arg_vt == TYPE_ENUM   || isPascalCharType(arg_vt);
             default:
                 return false; // Need structural info for arrays/records/etc.
         }
@@ -3519,21 +3516,23 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
         switch (param_actual->var_type) {
             case TYPE_INTEGER:
                 if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD ||
-                    arg_vt == TYPE_ENUM || arg_vt == TYPE_CHAR)
+                    arg_vt == TYPE_ENUM || isPascalCharType(arg_vt))
                     return true;
                 break;
             case TYPE_REAL:
                 if (arg_vt == TYPE_INTEGER || arg_vt == TYPE_BYTE ||
                     arg_vt == TYPE_WORD || arg_vt == TYPE_ENUM ||
-                    arg_vt == TYPE_CHAR)
+                    isPascalCharType(arg_vt))
                     return true;
                 break;
             case TYPE_CHAR:
+            case TYPE_WIDECHAR:
                 if (arg_vt == TYPE_BYTE || arg_vt == TYPE_WORD)
                     return true;
                 break;
             case TYPE_STRING:
-                if (arg_vt == TYPE_CHAR)
+            case TYPE_UNICODE_STRING:
+                if (isPascalCharType(arg_vt))
                     return true;
                 break;
             default:
@@ -9189,7 +9188,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             // This logic correctly distinguishes between accessing a string/char vs. a regular array.
-            if (node->left && (node->left->var_type == TYPE_STRING || node->left->var_type == TYPE_CHAR)) {
+            if (node->left && (isPascalStringType(node->left->var_type) || isPascalCharType(node->left->var_type))) {
                 compileRValue(node->left, chunk, getLine(node->left));      // Push the string or char
                 compileRValue(node->children[0], chunk, getLine(node->children[0])); // Push the index
                 writeBytecodeChunk(chunk, GET_CHAR_FROM_STRING, line); // Use the specialized opcode

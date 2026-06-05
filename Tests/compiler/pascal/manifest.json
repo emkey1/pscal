@@ -109,6 +109,12 @@
       "stdout_substring": "snow=\u96ea\nblock=\u2588\nblocks=\u2588\u2588"
     },
     {
+      "id": "unicode_text_types_foundation",
+      "path": "Tests/compiler/pascal/cases/unicode_text_types_foundation.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: unicode text foundation 5 65"
+    },
+    {
       "id": "variant_record_basic",
       "path": "Tests/compiler/pascal/cases/variant_record_basic.pas",
       "expect": "compile_success",
