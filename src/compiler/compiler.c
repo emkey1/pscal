@@ -5057,7 +5057,7 @@ static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int li
     if (target_type != TYPE_UNKNOWN) {
         if (isRealType(target_type)) {
             type_is_safe = true;
-        } else if (target_type == TYPE_BOOLEAN) {
+        } else if (target_type == TYPE_BOOLEAN || target_type == TYPE_RECORD) {
             type_is_safe = true;
         }
     }

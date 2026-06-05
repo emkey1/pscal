@@ -209,6 +209,13 @@
       "path": "Tests/compiler/pascal/cases/nested_record_array_field_name_access.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: nested record-array field name access"
+    },
+    {
+      "id": "local_record_store_bytecode",
+      "path": "Tests/compiler/pascal/cases/local_record_store_bytecode.pas",
+      "expect": "compile_success",
+      "compiler_args": ["--dump-bytecode-only"],
+      "stderr_substring": "LOAD_ELEMENT_VALUE_CONST          0 (flat offset)\n0032    | SET_LOCAL           0 (slot)"
     }
   ]
 }

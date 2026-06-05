@@ -59,10 +59,14 @@ def run_test(entry):
     stderr_sub = entry.get("stderr_substring")
     stderr_any = entry.get("stderr_substrings_any") or []
 
+    compiler_args = entry.get("compiler_args") or []
+    if compiler_args and not isinstance(compiler_args, list):
+        raise TestFailure(f"{test_id}: compiler_args must be a list")
+
     if not PASCAL_BIN.exists():
         raise TestFailure(f"Pascal compiler not found at {PASCAL_BIN}")
 
-    cmd = [str(PASCAL_BIN), "--no-cache", str(source_path)]
+    cmd = [str(PASCAL_BIN), "--no-cache", *compiler_args, str(source_path)]
     proc = subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
