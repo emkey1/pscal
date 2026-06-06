@@ -15,4 +15,18 @@ if [[ "$name" != ?海 ]]; then
 else
     printf 'test-neg=miss\n'
 fi
+case "$name" in
+    [雪海]山) printf 'case=bracket-prefix\n' ;;
+    *) printf 'case=bracket-miss\n' ;;
+esac
+if [[ "$name" = [雪海]山 ]]; then
+    printf 'test-bracket=match\n'
+else
+    printf 'test-bracket=miss\n'
+fi
+if [[ "$name" = [!海]山 ]]; then
+    printf 'test-bracket-neg=match\n'
+else
+    printf 'test-bracket-neg=miss\n'
+fi
 printf 'unicode-pattern:end\n'

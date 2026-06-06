@@ -505,19 +505,19 @@
             "id": "unicode_pattern_match",
             "name": "Unicode shell patterns match whole characters",
             "category": "expansion",
-            "description": "case clauses and [[ string = pattern ]] should treat '?' as one UTF-8 codepoint for valid text.",
+            "description": "case clauses and [[ string = pattern ]] should treat '?', bracket sets, and bracket negation as whole UTF-8 codepoints for valid text.",
             "script": "Tests/exsh/tests/unicode_pattern_match.exsh",
             "expect": "runtime_ok",
-            "expected_stdout": "unicode-pattern:start\ncase=single-prefix\ntest=match\ntest-neg=match\nunicode-pattern:end"
+            "expected_stdout": "unicode-pattern:start\ncase=single-prefix\ntest=match\ntest-neg=match\ncase=bracket-prefix\ntest-bracket=match\ntest-bracket-neg=match\nunicode-pattern:end"
         },
         {
             "id": "unicode_path_glob",
             "name": "Unicode pathname globs match whole characters",
             "category": "expansion",
-            "description": "Unquoted pathname globbing should treat '?' as one UTF-8 codepoint and preserve dotfile rules.",
+            "description": "Unquoted pathname globbing should treat '?', bracket sets, and bracket negation as whole UTF-8 codepoints while preserving dotfile rules.",
             "script": "Tests/exsh/tests/unicode_path_glob.exsh",
             "expect": "runtime_ok",
-            "expected_stdout": "unicode-glob:start\nsingle=山.txt\nsingle=雪.txt\nnested=雪dir/山.log\ndot=.雪.txt\nunicode-glob:end"
+            "expected_stdout": "unicode-glob:start\nsingle=山.txt\nsingle=雪.txt\nbracket=山.txt\nbracket=雪.txt\nnested=雪dir/山.log\nnested-bracket=雪dir/山.log\ndot=.雪.txt\nunicode-glob:end"
         },
         {
             "id": "unicode_identifiers",

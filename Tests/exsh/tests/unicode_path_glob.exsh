@@ -9,6 +9,8 @@ rm -f .隠し.txt
 touch .雪.txt
 printf 'unicode-glob:start\n'
 printf 'single=%s\n' ?.txt
+printf 'bracket=%s\n' [雪山].txt
 printf 'nested=%s\n' ?dir/?.log
+printf 'nested-bracket=%s\n' [雪山]dir/[山海].log
 printf 'dot=%s\n' .?.txt
 printf 'unicode-glob:end\n'
