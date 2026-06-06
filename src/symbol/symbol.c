@@ -52,7 +52,9 @@ static VarType deduceLocalSymbolTypeFromName(const char *name) {
     if (strcasecmp(name, "word") == 0) return TYPE_WORD;
     if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
     if (strcasecmp(name, "string") == 0) return TYPE_STRING;
-    if (strcasecmp(name, "file") == 0 || strcasecmp(name, "text") == 0) return TYPE_FILE;
+    if (strcasecmp(name, "file") == 0 ||
+        strcasecmp(name, "text") == 0 ||
+        strcasecmp(name, "textfile") == 0) return TYPE_FILE;
     if (strcasecmp(name, "mstream") == 0) return TYPE_MEMORYSTREAM;
     return TYPE_UNKNOWN;
 }

@@ -1555,7 +1555,8 @@ static void emitGlobalVarDefinition(AST* var_decl,
                     if (source_node && source_node->token && source_node->token->value) {
                         file_element_name = source_node->token->value;
                     }
-                } else if (strcasecmp(file_token, "text") == 0) {
+                } else if (strcasecmp(file_token, "text") == 0 ||
+                           strcasecmp(file_token, "textfile") == 0) {
                     is_text_file = true;
                     file_element_type = TYPE_VOID;
                     file_element_name = "";
@@ -6116,7 +6117,8 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                                 if (source_node && source_node->token && source_node->token->value) {
                                     file_element_name = source_node->token->value;
                                 }
-                            } else if (strcasecmp(type_name, "text") == 0) {
+                            } else if (strcasecmp(type_name, "text") == 0 ||
+                                       strcasecmp(type_name, "textfile") == 0) {
                                 is_text_file = true;
                                 file_element_type = TYPE_VOID;
                                 file_element_name = "";
@@ -7800,6 +7802,11 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
 
             if (!calleeName) {
                 calleeName = "";
+            }
+            if (strcasecmp(calleeName, "assignfile") == 0) {
+                calleeName = "assign";
+            } else if (strcasecmp(calleeName, "closefile") == 0) {
+                calleeName = "close";
             }
             if (!methodIdentifier) {
                 methodIdentifier = calleeName;

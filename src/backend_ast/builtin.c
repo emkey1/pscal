@@ -524,11 +524,7 @@ static int gSdlReadKeyBufferCount = 0;
 #endif
 
 static bool vmShouldBypassTerminalControl(void) {
-#ifdef SDL
-    return sdlIsGraphicsActive();
-#else
     return false;
-#endif
 }
 
 static const Value* resolveStringPointerBuiltin(const Value* value) {
@@ -1704,6 +1700,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"arcsin", vmBuiltinArcsin},
     {"arctan", vmBuiltinArctan},
     {"assign", vmBuiltinAssign},
+    {"assignfile", vmBuiltinAssign},
     {"beep", vmBuiltinBeep},
     {"biblinktext", vmBuiltinBlinktext},
     {"biboldtext", vmBuiltinBoldtext},
@@ -1725,6 +1722,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"clreol", vmBuiltinClreol},
     {"clrscr", vmBuiltinClrscr},
     {"close", vmBuiltinClose},
+    {"closefile", vmBuiltinClose},
     {"closegraph", NULL},
     {"closegraph3d", NULL},
     {"copy", vmBuiltinCopy},
@@ -5091,12 +5089,6 @@ static int getCursorPosition(int *row, int *col) {
     *row = 1;
     *col = 1;
 
-#ifdef SDL
-    if (sdlIsGraphicsActive()) {
-        return 0;
-    }
-#endif
-
     // --- Check if Input is a Terminal ---
     if (!pscalRuntimeStdinIsInteractive()) {
         ret_status = 0; // Non-interactive: fall back to default 1,1 silently.
@@ -5686,8 +5678,8 @@ Value vmBuiltinClrscr(VM* vm, int arg_count, Value* args) {
         return makeVoid();
     }
 
-    /* Clear scrollback + screen, then home. Matches exsh/clear behavior. */
-    fputs("\x1B[3J\x1B[H\x1B[2J", stdout);
+    /* Prefer the portable clear-screen sequence that embedded terminals reliably honor. */
+    fputs("\x1B[2J\x1B[H", stdout);
     fflush(stdout);
 
     return makeVoid();
@@ -5702,38 +5694,8 @@ Value vmBuiltinClreol(VM* vm, int arg_count, Value* args) {
     if (vmShouldBypassTerminalControl()) {
         return makeVoid();
     }
-    int cur_row = 1, cur_col = 1;
-    if (getCursorPosition(&cur_row, &cur_col) != 0) {
-        cur_row = 1;
-        cur_col = 1;
-    }
-    int screen_rows = 24, screen_cols = 80;
-    (void)screen_rows;
-    getTerminalSize(&screen_rows, &screen_cols);
-    int right_edge = gWindowRight > 0 ? gWindowRight : screen_cols;
-    if (right_edge < cur_col) {
-        right_edge = cur_col;
-    }
-    int span = right_edge - cur_col + 1;
-    bool color_was_applied = applyCurrentTextAttributes(stdout);
-    /* Send the ANSI sequence for terminals that honor it. */
+    /* Do not probe cursor position here: DSR queries interfere with some embedded terminals. */
     printf("\x1B[K");
-    /* Also paint spaces within the current window for terminals that ignore K. */
-    if (span > 0) {
-        fprintf(stdout, "\x1B[%d;%dH", cur_row, cur_col);
-        char spaces[128];
-        memset(spaces, ' ', sizeof(spaces));
-        int remaining = span;
-        while (remaining > 0) {
-            int chunk = remaining > (int)sizeof(spaces) ? (int)sizeof(spaces) : remaining;
-            fwrite(spaces, 1, (size_t)chunk, stdout);
-            remaining -= chunk;
-        }
-        fprintf(stdout, "\x1B[%d;%dH", cur_row, cur_col);
-    }
-    if (color_was_applied) {
-        resetTextAttributes(stdout);
-    }
     fflush(stdout);
     return makeVoid();
 }
@@ -10357,11 +10319,13 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("ArcTan2", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("atan2", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Assign", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("AssignFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Beep", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Byte", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Ceil", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Chr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Close", AST_PROCEDURE_DECL, NULL);
+    registerBuiltinFunctionUnlocked("CloseFile", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("ClrEol", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("Copy", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Cos", AST_FUNCTION_DECL, NULL);

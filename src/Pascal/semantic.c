@@ -14,7 +14,13 @@
 static AST *gProgramRoot = NULL;
 static ClosureCaptureRegistry gClosureRegistry;
 static bool gRegistryInitialized = false;
-static AST *desugarNode(AST *node, VarType currentFunctionType);
+typedef enum {
+    THROW_MODE_RETURN,
+    THROW_MODE_TRY_BREAK,
+    THROW_MODE_PROPAGATE_PENDING
+} ThrowDesugarMode;
+
+static AST *desugarNode(AST *node, VarType currentFunctionType, ThrowDesugarMode throwMode);
 static AST *resolveTypeAliasLocal(AST *type_node);
 static AST *findRecordMethod(AST *recordType, const char *name);
 static void appendStatementsFromBlock(AST *target, AST *block);
@@ -164,22 +170,6 @@ static AST *createPendingBreakNode(int line) {
     return ifNode;
 }
 
-static AST *takeThrowMessageExpr(AST *throwNode, int line) {
-    if (!throwNode) {
-        return createStringLiteral("", TYPE_STRING, line);
-    }
-
-    AST *expr = throwNode->left;
-    throwNode->left = NULL;
-    if (expr && expr->type == AST_STRING) {
-        return expr;
-    }
-    if (expr) {
-        freeAST(expr);
-    }
-    return createStringLiteral("", TYPE_STRING, line);
-}
-
 static AST *createThrowBreakBlock(AST *messageExpr, int line) {
     AST *block = newASTNode(AST_COMPOUND, NULL);
     addChild(block, createAssignment(createVarRef("__pas_exc_message", TYPE_STRING, NULL, line),
@@ -189,6 +179,17 @@ static AST *createThrowBreakBlock(AST *messageExpr, int line) {
                                      createBooleanLiteral(true, line),
                                      line));
     addChild(block, newASTNode(AST_BREAK, NULL));
+    return block;
+}
+
+static AST *createThrowPendingBlock(AST *messageExpr, int line) {
+    AST *block = newASTNode(AST_COMPOUND, NULL);
+    addChild(block, createAssignment(createVarRef("__pas_exc_message", TYPE_STRING, NULL, line),
+                                     messageExpr ? messageExpr : createStringLiteral("", TYPE_STRING, line),
+                                     line));
+    addChild(block, createAssignment(createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, line),
+                                     createBooleanLiteral(true, line),
+                                     line));
     return block;
 }
 
@@ -318,71 +319,6 @@ static AST *createDefaultReturnValue(VarType type, AST *typeDef, int line) {
             return NULL;
         default:
             return createNilLiteral(typeDef ? typeDef->var_type : type, line);
-    }
-}
-
-static void rewriteThrowsForTry(AST *node) {
-    if (!node) {
-        return;
-    }
-
-    if (node->type == AST_FUNCTION_DECL || node->type == AST_PROCEDURE_DECL || node->type == AST_TRY) {
-        return;
-    }
-
-    if (node->left) {
-        if (node->left->type == AST_THROW) {
-            AST *throwNode = node->left;
-            int line = throwNode->i_val;
-            AST *messageExpr = takeThrowMessageExpr(throwNode, line);
-            node->left = NULL;
-            freeAST(throwNode);
-            setLeft(node, createThrowBreakBlock(messageExpr, line));
-        } else {
-            rewriteThrowsForTry(node->left);
-        }
-    }
-
-    if (node->right) {
-        if (node->right->type == AST_THROW) {
-            AST *throwNode = node->right;
-            int line = throwNode->i_val;
-            AST *messageExpr = takeThrowMessageExpr(throwNode, line);
-            node->right = NULL;
-            freeAST(throwNode);
-            setRight(node, createThrowBreakBlock(messageExpr, line));
-        } else {
-            rewriteThrowsForTry(node->right);
-        }
-    }
-
-    if (node->extra) {
-        if (node->extra->type == AST_THROW) {
-            AST *throwNode = node->extra;
-            int line = throwNode->i_val;
-            AST *messageExpr = takeThrowMessageExpr(throwNode, line);
-            node->extra = NULL;
-            freeAST(throwNode);
-            setExtra(node, createThrowBreakBlock(messageExpr, line));
-        } else {
-            rewriteThrowsForTry(node->extra);
-        }
-    }
-
-    for (int i = 0; i < node->child_count; i++) {
-        AST *child = node->children[i];
-        if (!child) {
-            continue;
-        }
-        if (child->type == AST_THROW) {
-            int line = child->i_val;
-            AST *messageExpr = takeThrowMessageExpr(child, line);
-            freeAST(child);
-            node->children[i] = createThrowBreakBlock(messageExpr, line);
-            node->children[i]->parent = node;
-        } else {
-            rewriteThrowsForTry(child);
-        }
     }
 }
 
@@ -587,34 +523,39 @@ static AST *desugarWithNode(AST *node) {
     return body ? body : newASTNode(AST_NOOP, NULL);
 }
 
-static AST *desugarTryNode(AST *node, VarType currentFunctionType) {
+static AST *desugarTryNode(AST *node, VarType currentFunctionType, ThrowDesugarMode throwMode) {
     AST *tryBlock = node->left;
-    AST *catchNode = node->right;
-    AST *catchBody = NULL;
+    AST *handlerNode = node->right;
+    AST *handlerBody = NULL;
     AST *handlerVar = NULL;
     int labelLine = 0;
+    bool isFinally = false;
 
     node->left = NULL;
     node->right = NULL;
 
     if (tryBlock) {
         labelLine = nodeLine(tryBlock);
-        rewriteThrowsForTry(tryBlock);
-        tryBlock = desugarNode(tryBlock, currentFunctionType);
+        tryBlock = desugarNode(tryBlock, currentFunctionType, THROW_MODE_TRY_BREAK);
     }
 
-    if (catchNode) {
-        handlerVar = catchNode->left;
-        catchNode->left = NULL;
-        catchBody = catchNode->right;
-        catchNode->right = NULL;
-        freeAST(catchNode);
+    if (handlerNode) {
+        isFinally = handlerNode->type == AST_FINALLY;
+        handlerVar = handlerNode->left;
+        handlerNode->left = NULL;
+        handlerBody = handlerNode->right;
+        handlerNode->right = NULL;
+        freeAST(handlerNode);
     }
-    if (catchBody) {
-        catchBody = desugarNode(catchBody, currentFunctionType);
+
+    ThrowDesugarMode handlerThrowMode =
+        (throwMode == THROW_MODE_RETURN) ? THROW_MODE_RETURN : THROW_MODE_PROPAGATE_PENDING;
+
+    if (handlerBody) {
+        handlerBody = desugarNode(handlerBody, currentFunctionType, handlerThrowMode);
     }
-    if (handlerVar && handlerVar->token && handlerVar->token->value && catchBody) {
-        catchBody = rewriteExceptionMessageReferences(catchBody, handlerVar->token->value);
+    if (!isFinally && handlerVar && handlerVar->token && handlerVar->token->value && handlerBody) {
+        handlerBody = rewriteExceptionMessageReferences(handlerBody, handlerVar->token->value);
     }
     if (handlerVar) {
         freeAST(handlerVar);
@@ -635,22 +576,41 @@ static AST *desugarTryNode(AST *node, VarType currentFunctionType) {
     setRight(repeatNode, createBooleanLiteral(true, labelLine));
     addChild(result, repeatNode);
 
-    AST *ifBody = newASTNode(AST_COMPOUND, NULL);
-    addChild(ifBody, createAssignment(createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, labelLine),
-                                      createBooleanLiteral(false, labelLine),
-                                      labelLine));
-    appendStatementsFromBlock(ifBody, catchBody);
+    if (isFinally) {
+        appendStatementsFromBlock(result, handlerBody);
 
-    AST *catchIf = newASTNode(AST_IF, NULL);
-    setLeft(catchIf, createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, labelLine));
-    setRight(catchIf, ifBody);
-    addChild(result, catchIf);
+        if (throwMode == THROW_MODE_RETURN) {
+            AST *propagateIfBody = newASTNode(AST_COMPOUND, NULL);
+            Token *retTok = newToken(TOKEN_RETURN, "return", labelLine, 0);
+            AST *ret = newASTNode(AST_RETURN, retTok);
+            AST *retValue = createDefaultReturnValue(currentFunctionType, NULL, labelLine);
+            setLeft(ret, retValue);
+            setTypeAST(ret, currentFunctionType);
+            addChild(propagateIfBody, ret);
+
+            AST *propagateIf = newASTNode(AST_IF, NULL);
+            setLeft(propagateIf, createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, labelLine));
+            setRight(propagateIf, propagateIfBody);
+            addChild(result, propagateIf);
+        }
+    } else {
+        AST *ifBody = newASTNode(AST_COMPOUND, NULL);
+        addChild(ifBody, createAssignment(createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, labelLine),
+                                          createBooleanLiteral(false, labelLine),
+                                          labelLine));
+        appendStatementsFromBlock(ifBody, handlerBody);
+
+        AST *catchIf = newASTNode(AST_IF, NULL);
+        setLeft(catchIf, createVarRef("__pas_exc_pending", TYPE_BOOLEAN, NULL, labelLine));
+        setRight(catchIf, ifBody);
+        addChild(result, catchIf);
+    }
 
     free(node);
     return result;
 }
 
-static AST *desugarThrowNode(AST *node, VarType currentFunctionType) {
+static AST *desugarThrowNode(AST *node, VarType currentFunctionType, ThrowDesugarMode throwMode) {
     if (!node) {
         return NULL;
     }
@@ -668,6 +628,18 @@ static AST *desugarThrowNode(AST *node, VarType currentFunctionType) {
     }
     if (!messageExpr) {
         messageExpr = createStringLiteral("", TYPE_STRING, line);
+    }
+
+    if (throwMode == THROW_MODE_TRY_BREAK) {
+        AST *result = createThrowBreakBlock(messageExpr, line);
+        free(node);
+        return result;
+    }
+
+    if (throwMode == THROW_MODE_PROPAGATE_PENDING) {
+        AST *result = createThrowPendingBlock(messageExpr, line);
+        free(node);
+        return result;
     }
 
     AST *result = newASTNode(AST_COMPOUND, NULL);
@@ -689,72 +661,72 @@ static AST *desugarThrowNode(AST *node, VarType currentFunctionType) {
     return result;
 }
 
-static AST *desugarNode(AST *node, VarType currentFunctionType) {
+static AST *desugarNode(AST *node, VarType currentFunctionType, ThrowDesugarMode throwMode) {
     if (!node) {
         return NULL;
     }
 
     if (node->type == AST_TRY) {
-        return desugarTryNode(node, currentFunctionType);
+        return desugarTryNode(node, currentFunctionType, throwMode);
     }
 
     if (node->type == AST_THROW) {
-        return desugarThrowNode(node, currentFunctionType);
+        return desugarThrowNode(node, currentFunctionType, throwMode);
     }
 
     if (node->type == AST_FUNCTION_DECL) {
         if (node->left) {
-            AST *newLeft = desugarNode(node->left, currentFunctionType);
+            AST *newLeft = desugarNode(node->left, currentFunctionType, THROW_MODE_RETURN);
             if (newLeft != node->left) {
                 setLeft(node, newLeft);
             }
         }
         if (node->right) {
-            AST *newRight = desugarNode(node->right, currentFunctionType);
+            AST *newRight = desugarNode(node->right, currentFunctionType, THROW_MODE_RETURN);
             if (newRight != node->right) {
                 setRight(node, newRight);
             }
         }
         if (node->extra) {
-            AST *newExtra = desugarNode(node->extra, node->var_type);
+            AST *newExtra = desugarNode(node->extra, node->var_type, THROW_MODE_RETURN);
             if (newExtra != node->extra) {
                 setExtra(node, newExtra);
             }
         }
     } else if (node->type == AST_PROCEDURE_DECL) {
         if (node->left) {
-            AST *newLeft = desugarNode(node->left, currentFunctionType);
+            AST *newLeft = desugarNode(node->left, currentFunctionType, THROW_MODE_RETURN);
             if (newLeft != node->left) {
                 setLeft(node, newLeft);
             }
         }
         if (node->right) {
-            AST *newRight = desugarNode(node->right, TYPE_VOID);
+            AST *newRight = desugarNode(node->right, TYPE_VOID, THROW_MODE_RETURN);
             if (newRight != node->right) {
                 setRight(node, newRight);
             }
         }
         if (node->extra) {
-            AST *newExtra = desugarNode(node->extra, currentFunctionType);
+            AST *newExtra = desugarNode(node->extra, currentFunctionType, THROW_MODE_RETURN);
             if (newExtra != node->extra) {
                 setExtra(node, newExtra);
             }
         }
     } else {
         if (node->left) {
-            AST *newLeft = desugarNode(node->left, currentFunctionType);
+            AST *newLeft = desugarNode(node->left, currentFunctionType, throwMode);
             if (newLeft != node->left) {
                 setLeft(node, newLeft);
             }
         }
         if (node->right) {
-            AST *newRight = desugarNode(node->right, currentFunctionType);
+            AST *newRight = desugarNode(node->right, currentFunctionType, throwMode);
             if (newRight != node->right) {
                 setRight(node, newRight);
             }
         }
         if (node->extra) {
-            AST *newExtra = desugarNode(node->extra, currentFunctionType);
+            AST *newExtra = desugarNode(node->extra, currentFunctionType, throwMode);
             if (newExtra != node->extra) {
                 setExtra(node, newExtra);
             }
@@ -766,7 +738,7 @@ static AST *desugarNode(AST *node, VarType currentFunctionType) {
         if (!child) {
             continue;
         }
-        AST *newChild = desugarNode(child, currentFunctionType);
+        AST *newChild = desugarNode(child, currentFunctionType, throwMode);
         if (newChild != child) {
             node->children[i] = newChild;
             if (newChild) {
@@ -1286,7 +1258,7 @@ void pascalPerformSemanticAnalysis(AST *root) {
 
     ensureRegistry();
     ensureExceptionGlobals(root);
-    gProgramRoot = desugarNode(root, TYPE_VOID);
+    gProgramRoot = desugarNode(root, TYPE_VOID, THROW_MODE_RETURN);
     pascal_semantic_pass_active = 1;
     annotateTypes(gProgramRoot, NULL, gProgramRoot);
     pascal_semantic_pass_active = 0;

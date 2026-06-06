@@ -76,6 +76,7 @@ static void assignRecordFieldSlots(AST *fieldDecl, int baseSlot);
 static bool parseVariantRecordSection(Parser *parser, AST *recordNode, int *slotCursor);
 static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator, int *slotCursor);
 static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName);
+static AST *parseStatementListUntilEither(Parser *parser, TokenType terminatorA, TokenType terminatorB, const char *contextName);
 static AST *tryStatement(Parser *parser);
 static AST *raiseStatement(Parser *parser);
 static AST *withStatement(Parser *parser);
@@ -1974,6 +1975,7 @@ static bool tokenTerminatesStatement(TokenType type) {
         case TOKEN_END:
         case TOKEN_ELSE:
         case TOKEN_EXCEPT:
+        case TOKEN_FINALLY:
         case TOKEN_UNTIL:
         case TOKEN_EOF:
         case TOKEN_PERIOD:
@@ -2506,6 +2508,10 @@ AST *typeSpecifier(Parser *parser, int allowAnonymous) {
                  eat(parser, TOKEN_RBRACKET);
                  setRight(node, lengthNode);
             }
+        } else if (strcasecmp(typeNameCopy, "textfile") == 0) {
+            node = newASTNode(AST_VARIABLE, initialToken);
+            setTypeAST(node, TYPE_FILE);
+            eat(parser, TOKEN_IDENTIFIER);
         } else {
             VarType basicType = TYPE_VOID;
             // ... (checks for integer, real, char, etc.) ...
@@ -3174,17 +3180,107 @@ static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const 
     return node;
 }
 
+static AST *parseStatementListUntilEither(Parser *parser, TokenType terminatorA, TokenType terminatorB, const char *contextName) {
+    AST *node = newASTNode(AST_COMPOUND, NULL);
+    if (!node) {
+        return NULL;
+    }
+
+    while (1) {
+        if (!parser->current_token) {
+            char error_msg[160];
+            snprintf(error_msg, sizeof(error_msg), "Unexpected EOF while parsing %s block", contextName ? contextName : "statement");
+            errorParser(parser, error_msg);
+            break;
+        }
+
+        while (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+        }
+
+        if (!parser->current_token ||
+            parser->current_token->type == terminatorA ||
+            parser->current_token->type == terminatorB) {
+            break;
+        }
+        if (parser->current_token->type == TOKEN_EOF || parser->current_token->type == TOKEN_PERIOD) {
+            char error_msg[192];
+            snprintf(error_msg, sizeof(error_msg), "Expected %s or %s to terminate %s block",
+                     tokenTypeToString(terminatorA),
+                     tokenTypeToString(terminatorB),
+                     contextName ? contextName : "statement");
+            errorParser(parser, error_msg);
+            break;
+        }
+
+        AST *stmt = statement(parser);
+        if (!stmt) {
+            break;
+        }
+        addChild(node, stmt);
+
+        if (!parser->current_token ||
+            parser->current_token->type == terminatorA ||
+            parser->current_token->type == terminatorB) {
+            break;
+        }
+        if (parser->current_token->type == TOKEN_SEMICOLON) {
+            eat(parser, TOKEN_SEMICOLON);
+            continue;
+        }
+
+        char error_msg[224];
+        snprintf(error_msg, sizeof(error_msg),
+                 "Expected semicolon or %s/%s after statement in %s block (found token: %s)",
+                 tokenTypeToString(terminatorA),
+                 tokenTypeToString(terminatorB),
+                 contextName ? contextName : "statement",
+                 tokenTypeToString(parser->current_token->type));
+        errorParser(parser, error_msg);
+        break;
+    }
+
+    return node;
+}
+
 static AST *tryStatement(Parser *parser) {
     eat(parser, TOKEN_TRY);
 
-    AST *tryBlock = parseStatementListUntil(parser, TOKEN_EXCEPT, "TRY");
-    if (!parser->current_token || parser->current_token->type != TOKEN_EXCEPT) {
-        errorParser(parser, "Expected EXCEPT in TRY statement");
+    AST *tryBlock = parseStatementListUntilEither(parser, TOKEN_EXCEPT, TOKEN_FINALLY, "TRY");
+    if (!parser->current_token ||
+        (parser->current_token->type != TOKEN_EXCEPT && parser->current_token->type != TOKEN_FINALLY)) {
+        errorParser(parser, "Expected EXCEPT or FINALLY in TRY statement");
         if (tryBlock) {
             freeAST(tryBlock);
         }
         return newASTNode(AST_NOOP, NULL);
     }
+
+    if (parser->current_token->type == TOKEN_FINALLY) {
+        eat(parser, TOKEN_FINALLY);
+
+        AST *finallyBlock = parseStatementListUntil(parser, TOKEN_END, "FINALLY");
+        if (!parser->current_token || parser->current_token->type != TOKEN_END) {
+            errorParser(parser, "Expected END to close TRY/FINALLY statement");
+            if (tryBlock) {
+                freeAST(tryBlock);
+            }
+            if (finallyBlock) {
+                freeAST(finallyBlock);
+            }
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_END);
+
+        AST *finallyNode = newASTNode(AST_FINALLY, NULL);
+        setRight(finallyNode, finallyBlock);
+
+        AST *tryNode = newASTNode(AST_TRY, NULL);
+        setLeft(tryNode, tryBlock);
+        setRight(tryNode, finallyNode);
+        return tryNode;
+    }
+
     eat(parser, TOKEN_EXCEPT);
 
     AST *catchNode = newASTNode(AST_CATCH, NULL);

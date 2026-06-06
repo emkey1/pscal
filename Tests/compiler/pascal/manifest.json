@@ -31,6 +31,18 @@
       "stdout_substring": "PASS: Pascal try/except catches raised errors"
     },
     {
+      "id": "try_finally_basic",
+      "path": "Tests/compiler/pascal/cases/try_finally_basic.pas",
+      "expect": "compile_success",
+      "stdout_substring": "before\nbody\ncleanup\nafter"
+    },
+    {
+      "id": "try_finally_outer_except",
+      "path": "Tests/compiler/pascal/cases/try_finally_outer_except.pas",
+      "expect": "compile_success",
+      "stdout_substring": "body\ncleanup\ncaught boom"
+    },
+    {
       "id": "odd_builtin_condition",
       "path": "Tests/compiler/pascal/cases/odd_builtin_condition.pas",
       "expect": "compile_success",
@@ -113,6 +125,12 @@
       "path": "Tests/compiler/pascal/cases/unicode_text_types_foundation.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: unicode text foundation 5 65"
+    },
+    {
+      "id": "textfile_alias_basic",
+      "path": "Tests/compiler/pascal/cases/textfile_alias_basic.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: textfile alias"
     },
     {
       "id": "unicode_text_semantics",

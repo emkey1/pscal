@@ -540,6 +540,7 @@ const char *tokenTypeToString(TokenType type) {
         case TOKEN_JOIN:         return "JOIN";
         case TOKEN_TRY:          return "TRY";
         case TOKEN_EXCEPT:       return "EXCEPT";
+        case TOKEN_FINALLY:      return "FINALLY";
         case TOKEN_ON:           return "ON";
         case TOKEN_RAISE:        return "RAISE";
         case TOKEN_WITH:         return "WITH";
@@ -624,6 +625,7 @@ const char *astTypeToString(ASTNodeType type) {
         case AST_PATTERN_BINDING:return "PATTERN_BINDING";
         case AST_TRY:            return "TRY";
         case AST_CATCH:          return "CATCH";
+        case AST_FINALLY:        return "FINALLY";
         case AST_THROW:          return "THROW";
         case AST_WITH:           return "WITH";
         case AST_LABEL_DECL:     return "LABEL_DECL";
@@ -896,7 +898,9 @@ VarType lookupBuiltinPascalTypeName(const char *name) {
     if (strcasecmp(name, "word") == 0) return TYPE_WORD;
     if (strcasecmp(name, "boolean") == 0) return TYPE_BOOLEAN;
     if (strcasecmp(name, "unicodestring") == 0) return TYPE_UNICODE_STRING;
-    if (strcasecmp(name, "file") == 0 || strcasecmp(name, "text") == 0) return TYPE_FILE;
+    if (strcasecmp(name, "file") == 0 ||
+        strcasecmp(name, "text") == 0 ||
+        strcasecmp(name, "textfile") == 0) return TYPE_FILE;
     if (strcasecmp(name, "mstream") == 0) return TYPE_MEMORYSTREAM;
 
     return TYPE_VOID;
