@@ -1,0 +1,14 @@
+program ForRecordFieldReadonlyAssignError;
+
+type
+  TCursor = record
+    R: Integer;
+  end;
+
+var
+  cur: TCursor;
+
+begin
+  for cur.R := 1 to 3 do
+    cur.R := 0;
+end.

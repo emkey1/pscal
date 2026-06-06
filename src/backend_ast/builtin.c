@@ -1764,6 +1764,7 @@ static VmBuiltinMapping vmBuiltinDispatchTable[] = {
     {"findnext", vmBuiltinDosFindnext},
     {"float", vmBuiltinToFloat},
     {"floor", vmBuiltinFloor},
+    {"format", vmBuiltinFormat},
     {"formatfloat", vmBuiltinFormatfloat},
     {"freesound", NULL},
     {"getdate", vmBuiltinDosGetdate},
@@ -3467,6 +3468,234 @@ Value vmBuiltinRealtostr(VM* vm, int arg_count, Value* args) {
     char buffer[128];
     snprintf(buffer, sizeof(buffer), "%Lf", AS_REAL(args[0]));
     return makeString(buffer);
+}
+
+static bool appendFormatResultChunk(char** buffer, size_t* length, size_t* capacity, const char* text) {
+    if (!buffer || !length || !capacity || !text) {
+        return false;
+    }
+    size_t add_len = strlen(text);
+    size_t needed = *length + add_len + 1;
+    if (needed > *capacity) {
+        size_t new_capacity = (*capacity == 0) ? DEFAULT_STRING_CAPACITY : *capacity;
+        while (new_capacity < needed) {
+            new_capacity *= 2;
+        }
+        char* resized = (char*)realloc(*buffer, new_capacity);
+        if (!resized) {
+            return false;
+        }
+        *buffer = resized;
+        *capacity = new_capacity;
+    }
+    memcpy(*buffer + *length, text, add_len + 1);
+    *length += add_len;
+    return true;
+}
+
+Value vmBuiltinFormat(VM* vm, int arg_count, Value* args) {
+    if (arg_count < 1 || !isPascalStringType(args[0].type)) {
+        runtimeError(vm, "Format expects a format string followed by values.");
+        return makeString("");
+    }
+
+    const char* fmt = args[0].s_val ? args[0].s_val : "";
+    size_t flen = strlen(fmt);
+    int arg_index = 1;
+    char* result = NULL;
+    size_t result_len = 0;
+    size_t result_cap = 0;
+
+    if (!appendFormatResultChunk(&result, &result_len, &result_cap, "")) {
+        runtimeError(vm, "Format: memory allocation failed.");
+        return makeString("");
+    }
+
+    for (size_t i = 0; i < flen; ++i) {
+        if (fmt[i] != '%') {
+            char literal[2] = { fmt[i], '\0' };
+            if (!appendFormatResultChunk(&result, &result_len, &result_cap, literal)) {
+                free(result);
+                runtimeError(vm, "Format: memory allocation failed.");
+                return makeString("");
+            }
+            continue;
+        }
+
+        if (i + 1 < flen && fmt[i + 1] == '%') {
+            if (!appendFormatResultChunk(&result, &result_len, &result_cap, "%")) {
+                free(result);
+                runtimeError(vm, "Format: memory allocation failed.");
+                return makeString("");
+            }
+            ++i;
+            continue;
+        }
+
+        if (arg_index >= arg_count) {
+            free(result);
+            runtimeError(vm, "Format: not enough arguments for format string.");
+            return makeString("");
+        }
+
+        size_t j = i + 1;
+        char flags[16];
+        size_t flag_len = 0;
+        while (j < flen && strchr("-+ #0", fmt[j]) != NULL && flag_len + 1 < sizeof(flags)) {
+            flags[flag_len++] = fmt[j++];
+        }
+        flags[flag_len] = '\0';
+
+        bool width_specified = false;
+        int width = 0;
+        while (j < flen && isdigit((unsigned char)fmt[j])) {
+            width_specified = true;
+            width = width * 10 + (fmt[j] - '0');
+            ++j;
+        }
+
+        int precision = -1;
+        if (j < flen && fmt[j] == '.') {
+            ++j;
+            precision = 0;
+            while (j < flen && isdigit((unsigned char)fmt[j])) {
+                precision = precision * 10 + (fmt[j] - '0');
+                ++j;
+            }
+        }
+
+        const char* length_mods = "hlLjzt";
+        size_t mod_start = j;
+        while (j < flen && strchr(length_mods, fmt[j]) != NULL) {
+            ++j;
+        }
+
+        char lenmod[4] = {0};
+        size_t mod_len = (j > mod_start) ? (j - mod_start) : 0;
+        if (mod_len > sizeof(lenmod) - 1) {
+            mod_len = sizeof(lenmod) - 1;
+        }
+        if (mod_len > 0) {
+            memcpy(lenmod, fmt + mod_start, mod_len);
+            lenmod[mod_len] = '\0';
+        }
+
+        char spec = (j < flen) ? fmt[j] : '\0';
+        char fmtbuf[64];
+        size_t copy_len = (spec != '\0') ? (j - i + 1) : 0;
+        if (copy_len >= sizeof(fmtbuf)) {
+            copy_len = sizeof(fmtbuf) - 1;
+        }
+        if (copy_len > 0) {
+            memcpy(fmtbuf, fmt + i, copy_len);
+            fmtbuf[copy_len] = '\0';
+        } else {
+            fmtbuf[0] = '%';
+            fmtbuf[1] = '\0';
+        }
+
+        char piece[DEFAULT_STRING_CAPACITY];
+        piece[0] = '\0';
+        Value v = args[arg_index++];
+        bool expects_wide_char = (lenmod[0] != '\0' && strpbrk(lenmod, "lL") != NULL);
+
+        switch (spec) {
+            case 'd': case 'i': case 'u': case 'o': case 'x': case 'X': {
+                unsigned long long u = 0ULL;
+                long long s = 0LL;
+                if (isIntlikeType(v.type) || v.type == TYPE_BOOLEAN || v.type == TYPE_CHAR || v.type == TYPE_ENUM) {
+                    s = AS_INTEGER(v);
+                    u = (unsigned long long)AS_INTEGER(v);
+                }
+                bool is_unsigned = (spec == 'u' || spec == 'o' || spec == 'x' || spec == 'X');
+                if (is_unsigned) {
+                    if (strcmp(lenmod, "ll") == 0) snprintf(piece, sizeof(piece), fmtbuf, (unsigned long long)u);
+                    else if (strcmp(lenmod, "l") == 0) snprintf(piece, sizeof(piece), fmtbuf, (unsigned long)u);
+                    else if (strcmp(lenmod, "j") == 0) snprintf(piece, sizeof(piece), fmtbuf, (uintmax_t)u);
+                    else if (strcmp(lenmod, "z") == 0) snprintf(piece, sizeof(piece), fmtbuf, (size_t)u);
+                    else snprintf(piece, sizeof(piece), fmtbuf, (unsigned int)u);
+                } else {
+                    if (strcmp(lenmod, "ll") == 0) snprintf(piece, sizeof(piece), fmtbuf, (long long)s);
+                    else if (strcmp(lenmod, "l") == 0) snprintf(piece, sizeof(piece), fmtbuf, (long)s);
+                    else if (strcmp(lenmod, "j") == 0) snprintf(piece, sizeof(piece), fmtbuf, (intmax_t)s);
+                    else if (strcmp(lenmod, "t") == 0) snprintf(piece, sizeof(piece), fmtbuf, (ptrdiff_t)s);
+                    else snprintf(piece, sizeof(piece), fmtbuf, (int)s);
+                }
+                break;
+            }
+            case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+                long double rv = isRealType(v.type) ? AS_REAL(v) : (long double)AS_INTEGER(v);
+                if (strcmp(lenmod, "L") == 0) snprintf(piece, sizeof(piece), fmtbuf, (long double)rv);
+                else snprintf(piece, sizeof(piece), fmtbuf, (double)rv);
+                break;
+            }
+            case 'c': {
+                char safe_fmt[sizeof(fmtbuf)];
+                const char* active_fmt = fmtbuf;
+                char ch = (v.type == TYPE_CHAR) ? v.c_val : (char)AS_INTEGER(v);
+                if (expects_wide_char) {
+                    strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                    safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                    char* mod_pos = strstr(safe_fmt, lenmod);
+                    if (mod_pos) {
+                        size_t remove_len = strlen(lenmod);
+                        memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                        active_fmt = safe_fmt;
+                    }
+                }
+                snprintf(piece, sizeof(piece), active_fmt, (unsigned int)ch);
+                break;
+            }
+            case 's': {
+                char char_text[8] = {0};
+                const char* sv = "";
+                if (isPascalStringType(v.type) && v.s_val) {
+                    sv = v.s_val;
+                } else if (v.type == TYPE_CHAR) {
+                    char_text[0] = (char)v.c_val;
+                    sv = char_text;
+                } else if (v.type == TYPE_WIDECHAR) {
+                    encodeUtf8Codepoint((uint32_t)v.c_val, char_text);
+                    sv = char_text;
+                }
+                char safe_fmt[sizeof(fmtbuf)];
+                const char* active_fmt = fmtbuf;
+                if (expects_wide_char) {
+                    strncpy(safe_fmt, fmtbuf, sizeof(safe_fmt));
+                    safe_fmt[sizeof(safe_fmt) - 1] = '\0';
+                    char* mod_pos = strstr(safe_fmt, lenmod);
+                    if (mod_pos) {
+                        size_t remove_len = strlen(lenmod);
+                        memmove(mod_pos, mod_pos + remove_len, strlen(mod_pos + remove_len) + 1);
+                        active_fmt = safe_fmt;
+                    }
+                }
+                snprintf(piece, sizeof(piece), active_fmt, sv);
+                break;
+            }
+            default: {
+                if (width_specified && precision >= 0) {
+                    snprintf(piece, sizeof(piece), "%*.*s", width, precision, "");
+                } else if (width_specified) {
+                    snprintf(piece, sizeof(piece), "%*s", width, "");
+                } else {
+                    piece[0] = '\0';
+                }
+                break;
+            }
+        }
+
+        if (!appendFormatResultChunk(&result, &result_len, &result_cap, piece)) {
+            free(result);
+            runtimeError(vm, "Format: memory allocation failed.");
+            return makeString("");
+        }
+        i = j;
+    }
+
+    Value out = makeString(result ? result : "");
+    free(result);
+    return out;
 }
 
 Value vmBuiltinFormatfloat(VM* vm, int arg_count, Value* args) {
@@ -10398,6 +10627,7 @@ static void populateBuiltinRegistry(void) {
     registerBuiltinFunctionUnlocked("Randomize", AST_PROCEDURE_DECL, NULL);
     registerBuiltinFunctionUnlocked("ReadKey", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Real", AST_FUNCTION_DECL, NULL);
+    registerBuiltinFunctionUnlocked("Format", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("FormatFloat", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("RealToStr", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunctionUnlocked("Rename", AST_PROCEDURE_DECL, NULL);

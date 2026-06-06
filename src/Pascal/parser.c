@@ -348,6 +348,33 @@ static bool parserCurrentRoutineShadowsBuiltin(Parser *parser, const char *name)
     return false;
 }
 
+static bool parserIdentifierResolvesToValue(Parser *parser, AST *identifierNode) {
+    if (!parser || !identifierNode || identifierNode->type != AST_VARIABLE ||
+        !identifierNode->token || !identifierNode->token->value) {
+        return false;
+    }
+
+    const char *name = identifierNode->token->value;
+
+    if (parserCurrentRoutineShadowsBuiltin(parser, name)) {
+        return true;
+    }
+
+    Symbol *globalSym = lookupGlobalSymbol(name);
+    if (globalSym) {
+        return true;
+    }
+
+    if (parser->current_routine) {
+        AST *decl = findDeclarationInScope(name, parser->current_routine, identifierNode);
+        if (decl && decl->type != AST_FUNCTION_DECL && decl->type != AST_PROCEDURE_DECL) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool tokenTypeIsIdentifierLike(TokenType type) {
     return type == TOKEN_IDENTIFIER || type == TOKEN_LABEL;
 }
@@ -989,6 +1016,8 @@ static AST *parseInterfaceMethod(Parser *parser, bool isFunction) {
             if (parser->current_token->value &&
                 strcasecmp(parser->current_token->value, "virtual") == 0) {
                 routine->is_virtual = true;
+            } else {
+                break;
             }
             eat(parser, TOKEN_IDENTIFIER);
         } else if (t == TOKEN_INLINE) {
@@ -3908,6 +3937,103 @@ AST *parseCaseLabels(Parser *parser) {
     return labels;
 }
 
+static bool tokenCanStartCaseLabel(Token *tok) {
+    if (!tok) {
+        return false;
+    }
+
+    switch (tok->type) {
+        case TOKEN_IDENTIFIER:
+        case TOKEN_INTEGER_CONST:
+        case TOKEN_REAL_CONST:
+        case TOKEN_STRING_CONST:
+        case TOKEN_HEX_CONST:
+        case TOKEN_TRUE:
+        case TOKEN_FALSE:
+        case TOKEN_PLUS:
+        case TOKEN_MINUS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool parserAtNextCaseBranch(Parser *parser) {
+    if (!parser || !parser->current_token || !tokenCanStartCaseLabel(parser->current_token)) {
+        return false;
+    }
+
+    Token *lookahead = peekToken(parser);
+    bool is_branch = lookahead &&
+                     (lookahead->type == TOKEN_COLON ||
+                      lookahead->type == TOKEN_COMMA ||
+                      lookahead->type == TOKEN_DOTDOT);
+    if (lookahead) {
+        freeToken(lookahead);
+    }
+    return is_branch;
+}
+
+static AST *parseCaseBranchStatement(Parser *parser) {
+    if (!parser) {
+        return NULL;
+    }
+
+    AST *first = statement(parser);
+    if (!first) {
+        return NULL;
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+        return first;
+    }
+
+    AST *compound = newASTNode(AST_COMPOUND, NULL);
+    if (first->type != AST_NOOP) {
+        addChild(compound, first);
+    } else {
+        freeAST(first);
+    }
+
+    while (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+        eat(parser, TOKEN_SEMICOLON);
+        if (!parser->current_token ||
+            parser->current_token->type == TOKEN_ELSE ||
+            parser->current_token->type == TOKEN_END ||
+            parserAtNextCaseBranch(parser)) {
+            break;
+        }
+
+        AST *next_stmt = statement(parser);
+        if (!next_stmt) {
+            errorParser(parser, "Exp stmt after ; in case branch");
+            freeAST(compound);
+            return NULL;
+        }
+        if (next_stmt->type != AST_NOOP) {
+            addChild(compound, next_stmt);
+        } else {
+            freeAST(next_stmt);
+        }
+    }
+
+    if (compound->child_count == 0) {
+        freeAST(compound);
+        return newASTNode(AST_NOOP, NULL);
+    }
+    if (compound->child_count == 1) {
+        AST *single = compound->children[0];
+        single->parent = NULL;
+        free(compound->children);
+        compound->children = NULL;
+        compound->child_count = 0;
+        compound->child_capacity = 0;
+        freeAST(compound);
+        return single;
+    }
+    return compound;
+}
+
 AST *caseStatement(Parser *parser) {
     eat(parser,TOKEN_CASE); AST* ce=expression(parser); // <<< Use expression()
     if(!ce || ce->type==AST_NOOP){errorParser(parser,"Exp CASE expr"); return NULL;}
@@ -3918,9 +4044,14 @@ AST *caseStatement(Parser *parser) {
         AST* lbls = parseCaseLabels(parser); // <<< Calls expression() internally
         if(!lbls || lbls->type==AST_NOOP){errorParser(parser,"Bad case labels"); freeAST(br); break;} setLeft(br,lbls);
         if(!parser->current_token || parser->current_token->type!=TOKEN_COLON){errorParser(parser,"Exp :"); freeAST(br); break;} eat(parser,TOKEN_COLON);
-        AST* stmt = statement(parser); if(!stmt || stmt->type==AST_NOOP){errorParser(parser,"Exp stmt after :"); freeAST(br); break;} setRight(br,stmt); addChild(n,br);
-        if(parser->current_token && parser->current_token->type==TOKEN_SEMICOLON)eat(parser,TOKEN_SEMICOLON);
-        else break;
+        AST* stmt = parseCaseBranchStatement(parser); if(!stmt){errorParser(parser,"Exp stmt after :"); freeAST(br); break;} setRight(br,stmt); addChild(n,br);
+        if (stmt->type == AST_NOOP) continue;
+        if(parser->current_token &&
+           parser->current_token->type!=TOKEN_ELSE &&
+           parser->current_token->type!=TOKEN_END &&
+           !parserAtNextCaseBranch(parser)) {
+            break;
+        }
     }
     if(parser->current_token && parser->current_token->type==TOKEN_ELSE){eat(parser,TOKEN_ELSE); AST* elsestmt = statement(parser); if(!elsestmt){errorParser(parser,"Exp ELSE stmt");} setExtra(n,elsestmt); if(parser->current_token && parser->current_token->type==TOKEN_SEMICOLON)eat(parser,TOKEN_SEMICOLON);}
     if(!parser->current_token || parser->current_token->type!=TOKEN_END){errorParser(parser,"Exp END"); return n;} eat(parser,TOKEN_END); return n;
@@ -3947,6 +4078,8 @@ AST *forStatement(Parser *parser) {
     eat(parser,TOKEN_FOR);
 
     bool declares_inline_var = false;
+    Token* lvt = NULL;
+    AST* lvn = NULL;
     if (parser->current_token && parser->current_token->type == TOKEN_VAR) {
         if (parser->routine_depth <= 0) {
             errorParser(parser, "FOR VAR loop variables are only supported inside procedures and functions");
@@ -3956,19 +4089,28 @@ AST *forStatement(Parser *parser) {
         eat(parser, TOKEN_VAR);
     }
 
-    Token* lvt = copyToken(parser->current_token);
-    if (!lvt || lvt->type != TOKEN_IDENTIFIER) {
-        errorParser(parser, "Exp loop var");
-        if (lvt) freeToken(lvt);
-        return NULL;
+    if (declares_inline_var) {
+        lvt = copyToken(parser->current_token);
+        if (!lvt || lvt->type != TOKEN_IDENTIFIER) {
+            errorParser(parser, "Exp loop var");
+            if (lvt) freeToken(lvt);
+            return NULL;
+        }
+        eat(parser, TOKEN_IDENTIFIER);
+        lvn = newASTNode(AST_VARIABLE, lvt);
+    } else {
+        lvn = lvalue(parser);
+        if (!lvn || lvn->type == AST_NOOP) {
+            errorParser(parser, "Exp loop var");
+            freeAST(lvn);
+            return NULL;
+        }
     }
-    eat(parser, TOKEN_IDENTIFIER);
 
-    AST* lvn = newASTNode(AST_VARIABLE, lvt); // Loop var node created with copy
     if (!parser->current_token || parser->current_token->type != TOKEN_ASSIGN) {
         errorParser(parser, "Exp :=");
-        freeToken(lvt);
         freeAST(lvn);
+        if (lvt) freeToken(lvt);
         return NULL;
     }
     eat(parser, TOKEN_ASSIGN);
@@ -3976,19 +4118,19 @@ AST *forStatement(Parser *parser) {
     AST* se = expression(parser); // <<< Use expression() for start
     if (!se || se->type == AST_NOOP) {
         errorParser(parser, "Exp start expr");
-        freeToken(lvt);
         freeAST(lvn);
+        if (lvt) freeToken(lvt);
         return NULL;
     }
     TokenType dir=parser->current_token? parser->current_token->type : TOKEN_UNKNOWN; // Check NULL
-    if(dir!=TOKEN_TO && dir!=TOKEN_DOWNTO){errorParser(parser,"Exp TO/DOWNTO"); freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;} eat(parser,dir);
+    if(dir!=TOKEN_TO && dir!=TOKEN_DOWNTO){errorParser(parser,"Exp TO/DOWNTO"); if (lvt) freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;} eat(parser,dir);
     AST* ee=expression(parser); // <<< Use expression() for end
-    if(!ee || ee->type == AST_NOOP){errorParser(parser,"Exp end expr"); freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;}
-    if(!parser->current_token||parser->current_token->type!=TOKEN_DO){errorParser(parser,"Exp DO"); freeToken(lvt); freeAST(lvn); freeAST(se); freeAST(ee); return NULL;} eat(parser,TOKEN_DO);
-    AST* bd=statement(parser); if(!bd || bd->type == AST_NOOP){errorParser(parser,"Exp body"); freeToken(lvt); freeAST(lvn); freeAST(se); freeAST(ee); return NULL;}
+    if(!ee || ee->type == AST_NOOP){errorParser(parser,"Exp end expr"); if (lvt) freeToken(lvt); freeAST(lvn); freeAST(se); return NULL;}
+    if(!parser->current_token||parser->current_token->type!=TOKEN_DO){errorParser(parser,"Exp DO"); if (lvt) freeToken(lvt); freeAST(lvn); freeAST(se); freeAST(ee); return NULL;} eat(parser,TOKEN_DO);
+    AST* bd=statement(parser); if(!bd || bd->type == AST_NOOP){errorParser(parser,"Exp body"); if (lvt) freeToken(lvt); freeAST(lvn); freeAST(se); freeAST(ee); return NULL;}
     ASTNodeType ft=(dir==TOKEN_TO)?AST_FOR_TO:AST_FOR_DOWNTO; AST* n=newASTNode(ft,NULL);
     setLeft(n,se); setRight(n,ee); setExtra(n,bd); addChild(n,lvn); // Loop var is child[0]
-    freeToken(lvt); // Free the original copy used for lvn
+    if (lvt) freeToken(lvt);
 
     if (!declares_inline_var) {
         return n;
@@ -4779,7 +4921,7 @@ AST *factor(Parser *parser) {
                 if (node->token &&
                     isBuiltin(node->token->value) &&
                     getBuiltinType(node->token->value) == BUILTIN_TYPE_FUNCTION &&
-                    !parserCurrentRoutineShadowsBuiltin(parser, node->token->value)) {
+                    !parserIdentifierResolvesToValue(parser, node)) {
                     
                     #ifdef DEBUG
                     fprintf(stderr, "[DEBUG factor] IDENTIFIER '%s' is a built-in FUNCTION. Converting to AST_PROCEDURE_CALL.\n", node->token->value);

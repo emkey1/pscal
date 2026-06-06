@@ -310,6 +310,12 @@ int getInstructionLength(BytecodeChunk* chunk, int offset) {
         case LOAD_ELEMENT_VALUE:
             return 2; // opcode + operand byte
         case GET_CHAR_ADDRESS:
+        case SET_INDIRECT:
+        case GET_INDIRECT:
+        case IN:
+        case MAKE_SET_SINGLETON:
+        case MAKE_SET_RANGE:
+        case GET_CHAR_FROM_STRING:
             return 1; // opcode only
         case GET_ELEMENT_ADDRESS_CONST:
         case LOAD_ELEMENT_VALUE_CONST:
@@ -1138,6 +1144,12 @@ int disassembleInstruction(BytecodeChunk* chunk, int offset, HashTable* procedur
             return offset + 1;
         case IN:
             fprintf(stderr, "IN\n");
+            return offset + 1;
+        case MAKE_SET_SINGLETON:
+            fprintf(stderr, "MAKE_SET_SINGLETON\n");
+            return offset + 1;
+        case MAKE_SET_RANGE:
+            fprintf(stderr, "MAKE_SET_RANGE\n");
             return offset + 1;
         case GET_CHAR_FROM_STRING:
             fprintf(stderr, "GET_CHAR_FROM_STRING\n");

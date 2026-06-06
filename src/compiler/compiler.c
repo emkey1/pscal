@@ -327,6 +327,8 @@ static void emitConstantIndex16(BytecodeChunk* chunk, int constant_index, int li
 static void emitGlobalNameIdx(BytecodeChunk* chunk, OpCode op8, OpCode op16,
                               int name_idx, int line);
 static bool recordTypeHasVTable(AST* recordType);
+static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int line);
+static bool resolveUnitQualifiedGlobal(AST* node, char* outName, size_t outSize, Symbol** outSymbol);
 static void queueDeferredGlobalInitializer(AST* var_decl);
 static void emitDeferredGlobalInitializers(BytecodeChunk* chunk);
 static void emitGlobalInitializerForVar(AST* var_decl, AST* varNameNode,
@@ -340,6 +342,7 @@ static void emitGlobalVarDefinition(AST* var_decl,
                                     bool emit_initializer);
 static int resolveGlobalVariableIndex(BytecodeChunk* chunk, const char* name, int line);
 static bool valueToOrdinal(const Value* value, long long* out);
+static AST* resolveTypeAlias(AST* typeNode);
 
 typedef struct {
     char* name;
@@ -363,6 +366,15 @@ typedef struct {
 
 static Loop loop_stack[MAX_LOOP_DEPTH];
 static int loop_depth = -1; // -1 means we are not in a loop
+
+typedef struct {
+    bool is_field;
+    char base_name[MAX_SYMBOL_LENGTH];
+    char field_name[MAX_SYMBOL_LENGTH];
+} LoopControlTarget;
+
+static LoopControlTarget loop_control_stack[MAX_LOOP_DEPTH * 4];
+static int loop_control_depth = 0;
 
 typedef struct {
     uint8_t index;
@@ -3310,7 +3322,9 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
         AST* decl = findStaticDeclarationInAST(arg_node->token->value, arg_node, gCurrentProgramRoot);
         if (decl) {
             AST* decl_type = NULL;
-            if (decl->type == AST_FUNCTION_DECL && decl->right) {
+            if (decl->type == AST_ENUM_TYPE) {
+                decl_type = resolveTypeAlias(decl);
+            } else if (decl->type == AST_FUNCTION_DECL && decl->right) {
                 decl_type = resolveTypeAlias(decl->right);
             } else if (decl->type == AST_VAR_DECL && decl->right) {
                 decl_type = resolveTypeAlias(decl->right);
@@ -3856,6 +3870,245 @@ static void endLoop(void) {
     }
 
     loop_depth--;
+}
+
+static bool isOrdinalLoopControlType(AST* node) {
+    if (!node) {
+        return false;
+    }
+
+    AST* actual_type = resolveTypeAlias(node->type_def);
+    if (actual_type && actual_type->type == AST_SUBRANGE) {
+        return true;
+    }
+
+    if (node->var_type == TYPE_ENUM) {
+        return true;
+    }
+
+    return isIntlikeType(node->var_type) || isPascalCharType(node->var_type);
+}
+
+static bool describeLoopControlTarget(AST* node, char* buffer, size_t buffer_size) {
+    if (!buffer || buffer_size == 0 || !node) {
+        return false;
+    }
+
+    buffer[0] = '\0';
+    if (node->type == AST_VARIABLE && node->token && node->token->value) {
+        snprintf(buffer, buffer_size, "%s", node->token->value);
+        return true;
+    }
+
+    if (node->type == AST_FIELD_ACCESS &&
+        node->left && node->left->type == AST_VARIABLE &&
+        node->left->token && node->left->token->value &&
+        node->token && node->token->value) {
+        snprintf(buffer, buffer_size, "%s.%s",
+                 node->left->token->value, node->token->value);
+        return true;
+    }
+
+    return false;
+}
+
+static bool initLoopControlTargetFromAST(AST* node, LoopControlTarget* out) {
+    if (!node || !out) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+
+    if (node->type == AST_VARIABLE && node->token && node->token->value) {
+        strncpy(out->base_name, node->token->value, sizeof(out->base_name) - 1);
+        out->base_name[sizeof(out->base_name) - 1] = '\0';
+        out->is_field = false;
+        return true;
+    }
+
+    if (node->type != AST_FIELD_ACCESS ||
+        !node->left || node->left->type != AST_VARIABLE ||
+        !node->left->token || !node->left->token->value ||
+        !node->token || !node->token->value) {
+        return false;
+    }
+
+    char qualified_name[MAX_SYMBOL_LENGTH * 2 + 2];
+    Symbol* resolved_symbol = NULL;
+    if (resolveUnitQualifiedGlobal(node, qualified_name, sizeof(qualified_name), &resolved_symbol)) {
+        return false;
+    }
+
+    strncpy(out->base_name, node->left->token->value, sizeof(out->base_name) - 1);
+    out->base_name[sizeof(out->base_name) - 1] = '\0';
+    strncpy(out->field_name, node->token->value, sizeof(out->field_name) - 1);
+    out->field_name[sizeof(out->field_name) - 1] = '\0';
+    out->is_field = true;
+    return true;
+}
+
+static bool pushLoopControlTarget(AST* node) {
+    if (loop_control_depth >= (int)(sizeof(loop_control_stack) / sizeof(loop_control_stack[0]))) {
+        fprintf(stderr, "Compiler error: Loop control target nesting too deep.\n");
+        compiler_had_error = true;
+        return false;
+    }
+
+    LoopControlTarget target;
+    if (!initLoopControlTargetFromAST(node, &target)) {
+        return false;
+    }
+
+    loop_control_stack[loop_control_depth++] = target;
+    return true;
+}
+
+static void popLoopControlTarget(void) {
+    if (loop_control_depth > 0) {
+        loop_control_depth--;
+    }
+}
+
+static bool loopControlTargetMatchesAST(const LoopControlTarget* target, AST* node) {
+    if (!target || !node) {
+        return false;
+    }
+
+    if (!target->is_field) {
+        return node->type == AST_VARIABLE &&
+               node->token && node->token->value &&
+               strcasecmp(target->base_name, node->token->value) == 0;
+    }
+
+    return node->type == AST_FIELD_ACCESS &&
+           node->left && node->left->type == AST_VARIABLE &&
+           node->left->token && node->left->token->value &&
+           node->token && node->token->value &&
+           strcasecmp(target->base_name, node->left->token->value) == 0 &&
+           strcasecmp(target->field_name, node->token->value) == 0;
+}
+
+static const LoopControlTarget* findReadOnlyLoopControlTarget(AST* node) {
+    for (int i = loop_control_depth - 1; i >= 0; i--) {
+        if (loopControlTargetMatchesAST(&loop_control_stack[i], node)) {
+            return &loop_control_stack[i];
+        }
+    }
+    return NULL;
+}
+
+static void reportReadOnlyLoopControlError(int line, const LoopControlTarget* target, const char* action) {
+    if (!target) {
+        return;
+    }
+
+    if (target->is_field) {
+        fprintf(stderr,
+                "L%d: Compiler error: cannot %s FOR loop control variable '%s.%s' inside the loop body.\n",
+                line, action, target->base_name, target->field_name);
+    } else {
+        fprintf(stderr,
+                "L%d: Compiler error: cannot %s FOR loop control variable '%s' inside the loop body.\n",
+                line, action, target->base_name);
+    }
+    compiler_had_error = true;
+}
+
+static bool validateForLoopControlTarget(AST* node, int line) {
+    if (!node) {
+        fprintf(stderr, "L%d: Compiler error: missing FOR loop control variable.\n", line);
+        compiler_had_error = true;
+        return false;
+    }
+
+    LoopControlTarget target;
+    if (!initLoopControlTargetFromAST(node, &target)) {
+        fprintf(stderr,
+                "L%d: Compiler error: FOR loop control variable must be a simple variable or a single record field selector.\n",
+                line);
+        compiler_had_error = true;
+        return false;
+    }
+
+    if (!isOrdinalLoopControlType(node)) {
+        char target_desc[MAX_SYMBOL_LENGTH * 2 + 2];
+        if (!describeLoopControlTarget(node, target_desc, sizeof(target_desc))) {
+            strncpy(target_desc, "<unknown>", sizeof(target_desc) - 1);
+            target_desc[sizeof(target_desc) - 1] = '\0';
+        }
+        fprintf(stderr,
+                "L%d: Compiler error: FOR loop control variable '%s' must have an ordinal type.\n",
+                line, target_desc);
+        compiler_had_error = true;
+        return false;
+    }
+
+    return true;
+}
+
+static void compileLoopControlStore(AST* target, BytecodeChunk* chunk, int line) {
+    int store_line = getLine(target);
+    if (store_line <= 0) {
+        store_line = line;
+    }
+
+    if (!emitDirectStoreForVariable(target, chunk, store_line)) {
+        compileLValue(target, chunk, store_line);
+        writeBytecodeChunk(chunk, SWAP, line);
+        writeBytecodeChunk(chunk, SET_INDIRECT, line);
+    }
+}
+
+static bool astMatchesLoopControlTarget(AST* candidate, AST* target) {
+    LoopControlTarget parsed_target;
+    if (!candidate || !target || !initLoopControlTargetFromAST(target, &parsed_target)) {
+        return false;
+    }
+    return loopControlTargetMatchesAST(&parsed_target, candidate);
+}
+
+static bool validateLoopBodyReadOnlyWrites(AST* node, AST* target) {
+    if (!node || !target) {
+        return true;
+    }
+
+    int line = getLine(node);
+    LoopControlTarget parsed_target;
+    if (!initLoopControlTargetFromAST(target, &parsed_target)) {
+        return true;
+    }
+
+    if (node->type == AST_ASSIGN && node->left && astMatchesLoopControlTarget(node->left, target)) {
+        reportReadOnlyLoopControlError(line, &parsed_target, "assign to");
+        return false;
+    }
+
+    if (node->type == AST_PROCEDURE_CALL && node->token && node->token->value) {
+        const char* callee = node->token->value;
+        if ((strcasecmp(callee, "inc") == 0 || strcasecmp(callee, "dec") == 0) &&
+            node->child_count > 0 &&
+            astMatchesLoopControlTarget(node->children[0], target)) {
+            reportReadOnlyLoopControlError(line, &parsed_target, "modify with Inc/Dec");
+            return false;
+        }
+    }
+
+    if (node->left && !validateLoopBodyReadOnlyWrites(node->left, target)) {
+        return false;
+    }
+    if (node->right && !validateLoopBodyReadOnlyWrites(node->right, target)) {
+        return false;
+    }
+    if (node->extra && !validateLoopBodyReadOnlyWrites(node->extra, target)) {
+        return false;
+    }
+    for (int i = 0; i < node->child_count; i++) {
+        if (node->children[i] && !validateLoopBodyReadOnlyWrites(node->children[i], target)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static void addLocal(FunctionCompilerState* fc, const char* name, int line, bool is_ref) {
@@ -4610,6 +4863,53 @@ static void compileCallArgumentRValue(AST* node, BytecodeChunk* chunk, int curre
     compileRValue(node, chunk, current_line_approx);
     if (shouldDereferenceByRefArrayArgument(node)) {
         writeBytecodeChunk(chunk, GET_INDIRECT, getLine(node) > 0 ? getLine(node) : current_line_approx);
+    }
+}
+
+static bool isFormatOpenArrayCall(const char* calleeName, AST* node, int receiver_offset) {
+    if (!calleeName || !node || strcasecmp(calleeName, "format") != 0) {
+        return false;
+    }
+    int arg_count = node->child_count - receiver_offset;
+    if (arg_count != 2) {
+        return false;
+    }
+    int set_index = receiver_offset + 1;
+    if (set_index < 0 || set_index >= node->child_count) {
+        return false;
+    }
+    AST* set_arg = node->children[set_index];
+    return set_arg && set_arg->type == AST_SET;
+}
+
+static int getFormatOpenArrayExpandedArgCount(AST* node, int receiver_offset) {
+    if (!node) {
+        return 0;
+    }
+    int arg_count = node->child_count - receiver_offset;
+    if (arg_count < 0) {
+        arg_count = 0;
+    }
+    if (!isFormatOpenArrayCall("format", node, receiver_offset)) {
+        return arg_count;
+    }
+    AST* set_arg = node->children[receiver_offset + 1];
+    return 1 + (set_arg ? set_arg->child_count : 0);
+}
+
+static void compileFormatOpenArrayArgs(AST* node, BytecodeChunk* chunk, int receiver_offset) {
+    if (!node || !chunk || !isFormatOpenArrayCall("format", node, receiver_offset)) {
+        return;
+    }
+    AST* fmt_arg = node->children[receiver_offset];
+    AST* set_arg = node->children[receiver_offset + 1];
+    compileCallArgumentRValue(fmt_arg, chunk, getLine(fmt_arg));
+    if (!set_arg) {
+        return;
+    }
+    for (int i = 0; i < set_arg->child_count; ++i) {
+        AST* child = set_arg->children[i];
+        compileCallArgumentRValue(child, chunk, getLine(child));
     }
 }
 
@@ -7455,6 +7755,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         case AST_ASSIGN: {
             AST* lvalue = node->left;
             AST* rvalue = node->right;
+            const LoopControlTarget* read_only_target = findReadOnlyLoopControlTarget(lvalue);
+
+            if (read_only_target) {
+                reportReadOnlyLoopControlError(line, read_only_target, "assign to");
+                break;
+            }
 
             if (isIntlikeType(lvalue->var_type) && isIntlikeType(rvalue->var_type)) {
                 int lrank = intTypeRank(lvalue->var_type);
@@ -7550,54 +7856,48 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 compileNode(inline_decl, chunk, getLine(inline_decl));
             }
 
-            int var_slot = -1;
-            int var_name_idx = -1;
-            
-            if (current_function_compiler) {
-                var_slot = resolveLocal(current_function_compiler, var_node->token->value);
+            if (!validateForLoopControlTarget(var_node, line)) {
+                if (enters_scope) {
+                    for (int i = current_function_compiler->local_count - 1; i >= starting_local; i--) {
+                        if (current_function_compiler->locals[i].name) {
+                            free(current_function_compiler->locals[i].name);
+                            current_function_compiler->locals[i].name = NULL;
+                        }
+                    }
+                    current_function_compiler->local_count = starting_local;
+                    compilerEndScope(current_function_compiler);
+                    restoreLocalEnv(&scope_snapshot);
+                }
+                break;
             }
 
-            if (var_slot == -1) {
-                DBG_PRINTF("[dbg] FOR var '%s' not local; treating as global. Locals: ", var_node && var_node->token ? var_node->token->value : "<nil>");
-#ifdef DEBUG
-                if (current_function_compiler) {
-                    for (int li = 0; li < current_function_compiler->local_count; li++) {
-                        const char* lname = current_function_compiler->locals[li].name;
-                        if (!lname) continue;
-                        fprintf(stderr, "%s%s", li==0?"":" ,", lname);
+            if (!validateLoopBodyReadOnlyWrites(body_node, var_node)) {
+                if (enters_scope) {
+                    for (int i = current_function_compiler->local_count - 1; i >= starting_local; i--) {
+                        if (current_function_compiler->locals[i].name) {
+                            free(current_function_compiler->locals[i].name);
+                            current_function_compiler->locals[i].name = NULL;
+                        }
                     }
-                    fprintf(stderr, "\n");
+                    current_function_compiler->local_count = starting_local;
+                    compilerEndScope(current_function_compiler);
+                    restoreLocalEnv(&scope_snapshot);
                 }
-#endif
-                var_name_idx = addStringConstant(chunk, var_node->token->value);
+                break;
             }
 
             // 1. Initial assignment of the loop variable
             compileRValue(start_node, chunk, getLine(start_node));
-            if (var_slot != -1) {
-                noteLocalSlotUse(current_function_compiler, var_slot);
-                writeBytecodeChunk(chunk, SET_LOCAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
-            } else {
-                emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16,
-                                   var_name_idx, line);
-            }
+            compileLoopControlStore(var_node, chunk, line);
 
             // 2. Setup loop context for handling 'break'
             startLoop(-1); // Start address is not needed for FOR loop's break handling
+            bool pushed_loop_target = pushLoopControlTarget(var_node);
 
             int loopStart = chunk->count;
 
             // 3. The loop condition check
-            if (var_slot != -1) {
-                noteLocalSlotUse(current_function_compiler, var_slot);
-                writeBytecodeChunk(chunk, GET_LOCAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
-            } else {
-                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
-                                   var_name_idx, line);
-            }
-            
+            compileRValue(var_node, chunk, getLine(var_node));
             compileRValue(end_node, chunk, getLine(end_node));
             
             writeBytecodeChunk(chunk, is_downto ? GREATER_EQUAL : LESS_EQUAL, line);
@@ -7613,26 +7913,11 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             // Any 'continue' in the body should land here (the post step), not at the condition.
             loop_stack[loop_depth].continue_target = chunk->count;
             patchContinuesTo(chunk, chunk->count);
-            if (var_slot != -1) {
-                noteLocalSlotUse(current_function_compiler, var_slot);
-                writeBytecodeChunk(chunk, GET_LOCAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
-            } else {
-                emitGlobalNameIdx(chunk, GET_GLOBAL, GET_GLOBAL16,
-                                   var_name_idx, line);
-            }
+            compileRValue(var_node, chunk, getLine(var_node));
             int one_const_idx = addIntConstant(chunk, 1);
             emitConstant(chunk, one_const_idx, line);
             writeBytecodeChunk(chunk, is_downto ? SUBTRACT : ADD, line);
-
-            if (var_slot != -1) {
-                noteLocalSlotUse(current_function_compiler, var_slot);
-                writeBytecodeChunk(chunk, SET_LOCAL, line);
-                writeBytecodeChunk(chunk, (uint8_t)var_slot, line);
-            } else {
-                emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16,
-                                   var_name_idx, line);
-            }
+            compileLoopControlStore(var_node, chunk, line);
 
             // The value from the increment/decrement is still on the stack.
             // Pop it to prevent stack overflow.
@@ -7648,6 +7933,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
             
             // 8. Patch any 'break' statements that occurred inside the loop body.
             patchBreaks(chunk);
+            if (pushed_loop_target) {
+                popLoopControlTarget();
+            }
             endLoop();
 
             if (enters_scope) {
@@ -8097,6 +8385,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                 param_mismatch = true;
                                 break;
                             }
+                            const LoopControlTarget* read_only_target = findReadOnlyLoopControlTarget(arg_node);
+                            if (read_only_target) {
+                                reportReadOnlyLoopControlError(line, read_only_target, "pass as a VAR parameter");
+                                param_mismatch = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -8124,6 +8418,14 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                 line, calleeName, arg_count);
                         compiler_had_error = true;
                         param_mismatch = true;
+                    }
+                    if (!param_mismatch && arg_count >= 1) {
+                        AST* loop_arg = node->children[arg_start];
+                        const LoopControlTarget* read_only_target = findReadOnlyLoopControlTarget(loop_arg);
+                        if (read_only_target) {
+                            reportReadOnlyLoopControlError(line, read_only_target, "modify with Inc/Dec");
+                            param_mismatch = true;
+                        }
                     }
                 } else if (is_halt) {
                     if (!(arg_count == 0 || arg_count == 1)) {
@@ -8222,6 +8524,12 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                 param_mismatch = true;
                                 break;
                             }
+                            const LoopControlTarget* read_only_target = findReadOnlyLoopControlTarget(arg_node);
+                            if (read_only_target) {
+                                reportReadOnlyLoopControlError(line, read_only_target, "pass as a VAR parameter");
+                                param_mismatch = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -8231,7 +8539,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 break;
             }
 
-            int call_arg_count = node->child_count - receiver_offset;
+            int call_arg_count = getFormatOpenArrayExpandedArgCount(node, receiver_offset);
             if (call_arg_count < 0) call_arg_count = 0;
 
             // Inline routine bodies directly when possible.
@@ -8369,6 +8677,16 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
 
                     if (is_var_param) {
+                        const LoopControlTarget* read_only_target = findReadOnlyLoopControlTarget(arg_node);
+                        if (read_only_target) {
+                            if (calleeName &&
+                                (strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0)) {
+                                reportReadOnlyLoopControlError(line, read_only_target, "modify with Inc/Dec");
+                            } else {
+                                reportReadOnlyLoopControlError(line, read_only_target, "pass as a VAR parameter");
+                            }
+                            break;
+                        }
                         compileLValue(arg_node, chunk, getLine(arg_node));
                     } else {
                         compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
@@ -8396,69 +8714,70 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 emitGlobalNameIdx(chunk, SET_GLOBAL, SET_GLOBAL16, myself_idx, line);
             }
 
-            for (int i = receiver_offset; i < node->child_count; i++) {
-                AST* arg_node = node->children[i];
-                int param_index = i - receiver_offset;
-                bool is_var_param = false;
-                AST* param_type_hint = NULL;
-                if (is_read_proc && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) {
-                    is_var_param = true;
-                }
-                else if (calleeName && (
-                    (param_index == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
-                    (strcasecmp(calleeName, "readln") == 0 && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) ||
-                    ((strcasecmp(calleeName, "val") == 0 || strcasecmp(calleeName, "valreal") == 0) && param_index >= 1) ||
-                    (strcasecmp(calleeName, "getmousestate") == 0) || // All params are VAR
-                    (strcasecmp(calleeName, "getscreensize") == 0 && param_index <= 1) || // First two parameters are VAR
-                    (strcasecmp(calleeName, "gettextsize") == 0 && param_index > 0) || // Width and Height are VAR
-                    (strcasecmp(calleeName, "str") == 0 && param_index == 1) ||
-                    /* Date/time routines return values via VAR parameters */
-                    (strcasecmp(calleeName, "dosgetdate") == 0) ||
-                    (strcasecmp(calleeName, "dosgettime") == 0) ||
-                    (strcasecmp(calleeName, "getdate") == 0) ||
-                    (strcasecmp(calleeName, "gettime") == 0) ||
-                    /* MandelbrotRow returns results via the sixth VAR parameter */
-                    ((strcasecmp(calleeName, "mandelbrotrow") == 0 ||
-                      strcasecmp(calleeName, "MandelbrotRow") == 0) && param_index == 5) ||
-                    /* BouncingBalls3D builtins write simulation data back via VAR arrays */
-                    ((strcasecmp(calleeName, "bouncingballs3dstep") == 0 ||
-                      strcasecmp(calleeName, "BouncingBalls3DStep") == 0) && param_index >= 12) ||
-                    ((strcasecmp(calleeName, "bouncingballs3dstepultra") == 0 ||
-                      strcasecmp(calleeName, "BouncingBalls3DStepUltra") == 0) && param_index >= 12) ||
-                    ((strcasecmp(calleeName, "bouncingballs3dstepadvanced") == 0 ||
-                      strcasecmp(calleeName, "BouncingBalls3DStepAdvanced") == 0) && param_index >= 15) ||
-                    ((strcasecmp(calleeName, "bouncingballs3dstepultraadvanced") == 0 ||
-                      strcasecmp(calleeName, "BouncingBalls3DStepUltraAdvanced") == 0) && param_index >= 15)
-                    || ((strcasecmp(calleeName, "bouncingballs3daccelerate") == 0 ||
-                         strcasecmp(calleeName, "BouncingBalls3DAccelerate") == 0) && param_index <= 5)
-                )) {
-                    is_var_param = true;
-                }
-                else if (!proc_symbol && procPtrParams && param_index < procPtrParams->child_count) {
-                    AST* param_node = procPtrParams->children[param_index];
-                    if (param_node && param_node->by_ref) {
+            if (isFormatOpenArrayCall(calleeName, node, receiver_offset)) {
+                compileFormatOpenArrayArgs(node, chunk, receiver_offset);
+            } else {
+                for (int i = receiver_offset; i < node->child_count; i++) {
+                    AST* arg_node = node->children[i];
+                    int param_index = i - receiver_offset;
+                    bool is_var_param = false;
+                    AST* param_type_hint = NULL;
+                    if (is_read_proc && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) {
                         is_var_param = true;
                     }
-                    if (param_node) {
-                        param_type_hint = param_node->right ? param_node->right : param_node;
-                    }
-                }
-                else if (proc_symbol && proc_symbol->type_def && param_index < proc_symbol->type_def->child_count) {
-                    AST* param_node = proc_symbol->type_def->children[param_index];
-                    if (param_node && param_node->by_ref) {
+                    else if (calleeName && (
+                        (param_index == 0 && (strcasecmp(calleeName, "new") == 0 || strcasecmp(calleeName, "dispose") == 0 || strcasecmp(calleeName, "assign") == 0 || strcasecmp(calleeName, "reset") == 0 || strcasecmp(calleeName, "rewrite") == 0 || strcasecmp(calleeName, "append") == 0 || strcasecmp(calleeName, "close") == 0 || strcasecmp(calleeName, "rename") == 0 || strcasecmp(calleeName, "erase") == 0 || strcasecmp(calleeName, "inc") == 0 || strcasecmp(calleeName, "dec") == 0 || strcasecmp(calleeName, "setlength") == 0 || strcasecmp(calleeName, "mstreamloadfromfile") == 0 || strcasecmp(calleeName, "mstreamsavetofile") == 0 || strcasecmp(calleeName, "mstreamfree") == 0 || strcasecmp(calleeName, "eof") == 0 || strcasecmp(calleeName, "readkey") == 0)) ||
+                        (strcasecmp(calleeName, "readln") == 0 && (param_index > 0 || (param_index == 0 && arg_node->var_type != TYPE_FILE))) ||
+                        ((strcasecmp(calleeName, "val") == 0 || strcasecmp(calleeName, "valreal") == 0) && param_index >= 1) ||
+                        (strcasecmp(calleeName, "getmousestate") == 0) ||
+                        (strcasecmp(calleeName, "getscreensize") == 0 && param_index <= 1) ||
+                        (strcasecmp(calleeName, "gettextsize") == 0 && param_index > 0) ||
+                        (strcasecmp(calleeName, "str") == 0 && param_index == 1) ||
+                        (strcasecmp(calleeName, "dosgetdate") == 0) ||
+                        (strcasecmp(calleeName, "dosgettime") == 0) ||
+                        (strcasecmp(calleeName, "getdate") == 0) ||
+                        (strcasecmp(calleeName, "gettime") == 0) ||
+                        ((strcasecmp(calleeName, "mandelbrotrow") == 0 ||
+                          strcasecmp(calleeName, "MandelbrotRow") == 0) && param_index == 5) ||
+                        ((strcasecmp(calleeName, "bouncingballs3dstep") == 0 ||
+                          strcasecmp(calleeName, "BouncingBalls3DStep") == 0) && param_index >= 12) ||
+                        ((strcasecmp(calleeName, "bouncingballs3dstepultra") == 0 ||
+                          strcasecmp(calleeName, "BouncingBalls3DStepUltra") == 0) && param_index >= 12) ||
+                        ((strcasecmp(calleeName, "bouncingballs3dstepadvanced") == 0 ||
+                          strcasecmp(calleeName, "BouncingBalls3DStepAdvanced") == 0) && param_index >= 15) ||
+                        ((strcasecmp(calleeName, "bouncingballs3dstepultraadvanced") == 0 ||
+                          strcasecmp(calleeName, "BouncingBalls3DStepUltraAdvanced") == 0) && param_index >= 15) ||
+                        ((strcasecmp(calleeName, "bouncingballs3daccelerate") == 0 ||
+                          strcasecmp(calleeName, "BouncingBalls3DAccelerate") == 0) && param_index <= 5)
+                    )) {
                         is_var_param = true;
                     }
-                    if (param_node) {
-                        param_type_hint = param_node->type_def ? param_node->type_def
-                                                               : (param_node->right ? param_node->right : param_node);
+                    else if (!proc_symbol && procPtrParams && param_index < procPtrParams->child_count) {
+                        AST* param_node = procPtrParams->children[param_index];
+                        if (param_node && param_node->by_ref) {
+                            is_var_param = true;
+                        }
+                        if (param_node) {
+                            param_type_hint = param_node->right ? param_node->right : param_node;
+                        }
                     }
-                }
+                    else if (proc_symbol && proc_symbol->type_def && param_index < proc_symbol->type_def->child_count) {
+                        AST* param_node = proc_symbol->type_def->children[param_index];
+                        if (param_node && param_node->by_ref) {
+                            is_var_param = true;
+                        }
+                        if (param_node) {
+                            param_type_hint = param_node->type_def ? param_node->type_def
+                                                                   : (param_node->right ? param_node->right : param_node);
+                        }
+                    }
 
-                if (is_var_param) {
-                    compileLValue(arg_node, chunk, getLine(arg_node));
-                } else {
-                    compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
-                    maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
+                    if (is_var_param) {
+                        compileLValue(arg_node, chunk, getLine(arg_node));
+                    } else {
+                        compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
+                        maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
+                    }
                 }
             }
 
@@ -8660,118 +8979,6 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
     }
 }
 
-// --- NEW STATIC HELPER FOR COMPILING SETS ---
-// This is a simplified adaptation of the logic from `evalSet`
-static void addOrdinalToSetValue(Value* setVal, long long ordinal) {
-    // Check for duplicates
-    for (int i = 0; i < setVal->set_val.set_size; i++) {
-        if (setVal->set_val.set_values[i] == ordinal) {
-            return; // Already in set
-        }
-    }
-    // Reallocate if needed
-    if (setVal->set_val.set_size >= setVal->max_length) {
-        int new_capacity = (setVal->max_length == 0) ? 8 : setVal->max_length * 2;
-        long long* new_values = realloc(setVal->set_val.set_values, sizeof(long long) * new_capacity);
-        if (!new_values) {
-            fprintf(stderr, "FATAL: realloc failed in addOrdinalToSetValue\n");
-            EXIT_FAILURE_HANDLER();
-        }
-        setVal->set_val.set_values = new_values;
-        setVal->max_length = new_capacity;
-    }
-    // Add the new element
-    setVal->set_val.set_values[setVal->set_val.set_size++] = ordinal;
-}
-
-static bool lookupEnumMemberOrdinal(const char* name, long long* outOrdinal) {
-    if (!name || !outOrdinal) return false;
-
-    for (TypeEntry* entry = type_table; entry; entry = entry->next) {
-        if (!entry->typeAST) continue;
-
-        AST* enum_ast = entry->typeAST;
-        if (enum_ast->type == AST_TYPE_REFERENCE && enum_ast->right) {
-            enum_ast = enum_ast->right;
-        }
-
-        if (!enum_ast || enum_ast->type != AST_ENUM_TYPE) continue;
-
-        for (int i = 0; i < enum_ast->child_count; i++) {
-            AST* value_node = enum_ast->children[i];
-            if (!value_node || !value_node->token || !value_node->token->value) {
-                continue;
-            }
-            if (strcasecmp(value_node->token->value, name) == 0) {
-                *outOrdinal = value_node->i_val;
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-static bool resolveSetElementOrdinal(AST* member, long long* outOrdinal) {
-    if (!member || !outOrdinal) return false;
-
-    bool success = false;
-    long long ordinal = 0;
-
-    Value elem_val = evaluateCompileTimeValue(member);
-    switch (elem_val.type) {
-        case TYPE_INTEGER:
-            ordinal = elem_val.i_val;
-            success = true;
-            break;
-        case TYPE_CHAR:
-            ordinal = elem_val.c_val;
-            success = true;
-            break;
-        case TYPE_ENUM:
-            ordinal = elem_val.enum_val.ordinal;
-            success = true;
-            break;
-        default:
-            break;
-    }
-    freeValue(&elem_val);
-
-    if (success) {
-        *outOrdinal = ordinal;
-        return true;
-    }
-
-    if (member->type == AST_VARIABLE && member->token && member->token->value) {
-        const char* name = member->token->value;
-        Symbol* sym = lookupLocalSymbol(name);
-        if (!sym) {
-            sym = lookupGlobalSymbol(name);
-        }
-        sym = resolveSymbolAlias(sym);
-        if (sym && sym->value && sym->is_const) {
-            Value* v = sym->value;
-            if (v->type == TYPE_ENUM) {
-                *outOrdinal = v->enum_val.ordinal;
-                return true;
-            }
-            if (v->type == TYPE_INTEGER) {
-                *outOrdinal = v->i_val;
-                return true;
-            }
-            if (v->type == TYPE_CHAR) {
-                *outOrdinal = v->c_val;
-                return true;
-            }
-        }
-        if (lookupEnumMemberOrdinal(name, outOrdinal)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx) {
     if (!node) return;
     int line = getLine(node);
@@ -8886,60 +9093,28 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         case AST_SET: {
-            Value set_const_val;
-            memset(&set_const_val, 0, sizeof(Value));
-            set_const_val.type = TYPE_SET;
-            set_const_val.max_length = 0;
-            set_const_val.set_val.set_size = 0;
-            set_const_val.set_val.set_values = NULL;
+            if (node->child_count == 0) {
+                Value empty_set = makeValueForType(TYPE_SET, NULL, NULL);
+                int constIndex = addConstantToChunk(chunk, &empty_set);
+                freeValue(&empty_set);
+                emitConstant(chunk, constIndex, line);
+                break;
+            }
 
             for (int i = 0; i < node->child_count; i++) {
                 AST* member = node->children[i];
                 if (member->type == AST_SUBRANGE) {
-                    long long start_ord = 0;
-                    long long end_ord = 0;
-                    bool start_ok = resolveSetElementOrdinal(member->left, &start_ord);
-                    bool end_ok = resolveSetElementOrdinal(member->right, &end_ord);
-
-                    if (start_ok && end_ok) {
-                        if (start_ord <= end_ord) {
-                            for (long long j = start_ord; j <= end_ord; j++) {
-                                addOrdinalToSetValue(&set_const_val, j);
-                            }
-                        } else {
-                            long long j = start_ord;
-                            while (true) {
-                                addOrdinalToSetValue(&set_const_val, j);
-                                if (j == end_ord) {
-                                    break;
-                                }
-                                if (j == LLONG_MIN) {
-                                    fprintf(stderr, "L%d: Compiler error: Set range lower bound underflows ordinal minimum.\\n", getLine(member));
-                                    compiler_had_error = true;
-                                    break;
-                                }
-                                j--;
-                            }
-                        }
-                    } else {
-                        fprintf(stderr, "L%d: Compiler error: Set range bounds must be constant ordinal types.\n", getLine(member));
-                        compiler_had_error = true;
-                    }
+                    compileRValue(member->left, chunk, getLine(member->left));
+                    compileRValue(member->right, chunk, getLine(member->right));
+                    writeBytecodeChunk(chunk, MAKE_SET_RANGE, getLine(member));
                 } else {
-                    long long ord = 0;
-                    if (resolveSetElementOrdinal(member, &ord)) {
-                        addOrdinalToSetValue(&set_const_val, ord);
-                    } else {
-                        fprintf(stderr, "L%d: Compiler error: Set elements must be constant ordinal types.\n", getLine(member));
-                        compiler_had_error = true;
-                    }
+                    compileRValue(member, chunk, getLine(member));
+                    writeBytecodeChunk(chunk, MAKE_SET_SINGLETON, getLine(member));
+                }
+                if (i > 0) {
+                    writeBytecodeChunk(chunk, ADD, getLine(member));
                 }
             }
-
-            int constIndex = addConstantToChunk(chunk, &set_const_val);
-            freeValue(&set_const_val);
-
-            emitConstant(chunk, constIndex, line);
             break;
         }
         case AST_RECORD_LITERAL: {
@@ -10039,42 +10214,55 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             if (!isInterfaceDispatch && (!isLowHighBuiltin || !emittedLowHighArg)) {
-                for (int i = receiver_offset; i < node->child_count; i++) {
-                    AST* arg_node = node->children[i];
-                    if (!arg_node) continue;
+                if (isFormatOpenArrayCall(functionName, node, receiver_offset)) {
+                    compileFormatOpenArrayArgs(node, chunk, receiver_offset);
+                } else {
+                    for (int i = receiver_offset; i < node->child_count; i++) {
+                        AST* arg_node = node->children[i];
+                        if (!arg_node) continue;
 
-                    int param_index = i - receiver_offset;
-                    bool is_var_param = false;
-                    AST* param_type_hint = NULL;
-                    if (func_symbol && func_symbol->type_def && param_index < func_symbol->type_def->child_count) {
-                        AST* param_node = func_symbol->type_def->children[param_index];
-                        if (param_node && param_node->by_ref) {
+                        int param_index = i - receiver_offset;
+                        bool is_var_param = false;
+                        AST* param_type_hint = NULL;
+                        if (func_symbol && func_symbol->type_def && param_index < func_symbol->type_def->child_count) {
+                            AST* param_node = func_symbol->type_def->children[param_index];
+                            if (param_node && param_node->by_ref) {
+                                is_var_param = true;
+                            }
+                            if (param_node) {
+                                param_type_hint = param_node->type_def ? param_node->type_def
+                                                                       : (param_node->right ? param_node->right : param_node);
+                            }
+                        } else if (functionName && param_index == 0 && strcasecmp(functionName, "eof") == 0) {
                             is_var_param = true;
+                        } else if (!func_symbol && functionName) {
+                            if ((strcasecmp(functionName, "GetMouseState") == 0 && param_index <= 3) ||
+                                (strcasecmp(functionName, "GetScreenSize") == 0 && param_index <= 1)) {
+                                is_var_param = true;
+                            }
                         }
-                        if (param_node) {
-                            param_type_hint = param_node->type_def ? param_node->type_def
-                                                                   : (param_node->right ? param_node->right : param_node);
-                        }
-                    } else if (functionName && param_index == 0 && strcasecmp(functionName, "eof") == 0) {
-                        // Built-in EOF takes its file parameter by reference
-                        is_var_param = true;
-                    } else if (!func_symbol && functionName) {
-                        if ((strcasecmp(functionName, "GetMouseState") == 0 && param_index <= 3) ||
-                            (strcasecmp(functionName, "GetScreenSize") == 0 && param_index <= 1)) {
-                            is_var_param = true;
-                        }
-                    }
 
-                    if (is_var_param) {
-                        compileLValue(arg_node, chunk, getLine(arg_node));
-                    } else {
-                        compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
-                        maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
+                        if (is_var_param) {
+                            const LoopControlTarget* read_only_target = findReadOnlyLoopControlTarget(arg_node);
+                            if (read_only_target) {
+                                if (functionName &&
+                                    (strcasecmp(functionName, "inc") == 0 || strcasecmp(functionName, "dec") == 0)) {
+                                    reportReadOnlyLoopControlError(line, read_only_target, "modify with Inc/Dec");
+                                } else {
+                                    reportReadOnlyLoopControlError(line, read_only_target, "pass as a VAR parameter");
+                                }
+                                break;
+                            }
+                            compileLValue(arg_node, chunk, getLine(arg_node));
+                        } else {
+                            compileCallArgumentRValue(arg_node, chunk, getLine(arg_node));
+                            maybeAutoBoxInterfaceForType(param_type_hint, arg_node, chunk, getLine(arg_node), true, false);
+                        }
                     }
                 }
             }
 
-            int call_arg_count = node->child_count - receiver_offset;
+            int call_arg_count = getFormatOpenArrayExpandedArgCount(node, receiver_offset);
             if (call_arg_count < 0) call_arg_count = 0;
 
             if (usesReceiverGlobal && callReceiver) {

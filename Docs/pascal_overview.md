@@ -18,6 +18,7 @@ Pscal implements a substantial subset of classic Pascal:
 * **Operators** – arithmetic/logic expressions plus compound assignments (`+=`, `-=`) that expand to in-place addition or subtraction.
 * **Subroutines** – functions and procedures with local variables and parameters.
 * **Units** – separate compilation modules that export types, variables and routines.
+* **Targeted syntax extensions** – Delphi-style `for var i := ...`, record-field `for rec.field := ... do` loop control variables, and implicit multi-statement `case` branches without mandatory `begin ... end`.
 * **Threading and Synchronization** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish. Prefer `CreateThread(@Proc, arg)` and `WaitForThread(t)` when you need to pass a pointer argument; `WaitForThread` returns `0` on success and clears the stored status so idle workers can be reused immediately. The `Threading` unit adds helpers such as `ThreadOptionsNamed('worker')`, `SpawnBuiltinNamed('delay', 'worker')`, and `PoolSubmitNamed('delay', 'queue')` so Pascal code can forward names or queue-only flags to `ThreadSpawnBuiltin`/`ThreadPoolSubmit`, alongside simple wrappers like `ThreadStatsCount` or `ThreadStatusOk` for asynchronous monitoring. `mutex` and `rcmutex` create standard or recursive mutexes and return ids, while `lock`, `unlock`, and `destroy` manage their lifecycle.
 
 Examples

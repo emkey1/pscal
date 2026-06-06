@@ -407,6 +407,8 @@ static bool vmRequestHardSuspendCurrentVproc(void) {
     X(SET_INDIRECT) \
     X(GET_INDIRECT) \
     X(IN) \
+    X(MAKE_SET_SINGLETON) \
+    X(MAKE_SET_RANGE) \
     X(GET_CHAR_FROM_STRING) \
     X(ALLOC_OBJECT) \
     X(ALLOC_OBJECT16) \
@@ -3140,6 +3142,65 @@ static bool vmSetContains(const Value* setVal, const Value* itemVal) {
         }
     }
     return false;
+}
+
+static bool vmAddOrdinalToSet(Value* setVal, long long ordinal) {
+    if (!setVal || setVal->type != TYPE_SET) {
+        return false;
+    }
+    for (int i = 0; i < setVal->set_val.set_size; i++) {
+        if (setVal->set_val.set_values[i] == ordinal) {
+            return true;
+        }
+    }
+    if (setVal->set_val.set_size >= setVal->max_length) {
+        int new_capacity = (setVal->max_length == 0) ? 8 : setVal->max_length * 2;
+        long long* new_values = realloc(setVal->set_val.set_values, sizeof(long long) * new_capacity);
+        if (!new_values) {
+            return false;
+        }
+        setVal->set_val.set_values = new_values;
+        setVal->max_length = new_capacity;
+    }
+    setVal->set_val.set_values[setVal->set_val.set_size++] = ordinal;
+    return true;
+}
+
+static bool vmBuildSetFromOrdinal(Value* outSet, long long ordinal) {
+    if (!outSet) {
+        return false;
+    }
+    *outSet = makeValueForType(TYPE_SET, NULL, NULL);
+    return vmAddOrdinalToSet(outSet, ordinal);
+}
+
+static bool vmBuildSetFromRange(Value* outSet, long long start_ord, long long end_ord) {
+    if (!outSet) {
+        return false;
+    }
+    *outSet = makeValueForType(TYPE_SET, NULL, NULL);
+    if (start_ord <= end_ord) {
+        for (long long current = start_ord; current <= end_ord; ++current) {
+            if (!vmAddOrdinalToSet(outSet, current)) {
+                return false;
+            }
+            if (current == LLONG_MAX) {
+                break;
+            }
+        }
+        return true;
+    }
+    for (long long current = start_ord;; --current) {
+        if (!vmAddOrdinalToSet(outSet, current)) {
+            return false;
+        }
+        if (current == end_ord) {
+            return true;
+        }
+        if (current == LLONG_MIN) {
+            return false;
+        }
+    }
 }
 
 // Scans all global symbols and the entire VM value stack to find and nullify
@@ -7847,6 +7908,50 @@ comparison_error_label:
                 freeValue(&set_val);
 
                 push(vm, makeBoolean(result));
+                break;
+            }
+
+            case MAKE_SET_SINGLETON: {
+                Value item_val = pop(vm);
+                long long ordinal = 0;
+                if (!tryValueToOrdinal(&item_val, &ordinal)) {
+                    runtimeError(vm, "Set constructor element must be an ordinal value.");
+                    freeValue(&item_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value set_val;
+                if (!vmBuildSetFromOrdinal(&set_val, ordinal)) {
+                    runtimeError(vm, "VM Error: Failed to allocate set singleton.");
+                    freeValue(&item_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&item_val);
+                push(vm, set_val);
+                break;
+            }
+
+            case MAKE_SET_RANGE: {
+                Value end_val = pop(vm);
+                Value start_val = pop(vm);
+                long long start_ord = 0;
+                long long end_ord = 0;
+                if (!tryValueToOrdinal(&start_val, &start_ord) ||
+                    !tryValueToOrdinal(&end_val, &end_ord)) {
+                    runtimeError(vm, "Set constructor range bounds must be ordinal values.");
+                    freeValue(&start_val);
+                    freeValue(&end_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                Value set_val;
+                if (!vmBuildSetFromRange(&set_val, start_ord, end_ord)) {
+                    runtimeError(vm, "VM Error: Failed to allocate set range.");
+                    freeValue(&start_val);
+                    freeValue(&end_val);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                freeValue(&start_val);
+                freeValue(&end_val);
+                push(vm, set_val);
                 break;
             }
 

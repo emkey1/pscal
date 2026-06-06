@@ -265,6 +265,24 @@
       "stdout_substring": "PASS: case char code label multiline"
     },
     {
+      "id": "case_empty_statement_branch",
+      "path": "Tests/compiler/pascal/cases/case_empty_statement_branch.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: case empty statement branch"
+    },
+    {
+      "id": "runtime_set_constructors",
+      "path": "Tests/compiler/pascal/cases/runtime_set_constructors.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: runtime set constructors"
+    },
+    {
+      "id": "sysutils_format_open_array",
+      "path": "Tests/compiler/pascal/cases/sysutils_format_open_array.pas",
+      "expect": "compile_success",
+      "stdout_substring": "single=  7\nmulti=maze:42:!"
+    },
+    {
       "id": "var_record_result_param",
       "path": "Tests/compiler/pascal/cases/var_record_result_param.pas",
       "expect": "compile_success",
@@ -306,6 +324,42 @@
       "expect": "compile_success",
       "compiler_args": ["--dump-bytecode-only"],
       "stderr_substring": "LOAD_ELEMENT_VALUE_CONST          0 (flat offset)\n0032    | SET_LOCAL           0 (slot)"
+    },
+    {
+      "id": "for_record_field_control_var",
+      "path": "Tests/compiler/pascal/cases/for_record_field_control_var.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: 102"
+    },
+    {
+      "id": "for_record_field_readonly_assign_error",
+      "path": "Tests/compiler/pascal/cases/for_record_field_readonly_assign_error.pas",
+      "expect": "compile_error",
+      "stderr_substring": "Compiler error: cannot assign to FOR loop control variable 'cur.r' inside the loop body."
+    },
+    {
+      "id": "for_record_field_readonly_inc_error",
+      "path": "Tests/compiler/pascal/cases/for_record_field_readonly_inc_error.pas",
+      "expect": "compile_error",
+      "stderr_substring": "Compiler error: cannot modify with Inc/Dec FOR loop control variable 'cur.r' inside the loop body."
+    },
+    {
+      "id": "case_implicit_compound_branch",
+      "path": "Tests/compiler/pascal/cases/case_implicit_compound_branch.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: 8,20"
+    },
+    {
+      "id": "enum_member_beats_builtin_name",
+      "path": "Tests/compiler/pascal/cases/enum_member_beats_builtin_name.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: floor enum"
+    },
+    {
+      "id": "record_method_then_field",
+      "path": "Tests/compiler/pascal/cases/record_method_then_field.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: ok"
     }
   ]
 }

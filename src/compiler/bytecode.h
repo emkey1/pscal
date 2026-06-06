@@ -102,6 +102,8 @@ typedef enum {
     GET_INDIRECT,
     
     IN, // For set membership
+    MAKE_SET_SINGLETON, // Pop ordinal value, push singleton set
+    MAKE_SET_RANGE, // Pop upper and lower ordinals, push inclusive set range
     
     GET_CHAR_FROM_STRING, //  Pops index, pops string, pushes character.
 

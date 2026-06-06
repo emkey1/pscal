@@ -187,6 +187,16 @@ expression.
     ```
     In this form, the loop variable is scoped to the loop and does not remain
     visible after the loop finishes.
+    As an extension, the control variable may also be a single record field
+    selector whose base is a plain variable:
+    ```pascal
+    for cursor.Row := 1 to Height do
+      statement;
+    ```
+    Only `recordVar.field` is accepted here; array elements, dereferences, and
+    chained selectors are rejected. The selected field is treated as the loop
+    control variable and is read-only within the loop body, just like a normal
+    Pascal `for` variable.
 * **`repeat` Loops:**
     ```pascal
     repeat
@@ -203,6 +213,16 @@ expression.
       statement;
     end;
     ```
+    As an extension, a case branch may contain multiple semicolon-separated
+    statements without an explicit `begin ... end` wrapper:
+    ```pascal
+    case dir of
+      North: nxt := cur; nxt.R := cur.R - 2;
+      South: nxt := cur; nxt.R := cur.R + 2;
+    end;
+    ```
+    This is parsed as though each branch body were wrapped in `begin ... end`.
+    The standard explicit compound form remains valid and unchanged.
 * **`try` / `except`:**
     ```pascal
     try
