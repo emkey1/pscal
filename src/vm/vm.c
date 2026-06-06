@@ -689,7 +689,9 @@ static VarType vmDeclaredVarType(AST* type_node) {
                 if (strcasecmp(tn, "longint") == 0 || strcasecmp(tn, "int64") == 0) return TYPE_INT64;
                 if (strcasecmp(tn, "cardinal") == 0) return TYPE_UINT32;
                 if (strcasecmp(tn, "char") == 0) return TYPE_CHAR;
+                if (strcasecmp(tn, "widechar") == 0) return TYPE_WIDECHAR;
                 if (strcasecmp(tn, "string") == 0) return TYPE_STRING;
+                if (strcasecmp(tn, "unicodestring") == 0) return TYPE_UNICODE_STRING;
                 if (strcasecmp(tn, "boolean") == 0 || strcasecmp(tn, "bool") == 0) return TYPE_BOOLEAN;
                 if (strcasecmp(tn, "byte") == 0) return TYPE_BYTE;
                 if (strcasecmp(tn, "word") == 0) return TYPE_WORD;
@@ -4455,7 +4457,7 @@ static Value vmHostPrintf(VM* vm) {
         args[arg_count - 1 - i] = pop(vm);
     }
 
-    const char* fmt = (args[0].type == TYPE_STRING && args[0].s_val) ? args[0].s_val : "";
+    const char* fmt = (isPascalStringType(args[0].type) && args[0].s_val) ? args[0].s_val : "";
     int arg_index = 1;
     size_t flen = strlen(fmt);
     for (size_t i = 0; i < flen; ++i) {
@@ -4623,7 +4625,17 @@ static Value vmHostPrintf(VM* vm) {
                         break;
                     }
                     case 's': {
-                        const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
+                        char char_text[5] = {0};
+                        const char* sv = "";
+                        if (isPascalStringType(v.type) && v.s_val) {
+                            sv = v.s_val;
+                        } else if (v.type == TYPE_CHAR) {
+                            char_text[0] = (char)v.c_val;
+                            sv = char_text;
+                        } else if (v.type == TYPE_WIDECHAR) {
+                            encodeUtf8Codepoint((uint32_t)v.c_val, char_text);
+                            sv = char_text;
+                        }
                         char safe_fmt[sizeof(fmtbuf)];
                         const char* format = fmtbuf;
                         if (expects_wide_char) {
@@ -5315,6 +5327,8 @@ static InterpretResult handleDefineGlobal(VM* vm, Value varNameVal) {
                 else if (strcasecmp(tn, "real")    == 0 || strcasecmp(tn, "double") == 0) setTypeAST(type_def_node, TYPE_DOUBLE);
                 else if (strcasecmp(tn, "single")  == 0 || strcasecmp(tn, "float")  == 0) setTypeAST(type_def_node, TYPE_FLOAT);
                 else if (strcasecmp(tn, "char")    == 0) setTypeAST(type_def_node, TYPE_CHAR);
+                else if (strcasecmp(tn, "widechar")== 0) setTypeAST(type_def_node, TYPE_WIDECHAR);
+                else if (strcasecmp(tn, "unicodestring")== 0) setTypeAST(type_def_node, TYPE_UNICODE_STRING);
                 else if (strcasecmp(tn, "boolean") == 0 || strcasecmp(tn, "bool") == 0) setTypeAST(type_def_node, TYPE_BOOLEAN);
                 else if (strcasecmp(tn, "byte")    == 0) setTypeAST(type_def_node, TYPE_BYTE);
                 else if (strcasecmp(tn, "word")    == 0) setTypeAST(type_def_node, TYPE_WORD);
@@ -5634,20 +5648,33 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                 } \
                 if ((IS_STRING(*final_a) || IS_CHAR(*final_a)) && \
                     (IS_STRING(*final_b) || IS_CHAR(*final_b))) { \
-                    char a_buffer[2] = {0}; \
-                    char b_buffer[2] = {0}; \
+                    char a_buffer[5] = {0}; \
+                    char b_buffer[5] = {0}; \
                     const char* s_a = NULL; \
                     const char* s_b = NULL; \
+                    VarType result_type = \
+                        (final_a->type == TYPE_UNICODE_STRING || final_b->type == TYPE_UNICODE_STRING || \
+                         final_a->type == TYPE_WIDECHAR || final_b->type == TYPE_WIDECHAR) \
+                        ? TYPE_UNICODE_STRING \
+                        : TYPE_STRING; \
                     if (IS_STRING(*final_a)) { \
                         s_a = AS_STRING(*final_a) ? AS_STRING(*final_a) : ""; \
                     } else { \
-                        a_buffer[0] = AS_CHAR(*final_a); \
+                        if (final_a->type == TYPE_WIDECHAR) { \
+                            encodeUtf8Codepoint((uint32_t)AS_CHAR(*final_a), a_buffer); \
+                        } else { \
+                            a_buffer[0] = (char)AS_CHAR(*final_a); \
+                        } \
                         s_a = a_buffer; \
                     } \
                     if (IS_STRING(*final_b)) { \
                         s_b = AS_STRING(*final_b) ? AS_STRING(*final_b) : ""; \
                     } else { \
-                        b_buffer[0] = AS_CHAR(*final_b); \
+                        if (final_b->type == TYPE_WIDECHAR) { \
+                            encodeUtf8Codepoint((uint32_t)AS_CHAR(*final_b), b_buffer); \
+                        } else { \
+                            b_buffer[0] = (char)AS_CHAR(*final_b); \
+                        } \
                         s_b = b_buffer; \
                     } \
                     size_t len_a = strlen(s_a); \
@@ -5681,6 +5708,7 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                         temp_concat_buffer[total_len] = '\0'; \
                     } \
                     result_val = makeOwnedString(temp_concat_buffer, total_len); \
+                    result_val.type = result_type; \
                     freeValue(&a_val_popped); freeValue(&b_val_popped); \
                     op_is_handled = true; \
                 } else { \
@@ -5988,7 +6016,8 @@ dispatch_switch:
                 Value index_val = pop(vm);
                 Value* string_ptr_val = vm->stackTop - 1; // Peek at the string pointer
 
-                if (string_ptr_val->type != TYPE_POINTER || !string_ptr_val->ptr_val || ((Value*)string_ptr_val->ptr_val)->type != TYPE_STRING) {
+                if (string_ptr_val->type != TYPE_POINTER || !string_ptr_val->ptr_val ||
+                    !isPascalStringType(((Value*)string_ptr_val->ptr_val)->type)) {
                     runtimeError(vm, "VM Error: Base for character index is not a pointer to a string.");
                     freeValue(&index_val);
                     return INTERPRET_RUNTIME_ERROR;
@@ -6395,25 +6424,44 @@ dispatch_switch:
                     }
                     comparison_succeeded = true;
                 } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
-                    char char_val;
-                    const char* str_val;
+                    char a_text[5] = {0};
+                    char b_text[5] = {0};
+                    const char *sa = NULL;
+                    const char *sb = NULL;
 
-                    if (IS_CHAR(a_val)) {
-                        char_val = AS_CHAR(a_val);
-                        str_val = AS_STRING(b_val);
+                    if (IS_STRING(a_val)) {
+                        sa = AS_STRING(a_val) ? AS_STRING(a_val) : "";
+                    } else if (a_val.type == TYPE_WIDECHAR) {
+                        encodeUtf8Codepoint((uint32_t)AS_CHAR(a_val), a_text);
+                        sa = a_text;
                     } else {
-                        char_val = AS_CHAR(b_val);
-                        str_val = AS_STRING(a_val);
+                        a_text[0] = (char)AS_CHAR(a_val);
+                        sa = a_text;
                     }
 
-                    if (strlen(str_val) == 1 && str_val[0] == char_val) {
-                        result_val = makeBoolean(instruction_val == EQUAL);
+                    if (IS_STRING(b_val)) {
+                        sb = AS_STRING(b_val) ? AS_STRING(b_val) : "";
+                    } else if (b_val.type == TYPE_WIDECHAR) {
+                        encodeUtf8Codepoint((uint32_t)AS_CHAR(b_val), b_text);
+                        sb = b_text;
                     } else {
-                        result_val = makeBoolean(instruction_val != EQUAL);
+                        b_text[0] = (char)AS_CHAR(b_val);
+                        sb = b_text;
+                    }
+
+                    int cmp = strcmp(sa, sb);
+                    switch (instruction_val) {
+                        case EQUAL:         result_val = makeBoolean(cmp == 0); break;
+                        case NOT_EQUAL:     result_val = makeBoolean(cmp != 0); break;
+                        case GREATER:       result_val = makeBoolean(cmp > 0);  break;
+                        case GREATER_EQUAL: result_val = makeBoolean(cmp >= 0); break;
+                        case LESS:          result_val = makeBoolean(cmp < 0);  break;
+                        case LESS_EQUAL:    result_val = makeBoolean(cmp <= 0); break;
+                        default:
+                            goto comparison_error_label;
                     }
                     comparison_succeeded = true;
                 }
-                // String comparison
                 else if (IS_STRING(a_val) && IS_STRING(b_val)) {
                     const char* sa = AS_STRING(a_val) ? AS_STRING(a_val) : "";
                     const char* sb = AS_STRING(b_val) ? AS_STRING(b_val) : "";
@@ -6460,38 +6508,6 @@ dispatch_switch:
                         case LESS_EQUAL:    result_val = makeBoolean(ca <= cb); break;
                         default:
                             runtimeError(vm, "VM Error: Unexpected char comparison opcode %d.", instruction_val);
-                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
-                    }
-                    comparison_succeeded = true;
-                } else if ((IS_CHAR(a_val) && IS_STRING(b_val)) || (IS_STRING(a_val) && IS_CHAR(b_val))) {
-                    char char_val;
-                    const char* str_val;
-                    if (IS_CHAR(a_val)) { char_val = AS_CHAR(a_val); str_val = AS_STRING(b_val); }
-                    else { char_val = AS_CHAR(b_val); str_val = AS_STRING(a_val); }
-
-                    size_t slen = str_val ? strlen(str_val) : 0;
-
-                    bool eq;
-                    if (slen == 1) {
-                        eq = (str_val[0] == char_val);
-                    } else if (slen == 0) {
-                        // Treat empty string as #0 char for equality tests
-                        eq = (char_val == '\0');
-                    } else {
-                        eq = false;
-                    }
-
-                    switch (instruction_val) {
-                        case EQUAL:         result_val = makeBoolean(eq); break;
-                        case NOT_EQUAL:     result_val = makeBoolean(!eq); break;
-                        case GREATER:
-                        case GREATER_EQUAL:
-                        case LESS:
-                        case LESS_EQUAL:
-                            runtimeError(vm, "Runtime Error: Relational comparison between CHAR and STRING is not supported.");
-                            freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
-                        default:
-                            runtimeError(vm, "VM Error: Unexpected char/string comparison opcode %d.", instruction_val);
                             freeValue(&a_val); freeValue(&b_val); return INTERPRET_RUNTIME_ERROR;
                     }
                     comparison_succeeded = true;
@@ -6957,7 +6973,7 @@ comparison_error_label:
                 // string.
                 if (dimension_count == 1 && operand.type == TYPE_POINTER) {
                     Value* base_val = (Value*)operand.ptr_val;
-                    if (base_val && base_val->type == TYPE_STRING) {
+                    if (base_val && isPascalStringType(base_val->type)) {
                         Value index_val = pop(vm);
                         if (!isIntlikeType(index_val.type)) {
                             runtimeError(vm, "VM Error: String index must be an integer.");
@@ -7121,7 +7137,7 @@ comparison_error_label:
 
                 if (operand.type == TYPE_POINTER) {
                     Value* base_val = (Value*)operand.ptr_val;
-                    if (base_val && base_val->type == TYPE_STRING) {
+                    if (base_val && isPascalStringType(base_val->type)) {
                         const char* str = base_val->s_val ? base_val->s_val : "";
                         size_t len = strlen(str);
 
@@ -7252,7 +7268,7 @@ comparison_error_label:
 
                 if (dimension_count == 1 && operand.type == TYPE_POINTER) {
                     Value* base_val = (Value*)operand.ptr_val;
-                    if (base_val && base_val->type == TYPE_STRING) {
+                    if (base_val && isPascalStringType(base_val->type)) {
                         Value index_val = pop(vm);
                         if (!isIntlikeType(index_val.type)) {
                             runtimeError(vm, "VM Error: String index must be an integer.");
@@ -7415,7 +7431,7 @@ comparison_error_label:
 
                 if (operand.type == TYPE_POINTER) {
                     Value* base_val = (Value*)operand.ptr_val;
-                    if (base_val && base_val->type == TYPE_STRING) {
+                    if (base_val && isPascalStringType(base_val->type)) {
                         const char* str = base_val->s_val ? base_val->s_val : "";
                         size_t len = strlen(str);
 
@@ -7657,24 +7673,35 @@ comparison_error_label:
                     }
 
                     // (Your existing logic for handling fixed-length strings, pointers, reals, etc. goes here)
-                    if (target_lvalue_ptr->type == TYPE_STRING && target_lvalue_ptr->max_length <= 0) {
-                        if (value_to_set.type == TYPE_CHAR) {
+                    if (isPascalStringType(target_lvalue_ptr->type) && target_lvalue_ptr->max_length <= 0) {
+                        if (value_to_set.type == TYPE_CHAR || value_to_set.type == TYPE_WIDECHAR) {
                             freeValue(target_lvalue_ptr);
-                            target_lvalue_ptr->s_val = (char*)malloc(2);
-                            if (!target_lvalue_ptr->s_val) {
-                                runtimeError(vm, "VM Error: Malloc failed for CHAR to STRING assignment.");
+                            char encoded[5] = {0};
+                            size_t encoded_len = 0;
+                            if (value_to_set.type == TYPE_CHAR) {
+                                encoded[0] = (char)value_to_set.c_val;
+                                encoded_len = 1;
                             } else {
-                                target_lvalue_ptr->s_val[0] = value_to_set.c_val;
-                                target_lvalue_ptr->s_val[1] = '\0';
+                                encoded_len = encodeUtf8Codepoint((uint32_t)value_to_set.c_val, encoded);
                             }
-                            target_lvalue_ptr->type = TYPE_STRING;
+                            target_lvalue_ptr->s_val = (char*)malloc(encoded_len + 1);
+                            if (!target_lvalue_ptr->s_val) {
+                                runtimeError(vm, "VM Error: Malloc failed for CHAR/WIDECHAR to string assignment.");
+                            } else {
+                                memcpy(target_lvalue_ptr->s_val, encoded, encoded_len);
+                                target_lvalue_ptr->s_val[encoded_len] = '\0';
+                            }
+                            target_lvalue_ptr->type = target_lvalue_ptr->type == TYPE_UNICODE_STRING
+                                ? TYPE_UNICODE_STRING
+                                : TYPE_STRING;
                             target_lvalue_ptr->max_length = -1;
-                        } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                        } else if (isPascalStringType(value_to_set.type) && value_to_set.s_val) {
+                            VarType destType = target_lvalue_ptr->type;
                             freeValue(target_lvalue_ptr);
                             /* Optimization: Steal buffer from temporary value on stack */
                             target_lvalue_ptr->s_val = value_to_set.s_val;
                             value_to_set.s_val = NULL; /* Prevent double-free */
-                            target_lvalue_ptr->type = TYPE_STRING;
+                            target_lvalue_ptr->type = destType;
                             target_lvalue_ptr->max_length = -1;
                         } else {
                             runtimeError(vm, "Type mismatch: Cannot assign this type to a dynamic string.");
@@ -7735,7 +7762,7 @@ comparison_error_label:
                     else if (target_lvalue_ptr->type == TYPE_CHAR) {
                         if (value_to_set.type == TYPE_CHAR) {
                             target_lvalue_ptr->c_val = value_to_set.c_val;
-                        } else if (value_to_set.type == TYPE_STRING && value_to_set.s_val) {
+                        } else if (isPascalStringType(value_to_set.type) && value_to_set.s_val) {
                             size_t len = strlen(value_to_set.s_val);
                             if (len == 1) {
                                 target_lvalue_ptr->c_val = (unsigned char)value_to_set.s_val[0];
@@ -7748,6 +7775,28 @@ comparison_error_label:
                             target_lvalue_ptr->c_val = (int)value_to_set.i_val;
                         } else {
                             runtimeError(vm, "Type mismatch: Cannot assign %s to CHAR.", varTypeToString(value_to_set.type));
+                        }
+                        SET_INT_VALUE(target_lvalue_ptr, target_lvalue_ptr->c_val);
+                    }
+                    else if (target_lvalue_ptr->type == TYPE_WIDECHAR) {
+                        if (value_to_set.type == TYPE_WIDECHAR || value_to_set.type == TYPE_CHAR) {
+                            target_lvalue_ptr->c_val = value_to_set.c_val;
+                        } else if (isPascalStringType(value_to_set.type) && value_to_set.s_val) {
+                            size_t len = strlen(value_to_set.s_val);
+                            uint32_t codepoint = 0;
+                            size_t advance = 0;
+                            if (len == 0) {
+                                target_lvalue_ptr->c_val = 0;
+                            } else if (decodeUtf8Codepoint(value_to_set.s_val, len, &codepoint, &advance) &&
+                                       advance == len) {
+                                target_lvalue_ptr->c_val = (int)codepoint;
+                            } else {
+                                runtimeError(vm, "Type mismatch: Cannot assign multi-character string to WIDECHAR.");
+                            }
+                        } else if (value_to_set.type == TYPE_INTEGER) {
+                            target_lvalue_ptr->c_val = (int)value_to_set.i_val;
+                        } else {
+                            runtimeError(vm, "Type mismatch: Cannot assign %s to WIDECHAR.", varTypeToString(value_to_set.type));
                         }
                         SET_INT_VALUE(target_lvalue_ptr, target_lvalue_ptr->c_val);
                     }
@@ -7829,7 +7878,13 @@ comparison_error_label:
                 } else if (pointer_val.base_type_node == STRING_LENGTH_SENTINEL && !frontendIsShell()) {
                     // Special case: request for string length via element 0.
                     Value* str_val = (Value*)pointer_val.ptr_val;
-                    size_t len = (str_val && str_val->s_val) ? strlen(str_val->s_val) : 0;
+                    size_t len = 0;
+                    if (str_val && str_val->s_val) {
+                        size_t byte_len = strlen(str_val->s_val);
+                        len = (str_val->type == TYPE_UNICODE_STRING)
+                            ? utf8CodepointCount(str_val->s_val, byte_len)
+                            : byte_len;
+                    }
                     push(vm, makeInt((long long)len));
                 } else if (pointer_val.base_type_node == SHELL_FUNCTION_PTR_SENTINEL ||
                            pointer_val.base_type_node == OPAQUE_POINTER_SENTINEL) {
@@ -7859,9 +7914,32 @@ comparison_error_label:
                  }
 
                  long long pscal_index = index_val.i_val;
-                 char result_char;
 
-                 if (base_val.type == TYPE_STRING) {
+                 if (base_val.type == TYPE_UNICODE_STRING) {
+                     const char* str = base_val.s_val ? base_val.s_val : "";
+                     size_t len = strlen(str);
+                     size_t cp_count = utf8CodepointCount(str, len);
+                     long long expected_index = frontendIsShell() ? 0 : 1;
+                     if (pscal_index < expected_index ||
+                         (size_t)(pscal_index - expected_index) >= cp_count) {
+                         runtimeError(vm, "Runtime Error: String index %lld out of bounds for UnicodeString length %zu.",
+                                      pscal_index, cp_count);
+                         freeValue(&index_val); freeValue(&base_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     size_t cp_index = (size_t)(pscal_index - expected_index);
+                     size_t byte_offset = utf8ByteOffsetForCodepointIndex(str, len, cp_index);
+                     uint32_t codepoint = 0;
+                     size_t advance = 0;
+                     if (!decodeUtf8Codepoint(str + byte_offset, len - byte_offset, &codepoint, &advance)) {
+                         runtimeError(vm, "VM Error: Failed to decode UnicodeString character.");
+                         freeValue(&index_val); freeValue(&base_val);
+                         return INTERPRET_RUNTIME_ERROR;
+                     }
+                     push(vm, makeWideChar((int)codepoint));
+                 } else {
+                     char result_char;
+                     if (base_val.type == TYPE_STRING) {
                      const char* str = base_val.s_val ? base_val.s_val : "";
                      size_t len = strlen(str);
                      size_t char_offset = 0;
@@ -7870,7 +7948,7 @@ comparison_error_label:
                          return INTERPRET_RUNTIME_ERROR;
                      }
                      result_char = str[char_offset];
-                } else if (base_val.type == TYPE_CHAR) {
+                     } else if (base_val.type == TYPE_CHAR) {
                     long long expected_index = frontendIsShell() ? 0 : 1;
                     if (pscal_index != expected_index) {
                         runtimeError(vm,
@@ -7882,13 +7960,29 @@ comparison_error_label:
                         return INTERPRET_RUNTIME_ERROR;
                     }
                     result_char = base_val.c_val;
-                 } else {
+                     } else if (base_val.type == TYPE_WIDECHAR) {
+                         long long expected_index = frontendIsShell() ? 0 : 1;
+                         if (pscal_index != expected_index) {
+                             runtimeError(vm,
+                                          "Runtime Error: Index for a WIDECHAR type must be %lld, got %lld.",
+                                          expected_index,
+                                          pscal_index);
+                             freeValue(&index_val);
+                             freeValue(&base_val);
+                             return INTERPRET_RUNTIME_ERROR;
+                         }
+                         push(vm, makeWideChar(base_val.c_val));
+                         freeValue(&index_val);
+                         freeValue(&base_val);
+                         break;
+                     } else {
                      runtimeError(vm, "VM Error: Base for character index is not a string or char. Got %s", varTypeToString(base_val.type));
                      freeValue(&index_val); freeValue(&base_val);
                      return INTERPRET_RUNTIME_ERROR;
-                 }
+                     }
 
-                 push(vm, makeChar(result_char));
+                     push(vm, makeChar(result_char));
+                 }
 
                  freeValue(&index_val);
                  freeValue(&base_val);
@@ -8225,12 +8319,44 @@ comparison_error_label:
                     // Assigning nil to a pointer variable preserves its base type and type
                     target_slot->ptr_val = NULL;
                     // type and base_type_node remain unchanged
+                } else if (isPascalStringType(target_slot->type) && target_slot->max_length <= 0) {
+                    VarType destType = target_slot->type;
+                    char encoded[5] = {0};
+                    const char* source_str = NULL;
+
+                    if (value_from_stack.type == TYPE_CHAR) {
+                        encoded[0] = (char)value_from_stack.c_val;
+                        encoded[1] = '\0';
+                        source_str = encoded;
+                    } else if (value_from_stack.type == TYPE_WIDECHAR) {
+                        encodeUtf8Codepoint((uint32_t)value_from_stack.c_val, encoded);
+                        source_str = encoded;
+                    } else if (isPascalStringType(value_from_stack.type) && value_from_stack.s_val) {
+                        source_str = value_from_stack.s_val;
+                    }
+
+                    if (!source_str) {
+                        runtimeError(vm, "Type mismatch: Cannot assign %s to string.",
+                                     varTypeToString(value_from_stack.type));
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+
+                    freeValue(target_slot);
+                    target_slot->s_val = strdup(source_str);
+                    if (!target_slot->s_val) {
+                        runtimeError(vm, "VM Error: strdup failed for dynamic string assignment.");
+                        freeValue(&value_from_stack);
+                        return INTERPRET_RUNTIME_ERROR;
+                    }
+                    target_slot->type = destType;
+                    target_slot->max_length = -1;
                 } else if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
                     // Special case: Assignment to a fixed-length string.
                     const char* source_str = "";
                     char char_buf[2] = {0};
 
-                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                    if (isPascalStringType(value_from_stack.type) && value_from_stack.s_val) {
                         source_str = value_from_stack.s_val;
                     } else if (value_from_stack.type == TYPE_CHAR) {
                         char_buf[0] = value_from_stack.c_val;
@@ -8260,7 +8386,9 @@ comparison_error_label:
                             long long tmp = asI64(value_from_stack);
                             if (target_slot->type == TYPE_BOOLEAN) tmp = (tmp != 0) ? 1 : 0;
                             SET_INT_VALUE(target_slot, tmp);
-                            if (target_slot->type == TYPE_CHAR) target_slot->c_val = (int)tmp;
+                            if (target_slot->type == TYPE_CHAR || target_slot->type == TYPE_WIDECHAR) {
+                                target_slot->c_val = (int)tmp;
+                            }
                         }
                     } else {
                         runtimeError(vm, "Type mismatch: Cannot assign %s to integer.",
@@ -8355,7 +8483,7 @@ comparison_error_label:
                 } else if (target_slot->type == TYPE_STRING && target_slot->max_length > 0) {
                     const char* source_str = "";
                     char char_buf[2] = {0};
-                    if (value_from_stack.type == TYPE_STRING && value_from_stack.s_val) {
+                    if (isPascalStringType(value_from_stack.type) && value_from_stack.s_val) {
                         source_str = value_from_stack.s_val;
                     } else if (value_from_stack.type == TYPE_CHAR) {
                         char_buf[0] = value_from_stack.c_val;
@@ -8683,6 +8811,8 @@ comparison_error_label:
                         else if (strcasecmp(tn, "real")    == 0 || strcasecmp(tn, "double") == 0) setTypeAST(type_def, TYPE_DOUBLE);
                         else if (strcasecmp(tn, "single")  == 0 || strcasecmp(tn, "float")  == 0) setTypeAST(type_def, TYPE_FLOAT);
                         else if (strcasecmp(tn, "char")    == 0) setTypeAST(type_def, TYPE_CHAR);
+                        else if (strcasecmp(tn, "widechar")== 0) setTypeAST(type_def, TYPE_WIDECHAR);
+                        else if (strcasecmp(tn, "unicodestring")== 0) setTypeAST(type_def, TYPE_UNICODE_STRING);
                         else if (strcasecmp(tn, "boolean") == 0 || strcasecmp(tn, "bool") == 0) setTypeAST(type_def, TYPE_BOOLEAN);
                         else if (strcasecmp(tn, "byte")    == 0) setTypeAST(type_def, TYPE_BYTE);
                         else if (strcasecmp(tn, "word")    == 0) setTypeAST(type_def, TYPE_WORD);

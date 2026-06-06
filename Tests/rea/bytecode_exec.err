@@ -16,20 +16,20 @@ Offset Line Opcode           Operand  Value / Target (Args)
 0044    | PUSH_IMM_I8         7
 0046    | GREATER_EQUAL
 0047    | SET_GLOBAL          8 'b' cache=0x0
-0057    3 DEFINE_GLOBAL    NameIdx:11  'msg' Type:STRING ('str') len=0
-0064    | CONSTANT           14 'hi'
-0066    | SET_GLOBAL         11 'msg' cache=0x0
-0076    4 GET_GLOBAL          3 'a' cache=0x0
-0086    | NEGATE
-0087    | PUSH_IMM_I8         4
-0089    | ADD
-0090    | GET_GLOBAL_ADDRESS    3 'a'
-0092    | SWAP
-0093    | SET_INDIRECT
-0094    0 HALT
+0057    3 DEFINE_GLOBAL    NameIdx:11  'msg' Type:UNICODESTRING ('__pscal_anon_type_3')
+0062    | CONSTANT           13 'hi'
+0064    | SET_GLOBAL         11 'msg' cache=0x0
+0074    4 GET_GLOBAL          3 'a' cache=0x0
+0084    | NEGATE
+0085    | PUSH_IMM_I8         4
+0087    | ADD
+0088    | GET_GLOBAL_ADDRESS    3 'a'
+0090    | SWAP
+0091    | SET_INDIRECT
+0092    0 HALT
 == End Disassembly: rea/bytecode_exec.rea ==
 
-Constants (16):\n  0000: STR   "myself"
+Constants (15):\n  0000: STR   "myself"
   0001: NIL
   0002: STR   ""
   0003: STR   "a"
@@ -41,8 +41,7 @@ Constants (16):\n  0000: STR   "myself"
   0009: STR   "__pscal_anon_type_2"
   0010: INT   7
   0011: STR   "msg"
-  0012: STR   "str"
-  0013: INT   0
-  0014: STR   "hi"
-  0015: INT   4
+  0012: STR   "__pscal_anon_type_3"
+  0013: STR   "hi"
+  0014: INT   4
 

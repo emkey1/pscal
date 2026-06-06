@@ -1026,8 +1026,16 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
         if (isRealType(sym->type) && (isRealType(val.type) || isIntlikeType(val.type))) types_compatible = true;
         else if (sym->type == TYPE_INTEGER && isRealType(val.type)) { types_compatible = false; } // No implicit Real to Integer
         else if (isIntlikeType(sym->type) && isIntlikeType(val.type)) types_compatible = true;
-        else if (sym->type == TYPE_STRING && val.type == TYPE_CHAR) types_compatible = true;
-        else if (sym->type == TYPE_CHAR && val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
+        else if (isPascalStringType(sym->type) && isPascalStringType(val.type)) types_compatible = true;
+        else if (isPascalStringType(sym->type) && isPascalCharType(val.type)) types_compatible = true;
+        else if (sym->type == TYPE_CHAR && isPascalStringType(val.type) && val.s_val && strlen(val.s_val) == 1) types_compatible = true;
+        else if (sym->type == TYPE_WIDECHAR && isPascalStringType(val.type) && val.s_val) {
+            uint32_t codepoint = 0;
+            size_t advance = 0;
+            size_t len = strlen(val.s_val);
+            types_compatible = decodeUtf8Codepoint(val.s_val, len, &codepoint, &advance) &&
+                               advance == len;
+        }
         else if (sym->type == TYPE_ENUM && val.type == TYPE_ENUM) {
              if ((sym->value->enum_val.enum_name == NULL && val.enum_val.enum_name == NULL) ||
                  (sym->value->enum_val.enum_name != NULL && val.enum_val.enum_name != NULL &&
@@ -1210,15 +1218,19 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
             break;
         }
 
-        case TYPE_STRING: {
+        case TYPE_STRING:
+        case TYPE_UNICODE_STRING: {
             const char* source_str = NULL;
-            char char_buf[2];
+            char char_buf[5] = {0};
 
-            if (val.type == TYPE_STRING) {
+            if (isPascalStringType(val.type)) {
                 source_str = val.s_val;
             } else if (val.type == TYPE_CHAR) {
-                char_buf[0] = val.c_val;
+                char_buf[0] = (char)val.c_val;
                 char_buf[1] = '\0';
+                source_str = char_buf;
+            } else if (val.type == TYPE_WIDECHAR) {
+                encodeUtf8Codepoint((uint32_t)val.c_val, char_buf);
                 source_str = char_buf;
             }
             if (!source_str) source_str = "";
@@ -1227,12 +1239,16 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
                 strncpy(sym->value->s_val, source_str, sym->value->max_length);
                 sym->value->s_val[sym->value->max_length] = '\0';
             } else { // Target is a dynamic string.
+                if (sym->value->s_val) {
+                    free(sym->value->s_val);
+                }
                 sym->value->s_val = strdup(source_str);
                 if (!sym->value->s_val) {
                     fprintf(stderr, "FATAL: Memory allocation failed for dynamic string assignment to '%s'.\n", name);
                     EXIT_FAILURE_HANDLER();
                 }
             }
+            sym->value->type = sym->type;
             break;
         }
 
@@ -1266,8 +1282,23 @@ static void updateSymbolInternal(Symbol *sym, const char *name, Value val) {
         case TYPE_CHAR:
             if (isIntlikeType(val.type)) {
                 sym->value->c_val = (int)asI64(val);
-            } else if (val.type == TYPE_STRING && val.s_val && strlen(val.s_val) == 1) {
+            } else if (isPascalStringType(val.type) && val.s_val && strlen(val.s_val) == 1) {
                 sym->value->c_val = val.s_val[0];
+            }
+            break;
+
+        case TYPE_WIDECHAR:
+            if (val.type == TYPE_WIDECHAR || val.type == TYPE_CHAR || isIntlikeType(val.type)) {
+                sym->value->c_val = (int)asI64(val);
+            } else if (isPascalStringType(val.type) && val.s_val) {
+                size_t len = strlen(val.s_val);
+                uint32_t codepoint = 0;
+                size_t advance = 0;
+                if (len == 0) {
+                    sym->value->c_val = 0;
+                } else if (decodeUtf8Codepoint(val.s_val, len, &codepoint, &advance) && advance == len) {
+                    sym->value->c_val = (int)codepoint;
+                }
             }
             break;
 

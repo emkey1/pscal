@@ -4595,11 +4595,28 @@ AST *factor(Parser *parser) {
         combinedToken.line = initialLine;
         combinedToken.column = initialColumn;
         combinedToken.is_char_code = (bufferLen == 1) && allCharCodes;
+        combinedToken.char_code_value = (combinedToken.is_char_code && initialToken)
+            ? initialToken->char_code_value
+            : 0;
 
         node = newASTNode(AST_STRING, &combinedToken);
         free(buffer);
 
-        setTypeAST(node, (bufferLen == 1) ? TYPE_CHAR : TYPE_STRING);
+        VarType literalType = TYPE_STRING;
+        if (bufferLen == 1) {
+            literalType = TYPE_CHAR;
+        } else if (combinedToken.value) {
+            uint32_t codepoint = 0;
+            size_t advance = 0;
+            if (decodeUtf8Codepoint(combinedToken.value, bufferLen, &codepoint, &advance) &&
+                advance == bufferLen) {
+                literalType = TYPE_WIDECHAR;
+            } else if (isValidUtf8Bytes(combinedToken.value, bufferLen) &&
+                       utf8CodepointCount(combinedToken.value, bufferLen) < bufferLen) {
+                literalType = TYPE_UNICODE_STRING;
+            }
+        }
+        setTypeAST(node, literalType);
         return node; // <<< RETURN IMMEDIATELY
 
     } else if (initialTokenType == TOKEN_IDENTIFIER) {

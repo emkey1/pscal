@@ -44,7 +44,7 @@ static VarType builtinReturnType(const char* name) {
         "httpgetlastheaders", "httplasterror"
     };
     if (builtinMatches(name, stringFuncs, sizeof(stringFuncs) / sizeof(stringFuncs[0]))) {
-        return TYPE_STRING;
+        return TYPE_UNICODE_STRING;
     }
 
     static const char *const memoryStreamFuncs[] = {
@@ -290,20 +290,20 @@ static void registerBuiltinFunctions(void) {
     registerFunctionSignature(strdup("mstreamloadfromfile"), TYPE_BOOLEAN, 0, 0, 0);
     registerFunctionSignature(strdup("mstreamsavetofile"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("mstreamfree"), TYPE_VOID, 0, 0, 0);
-    registerFunctionSignature(strdup("mstreambuffer"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("mstreambuffer"), TYPE_UNICODE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("mstreamfromstring"), TYPE_MEMORYSTREAM, 0, 0, 0);
     registerFunctionSignature(strdup("mstreamappendbyte"), TYPE_VOID, 0, 0, 0);
     registerFunctionSignature(strdup("fileexists"), TYPE_BOOLEAN, 0, 0, 0);
     registerFunctionSignature(strdup("filesize"), TYPE_INT64, 0, 0, 0);
     registerFunctionSignature(strdup("hasextbuiltin"), TYPE_INT32, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltincategorycount"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("extbuiltincategoryname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltincategoryname"), TYPE_UNICODE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltinfunctioncount"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("extbuiltinfunctionname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltinfunctionname"), TYPE_UNICODE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltingroupcount"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("extbuiltingroupname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupname"), TYPE_UNICODE_STRING, 0, 0, 0);
     registerFunctionSignature(strdup("extbuiltingroupfunctioncount"), TYPE_INT32, 0, 0, 0);
-    registerFunctionSignature(strdup("extbuiltingroupfunctionname"), TYPE_STRING, 0, 0, 0);
+    registerFunctionSignature(strdup("extbuiltingroupfunctionname"), TYPE_UNICODE_STRING, 0, 0, 0);
 
 }
 
@@ -356,16 +356,19 @@ static int canAssignToType(VarType target, VarType value, int allowStringToCharP
     if (target == value) {
         return 1;
     }
+    if (isPascalStringType(target) && isPascalStringType(value)) {
+        return 1;
+    }
     if (isRealType(target) && isRealType(value)) {
         return 1;
     }
     if (isRealType(target) && isIntlikeType(value)) {
         return 1;
     }
-    if (target == TYPE_STRING && value == TYPE_CHAR) {
+    if (isPascalStringType(target) && isPascalCharType(value)) {
         return 1;
     }
-    if (target == TYPE_STRING && isIntlikeType(value)) {
+    if (isPascalStringType(target) && isIntlikeType(value)) {
         return 1;
     }
     if (isIntlikeType(target) && isIntlikeType(value)) {
@@ -374,7 +377,7 @@ static int canAssignToType(VarType target, VarType value, int allowStringToCharP
     if (isIntlikeType(target) && value == TYPE_POINTER) {
         return 1;
     }
-    if (target == TYPE_POINTER && value == TYPE_STRING && allowStringToCharPointer) {
+    if (target == TYPE_POINTER && isPascalStringType(value) && allowStringToCharPointer) {
         return 1;
     }
     return 0;
@@ -417,8 +420,9 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 if (lt == TYPE_LONG_DOUBLE || rt == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
                 else if (lt == TYPE_DOUBLE || rt == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
                 else node->var_type = TYPE_FLOAT;
-            } else if (lt == TYPE_STRING || rt == TYPE_STRING) {
-                node->var_type = TYPE_STRING;
+            } else if (isPascalStringType(lt) || isPascalStringType(rt) ||
+                       isPascalCharType(lt) || isPascalCharType(rt)) {
+                node->var_type = inferBinaryOpType(lt, rt);
             } else {
                 node->var_type = lt != TYPE_UNKNOWN ? lt : rt;
             }
@@ -453,8 +457,9 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 if (rt == TYPE_LONG_DOUBLE || ft == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
                 else if (rt == TYPE_DOUBLE || ft == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
                 else node->var_type = TYPE_FLOAT;
-            } else if (rt == TYPE_STRING || ft == TYPE_STRING) {
-                node->var_type = TYPE_STRING;
+            } else if (isPascalStringType(rt) || isPascalStringType(ft) ||
+                       isPascalCharType(rt) || isPascalCharType(ft)) {
+                node->var_type = inferBinaryOpType(rt, ft);
             } else if (rt == TYPE_BOOLEAN && ft == TYPE_BOOLEAN) {
                 node->var_type = TYPE_BOOLEAN;
             } else {
@@ -537,7 +542,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
             }
             free(lhsName);
             int allowStringToCharPointer = 0;
-            if (lt == TYPE_POINTER && rt == TYPE_STRING) {
+            if (lt == TYPE_POINTER && isPascalStringType(rt)) {
                 ASTNodeClike *lhsDeclForPtr = NULL;
                 if (node->left && node->left->type == TCAST_IDENTIFIER) {
                     char *lhsName = tokenToCString(node->left->token);
@@ -710,8 +715,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     clike_error_count++;
                 } else {
                     if (!isIntlikeType(analyzeExpr(node->children[0], scopes)) ||
-                        analyzeExpr(node->children[1], scopes) != TYPE_STRING ||
-                        analyzeExpr(node->children[2], scopes) != TYPE_STRING) {
+                        !isPascalStringType(analyzeExpr(node->children[1], scopes)) ||
+                        !isPascalStringType(analyzeExpr(node->children[2], scopes))) {
                         fprintf(stderr,
                                 "Type error: httpsetheader argument types are (int, string, string) at line %d, column %d\n",
                                 node->token.line, node->token.column);
@@ -737,7 +742,8 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     VarType a0 = analyzeExpr(node->children[0], scopes);
                     VarType a1 = analyzeExpr(node->children[1], scopes);
                     VarType a2 = analyzeExpr(node->children[2], scopes);
-                    if (!isIntlikeType(a0) || a1 != TYPE_STRING || !(isIntlikeType(a2) || a2 == TYPE_STRING)) {
+                    if (!isIntlikeType(a0) || !isPascalStringType(a1) ||
+                        !(isIntlikeType(a2) || isPascalStringType(a2))) {
                         fprintf(stderr,
                                 "Type error: httpsetoption expects (int, string, int|string) at line %d, column %d\n",
                                 node->token.line, node->token.column);
@@ -752,7 +758,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                             node->token.line, node->token.column);
                     clike_error_count++;
                 }
-                t = TYPE_STRING;
+                t = TYPE_UNICODE_STRING;
             } else if (strcasecmp(name, "httpgetheader") == 0) {
                 if (node->child_count != 2) {
                     fprintf(stderr,
@@ -762,14 +768,14 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                 } else {
                     VarType a0 = analyzeExpr(node->children[0], scopes);
                     VarType a1 = analyzeExpr(node->children[1], scopes);
-                    if (!isIntlikeType(a0) || a1 != TYPE_STRING) {
+                    if (!isIntlikeType(a0) || !isPascalStringType(a1)) {
                         fprintf(stderr,
                                 "Type error: httpgetheader expects (int, string) at line %d, column %d\n",
                                 node->token.line, node->token.column);
                         clike_error_count++;
                     }
                 }
-                t = TYPE_STRING;
+                t = TYPE_UNICODE_STRING;
             } else if (strcasecmp(name, "httperrorcode") == 0) {
                 if (node->child_count != 1 || !isIntlikeType(analyzeExpr(node->children[0], scopes))) {
                     fprintf(stderr,
@@ -785,7 +791,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                             node->token.line, node->token.column);
                     clike_error_count++;
                 }
-                t = TYPE_STRING;
+                t = TYPE_UNICODE_STRING;
             } else if ((strcasecmp(name, "httprequest") == 0)) {
                 // We leave flexible checking for now; ensure it returns int
                 t = TYPE_INT32;
@@ -802,7 +808,9 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                     VarType a2 = analyzeExpr(node->children[2], scopes);
                     VarType a3 = analyzeExpr(node->children[3], scopes);
                     VarType a4 = analyzeExpr(node->children[4], scopes);
-                    if (!isIntlikeType(a0) || a1 != TYPE_STRING || a2 != TYPE_STRING || !(a3 == TYPE_STRING || a3 == TYPE_MEMORYSTREAM || a3 == TYPE_NIL) || a4 != TYPE_STRING) {
+                    if (!isIntlikeType(a0) || !isPascalStringType(a1) || !isPascalStringType(a2) ||
+                        !(isPascalStringType(a3) || a3 == TYPE_MEMORYSTREAM || a3 == TYPE_NIL) ||
+                        !isPascalStringType(a4)) {
                         fprintf(stderr,
                                 "Type error: httprequesttofile expects (int, string, string, string|mstream|nil, string) at line %d, column %d\n",
                                 node->token.line, node->token.column);
@@ -875,7 +883,7 @@ static VarType analyzeExpr(ASTNodeClike *node, ScopeStack *scopes) {
                                 node->token.column);
                         clike_error_count++;
                     }
-                    if (node->children[1]->var_type != TYPE_STRING) {
+                    if (!isPascalStringType(node->children[1]->var_type)) {
                         fprintf(stderr,
                                 "Type error: second argument to %s must be a string at line %d, column %d\n",
                                 name,

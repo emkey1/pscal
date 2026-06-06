@@ -1313,8 +1313,10 @@ resolved_field: ;
                         node->var_type = TYPE_FLOAT;
                     }
                 }
-                else if (op == TOKEN_PLUS && (leftType == TYPE_STRING || rightType == TYPE_STRING || leftType == TYPE_CHAR || rightType == TYPE_CHAR)) {
-                    node->var_type = TYPE_STRING;
+                else if (op == TOKEN_PLUS &&
+                         (isPascalStringType(leftType) || isPascalStringType(rightType) ||
+                          isPascalCharType(leftType) || isPascalCharType(rightType))) {
+                    node->var_type = inferBinaryOpType(leftType, rightType);
                 }
                 else if (leftType == TYPE_INTEGER && rightType == TYPE_INTEGER) {
                     node->var_type = TYPE_INTEGER;
@@ -1338,8 +1340,9 @@ resolved_field: ;
                     if (thenType == TYPE_LONG_DOUBLE || elseType == TYPE_LONG_DOUBLE) node->var_type = TYPE_LONG_DOUBLE;
                     else if (thenType == TYPE_DOUBLE || elseType == TYPE_DOUBLE) node->var_type = TYPE_DOUBLE;
                     else node->var_type = TYPE_FLOAT;
-                } else if (thenType == TYPE_STRING || elseType == TYPE_STRING) {
-                    node->var_type = TYPE_STRING;
+                } else if (isPascalStringType(thenType) || isPascalStringType(elseType) ||
+                           isPascalCharType(thenType) || isPascalCharType(elseType)) {
+                    node->var_type = inferBinaryOpType(thenType, elseType);
                 } else if (thenType == TYPE_BOOLEAN && elseType == TYPE_BOOLEAN) {
                     node->var_type = TYPE_BOOLEAN;
                 } else if (thenType != TYPE_UNKNOWN && thenType != TYPE_VOID) {
@@ -1613,9 +1616,13 @@ resolved_field: ;
                             }
                         }
                     } else if (node->left->var_type == TYPE_STRING) {
-                        // Special case: indexing into a string yields a char
+                        // Special case: indexing into a byte string yields a char
                         node->var_type = TYPE_CHAR;
                         node->type_def = lookupType("char");
+                    } else if (node->left->var_type == TYPE_UNICODE_STRING) {
+                        // Indexing into a Unicode string yields a widechar
+                        node->var_type = TYPE_WIDECHAR;
+                        node->type_def = lookupType("widechar");
                     }
                 }
                 break;
@@ -1625,6 +1632,10 @@ resolved_field: ;
                 node->var_type = (node->token && node->token->type == TOKEN_REAL_CONST) ? TYPE_REAL : TYPE_INTEGER;
                 break;
             case AST_STRING:
+                if (node->var_type == TYPE_CHAR || node->var_type == TYPE_WIDECHAR ||
+                    node->var_type == TYPE_UNICODE_STRING) {
+                    break;
+                }
                 if (node->token && node->token->value) {
                     size_t literal_len = (node->i_val > 0) ? (size_t)node->i_val
                                                 : strlen(node->token->value);
@@ -1632,6 +1643,15 @@ resolved_field: ;
                         node->var_type = TYPE_CHAR;
                         node->type_def = lookupType("char");
                         break;
+                    } else {
+                        uint32_t codepoint = 0;
+                        size_t advance = 0;
+                        if (decodeUtf8Codepoint(node->token->value, literal_len, &codepoint, &advance) &&
+                            advance == literal_len) {
+                            node->var_type = TYPE_WIDECHAR;
+                            node->type_def = lookupType("widechar");
+                            break;
+                        }
                     }
                 }
                 node->var_type = TYPE_STRING;

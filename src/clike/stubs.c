@@ -49,7 +49,7 @@ AST* lookupType(const char* name) {
         {"single", &floatType, TYPE_FLOAT},
         {"float", &floatType, TYPE_FLOAT},
         {"char", &charType, TYPE_CHAR},
-        {"string", &stringType, TYPE_STRING},
+        {"string", &stringType, TYPE_UNICODE_STRING},
         {"boolean", &booleanType, TYPE_BOOLEAN},
         {"bool", &booleanType, TYPE_BOOLEAN},
         {"byte", &byteType, TYPE_BYTE},

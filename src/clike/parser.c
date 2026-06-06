@@ -3,9 +3,14 @@
 #include "clike/opt.h"
 #include "ast/ast.h"
 #include "Pascal/type_registry.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+bool isValidUtf8Bytes(const char *text, size_t len);
+bool decodeUtf8Codepoint(const char *text, size_t len, uint32_t *out_codepoint, size_t *out_advance);
+size_t utf8CodepointCount(const char *text, size_t len);
 
 VarType clikeTokenTypeToVarType(ClikeTokenType t) {
     switch (t) {
@@ -15,7 +20,7 @@ VarType clikeTokenTypeToVarType(ClikeTokenType t) {
         case CLIKE_TOKEN_FLOAT:      return TYPE_FLOAT;
         case CLIKE_TOKEN_DOUBLE:     return TYPE_DOUBLE;
         case CLIKE_TOKEN_LONG_DOUBLE:return TYPE_LONG_DOUBLE;
-        case CLIKE_TOKEN_STR:        return TYPE_STRING;
+        case CLIKE_TOKEN_STR:        return TYPE_UNICODE_STRING;
         case CLIKE_TOKEN_TEXT:       return TYPE_FILE;
         case CLIKE_TOKEN_MSTREAM:    return TYPE_MEMORYSTREAM;
         case CLIKE_TOKEN_VOID:       return TYPE_VOID;
@@ -30,6 +35,28 @@ VarType clikeTokenTypeToVarType(ClikeTokenType t) {
     }
 }
 
+static VarType inferClikeStringLiteralType(const char *text, size_t len) {
+    if (!text) {
+        return TYPE_STRING;
+    }
+    if (len == 1) {
+        return TYPE_CHAR;
+    }
+    if (len == 0) {
+        return TYPE_STRING;
+    }
+
+    uint32_t codepoint = 0;
+    size_t advance = 0;
+    if (decodeUtf8Codepoint(text, len, &codepoint, &advance) && advance == len) {
+        return TYPE_WIDECHAR;
+    }
+    if (isValidUtf8Bytes(text, len) && utf8CodepointCount(text, len) < len) {
+        return TYPE_UNICODE_STRING;
+    }
+    return TYPE_STRING;
+}
+
 const char *clikeTokenTypeToTypeName(ClikeTokenType t) {
     switch (t) {
         case CLIKE_TOKEN_INT:    return "int";
@@ -38,7 +65,7 @@ const char *clikeTokenTypeToTypeName(ClikeTokenType t) {
         case CLIKE_TOKEN_FLOAT:  return "float";
         case CLIKE_TOKEN_DOUBLE: return "double";
         case CLIKE_TOKEN_LONG_DOUBLE: return "long double";
-        case CLIKE_TOKEN_STR:    return "string";
+        case CLIKE_TOKEN_STR:    return "unicodestring";
         case CLIKE_TOKEN_TEXT:   return "text";
         case CLIKE_TOKEN_MSTREAM:return "mstream";
         case CLIKE_TOKEN_CHAR:   return "char";
@@ -319,6 +346,7 @@ static Token* makeIdentToken(const char *s) {
     t->line = 0;
     t->column = 0;
     t->is_char_code = false;
+    t->char_code_value = 0;
     return t;
 }
 
@@ -1345,7 +1373,7 @@ static ASTNodeClike* factor(ParserClike *p) {
     if (p->current.type == CLIKE_TOKEN_STRING) {
         ClikeToken str = parseStringLiteral(p);
         ASTNodeClike *n = newASTNodeClike(TCAST_STRING, str);
-        n->var_type = TYPE_STRING;
+        n->var_type = inferClikeStringLiteralType(str.lexeme, (size_t)str.length);
         return n;
     }
     if (p->current.type == CLIKE_TOKEN_IDENTIFIER) {

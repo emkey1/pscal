@@ -554,13 +554,13 @@ static const Value* resolveStringPointerBuiltin(const Value* value) {
 
 static int builtinValueIsStringLike(const Value* value) {
     if (!value) return 0;
-    if (value->type == TYPE_STRING) return 1;
+    if (isPascalStringType(value->type)) return 1;
     if (value->type == TYPE_POINTER) {
         if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
             value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) return 1;
         const Value* resolved = resolveStringPointerBuiltin(value);
         if (!resolved) return 0;
-        if (resolved->type == TYPE_STRING) return 1;
+        if (isPascalStringType(resolved->type)) return 1;
         if (resolved->type == TYPE_POINTER &&
             (resolved->base_type_node == STRING_CHAR_PTR_SENTINEL ||
              resolved->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL)) {
@@ -572,7 +572,7 @@ static int builtinValueIsStringLike(const Value* value) {
 
 static const char* builtinValueToCString(const Value* value) {
     if (!value) return NULL;
-    if (value->type == TYPE_STRING) return value->s_val ? value->s_val : "";
+    if (isPascalStringType(value->type)) return value->s_val ? value->s_val : "";
     if (value->type == TYPE_POINTER) {
         if (value->base_type_node == STRING_CHAR_PTR_SENTINEL ||
             value->base_type_node == SERIALIZED_CHAR_PTR_SENTINEL) {
@@ -580,7 +580,7 @@ static const char* builtinValueToCString(const Value* value) {
         }
         const Value* resolved = resolveStringPointerBuiltin(value);
         if (!resolved) return NULL;
-        if (resolved->type == TYPE_STRING) {
+        if (isPascalStringType(resolved->type)) {
             return resolved->s_val ? resolved->s_val : "";
         }
         if (resolved->type == TYPE_POINTER &&
@@ -2348,7 +2348,7 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
 
     Value arg = args[0];
     int c;
-    if (arg.type == TYPE_CHAR) {
+    if (arg.type == TYPE_CHAR || arg.type == TYPE_WIDECHAR) {
         c = arg.c_val;
     } else if (IS_INTLIKE(arg)) {
         c = (int)AS_INTEGER(arg);
@@ -2360,10 +2360,16 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
          * the value was widened to a real earlier in the pipeline.
          */
         c = (int)AS_REAL(arg);
-    } else if (arg.type == TYPE_STRING) {
+    } else if (isPascalStringType(arg.type)) {
         const char* s = AS_STRING(arg);
         if (s && s[0] != '\0') {
-            c = (unsigned char)s[0];
+            uint32_t codepoint = 0;
+            size_t advance = 0;
+            if (decodeUtf8Codepoint(s, strlen(s), &codepoint, &advance)) {
+                c = (int)codepoint;
+            } else {
+                c = (unsigned char)s[0];
+            }
         } else {
             runtimeError(vm,
                          "Upcase expects a non-empty string or char argument. Got an empty string.");
@@ -2375,7 +2381,10 @@ Value vmBuiltinUpcase(VM* vm, int arg_count, Value* args) {
                      varTypeToString(arg.type));
         return makeChar('\0');
     }
-    return makeChar(toupper((unsigned char)c));
+    if (c >= 0 && c <= 255) {
+        return makeChar(toupper((unsigned char)c));
+    }
+    return makeWideChar(c);
 }
 
 Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
@@ -2384,19 +2393,22 @@ Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
         return makeInt(0);
     }
     // Allow the first argument to be a char
-    if (args[0].type != TYPE_STRING && args[0].type != TYPE_CHAR) {
+    if (!isPascalStringType(args[0].type) && !isPascalCharType(args[0].type)) {
         runtimeError(vm, "Pos first argument must be a string or char.");
         return makeInt(0);
     }
-    if (args[1].type != TYPE_STRING) {
+    if (!isPascalStringType(args[1].type)) {
         runtimeError(vm, "Pos second argument must be a string.");
         return makeInt(0);
     }
 
     const char* needle = NULL;
-    char needle_buf[2] = {0};
+    char needle_buf[5] = {0};
     if (args[0].type == TYPE_CHAR) {
         needle_buf[0] = AS_CHAR(args[0]);
+        needle = needle_buf;
+    } else if (args[0].type == TYPE_WIDECHAR) {
+        encodeUtf8Codepoint((uint32_t)AS_CHAR(args[0]), needle_buf);
         needle = needle_buf;
     } else {
         needle = AS_STRING(args[0]);
@@ -2408,11 +2420,15 @@ Value vmBuiltinPos(VM* vm, int arg_count, Value* args) {
     if (!found) {
         return makeInt(0);
     }
+    if (args[1].type == TYPE_UNICODE_STRING) {
+        size_t prefix_len = (size_t)(found - haystack);
+        return makeInt((long long)utf8CodepointCount(haystack, prefix_len) + 1);
+    }
     return makeInt((long long)(found - haystack) + 1);
 }
 
 Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
-    if (arg_count < 1 || args[0].type != TYPE_STRING) {
+    if (arg_count < 1 || !isPascalStringType(args[0].type)) {
         runtimeError(vm, "printf expects a format string as the first argument.");
         return makeInt(0);
     }
@@ -2594,7 +2610,17 @@ Value vmBuiltinPrintf(VM* vm, int arg_count, Value* args) {
                         break;
                     }
                     case 's': {
-                        const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
+                        char char_text[5] = {0};
+                        const char* sv = "";
+                        if (isPascalStringType(v.type) && v.s_val) {
+                            sv = v.s_val;
+                        } else if (v.type == TYPE_CHAR) {
+                            char_text[0] = (char)v.c_val;
+                            sv = char_text;
+                        } else if (v.type == TYPE_WIDECHAR) {
+                            encodeUtf8Codepoint((uint32_t)v.c_val, char_text);
+                            sv = char_text;
+                        }
                         char safe_fmt[sizeof(fmtbuf)];
                         const char* format = fmtbuf;
                         if (has_wide_char_length) {
@@ -2648,7 +2674,7 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "fprintf first argument must be an open file.");
         return makeInt(0);
     }
-    if (args[1].type != TYPE_STRING || !args[1].s_val) {
+    if (!isPascalStringType(args[1].type) || !args[1].s_val) {
         runtimeError(vm, "fprintf expects a format string as the second argument.");
         return makeInt(0);
     }
@@ -2805,7 +2831,17 @@ Value vmBuiltinFprintf(VM* vm, int arg_count, Value* args) {
                         fputs(buf, output_stream);
                         break; }
                     case 's': {
-                        const char* sv = (v.type == TYPE_STRING && v.s_val) ? v.s_val : "";
+                        char char_text[5] = {0};
+                        const char* sv = "";
+                        if (isPascalStringType(v.type) && v.s_val) {
+                            sv = v.s_val;
+                        } else if (v.type == TYPE_CHAR) {
+                            char_text[0] = (char)v.c_val;
+                            sv = char_text;
+                        } else if (v.type == TYPE_WIDECHAR) {
+                            encodeUtf8Codepoint((uint32_t)v.c_val, char_text);
+                            sv = char_text;
+                        }
                         char safe_fmt[sizeof(fmtbuf)];
                         const char* format = fmtbuf;
                         if (has_wide_char_length) {
@@ -2866,7 +2902,7 @@ Value vmBuiltinFflush(VM* vm, int arg_count, Value* args) {
 
 // fopen(path, mode) -> FILE
 Value vmBuiltinFopen(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+    if (arg_count != 2 || !isPascalStringType(args[0].type) || !isPascalStringType(args[1].type)) {
         runtimeError(vm, "fopen expects (path:string, mode:string).");
         return makeVoid();
     }
@@ -2902,25 +2938,43 @@ Value vmBuiltinFclose(VM* vm, int arg_count, Value* args) {
 
 Value vmBuiltinCopy(VM* vm, int arg_count, Value* args) {
     // Allow the first argument to be a char
-    if (arg_count != 3 || (args[0].type != TYPE_STRING && args[0].type != TYPE_CHAR) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2])) {
+    if (arg_count != 3 || (!isPascalStringType(args[0].type) && !isPascalCharType(args[0].type)) || !IS_INTLIKE(args[1]) || !IS_INTLIKE(args[2])) {
         runtimeError(vm, "Copy expects (String/Char, Integer, Integer).");
         return makeString("");
     }
     const char* source = NULL;
-    char source_buf[2] = {0};
+    char source_buf[5] = {0};
     if (args[0].type == TYPE_CHAR) {
         source_buf[0] = AS_CHAR(args[0]);
+        source = source_buf;
+    } else if (args[0].type == TYPE_WIDECHAR) {
+        encodeUtf8Codepoint((uint32_t)AS_CHAR(args[0]), source_buf);
         source = source_buf;
     } else {
         source = AS_STRING(args[0]);
     }
-    // ... (rest of the function is the same)
     long long start_idx = AS_INTEGER(args[1]);
     long long count = AS_INTEGER(args[2]);
 
-    if (!source || start_idx < 1 || count < 0) return makeString("");
+    if (!source || start_idx < 1 || count < 0) {
+        return (args[0].type == TYPE_UNICODE_STRING) ? makeUnicodeString("") : makeString("");
+    }
 
     size_t source_len = strlen(source);
+    if (args[0].type == TYPE_UNICODE_STRING) {
+        size_t source_cp_len = utf8CodepointCount(source, source_len);
+        if ((size_t)start_idx > source_cp_len) return makeUnicodeString("");
+
+        size_t start_0based = (size_t)(start_idx - 1);
+        size_t start_byte = utf8ByteOffsetForCodepointIndex(source, source_len, start_0based);
+        size_t end_index = start_0based + (size_t)count;
+        if (end_index > source_cp_len) {
+            end_index = source_cp_len;
+        }
+        size_t end_byte = utf8ByteOffsetForCodepointIndex(source, source_len, end_index);
+        return makeUnicodeStringLen(source + start_byte, end_byte - start_byte);
+    }
+
     if ((size_t)start_idx > source_len) return makeString("");
 
     size_t start_0based = start_idx - 1;
@@ -2974,13 +3028,38 @@ Value vmBuiltinStringOfChar(VM* vm, int arg_count, Value* args) {
     }
 
     int fill = 0;
+    char encoded_fill[5] = {0};
+    size_t encoded_fill_len = 0;
+    bool unicode_fill = false;
     if (args[0].type == TYPE_CHAR) {
         fill = (unsigned char)AS_CHAR(args[0]);
+        encoded_fill[0] = (char)fill;
+        encoded_fill[1] = '\0';
+        encoded_fill_len = 1;
+    } else if (args[0].type == TYPE_WIDECHAR) {
+        fill = AS_CHAR(args[0]);
+        encoded_fill_len = encodeUtf8Codepoint((uint32_t)fill, encoded_fill);
+        unicode_fill = true;
     } else if (args[0].type == TYPE_STRING) {
         const char *source = AS_STRING(args[0]);
         fill = (source && source[0]) ? (unsigned char)source[0] : 0;
+        encoded_fill[0] = (char)fill;
+        encoded_fill[1] = '\0';
+        encoded_fill_len = 1;
+    } else if (args[0].type == TYPE_UNICODE_STRING) {
+        const char *source = AS_STRING(args[0]);
+        uint32_t codepoint = 0;
+        size_t advance = 0;
+        if (source && decodeUtf8Codepoint(source, strlen(source), &codepoint, &advance)) {
+            fill = (int)codepoint;
+            encoded_fill_len = encodeUtf8Codepoint(codepoint, encoded_fill);
+            unicode_fill = true;
+        }
     } else if (IS_INTLIKE(args[0])) {
         fill = (unsigned char)AS_INTEGER(args[0]);
+        encoded_fill[0] = (char)fill;
+        encoded_fill[1] = '\0';
+        encoded_fill_len = 1;
     } else {
         runtimeError(vm, "StringOfChar expects a character-like first argument.");
         return makeString("");
@@ -2988,20 +3067,30 @@ Value vmBuiltinStringOfChar(VM* vm, int arg_count, Value* args) {
 
     long long count = AS_INTEGER(args[1]);
     if (count <= 0) {
-        return makeString("");
+        return unicode_fill ? makeUnicodeString("") : makeString("");
     }
 
     size_t len = (size_t)count;
-    char *buffer = (char*)malloc(len + 1);
+    size_t total_bytes = unicode_fill ? len * encoded_fill_len : len;
+    char *buffer = (char*)malloc(total_bytes + 1);
     if (!buffer) {
         runtimeError(vm, "StringOfChar: memory allocation failed.");
         return makeString("");
     }
 
-    memset(buffer, fill, len);
-    buffer[len] = '\0';
+    if (unicode_fill) {
+        char *cursor = buffer;
+        for (size_t i = 0; i < len; i++) {
+            memcpy(cursor, encoded_fill, encoded_fill_len);
+            cursor += encoded_fill_len;
+        }
+        buffer[total_bytes] = '\0';
+    } else {
+        memset(buffer, fill, len);
+        buffer[len] = '\0';
+    }
 
-    Value result = makeString(buffer);
+    Value result = unicode_fill ? makeUnicodeString(buffer) : makeString(buffer);
     free(buffer);
     return result;
 }
@@ -3281,31 +3370,50 @@ Value vmBuiltinSetlength(VM* vm, int arg_count, Value* args) {
         long long new_len = AS_INTEGER(args[1]);
         if (new_len < 0) new_len = 0;
 
-        if (target->type != TYPE_STRING) {
-            freeValue(target);
-            target->type = TYPE_STRING;
-            target->s_val = NULL;
-            target->max_length = -1;
+        if (!isPascalStringType(target->type)) {
+            runtimeError(vm, "SetLength expects a string or dynamic array target.");
+            return makeVoid();
         }
 
-        char* new_buf = (char*)malloc((size_t)new_len + 1);
+        size_t alloc_len = (size_t)new_len;
+        size_t copy_len = 0;
+        bool unicode_target = (target->type == TYPE_UNICODE_STRING);
+
+        if (unicode_target) {
+            const char *src = target->s_val ? target->s_val : "";
+            size_t src_len = strlen(src);
+            size_t src_cp_len = utf8CodepointCount(src, src_len);
+            size_t copy_cp_len = src_cp_len;
+            if (copy_cp_len > (size_t)new_len) {
+                copy_cp_len = (size_t)new_len;
+            }
+            copy_len = utf8ByteOffsetForCodepointIndex(src, src_len, copy_cp_len);
+            alloc_len = copy_len + (((size_t)new_len > copy_cp_len) ? ((size_t)new_len - copy_cp_len) : 0);
+        }
+
+        char* new_buf = (char*)malloc(alloc_len + 1);
         if (!new_buf) {
             runtimeError(vm, "SetLength: memory allocation failed.");
             return makeVoid();
         }
 
-        size_t copy_len = 0;
         if (target->s_val) {
-            copy_len = strlen(target->s_val);
-            if (copy_len > (size_t)new_len) copy_len = (size_t)new_len;
+            if (!unicode_target) {
+                copy_len = strlen(target->s_val);
+                if (copy_len > (size_t)new_len) copy_len = (size_t)new_len;
+            }
             memcpy(new_buf, target->s_val, copy_len);
             free(target->s_val);
         }
 
-        if ((size_t)new_len > copy_len) {
-            memset(new_buf + copy_len, ' ', (size_t)new_len - copy_len);
+        if ((size_t)new_len > (unicode_target ? utf8CodepointCount(new_buf, copy_len) : copy_len)) {
+            size_t fill_len = unicode_target
+                ? ((size_t)new_len - utf8CodepointCount(new_buf, copy_len))
+                : ((size_t)new_len - copy_len);
+            memset(new_buf + copy_len, ' ', fill_len);
+            copy_len += fill_len;
         }
-        new_buf[new_len] = '\0';
+        new_buf[copy_len] = '\0';
 
         target->s_val = new_buf;
         target->max_length = -1;
@@ -6101,7 +6209,15 @@ static inline long long coerceDeltaToI64(const Value* v) {
 Value vmBuiltinOrd(VM* vm, int arg_count, Value* args) {
     if (arg_count != 1) { runtimeError(vm, "ord expects 1 argument."); return makeInt(0); }
     Value arg = args[0];
-    if (arg.type == TYPE_CHAR) return makeInt(arg.c_val);
+    if (arg.type == TYPE_CHAR || arg.type == TYPE_WIDECHAR) return makeInt(arg.c_val);
+    if (isPascalStringType(arg.type) && arg.s_val) {
+        size_t len = strlen(arg.s_val);
+        uint32_t codepoint = 0;
+        size_t advance = 0;
+        if (len > 1 && decodeUtf8Codepoint(arg.s_val, len, &codepoint, &advance) && advance == len) {
+            return makeInt((long long)codepoint);
+        }
+    }
     if (arg.type == TYPE_BOOLEAN) return makeInt(arg.i_val);
     if (arg.type == TYPE_ENUM) return makeInt(arg.enum_val.ordinal);
     if (IS_INTLIKE(arg)) return makeInt(AS_INTEGER(arg));
@@ -6581,7 +6697,7 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
 
 // newobj(typeName: string): pointer
 Value vmBuiltinNewObj(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING || !args[0].s_val) {
+    if (arg_count != 1 || !isPascalStringType(args[0].type) || !args[0].s_val) {
         runtimeError(vm, "newobj expects 1 string type name.");
         return makeNil();
     }
@@ -6788,7 +6904,7 @@ Value vmBuiltinRename(VM* vm, int arg_count, Value* args) {
 
     if (fileVarLValue->type != TYPE_FILE) { runtimeError(vm, "First argument to Rename must be a file variable."); return makeVoid(); }
     if (fileVarLValue->filename == NULL) { runtimeError(vm, "File variable not assigned a name before Rename."); return makeVoid(); }
-    if (args[1].type != TYPE_STRING) { runtimeError(vm, "Second argument to Rename must be a string."); return makeVoid(); }
+    if (!isPascalStringType(args[1].type)) { runtimeError(vm, "Second argument to Rename must be a string."); return makeVoid(); }
     vmMaybeCloseFileValue(fileVarLValue);
 
     int res = rename(fileVarLValue->filename, args[1].s_val);
@@ -7657,17 +7773,18 @@ Value vmBuiltinReadln(VM* vm, int arg_count, Value* args) {
                 break;
             }
 
-            case TYPE_STRING: {
+            case TYPE_STRING:
+            case TYPE_UNICODE_STRING: {
                 char* tmp = strdup(p);
                 if (!tmp) {
                     runtimeError(vm, "Out of memory in Readln.");
                     io_error = 1;
                     break;
                 }
-                if (dst->type == TYPE_STRING && dst->s_val) {
+                if (isPascalStringType(dst->type) && dst->s_val) {
                     free(dst->s_val);
                 }
-                dst->type = TYPE_STRING;
+                dst->type = (dst->type == TYPE_UNICODE_STRING) ? TYPE_UNICODE_STRING : TYPE_STRING;
                 dst->s_val = tmp;
                 i = arg_count; // consume the line; ignore trailing params
                 break;
@@ -7942,7 +8059,7 @@ Value vmBuiltinRandom(VM* vm, int arg_count, Value* args) {
 // --- VM BUILT-IN IMPLEMENTATIONS: DOS/OS ---
 
 Value vmBuiltinDosGetenv(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+    if (arg_count != 1 || !isPascalStringType(args[0].type)) {
         runtimeError(vm, "dosGetenv expects 1 string argument.");
         return makeString("");
     }
@@ -7953,7 +8070,7 @@ Value vmBuiltinDosGetenv(VM* vm, int arg_count, Value* args) {
 
 // Expose getenv without the DOS_ prefix for portability
 Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+    if (arg_count != 1 || !isPascalStringType(args[0].type)) {
         runtimeError(vm, "getenv expects 1 string argument.");
         return makeString("");
     }
@@ -7963,7 +8080,7 @@ Value vmBuiltinGetenv(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinGetenvint(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2 || args[0].type != TYPE_STRING ||
+    if (arg_count != 2 || !isPascalStringType(args[0].type) ||
         !IS_INTLIKE(args[1])) {
         runtimeError(vm, "getEnvInt expects (string, integer).");
         return makeInt(0);
@@ -8035,7 +8152,7 @@ Value vmBuiltinBytecodeVersion(VM* vm, int arg_count, Value* args) {
 }
 
 Value vmBuiltinDosExec(VM* vm, int arg_count, Value* args) {
-    if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+    if (arg_count != 2 || !isPascalStringType(args[0].type) || !isPascalStringType(args[1].type)) {
         runtimeError(vm, "dosExec expects 2 string arguments.");
         return makeInt(-1);
     }
@@ -8423,7 +8540,7 @@ Value vmBuiltinMstreamsavetofile(VM* vm, int arg_count, Value* args) {
     }
 
     // Argument 1 is the filename string
-    if (args[1].type != TYPE_STRING || args[1].s_val == NULL) {
+    if (!isPascalStringType(args[1].type) || args[1].s_val == NULL) {
         runtimeError(vm, "MStreamSaveToFile: Second argument must be a string filename.");
         return makeVoid();
     }
@@ -8612,7 +8729,7 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
     }
 
     char* new_buf = NULL;
-    if (val.type == TYPE_STRING) {
+    if (isPascalStringType(val.type)) {
         const char* src = val.s_val ? val.s_val : "";
         new_buf = strdup(src);
     } else {
@@ -8621,6 +8738,12 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
             case TYPE_CHAR:
                 snprintf(buffer, sizeof(buffer), "%c", val.c_val);
                 break;
+            case TYPE_WIDECHAR: {
+                char utf8[5];
+                encodeUtf8Codepoint((uint32_t)val.c_val, utf8);
+                snprintf(buffer, sizeof(buffer), "%s", utf8);
+                break;
+            }
             case TYPE_BOOLEAN:
                 snprintf(buffer, sizeof(buffer), "%s", val.i_val ? "TRUE" : "FALSE");
                 break;
@@ -8641,8 +8764,9 @@ Value vmBuiltinStr(VM* vm, int arg_count, Value* args) {
         runtimeError(vm, "Str: memory allocation failed.");
         return makeVoid();
     }
+    VarType dest_type = isPascalStringType(dest->type) ? dest->type : TYPE_STRING;
     freeValue(dest);
-    dest->type = TYPE_STRING;
+    dest->type = dest_type;
     dest->s_val = new_buf;
     dest->max_length = -1;
     return makeVoid();
@@ -8662,16 +8786,25 @@ Value vmBuiltinLength(VM* vm, int arg_count, Value* args) {
             return makeInt(0);
         }
         Value* pointed = (Value*)arg.ptr_val;
-        if (pointed->type == TYPE_STRING) {
+        if (isPascalStringType(pointed->type)) {
+            if (pointed->type == TYPE_UNICODE_STRING) {
+                size_t len = pointed->s_val ? strlen(pointed->s_val) : 0;
+                return makeInt((long long)utf8CodepointCount(pointed->s_val, len));
+            }
             return makeInt(pointed->s_val ? (long long)strlen(pointed->s_val) : 0);
         }
+    }
+
+    if (arg.type == TYPE_UNICODE_STRING) {
+        size_t len = arg.s_val ? strlen(arg.s_val) : 0;
+        return makeInt((long long)utf8CodepointCount(arg.s_val, len));
     }
 
     if (arg.type == TYPE_STRING) {
         return makeInt(arg.s_val ? (long long)strlen(arg.s_val) : 0);
     }
 
-    if (arg.type == TYPE_CHAR) {
+    if (arg.type == TYPE_CHAR || arg.type == TYPE_WIDECHAR) {
         return makeInt(1);
     }
 

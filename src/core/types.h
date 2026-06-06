@@ -208,6 +208,7 @@ typedef struct {
     int line;
     int column;
     bool is_char_code;
+    uint32_t char_code_value;
 } Token;
 
 /* =======================

@@ -173,6 +173,150 @@ bool isValidUtf8Bytes(const char *text, size_t len) {
     return true;
 }
 
+bool decodeUtf8Codepoint(const char *text, size_t len, uint32_t *out_codepoint, size_t *out_advance) {
+    if (!text || len == 0 || !out_codepoint || !out_advance) {
+        return false;
+    }
+
+    unsigned char c0 = (unsigned char)text[0];
+    if (c0 <= 0x7F) {
+        *out_codepoint = c0;
+        *out_advance = 1;
+        return true;
+    }
+
+    if (c0 >= 0xC2 && c0 <= 0xDF) {
+        if (len < 2) return false;
+        unsigned char c1 = (unsigned char)text[1];
+        if ((c1 & 0xC0) != 0x80) return false;
+        *out_codepoint = ((uint32_t)(c0 & 0x1F) << 6) | (uint32_t)(c1 & 0x3F);
+        *out_advance = 2;
+        return true;
+    }
+
+    if (c0 == 0xE0) {
+        if (len < 3) return false;
+        unsigned char c1 = (unsigned char)text[1];
+        unsigned char c2 = (unsigned char)text[2];
+        if (c1 < 0xA0 || c1 > 0xBF || (c2 & 0xC0) != 0x80) return false;
+        *out_codepoint = ((uint32_t)(c0 & 0x0F) << 12) |
+                         ((uint32_t)(c1 & 0x3F) << 6) |
+                         (uint32_t)(c2 & 0x3F);
+        *out_advance = 3;
+        return true;
+    }
+
+    if ((c0 >= 0xE1 && c0 <= 0xEC) || (c0 >= 0xEE && c0 <= 0xEF)) {
+        if (len < 3) return false;
+        unsigned char c1 = (unsigned char)text[1];
+        unsigned char c2 = (unsigned char)text[2];
+        if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) return false;
+        *out_codepoint = ((uint32_t)(c0 & 0x0F) << 12) |
+                         ((uint32_t)(c1 & 0x3F) << 6) |
+                         (uint32_t)(c2 & 0x3F);
+        *out_advance = 3;
+        return true;
+    }
+
+    if (c0 == 0xED) {
+        if (len < 3) return false;
+        unsigned char c1 = (unsigned char)text[1];
+        unsigned char c2 = (unsigned char)text[2];
+        if (c1 < 0x80 || c1 > 0x9F || (c2 & 0xC0) != 0x80) return false;
+        *out_codepoint = ((uint32_t)(c0 & 0x0F) << 12) |
+                         ((uint32_t)(c1 & 0x3F) << 6) |
+                         (uint32_t)(c2 & 0x3F);
+        *out_advance = 3;
+        return true;
+    }
+
+    if (c0 == 0xF0) {
+        if (len < 4) return false;
+        unsigned char c1 = (unsigned char)text[1];
+        unsigned char c2 = (unsigned char)text[2];
+        unsigned char c3 = (unsigned char)text[3];
+        if (c1 < 0x90 || c1 > 0xBF ||
+            (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) return false;
+        *out_codepoint = ((uint32_t)(c0 & 0x07) << 18) |
+                         ((uint32_t)(c1 & 0x3F) << 12) |
+                         ((uint32_t)(c2 & 0x3F) << 6) |
+                         (uint32_t)(c3 & 0x3F);
+        *out_advance = 4;
+        return true;
+    }
+
+    if (c0 >= 0xF1 && c0 <= 0xF3) {
+        if (len < 4) return false;
+        unsigned char c1 = (unsigned char)text[1];
+        unsigned char c2 = (unsigned char)text[2];
+        unsigned char c3 = (unsigned char)text[3];
+        if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) return false;
+        *out_codepoint = ((uint32_t)(c0 & 0x07) << 18) |
+                         ((uint32_t)(c1 & 0x3F) << 12) |
+                         ((uint32_t)(c2 & 0x3F) << 6) |
+                         (uint32_t)(c3 & 0x3F);
+        *out_advance = 4;
+        return true;
+    }
+
+    if (c0 == 0xF4) {
+        if (len < 4) return false;
+        unsigned char c1 = (unsigned char)text[1];
+        unsigned char c2 = (unsigned char)text[2];
+        unsigned char c3 = (unsigned char)text[3];
+        if (c1 < 0x80 || c1 > 0x8F ||
+            (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) return false;
+        *out_codepoint = ((uint32_t)(c0 & 0x07) << 18) |
+                         ((uint32_t)(c1 & 0x3F) << 12) |
+                         ((uint32_t)(c2 & 0x3F) << 6) |
+                         (uint32_t)(c3 & 0x3F);
+        *out_advance = 4;
+        return true;
+    }
+
+    return false;
+}
+
+size_t utf8CodepointCount(const char *text, size_t len) {
+    if (!text || len == 0) {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t offset = 0;
+    while (offset < len) {
+        uint32_t codepoint = 0;
+        size_t advance = 0;
+        if (!decodeUtf8Codepoint(text + offset, len - offset, &codepoint, &advance)) {
+            return len;
+        }
+        (void)codepoint;
+        offset += advance;
+        count++;
+    }
+    return count;
+}
+
+size_t utf8ByteOffsetForCodepointIndex(const char *text, size_t len, size_t index) {
+    if (!text || len == 0 || index == 0) {
+        return 0;
+    }
+
+    size_t offset = 0;
+    size_t current = 0;
+    while (offset < len && current < index) {
+        uint32_t codepoint = 0;
+        size_t advance = 0;
+        if (!decodeUtf8Codepoint(text + offset, len - offset, &codepoint, &advance)) {
+            return index < len ? index : len;
+        }
+        (void)codepoint;
+        offset += advance;
+        current++;
+    }
+    return offset;
+}
+
 void writePascalText(FILE *stream, const char *text, size_t len) {
     if (!stream || !text || len == 0) {
         return;
@@ -1125,6 +1269,18 @@ Value makeStringLen(const char *val, size_t len) {
     return v;
 }
 
+Value makeUnicodeString(const char *val) {
+    Value v = makeString(val);
+    v.type = TYPE_UNICODE_STRING;
+    return v;
+}
+
+Value makeUnicodeStringLen(const char *val, size_t len) {
+    Value v = makeStringLen(val, len);
+    v.type = TYPE_UNICODE_STRING;
+    return v;
+}
+
 Value makeChar(int c) {
     Value v;
     memset(&v, 0, sizeof(Value));
@@ -1132,6 +1288,12 @@ Value makeChar(int c) {
     v.c_val = c;
     SET_INT_VALUE(&v, c); // Keep numeric fields in sync for ordinal ops
     v.max_length = 1; // Character has a fixed length of 1
+    return v;
+}
+
+Value makeWideChar(int c) {
+    Value v = makeChar(c);
+    v.type = TYPE_WIDECHAR;
     return v;
 }
 
@@ -1788,6 +1950,7 @@ Token *newToken(TokenType type, const char *value, int line, int column) { // Ad
     token->line = line;     // <<< SET LINE
     token->column = column; // <<< SET COLUMN
     token->is_char_code = false;
+    token->char_code_value = 0;
     return token;
 }
 
@@ -1800,6 +1963,7 @@ Token *copyToken(const Token *orig_token) { // Renamed parameter to avoid confli
     new_token->type = orig_token->type;
     new_token->length = orig_token->length;
     new_token->is_char_code = orig_token->is_char_code;
+    new_token->char_code_value = orig_token->char_code_value;
     if (orig_token->value) {
         new_token->value = (char*)malloc(orig_token->length + 1);
         if (!new_token->value) {

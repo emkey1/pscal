@@ -115,6 +115,66 @@
       "stdout_substring": "PASS: unicode text foundation 5 65"
     },
     {
+      "id": "unicode_text_semantics",
+      "path": "Tests/compiler/pascal/cases/unicode_text_semantics.pas",
+      "expect": "compile_success",
+      "stdout_substring": "len=2\ncopy=山\nord=38634"
+    },
+    {
+      "id": "unicode_char_code_literals",
+      "path": "Tests/compiler/pascal/cases/unicode_char_code_literals.pas",
+      "expect": "compile_success",
+      "stdout_substring": "hex=→\nhexord=8594\ndec=→\ndecord=8594\nbyte=█\nbytelen=1"
+    },
+    {
+      "id": "unicode_literal_semantics",
+      "path": "Tests/compiler/pascal/cases/unicode_literal_semantics.pas",
+      "expect": "compile_success",
+      "stdout_substring": "len=2\ncopy=山"
+    },
+    {
+      "id": "unicode_text_runtime_ops",
+      "path": "Tests/compiler/pascal/cases/unicode_text_runtime_ops.pas",
+      "expect": "compile_success",
+      "stdout_substring": "index=山\nindexord=23665\npos=2\nrepeat=雪雪\nstr=山"
+    },
+    {
+      "id": "unicode_concat_mixed",
+      "path": "Tests/compiler/pascal/cases/unicode_concat_mixed.pas",
+      "expect": "compile_success",
+      "stdout_substring": "len=2\nvalue=雪山"
+    },
+    {
+      "id": "unicode_params_and_setlength",
+      "path": "Tests/compiler/pascal/cases/unicode_params_and_setlength.pas",
+      "expect": "compile_success",
+      "stdout_substring": "char=雪\ntext=雪山\ntrim=雪\ngrow=雪  ."
+    },
+    {
+      "id": "unicode_printf_format",
+      "path": "Tests/compiler/pascal/cases/unicode_printf_format.pas",
+      "expect": "compile_success",
+      "stdout_substring": "fmt=雪\n"
+    },
+    {
+      "id": "unicode_const_concat",
+      "path": "Tests/compiler/pascal/cases/unicode_const_concat.pas",
+      "expect": "compile_success",
+      "stdout_substring": "mixed=雪山\nlen=2\nmixed2=雪→"
+    },
+    {
+      "id": "unicode_compare_and_case",
+      "path": "Tests/compiler/pascal/cases/unicode_compare_and_case.pas",
+      "expect": "compile_success",
+      "stdout_substring": "eq=1\ngt=1\ncase=snow"
+    },
+    {
+      "id": "unicode_record_array_fields",
+      "path": "Tests/compiler/pascal/cases/unicode_record_array_fields.pas",
+      "expect": "compile_success",
+      "stdout_substring": "name1=雪山\nmark1=雪\nname2=雪山→\nmark2=→"
+    },
+    {
       "id": "variant_record_basic",
       "path": "Tests/compiler/pascal/cases/variant_record_basic.pas",
       "expect": "compile_success",

@@ -44,6 +44,28 @@ static ReaToken reaPeekToken(ReaParser *p) {
     return reaNextToken(&saved);
 }
 
+static VarType inferReaStringLiteralType(const char *text, size_t len) {
+    if (!text) {
+        return TYPE_STRING;
+    }
+    if (len == 1) {
+        return TYPE_CHAR;
+    }
+    if (len == 0) {
+        return TYPE_STRING;
+    }
+
+    uint32_t codepoint = 0;
+    size_t advance = 0;
+    if (decodeUtf8Codepoint(text, len, &codepoint, &advance) && advance == len) {
+        return TYPE_WIDECHAR;
+    }
+    if (isValidUtf8Bytes(text, len) && utf8CodepointCount(text, len) < len) {
+        return TYPE_UNICODE_STRING;
+    }
+    return TYPE_STRING;
+}
+
 static bool tokenIsTypeKeyword(ReaTokenType t);
 static Token *copyCurrentTokenAsIdentifier(ReaParser *p);
 
@@ -729,10 +751,11 @@ static AST *parseStringLiteralSequence(ReaParser *p) {
     tok->line = startLine;
     tok->column = 0;
     tok->is_char_code = false;
+    tok->char_code_value = 0;
 
     AST *node = newASTNode(AST_STRING, tok);
     node->i_val = (int)totalLen;
-    setTypeAST(node, charCandidate ? TYPE_CHAR : TYPE_STRING);
+    setTypeAST(node, charCandidate ? TYPE_CHAR : inferReaStringLiteralType(buffer, totalLen));
     return node;
 }
 
@@ -1570,8 +1593,9 @@ static AST *parseAdditive(ReaParser *p) {
         VarType res;
         bool leftReal = isRealType(lt);
         bool rightReal = isRealType(rt);
-        if (tt == TOKEN_PLUS && (lt == TYPE_STRING || rt == TYPE_STRING || lt == TYPE_CHAR || rt == TYPE_CHAR)) {
-            res = TYPE_STRING;
+        if (tt == TOKEN_PLUS && (isPascalStringType(lt) || isPascalStringType(rt) ||
+                                 isPascalCharType(lt) || isPascalCharType(rt))) {
+            res = inferBinaryOpType(lt, rt);
         } else if (leftReal || rightReal) {
             res = promoteRealBinaryType(lt, rt);
         } else {
@@ -1771,10 +1795,9 @@ static VarType resolveConditionalType(AST *thenExpr, AST *elseExpr, AST **typeDe
         return TYPE_POINTER;
     }
 
-    if (thenType == TYPE_STRING || elseType == TYPE_STRING ||
-        (thenType == TYPE_CHAR && elseType == TYPE_STRING) ||
-        (thenType == TYPE_STRING && elseType == TYPE_CHAR)) {
-        return TYPE_STRING;
+    if (isPascalStringType(thenType) || isPascalStringType(elseType) ||
+        isPascalCharType(thenType) || isPascalCharType(elseType)) {
+        return inferBinaryOpType(thenType, elseType);
     }
 
     if (thenType == TYPE_CHAR && elseType == TYPE_CHAR) {
@@ -1963,7 +1986,7 @@ static VarType mapType(ReaTokenType t) {
         case REA_TOKEN_CHAR: return TYPE_CHAR;
         case REA_TOKEN_BYTE: return TYPE_BYTE;
         case REA_TOKEN_WORD: return TYPE_WORD;
-        case REA_TOKEN_STR: return TYPE_STRING;
+        case REA_TOKEN_STR: return TYPE_UNICODE_STRING;
         case REA_TOKEN_TEXT: return TYPE_FILE;
         case REA_TOKEN_MSTREAM: return TYPE_MEMORYSTREAM;
         case REA_TOKEN_BOOL: return TYPE_BOOLEAN;

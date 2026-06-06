@@ -67,9 +67,10 @@ AST* rea_lookupType(const char* name) {
     else if (strcasecmp(name, "char")     == 0) setTypeAST(node, TYPE_CHAR);
     else if (strcasecmp(name, "byte")     == 0) setTypeAST(node, TYPE_BYTE);
     else if (strcasecmp(name, "word")     == 0) setTypeAST(node, TYPE_WORD);
-    else if (strcasecmp(name, "str")      == 0 ||
-             strcasecmp(name, "text")     == 0)
-        setTypeAST(node, TYPE_STRING);
+    else if (strcasecmp(name, "str")      == 0)
+        setTypeAST(node, TYPE_UNICODE_STRING);
+    else if (strcasecmp(name, "text")     == 0)
+        setTypeAST(node, TYPE_FILE);
     else if (strcasecmp(name, "mstream")  == 0)
         setTypeAST(node, TYPE_MEMORYSTREAM);
     else if (strcasecmp(name, "bool")     == 0) setTypeAST(node, TYPE_BOOLEAN);

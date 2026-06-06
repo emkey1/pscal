@@ -1348,6 +1348,7 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
                     fprintf(stderr, "REAL  %Lf\n", AS_REAL(constantValue));
                     break;
                 case TYPE_STRING:
+                case TYPE_UNICODE_STRING:
                     fprintf(stderr, "STR   \"");
                     if (constantValue.s_val) {
                         printEscapedString(constantValue.s_val);
@@ -1367,6 +1368,7 @@ void disassembleBytecodeChunk(BytecodeChunk* chunk, const char* name, HashTable*
                     fprintf(stderr, "\n");
                     break;
                 case TYPE_CHAR:
+                case TYPE_WIDECHAR:
                     fprintf(stderr, "CHAR  '");
                     printEscapedChar(constantValue.c_val);
                     fprintf(stderr, "'\n");

@@ -381,6 +381,7 @@ Token *identifier(Lexer *lexer) {
     token->line = token_line;
     token->column = token_column;
     token->is_char_code = false;
+    token->char_code_value = 0;
     for (int i = 0; i < (int)NUM_KEYWORDS; i++) {
         // ADD DEBUG PRINT 3: See the comparison being made
         // DEBUG_PRINT("identifier: Comparing \"_%s_\" with keyword \"_%s_\"\n", id_str, keywords[i].keyword);
@@ -597,41 +598,61 @@ Token *getNextToken(Lexer *lexer) {
              continue; // Resume token search
          }
 
-        // Handle Character Code Constant (# followed by decimal digits)
+        // Handle Character Code Constant (#<decimal> or #$<hex>)
         if (lexer->current_char == '#') {
             advance(lexer); // Consume '#'
             size_t start = lexer->pos;
-            while (isdigit((unsigned char)lexer->current_char)) {
+            int base = 10;
+            bool is_hex = false;
+            if (lexer->current_char == '$') {
+                is_hex = true;
+                base = 16;
+                advance(lexer);
+                start = lexer->pos;
+            }
+
+            while ((base == 10 && isdigit((unsigned char)lexer->current_char)) ||
+                   (base == 16 && isxdigit((unsigned char)lexer->current_char))) {
                 advance(lexer);
             }
             size_t len = lexer->pos - start;
             if (len == 0) {
-                lexerError(lexer, "Character code literal must have at least one digit after '#'");
+                lexerError(lexer, is_hex
+                    ? "Character code literal must have at least one hex digit after '#$'"
+                    : "Character code literal must have at least one digit after '#'");
                 return newToken(TOKEN_UNKNOWN, "#", start_line, start_column);
             }
             char *num_str = malloc(len + 1);
             if (!num_str) { fprintf(stderr, "malloc failed in getNextToken for char code\n"); EXIT_FAILURE_HANDLER(); }
             memcpy(num_str, lexer->text + start, len);
             num_str[len] = '\0';
-            long val = atol(num_str);
+            char *endptr = NULL;
+            unsigned long val = strtoul(num_str, &endptr, base);
+            bool parse_ok = (endptr && *endptr == '\0');
             free(num_str);
-
-            if (val < 0 || val > 255) {
-                lexerError(lexer, "Character code value out of range (0-255)");
+            if (!parse_ok) {
+                lexerError(lexer, "Invalid character code literal");
+                return newToken(TOKEN_UNKNOWN, "#", start_line, start_column);
             }
-            // Represent this as a single-character string constant for the parser.
-            // The parser's `evaluateCompileTimeValue` will see a STRING_CONST of length 1
-            // and correctly convert it to a CHAR value.
-            char char_buf[2];
-            /* Store the numeric character code using an unsigned cast so that
-             * values 128..255 are preserved instead of sign-extending to
-             * negative numbers on platforms where 'char' is signed.  The
-             * parser later interprets single-character string tokens as CHAR
-             * constants. */
-            char_buf[0] = (unsigned char)val;
-            char_buf[1] = '\0';
-            Token *char_token = newToken(TOKEN_STRING_CONST, char_buf, start_line, start_column);
+
+            if (val > UNICODE_MAX) {
+                lexerError(lexer, "Character code value out of range (0-0x10FFFF)");
+            }
+
+            char encoded[5];
+            size_t encoded_len = 0;
+            if (val <= PASCAL_CHAR_MAX) {
+                encoded[0] = (unsigned char)val;
+                encoded[1] = '\0';
+                encoded_len = 1;
+            } else {
+                encoded_len = encodeUtf8Codepoint((uint32_t)val, encoded);
+            }
+
+            Token *char_token = newToken(TOKEN_STRING_CONST, encoded, start_line, start_column);
+            char_token->length = encoded_len;
             char_token->is_char_code = true;
+            char_token->char_code_value = (uint32_t)val;
             return char_token;
         }
         

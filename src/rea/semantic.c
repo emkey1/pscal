@@ -1422,7 +1422,10 @@ static AST *cloneTypeForVar(VarType type, AST *typeDef, int line) {
             break;
         case TYPE_FLOAT: name = "float32"; break;
         case TYPE_BOOLEAN: name = "bool"; break;
-        case TYPE_STRING: name = "str"; break;
+        case TYPE_STRING:
+        case TYPE_UNICODE_STRING:
+            name = "str";
+            break;
         case TYPE_CHAR:   name = "char"; break;
         case TYPE_BYTE:   name = "byte"; break;
         default:

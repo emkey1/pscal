@@ -101,7 +101,7 @@ static Value vmBuiltinExtBuiltinCategoryName(struct VM_s *vm, int arg_count,
 
 static Value vmBuiltinExtBuiltinGroupCount(struct VM_s *vm, int arg_count,
                                           Value *args) {
-  if (arg_count != 1 || args[0].type != TYPE_STRING) {
+  if (arg_count != 1 || !isPascalStringType(args[0].type)) {
     runtimeError(vm,
                  "ExtBuiltinGroupCount expects a single string argument.");
     return makeInt(0);
@@ -115,7 +115,7 @@ static Value vmBuiltinExtBuiltinGroupCount(struct VM_s *vm, int arg_count,
 
 static Value vmBuiltinExtBuiltinGroupName(struct VM_s *vm, int arg_count,
                                          Value *args) {
-  if (arg_count != 2 || args[0].type != TYPE_STRING || !IS_INTLIKE(args[1])) {
+  if (arg_count != 2 || !isPascalStringType(args[0].type) || !IS_INTLIKE(args[1])) {
     runtimeError(vm,
                  "ExtBuiltinGroupName expects a string category and integer index.");
     return makeString("");
@@ -139,7 +139,7 @@ static Value vmBuiltinExtBuiltinGroupName(struct VM_s *vm, int arg_count,
 
 static Value vmBuiltinExtBuiltinFunctionCount(struct VM_s *vm, int arg_count,
                                               Value *args) {
-  if (arg_count != 1 || args[0].type != TYPE_STRING) {
+  if (arg_count != 1 || !isPascalStringType(args[0].type)) {
     runtimeError(vm,
                  "ExtBuiltinFunctionCount expects a single string argument.");
     return makeInt(0);
@@ -150,7 +150,7 @@ static Value vmBuiltinExtBuiltinFunctionCount(struct VM_s *vm, int arg_count,
 
 static Value vmBuiltinExtBuiltinFunctionName(struct VM_s *vm, int arg_count,
                                              Value *args) {
-  if (arg_count != 2 || args[0].type != TYPE_STRING || !IS_INTLIKE(args[1])) {
+  if (arg_count != 2 || !isPascalStringType(args[0].type) || !IS_INTLIKE(args[1])) {
     runtimeError(
         vm,
         "ExtBuiltinFunctionName expects a string category and integer index.");
@@ -171,7 +171,7 @@ static Value vmBuiltinExtBuiltinFunctionName(struct VM_s *vm, int arg_count,
 static Value vmBuiltinExtBuiltinGroupFunctionCount(struct VM_s *vm,
                                                    int arg_count,
                                                    Value *args) {
-  if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+  if (arg_count != 2 || !isPascalStringType(args[0].type) || !isPascalStringType(args[1].type)) {
     runtimeError(vm, "ExtBuiltinGroupFunctionCount expects two string arguments.");
     return makeInt(0);
   }
@@ -185,7 +185,7 @@ static Value vmBuiltinExtBuiltinGroupFunctionCount(struct VM_s *vm,
 static Value vmBuiltinExtBuiltinGroupFunctionName(struct VM_s *vm,
                                                   int arg_count,
                                                   Value *args) {
-  if (arg_count != 3 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING ||
+  if (arg_count != 3 || !isPascalStringType(args[0].type) || !isPascalStringType(args[1].type) ||
       !IS_INTLIKE(args[2])) {
     runtimeError(vm, "ExtBuiltinGroupFunctionName expects category, group, and index.");
     return makeString("");

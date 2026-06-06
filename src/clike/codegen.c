@@ -792,6 +792,20 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
                     writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
                 }
+            } else if (node->var_type == TYPE_UNICODE_STRING) {
+                writeBytecodeChunk(chunk, RESET_LOCAL, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
+                if (node->left) {
+                    compileExpression(node->left, chunk, ctx);
+                } else {
+                    Value init = makeString("");
+                    init.type = TYPE_UNICODE_STRING;
+                    int cidx = addConstantToChunk(chunk, &init);
+                    freeValue(&init);
+                    emitConstantOperand(chunk, cidx, node->token.line);
+                }
+                writeBytecodeChunk(chunk, SET_LOCAL, node->token.line);
+                writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
             } else if (node->var_type == TYPE_FILE) {
                 writeBytecodeChunk(chunk, INIT_LOCAL_FILE, node->token.line);
                 writeBytecodeChunk(chunk, (uint8_t)idx, node->token.line);
@@ -834,6 +848,7 @@ static void compileStatement(ASTNodeClike *node, BytecodeChunk *chunk, FuncConte
                     } else {
                         switch (node->var_type) {
                             case TYPE_STRING:
+                            case TYPE_UNICODE_STRING:
                                 init = makeNil();
                                 break;
                             case TYPE_FILE:
@@ -950,7 +965,7 @@ static void compileGlobalVar(ASTNodeClike *node, BytecodeChunk *chunk) {
         const char* type_name = varTypeToString(node->var_type);
         int type_idx = addStringConstant(chunk, type_name);
         emitShort(chunk, (uint16_t)type_idx, node->token.line);
-        if (node->var_type == TYPE_STRING) {
+        if (isPascalStringType(node->var_type)) {
             Value zero = makeInt(0);
             int len_idx = addConstantToChunk(chunk, &zero);
             freeValue(&zero);
@@ -1006,7 +1021,22 @@ static void compileExpressionWithResult(ASTNodeClike *node, BytecodeChunk *chunk
                 emitCharPointerConstant(node, chunk);
             } else {
                 char* s = tokenStringToCString(node->token);
-                Value v = makeString(s);
+                Value v;
+                if (node->var_type == TYPE_CHAR) {
+                    v = makeChar((unsigned char)s[0]);
+                } else if (node->var_type == TYPE_WIDECHAR) {
+                    uint32_t codepoint = 0;
+                    size_t advance = 0;
+                    if (!decodeUtf8Codepoint(s, strlen(s), &codepoint, &advance)) {
+                        codepoint = 0;
+                    }
+                    v = makeWideChar((int)codepoint);
+                } else {
+                    v = makeString(s);
+                    if (node->var_type == TYPE_UNICODE_STRING) {
+                        v.type = TYPE_UNICODE_STRING;
+                    }
+                }
                 free(s);
                 int idx = addConstantToChunk(chunk, &v);
                 freeValue(&v);

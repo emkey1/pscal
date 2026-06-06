@@ -269,6 +269,9 @@ Value makePointer(void* address, AST* base_type_node); // <<< ADD THIS PROTOTYPE
 Value makeString(const char *val);
 Value makeStringLen(const char *val, size_t len);
 Value makeChar(int c);
+Value makeUnicodeString(const char *val);
+Value makeUnicodeStringLen(const char *val, size_t len);
+Value makeWideChar(int c);
 Value makeBoolean(int b);
 Value makeFile(FILE *f);
 Value makeRecord(FieldValue *rec);
@@ -299,6 +302,9 @@ void printValueToStream(Value v, FILE *stream);
 size_t encodeUtf8Codepoint(uint32_t codepoint, char out[5]);
 size_t encodePascalCharUtf8(int value, char out[5]);
 bool isValidUtf8Bytes(const char *text, size_t len);
+bool decodeUtf8Codepoint(const char *text, size_t len, uint32_t *out_codepoint, size_t *out_advance);
+size_t utf8CodepointCount(const char *text, size_t len);
+size_t utf8ByteOffsetForCodepointIndex(const char *text, size_t len, size_t index);
 void writePascalText(FILE *stream, const char *text, size_t len);
 int calculateArrayTotalSize(const Value* array_val);
 

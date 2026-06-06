@@ -3382,6 +3382,9 @@ static bool typesMatch(AST* param_type, AST* arg_node, bool allow_coercion) {
             if (param_actual->var_type == TYPE_POINTER && arg_vt == TYPE_NIL) {
                 return true;
             }
+            if (isPascalStringType(param_actual->var_type) && isPascalStringType(arg_vt)) {
+                return true;
+            }
             // Treat unresolved identifiers (VOID) as compatible when the
             // parameter expects an integer. This aligns with frontends where
             // declaration attribution may occur later in the pipeline.
@@ -4028,6 +4031,62 @@ Value* findCompilerConstant(const char* name_original_case) {
 }
 
 // New function for parser/compiler to evaluate simple constant expressions
+static bool compileTimeValueToUtf8(const Value *value, const char **out_text, char encoded[5]) {
+    if (!value || !out_text) {
+        return false;
+    }
+    *out_text = NULL;
+    if (isPascalStringType(value->type)) {
+        *out_text = value->s_val ? value->s_val : "";
+        return true;
+    }
+    if (value->type == TYPE_CHAR) {
+        encoded[0] = (char)value->c_val;
+        encoded[1] = '\0';
+        *out_text = encoded;
+        return true;
+    }
+    if (value->type == TYPE_WIDECHAR) {
+        encodeUtf8Codepoint((uint32_t)value->c_val, encoded);
+        *out_text = encoded;
+        return true;
+    }
+    return false;
+}
+
+static Value foldCompileTimeStringConcat(const Value *left_val, const Value *right_val) {
+    char left_encoded[5] = {0};
+    char right_encoded[5] = {0};
+    const char *left_text = NULL;
+    const char *right_text = NULL;
+
+    if (!compileTimeValueToUtf8(left_val, &left_text, left_encoded) ||
+        !compileTimeValueToUtf8(right_val, &right_text, right_encoded)) {
+        return makeVoid();
+    }
+
+    size_t left_len = strlen(left_text);
+    size_t right_len = strlen(right_text);
+    char *combined = (char *)malloc(left_len + right_len + 1);
+    if (!combined) {
+        fprintf(stderr, "Compile-time Error: Out of memory folding string concatenation.\n");
+        return makeVoid();
+    }
+
+    memcpy(combined, left_text, left_len);
+    memcpy(combined + left_len, right_text, right_len);
+    combined[left_len + right_len] = '\0';
+
+    bool result_unicode =
+        left_val->type == TYPE_UNICODE_STRING || right_val->type == TYPE_UNICODE_STRING ||
+        left_val->type == TYPE_WIDECHAR || right_val->type == TYPE_WIDECHAR;
+    Value result = result_unicode
+        ? makeUnicodeStringLen(combined, left_len + right_len)
+        : makeStringLen(combined, left_len + right_len);
+    free(combined);
+    return result;
+}
+
 Value evaluateCompileTimeValue(AST* node) {
     if (!node) return makeVoid(); // Or some error indicator
 
@@ -4062,8 +4121,20 @@ Value evaluateCompileTimeValue(AST* node) {
             if (node->token && node->token->value) {
                 size_t len = (node->i_val > 0) ? (size_t)node->i_val
                                                : strlen(node->token->value);
+                uint32_t codepoint = 0;
+                size_t advance = 0;
+                if (len > 1 &&
+                    decodeUtf8Codepoint(node->token->value, len, &codepoint, &advance) &&
+                    advance == len) {
+                    return makeWideChar((int)codepoint);
+                }
                 if (len == 1) {
                     return makeChar((unsigned char)node->token->value[0]);
+                }
+                if (node->var_type == TYPE_UNICODE_STRING ||
+                    (isValidUtf8Bytes(node->token->value, len) &&
+                     utf8CodepointCount(node->token->value, len) < len)) {
+                    return makeUnicodeStringLen(node->token->value, len);
                 }
                 return makeStringLen(node->token->value, len);
             }
@@ -4129,7 +4200,7 @@ Value evaluateCompileTimeValue(AST* node) {
                     } else if (strcasecmp(funcName, "ord") == 0 && node->child_count == 1) {
                         Value arg = evaluateCompileTimeValue(node->children[0]);
                         Value result = makeVoid();
-                        if (arg.type == TYPE_CHAR) {
+                        if (arg.type == TYPE_CHAR || arg.type == TYPE_WIDECHAR) {
                             result = makeInt(arg.c_val);
                         } else if (arg.type == TYPE_BOOLEAN) {
                             result = makeInt(arg.i_val ? 1 : 0);
@@ -4164,7 +4235,11 @@ Value evaluateCompileTimeValue(AST* node) {
                 bool op_is_mod = (node->token->type == TOKEN_MOD);
                 bool op_requires_int = op_is_int_div || op_is_mod;
 
-                if (op_requires_int && (left_is_real || right_is_real)) {
+                if (node->token->type == TOKEN_PLUS &&
+                    (isPascalStringType(left_val.type) || isPascalStringType(right_val.type) ||
+                     isPascalCharType(left_val.type) || isPascalCharType(right_val.type))) {
+                    result = foldCompileTimeStringConcat(&left_val, &right_val);
+                } else if (op_requires_int && (left_is_real || right_is_real)) {
                     fprintf(stderr, "Compile-time Error: '%s' operands must be integers in constant expressions.\n",
                             op_is_int_div ? "div" : "mod");
                 } else if (left_is_real && right_is_real) {
@@ -8918,6 +8993,16 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             size_t len = (node->i_val > 0) ? (size_t)node->i_val
                                            : strlen(node_token->value);
+            uint32_t codepoint = 0;
+            size_t advance = 0;
+            if (len > 1 &&
+                decodeUtf8Codepoint(node_token->value, len, &codepoint, &advance) &&
+                advance == len) {
+                Value val = makeWideChar((int)codepoint);
+                int constIndex = addConstantToChunk(chunk, &val);
+                emitConstant(chunk, constIndex, line);
+                break;
+            }
             if (len == 1) {
                 /* Single-character string literals represent CHAR constants.
                  * Cast through unsigned char so values in the 128..255 range
@@ -8927,7 +9012,16 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitConstant(chunk, constIndex, line);
                 // The temporary char value `val` does not need `freeValue`
             } else {
-                int constIndex = addStringConstantLen(chunk, node_token->value, len);
+                int constIndex = -1;
+                if (node->var_type == TYPE_UNICODE_STRING ||
+                    (isValidUtf8Bytes(node_token->value, len) &&
+                     utf8CodepointCount(node_token->value, len) < len)) {
+                    Value val = makeUnicodeStringLen(node_token->value, len);
+                    constIndex = addConstantToChunk(chunk, &val);
+                    freeValue(&val);
+                } else {
+                    constIndex = addStringConstantLen(chunk, node_token->value, len);
+                }
                 emitConstant(chunk, constIndex, line);
             }
             break;

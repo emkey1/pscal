@@ -188,7 +188,7 @@
                         "type": "IDENTIFIER",
                         "value": "str"
                     },
-                    "var_type_annotated": "STRING"
+                    "var_type_annotated": "UNICODESTRING"
                   }
 ,
                   "children": [
@@ -291,7 +291,7 @@
                     {
 
                       "node_type": "ARRAY_ACCESS",
-                      "var_type_annotated": "STRING",
+                      "var_type_annotated": "UNICODESTRING",
                       "left": 
                       {
 
