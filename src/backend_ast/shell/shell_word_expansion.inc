@@ -3740,23 +3740,21 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
         }
         bool appended = false;
         if (shellWordShouldGlob(flags, field)) {
-            glob_t glob_result;
-            int glob_status =
-#if defined(PSCAL_TARGET_IOS)
-                pscalPathVirtualized_glob(field, 0, NULL, &glob_result);
-#else
-                glob(field, 0, NULL, &glob_result);
-#endif
+            char **glob_matches = NULL;
+            size_t glob_count = 0;
+            int glob_status = shellExpandGlobPattern(field, &glob_matches, &glob_count);
             if (glob_status == 0) {
                 size_t original_argc = cmd->argc;
                 bool ok = true;
-                for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
-                    char *dup = strdup(glob_result.gl_pathv[g]);
+                for (size_t g = 0; g < glob_count; ++g) {
+                    char *dup = glob_matches[g];
+                    glob_matches[g] = NULL;
                     if (!dup) {
                         ok = false;
                         break;
                     }
                     if (!shellCommandAppendArgOwned(cmd, dup)) {
+                        free(dup);
                         ok = false;
                         break;
                     }
@@ -3769,7 +3767,10 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
                     if (cmd->argv) {
                         cmd->argv[cmd->argc] = NULL;
                     }
-                    globfree(&glob_result);
+                    for (size_t g = 0; g < glob_count; ++g) {
+                        free(glob_matches[g]);
+                    }
+                    free(glob_matches);
                     for (size_t j = i; j < field_count; ++j) {
                         if (fields[j]) {
                             free(fields[j]);
@@ -3779,7 +3780,7 @@ static bool shellAddArg(ShellCommand *cmd, const char *arg, bool *saw_command_wo
                     free(field);
                     return false;
                 }
-                globfree(&glob_result);
+                free(glob_matches);
                 appended = true;
             } else if (glob_status != GLOB_NOMATCH) {
                 fprintf(stderr, "exsh: glob failed for '%s'\n", field);

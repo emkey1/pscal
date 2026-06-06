@@ -511,6 +511,15 @@
             "expected_stdout": "unicode-pattern:start\ncase=single-prefix\ntest=match\ntest-neg=match\nunicode-pattern:end"
         },
         {
+            "id": "unicode_path_glob",
+            "name": "Unicode pathname globs match whole characters",
+            "category": "expansion",
+            "description": "Unquoted pathname globbing should treat '?' as one UTF-8 codepoint and preserve dotfile rules.",
+            "script": "Tests/exsh/tests/unicode_path_glob.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "unicode-glob:start\nsingle=山.txt\nsingle=雪.txt\nnested=雪dir/山.log\ndot=.雪.txt\nunicode-glob:end"
+        },
+        {
             "id": "grammar_here_documents",
             "name": "Here documents expand and quote correctly",
             "category": "grammar",

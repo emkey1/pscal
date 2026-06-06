@@ -1396,26 +1396,24 @@ Value vmBuiltinShellLoop(VM *vm, int arg_count, Value *args) {
                         continue;
                     }
                     if (shellWordShouldGlob(word_flags, field_value)) {
-                        glob_t glob_result;
-                        int glob_status =
-#if defined(PSCAL_TARGET_IOS)
-                            pscalPathVirtualized_glob(field_value, 0, NULL, &glob_result);
-#else
-                            glob(field_value, 0, NULL, &glob_result);
-#endif
+                        char **glob_matches = NULL;
+                        size_t glob_count = 0;
+                        int glob_status = shellExpandGlobPattern(field_value, &glob_matches, &glob_count);
                         if (glob_status == 0) {
                             bool glob_ok = true;
-                            for (size_t g = 0; g < glob_result.gl_pathc; ++g) {
-                                char *dup = strdup(glob_result.gl_pathv[g]);
+                            for (size_t g = 0; g < glob_count; ++g) {
+                                char *dup = glob_matches[g];
+                                glob_matches[g] = NULL;
                                 if (!dup || !shellLoopFrameAppendValue(frame, &values_capacity, dup)) {
-                                    if (dup) {
-                                        free(dup);
-                                    }
+                                    free(dup);
                                     glob_ok = false;
                                     break;
                                 }
                             }
-                            globfree(&glob_result);
+                            for (size_t g = 0; g < glob_count; ++g) {
+                                free(glob_matches[g]);
+                            }
+                            free(glob_matches);
                             free(field_value);
                             fields[f] = NULL;
                             if (!glob_ok) {

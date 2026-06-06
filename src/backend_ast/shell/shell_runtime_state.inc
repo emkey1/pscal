@@ -1204,6 +1204,7 @@ static void shellFreeOwnedPositionalParameters(void) {
 }
 
 static int shellPatternMatch(const char *pattern, const char *text);
+static int shellExpandGlobPattern(const char *pattern, char ***out_matches, size_t *out_count);
 
 static char *shellRemovePatternPrefix(const char *value, const char *pattern, bool longest) {
     if (!value) {
@@ -1394,6 +1395,308 @@ static int shellPatternMatch(const char *pattern, const char *text) {
         return shellUtf8GlobMatchInternal(pattern, text) ? 0 : FNM_NOMATCH;
     }
     return fnmatch(pattern, text, 0);
+}
+
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} ShellGlobMatchList;
+
+static bool shellGlobPatternHasMeta(const char *pattern) {
+    if (!pattern) {
+        return false;
+    }
+    for (const char *cursor = pattern; *cursor; ++cursor) {
+        if (*cursor == '*' || *cursor == '?' || *cursor == '[') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool shellGlobSegmentAllowsDot(const char *segment) {
+    return segment && segment[0] == '.';
+}
+
+static bool shellGlobAppendOwned(ShellGlobMatchList *list, char *value) {
+    if (!list || !value) {
+        return false;
+    }
+    if (list->count == list->capacity) {
+        size_t new_capacity = list->capacity ? (list->capacity * 2) : 8;
+        char **new_items = (char **)realloc(list->items, new_capacity * sizeof(char *));
+        if (!new_items) {
+            return false;
+        }
+        list->items = new_items;
+        list->capacity = new_capacity;
+    }
+    list->items[list->count++] = value;
+    return true;
+}
+
+static void shellGlobFreeList(ShellGlobMatchList *list) {
+    if (!list) {
+        return;
+    }
+    for (size_t i = 0; i < list->count; ++i) {
+        free(list->items[i]);
+    }
+    free(list->items);
+    list->items = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+static char *shellGlobJoinPath(const char *base, const char *component) {
+    const char *lhs = base ? base : "";
+    const char *rhs = component ? component : "";
+    if (lhs[0] == '\0') {
+        return strdup(rhs);
+    }
+    if (strcmp(lhs, "/") == 0) {
+        size_t len = strlen(rhs);
+        char *result = (char *)malloc(len + 2);
+        if (!result) {
+            return NULL;
+        }
+        result[0] = '/';
+        memcpy(result + 1, rhs, len + 1);
+        return result;
+    }
+    size_t lhs_len = strlen(lhs);
+    size_t rhs_len = strlen(rhs);
+    char *result = (char *)malloc(lhs_len + rhs_len + 2);
+    if (!result) {
+        return NULL;
+    }
+    memcpy(result, lhs, lhs_len);
+    result[lhs_len] = '/';
+    memcpy(result + lhs_len + 1, rhs, rhs_len + 1);
+    return result;
+}
+
+static int shellGlobResultCompare(const void *lhs, const void *rhs) {
+    const char *const *left = (const char *const *)lhs;
+    const char *const *right = (const char *const *)rhs;
+    const char *a = (left && *left) ? *left : "";
+    const char *b = (right && *right) ? *right : "";
+    return strcmp(a, b);
+}
+
+static int shellExpandUtf8GlobRecursive(const char *fs_base,
+                                        const char *display_base,
+                                        const char *pattern,
+                                        ShellGlobMatchList *results) {
+    if (!pattern || !results) {
+        return GLOB_NOMATCH;
+    }
+
+    while (*pattern == '/') {
+        pattern++;
+    }
+    if (*pattern == '\0') {
+        const char *display = (display_base && *display_base) ? display_base : fs_base;
+        if (!display || !*display) {
+            display = ".";
+        }
+        char *dup = strdup(display);
+        if (!dup) {
+            return GLOB_NOSPACE;
+        }
+        if (!shellGlobAppendOwned(results, dup)) {
+            free(dup);
+            return GLOB_NOSPACE;
+        }
+        return 0;
+    }
+
+    const char *slash = strchr(pattern, '/');
+    size_t segment_len = slash ? (size_t)(slash - pattern) : strlen(pattern);
+    char *segment = (char *)malloc(segment_len + 1);
+    if (!segment) {
+        return GLOB_NOSPACE;
+    }
+    memcpy(segment, pattern, segment_len);
+    segment[segment_len] = '\0';
+    const char *rest = slash ? (slash + 1) : "";
+
+    bool has_meta = shellGlobPatternHasMeta(segment);
+    int rc = GLOB_NOMATCH;
+
+    if (!has_meta) {
+        char *next_fs = shellGlobJoinPath(fs_base, segment);
+        char *next_display = shellGlobJoinPath(display_base, segment);
+        if (!next_fs || !next_display) {
+            free(segment);
+            free(next_fs);
+            free(next_display);
+            return GLOB_NOSPACE;
+        }
+        struct stat st;
+        if (stat(next_fs, &st) == 0) {
+            rc = shellExpandUtf8GlobRecursive(next_fs, next_display, rest, results);
+        }
+        free(next_fs);
+        free(next_display);
+        free(segment);
+        return rc;
+    }
+
+    const char *dir_path = (fs_base && *fs_base) ? fs_base : ".";
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        free(segment);
+        return GLOB_NOMATCH;
+    }
+
+    bool allow_dot = shellGlobSegmentAllowsDot(segment);
+    struct dirent *dent = NULL;
+    while ((dent = readdir(dir)) != NULL) {
+        const char *name = dent->d_name;
+        if (!name) {
+            continue;
+        }
+        if (!allow_dot && name[0] == '.') {
+            continue;
+        }
+        if (shellPatternMatch(segment, name) != 0) {
+            continue;
+        }
+        char *next_fs = shellGlobJoinPath(fs_base, name);
+        char *next_display = shellGlobJoinPath(display_base, name);
+        if (!next_fs || !next_display) {
+            free(next_fs);
+            free(next_display);
+            closedir(dir);
+            free(segment);
+            return GLOB_NOSPACE;
+        }
+        int child_rc = shellExpandUtf8GlobRecursive(next_fs, next_display, rest, results);
+        if (child_rc == 0) {
+            rc = 0;
+        } else if (child_rc == GLOB_NOSPACE) {
+            free(next_fs);
+            free(next_display);
+            closedir(dir);
+            free(segment);
+            return GLOB_NOSPACE;
+        }
+        free(next_fs);
+        free(next_display);
+    }
+
+    closedir(dir);
+    free(segment);
+    return rc;
+}
+
+static int shellExpandUtf8GlobFallback(const char *pattern, char ***out_matches, size_t *out_count) {
+    if (out_matches) {
+        *out_matches = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!pattern || !*pattern) {
+        return GLOB_NOMATCH;
+    }
+
+    const char *cursor = pattern;
+    const char *fs_base = ".";
+    const char *display_base = "";
+    if (pattern[0] == '/') {
+        while (*cursor == '/') {
+            cursor++;
+        }
+        fs_base = "/";
+        display_base = "/";
+    }
+
+    ShellGlobMatchList results = {0};
+    int rc = shellExpandUtf8GlobRecursive(fs_base, display_base, cursor, &results);
+    if (rc != 0) {
+        shellGlobFreeList(&results);
+        return rc;
+    }
+    if (results.count == 0) {
+        shellGlobFreeList(&results);
+        return GLOB_NOMATCH;
+    }
+    qsort(results.items, results.count, sizeof(char *), shellGlobResultCompare);
+    if (out_matches) {
+        *out_matches = results.items;
+    } else {
+        shellGlobFreeList(&results);
+    }
+    if (out_count) {
+        *out_count = results.count;
+    }
+    return 0;
+}
+
+static int shellExpandGlobPattern(const char *pattern, char ***out_matches, size_t *out_count) {
+    if (out_matches) {
+        *out_matches = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
+    }
+    if (!pattern || !*pattern) {
+        return GLOB_NOMATCH;
+    }
+
+    glob_t glob_result;
+    memset(&glob_result, 0, sizeof(glob_result));
+    int glob_status =
+#if defined(PSCAL_TARGET_IOS)
+        pscalPathVirtualized_glob(pattern, 0, NULL, &glob_result);
+#else
+        glob(pattern, 0, NULL, &glob_result);
+#endif
+    if (glob_status == 0) {
+        char **matches = (char **)calloc(glob_result.gl_pathc, sizeof(char *));
+        if (!matches) {
+            globfree(&glob_result);
+            return GLOB_NOSPACE;
+        }
+        size_t count = 0;
+        for (size_t i = 0; i < glob_result.gl_pathc; ++i) {
+            matches[count] = strdup(glob_result.gl_pathv[i]);
+            if (!matches[count]) {
+                for (size_t j = 0; j < count; ++j) {
+                    free(matches[j]);
+                }
+                free(matches);
+                globfree(&glob_result);
+                return GLOB_NOSPACE;
+            }
+            count++;
+        }
+        globfree(&glob_result);
+        if (out_matches) {
+            *out_matches = matches;
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                free(matches[i]);
+            }
+            free(matches);
+        }
+        if (out_count) {
+            *out_count = count;
+        }
+        return 0;
+    }
+    if (glob_status != GLOB_NOMATCH) {
+        return glob_status;
+    }
+
+    size_t pattern_len = strlen(pattern);
+    if (!isValidUtf8Bytes(pattern, pattern_len) || strchr(pattern, '[') != NULL) {
+        return GLOB_NOMATCH;
+    }
+    return shellExpandUtf8GlobFallback(pattern, out_matches, out_count);
 }
 
 static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c);
