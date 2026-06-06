@@ -493,6 +493,15 @@
             "expected_stdout": "param-default:start\nunset:fallback\nempty:fallback\nset:value\nparam-default:end"
         },
         {
+            "id": "unicode_parameter_text",
+            "name": "Unicode parameter expansion counts characters",
+            "category": "expansion",
+            "description": "UTF-8 shell values should preserve codepoint-based length and substring semantics.",
+            "script": "Tests/exsh/tests/unicode_parameter_text.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "unicode-parameter:start\nlen=2\nslice=山\nroundtrip=雪山\nunicode-parameter:end"
+        },
+        {
             "id": "grammar_here_documents",
             "name": "Here documents expand and quote correctly",
             "category": "grammar",

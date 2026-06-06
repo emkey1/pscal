@@ -248,6 +248,9 @@ static char *shellExpandParameter(const char *input,
                     return NULL;
                 }
                 size_t val_len = strlen(value);
+                if (val_len > 0 && isValidUtf8Bytes(value, val_len)) {
+                    val_len = utf8CodepointCount(value, val_len);
+                }
                 free(value);
                 char buffer[32];
                 snprintf(buffer, sizeof(buffer), "%zu", val_len);
@@ -310,6 +313,9 @@ static char *shellExpandParameter(const char *input,
                 return NULL;
             }
             size_t elem_len = strlen(element);
+            if (elem_len > 0 && isValidUtf8Bytes(element, elem_len)) {
+                elem_len = utf8CodepointCount(element, elem_len);
+            }
             free(element);
             char buffer[32];
             snprintf(buffer, sizeof(buffer), "%zu", elem_len);
@@ -532,24 +538,34 @@ static char *shellExpandParameter(const char *input,
                 return NULL;
             }
             size_t value_len = strlen(value);
+            bool utf8_value = (value_len > 0 && isValidUtf8Bytes(value, value_len));
+            size_t logical_len = utf8_value ? utf8CodepointCount(value, value_len) : value_len;
             size_t start_index = offset_value;
-            if (start_index > value_len) {
-                start_index = value_len;
+            if (start_index > logical_len) {
+                start_index = logical_len;
             }
-            size_t available = value_len - start_index;
+            size_t start_byte = utf8_value
+                ? utf8ByteOffsetForCodepointIndex(value, value_len, start_index)
+                : start_index;
+            size_t available = logical_len - start_index;
             size_t copy_len = available;
             if (have_length && length_value < copy_len) {
                 copy_len = length_value;
             }
-            char *result = (char *)malloc(copy_len + 1);
+            size_t copy_bytes = utf8_value
+                ? (utf8ByteOffsetForCodepointIndex(value + start_byte,
+                                                   value_len - start_byte,
+                                                   copy_len))
+                : copy_len;
+            char *result = (char *)malloc(copy_bytes + 1);
             if (!result) {
                 free(value);
                 return NULL;
             }
-            if (copy_len > 0) {
-                memcpy(result, value + start_index, copy_len);
+            if (copy_bytes > 0) {
+                memcpy(result, value + start_byte, copy_bytes);
             }
-            result[copy_len] = '\0';
+            result[copy_bytes] = '\0';
             free(value);
             return result;
         }
