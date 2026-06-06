@@ -29,4 +29,14 @@ if [[ "$name" = [!海]山 ]]; then
 else
     printf 'test-bracket-neg=miss\n'
 fi
+if [[ "$name" = [[:alpha:]][[:alpha:]] ]]; then
+    printf 'test-class-alpha=match\n'
+else
+    printf 'test-class-alpha=miss\n'
+fi
+if [[ "9" = [[:digit:]] ]]; then
+    printf 'test-class-digit=match\n'
+else
+    printf 'test-class-digit=miss\n'
+fi
 printf 'unicode-pattern:end\n'

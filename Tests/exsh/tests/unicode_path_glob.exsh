@@ -10,6 +10,7 @@ touch .雪.txt
 printf 'unicode-glob:start\n'
 printf 'single=%s\n' ?.txt
 printf 'bracket=%s\n' [雪山].txt
+printf 'class=%s\n' [[:alpha:]].txt
 printf 'nested=%s\n' ?dir/?.log
 printf 'nested-bracket=%s\n' [雪山]dir/[山海].log
 printf 'dot=%s\n' .?.txt

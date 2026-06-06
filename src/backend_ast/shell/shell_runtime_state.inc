@@ -18,6 +18,7 @@
 #include <fnmatch.h>
 #include <glob.h>
 #include <limits.h>
+#include <locale.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,6 +39,7 @@
 #include <pwd.h>
 #include <pthread.h>
 #include <time.h>
+#include <wctype.h>
 
 #if defined(PSCAL_TARGET_IOS)
 typedef struct {
@@ -1165,6 +1167,12 @@ static size_t gShellBindOptionCount = 0;
 static int gShellCurrentCommandLine = 0;
 static int gShellCurrentCommandColumn = 0;
 static const char *gShellCurrentCommandName = NULL;
+static pthread_once_t gShellUtf8LocaleOnce = PTHREAD_ONCE_INIT;
+static locale_t gShellUtf8Locale = (locale_t)0;
+
+static void shellInitUtf8Locale(void) {
+    gShellUtf8Locale = newlocale(LC_CTYPE_MASK, "", (locale_t)0);
+}
 
 static void shellRuntimeSetCurrentCommandLocation(int line, int column) {
     gShellCurrentCommandLine = line;
@@ -1331,6 +1339,115 @@ static int shellUtf8GlobReadLiteralCodepoint(const char *pattern,
     return decodeUtf8Codepoint(pattern, strlen(pattern), out_codepoint, out_advance) ? 1 : -1;
 }
 
+static bool shellUtf8CodepointIsUnicodeSpace(uint32_t codepoint) {
+    switch (codepoint) {
+        case 0x0009: case 0x000A: case 0x000B: case 0x000C: case 0x000D:
+        case 0x0020: case 0x0085: case 0x00A0: case 0x1680: case 0x2028:
+        case 0x2029: case 0x202F: case 0x205F: case 0x3000:
+            return true;
+        default:
+            return (codepoint >= 0x2000 && codepoint <= 0x200A);
+    }
+}
+
+static bool shellUtf8CodepointIsUnicodeDigit(uint32_t codepoint) {
+    if (codepoint >= '0' && codepoint <= '9') return true;
+    if (codepoint >= 0x0660 && codepoint <= 0x0669) return true;
+    if (codepoint >= 0x06F0 && codepoint <= 0x06F9) return true;
+    if (codepoint >= 0x0966 && codepoint <= 0x096F) return true;
+    if (codepoint >= 0x09E6 && codepoint <= 0x09EF) return true;
+    if (codepoint >= 0x0A66 && codepoint <= 0x0A6F) return true;
+    if (codepoint >= 0x0AE6 && codepoint <= 0x0AEF) return true;
+    if (codepoint >= 0x0B66 && codepoint <= 0x0B6F) return true;
+    if (codepoint >= 0x0BE6 && codepoint <= 0x0BEF) return true;
+    if (codepoint >= 0x0C66 && codepoint <= 0x0C6F) return true;
+    if (codepoint >= 0x0CE6 && codepoint <= 0x0CEF) return true;
+    if (codepoint >= 0x0D66 && codepoint <= 0x0D6F) return true;
+    if (codepoint >= 0x0E50 && codepoint <= 0x0E59) return true;
+    if (codepoint >= 0x0ED0 && codepoint <= 0x0ED9) return true;
+    if (codepoint >= 0x0F20 && codepoint <= 0x0F29) return true;
+    if (codepoint >= 0x1040 && codepoint <= 0x1049) return true;
+    if (codepoint >= 0x17E0 && codepoint <= 0x17E9) return true;
+    if (codepoint >= 0x1810 && codepoint <= 0x1819) return true;
+    if (codepoint >= 0xFF10 && codepoint <= 0xFF19) return true;
+    return false;
+}
+
+static bool shellUtf8CodepointIsLikelyLetter(uint32_t codepoint) {
+    if (codepoint < 0x80) {
+        return ((codepoint >= 'A' && codepoint <= 'Z') ||
+                (codepoint >= 'a' && codepoint <= 'z'));
+    }
+    if (shellUtf8CodepointIsUnicodeSpace(codepoint) || shellUtf8CodepointIsUnicodeDigit(codepoint)) {
+        return false;
+    }
+    if ((codepoint >= 0x2000 && codepoint <= 0x206F) ||
+        (codepoint >= 0x20A0 && codepoint <= 0x20CF) ||
+        (codepoint >= 0x2100 && codepoint <= 0x214F) ||
+        (codepoint >= 0x2190 && codepoint <= 0x21FF) ||
+        (codepoint >= 0x2200 && codepoint <= 0x27FF) ||
+        (codepoint >= 0x2900 && codepoint <= 0x2BFF) ||
+        (codepoint >= 0x2E00 && codepoint <= 0x2E7F) ||
+        (codepoint >= 0x3000 && codepoint <= 0x303F) ||
+        (codepoint >= 0xFE10 && codepoint <= 0xFE1F) ||
+        (codepoint >= 0xFE30 && codepoint <= 0xFE6F) ||
+        (codepoint >= 0xFF01 && codepoint <= 0xFF0F) ||
+        (codepoint >= 0xFF1A && codepoint <= 0xFF20) ||
+        (codepoint >= 0xFF3B && codepoint <= 0xFF40) ||
+        (codepoint >= 0xFF5B && codepoint <= 0xFF65) ||
+        (codepoint >= 0x1F300 && codepoint <= 0x1FAFF)) {
+        return false;
+    }
+    return true;
+}
+
+static bool shellUtf8CodepointMatchesPosixClass(uint32_t codepoint, const char *class_name) {
+    if (!class_name || !*class_name || codepoint > (uint32_t)WCHAR_MAX) {
+        return false;
+    }
+    pthread_once(&gShellUtf8LocaleOnce, shellInitUtf8Locale);
+    wint_t wc = (wint_t)codepoint;
+    if (gShellUtf8Locale) {
+        locale_t previous = uselocale(gShellUtf8Locale);
+        bool result = false;
+        if (strcmp(class_name, "alnum") == 0) result = iswalnum(wc) != 0;
+        else if (strcmp(class_name, "alpha") == 0) result = iswalpha(wc) != 0;
+        else if (strcmp(class_name, "blank") == 0) result = iswblank(wc) != 0;
+        else if (strcmp(class_name, "cntrl") == 0) result = iswcntrl(wc) != 0;
+        else if (strcmp(class_name, "digit") == 0) result = iswdigit(wc) != 0;
+        else if (strcmp(class_name, "graph") == 0) result = iswgraph(wc) != 0;
+        else if (strcmp(class_name, "lower") == 0) result = iswlower(wc) != 0;
+        else if (strcmp(class_name, "print") == 0) result = iswprint(wc) != 0;
+        else if (strcmp(class_name, "punct") == 0) result = iswpunct(wc) != 0;
+        else if (strcmp(class_name, "space") == 0) result = iswspace(wc) != 0;
+        else if (strcmp(class_name, "upper") == 0) result = iswupper(wc) != 0;
+        else if (strcmp(class_name, "xdigit") == 0) result = iswxdigit(wc) != 0;
+        uselocale(previous);
+        if (!result && codepoint >= 0x80) {
+            if (strcmp(class_name, "alpha") == 0) result = shellUtf8CodepointIsLikelyLetter(codepoint);
+            else if (strcmp(class_name, "alnum") == 0) result = shellUtf8CodepointIsLikelyLetter(codepoint) || shellUtf8CodepointIsUnicodeDigit(codepoint);
+            else if (strcmp(class_name, "digit") == 0) result = shellUtf8CodepointIsUnicodeDigit(codepoint);
+            else if (strcmp(class_name, "space") == 0) result = shellUtf8CodepointIsUnicodeSpace(codepoint);
+            else if (strcmp(class_name, "graph") == 0) result = !shellUtf8CodepointIsUnicodeSpace(codepoint);
+            else if (strcmp(class_name, "print") == 0) result = true;
+        }
+        return result;
+    }
+    if (strcmp(class_name, "alnum") == 0) return iswalnum(wc) != 0;
+    if (strcmp(class_name, "alpha") == 0) return iswalpha(wc) != 0;
+    if (strcmp(class_name, "blank") == 0) return iswblank(wc) != 0;
+    if (strcmp(class_name, "cntrl") == 0) return iswcntrl(wc) != 0;
+    if (strcmp(class_name, "digit") == 0) return iswdigit(wc) != 0;
+    if (strcmp(class_name, "graph") == 0) return iswgraph(wc) != 0;
+    if (strcmp(class_name, "lower") == 0) return iswlower(wc) != 0;
+    if (strcmp(class_name, "print") == 0) return iswprint(wc) != 0;
+    if (strcmp(class_name, "punct") == 0) return iswpunct(wc) != 0;
+    if (strcmp(class_name, "space") == 0) return iswspace(wc) != 0;
+    if (strcmp(class_name, "upper") == 0) return iswupper(wc) != 0;
+    if (strcmp(class_name, "xdigit") == 0) return iswxdigit(wc) != 0;
+    return false;
+}
+
 static int shellUtf8GlobMatchBracket(const char *pattern, uint32_t text_cp, size_t *out_advance) {
     if (!pattern || pattern[0] != '[' || !out_advance) {
         return -1;
@@ -1355,8 +1472,29 @@ static int shellUtf8GlobMatchBracket(const char *pattern, uint32_t text_cp, size
             return (negate ? !matched : matched) ? 1 : 0;
         }
 
+        if (pattern[offset] == '[' && pattern[offset + 1] == ':') {
+            const char *class_start = pattern + offset + 2;
+            const char *class_end = strstr(class_start, ":]");
+            if (!class_end) {
+                return -1;
+            }
+            size_t class_len = (size_t)(class_end - class_start);
+            if (class_len == 0 || class_len >= 32) {
+                return -1;
+            }
+            char class_name[32];
+            memcpy(class_name, class_start, class_len);
+            class_name[class_len] = '\0';
+            if (shellUtf8CodepointMatchesPosixClass(text_cp, class_name)) {
+                matched = true;
+            }
+            offset = (size_t)(class_end - pattern) + 2;
+            allow_literal_close = false;
+            continue;
+        }
+
         if (pattern[offset] == '[' &&
-            (pattern[offset + 1] == ':' || pattern[offset + 1] == '.' || pattern[offset + 1] == '=')) {
+            (pattern[offset + 1] == '.' || pattern[offset + 1] == '=')) {
             return -1;
         }
 
