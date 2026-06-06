@@ -520,6 +520,15 @@
             "expected_stdout": "unicode-glob:start\nsingle=山.txt\nsingle=雪.txt\nnested=雪dir/山.log\ndot=.雪.txt\nunicode-glob:end"
         },
         {
+            "id": "unicode_identifiers",
+            "name": "Unicode shell identifiers work across core syntax",
+            "category": "expansion",
+            "description": "Variables, functions, for-loop names, export, and arithmetic assignments should accept UTF-8 identifiers.",
+            "script": "Tests/exsh/tests/unicode_identifiers.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "unicode-ident:start\nvar=山\nlen=1\nfn=ok\nkw=山\nfor=一\nfor=二\nexport=海\narith=3\nunicode-ident:end"
+        },
+        {
             "id": "grammar_here_documents",
             "name": "Here documents expand and quote correctly",
             "category": "grammar",

@@ -967,14 +967,12 @@ static bool shellParseAssignment(const char *assignment, char **out_name, const 
     }
     size_t name_len = (size_t)(eq - assignment);
     bool in_brackets = false;
-    for (size_t i = 0; i < name_len; ++i) {
+    size_t prefix_len = 0;
+    if (!consumeShellIdentifier(assignment, name_len, &prefix_len, false)) {
+        return false;
+    }
+    for (size_t i = prefix_len; i < name_len; ++i) {
         unsigned char ch = (unsigned char)assignment[i];
-        if (i == 0) {
-            if (!isalpha(ch) && ch != '_') {
-                return false;
-            }
-            continue;
-        }
         if (in_brackets) {
             if (ch == ']') {
                 in_brackets = false;
@@ -985,7 +983,7 @@ static bool shellParseAssignment(const char *assignment, char **out_name, const 
             in_brackets = true;
             continue;
         }
-        if (!isalnum(ch) && ch != '_') {
+        if (ch != '[') {
             return false;
         }
     }

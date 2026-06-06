@@ -233,15 +233,14 @@ static char *shellExpandParameter(const char *input,
             if (name_start >= closing) {
                 return NULL;
             }
-            const char *cursor = name_start;
-            while (cursor < closing &&
-                   (isalnum((unsigned char)*cursor) || *cursor == '_')) {
-                cursor++;
+            size_t name_len = 0;
+            if (!consumeShellIdentifier(name_start, (size_t)(closing - name_start), &name_len, false)) {
+                return NULL;
             }
+            const char *cursor = name_start + name_len;
             if (cursor == name_start) {
                 return NULL;
             }
-            size_t name_len = (size_t)(cursor - name_start);
             if (cursor == closing) {
                 char *value = shellLookupParameterValue(name_start, name_len);
                 if (!value) {
@@ -327,14 +326,11 @@ static char *shellExpandParameter(const char *input,
             if (name_start >= closing) {
                 return NULL;
             }
-            const char *cursor = name_start;
-            while (cursor < closing && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
-                cursor++;
-            }
-            if (cursor == name_start) {
+            size_t name_len = 0;
+            if (!consumeShellIdentifier(name_start, (size_t)(closing - name_start), &name_len, false)) {
                 return NULL;
             }
-            size_t name_len = (size_t)(cursor - name_start);
+            const char *cursor = name_start + name_len;
             if (cursor == closing || *cursor != '[') {
                 return NULL;
             }
@@ -442,13 +438,8 @@ static char *shellExpandParameter(const char *input,
                 }
             } else {
                 simple_name = true;
-                for (size_t i = 0; i < name_len; ++i) {
-                    unsigned char ch = (unsigned char)inner[i];
-                    if (!isalnum(ch) && ch != '_') {
-                        simple_name = false;
-                        break;
-                    }
-                }
+                size_t consumed = 0;
+                simple_name = consumeShellIdentifier(inner, name_len, &consumed, false) && consumed == name_len;
             }
             if (simple_name) {
                 bool is_set = false;
@@ -571,14 +562,11 @@ static char *shellExpandParameter(const char *input,
         }
 
         const char *cursor = inner;
-        while (cursor < closing &&
-               (isalnum((unsigned char)*cursor) || *cursor == '_')) {
-            cursor++;
-        }
-        if (cursor == inner) {
+        size_t name_len = 0;
+        if (!consumeShellIdentifier(inner, (size_t)(closing - inner), &name_len, false)) {
             return NULL;
         }
-        size_t name_len = (size_t)(cursor - inner);
+        cursor += name_len;
         if (cursor < closing && *cursor == '[') {
             const char *subscript_start = cursor + 1;
             const char *subscript_end = memchr(subscript_start, ']', (size_t)(closing - subscript_start));
@@ -721,15 +709,12 @@ static char *shellExpandParameter(const char *input,
         return shellLookupParameterValue(input, (size_t)(cursor - input));
     }
 
-    if (isalpha((unsigned char)*input) || *input == '_') {
-        const char *cursor = input + 1;
-        while (isalnum((unsigned char)*cursor) || *cursor == '_') {
-            cursor++;
-        }
+    size_t name_len = 0;
+    if (consumeShellIdentifier(input, strlen(input), &name_len, false)) {
         if (out_consumed) {
-            *out_consumed = (size_t)(cursor - input);
+            *out_consumed = name_len;
         }
-        return shellLookupParameterValue(input, (size_t)(cursor - input));
+        return shellLookupParameterValue(input, name_len);
     }
 
     return NULL;
@@ -825,18 +810,14 @@ static bool shellArithmeticParsePrimary(ShellArithmeticParser *parser, long long
         *out_value = parsed;
         return true;
     }
-    if (isalpha((unsigned char)c) || c == '_') {
+    size_t name_len = 0;
+    if (consumeShellIdentifier(parser->input + parser->pos,
+                               parser->length - parser->pos,
+                               &name_len,
+                               false)) {
         size_t start = parser->pos;
-        parser->pos++;
-        while (parser->pos < parser->length) {
-            char ch = parser->input[parser->pos];
-            if (!isalnum((unsigned char)ch) && ch != '_') {
-                break;
-            }
-            parser->pos++;
-        }
-        size_t len = parser->pos - start;
-        char *value = shellLookupParameterValue(parser->input + start, len);
+        parser->pos += name_len;
+        char *value = shellLookupParameterValue(parser->input + start, name_len);
         if (!value) {
             return false;
         }
@@ -860,8 +841,11 @@ static bool shellArithmeticParsePrimary(ShellArithmeticParser *parser, long long
         size_t consumed = (size_t)(endptr - start_ptr);
         parser->pos += consumed;
         if (parser->pos < parser->length) {
-            char next = parser->input[parser->pos];
-            if (isalnum((unsigned char)next) || next == '_') {
+            size_t next_name_len = 0;
+            if (consumeShellIdentifier(parser->input + parser->pos,
+                                       parser->length - parser->pos,
+                                       &next_name_len,
+                                       false)) {
                 return false;
             }
         }

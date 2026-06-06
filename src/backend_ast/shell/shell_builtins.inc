@@ -427,21 +427,18 @@ static const char *shellArithmeticCommandParseName(const char *start, const char
     while (cursor < end && isspace((unsigned char)*cursor)) {
         cursor++;
     }
-    if (cursor >= end || (!isalpha((unsigned char)*cursor) && *cursor != '_')) {
+    size_t name_len = 0;
+    if (!consumeShellIdentifier(cursor, (size_t)(end - cursor), &name_len, false)) {
         return NULL;
     }
     const char *name_start = cursor;
-    cursor++;
-    while (cursor < end && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
-        cursor++;
-    }
-    size_t len = (size_t)(cursor - name_start);
-    char *name = (char *)malloc(len + 1);
+    cursor += name_len;
+    char *name = (char *)malloc(name_len + 1);
     if (!name) {
         return NULL;
     }
-    memcpy(name, name_start, len);
-    name[len] = '\0';
+    memcpy(name, name_start, name_len);
+    name[name_len] = '\0';
     while (cursor < end && isspace((unsigned char)*cursor)) {
         cursor++;
     }
@@ -8831,17 +8828,9 @@ static bool shellIsValidEnvName(const char *name) {
     if (!name || !*name) {
         return false;
     }
-    unsigned char first = (unsigned char)name[0];
-    if (!(isalpha(first) || first == '_')) {
-        return false;
-    }
-    for (const char *cursor = name + 1; *cursor; ++cursor) {
-        unsigned char ch = (unsigned char)*cursor;
-        if (!(isalnum(ch) || ch == '_')) {
-            return false;
-        }
-    }
-    return true;
+    size_t len = strlen(name);
+    size_t consumed = 0;
+    return consumeShellIdentifier(name, len, &consumed, false) && consumed == len;
 }
 
 static int shellCompareEnvStrings(const void *lhs, const void *rhs) {

@@ -317,6 +317,59 @@ size_t utf8ByteOffsetForCodepointIndex(const char *text, size_t len, size_t inde
     return offset;
 }
 
+bool isShellIdentifierStartCodepoint(uint32_t codepoint) {
+    if (codepoint == '_') {
+        return true;
+    }
+    if (codepoint <= 0x7F) {
+        return isalpha((unsigned char)codepoint) != 0;
+    }
+    return codepoint <= 0x10FFFF;
+}
+
+bool isShellIdentifierContinueCodepoint(uint32_t codepoint, bool allow_hash) {
+    if (codepoint == '_') {
+        return true;
+    }
+    if (allow_hash && codepoint == '#') {
+        return true;
+    }
+    if (codepoint <= 0x7F) {
+        return isalnum((unsigned char)codepoint) != 0;
+    }
+    return codepoint <= 0x10FFFF;
+}
+
+bool consumeShellIdentifier(const char *text, size_t len, size_t *out_advance, bool allow_hash) {
+    if (out_advance) {
+        *out_advance = 0;
+    }
+    if (!text || len == 0) {
+        return false;
+    }
+
+    uint32_t codepoint = 0;
+    size_t advance = 0;
+    if (!decodeUtf8Codepoint(text, len, &codepoint, &advance) ||
+        !isShellIdentifierStartCodepoint(codepoint)) {
+        return false;
+    }
+
+    size_t consumed = advance;
+    while (consumed < len) {
+        if (!decodeUtf8Codepoint(text + consumed, len - consumed, &codepoint, &advance) ||
+            !isShellIdentifierContinueCodepoint(codepoint, allow_hash)) {
+            break;
+        }
+        consumed += advance;
+    }
+
+    if (out_advance) {
+        *out_advance = consumed;
+    }
+    return true;
+}
+
 void writePascalText(FILE *stream, const char *text, size_t len) {
     if (!stream || !text || len == 0) {
         return;

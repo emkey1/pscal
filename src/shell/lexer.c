@@ -79,8 +79,8 @@ static bool isValidNameLexeme(const char *lexeme, size_t length) {
     if (!lexeme || length == 0) {
         return false;
     }
-    unsigned char first = (unsigned char)lexeme[0];
-    if (!(isalpha(first) || first == '_')) {
+    size_t prefix_len = 0;
+    if (!consumeShellIdentifier(lexeme, length, &prefix_len, false)) {
         return false;
     }
     const unsigned char backslash = 92;
@@ -89,7 +89,7 @@ static bool isValidNameLexeme(const char *lexeme, size_t length) {
     bool in_brackets = false;
     bool in_single = false;
     bool in_double = false;
-    for (size_t i = 1; i < length; ++i) {
+    for (size_t i = prefix_len; i < length; ++i) {
         unsigned char ch = (unsigned char)lexeme[i];
         if (in_single) {
             if (ch == backslash && i + 1 < length) {
@@ -137,7 +137,7 @@ static bool isValidNameLexeme(const char *lexeme, size_t length) {
             in_brackets = true;
             continue;
         }
-        if (!(isalnum(ch) || ch == '_')) {
+        if (ch != 91) {
             return false;
         }
     }
@@ -299,9 +299,13 @@ static ShellToken scanParameter(ShellLexer *lexer) {
         if (c == '?' || c == '@' || c == '*' || c == '!' || c == '-' || c == '$') {
             advanceChar(lexer);
         } else {
-            while (isalnum(c) || c == '_' || c == '#') {
-                advanceChar(lexer);
-                c = peekChar(lexer);
+            size_t name_bytes = 0;
+            const char *name_start = lexer->src + lexer->pos;
+            size_t remaining = lexer->length - lexer->pos;
+            if (consumeShellIdentifier(name_start, remaining, &name_bytes, true)) {
+                for (size_t i = 0; i < name_bytes; ++i) {
+                    advanceChar(lexer);
+                }
             }
         }
     }
@@ -588,18 +592,22 @@ static ShellToken scanWord(ShellLexer *lexer) {
                     }
                     buffer[bufLen++] = (char)advanceChar(lexer);
                 } else {
-                    while (isalnum(next) || next == '_' || next == '#') {
-                        if (bufLen + 1 >= bufCap) {
-                            bufCap = bufCap ? bufCap * 2 : 32;
-                            char *tmp3 = (char *)realloc(buffer, bufCap);
-                            if (!tmp3) {
-                                free(buffer);
-                                return makeErrorToken(lexer, "Out of memory while scanning word");
+                    size_t name_bytes = 0;
+                    const char *name_start = lexer->src + lexer->pos;
+                    size_t remaining = lexer->length - lexer->pos;
+                    if (consumeShellIdentifier(name_start, remaining, &name_bytes, true)) {
+                        for (size_t consumed = 0; consumed < name_bytes; ++consumed) {
+                            if (bufLen + 1 >= bufCap) {
+                                bufCap = bufCap ? bufCap * 2 : 32;
+                                char *tmp3 = (char *)realloc(buffer, bufCap);
+                                if (!tmp3) {
+                                    free(buffer);
+                                    return makeErrorToken(lexer, "Out of memory while scanning word");
+                                }
+                                buffer = tmp3;
                             }
-                            buffer = tmp3;
+                            buffer[bufLen++] = (char)advanceChar(lexer);
                         }
-                        buffer[bufLen++] = (char)advanceChar(lexer);
-                        next = peekChar(lexer);
                     }
                 }
                 continue;

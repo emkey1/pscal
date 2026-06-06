@@ -4107,20 +4107,17 @@ static const char *shellLoopParseVariableName(const char *start, const char *end
     while (start < end && isspace((unsigned char)*start)) {
         start++;
     }
-    if (start >= end || (!isalpha((unsigned char)*start) && *start != '_')) {
+    size_t name_len = 0;
+    if (!consumeShellIdentifier(start, (size_t)(end - start), &name_len, false)) {
         return NULL;
     }
-    const char *cursor = start + 1;
-    while (cursor < end && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
-        cursor++;
-    }
-    size_t len = (size_t)(cursor - start);
-    char *name = (char *)malloc(len + 1);
+    const char *cursor = start + name_len;
+    char *name = (char *)malloc(name_len + 1);
     if (!name) {
         return NULL;
     }
-    memcpy(name, start, len);
-    name[len] = '\0';
+    memcpy(name, start, name_len);
+    name[name_len] = '\0';
     while (cursor < end && isspace((unsigned char)*cursor)) {
         cursor++;
     }

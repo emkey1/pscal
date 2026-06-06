@@ -1912,11 +1912,11 @@ static void populateWordExpansions(ShellWord *word) {
             if (j < len && text[j] == '{') {
                 j++;
                 const char *start = text + j;
-                while (j < len && text[j] && text[j] != '}' &&
-                       (isalnum((unsigned char)text[j]) || text[j] == '_' || text[j] == '#')) {
-                    j++;
+                size_t name_len = 0;
+                if (j < len && text[j] && text[j] != '}') {
+                    consumeShellIdentifier(start, len - j, &name_len, true);
+                    j += name_len;
                 }
-                size_t name_len = (size_t)((text + j) - start);
                 if (name_len > 0) {
                     char *name = (char *)malloc(name_len + 1);
                     if (name) {
@@ -1936,10 +1936,9 @@ static void populateWordExpansions(ShellWord *word) {
                 continue;
             } else {
                 const char *start = text + j;
-                while (j < len && (isalnum((unsigned char)text[j]) || text[j] == '_' || text[j] == '#')) {
-                    j++;
-                }
-                size_t name_len = (size_t)((text + j) - start);
+                size_t name_len = 0;
+                consumeShellIdentifier(start, len - j, &name_len, true);
+                j += name_len;
                 if (name_len > 0) {
                     char *name = (char *)malloc(name_len + 1);
                     if (name) {
