@@ -398,7 +398,7 @@ cleanup:
 }
 
 static Value vmBuiltinYyjsonGetKey(struct VM_s *vm, int arg_count, Value *args) {
-    if (arg_count != 2 || !IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || !isPascalStringType(args[1].type)) {
         runtimeError(vm, "YyjsonGetKey expects (value_handle:int, key:string).");
         return makeInt(YYJSON_UNUSED_HANDLE);
     }

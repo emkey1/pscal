@@ -110,7 +110,7 @@ static Value vmSqliteOpen(struct VM_s *vm, int arg_count, Value *args) {
         runtimeError(vm, "SqliteOpen expects exactly 1 argument.");
         return makeInt(-1);
     }
-    if (args[0].type != TYPE_STRING) {
+    if (!isPascalStringType(args[0].type)) {
         runtimeError(vm, "SqliteOpen argument must be a string path.");
         return makeInt(-1);
     }
@@ -194,7 +194,7 @@ static Value vmSqliteExec(struct VM_s *vm, int arg_count, Value *args) {
         runtimeError(vm, "SqliteExec expects (db_handle:int, sql:string).");
         return makeInt(-1);
     }
-    if (!IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING) {
+    if (!IS_INTLIKE(args[0]) || !isPascalStringType(args[1].type)) {
         runtimeError(vm, "SqliteExec argument types are (int, string).");
         return makeInt(-1);
     }
@@ -231,7 +231,7 @@ static Value vmSqlitePrepare(struct VM_s *vm, int arg_count, Value *args) {
         runtimeError(vm, "SqlitePrepare expects (db_handle:int, sql:string).");
         return makeInt(-1);
     }
-    if (!IS_INTLIKE(args[0]) || args[1].type != TYPE_STRING) {
+    if (!IS_INTLIKE(args[0]) || !isPascalStringType(args[1].type)) {
         runtimeError(vm, "SqlitePrepare argument types are (int, string).");
         return makeInt(-1);
     }
@@ -513,7 +513,7 @@ static Value vmSqliteBindText(struct VM_s *vm, int arg_count, Value *args) {
         runtimeError(vm, "SqliteBindText index must be integer.");
         return makeInt(-1);
     }
-    if (args[2].type != TYPE_STRING) {
+    if (!isPascalStringType(args[2].type)) {
         runtimeError(vm, "SqliteBindText value must be string.");
         return makeInt(-1);
     }

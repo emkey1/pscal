@@ -89,7 +89,7 @@ static bool parseMatrixMode(Value arg, GLenum* mode) {
         *mode = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "modelview") == 0) {
             *mode = GL_MODELVIEW;
             return true;
@@ -111,7 +111,7 @@ static bool parsePrimitive(Value arg, GLenum* primitive) {
         *primitive = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "points") == 0) {
             *primitive = GL_POINTS;
             return true;
@@ -167,7 +167,7 @@ static bool parseCapability(Value arg, GLenum* cap) {
         *cap = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
 #ifdef GL_CULL_FACE
         if (strcasecmp(arg.s_val, "cull_face") == 0 || strcasecmp(arg.s_val, "cullface") == 0) {
             *cap = GL_CULL_FACE;
@@ -278,7 +278,7 @@ static bool parseCullFaceMode(Value arg, GLenum* mode) {
         *mode = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "front") == 0) {
             *mode = GL_FRONT;
             return true;
@@ -302,7 +302,7 @@ static bool parseDepthFunc(Value arg, GLenum* func) {
         *func = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "never") == 0) {
             *func = GL_NEVER;
             return true;
@@ -350,7 +350,7 @@ static bool parseShadeModel(Value arg, GLenum* mode) {
         *mode = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "smooth") == 0) {
             *mode = GL_SMOOTH;
             return true;
@@ -368,7 +368,7 @@ static bool parseLight(Value arg, GLenum* light) {
         *light = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
 #ifdef GL_LIGHT0
         if (strcasecmp(arg.s_val, "light0") == 0) {
             *light = GL_LIGHT0;
@@ -426,7 +426,7 @@ static bool parseLightParam(Value arg, GLenum* pname) {
         *pname = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "position") == 0) {
             *pname = GL_POSITION;
             return true;
@@ -452,7 +452,7 @@ static bool parseMaterialFace(Value arg, GLenum* face) {
         *face = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "front") == 0) {
             *face = GL_FRONT;
             return true;
@@ -475,7 +475,7 @@ static bool parseMaterialParam(Value arg, GLenum* pname) {
         *pname = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "ambient") == 0) {
             *pname = GL_AMBIENT;
             return true;
@@ -510,7 +510,7 @@ static bool parseColorMaterialMode(Value arg, GLenum* mode) {
         *mode = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "ambient") == 0) {
             *mode = GL_AMBIENT;
             return true;
@@ -541,7 +541,7 @@ static bool parseBlendFactor(Value arg, GLenum* factor) {
         *factor = (GLenum)AS_INTEGER(arg);
         return true;
     }
-    if (arg.type == TYPE_STRING && arg.s_val) {
+    if (isPascalStringType(arg.type) && arg.s_val) {
         if (strcasecmp(arg.s_val, "zero") == 0) {
             *factor = GL_ZERO;
             return true;
@@ -1289,7 +1289,7 @@ PSCAL_DEFINE_IOS_GL_BUILTIN(vmBuiltinGlsaveframebufferpng) {
     if (!ensureGlContext(vm, name)) {
         return makeBoolean(false);
     }
-    if (args[0].type != TYPE_STRING || !args[0].s_val) {
+    if (!isPascalStringType(args[0].type) || !args[0].s_val) {
         runtimeError(vm, "%s expects the first argument to be a file path string.", name);
         return makeBoolean(false);
     }

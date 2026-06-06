@@ -4466,6 +4466,14 @@ static bool valueToOrdinal(const Value* value, long long* out) {
         *out = value->i_val;
         return true;
     }
+    if (isRealType(value->type)) {
+        long double real_value = AS_REAL(*value);
+        long double integral_part = 0.0L;
+        if (modfl(real_value, &integral_part) == 0.0L) {
+            *out = (long long)integral_part;
+            return true;
+        }
+    }
     if (value->type == TYPE_CHAR) {
         *out = (unsigned char)value->c_val;
         return true;

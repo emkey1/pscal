@@ -6648,7 +6648,9 @@ Value vmBuiltinNew(VM* vm, int arg_count, Value* args) {
         if (strcasecmp(typeName, "integer")==0) { baseVarType=TYPE_INTEGER; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "real")==0 || strcasecmp(typeName, "double")==0) { baseVarType=TYPE_DOUBLE; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "float")==0) { baseVarType=TYPE_FLOAT; actualBaseTypeDef = NULL; }
-        else if (strcasecmp(typeName, "str")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "str")==0 ||
+                 strcasecmp(typeName, "string")==0) { baseVarType=TYPE_STRING; actualBaseTypeDef = NULL; }
+        else if (strcasecmp(typeName, "unicodestring")==0) { baseVarType=TYPE_UNICODE_STRING; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "boolean")==0 || strcasecmp(typeName, "bool")==0) { baseVarType=TYPE_BOOLEAN; actualBaseTypeDef = NULL; }
         else if (strcasecmp(typeName, "int")==0) { baseVarType=TYPE_INT32; actualBaseTypeDef = NULL; }
         else {

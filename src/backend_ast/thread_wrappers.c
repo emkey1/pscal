@@ -84,7 +84,7 @@ static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool 
     const Value* target = &args[0];
     const Value* name_arg = &args[1];
 
-    if (!(target->type == TYPE_STRING || IS_INTLIKE(*target))) {
+    if (!(isPascalStringType(target->type) || IS_INTLIKE(*target))) {
         runtimeError(vm, "%s target must be a string or integer id.",
                      submit_only ? "thread_pool_submit" : "thread_spawn_named");
         return makeInt(-1);
@@ -92,7 +92,7 @@ static Value threadSpawnOrSubmitCommon(VM* vm, int arg_count, Value* args, bool 
 
     const char* requested_name = "";
     bool include_name = false;
-    if (name_arg->type == TYPE_STRING) {
+    if (isPascalStringType(name_arg->type)) {
         include_name = true;
         requested_name = name_arg->s_val ? name_arg->s_val : "";
     } else if (name_arg->type == TYPE_NIL) {

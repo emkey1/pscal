@@ -145,7 +145,7 @@ Value vmBuiltinLoadsound(VM* vm, int arg_count, Value* args) {
         return makeInt(-1);
     }
     Value fileNameVal = args[0];
-    if (fileNameVal.type != TYPE_STRING || fileNameVal.s_val == NULL) {
+    if (!isPascalStringType(fileNameVal.type) || fileNameVal.s_val == NULL) {
         runtimeError(vm, "LoadSound argument must be a valid String. Got %s.", varTypeToString(fileNameVal.type));
         return makeInt(-1);
     }

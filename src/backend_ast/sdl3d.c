@@ -127,7 +127,7 @@ static bool sdlCreate3DRendererWindow(const char* title, int width, int height) 
 }
 
 PSCAL_DEFINE_IOS_SDL_BUILTIN(vmBuiltinInitgraph3d) {
-    if (arg_count != 5 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || args[2].type != TYPE_STRING
+    if (arg_count != 5 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1]) || !isPascalStringType(args[2].type)
         || !IS_INTLIKE(args[3]) || !IS_INTLIKE(args[4])) {
         runtimeError(vm, "VM Error: InitGraph3D expects (Integer, Integer, String, Integer, Integer)");
         return makeVoid();
