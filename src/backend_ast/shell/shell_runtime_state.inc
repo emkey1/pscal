@@ -1203,6 +1203,8 @@ static void shellFreeOwnedPositionalParameters(void) {
     gShellPositionalOwned = false;
 }
 
+static int shellPatternMatch(const char *pattern, const char *text);
+
 static char *shellRemovePatternPrefix(const char *value, const char *pattern, bool longest) {
     if (!value) {
         return strdup("");
@@ -1215,21 +1217,26 @@ static char *shellRemovePatternPrefix(const char *value, const char *pattern, bo
     if (pattern_len == 0) {
         return strdup(value);
     }
+    bool utf8_value = value_len > 0 && isValidUtf8Bytes(value, value_len);
+    size_t logical_len = utf8_value ? utf8CodepointCount(value, value_len) : value_len;
     size_t match_len = SIZE_MAX;
     if (longest) {
-        for (size_t len = value_len; ; --len) {
-            char *prefix = (char *)malloc(len + 1);
+        for (size_t len = logical_len; ; --len) {
+            size_t prefix_len = utf8_value
+                ? utf8ByteOffsetForCodepointIndex(value, value_len, len)
+                : len;
+            char *prefix = (char *)malloc(prefix_len + 1);
             if (!prefix) {
                 return NULL;
             }
-            if (len > 0) {
-                memcpy(prefix, value, len);
+            if (prefix_len > 0) {
+                memcpy(prefix, value, prefix_len);
             }
-            prefix[len] = '\0';
-            int rc = fnmatch(pattern, prefix, 0);
+            prefix[prefix_len] = '\0';
+            int rc = shellPatternMatch(pattern, prefix);
             free(prefix);
             if (rc == 0) {
-                match_len = len;
+                match_len = prefix_len;
                 break;
             }
             if (len == 0) {
@@ -1237,19 +1244,22 @@ static char *shellRemovePatternPrefix(const char *value, const char *pattern, bo
             }
         }
     } else {
-        for (size_t len = 0; len <= value_len; ++len) {
-            char *prefix = (char *)malloc(len + 1);
+        for (size_t len = 0; len <= logical_len; ++len) {
+            size_t prefix_len = utf8_value
+                ? utf8ByteOffsetForCodepointIndex(value, value_len, len)
+                : len;
+            char *prefix = (char *)malloc(prefix_len + 1);
             if (!prefix) {
                 return NULL;
             }
-            if (len > 0) {
-                memcpy(prefix, value, len);
+            if (prefix_len > 0) {
+                memcpy(prefix, value, prefix_len);
             }
-            prefix[len] = '\0';
-            int rc = fnmatch(pattern, prefix, 0);
+            prefix[prefix_len] = '\0';
+            int rc = shellPatternMatch(pattern, prefix);
             free(prefix);
             if (rc == 0) {
-                match_len = len;
+                match_len = prefix_len;
                 break;
             }
         }
@@ -1262,6 +1272,128 @@ static char *shellRemovePatternPrefix(const char *value, const char *pattern, bo
     }
     const char *remainder = value + match_len;
     return strdup(remainder);
+}
+
+static bool shellUtf8PatternHasBracket(const char *pattern) {
+    if (!pattern) {
+        return false;
+    }
+    for (const char *cursor = pattern; *cursor; ++cursor) {
+        if (*cursor == '\\' && cursor[1] != '\0') {
+            ++cursor;
+            continue;
+        }
+        if (*cursor == '[') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool shellUtf8GlobConsumeToken(const char *pattern,
+                                      uint32_t *out_codepoint,
+                                      size_t *out_advance,
+                                      bool *out_wildcard_any,
+                                      bool *out_wildcard_single) {
+    if (!pattern || !*pattern || !out_advance || !out_wildcard_any || !out_wildcard_single) {
+        return false;
+    }
+    *out_wildcard_any = false;
+    *out_wildcard_single = false;
+    if (*pattern == '*') {
+        *out_wildcard_any = true;
+        *out_advance = 1;
+        return true;
+    }
+    if (*pattern == '?') {
+        *out_wildcard_single = true;
+        *out_advance = 1;
+        return true;
+    }
+    if (*pattern == '\\' && pattern[1] != '\0') {
+        if (out_codepoint) {
+            *out_codepoint = (unsigned char)pattern[1];
+        }
+        *out_advance = 2;
+        return true;
+    }
+    if ((unsigned char)*pattern < 0x80) {
+        if (out_codepoint) {
+            *out_codepoint = (unsigned char)*pattern;
+        }
+        *out_advance = 1;
+        return true;
+    }
+    return decodeUtf8Codepoint(pattern, strlen(pattern), out_codepoint, out_advance);
+}
+
+static bool shellUtf8GlobMatchInternal(const char *pattern, const char *text) {
+    while (pattern && *pattern) {
+        uint32_t pat_cp = 0;
+        size_t pat_advance = 0;
+        bool wildcard_any = false;
+        bool wildcard_single = false;
+        if (!shellUtf8GlobConsumeToken(pattern,
+                                       &pat_cp,
+                                       &pat_advance,
+                                       &wildcard_any,
+                                       &wildcard_single)) {
+            return false;
+        }
+        if (wildcard_any) {
+            pattern += pat_advance;
+            while (*pattern == '*') {
+                pattern++;
+            }
+            if (*pattern == '\0') {
+                return true;
+            }
+            const char *cursor = text;
+            while (true) {
+                if (shellUtf8GlobMatchInternal(pattern, cursor)) {
+                    return true;
+                }
+                if (!cursor || *cursor == '\0') {
+                    break;
+                }
+                uint32_t text_cp = 0;
+                size_t text_advance = 0;
+                if (!decodeUtf8Codepoint(cursor, strlen(cursor), &text_cp, &text_advance)) {
+                    return false;
+                }
+                cursor += text_advance;
+            }
+            return false;
+        }
+        if (!text || *text == '\0') {
+            return false;
+        }
+        uint32_t text_cp = 0;
+        size_t text_advance = 0;
+        if (!decodeUtf8Codepoint(text, strlen(text), &text_cp, &text_advance)) {
+            return false;
+        }
+        if (!wildcard_single && pat_cp != text_cp) {
+            return false;
+        }
+        pattern += pat_advance;
+        text += text_advance;
+    }
+    return !text || *text == '\0';
+}
+
+static int shellPatternMatch(const char *pattern, const char *text) {
+    if (!pattern || !text) {
+        return FNM_NOMATCH;
+    }
+    size_t text_len = strlen(text);
+    size_t pattern_len = strlen(pattern);
+    bool utf8_text = text_len > 0 && isValidUtf8Bytes(text, text_len);
+    bool utf8_pattern = pattern_len > 0 && isValidUtf8Bytes(pattern, pattern_len);
+    if (utf8_text && utf8_pattern && !shellUtf8PatternHasBracket(pattern)) {
+        return shellUtf8GlobMatchInternal(pattern, text) ? 0 : FNM_NOMATCH;
+    }
+    return fnmatch(pattern, text, 0);
 }
 
 static void shellBufferAppendChar(char **buffer, size_t *length, size_t *capacity, char c);
@@ -1283,13 +1415,18 @@ static char *shellRemovePatternSuffix(const char *value, const char *pattern, bo
     if (pattern_len == 0) {
         return strdup(value);
     }
+    bool utf8_value = value_len > 0 && isValidUtf8Bytes(value, value_len);
+    size_t logical_len = utf8_value ? utf8CodepointCount(value, value_len) : value_len;
     size_t match_len = SIZE_MAX;
     if (longest) {
-        for (size_t len = value_len; ; --len) {
-            size_t offset = value_len - len;
+        for (size_t len = logical_len; ; --len) {
+            size_t suffix_len = utf8_value
+                ? (value_len - utf8ByteOffsetForCodepointIndex(value, value_len, logical_len - len))
+                : len;
+            size_t offset = value_len - suffix_len;
             const char *suffix = value + offset;
-            if (fnmatch(pattern, suffix, 0) == 0) {
-                match_len = len;
+            if (shellPatternMatch(pattern, suffix) == 0) {
+                match_len = suffix_len;
                 break;
             }
             if (len == 0) {
@@ -1297,11 +1434,14 @@ static char *shellRemovePatternSuffix(const char *value, const char *pattern, bo
             }
         }
     } else {
-        for (size_t len = 0; len <= value_len; ++len) {
-            size_t offset = value_len - len;
+        for (size_t len = 0; len <= logical_len; ++len) {
+            size_t suffix_len = utf8_value
+                ? (value_len - utf8ByteOffsetForCodepointIndex(value, value_len, logical_len - len))
+                : len;
+            size_t offset = value_len - suffix_len;
             const char *suffix = value + offset;
-            if (fnmatch(pattern, suffix, 0) == 0) {
-                match_len = len;
+            if (shellPatternMatch(pattern, suffix) == 0) {
+                match_len = suffix_len;
                 break;
             }
         }

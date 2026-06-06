@@ -499,7 +499,16 @@
             "description": "UTF-8 shell values should preserve codepoint-based length and substring semantics.",
             "script": "Tests/exsh/tests/unicode_parameter_text.exsh",
             "expect": "runtime_ok",
-            "expected_stdout": "unicode-parameter:start\nlen=2\nslice=山\nroundtrip=雪山\nunicode-parameter:end"
+            "expected_stdout": "unicode-parameter:start\nlen=2\nslice=山\nprefix=山\nsuffix=雪\nroundtrip=雪山\nunicode-parameter:end"
+        },
+        {
+            "id": "unicode_pattern_match",
+            "name": "Unicode shell patterns match whole characters",
+            "category": "expansion",
+            "description": "case clauses and [[ string = pattern ]] should treat '?' as one UTF-8 codepoint for valid text.",
+            "script": "Tests/exsh/tests/unicode_pattern_match.exsh",
+            "expect": "runtime_ok",
+            "expected_stdout": "unicode-pattern:start\ncase=single-prefix\ntest=match\ntest-neg=match\nunicode-pattern:end"
         },
         {
             "id": "grammar_here_documents",

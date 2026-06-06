@@ -1860,7 +1860,7 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
             goto cleanup;
         }
         if (shellWordShouldGlob(pattern_flags, expanded_pattern)) {
-            if (fnmatch(expanded_pattern, subject, 0) == 0) {
+            if (shellPatternMatch(expanded_pattern, subject) == 0) {
                 free(expanded_pattern);
                 matched = true;
                 break;
@@ -1977,7 +1977,7 @@ static bool shellTestApplyBinary(const char *left,
     }
     if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) {
         if (shellTestHasPatternChars(right)) {
-            *out_result = (fnmatch(right, left, 0) == 0);
+            *out_result = (shellPatternMatch(right, left) == 0);
         } else {
             *out_result = (strcmp(left, right) == 0);
         }
@@ -1985,7 +1985,7 @@ static bool shellTestApplyBinary(const char *left,
     }
     if (strcmp(op, "!=") == 0) {
         if (shellTestHasPatternChars(right)) {
-            *out_result = (fnmatch(right, left, 0) != 0);
+            *out_result = (shellPatternMatch(right, left) != 0);
         } else {
             *out_result = (strcmp(left, right) != 0);
         }
@@ -2727,10 +2727,18 @@ Value vmBuiltinShellDoubleBracket(VM *vm, int arg_count, Value *args) {
         if (shellEvaluateFileBinary(left, op, right, &result)) {
             compared = true;
         } else if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) {
-            result = (strcmp(left, right) == 0);
+            if (shellTestHasPatternChars(right)) {
+                result = (shellPatternMatch(right, left) == 0);
+            } else {
+                result = (strcmp(left, right) == 0);
+            }
             compared = true;
         } else if (strcmp(op, "!=") == 0) {
-            result = (strcmp(left, right) != 0);
+            if (shellTestHasPatternChars(right)) {
+                result = (shellPatternMatch(right, left) != 0);
+            } else {
+                result = (strcmp(left, right) != 0);
+            }
             compared = true;
         } else if (strcmp(op, ">") == 0) {
             result = (strcmp(left, right) > 0);

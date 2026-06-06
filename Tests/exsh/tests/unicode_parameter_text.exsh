@@ -3,5 +3,7 @@ name="雪山"
 printf 'unicode-parameter:start\n'
 printf 'len=%s\n' "${#name}"
 printf 'slice=%s\n' "${name:1:1}"
+printf 'prefix=%s\n' "${name#?}"
+printf 'suffix=%s\n' "${name%?}"
 printf 'roundtrip=%s\n' "$(printf '雪山')"
 printf 'unicode-parameter:end\n'

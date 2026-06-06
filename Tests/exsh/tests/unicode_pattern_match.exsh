@@ -1,0 +1,18 @@
+#!/bin/sh
+name="雪山"
+printf 'unicode-pattern:start\n'
+case "$name" in
+    ?山) printf 'case=single-prefix\n' ;;
+    *) printf 'case=miss\n' ;;
+esac
+if [[ "$name" = ?山 ]]; then
+    printf 'test=match\n'
+else
+    printf 'test=miss\n'
+fi
+if [[ "$name" != ?海 ]]; then
+    printf 'test-neg=match\n'
+else
+    printf 'test-neg=miss\n'
+fi
+printf 'unicode-pattern:end\n'
