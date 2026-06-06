@@ -3,6 +3,7 @@ tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/exsh-unicode-glob.XXXXXX")" || exit 1
 trap 'rm -rf "$tmpdir"' EXIT INT TERM
 cd "$tmpdir" || exit 1
 touch 雪.txt 山.txt .隠し.txt
+touch Ä.txt
 mkdir 雪dir
 touch 雪dir/山.log
 rm -f .隠し.txt
@@ -11,6 +12,9 @@ printf 'unicode-glob:start\n'
 printf 'single=%s\n' ?.txt
 printf 'bracket=%s\n' [雪山].txt
 printf 'class=%s\n' [[:alpha:]].txt
+shopt -s nocaseglob
+printf 'nocase=%s\n' [ä].txt
+shopt -u nocaseglob
 printf 'nested=%s\n' ?dir/?.log
 printf 'nested-bracket=%s\n' [雪山]dir/[山海].log
 printf 'dot=%s\n' .?.txt

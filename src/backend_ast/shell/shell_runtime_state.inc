@@ -1211,6 +1211,12 @@ static void shellFreeOwnedPositionalParameters(void) {
     gShellPositionalOwned = false;
 }
 
+typedef enum {
+    SHELL_PATTERN_NONE = 0,
+    SHELL_PATTERN_NOCASE = 1 << 0
+} ShellPatternFlags;
+
+static int shellPatternMatchEx(const char *pattern, const char *text, ShellPatternFlags flags);
 static int shellPatternMatch(const char *pattern, const char *text);
 static int shellExpandGlobPattern(const char *pattern, char ***out_matches, size_t *out_count);
 
@@ -1339,6 +1345,79 @@ static int shellUtf8GlobReadLiteralCodepoint(const char *pattern,
     return decodeUtf8Codepoint(pattern, strlen(pattern), out_codepoint, out_advance) ? 1 : -1;
 }
 
+static uint32_t shellUtf8FoldCaseCodepoint(uint32_t codepoint) {
+    if (codepoint <= (uint32_t)WCHAR_MAX) {
+        pthread_once(&gShellUtf8LocaleOnce, shellInitUtf8Locale);
+        wint_t wc = (wint_t)codepoint;
+        if (gShellUtf8Locale) {
+            locale_t previous = uselocale(gShellUtf8Locale);
+            wint_t lowered = towlower(wc);
+            uselocale(previous);
+            if ((uint32_t)lowered != codepoint) {
+                return (uint32_t)lowered;
+            }
+        } else {
+            wint_t lowered = towlower(wc);
+            if ((uint32_t)lowered != codepoint) {
+                return (uint32_t)lowered;
+            }
+        }
+    }
+
+    if (codepoint >= 'A' && codepoint <= 'Z') {
+        return codepoint + 0x20;
+    }
+    if (codepoint >= 0x00C0 && codepoint <= 0x00D6) return codepoint + 0x20;
+    if (codepoint >= 0x00D8 && codepoint <= 0x00DE) return codepoint + 0x20;
+    if (codepoint >= 0x0391 && codepoint <= 0x03AB) return codepoint + 0x20;
+    if (codepoint >= 0x0410 && codepoint <= 0x042F) return codepoint + 0x20;
+    if (codepoint == 0x0401) return 0x0451;
+    return codepoint;
+}
+
+static bool shellUtf8CodepointsEqual(uint32_t lhs, uint32_t rhs, bool nocase) {
+    if (!nocase) {
+        return lhs == rhs;
+    }
+    return shellUtf8FoldCaseCodepoint(lhs) == shellUtf8FoldCaseCodepoint(rhs);
+}
+
+static int shellUtf8StringCompare(const char *lhs, const char *rhs, bool nocase) {
+    if (!lhs) lhs = "";
+    if (!rhs) rhs = "";
+    if (!nocase) {
+        return strcmp(lhs, rhs);
+    }
+
+    size_t lhs_len = strlen(lhs);
+    size_t rhs_len = strlen(rhs);
+    bool lhs_utf8 = lhs_len == 0 || isValidUtf8Bytes(lhs, lhs_len);
+    bool rhs_utf8 = rhs_len == 0 || isValidUtf8Bytes(rhs, rhs_len);
+    if (!lhs_utf8 || !rhs_utf8) {
+        return strcasecmp(lhs, rhs);
+    }
+
+    const char *lcur = lhs;
+    const char *rcur = rhs;
+    while (*lcur && *rcur) {
+        uint32_t lcp = 0, rcp = 0;
+        size_t ladv = 0, radv = 0;
+        if (!decodeUtf8Codepoint(lcur, strlen(lcur), &lcp, &ladv) ||
+            !decodeUtf8Codepoint(rcur, strlen(rcur), &rcp, &radv)) {
+            return strcasecmp(lhs, rhs);
+        }
+        uint32_t lf = shellUtf8FoldCaseCodepoint(lcp);
+        uint32_t rf = shellUtf8FoldCaseCodepoint(rcp);
+        if (lf != rf) {
+            return (lf < rf) ? -1 : 1;
+        }
+        lcur += ladv;
+        rcur += radv;
+    }
+    if (*lcur == '\0' && *rcur == '\0') return 0;
+    return *lcur ? 1 : -1;
+}
+
 static bool shellUtf8CodepointIsUnicodeSpace(uint32_t codepoint) {
     switch (codepoint) {
         case 0x0009: case 0x000A: case 0x000B: case 0x000C: case 0x000D:
@@ -1448,7 +1527,10 @@ static bool shellUtf8CodepointMatchesPosixClass(uint32_t codepoint, const char *
     return false;
 }
 
-static int shellUtf8GlobMatchBracket(const char *pattern, uint32_t text_cp, size_t *out_advance) {
+static int shellUtf8GlobMatchBracket(const char *pattern,
+                                     uint32_t text_cp,
+                                     size_t *out_advance,
+                                     ShellPatternFlags flags) {
     if (!pattern || pattern[0] != '[' || !out_advance) {
         return -1;
     }
@@ -1513,14 +1595,21 @@ static int shellUtf8GlobMatchBracket(const char *pattern, uint32_t text_cp, size
             if (shellUtf8GlobReadLiteralCodepoint(pattern + next_offset + 1, &end_cp, &end_advance) <= 0) {
                 return -1;
             }
+            if (flags & SHELL_PATTERN_NOCASE) {
+                start_cp = shellUtf8FoldCaseCodepoint(start_cp);
+                end_cp = shellUtf8FoldCaseCodepoint(end_cp);
+            }
+            uint32_t folded_text = (flags & SHELL_PATTERN_NOCASE)
+                ? shellUtf8FoldCaseCodepoint(text_cp)
+                : text_cp;
             uint32_t lo = start_cp < end_cp ? start_cp : end_cp;
             uint32_t hi = start_cp > end_cp ? start_cp : end_cp;
-            if (text_cp >= lo && text_cp <= hi) {
+            if (folded_text >= lo && folded_text <= hi) {
                 matched = true;
             }
             offset = next_offset + 1 + end_advance;
         } else {
-            if (text_cp == start_cp) {
+            if (shellUtf8CodepointsEqual(text_cp, start_cp, (flags & SHELL_PATTERN_NOCASE) != 0)) {
                 matched = true;
             }
             offset = next_offset;
@@ -1532,7 +1621,7 @@ static int shellUtf8GlobMatchBracket(const char *pattern, uint32_t text_cp, size
     return -1;
 }
 
-static int shellUtf8GlobMatchInternal(const char *pattern, const char *text) {
+static int shellUtf8GlobMatchInternal(const char *pattern, const char *text, ShellPatternFlags flags) {
     while (pattern && *pattern) {
         uint32_t pat_cp = 0;
         size_t pat_advance = 0;
@@ -1560,7 +1649,7 @@ static int shellUtf8GlobMatchInternal(const char *pattern, const char *text) {
             }
             const char *cursor = text;
             while (true) {
-                int nested = shellUtf8GlobMatchInternal(pattern, cursor);
+                int nested = shellUtf8GlobMatchInternal(pattern, cursor, flags);
                 if (nested > 0) {
                     return 1;
                 }
@@ -1588,14 +1677,15 @@ static int shellUtf8GlobMatchInternal(const char *pattern, const char *text) {
             return -1;
         }
         if (bracket) {
-            int bracket_match = shellUtf8GlobMatchBracket(pattern, text_cp, &pat_advance);
+            int bracket_match = shellUtf8GlobMatchBracket(pattern, text_cp, &pat_advance, flags);
             if (bracket_match < 0) {
                 return -1;
             }
             if (bracket_match == 0) {
                 return 0;
             }
-        } else if (!wildcard_single && pat_cp != text_cp) {
+        } else if (!wildcard_single &&
+                   !shellUtf8CodepointsEqual(text_cp, pat_cp, (flags & SHELL_PATTERN_NOCASE) != 0)) {
             return 0;
         }
         pattern += pat_advance;
@@ -1604,7 +1694,7 @@ static int shellUtf8GlobMatchInternal(const char *pattern, const char *text) {
     return (!text || *text == '\0') ? 1 : 0;
 }
 
-static int shellPatternMatch(const char *pattern, const char *text) {
+static int shellPatternMatchEx(const char *pattern, const char *text, ShellPatternFlags flags) {
     if (!pattern || !text) {
         return FNM_NOMATCH;
     }
@@ -1613,12 +1703,22 @@ static int shellPatternMatch(const char *pattern, const char *text) {
     bool utf8_text = text_len > 0 && isValidUtf8Bytes(text, text_len);
     bool utf8_pattern = pattern_len > 0 && isValidUtf8Bytes(pattern, pattern_len);
     if (utf8_text && utf8_pattern) {
-        int native_rc = shellUtf8GlobMatchInternal(pattern, text);
+        int native_rc = shellUtf8GlobMatchInternal(pattern, text, flags);
         if (native_rc >= 0) {
             return native_rc > 0 ? 0 : FNM_NOMATCH;
         }
     }
-    return fnmatch(pattern, text, 0);
+    int fnm_flags = 0;
+#ifdef FNM_CASEFOLD
+    if (flags & SHELL_PATTERN_NOCASE) {
+        fnm_flags |= FNM_CASEFOLD;
+    }
+#endif
+    return fnmatch(pattern, text, fnm_flags);
+}
+
+static int shellPatternMatch(const char *pattern, const char *text) {
+    return shellPatternMatchEx(pattern, text, SHELL_PATTERN_NONE);
 }
 
 typedef struct {
@@ -1712,7 +1812,8 @@ static int shellGlobResultCompare(const void *lhs, const void *rhs) {
 static int shellExpandUtf8GlobRecursive(const char *fs_base,
                                         const char *display_base,
                                         const char *pattern,
-                                        ShellGlobMatchList *results) {
+                                        ShellGlobMatchList *results,
+                                        ShellPatternFlags flags) {
     if (!pattern || !results) {
         return GLOB_NOMATCH;
     }
@@ -1760,7 +1861,7 @@ static int shellExpandUtf8GlobRecursive(const char *fs_base,
         }
         struct stat st;
         if (stat(next_fs, &st) == 0) {
-            rc = shellExpandUtf8GlobRecursive(next_fs, next_display, rest, results);
+            rc = shellExpandUtf8GlobRecursive(next_fs, next_display, rest, results, flags);
         }
         free(next_fs);
         free(next_display);
@@ -1785,7 +1886,7 @@ static int shellExpandUtf8GlobRecursive(const char *fs_base,
         if (!allow_dot && name[0] == '.') {
             continue;
         }
-        if (shellPatternMatch(segment, name) != 0) {
+        if (shellPatternMatchEx(segment, name, flags) != 0) {
             continue;
         }
         char *next_fs = shellGlobJoinPath(fs_base, name);
@@ -1797,7 +1898,7 @@ static int shellExpandUtf8GlobRecursive(const char *fs_base,
             free(segment);
             return GLOB_NOSPACE;
         }
-        int child_rc = shellExpandUtf8GlobRecursive(next_fs, next_display, rest, results);
+        int child_rc = shellExpandUtf8GlobRecursive(next_fs, next_display, rest, results, flags);
         if (child_rc == 0) {
             rc = 0;
         } else if (child_rc == GLOB_NOSPACE) {
@@ -1839,7 +1940,10 @@ static int shellExpandUtf8GlobFallback(const char *pattern, char ***out_matches,
     }
 
     ShellGlobMatchList results = {0};
-    int rc = shellExpandUtf8GlobRecursive(fs_base, display_base, cursor, &results);
+    ShellPatternFlags flags = shellShoptOptionEnabled("nocaseglob")
+        ? SHELL_PATTERN_NOCASE
+        : SHELL_PATTERN_NONE;
+    int rc = shellExpandUtf8GlobRecursive(fs_base, display_base, cursor, &results, flags);
     if (rc != 0) {
         shellGlobFreeList(&results);
         return rc;
@@ -1871,14 +1975,18 @@ static int shellExpandGlobPattern(const char *pattern, char ***out_matches, size
         return GLOB_NOMATCH;
     }
 
+    bool nocaseglob = shellShoptOptionEnabled("nocaseglob");
     glob_t glob_result;
     memset(&glob_result, 0, sizeof(glob_result));
-    int glob_status =
+    int glob_status = GLOB_NOMATCH;
+    if (!nocaseglob) {
+        glob_status =
 #if defined(PSCAL_TARGET_IOS)
-        pscalPathVirtualized_glob(pattern, 0, NULL, &glob_result);
+            pscalPathVirtualized_glob(pattern, 0, NULL, &glob_result);
 #else
-        glob(pattern, 0, NULL, &glob_result);
+            glob(pattern, 0, NULL, &glob_result);
 #endif
+    }
     if (glob_status == 0) {
         char **matches = (char **)calloc(glob_result.gl_pathc, sizeof(char *));
         if (!matches) {

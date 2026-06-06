@@ -39,4 +39,16 @@ if [[ "9" = [[:digit:]] ]]; then
 else
     printf 'test-class-digit=miss\n'
 fi
+shopt -s nocasematch
+if [[ "Ä" = ä ]]; then
+    printf 'test-nocase-literal=match\n'
+else
+    printf 'test-nocase-literal=miss\n'
+fi
+if [[ "Ä" = [ä] ]]; then
+    printf 'test-nocase-bracket=match\n'
+else
+    printf 'test-nocase-bracket=miss\n'
+fi
+shopt -u nocasematch
 printf 'unicode-pattern:end\n'

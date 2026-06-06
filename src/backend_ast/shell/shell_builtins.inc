@@ -1855,13 +1855,18 @@ Value vmBuiltinShellCaseClause(VM *vm, int arg_count, Value *args) {
             goto cleanup;
         }
         if (shellWordShouldGlob(pattern_flags, expanded_pattern)) {
-            if (shellPatternMatch(expanded_pattern, subject) == 0) {
+            ShellPatternFlags match_flags = shellShoptOptionEnabled("nocasematch")
+                ? SHELL_PATTERN_NOCASE
+                : SHELL_PATTERN_NONE;
+            if (shellPatternMatchEx(expanded_pattern, subject, match_flags) == 0) {
                 free(expanded_pattern);
                 matched = true;
                 break;
             }
         } else {
-            if (strcmp(expanded_pattern, subject) == 0) {
+            if (shellUtf8StringCompare(expanded_pattern,
+                                       subject,
+                                       shellShoptOptionEnabled("nocasematch")) == 0) {
                 free(expanded_pattern);
                 matched = true;
                 break;
@@ -1971,18 +1976,22 @@ static bool shellTestApplyBinary(const char *left,
         return false;
     }
     if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) {
+        bool nocasematch = shellShoptOptionEnabled("nocasematch");
         if (shellTestHasPatternChars(right)) {
-            *out_result = (shellPatternMatch(right, left) == 0);
+            *out_result = (shellPatternMatchEx(right, left,
+                                               nocasematch ? SHELL_PATTERN_NOCASE : SHELL_PATTERN_NONE) == 0);
         } else {
-            *out_result = (strcmp(left, right) == 0);
+            *out_result = (shellUtf8StringCompare(left, right, nocasematch) == 0);
         }
         return true;
     }
     if (strcmp(op, "!=") == 0) {
+        bool nocasematch = shellShoptOptionEnabled("nocasematch");
         if (shellTestHasPatternChars(right)) {
-            *out_result = (shellPatternMatch(right, left) != 0);
+            *out_result = (shellPatternMatchEx(right, left,
+                                               nocasematch ? SHELL_PATTERN_NOCASE : SHELL_PATTERN_NONE) != 0);
         } else {
-            *out_result = (strcmp(left, right) != 0);
+            *out_result = (shellUtf8StringCompare(left, right, nocasematch) != 0);
         }
         return true;
     }
@@ -2722,17 +2731,21 @@ Value vmBuiltinShellDoubleBracket(VM *vm, int arg_count, Value *args) {
         if (shellEvaluateFileBinary(left, op, right, &result)) {
             compared = true;
         } else if (strcmp(op, "=") == 0 || strcmp(op, "==") == 0) {
+            bool nocasematch = shellShoptOptionEnabled("nocasematch");
             if (shellTestHasPatternChars(right)) {
-                result = (shellPatternMatch(right, left) == 0);
+                result = (shellPatternMatchEx(right, left,
+                                              nocasematch ? SHELL_PATTERN_NOCASE : SHELL_PATTERN_NONE) == 0);
             } else {
-                result = (strcmp(left, right) == 0);
+                result = (shellUtf8StringCompare(left, right, nocasematch) == 0);
             }
             compared = true;
         } else if (strcmp(op, "!=") == 0) {
+            bool nocasematch = shellShoptOptionEnabled("nocasematch");
             if (shellTestHasPatternChars(right)) {
-                result = (shellPatternMatch(right, left) != 0);
+                result = (shellPatternMatchEx(right, left,
+                                              nocasematch ? SHELL_PATTERN_NOCASE : SHELL_PATTERN_NONE) != 0);
             } else {
-                result = (strcmp(left, right) != 0);
+                result = (shellUtf8StringCompare(left, right, nocasematch) != 0);
             }
             compared = true;
         } else if (strcmp(op, ">") == 0) {
