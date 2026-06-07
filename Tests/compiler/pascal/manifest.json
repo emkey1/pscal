@@ -420,6 +420,12 @@
       "path": "Tests/compiler/pascal/cases/advanced_threading_thread_type.pas",
       "expect": "compile_success",
       "stdout_substring": "SUITE 12 COMPLETE: Advanced Threading"
+    },
+    {
+      "id": "label_after_var_block",
+      "path": "Tests/compiler/pascal/cases/label_after_var_block.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: label after var block 1"
     }
   ]
 }

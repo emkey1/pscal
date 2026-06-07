@@ -546,7 +546,8 @@ AST *declarations(Parser *parser, bool in_interface) {
             eat(parser, TOKEN_VAR);
             // Loop for multiple variable declaration lines within a single VAR block
             // e.g., VAR a,b: integer; c: char;
-            while (currentTokenIsIdentifierLike(parser)) {
+            while (parser->current_token &&
+                   parser->current_token->type == TOKEN_IDENTIFIER) {
                 AST *vdecl_result = varDeclaration(parser, parser->current_unit_name_context == NULL);
                 if (!vdecl_result || vdecl_result->type == AST_NOOP) {
                     // varDeclaration should call errorParser on syntax error.
@@ -579,7 +580,8 @@ AST *declarations(Parser *parser, bool in_interface) {
                 } else {
                     // If it's not a semicolon, and the next line *does* start with an identifier,
                     // it implies a missing semicolon between var declaration lines.
-                    if (currentTokenIsIdentifierLike(parser)) {
+                    if (parser->current_token &&
+                        parser->current_token->type == TOKEN_IDENTIFIER) {
                          errorParser(parser, "Expected semicolon to separate variable declarations within VAR block");
                     }
                     // If not a semicolon and not another identifier, this VAR section is ending.
