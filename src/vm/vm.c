@@ -3614,6 +3614,17 @@ static Value vmHostCreateThreadAddr(VM* vm) {
                 retainClosureEnv(closureEnv);
             }
             validEntry = true;
+        } else if (addrVal.type == TYPE_STRING && addrVal.s_val) {
+            char lookup_name[MAX_SYMBOL_LENGTH + 1];
+            strncpy(lookup_name, addrVal.s_val, MAX_SYMBOL_LENGTH);
+            lookup_name[MAX_SYMBOL_LENGTH] = '\0';
+            toLowerString(lookup_name);
+            Symbol* proc_symbol = findProcedureByName(vm->procedureTable, lookup_name, vm);
+            if (proc_symbol && proc_symbol->is_defined && proc_symbol->bytecode_address >= 0) {
+                entry = (uint16_t)proc_symbol->bytecode_address;
+                closureSymbol = proc_symbol;
+                validEntry = true;
+            }
         } else if (IS_INTLIKE(addrVal)) {
             entry = (uint16_t)AS_INTEGER(addrVal);
             validEntry = true;
@@ -3653,6 +3664,17 @@ static Value vmHostCreateThreadAddr(VM* vm) {
                 retainClosureEnv(closureEnv);
             }
             validEntry = true;
+        } else if (addrVal.type == TYPE_STRING && addrVal.s_val) {
+            char lookup_name[MAX_SYMBOL_LENGTH + 1];
+            strncpy(lookup_name, addrVal.s_val, MAX_SYMBOL_LENGTH);
+            lookup_name[MAX_SYMBOL_LENGTH] = '\0';
+            toLowerString(lookup_name);
+            Symbol* proc_symbol = findProcedureByName(vm->procedureTable, lookup_name, vm);
+            if (proc_symbol && proc_symbol->is_defined && proc_symbol->bytecode_address >= 0) {
+                entry = (uint16_t)proc_symbol->bytecode_address;
+                closureSymbol = proc_symbol;
+                validEntry = true;
+            }
         } else if (IS_INTLIKE(addrVal)) {
             entry = (uint16_t)AS_INTEGER(addrVal);
             validEntry = true;

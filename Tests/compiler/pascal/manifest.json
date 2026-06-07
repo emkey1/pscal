@@ -426,6 +426,12 @@
       "path": "Tests/compiler/pascal/cases/label_after_var_block.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: label after var block 1"
+    },
+    {
+      "id": "createthread_forward_proc_address",
+      "path": "Tests/compiler/pascal/cases/createthread_forward_proc_address.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: CreateThread forward proc address"
     }
   ]
 }

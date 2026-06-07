@@ -41,6 +41,8 @@ typedef struct {
     int constant_index;
     int original_address;
     int element_index;
+    char* symbol_name;
+    Symbol* symbol_ref;
 } AddressConstantEntry;
 
 static VarType resolveOrdinalBuiltinTypeName(const char *name) {
@@ -70,6 +72,9 @@ typedef enum InterfaceBoxingResult {
 static AST* resolveTypeAlias(AST* type_node);
 static AST* getRecordTypeFromExpr(AST* expr);
 static AST* resolveInterfaceAST(AST* typeNode);
+static void emitConstantNoImmediate(BytecodeChunk* chunk, int constant_index, int line);
+static bool procedureSymbolNeedsClosureLiteral(Symbol *psym);
+static bool emitProcedureReferenceLiteral(Symbol *psym, BytecodeChunk *chunk, int line, AST *context_node);
 static InterfaceBoxingResult maybeAutoBoxInterfaceForType(AST* interfaceType,
                                                           AST* valueExpr,
                                                           BytecodeChunk* chunk,
@@ -78,6 +83,8 @@ static InterfaceBoxingResult maybeAutoBoxInterfaceForType(AST* interfaceType,
                                                           bool strictRecord);
 static const char* getSerializablePointerBaseTypeName(AST* type_node);
 static bool emitImplicitMyselfFieldValue(BytecodeChunk* chunk, int line, const char* fieldName);
+static bool closureLiteralEscapesCurrentRoutine(AST *expr_node);
+static void markClosureLiteralEscapes(Symbol *psym);
 static BytecodeChunk* tracked_vtable_chunk = NULL;
 static char** emitted_vtable_classes = NULL;
 static int emitted_vtable_count = 0;
@@ -274,8 +281,12 @@ static void popVTableTrackerState(void) {
     }
 }
 
-static void recordAddressConstantEntry(int constant_index, int element_index, int address) {
-    if (constant_index < 0 || address < 0) return;
+static void recordAddressConstantEntry(int constant_index,
+                                       int element_index,
+                                       int address,
+                                       const char* symbol_name,
+                                       Symbol* symbol_ref) {
+    if (constant_index < 0) return;
     if (address_constant_count >= address_constant_capacity) {
         int new_capacity = address_constant_capacity < 8 ? 8 : address_constant_capacity * 2;
         AddressConstantEntry* resized = (AddressConstantEntry*)realloc(address_constant_entries,
@@ -289,18 +300,29 @@ static void recordAddressConstantEntry(int constant_index, int element_index, in
     address_constant_entries[address_constant_count].constant_index = constant_index;
     address_constant_entries[address_constant_count].original_address = address;
     address_constant_entries[address_constant_count].element_index = element_index;
+    address_constant_entries[address_constant_count].symbol_name = symbol_name ? strdup(symbol_name) : NULL;
+    address_constant_entries[address_constant_count].symbol_ref = symbol_ref;
     address_constant_count++;
 }
 
 static void recordAddressConstant(int constant_index, int address) {
-    recordAddressConstantEntry(constant_index, -1, address);
+    recordAddressConstantEntry(constant_index, -1, address, NULL, NULL);
 }
 
 static void recordArrayAddressConstant(int constant_index, int element_index, int address) {
-    recordAddressConstantEntry(constant_index, element_index, address);
+    recordAddressConstantEntry(constant_index, element_index, address, NULL, NULL);
+}
+
+static void recordNamedAddressConstant(int constant_index, int address, const char* symbol_name, Symbol* symbol_ref) {
+    recordAddressConstantEntry(constant_index, -1, address, symbol_name, symbol_ref);
 }
 
 static void resetAddressConstantTracking(void) {
+    for (int i = 0; i < address_constant_count; ++i) {
+        free(address_constant_entries[i].symbol_name);
+        address_constant_entries[i].symbol_name = NULL;
+        address_constant_entries[i].symbol_ref = NULL;
+    }
     address_constant_count = 0;
 }
 
@@ -1312,6 +1334,31 @@ static bool emitClosureLiteral(Symbol *psym, BytecodeChunk *chunk, int line) {
     return true;
 }
 
+static bool procedureSymbolNeedsClosureLiteral(Symbol *psym) {
+    if (!psym) {
+        return false;
+    }
+    return psym->closure_captures || psym->closure_escapes || psym->upvalue_count > 0;
+}
+
+static bool emitProcedureReferenceLiteral(Symbol *psym, BytecodeChunk *chunk, int line, AST *context_node) {
+    if (!psym || !chunk) {
+        return false;
+    }
+
+    if (procedureSymbolNeedsClosureLiteral(psym)) {
+        if (context_node && closureLiteralEscapesCurrentRoutine(context_node)) {
+            markClosureLiteralEscapes(psym);
+        }
+        return emitClosureLiteral(psym, chunk, line);
+    }
+
+    int addrConst = addIntConstant(chunk, psym->bytecode_address);
+    recordNamedAddressConstant(addrConst, psym->bytecode_address, psym->name, psym);
+    emitConstantNoImmediate(chunk, addrConst, line);
+    return true;
+}
+
 static bool closureLiteralEscapesCurrentRoutine(AST *expr_node) {
     if (!expr_node || !expr_node->parent || expr_node->parent->type != AST_ASSIGN ||
         !expr_node->parent->left) {
@@ -1825,6 +1872,25 @@ static void emitConstant(BytecodeChunk* chunk, int constant_index, int line) {
         return;
     }
     if (emitImmediateConstant(chunk, constant_index, line)) {
+        return;
+    }
+    if (constant_index <= 0xFF) {
+        writeBytecodeChunk(chunk, CONSTANT, line);
+        writeBytecodeChunk(chunk, (uint8_t)constant_index, line);
+    } else if (constant_index <= 0xFFFF) {
+        writeBytecodeChunk(chunk, CONSTANT16, line);
+        emitShort(chunk, (uint16_t)constant_index, line);
+    } else {
+        fprintf(stderr, "L%d: Compiler error: too many constants (%d). Limit is 65535.\n",
+                line, constant_index);
+        compiler_had_error = true;
+    }
+}
+
+static void emitConstantNoImmediate(BytecodeChunk* chunk, int constant_index, int line) {
+    if (constant_index < 0) {
+        fprintf(stderr, "L%d: Compiler error: negative constant index.\n", line);
+        compiler_had_error = true;
         return;
     }
     if (constant_index <= 0xFF) {
@@ -3759,6 +3825,43 @@ static bool validateCompilerProcPointerArgument(AST* expectedProcPtr, AST* arg_n
     return true;
 }
 
+static void compileProcedureReferenceArgument(AST* arg_node, BytecodeChunk* chunk, int line) {
+    if (!arg_node) {
+        emitConstant(chunk, addIntConstant(chunk, 0), line);
+        return;
+    }
+
+    if (arg_node->type == AST_ADDR_OF &&
+        arg_node->left &&
+        arg_node->left->token &&
+        arg_node->left->token->value) {
+        Symbol* psym = resolveProcedureSymbolInScope(arg_node->left->token->value, arg_node, gCurrentProgramRoot);
+        if (psym && psym->bytecode_address < 0 && !procedureSymbolNeedsClosureLiteral(psym)) {
+            emitConstant(chunk, addStringConstant(chunk, psym->name ? psym->name : arg_node->left->token->value), line);
+            return;
+        }
+        if (psym && emitProcedureReferenceLiteral(psym, chunk, line, arg_node)) {
+            return;
+        }
+    }
+
+    if (arg_node->type == AST_PROCEDURE_CALL &&
+        arg_node->child_count == 0 &&
+        arg_node->token &&
+        arg_node->token->value) {
+        Symbol* psym = resolveProcedureSymbolInScope(arg_node->token->value, arg_node, gCurrentProgramRoot);
+        if (psym && psym->bytecode_address < 0 && !procedureSymbolNeedsClosureLiteral(psym)) {
+            emitConstant(chunk, addStringConstant(chunk, psym->name ? psym->name : arg_node->token->value), line);
+            return;
+        }
+        if (psym && emitProcedureReferenceLiteral(psym, chunk, line, arg_node)) {
+            return;
+        }
+    }
+
+    compileRValue(arg_node, chunk, getLine(arg_node));
+}
+
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -5616,7 +5719,6 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     if (!chunk || chunk->count <= 0 || !chunk->code) {
         return;
     }
-
     const int original_count = chunk->count;
     uint8_t* original_code = chunk->code;
     int* original_lines = chunk->lines;
@@ -5975,12 +6077,34 @@ static void applyPeepholeOptimizations(BytecodeChunk* chunk) {
     for (int i = 0; i < address_constant_count; ++i) {
         int const_index = address_constant_entries[i].constant_index;
         if (const_index < 0 || const_index >= chunk->constants_count) continue;
-        int old_address = address_constant_entries[i].original_address;
-        if (old_address < 0) old_address = 0;
-        if (old_address > original_count) old_address = original_count;
-        int mapped = offset_map[old_address];
-        if (mapped < 0) mapped = offset_map[original_count];
-
+        int mapped = -1;
+        Symbol* target = resolveSymbolAlias(address_constant_entries[i].symbol_ref);
+        const char* symbol_name = address_constant_entries[i].symbol_name;
+        if ((!target || !target->is_defined || target->bytecode_address < 0) &&
+            symbol_name && procedure_table) {
+            target = hashTableLookup(procedure_table, symbol_name);
+            target = resolveSymbolAlias(target);
+        }
+        if (target) {
+            target = resolveSymbolAlias(target);
+        }
+        if (target && target->is_defined && target->bytecode_address >= 0) {
+            mapped = target->bytecode_address;
+        }
+        if (mapped < 0 && symbol_name && procedure_table) {
+            target = hashTableLookup(procedure_table, symbol_name);
+            target = resolveSymbolAlias(target);
+            if (target && target->is_defined && target->bytecode_address >= 0) {
+                mapped = target->bytecode_address;
+            }
+        }
+        if (mapped < 0) {
+            int old_address = address_constant_entries[i].original_address;
+            if (old_address < 0) old_address = 0;
+            if (old_address > original_count) old_address = original_count;
+            mapped = offset_map[old_address];
+            if (mapped < 0) mapped = offset_map[original_count];
+        }
         int element_index = address_constant_entries[i].element_index;
         if (element_index >= 0) {
             Value* array_const = &chunk->constants[const_index];
@@ -8990,7 +9114,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                         fprintf(stderr, "L%d: Compiler Error: CreateThread expects 1 or 2 arguments.\n", line);
                     }
                     if (node->child_count >= 1) {
-                        compileRValue(node->children[0], chunk, getLine(node->children[0])); // proc addr
+                        compileProcedureReferenceArgument(node->children[0], chunk, getLine(node->children[0]));
                     } else {
                         emitConstant(chunk, addIntConstant(chunk, 0), line); // push 0 as fallback addr
                     }
@@ -9356,10 +9480,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 const char* pname = node->left->token->value;
                 Symbol* psym = resolveProcedureSymbolInScope(pname, node, gCurrentProgramRoot);
                 if (psym) {
-                    if (closureLiteralEscapesCurrentRoutine(node)) {
-                        markClosureLiteralEscapes(psym);
-                    }
-                    if (!emitClosureLiteral(psym, chunk, line)) {
+                    if (!emitProcedureReferenceLiteral(psym, chunk, line, node)) {
                         break;
                     }
                     break;
@@ -9988,10 +10109,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             if (treat_as_literal) {
                 Symbol *closure_sym = resolveProcedureSymbolInScope(node->token->value, node, gCurrentProgramRoot);
                 if (closure_sym) {
-                    if (closureLiteralEscapesCurrentRoutine(node)) {
-                        markClosureLiteralEscapes(closure_sym);
-                    }
-                    if (!emitClosureLiteral(closure_sym, chunk, line)) {
+                    if (!emitProcedureReferenceLiteral(closure_sym, chunk, line, node)) {
                         emitConstant(chunk, addNilConstant(chunk), line);
                     }
                     break;
@@ -10009,7 +10127,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     fprintf(stderr, "L%d: Compiler Error: CreateThread expects 1 or 2 arguments.\n", line);
                 }
                 if (node->child_count >= 1) {
-                    compileRValue(node->children[0], chunk, getLine(node->children[0])); // proc addr
+                    compileProcedureReferenceArgument(node->children[0], chunk, getLine(node->children[0]));
                 } else {
                     emitConstant(chunk, addIntConstant(chunk, 0), line);
                 }
