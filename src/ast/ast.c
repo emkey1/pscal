@@ -1437,8 +1437,19 @@ resolved_field: ;
                              if (!formal || !actual) continue;
                              AST* ftype = resolveTypeAlias(formal->right);
                              if (ftype && ftype->type == AST_PROC_PTR_TYPE) {
+                                 const char* aname = NULL;
                                  if (actual->type == AST_ADDR_OF && actual->left && actual->left->token) {
-                                     const char* aname = actual->left->token->value;
+                                     aname = actual->left->token->value;
+                                 } else if (actual->type == AST_PROCEDURE_CALL &&
+                                            actual->child_count == 0 &&
+                                            actual->token && actual->token->value &&
+                                            actual->type_def &&
+                                            resolveTypeAlias(actual->type_def) &&
+                                            resolveTypeAlias(actual->type_def)->type == AST_PROC_PTR_TYPE) {
+                                     aname = actual->token->value;
+                                 }
+
+                                 if (aname) {
                                      Symbol* as = resolveProcedureSymbolInScope(aname, node, globalProgramNode);
                                      if (as && as->type_def) {
                                          verifyProcPointerAgainstDecl(ftype, as->type_def, aname, true);
@@ -1447,7 +1458,7 @@ resolved_field: ;
                                          pascal_semantic_error_count++;
                                      }
                                  } else {
-                                     fprintf(stderr, "Type error: expected '@proc' for procedure pointer argument.\n");
+                                     fprintf(stderr, "Type error: expected '@proc' or anonymous routine literal for procedure pointer argument.\n");
                                      pascal_semantic_error_count++;
                                  }
                              }

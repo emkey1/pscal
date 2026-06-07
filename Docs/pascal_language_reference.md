@@ -248,6 +248,22 @@ expression.
   capture outer-scope locals the same way other nested Pascal closures do.
   This form is currently supported only inside routines, not at top level, and
   only for `procedure ... begin ... end` bodies with no explicit parameter list.
+* **Anonymous routine literals:** As an extension, expression context may use
+  anonymous `function` or `procedure` literals where a procedure-pointer or
+  function-pointer value is expected:
+  ```pascal
+  Result := function(delta: integer): integer;
+  begin
+    Result := base + delta;
+  end;
+  ```
+  These literals are lowered to generated nested routines and therefore share
+  the same closure-capture semantics as named nested routines. They are
+  currently supported only inside routines, not at top level.
+  For compatibility, the parser also accepts Pascal `expr:width[:precision]`
+  items inside `Format(..., [ ... ])` open-array argument lists. In that
+  context the formatting still comes from the format string itself, so the
+  underlying value is passed through unchanged.
 * **Label declarations:** `label StartPoint, Retry1;` — must appear before the first statement inside a routine or block.
 * **`goto` Statements:** `goto StartPoint;` jumps to a label declared in the current routine.
 
@@ -471,6 +487,10 @@ Nested closures (`Next`) capture lexical variables (`current`) even after the
 factory returns.  When you cast a pointer to an interface (`IRunnable(runner)`),
 the runtime boxes the record and its vtable, giving you Go-style method sets
 without introducing new syntax.
+
+For a practical guide focused on closure escape, anonymous routine literals,
+`myself`, proc/function pointers, and interface boxing, see
+[`pascal_closures_for_dummies.md`](pascal_closures_for_dummies.md).
 * **`array`:**
     ```pascal
     type

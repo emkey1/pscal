@@ -9,6 +9,8 @@ Start here to explore the available guides and references in this directory.
 ## Pascal front end
 - [pascal_overview.md](pascal_overview.md): architecture and language features of the Pascal-style compiler.
 - [pascal_language_reference.md](pascal_language_reference.md): full specification of the Pascal-like language.
+- [pascal_closures_for_dummies.md](pascal_closures_for_dummies.md): practical guide to closures, function pointers, interface boxing, and current receiver rules.
+- [go_style_closure_interface_demo.md](go_style_closure_interface_demo.md): walkthrough of PSCAL's composition-first record/interface model and how closures fit into it.
 
 ## C-like front end
 - [clike_overview.md](clike_overview.md): semantics and capabilities of the compact C-style language.

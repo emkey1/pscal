@@ -1,106 +1,254 @@
 # GoStyleClosureInterfaceDemo Walkthrough
 
-The `Examples/pascal/base/GoStyleClosureInterfaceDemo` sample illustrates two advanced Pascal front-end features in PSCAL:
+The `Examples/pascal/base/GoStyleClosureInterfaceDemo` sample still shows the
+core PSCAL idea set clearly:
 
-* **Go-style closures that capture state and escape their defining scope.**
-* **Interface values that box a record pointer together with its virtual method table.**
+* closure values can capture state and escape their defining scope
+* interface values box a record receiver together with virtual dispatch metadata
+* records, not classes, are the primary OO building block
 
-This walkthrough dissects the program step by step so you can see how these features interact.
+Since that sample was first written, the Pascal front end has gained a few
+extensions that sharpen the same design direction. This walkthrough explains
+the original sample and then maps it onto the newer features.
 
-## Key types and declarations
+## Core idea
+
+The sample builds a concrete record that stores:
+
+* ordinary record state such as a label
+* a closure field that advances an internal counter
+* a virtual method used through an interface
+
+That is the basic PSCAL "Go-style OO" model:
+
+* concrete behavior lives in records
+* stateful callbacks are closures
+* polymorphism happens through interfaces
+* composition is preferred over class syntax
+
+## Key declarations
 
 ```pascal
 TCounterFactory = function: integer;
+
 IRunnable = interface
-    procedure Run;
+  procedure Run;
 end;
+
 TClosureRunner = record
-    labelText: string;
-    nextValue: TCounterFactory;
-    procedure Run; virtual;
+  labelText: string;
+  nextValue: TCounterFactory;
+  procedure Run; virtual;
 end;
 ```
 
-* `TCounterFactory` is a function type alias. Instances of this type are closure values that return an `integer` on each invocation.
-* `IRunnable` is a single-method interface used to expose a `Run` operation without exposing implementation details.
-* `TClosureRunner` is a record with a virtual `Run` method. In the Pascal front end, records with virtual methods carry a hidden self pointer (`myself`) when invoked via an interface, similar to Go method sets. Its fields store a label and the closure that produces the next counter value.
+What each part means:
 
-## The closure factory
+* `TCounterFactory` is a function-pointer type. Values of this type may be
+  plain function pointers or capturing closure values.
+* `IRunnable` exposes only behavior. Code using the interface does not need to
+  know how the record stores its state.
+* `TClosureRunner` is a concrete record with a virtual `Run` method and a
+  stored closure field.
 
-`MakeRunner` builds an `IRunnable` backed by a heap-allocated `TClosureRunner` record:
+## Closure factory
+
+The sample's factory returns an `IRunnable` backed by a heap-allocated record:
 
 ```pascal
 function MakeRunner(const name: string; start, step: integer): IRunnable;
 var
-    current: integer;
-    runner: ^TClosureRunner;
+  current: integer;
+  runner: ^TClosureRunner;
 
-    function Next: integer;
-    begin
-        current := current + step;
-        Next := current;
-    end;
+  function Next: integer;
+  begin
+    current := current + step;
+    Next := current;
+  end;
 begin
-    new(runner);
-    current := start;
-    runner^.labelText := name;
-    runner^.nextValue := @Next;
-    MakeRunner := IRunnable(runner);
+  new(runner);
+  current := start;
+  runner^.labelText := name;
+  runner^.nextValue := @Next;
+  MakeRunner := IRunnable(runner);
 end;
 ```
 
-* `current` lives on `MakeRunner`'s stack frame, but the nested `Next` function forms a closure over it. When `MakeRunner` returns, the Pascal front end hoists `current` into heap storage so the closure can outlive the factory call.
-* `Next` is assigned to `runner^.nextValue` as a `TCounterFactory`. Each invocation mutates the captured `current` and returns the updated count.
-* `new(runner)` allocates `TClosureRunner` on the heap. Casting the pointer to `IRunnable` boxes both the pointer and the record’s vtable, mirroring Go’s interface boxing semantics.
+Important points:
 
-## Virtual dispatch via the interface
+* `Next` captures `current` and `step`.
+* assigning `@Next` to `runner^.nextValue` allows that nested function to
+  escape the factory scope
+* the compiler preserves the captured state so later calls still mutate the
+  same `current`
+* casting `runner` to `IRunnable` boxes the receiver pointer and method table
 
-`TClosureRunner.Run` uses the Pascal front end's implicit `myself` pointer (the interface receiver) to reach the boxed record:
+This is still the canonical pattern when you want a named nested routine to
+escape.
+
+## Virtual dispatch and `myself`
+
+The sample's virtual method uses the receiver pointer supplied by the runtime:
 
 ```pascal
 procedure TClosureRunner.Run;
 var
-    value: integer;
-    runner: ^TClosureRunner;
-    next: TCounterFactory;
+  value: integer;
+  runner: ^TClosureRunner;
+  next: TCounterFactory;
 begin
-    runner := myself;
-    next := runner^.nextValue;
-    value := next();
-    writeln(runner^.labelText, ' tick=', value);
+  runner := myself;
+  next := runner^.nextValue;
+  value := next();
+  writeln(runner^.labelText, ' tick=', value);
 end;
 ```
 
-* `myself` resolves to the `TClosureRunner` instance that lives behind the interface value.
-* The stored `TCounterFactory` closure is invoked to advance the counter and fetch the next integer.
-* The result is printed alongside the runner’s label, demonstrating that the record state (`labelText`) and the closure state (`current`) travel together through the interface indirection.
+In PSCAL record methods, the implicit receiver is `myself`. That is the current
+front-end convention; `Self` is not the receiver keyword here.
 
-## Program flow
+The method demonstrates two independent state channels:
 
-The main block wires everything together:
+* record state, accessed through `runner^.labelText`
+* closure state, accessed by calling `runner^.nextValue`
+
+## What newer PSCAL supports now
+
+The sample predates several useful extensions. They fit the same overall
+philosophy rather than changing it.
+
+### Embedded record composition
+
+Records may now embed one base record with `inherit`:
+
+```pascal
+type
+  TRunnerBase = record
+    labelText: string;
+    procedure Run; virtual;
+  end;
+
+  TCounterRunner = record
+    inherit TRunnerBase;
+    nextValue: TCounterFactory;
+  end;
+```
+
+This is composition-oriented record embedding, not class inheritance. The base
+record occupies the leading storage and its fields/methods are promoted onto
+the derived record.
+
+That means the closure/interface demo could now be factored into a reusable
+base record plus a specialized embedded record without introducing `class` or
+`object`.
+
+### Anonymous routine literals inside routines
+
+In addition to named nested closures like `@Next`, PSCAL now accepts anonymous
+routine literals in expression position inside routines:
+
+```pascal
+nextValue := function: integer;
+begin
+  current := current + step;
+  Result := current;
+end;
+```
+
+or with parameters:
+
+```pascal
+transform := function(delta: integer): integer;
+begin
+  Result := base + delta;
+end;
+```
+
+These literals are lowered to generated nested routines and use the same
+closure-capture machinery as named nested routines.
+
+For the sample's specific shape, both of these are now valid styles:
+
+```pascal
+runner^.nextValue := @Next;
+```
+
+and
+
+```pascal
+runner^.nextValue := function: integer;
+begin
+  current := current + step;
+  Result := current;
+end;
+```
+
+The named form remains a good choice when the logic is reused or when you want
+clearer debugging symbols. The anonymous form is better when the callback is
+truly local and single-use.
+
+### Threading-related closure shorthand
+
+Inside routines, `spawn(procedure begin ... end)` is also accepted as a
+parameterless anonymous-procedure shorthand. That feature is adjacent to this
+demo's closure model: it uses the same nested-routine lowering strategy, but
+targets thread launch instead of proc-pointer storage.
+
+When arguments must be passed to the thread entry, prefer:
+
+```pascal
+t := CreateThread(@Worker, argPtr);
+```
+
+rather than `spawn(...)`.
+
+## Updated mental model
+
+The current PSCAL model is best understood this way:
+
+* use plain `record`s for concrete state and behavior
+* use `virtual` methods when a record must satisfy an interface
+* use `myself` inside record methods to access the active receiver
+* use nested routines or anonymous routine literals when behavior must capture
+  local state
+* use `inherit BaseRecord;` when you want promoted embedded composition
+* use interfaces when callers should depend on behavior rather than layout
+
+That gives you something closer to Go's combination of:
+
+* concrete structs
+* method sets
+* interface values
+* closure-based callbacks
+
+than to Delphi's `class` hierarchy model.
+
+## Program flow in the original sample
+
+The main block is still useful because it shows the behavioral payoff:
 
 ```pascal
 fast := MakeRunner('fast', 0, 2);
 slow := MakeRunner('slow', 10, -1);
 
 for i := 1 to 3 do
-    fast.Run;
+  fast.Run;
 
 slow.Run;
 fast.Run;
 slow.Run;
 ```
 
-1. `fast` is a counter starting at `0` and incrementing by `2` each time `Run` is called.
-2. `slow` starts at `10` and decrements by `1` each time.
-3. The `for` loop drives `fast` three times, showing the closure retains its mutable state across calls.
-4. Subsequent alternating calls demonstrate that each boxed runner maintains its own independent captured `current` value.
+This confirms:
+
+* each boxed interface value dispatches to the correct record instance
+* each stored closure retains its own captured state
+* record state and closure state travel together cleanly through interface use
 
 ## Sample output
 
-Running the program prints interleaved ticks that reflect the per-runner state:
-
-```
+```text
 fast tick=2
 fast tick=4
 fast tick=6
@@ -109,8 +257,23 @@ fast tick=8
 slow tick=8
 ```
 
-The sequence confirms that:
+The output demonstrates that:
 
-* Each `Run` call dispatches through the `IRunnable` interface into the correct record instance.
-* The closures created inside `MakeRunner` continue to mutate their captured `current` even after the factory returns.
-* Distinct interface values (`fast` and `slow`) encapsulate separate heaps of state while sharing a common implementation.
+* interface dispatch resolves the correct `Run` implementation
+* the `fast` and `slow` runners keep separate closure state
+* the closure value remains valid after the factory returns
+
+## Recommended style going forward
+
+For new PSCAL code in this design family:
+
+* prefer records plus interfaces over inventing class-like syntax
+* prefer embedded records with `inherit` when you want promoted shared state or
+  helper behavior
+* prefer anonymous routine literals for short callback construction
+* prefer named nested routines when the closure is conceptually reusable or
+  deserves a real name
+* keep `myself`-based receiver logic explicit in record methods
+
+That keeps the language aligned with its current strengths and with the
+long-term composition-first direction.

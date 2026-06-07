@@ -18,7 +18,7 @@ Pscal implements a substantial subset of classic Pascal:
 * **Operators** – arithmetic/logic expressions plus compound assignments (`+=`, `-=`) that expand to in-place addition or subtraction.
 * **Subroutines** – functions and procedures with local variables and parameters.
 * **Units** – separate compilation modules that export types, variables and routines.
-* **Targeted syntax extensions** – Delphi-style `for var i := ...`, record-field `for rec.field := ... do` loop control variables, implicit multi-statement `case` branches without mandatory `begin ... end`, and `inherit BaseRecord;` record embedding with promoted base fields and methods.
+* **Targeted syntax extensions** – Delphi-style `for var i := ...`, record-field `for rec.field := ... do` loop control variables, implicit multi-statement `case` branches without mandatory `begin ... end`, `inherit BaseRecord;` record embedding with promoted base fields and methods, and anonymous `function`/`procedure` literals inside routines for closure-style callback construction.
 * **Threading and Synchronization** – `spawn` starts a parameterless procedure in a new thread and returns its id; `join` waits for that thread to finish. The front end also accepts `spawn(procedure begin ... end)` as a parameterless anonymous-procedure shorthand inside routines, reusing the same closure-capture machinery as nested procedures. Prefer `CreateThread(@Proc, arg)` and `WaitForThread(t)` when you need to pass a pointer argument; `WaitForThread` returns `0` on success and clears the stored status so idle workers can be reused immediately. The `Threading` unit adds helpers such as `ThreadOptionsNamed('worker')`, `SpawnBuiltinNamed('delay', 'worker')`, and `PoolSubmitNamed('delay', 'queue')` so Pascal code can forward names or queue-only flags to `ThreadSpawnBuiltin`/`ThreadPoolSubmit`, alongside simple wrappers like `ThreadStatsCount` or `ThreadStatusOk` for asynchronous monitoring. `mutex` and `rcmutex` create standard or recursive mutexes and return ids, while `lock`, `unlock`, and `destroy` manage their lifecycle.
 
 Examples
@@ -34,6 +34,12 @@ Examples
 - `Examples/pascal/base/ClosureEscapingWorkaround` shows how to enqueue
   stateful callbacks safely by boxing the payload on the heap and passing it to
   a global handler instead of capturing local variables.
+- `Docs/pascal_closures_for_dummies.md` collects the current closure rules,
+  anonymous routine literal support, receiver conventions, and interface/record
+  interaction in one practical guide.
+- `Docs/go_style_closure_interface_demo.md` explains how closures, embedded
+  records, `myself`, and interface boxing fit PSCAL's composition-first OO
+  direction.
 
 Example programs: (Examples in this document can be found in Examples/Pascal/base/docs_examples)
 
@@ -274,3 +280,6 @@ Pscal offers a Pascal environment with a modular architecture, a rich set of bui
 
 For a complete language specification, see
 [`pascal_language_reference.md`](pascal_language_reference.md).
+For closure-heavy or interface-heavy Pascal code, see
+[`pascal_closures_for_dummies.md`](pascal_closures_for_dummies.md) and
+[`go_style_closure_interface_demo.md`](go_style_closure_interface_demo.md).

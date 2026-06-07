@@ -1,42 +1,42 @@
 # Closures (and Friends) for PSCAL Pascal Developers
 
-Welcome! This guide explains how the Pascal front end now supports Go-style closures and interface payloads without making you wade through compiler internals. If you just want to return nested routines, stash them in records, or pass them around via interfaces, start here.
+This is the practical guide to PSCAL Pascal closures, function/procedure
+pointers, interface boxing, and the newer composition-oriented record features.
+If you want to know what actually works today, start here.
 
-## What Changed?
+## Short version
 
-1. **Semantic analysis records which nested routines capture locals _and_ escape.** Instead of failing immediately, the compiler tags those routines so later stages can allocate closure environments.【F:src/Pascal/semantic.c†L207-L289】
-2. **Closure values are real heap-backed objects.** When you take `@NestedProc`, the compiler emits a host call that bundles the procedure entry point together with boxed copies (or references) of the captured locals.【F:src/compiler/compiler.c†L960-L1003】【F:src/core/utils.c†L1117-L1182】
-3. **The VM understands closures and interfaces.** `vmHostCreateClosure` assembles the capture payload, while interface casts rely on `vmHostBoxInterface`, dispatch through `vmHostInterfaceLookup`, and assert concrete types via `vmHostInterfaceAssert`.【F:src/vm/vm.c†L2681-L3325】
+PSCAL Pascal now supports all of these patterns inside routines:
 
-Taken together, nested routines can finally outlive their defining scope, and interface values no longer require hand-written record wrappers.
+* returning a nested routine as a closure
+* storing closures in globals, records, and interface-backed objects
+* using anonymous `function ... begin ... end` and `procedure ... begin ... end`
+  literals in expression context
+* spawning parameterless anonymous procedures with `spawn(procedure ... end)`
+* composing records with `inherit BaseRecord;`
 
-## Captures, Escapes, and Boxing Explained
+The mental model is:
 
-- During semantic analysis the compiler records each captured slot’s index and whether it was passed by reference. Escaping routines are marked so code generation knows to build a heap environment rather than relying on the caller’s stack.【F:src/Pascal/semantic.c†L207-L324】
-- At runtime a closure environment is just a tiny struct: a refcount, a slot array, and a pointer back to the routine’s symbol so the VM can respect which captures were by-reference.【F:src/core/utils.c†L1117-L1167】
-- When the closure is created the VM pops each captured value. `VAR` parameters stay as shared pointers, while normal locals are copied into freshly allocated heap cells so they remain valid after the parent returns.【F:src/vm/vm.c†L2681-L2755】
+* a nested routine that captures outer locals becomes a heap-backed closure
+* a record with `virtual` methods can be boxed behind an interface
+* `myself` is the implicit receiver inside record methods
+* embedded records are promoted composition, not `class` inheritance
 
-### Practical takeaway
-You can now safely return or store nested routines that touch outer-scope variables. The environment lives on the heap and is reference counted, so multiple closures can share the same captured data without leaks.
+## The two closure styles
 
-## Quick Demo
+PSCAL supports both named nested closures and anonymous routine literals.
 
-For a compact walkthrough, see `Examples/pascal/base/docs_examples/GoStyleClosureInterfaceDemo`.
-It returns a nested function that captures its local counter, stores the resulting
-closure inside a record, and boxes that record behind an interface. Each call goes
-through the interface method, unpacks the receiver, and invokes the captured
-closure so the counter keeps advancing even after the factory routine has exited.
-During dispatch the VM now seeds the implicit `myself` pointer, letting the record
-method reach its own fields without any extra scaffolding.
+### Named nested closure
 
-## Everyday Closure Patterns
-
-### Returning a Counter Function
 ```pascal
-function MakeCounter(start: integer): function(): integer;
+type
+  TStep = function(): Integer;
+
+function MakeCounter(start: Integer): TStep;
 var
-  value: integer;
-  function Next: integer;
+  value: Integer;
+
+  function Next: Integer;
   begin
     value := value + 1;
     Next := value;
@@ -46,79 +46,334 @@ begin
   MakeCounter := @Next;
 end;
 ```
-The nested `Next` procedure captures `value`. When `MakeCounter` returns, the compiler emits a closure that keeps `value` alive. You can store and call it later—even in global variables or records.【F:Tests/compiler/pascal/cases/closure_capturing_store_return.pas†L1-L35】
 
-### Storing Closures in Globals or Records
-```
-var
-  Stored: function(): integer;
+Use this when the callback deserves a real name or when the body is large
+enough that a named helper reads better.
 
-Stored := MakeCounter(2);
-writeln(Stored()); // prints 3 on the first call
-```
-Because the closure owns its environment, using it after `MakeCounter` has returned is safe and produces the expected sequence.【F:Tests/compiler/pascal/cases/closure_capturing_store_return.pas†L19-L34】
-
-### Limitations to Remember
-- **Threads now retain closure environments.** `CreateThread` accepts capturing closures, keeps their environments alive until the worker finishes, and releases them automatically; the `Threading` unit’s `SpawnProcedure` helper lets Pascal code forward nested routines without building custom payload records. The guard inside `vmHostCreateThreadAddr` enforces that callers pass a closure or procedure pointer, retaining the environment until the job is queued.【F:src/vm/vm.c†L2589-L2678】【F:lib/pascal/threading.pl†L11-L61】
-- **Global scope cannot host capturing closures.** Attempting to take the address of a capturing routine declared at the top level still produces a compiler error.【F:src/compiler/compiler.c†L965-L1003】
-
-## Interface Payloads Without Boilerplate
-
-Casting a record pointer to an interface now boxes two things for you: the receiver pointer and its method table. Calls through the interface push the receiver back on the stack and jump via the stored address, mirroring Go’s interface dispatch model.【F:src/compiler/compiler.c†L8000-L8066】【F:src/vm/vm.c†L2990-L3247】
-
-### Example Flow
-1. The compiler emits `CALL_HOST HOST_FN_BOX_INTERFACE`, providing the vtable pointer, receiver pointer, and the interface type name.【F:src/compiler/compiler.c†L8000-L8066】
-2. `vmHostBoxInterface` builds a closure-style payload with slots for the receiver, method table, and lowered class identity.【F:src/vm/vm.c†L2990-L3126】
-3. When you invoke `iface.Log('hi')`, `vmHostInterfaceLookup` unpacks the payload, fetches the right method entry, pushes the receiver, and performs an indirect call using the stored address.【F:src/vm/vm.c†L3129-L3247】
-
-The net effect: you can assign different concrete records to the same interface variable without hand-writing glue code.
-
-### Go-Style Interface Roundtrip
-
-The compiler emits the interface boxing helper automatically—you can return a record value, assign it to an interface, and call methods with no boilerplate:
+### Anonymous routine literal
 
 ```pascal
-program GoInterfaceDemo;
-
 type
-  Logger = interface
-    procedure Log(const msg: string);
+  TStep = function(delta: Integer): Integer;
+
+function MakeAdder(base: Integer): TStep;
+begin
+  Result := function(delta: Integer): Integer;
+  begin
+    Result := base + delta;
   end;
-
-type
-  ConsoleLogger = record
-    tag: string;
-    procedure Log(const msg: string);
-  end;
-
-procedure ConsoleLogger.Log(const msg: string);
-begin
-  writeln(tag, ': ', msg);
 end;
-
-function MakeLogger(const tag: string): Logger;
-var
-  inst: ConsoleLogger;
-begin
-  inst.tag := tag;
-  MakeLogger := inst;
-end;
-
-var L: Logger;
-begin
-  L := MakeLogger('demo');
-  L.Log('hello world');
-end.
 ```
-No pointer aliases or `virtual` annotations required—the boxing flow described above kicks in automatically whenever a record is assigned to an interface.
 
-## Debugging Tips
-- If a closure crashes when invoked, check the capture count mismatch error—the VM reports when the emitted metadata and runtime payload disagree.【F:src/vm/vm.c†L2724-L2755】
-- Use the bytecode disassembler to confirm the closure host calls are present; `CALL_HOST HOST_FN_CREATE_CLOSURE` will appear right after the captured values are pushed.【F:src/compiler/compiler.c†L994-L1003】
-- Interfaces rely on the method table exported from your record’s virtual declarations. Missing or empty tables trigger the “Interface method table is not an array” runtime guard inside `vmHostInterfaceLookup`.【F:src/vm/vm.c†L3179-L3243】
+Use this when the callback is single-use and tightly local to the surrounding
+routine.
 
-## Where to Experiment Next
-- The `Examples/pascal/base/ClosureEscapingWorkaround` demo still compiles, but you can now simplify it by returning the nested handlers directly.
-- Try building a small task scheduler that stores closures in a queue, or define a `Runnable` interface and box different record implementations—the runtime already handles the plumbing.
+Anonymous routine literals are currently supported only inside routines, not at
+top level.
 
-Happy hacking!
+## What counts as a closure?
+
+A routine is a closure when it captures something from an outer routine, for
+example:
+
+* a local variable
+* a parameter
+* a `var` parameter
+
+Example:
+
+```pascal
+function MakeAccumulator(start: Integer): function(x: Integer): Integer;
+var
+  total: Integer;
+begin
+  total := start;
+  Result := function(x: Integer): Integer;
+  begin
+    total := total + x;
+    Result := total;
+  end;
+end;
+```
+
+`total` outlives `MakeAccumulator`, so PSCAL moves the captured state into a
+heap-managed closure environment.
+
+## What actually happens under the hood
+
+You do not need to memorize compiler internals, but the behavior is easier to
+trust if you know the high-level flow:
+
+1. semantic analysis records which nested routines capture outer locals
+2. escaping routines are marked so code generation emits closure construction
+3. the VM allocates a closure environment and retains it while references exist
+4. by-reference captures stay shared; plain value captures are boxed
+
+Practical result:
+
+* you can safely return a capturing routine
+* you can safely store it in a record field or global
+* multiple closures can share the same captured state when appropriate
+
+## The receiver rule: `myself`
+
+Inside PSCAL record methods, the implicit receiver is `myself`, not `Self`.
+
+Example:
+
+```pascal
+type
+  PRunner = ^TRunner;
+  TRunner = record
+    labelText: String;
+    procedure Print; virtual;
+  end;
+
+procedure TRunner.Print;
+var
+  runner: PRunner;
+begin
+  runner := myself;
+  Writeln(runner^.labelText);
+end;
+```
+
+This matters for closure-heavy OO code because interface calls seed `myself`
+before dispatch.
+
+## Closures inside records
+
+This is the core PSCAL pattern for Go-style stateful behavior:
+
+```pascal
+type
+  TCounterFactory = function(): Integer;
+
+  TClosureRunner = record
+    labelText: String;
+    nextValue: TCounterFactory;
+    procedure Run; virtual;
+  end;
+
+procedure TClosureRunner.Run;
+var
+  runner: ^TClosureRunner;
+begin
+  runner := myself;
+  Writeln(runner^.labelText, ' tick=', runner^.nextValue());
+end;
+```
+
+You can populate `nextValue` with either:
+
+* `@NamedNestedRoutine`
+* an anonymous function literal
+
+Both are valid closure values.
+
+## Interfaces and closures fit together
+
+A common PSCAL design is:
+
+* build a concrete record
+* store closures in its fields
+* expose only an interface
+
+Example shape:
+
+```pascal
+type
+  IRunnable = interface
+    procedure Run;
+  end;
+
+  TRunner = record
+    labelText: String;
+    nextValue: function(): Integer;
+    procedure Run; virtual;
+  end;
+```
+
+Then:
+
+```pascal
+runner^.nextValue := function: Integer;
+begin
+  current := current + 1;
+  Result := current;
+end;
+
+iface := IRunnable(runner);
+```
+
+The interface boxes:
+
+* the receiver pointer
+* the record’s dispatch metadata
+
+The closure field keeps its own captured environment. So record state and
+closure state move together cleanly.
+
+## Embedded-record composition
+
+PSCAL now supports:
+
+```pascal
+type
+  TRunnerBase = record
+    labelText: String;
+    procedure Run; virtual;
+  end;
+
+  TCounterRunner = record
+    inherit TRunnerBase;
+    nextValue: function(): Integer;
+  end;
+```
+
+This is the preferred reuse story for PSCAL OO code:
+
+* plain records
+* one embedded base record
+* promoted base fields and methods
+* interfaces for abstraction
+
+This is not `class` inheritance. Think Go embedding, not Delphi `class`.
+
+## Thread-related closure support
+
+There are two separate threading stories:
+
+### `spawn(procedure begin ... end)`
+
+Valid inside routines for parameterless anonymous procedures:
+
+```pascal
+tid := spawn(procedure
+             begin
+               counter := counter + 1;
+             end);
+```
+
+This is convenient for short fire-and-forget work that captures outer locals.
+
+### `CreateThread(@Proc, arg)`
+
+Use this when the worker needs an explicit pointer argument:
+
+```pascal
+t := CreateThread(@Worker, payloadPtr);
+WaitForThread(t);
+```
+
+Prefer this form for classic worker-entry APIs and explicit payload passing.
+
+## Patterns that work well
+
+### Returning a closure
+
+```pascal
+counter := MakeCounter(10);
+Writeln(counter());
+Writeln(counter());
+```
+
+### Storing a closure in a global
+
+```pascal
+var
+  Stored: function(): Integer;
+
+Stored := MakeCounter(2);
+Writeln(Stored());
+```
+
+### Passing an anonymous function as a callback
+
+```pascal
+UseAdder('inline=', function(delta: Integer): Integer;
+                    begin
+                      Result := delta * 2;
+                    end);
+```
+
+### Boxing a closure-backed record behind an interface
+
+```pascal
+runner^.nextValue := @Next;
+iface := IRunnable(runner);
+iface.Run;
+```
+
+## Common mistakes
+
+### Using `Self` instead of `myself`
+
+Wrong:
+
+```pascal
+selfPtr := @Self;
+```
+
+Right:
+
+```pascal
+selfPtr := myself;
+```
+
+### Forgetting that top-level anonymous routine literals are not supported
+
+This works only inside routines:
+
+```pascal
+Result := function: Integer;
+begin
+  Result := 42;
+end;
+```
+
+### Mixing type syntax and value syntax
+
+Wrong:
+
+```pascal
+destroy(sensor as TBaseSensor.fMutex);
+```
+
+Right:
+
+```pascal
+destroy((sensor as TBaseSensor).fMutex);
+```
+
+### Treating embedded-record composition like `class` inheritance
+
+`inherit BaseRecord;` promotes a base record’s fields and methods. It does not
+turn PSCAL records into Delphi classes.
+
+## Limits to remember
+
+Current limitations worth knowing:
+
+* anonymous routine literals are routine-local only
+* `spawn(procedure ... end)` is procedure-only and parameterless
+* embedded records currently allow one base record
+* global-scope capturing closures are still rejected
+
+## Recommended style
+
+For new PSCAL Pascal code:
+
+* use named nested routines when the callback has conceptual weight
+* use anonymous routine literals when the callback is small and local
+* use `myself` explicitly in record methods
+* use `inherit BaseRecord;` for shared record behavior/state
+* use interfaces when callers should depend on behavior instead of layout
+
+## Where to read next
+
+* [go_style_closure_interface_demo.md](go_style_closure_interface_demo.md)
+  for the composition/interface walkthrough
+* [pascal_language_reference.md](pascal_language_reference.md) for the complete
+  Pascal syntax reference
+* [pascal_overview.md](pascal_overview.md) for the broad language/runtime tour

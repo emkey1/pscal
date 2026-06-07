@@ -80,6 +80,7 @@ static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const 
 static AST *parseStatementListUntilEither(Parser *parser, TokenType terminatorA, TokenType terminatorB, const char *contextName);
 static AST *tryStatement(Parser *parser);
 static AST *parseAnonymousSpawnProcedure(Parser *parser);
+static AST *parseAnonymousRoutineLiteral(Parser *parser);
 static AST *raiseStatement(Parser *parser);
 static AST *withStatement(Parser *parser);
 static AST *parsePostfixSelectors(Parser *parser, AST *node);
@@ -4226,14 +4227,14 @@ AST *forStatement(Parser *parser) {
 
     AST *decl = newASTNode(AST_VAR_DECL, NULL);
     addChild(decl, decl_name);
+    setRight(decl, decl_type);
+    decl->var_type = decl_type->var_type;
     setTypeAST(lvn, decl_type->var_type);
     if (lvn->type_def) {
         freeAST(lvn->type_def);
         lvn->type_def = NULL;
     }
     lvn->type_def = copyAST(decl_type);
-    setRight(decl, decl_type);
-    decl->var_type = decl_type->var_type;
     addChild(n, decl);
     return n;
 }
@@ -4410,6 +4411,140 @@ static AST *parseAnonymousSpawnProcedure(Parser *parser) {
     AST *call = newASTNode(AST_PROCEDURE_CALL, node->token);
     return call;
 }
+
+static AST *parseAnonymousRoutineLiteral(Parser *parser) {
+    static unsigned anonymous_routine_counter = 1;
+
+    if (!parser || !parser->current_token ||
+        (parser->current_token->type != TOKEN_FUNCTION &&
+         parser->current_token->type != TOKEN_PROCEDURE)) {
+        errorParser(parser, "Expected FUNCTION or PROCEDURE for anonymous routine literal");
+        return NULL;
+    }
+
+    if (!parser->current_routine) {
+        errorParser(parser, "Anonymous routine literals are only supported inside routines");
+        return NULL;
+    }
+
+    AST *declarationsNode = parserCurrentRoutineDeclarations(parser);
+    if (!declarationsNode) {
+        errorParser(parser, "Internal error: current routine missing declaration list for anonymous routine literal");
+        return NULL;
+    }
+
+    bool isFunction = parser->current_token->type == TOKEN_FUNCTION;
+    int line = parser->current_token->line;
+    int column = parser->current_token->column;
+    eat(parser, parser->current_token->type);
+
+    char generatedName[64];
+    snprintf(generatedName, sizeof(generatedName), "__anon_%u", anonymous_routine_counter++);
+    Token *nameToken = newToken(TOKEN_IDENTIFIER, generatedName, line, column);
+    if (!nameToken) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    AST *node = newASTNode(isFunction ? AST_FUNCTION_DECL : AST_PROCEDURE_DECL, nameToken);
+    freeToken(nameToken);
+    if (!node) {
+        EXIT_FAILURE_HANDLER();
+    }
+    setTypeAST(node, isFunction ? TYPE_UNKNOWN : TYPE_VOID);
+
+    AST *params = NULL;
+    if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
+        eat(parser, TOKEN_LPAREN);
+        if (parser->current_token && parser->current_token->type != TOKEN_RPAREN) {
+            params = paramList(parser);
+        }
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ')' to close anonymous routine parameter list");
+            if (params) freeAST(params);
+            freeAST(node);
+            return NULL;
+        }
+        eat(parser, TOKEN_RPAREN);
+    }
+
+    if (params) {
+        adoptRoutineParameters(node, params);
+    }
+
+    if (isFunction) {
+        if (!parser->current_token || parser->current_token->type != TOKEN_COLON) {
+            errorParser(parser, "Expected ':' and return type for anonymous function literal");
+            freeAST(node);
+            return NULL;
+        }
+        eat(parser, TOKEN_COLON);
+
+        AST *returnType = typeSpecifier(parser, 0);
+        if (!returnType || returnType->type == AST_NOOP) {
+            errorParser(parser, "Invalid return type for anonymous function literal");
+            if (returnType) freeAST(returnType);
+            freeAST(node);
+            return NULL;
+        }
+        setRight(node, returnType);
+        node->var_type = returnType->var_type;
+    }
+
+    if (!parser->current_token || parser->current_token->type != TOKEN_SEMICOLON) {
+        errorParser(parser, "Expected ';' after anonymous routine literal header");
+        freeAST(node);
+        return NULL;
+    }
+    eat(parser, TOKEN_SEMICOLON);
+
+    HashTable *outer_table = current_procedure_table;
+    HashTable *my_table = pushProcedureTable();
+    AST *saved_routine = parser->current_routine;
+    parser->current_routine = node;
+    parser->routine_depth++;
+
+    AST *local_declarations = declarations(parser, false);
+    AST *blockNode = newASTNode(AST_BLOCK, NULL);
+    addChild(blockNode, local_declarations);
+    blockNode->is_global_scope = false;
+    if (isFunction) {
+        setExtra(node, blockNode);
+    } else {
+        setRight(node, blockNode);
+    }
+    AST *compound_body = compoundStatement(parser);
+    addChild(blockNode, compound_body);
+
+    parser->routine_depth--;
+    parser->current_routine = saved_routine;
+    node->symbol_table = (Symbol*)my_table;
+    popProcedureTable(false);
+
+    addChild(declarationsNode, node);
+    addProcedure(parser, node, parser->current_unit_name_context, outer_table);
+
+    AST *literalType = newASTNode(AST_PROC_PTR_TYPE, node->token);
+    setTypeAST(literalType, TYPE_POINTER);
+    if (node->child_count > 0) {
+        AST *paramListCopy = newASTNode(AST_LIST, NULL);
+        for (int i = 0; i < node->child_count; i++) {
+            AST *paramCopy = copyAST(node->children[i]);
+            if (!paramCopy) {
+                EXIT_FAILURE_HANDLER();
+            }
+            addChild(paramListCopy, paramCopy);
+        }
+        addChild(literalType, paramListCopy);
+    }
+    if (isFunction && node->right) {
+        setRight(literalType, copyAST(node->right));
+    }
+
+    AST *literalNode = newASTNode(AST_PROCEDURE_CALL, node->token);
+    setTypeAST(literalNode, TYPE_POINTER);
+    literalNode->type_def = literalType;
+    return literalNode;
+}
 // exprList: Calls expression
 AST *exprList(Parser *parser) {
     AST *node=newASTNode(AST_COMPOUND,NULL);
@@ -4431,7 +4566,7 @@ AST *parseSetConstructor(Parser *parser) {
     AST *sn=newASTNode(AST_SET,NULL); setTypeAST(sn,TYPE_SET);
     if(parser->current_token && parser->current_token->type!=TOKEN_RBRACKET){
         while(1){
-            AST* el=expression(parser); // <<< Use expression()
+            AST* el=parseWriteArgument(parser);
             if(!el||el->type==AST_NOOP){errorParser(parser,"Bad set elem"); break;}
             // Runtime checks ordinal compatibility
             if(parser->current_token && parser->current_token->type==TOKEN_DOTDOT){
@@ -5200,6 +5335,12 @@ AST *factor(Parser *parser) {
         if (!node || node->type == AST_NOOP) { return newASTNode(AST_NOOP, NULL); }
         setTypeAST(node, TYPE_SET);
         // Flow continues to end, return node
+
+    } else if (initialTokenType == TOKEN_FUNCTION || initialTokenType == TOKEN_PROCEDURE) {
+        node = parseAnonymousRoutineLiteral(parser);
+        if (!node || node->type == AST_NOOP) {
+            return newASTNode(AST_NOOP, NULL);
+        }
 
     } else {
         errorParser(parser, "Unexpected token in factor");
