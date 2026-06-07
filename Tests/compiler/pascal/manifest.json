@@ -408,6 +408,12 @@
       "path": "Tests/compiler/pascal/cases/interface_assertions_is_as.pas",
       "expect": "compile_success",
       "stdout_substring": "SUITE 7 COMPLETE: Interface Assertions"
+    },
+    {
+      "id": "dynamic_arrays_advanced",
+      "path": "Tests/compiler/pascal/cases/dynamic_arrays_advanced.pas",
+      "expect": "compile_success",
+      "stdout_substring": "SUITE 9 COMPLETE: Dynamic Arrays Advanced"
     }
   ]
 }

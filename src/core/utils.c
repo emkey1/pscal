@@ -1446,6 +1446,11 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
     v.dimensions = dimensions;
     bool use_packed = isPackedByteElementType(element_type);
     v.array_is_packed = use_packed;
+    v.array_is_dynamic = false;
+    if (v.array_refcount) {
+        free(v.array_refcount);
+        v.array_refcount = NULL;
+    }
 
     if (dimensions <= 0) {
          fprintf(stderr, "Warning: makeArrayND called with zero or negative dimensions.\n");
@@ -1563,6 +1568,13 @@ Value makeEmptyArray(VarType element_type, AST *type_def) {
     v.array_val = NULL;
     v.array_raw = NULL;
     v.array_is_packed = isPackedByteElementType(element_type);
+    v.array_is_dynamic = true;
+    v.array_refcount = (uint32_t*)malloc(sizeof(uint32_t));
+    if (!v.array_refcount) {
+        fprintf(stderr, "Memory allocation error for dynamic array refcount.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    *v.array_refcount = 1;
     v.lower_bound = 0;
     v.upper_bound = -1;
     return v;
@@ -2271,6 +2283,22 @@ void freeValue(Value *v) {
              fprintf(stderr, "[DEBUG]   Processing array for Value* at %p (array_val=%p)\n", (void*)v, (void*)v->array_val);
              fflush(stderr);
 #endif
+             if (v->array_is_dynamic && v->array_refcount) {
+                 if (*v->array_refcount > 1) {
+                     (*v->array_refcount)--;
+                     v->array_val = NULL;
+                     v->array_raw = NULL;
+                     v->lower_bounds = NULL;
+                     v->upper_bounds = NULL;
+                     v->array_refcount = NULL;
+                     v->array_is_packed = false;
+                     v->array_is_dynamic = false;
+                     v->dimensions = 0;
+                     break;
+                 }
+                 free(v->array_refcount);
+                 v->array_refcount = NULL;
+             }
              if (v->array_is_packed) {
                  if (v->array_raw) {
                      free(v->array_raw);
@@ -2311,6 +2339,7 @@ void freeValue(Value *v) {
              v->array_val = NULL;
              v->array_raw = NULL;
              v->array_is_packed = false;
+             v->array_is_dynamic = false;
              v->lower_bounds = NULL;
              v->upper_bounds = NULL;
              v->dimensions = 0; // Reset dimensions
@@ -3326,10 +3355,27 @@ Value makeCopyOfValue(const Value *src) {
             break;
         }
         case TYPE_ARRAY: {
-            int total = 1;
             v.dimensions = src->dimensions;
             v.array_is_packed = src->array_is_packed;
+            v.array_is_dynamic = src->array_is_dynamic;
+            v.element_type_def = src->element_type_def;
+            v.element_type = src->element_type;
+            v.lower_bound = src->lower_bound;
+            v.upper_bound = src->upper_bound;
 
+            if (src->array_is_dynamic) {
+                v.lower_bounds = src->lower_bounds;
+                v.upper_bounds = src->upper_bounds;
+                v.array_val = src->array_val;
+                v.array_raw = src->array_raw;
+                v.array_refcount = src->array_refcount;
+                if (v.array_refcount) {
+                    (*v.array_refcount)++;
+                }
+                break;
+            }
+
+            int total = 1;
             if (v.dimensions > 0 && src->lower_bounds && src->upper_bounds) {
                 v.lower_bounds = malloc(sizeof(int) * src->dimensions);
                 v.upper_bounds = malloc(sizeof(int) * src->dimensions);
@@ -3350,6 +3396,7 @@ Value makeCopyOfValue(const Value *src) {
 
             v.array_val = NULL;
             v.array_raw = NULL;
+            v.array_refcount = NULL;
             if (total > 0) {
                 if (v.array_is_packed) {
                     v.array_raw = (uint8_t*)calloc((size_t)total, sizeof(uint8_t));
@@ -3370,10 +3417,6 @@ Value makeCopyOfValue(const Value *src) {
                 free(v.lower_bounds); v.lower_bounds = NULL;
                 free(v.upper_bounds); v.upper_bounds = NULL;
             }
-
-            v.element_type_def = src->element_type_def;
-            v.element_type = src->element_type;
-
             break;
         }
         case TYPE_CHAR:

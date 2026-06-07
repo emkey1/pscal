@@ -142,6 +142,8 @@ typedef struct ValueStruct {
     };
     uint8_t *array_raw;
     bool array_is_packed;
+    bool array_is_dynamic;
+    uint32_t *array_refcount;
     AST *base_type_node; // AST node defining the type this pointer points to
                          // Needed for new(), dispose(), dereferencing type checks.
 

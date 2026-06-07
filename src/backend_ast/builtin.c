@@ -3167,6 +3167,13 @@ static bool resizeDynamicArrayValue(VM* vm,
     }
 
     size_t old_total = 0;
+    int* old_lower_bounds = array_value->lower_bounds;
+    int* old_upper_bounds = array_value->upper_bounds;
+    Value* old_array_val = array_value->array_val;
+    unsigned char* old_array_raw = array_value->array_raw;
+    bool old_array_is_packed = array_value->array_is_packed;
+    bool old_array_is_dynamic = array_value->array_is_dynamic;
+    uint32_t* old_array_refcount = array_value->array_refcount;
     if (array_value->dimensions > 0 &&
         array_value->lower_bounds && array_value->upper_bounds) {
         old_total = 1;
@@ -3182,6 +3189,7 @@ static bool resizeDynamicArrayValue(VM* vm,
 
     Value* new_elements = NULL;
     unsigned char* new_raw = NULL;
+    uint32_t* new_refcount = NULL;
     int* copy_lower = NULL;
     int* copy_upper = NULL;
     int* copy_indices = NULL;
@@ -3281,6 +3289,23 @@ static bool resizeDynamicArrayValue(VM* vm,
         }
     }
 
+    if (element_type == TYPE_ARRAY && dimension_count > 1 && new_elements) {
+        for (size_t i = 0; i < new_total; ++i) {
+            if (!resizeDynamicArrayValue(vm, &new_elements[i], dimension_count - 1, lengths + 1)) {
+                goto setlength_cleanup_failure;
+            }
+        }
+    }
+
+    if (array_value->array_is_dynamic) {
+        new_refcount = (uint32_t*)malloc(sizeof(uint32_t));
+        if (!new_refcount) {
+            runtimeError(vm, "SetLength: memory allocation failed for dynamic array metadata.");
+            goto setlength_cleanup_failure;
+        }
+        *new_refcount = 1;
+    }
+
     if (copy_indices) {
         free(copy_indices);
         copy_indices = NULL;
@@ -3294,23 +3319,38 @@ static bool resizeDynamicArrayValue(VM* vm,
         copy_upper = NULL;
     }
 
-    if (array_value->array_is_packed) {
-        free(array_value->array_raw);
-        array_value->array_raw = NULL;
-    } else if (array_value->array_val) {
-        for (size_t i = 0; i < old_total; ++i) {
-            freeValue(&array_value->array_val[i]);
+    bool release_old_storage = true;
+    if (old_array_is_dynamic && old_array_refcount) {
+        if (*old_array_refcount > 1) {
+            (*old_array_refcount)--;
+            release_old_storage = false;
+        } else {
+            free(old_array_refcount);
+            old_array_refcount = NULL;
         }
-        free(array_value->array_val);
     }
-    free(array_value->lower_bounds);
-    free(array_value->upper_bounds);
+
+    if (release_old_storage) {
+        if (old_array_is_packed) {
+            free(old_array_raw);
+            old_array_raw = NULL;
+        } else if (old_array_val) {
+            for (size_t i = 0; i < old_total; ++i) {
+                freeValue(&old_array_val[i]);
+            }
+            free(old_array_val);
+            old_array_val = NULL;
+        }
+        free(old_lower_bounds);
+        free(old_upper_bounds);
+    }
 
     array_value->lower_bounds = new_lower;
     array_value->upper_bounds = new_upper;
     array_value->array_val = new_elements;
     array_value->array_raw = new_raw;
     array_value->array_is_packed = use_packed;
+    array_value->array_refcount = new_refcount;
     array_value->dimensions = dimension_count;
     array_value->lower_bound = (dimension_count >= 1) ? new_lower[0] : 0;
     array_value->upper_bound = (dimension_count >= 1) ? new_upper[0] : -1;
@@ -3342,6 +3382,9 @@ setlength_cleanup_failure:
     }
     if (new_raw) {
         free(new_raw);
+    }
+    if (new_refcount) {
+        free(new_refcount);
     }
     free(new_lower);
     free(new_upper);
