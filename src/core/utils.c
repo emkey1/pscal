@@ -936,6 +936,7 @@ VarType lookupBuiltinPascalTypeName(const char *name) {
     if (strcasecmp(name, "file") == 0 ||
         strcasecmp(name, "text") == 0 ||
         strcasecmp(name, "textfile") == 0) return TYPE_FILE;
+    if (strcasecmp(name, "thread") == 0) return TYPE_THREAD;
     if (strcasecmp(name, "mstream") == 0) return TYPE_MEMORYSTREAM;
 
     return TYPE_VOID;
@@ -1938,6 +1939,9 @@ Value makeValueForType(VarType type, AST *type_def_param, Symbol* context_symbol
         case TYPE_SET:     v.set_val.set_size = 0; v.set_val.set_values = NULL; v.max_length = 0; break;
         case TYPE_POINTER:
             v.ptr_val = NULL;
+            break;
+        case TYPE_THREAD:
+            SET_INT_VALUE(&v, -1);
             break;
         case TYPE_INTERFACE:
             v.interface.type_def = actual_type_def ? actual_type_def : type_def_param;

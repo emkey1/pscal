@@ -414,6 +414,12 @@
       "path": "Tests/compiler/pascal/cases/dynamic_arrays_advanced.pas",
       "expect": "compile_success",
       "stdout_substring": "SUITE 9 COMPLETE: Dynamic Arrays Advanced"
+    },
+    {
+      "id": "advanced_threading_thread_type",
+      "path": "Tests/compiler/pascal/cases/advanced_threading_thread_type.pas",
+      "expect": "compile_success",
+      "stdout_substring": "SUITE 12 COMPLETE: Advanced Threading"
     }
   ]
 }
