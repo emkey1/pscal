@@ -1,0 +1,288 @@
+program SubstantialNodeProcessor;
+
+type
+  { A functional closure blueprint for data transformation processing }
+  TTransform = function(val: Integer): Integer;
+
+  { The structural contract exposing behavior abstractly }
+  IProcessor = interface
+    procedure Start;
+    procedure AddTask(t: TTransform);
+    procedure Shutdown;
+    function FetchResult: Integer;
+  end;
+
+  { Reusable structural base for embedding composition }
+  TBaseComponent = record
+    ComponentName: string;
+    LogEnabled: Boolean;
+  end;
+
+  { Concrete state representation acting as our processing node }
+  TProcessingNode = record
+    inherit TBaseComponent; { Go-style structural field promotion embedding }
+    MutexID: Integer;
+    ThreadHandle: Thread;
+    IsRunning: Boolean;
+    
+    { Dynamic array handling state acting as our safe queue container }
+    JobQueue: array of TTransform;
+    QueueLength: Integer;
+    
+    DataState: Integer;
+    JobsCompleted: Integer;
+
+    { Virtual method overrides implementing interface layout signatures }
+    procedure Start; virtual;
+    procedure AddTask(t: TTransform); virtual;
+    procedure Shutdown; virtual;
+    function FetchResult: Integer; virtual;
+  end;
+
+{ Forward declaration required for cross-routine worker reference assignment }
+procedure NodeWorkerThread(arg: Pointer); forward;
+
+procedure TProcessingNode.Start;
+var
+  node: ^TProcessingNode;
+label
+  InitError; { Declare local jump label for unexpected failure bailouts }
+begin
+  node := myself; { Explicit usage of implicit system receiver tracking register }
+  node^.IsRunning := true;
+  node^.QueueLength := 0;
+  SetLength(node^.JobQueue, 0);
+
+  node^.MutexID := mutex();
+  
+  { Check strictly for negative return markers designating structural faults. Mutex 0 is valid. }
+  if node^.MutexID < 0 then
+    goto InitError;
+
+  if node^.LogEnabled then
+    writeln('[', node^.ComponentName, '] Mutex initialized safely with ID: ', node^.MutexID);
+
+  { Pass concrete structure instance reference into active thread execution pool }
+  node^.ThreadHandle := CreateThread(@NodeWorkerThread, node);
+  Exit;
+
+InitError:
+  writeln('FATAL ERROR: Failed to provision execution synchronization handle context.');
+  node^.IsRunning := false;
+end;
+
+procedure TProcessingNode.AddTask(t: TTransform);
+var
+  node: ^TProcessingNode;
+begin
+  node := myself; { }
+  lock(node^.MutexID);
+  
+  { Dynamically shift allocation footprints of queue array parameters }
+  var currentLen: Integer; { Inline block scoped declaration context }
+  currentLen := Length(node^.JobQueue);
+  SetLength(node^.JobQueue, currentLen + 1);
+  node^.JobQueue[currentLen] := t;
+  node^.QueueLength += 1;
+  
+  unlock(node^.MutexID);
+end;
+
+function TProcessingNode.FetchResult: Integer;
+var
+  node: ^TProcessingNode;
+begin
+  node := myself; { }
+  lock(node^.MutexID);
+  FetchResult := node^.DataState;
+  unlock(node^.MutexID);
+end;
+
+procedure TProcessingNode.Shutdown;
+var
+  node: ^TProcessingNode;
+  waitResult: Integer;
+begin
+  node := myself; { }
+  
+  lock(node^.MutexID);
+  node^.IsRunning := false;
+  unlock(node^.MutexID);
+
+  { Await clean fallout exit completion sequence of worker execution block }
+  waitResult := WaitForThread(node^.ThreadHandle);
+  
+  { Use zero-inclusive comparison boundaries for resource disposal routines }
+  if node^.MutexID >= 0 then
+  begin
+    destroy(node^.MutexID);
+    if node^.LogEnabled then
+      writeln('[', node^.ComponentName, '] Mutex context destroyed cleanly.');
+  end;
+end;
+
+{ Background operational execution engine routine loop logic }
+procedure NodeWorkerThread(arg: Pointer);
+var
+  node: ^TProcessingNode;
+  activeJob: TTransform;
+  hasJob: Boolean;
+  i: Integer;
+  statusMsg: string;
+begin
+  node := arg;
+  hasJob := false;
+
+  while true do
+  begin
+    lock(node^.MutexID);
+    if not node^.IsRunning then
+    begin
+      unlock(node^.MutexID);
+      break;
+    end;
+
+    if node^.QueueLength > 0 then
+    begin
+      activeJob := node^.JobQueue[0];
+      
+      { Shift elements manually downstream to handle first-in first-out routing }
+      for i := 0 to node^.QueueLength - 2 do
+        node^.JobQueue[i] := node^.JobQueue[i + 1];
+      
+      node^.QueueLength -= 1;
+      SetLength(node^.JobQueue, node^.QueueLength);
+      hasJob := true;
+    end
+    else
+      hasJob := false;
+
+    unlock(node^.MutexID);
+
+    if hasJob then
+    begin
+      try
+        { Process data changes utilizing isolated target task execution paths }
+        node^.DataState := activeJob(node^.DataState);
+        
+        lock(node^.MutexID);
+        node^.JobsCompleted += 1; { Compound assignment operation logic }
+        unlock(node^.MutexID);
+      except
+        on E: Exception do
+          writeln('EXCEPTION HANDLER: Runtime processing task fault intercepted: ', E.Message);
+      end;
+    end;
+  end;
+  
+  { Verification block validating Ternary Expressions combined with Inline Variables }
+  begin
+    var totalProcessed: Integer;
+    totalProcessed := node^.JobsCompleted;
+    statusMsg := totalProcessed > 0 ? 'ACTIVE_COMPLETION' : 'EMPTY_RUN_LOG';
+    writeln('Asynchronous worker thread cleanup finished with code: ', statusMsg);
+  end;
+end;
+
+procedure RunSimulation;
+var
+  procNode: ^TProcessingNode;
+  procInterface: IProcessor;
+  localModifier: Integer;
+  runningFactor: Integer; { Declared here so the named nested closure can capture it lexically }
+
+  { Named nested routines live in the declaration section before the executable statement stream }
+  function NamedMultiplierClosure(inputVal: Integer): Integer;
+  begin
+    { Intercepts and captures dynamic values from the surrounding routine's stack framework }
+    NamedMultiplierClosure := (inputVal * runningFactor) + localModifier;
+  end;
+
+begin
+  new(procNode);
+  { Assign properties promoted out of TBaseComponent base layouts }
+  procNode^.ComponentName := 'ComputeNode_Alpha';
+  procNode^.LogEnabled := true;
+  procNode^.DataState := 25;       { Initialize computational baseline value state }
+  procNode^.JobsCompleted := 0;
+
+  { Explicit Go-Style Interface Structural Metadata Boxing Allocation }
+  procInterface := IProcessor(procNode);
+
+  { Fire background runtime execution thread framework }
+  procInterface.Start;
+
+  { Establish the state variables that our named nested closure will capture }
+  localModifier := 15;
+  runningFactor := 3;
+
+  { ------------------------------------------------------------------------- }
+  { SCENARIO A: NAMED NESTED ROUTINE CLOSURE ESCAPE TRACKING                  }
+  { ------------------------------------------------------------------------- }
+  procInterface.AddTask(@NamedMultiplierClosure);
+
+  { ------------------------------------------------------------------------- }
+  { SCENARIO B: ANONYMOUS EXPRESSION ROUTINE LITERAL ENTRY                    }
+  { ------------------------------------------------------------------------- }
+  { This works fine in the statement stream because it is an expressional literal value }
+  procInterface.AddTask(function(inputVal: Integer): Integer;
+                        begin
+                          Result := inputVal + 250;
+                        end);
+
+  { ------------------------------------------------------------------------- }
+  { SCENARIO C: RISKY PAYLOAD EXECUTING INSIDE THREADED TRY CATCH BLOCKS      }
+  { ------------------------------------------------------------------------- }
+  procInterface.AddTask(function(inputVal: Integer): Integer;
+                        begin
+                          if inputVal > 100 then
+                            raise 'NODE_CRITICAL_VALUE_OVERFLOW';
+                          Result := inputVal * 2;
+                        end);
+
+  { ------------------------------------------------------------------------- }
+  { SCENARIO D: IMPLICIT MULTI-STATEMENT CASE ROUTING SYNTAX CHECK            }
+  { ------------------------------------------------------------------------- }
+  begin
+    var configurationBranchSelector: Integer;
+    configurationBranchSelector := 2;
+    
+    case configurationBranchSelector of
+      1: procNode^.DataState += 500; writeln('Diagnostics: Executed Option 1 state bypass.');
+      2: procNode^.DataState := procNode^.DataState; writeln('Diagnostics: Multi-statement branch verification stable.');
+    end;
+  end;
+
+  { Wait until the queue is drained and both non-raising transforms have committed }
+  while true do
+  begin
+    lock(procNode^.MutexID);
+    if (procNode^.QueueLength = 0) and (procNode^.JobsCompleted >= 2) then
+    begin
+      unlock(procNode^.MutexID);
+      break;
+    end;
+    unlock(procNode^.MutexID);
+  end;
+
+  { FIXED: Safely fetch the computational state context BEFORE the mutex layout is unmapped }
+  var finalCalculatedState: Integer;
+  finalCalculatedState := procInterface.FetchResult();
+
+  { Tear down components, verify join mechanisms, destroy mutex context safely }
+  procInterface.Shutdown;
+
+  writeln('Simulation Final Accumulated Data Result: ', finalCalculatedState);
+  
+  { ------------------------------------------------------------------------- }
+  { SCENARIO E: INTERFACE OBJECT IDENTITY ASSERTION RUNTIME CHECKS            }
+  { ------------------------------------------------------------------------- }
+  if procInterface is TProcessingNode then
+    writeln('Identity Verification: Concrete typing accurately identified on boxed instance targets.');
+
+  dispose(procNode);
+end;
+
+begin
+  RunSimulation;
+end.

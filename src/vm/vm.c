@@ -1074,6 +1074,27 @@ static bool vmNameIsMyself(const char* name) {
     return name && strcasecmp(name, "myself") == 0;
 }
 
+static bool vmNameIsPasExceptionGlobal(const char* name) {
+    return name &&
+           (strcasecmp(name, "__pas_exc_pending") == 0 ||
+            strcasecmp(name, "__pas_exc_message") == 0);
+}
+
+static bool vmPasExceptionPending(VM* vm) {
+    if (!vm || !vm->vmGlobalSymbols) {
+        return false;
+    }
+
+    bool pending = false;
+    pthread_mutex_lock(&globals_mutex);
+    Symbol* sym = hashTableLookup(vm->vmGlobalSymbols, "__pas_exc_pending");
+    if (sym && sym->value && IS_BOOLEAN(*sym->value)) {
+        pending = AS_BOOLEAN(*sym->value);
+    }
+    pthread_mutex_unlock(&globals_mutex);
+    return pending;
+}
+
 static Value vmLoadThreadMyselfCopy(VM* vm) {
     if (!vm) {
         return makeNil();
@@ -7778,6 +7799,11 @@ comparison_error_label:
             case SET_INDIRECT: {
                 Value value_to_set = pop(vm);
                 Value pointer_to_lvalue = pop(vm);
+                if (vmPasExceptionPending(vm)) {
+                    freeValue(&value_to_set);
+                    freeValue(&pointer_to_lvalue);
+                    break;
+                }
                 if (pointer_to_lvalue.type != TYPE_POINTER) {
                     runtimeError(vm, "VM Error: SET_INDIRECT requires an address on the stack.");
                     freeValue(&value_to_set);
@@ -8442,6 +8468,13 @@ comparison_error_label:
                     runtimeError(vm, "Runtime Error: Invalid global variable name.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                if (vmPasExceptionPending(vm) &&
+                    !vmNameIsPasExceptionGlobal(name_val->s_val) &&
+                    !vmNameIsMyself(name_val->s_val)) {
+                    Value skipped_value = pop(vm);
+                    freeValue(&skipped_value);
+                    break;
+                }
                 if (vmNameIsMyself(name_val->s_val)) {
                     Value value_from_stack = pop(vm);
                     vmStoreThreadMyself(vm, value_from_stack);
@@ -8490,6 +8523,13 @@ comparison_error_label:
                 if (name_val->type != TYPE_STRING || !name_val->s_val) {
                     runtimeError(vm, "Runtime Error: Invalid global variable name.");
                     return INTERPRET_RUNTIME_ERROR;
+                }
+                if (vmPasExceptionPending(vm) &&
+                    !vmNameIsPasExceptionGlobal(name_val->s_val) &&
+                    !vmNameIsMyself(name_val->s_val)) {
+                    Value skipped_value = pop(vm);
+                    freeValue(&skipped_value);
+                    break;
                 }
                 if (vmNameIsMyself(name_val->s_val)) {
                     Value value_from_stack = pop(vm);
@@ -8626,6 +8666,10 @@ comparison_error_label:
                 }
                 Value* target_slot = &frame->slots[slot];
                 Value value_from_stack = pop(vm);
+                if (vmPasExceptionPending(vm)) {
+                    freeValue(&value_from_stack);
+                    break;
+                }
 
                 // --- START CORRECTED LOGIC ---
                 if (target_slot->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
@@ -8786,6 +8830,10 @@ comparison_error_label:
                 }
                 Value* target_slot = frame->upvalues[slot];
                 Value value_from_stack = pop(vm);
+                if (vmPasExceptionPending(vm)) {
+                    freeValue(&value_from_stack);
+                    break;
+                }
 
                 if (target_slot->type == TYPE_POINTER && value_from_stack.type == TYPE_NIL) {
                     // Preserve pointer metadata when assigning NIL.
