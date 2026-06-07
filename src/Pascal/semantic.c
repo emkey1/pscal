@@ -847,26 +847,36 @@ static bool astIsRecord(AST *node) {
 }
 
 static AST *findRecordMethod(AST *recordType, const char *name) {
-    if (!recordType || recordType->type != AST_RECORD_TYPE || !name) {
+    AST *resolved = resolveTypeAliasLocal(recordType);
+    if (!resolved || resolved->type != AST_RECORD_TYPE || !name) {
         return NULL;
     }
 
-    for (int i = 0; i < recordType->child_count; i++) {
-        AST *child = recordType->children[i];
-        if (!child) {
-            continue;
+    while (resolved && resolved->type == AST_RECORD_TYPE) {
+        for (int i = 0; i < resolved->child_count; i++) {
+            AST *child = resolved->children[i];
+            if (!child) {
+                continue;
+            }
+            if ((child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) &&
+                child->token && child->token->value &&
+                strcasecmp(child->token->value, name) == 0) {
+                return child;
+            }
         }
-        if ((child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) &&
-            child->token && child->token->value &&
-            strcasecmp(child->token->value, name) == 0) {
-            return child;
+
+        AST *parentType = resolveTypeAliasLocal(resolved->extra);
+        if (!parentType || parentType == resolved) {
+            break;
         }
+        resolved = parentType;
     }
 
     return NULL;
 }
 
 static void markRecordAgainstInterface(AST *recordType, AST *interfaceType);
+static void validateEmbeddedRecordBases(void);
 
 static void markRecordAgainstInterfaceList(AST *recordType, AST *baseList) {
     if (!baseList) {
@@ -920,6 +930,22 @@ static void markVirtualMethodsForInterfaces(void) {
                 continue;
             }
             markRecordAgainstInterface(recordNode, ifaceNode);
+        }
+    }
+}
+
+static void validateEmbeddedRecordBases(void) {
+    for (TypeEntry *recordEntry = type_table; recordEntry; recordEntry = recordEntry->next) {
+        AST *recordNode = resolveTypeAliasLocal(recordEntry->typeAST);
+        if (!astIsRecord(recordNode) || !recordNode->extra) {
+            continue;
+        }
+
+        AST *baseNode = resolveTypeAliasLocal(recordNode->extra);
+        if (!baseNode || baseNode->type != AST_RECORD_TYPE) {
+            const char *recordName = (recordEntry->name && *recordEntry->name) ? recordEntry->name : "<anonymous>";
+            fprintf(stderr, "Type error: record '%s' inherit target must resolve to a record type.\n", recordName);
+            pascal_semantic_error_count++;
         }
     }
 }
@@ -1263,6 +1289,7 @@ void pascalPerformSemanticAnalysis(AST *root) {
     annotateTypes(gProgramRoot, NULL, gProgramRoot);
     pascal_semantic_pass_active = 0;
 
+    validateEmbeddedRecordBases();
     markVirtualMethodsForInterfaces();
 
     analyzeClosureCaptures(gProgramRoot);

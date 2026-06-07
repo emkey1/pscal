@@ -360,6 +360,18 @@
       "path": "Tests/compiler/pascal/cases/record_method_then_field.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: ok"
+    },
+    {
+      "id": "spawn_anonymous_procedure_capture",
+      "path": "Tests/compiler/pascal/cases/spawn_anonymous_procedure_capture.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: 42"
+    },
+    {
+      "id": "record_inherit_embedded_base",
+      "path": "Tests/compiler/pascal/cases/record_inherit_embedded_base.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: 41 7"
     }
   ]
 }

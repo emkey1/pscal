@@ -236,6 +236,18 @@ expression.
 * **`raise`:** Signals an exception for the innermost enclosing `try` block.
 * **`break`:** Exits the current loop.
 * **`continue`:** Skips the remainder of the current iteration and proceeds to the next loop iteration.
+* **Anonymous procedures in `spawn`:** As an extension, `spawn` may wrap a
+  parameterless anonymous procedure literal inside parentheses:
+  ```pascal
+  tid := spawn(procedure
+               begin
+                 counter := counter + 1;
+               end);
+  ```
+  The anonymous routine is lowered to a generated nested procedure, so it may
+  capture outer-scope locals the same way other nested Pascal closures do.
+  This form is currently supported only inside routines, not at top level, and
+  only for `procedure ... begin ... end` bodies with no explicit parameter list.
 * **Label declarations:** `label StartPoint, Retry1;` — must appear before the first statement inside a routine or block.
 * **`goto` Statements:** `goto StartPoint;` jumps to a label declared in the current routine.
 
@@ -348,6 +360,26 @@ Types are defined in a `type` block.
         field2: string;
       end;
     ```
+
+    As an extension, a record may embed one base record with `inherit`:
+    ```pascal
+    type
+      TBase = record
+        value: integer;
+        procedure Bump;
+      end;
+
+      TChild = record
+        inherit TBase;
+        labelText: string;
+      end;
+    ```
+
+    This follows PSCAL's Go-style composition direction rather than classic
+    Pascal class inheritance. The embedded base occupies the leading portion of
+    the derived record's storage, and the base record's fields and methods are
+    promoted for member lookup on the derived record. Only a single embedded
+    base is currently accepted, and it must resolve to a record type.
 
     Variant records are also accepted:
     ```pascal
@@ -555,6 +587,9 @@ Extended helpers (procedure pointers)
 In addition to `spawn`/`join`, the following helpers support passing data to a new thread:
 
 - `CreateThread(@Proc, argPtr: Pointer = nil): Thread` – spawn a new thread that calls `Proc`, passing `argPtr` as its first (and only) parameter.
+- `spawn(procedure begin ... end)` – shorthand for spawning a parameterless
+  anonymous nested procedure. Captures are retained for the worker thread just
+  like other escaping closures.
 - `WaitForThread(t: Thread): Integer` – wait for completion of the given thread handle (returns 0).
 
 Examples

@@ -2135,6 +2135,39 @@ static AST* findRecordMethodInHierarchy(AST* recordType, const char* methodName)
     return NULL;
 }
 
+static AST* findRecordTypeDefiningMethod(AST* recordType, const char* methodName) {
+    recordType = resolveRecordAST(recordType);
+    if (!recordType || !methodName) {
+        return NULL;
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* child = recordType->children[i];
+        if (!child) continue;
+        if ((child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) &&
+            child->token && child->token->value &&
+            strcasecmp(child->token->value, methodName) == 0) {
+            return recordType;
+        }
+    }
+
+    AST* parentRef = recordType->extra;
+    if (!parentRef) {
+        return NULL;
+    }
+
+    AST* parent = resolveRecordAST(parentRef);
+    if (!parent && parentRef->token && parentRef->token->value) {
+        parent = resolveRecordAST(lookupType(parentRef->token->value));
+    }
+
+    if (parent && parent != recordType) {
+        return findRecordTypeDefiningMethod(parent, methodName);
+    }
+
+    return NULL;
+}
+
 static bool addInterfaceMethod(AST*** methods, int* count, int* capacity, AST* method) {
     if (!methods || !count || !capacity || !method) {
         return false;
@@ -3088,12 +3121,14 @@ static bool buildReceiverMethodName(AST* receiverExpr, const char* memberName,
     }
 
     AST* recordType = getRecordTypeFromExpr(receiverExpr);
-    recordType = resolveTypeAlias(recordType);
-    if (recordType && recordType->type == AST_TYPE_DECL && recordType->left) {
-        recordType = resolveTypeAlias(recordType->left);
-    }
+    recordType = resolveRecordAST(recordType);
     if (!recordType || recordType->type != AST_RECORD_TYPE) {
         return false;
+    }
+
+    AST* definingRecord = findRecordTypeDefiningMethod(recordType, memberName);
+    if (definingRecord && definingRecord->type == AST_RECORD_TYPE) {
+        recordType = definingRecord;
     }
 
     const char* typeName = getTypeNameFromAST(recordType);
@@ -9252,22 +9287,32 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 compiler_had_error = true;
                 break;
             }
-            const char *calleeName = call->token->value;
-            Symbol *proc_symbol = lookupProcedure(calleeName);
+            const char *calleeName = (call->token && call->token->value) ? call->token->value : NULL;
+            Symbol *proc_symbol = calleeName ? resolveProcedureSymbolInScope(calleeName, call, gCurrentProgramRoot) : NULL;
+            if (!proc_symbol && calleeName) {
+                proc_symbol = lookupProcedure(calleeName);
+            }
             if (!proc_symbol || !proc_symbol->is_defined) {
-                fprintf(stderr, "L%d: Compiler error: Undefined procedure '%s' in spawn.\n", line, calleeName);
+                fprintf(stderr, "L%d: Compiler error: Undefined procedure '%s' in spawn.\n", line, calleeName ? calleeName : "<anonymous>");
                 compiler_had_error = true;
                 break;
             }
-            if (call->child_count == 0) {
+            bool needs_closure = proc_symbol->closure_captures || proc_symbol->closure_escapes || proc_symbol->upvalue_count > 0;
+            if (call->child_count == 0 && !needs_closure) {
                 writeBytecodeChunk(chunk, THREAD_CREATE, line);
                 emitShort(chunk, (uint16_t)proc_symbol->bytecode_address, line);
             } else {
                 // Support spawning with multiple arguments (including receiver for methods).
                 // Stack layout for host: [addr, arg0, arg1, ..., argc]
-                int addrConstIndex = addIntConstant(chunk, proc_symbol->bytecode_address);
-                recordAddressConstant(addrConstIndex, proc_symbol->bytecode_address);
-                emitConstant(chunk, addrConstIndex, line);
+                if (needs_closure) {
+                    if (!emitClosureLiteral(proc_symbol, chunk, line)) {
+                        break;
+                    }
+                } else {
+                    int addrConstIndex = addIntConstant(chunk, proc_symbol->bytecode_address);
+                    recordAddressConstant(addrConstIndex, proc_symbol->bytecode_address);
+                    emitConstant(chunk, addrConstIndex, line);
+                }
                 for (int i = 0; i < call->child_count; i++) {
                     compileRValue(call->children[i], chunk, getLine(call->children[i]));
                 }

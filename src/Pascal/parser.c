@@ -72,12 +72,14 @@ static void adoptRoutineParameters(AST *routine, AST *params);
 static Token *parseQualifiedRoutineName(Parser *parser, const char *missingNameError);
 static AST *parseTypeAssertionTarget(Parser *parser, TokenType keywordToken);
 static AST *parseRecordFieldDecl(Parser *parser);
+static AST *parseRecordEmbeddedBase(Parser *parser, AST *recordNode);
 static void assignRecordFieldSlots(AST *fieldDecl, int baseSlot);
 static bool parseVariantRecordSection(Parser *parser, AST *recordNode, int *slotCursor);
 static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType terminator, int *slotCursor);
 static AST *parseStatementListUntil(Parser *parser, TokenType terminator, const char *contextName);
 static AST *parseStatementListUntilEither(Parser *parser, TokenType terminatorA, TokenType terminatorB, const char *contextName);
 static AST *tryStatement(Parser *parser);
+static AST *parseAnonymousSpawnProcedure(Parser *parser);
 static AST *raiseStatement(Parser *parser);
 static AST *withStatement(Parser *parser);
 static AST *parsePostfixSelectors(Parser *parser, AST *node);
@@ -373,6 +375,33 @@ static bool parserIdentifierResolvesToValue(Parser *parser, AST *identifierNode)
     }
 
     return false;
+}
+
+static AST *parserCurrentRoutineBlock(Parser *parser) {
+    if (!parser || !parser->current_routine) {
+        return NULL;
+    }
+
+    if (parser->current_routine->type == AST_PROCEDURE_DECL) {
+        return parser->current_routine->right;
+    }
+    if (parser->current_routine->type == AST_FUNCTION_DECL) {
+        return parser->current_routine->extra;
+    }
+    return NULL;
+}
+
+static AST *parserCurrentRoutineDeclarations(Parser *parser) {
+    AST *blockNode = parserCurrentRoutineBlock(parser);
+    if (!blockNode || blockNode->type != AST_BLOCK || blockNode->child_count <= 0) {
+        return NULL;
+    }
+
+    AST *decls = blockNode->children[0];
+    if (!decls || decls->type != AST_COMPOUND) {
+        return NULL;
+    }
+    return decls;
 }
 
 static bool tokenTypeIsIdentifierLike(TokenType type) {
@@ -1080,6 +1109,31 @@ static AST *parseRecordFieldDecl(Parser *parser) {
     return fieldDecl;
 }
 
+static AST *parseRecordEmbeddedBase(Parser *parser, AST *recordNode) {
+    if (!parser || !recordNode || !parser->current_token || !parser->current_token->value) {
+        return NULL;
+    }
+
+    if (strcasecmp(parser->current_token->value, "inherit") != 0) {
+        return NULL;
+    }
+
+    eat(parser, parser->current_token->type);
+
+    if (recordNode->extra) {
+        errorParser(parser, "Record may only embed one base record with inherit");
+        return NULL;
+    }
+
+    AST *baseType = typeSpecifier(parser, 0);
+    if (!baseType) {
+        return NULL;
+    }
+
+    setExtra(recordNode, baseType);
+    return baseType;
+}
+
 static void assignRecordFieldSlots(AST *fieldDecl, int baseSlot) {
     if (!fieldDecl || fieldDecl->type != AST_VAR_DECL) {
         return;
@@ -1225,6 +1279,30 @@ static bool parseRecordMembers(Parser *parser, AST *recordNode, TokenType termin
                 return false;
             }
             continue;
+        }
+
+        if (parser->current_token->value &&
+            strcasecmp(parser->current_token->value, "inherit") == 0) {
+            Token *lookahead = peekToken(parser);
+            bool hasEmbeddedBase = lookahead &&
+                                   lookahead->type != TOKEN_COLON &&
+                                   lookahead->type != TOKEN_COMMA;
+            if (lookahead) {
+                freeToken(lookahead);
+            }
+
+            if (hasEmbeddedBase) {
+                AST *baseType = parseRecordEmbeddedBase(parser, recordNode);
+                if (!baseType) {
+                    return false;
+                }
+                if (parser->current_token && parser->current_token->type == TOKEN_SEMICOLON) {
+                    eat(parser, TOKEN_SEMICOLON);
+                    continue;
+                }
+                errorParser(parser, "Expected ';' after record inherit declaration");
+                return false;
+            }
         }
 
         if (currentTokenIsIdentifierLike(parser)) {
@@ -4224,11 +4302,33 @@ AST *readlnStatement(Parser *parser) {
 
 AST *spawnStatement(Parser *parser) {
     eat(parser, TOKEN_SPAWN);
-    if (!tokenIsIdentifierLike(parser->current_token)) {
-        errorParser(parser, "Expected procedure identifier after SPAWN");
-        return newASTNode(AST_NOOP, NULL);
+    AST *call = NULL;
+
+    if (parser->current_token && parser->current_token->type == TOKEN_LPAREN) {
+        eat(parser, TOKEN_LPAREN);
+        if (parser->current_token && parser->current_token->type == TOKEN_PROCEDURE) {
+            call = parseAnonymousSpawnProcedure(parser);
+        } else if (tokenIsIdentifierLike(parser->current_token)) {
+            call = procedureCall(parser);
+        } else {
+            errorParser(parser, "Expected procedure identifier or anonymous procedure after SPAWN(");
+            return newASTNode(AST_NOOP, NULL);
+        }
+
+        if (!parser->current_token || parser->current_token->type != TOKEN_RPAREN) {
+            errorParser(parser, "Expected ')' after SPAWN operand");
+            freeAST(call);
+            return newASTNode(AST_NOOP, NULL);
+        }
+        eat(parser, TOKEN_RPAREN);
+    } else {
+        if (!tokenIsIdentifierLike(parser->current_token)) {
+            errorParser(parser, "Expected procedure identifier after SPAWN");
+            return newASTNode(AST_NOOP, NULL);
+        }
+        call = procedureCall(parser);
     }
-    AST *call = procedureCall(parser);
+
     AST *node = newThreadSpawn(call);
     setTypeAST(node, TYPE_INTEGER);
     return node;
@@ -4240,6 +4340,69 @@ AST *joinStatement(Parser *parser) {
     if (!exprNode) return newASTNode(AST_NOOP, NULL);
     AST *node = newThreadJoin(exprNode);
     return node;
+}
+
+static AST *parseAnonymousSpawnProcedure(Parser *parser) {
+    static unsigned anonymous_spawn_counter = 1;
+
+    if (!parser || !parser->current_token || parser->current_token->type != TOKEN_PROCEDURE) {
+        errorParser(parser, "Expected PROCEDURE for anonymous spawn routine");
+        return NULL;
+    }
+
+    if (!parser->current_routine) {
+        errorParser(parser, "Anonymous spawn procedures are only supported inside routines");
+        return NULL;
+    }
+
+    AST *declarationsNode = parserCurrentRoutineDeclarations(parser);
+    if (!declarationsNode) {
+        errorParser(parser, "Internal error: current routine missing declaration list for anonymous spawn procedure");
+        return NULL;
+    }
+
+    int line = parser->current_token->line;
+    int column = parser->current_token->column;
+    eat(parser, TOKEN_PROCEDURE);
+
+    char generatedName[64];
+    snprintf(generatedName, sizeof(generatedName), "__spawn_anon_%u", anonymous_spawn_counter++);
+    Token *nameToken = newToken(TOKEN_IDENTIFIER, generatedName, line, column);
+    if (!nameToken) {
+        EXIT_FAILURE_HANDLER();
+    }
+
+    AST *node = newASTNode(AST_PROCEDURE_DECL, nameToken);
+    freeToken(nameToken);
+    if (!node) {
+        EXIT_FAILURE_HANDLER();
+    }
+    setTypeAST(node, TYPE_VOID);
+
+    HashTable *outer_table = current_procedure_table;
+    HashTable *my_table = pushProcedureTable();
+    AST *saved_routine = parser->current_routine;
+    parser->current_routine = node;
+    parser->routine_depth++;
+
+    AST *local_declarations = declarations(parser, false);
+    AST *blockNode = newASTNode(AST_BLOCK, NULL);
+    addChild(blockNode, local_declarations);
+    blockNode->is_global_scope = false;
+    setRight(node, blockNode);
+    AST *compound_body = compoundStatement(parser);
+    addChild(blockNode, compound_body);
+
+    parser->routine_depth--;
+    parser->current_routine = saved_routine;
+    node->symbol_table = (Symbol*)my_table;
+    popProcedureTable(false);
+
+    addChild(declarationsNode, node);
+    addProcedure(parser, node, parser->current_unit_name_context, outer_table);
+
+    AST *call = newASTNode(AST_PROCEDURE_CALL, node->token);
+    return call;
 }
 // exprList: Calls expression
 AST *exprList(Parser *parser) {

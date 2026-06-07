@@ -815,6 +815,41 @@ static const char* getTypeNameForRecord(AST* typeAst) {
     return NULL;
 }
 
+static int getLocalRecordSlotCount(AST* recordType) {
+    recordType = resolveTypeAliasForRecord(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        return 0;
+    }
+
+    if (recordType->i_val > 0) {
+        return recordType->i_val;
+    }
+
+    int count = 0;
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* member = recordType->children[i];
+        if (!member) continue;
+        if (member->type == AST_VAR_DECL) {
+            count += member->child_count;
+        }
+    }
+    return count;
+}
+
+static int getRecordSlotCount(AST* recordType) {
+    recordType = resolveTypeAliasForRecord(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) {
+        return 0;
+    }
+
+    int count = getLocalRecordSlotCount(recordType);
+    AST* parent = resolveTypeAliasForRecord(recordType->extra);
+    if (parent && parent != recordType) {
+        count += getRecordSlotCount(parent);
+    }
+    return count;
+}
+
 static bool recordTypeNeedsVTableSlot(AST* recordType) {
     recordType = resolveTypeAliasForRecord(recordType);
     if (!recordType || recordType->type != AST_RECORD_TYPE) {
@@ -1017,9 +1052,16 @@ FieldValue *createEmptyRecord(AST *recordType) {
 
     FieldValue *head = NULL, **ptr = &head; // Use pointer-to-pointer for easy list building
 
-    bool needsVTableSlot = recordTypeNeedsVTableSlot(recordType);
+    AST* parentRecord = resolveTypeAliasForRecord(recordType->extra);
+    bool parentNeedsVTableSlot = parentRecord && parentRecord != recordType &&
+                                 recordTypeNeedsVTableSlot(parentRecord);
+    bool needsVTableSlot = recordTypeNeedsVTableSlot(recordType) && !parentNeedsVTableSlot;
     int slotBias = needsVTableSlot ? 1 : 0;
-    int slotOwnerCapacity = (recordType->i_val > 0) ? (recordType->i_val + slotBias) : 0;
+    int inheritedSlotCount = (parentRecord && parentRecord != recordType)
+                                 ? getRecordSlotCount(parentRecord)
+                                 : 0;
+    int totalSlotCount = getRecordSlotCount(recordType);
+    int slotOwnerCapacity = totalSlotCount + slotBias;
     FieldValue **slotOwners = NULL;
     if (slotOwnerCapacity > 0) {
         slotOwners = calloc((size_t)slotOwnerCapacity, sizeof(FieldValue*));
@@ -1028,7 +1070,7 @@ FieldValue *createEmptyRecord(AST *recordType) {
             EXIT_FAILURE_HANDLER();
         }
     }
-    int sequentialSlot = slotBias;
+    int sequentialSlot = slotBias + inheritedSlotCount;
 
     if (needsVTableSlot) {
         FieldValue *vtableField = calloc(1, sizeof(FieldValue));
@@ -1053,6 +1095,24 @@ FieldValue *createEmptyRecord(AST *recordType) {
         vtableField->next = NULL;
         *ptr = vtableField;
         ptr = &vtableField->next;
+    }
+
+    if (parentRecord && parentRecord != recordType) {
+        FieldValue *baseFields = createEmptyRecord(parentRecord);
+        *ptr = baseFields;
+        while (*ptr) {
+            FieldValue *field = *ptr;
+            if (field->slot_index >= 0) {
+                if (!ensureFieldSlotCapacity(&slotOwners, &slotOwnerCapacity, field->slot_index + 1)) {
+                    fprintf(stderr, "FATAL: realloc failed for inherited record slot owner table in createEmptyRecord.\n");
+                    free(slotOwners);
+                    freeFieldValue(head);
+                    EXIT_FAILURE_HANDLER();
+                }
+                slotOwners[field->slot_index] = field->owns_storage ? field : slotOwners[field->slot_index];
+            }
+            ptr = &field->next;
+        }
     }
 
     // Iterate through the children of the RECORD_TYPE node (these should be VAR_DECLs for fields)
@@ -1108,7 +1168,9 @@ FieldValue *createEmptyRecord(AST *recordType) {
             }
 
             bool usesExplicitSlots = (recordType->i_val > 0);
-            int slotIndex = usesExplicitSlots ? (varNode->i_val + slotBias) : sequentialSlot++;
+            int slotIndex = usesExplicitSlots
+                                ? (slotBias + inheritedSlotCount + varNode->i_val)
+                                : sequentialSlot++;
             fv->slot_index = slotIndex;
             fv->type_def = fieldTypeDef;
             fv->declared_type = fieldType;
