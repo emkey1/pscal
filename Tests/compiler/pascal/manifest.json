@@ -396,6 +396,12 @@
       "path": "Tests/compiler/pascal/cases/anonymous_function_literal_inline_var_capture.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: 505"
+    },
+    {
+      "id": "interface_dispatch_zero_arg_function",
+      "path": "Tests/compiler/pascal/cases/interface_dispatch_zero_arg_function.pas",
+      "expect": "compile_success",
+      "stdout_substring": "SUITE 6 COMPLETE: Interface Dispatch"
     }
   ]
 }

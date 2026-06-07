@@ -2869,6 +2869,39 @@ static int ensureInterfaceMethodSlot(AST* interfaceType, const char* methodName)
     return -1;
 }
 
+static AST* findInterfaceMethodDecl(AST* interfaceType, const char* methodName) {
+    interfaceType = resolveInterfaceAST(interfaceType);
+    if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE || !methodName) {
+        return NULL;
+    }
+
+    for (int i = 0; i < interfaceType->child_count; i++) {
+        AST* child = interfaceType->children[i];
+        if (!child) continue;
+        if ((child->type == AST_PROCEDURE_DECL || child->type == AST_FUNCTION_DECL) &&
+            child->token && child->token->value &&
+            strcasecmp(child->token->value, methodName) == 0) {
+            return child;
+        }
+    }
+
+    if (interfaceType->extra) {
+        AST* baseList = interfaceType->extra;
+        if (baseList->type == AST_LIST) {
+            for (int i = 0; i < baseList->child_count; i++) {
+                AST* found = findInterfaceMethodDecl(baseList->children[i], methodName);
+                if (found) {
+                    return found;
+                }
+            }
+        } else {
+            return findInterfaceMethodDecl(baseList, methodName);
+        }
+    }
+
+    return NULL;
+}
+
 // --- Object layout helpers -------------------------------------------------
 
 static bool recordUsesExplicitFieldSlots(AST* recordType) {
@@ -8220,6 +8253,9 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                     }
                 }
             }
+            if (!interfaceType && interfaceReceiver) {
+                interfaceType = getInterfaceTypeFromExpression(interfaceReceiver);
+            }
 
             bool isVirtualMethod = (isCallQualified && callReceiver && node->i_val == 0 &&
                                     proc_symbol && proc_symbol->type_def &&
@@ -10120,6 +10156,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     }
                 }
             }
+            if (!interfaceType && interfaceReceiver) {
+                interfaceType = getInterfaceTypeFromExpression(interfaceReceiver);
+            }
 
             bool isVirtualMethod = isCallQualified && interfaceReceiver == NULL &&
                                    node->i_val == 0 && func_symbol && func_symbol->type_def &&
@@ -10178,7 +10217,12 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             }
 
             if (isInterfaceDispatch) {
-                if (!func_symbol || !func_symbol->type_def) {
+                const char* slotName = methodIdentifier ? methodIdentifier : functionName;
+                AST* methodSignature = (func_symbol && func_symbol->type_def)
+                                           ? func_symbol->type_def
+                                           : findInterfaceMethodDecl(interfaceType, slotName);
+
+                if (!methodSignature) {
                     fprintf(stderr,
                             "L%d: Compiler Error: Unable to resolve interface method '%s'.\n",
                             line, functionName ? functionName : "<anonymous>");
@@ -10187,13 +10231,19 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     break;
                 }
 
-                int method_slot = func_symbol->type_def->i_val;
-                const char* slotName = methodIdentifier ? methodIdentifier : functionName;
+                if (methodSignature->type == AST_FUNCTION_DECL) {
+                    node->var_type = methodSignature->var_type;
+                    if (!node->type_def && methodSignature->right) {
+                        node->type_def = copyAST(methodSignature->right);
+                    }
+                }
+
+                int method_slot = methodSignature->i_val;
                 if (interfaceType) {
                     int resolved_slot = ensureInterfaceMethodSlot(interfaceType, slotName);
                     if (resolved_slot >= 0) {
                         method_slot = resolved_slot;
-                        func_symbol->type_def->i_val = method_slot;
+                        methodSignature->i_val = method_slot;
                     }
                 }
                 if (method_slot < 0) {
@@ -10219,9 +10269,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     bool is_var_param = false;
                     AST* param_type_hint = NULL;
                     int meta_index = i + metadataOffset;
-                    if (func_symbol->type_def &&
-                        meta_index >= 0 && meta_index < func_symbol->type_def->child_count) {
-                        AST* param_node = func_symbol->type_def->children[meta_index];
+                    if (methodSignature &&
+                        meta_index >= 0 && meta_index < methodSignature->child_count) {
+                        AST* param_node = methodSignature->children[meta_index];
                         if (param_node && param_node->by_ref) is_var_param = true;
                         if (param_node) {
                             param_type_hint = param_node->type_def ? param_node->type_def
