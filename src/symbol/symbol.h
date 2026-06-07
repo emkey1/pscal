@@ -42,6 +42,7 @@ struct Symbol_s {
         uint8_t index;
         bool isLocal;
         bool is_ref;          // Indicates whether the captured variable is a reference (VAR param)
+        bool source_is_ref;   // Indicates whether the source local slot already stores a pointer.
     } upvalues[256];
 };
 

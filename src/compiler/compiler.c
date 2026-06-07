@@ -380,6 +380,7 @@ typedef struct {
     uint8_t index;
     bool isLocal;
     bool is_ref;
+    bool source_is_ref;
 } CompilerUpvalue;
 
 #define MAX_UPVALUES 256
@@ -408,6 +409,7 @@ static int inline_routine_exit_capacity = 0;
 static int addStringConstant(BytecodeChunk* chunk, const char* str);
 static int addIntConstant(BytecodeChunk* chunk, long long intValue);
 static void noteLocalSlotUse(FunctionCompilerState* fc, int slot);
+static int resolveLocal(FunctionCompilerState* fc, const char* name);
 static AST* resolveTypeAlias(AST* type_node);
 static const char* ensureSerializableTypeName(AST* type_node);
 static void recordInlineRoutineExitJump(int jump_opcode_offset);
@@ -1283,21 +1285,17 @@ static bool emitClosureLiteral(Symbol *psym, BytecodeChunk *chunk, int line) {
     for (int i = 0; i < capture_count; i++) {
         uint8_t slot_index = psym->upvalues[i].index;
         bool isLocal = psym->upvalues[i].isLocal;
-        bool is_ref = psym->upvalues[i].is_ref;
+        bool source_is_ref = psym->upvalues[i].source_is_ref;
 
         if (isLocal) {
-            if (is_ref) {
-                writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, line);
-            } else {
+            if (source_is_ref) {
                 writeBytecodeChunk(chunk, GET_LOCAL, line);
+            } else {
+                writeBytecodeChunk(chunk, GET_LOCAL_ADDRESS, line);
             }
             writeBytecodeChunk(chunk, slot_index, line);
         } else {
-            if (is_ref) {
-                writeBytecodeChunk(chunk, GET_UPVALUE_ADDRESS, line);
-            } else {
-                writeBytecodeChunk(chunk, GET_UPVALUE, line);
-            }
+            writeBytecodeChunk(chunk, GET_UPVALUE_ADDRESS, line);
             writeBytecodeChunk(chunk, slot_index, line);
         }
     }
@@ -1312,6 +1310,34 @@ static bool emitClosureLiteral(Symbol *psym, BytecodeChunk *chunk, int line) {
     writeBytecodeChunk(chunk, CALL_HOST, line);
     writeBytecodeChunk(chunk, (uint8_t)HOST_FN_CREATE_CLOSURE, line);
     return true;
+}
+
+static bool closureLiteralEscapesCurrentRoutine(AST *expr_node) {
+    if (!expr_node || !expr_node->parent || expr_node->parent->type != AST_ASSIGN ||
+        !expr_node->parent->left) {
+        return false;
+    }
+
+    AST *lhs = expr_node->parent->left;
+    if (!current_function_compiler || !lhs || lhs->type != AST_VARIABLE ||
+        !lhs->token || !lhs->token->value) {
+        return true;
+    }
+
+    const char *lhs_name = lhs->token->value;
+    if (isCurrentFunctionResultIdentifier(current_function_compiler, lhs_name)) {
+        return true;
+    }
+
+    return resolveLocal(current_function_compiler, lhs_name) == -1;
+}
+
+static void markClosureLiteralEscapes(Symbol *psym) {
+    if (!psym) return;
+    psym->closure_escapes = true;
+    if (psym->real_symbol) {
+        psym->real_symbol->closure_escapes = true;
+    }
 }
 
 static void queueDeferredGlobalInitializer(AST* var_decl) {
@@ -3620,13 +3646,21 @@ static bool validateCompilerProcPointerArgument(AST* expectedProcPtr, AST* arg_n
         return true;
     }
 
-    if (arg_node->type != AST_ADDR_OF || !arg_node->left || !arg_node->left->token || !arg_node->left->token->value) {
-        fprintf(stderr, "Type error: expected '@proc' for procedure pointer argument.\n");
+    const char* aname = NULL;
+    if (arg_node->type == AST_ADDR_OF && arg_node->left && arg_node->left->token && arg_node->left->token->value) {
+        aname = arg_node->left->token->value;
+    } else if (arg_node->type == AST_PROCEDURE_CALL &&
+               arg_node->child_count == 0 &&
+               arg_node->token && arg_node->token->value &&
+               arg_node->type_def &&
+               arg_node->type_def->type == AST_PROC_PTR_TYPE) {
+        aname = arg_node->token->value;
+    } else {
+        fprintf(stderr, "Type error: expected '@proc' or anonymous routine literal for procedure pointer argument.\n");
         compiler_had_error = true;
         return false;
     }
 
-    const char* aname = arg_node->left->token->value;
     Symbol* as = resolveProcedureSymbolInScope(aname, arg_node, gCurrentProgramRoot);
     if (!as || !as->type_def) {
         fprintf(stderr, "Type error: '@%s' does not name a known procedure or function.\n", aname);
@@ -4223,7 +4257,7 @@ static void updateMaxSlotFromBytecode(FunctionCompilerState* fc, BytecodeChunk* 
     }
 }
 
-static int addUpvalue(FunctionCompilerState* fc, uint8_t index, bool isLocal, bool is_ref) {
+static int addUpvalue(FunctionCompilerState* fc, uint8_t index, bool isLocal, bool is_ref, bool source_is_ref) {
     for (int i = 0; i < fc->upvalue_count; i++) {
         CompilerUpvalue* up = &fc->upvalues[i];
         if (up->index == index && up->isLocal == isLocal) {
@@ -4238,6 +4272,7 @@ static int addUpvalue(FunctionCompilerState* fc, uint8_t index, bool isLocal, bo
     fc->upvalues[fc->upvalue_count].index = index;
     fc->upvalues[fc->upvalue_count].isLocal = isLocal;
     fc->upvalues[fc->upvalue_count].is_ref = is_ref;
+    fc->upvalues[fc->upvalue_count].source_is_ref = source_is_ref;
     return fc->upvalue_count++;
 }
 
@@ -4247,14 +4282,13 @@ static int resolveUpvalue(FunctionCompilerState* fc, const char* name) {
     int localIndex = resolveLocal(fc->enclosing, name);
     if (localIndex != -1) {
         fc->enclosing->locals[localIndex].is_captured = true;
-        bool is_ref = fc->enclosing->locals[localIndex].is_ref;
-        return addUpvalue(fc, (uint8_t)localIndex, true, is_ref);
+        bool source_is_ref = fc->enclosing->locals[localIndex].is_ref;
+        return addUpvalue(fc, (uint8_t)localIndex, true, false, source_is_ref);
     }
 
     int upvalueIndex = resolveUpvalue(fc->enclosing, name);
     if (upvalueIndex != -1) {
-        bool is_ref = fc->enclosing->upvalues[upvalueIndex].is_ref;
-        return addUpvalue(fc, (uint8_t)upvalueIndex, false, is_ref);
+        return addUpvalue(fc, (uint8_t)upvalueIndex, false, false, false);
     }
 
     return -1;
@@ -4888,7 +4922,7 @@ static bool shouldDereferenceByRefArrayArgument(AST* node) {
 
     int upvalue_slot = resolveUpvalue(current_function_compiler, varName);
     if (upvalue_slot != -1) {
-        return current_function_compiler->upvalues[upvalue_slot].is_ref;
+        return false;
     }
 
     return false;
@@ -4944,6 +4978,9 @@ static void compileFormatOpenArrayArgs(AST* node, BytecodeChunk* chunk, int rece
     }
     for (int i = 0; i < set_arg->child_count; ++i) {
         AST* child = set_arg->children[i];
+        if (child && child->type == AST_FORMATTED_EXPR && child->left) {
+            child = child->left;
+        }
         compileCallArgumentRValue(child, chunk, getLine(child));
     }
 }
@@ -5266,14 +5303,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     upvalue_slot = resolveUpvalue(current_function_compiler, varName);
                 }
                 if (upvalue_slot != -1) {
-                    bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
-                    if (up_is_ref) {
-                        writeBytecodeChunk(chunk, GET_UPVALUE, line);
-                        writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
-                    } else {
-                        writeBytecodeChunk(chunk, GET_UPVALUE_ADDRESS, line);
-                        writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
-                    }
+                    writeBytecodeChunk(chunk, GET_UPVALUE_ADDRESS, line);
+                    writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
                 } else {
                     if (!globalVariableExists(varName) && !lookupGlobalSymbol(varName)) {
                         fprintf(stderr, "L%d: Undefined variable '%s'.\n", line, varName);
@@ -5517,9 +5548,6 @@ static bool emitDirectStoreForVariable(AST* lvalue, BytecodeChunk* chunk, int li
 
         int upvalue_slot = resolveUpvalue(current_function_compiler, varName);
         if (upvalue_slot != -1) {
-            if (current_function_compiler->upvalues[upvalue_slot].is_ref) {
-                return false;
-            }
             writeBytecodeChunk(chunk, SET_UPVALUE, line);
             writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
             return true;
@@ -6188,6 +6216,14 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                 if (at_program_level) postpone_global_initializers = saved_postpone;
                 if (compiler_had_error) {
                     break;
+                }
+                if (current_function_compiler && statements && statements->type == AST_COMPOUND) {
+                    for (int i = 0; i < statements->child_count; i++) {
+                        AST* stmt_child = statements->children[i];
+                        if (stmt_child && stmt_child->type == AST_VAR_DECL) {
+                            registerVarDeclLocals(stmt_child, false);
+                        }
+                    }
                 }
                 // Pass 2: Compile routines from the declaration block.
                 for (int i = 0; i < declarations->child_count; i++) {
@@ -6858,7 +6894,6 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
     // Step 3: Add all other local variables.
     blockNode = (func_decl_node->type == AST_PROCEDURE_DECL) ? func_decl_node->right : func_decl_node->extra;
     if (blockNode) {
-        int locals_before_decl_scan = fc.local_count;
         if (blockNode->type == AST_BLOCK && blockNode->child_count > 0 &&
             blockNode->children[0]->type == AST_COMPOUND) {
             AST* decls = blockNode->children[0];
@@ -6869,26 +6904,36 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
                         AST* var_name_node = var_decl_group->children[j];
                         if (var_name_node && var_name_node->token) {
                             addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+                            fc.locals[fc.local_count - 1].decl_node = var_decl_group;
                         }
                     }
                 }
             }
-        } else if (compiler_dynamic_locals && blockNode->type == AST_COMPOUND) {
-            for (int i = 0; i < blockNode->child_count; i++) {
-                AST* child = blockNode->children[i];
-                if (child && child->type == AST_VAR_DECL) {
-                    for (int j = 0; j < child->child_count; j++) {
-                        AST* var_name_node = child->children[j];
-                        if (var_name_node && var_name_node->token) {
-                            addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+        } else {
+            AST* inlineDeclOwner = NULL;
+            if (blockNode->type == AST_COMPOUND) {
+                inlineDeclOwner = blockNode;
+            } else if (blockNode->type == AST_BLOCK && blockNode->child_count > 1) {
+                AST* bodyNode = blockNode->children[blockNode->child_count - 1];
+                if (bodyNode && bodyNode->type == AST_COMPOUND) {
+                    inlineDeclOwner = bodyNode;
+                }
+            }
+
+            if (inlineDeclOwner) {
+                for (int i = 0; i < inlineDeclOwner->child_count; i++) {
+                    AST* child = inlineDeclOwner->children[i];
+                    if (child && child->type == AST_VAR_DECL) {
+                        for (int j = 0; j < child->child_count; j++) {
+                            AST* var_name_node = child->children[j];
+                            if (var_name_node && var_name_node->token) {
+                                addLocal(&fc, var_name_node->token->value, getLine(var_name_node), false);
+                                fc.locals[fc.local_count - 1].decl_node = child;
+                            }
                         }
                     }
                 }
             }
-        }
-        for (int i = locals_before_decl_scan; i < fc.local_count; i++) {
-            fc.locals[i].depth = -1;
-            fc.locals[i].decl_node = NULL;
         }
     }
 
@@ -7031,6 +7076,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
             proc_symbol->upvalues[i].index = fc.upvalues[i].index;
             proc_symbol->upvalues[i].isLocal = fc.upvalues[i].isLocal;
             proc_symbol->upvalues[i].is_ref = fc.upvalues[i].is_ref;
+            proc_symbol->upvalues[i].source_is_ref = fc.upvalues[i].source_is_ref;
         }
     }
 
@@ -9270,6 +9316,9 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 const char* pname = node->left->token->value;
                 Symbol* psym = resolveProcedureSymbolInScope(pname, node, gCurrentProgramRoot);
                 if (psym) {
+                    if (closureLiteralEscapesCurrentRoutine(node)) {
+                        markClosureLiteralEscapes(psym);
+                    }
                     if (!emitClosureLiteral(psym, chunk, line)) {
                         break;
                     }
@@ -9411,12 +9460,8 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                         upvalue_slot = resolveUpvalue(current_function_compiler, varName);
                     }
                     if (upvalue_slot != -1) {
-                        bool up_is_ref = current_function_compiler->upvalues[upvalue_slot].is_ref;
                         writeBytecodeChunk(chunk, GET_UPVALUE, line);
                         writeBytecodeChunk(chunk, (uint8_t)upvalue_slot, line);
-                        if (up_is_ref && node->var_type != TYPE_ARRAY) {
-                            writeBytecodeChunk(chunk, GET_INDIRECT, line);
-                        }
                     } else {
                         // Check if it's a compile-time constant first.
                         Value* const_val_ptr = findCompilerConstant(varName);
@@ -9878,6 +9923,39 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             if (receiverMethodName[0] != '\0') {
                 functionName = receiverMethodName;
+            }
+
+            bool treat_as_literal = false;
+            if (node->child_count == 0 && node->token && node->token->value) {
+                if (node->var_type == TYPE_POINTER) {
+                    treat_as_literal = true;
+                } else if (node->type_def &&
+                           (node->type_def->type == AST_PROC_PTR_TYPE ||
+                            (node->type_def->type == AST_TYPE_REFERENCE && node->type_def->right &&
+                             node->type_def->right->type == AST_PROC_PTR_TYPE))) {
+                    treat_as_literal = true;
+                } else if (node->parent && node->parent->type == AST_ASSIGN && node->parent->left) {
+                    AST *lhs = node->parent->left;
+                    AST *lhsType = lhs->type_def;
+                    if ((lhsType && (lhsType->type == AST_PROC_PTR_TYPE ||
+                                     (lhsType->type == AST_TYPE_REFERENCE && lhsType->right &&
+                                      lhsType->right->type == AST_PROC_PTR_TYPE))) ||
+                        lhs->var_type == TYPE_POINTER) {
+                        treat_as_literal = true;
+                    }
+                }
+            }
+            if (treat_as_literal) {
+                Symbol *closure_sym = resolveProcedureSymbolInScope(node->token->value, node, gCurrentProgramRoot);
+                if (closure_sym) {
+                    if (closureLiteralEscapesCurrentRoutine(node)) {
+                        markClosureLiteralEscapes(closure_sym);
+                    }
+                    if (!emitClosureLiteral(closure_sym, chunk, line)) {
+                        emitConstant(chunk, addNilConstant(chunk), line);
+                    }
+                    break;
+                }
             }
 
             if (strcasecmp(functionName, "printf") == 0) {

@@ -374,10 +374,28 @@
       "stdout_substring": "PASS: 41 7"
     },
     {
+      "id": "anonymous_function_literal_closure",
+      "path": "Tests/compiler/pascal/cases/anonymous_function_literal_closure.pas",
+      "expect": "compile_success",
+      "stdout_substring": "first=15\ninline=6"
+    },
+    {
+      "id": "sysutils_format_open_array_write_style_arg",
+      "path": "Tests/compiler/pascal/cases/sysutils_format_open_array_write_style_arg.pas",
+      "expect": "compile_success",
+      "stdout_substring": "[maze] = 3.50"
+    },
+    {
       "id": "inline_for_var_ordinal_type",
       "path": "Tests/compiler/pascal/cases/inline_for_var_ordinal_type.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: 15"
+    },
+    {
+      "id": "anonymous_function_literal_inline_var_capture",
+      "path": "Tests/compiler/pascal/cases/anonymous_function_literal_inline_var_capture.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: 505"
     }
   ]
 }

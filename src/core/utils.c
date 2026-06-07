@@ -2009,7 +2009,11 @@ void releaseClosureEnv(ClosureEnvPayload* env) {
             if (!cell) {
                 continue;
             }
-            if (!env->symbol || i >= env->symbol->upvalue_count || !env->symbol->upvalues[i].is_ref) {
+            bool owns_cell = true;
+            if (env->symbol) {
+                owns_cell = env->symbol->closure_escapes;
+            }
+            if (owns_cell) {
                 freeValue(cell);
                 free(cell);
             }

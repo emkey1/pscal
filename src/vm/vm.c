@@ -3724,28 +3724,26 @@ static Value vmHostCreateClosure(VM* vm) {
 
     for (int i = capture_count - 1; i >= 0; --i) {
         Value captured = pop(vm);
-        bool is_ref = proc_symbol->upvalues[i].is_ref;
-        if (is_ref) {
-            if (captured.type != TYPE_POINTER || captured.ptr_val == NULL) {
-                freeValue(&captured);
-                releaseClosureEnv(env);
-                runtimeError(vm, "VM Error: Expected pointer for captured VAR parameter in closure.");
-                return makeNil();
-            }
-            env->slots[i] = (Value*)captured.ptr_val;
+        if (captured.type != TYPE_POINTER || captured.ptr_val == NULL) {
             freeValue(&captured);
-        } else {
+            releaseClosureEnv(env);
+            runtimeError(vm, "VM Error: Expected pointer for captured closure variable.");
+            return makeNil();
+        }
+        if (proc_symbol->closure_escapes) {
             Value* cell = (Value*)malloc(sizeof(Value));
             if (!cell) {
                 freeValue(&captured);
                 releaseClosureEnv(env);
-                runtimeError(vm, "VM Error: Out of memory initialising closure environment.");
+                runtimeError(vm, "VM Error: Out of memory initialising escaping closure environment.");
                 return makeNil();
             }
-            *cell = makeCopyOfValue(&captured);
+            *cell = makeCopyOfValue((Value*)captured.ptr_val);
             env->slots[i] = cell;
-            freeValue(&captured);
+        } else {
+            env->slots[i] = (Value*)captured.ptr_val;
         }
+        freeValue(&captured);
     }
 
     Value closure = makeClosure(entry, proc_symbol, env);
