@@ -5380,16 +5380,20 @@ AST *factor(Parser *parser) {
         setLeft(assertNode, node);
         setRight(assertNode, targetType);
 
-        AST *resolvedTarget = targetType->type_def ? targetType->type_def : targetType->right;
-        if (!resolvedTarget) {
-            resolvedTarget = targetType;
-        }
-        if (resolvedTarget) {
-            setTypeAST(assertNode, resolvedTarget->var_type);
+        if (opType == TOKEN_IS) {
+            setTypeAST(assertNode, TYPE_BOOLEAN);
         } else {
-            setTypeAST(assertNode, targetType->var_type);
+            AST *resolvedTarget = targetType->type_def ? targetType->type_def : targetType->right;
+            if (!resolvedTarget) {
+                resolvedTarget = targetType;
+            }
+            if (resolvedTarget) {
+                setTypeAST(assertNode, resolvedTarget->var_type);
+            } else {
+                setTypeAST(assertNode, targetType->var_type);
+            }
+            assertNode->type_def = resolvedTarget;
         }
-        assertNode->type_def = resolvedTarget;
         node = assertNode;
     }
 

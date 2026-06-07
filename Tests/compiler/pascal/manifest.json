@@ -402,6 +402,12 @@
       "path": "Tests/compiler/pascal/cases/interface_dispatch_zero_arg_function.pas",
       "expect": "compile_success",
       "stdout_substring": "SUITE 6 COMPLETE: Interface Dispatch"
+    },
+    {
+      "id": "interface_assertions_is_as",
+      "path": "Tests/compiler/pascal/cases/interface_assertions_is_as.pas",
+      "expect": "compile_success",
+      "stdout_substring": "SUITE 7 COMPLETE: Interface Assertions"
     }
   ]
 }

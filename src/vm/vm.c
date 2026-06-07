@@ -4489,6 +4489,66 @@ static Value vmHostInterfaceAssert(VM* vm) {
     return result;
 }
 
+static Value vmHostInterfaceIs(VM* vm) {
+    if (!vm) {
+        return makeBoolean(false);
+    }
+
+    Value targetTypeVal = pop(vm);
+    Value ifaceVal = pop(vm);
+
+    if (ifaceVal.type != TYPE_INTERFACE) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface type test requires interface value.");
+        return makeBoolean(false);
+    }
+
+    if (targetTypeVal.type != TYPE_STRING || !targetTypeVal.s_val) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface type test requires target type name string.");
+        return makeBoolean(false);
+    }
+
+    ClosureEnvPayload* payload = ifaceVal.interface.payload;
+    if (!payload || payload->slot_count < 3) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface payload missing receiver metadata.");
+        return makeBoolean(false);
+    }
+
+    Value* classCell = payload->slots[2];
+    if (!classCell || classCell->type != TYPE_STRING || !classCell->s_val) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Interface payload missing class identity.");
+        return makeBoolean(false);
+    }
+
+    size_t type_len = strlen(targetTypeVal.s_val);
+    char* lowered_target = (char*)malloc(type_len + 1);
+    if (!lowered_target) {
+        freeValue(&targetTypeVal);
+        freeValue(&ifaceVal);
+        runtimeError(vm, "VM Error: Out of memory during interface type test.");
+        return makeBoolean(false);
+    }
+
+    for (size_t i = 0; i < type_len; ++i) {
+        lowered_target[i] = (char)tolower((unsigned char)targetTypeVal.s_val[i]);
+    }
+    lowered_target[type_len] = '\0';
+
+    bool matches = (strcmp(lowered_target, classCell->s_val) == 0);
+    free(lowered_target);
+
+    freeValue(&targetTypeVal);
+    freeValue(&ifaceVal);
+    return makeBoolean(matches);
+}
+
 static Value vmHostWaitThread(VM* vm) {
     // Expects top of stack: integer thread id
     Value tidVal = pop(vm);
@@ -4948,6 +5008,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     registerHostFunction(vm, HOST_FN_CREATE_CLOSURE, vmHostCreateClosure);
     registerHostFunction(vm, HOST_FN_BOX_INTERFACE, vmHostBoxInterface);
     registerHostFunction(vm, HOST_FN_INTERFACE_LOOKUP, vmHostInterfaceLookup);
+    registerHostFunction(vm, HOST_FN_INTERFACE_IS, vmHostInterfaceIs);
     registerHostFunction(vm, HOST_FN_INTERFACE_ASSERT, vmHostInterfaceAssert);
 
     // Default: tracing disabled

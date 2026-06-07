@@ -9206,7 +9206,11 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             int typeConstIndex = addStringConstant(chunk, typeName);
             emitConstant(chunk, typeConstIndex, line);
             writeBytecodeChunk(chunk, CALL_HOST, line);
-            writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_ASSERT, line);
+            if (node->token && node->token->type == TOKEN_IS) {
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_IS, line);
+            } else {
+                writeBytecodeChunk(chunk, (uint8_t)HOST_FN_INTERFACE_ASSERT, line);
+            }
             break;
         }
         case AST_SET: {
