@@ -432,6 +432,12 @@
       "path": "Tests/compiler/pascal/cases/createthread_forward_proc_address.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: CreateThread forward proc address"
+    },
+    {
+      "id": "interface_array_result_nested_index",
+      "path": "Tests/compiler/pascal/cases/interface_array_result_nested_index.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: interface array result nested index 7"
     }
   ]
 }

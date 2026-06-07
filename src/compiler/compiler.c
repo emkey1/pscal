@@ -72,6 +72,8 @@ typedef enum InterfaceBoxingResult {
 static AST* resolveTypeAlias(AST* type_node);
 static AST* getRecordTypeFromExpr(AST* expr);
 static AST* resolveInterfaceAST(AST* typeNode);
+static AST* getParameterTypeAST(AST* param_node);
+static AST* getInterfaceASTForParam(AST* param_node, AST* param_type);
 static void emitConstantNoImmediate(BytecodeChunk* chunk, int constant_index, int line);
 static bool procedureSymbolNeedsClosureLiteral(Symbol *psym);
 static bool emitProcedureReferenceLiteral(Symbol *psym, BytecodeChunk *chunk, int line, AST *context_node);
@@ -2125,6 +2127,36 @@ static AST* getInterfaceTypeFromExpression(AST* expr) {
         }
     }
 
+    if (!type_node && expr->type == AST_VARIABLE && expr->token && expr->token->value &&
+        current_function_compiler && current_function_compiler->function_symbol &&
+        current_function_compiler->function_symbol->type_def) {
+        AST* func_decl = current_function_compiler->function_symbol->type_def;
+        AST* decl = findDeclarationInScope(expr->token->value, func_decl, expr);
+        if (decl) {
+            AST* decl_type = getParameterTypeAST(decl);
+            AST* iface_decl = getInterfaceASTForParam(decl, decl_type);
+            if (iface_decl) {
+                type_node = iface_decl;
+            } else if (decl_type) {
+                type_node = resolveTypeAlias(decl_type);
+            }
+        }
+    }
+
+    if (!type_node && expr->type == AST_VARIABLE && expr->token && expr->token->value &&
+        gCurrentProgramRoot) {
+        AST* decl = findStaticDeclarationInAST(expr->token->value, expr, gCurrentProgramRoot);
+        if (decl) {
+            AST* decl_type = getParameterTypeAST(decl);
+            AST* iface_decl = getInterfaceASTForParam(decl, decl_type);
+            if (iface_decl) {
+                type_node = iface_decl;
+            } else if (decl_type) {
+                type_node = resolveTypeAlias(decl_type);
+            }
+        }
+    }
+
     if (!type_node && current_function_compiler && current_function_compiler->returns_value &&
         expr->type == AST_VARIABLE && expr->token && expr->token->value) {
         const char* varName = expr->token->value;
@@ -2896,13 +2928,47 @@ static bool isInterfaceParameterNode(AST* param_node, AST* param_type) {
     return getInterfaceASTForParam(param_node, param_type) != NULL;
 }
 
+static bool ensureInterfaceMethodLayout(AST* interfaceType) {
+    interfaceType = resolveInterfaceAST(interfaceType);
+    if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE) {
+        return false;
+    }
+
+    if (interfaceType->i_val != 0) {
+        return true;
+    }
+
+    AST** ifaceMethods = NULL;
+    int methodCount = 0;
+    int methodCapacity = 0;
+    if (!collectInterfaceMethods(interfaceType, &ifaceMethods, &methodCount, &methodCapacity, 0)) {
+        free(ifaceMethods);
+        return false;
+    }
+
+    for (int i = 0; i < methodCount; i++) {
+        AST* method = ifaceMethods[i];
+        if (!method) {
+            continue;
+        }
+        method->i_val = i;
+        if (method->parent && method->parent->type == AST_INTERFACE) {
+            method->parent->i_val = 1;
+        }
+    }
+
+    interfaceType->i_val = 1;
+    free(ifaceMethods);
+    return !compiler_had_error;
+}
+
 static int ensureInterfaceMethodSlot(AST* interfaceType, const char* methodName) {
     interfaceType = resolveInterfaceAST(interfaceType);
     if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE || !methodName) {
         return -1;
     }
 
-    if (interfaceType->i_val == 0) {
+    if (!ensureInterfaceMethodLayout(interfaceType)) {
         return -1;
     }
 
@@ -2940,6 +3006,8 @@ static AST* findInterfaceMethodDecl(AST* interfaceType, const char* methodName) 
     if (!interfaceType || interfaceType->var_type != TYPE_INTERFACE || !methodName) {
         return NULL;
     }
+
+    ensureInterfaceMethodLayout(interfaceType);
 
     for (int i = 0; i < interfaceType->child_count; i++) {
         AST* child = interfaceType->children[i];
@@ -3862,6 +3930,55 @@ static void compileProcedureReferenceArgument(AST* arg_node, BytecodeChunk* chun
     compileRValue(arg_node, chunk, getLine(arg_node));
 }
 
+static void compileArrayReadBase(AST* base, BytecodeChunk* chunk, int line) {
+    if (!base) {
+        fprintf(stderr, "L%d: Compiler error: Array access missing base expression.\n", line);
+        compiler_had_error = true;
+        return;
+    }
+
+    switch (base->type) {
+        case AST_VARIABLE: {
+            bool emitted_base = false;
+            if (base->token && base->token->value) {
+                const char* base_name = base->token->value;
+                Symbol* local_const = lookupLocalSymbol(base_name);
+                if (local_const && local_const->is_const && local_const->value) {
+                    emitConstant(chunk, addConstantToChunk(chunk, local_const->value), line);
+                    emitted_base = true;
+                } else {
+                    Symbol* global_const = lookupGlobalSymbol(base_name);
+                    if (global_const && global_const->is_const && global_const->value) {
+                        emitConstant(chunk, addConstantToChunk(chunk, global_const->value), line);
+                        emitted_base = true;
+                    } else {
+                        Value* const_val_ptr = findCompilerConstant(base_name);
+                        if (const_val_ptr) {
+                            emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
+                            emitted_base = true;
+                        }
+                    }
+                }
+            }
+            if (!emitted_base) {
+                compileLValue(base, chunk, getLine(base));
+            }
+            break;
+        }
+        case AST_FIELD_ACCESS:
+        case AST_DEREFERENCE:
+            compileLValue(base, chunk, getLine(base));
+            break;
+        case AST_ARRAY_ACCESS:
+        case AST_PROCEDURE_CALL:
+            compileRValue(base, chunk, getLine(base));
+            break;
+        default:
+            compileRValue(base, chunk, getLine(base));
+            break;
+    }
+}
+
 // --- Forward Declarations for Recursive Compilation ---
 static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -3870,6 +3987,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, int line);
 static void compileInlineRoutine(Symbol* proc_symbol, AST* call_node, BytecodeChunk* chunk, int line, bool push_result);
 static void compilePrintf(AST* node, BytecodeChunk* chunk, int line);
+static void compileArrayReadBase(AST* base, BytecodeChunk* chunk, int line);
 
 // --- Global/Module State for Compiler ---
 // For mapping global variable names to an index during this compilation pass.
@@ -5623,7 +5741,8 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
             break;
         }
         default:
-            fprintf(stderr, "L%d: Compiler error: Invalid expression cannot be used as a variable reference (L-Value).\n", line);
+            fprintf(stderr, "L%d: Compiler error: Invalid expression cannot be used as a variable reference (L-Value).\n",
+                    line);
             compiler_had_error = true;
             break;
     }
@@ -9756,7 +9875,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                     }
                 }
                 if (!emitted_base) {
-                    compileLValue(base_expr, chunk, getLine(base_expr));
+                    compileArrayReadBase(base_expr, chunk, getLine(base_expr));
                 }
                 writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE_CONST, line);
                 emitInt32(chunk, (uint32_t)const_info.offset, line);
@@ -9774,43 +9893,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
-            switch (base->type) {
-                case AST_VARIABLE: {
-                    bool emitted_base = false;
-                    if (base->token && base->token->value) {
-                        const char* base_name = base->token->value;
-                        Symbol* local_const = lookupLocalSymbol(base_name);
-                        if (local_const && local_const->is_const && local_const->value) {
-                            emitConstant(chunk, addConstantToChunk(chunk, local_const->value), line);
-                            emitted_base = true;
-                        } else {
-                            Symbol* global_const = lookupGlobalSymbol(base_name);
-                            if (global_const && global_const->is_const && global_const->value) {
-                                emitConstant(chunk, addConstantToChunk(chunk, global_const->value), line);
-                                emitted_base = true;
-                            } else {
-                                Value* const_val_ptr = findCompilerConstant(base_name);
-                                if (const_val_ptr) {
-                                    emitConstant(chunk, addConstantToChunk(chunk, const_val_ptr), line);
-                                    emitted_base = true;
-                                }
-                            }
-                        }
-                    }
-                    if (!emitted_base) {
-                        compileLValue(base, chunk, getLine(base));
-                    }
-                    break;
-                }
-                case AST_FIELD_ACCESS:
-                case AST_ARRAY_ACCESS:
-                case AST_DEREFERENCE:
-                    compileLValue(base, chunk, getLine(base));
-                    break;
-                default:
-                    compileRValue(base, chunk, getLine(base));
-                    break;
-            }
+            compileArrayReadBase(base, chunk, line);
             writeBytecodeChunk(chunk, LOAD_ELEMENT_VALUE, line);
             writeBytecodeChunk(chunk, (uint8_t)node->child_count, line);
             break;
