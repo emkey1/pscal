@@ -438,6 +438,18 @@
       "path": "Tests/compiler/pascal/cases/interface_array_result_nested_index.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: interface array result nested index 7"
+    },
+    {
+      "id": "dynamic_array_alias_lifetime",
+      "path": "Tests/compiler/pascal/cases/dynamic_array_alias_lifetime.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: dynamic array alias lifetime"
+    },
+    {
+      "id": "dynamic_array_field_thread_race_regression",
+      "path": "Tests/compiler/pascal/cases/dynamic_array_field_thread_race_regression.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: dynamic array field thread race regression"
     }
   ]
 }

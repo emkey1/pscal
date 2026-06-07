@@ -52,6 +52,7 @@ static bool vmIsRootExecutor(const VM* vm);
 #define VM_PROC_REGISTRY_CAPACITY 1024
 
 static pthread_mutex_t gVmProcRegistryLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t value_cell_mutex = PTHREAD_MUTEX_INITIALIZER;
 static VM* gVmProcRegistry[VM_PROC_REGISTRY_CAPACITY];
 static size_t gVmProcRegistryCount = 0;
 
@@ -1047,6 +1048,43 @@ static bool adjustLocalByDelta(VM* vm, Value* slot, long long delta, const char*
     runtimeError(vm, "VM Error: %s requires an ordinal or real local, got %s.",
                  opcode_name, varTypeToString(slot->type));
     return false;
+}
+
+static void replaceValueCell(Value* target, Value replacement, AST* preserved_base_type) {
+    if (!target) {
+        return;
+    }
+
+    pthread_mutex_lock(&value_cell_mutex);
+    Value old_value = *target;
+    *target = replacement;
+    if (target->type == TYPE_POINTER && target->base_type_node == NULL && preserved_base_type) {
+        target->base_type_node = preserved_base_type;
+    }
+    pthread_mutex_unlock(&value_cell_mutex);
+    freeValue(&old_value);
+}
+
+static bool vmNameIsMyself(const char* name) {
+    return name && strcasecmp(name, "myself") == 0;
+}
+
+static Value vmLoadThreadMyselfCopy(VM* vm) {
+    if (!vm) {
+        return makeNil();
+    }
+    return copyValueForStack(&vm->threadMyself);
+}
+
+static void vmStoreThreadMyself(VM* vm, Value value) {
+    if (!vm) {
+        freeValue(&value);
+        return;
+    }
+    AST* preserved_base = vm->threadMyself.base_type_node;
+    Value replacement = makeCopyOfValue(&value);
+    replaceValueCell(&vm->threadMyself, replacement, preserved_base);
+    freeValue(&value);
 }
 
 // --- Class method registration helpers ---
@@ -3359,6 +3397,8 @@ static Value copyValueForStack(const Value* src) {
         return makeNil();
     }
 
+    pthread_mutex_lock(&value_cell_mutex);
+
     switch (src->type) {
         case TYPE_VOID:
         case TYPE_INT32:
@@ -3377,7 +3417,11 @@ static Value copyValueForStack(const Value* src) {
         case TYPE_FLOAT:
         case TYPE_LONG_DOUBLE:
         case TYPE_NIL:
-            return *src;
+        {
+            Value copy = *src;
+            pthread_mutex_unlock(&value_cell_mutex);
+            return copy;
+        }
         default:
             break;
     }
@@ -3387,6 +3431,7 @@ static Value copyValueForStack(const Value* src) {
         if (alias.mstream) {
             retainMStream(alias.mstream);
         }
+        pthread_mutex_unlock(&value_cell_mutex);
         return alias;
     }
 
@@ -3395,10 +3440,13 @@ static Value copyValueForStack(const Value* src) {
         if (alias.closure.env) {
             retainClosureEnv(alias.closure.env);
         }
+        pthread_mutex_unlock(&value_cell_mutex);
         return alias;
     }
 
-    return makeCopyOfValue(src);
+    Value copy = makeCopyOfValue(src);
+    pthread_mutex_unlock(&value_cell_mutex);
+    return copy;
 }
 
 static void push(VM* vm, Value value) { // Using your original name 'push'
@@ -4415,14 +4463,7 @@ static Value vmHostInterfaceLookup(VM* vm) {
 
     Value receiverCopy = copyInterfaceReceiverAlias(receiverCell);
 
-    if (vm->vmGlobalSymbols) {
-        pthread_mutex_lock(&globals_mutex);
-        Symbol* myselfSym = hashTableLookup(vm->vmGlobalSymbols, "myself");
-        if (myselfSym) {
-            updateSymbol("myself", copyInterfaceReceiverAlias(receiverCell));
-        }
-        pthread_mutex_unlock(&globals_mutex);
-    }
+    vmStoreThreadMyself(vm, copyInterfaceReceiverAlias(receiverCell));
 
     push(vm, receiverCopy);
 
@@ -4908,6 +4949,8 @@ void vmResetExecutionState(VM* vm) {
     vm->suspend_unwind_requested = false;
     vm->current_builtin_name = NULL;
     vm->trace_executed = 0;
+    freeValue(&vm->threadMyself);
+    vm->threadMyself = makeNil();
 
     atomic_store(&vm->shuttingDownWorkers, true);
     if (vm->jobQueue) {
@@ -4984,6 +5027,7 @@ void initVM(VM* vm) { // As in all.txt, with frameCount
     vm->abort_requested = false;
     vm->suspend_unwind_requested = false;
     vm->current_builtin_name = NULL;
+    vm->threadMyself = makeNil();
 
     vm->threadCount = 1; // main thread occupies index 0
     vm->threadOwner = vm;
@@ -5044,6 +5088,8 @@ void freeVM(VM* vm) {
     if (!vm) return;
     vmProcUnregister(vm);
     vmReleaseExecutionResources(vm);
+    freeValue(&vm->threadMyself);
+    vm->threadMyself = makeNil();
     // The VM holds references to global symbol tables that are owned and
     // managed by the caller (e.g. vm_main.c). Freeing them here would lead to
     // double-free errors when the caller performs its own cleanup. Simply
@@ -6200,6 +6246,10 @@ dispatch_switch:
                     runtimeError(vm, "Runtime Error: Invalid global name for address lookup.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                if (vmNameIsMyself(name_val->s_val)) {
+                    push(vm, makePointer(&vm->threadMyself, NULL));
+                    break;
+                }
 
                 Symbol* sym = NULL;
                 if (vm->vmConstGlobalSymbols) {
@@ -6231,6 +6281,10 @@ dispatch_switch:
                 if (name_val->type != TYPE_STRING || !name_val->s_val) {
                     runtimeError(vm, "Runtime Error: Invalid global name for address lookup.");
                     return INTERPRET_RUNTIME_ERROR;
+                }
+                if (vmNameIsMyself(name_val->s_val)) {
+                    push(vm, makePointer(&vm->threadMyself, NULL));
+                    break;
                 }
 
                 Symbol* sym = NULL;
@@ -7943,14 +7997,16 @@ comparison_error_label:
                         SET_INT_VALUE(target_lvalue_ptr, target_lvalue_ptr->c_val);
                     }
                     else {
-                        freeValue(target_lvalue_ptr);
+                        AST* preserved_base = target_lvalue_ptr->base_type_node;
                         if (value_to_set.type == TYPE_MEMORYSTREAM) {
                             /* Transfer ownership of the MStream pointer without freeing it
                              * when the temporary value is cleaned up below. */
-                            *target_lvalue_ptr = value_to_set;
+                            Value replacement = value_to_set;
+                            replaceValueCell(target_lvalue_ptr, replacement, preserved_base);
                             value_to_set.mstream = NULL;
                         } else {
-                            *target_lvalue_ptr = makeCopyOfValue(&value_to_set);
+                            Value replacement = makeCopyOfValue(&value_to_set);
+                            replaceValueCell(target_lvalue_ptr, replacement, preserved_base);
                         }
                     }
                 }
@@ -8205,6 +8261,10 @@ comparison_error_label:
                     runtimeError(vm, "Runtime Error: Invalid global name.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                if (vmNameIsMyself(name_val->s_val)) {
+                    push(vm, vmLoadThreadMyselfCopy(vm));
+                    break;
+                }
 
                 Symbol* sym = vmGetCachedGlobalSymbol(vm->chunk, name_idx);
                 if (!sym || !sym->value) {
@@ -8258,6 +8318,10 @@ comparison_error_label:
                     runtimeError(vm, "Runtime Error: Invalid global name.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                if (vmNameIsMyself(name_val->s_val)) {
+                    push(vm, vmLoadThreadMyselfCopy(vm));
+                    break;
+                }
 
                 Symbol* sym = vmGetCachedGlobalSymbol(vm->chunk, name_idx);
                 if (!sym || !sym->value) {
@@ -8305,7 +8369,11 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Cached global unavailable in GET_GLOBAL_CACHED.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, copyValueForStack(sym->value));
+                if (vmNameIsMyself(sym->name)) {
+                    push(vm, vmLoadThreadMyselfCopy(vm));
+                } else {
+                    push(vm, copyValueForStack(sym->value));
+                }
                 break;
             }
             case GET_GLOBAL16_CACHED: {
@@ -8317,7 +8385,11 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Cached global unavailable in GET_GLOBAL16_CACHED.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
-                push(vm, copyValueForStack(sym->value));
+                if (vmNameIsMyself(sym->name)) {
+                    push(vm, vmLoadThreadMyselfCopy(vm));
+                } else {
+                    push(vm, copyValueForStack(sym->value));
+                }
                 break;
             }
             case SET_GLOBAL: {
@@ -8334,6 +8406,11 @@ comparison_error_label:
                 if (name_val->type != TYPE_STRING || !name_val->s_val) {
                     runtimeError(vm, "Runtime Error: Invalid global variable name.");
                     return INTERPRET_RUNTIME_ERROR;
+                }
+                if (vmNameIsMyself(name_val->s_val)) {
+                    Value value_from_stack = pop(vm);
+                    vmStoreThreadMyself(vm, value_from_stack);
+                    break;
                 }
 
                 pthread_mutex_lock(&globals_mutex);
@@ -8379,6 +8456,11 @@ comparison_error_label:
                     runtimeError(vm, "Runtime Error: Invalid global variable name.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                if (vmNameIsMyself(name_val->s_val)) {
+                    Value value_from_stack = pop(vm);
+                    vmStoreThreadMyself(vm, value_from_stack);
+                    break;
+                }
 
                 pthread_mutex_lock(&globals_mutex);
                 Symbol* sym = vmGetCachedGlobalSymbol(vm->chunk, name_idx);
@@ -8417,6 +8499,11 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Cached symbol missing for SET_GLOBAL_CACHED.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                if (vmNameIsMyself(sym->name)) {
+                    Value value_from_stack = pop(vm);
+                    vmStoreThreadMyself(vm, value_from_stack);
+                    break;
+                }
                 pthread_mutex_lock(&globals_mutex);
                 if (!sym->value) {
                     sym->value = (Value*)malloc(sizeof(Value));
@@ -8440,6 +8527,11 @@ comparison_error_label:
                 if (!sym) {
                     runtimeError(vm, "VM Error: Cached symbol missing for SET_GLOBAL16_CACHED.");
                     return INTERPRET_RUNTIME_ERROR;
+                }
+                if (vmNameIsMyself(sym->name)) {
+                    Value value_from_stack = pop(vm);
+                    vmStoreThreadMyself(vm, value_from_stack);
+                    break;
                 }
                 pthread_mutex_lock(&globals_mutex);
                 if (!sym->value) {
@@ -8586,11 +8678,8 @@ comparison_error_label:
                     // This is the logic for all other types, including dynamic strings,
                     // numbers, records, etc., which requires a deep copy.
                     AST* preserved_base = target_slot->base_type_node;
-                    freeValue(target_slot);
-                    *target_slot = makeCopyOfValue(&value_from_stack);
-                    if (target_slot->type == TYPE_POINTER && target_slot->base_type_node == NULL) {
-                        target_slot->base_type_node = preserved_base;
-                    }
+                    Value replacement = makeCopyOfValue(&value_from_stack);
+                    replaceValueCell(target_slot, replacement, preserved_base);
                 }
                 // --- END CORRECTED LOGIC ---
                 #ifdef DEBUG
@@ -8704,11 +8793,8 @@ comparison_error_label:
                     }
                 } else {
                     AST* preserved_base = target_slot->base_type_node;
-                    freeValue(target_slot);
-                    *target_slot = makeCopyOfValue(&value_from_stack);
-                    if (target_slot->type == TYPE_POINTER && target_slot->base_type_node == NULL) {
-                        target_slot->base_type_node = preserved_base;
-                    }
+                    Value replacement = makeCopyOfValue(&value_from_stack);
+                    replaceValueCell(target_slot, replacement, preserved_base);
                 }
                 freeValue(&value_from_stack);
                 break;

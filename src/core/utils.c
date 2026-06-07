@@ -18,6 +18,7 @@
 #include <unistd.h>    // For STDOUT_FILENO
 #include <sys/stat.h>  // For stat
 #include <limits.h>    // For PATH_MAX
+#include <pthread.h>
 #ifdef __linux__
 #include <linux/limits.h>
 #endif
@@ -25,6 +26,8 @@
 #define PATH_MAX 4096
 #endif
 #include "pscal_paths.h"
+
+static pthread_mutex_t dynamic_array_refcount_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static const uint16_t kCp437ToUnicode[128] = {
     0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
@@ -2288,8 +2291,11 @@ void freeValue(Value *v) {
              fflush(stderr);
 #endif
              if (v->array_is_dynamic && v->array_refcount) {
+                 bool release_storage = false;
+                 pthread_mutex_lock(&dynamic_array_refcount_mutex);
                  if (*v->array_refcount > 1) {
                      (*v->array_refcount)--;
+                     pthread_mutex_unlock(&dynamic_array_refcount_mutex);
                      v->array_val = NULL;
                      v->array_raw = NULL;
                      v->lower_bounds = NULL;
@@ -2300,7 +2306,11 @@ void freeValue(Value *v) {
                      v->dimensions = 0;
                      break;
                  }
-                 free(v->array_refcount);
+                 release_storage = true;
+                 pthread_mutex_unlock(&dynamic_array_refcount_mutex);
+                 if (release_storage) {
+                     free(v->array_refcount);
+                 }
                  v->array_refcount = NULL;
              }
              if (v->array_is_packed) {
@@ -3374,7 +3384,9 @@ Value makeCopyOfValue(const Value *src) {
                 v.array_raw = src->array_raw;
                 v.array_refcount = src->array_refcount;
                 if (v.array_refcount) {
+                    pthread_mutex_lock(&dynamic_array_refcount_mutex);
                     (*v.array_refcount)++;
+                    pthread_mutex_unlock(&dynamic_array_refcount_mutex);
                 }
                 break;
             }

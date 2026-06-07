@@ -236,6 +236,7 @@ typedef struct VM_s {
     bool abort_requested;     // Raised when a builtin requests an immediate interpreter abort
     bool suspend_unwind_requested; // Keep unwinding frames for cooperative Ctrl-Z requests
     const char* current_builtin_name; // Tracks the name of the builtin currently executing (for diagnostics)
+    Value threadMyself;       // Per-VM receiver context for Pascal record methods
 
     // Threading support
     Thread threads[VM_MAX_THREADS];
