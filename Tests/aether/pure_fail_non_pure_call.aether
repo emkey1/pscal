@@ -1,0 +1,17 @@
+fn noisy() -> Void {
+    fx {
+        writeln("not pure");
+    }
+    ret;
+}
+
+@pure
+fn wrapper() -> Void {
+    noisy();
+    ret;
+}
+
+fn main() -> Void {
+    wrapper();
+    ret;
+}

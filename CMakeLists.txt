@@ -2384,6 +2384,109 @@ if(PSCAL_BUILD_STATIC_LIBS)
     target_link_libraries(pscal_rea_static PUBLIC pscal_core_static)
 endif()
 
+# Aether front-end executable (bootstrapped on the shared Rea implementation)
+set(AETHER_SOURCES
+    ${REA_SOURCES}
+    src/aether/translate.c
+    src/aether/parser.c
+    src/aether/semantic.c
+    src/aether/state.c
+)
+
+if(NOT PSCAL_PLATFORM_IOS)
+    add_executable(aether ${AETHER_SOURCES})
+    target_compile_definitions(aether PRIVATE
+        FRONTEND_REA
+        PSCAL_FRONTEND_MAIN_NAME=aether_main
+        PSCAL_FRONTEND_KIND=FRONTEND_KIND_AETHER
+        PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
+        PSCAL_FRONTEND_USAGE_NAME=\"aether\"
+        PSCAL_FRONTEND_COMPILER_ID=\"aether\"
+        PSCAL_FRONTEND_PARSE_SOURCE=parseAether
+        PSCAL_FRONTEND_SET_STRICT_MODE=aetherSetStrictMode
+        PSCAL_FRONTEND_RESET_SYMBOL_STATE=aetherResetSymbolState
+        PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE=aetherInvalidateGlobalState
+        PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH=aetherSemanticSetSourcePath
+        PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS=aetherPerformSemanticAnalysis
+        PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT=aetherGetLoadedModuleCount
+        PSCAL_FRONTEND_GET_MODULE_AST=aetherGetModuleAST
+        PSCAL_FRONTEND_GET_MODULE_PATH=aetherGetModulePath
+        PSCAL_FRONTEND_GET_MODULE_NAME=aetherGetModuleName
+        PSCAL_FRONTEND_RESOLVE_IMPORT_PATH=aetherResolveImportPath)
+    target_link_libraries(aether PRIVATE pscal_pascal_static)
+    if(PSCAL_HAS_LIBCURL)
+        if(TARGET CURL::libcurl)
+            target_link_libraries(aether PRIVATE CURL::libcurl)
+        else()
+            target_link_libraries(aether PRIVATE ${CURL_LIBRARIES})
+        endif()
+    endif()
+    target_link_libraries(aether PRIVATE m Threads::Threads)
+    if(ENABLE_EXT_BUILTIN_SQLITE AND PSCAL_SQLITE_LIBS)
+        target_link_libraries(aether PRIVATE ${PSCAL_SQLITE_LIBS})
+    endif()
+
+    if(SDL)
+        target_include_directories(aether PRIVATE
+            ${PSCAL_SDL_INCLUDE_DIRS}
+            ${PC_SDL_IMAGE_INCLUDE_DIRS}
+            ${PC_SDL_MIXER_INCLUDE_DIRS}
+            ${PC_SDL_TTF_INCLUDE_DIRS}
+        )
+
+        target_link_directories(aether PRIVATE
+            ${PC_SDL_IMAGE_LIBRARY_DIRS}
+            ${PC_SDL_MIXER_LIBRARY_DIRS}
+            ${PC_SDL_TTF_LIBRARY_DIRS}
+        )
+
+        set(AETHER_SDL_LIBS "")
+        list(APPEND AETHER_SDL_LIBS ${PSCAL_SDL_CORE_LINK_LIBS})
+        list(APPEND AETHER_SDL_LIBS
+            ${PC_SDL_IMAGE_LIBRARIES}
+            ${PC_SDL_MIXER_LIBRARIES}
+            ${PC_SDL_TTF_LIBRARIES}
+            ${PC_SDL_IMAGE_LDFLAGS_OTHER}
+            ${PC_SDL_MIXER_LDFLAGS_OTHER}
+            ${PC_SDL_TTF_LDFLAGS_OTHER}
+        )
+        if(PSCAL_OPENGL_TARGET)
+            list(APPEND AETHER_SDL_LIBS ${PSCAL_OPENGL_TARGET})
+        elseif(OPENGL_LIBRARIES)
+            list(APPEND AETHER_SDL_LIBS ${OPENGL_LIBRARIES})
+        endif()
+        list(APPEND AETHER_SDL_LIBS ${PSCAL_SDL_PLATFORM_LIBS})
+        list(REMOVE_DUPLICATES AETHER_SDL_LIBS)
+        target_link_libraries(aether PRIVATE ${AETHER_SDL_LIBS})
+        target_compile_definitions(aether PRIVATE SDL)
+    endif()
+endif()
+
+if(PSCAL_BUILD_STATIC_LIBS)
+    pscal_add_static_library(pscal_aether_static
+        FRONTEND FRONTEND_REA
+        SOURCES ${AETHER_SOURCES})
+    target_compile_definitions(pscal_aether_static PRIVATE
+        FRONTEND_REA
+        PSCAL_FRONTEND_MAIN_NAME=aether_main
+        PSCAL_FRONTEND_KIND=FRONTEND_KIND_AETHER
+        PSCAL_FRONTEND_DISPLAY_NAME=\"Aether\"
+        PSCAL_FRONTEND_USAGE_NAME=\"aether\"
+        PSCAL_FRONTEND_COMPILER_ID=\"aether\"
+        PSCAL_FRONTEND_PARSE_SOURCE=parseAether
+        PSCAL_FRONTEND_SET_STRICT_MODE=aetherSetStrictMode
+        PSCAL_FRONTEND_RESET_SYMBOL_STATE=aetherResetSymbolState
+        PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE=aetherInvalidateGlobalState
+        PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH=aetherSemanticSetSourcePath
+        PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS=aetherPerformSemanticAnalysis
+        PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT=aetherGetLoadedModuleCount
+        PSCAL_FRONTEND_GET_MODULE_AST=aetherGetModuleAST
+        PSCAL_FRONTEND_GET_MODULE_PATH=aetherGetModulePath
+        PSCAL_FRONTEND_GET_MODULE_NAME=aetherGetModuleName
+        PSCAL_FRONTEND_RESOLVE_IMPORT_PATH=aetherResolveImportPath)
+    target_link_libraries(pscal_aether_static PUBLIC pscal_core_static)
+endif()
+
 # ---- Examples ----
 if(NOT PSCAL_PLATFORM_IOS)
     add_subdirectory(Examples)
@@ -2444,7 +2547,7 @@ if(NOT PSCAL_PLATFORM_IOS)
     include(GNUInstallDirs)
     set(_pscal_runtime_root "${PSCAL_INSTALL_ROOT_DESTINATION}")
 
-    install(TARGETS pascal pscalvm clike clike-repl rea
+    install(TARGETS pascal pscalvm clike clike-repl rea aether
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     if(BUILD_DASCAL)
         install(TARGETS dascal
@@ -2583,6 +2686,7 @@ if(NOT PSCAL_PLATFORM_IOS)
     add_test(NAME pascal_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_pascal_tests.sh)
     add_test(NAME clike_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_clike_tests.sh)
     add_test(NAME rea_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_rea_tests.sh)
+    add_test(NAME aether_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_aether_tests.sh)
     set_tests_properties(rea_tests PROPERTIES ENVIRONMENT "REA_SKIP_TESTS=constructor_init field_access_assign field_access_read method_this_assign new_alloc new_assign_ptr")
     add_test(NAME json2bc_tests COMMAND bash ${CMAKE_SOURCE_DIR}/Tests/run_json2bc_tests.sh)
 endif()

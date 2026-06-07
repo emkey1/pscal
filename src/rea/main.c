@@ -49,10 +49,77 @@
 #include "rea/parser.h"
 #include "rea/state.h"
 #include "rea/semantic.h"
+#include "aether/parser.h"
+#include "aether/state.h"
+#include "aether/semantic.h"
 #include "Pascal/lexer.h"
 #include "Pascal/parser.h"
 #include "ext_builtins/dump.h"
 #include "common/path_virtualization.h"
+
+#ifndef PSCAL_FRONTEND_MAIN_NAME
+#define PSCAL_FRONTEND_MAIN_NAME rea_main
+#endif
+
+#ifndef PSCAL_FRONTEND_KIND
+#define PSCAL_FRONTEND_KIND FRONTEND_KIND_REA
+#endif
+
+#ifndef PSCAL_FRONTEND_DISPLAY_NAME
+#define PSCAL_FRONTEND_DISPLAY_NAME "Rea"
+#endif
+
+#ifndef PSCAL_FRONTEND_USAGE_NAME
+#define PSCAL_FRONTEND_USAGE_NAME "rea"
+#endif
+
+#ifndef PSCAL_FRONTEND_COMPILER_ID
+#define PSCAL_FRONTEND_COMPILER_ID "rea"
+#endif
+
+#ifndef PSCAL_FRONTEND_PARSE_SOURCE
+#define PSCAL_FRONTEND_PARSE_SOURCE(source) parseRea(source)
+#endif
+
+#ifndef PSCAL_FRONTEND_SET_STRICT_MODE
+#define PSCAL_FRONTEND_SET_STRICT_MODE(enable) reaSetStrictMode(enable)
+#endif
+
+#ifndef PSCAL_FRONTEND_RESET_SYMBOL_STATE
+#define PSCAL_FRONTEND_RESET_SYMBOL_STATE() reaResetSymbolState()
+#endif
+
+#ifndef PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE
+#define PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE() reaInvalidateGlobalState()
+#endif
+
+#ifndef PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH
+#define PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH(path) reaSemanticSetSourcePath(path)
+#endif
+
+#ifndef PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS
+#define PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS(root) reaPerformSemanticAnalysis(root)
+#endif
+
+#ifndef PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT
+#define PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT() reaGetLoadedModuleCount()
+#endif
+
+#ifndef PSCAL_FRONTEND_GET_MODULE_AST
+#define PSCAL_FRONTEND_GET_MODULE_AST(index) reaGetModuleAST(index)
+#endif
+
+#ifndef PSCAL_FRONTEND_GET_MODULE_PATH
+#define PSCAL_FRONTEND_GET_MODULE_PATH(index) reaGetModulePath(index)
+#endif
+
+#ifndef PSCAL_FRONTEND_GET_MODULE_NAME
+#define PSCAL_FRONTEND_GET_MODULE_NAME(index) reaGetModuleName(index)
+#endif
+
+#ifndef PSCAL_FRONTEND_RESOLVE_IMPORT_PATH
+#define PSCAL_FRONTEND_RESOLVE_IMPORT_PATH(path) reaResolveImportPath(path)
+#endif
 
 static void initSymbolSystem(void) {
     globalSymbols = createHashTable();
@@ -85,7 +152,7 @@ static void reaInstallSigint(void) {
 }
 
 static const char *REA_USAGE =
-    "Usage: rea <options> <source.rea> [program_parameters...]\n"
+    "Usage: " PSCAL_FRONTEND_USAGE_NAME " <options> <source> [program_parameters...]\n"
     "   Options:\n"
     "     -v                     Display version.\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
@@ -105,7 +172,7 @@ static const char *REA_USAGE =
     "     thread_get_status(handle, drop)       Inspect success flags (drop non-zero releases the slot).\n"
     "     thread_stats()                        Array of records summarizing pool usage.\n";
 
-static const char *const kReaCompilerId = "rea";
+static const char *const kReaCompilerId = PSCAL_FRONTEND_COMPILER_ID;
 
 static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
     if (!unit_list) return true;
@@ -267,7 +334,7 @@ static void collectUsesClauses(AST* node, List* out) {
         collectUnitListPaths(node->unit_list, out);
     }
     if (node->type == AST_IMPORT && node->token && node->token->value) {
-        char *resolved = reaResolveImportPath(node->token->value);
+        char *resolved = PSCAL_FRONTEND_RESOLVE_IMPORT_PATH(node->token->value);
         if (resolved) {
             listAppend(out, resolved);
             free(resolved);
@@ -283,10 +350,10 @@ static void collectUsesClauses(AST* node, List* out) {
     }
 }
 
-int rea_main(int argc, char **argv) {
+int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     /* Always start from a clean slate in case a prior in-process run aborted
      * early (e.g., exit()/halt during startup). */
-    reaInvalidateGlobalState();
+    PSCAL_FRONTEND_INVALIDATE_GLOBAL_STATE();
 
     /* Skip process-wide fd redirection on iOS; background jobs share descriptors with the shell. */
 #if !defined(PSCAL_TARGET_IOS)
@@ -314,12 +381,12 @@ int rea_main(int argc, char **argv) {
     }
 #endif
 
-    FrontendKind previousKind = frontendPushKind(FRONTEND_KIND_REA);
+    FrontendKind previousKind = frontendPushKind(PSCAL_FRONTEND_KIND);
 #define REA_RETURN(value)                           \
     do {                                            \
         int __rea_rc = (value);                     \
         if (reaSymbolStateActive) {                 \
-            reaResetSymbolState();                  \
+            PSCAL_FRONTEND_RESET_SYMBOL_STATE();    \
             reaSymbolStateActive = false;           \
         }                                           \
         frontendPopKind(previousKind);              \
@@ -362,7 +429,7 @@ int rea_main(int argc, char **argv) {
             printf("%s", REA_USAGE);
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[argi], "-v") == 0 || strcmp(argv[argi], "--version") == 0) {
-            printf("Rea Compiler Version: %s (latest tag: %s)\n",
+            printf(PSCAL_FRONTEND_DISPLAY_NAME " Compiler Version: %s (latest tag: %s)\n",
                    pscal_program_version_string(), pscal_git_tag_string());
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[argi], "--dump-ast-json") == 0) {
@@ -432,7 +499,6 @@ int rea_main(int argc, char **argv) {
 #endif
     char *preprocessed_source = preprocessConditionals(src, defines, define_count);
     const char *effective_src = preprocessed_source ? preprocessed_source : src;
-
     // Note: Bootstrap of entrypoint is disabled; rely on source top-level or
     // future bytecode-level CALL injection.
 
@@ -459,15 +525,15 @@ int rea_main(int argc, char **argv) {
     registerBuiltinFunction("tobool", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobyte", AST_FUNCTION_DECL, NULL);
 
-    if (strict_mode) reaSetStrictMode(1);
-    AST *program = parseRea(effective_src);
+    if (strict_mode) PSCAL_FRONTEND_SET_STRICT_MODE(1);
+    AST *program = PSCAL_FRONTEND_PARSE_SOURCE(effective_src);
     if (!program) {
         if (preprocessed_source) free(preprocessed_source);
         free(src);
         REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
-    reaSemanticSetSourcePath(path);
-    reaPerformSemanticAnalysis(program);
+    PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH(path);
+    PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         freeAST(program);
         if (preprocessed_source) free(preprocessed_source);
@@ -524,15 +590,17 @@ int rea_main(int argc, char **argv) {
         // Handle #import directives by loading and linking Pascal units before compiling the main program
         walkUsesClauses(program, &chunk);
 
-        int moduleCount = reaGetLoadedModuleCount();
+        int moduleCount = PSCAL_FRONTEND_GET_LOADED_MODULE_COUNT();
         for (int i = 0; i < moduleCount && compilation_ok; i++) {
-            AST *moduleAST = reaGetModuleAST(i);
+            AST *moduleAST = PSCAL_FRONTEND_GET_MODULE_AST(i);
             if (!moduleAST) continue;
             annotateTypes(moduleAST, NULL, moduleAST);
             if (!compileModuleAST(moduleAST, &chunk)) {
                 compilation_ok = false;
                 fprintf(stderr, "Compilation failed while processing module '%s'.\n",
-                        reaGetModuleName(i) ? reaGetModuleName(i) : reaGetModulePath(i));
+                        PSCAL_FRONTEND_GET_MODULE_NAME(i)
+                            ? PSCAL_FRONTEND_GET_MODULE_NAME(i)
+                            : PSCAL_FRONTEND_GET_MODULE_PATH(i));
             }
         }
 
@@ -616,6 +684,6 @@ int rea_main(int argc, char **argv) {
 
 #ifndef PSCAL_NO_CLI_ENTRYPOINTS
 int main(int argc, char **argv) {
-    return rea_main(argc, argv);
+    return PSCAL_FRONTEND_MAIN_NAME(argc, argv);
 }
 #endif

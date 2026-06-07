@@ -6,6 +6,7 @@ typedef enum FrontendKind {
     FRONTEND_KIND_UNKNOWN = 0,
     FRONTEND_KIND_PASCAL,
     FRONTEND_KIND_REA,
+    FRONTEND_KIND_AETHER,
     FRONTEND_KIND_CLIKE,
     FRONTEND_KIND_SHELL
 } FrontendKind;
@@ -21,6 +22,10 @@ static inline bool frontendIsPascal(void) {
 
 static inline bool frontendIsRea(void) {
     return frontendGetKind() == FRONTEND_KIND_REA;
+}
+
+static inline bool frontendIsAether(void) {
+    return frontendGetKind() == FRONTEND_KIND_AETHER;
 }
 
 static inline bool frontendIsClike(void) {

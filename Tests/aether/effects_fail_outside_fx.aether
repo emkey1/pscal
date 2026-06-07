@@ -1,0 +1,4 @@
+fn main() -> Void {
+    writeln("outside fx");
+    ret;
+}

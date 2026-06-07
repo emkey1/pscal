@@ -1,0 +1,22 @@
+@pure
+fn clampToHundred(value: Int) -> Int {
+    if value > 100 {
+        ret 100;
+    }
+    ret value;
+}
+
+@pre value >= 0
+@post result >= 0
+fn reportScore(value: Int) -> Void {
+    let safe: Int = clampToHundred(value);
+    fx {
+        writeln("score = ", safe);
+    }
+    ret;
+}
+
+fn main() -> Void {
+    reportScore(87);
+    ret;
+}

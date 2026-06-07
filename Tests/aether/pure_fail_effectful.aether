@@ -1,0 +1,12 @@
+@pure
+fn noisy() -> Void {
+    fx {
+        writeln("still not pure");
+    }
+    ret;
+}
+
+fn main() -> Void {
+    noisy();
+    ret;
+}

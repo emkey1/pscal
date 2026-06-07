@@ -1,0 +1,16 @@
+const Greeting: Text = "aether";
+
+@pure
+fn echoFlag() -> Bool {
+    ret true;
+}
+
+fn main() -> Void {
+    let local: Text = Greeting;
+    fx {
+        if echoFlag() {
+            writeln(local);
+        }
+    }
+    ret;
+}
