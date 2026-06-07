@@ -9,6 +9,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/effects_contracts
 ./build/bin/aether Examples/aether/base/contracts
 ./build/bin/aether Examples/aether/base/pure_functions
+./build/bin/aether Examples/aether/base/parallel_calls
 ```
 
 These examples stay within the currently supported Aether Core subset:
@@ -22,6 +23,8 @@ These examples stay within the currently supported Aether Core subset:
   `halt`, and thread-launch helpers require `fx`
 - `@pure` now rejects direct effectful builtin calls and direct calls into
   non-pure Aether functions
+- restricted `par { ... }` lowering for direct call statements, mapped onto
+  shared spawn/join behavior
 - `@pre` and `@post` lowered into runtime guards
 - annotation forms such as `@pure` and `@cost` preserved as metadata comments
 

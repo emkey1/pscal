@@ -1,0 +1,21 @@
+fn workerA() -> Void {
+    fx {
+        writeln("worker A");
+    }
+    ret;
+}
+
+fn workerB() -> Void {
+    fx {
+        writeln("worker B");
+    }
+    ret;
+}
+
+fn main() -> Void {
+    par {
+        workerA();
+        workerB();
+    }
+    ret;
+}

@@ -176,6 +176,14 @@ typedef struct FunctionContracts {
     char *postExpr;
 } FunctionContracts;
 
+typedef struct ParBlockState {
+    int active;
+    int bodyDepth;
+    int nextHandle;
+    char *indent;
+    Buffer joinLines;
+} ParBlockState;
+
 static void freePendingContracts(PendingContracts *pending) {
     if (!pending) {
         return;
@@ -197,6 +205,21 @@ static void clearFunctionContracts(FunctionContracts *state) {
     state->isVoid = 0;
     state->name = NULL;
     state->postExpr = NULL;
+}
+
+static void clearParBlockState(ParBlockState *state) {
+    if (!state) {
+        return;
+    }
+    free(state->indent);
+    free(state->joinLines.data);
+    state->active = 0;
+    state->bodyDepth = 0;
+    state->nextHandle = 0;
+    state->indent = NULL;
+    state->joinLines.data = NULL;
+    state->joinLines.len = 0;
+    state->joinLines.cap = 0;
 }
 
 static int isLineComment(const char *body, const char *lineEnd) {
@@ -376,6 +399,76 @@ static int appendContractGuard(Buffer *out,
         return 0;
     }
     return 1;
+}
+
+static int isStandaloneCloseBrace(const char *body, const char *lineEnd) {
+    const char *tail = lineEnd;
+
+    while (tail > body && isspace((unsigned char)tail[-1])) {
+        tail--;
+    }
+    return tail == body + 1 && body < tail && *body == '}';
+}
+
+static int isParallelCallStatement(const char *body, const char *lineEnd) {
+    const char *semi;
+    const char *open;
+    const char *tail = lineEnd;
+
+    if (!body || body >= lineEnd) {
+        return 0;
+    }
+    if (startsWithWord(body, lineEnd, "if") ||
+        startsWithWord(body, lineEnd, "while") ||
+        startsWithWord(body, lineEnd, "let") ||
+        startsWithWord(body, lineEnd, "const") ||
+        startsWithWord(body, lineEnd, "ret") ||
+        startsWithWord(body, lineEnd, "fx") ||
+        startsWithWord(body, lineEnd, "par")) {
+        return 0;
+    }
+    while (tail > body && isspace((unsigned char)tail[-1])) {
+        tail--;
+    }
+    if (tail <= body || tail[-1] != ';') {
+        return 0;
+    }
+    semi = tail - 1;
+    open = findCharInRange(body, semi, '(');
+    return open != NULL;
+}
+
+static char *translateParallelCallLine(const char *lineStart,
+                                       const char *body,
+                                       const char *lineEnd,
+                                       ParBlockState *parState) {
+    Buffer out = {0};
+    char handleName[64];
+
+    if (!parState || !parState->indent) {
+        return NULL;
+    }
+    parState->nextHandle++;
+    snprintf(handleName, sizeof(handleName), "__aether_par_%d", parState->nextHandle);
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "int ") ||
+        !bufferAppend(&out, handleName) ||
+        !bufferAppend(&out, " = spawn ") ||
+        !bufferAppendN(&out, body, (size_t)(lineEnd - body))) {
+        free(out.data);
+        return NULL;
+    }
+
+    if (!bufferAppend(&parState->joinLines, parState->indent) ||
+        !bufferAppend(&parState->joinLines, "join ") ||
+        !bufferAppend(&parState->joinLines, handleName) ||
+        !bufferAppend(&parState->joinLines, ";\n")) {
+        free(out.data);
+        return NULL;
+    }
+
+    return out.data;
 }
 
 static char *translateReturnWithPost(const char *lineStart,
@@ -740,6 +833,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     Buffer out = {0};
     PendingContracts pending = {0};
     FunctionContracts fnState = {0};
+    ParBlockState parState = {0};
     int braceDepth = 0;
     (void)path;
 
@@ -764,15 +858,12 @@ char *aetherRewriteSource(const char *source, const char *path) {
         }
 
         if (fnState.active && fnState.postExpr && braceDepth == fnState.bodyDepth) {
-            const char *tail = lineEnd;
-            while (tail > body && isspace((unsigned char)tail[-1])) {
-                tail--;
-            }
-            if (tail == body + 1 && body < tail && *body == '}') {
+            if (isStandaloneCloseBrace(body, lineEnd)) {
                 char *indent = dupRange(lineStart, body);
                 if (!indent) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
                     free(out.data);
                     return NULL;
                 }
@@ -780,10 +871,41 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(indent);
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
                     free(out.data);
                     return NULL;
                 }
                 free(indent);
+            }
+        }
+
+        if (parState.active && braceDepth == parState.bodyDepth) {
+            if (isStandaloneCloseBrace(body, lineEnd)) {
+                if (parState.joinLines.len > 0 && !bufferAppend(&out, parState.joinLines.data)) {
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    free(out.data);
+                    return NULL;
+                }
+            } else if (body < lineEnd && !isLineComment(body, lineEnd)) {
+                if (!isParallelCallStatement(body, lineEnd)) {
+                    fprintf(stderr,
+                            "Aether par rewrite error: only direct call statements are allowed inside par blocks.\n");
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    free(out.data);
+                    return NULL;
+                }
+                translated = translateParallelCallLine(lineStart, body, lineEnd, &parState);
+                if (!translated) {
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    free(out.data);
+                    return NULL;
+                }
             }
         }
 
@@ -804,14 +926,31 @@ char *aetherRewriteSource(const char *source, const char *path) {
             freePendingContracts(&pending);
         }
 
-        if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
-            translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState);
-        } else {
-            translated = translateLine(lineStart, lineEnd);
+        if (!translated) {
+            if (startsWithWord(body, lineEnd, "par") &&
+                findCharInRange(body, lineEnd, '{') != NULL) {
+                Buffer parOpen = {0};
+
+                if (!bufferAppendN(&parOpen, lineStart, (size_t)(body - lineStart)) ||
+                    !bufferAppend(&parOpen, "{")) {
+                    free(parOpen.data);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    free(out.data);
+                    return NULL;
+                }
+                translated = parOpen.data;
+            } else if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
+                translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState);
+            } else {
+                translated = translateLine(lineStart, lineEnd);
+            }
         }
         if (!translated) {
             freePendingContracts(&pending);
             clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
             free(out.data);
             return NULL;
         }
@@ -819,10 +958,27 @@ char *aetherRewriteSource(const char *source, const char *path) {
             free(translated);
             freePendingContracts(&pending);
             clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
             free(out.data);
             return NULL;
         }
         lineDelta = braceDeltaForLine(translated);
+
+        if (startsWithWord(body, lineEnd, "par") && findCharInRange(body, lineEnd, '{') != NULL) {
+            clearParBlockState(&parState);
+            parState.active = lineDelta > 0;
+            parState.bodyDepth = braceDepth + lineDelta;
+            parState.nextHandle = 0;
+            parState.indent = buildContractIndent(lineStart, body);
+            if (!parState.indent) {
+                free(translated);
+                freePendingContracts(&pending);
+                clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
+                free(out.data);
+                return NULL;
+            }
+        }
 
         if (startsWithWord(body, lineEnd, "fn")) {
             char *fnName = NULL;
@@ -832,6 +988,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 free(translated);
                 freePendingContracts(&pending);
                 clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
                 free(out.data);
                 return NULL;
             }
@@ -844,6 +1001,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(translated);
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
                     free(out.data);
                     return NULL;
                 }
@@ -855,6 +1013,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(translated);
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
                     free(out.data);
                     return NULL;
                 }
@@ -880,6 +1039,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             if (!bufferAppendN(&out, "\n", 1)) {
                 freePendingContracts(&pending);
                 clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
                 free(out.data);
                 return NULL;
             }
@@ -889,10 +1049,14 @@ char *aetherRewriteSource(const char *source, const char *path) {
         if (fnState.active && braceDepth < fnState.bodyDepth) {
             clearFunctionContracts(&fnState);
         }
+        if (parState.active && braceDepth < parState.bodyDepth) {
+            clearParBlockState(&parState);
+        }
         cursor = lineEnd;
     }
 
     freePendingContracts(&pending);
     clearFunctionContracts(&fnState);
+    clearParBlockState(&parState);
     return out.data;
 }

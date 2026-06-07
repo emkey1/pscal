@@ -22,6 +22,8 @@ Bootstrap status:
 - `@pure` now has a first semantic pass as well: pure functions reject direct
   calls to effectful builtins and direct calls into known non-pure Aether
   functions.
+- A restricted `par { ... }` form now lowers to shared `spawn`/`join`
+  semantics for direct call statements, without adding runtime machinery.
 - The next phase is to replace the shared Rea grammar incrementally with
   Aether-specific lexer, parser, and semantic logic.
 
