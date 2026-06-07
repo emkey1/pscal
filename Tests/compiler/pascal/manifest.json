@@ -372,6 +372,12 @@
       "path": "Tests/compiler/pascal/cases/record_inherit_embedded_base.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: 41 7"
+    },
+    {
+      "id": "inline_for_var_ordinal_type",
+      "path": "Tests/compiler/pascal/cases/inline_for_var_ordinal_type.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: 15"
     }
   ]
 }

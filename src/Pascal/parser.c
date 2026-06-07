@@ -4226,6 +4226,12 @@ AST *forStatement(Parser *parser) {
 
     AST *decl = newASTNode(AST_VAR_DECL, NULL);
     addChild(decl, decl_name);
+    setTypeAST(lvn, decl_type->var_type);
+    if (lvn->type_def) {
+        freeAST(lvn->type_def);
+        lvn->type_def = NULL;
+    }
+    lvn->type_def = copyAST(decl_type);
     setRight(decl, decl_type);
     decl->var_type = decl_type->var_type;
     addChild(n, decl);
