@@ -3516,6 +3516,20 @@ Value makeCopyOfValue(const Value *src) {
     return v;
 }
 
+Value copyDynamicArraySnapshotValue(const Value *src) {
+    if (!src) {
+        return makeNil();
+    }
+
+    pthread_mutex_lock(&dynamic_array_refcount_mutex);
+    Value snapshot = *src;
+    if (snapshot.type == TYPE_ARRAY && snapshot.array_is_dynamic && snapshot.array_refcount) {
+        (*snapshot.array_refcount)++;
+    }
+    pthread_mutex_unlock(&dynamic_array_refcount_mutex);
+    return snapshot;
+}
+
 int calculateArrayTotalSize(const Value* array_val) {
     if (!array_val || array_val->type != TYPE_ARRAY || array_val->dimensions == 0) {
         return 0;

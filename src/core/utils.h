@@ -337,6 +337,7 @@ Value makeArrayND(int dimensions, int *lower_bounds, int *upper_bounds, VarType 
 Value makeEmptyArray(VarType element_type, AST *type_def);
 int computeFlatOffset(Value *array, int *indices);
 Value makeCopyOfValue(const Value *src);
+Value copyDynamicArraySnapshotValue(const Value *src);
 
 // Set operations
 Value setUnion(Value setA, Value setB);

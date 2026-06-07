@@ -450,6 +450,18 @@
       "path": "Tests/compiler/pascal/cases/dynamic_array_field_thread_race_regression.pas",
       "expect": "compile_success",
       "stdout_substring": "PASS: dynamic array field thread race regression"
+    },
+    {
+      "id": "interface_zero_arg_function_repeated",
+      "path": "Tests/compiler/pascal/cases/interface_zero_arg_function_repeated.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: repeated interface zero-arg function dispatch"
+    },
+    {
+      "id": "dynamic_array_fresh_publish_race",
+      "path": "Tests/compiler/pascal/cases/dynamic_array_fresh_publish_race.pas",
+      "expect": "compile_success",
+      "stdout_substring": "PASS: dynamic array fresh publish race"
     }
   ]
 }

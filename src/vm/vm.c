@@ -788,7 +788,12 @@ static bool pushFieldValueByName(VM* vm, Value* base_val_ptr, const char* field_
 
     FieldValue* current = findRecordFieldByName(record_struct_ptr, field_name);
     if (current) {
-        push(vm, copyValueForStack(fieldValueStorage(current)));
+        Value* fieldStorage = fieldValueStorage(current);
+        if (fieldStorage && fieldStorage->type == TYPE_ARRAY && fieldStorage->array_is_dynamic) {
+            push(vm, copyDynamicArraySnapshotValue(fieldStorage));
+        } else {
+            push(vm, copyValueForStack(fieldStorage));
+        }
         return true;
     }
 
@@ -4461,11 +4466,7 @@ static Value vmHostInterfaceLookup(VM* vm) {
         return makeNil();
     }
 
-    Value receiverCopy = copyInterfaceReceiverAlias(receiverCell);
-
     vmStoreThreadMyself(vm, copyInterfaceReceiverAlias(receiverCell));
-
-    push(vm, receiverCopy);
 
     uint16_t target_address = (uint16_t)AS_INTEGER(entry);
 
@@ -7520,15 +7521,23 @@ comparison_error_label:
                 }
 
                 Value* array_val_ptr = NULL;
+                Value shared_snapshot = makeNil();
                 Value temp_wrapper;
                 temp_wrapper.lower_bounds = NULL;
                 temp_wrapper.upper_bounds = NULL;
                 bool using_wrapper = false;
+                bool using_snapshot = false;
 
                 if (operand.type == TYPE_POINTER) {
                     Value* candidate = (Value*)operand.ptr_val;
                     if (candidate && candidate->type == TYPE_ARRAY) {
-                        array_val_ptr = candidate;
+                        if (candidate->array_is_dynamic) {
+                            shared_snapshot = copyDynamicArraySnapshotValue(candidate);
+                            array_val_ptr = &shared_snapshot;
+                            using_snapshot = true;
+                        } else {
+                            array_val_ptr = candidate;
+                        }
                     } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
                         AST* arrayType = operand.base_type_node;
                         int dims = arrayType->child_count;
@@ -7594,6 +7603,9 @@ comparison_error_label:
                         free(temp_wrapper.lower_bounds);
                         free(temp_wrapper.upper_bounds);
                     }
+                    if (using_snapshot) {
+                        freeValue(&shared_snapshot);
+                    }
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -7604,6 +7616,9 @@ comparison_error_label:
                         if (using_wrapper) {
                             free(temp_wrapper.lower_bounds);
                             free(temp_wrapper.upper_bounds);
+                        }
+                        if (using_snapshot) {
+                            freeValue(&shared_snapshot);
                         }
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -7616,6 +7631,9 @@ comparison_error_label:
                 if (using_wrapper) {
                     free(temp_wrapper.lower_bounds);
                     free(temp_wrapper.upper_bounds);
+                }
+                if (using_snapshot) {
+                    freeValue(&shared_snapshot);
                 }
 
                 break;
@@ -7647,15 +7665,23 @@ comparison_error_label:
                 }
 
                 Value* array_val_ptr = NULL;
+                Value shared_snapshot = makeNil();
                 Value temp_wrapper;
                 temp_wrapper.lower_bounds = NULL;
                 temp_wrapper.upper_bounds = NULL;
                 bool using_wrapper = false;
+                bool using_snapshot = false;
 
                 if (operand.type == TYPE_POINTER) {
                     Value* candidate = (Value*)operand.ptr_val;
                     if (candidate && candidate->type == TYPE_ARRAY) {
-                        array_val_ptr = candidate;
+                        if (candidate->array_is_dynamic) {
+                            shared_snapshot = copyDynamicArraySnapshotValue(candidate);
+                            array_val_ptr = &shared_snapshot;
+                            using_snapshot = true;
+                        } else {
+                            array_val_ptr = candidate;
+                        }
                     } else if (operand.base_type_node && operand.base_type_node->type == AST_ARRAY_TYPE) {
                         AST* arrayType = operand.base_type_node;
                         int dims = arrayType->child_count;
@@ -7714,6 +7740,9 @@ comparison_error_label:
                         free(temp_wrapper.lower_bounds);
                         free(temp_wrapper.upper_bounds);
                     }
+                    if (using_snapshot) {
+                        freeValue(&shared_snapshot);
+                    }
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -7724,6 +7753,9 @@ comparison_error_label:
                         if (using_wrapper) {
                             free(temp_wrapper.lower_bounds);
                             free(temp_wrapper.upper_bounds);
+                        }
+                        if (using_snapshot) {
+                            freeValue(&shared_snapshot);
                         }
                         return INTERPRET_RUNTIME_ERROR;
                     }
@@ -7736,6 +7768,9 @@ comparison_error_label:
                 if (using_wrapper) {
                     free(temp_wrapper.lower_bounds);
                     free(temp_wrapper.upper_bounds);
+                }
+                if (using_snapshot) {
+                    freeValue(&shared_snapshot);
                 }
 
                 break;
