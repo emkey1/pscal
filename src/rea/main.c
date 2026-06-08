@@ -39,6 +39,7 @@
 #include "core/build_info.h"
 #include "symbol/symbol.h"
 #include <fcntl.h>
+#include <errno.h>
 #include "Pascal/globals.h"
 #include "ast/ast.h"
 #include "compiler/bytecode.h"
@@ -163,6 +164,7 @@ static const char *REA_USAGE =
     "     --no-cache             Compile fresh (ignore cached bytecode).\n"
     "     --verbose              Print compilation/cache status messages.\n"
     "     --strict               Enable strict parser checks for top-level structure.\n"
+    "     --diagnostics-json     Emit compiler diagnostics as JSON on failure.\n"
     "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n"
     "\n"
     "   Thread helpers available to JSON snippets and the REPL:\n"
@@ -173,6 +175,300 @@ static const char *REA_USAGE =
     "     thread_stats()                        Array of records summarizing pool usage.\n";
 
 static const char *const kReaCompilerId = PSCAL_FRONTEND_COMPILER_ID;
+
+typedef struct DiagnosticCapture {
+    int enabled;
+    int saved_stderr_fd;
+    FILE *tmp;
+} DiagnosticCapture;
+
+typedef struct ParsedDiagnostic {
+    char *file;
+    int line;
+    char *phase;
+    char *kind;
+    char *message;
+    char *hint;
+    char *raw;
+} ParsedDiagnostic;
+
+static void freeParsedDiagnostics(ParsedDiagnostic *items, int count) {
+    if (!items) return;
+    for (int i = 0; i < count; i++) {
+        free(items[i].file);
+        free(items[i].phase);
+        free(items[i].kind);
+        free(items[i].message);
+        free(items[i].hint);
+        free(items[i].raw);
+    }
+    free(items);
+}
+
+static char *diagDupRange(const char *start, const char *end) {
+    if (!start || !end || end < start) return NULL;
+    size_t len = (size_t)(end - start);
+    char *copy = (char *)malloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, start, len);
+    copy[len] = '\0';
+    return copy;
+}
+
+static const char *trimEnd(const char *start, const char *end) {
+    while (end > start && (end[-1] == '\n' || end[-1] == '\r' ||
+                           end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    return end;
+}
+
+static int diagnosticCaptureBegin(DiagnosticCapture *capture) {
+    if (!capture || !capture->enabled) return 1;
+    capture->saved_stderr_fd = dup(STDERR_FILENO);
+    if (capture->saved_stderr_fd < 0) {
+        return 0;
+    }
+    capture->tmp = tmpfile();
+    if (!capture->tmp) {
+        close(capture->saved_stderr_fd);
+        capture->saved_stderr_fd = -1;
+        return 0;
+    }
+    fflush(stderr);
+    if (dup2(fileno(capture->tmp), STDERR_FILENO) < 0) {
+        fclose(capture->tmp);
+        capture->tmp = NULL;
+        close(capture->saved_stderr_fd);
+        capture->saved_stderr_fd = -1;
+        return 0;
+    }
+    return 1;
+}
+
+static void diagnosticCaptureEnd(DiagnosticCapture *capture) {
+    if (!capture || !capture->enabled) return;
+    fflush(stderr);
+    if (capture->saved_stderr_fd >= 0) {
+        dup2(capture->saved_stderr_fd, STDERR_FILENO);
+        close(capture->saved_stderr_fd);
+        capture->saved_stderr_fd = -1;
+    }
+}
+
+static char *diagnosticCaptureRead(DiagnosticCapture *capture) {
+    long size;
+    char *text;
+
+    if (!capture || !capture->tmp) return NULL;
+    fflush(capture->tmp);
+    if (fseek(capture->tmp, 0, SEEK_END) != 0) return NULL;
+    size = ftell(capture->tmp);
+    if (size < 0) return NULL;
+    if (fseek(capture->tmp, 0, SEEK_SET) != 0) return NULL;
+    text = (char *)malloc((size_t)size + 1);
+    if (!text) return NULL;
+    if (size > 0 && fread(text, 1, (size_t)size, capture->tmp) != (size_t)size) {
+        free(text);
+        return NULL;
+    }
+    text[size] = '\0';
+    return text;
+}
+
+static void diagnosticCaptureDispose(DiagnosticCapture *capture) {
+    if (!capture) return;
+    diagnosticCaptureEnd(capture);
+    if (capture->tmp) {
+        fclose(capture->tmp);
+        capture->tmp = NULL;
+    }
+}
+
+static void jsonWriteEscaped(FILE *out, const char *text) {
+    const unsigned char *p = (const unsigned char *)(text ? text : "");
+    fputc('"', out);
+    while (*p) {
+        switch (*p) {
+            case '\\': fputs("\\\\", out); break;
+            case '"': fputs("\\\"", out); break;
+            case '\n': fputs("\\n", out); break;
+            case '\r': fputs("\\r", out); break;
+            case '\t': fputs("\\t", out); break;
+            default:
+                if (*p < 0x20) {
+                    fprintf(out, "\\u%04x", *p);
+                } else {
+                    fputc(*p, out);
+                }
+                break;
+        }
+        p++;
+    }
+    fputc('"', out);
+}
+
+static void inferDiagnosticPhaseKind(const char *message, char **outPhase, char **outKind) {
+    const char *phase = "compile";
+    const char *kind = "generic";
+
+    if (message) {
+        if (strstr(message, "rewrite error")) {
+            phase = "rewrite";
+            if (strstr(message, "declaration")) kind = "declaration";
+            else if (strstr(message, "TOON")) kind = "toon";
+            else if (strstr(message, "par")) kind = "par";
+            else kind = "rewrite";
+        } else if (strstr(message, "Aether contract error")) {
+            phase = "semantic";
+            kind = "contract";
+        } else if (strstr(message, "Aether effect error")) {
+            phase = "semantic";
+            kind = "effect";
+        } else if (strstr(message, "Aether purity error")) {
+            phase = "semantic";
+            kind = "purity";
+        } else if (strstr(message, "Aether type error")) {
+            phase = "semantic";
+            kind = "type";
+        } else if (strstr(message, "not in scope")) {
+            phase = "semantic";
+            kind = "scope";
+        } else if (strstr(message, "not callable")) {
+            phase = "semantic";
+            kind = "call";
+        } else if (strstr(message, "Not enough arguments") ||
+                   strstr(message, "Too many arguments")) {
+            phase = "semantic";
+            kind = "arity";
+        } else if (strstr(message, "Compilation failed")) {
+            phase = "compile";
+            kind = "compiler";
+        }
+    }
+
+    *outPhase = diagDupRange(phase, phase + strlen(phase));
+    *outKind = diagDupRange(kind, kind + strlen(kind));
+}
+
+static ParsedDiagnostic parseDiagnosticLine(const char *line) {
+    ParsedDiagnostic diag = {0};
+    const char *firstColon;
+    const char *secondColon;
+    char *endptr = NULL;
+
+    if (!line) return diag;
+    diag.raw = diagDupRange(line, line + strlen(line));
+
+    firstColon = strchr(line, ':');
+    if (firstColon && firstColon[1] && isdigit((unsigned char)firstColon[1])) {
+        long parsedLine;
+        secondColon = strchr(firstColon + 1, ':');
+        if (secondColon) {
+            parsedLine = strtol(firstColon + 1, &endptr, 10);
+            if (endptr == secondColon) {
+                const char *message = secondColon + 1;
+                while (*message == ' ') message++;
+                diag.file = diagDupRange(line, firstColon);
+                diag.line = (int)parsedLine;
+                diag.message = diagDupRange(message, message + strlen(message));
+                inferDiagnosticPhaseKind(diag.message, &diag.phase, &diag.kind);
+                return diag;
+            }
+        }
+    }
+
+    if (line[0] == 'L' && isdigit((unsigned char)line[1])) {
+        long parsedLine = strtol(line + 1, &endptr, 10);
+        if (endptr && endptr[0] == ':' && endptr[1] == ' ') {
+            const char *message = endptr + 2;
+            diag.line = (int)parsedLine;
+            diag.message = diagDupRange(message, message + strlen(message));
+            inferDiagnosticPhaseKind(diag.message, &diag.phase, &diag.kind);
+            return diag;
+        }
+    }
+
+    diag.message = diagDupRange(line, line + strlen(line));
+    inferDiagnosticPhaseKind(diag.message, &diag.phase, &diag.kind);
+    return diag;
+}
+
+static void emitDiagnosticsJsonFromText(FILE *out, const char *text) {
+    ParsedDiagnostic *items = NULL;
+    int count = 0;
+    int capacity = 0;
+    const char *cursor = text ? text : "";
+
+    while (*cursor) {
+        const char *lineStart = cursor;
+        const char *lineEnd = cursor;
+        const char *rawLineEnd;
+        ParsedDiagnostic diag;
+
+        while (*lineEnd && *lineEnd != '\n') lineEnd++;
+        rawLineEnd = lineEnd;
+        lineEnd = trimEnd(lineStart, lineEnd);
+        if (lineEnd > lineStart) {
+            char *line = diagDupRange(lineStart, lineEnd);
+            if (line && strncmp(line, "hint: ", 6) == 0 && count > 0) {
+                free(items[count - 1].hint);
+                items[count - 1].hint = diagDupRange(line + 6, line + strlen(line));
+                free(line);
+            } else if (line) {
+                if (count == capacity) {
+                    int newCap = capacity ? capacity * 2 : 8;
+                    ParsedDiagnostic *resized =
+                        (ParsedDiagnostic *)realloc(items, (size_t)newCap * sizeof(ParsedDiagnostic));
+                    if (!resized) {
+                        free(line);
+                        freeParsedDiagnostics(items, count);
+                        return;
+                    }
+                    items = resized;
+                    capacity = newCap;
+                }
+                diag = parseDiagnosticLine(line);
+                items[count++] = diag;
+                free(line);
+            }
+        }
+        cursor = *rawLineEnd == '\0' ? rawLineEnd : rawLineEnd + 1;
+    }
+
+    fputs("[\n", out);
+    for (int i = 0; i < count; i++) {
+        ParsedDiagnostic *diag = &items[i];
+        fputs("  {\"severity\":\"error\"", out);
+        fputs(",\"phase\":", out);
+        jsonWriteEscaped(out, diag->phase ? diag->phase : "compile");
+        fputs(",\"kind\":", out);
+        jsonWriteEscaped(out, diag->kind ? diag->kind : "generic");
+        fputs(",\"file\":", out);
+        if (diag->file) {
+            jsonWriteEscaped(out, diag->file);
+        } else {
+            fputs("null", out);
+        }
+        fprintf(out, ",\"line\":%d", diag->line);
+        fputs(",\"column\":null", out);
+        fputs(",\"message\":", out);
+        jsonWriteEscaped(out, diag->message ? diag->message : "");
+        fputs(",\"hint\":", out);
+        if (diag->hint) {
+            jsonWriteEscaped(out, diag->hint);
+        } else {
+            fputs("null", out);
+        }
+        fputs(",\"raw\":", out);
+        jsonWriteEscaped(out, diag->raw ? diag->raw : "");
+        fputs("}", out);
+        if (i + 1 < count) fputs(",", out);
+        fputs("\n", out);
+    }
+    fputs("]\n", out);
+    freeParsedDiagnostics(items, count);
+}
 
 static bool isUnitListFresh(List* unit_list, time_t cache_mtime) {
     if (!unit_list) return true;
@@ -416,6 +712,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
 #endif
     int verbose_flag = 0;
     int strict_mode = 0;
+    int diagnostics_json = 0;
     int argi = 1;
     bool reaSymbolStateActive = false;
     /* Clear any stale compiler/unit state that might linger when invoked
@@ -449,6 +746,8 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
             verbose_flag = 1;
         } else if (strcmp(argv[argi], "--strict") == 0) {
             strict_mode = 1;
+        } else if (strcmp(argv[argi], "--diagnostics-json") == 0) {
+            diagnostics_json = 1;
         } else if (strncmp(argv[argi], "--vm-trace-head=", 16) == 0) {
             vm_trace_head = atoi(argv[argi] + 16);
         } else {
@@ -525,22 +824,50 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     registerBuiltinFunction("tobool", AST_FUNCTION_DECL, NULL);
     registerBuiltinFunction("tobyte", AST_FUNCTION_DECL, NULL);
 
+    DiagnosticCapture diagCapture = {
+        .enabled = diagnostics_json,
+        .saved_stderr_fd = -1,
+        .tmp = NULL
+    };
+    if (!diagnosticCaptureBegin(&diagCapture)) {
+        fprintf(stderr, "Failed to initialize diagnostics capture: %s\n", strerror(errno));
+        if (preprocessed_source) free(preprocessed_source);
+        free(src);
+        REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
+    }
+
     if (strict_mode) PSCAL_FRONTEND_SET_STRICT_MODE(1);
     PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH(path);
     AST *program = PSCAL_FRONTEND_PARSE_SOURCE(effective_src);
     if (!program) {
+        diagnosticCaptureEnd(&diagCapture);
+        if (diagnostics_json) {
+            char *diagText = diagnosticCaptureRead(&diagCapture);
+            emitDiagnosticsJsonFromText(stderr, diagText);
+            free(diagText);
+        }
+        diagnosticCaptureDispose(&diagCapture);
         if (preprocessed_source) free(preprocessed_source);
         free(src);
         REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
     PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
+        diagnosticCaptureEnd(&diagCapture);
+        if (diagnostics_json) {
+            char *diagText = diagnosticCaptureRead(&diagCapture);
+            emitDiagnosticsJsonFromText(stderr, diagText);
+            free(diagText);
+        }
+        diagnosticCaptureDispose(&diagCapture);
         freeAST(program);
         if (preprocessed_source) free(preprocessed_source);
         free(src);
         REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
     if (dump_ast_json) {
+        diagnosticCaptureEnd(&diagCapture);
+        diagnosticCaptureDispose(&diagCapture);
         annotateTypes(program, NULL, program);
         dumpASTJSON(program, stdout);
         freeAST(program);
@@ -647,6 +974,14 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
             }
         }
     }
+
+    diagnosticCaptureEnd(&diagCapture);
+    if (!compilation_ok && diagnostics_json) {
+        char *diagText = diagnosticCaptureRead(&diagCapture);
+        emitDiagnosticsJsonFromText(stderr, diagText);
+        free(diagText);
+    }
+    diagnosticCaptureDispose(&diagCapture);
 
     if (compilation_ok) {
         if (argc > argi) {

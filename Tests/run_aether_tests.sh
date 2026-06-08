@@ -720,6 +720,30 @@ if ! grep -q "hint: add an explicit type, for example \`let answer: Int = ...;\`
     cat /tmp/aether_inferred_let_unknown_fail.out >&2
     exit 1
 fi
+if "$AETHER_BIN" --diagnostics-json --no-cache "$INFERRED_LET_UNKNOWN_FAIL_FIXTURE" >/tmp/aether_inferred_let_unknown_json.out 2>&1; then
+    echo "expected inferred let rewrite failure with diagnostics-json but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '"phase":"rewrite"' /tmp/aether_inferred_let_unknown_json.out; then
+    echo "missing diagnostics-json rewrite phase" >&2
+    cat /tmp/aether_inferred_let_unknown_json.out >&2
+    exit 1
+fi
+if ! grep -q '"kind":"declaration"' /tmp/aether_inferred_let_unknown_json.out; then
+    echo "missing diagnostics-json declaration kind" >&2
+    cat /tmp/aether_inferred_let_unknown_json.out >&2
+    exit 1
+fi
+if ! grep -q '"file":"'"$INFERRED_LET_UNKNOWN_FAIL_FIXTURE"'"' /tmp/aether_inferred_let_unknown_json.out; then
+    echo "missing diagnostics-json file path" >&2
+    cat /tmp/aether_inferred_let_unknown_json.out >&2
+    exit 1
+fi
+if ! grep -q '"hint":"add an explicit type, for example `let answer: Int = ...;`."' /tmp/aether_inferred_let_unknown_json.out; then
+    echo "missing diagnostics-json hint" >&2
+    cat /tmp/aether_inferred_let_unknown_json.out >&2
+    exit 1
+fi
 
 if "$AETHER_BIN" --no-cache "$PURE_FAIL_EFFECTFUL_FIXTURE" >/tmp/aether_pure_fail_effectful.out 2>&1; then
     echo "expected purity failure for effectful builtin but program succeeded" >&2

@@ -118,6 +118,10 @@ Bootstrap status:
   methods and lowers to the shared backend's `myself` identifier.
 - `self.field = ...` mutation inside method bodies now follows that same
   rewrite path instead of being misclassified as a type-field declaration.
+- `--diagnostics-json` now emits machine-readable compiler diagnostics for
+  Aether failures by capturing the frontend's text diagnostics and re-emitting
+  them as structured JSON with file, line, phase, kind, message, and hint
+  fields where available.
 - The next phase is to replace the shared Rea grammar incrementally with
   Aether-specific lexer, parser, and semantic logic.
 
