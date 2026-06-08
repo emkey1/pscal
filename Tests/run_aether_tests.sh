@@ -46,6 +46,7 @@ TOON_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_block_pass.aether"
 TYPE_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_block_pass.aether"
 TYPE_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_pass.aether"
 SELF_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_alias_pass.aether"
+SELF_MUTATION_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_mutation_pass.aether"
 TOON_JSON_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_json_helpers_pass.aether"
 TOON_HANDLE_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_helpers_pass.aether"
 TOON_VARIABLE_PARSE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_variable_parse_pass.aether"
@@ -120,6 +121,7 @@ for fixture in \
     "$TYPE_BLOCK_PASS_FIXTURE" \
     "$TYPE_INIT_PASS_FIXTURE" \
     "$SELF_ALIAS_PASS_FIXTURE" \
+    "$SELF_MUTATION_PASS_FIXTURE" \
     "$TOON_JSON_HELPERS_PASS_FIXTURE" \
     "$TOON_HANDLE_HELPERS_PASS_FIXTURE" \
     "$TOON_VARIABLE_PARSE_PASS_FIXTURE" \
@@ -311,6 +313,12 @@ printf '41\n42\n' >/tmp/aether_self_alias_expected.out
 if ! cmp -s /tmp/aether_self_alias_expected.out /tmp/aether_self_alias_pass.out; then
     echo "unexpected self alias output" >&2
     cat /tmp/aether_self_alias_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$SELF_MUTATION_PASS_FIXTURE" >/tmp/aether_self_mutation_pass.out
+if ! grep -qx "42" /tmp/aether_self_mutation_pass.out; then
+    echo "unexpected self mutation output" >&2
+    cat /tmp/aether_self_mutation_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$TOON_JSON_HELPERS_PASS_FIXTURE" >/tmp/aether_toon_json_helpers_pass.out

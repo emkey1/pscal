@@ -531,6 +531,8 @@ phase, for example `let point: Point = Point { x: 1, y: 2 };`.
 
 For method bodies, Aether should prefer `self` as the source-level receiver
 spelling even if the shared backend internally still uses `myself`.
+That includes mutation such as `self.field = ...`, which should lower through
+ordinary assignment handling rather than a field-declaration path.
 
 ### 10.3 TOON
 

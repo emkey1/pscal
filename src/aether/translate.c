@@ -3344,6 +3344,23 @@ static char *translateTypeFieldLine(const char *lineStart, const char *body, con
     return out.data;
 }
 
+static int isTypeFieldDeclarationLine(const char *body, const char *lineEnd) {
+    const char *cursor;
+
+    if (!body || !lineEnd) {
+        return 0;
+    }
+    cursor = body;
+    if (cursor >= lineEnd || !(isalpha((unsigned char)*cursor) || *cursor == '_')) {
+        return 0;
+    }
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    cursor = skipSpaces(cursor);
+    return cursor < lineEnd && *cursor == ':';
+}
+
 static char *translateLine(const char *lineStart,
                            const char *lineEnd,
                            JsonAliasState *jsonState,
@@ -3677,6 +3694,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             } else if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
                 translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState);
             } else if (typeState.active &&
+                       isTypeFieldDeclarationLine(body, lineEnd) &&
                        !startsWithWord(body, lineEnd, "fn") &&
                        !startsWithWord(body, lineEnd, "@pre") &&
                        !startsWithWord(body, lineEnd, "@post") &&

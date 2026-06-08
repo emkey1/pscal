@@ -116,6 +116,8 @@ Bootstrap status:
   now lowers to shared object construction plus explicit field assignments.
 - `self` is now the Aether source spelling for the current object inside
   methods and lowers to the shared backend's `myself` identifier.
+- `self.field = ...` mutation inside method bodies now follows that same
+  rewrite path instead of being misclassified as a type-field declaration.
 - The next phase is to replace the shared Rea grammar incrementally with
   Aether-specific lexer, parser, and semantic logic.
 

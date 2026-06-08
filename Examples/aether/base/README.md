@@ -43,6 +43,7 @@ For a larger multi-file example, see `Examples/aether/showcase`.
 ./build/bin/aether Examples/aether/base/type_blocks
 ./build/bin/aether Examples/aether/base/type_init
 ./build/bin/aether Examples/aether/base/self_alias
+./build/bin/aether Examples/aether/base/self_mutation
 ```
 
 These examples stay within the currently supported Aether Core subset:
@@ -145,6 +146,7 @@ These examples stay within the currently supported Aether Core subset:
   lowered onto `new Type()` plus field assignments
 - `self` as the Aether source spelling for the current object inside `type`
   methods, lowered onto the shared backend's `myself`
+- `self_mutation`: shows `self.field = ...` mutation inside a method body
 - `@pre` and `@post` lowered into runtime guards
 - contract annotations now have frontend attachment checks too: `@pre`,
   `@post`, `@pure`, and `@cost` must all decorate the next function
