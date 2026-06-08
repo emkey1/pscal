@@ -51,6 +51,20 @@ Typical Aether jobs look like this:
 - print or store a result inside `fx`
 - use a few compact helper types and functions
 
+Nested TOON helper expressions are supported. For example:
+
+```aether
+let name: Text = toon_get_text(toon_at(jobs, i), "name");
+```
+
+That said, intermediate `ToonNode` bindings are still often easier for humans
+and LLMs to read and debug:
+
+```aether
+let job: ToonNode = toon_at(jobs, i);
+let name: Text = toon_get_text(job, "name");
+```
+
 ## The mental model
 
 Think of Aether as:

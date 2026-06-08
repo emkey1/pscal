@@ -2018,6 +2018,10 @@ static const char *toonTypePredicateExpected(const char *nameStart, size_t nameL
     return NULL;
 }
 
+static char *applyJsonAliasesToLine(const char *line,
+                                    JsonAliasState *jsonState,
+                                    const ToonLiteralTable *toonTable);
+
 static int appendTrimmedRange(Buffer *out, const char *start, const char *end) {
     while (start < end && isspace((unsigned char)*start)) {
         start++;
@@ -2028,12 +2032,42 @@ static int appendTrimmedRange(Buffer *out, const char *start, const char *end) {
     return bufferAppendN(out, start, (size_t)(end - start));
 }
 
+static int appendAliasedTrimmedRange(Buffer *out,
+                                     const char *start,
+                                     const char *end,
+                                     JsonAliasState *jsonState,
+                                     const ToonLiteralTable *toonTable) {
+    char *segment;
+    char *aliased;
+    int ok;
+
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    segment = dupRange(start, end);
+    if (!segment) {
+        return 0;
+    }
+    aliased = applyJsonAliasesToLine(segment, jsonState, toonTable);
+    free(segment);
+    if (!aliased) {
+        return 0;
+    }
+    ok = bufferAppend(out, aliased);
+    free(aliased);
+    return ok;
+}
+
 static int appendToonScalarAlias(Buffer *out,
                                  const char *nameStart,
                                  size_t nameLen,
                                  const char *openParen,
                                  const char **outCursor,
-                                 JsonAliasState *jsonState) {
+                                 JsonAliasState *jsonState,
+                                 const ToonLiteralTable *toonTable) {
     const char *getter = toonScalarGetterForName(nameStart, nameLen);
     const char *cursor;
     const char *arg1Start;
@@ -2107,26 +2141,26 @@ static int appendToonScalarAlias(Buffer *out,
     jsonState->needed = 1;
     if (defaultHelper) {
         if (!bufferAppend(out, "(YyjsonHasKey(") ||
-            !appendTrimmedRange(out, arg1Start, arg1End) ||
+            !appendAliasedTrimmedRange(out, arg1Start, arg1End, jsonState, toonTable) ||
             !bufferAppend(out, ", ") ||
-            !appendTrimmedRange(out, arg2Start, arg2End) ||
+            !appendAliasedTrimmedRange(out, arg2Start, arg2End, jsonState, toonTable) ||
             !bufferAppend(out, ") ? ") ||
             !bufferAppend(out, getter) ||
             !bufferAppend(out, "(YyjsonGetKey(") ||
-            !appendTrimmedRange(out, arg1Start, arg1End) ||
+            !appendAliasedTrimmedRange(out, arg1Start, arg1End, jsonState, toonTable) ||
             !bufferAppend(out, ", ") ||
-            !appendTrimmedRange(out, arg2Start, arg2End) ||
+            !appendAliasedTrimmedRange(out, arg2Start, arg2End, jsonState, toonTable) ||
             !bufferAppend(out, ")) : ") ||
-            !appendTrimmedRange(out, arg3Start, arg3End) ||
+            !appendAliasedTrimmedRange(out, arg3Start, arg3End, jsonState, toonTable) ||
             !bufferAppend(out, ")")) {
             return 0;
         }
     } else {
         if (!bufferAppend(out, getter) ||
             !bufferAppend(out, "(YyjsonGetKey(") ||
-            !appendTrimmedRange(out, arg1Start, arg1End) ||
+            !appendAliasedTrimmedRange(out, arg1Start, arg1End, jsonState, toonTable) ||
             !bufferAppend(out, ", ") ||
-            !appendTrimmedRange(out, arg2Start, arg2End) ||
+            !appendAliasedTrimmedRange(out, arg2Start, arg2End, jsonState, toonTable) ||
             !bufferAppend(out, "))")) {
             return 0;
         }
@@ -2140,7 +2174,8 @@ static int appendToonInspectAlias(Buffer *out,
                                   size_t nameLen,
                                   const char *openParen,
                                   const char **outCursor,
-                                  JsonAliasState *jsonState) {
+                                  JsonAliasState *jsonState,
+                                  const ToonLiteralTable *toonTable) {
     const char *expectedType = toonTypePredicateExpected(nameStart, nameLen);
     const char *cursor;
     const char *argStart;
@@ -2182,7 +2217,7 @@ static int appendToonInspectAlias(Buffer *out,
                     argEnd = cursor;
                     jsonState->needed = 1;
                     if (!bufferAppend(out, "YyjsonGetType(") ||
-                        !appendTrimmedRange(out, argStart, argEnd) ||
+                        !appendAliasedTrimmedRange(out, argStart, argEnd, jsonState, toonTable) ||
                         !bufferAppend(out, ")")) {
                         return 0;
                     }
@@ -2228,7 +2263,7 @@ static int appendToonInspectAlias(Buffer *out,
                 argEnd = cursor;
                 jsonState->needed = 1;
                 if (!bufferAppend(out, "(YyjsonGetType(") ||
-                    !appendTrimmedRange(out, argStart, argEnd) ||
+                    !appendAliasedTrimmedRange(out, argStart, argEnd, jsonState, toonTable) ||
                     !bufferAppend(out, ") == \"") ||
                     !bufferAppend(out, expectedType) ||
                     !bufferAppend(out, "\")")) {
@@ -2316,7 +2351,8 @@ static char *applyJsonAliasesToLine(const char *line,
                                       (size_t)(nameEnd - nameStart),
                                       afterName,
                                       &advancedCursor,
-                                      jsonState)) {
+                                      jsonState,
+                                      toonTable)) {
                 cursor = advancedCursor;
                 continue;
             }
@@ -2326,7 +2362,8 @@ static char *applyJsonAliasesToLine(const char *line,
                                        (size_t)(nameEnd - nameStart),
                                        afterName,
                                        &advancedCursor,
-                                       jsonState)) {
+                                       jsonState,
+                                       toonTable)) {
                 cursor = advancedCursor;
                 continue;
             }
