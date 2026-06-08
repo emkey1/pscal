@@ -795,6 +795,7 @@ static int aetherIsEffectfulBuiltin(const char *name, size_t len) {
         "flush",
         "fprintf",
         "halt",
+        "ai_chat",
         "openaichatcompletions",
         "print",
         "printf",

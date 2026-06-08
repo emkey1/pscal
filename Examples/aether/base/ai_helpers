@@ -1,0 +1,15 @@
+fn draftReply(model: Text, messages: Text, apiKey: Text) -> Text {
+    let reply: Text = "";
+    fx {
+        reply = ai_chat(model, messages, "", apiKey, "");
+    }
+    ret reply;
+}
+
+fn main() -> Void {
+    fx {
+        println("has_ai = ", has_ai());
+        println("has_openai = ", has_builtin("openai", "OpenAIChatCompletions"));
+    }
+    ret;
+}

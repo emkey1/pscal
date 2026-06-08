@@ -563,6 +563,10 @@ The same naming rule should apply to the concurrency surface too. Source-level
 helpers like `task_spawn`, `task_queue`, and `task_wait` are a better Aether
 fit than exposing raw worker-pool builtin inventory in user code.
 
+The same is true for agent/tooling calls. A compact helper like `ai_chat(...)`
+is a better Aether-facing spelling than exposing the full backend builtin name
+directly in ordinary source.
+
 Opaque source-level handle types such as `ToonDoc` and `ToonNode` are also a
 good fit even before Aether owns richer native runtime types, as long as the
 bootstrap lowering to the shared backend remains explicit and predictable.

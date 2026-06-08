@@ -856,6 +856,9 @@ static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t n
     if (nameLen == 15 && strncmp(nameStart, "task_stats_json", nameLen) == 0) {
         return bufferAppend(out, "ThreadStatsJson");
     }
+    if (nameLen == 7 && strncmp(nameStart, "ai_chat", nameLen) == 0) {
+        return bufferAppend(out, "openaichatcompletions");
+    }
     if (nameLen == 7 && strncmp(nameStart, "println", nameLen) == 0) {
         return bufferAppend(out, "writeln");
     }

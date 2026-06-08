@@ -12,6 +12,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/pure_functions
 ./build/bin/aether Examples/aether/base/parallel_calls
 ./build/bin/aether Examples/aether/base/task_helpers
+./build/bin/aether Examples/aether/base/ai_helpers
 ./build/bin/aether Examples/aether/base/for_range
 ./build/bin/aether Examples/aether/base/module_demo
 ./build/bin/aether Examples/aether/base/toon_blocks
@@ -48,6 +49,8 @@ These examples stay within the currently supported Aether Core subset:
   `halt`, and thread-launch helpers require `fx`
 - Aether-native `print(...)` and `println(...)` spellings lowered onto the
   shared `write` and `writeln` builtins
+- `ai_chat(...)` lowered onto the shared OpenAI chat-completions builtin for
+  compact agent/tooling-oriented source
 - compact task/thread helpers such as `task_spawn`, `task_queue`, `task_wait`,
   `task_lookup`, `task_stats`, and `task_stats_json` lowered onto the shared
   worker-pool/runtime thread helpers
@@ -103,6 +106,8 @@ These examples stay within the currently supported Aether Core subset:
 - `task_helpers`: shows the compact Aether task/thread alias surface along with
   the `has_ai()` capability probe, while still respecting `fx` around effectful
   worker launches
+- `ai_helpers`: shows the compact `ai_chat(...)` alias and the Aether AI
+  capability probes without requiring a live call during the example run
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
   `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
   yyjson builtins

@@ -31,6 +31,9 @@ Bootstrap status:
 - Aether now also exposes a compact task/thread helper surface over the shared
   worker-pool builtins: `task_spawn`, `task_queue`, `task_wait`, `task_lookup`,
   `task_status`, `task_result`, `task_stats`, and `task_stats_json`.
+- Aether now also exposes `ai_chat(...)` as a compact alias over the shared
+  OpenAI chat-completions builtin, keeping agent-facing source shorter while
+  preserving the same runtime path.
 - `@pure` now has a first semantic pass as well: pure functions reject direct
   calls to effectful builtins and direct calls into known non-pure Aether
   functions.

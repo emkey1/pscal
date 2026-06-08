@@ -1,0 +1,7 @@
+fn main() -> Void {
+    let reply: Text = ai_chat("gpt-5-mini", "[]");
+    fx {
+        println(reply);
+    }
+    ret;
+}

@@ -23,6 +23,8 @@ PRINT_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/print_alias_fail_outside_fx.aet
 TASK_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/task_helpers_pass.aether"
 TASK_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/task_alias_fail_outside_fx.aether"
 HAS_BUILTIN_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_builtin_alias_pass.aether"
+AI_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/ai_helpers_pass.aether"
+AI_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/ai_alias_fail_outside_fx.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -85,6 +87,8 @@ for fixture in \
     "$TASK_HELPERS_PASS_FIXTURE" \
     "$TASK_ALIAS_FAIL_FIXTURE" \
     "$HAS_BUILTIN_ALIAS_PASS_FIXTURE" \
+    "$AI_HELPERS_PASS_FIXTURE" \
+    "$AI_ALIAS_FAIL_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -180,6 +184,17 @@ fi
 if ! grep -Eq '^(true|false)$' /tmp/aether_has_builtin_alias_pass.out; then
     echo "unexpected has_builtin alias output" >&2
     cat /tmp/aether_has_builtin_alias_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$AI_HELPERS_PASS_FIXTURE" >/tmp/aether_ai_helpers_pass.out
+if ! grep -Eq '^has_ai = (true|false)$' /tmp/aether_ai_helpers_pass.out; then
+    echo "unexpected ai helper capability output" >&2
+    cat /tmp/aether_ai_helpers_pass.out >&2
+    exit 1
+fi
+if ! grep -Eq '^has_openai = (true|false)$' /tmp/aether_ai_helpers_pass.out; then
+    echo "unexpected ai helper builtin output" >&2
+    cat /tmp/aether_ai_helpers_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null
@@ -584,6 +599,16 @@ fi
 if ! grep -q "Aether effect error: call to 'task_spawn' requires an fx block" /tmp/aether_task_alias_fail.out; then
     echo "missing task alias effect-boundary failure message" >&2
     cat /tmp/aether_task_alias_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$AI_ALIAS_FAIL_FIXTURE" >/tmp/aether_ai_alias_fail.out 2>&1; then
+    echo "expected ai alias effect-boundary failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether effect error: call to 'ai_chat' requires an fx block" /tmp/aether_ai_alias_fail.out; then
+    echo "missing ai alias effect-boundary failure message" >&2
+    cat /tmp/aether_ai_alias_fail.out >&2
     exit 1
 fi
 
