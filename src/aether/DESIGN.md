@@ -236,6 +236,11 @@ This is intentionally transitional. It exists to:
 
 The rewrite layer is not the final design.
 
+The repository also includes both small base examples under
+`Examples/aether/base` and a larger showcase under
+`Examples/aether/showcase/agent_report` so the supported surface can be
+exercised as complete programs instead of only isolated snippets.
+
 ### 6.3 Shared Backend Rule
 
 Aether-specific behavior should stay in the Aether front end unless there is a

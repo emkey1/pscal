@@ -3,6 +3,8 @@
 This directory contains small Aether programs that run with the current
 bootstrap frontend:
 
+For a larger multi-file example, see `Examples/aether/showcase`.
+
 ```sh
 ./build/bin/aether Examples/aether/base/hello
 ./build/bin/aether Examples/aether/base/control_flow

@@ -1,0 +1,82 @@
+use "agent_support";
+
+type JobSummary {
+    name: Text;
+    score: Int;
+    status: Text;
+    priority: Int;
+
+    fn isReady() -> Bool {
+        ret self.priority == 3;
+    }
+}
+
+@pre score >= 0
+@post result >= 0
+fn normalizeScore(score: Int) -> Int {
+    if score > 100 {
+        ret 100;
+    }
+    ret score;
+}
+
+fn makeSummary(job: ToonNode) -> JobSummary {
+    let name = toon_get_text(job, "name");
+    let rawScore = toon_get_int_or(job, "score", DefaultScore);
+    let score: Int = normalizeScore(rawScore);
+    let summary: JobSummary = new JobSummary();
+    summary.name = name;
+    summary.score = score;
+    summary.status = classify(score);
+    summary.priority = priority(score);
+    ret summary;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let payloadPath = PayloadPath;
+    let doc = toon_parse_file(payloadPath);
+    let root = toon_root(doc);
+    let jobs = toon_key(root, "jobs");
+    let total = toon_len(jobs);
+    let ready = 0;
+    let review = 0;
+    let blocked = 0;
+    let index = 0;
+
+    loop index < total {
+        let job = toon_at(jobs, index);
+        let summary: JobSummary = makeSummary(job);
+
+        if summary.isReady() {
+            ready = ready + 1;
+        } else {
+            if summary.priority == 2 {
+                review = review + 1;
+            } else {
+                blocked = blocked + 1;
+            }
+        }
+
+        fx {
+            println("job ", index, ": ", summary.name, " / ", summary.status, " / ", summary.score);
+        }
+        index = index + 1;
+    }
+
+    fx {
+        println("total = ", total);
+        println("ready = ", ready);
+        println("review = ", review);
+        println("blocked = ", blocked);
+    }
+
+    toon_close(doc);
+    ret;
+}

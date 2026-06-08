@@ -115,6 +115,9 @@ Bootstrap status:
 - The next phase is to replace the shared Rea grammar incrementally with
   Aether-specific lexer, parser, and semantic logic.
 
+- For a more realistic multi-file reference program, see
+  `Examples/aether/showcase/agent_report`.
+
 Planned near-term work:
 
 1. Define and stabilize a small Aether Core before expanding surface area.

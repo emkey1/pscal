@@ -67,6 +67,7 @@ TOON_REAL_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_real_decl_fail.aether"
 TOON_TYPE_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_type_decl_fail.aether"
 TOON_PRESENCE_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_presence_decl_fail.aether"
 TOON_DEFAULTS_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_defaults_decl_fail.aether"
+SHOWCASE_EXAMPLE="$ROOT_DIR/Examples/aether/showcase/agent_report"
 
 if [ ! -x "$AETHER_BIN" ]; then
     echo "missing aether binary: $AETHER_BIN" >&2
@@ -136,7 +137,8 @@ for fixture in \
     "$TOON_REAL_DECL_FAIL_FIXTURE" \
     "$TOON_TYPE_DECL_FAIL_FIXTURE" \
     "$TOON_PRESENCE_DECL_FAIL_FIXTURE" \
-    "$TOON_DEFAULTS_DECL_FAIL_FIXTURE"
+    "$TOON_DEFAULTS_DECL_FAIL_FIXTURE" \
+    "$SHOWCASE_EXAMPLE"
 do
     if [ ! -f "$fixture" ]; then
         echo "missing fixture: $fixture" >&2
@@ -253,6 +255,17 @@ if ! cmp -s /tmp/aether_module_const_import_expected.out /tmp/aether_module_cons
     echo "unexpected module const import output" >&2
     cat /tmp/aether_module_const_import_pass.out >&2
     exit 1
+fi
+"$AETHER_BIN" --no-cache "$SHOWCASE_EXAMPLE" >/tmp/aether_showcase_example.out
+if grep -qx "yyjson unavailable" /tmp/aether_showcase_example.out; then
+    :
+else
+    printf 'job 0: planner / ready / 95\njob 1: writer / review / 81\njob 2: tester / review / 72\njob 3: auditor / blocked / 55\ntotal = 4\nready = 1\nreview = 2\nblocked = 1\n' >/tmp/aether_showcase_example_expected.out
+    if ! cmp -s /tmp/aether_showcase_example_expected.out /tmp/aether_showcase_example.out; then
+        echo "unexpected Aether showcase output" >&2
+        cat /tmp/aether_showcase_example.out >&2
+        exit 1
+    fi
 fi
 "$AETHER_BIN" --no-cache "$TOON_BLOCK_PASS_FIXTURE" >/tmp/aether_toon_block_pass.out
 printf 'users[2]{id,name,role}:\n  1,Ada,admin\n  2,Bob,user\n' >/tmp/aether_toon_block_expected.out
