@@ -16,6 +16,7 @@ For a larger multi-file example, see `Examples/aether/showcase`.
 ./build/bin/aether Examples/aether/base/task_helpers
 ./build/bin/aether Examples/aether/base/ai_helpers
 ./build/bin/aether Examples/aether/base/inferred_decls
+./build/bin/aether Examples/aether/base/function_inference
 ./build/bin/aether Examples/aether/base/for_range
 ./build/bin/aether Examples/aether/base/loop_forms
 ./build/bin/aether Examples/aether/base/module_demo
@@ -123,6 +124,8 @@ These examples stay within the currently supported Aether Core subset:
   capability probes without requiring a live call during the example run
 - `inferred_decls`: shows compact initialized `const` / `let` declarations
   without explicit types, including helper-return and binding-alias inference
+- `function_inference`: shows `let` inference from both local Aether function
+  returns and imported Aether function signatures
 - `loop_forms`: shows `loop cond { ... }`, `loop name in start..end { ... }`,
   and bare `loop { ... }` forms with `break`
 - `module_consts_demo`: shows inferred `let` bindings sourced from exported

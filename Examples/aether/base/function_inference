@@ -1,0 +1,16 @@
+use "function_inference_support";
+
+fn plusTwo(value: Int) -> Int {
+    ret value + 2;
+}
+
+fn main() -> Void {
+    let answer = plusTwo(localBase());
+    let tag = label();
+
+    fx {
+        println(tag);
+        println(answer);
+    }
+    ret;
+}

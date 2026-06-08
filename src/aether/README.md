@@ -32,6 +32,8 @@ Bootstrap status:
   lowers directly onto the shared Rea constant form, while `let name = ...`
   is accepted when the frontend can infer an obvious source-level type from
   the initializer or a previously known binding.
+- That inference now also includes known Aether function signatures, including
+  imported Aether functions harvested from quoted `use` targets.
 - Aether now also exposes a compact task/thread helper surface over the shared
   worker-pool builtins: `task_spawn`, `task_queue`, `task_wait`, `task_lookup`,
   `task_status`, `task_result`, `task_stats`, and `task_stats_json`.

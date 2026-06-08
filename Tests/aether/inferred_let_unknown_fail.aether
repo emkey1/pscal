@@ -1,9 +1,6 @@
-fn compute(value: Int) -> Int {
-    ret value;
-}
-
 fn main() -> Void {
-    let answer = compute(42);
+    let base: Int = 41;
+    let answer = base + 1;
     fx {
         println(answer);
     }

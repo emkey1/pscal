@@ -28,6 +28,8 @@ AI_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/ai_alias_fail_outside_fx.aether"
 INFERRED_BINDINGS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_bindings_pass.aether"
 INFERRED_CONST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_const_pass.aether"
 INFERRED_LET_UNKNOWN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/inferred_let_unknown_fail.aether"
+FUNCTION_INFERENCE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/function_inference_support"
+FUNCTION_RETURN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_return_inference_pass.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -99,6 +101,8 @@ for fixture in \
     "$INFERRED_BINDINGS_PASS_FIXTURE" \
     "$INFERRED_CONST_PASS_FIXTURE" \
     "$INFERRED_LET_UNKNOWN_FAIL_FIXTURE" \
+    "$FUNCTION_INFERENCE_SUPPORT_FIXTURE" \
+    "$FUNCTION_RETURN_INFERENCE_PASS_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -226,6 +230,13 @@ fi
 if ! grep -qx "Aether" /tmp/aether_inferred_const_pass.out; then
     echo "unexpected inferred const output" >&2
     cat /tmp/aether_inferred_const_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$FUNCTION_RETURN_INFERENCE_PASS_FIXTURE" >/tmp/aether_function_return_inference_pass.out
+printf 'Aether\n42\n' >/tmp/aether_function_return_inference_expected.out
+if ! cmp -s /tmp/aether_function_return_inference_expected.out /tmp/aether_function_return_inference_pass.out; then
+    echo "unexpected function return inference output" >&2
+    cat /tmp/aether_function_return_inference_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null

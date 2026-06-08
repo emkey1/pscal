@@ -1,5 +1,6 @@
 mod AgentSupport {
-    export const PayloadPath = "Examples/aether/showcase/agent_payload.json";
+    export const PayloadPath = "agent_payload.json";
+    export const RepoPayloadPath = "Examples/aether/showcase/agent_payload.json";
     export const ReviewScore = 70;
     export const ReadyScore = 90;
     export const DefaultScore = 72;

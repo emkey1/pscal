@@ -23,7 +23,7 @@ fn normalizeScore(score: Int) -> Int {
 fn makeSummary(job: ToonNode) -> JobSummary {
     let name = toon_get_text(job, "name");
     let rawScore = toon_get_int_or(job, "score", DefaultScore);
-    let score: Int = normalizeScore(rawScore);
+    let score = normalizeScore(rawScore);
     let summary: JobSummary = new JobSummary();
     summary.name = name;
     summary.score = score;
@@ -40,7 +40,25 @@ fn main() -> Void {
         ret;
     }
 
-    let payloadPath = PayloadPath;
+    let payloadPath: Text = RepoPayloadPath;
+    if fileexists("agent_payload.json") {
+        payloadPath = "agent_payload.json";
+    } else {
+        if fileexists("Examples/aether/showcase/agent_payload.json") {
+            payloadPath = "Examples/aether/showcase/agent_payload.json";
+        } else {
+            fx {
+                println("payload unavailable: agent_payload.json");
+            }
+            ret;
+        }
+    }
+    if !fileexists("agent_payload.json") && !fileexists("Examples/aether/showcase/agent_payload.json") {
+        fx {
+            println("payload unavailable: agent_payload.json");
+        }
+        ret;
+    }
     let doc = toon_parse_file(payloadPath);
     let root = toon_root(doc);
     let jobs = toon_key(root, "jobs");
@@ -52,7 +70,7 @@ fn main() -> Void {
 
     loop index < total {
         let job = toon_at(jobs, index);
-        let summary: JobSummary = makeSummary(job);
+        let summary = makeSummary(job);
 
         if summary.isReady() {
             ready = ready + 1;

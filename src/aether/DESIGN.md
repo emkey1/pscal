@@ -413,6 +413,8 @@ Aether distinguishes:
   narrow, predictable, and source-local.
 - imported exported bindings may participate in that inference when the
   frontend can resolve them from a quoted `use` target without ambiguity.
+- known Aether function signatures may also participate in that inference when
+  local or imported Aether functions declare explicit return types.
 
 These should lower directly onto shared declaration and constant-handling
 machinery.
