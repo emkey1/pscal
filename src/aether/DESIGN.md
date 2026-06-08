@@ -372,6 +372,8 @@ The first meaningful Aether Core should include:
 - imports,
 - constants,
 - typed `let` bindings,
+- compact initialized `let` bindings without explicit types when the
+  initializer has an obvious source-level type,
 - functions and procedures,
 - `if`,
 - `while`,
@@ -401,7 +403,9 @@ The first meaningful Aether Core should explicitly defer:
 Aether distinguishes:
 
 - mutable local/global bindings via `let`,
-- immutable bindings via `const`.
+- immutable bindings via `const`,
+- compact initialized declarations without explicit types when inference is
+  narrow, predictable, and source-local.
 
 These should lower directly onto shared declaration and constant-handling
 machinery.

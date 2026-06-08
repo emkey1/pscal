@@ -25,6 +25,9 @@ TASK_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/task_alias_fail_outside_fx.aethe
 HAS_BUILTIN_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_builtin_alias_pass.aether"
 AI_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/ai_helpers_pass.aether"
 AI_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/ai_alias_fail_outside_fx.aether"
+INFERRED_BINDINGS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_bindings_pass.aether"
+INFERRED_CONST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_const_pass.aether"
+INFERRED_LET_UNKNOWN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/inferred_let_unknown_fail.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -90,6 +93,9 @@ for fixture in \
     "$HAS_BUILTIN_ALIAS_PASS_FIXTURE" \
     "$AI_HELPERS_PASS_FIXTURE" \
     "$AI_ALIAS_FAIL_FIXTURE" \
+    "$INFERRED_BINDINGS_PASS_FIXTURE" \
+    "$INFERRED_CONST_PASS_FIXTURE" \
+    "$INFERRED_LET_UNKNOWN_FAIL_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -199,6 +205,18 @@ if ! grep -Eq '^has_openai = (true|false)$' /tmp/aether_ai_helpers_pass.out; the
     cat /tmp/aether_ai_helpers_pass.out >&2
     exit 1
 fi
+"$AETHER_BIN" --no-cache "$INFERRED_BINDINGS_PASS_FIXTURE" >/tmp/aether_inferred_bindings_pass.out
+if grep -qx "yyjson unavailable" /tmp/aether_inferred_bindings_pass.out; then
+    :
+else
+    printf 'Aether\n42\n3.500000\ntrue\n2\n' >/tmp/aether_inferred_bindings_expected.out
+    if ! cmp -s /tmp/aether_inferred_bindings_expected.out /tmp/aether_inferred_bindings_pass.out; then
+        echo "unexpected inferred binding output" >&2
+        cat /tmp/aether_inferred_bindings_pass.out >&2
+        exit 1
+    fi
+fi
+"$AETHER_BIN" --no-cache --no-run "$INFERRED_CONST_PASS_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache --no-run "$PAR_PASS_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache "$FOR_RANGE_PASS_FIXTURE" >/tmp/aether_for_range_pass.out
@@ -628,6 +646,16 @@ fi
 if ! grep -q "Aether effect error: call to 'println' requires an fx block" /tmp/aether_print_alias_fail.out; then
     echo "missing print alias effect-boundary failure message" >&2
     cat /tmp/aether_print_alias_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$INFERRED_LET_UNKNOWN_FAIL_FIXTURE" >/tmp/aether_inferred_let_unknown_fail.out 2>&1; then
+    echo "expected inferred let rewrite failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether declaration rewrite error: let binding 'answer' needs an explicit type" /tmp/aether_inferred_let_unknown_fail.out; then
+    echo "missing inferred let rewrite failure message" >&2
+    cat /tmp/aether_inferred_let_unknown_fail.out >&2
     exit 1
 fi
 

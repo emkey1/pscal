@@ -28,6 +28,10 @@ Bootstrap status:
 - Aether-native `print(...)` and `println(...)` spellings now lower onto the
   shared `write` and `writeln` builtins and participate in the same `fx` and
   `@pure` validation rules.
+- Aether now supports compact initialized declarations too: `const name = ...`
+  lowers directly onto the shared Rea constant form, while `let name = ...`
+  is accepted when the frontend can infer an obvious source-level type from
+  the initializer or a previously known binding.
 - Aether now also exposes a compact task/thread helper surface over the shared
   worker-pool builtins: `task_spawn`, `task_queue`, `task_wait`, `task_lookup`,
   `task_status`, `task_result`, `task_stats`, and `task_stats_json`.

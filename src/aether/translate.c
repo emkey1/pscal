@@ -65,6 +65,10 @@ static char *dupRange(const char *start, const char *end) {
     return copy;
 }
 
+static char *dupCString(const char *text) {
+    return text ? dupRange(text, text + strlen(text)) : NULL;
+}
+
 static char *trimmedCopy(const char *start, const char *end) {
     while (start < end && isspace((unsigned char)*start)) {
         start++;
@@ -129,6 +133,24 @@ static const char *skipSpacesInRange(const char *p, const char *end) {
         p++;
     }
     return p;
+}
+
+static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
+    const char *cursor;
+    const char *nameEnd;
+    const char *marker;
+
+    if (!body || !lineEnd) {
+        return 0;
+    }
+    cursor = body + (isConst ? 5 : 3);
+    cursor = skipSpacesInRange(cursor, lineEnd);
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    marker = skipSpacesInRange(nameEnd, lineEnd);
+    return marker < lineEnd && *marker == ':';
 }
 
 static int appendIdentifier(Buffer *buf, const char *start, const char *end) {
@@ -473,6 +495,17 @@ typedef struct JsonAliasState {
     int alreadyImported;
 } JsonAliasState;
 
+typedef struct AetherBinding {
+    char *name;
+    char *typeName;
+} AetherBinding;
+
+typedef struct AetherBindingTable {
+    AetherBinding *items;
+    size_t count;
+    size_t cap;
+} AetherBindingTable;
+
 typedef struct ToonLiteralBinding {
     char *name;
     char *literal;
@@ -528,6 +561,97 @@ static void clearTypeBlockState(TypeBlockState *state) {
     }
     state->active = 0;
     state->bodyDepth = 0;
+}
+
+static void freeAetherBindingTable(AetherBindingTable *table) {
+    size_t i;
+
+    if (!table) {
+        return;
+    }
+    for (i = 0; i < table->count; i++) {
+        free(table->items[i].name);
+        free(table->items[i].typeName);
+    }
+    free(table->items);
+    table->items = NULL;
+    table->count = 0;
+    table->cap = 0;
+}
+
+static int ensureAetherBindingTable(AetherBindingTable *table, size_t extra) {
+    AetherBinding *resized;
+    size_t need;
+    size_t newCap;
+
+    if (!table) {
+        return 0;
+    }
+    need = table->count + extra;
+    if (need <= table->cap) {
+        return 1;
+    }
+    newCap = table->cap ? table->cap * 2 : 16;
+    while (newCap < need) {
+        newCap *= 2;
+    }
+    resized = (AetherBinding *)realloc(table->items, newCap * sizeof(AetherBinding));
+    if (!resized) {
+        return 0;
+    }
+    table->items = resized;
+    table->cap = newCap;
+    return 1;
+}
+
+static int setAetherBindingType(AetherBindingTable *table, const char *name, const char *typeName) {
+    size_t i;
+    char *nameCopy;
+    char *typeCopy;
+
+    if (!table || !name || !typeName) {
+        return 0;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].name, name) == 0) {
+            typeCopy = dupRange(typeName, typeName + strlen(typeName));
+            if (!typeCopy) {
+                return 0;
+            }
+            free(table->items[i].typeName);
+            table->items[i].typeName = typeCopy;
+            return 1;
+        }
+    }
+    if (!ensureAetherBindingTable(table, 1)) {
+        return 0;
+    }
+    nameCopy = dupRange(name, name + strlen(name));
+    typeCopy = dupRange(typeName, typeName + strlen(typeName));
+    if (!nameCopy || !typeCopy) {
+        free(nameCopy);
+        free(typeCopy);
+        return 0;
+    }
+    table->items[table->count].name = nameCopy;
+    table->items[table->count].typeName = typeCopy;
+    table->count++;
+    return 1;
+}
+
+static const char *findAetherBindingType(const AetherBindingTable *table, const char *name, size_t len) {
+    size_t i;
+
+    if (!table || !name) {
+        return NULL;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strlen(table->items[i].name) == len &&
+            strncmp(table->items[i].name, name, len) == 0) {
+            return table->items[i].typeName;
+        }
+    }
+    return NULL;
 }
 
 static void freeToonLiteralTable(ToonLiteralTable *table) {
@@ -658,6 +782,284 @@ static int isSupportedToonBindingType(const char *typeStart, const char *typeEnd
     len = (size_t)(typeEnd - typeStart);
     return (len == 4 && strncmp(typeStart, "TOON", len) == 0) ||
            (len == 4 && strncmp(typeStart, "Text", len) == 0);
+}
+
+static int isAetherBoolLiteral(const char *start, const char *end) {
+    size_t len;
+
+    if (!start || !end || end <= start) {
+        return 0;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    len = (size_t)(end - start);
+    return (len == 4 && strncmp(start, "true", 4) == 0) ||
+           (len == 5 && strncmp(start, "false", 5) == 0);
+}
+
+static int inferNumericLiteralType(const char *start, const char *end, const char **outTypeName) {
+    const char *cursor;
+    int sawDigit = 0;
+    int sawDot = 0;
+    int sawExp = 0;
+
+    if (!start || !end || !outTypeName) {
+        return 0;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if (start >= end) {
+        return 0;
+    }
+    cursor = start;
+    if (*cursor == '+' || *cursor == '-') {
+        cursor++;
+    }
+    while (cursor < end) {
+        if (isdigit((unsigned char)*cursor)) {
+            sawDigit = 1;
+            cursor++;
+            continue;
+        }
+        if (*cursor == '.' && !sawDot && !sawExp) {
+            sawDot = 1;
+            cursor++;
+            continue;
+        }
+        if ((*cursor == 'e' || *cursor == 'E') && !sawExp && sawDigit) {
+            sawExp = 1;
+            sawDot = 1;
+            cursor++;
+            if (cursor < end && (*cursor == '+' || *cursor == '-')) {
+                cursor++;
+            }
+            continue;
+        }
+        return 0;
+    }
+    if (!sawDigit) {
+        return 0;
+    }
+    *outTypeName = sawDot ? "Real" : "Int";
+    return 1;
+}
+
+static const char *inferHelperReturnTypeName(const char *nameStart, size_t nameLen) {
+    if (!nameStart || nameLen == 0) {
+        return NULL;
+    }
+    if ((nameLen == 10 && strncmp(nameStart, "toon_parse", 10) == 0) ||
+        (nameLen == 15 && strncmp(nameStart, "toon_parse_file", 15) == 0)) {
+        return "ToonDoc";
+    }
+    if ((nameLen == 9 && strncmp(nameStart, "toon_root", 9) == 0) ||
+        (nameLen == 8 && strncmp(nameStart, "toon_key", 8) == 0) ||
+        (nameLen == 7 && strncmp(nameStart, "toon_at", 7) == 0)) {
+        return "ToonNode";
+    }
+    if ((nameLen == 9 && strncmp(nameStart, "toon_type", 9) == 0) ||
+        (nameLen == 13 && strncmp(nameStart, "toon_get_text", 13) == 0) ||
+        (nameLen == 16 && strncmp(nameStart, "toon_get_text_or", 16) == 0) ||
+        (nameLen == 15 && strncmp(nameStart, "toon_text_value", 15) == 0) ||
+        (nameLen == 7 && strncmp(nameStart, "ai_chat", 7) == 0)) {
+        return "Text";
+    }
+    if ((nameLen == 8 && strncmp(nameStart, "toon_len", 8) == 0) ||
+        (nameLen == 12 && strncmp(nameStart, "toon_get_int", 12) == 0) ||
+        (nameLen == 15 && strncmp(nameStart, "toon_get_int_or", 15) == 0) ||
+        (nameLen == 14 && strncmp(nameStart, "toon_int_value", 14) == 0)) {
+        return "Int";
+    }
+    if ((nameLen == 13 && strncmp(nameStart, "toon_get_real", 13) == 0) ||
+        (nameLen == 16 && strncmp(nameStart, "toon_get_real_or", 16) == 0) ||
+        (nameLen == 15 && strncmp(nameStart, "toon_real_value", 15) == 0)) {
+        return "Real";
+    }
+    if ((nameLen == 13 && strncmp(nameStart, "toon_get_bool", 13) == 0) ||
+        (nameLen == 16 && strncmp(nameStart, "toon_get_bool_or", 16) == 0) ||
+        (nameLen == 15 && strncmp(nameStart, "toon_bool_value", 15) == 0) ||
+        (nameLen == 15 && strncmp(nameStart, "toon_null_value", 15) == 0) ||
+        (nameLen == 12 && strncmp(nameStart, "toon_is_text", 12) == 0) ||
+        (nameLen == 11 && strncmp(nameStart, "toon_is_int", 11) == 0) ||
+        (nameLen == 12 && strncmp(nameStart, "toon_is_real", 12) == 0) ||
+        (nameLen == 12 && strncmp(nameStart, "toon_is_bool", 12) == 0) ||
+        (nameLen == 12 && strncmp(nameStart, "toon_is_null", 12) == 0) ||
+        (nameLen == 11 && strncmp(nameStart, "toon_is_arr", 11) == 0) ||
+        (nameLen == 11 && strncmp(nameStart, "toon_is_obj", 11) == 0) ||
+        (nameLen == 12 && strncmp(nameStart, "toon_has_key", 12) == 0) ||
+        (nameLen == 11 && strncmp(nameStart, "toon_has_at", 11) == 0) ||
+        (nameLen == 8 && strncmp(nameStart, "has_toon", 8) == 0) ||
+        (nameLen == 6 && strncmp(nameStart, "has_ai", 6) == 0) ||
+        (nameLen == 11 && strncmp(nameStart, "has_builtin", 11) == 0)) {
+        return "Bool";
+    }
+    if ((nameLen == 8 && strncmp(nameStart, "has_toon", 8) == 0) ||
+        (nameLen == 6 && strncmp(nameStart, "has_ai", 6) == 0) ||
+        (nameLen == 11 && strncmp(nameStart, "has_builtin", 11) == 0)) {
+        return "Bool";
+    }
+    return NULL;
+}
+
+static const char *inferObjectInitTypeName(const char *start, const char *end) {
+    const char *nameStart;
+    const char *nameEnd;
+    const char *cursor;
+
+    if (!start || !end || end <= start) {
+        return NULL;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if (start >= end || !(isalpha((unsigned char)*start) || *start == '_')) {
+        return NULL;
+    }
+    nameStart = start;
+    nameEnd = start + 1;
+    while (nameEnd < end && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    cursor = skipSpacesInRange(nameEnd, end);
+    if (cursor < end && *cursor == '{' && end[-1] == '}') {
+        return trimmedCopy(nameStart, nameEnd);
+    }
+    return NULL;
+}
+
+static char *inferAetherBindingTypeName(const char *exprStart,
+                                        const char *exprEnd,
+                                        const AetherBindingTable *bindings) {
+    const char *trimmedStart = exprStart;
+    const char *trimmedEnd = exprEnd;
+    const char *nameEnd;
+    const char *helperType;
+    char *objectInitType;
+
+    if (!exprStart || !exprEnd || exprEnd < exprStart) {
+        return NULL;
+    }
+    while (trimmedStart < trimmedEnd && isspace((unsigned char)*trimmedStart)) {
+        trimmedStart++;
+    }
+    while (trimmedEnd > trimmedStart && isspace((unsigned char)trimmedEnd[-1])) {
+        trimmedEnd--;
+    }
+    if (trimmedEnd > trimmedStart && trimmedEnd[-1] == ';') {
+        trimmedEnd--;
+    }
+    while (trimmedEnd > trimmedStart && isspace((unsigned char)trimmedEnd[-1])) {
+        trimmedEnd--;
+    }
+    if (trimmedStart >= trimmedEnd) {
+        return NULL;
+    }
+    if (*trimmedStart == '"' && trimmedEnd[-1] == '"') {
+        return dupCString("Text");
+    }
+    if (isAetherBoolLiteral(trimmedStart, trimmedEnd)) {
+        return dupCString("Bool");
+    }
+    if (inferNumericLiteralType(trimmedStart, trimmedEnd, &helperType)) {
+        return dupCString(helperType);
+    }
+    nameEnd = trimmedStart;
+    if (isalpha((unsigned char)*nameEnd) || *nameEnd == '_') {
+        while (nameEnd < trimmedEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+            nameEnd++;
+        }
+        if (nameEnd == trimmedEnd && bindings) {
+            const char *bindingType = findAetherBindingType(bindings,
+                                                            trimmedStart,
+                                                            (size_t)(trimmedEnd - trimmedStart));
+            if (bindingType) {
+                return dupCString(bindingType);
+            }
+        }
+        if (nameEnd < trimmedEnd && *skipSpacesInRange(nameEnd, trimmedEnd) == '(') {
+            helperType = inferHelperReturnTypeName(trimmedStart, (size_t)(nameEnd - trimmedStart));
+            if (helperType) {
+                return dupCString(helperType);
+            }
+        }
+    }
+    objectInitType = (char *)inferObjectInitTypeName(trimmedStart, trimmedEnd);
+    if (objectInitType) {
+        return objectInitType;
+    }
+    return NULL;
+}
+
+static void maybeRecordAetherBindingType(AetherBindingTable *table,
+                                         const char *body,
+                                         const char *lineEnd) {
+    const char *cursor;
+    const char *nameStart;
+    const char *nameEnd;
+    const char *colon;
+    const char *equals;
+    char *name = NULL;
+    char *typeName = NULL;
+
+    if (!table || !body || !lineEnd) {
+        return;
+    }
+    if (!(startsWithWord(body, lineEnd, "let") || startsWithWord(body, lineEnd, "const"))) {
+        return;
+    }
+    cursor = body + (startsWithWord(body, lineEnd, "const") ? 5 : 3);
+    cursor = skipSpacesInRange(cursor, lineEnd);
+    nameStart = cursor;
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    if (nameEnd == nameStart) {
+        return;
+    }
+    name = trimmedCopy(nameStart, nameEnd);
+    if (!name) {
+        return;
+    }
+
+    colon = skipSpacesInRange(cursor, lineEnd);
+    if (colon < lineEnd && *colon == ':') {
+        const char *typeStart = skipSpacesInRange(colon + 1, lineEnd);
+        const char *typeEnd = typeStart;
+
+        while (typeEnd < lineEnd && *typeEnd != '=' && *typeEnd != ';') {
+            typeEnd++;
+        }
+        while (typeEnd > typeStart && isspace((unsigned char)typeEnd[-1])) {
+            typeEnd--;
+        }
+        typeName = trimmedCopy(typeStart, typeEnd);
+    } else {
+        equals = colon;
+        while (equals < lineEnd && *equals != '=') {
+            equals++;
+        }
+        if (equals < lineEnd && *equals == '=') {
+            typeName = inferAetherBindingTypeName(skipSpacesInRange(equals + 1, lineEnd), lineEnd, table);
+        }
+    }
+
+    if (typeName) {
+        setAetherBindingType(table, name, typeName);
+    }
+    free(name);
+    free(typeName);
 }
 
 static void maybeRecordToonLiteralBinding(ToonLiteralTable *table, const char *body, const char *lineEnd) {
@@ -1750,7 +2152,10 @@ static char *translateFnLine(const char *lineStart, const char *body, const char
     return out.data;
 }
 
-static char *translateTypedDeclLine(const char *lineStart, const char *body, const char *lineEnd, int isConst) {
+static char *translateTypedDeclLine(const char *lineStart,
+                                    const char *body,
+                                    const char *lineEnd,
+                                    int isConst) {
     const char *cursor = body + (isConst ? 5 : 3);
     const char *nameStart;
     const char *nameEnd;
@@ -1920,6 +2325,64 @@ static char *translateTypedDeclLine(const char *lineStart, const char *body, con
         free(out.data);
         return NULL;
     }
+    return out.data;
+}
+
+static char *translateInferredDeclLine(const char *lineStart,
+                                       const char *body,
+                                       const char *lineEnd,
+                                       int isConst,
+                                       const AetherBindingTable *bindings) {
+    const char *cursor = body + (isConst ? 5 : 3);
+    const char *nameStart;
+    const char *nameEnd;
+    const char *equals;
+    const char *exprStart;
+    char *typeName = NULL;
+    Buffer out = {0};
+
+    cursor = skipSpaces(cursor);
+    nameStart = cursor;
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    equals = skipSpaces(cursor);
+    if (nameEnd == nameStart || equals >= lineEnd || *equals != '=') {
+        return dupRange(lineStart, lineEnd);
+    }
+    exprStart = skipSpaces(equals + 1);
+
+    if (isConst) {
+        if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+            !bufferAppend(&out, "const ") ||
+            !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+            !bufferAppendN(&out, equals, (size_t)(lineEnd - equals))) {
+            free(out.data);
+            return NULL;
+        }
+        return out.data;
+    }
+
+    typeName = inferAetherBindingTypeName(exprStart, lineEnd, bindings);
+    if (!typeName) {
+        fprintf(stderr,
+                "Aether declaration rewrite error: let binding '%.*s' needs an explicit type.\n",
+                (int)(nameEnd - nameStart),
+                nameStart);
+        return NULL;
+    }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, mapTypeName(typeName)) ||
+        !bufferAppend(&out, " ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppendN(&out, equals, (size_t)(lineEnd - equals))) {
+        free(typeName);
+        free(out.data);
+        return NULL;
+    }
+    free(typeName);
     return out.data;
 }
 
@@ -2196,7 +2659,10 @@ static char *translateForRangeLine(const char *lineStart, const char *body, cons
     return out.data;
 }
 
-static char *translateExportLine(const char *lineStart, const char *body, const char *lineEnd) {
+static char *translateExportLine(const char *lineStart,
+                                 const char *body,
+                                 const char *lineEnd,
+                                 const AetherBindingTable *bindings) {
     const char *rest = skipSpaces(body + 6);
     char *translatedRest = NULL;
     Buffer out = {0};
@@ -2206,10 +2672,14 @@ static char *translateExportLine(const char *lineStart, const char *body, const 
     }
     if (strncmp(rest, "fn ", 3) == 0) {
         translatedRest = translateFnLine(rest, rest, lineEnd);
-    } else if (strncmp(rest, "let ", 4) == 0 && memchr(rest, ':', (size_t)(lineEnd - rest))) {
+    } else if (strncmp(rest, "let ", 4) == 0 && hasTypedDeclSeparator(rest, lineEnd, 0)) {
         translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 0);
-    } else if (strncmp(rest, "const ", 6) == 0 && memchr(rest, ':', (size_t)(lineEnd - rest))) {
+    } else if (strncmp(rest, "const ", 6) == 0 && hasTypedDeclSeparator(rest, lineEnd, 1)) {
         translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 1);
+    } else if (strncmp(rest, "let ", 4) == 0) {
+        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 0, bindings);
+    } else if (strncmp(rest, "const ", 6) == 0) {
+        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 1, bindings);
     } else {
         return dupRange(lineStart, lineEnd);
     }
@@ -2280,7 +2750,10 @@ static char *translateTypeFieldLine(const char *lineStart, const char *body, con
     return out.data;
 }
 
-static char *translateLine(const char *lineStart, const char *lineEnd, JsonAliasState *jsonState) {
+static char *translateLine(const char *lineStart,
+                           const char *lineEnd,
+                           JsonAliasState *jsonState,
+                           const AetherBindingTable *bindings) {
     const char *body = lineStart;
     Buffer out = {0};
 
@@ -2304,16 +2777,22 @@ static char *translateLine(const char *lineStart, const char *lineEnd, JsonAlias
         return out.data;
     }
     if (strncmp(body, "export ", 7) == 0) {
-        return translateExportLine(lineStart, body, lineEnd);
+        return translateExportLine(lineStart, body, lineEnd, bindings);
     }
     if (strncmp(body, "fn ", 3) == 0) {
         return translateFnLine(lineStart, body, lineEnd);
     }
-    if (strncmp(body, "let ", 4) == 0 && memchr(body, ':', (size_t)(lineEnd - body))) {
+    if (strncmp(body, "let ", 4) == 0 && hasTypedDeclSeparator(body, lineEnd, 0)) {
         return translateTypedDeclLine(lineStart, body, lineEnd, 0);
     }
-    if (strncmp(body, "const ", 6) == 0 && memchr(body, ':', (size_t)(lineEnd - body))) {
+    if (strncmp(body, "const ", 6) == 0 && hasTypedDeclSeparator(body, lineEnd, 1)) {
         return translateTypedDeclLine(lineStart, body, lineEnd, 1);
+    }
+    if (strncmp(body, "let ", 4) == 0) {
+        return translateInferredDeclLine(lineStart, body, lineEnd, 0, bindings);
+    }
+    if (strncmp(body, "const ", 6) == 0) {
+        return translateInferredDeclLine(lineStart, body, lineEnd, 1, bindings);
     }
     if (strncmp(body, "use ", 4) == 0) {
         if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
@@ -2439,6 +2918,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     ParBlockState parState = {0};
     TypeBlockState typeState = {0};
     JsonAliasState jsonState = {0};
+    AetherBindingTable bindingTable = {0};
     ToonLiteralTable toonTable = {0};
     int braceDepth = 0;
     (void)path;
@@ -2469,6 +2949,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
         }
 
         maybeRecordToonLiteralBinding(&toonTable, body, lineEnd);
+        maybeRecordAetherBindingType(&bindingTable, body, lineEnd);
 
         if (fnState.active && fnState.postExpr && braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
@@ -2478,6 +2959,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
                     clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
                     freeToonLiteralTable(&toonTable);
                     free(preprocessed);
                     free(out.data);
@@ -2489,6 +2971,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
                     clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
                     freeToonLiteralTable(&toonTable);
                     free(preprocessed);
                     free(out.data);
@@ -2504,6 +2987,10 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
@@ -2515,6 +3002,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
                     clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
                     freeToonLiteralTable(&toonTable);
                     free(preprocessed);
                     free(out.data);
@@ -2526,6 +3014,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
                     clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
                     freeToonLiteralTable(&toonTable);
                     free(preprocessed);
                     free(out.data);
@@ -2563,6 +3052,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
                     clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
                     freeToonLiteralTable(&toonTable);
                     free(preprocessed);
                     free(out.data);
@@ -2593,7 +3083,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                        !isLineComment(body, lineEnd)) {
                 translated = translateTypeFieldLine(lineStart, body, lineEnd);
             } else {
-                translated = translateLine(lineStart, lineEnd, &jsonState);
+                translated = translateLine(lineStart, lineEnd, &jsonState, &bindingTable);
             }
         }
         if (!translated) {
@@ -2601,6 +3091,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             clearFunctionContracts(&fnState);
             clearParBlockState(&parState);
             clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
             freeToonLiteralTable(&toonTable);
             free(preprocessed);
             free(out.data);
@@ -2614,6 +3105,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 clearFunctionContracts(&fnState);
                 clearParBlockState(&parState);
                 clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
                 freeToonLiteralTable(&toonTable);
                 free(preprocessed);
                 free(out.data);
@@ -2628,6 +3120,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             clearFunctionContracts(&fnState);
             clearParBlockState(&parState);
             clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
             freeToonLiteralTable(&toonTable);
             free(preprocessed);
             free(out.data);
@@ -2647,6 +3140,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 clearFunctionContracts(&fnState);
                 clearParBlockState(&parState);
                 clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
                 freeToonLiteralTable(&toonTable);
                 free(preprocessed);
                 free(out.data);
@@ -2663,6 +3157,10 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 freePendingContracts(&pending);
                 clearFunctionContracts(&fnState);
                 clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
+                freeToonLiteralTable(&toonTable);
+                free(preprocessed);
                 free(out.data);
                 return NULL;
             }
@@ -2677,6 +3175,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
                     clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
                     freeToonLiteralTable(&toonTable);
                     free(preprocessed);
                     free(out.data);
@@ -2692,6 +3191,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
                     clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
                     freeToonLiteralTable(&toonTable);
                     free(preprocessed);
                     free(out.data);
@@ -2721,6 +3221,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 clearFunctionContracts(&fnState);
                 clearParBlockState(&parState);
                 clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
                 freeToonLiteralTable(&toonTable);
                 free(preprocessed);
                 free(out.data);
@@ -2751,6 +3252,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     clearFunctionContracts(&fnState);
     clearParBlockState(&parState);
     clearTypeBlockState(&typeState);
+    freeAetherBindingTable(&bindingTable);
     freeToonLiteralTable(&toonTable);
     free(preprocessed);
     return out.data;

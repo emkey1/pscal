@@ -1,0 +1,11 @@
+fn compute(value: Int) -> Int {
+    ret value;
+}
+
+fn main() -> Void {
+    let answer = compute(42);
+    fx {
+        println(answer);
+    }
+    ret;
+}

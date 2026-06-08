@@ -51,6 +51,8 @@ typedef struct AetherScopeFrame {
 
 static const char *g_aether_source_path = NULL;
 static void reportAetherError(const char *kind, int line, const char *detail);
+static int expectedOpaqueReturnKind(const char *name, size_t len, int *returnsDoc);
+static const char *expectedScalarReturnTypeName(const char *name, size_t len);
 
 static void freeOpaqueBindingTable(AetherOpaqueBindingTable *table) {
     size_t i;
@@ -528,6 +530,166 @@ static const AetherScalarBinding *findScalarBinding(const AetherScalarBindingTab
     return NULL;
 }
 
+static int isBoolLiteralRange(const char *start, const char *end) {
+    size_t len;
+
+    if (!start || !end || end <= start) {
+        return 0;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    len = (size_t)(end - start);
+    return (len == 4 && strncmp(start, "true", 4) == 0) ||
+           (len == 5 && strncmp(start, "false", 5) == 0);
+}
+
+static const char *inferNumericTypeName(const char *start, const char *end) {
+    const char *cursor;
+    int sawDigit = 0;
+    int sawDot = 0;
+    int sawExp = 0;
+
+    if (!start || !end || end <= start) {
+        return NULL;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if (start >= end) {
+        return NULL;
+    }
+    cursor = start;
+    if (*cursor == '+' || *cursor == '-') {
+        cursor++;
+    }
+    while (cursor < end) {
+        if (isdigit((unsigned char)*cursor)) {
+            sawDigit = 1;
+            cursor++;
+            continue;
+        }
+        if (*cursor == '.' && !sawDot && !sawExp) {
+            sawDot = 1;
+            cursor++;
+            continue;
+        }
+        if ((*cursor == 'e' || *cursor == 'E') && !sawExp && sawDigit) {
+            sawExp = 1;
+            sawDot = 1;
+            cursor++;
+            if (cursor < end && (*cursor == '+' || *cursor == '-')) {
+                cursor++;
+            }
+            continue;
+        }
+        return NULL;
+    }
+    if (!sawDigit) {
+        return NULL;
+    }
+    return sawDot ? "Real" : "Int";
+}
+
+static const char *inferInitializerTypeName(const char *start,
+                                            const char *end,
+                                            const AetherOpaqueBindingTable *opaqueBindings,
+                                            const AetherScalarBindingTable *scalarBindings,
+                                            int *isOpaqueDoc) {
+    const char *trimmedStart = start;
+    const char *trimmedEnd = end;
+    const char *nameEnd;
+    const AetherOpaqueBinding *opaqueBinding;
+    const AetherScalarBinding *scalarBinding;
+    const char *numericType;
+    int returnsDoc = 0;
+
+    if (isOpaqueDoc) {
+        *isOpaqueDoc = 0;
+    }
+    if (!start || !end || end < start) {
+        return NULL;
+    }
+    while (trimmedStart < trimmedEnd && isspace((unsigned char)*trimmedStart)) {
+        trimmedStart++;
+    }
+    while (trimmedEnd > trimmedStart && isspace((unsigned char)trimmedEnd[-1])) {
+        trimmedEnd--;
+    }
+    if (trimmedEnd > trimmedStart && trimmedEnd[-1] == ';') {
+        trimmedEnd--;
+    }
+    while (trimmedEnd > trimmedStart && isspace((unsigned char)trimmedEnd[-1])) {
+        trimmedEnd--;
+    }
+    if (trimmedStart >= trimmedEnd) {
+        return NULL;
+    }
+    if (*trimmedStart == '"' && trimmedEnd[-1] == '"') {
+        return "Text";
+    }
+    if (isBoolLiteralRange(trimmedStart, trimmedEnd)) {
+        return "Bool";
+    }
+    numericType = inferNumericTypeName(trimmedStart, trimmedEnd);
+    if (numericType) {
+        return numericType;
+    }
+    nameEnd = trimmedStart;
+    if (!(isalpha((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        return NULL;
+    }
+    while (nameEnd < trimmedEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    if (nameEnd == trimmedEnd) {
+        opaqueBinding = findOpaqueBinding(opaqueBindings,
+                                          trimmedStart,
+                                          (size_t)(trimmedEnd - trimmedStart));
+        if (opaqueBinding) {
+            if (isOpaqueDoc) {
+                *isOpaqueDoc = opaqueBinding->isDoc;
+            }
+            return opaqueBinding->isDoc ? "ToonDoc" : "ToonNode";
+        }
+        scalarBinding = findScalarBinding(scalarBindings,
+                                          trimmedStart,
+                                          (size_t)(trimmedEnd - trimmedStart));
+        if (scalarBinding) {
+            return scalarBinding->typeName;
+        }
+        return NULL;
+    }
+    if (*skipInlineSpaces(nameEnd, trimmedEnd) != '(') {
+        return NULL;
+    }
+    if (expectedOpaqueReturnKind(trimmedStart, (size_t)(nameEnd - trimmedStart), &returnsDoc)) {
+        if (isOpaqueDoc) {
+            *isOpaqueDoc = returnsDoc;
+        }
+        return returnsDoc ? "ToonDoc" : "ToonNode";
+    }
+    if ((size_t)(nameEnd - trimmedStart) == 7 && strncmp(trimmedStart, "ai_chat", 7) == 0) {
+        return "Text";
+    }
+    if ((size_t)(nameEnd - trimmedStart) == 8 && strncmp(trimmedStart, "has_toon", 8) == 0) {
+        return "Bool";
+    }
+    if ((size_t)(nameEnd - trimmedStart) == 6 && strncmp(trimmedStart, "has_ai", 6) == 0) {
+        return "Bool";
+    }
+    if ((size_t)(nameEnd - trimmedStart) == 11 && strncmp(trimmedStart, "has_builtin", 11) == 0) {
+        return "Bool";
+    }
+    return expectedScalarReturnTypeName(trimmedStart, (size_t)(nameEnd - trimmedStart));
+}
+
 static void collectOpaqueBindings(const char *source, AetherOpaqueBindingTable *table) {
     const char *cursor = source;
 
@@ -545,8 +707,9 @@ static void collectOpaqueBindings(const char *source, AetherOpaqueBindingTable *
             const char *nameStart;
             const char *nameEnd;
             const char *colon;
-            const char *typeStart;
-            const char *typeEnd;
+            const char *typeStart = NULL;
+            const char *typeEnd = NULL;
+            const char *equals;
             int isDoc = 0;
 
             scan = skipInlineSpaces(scan, lineEnd);
@@ -573,12 +736,45 @@ static void collectOpaqueBindings(const char *source, AetherOpaqueBindingTable *
                     cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
                     continue;
                 }
+            } else {
+                equals = colon;
+                while (equals < lineEnd && *equals != '=') {
+                    equals++;
+                }
+                if (equals >= lineEnd || *equals != '=') {
+                    cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+                    continue;
+                }
+                if (!inferInitializerTypeName(skipInlineSpaces(equals + 1, lineEnd),
+                                             lineEnd,
+                                             table,
+                                             NULL,
+                                             &isDoc)) {
+                    cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+                    continue;
+                }
+                if (!(isDoc == 0 || isDoc == 1)) {
+                    cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+                    continue;
+                }
                 {
-                    char *name = dupRange(nameStart, nameEnd);
-                    if (name) {
-                        addOpaqueBinding(table, name, isDoc);
-                        free(name);
+                    const char *typeName = inferInitializerTypeName(skipInlineSpaces(equals + 1, lineEnd),
+                                                                    lineEnd,
+                                                                    table,
+                                                                    NULL,
+                                                                    &isDoc);
+                    if (!typeName ||
+                        !((strcmp(typeName, "ToonDoc") == 0) || (strcmp(typeName, "ToonNode") == 0))) {
+                        cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+                        continue;
                     }
+                }
+            }
+            {
+                char *name = dupRange(nameStart, nameEnd);
+                if (name) {
+                    addOpaqueBinding(table, name, isDoc);
+                    free(name);
                 }
             }
         }
@@ -603,9 +799,11 @@ static void collectScalarBindings(const char *source, AetherScalarBindingTable *
             const char *nameStart;
             const char *nameEnd;
             const char *colon;
-            const char *typeStart;
-            const char *typeEnd;
+            const char *typeStart = NULL;
+            const char *typeEnd = NULL;
+            const char *equals;
             char *name;
+            const char *inferredType = NULL;
 
             scan = skipInlineSpaces(scan, lineEnd);
             nameStart = scan;
@@ -614,15 +812,31 @@ static void collectScalarBindings(const char *source, AetherScalarBindingTable *
             }
             nameEnd = scan;
             colon = skipInlineSpaces(scan, lineEnd);
-            if (nameEnd == nameStart || colon >= lineEnd || *colon != ':') {
+            if (nameEnd == nameStart) {
                 cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
                 continue;
             }
-            typeStart = skipInlineSpaces(colon + 1, lineEnd);
-            typeEnd = typeStart;
-            while (typeEnd < lineEnd && *typeEnd != '=' && *typeEnd != ';' &&
-                   !isspace((unsigned char)*typeEnd)) {
-                typeEnd++;
+            if (colon < lineEnd && *colon == ':') {
+                typeStart = skipInlineSpaces(colon + 1, lineEnd);
+                typeEnd = typeStart;
+                while (typeEnd < lineEnd && *typeEnd != '=' && *typeEnd != ';' &&
+                       !isspace((unsigned char)*typeEnd)) {
+                    typeEnd++;
+                }
+            } else {
+                equals = colon;
+                while (equals < lineEnd && *equals != '=') {
+                    equals++;
+                }
+                if (equals >= lineEnd || *equals != '=') {
+                    cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+                    continue;
+                }
+                inferredType = inferInitializerTypeName(skipInlineSpaces(equals + 1, lineEnd),
+                                                        lineEnd,
+                                                        NULL,
+                                                        table,
+                                                        NULL);
             }
 
             name = dupRange(nameStart, nameEnd);
@@ -630,19 +844,27 @@ static void collectScalarBindings(const char *source, AetherScalarBindingTable *
                 cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
                 continue;
             }
-            if ((size_t)(typeEnd - typeStart) == 4 && strncmp(typeStart, "Text", 4) == 0) {
+            if (typeStart && (size_t)(typeEnd - typeStart) == 4 && strncmp(typeStart, "Text", 4) == 0) {
                 addScalarBinding(table, name, "Text");
-            } else if ((size_t)(typeEnd - typeStart) == 4 &&
+            } else if (typeStart && (size_t)(typeEnd - typeStart) == 4 &&
                        strncmp(typeStart, "TOON", 4) == 0) {
                 addScalarBinding(table, name, "TOON");
-            } else if ((size_t)(typeEnd - typeStart) == 3 && strncmp(typeStart, "Int", 3) == 0) {
+            } else if (typeStart && (size_t)(typeEnd - typeStart) == 3 &&
+                       strncmp(typeStart, "Int", 3) == 0) {
                 addScalarBinding(table, name, "Int");
-            } else if ((size_t)(typeEnd - typeStart) == 4 &&
+            } else if (typeStart && (size_t)(typeEnd - typeStart) == 4 &&
                        strncmp(typeStart, "Real", 4) == 0) {
                 addScalarBinding(table, name, "Real");
-            } else if ((size_t)(typeEnd - typeStart) == 4 &&
+            } else if (typeStart && (size_t)(typeEnd - typeStart) == 4 &&
                        strncmp(typeStart, "Bool", 4) == 0) {
                 addScalarBinding(table, name, "Bool");
+            } else if (inferredType &&
+                       (strcmp(inferredType, "Text") == 0 ||
+                        strcmp(inferredType, "TOON") == 0 ||
+                        strcmp(inferredType, "Int") == 0 ||
+                        strcmp(inferredType, "Real") == 0 ||
+                        strcmp(inferredType, "Bool") == 0)) {
+                addScalarBinding(table, name, inferredType);
             }
             free(name);
         }
@@ -905,7 +1127,8 @@ static int expectedOpaqueReturnKind(const char *name, size_t len, int *returnsDo
     if (!name || !returnsDoc) {
         return 0;
     }
-    if (len == 10 && strncmp(name, "toon_parse", len) == 0) {
+    if ((len == 10 && strncmp(name, "toon_parse", len) == 0) ||
+        (len == 15 && strncmp(name, "toon_parse_file", len) == 0)) {
         *returnsDoc = 1;
         return 1;
     }

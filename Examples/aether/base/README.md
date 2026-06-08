@@ -13,6 +13,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/parallel_calls
 ./build/bin/aether Examples/aether/base/task_helpers
 ./build/bin/aether Examples/aether/base/ai_helpers
+./build/bin/aether Examples/aether/base/inferred_decls
 ./build/bin/aether Examples/aether/base/for_range
 ./build/bin/aether Examples/aether/base/loop_forms
 ./build/bin/aether Examples/aether/base/module_demo
@@ -42,6 +43,10 @@ bootstrap frontend:
 These examples stay within the currently supported Aether Core subset:
 
 - `const` and `let` declarations with types
+- initialized `const` declarations without types
+- initialized `let` declarations without types when the initializer has an
+  obvious source-level type such as a literal, compact helper return, or a
+  previously known binding
 - `fn ... -> Type`
 - `ret`
 - `if` and `while` without mandatory parentheses
@@ -111,6 +116,8 @@ These examples stay within the currently supported Aether Core subset:
   worker launches
 - `ai_helpers`: shows the compact `ai_chat(...)` alias and the Aether AI
   capability probes without requiring a live call during the example run
+- `inferred_decls`: shows compact initialized `const` / `let` declarations
+  without explicit types, including helper-return and binding-alias inference
 - `loop_forms`: shows `loop cond { ... }`, `loop name in start..end { ... }`,
   and bare `loop { ... }` forms with `break`
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,

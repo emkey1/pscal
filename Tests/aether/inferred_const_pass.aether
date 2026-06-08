@@ -1,0 +1,5 @@
+const Greeting = "Aether";
+
+fn main() -> Void {
+    ret;
+}
