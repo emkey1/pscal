@@ -2323,6 +2323,7 @@ set(REA_SOURCES
     src/rea/state.c
     src/rea/builtins/thread.c
     src/rea/type_stubs.c
+    src/aether/diagmap.c
 )
 
 if(NOT PSCAL_PLATFORM_IOS)
