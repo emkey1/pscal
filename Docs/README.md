@@ -28,6 +28,9 @@ Start here to explore the available guides and references in this directory.
 - [rea_programmers_guide.md](rea_programmers_guide.md): practical workflows for building, testing, and extending Rea.
 - [rea_tutorial.md](rea_tutorial.md): build and run the Rea compiler with an SDL sample.
 
+## Aether front end
+- [aether_for_llms_and_others.md](aether_for_llms_and_others.md): practical guide for humans and LLMs writing current Aether code, with examples and supported patterns.
+
 ## Tiny compiler
 - [tools/tiny](../tools/tiny): educational Python-based compiler front end.
 - [clike_tiny_compiler.md](clike_tiny_compiler.md): Tiny compiler implemented in CLike (`bin/tiny.clike`) and wrapper usage (`bin/tiny`).
