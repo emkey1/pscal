@@ -1,5 +1,5 @@
 fn main() -> Void {
-    let label = "Aether";
+    const label = "Aether";
     let answer = 42;
     let ratio = 3.5;
     let enabled = true;

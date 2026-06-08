@@ -216,7 +216,12 @@ else
         exit 1
     fi
 fi
-"$AETHER_BIN" --no-cache --no-run "$INFERRED_CONST_PASS_FIXTURE" >/dev/null
+"$AETHER_BIN" --no-cache "$INFERRED_CONST_PASS_FIXTURE" >/tmp/aether_inferred_const_pass.out
+if ! grep -qx "Aether" /tmp/aether_inferred_const_pass.out; then
+    echo "unexpected inferred const output" >&2
+    cat /tmp/aether_inferred_const_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache --no-run "$PAR_PASS_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache "$FOR_RANGE_PASS_FIXTURE" >/tmp/aether_for_range_pass.out

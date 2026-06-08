@@ -3057,6 +3057,18 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
             if (type && type->token) {
                 return type->token->value;
             }
+        } else if (decl && decl->type == AST_CONST_DECL && decl->left) {
+            AST *type = decl->left;
+
+            while (type && (type->type == AST_ARRAY_TYPE || type->type == AST_POINTER_TYPE)) {
+                type = type->right;
+            }
+            if (type && type->type == AST_TYPE_REFERENCE && type->token) {
+                return type->token->value;
+            }
+            if (type && type->token) {
+                return type->token->value;
+            }
         }
         return NULL;
     }
@@ -3299,6 +3311,11 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
         if (decl && decl->right) {
             node->type_def = decl->right;
             node->var_type = decl->right->var_type;
+        } else if (decl && decl->type == AST_CONST_DECL) {
+            node->type_def = decl->left;
+            node->var_type = decl->var_type != TYPE_UNKNOWN
+                                 ? decl->var_type
+                                 : (decl->left ? decl->left->var_type : TYPE_UNKNOWN);
         } else {
             if (isGenericTypeName(ident)) {
                 node->var_type = TYPE_UNKNOWN;

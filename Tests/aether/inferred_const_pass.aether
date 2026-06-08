@@ -1,5 +1,9 @@
 const Greeting = "Aether";
 
 fn main() -> Void {
+    let copy = Greeting;
+    fx {
+        println(copy);
+    }
     ret;
 }
