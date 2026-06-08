@@ -1,0 +1,6 @@
+fn main() -> Void {
+    fx {
+        println(has_builtin("yyjson", "YyjsonRead"));
+    }
+    ret;
+}

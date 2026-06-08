@@ -20,6 +20,9 @@ CONTRACT_FAIL_POST_FIXTURE="$ROOT_DIR/Tests/aether/contracts_fail_post.aether"
 EFFECTS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/effects_fail_outside_fx.aether"
 PRINT_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/print_alias_pass.aether"
 PRINT_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/print_alias_fail_outside_fx.aether"
+TASK_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/task_helpers_pass.aether"
+TASK_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/task_alias_fail_outside_fx.aether"
+HAS_BUILTIN_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_builtin_alias_pass.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -79,6 +82,9 @@ for fixture in \
     "$EFFECTS_FAIL_FIXTURE" \
     "$PRINT_ALIAS_PASS_FIXTURE" \
     "$PRINT_ALIAS_FAIL_FIXTURE" \
+    "$TASK_HELPERS_PASS_FIXTURE" \
+    "$TASK_ALIAS_FAIL_FIXTURE" \
+    "$HAS_BUILTIN_ALIAS_PASS_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -142,6 +148,38 @@ printf 'Aether print aliases\n' >/tmp/aether_print_alias_expected.out
 if ! cmp -s /tmp/aether_print_alias_expected.out /tmp/aether_print_alias_pass.out; then
     echo "unexpected print alias output" >&2
     cat /tmp/aether_print_alias_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TASK_HELPERS_PASS_FIXTURE" >/tmp/aether_task_helpers_pass.out
+if ! grep -q '^named_ok = true$' /tmp/aether_task_helpers_pass.out; then
+    echo "unexpected task helper named output" >&2
+    cat /tmp/aether_task_helpers_pass.out >&2
+    exit 1
+fi
+if ! grep -q '^pooled_ok = true$' /tmp/aether_task_helpers_pass.out; then
+    echo "unexpected task helper pooled output" >&2
+    cat /tmp/aether_task_helpers_pass.out >&2
+    exit 1
+fi
+if ! grep -q '^lookup_match = true$' /tmp/aether_task_helpers_pass.out; then
+    echo "unexpected task helper lookup output" >&2
+    cat /tmp/aether_task_helpers_pass.out >&2
+    exit 1
+fi
+if ! grep -Eq '^stats = [0-9]+$' /tmp/aether_task_helpers_pass.out; then
+    echo "unexpected task helper stats output" >&2
+    cat /tmp/aether_task_helpers_pass.out >&2
+    exit 1
+fi
+if ! grep -Eq '^has_ai = (true|false)$' /tmp/aether_task_helpers_pass.out; then
+    echo "unexpected task helper has_ai output" >&2
+    cat /tmp/aether_task_helpers_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$HAS_BUILTIN_ALIAS_PASS_FIXTURE" >/tmp/aether_has_builtin_alias_pass.out
+if ! grep -Eq '^(true|false)$' /tmp/aether_has_builtin_alias_pass.out; then
+    echo "unexpected has_builtin alias output" >&2
+    cat /tmp/aether_has_builtin_alias_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null
@@ -536,6 +574,16 @@ fi
 if ! grep -q "Aether effect error: call to 'writeln' requires an fx block" /tmp/aether_effects_fail.out; then
     echo "missing effect-boundary failure message" >&2
     cat /tmp/aether_effects_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TASK_ALIAS_FAIL_FIXTURE" >/tmp/aether_task_alias_fail.out 2>&1; then
+    echo "expected task alias effect-boundary failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether effect error: call to 'task_spawn' requires an fx block" /tmp/aether_task_alias_fail.out; then
+    echo "missing task alias effect-boundary failure message" >&2
+    cat /tmp/aether_task_alias_fail.out >&2
     exit 1
 fi
 

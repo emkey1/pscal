@@ -11,6 +11,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/contract_layouts
 ./build/bin/aether Examples/aether/base/pure_functions
 ./build/bin/aether Examples/aether/base/parallel_calls
+./build/bin/aether Examples/aether/base/task_helpers
 ./build/bin/aether Examples/aether/base/for_range
 ./build/bin/aether Examples/aether/base/module_demo
 ./build/bin/aether Examples/aether/base/toon_blocks
@@ -47,6 +48,9 @@ These examples stay within the currently supported Aether Core subset:
   `halt`, and thread-launch helpers require `fx`
 - Aether-native `print(...)` and `println(...)` spellings lowered onto the
   shared `write` and `writeln` builtins
+- compact task/thread helpers such as `task_spawn`, `task_queue`, `task_wait`,
+  `task_lookup`, `task_stats`, and `task_stats_json` lowered onto the shared
+  worker-pool/runtime thread helpers
 - `@pure` now rejects direct effectful builtin calls and direct calls into
   non-pure Aether functions
 - restricted `par { ... }` lowering for direct call statements, mapped onto
@@ -96,6 +100,9 @@ These examples stay within the currently supported Aether Core subset:
   forms without changing the shared backend
 - `contract_layouts`: shows `@pre`, `@post`, and `@cost` surviving realistic
   blank-line and comment-separated layouts before a function declaration
+- `task_helpers`: shows the compact Aether task/thread alias surface along with
+  the `has_ai()` capability probe, while still respecting `fx` around effectful
+  worker launches
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
   `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
   yyjson builtins

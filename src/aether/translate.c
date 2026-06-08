@@ -820,6 +820,42 @@ static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t n
     if (!out || !nameStart || nameLen == 0) {
         return 0;
     }
+    if (nameLen == 10 && strncmp(nameStart, "task_spawn", nameLen) == 0) {
+        return bufferAppend(out, "thread_spawn_named");
+    }
+    if (nameLen == 10 && strncmp(nameStart, "task_queue", nameLen) == 0) {
+        return bufferAppend(out, "thread_pool_submit");
+    }
+    if (nameLen == 13 && strncmp(nameStart, "task_set_name", nameLen) == 0) {
+        return bufferAppend(out, "thread_set_name");
+    }
+    if (nameLen == 10 && strncmp(nameStart, "task_pause", nameLen) == 0) {
+        return bufferAppend(out, "thread_pause");
+    }
+    if (nameLen == 11 && strncmp(nameStart, "task_resume", nameLen) == 0) {
+        return bufferAppend(out, "thread_resume");
+    }
+    if (nameLen == 11 && strncmp(nameStart, "task_cancel", nameLen) == 0) {
+        return bufferAppend(out, "thread_cancel");
+    }
+    if (nameLen == 11 && strncmp(nameStart, "task_lookup", nameLen) == 0) {
+        return bufferAppend(out, "thread_lookup");
+    }
+    if (nameLen == 9 && strncmp(nameStart, "task_wait", nameLen) == 0) {
+        return bufferAppend(out, "WaitForThread");
+    }
+    if (nameLen == 11 && strncmp(nameStart, "task_status", nameLen) == 0) {
+        return bufferAppend(out, "thread_get_status");
+    }
+    if (nameLen == 11 && strncmp(nameStart, "task_result", nameLen) == 0) {
+        return bufferAppend(out, "thread_get_result");
+    }
+    if (nameLen == 10 && strncmp(nameStart, "task_stats", nameLen) == 0) {
+        return bufferAppend(out, "thread_stats");
+    }
+    if (nameLen == 15 && strncmp(nameStart, "task_stats_json", nameLen) == 0) {
+        return bufferAppend(out, "ThreadStatsJson");
+    }
     if (nameLen == 7 && strncmp(nameStart, "println", nameLen) == 0) {
         return bufferAppend(out, "writeln");
     }
@@ -850,8 +886,22 @@ static int appendAetherCapabilityAlias(Buffer *out,
         *outCursor = closeParen + 1;
         return 1;
     }
+    if (nameLen == 6 && strncmp(nameStart, "has_ai", nameLen) == 0) {
+        if (*closeParen != ')') {
+            return 0;
+        }
+        if (!bufferAppend(out, "hasextbuiltin(\"openai\", \"OpenAIChatCompletions\")")) {
+            return 0;
+        }
+        *outCursor = closeParen + 1;
+        return 1;
+    }
     if (nameLen == 11 && strncmp(nameStart, "has_builtin", nameLen) == 0) {
-        return 0;
+        if (!bufferAppend(out, "hasextbuiltin")) {
+            return 0;
+        }
+        *outCursor = openParen;
+        return 1;
     }
     return 0;
 }

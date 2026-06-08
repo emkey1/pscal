@@ -28,6 +28,9 @@ Bootstrap status:
 - Aether-native `print(...)` and `println(...)` spellings now lower onto the
   shared `write` and `writeln` builtins and participate in the same `fx` and
   `@pure` validation rules.
+- Aether now also exposes a compact task/thread helper surface over the shared
+  worker-pool builtins: `task_spawn`, `task_queue`, `task_wait`, `task_lookup`,
+  `task_status`, `task_result`, `task_stats`, and `task_stats_json`.
 - `@pure` now has a first semantic pass as well: pure functions reject direct
   calls to effectful builtins and direct calls into known non-pure Aether
   functions.
@@ -49,6 +52,8 @@ Bootstrap status:
   lower directly onto yyjson key lookup plus scalar extraction.
 - `has_toon()` now lowers to the shared yyjson availability probe instead of
   exposing raw `hasextbuiltin("yyjson", "YyjsonRead")` in Aether source.
+- `has_ai()` and `has_builtin(category, function)` now lower onto the shared
+  extended-builtin query path as compact Aether capability probes.
 - `ToonDoc` and `ToonNode` are now valid source-level opaque handle types for
   parsed TOON documents and nodes, while still lowering to the shared runtime
   representation during the bootstrap phase.

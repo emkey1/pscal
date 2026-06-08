@@ -1,0 +1,25 @@
+fn main() -> Void {
+    let named: Int = 0;
+    let namedWait: Int = 0;
+    let pooled: Int = 0;
+    let pooledWait: Int = 0;
+    let lookup: Int = 0;
+    let statsCount: Int = 0;
+
+    fx {
+        named = task_spawn("delay", "aether_worker", 5);
+        namedWait = task_wait(named);
+
+        pooled = task_queue("delay", "aether_pool", 5);
+        pooledWait = task_wait(pooled);
+        lookup = task_lookup("aether_pool");
+        statsCount = length(task_stats());
+        println("named_ok = ", namedWait == 0);
+        println("pooled_ok = ", pooledWait == 0);
+        println("lookup_match = ", lookup == pooled);
+        println("stats = ", statsCount);
+        println("has_ai = ", has_ai());
+    }
+
+    ret;
+}
