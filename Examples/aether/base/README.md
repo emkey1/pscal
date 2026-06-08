@@ -8,6 +8,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/control_flow
 ./build/bin/aether Examples/aether/base/effects_contracts
 ./build/bin/aether Examples/aether/base/contracts
+./build/bin/aether Examples/aether/base/contract_layouts
 ./build/bin/aether Examples/aether/base/pure_functions
 ./build/bin/aether Examples/aether/base/parallel_calls
 ./build/bin/aether Examples/aether/base/for_range
@@ -93,6 +94,8 @@ These examples stay within the currently supported Aether Core subset:
   typed fallback defaults
 - `cost_annotations`: shows validated `@cost` budgets in both `ops` and `ms`
   forms without changing the shared backend
+- `contract_layouts`: shows `@pre`, `@post`, and `@cost` surviving realistic
+  blank-line and comment-separated layouts before a function declaration
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
   `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
   yyjson builtins
@@ -106,6 +109,8 @@ These examples stay within the currently supported Aether Core subset:
 - `self` as the Aether source spelling for the current object inside `type`
   methods, lowered onto the shared backend's `myself`
 - `@pre` and `@post` lowered into runtime guards
+- contract annotations now have frontend attachment checks too: `@pre`,
+  `@post`, `@pure`, and `@cost` must all decorate the next function
 - `@cost` is now frontend-validated: it must be a positive integer budget with
   an optional unit such as `ns`, `us`, `ms`, `s`, `op`/`ops`, or `step`/`steps`
 

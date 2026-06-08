@@ -477,6 +477,10 @@ These should be treated as executable or analyzable language constructs, not as
 free-form prose. Aether should avoid contract forms that merely look formal but
 do not affect checking, diagnostics, or tooling.
 
+That applies to attachment and syntax as well as runtime meaning. An annotation
+that does not bind cleanly to the next function, or that has malformed syntax,
+should fail in the frontend rather than silently degrade into commentary.
+
 ## 10. Data Model
 
 ### 10.1 Primitive Types

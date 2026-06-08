@@ -342,6 +342,61 @@ static int validateCostAnnotationSyntax(const char *body,
     return 1;
 }
 
+static const char *skipAnnotationTail(const char *cursor, const char *lineEnd) {
+    const char *trimmed;
+
+    trimmed = skipInlineSpaces(cursor, lineEnd);
+    if (trimmed + 1 < lineEnd && trimmed[0] == '/' && trimmed[1] == '/') {
+        return lineEnd;
+    }
+    return trimmed;
+}
+
+static int validateContractExprAnnotation(const char *body,
+                                          const char *lineEnd,
+                                          const char *directive,
+                                          char *detail,
+                                          size_t detailSize) {
+    const char *cursor;
+
+    if (!body || !lineEnd || !directive || !detail || detailSize == 0) {
+        return 0;
+    }
+    detail[0] = '\0';
+    if (!startsWithWord(body, lineEnd, directive)) {
+        snprintf(detail, detailSize, "internal %s validator mismatch.", directive);
+        return 0;
+    }
+    cursor = skipAnnotationTail(body + strlen(directive), lineEnd);
+    if (cursor >= lineEnd) {
+        snprintf(detail, detailSize, "%s requires an expression.", directive);
+        return 0;
+    }
+    return 1;
+}
+
+static int validatePureAnnotationSyntax(const char *body,
+                                        const char *lineEnd,
+                                        char *detail,
+                                        size_t detailSize) {
+    const char *cursor;
+
+    if (!body || !lineEnd || !detail || detailSize == 0) {
+        return 0;
+    }
+    detail[0] = '\0';
+    if (!startsWithWord(body, lineEnd, "@pure")) {
+        snprintf(detail, detailSize, "internal @pure validator mismatch.");
+        return 0;
+    }
+    cursor = skipAnnotationTail(body + 5, lineEnd);
+    if (cursor < lineEnd) {
+        snprintf(detail, detailSize, "@pure does not take arguments.");
+        return 0;
+    }
+    return 1;
+}
+
 static const AetherFunctionInfo *findFunctionInfo(const AetherFunctionTable *table,
                                                   const char *name,
                                                   size_t len) {
@@ -627,9 +682,19 @@ static void collectFunctionPurity(const char *source, AetherFunctionTable *table
     }
 }
 
-static void validateCostAnnotations(const char *source) {
+static void reportDetachedAnnotation(const char *directive, int line) {
+    char detail[256];
+
+    snprintf(detail, sizeof(detail), "%s must annotate the next function declaration.", directive);
+    reportAetherError("contract", line, detail);
+}
+
+static void validateContractAnnotations(const char *source) {
     const char *cursor = source;
     int line = 1;
+    int pendingPreLine = 0;
+    int pendingPostLine = 0;
+    int pendingPureLine = 0;
     int pendingCostLine = 0;
 
     while (cursor && *cursor) {
@@ -643,7 +708,31 @@ static void validateCostAnnotations(const char *source) {
         }
         body = skipInlineSpaces(lineStart, lineEnd);
 
-        if (startsWithWord(body, lineEnd, "@cost")) {
+        if (startsWithWord(body, lineEnd, "@pre")) {
+            if (!validateContractExprAnnotation(body, lineEnd, "@pre", detail, sizeof(detail))) {
+                reportAetherError("contract", line, detail);
+            }
+            if (pendingPreLine == 0) {
+                pendingPreLine = line;
+            }
+        } else if (startsWithWord(body, lineEnd, "@post")) {
+            if (!validateContractExprAnnotation(body, lineEnd, "@post", detail, sizeof(detail))) {
+                reportAetherError("contract", line, detail);
+            }
+            if (pendingPostLine == 0) {
+                pendingPostLine = line;
+            }
+        } else if (startsWithWord(body, lineEnd, "@pure")) {
+            if (!validatePureAnnotationSyntax(body, lineEnd, detail, sizeof(detail))) {
+                reportAetherError("contract", line, detail);
+            }
+            if (pendingPureLine != 0) {
+                reportAetherError("contract",
+                                  line,
+                                  "duplicate @pure annotation before function declaration.");
+            }
+            pendingPureLine = line;
+        } else if (startsWithWord(body, lineEnd, "@cost")) {
             if (!validateCostAnnotationSyntax(body, lineEnd, detail, sizeof(detail))) {
                 reportAetherError("contract", line, detail);
             }
@@ -653,16 +742,26 @@ static void validateCostAnnotations(const char *source) {
                                   "duplicate @cost annotation before function declaration.");
             }
             pendingCostLine = line;
-        } else if (startsWithWord(body, lineEnd, "@pure") ||
-                   startsWithWord(body, lineEnd, "@pre") ||
-                   startsWithWord(body, lineEnd, "@post")) {
         } else if (startsWithWord(body, lineEnd, "fn")) {
+            pendingPreLine = 0;
+            pendingPostLine = 0;
+            pendingPureLine = 0;
             pendingCostLine = 0;
         } else if (body < lineEnd && !(body[0] == '/' && body + 1 < lineEnd && body[1] == '/')) {
+            if (pendingPreLine != 0) {
+                reportDetachedAnnotation("@pre", pendingPreLine);
+                pendingPreLine = 0;
+            }
+            if (pendingPostLine != 0) {
+                reportDetachedAnnotation("@post", pendingPostLine);
+                pendingPostLine = 0;
+            }
+            if (pendingPureLine != 0) {
+                reportDetachedAnnotation("@pure", pendingPureLine);
+                pendingPureLine = 0;
+            }
             if (pendingCostLine != 0) {
-                reportAetherError("contract",
-                                  pendingCostLine,
-                                  "@cost must annotate the next function declaration.");
+                reportDetachedAnnotation("@cost", pendingCostLine);
                 pendingCostLine = 0;
             }
         }
@@ -675,10 +774,17 @@ static void validateCostAnnotations(const char *source) {
         }
     }
 
+    if (pendingPreLine != 0) {
+        reportDetachedAnnotation("@pre", pendingPreLine);
+    }
+    if (pendingPostLine != 0) {
+        reportDetachedAnnotation("@post", pendingPostLine);
+    }
+    if (pendingPureLine != 0) {
+        reportDetachedAnnotation("@pure", pendingPureLine);
+    }
     if (pendingCostLine != 0) {
-        reportAetherError("contract",
-                          pendingCostLine,
-                          "@cost must annotate the next function declaration.");
+        reportDetachedAnnotation("@cost", pendingCostLine);
     }
 }
 
@@ -1765,7 +1871,7 @@ void aetherPerformSemanticAnalysis(AST *root) {
         AetherFunctionTable table = {0};
         AetherOpaqueBindingTable opaqueBindings = {0};
         AetherScalarBindingTable scalarBindings = {0};
-        validateCostAnnotations(source);
+        validateContractAnnotations(source);
         collectFunctionPurity(source, &table);
         collectOpaqueBindings(source, &opaqueBindings);
         collectScalarBindings(source, &scalarBindings);

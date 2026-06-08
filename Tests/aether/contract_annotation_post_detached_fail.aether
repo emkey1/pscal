@@ -1,0 +1,6 @@
+@post result > 0
+let value: Int = 1;
+
+fn main() -> Void {
+    ret;
+}

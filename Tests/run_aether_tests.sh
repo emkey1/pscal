@@ -6,11 +6,15 @@ ROOT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$S
 AETHER_BIN="$ROOT_DIR/build/bin/aether"
 SMOKE_FIXTURE="$ROOT_DIR/Tests/aether/smoke.aether"
 CONTRACT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contracts_pass.aether"
+CONTRACT_LAYOUT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contract_layout_pass.aether"
 COST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_pass.aether"
 COST_ZERO_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_zero_fail.aether"
 COST_UNIT_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_unit_fail.aether"
 COST_DETACHED_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_detached_fail.aether"
 COST_DUPLICATE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_duplicate_fail.aether"
+CONTRACT_PRE_EMPTY_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/contract_annotation_pre_empty_fail.aether"
+CONTRACT_POST_DETACHED_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/contract_annotation_post_detached_fail.aether"
+CONTRACT_PURE_TRAILING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/contract_annotation_pure_trailing_fail.aether"
 CONTRACT_FAIL_PRE_FIXTURE="$ROOT_DIR/Tests/aether/contracts_fail_pre.aether"
 CONTRACT_FAIL_POST_FIXTURE="$ROOT_DIR/Tests/aether/contracts_fail_post.aether"
 EFFECTS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/effects_fail_outside_fx.aether"
@@ -61,11 +65,15 @@ fi
 for fixture in \
     "$SMOKE_FIXTURE" \
     "$CONTRACT_PASS_FIXTURE" \
+    "$CONTRACT_LAYOUT_PASS_FIXTURE" \
     "$COST_PASS_FIXTURE" \
     "$COST_ZERO_FAIL_FIXTURE" \
     "$COST_UNIT_FAIL_FIXTURE" \
     "$COST_DETACHED_FAIL_FIXTURE" \
     "$COST_DUPLICATE_FAIL_FIXTURE" \
+    "$CONTRACT_PRE_EMPTY_FAIL_FIXTURE" \
+    "$CONTRACT_POST_DETACHED_FAIL_FIXTURE" \
+    "$CONTRACT_PURE_TRAILING_FAIL_FIXTURE" \
     "$CONTRACT_FAIL_PRE_FIXTURE" \
     "$CONTRACT_FAIL_POST_FIXTURE" \
     "$EFFECTS_FAIL_FIXTURE" \
@@ -117,6 +125,12 @@ done
 "$AETHER_BIN" --no-cache --no-run "$SMOKE_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache --dump-ast-json "$SMOKE_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache "$CONTRACT_PASS_FIXTURE" >/dev/null
+"$AETHER_BIN" --no-cache "$CONTRACT_LAYOUT_PASS_FIXTURE" >/tmp/aether_contract_layout_pass.out
+if ! grep -qx "42" /tmp/aether_contract_layout_pass.out; then
+    echo "unexpected contract layout output" >&2
+    cat /tmp/aether_contract_layout_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$COST_PASS_FIXTURE" >/tmp/aether_cost_pass.out
 if ! grep -qx "42" /tmp/aether_cost_pass.out; then
     echo "unexpected cost annotation output" >&2
@@ -462,6 +476,36 @@ fi
 if ! grep -q "duplicate @cost annotation before function declaration" /tmp/aether_cost_duplicate_fail.out; then
     echo "missing duplicate @cost failure message" >&2
     cat /tmp/aether_cost_duplicate_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$CONTRACT_PRE_EMPTY_FAIL_FIXTURE" >/tmp/aether_contract_pre_empty_fail.out 2>&1; then
+    echo "expected empty @pre failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "@pre requires an expression" /tmp/aether_contract_pre_empty_fail.out; then
+    echo "missing empty @pre failure message" >&2
+    cat /tmp/aether_contract_pre_empty_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$CONTRACT_POST_DETACHED_FAIL_FIXTURE" >/tmp/aether_contract_post_detached_fail.out 2>&1; then
+    echo "expected detached @post failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "@post must annotate the next function declaration" /tmp/aether_contract_post_detached_fail.out; then
+    echo "missing detached @post failure message" >&2
+    cat /tmp/aether_contract_post_detached_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$CONTRACT_PURE_TRAILING_FAIL_FIXTURE" >/tmp/aether_contract_pure_trailing_fail.out 2>&1; then
+    echo "expected trailing @pure syntax failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "@pure does not take arguments" /tmp/aether_contract_pure_trailing_fail.out; then
+    echo "missing trailing @pure syntax failure message" >&2
+    cat /tmp/aether_contract_pure_trailing_fail.out >&2
     exit 1
 fi
 

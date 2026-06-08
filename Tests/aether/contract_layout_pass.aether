@@ -1,0 +1,14 @@
+@pre value >= 0
+
+@post result == value + 1
+@cost 3 steps
+fn next(value: Int) -> Int {
+    ret value + 1;
+}
+
+fn main() -> Void {
+    fx {
+        println(next(41));
+    }
+    ret;
+}

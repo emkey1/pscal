@@ -17,6 +17,9 @@ Bootstrap status:
   bytecode compiler.
 - `@pre` and `@post` now lower through the Aether rewrite path into ordinary
   guard code, so contract failures are enforced without backend changes.
+- Contract annotations now also have explicit frontend attachment rules:
+  `@pre`, `@post`, `@pure`, and `@cost` must decorate the next function, and
+  malformed annotation syntax is rejected before the shared Rea semantic pass.
 - `@cost` is now a real frontend-validated contract form as well: it must
   attach to the next function declaration and use a positive integer budget,
   optionally followed by a compact unit like `ms`, `ops`, or `steps`.

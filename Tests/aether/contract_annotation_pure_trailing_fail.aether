@@ -1,0 +1,4 @@
+@pure noisy
+fn main() -> Void {
+    ret;
+}
