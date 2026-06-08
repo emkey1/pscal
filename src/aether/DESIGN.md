@@ -581,6 +581,16 @@ Likewise, `toon_parse(...)` should require a `Text` or `TOON` payload binding
 when its source argument is a named variable rather than a literal.
 `toon_parse_file(...)` should similarly require a `Text` path binding for named
 arguments at the Aether source level.
+On top of extraction, Aether should expose compact inspection helpers like
+`toon_type(...)` and `toon_is_*` so agents can branch on node kind without
+falling back to backend-specific yyjson names.
+For the same reason it should expose compact presence checks such as
+`toon_has_key(...)` and `toon_has_at(...)`, so common “is this here?” queries
+do not require raw handle-probing patterns in user code.
+Likewise, defaulted lookup helpers such as `toon_get_text_or(...)` and
+`toon_get_int_or(...)` are a good fit for agent-oriented code, because they
+encode a very common data-extraction pattern directly in the source language
+without forcing explicit presence checks and branching at each call site.
 
 ## 11. Why Standalone Front-End Status Matters
 

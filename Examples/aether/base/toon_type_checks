@@ -1,0 +1,42 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"name\":\"Ada\",\"count\":2,\"enabled\":true,\"items\":[1,2],\"nested\":{\"x\":1},\"maybe\":null}");
+    let root: ToonNode = toon_root(doc);
+    let nameNode: ToonNode = toon_key(root, "name");
+    let countNode: ToonNode = toon_key(root, "count");
+    let enabledNode: ToonNode = toon_key(root, "enabled");
+    let itemsNode: ToonNode = toon_key(root, "items");
+    let nestedNode: ToonNode = toon_key(root, "nested");
+    let maybeNode: ToonNode = toon_key(root, "maybe");
+
+    let nameType: Text = toon_type(nameNode);
+    let countIsInt: Bool = toon_is_int(countNode);
+    let enabledIsBool: Bool = toon_is_bool(enabledNode);
+    let itemsIsArr: Bool = toon_is_arr(itemsNode);
+    let nestedIsObj: Bool = toon_is_obj(nestedNode);
+    let maybeIsNull: Bool = toon_is_null(maybeNode);
+
+    fx {
+        println("nameType = ", nameType);
+        println("countIsInt = ", countIsInt);
+        println("enabledIsBool = ", enabledIsBool);
+        println("itemsIsArr = ", itemsIsArr);
+        println("nestedIsObj = ", nestedIsObj);
+        println("maybeIsNull = ", maybeIsNull);
+    }
+
+    toon_free(maybeNode);
+    toon_free(nestedNode);
+    toon_free(itemsNode);
+    toon_free(enabledNode);
+    toon_free(countNode);
+    toon_free(nameNode);
+    toon_close(doc);
+    ret;
+}

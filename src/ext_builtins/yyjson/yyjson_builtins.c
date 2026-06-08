@@ -284,7 +284,7 @@ static yyjson_doc *jsonDetachDocHandle(int handle) {
 static const char *jsonTypeToString(yyjson_val *val) {
     switch (yyjson_get_type(val)) {
         case YYJSON_TYPE_NULL: return "null";
-        case YYJSON_TYPE_BOOL: return yyjson_get_bool(val) ? "true" : "false";
+        case YYJSON_TYPE_BOOL: return "bool";
         case YYJSON_TYPE_NUM:
             return yyjson_is_int(val) ? "int" : "real";
         case YYJSON_TYPE_STR: return "string";
@@ -470,6 +470,65 @@ static Value vmBuiltinYyjsonGetIndex(struct VM_s *vm, int arg_count, Value *args
     }
 
     result = makeInt(child_handle);
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
+}
+
+static Value vmBuiltinYyjsonHasKey(struct VM_s *vm, int arg_count, Value *args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || !isPascalStringType(args[1].type)) {
+        runtimeError(vm, "YyjsonHasKey expects (value_handle:int, key:string).");
+        return makeInt(0);
+    }
+    int handle = (int)AS_INTEGER(args[0]);
+    yyjson_doc *doc = NULL;
+    yyjson_val *val = NULL;
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
+        runtimeError(vm, "YyjsonHasKey received an invalid value handle (%d).", handle);
+        return makeInt(0);
+    }
+
+    Value result = makeInt(0);
+    if (!yyjson_is_obj(val)) {
+        runtimeError(vm, "YyjsonHasKey requires an object value handle.");
+        goto cleanup;
+    }
+
+    {
+        const char *key = args[1].s_val ? args[1].s_val : "";
+        result = makeInt(yyjson_obj_get(val, key) ? 1 : 0);
+    }
+
+cleanup:
+    jsonReleaseValue(handle);
+    return result;
+}
+
+static Value vmBuiltinYyjsonHasIndex(struct VM_s *vm, int arg_count, Value *args) {
+    if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
+        runtimeError(vm, "YyjsonHasIndex expects (value_handle:int, index:int).");
+        return makeInt(0);
+    }
+    int handle = (int)AS_INTEGER(args[0]);
+    long long index = AS_INTEGER(args[1]);
+    if (index < 0) {
+        return makeInt(0);
+    }
+    yyjson_doc *doc = NULL;
+    yyjson_val *val = NULL;
+    if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
+        runtimeError(vm, "YyjsonHasIndex received an invalid value handle (%d).", handle);
+        return makeInt(0);
+    }
+
+    Value result = makeInt(0);
+    if (!yyjson_is_arr(val)) {
+        runtimeError(vm, "YyjsonHasIndex requires an array value handle.");
+        goto cleanup;
+    }
+
+    result = makeInt(yyjson_arr_get(val, (size_t)index) ? 1 : 0);
 
 cleanup:
     jsonReleaseValue(handle);
@@ -677,6 +736,14 @@ void registerYyjsonGetKeyBuiltin(void) {
 
 void registerYyjsonGetIndexBuiltin(void) {
     registerVmBuiltin("yyjsongetindex", vmBuiltinYyjsonGetIndex, BUILTIN_TYPE_FUNCTION, "YyjsonGetIndex");
+}
+
+void registerYyjsonHasKeyBuiltin(void) {
+    registerVmBuiltin("yyjsonhaskey", vmBuiltinYyjsonHasKey, BUILTIN_TYPE_FUNCTION, "YyjsonHasKey");
+}
+
+void registerYyjsonHasIndexBuiltin(void) {
+    registerVmBuiltin("yyjsonhasindex", vmBuiltinYyjsonHasIndex, BUILTIN_TYPE_FUNCTION, "YyjsonHasIndex");
 }
 
 void registerYyjsonGetLengthBuiltin(void) {

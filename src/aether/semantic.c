@@ -585,18 +585,32 @@ static int expectedOpaqueArgKind(const char *name, size_t len, int *expectsDoc) 
         return 1;
     }
     if ((len == 8 && strncmp(name, "toon_key", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_has_key", len) == 0) ||
         (len == 7 && strncmp(name, "toon_at", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_has_at", len) == 0) ||
         (len == 8 && strncmp(name, "toon_len", len) == 0) ||
+        (len == 9 && strncmp(name, "toon_type", len) == 0) ||
         (len == 9 && strncmp(name, "toon_free", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_text", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_is_int", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_real", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_bool", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_null", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_is_arr", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_is_obj", len) == 0) ||
         (len == 15 && strncmp(name, "toon_text_value", len) == 0) ||
         (len == 14 && strncmp(name, "toon_int_value", len) == 0) ||
         (len == 15 && strncmp(name, "toon_real_value", len) == 0) ||
         (len == 15 && strncmp(name, "toon_bool_value", len) == 0) ||
         (len == 15 && strncmp(name, "toon_null_value", len) == 0) ||
         (len == 13 && strncmp(name, "toon_get_text", len) == 0) ||
+        (len == 16 && strncmp(name, "toon_get_text_or", len) == 0) ||
         (len == 12 && strncmp(name, "toon_get_int", len) == 0) ||
+        (len == 15 && strncmp(name, "toon_get_int_or", len) == 0) ||
         (len == 13 && strncmp(name, "toon_get_real", len) == 0) ||
-        (len == 13 && strncmp(name, "toon_get_bool", len) == 0)) {
+        (len == 16 && strncmp(name, "toon_get_real_or", len) == 0) ||
+        (len == 13 && strncmp(name, "toon_get_bool", len) == 0) ||
+        (len == 16 && strncmp(name, "toon_get_bool_or", len) == 0)) {
         *expectsDoc = 0;
         return 1;
     }
@@ -605,13 +619,19 @@ static int expectedOpaqueArgKind(const char *name, size_t len, int *expectsDoc) 
 
 static const char *expectedSecondaryArgTypeName(const char *name, size_t len) {
     if ((len == 8 && strncmp(name, "toon_key", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_has_key", len) == 0) ||
         (len == 13 && strncmp(name, "toon_get_text", len) == 0) ||
+        (len == 16 && strncmp(name, "toon_get_text_or", len) == 0) ||
         (len == 12 && strncmp(name, "toon_get_int", len) == 0) ||
+        (len == 15 && strncmp(name, "toon_get_int_or", len) == 0) ||
         (len == 13 && strncmp(name, "toon_get_real", len) == 0) ||
-        (len == 13 && strncmp(name, "toon_get_bool", len) == 0)) {
+        (len == 16 && strncmp(name, "toon_get_real_or", len) == 0) ||
+        (len == 13 && strncmp(name, "toon_get_bool", len) == 0) ||
+        (len == 16 && strncmp(name, "toon_get_bool_or", len) == 0)) {
         return "Text";
     }
-    if (len == 7 && strncmp(name, "toon_at", len) == 0) {
+    if ((len == 7 && strncmp(name, "toon_at", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_has_at", len) == 0)) {
         return "Int";
     }
     return NULL;
@@ -645,22 +665,52 @@ static int expectedOpaqueReturnKind(const char *name, size_t len, int *returnsDo
 }
 
 static const char *expectedScalarReturnTypeName(const char *name, size_t len) {
-    if ((len == 13 && strncmp(name, "toon_get_text", len) == 0) ||
+    if ((len == 9 && strncmp(name, "toon_type", len) == 0) ||
+        (len == 13 && strncmp(name, "toon_get_text", len) == 0) ||
+        (len == 16 && strncmp(name, "toon_get_text_or", len) == 0) ||
         (len == 15 && strncmp(name, "toon_text_value", len) == 0)) {
         return "Text";
     }
     if ((len == 8 && strncmp(name, "toon_len", len) == 0) ||
         (len == 12 && strncmp(name, "toon_get_int", len) == 0) ||
+        (len == 15 && strncmp(name, "toon_get_int_or", len) == 0) ||
         (len == 14 && strncmp(name, "toon_int_value", len) == 0)) {
         return "Int";
     }
     if ((len == 13 && strncmp(name, "toon_get_real", len) == 0) ||
+        (len == 16 && strncmp(name, "toon_get_real_or", len) == 0) ||
         (len == 15 && strncmp(name, "toon_real_value", len) == 0)) {
         return "Real";
     }
     if ((len == 13 && strncmp(name, "toon_get_bool", len) == 0) ||
+        (len == 16 && strncmp(name, "toon_get_bool_or", len) == 0) ||
         (len == 15 && strncmp(name, "toon_bool_value", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_text", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_is_int", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_real", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_bool", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_is_null", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_is_arr", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_is_obj", len) == 0) ||
+        (len == 12 && strncmp(name, "toon_has_key", len) == 0) ||
+        (len == 11 && strncmp(name, "toon_has_at", len) == 0) ||
         (len == 15 && strncmp(name, "toon_null_value", len) == 0)) {
+        return "Bool";
+    }
+    return NULL;
+}
+
+static const char *expectedTertiaryArgTypeName(const char *name, size_t len) {
+    if (len == 16 && strncmp(name, "toon_get_text_or", len) == 0) {
+        return "Text";
+    }
+    if (len == 15 && strncmp(name, "toon_get_int_or", len) == 0) {
+        return "Int";
+    }
+    if (len == 16 && strncmp(name, "toon_get_real_or", len) == 0) {
+        return "Real";
+    }
+    if (len == 16 && strncmp(name, "toon_get_bool_or", len) == 0) {
         return "Bool";
     }
     return NULL;
@@ -1198,6 +1248,99 @@ static void validateSecondaryHelperArgType(const char *callName,
     reportAetherError("type", line, detail);
 }
 
+static void validateTertiaryHelperArgType(const char *callName,
+                                          size_t callNameLen,
+                                          const char *openParen,
+                                          const char *lineEnd,
+                                          int line,
+                                          const AetherScalarBindingTable *scalarBindings) {
+    const char *expectedType;
+    const char *cursor;
+    const char *thirdStart = NULL;
+    const char *thirdEnd = NULL;
+    const AetherScalarBinding *binding;
+    int depth = 0;
+    int commaCount = 0;
+    char detail[256];
+
+    if (!callName || !openParen || !lineEnd || !scalarBindings) {
+        return;
+    }
+    expectedType = expectedTertiaryArgTypeName(callName, callNameLen);
+    if (!expectedType) {
+        return;
+    }
+
+    cursor = openParen + 1;
+    while (cursor < lineEnd && *cursor) {
+        if (*cursor == '"' || *cursor == '\'') {
+            int ignoredLine = line;
+            cursor = skipQuotedString(cursor, &ignoredLine);
+            continue;
+        }
+        if (*cursor == '(') {
+            depth++;
+        } else if (*cursor == ')') {
+            if (depth == 0) {
+                if (thirdStart) {
+                    thirdEnd = cursor;
+                }
+                break;
+            }
+            depth--;
+        } else if (*cursor == ',' && depth == 0) {
+            commaCount++;
+            if (commaCount == 2) {
+                thirdStart = skipInlineSpaces(cursor + 1, lineEnd);
+            } else if (commaCount > 2) {
+                break;
+            }
+        }
+        cursor++;
+    }
+    if (!thirdStart || !thirdEnd || thirdStart >= thirdEnd) {
+        return;
+    }
+
+    while (thirdEnd > thirdStart && isspace((unsigned char)thirdEnd[-1])) {
+        thirdEnd--;
+    }
+    while (thirdStart < thirdEnd && isspace((unsigned char)*thirdStart)) {
+        thirdStart++;
+    }
+    if (thirdEnd == thirdStart) {
+        return;
+    }
+
+    {
+        const char *identEnd = thirdStart;
+        while (identEnd < thirdEnd && (isalnum((unsigned char)*identEnd) || *identEnd == '_')) {
+            identEnd++;
+        }
+        if (identEnd != thirdEnd) {
+            return;
+        }
+        binding = findScalarBinding(scalarBindings, thirdStart, (size_t)(thirdEnd - thirdStart));
+    }
+    if (!binding) {
+        return;
+    }
+    if (strcmp(binding->typeName, expectedType) == 0) {
+        return;
+    }
+
+    snprintf(detail,
+             sizeof(detail),
+             "call to '%.*s' expects a %s third argument, but '%.*s' is %s.",
+             (int)callNameLen,
+             callName,
+             expectedType,
+             (int)(thirdEnd - thirdStart),
+             thirdStart,
+             binding->typeName);
+    reportAetherError("type", line, detail);
+}
+
 static void validatePrimaryHelperArgType(const char *callName,
                                          size_t callNameLen,
                                          const char *openParen,
@@ -1427,6 +1570,12 @@ static void validateAetherSource(const char *source,
                                                    lineEnd,
                                                    line,
                                                    scalarBindings);
+                    validateTertiaryHelperArgType(start,
+                                                  nameLen,
+                                                  afterName,
+                                                  lineEnd,
+                                                  line,
+                                                  scalarBindings);
                 }
 
                 if (findOpaqueBinding(opaqueBindings, start, nameLen) != NULL) {

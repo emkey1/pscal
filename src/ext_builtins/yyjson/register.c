@@ -8,6 +8,8 @@ void registerYyjsonFreeValueBuiltin(void);
 void registerYyjsonGetRootBuiltin(void);
 void registerYyjsonGetKeyBuiltin(void);
 void registerYyjsonGetIndexBuiltin(void);
+void registerYyjsonHasKeyBuiltin(void);
+void registerYyjsonHasIndexBuiltin(void);
 void registerYyjsonGetLengthBuiltin(void);
 void registerYyjsonGetTypeBuiltin(void);
 void registerYyjsonGetStringBuiltin(void);
@@ -29,6 +31,8 @@ void registerYyjsonBuiltins(void) {
     extBuiltinRegisterFunction(category, "query", "YyjsonGetRoot");
     extBuiltinRegisterFunction(category, "query", "YyjsonGetKey");
     extBuiltinRegisterFunction(category, "query", "YyjsonGetIndex");
+    extBuiltinRegisterFunction(category, "query", "YyjsonHasKey");
+    extBuiltinRegisterFunction(category, "query", "YyjsonHasIndex");
     extBuiltinRegisterFunction(category, "query", "YyjsonGetLength");
     extBuiltinRegisterFunction(category, "query", "YyjsonGetType");
     extBuiltinRegisterFunction(category, "primitives", "YyjsonGetString");
@@ -44,6 +48,8 @@ void registerYyjsonBuiltins(void) {
     registerYyjsonGetRootBuiltin();
     registerYyjsonGetKeyBuiltin();
     registerYyjsonGetIndexBuiltin();
+    registerYyjsonHasKeyBuiltin();
+    registerYyjsonHasIndexBuiltin();
     registerYyjsonGetLengthBuiltin();
     registerYyjsonGetTypeBuiltin();
     registerYyjsonGetStringBuiltin();

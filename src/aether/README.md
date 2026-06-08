@@ -59,6 +59,14 @@ Bootstrap status:
   `Text`, `Int`, `Real`, or `Bool` source types.
 - That typed scalar model now has direct example/test coverage for text, int,
   real, bool, length, and null-shape helpers.
+- Aether now also exposes node inspection helpers like `toon_type(...)` and
+  `toon_is_text` / `toon_is_int` / `toon_is_real` / `toon_is_bool` /
+  `toon_is_null` / `toon_is_arr` / `toon_is_obj`.
+- It also now exposes compact presence helpers: `toon_has_key(...)` for object
+  membership and `toon_has_at(...)` for array index existence checks.
+- For common fallback-heavy automation flows, Aether now also exposes
+  `toon_get_text_or(...)`, `toon_get_int_or(...)`, `toon_get_real_or(...)`,
+  and `toon_get_bool_or(...)` for typed scalar lookup with defaults.
 - Once those scalar bindings are known, direct assignment between them must
   also preserve the same source-level scalar type.
 - Keyed and indexed TOON helpers now also validate typed variable arguments:

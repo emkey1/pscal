@@ -25,6 +25,9 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/toon_parse_file
 ./build/bin/aether Examples/aether/base/toon_shape_scalars
 ./build/bin/aether Examples/aether/base/toon_real_scalars
+./build/bin/aether Examples/aether/base/toon_type_checks
+./build/bin/aether Examples/aether/base/toon_presence_checks
+./build/bin/aether Examples/aether/base/toon_defaults
 ./build/bin/aether Examples/aether/base/toon_variable_parse
 ./build/bin/aether Examples/aether/base/type_blocks
 ./build/bin/aether Examples/aether/base/type_init
@@ -81,6 +84,12 @@ These examples stay within the currently supported Aether Core subset:
   matching `Int` and `Bool` variables
 - `toon_real_scalars`: binds `toon_get_real(...)` and `toon_real_value(...)`
   into `Real` variables
+- `toon_type_checks`: uses `toon_type(...)` and `toon_is_*` helpers to inspect
+  node kinds through Aether-native names
+- `toon_presence_checks`: uses `toon_has_key(...)` and `toon_has_at(...)` for
+  compact existence checks on objects and arrays
+- `toon_defaults`: uses `toon_get_*_or(...)` helpers to read scalar values with
+  typed fallback defaults
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
   `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
   yyjson builtins

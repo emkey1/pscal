@@ -44,6 +44,9 @@ TOON_PARSE_ARG_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_parse_arg_type_fai
 TOON_PARSE_FILE_ARG_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_parse_file_arg_type_fail.aether"
 TOON_SHAPE_SCALAR_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_shape_scalar_decl_fail.aether"
 TOON_REAL_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_real_decl_fail.aether"
+TOON_TYPE_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_type_decl_fail.aether"
+TOON_PRESENCE_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_presence_decl_fail.aether"
+TOON_DEFAULTS_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_defaults_decl_fail.aether"
 
 if [ ! -x "$AETHER_BIN" ]; then
     echo "missing aether binary: $AETHER_BIN" >&2
@@ -90,7 +93,10 @@ for fixture in \
     "$TOON_PARSE_ARG_TYPE_FAIL_FIXTURE" \
     "$TOON_PARSE_FILE_ARG_TYPE_FAIL_FIXTURE" \
     "$TOON_SHAPE_SCALAR_DECL_FAIL_FIXTURE" \
-    "$TOON_REAL_DECL_FAIL_FIXTURE"
+    "$TOON_REAL_DECL_FAIL_FIXTURE" \
+    "$TOON_TYPE_DECL_FAIL_FIXTURE" \
+    "$TOON_PRESENCE_DECL_FAIL_FIXTURE" \
+    "$TOON_DEFAULTS_DECL_FAIL_FIXTURE"
 do
     if [ ! -f "$fixture" ]; then
         echo "missing fixture: $fixture" >&2
@@ -355,6 +361,51 @@ fi
 if ! grep -q "binding for 'wrong' must use Real when initialized from 'toon_get_real'" /tmp/aether_toon_real_decl_fail.out; then
     echo "missing TOON real declaration type failure message" >&2
     cat /tmp/aether_toon_real_decl_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_TYPE_DECL_FAIL_FIXTURE" >/tmp/aether_toon_type_decl_fail.out 2>&1; then
+    echo "expected TOON type inspection declaration failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrongType' must use Text when initialized from 'toon_type'" /tmp/aether_toon_type_decl_fail.out; then
+    echo "missing TOON type() declaration type failure message" >&2
+    cat /tmp/aether_toon_type_decl_fail.out >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrongArr' must use Bool when initialized from 'toon_is_arr'" /tmp/aether_toon_type_decl_fail.out; then
+    echo "missing TOON is_arr declaration type failure message" >&2
+    cat /tmp/aether_toon_type_decl_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_PRESENCE_DECL_FAIL_FIXTURE" >/tmp/aether_toon_presence_decl_fail.out 2>&1; then
+    echo "expected TOON presence declaration failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrongKey' must use Bool when initialized from 'toon_has_key'" /tmp/aether_toon_presence_decl_fail.out; then
+    echo "missing TOON has_key declaration type failure message" >&2
+    cat /tmp/aether_toon_presence_decl_fail.out >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrongIndex' must use Bool when initialized from 'toon_has_at'" /tmp/aether_toon_presence_decl_fail.out; then
+    echo "missing TOON has_at declaration type failure message" >&2
+    cat /tmp/aether_toon_presence_decl_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_DEFAULTS_DECL_FAIL_FIXTURE" >/tmp/aether_toon_defaults_decl_fail.out 2>&1; then
+    echo "expected TOON defaults declaration failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_get_int_or' expects a Int third argument, but 'fallbackText' is Text" /tmp/aether_toon_defaults_decl_fail.out; then
+    echo "missing TOON int default fallback type failure message" >&2
+    cat /tmp/aether_toon_defaults_decl_fail.out >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrongFlag' must use Bool when initialized from 'toon_get_bool_or'" /tmp/aether_toon_defaults_decl_fail.out; then
+    echo "missing TOON bool default declaration type failure message" >&2
+    cat /tmp/aether_toon_defaults_decl_fail.out >&2
     exit 1
 fi
 

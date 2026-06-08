@@ -1,0 +1,22 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"users\":[{\"name\":\"Ada\"}]}");
+    let root: ToonNode = toon_root(doc);
+    let users: ToonNode = toon_key(root, "users");
+    let wrongKey: Text = toon_has_key(root, "users");
+    let wrongIndex: Int = toon_has_at(users, 0);
+
+    fx {
+        println(wrongKey, wrongIndex);
+    }
+
+    toon_free(users);
+    toon_close(doc);
+    ret;
+}

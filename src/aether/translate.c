@@ -773,9 +773,17 @@ static int appendJsonAliasReplacement(Buffer *out,
         jsonState->needed = 1;
         return bufferAppend(out, "YyjsonGetKey");
     }
+    if (nameLen == 12 && strncmp(nameStart, "toon_has_key", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonHasKey");
+    }
     if (nameLen == 7 && strncmp(nameStart, "toon_at", nameLen) == 0) {
         jsonState->needed = 1;
         return bufferAppend(out, "YyjsonGetIndex");
+    }
+    if (nameLen == 11 && strncmp(nameStart, "toon_has_at", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonHasIndex");
     }
     if (nameLen == 8 && strncmp(nameStart, "toon_len", nameLen) == 0) {
         jsonState->needed = 1;
@@ -852,14 +860,58 @@ static const char *toonScalarGetterForName(const char *nameStart, size_t nameLen
     if (nameLen == 13 && strncmp(nameStart, "toon_get_text", nameLen) == 0) {
         return "YyjsonGetString";
     }
+    if (nameLen == 16 && strncmp(nameStart, "toon_get_text_or", nameLen) == 0) {
+        return "YyjsonGetString";
+    }
     if (nameLen == 12 && strncmp(nameStart, "toon_get_int", nameLen) == 0) {
+        return "YyjsonGetInt";
+    }
+    if (nameLen == 15 && strncmp(nameStart, "toon_get_int_or", nameLen) == 0) {
         return "YyjsonGetInt";
     }
     if (nameLen == 13 && strncmp(nameStart, "toon_get_real", nameLen) == 0) {
         return "YyjsonGetNumber";
     }
+    if (nameLen == 16 && strncmp(nameStart, "toon_get_real_or", nameLen) == 0) {
+        return "YyjsonGetNumber";
+    }
     if (nameLen == 13 && strncmp(nameStart, "toon_get_bool", nameLen) == 0) {
         return "YyjsonGetBool";
+    }
+    if (nameLen == 16 && strncmp(nameStart, "toon_get_bool_or", nameLen) == 0) {
+        return "YyjsonGetBool";
+    }
+    return NULL;
+}
+
+static int isToonScalarDefaultHelper(const char *nameStart, size_t nameLen) {
+    return (nameLen == 16 && strncmp(nameStart, "toon_get_text_or", nameLen) == 0) ||
+           (nameLen == 15 && strncmp(nameStart, "toon_get_int_or", nameLen) == 0) ||
+           (nameLen == 16 && strncmp(nameStart, "toon_get_real_or", nameLen) == 0) ||
+           (nameLen == 16 && strncmp(nameStart, "toon_get_bool_or", nameLen) == 0);
+}
+
+static const char *toonTypePredicateExpected(const char *nameStart, size_t nameLen) {
+    if (nameLen == 12 && strncmp(nameStart, "toon_is_text", nameLen) == 0) {
+        return "string";
+    }
+    if (nameLen == 11 && strncmp(nameStart, "toon_is_int", nameLen) == 0) {
+        return "int";
+    }
+    if (nameLen == 12 && strncmp(nameStart, "toon_is_real", nameLen) == 0) {
+        return "real";
+    }
+    if (nameLen == 12 && strncmp(nameStart, "toon_is_bool", nameLen) == 0) {
+        return "bool";
+    }
+    if (nameLen == 12 && strncmp(nameStart, "toon_is_null", nameLen) == 0) {
+        return "null";
+    }
+    if (nameLen == 11 && strncmp(nameStart, "toon_is_arr", nameLen) == 0) {
+        return "array";
+    }
+    if (nameLen == 11 && strncmp(nameStart, "toon_is_obj", nameLen) == 0) {
+        return "object";
     }
     return NULL;
 }
@@ -886,9 +938,12 @@ static int appendToonScalarAlias(Buffer *out,
     const char *arg1End = NULL;
     const char *arg2Start = NULL;
     const char *arg2End = NULL;
+    const char *arg3Start = NULL;
+    const char *arg3End = NULL;
     int depth = 0;
     int inString = 0;
     char quote = '\0';
+    int defaultHelper = isToonScalarDefaultHelper(nameStart, nameLen);
 
     if (!getter || !openParen || *openParen != '(' || !outCursor) {
         return 0;
@@ -921,30 +976,170 @@ static int appendToonScalarAlias(Buffer *out,
                 if (!arg1End || !arg2Start) {
                     return 0;
                 }
-                arg2End = cursor;
+                if (arg3Start) {
+                    arg3End = cursor;
+                } else {
+                    arg2End = cursor;
+                }
                 break;
             }
             depth--;
         } else if (*cursor == ',' && depth == 0 && !arg1End) {
             arg1End = cursor;
             arg2Start = cursor + 1;
+        } else if (*cursor == ',' && depth == 0 && !arg2End) {
+            arg2End = cursor;
+            arg3Start = cursor + 1;
         }
         cursor++;
     }
     if (!arg1End || !arg2Start || !arg2End) {
         return 0;
     }
-    jsonState->needed = 1;
-    if (!bufferAppend(out, getter) ||
-        !bufferAppend(out, "(YyjsonGetKey(") ||
-        !appendTrimmedRange(out, arg1Start, arg1End) ||
-        !bufferAppend(out, ", ") ||
-        !appendTrimmedRange(out, arg2Start, arg2End) ||
-        !bufferAppend(out, "))")) {
+    if (defaultHelper && (!arg3Start || !arg3End)) {
         return 0;
+    }
+    if (!defaultHelper && arg3Start) {
+        return 0;
+    }
+    jsonState->needed = 1;
+    if (defaultHelper) {
+        if (!bufferAppend(out, "(YyjsonHasKey(") ||
+            !appendTrimmedRange(out, arg1Start, arg1End) ||
+            !bufferAppend(out, ", ") ||
+            !appendTrimmedRange(out, arg2Start, arg2End) ||
+            !bufferAppend(out, ") ? ") ||
+            !bufferAppend(out, getter) ||
+            !bufferAppend(out, "(YyjsonGetKey(") ||
+            !appendTrimmedRange(out, arg1Start, arg1End) ||
+            !bufferAppend(out, ", ") ||
+            !appendTrimmedRange(out, arg2Start, arg2End) ||
+            !bufferAppend(out, ")) : ") ||
+            !appendTrimmedRange(out, arg3Start, arg3End) ||
+            !bufferAppend(out, ")")) {
+            return 0;
+        }
+    } else {
+        if (!bufferAppend(out, getter) ||
+            !bufferAppend(out, "(YyjsonGetKey(") ||
+            !appendTrimmedRange(out, arg1Start, arg1End) ||
+            !bufferAppend(out, ", ") ||
+            !appendTrimmedRange(out, arg2Start, arg2End) ||
+            !bufferAppend(out, "))")) {
+            return 0;
+        }
     }
     *outCursor = cursor + 1;
     return 1;
+}
+
+static int appendToonInspectAlias(Buffer *out,
+                                  const char *nameStart,
+                                  size_t nameLen,
+                                  const char *openParen,
+                                  const char **outCursor,
+                                  JsonAliasState *jsonState) {
+    const char *expectedType = toonTypePredicateExpected(nameStart, nameLen);
+    const char *cursor;
+    const char *argStart;
+    const char *argEnd;
+    int depth = 0;
+    int inString = 0;
+    char quote = '\0';
+
+    if (!out || !nameStart || !openParen || *openParen != '(' || !outCursor) {
+        return 0;
+    }
+
+    if (nameLen == 9 && strncmp(nameStart, "toon_type", nameLen) == 0) {
+        cursor = openParen + 1;
+        argStart = cursor;
+        while (*cursor) {
+            if (inString) {
+                if (*cursor == '\\' && cursor[1] != '\0') {
+                    cursor += 2;
+                    continue;
+                }
+                if (*cursor == quote) {
+                    inString = 0;
+                    quote = '\0';
+                }
+                cursor++;
+                continue;
+            }
+            if (*cursor == '"' || *cursor == '\'') {
+                inString = 1;
+                quote = *cursor;
+                cursor++;
+                continue;
+            }
+            if (*cursor == '(' || *cursor == '[' || *cursor == '{') {
+                depth++;
+            } else if (*cursor == ')' || *cursor == ']' || *cursor == '}') {
+                if (depth == 0) {
+                    argEnd = cursor;
+                    jsonState->needed = 1;
+                    if (!bufferAppend(out, "YyjsonGetType(") ||
+                        !appendTrimmedRange(out, argStart, argEnd) ||
+                        !bufferAppend(out, ")")) {
+                        return 0;
+                    }
+                    *outCursor = cursor + 1;
+                    return 1;
+                }
+                depth--;
+            }
+            cursor++;
+        }
+        return 0;
+    }
+
+    if (!expectedType) {
+        return 0;
+    }
+
+    cursor = openParen + 1;
+    argStart = cursor;
+    while (*cursor) {
+        if (inString) {
+            if (*cursor == '\\' && cursor[1] != '\0') {
+                cursor += 2;
+                continue;
+            }
+            if (*cursor == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            inString = 1;
+            quote = *cursor;
+            cursor++;
+            continue;
+        }
+        if (*cursor == '(' || *cursor == '[' || *cursor == '{') {
+            depth++;
+        } else if (*cursor == ')' || *cursor == ']' || *cursor == '}') {
+            if (depth == 0) {
+                argEnd = cursor;
+                jsonState->needed = 1;
+                if (!bufferAppend(out, "(YyjsonGetType(") ||
+                    !appendTrimmedRange(out, argStart, argEnd) ||
+                    !bufferAppend(out, ") == \"") ||
+                    !bufferAppend(out, expectedType) ||
+                    !bufferAppend(out, "\")")) {
+                    return 0;
+                }
+                *outCursor = cursor + 1;
+                return 1;
+            }
+            depth--;
+        }
+        cursor++;
+    }
+    return 0;
 }
 
 static char *applyJsonAliasesToLine(const char *line,
@@ -1020,6 +1215,16 @@ static char *applyJsonAliasesToLine(const char *line,
                                       afterName,
                                       &advancedCursor,
                                       jsonState)) {
+                cursor = advancedCursor;
+                continue;
+            }
+            if (*afterName == '(' &&
+                appendToonInspectAlias(&out,
+                                       nameStart,
+                                       (size_t)(nameEnd - nameStart),
+                                       afterName,
+                                       &advancedCursor,
+                                       jsonState)) {
                 cursor = advancedCursor;
                 continue;
             }
