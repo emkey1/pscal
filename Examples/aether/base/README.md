@@ -14,6 +14,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/task_helpers
 ./build/bin/aether Examples/aether/base/ai_helpers
 ./build/bin/aether Examples/aether/base/for_range
+./build/bin/aether Examples/aether/base/loop_forms
 ./build/bin/aether Examples/aether/base/module_demo
 ./build/bin/aether Examples/aether/base/toon_blocks
 ./build/bin/aether Examples/aether/base/toon_access
@@ -60,6 +61,8 @@ These examples stay within the currently supported Aether Core subset:
   shared spawn/join behavior
 - half-open `for name in start..end { ... }` range loops lowered onto shared
   `for (...)` semantics
+- compact `loop` forms now supported for condition loops, half-open range
+  loops, and infinite loops lowered onto shared `while` / `for` constructs
 - `mod`, `use`, and `export fn` lowered onto the shared module/import system
 - embedded `toon:` blocks that carry upstream TOON syntax and currently lower
   to `TOON`/`Text` string payloads
@@ -108,6 +111,8 @@ These examples stay within the currently supported Aether Core subset:
   worker launches
 - `ai_helpers`: shows the compact `ai_chat(...)` alias and the Aether AI
   capability probes without requiring a live call during the example run
+- `loop_forms`: shows `loop cond { ... }`, `loop name in start..end { ... }`,
+  and bare `loop { ... }` forms with `break`
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
   `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
   yyjson builtins

@@ -31,6 +31,7 @@ PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.
 PAR_PASS_FIXTURE="$ROOT_DIR/Tests/aether/par_pass.aether"
 PAR_FAIL_NON_CALL_FIXTURE="$ROOT_DIR/Tests/aether/par_fail_non_call.aether"
 FOR_RANGE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/for_range_pass.aether"
+LOOP_FORMS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/loop_forms_pass.aether"
 MODULE_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_import_pass.aether"
 MODULE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_math"
 TOON_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_block_pass.aether"
@@ -95,6 +96,7 @@ for fixture in \
     "$PAR_PASS_FIXTURE" \
     "$PAR_FAIL_NON_CALL_FIXTURE" \
     "$FOR_RANGE_PASS_FIXTURE" \
+    "$LOOP_FORMS_PASS_FIXTURE" \
     "$MODULE_IMPORT_PASS_FIXTURE" \
     "$MODULE_SUPPORT_FIXTURE" \
     "$TOON_BLOCK_PASS_FIXTURE" \
@@ -203,6 +205,13 @@ fi
 if ! grep -qx "10" /tmp/aether_for_range_pass.out; then
     echo "unexpected for-range output" >&2
     cat /tmp/aether_for_range_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$LOOP_FORMS_PASS_FIXTURE" >/tmp/aether_loop_forms_pass.out
+printf 'total = 9\nspins = 2\n' >/tmp/aether_loop_forms_expected.out
+if ! cmp -s /tmp/aether_loop_forms_expected.out /tmp/aether_loop_forms_pass.out; then
+    echo "unexpected loop forms output" >&2
+    cat /tmp/aether_loop_forms_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$MODULE_IMPORT_PASS_FIXTURE" >/tmp/aether_module_import_pass.out

@@ -1965,6 +1965,143 @@ static char *translateConditionLine(const char *lineStart,
     return out.data;
 }
 
+static char *translateLoopRangeLine(const char *lineStart, const char *body, const char *lineEnd) {
+    const char *nameStart = body + 4;
+    const char *nameEnd;
+    const char *inKw;
+    const char *exprStart;
+    const char *rangeOp = NULL;
+    const char *exprEnd;
+    const char *brace;
+    const char *endExprStart;
+    const char *endExprEnd;
+    const char *scan;
+    int depth = 0;
+    Buffer out = {0};
+
+    nameStart = skipSpaces(nameStart);
+    nameEnd = nameStart;
+    while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    inKw = skipSpaces(nameEnd);
+    if (!startsWithWord(inKw, lineEnd, "in")) {
+        return dupRange(lineStart, lineEnd);
+    }
+    exprStart = skipSpaces(inKw + 2);
+    brace = findLastCharInRange(exprStart, lineEnd, '{');
+    if (!brace) {
+        return dupRange(lineStart, lineEnd);
+    }
+
+    scan = exprStart;
+    while (scan < brace) {
+        if (*scan == '"' || *scan == '\'') {
+            char quote = *scan++;
+            while (scan < brace) {
+                if (*scan == '\\' && scan + 1 < brace) {
+                    scan += 2;
+                    continue;
+                }
+                if (*scan == quote) {
+                    scan++;
+                    break;
+                }
+                scan++;
+            }
+            continue;
+        }
+        if (*scan == '(' || *scan == '[' || *scan == '{') {
+            depth++;
+        } else if ((*scan == ')' || *scan == ']' || *scan == '}') && depth > 0) {
+            depth--;
+        } else if (*scan == '.' && scan + 1 < brace && scan[1] == '.' && depth == 0) {
+            rangeOp = scan;
+            break;
+        }
+        scan++;
+    }
+    if (!rangeOp) {
+        return dupRange(lineStart, lineEnd);
+    }
+    exprEnd = rangeOp;
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    endExprStart = rangeOp + 2;
+    while (endExprStart < brace && isspace((unsigned char)*endExprStart)) {
+        endExprStart++;
+    }
+    endExprEnd = brace;
+    while (endExprEnd > endExprStart && isspace((unsigned char)endExprEnd[-1])) {
+        endExprEnd--;
+    }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "for (int ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " = ") ||
+        !bufferAppendN(&out, exprStart, (size_t)(exprEnd - exprStart)) ||
+        !bufferAppend(&out, "; ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " < ") ||
+        !bufferAppendN(&out, endExprStart, (size_t)(endExprEnd - endExprStart)) ||
+        !bufferAppend(&out, "; ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " = ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " + 1)") ||
+        !bufferAppendN(&out, brace, (size_t)(lineEnd - brace))) {
+        free(out.data);
+        return NULL;
+    }
+
+    return out.data;
+}
+
+static char *translateLoopLine(const char *lineStart, const char *body, const char *lineEnd) {
+    const char *cursor = skipSpaces(body + 4);
+    const char *brace;
+    Buffer out = {0};
+
+    if (cursor >= lineEnd || *cursor == '{') {
+        brace = findLastCharInRange(cursor, lineEnd, '{');
+
+        if (!brace) {
+            return dupRange(lineStart, lineEnd);
+        }
+        if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+            !bufferAppend(&out, "while (true)") ||
+            !bufferAppendN(&out, brace, (size_t)(lineEnd - brace))) {
+            free(out.data);
+            return NULL;
+        }
+        return out.data;
+    }
+
+    if (findSubstringInRange(cursor, lineEnd, "..") != NULL &&
+        findSubstringInRange(cursor, lineEnd, "in") != NULL) {
+        return translateLoopRangeLine(lineStart, body, lineEnd);
+    }
+
+    brace = findLastCharInRange(cursor, lineEnd, '{');
+    if (!brace) {
+        return dupRange(lineStart, lineEnd);
+    }
+    while (brace > cursor && isspace((unsigned char)brace[-1])) {
+        brace--;
+    }
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "while (") ||
+        !bufferAppendN(&out, cursor, (size_t)(brace - cursor)) ||
+        !bufferAppend(&out, ")") ||
+        !bufferAppendN(&out, brace, (size_t)(lineEnd - brace))) {
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
+}
+
 static char *translateForRangeLine(const char *lineStart, const char *body, const char *lineEnd) {
     const char *nameStart = body + 3;
     const char *nameEnd;
@@ -2204,6 +2341,10 @@ static char *translateLine(const char *lineStart, const char *lineEnd, JsonAlias
     }
     if (strncmp(body, "for ", 4) == 0) {
         return translateForRangeLine(lineStart, body, lineEnd);
+    }
+    if (strncmp(body, "loop", 4) == 0 &&
+        (body[4] == '\0' || isspace((unsigned char)body[4]) || body[4] == '{')) {
+        return translateLoopLine(lineStart, body, lineEnd);
     }
     if (strncmp(body, "while ", 6) == 0) {
         return translateConditionLine(lineStart, body, lineEnd, "while");

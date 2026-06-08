@@ -855,6 +855,10 @@ It is better to ship:
 
 than a broad but unstable design.
 
+That same rule supports compact loop forms when they lower transparently.
+`loop cond { ... }` and `loop { ... }` reduce ceremony without obscuring
+control-flow shape, so they are a good fit for Aether's source design.
+
 ## 18. Summary
 
 Aether is intended to be a compact, explicit, human-auditable language for

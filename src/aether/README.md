@@ -41,6 +41,9 @@ Bootstrap status:
   semantics for direct call statements, without adding runtime machinery.
 - A compact half-open range loop form `for name in start..end { ... }` now
   lowers onto the shared Rea `for (...)` form.
+- Aether now also supports compact `loop` forms:
+  `loop cond { ... }`, `loop name in start..end { ... }`, and `loop { ... }`,
+  all lowered onto the shared control-flow constructs.
 - Imported modules now parse through the active frontend parser as well, so
   Aether module files can use `mod`, `use`, and `export fn` syntax instead of
   needing raw Rea syntax in imported sources.
