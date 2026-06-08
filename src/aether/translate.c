@@ -13,6 +13,92 @@ typedef struct Buffer {
     size_t cap;
 } Buffer;
 
+static int *g_aether_rewrite_line_map = NULL;
+static int g_aether_rewrite_line_count = 0;
+static int g_aether_rewrite_line_cap = 0;
+
+void aetherClearRewriteLineMap(void) {
+    free(g_aether_rewrite_line_map);
+    g_aether_rewrite_line_map = NULL;
+    g_aether_rewrite_line_count = 0;
+    g_aether_rewrite_line_cap = 0;
+}
+
+static int ensureRewriteLineCapacity(int needed) {
+    int newCap;
+    int *resized;
+
+    if (g_aether_rewrite_line_cap >= needed) {
+        return 1;
+    }
+    newCap = g_aether_rewrite_line_cap ? g_aether_rewrite_line_cap * 2 : 128;
+    while (newCap < needed) {
+        newCap *= 2;
+    }
+    resized = (int *)realloc(g_aether_rewrite_line_map, (size_t)newCap * sizeof(int));
+    if (!resized) {
+        return 0;
+    }
+    for (int i = g_aether_rewrite_line_cap; i < newCap; i++) {
+        resized[i] = 0;
+    }
+    g_aether_rewrite_line_map = resized;
+    g_aether_rewrite_line_cap = newCap;
+    return 1;
+}
+
+static int noteRewriteLineMapping(int rewrittenLine, int sourceLine) {
+    if (rewrittenLine <= 0) {
+        return 1;
+    }
+    if (!ensureRewriteLineCapacity(rewrittenLine + 1)) {
+        return 0;
+    }
+    if (rewrittenLine > g_aether_rewrite_line_count) {
+        g_aether_rewrite_line_count = rewrittenLine;
+    }
+    if (g_aether_rewrite_line_map[rewrittenLine] == 0) {
+        g_aether_rewrite_line_map[rewrittenLine] = sourceLine > 0 ? sourceLine : 1;
+    }
+    return 1;
+}
+
+int aetherMapRewrittenLineToSource(int rewrittenLine) {
+    if (rewrittenLine <= 0) {
+        return rewrittenLine;
+    }
+    if (rewrittenLine <= g_aether_rewrite_line_count &&
+        g_aether_rewrite_line_map &&
+        g_aether_rewrite_line_map[rewrittenLine] > 0) {
+        return g_aether_rewrite_line_map[rewrittenLine];
+    }
+    return rewrittenLine;
+}
+
+static int trackRewriteOutputLines(const char *text, int *currentOutputLine, int sourceLine) {
+    const char *cursor = text;
+
+    if (!currentOutputLine) {
+        return 0;
+    }
+    if (!noteRewriteLineMapping(*currentOutputLine, sourceLine)) {
+        return 0;
+    }
+    if (!text) {
+        return 1;
+    }
+    while (*cursor) {
+        if (*cursor == '\n') {
+            (*currentOutputLine)++;
+            if (!noteRewriteLineMapping(*currentOutputLine, sourceLine)) {
+                return 0;
+            }
+        }
+        cursor++;
+    }
+    return 1;
+}
+
 static int bufferEnsure(Buffer *buf, size_t extra) {
     if (!buf) {
         return 0;
@@ -3594,10 +3680,12 @@ char *aetherRewriteSource(const char *source, const char *path) {
     ToonLiteralTable toonTable = {0};
     int braceDepth = 0;
     int lineNumber = 1;
+    int outputLineNumber = 1;
 
     if (!source) {
         return NULL;
     }
+    aetherClearRewriteLineMap();
     preprocessed = preprocessToonBlocks(source, path);
     if (!preprocessed) {
         return NULL;
@@ -3639,6 +3727,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
         if (fnState.active && fnState.postExpr && braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
                 char *indent = dupRange(lineStart, body);
+                size_t outLenBefore = out.len;
                 if (!indent) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
@@ -3664,13 +3753,40 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(out.data);
                     return NULL;
                 }
+                if (!trackRewriteOutputLines(out.data + outLenBefore, &outputLineNumber, lineNumber)) {
+                    free(indent);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
                 free(indent);
             }
         }
 
         if (parState.active && braceDepth == parState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
+                size_t outLenBefore = out.len;
                 if (parState.joinLines.len > 0 && !bufferAppend(&out, parState.joinLines.data)) {
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+                if (parState.joinLines.len > 0 &&
+                    !trackRewriteOutputLines(out.data + outLenBefore, &outputLineNumber, lineNumber)) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
@@ -3830,6 +3946,19 @@ char *aetherRewriteSource(const char *source, const char *path) {
             free(out.data);
             return NULL;
         }
+        if (!trackRewriteOutputLines(translated, &outputLineNumber, lineNumber)) {
+            free(translated);
+            freePendingContracts(&pending);
+            clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
+            freeAetherFunctionTable(&functionTable);
+            freeToonLiteralTable(&toonTable);
+            free(preprocessed);
+            free(out.data);
+            return NULL;
+        }
         lineDelta = braceDeltaForLine(translated);
 
         if (startsWithWord(body, lineEnd, "par") && findCharInRange(body, lineEnd, '{') != NULL) {
@@ -3873,6 +4002,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
 
             if ((pending.preExpr || pending.postExpr) && lineDelta > 0) {
                 char *indent = buildContractIndent(lineStart, body);
+                size_t outLenBefore = out.len;
                 if (!indent) {
                     free(fnName);
                     free(returnType);
@@ -3890,6 +4020,23 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 }
                 if (pending.preExpr &&
                     !appendContractGuard(&out, indent, fnName, "pre", pending.preExpr)) {
+                    free(indent);
+                    free(fnName);
+                    free(returnType);
+                    free(translated);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+                if (pending.preExpr &&
+                    !trackRewriteOutputLines(out.data + outLenBefore, &outputLineNumber, lineNumber)) {
                     free(indent);
                     free(fnName);
                     free(returnType);
@@ -3936,6 +4083,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 free(out.data);
                 return NULL;
             }
+            outputLineNumber++;
             lineEnd++;
             lineNumber++;
         }

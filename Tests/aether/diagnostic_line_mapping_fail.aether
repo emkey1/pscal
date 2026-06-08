@@ -1,0 +1,12 @@
+@pre value >= 0
+fn keep(value: Int) -> Int {
+    ret value;
+}
+
+fn main() -> Void {
+    let total: Int = keep(2);
+    loop i < total {
+        i = i + 1;
+    }
+    ret;
+}

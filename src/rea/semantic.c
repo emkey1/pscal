@@ -5,6 +5,8 @@
 #include "core/utils.h"
 #include "rea/parser.h"
 #include "aether/parser.h"
+#include "aether/translate.h"
+#include "common/frontend_kind.h"
 #include "ast/ast.h"
 #include "ast/closure_registry.h"
 #include "compiler/compiler.h"
@@ -131,12 +133,17 @@ static char *joinPaths(const char *base, const char *relative);
 
 static void reportReaLineError(int line, const char *fmt, ...) {
     va_list args;
+    int displayLine = line;
+
+    if (frontendIsAether()) {
+        displayLine = aetherMapRewrittenLineToSource(line);
+    }
 
     va_start(args, fmt);
     if (gReaSourcePath && *gReaSourcePath) {
-        fprintf(stderr, "%s:%d: ", gReaSourcePath, line);
+        fprintf(stderr, "%s:%d: ", gReaSourcePath, displayLine);
     } else {
-        fprintf(stderr, "L%d: ", line);
+        fprintf(stderr, "L%d: ", displayLine);
     }
     vfprintf(stderr, fmt, args);
     fprintf(stderr, "\n");

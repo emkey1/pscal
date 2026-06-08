@@ -122,6 +122,9 @@ Bootstrap status:
   Aether failures by capturing the frontend's text diagnostics and re-emitting
   them as structured JSON with file, line, phase, kind, message, and hint
   fields where available.
+- `--diagnostics-toon` now emits the same structured diagnostics in a compact
+  TOON table form, and both renderers preserve original `.aether` source line
+  numbers even when the rewrite layer inserts extra generated lines.
 - The next phase is to replace the shared Rea grammar incrementally with
   Aether-specific lexer, parser, and semantic logic.
 

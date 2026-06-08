@@ -28,6 +28,7 @@ AI_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/ai_alias_fail_outside_fx.aether"
 INFERRED_BINDINGS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_bindings_pass.aether"
 INFERRED_CONST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_const_pass.aether"
 INFERRED_LET_UNKNOWN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/inferred_let_unknown_fail.aether"
+DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/diagnostic_line_mapping_fail.aether"
 FUNCTION_INFERENCE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/function_inference_support"
 FUNCTION_RETURN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_return_inference_pass.aether"
 OBJECT_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_inference_pass.aether"
@@ -103,6 +104,7 @@ for fixture in \
     "$INFERRED_BINDINGS_PASS_FIXTURE" \
     "$INFERRED_CONST_PASS_FIXTURE" \
     "$INFERRED_LET_UNKNOWN_FAIL_FIXTURE" \
+    "$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE" \
     "$FUNCTION_INFERENCE_SUPPORT_FIXTURE" \
     "$FUNCTION_RETURN_INFERENCE_PASS_FIXTURE" \
     "$OBJECT_INFERENCE_PASS_FIXTURE" \
@@ -742,6 +744,44 @@ fi
 if ! grep -q '"hint":"add an explicit type, for example `let answer: Int = ...;`."' /tmp/aether_inferred_let_unknown_json.out; then
     echo "missing diagnostics-json hint" >&2
     cat /tmp/aether_inferred_let_unknown_json.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --diagnostics-json --no-cache "$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE" >/tmp/aether_diagnostic_line_mapping_json.out 2>&1; then
+    echo "expected diagnostic line-mapping failure with diagnostics-json but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '"file":"'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'"' /tmp/aether_diagnostic_line_mapping_json.out; then
+    echo "missing mapped diagnostics-json file path" >&2
+    cat /tmp/aether_diagnostic_line_mapping_json.out >&2
+    exit 1
+fi
+if ! grep -q '"line":8' /tmp/aether_diagnostic_line_mapping_json.out; then
+    echo "missing mapped diagnostics-json loop line" >&2
+    cat /tmp/aether_diagnostic_line_mapping_json.out >&2
+    exit 1
+fi
+if ! grep -q '"line":9' /tmp/aether_diagnostic_line_mapping_json.out; then
+    echo "missing mapped diagnostics-json body line" >&2
+    cat /tmp/aether_diagnostic_line_mapping_json.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --diagnostics-toon --no-cache "$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE" >/tmp/aether_diagnostic_line_mapping_toon.out 2>&1; then
+    echo "expected diagnostic line-mapping failure with diagnostics-toon but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '^diagnostics\[3\]{severity,phase,kind,file,line,column,message,hint,raw}:$' /tmp/aether_diagnostic_line_mapping_toon.out; then
+    echo "missing diagnostics-toon header" >&2
+    cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
+    exit 1
+fi
+if ! grep -q '"scope","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,8,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
+    echo "missing diagnostics-toon mapped loop line" >&2
+    cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
+    exit 1
+fi
+if ! grep -q '"scope","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,9,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
+    echo "missing diagnostics-toon mapped body line" >&2
+    cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
     exit 1
 fi
 

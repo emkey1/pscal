@@ -165,6 +165,7 @@ static const char *REA_USAGE =
     "     --verbose              Print compilation/cache status messages.\n"
     "     --strict               Enable strict parser checks for top-level structure.\n"
     "     --diagnostics-json     Emit compiler diagnostics as JSON on failure.\n"
+    "     --diagnostics-toon     Emit compiler diagnostics as TOON on failure.\n"
     "     --vm-trace-head=N      Trace first N instructions in the VM (also enabled by '{trace on}' in source).\n"
     "\n"
     "   Thread helpers available to JSON snippets and the REPL:\n"
@@ -308,6 +309,23 @@ static void jsonWriteEscaped(FILE *out, const char *text) {
     fputc('"', out);
 }
 
+static void toonWriteEscaped(FILE *out, const char *text) {
+    const unsigned char *p = (const unsigned char *)(text ? text : "");
+    while (*p) {
+        switch (*p) {
+            case '\\': fputs("\\\\", out); break;
+            case '"': fputs("\\\"", out); break;
+            case '\n': fputs("\\n", out); break;
+            case '\r': fputs("\\r", out); break;
+            case '\t': fputs("\\t", out); break;
+            default:
+                fputc(*p, out);
+                break;
+        }
+        p++;
+    }
+}
+
 static void inferDiagnosticPhaseKind(const char *message, char **outPhase, char **outKind) {
     const char *phase = "compile";
     const char *kind = "generic";
@@ -394,7 +412,7 @@ static ParsedDiagnostic parseDiagnosticLine(const char *line) {
     return diag;
 }
 
-static void emitDiagnosticsJsonFromText(FILE *out, const char *text) {
+static ParsedDiagnostic *collectDiagnosticsFromText(const char *text, int *outCount) {
     ParsedDiagnostic *items = NULL;
     int count = 0;
     int capacity = 0;
@@ -423,7 +441,7 @@ static void emitDiagnosticsJsonFromText(FILE *out, const char *text) {
                     if (!resized) {
                         free(line);
                         freeParsedDiagnostics(items, count);
-                        return;
+                        return NULL;
                     }
                     items = resized;
                     capacity = newCap;
@@ -436,6 +454,11 @@ static void emitDiagnosticsJsonFromText(FILE *out, const char *text) {
         cursor = *rawLineEnd == '\0' ? rawLineEnd : rawLineEnd + 1;
     }
 
+    if (outCount) *outCount = count;
+    return items;
+}
+
+static void emitDiagnosticsJson(FILE *out, ParsedDiagnostic *items, int count) {
     fputs("[\n", out);
     for (int i = 0; i < count; i++) {
         ParsedDiagnostic *diag = &items[i];
@@ -467,6 +490,49 @@ static void emitDiagnosticsJsonFromText(FILE *out, const char *text) {
         fputs("\n", out);
     }
     fputs("]\n", out);
+}
+
+static void emitDiagnosticsToon(FILE *out, ParsedDiagnostic *items, int count) {
+    fprintf(out, "diagnostics[%d]{severity,phase,kind,file,line,column,message,hint,raw}:\n", count);
+    for (int i = 0; i < count; i++) {
+        ParsedDiagnostic *diag = &items[i];
+        fputs("  \"", out);
+        toonWriteEscaped(out, "error");
+        fputs("\",\"", out);
+        toonWriteEscaped(out, diag->phase ? diag->phase : "compile");
+        fputs("\",\"", out);
+        toonWriteEscaped(out, diag->kind ? diag->kind : "generic");
+        fputs("\",\"", out);
+        toonWriteEscaped(out, diag->file ? diag->file : "");
+        fprintf(out, "\",%d,null,\"", diag->line);
+        toonWriteEscaped(out, diag->message ? diag->message : "");
+        fputs("\",\"", out);
+        toonWriteEscaped(out, diag->hint ? diag->hint : "");
+        fputs("\",\"", out);
+        toonWriteEscaped(out, diag->raw ? diag->raw : "");
+        fputs("\"\n", out);
+    }
+}
+
+static void emitDiagnosticsFromText(FILE *out, const char *text, int asToon) {
+    int count = 0;
+    ParsedDiagnostic *items = collectDiagnosticsFromText(text, &count);
+
+    if (!items && count == 0) {
+        if (asToon) {
+            fputs("diagnostics[0]{severity,phase,kind,file,line,column,message,hint,raw}:\n", out);
+        } else {
+            fputs("[]\n", out);
+        }
+        return;
+    }
+
+    if (asToon) {
+        emitDiagnosticsToon(out, items, count);
+    } else {
+        emitDiagnosticsJson(out, items, count);
+    }
+
     freeParsedDiagnostics(items, count);
 }
 
@@ -713,6 +779,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     int verbose_flag = 0;
     int strict_mode = 0;
     int diagnostics_json = 0;
+    int diagnostics_toon = 0;
     int argi = 1;
     bool reaSymbolStateActive = false;
     /* Clear any stale compiler/unit state that might linger when invoked
@@ -748,6 +815,8 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
             strict_mode = 1;
         } else if (strcmp(argv[argi], "--diagnostics-json") == 0) {
             diagnostics_json = 1;
+        } else if (strcmp(argv[argi], "--diagnostics-toon") == 0) {
+            diagnostics_toon = 1;
         } else if (strncmp(argv[argi], "--vm-trace-head=", 16) == 0) {
             vm_trace_head = atoi(argv[argi] + 16);
         } else {
@@ -829,6 +898,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
         .saved_stderr_fd = -1,
         .tmp = NULL
     };
+    if (diagnostics_toon) {
+        diagCapture.enabled = 1;
+    }
     if (!diagnosticCaptureBegin(&diagCapture)) {
         fprintf(stderr, "Failed to initialize diagnostics capture: %s\n", strerror(errno));
         if (preprocessed_source) free(preprocessed_source);
@@ -841,9 +913,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     AST *program = PSCAL_FRONTEND_PARSE_SOURCE(effective_src);
     if (!program) {
         diagnosticCaptureEnd(&diagCapture);
-        if (diagnostics_json) {
+        if (diagnostics_json || diagnostics_toon) {
             char *diagText = diagnosticCaptureRead(&diagCapture);
-            emitDiagnosticsJsonFromText(stderr, diagText);
+            emitDiagnosticsFromText(stderr, diagText, diagnostics_toon);
             free(diagText);
         }
         diagnosticCaptureDispose(&diagCapture);
@@ -854,9 +926,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         diagnosticCaptureEnd(&diagCapture);
-        if (diagnostics_json) {
+        if (diagnostics_json || diagnostics_toon) {
             char *diagText = diagnosticCaptureRead(&diagCapture);
-            emitDiagnosticsJsonFromText(stderr, diagText);
+            emitDiagnosticsFromText(stderr, diagText, diagnostics_toon);
             free(diagText);
         }
         diagnosticCaptureDispose(&diagCapture);
@@ -976,9 +1048,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     }
 
     diagnosticCaptureEnd(&diagCapture);
-    if (!compilation_ok && diagnostics_json) {
+    if (!compilation_ok && (diagnostics_json || diagnostics_toon)) {
         char *diagText = diagnosticCaptureRead(&diagCapture);
-        emitDiagnosticsJsonFromText(stderr, diagText);
+        emitDiagnosticsFromText(stderr, diagText, diagnostics_toon);
         free(diagText);
     }
     diagnosticCaptureDispose(&diagCapture);
