@@ -14,6 +14,7 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include <limits.h>
 #if defined(_WIN32)
 #include <direct.h>
@@ -118,6 +119,7 @@ static void clearModuleCache(void) {
 }
 
 static ReaModuleBindingList *gActiveBindings = NULL;
+static char *gReaSourcePath = NULL;
 static char **gModuleDirStack = NULL;
 static int gModuleDirDepth = 0;
 static int gModuleDirCapacity = 0;
@@ -126,6 +128,20 @@ static char *duplicateDirName(const char *path);
 static char *tryResolveFromRepository(const char *relative, bool *out_exists);
 static char *tryResolveRepoLibFromBase(const char *baseDir, const char *relative, bool *out_exists);
 static char *joinPaths(const char *base, const char *relative);
+
+static void reportReaLineError(int line, const char *fmt, ...) {
+    va_list args;
+
+    va_start(args, fmt);
+    if (gReaSourcePath && *gReaSourcePath) {
+        fprintf(stderr, "%s:%d: ", gReaSourcePath, line);
+    } else {
+        fprintf(stderr, "L%d: ", line);
+    }
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n");
+    va_end(args);
+}
 
 static char **gEnvImportPaths = NULL;
 static int gEnvImportPathCount = 0;
@@ -535,6 +551,8 @@ static char *duplicateDirName(const char *path) {
 
 void reaSemanticSetSourcePath(const char *path) {
     freeDirStack();
+    free(gReaSourcePath);
+    gReaSourcePath = path ? reaDupString(path) : NULL;
     if (!path) {
         pushModuleDir(".");
         return;
@@ -589,7 +607,7 @@ static bool addBinding(ReaModuleBindingList *list, const char *alias, ReaModuleI
     ReaModuleBinding *existing = findBindingInList(list, alias);
     if (existing) {
         if (existing->module != module) {
-            fprintf(stderr, "L%d: duplicate module alias '%s'.\n", line, alias);
+            reportReaLineError(line, "duplicate module alias '%s'.", alias);
             pascal_semantic_error_count++;
             return false;
         }
@@ -3412,14 +3430,17 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                         if (pushedGenericFrame) popGenericFrame();
                         return;
                     }
-                    fprintf(stderr, "L%d: identifier '%s' is not a value export.\n",
-                            node->token->line, ident);
+                    reportReaLineError(node->token->line,
+                                       "identifier '%s' is not a value export.",
+                                       ident);
                 } else if (matches > 1) {
-                    fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
-                            node->token->line, ident);
+                    reportReaLineError(node->token->line,
+                                       "ambiguous reference to '%s'.",
+                                       ident);
                 } else {
-                    fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                            node->token->line, ident);
+                    reportReaLineError(node->token->line,
+                                       "identifier '%s' not in scope.",
+                                       ident);
                 }
                 pascal_semantic_error_count++;
             }
@@ -3467,11 +3488,13 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                                 }
                                 decl = NULL;
                             } else if (matches > 1) {
-                                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
-                                        node->token->line, ident);
+                                reportReaLineError(node->token->line,
+                                                   "ambiguous reference to '%s'.",
+                                                   ident);
                             } else {
-                                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                        node->token->line, ident);
+                                reportReaLineError(node->token->line,
+                                                   "identifier '%s' not in scope.",
+                                                   ident);
                             }
                             pascal_semantic_error_count++;
                         }
@@ -3491,9 +3514,8 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     partOfCall = true;
                 }
                 if (!partOfCall) {
-                    fprintf(stderr,
-                            "L%d: closure captures a local value that would escape its lifetime.\n",
-                            node->token->line);
+                    reportReaLineError(node->token->line,
+                                       "closure captures a local value that would escape its lifetime.");
                     pascal_semantic_error_count++;
                 }
             }
@@ -3604,9 +3626,10 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     if (binding && binding->module) {
                         ReaModuleExport *exp = findModuleExport(binding->module, member);
                         if (!exp) {
-                            fprintf(stderr, "L%d: '%s' is not exported from module '%s'.\n",
-                                    node->token->line, member,
-                                    binding->module->name ? binding->module->name : "(unknown)");
+                            reportReaLineError(node->token->line,
+                                               "'%s' is not exported from module '%s'.",
+                                               member,
+                                               binding->module->name ? binding->module->name : "(unknown)");
                             pascal_semantic_error_count++;
                         } else if (exp->kind == REA_MODULE_EXPORT_FUNCTION || exp->kind == REA_MODULE_EXPORT_PROCEDURE) {
                             char *qualified = makeQualifiedName(binding->module->name, exp->name);
@@ -3625,8 +3648,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                             }
                             qualifiedModuleCallResolved = true;
                         } else {
-                            fprintf(stderr, "L%d: '%s' is not callable.\n",
-                                    node->token->line, node->token->value);
+                            reportReaLineError(node->token->line,
+                                               "'%s' is not callable.",
+                                               node->token->value);
                             pascal_semantic_error_count++;
                         }
                     }
@@ -3657,8 +3681,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     if (decl_line > 0 && decl_line > node->token->line) {
                         Symbol *global = lookupGlobalSymbol(node->token->value);
                         if (!global) {
-                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                    node->token->line, node->token->value);
+                            reportReaLineError(node->token->line,
+                                               "identifier '%s' not in scope.",
+                                               node->token->value);
                             pascal_semantic_error_count++;
                         }
                     }
@@ -3674,8 +3699,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                     if (decl_scope && use_scope && decl_scope == use_scope) {
                         int decl_line = declarationLine(nested);
                         if (decl_line > 0 && decl_line > node->token->line) {
-                            fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                                    node->token->line, node->token->value);
+                            reportReaLineError(node->token->line,
+                                               "identifier '%s' not in scope.",
+                                               node->token->value);
                             pascal_semantic_error_count++;
                         }
                     }
@@ -3709,8 +3735,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             ReaModuleExport *firstExport = NULL;
             int matches = countAccessibleExports(node->token->value, gActiveBindings, &firstModule, &firstExport);
             if (matches > 1) {
-                fprintf(stderr, "L%d: ambiguous reference to '%s'.\n",
-                        node->token->line, node->token->value);
+                reportReaLineError(node->token->line,
+                                   "ambiguous reference to '%s'.",
+                                   node->token->value);
                 pascal_semantic_error_count++;
             } else if (matches == 1 && firstModule && firstExport) {
                 if (firstExport->kind == REA_MODULE_EXPORT_FUNCTION ||
@@ -3730,17 +3757,20 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
                         node->var_type = TYPE_VOID;
                     }
                 } else {
-                    fprintf(stderr, "L%d: '%s' is not callable.\n",
-                            node->token->line, node->token->value);
+                    reportReaLineError(node->token->line,
+                                       "'%s' is not callable.",
+                                       node->token->value);
                     pascal_semantic_error_count++;
                 }
             } else if (!isBuiltin(node->token->value) && proc_sym && proc_sym->is_defined) {
-                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                        node->token->line, node->token->value);
+                reportReaLineError(node->token->line,
+                                   "identifier '%s' not in scope.",
+                                   node->token->value);
                 pascal_semantic_error_count++;
             } else if (!isBuiltin(node->token->value) && (!proc_sym || !proc_sym->is_defined)) {
-                fprintf(stderr, "L%d: identifier '%s' not in scope.\n",
-                        node->token->line, node->token->value);
+                reportReaLineError(node->token->line,
+                                   "identifier '%s' not in scope.",
+                                   node->token->value);
                 pascal_semantic_error_count++;
             }
         }
@@ -3881,12 +3911,14 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
 
                         int requiredArgs = explicitParams - optionalCount;
                         if (providedArgs < requiredArgs) {
-                            fprintf(stderr, "L%d: Not enough arguments for '%s'.\n",
-                                    node->token->line, node->token->value);
+                            reportReaLineError(node->token->line,
+                                               "Not enough arguments for '%s'.",
+                                               node->token->value);
                             pascal_semantic_error_count++;
                         } else if (providedArgs > explicitParams) {
-                            fprintf(stderr, "L%d: Too many arguments for '%s'.\n",
-                                    node->token->line, node->token->value);
+                            reportReaLineError(node->token->line,
+                                               "Too many arguments for '%s'.",
+                                               node->token->value);
                             pascal_semantic_error_count++;
                         } else if (providedArgs < explicitParams) {
                             for (int idx = providedArgs; idx < explicitParams; idx++) {
@@ -4020,6 +4052,8 @@ void reaPerformSemanticAnalysis(AST *root) {
     freeBindingList(&mainBindings);
     clearGenericTypeState();
     freeDirStack();
+    free(gReaSourcePath);
+    gReaSourcePath = NULL;
 }
 
 int reaGetLoadedModuleCount(void) {
@@ -4061,6 +4095,8 @@ void reaSemanticResetState(void) {
     clearModuleCache();
     clearEnvImportPaths();
     clearGenericTypeState();
+    free(gReaSourcePath);
+    gReaSourcePath = NULL;
     freeDirStack();
     freeClassTable();
     gActiveBindings = NULL;

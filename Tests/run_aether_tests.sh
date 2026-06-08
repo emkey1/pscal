@@ -710,8 +710,13 @@ if "$AETHER_BIN" --no-cache "$INFERRED_LET_UNKNOWN_FAIL_FIXTURE" >/tmp/aether_in
     echo "expected inferred let rewrite failure but program succeeded" >&2
     exit 1
 fi
-if ! grep -q "Aether declaration rewrite error: let binding 'answer' needs an explicit type" /tmp/aether_inferred_let_unknown_fail.out; then
+if ! grep -q "Aether declaration rewrite error: cannot infer the type of 'answer' from its initializer" /tmp/aether_inferred_let_unknown_fail.out; then
     echo "missing inferred let rewrite failure message" >&2
+    cat /tmp/aether_inferred_let_unknown_fail.out >&2
+    exit 1
+fi
+if ! grep -q "hint: add an explicit type, for example \`let answer: Int = ...;\`." /tmp/aether_inferred_let_unknown_fail.out; then
+    echo "missing inferred let rewrite failure hint" >&2
     cat /tmp/aether_inferred_let_unknown_fail.out >&2
     exit 1
 fi

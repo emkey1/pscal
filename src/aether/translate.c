@@ -281,6 +281,22 @@ static const char *findSubstringInRange(const char *start, const char *end, cons
 static int startsWithWord(const char *body, const char *lineEnd, const char *word);
 static int braceDeltaForLine(const char *line);
 
+static void reportAetherRewriteError(const char *path,
+                                     int line,
+                                     const char *kind,
+                                     const char *detail,
+                                     const char *hint) {
+    fprintf(stderr,
+            "%s:%d: Aether %s rewrite error: %s\n",
+            path ? path : "<aether>",
+            line > 0 ? line : 1,
+            kind ? kind : "rewrite",
+            detail ? detail : "unknown rewrite error.");
+    if (hint && *hint) {
+        fprintf(stderr, "hint: %s\n", hint);
+    }
+}
+
 static int isIdentifierChar(unsigned char ch) {
     return isalnum(ch) || ch == '_';
 }
@@ -383,6 +399,7 @@ static size_t leadingIndentWidth(const char *lineStart, const char *lineEnd) {
 static char *preprocessToonBlocks(const char *source, const char *path) {
     const char *cursor = source;
     Buffer out = {0};
+    int line = 1;
 
     if (!source) {
         return NULL;
@@ -428,9 +445,11 @@ static char *preprocessToonBlocks(const char *source, const char *path) {
                     break;
                 }
                 if (!isspace((unsigned char)*scan)) {
-                    fprintf(stderr,
-                            "%s: Aether TOON rewrite error: only whitespace or comments may follow 'toon:'.\n",
-                            path ? path : "<aether>");
+                    reportAetherRewriteError(path,
+                                             line,
+                                             "TOON",
+                                             "only whitespace or comments may follow 'toon:'.",
+                                             NULL);
                     free(out.data);
                     return NULL;
                 }
@@ -468,9 +487,11 @@ static char *preprocessToonBlocks(const char *source, const char *path) {
             }
 
             if (!sawContent) {
-                fprintf(stderr,
-                        "%s: Aether TOON rewrite error: 'toon:' must be followed by an indented TOON block.\n",
-                        path ? path : "<aether>");
+                reportAetherRewriteError(path,
+                                         line,
+                                         "TOON",
+                                         "'toon:' must be followed by an indented TOON block.",
+                                         NULL);
                 free(out.data);
                 return NULL;
             }
@@ -535,7 +556,17 @@ static char *preprocessToonBlocks(const char *source, const char *path) {
                 blockCursor = *blockLineEnd == '\n' ? blockLineEnd + 1 : blockLineEnd;
             }
 
-            cursor = blockEnd;
+            while (cursor < blockEnd) {
+                if (*cursor == '\n') {
+                    line++;
+                }
+                cursor++;
+            }
+            continue;
+        }
+
+        if (*lineEnd == '\n') {
+            line++;
         }
     }
 
@@ -2925,7 +2956,9 @@ static char *translateInferredDeclLine(const char *lineStart,
                                        const char *lineEnd,
                                        int isConst,
                                        const AetherBindingTable *bindings,
-                                       const AetherFunctionTable *functions) {
+                                       const AetherFunctionTable *functions,
+                                       const char *path,
+                                       int lineNumber) {
     const char *cursor = body + (isConst ? 5 : 3);
     const char *nameStart;
     const char *nameEnd;
@@ -2959,10 +2992,32 @@ static char *translateInferredDeclLine(const char *lineStart,
 
     typeName = inferAetherBindingTypeName(exprStart, lineEnd, bindings, functions);
     if (!typeName) {
-        fprintf(stderr,
-                "Aether declaration rewrite error: let binding '%.*s' needs an explicit type.\n",
-                (int)(nameEnd - nameStart),
-                nameStart);
+        char detail[512];
+        char hint[512];
+        char *newObjectType = inferNewObjectTypeName(exprStart, lineEnd);
+
+        snprintf(detail,
+                 sizeof(detail),
+                 "cannot infer the type of '%.*s' from its initializer.",
+                 (int)(nameEnd - nameStart),
+                 nameStart);
+        if (newObjectType) {
+            snprintf(hint,
+                     sizeof(hint),
+                     "write `let %.*s: %s = new %s();`.",
+                     (int)(nameEnd - nameStart),
+                     nameStart,
+                     newObjectType,
+                     newObjectType);
+            free(newObjectType);
+        } else {
+            snprintf(hint,
+                     sizeof(hint),
+                     "add an explicit type, for example `let %.*s: Int = ...;`.",
+                     (int)(nameEnd - nameStart),
+                     nameStart);
+        }
+        reportAetherRewriteError(path, lineNumber, "declaration", detail, hint);
         return NULL;
     }
 
@@ -3256,7 +3311,9 @@ static char *translateExportLine(const char *lineStart,
                                  const char *body,
                                  const char *lineEnd,
                                  const AetherBindingTable *bindings,
-                                 const AetherFunctionTable *functions) {
+                                 const AetherFunctionTable *functions,
+                                 const char *path,
+                                 int lineNumber) {
     const char *rest = skipSpaces(body + 6);
     char *translatedRest = NULL;
     Buffer out = {0};
@@ -3271,9 +3328,9 @@ static char *translateExportLine(const char *lineStart,
     } else if (strncmp(rest, "const ", 6) == 0 && hasTypedDeclSeparator(rest, lineEnd, 1)) {
         translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 1);
     } else if (strncmp(rest, "let ", 4) == 0) {
-        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 0, bindings, functions);
+        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 0, bindings, functions, path, lineNumber);
     } else if (strncmp(rest, "const ", 6) == 0) {
-        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 1, bindings, functions);
+        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 1, bindings, functions, path, lineNumber);
     } else {
         return dupRange(lineStart, lineEnd);
     }
@@ -3365,7 +3422,9 @@ static char *translateLine(const char *lineStart,
                            const char *lineEnd,
                            JsonAliasState *jsonState,
                            const AetherBindingTable *bindings,
-                           const AetherFunctionTable *functions) {
+                           const AetherFunctionTable *functions,
+                           const char *path,
+                           int lineNumber) {
     const char *body = lineStart;
     Buffer out = {0};
 
@@ -3389,7 +3448,7 @@ static char *translateLine(const char *lineStart,
         return out.data;
     }
     if (strncmp(body, "export ", 7) == 0) {
-        return translateExportLine(lineStart, body, lineEnd, bindings, functions);
+        return translateExportLine(lineStart, body, lineEnd, bindings, functions, path, lineNumber);
     }
     if (strncmp(body, "fn ", 3) == 0) {
         return translateFnLine(lineStart, body, lineEnd);
@@ -3401,10 +3460,10 @@ static char *translateLine(const char *lineStart,
         return translateTypedDeclLine(lineStart, body, lineEnd, 1);
     }
     if (strncmp(body, "let ", 4) == 0) {
-        return translateInferredDeclLine(lineStart, body, lineEnd, 0, bindings, functions);
+        return translateInferredDeclLine(lineStart, body, lineEnd, 0, bindings, functions, path, lineNumber);
     }
     if (strncmp(body, "const ", 6) == 0) {
-        return translateInferredDeclLine(lineStart, body, lineEnd, 1, bindings, functions);
+        return translateInferredDeclLine(lineStart, body, lineEnd, 1, bindings, functions, path, lineNumber);
     }
     if (strncmp(body, "use ", 4) == 0) {
         if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
@@ -3534,7 +3593,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     AetherFunctionTable functionTable = {0};
     ToonLiteralTable toonTable = {0};
     int braceDepth = 0;
-    (void)path;
+    int lineNumber = 1;
 
     if (!source) {
         return NULL;
@@ -3625,8 +3684,11 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 }
             } else if (body < lineEnd && !isLineComment(body, lineEnd)) {
                 if (!isParallelCallStatement(body, lineEnd)) {
-                    fprintf(stderr,
-                            "Aether par rewrite error: only direct call statements are allowed inside par blocks.\n");
+                    reportAetherRewriteError(path,
+                                             lineNumber,
+                                             "par",
+                                             "only direct call statements are allowed inside par blocks.",
+                                             "move side effects into direct calls inside `par { ... }`.");
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
@@ -3716,7 +3778,13 @@ char *aetherRewriteSource(const char *source, const char *path) {
                        !isLineComment(body, lineEnd)) {
                 translated = translateTypeFieldLine(lineStart, body, lineEnd);
             } else {
-                translated = translateLine(lineStart, lineEnd, &jsonState, &bindingTable, &functionTable);
+                translated = translateLine(lineStart,
+                                           lineEnd,
+                                           &jsonState,
+                                           &bindingTable,
+                                           &functionTable,
+                                           path,
+                                           lineNumber);
             }
         }
         if (!translated) {
@@ -3869,6 +3937,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 return NULL;
             }
             lineEnd++;
+            lineNumber++;
         }
 
         if (startsWithWord(body, lineEnd, "type") && lineDelta > 0) {

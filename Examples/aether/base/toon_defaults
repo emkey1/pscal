@@ -6,7 +6,7 @@ fn main() -> Void {
         ret;
     }
 
-    let doc: ToonDoc = toon_parse("{\"name\":\"Ada\",\"count\":2,\"pi\":3.5,\"enabled\":true}");
+    let doc: ToonDoc = toon_parse("{\"name\":\"Ada\",\"count\":2,\"pi\":3.15,\"enabled\":true}");
     let root: ToonNode = toon_root(doc);
     let fallbackName: Text = "unknown";
     let fallbackCount: Int = 9;
