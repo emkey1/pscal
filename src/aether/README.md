@@ -34,6 +34,8 @@ Bootstrap status:
   the initializer or a previously known binding.
 - That inference now also includes known Aether function signatures, including
   imported Aether functions harvested from quoted `use` targets.
+- It also now covers `new Type()` object construction and typed method calls
+  on bindings whose source-level type is already known.
 - Aether now also exposes a compact task/thread helper surface over the shared
   worker-pool builtins: `task_spawn`, `task_queue`, `task_wait`, `task_lookup`,
   `task_status`, `task_result`, `task_stats`, and `task_stats_json`.

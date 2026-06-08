@@ -279,6 +279,7 @@ static const char *findSubstringInRange(const char *start, const char *end, cons
 }
 
 static int startsWithWord(const char *body, const char *lineEnd, const char *word);
+static int braceDeltaForLine(const char *line);
 
 static int isIdentifierChar(unsigned char ch) {
     return isalnum(ch) || ch == '_';
@@ -565,6 +566,7 @@ typedef struct ParBlockState {
 typedef struct TypeBlockState {
     int active;
     int bodyDepth;
+    char *name;
 } TypeBlockState;
 
 typedef struct JsonAliasState {
@@ -647,8 +649,10 @@ static void clearTypeBlockState(TypeBlockState *state) {
     if (!state) {
         return;
     }
+    free(state->name);
     state->active = 0;
     state->bodyDepth = 0;
+    state->name = NULL;
 }
 
 static void freeAetherBindingTable(AetherBindingTable *table) {
@@ -1121,6 +1125,58 @@ static const char *inferObjectInitTypeName(const char *start, const char *end) {
     return NULL;
 }
 
+static char *inferNewObjectTypeName(const char *start, const char *end) {
+    const char *nameStart;
+    const char *nameEnd;
+    const char *cursor;
+
+    if (!start || !end || end <= start) {
+        return NULL;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if ((size_t)(end - start) < 4 || strncmp(start, "new ", 4) != 0) {
+        return NULL;
+    }
+    nameStart = skipSpacesInRange(start + 3, end);
+    if (nameStart >= end || !(isalpha((unsigned char)*nameStart) || *nameStart == '_')) {
+        return NULL;
+    }
+    nameEnd = nameStart + 1;
+    while (nameEnd < end && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    cursor = skipSpacesInRange(nameEnd, end);
+    if (cursor < end && *cursor == '(' && end[-1] == ')') {
+        return trimmedCopy(nameStart, nameEnd);
+    }
+    return NULL;
+}
+
+static char *composeQualifiedLookup(const char *left,
+                                    size_t leftLen,
+                                    const char *right,
+                                    size_t rightLen) {
+    char *qualified;
+
+    if (!left || !right || leftLen == 0 || rightLen == 0) {
+        return NULL;
+    }
+    qualified = (char *)malloc(leftLen + 1 + rightLen + 1);
+    if (!qualified) {
+        return NULL;
+    }
+    memcpy(qualified, left, leftLen);
+    qualified[leftLen] = '.';
+    memcpy(qualified + leftLen + 1, right, rightLen);
+    qualified[leftLen + 1 + rightLen] = '\0';
+    return qualified;
+}
+
 static char *inferAetherBindingTypeName(const char *exprStart,
                                         const char *exprEnd,
                                         const AetherBindingTable *bindings,
@@ -1130,6 +1186,7 @@ static char *inferAetherBindingTypeName(const char *exprStart,
     const char *nameEnd;
     const char *helperType;
     char *objectInitType;
+    char *newObjectType;
 
     if (!exprStart || !exprEnd || exprEnd < exprStart) {
         return NULL;
@@ -1157,6 +1214,10 @@ static char *inferAetherBindingTypeName(const char *exprStart,
     }
     if (inferNumericLiteralType(trimmedStart, trimmedEnd, &helperType)) {
         return dupCString(helperType);
+    }
+    newObjectType = inferNewObjectTypeName(trimmedStart, trimmedEnd);
+    if (newObjectType) {
+        return newObjectType;
     }
     nameEnd = trimmedStart;
     if (isalpha((unsigned char)*nameEnd) || *nameEnd == '_') {
@@ -1197,6 +1258,29 @@ static char *inferAetherBindingTypeName(const char *exprStart,
                                                                         (size_t)(callNameEnd - trimmedStart));
                 if (functionType) {
                     return dupCString(functionType);
+                }
+                {
+                    const char *dot = findCharInRange(trimmedStart, callNameEnd, '.');
+                    if (dot && bindings) {
+                        const char *receiverType = findAetherBindingType(bindings,
+                                                                         trimmedStart,
+                                                                         (size_t)(dot - trimmedStart));
+                        if (receiverType) {
+                            char *qualified = composeQualifiedLookup(receiverType,
+                                                                     strlen(receiverType),
+                                                                     dot + 1,
+                                                                     (size_t)(callNameEnd - (dot + 1)));
+                            if (qualified) {
+                                functionType = findAetherFunctionReturnType(functions,
+                                                                            qualified,
+                                                                            strlen(qualified));
+                                free(qualified);
+                                if (functionType) {
+                                    return dupCString(functionType);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1336,10 +1420,29 @@ static char *extractModuleName(const char *source) {
     return NULL;
 }
 
+static char *extractTypeNameFromLine(const char *body, const char *lineEnd) {
+    const char *nameStart;
+    const char *nameEnd;
+
+    if (!body || !lineEnd || !startsWithWord(body, lineEnd, "type")) {
+        return NULL;
+    }
+    nameStart = skipSpacesInRange(body + 4, lineEnd);
+    nameEnd = nameStart;
+    while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    if (nameEnd == nameStart) {
+        return NULL;
+    }
+    return trimmedCopy(nameStart, nameEnd);
+}
+
 static void maybeRecordAetherFunctionReturnType(AetherFunctionTable *table,
                                                 const char *body,
                                                 const char *lineEnd,
-                                                const char *moduleName) {
+                                                const char *moduleName,
+                                                const char *typeName) {
     const char *cursor;
     const char *nameStart;
     const char *nameEnd;
@@ -1391,6 +1494,10 @@ static void maybeRecordAetherFunctionReturnType(AetherFunctionTable *table,
     setAetherFunctionReturnType(table, fnName, returnType);
     if (moduleName && *moduleName &&
         snprintf(qualifiedName, sizeof(qualifiedName), "%s.%s", moduleName, fnName) < (int)sizeof(qualifiedName)) {
+        setAetherFunctionReturnType(table, qualifiedName, returnType);
+    }
+    if (typeName && *typeName &&
+        snprintf(qualifiedName, sizeof(qualifiedName), "%s.%s", typeName, fnName) < (int)sizeof(qualifiedName)) {
         setAetherFunctionReturnType(table, qualifiedName, returnType);
     }
     free(fnName);
@@ -1448,7 +1555,9 @@ static int collectImportedAetherBindings(AetherBindingTable *out,
                                          const char *modulePath) {
     AetherBindingTable local = {0};
     char *moduleName = NULL;
+    char *currentTypeName = NULL;
     const char *cursor = source;
+    int braceDepth = 0;
 
     (void)modulePath;
     if (!out || !source) {
@@ -1466,10 +1575,20 @@ static int collectImportedAetherBindings(AetherBindingTable *out,
         }
         body = skipSpacesInRange(lineStart, lineEnd);
 
+        if (startsWithWord(body, lineEnd, "type")) {
+            const char *nameStart = skipSpacesInRange(body + 4, lineEnd);
+            const char *nameEnd = nameStart;
+            while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+                nameEnd++;
+            }
+            free(currentTypeName);
+            currentTypeName = (nameEnd > nameStart) ? trimmedCopy(nameStart, nameEnd) : NULL;
+        }
+
         if (startsWithWord(body, lineEnd, "export")) {
             const char *rest = skipSpacesInRange(body + 6, lineEnd);
 
-            maybeRecordAetherFunctionReturnType(functions, rest, lineEnd, moduleName);
+            maybeRecordAetherFunctionReturnType(functions, rest, lineEnd, moduleName, currentTypeName);
             maybeRecordAetherBindingType(&local, rest, lineEnd, functions);
             if (startsWithWord(rest, lineEnd, "let") || startsWithWord(rest, lineEnd, "const")) {
                 char *name = extractBindingName(rest, lineEnd);
@@ -1484,13 +1603,20 @@ static int collectImportedAetherBindings(AetherBindingTable *out,
                 }
             }
         } else {
-            maybeRecordAetherFunctionReturnType(functions, body, lineEnd, moduleName);
+            maybeRecordAetherFunctionReturnType(functions, body, lineEnd, moduleName, currentTypeName);
             maybeRecordAetherBindingType(&local, body, lineEnd, functions);
+        }
+
+        braceDepth += braceDeltaForLine(body);
+        if (currentTypeName && braceDepth <= 0) {
+            free(currentTypeName);
+            currentTypeName = NULL;
         }
 
         cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
     }
 
+    free(currentTypeName);
     free(moduleName);
     freeAetherBindingTable(&local);
     return 1;
@@ -3431,7 +3557,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             return NULL;
         }
         maybeRecordToonLiteralBinding(&toonTable, body, lineEnd);
-        maybeRecordAetherFunctionReturnType(&functionTable, body, lineEnd, NULL);
+        maybeRecordAetherFunctionReturnType(&functionTable, body, lineEnd, NULL, typeState.name);
         maybeRecordAetherBindingType(&bindingTable, body, lineEnd, &functionTable);
 
         if (fnState.active && fnState.postExpr && braceDepth == fnState.bodyDepth) {
@@ -3731,6 +3857,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             clearTypeBlockState(&typeState);
             typeState.active = 1;
             typeState.bodyDepth = braceDepth + lineDelta;
+            typeState.name = extractTypeNameFromLine(body, lineEnd);
         }
         braceDepth += lineDelta;
         if (fnState.active && braceDepth < fnState.bodyDepth) {

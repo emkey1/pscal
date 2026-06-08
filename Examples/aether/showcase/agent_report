@@ -24,7 +24,7 @@ fn makeSummary(job: ToonNode) -> JobSummary {
     let name = toon_get_text(job, "name");
     let rawScore = toon_get_int_or(job, "score", DefaultScore);
     let score = normalizeScore(rawScore);
-    let summary: JobSummary = new JobSummary();
+    let summary = new JobSummary();
     summary.name = name;
     summary.score = score;
     summary.status = classify(score);
@@ -71,8 +71,9 @@ fn main() -> Void {
     loop index < total {
         let job = toon_at(jobs, index);
         let summary = makeSummary(job);
+        let isReady = summary.isReady();
 
-        if summary.isReady() {
+        if isReady {
             ready = ready + 1;
         } else {
             if summary.priority == 2 {

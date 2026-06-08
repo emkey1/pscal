@@ -415,6 +415,9 @@ Aether distinguishes:
   frontend can resolve them from a quoted `use` target without ambiguity.
 - known Aether function signatures may also participate in that inference when
   local or imported Aether functions declare explicit return types.
+- object construction via `new Type()` and typed method calls on known bindings
+  are appropriate inference targets as well because they remain explicit and
+  predictable at the source level.
 
 These should lower directly onto shared declaration and constant-handling
 machinery.
