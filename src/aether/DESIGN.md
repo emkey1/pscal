@@ -467,7 +467,9 @@ Example direction:
 - `@pre` becomes a check at function entry,
 - `@post` becomes a check before returning,
 - `@pure` informs analysis and optimization,
-- `@cost` is metadata first, enforcement later.
+- `@cost` is frontend-validated immediately, even before it grows runtime
+  meaning: it must attach to the next function and use a positive integer
+  budget with an optional compact unit such as `ms`, `ops`, or `steps`.
 
 This keeps the shared compiler concise while still enabling future expansion.
 

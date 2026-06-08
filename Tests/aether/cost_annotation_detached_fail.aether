@@ -1,0 +1,9 @@
+@cost 4 ops
+let value: Int = 1;
+
+fn main() -> Void {
+    fx {
+        println(value);
+    }
+    ret;
+}

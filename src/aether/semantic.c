@@ -50,6 +50,7 @@ typedef struct AetherScopeFrame {
 } AetherScopeFrame;
 
 static const char *g_aether_source_path = NULL;
+static void reportAetherError(const char *kind, int line, const char *detail);
 
 static void freeOpaqueBindingTable(AetherOpaqueBindingTable *table) {
     size_t i;
@@ -254,6 +255,91 @@ static int parseFunctionNameFromLine(const char *body, const char *lineEnd, char
     }
     *outName = dupRange(nameStart, nameEnd);
     return *outName != NULL;
+}
+
+static int isSupportedCostUnit(const char *start, const char *end) {
+    size_t len;
+
+    if (!start || !end || end < start) {
+        return 0;
+    }
+    len = (size_t)(end - start);
+    return (len == 2 && strncmp(start, "ns", 2) == 0) ||
+           (len == 2 && strncmp(start, "us", 2) == 0) ||
+           (len == 2 && strncmp(start, "ms", 2) == 0) ||
+           (len == 1 && strncmp(start, "s", 1) == 0) ||
+           (len == 2 && strncmp(start, "op", 2) == 0) ||
+           (len == 3 && strncmp(start, "ops", 3) == 0) ||
+           (len == 4 && strncmp(start, "step", 4) == 0) ||
+           (len == 5 && strncmp(start, "steps", 5) == 0);
+}
+
+static int validateCostAnnotationSyntax(const char *body,
+                                        const char *lineEnd,
+                                        char *detail,
+                                        size_t detailSize) {
+    const char *cursor;
+    const char *digitsStart;
+    const char *digitsEnd;
+    const char *unitStart;
+    const char *unitEnd;
+    long budget = 0;
+
+    if (!body || !lineEnd || !detail || detailSize == 0) {
+        return 0;
+    }
+    detail[0] = '\0';
+    if (!startsWithWord(body, lineEnd, "@cost")) {
+        snprintf(detail, detailSize, "internal @cost validator mismatch.");
+        return 0;
+    }
+
+    cursor = skipInlineSpaces(body + 5, lineEnd);
+    if (cursor >= lineEnd) {
+        snprintf(detail, detailSize, "@cost requires a positive integer budget.");
+        return 0;
+    }
+    digitsStart = cursor;
+    while (cursor < lineEnd && isdigit((unsigned char)*cursor)) {
+        budget = budget * 10 + (*cursor - '0');
+        cursor++;
+    }
+    digitsEnd = cursor;
+    if (digitsEnd == digitsStart) {
+        snprintf(detail, detailSize, "@cost requires a positive integer budget.");
+        return 0;
+    }
+    if (budget <= 0) {
+        snprintf(detail, detailSize, "@cost budget must be greater than zero.");
+        return 0;
+    }
+
+    unitStart = skipInlineSpaces(cursor, lineEnd);
+    if (unitStart >= lineEnd) {
+        return 1;
+    }
+    unitEnd = unitStart;
+    while (unitEnd < lineEnd && isalpha((unsigned char)*unitEnd)) {
+        unitEnd++;
+    }
+    if (unitEnd == unitStart) {
+        snprintf(detail, detailSize, "@cost has invalid trailing syntax.");
+        return 0;
+    }
+    if (!isSupportedCostUnit(unitStart, unitEnd)) {
+        snprintf(detail,
+                 detailSize,
+                 "unsupported @cost unit '%.*s'.",
+                 (int)(unitEnd - unitStart),
+                 unitStart);
+        return 0;
+    }
+    cursor = skipInlineSpaces(unitEnd, lineEnd);
+    if (cursor < lineEnd) {
+        snprintf(detail, detailSize, "@cost has invalid trailing syntax.");
+        return 0;
+    }
+    return 1;
 }
 
 static const AetherFunctionInfo *findFunctionInfo(const AetherFunctionTable *table,
@@ -538,6 +624,61 @@ static void collectFunctionPurity(const char *source, AetherFunctionTable *table
             pendingPure = 0;
         }
         cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+    }
+}
+
+static void validateCostAnnotations(const char *source) {
+    const char *cursor = source;
+    int line = 1;
+    int pendingCostLine = 0;
+
+    while (cursor && *cursor) {
+        const char *lineStart = cursor;
+        const char *lineEnd = cursor;
+        const char *body;
+        char detail[256];
+
+        while (*lineEnd && *lineEnd != '\n') {
+            lineEnd++;
+        }
+        body = skipInlineSpaces(lineStart, lineEnd);
+
+        if (startsWithWord(body, lineEnd, "@cost")) {
+            if (!validateCostAnnotationSyntax(body, lineEnd, detail, sizeof(detail))) {
+                reportAetherError("contract", line, detail);
+            }
+            if (pendingCostLine != 0) {
+                reportAetherError("contract",
+                                  line,
+                                  "duplicate @cost annotation before function declaration.");
+            }
+            pendingCostLine = line;
+        } else if (startsWithWord(body, lineEnd, "@pure") ||
+                   startsWithWord(body, lineEnd, "@pre") ||
+                   startsWithWord(body, lineEnd, "@post")) {
+        } else if (startsWithWord(body, lineEnd, "fn")) {
+            pendingCostLine = 0;
+        } else if (body < lineEnd && !(body[0] == '/' && body + 1 < lineEnd && body[1] == '/')) {
+            if (pendingCostLine != 0) {
+                reportAetherError("contract",
+                                  pendingCostLine,
+                                  "@cost must annotate the next function declaration.");
+                pendingCostLine = 0;
+            }
+        }
+
+        if (*lineEnd == '\n') {
+            line++;
+            cursor = lineEnd + 1;
+        } else {
+            cursor = lineEnd;
+        }
+    }
+
+    if (pendingCostLine != 0) {
+        reportAetherError("contract",
+                          pendingCostLine,
+                          "@cost must annotate the next function declaration.");
     }
 }
 
@@ -1624,6 +1765,7 @@ void aetherPerformSemanticAnalysis(AST *root) {
         AetherFunctionTable table = {0};
         AetherOpaqueBindingTable opaqueBindings = {0};
         AetherScalarBindingTable scalarBindings = {0};
+        validateCostAnnotations(source);
         collectFunctionPurity(source, &table);
         collectOpaqueBindings(source, &opaqueBindings);
         collectScalarBindings(source, &scalarBindings);

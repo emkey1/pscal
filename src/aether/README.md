@@ -17,6 +17,9 @@ Bootstrap status:
   bytecode compiler.
 - `@pre` and `@post` now lower through the Aether rewrite path into ordinary
   guard code, so contract failures are enforced without backend changes.
+- `@cost` is now a real frontend-validated contract form as well: it must
+  attach to the next function declaration and use a positive integer budget,
+  optionally followed by a compact unit like `ms`, `ops`, or `steps`.
 - A first `fx` validation pass now rejects selected effectful builtin calls
   outside `fx { ... }` blocks before the shared Rea semantic pass runs.
 - Aether-native `print(...)` and `println(...)` spellings now lower onto the
@@ -97,8 +100,8 @@ Planned near-term work:
 2. Introduce the Aether lexer/token set with compact, regular syntax.
 3. Parse Aether declarations and control-flow into the shared PSCAL AST.
 4. Enforce explicit effect regions in semantic analysis.
-5. Lower contracts (`@pre`, `@post`, `@cost`, `@pure`) cleanly onto the
-   existing compiler/runtime path.
+5. Continue lowering contracts (`@pre`, `@post`) and validating contract
+   forms (`@cost`, `@pure`) cleanly on the existing compiler/runtime path.
 6. Add Aether-specific tests and library fixtures under `Tests/`.
 
 Roadmap item:

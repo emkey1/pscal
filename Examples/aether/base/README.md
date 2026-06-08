@@ -28,6 +28,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/toon_type_checks
 ./build/bin/aether Examples/aether/base/toon_presence_checks
 ./build/bin/aether Examples/aether/base/toon_defaults
+./build/bin/aether Examples/aether/base/cost_annotations
 ./build/bin/aether Examples/aether/base/toon_variable_parse
 ./build/bin/aether Examples/aether/base/type_blocks
 ./build/bin/aether Examples/aether/base/type_init
@@ -90,6 +91,8 @@ These examples stay within the currently supported Aether Core subset:
   compact existence checks on objects and arrays
 - `toon_defaults`: uses `toon_get_*_or(...)` helpers to read scalar values with
   typed fallback defaults
+- `cost_annotations`: shows validated `@cost` budgets in both `ops` and `ms`
+  forms without changing the shared backend
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
   `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
   yyjson builtins
@@ -103,6 +106,7 @@ These examples stay within the currently supported Aether Core subset:
 - `self` as the Aether source spelling for the current object inside `type`
   methods, lowered onto the shared backend's `myself`
 - `@pre` and `@post` lowered into runtime guards
-- annotation forms such as `@pure` and `@cost` preserved as metadata comments
+- `@cost` is now frontend-validated: it must be a positive integer budget with
+  an optional unit such as `ns`, `us`, `ms`, `s`, `op`/`ops`, or `step`/`steps`
 
 The backend remains the shared PSCAL compiler and VM.

@@ -6,6 +6,11 @@ ROOT_DIR="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$S
 AETHER_BIN="$ROOT_DIR/build/bin/aether"
 SMOKE_FIXTURE="$ROOT_DIR/Tests/aether/smoke.aether"
 CONTRACT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contracts_pass.aether"
+COST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_pass.aether"
+COST_ZERO_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_zero_fail.aether"
+COST_UNIT_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_unit_fail.aether"
+COST_DETACHED_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_detached_fail.aether"
+COST_DUPLICATE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_duplicate_fail.aether"
 CONTRACT_FAIL_PRE_FIXTURE="$ROOT_DIR/Tests/aether/contracts_fail_pre.aether"
 CONTRACT_FAIL_POST_FIXTURE="$ROOT_DIR/Tests/aether/contracts_fail_post.aether"
 EFFECTS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/effects_fail_outside_fx.aether"
@@ -56,6 +61,11 @@ fi
 for fixture in \
     "$SMOKE_FIXTURE" \
     "$CONTRACT_PASS_FIXTURE" \
+    "$COST_PASS_FIXTURE" \
+    "$COST_ZERO_FAIL_FIXTURE" \
+    "$COST_UNIT_FAIL_FIXTURE" \
+    "$COST_DETACHED_FAIL_FIXTURE" \
+    "$COST_DUPLICATE_FAIL_FIXTURE" \
     "$CONTRACT_FAIL_PRE_FIXTURE" \
     "$CONTRACT_FAIL_POST_FIXTURE" \
     "$EFFECTS_FAIL_FIXTURE" \
@@ -107,6 +117,12 @@ done
 "$AETHER_BIN" --no-cache --no-run "$SMOKE_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache --dump-ast-json "$SMOKE_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache "$CONTRACT_PASS_FIXTURE" >/dev/null
+"$AETHER_BIN" --no-cache "$COST_PASS_FIXTURE" >/tmp/aether_cost_pass.out
+if ! grep -qx "42" /tmp/aether_cost_pass.out; then
+    echo "unexpected cost annotation output" >&2
+    cat /tmp/aether_cost_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$PRINT_ALIAS_PASS_FIXTURE" >/tmp/aether_print_alias_pass.out
 printf 'Aether print aliases\n' >/tmp/aether_print_alias_expected.out
 if ! cmp -s /tmp/aether_print_alias_expected.out /tmp/aether_print_alias_pass.out; then
@@ -406,6 +422,46 @@ fi
 if ! grep -q "binding for 'wrongFlag' must use Bool when initialized from 'toon_get_bool_or'" /tmp/aether_toon_defaults_decl_fail.out; then
     echo "missing TOON bool default declaration type failure message" >&2
     cat /tmp/aether_toon_defaults_decl_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$COST_ZERO_FAIL_FIXTURE" >/tmp/aether_cost_zero_fail.out 2>&1; then
+    echo "expected @cost zero-budget failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "@cost budget must be greater than zero" /tmp/aether_cost_zero_fail.out; then
+    echo "missing @cost zero-budget failure message" >&2
+    cat /tmp/aether_cost_zero_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$COST_UNIT_FAIL_FIXTURE" >/tmp/aether_cost_unit_fail.out 2>&1; then
+    echo "expected @cost unit failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "unsupported @cost unit 'ticks'" /tmp/aether_cost_unit_fail.out; then
+    echo "missing @cost unit failure message" >&2
+    cat /tmp/aether_cost_unit_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$COST_DETACHED_FAIL_FIXTURE" >/tmp/aether_cost_detached_fail.out 2>&1; then
+    echo "expected detached @cost failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "@cost must annotate the next function declaration" /tmp/aether_cost_detached_fail.out; then
+    echo "missing detached @cost failure message" >&2
+    cat /tmp/aether_cost_detached_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$COST_DUPLICATE_FAIL_FIXTURE" >/tmp/aether_cost_duplicate_fail.out 2>&1; then
+    echo "expected duplicate @cost failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "duplicate @cost annotation before function declaration" /tmp/aether_cost_duplicate_fail.out; then
+    echo "missing duplicate @cost failure message" >&2
+    cat /tmp/aether_cost_duplicate_fail.out >&2
     exit 1
 fi
 
