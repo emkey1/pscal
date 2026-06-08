@@ -79,6 +79,9 @@ repair, diagnose, and review is often the better Aether design.
 1. **Compact source**
    Aether should reduce token count compared with Pascal-like or Python-like
    spellings whenever that reduction does not materially harm readability.
+   That includes preferring source-level names like `print(...)` and
+   `println(...)` over backend-oriented spellings such as `write` and
+   `writeln` when the lowering is direct.
 
 2. **High correctness per token**
    Aether should optimize for valid generation, easy repair, stable diffs, and
@@ -497,6 +500,16 @@ Practical direction:
 - compact record-like structures,
 - later expansion as needed.
 
+In the bootstrap path, a compact `type Name { ... }` surface can lower onto the
+shared object/class machinery as long as the lowering is direct and readable.
+That gives Aether a concise data-shape construct without creating a separate
+runtime object model. A compact construction form that still lowers to
+ordinary object creation and field assignment is also a good fit for this
+phase, for example `let point: Point = Point { x: 1, y: 2 };`.
+
+For method bodies, Aether should prefer `self` as the source-level receiver
+spelling even if the shared backend internally still uses `myself`.
+
 ### 10.3 TOON
 
 TOON is attractive because compact data literals matter for agent-generated
@@ -513,6 +526,61 @@ blob.
 The initial implementation may lower TOON into existing PSCAL-compatible data
 construction patterns or library helpers before deciding whether additional
 backend support is justified.
+
+In the current bootstrap, Aether should prefer embedding canonical TOON text
+using the upstream TOON syntax itself, rather than inventing a fake JSON-like
+placeholder notation. A small frontend wrapper that lowers embedded TOON blocks
+to strings or helper calls is acceptable in v0; a separate runtime type is not.
+
+As a practical bridge, compact Aether helper spellings may lower directly onto
+the existing shared JSON helper library rather than introducing Aether-only
+data APIs. That keeps TOON usable in source while preserving the shared
+compiler and VM boundary. In v0, that bridge should be described honestly as a
+JSON-compatible literal path, not as full semantic support for all TOON
+documents. A small step beyond direct inline literals is still reasonable:
+simple local `Text`/`TOON` bindings can be folded back into literal parse
+calls when the frontend can prove their source text.
+
+Handle-oriented access helpers that map one-to-one onto existing yyjson
+builtins are a good fit for the bootstrap because they preserve predictable
+lowering and avoid introducing Aether-only runtime machinery.
+
+Slightly higher-level keyed scalar helpers are also a good fit when the
+lowering stays just as direct, for example `toon_get_text(root, "name")`
+becoming a yyjson key lookup followed by a string extraction.
+
+The same applies to capability probes: a compact source-level helper like
+`has_toon()` is preferable to surfacing backend-specific builtin names and
+extension identifiers directly in ordinary Aether code.
+
+Opaque source-level handle types such as `ToonDoc` and `ToonNode` are also a
+good fit even before Aether owns richer native runtime types, as long as the
+bootstrap lowering to the shared backend remains explicit and predictable.
+
+Even in the bootstrap phase, those opaque types should carry at least some
+front-end semantic weight. Obvious arithmetic misuse should be rejected rather
+than silently treated like ordinary integers in user-facing Aether source.
+Cross-assignment between `ToonDoc` and `ToonNode` should be rejected as well,
+even if both still lower to the same shared backend representation.
+The same goes for obvious helper-call mismatches like `toon_close(root)` or
+`toon_text_value(doc)` when the source-level handle kinds are known.
+The same frontend semantic layer should also enforce typed scalar extraction:
+`toon_get_text(...)` / `toon_text_value(...)` should flow into `Text`,
+`toon_get_int(...)` / `toon_int_value(...)` into `Int`,
+`toon_get_real(...)` / `toon_real_value(...)` into `Real`, and
+`toon_get_bool(...)` / `toon_bool_value(...)` into `Bool`. Structural helpers
+like `toon_len(...)` and `toon_null_value(...)` should participate in that same
+typed scalar model as `Int` and `Bool` respectively.
+Once those bindings exist, direct scalar-to-scalar assignment should preserve
+the same source-level type as well, so mismatches like assigning `Text` into a
+`Bool` binding fail in Aether before lowering.
+The same applies to helper arguments when they come from typed bindings:
+`toon_key(...)` and `toon_get_*` should require `Text` keys, while
+`toon_at(...)` should require an `Int` index.
+Likewise, `toon_parse(...)` should require a `Text` or `TOON` payload binding
+when its source argument is a named variable rather than a literal.
+`toon_parse_file(...)` should similarly require a `Text` path binding for named
+arguments at the Aether source level.
 
 ## 11. Why Standalone Front-End Status Matters
 

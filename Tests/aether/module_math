@@ -1,0 +1,5 @@
+mod Math {
+    export fn answer() -> Int {
+        ret 42;
+    }
+}

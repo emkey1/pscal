@@ -1,0 +1,18 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let badPayload: Int = 42;
+    let doc: ToonDoc = toon_parse(badPayload);
+
+    fx {
+        println(doc);
+    }
+
+    toon_close(doc);
+    ret;
+}

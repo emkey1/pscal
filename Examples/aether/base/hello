@@ -8,8 +8,8 @@ fn double(value: Int) -> Int {
 fn main() -> Void {
     let total: Int = double(21);
     fx {
-        writeln(Greeting);
-        writeln("2 * 21 = ", total);
+        println(Greeting);
+        println("2 * 21 = ", total);
     }
     ret;
 }

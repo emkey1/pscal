@@ -296,7 +296,7 @@ static const char *jsonTypeToString(yyjson_val *val) {
 }
 
 static Value vmBuiltinYyjsonRead(struct VM_s *vm, int arg_count, Value *args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+    if (arg_count != 1 || !isPascalStringType(args[0].type)) {
         runtimeError(vm, "YyjsonRead expects a single string argument.");
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
@@ -317,7 +317,7 @@ static Value vmBuiltinYyjsonRead(struct VM_s *vm, int arg_count, Value *args) {
 }
 
 static Value vmBuiltinYyjsonReadFile(struct VM_s *vm, int arg_count, Value *args) {
-    if (arg_count != 1 || args[0].type != TYPE_STRING) {
+    if (arg_count != 1 || !isPascalStringType(args[0].type)) {
         runtimeError(vm, "YyjsonReadFile expects a single string argument.");
         return makeInt(YYJSON_UNUSED_HANDLE);
     }

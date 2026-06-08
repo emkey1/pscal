@@ -1,0 +1,22 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"name\":\"Aether\",\"enabled\":true}");
+    let root: ToonNode = toon_root(doc);
+    let name: Text = toon_get_text(root, "name");
+    let enabled: Bool = toon_get_bool(root, "enabled");
+
+    enabled = name;
+
+    fx {
+        println(enabled);
+    }
+
+    toon_close(doc);
+    ret;
+}

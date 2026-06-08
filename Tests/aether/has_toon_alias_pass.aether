@@ -1,0 +1,12 @@
+fn main() -> Void {
+    if has_toon() {
+        fx {
+            println("toon-ready");
+        }
+    } else {
+        fx {
+            println("toon-missing");
+        }
+    }
+    ret;
+}

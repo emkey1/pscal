@@ -1,0 +1,10 @@
+fn main() -> Void {
+    let sum: Int = 0;
+    for i in 0..5 {
+        sum = sum + i;
+    }
+    fx {
+        writeln(sum);
+    }
+    ret;
+}

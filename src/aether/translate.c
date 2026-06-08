@@ -94,6 +94,15 @@ static const char *mapTypeName(const char *typeName) {
     if (strcmp(typeName, "Void") == 0) {
         return "void";
     }
+    if (strcmp(typeName, "TOON") == 0) {
+        return "str";
+    }
+    if (strcmp(typeName, "ToonDoc") == 0) {
+        return "int";
+    }
+    if (strcmp(typeName, "ToonNode") == 0) {
+        return "int";
+    }
     return typeName;
 }
 
@@ -110,6 +119,13 @@ static int appendMappedType(Buffer *buf, const char *start, const char *end) {
 
 static const char *skipSpaces(const char *p) {
     while (p && (*p == ' ' || *p == '\t')) {
+        p++;
+    }
+    return p;
+}
+
+static const char *skipSpacesInRange(const char *p, const char *end) {
+    while (p && p < end && (*p == ' ' || *p == '\t')) {
         p++;
     }
     return p;
@@ -163,6 +179,269 @@ static const char *findSubstringInRange(const char *start, const char *end, cons
     return NULL;
 }
 
+static int startsWithWord(const char *body, const char *lineEnd, const char *word);
+
+static int isIdentifierChar(unsigned char ch) {
+    return isalnum(ch) || ch == '_';
+}
+
+static int bufferAppendEscapedStringLiteral(Buffer *buf, const char *text, size_t len) {
+    size_t i;
+
+    if (!buf || (!text && len > 0)) {
+        return 0;
+    }
+    if (!bufferAppend(buf, "\"")) {
+        return 0;
+    }
+    for (i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)text[i];
+
+        if (ch == '\\') {
+            if (!bufferAppend(buf, "\\\\")) {
+                return 0;
+            }
+        } else if (ch == '"') {
+            if (!bufferAppend(buf, "\\\"")) {
+                return 0;
+            }
+        } else if (ch == '\n') {
+            if (!bufferAppend(buf, "\\n")) {
+                return 0;
+            }
+        } else if (ch == '\r') {
+            if (!bufferAppend(buf, "\\r")) {
+                return 0;
+            }
+        } else if (ch == '\t') {
+            if (!bufferAppend(buf, "\\t")) {
+                return 0;
+            }
+        } else if (ch < 0x20) {
+            char escaped[7];
+
+            snprintf(escaped, sizeof(escaped), "\\u%04x", ch);
+            if (!bufferAppend(buf, escaped)) {
+                return 0;
+            }
+        } else {
+            if (!bufferAppendN(buf, (const char *)&text[i], 1)) {
+                return 0;
+            }
+        }
+    }
+    return bufferAppend(buf, "\"");
+}
+
+static const char *findToonMarker(const char *lineStart, const char *lineEnd) {
+    const char *cursor = lineStart;
+    int inString = 0;
+    char quote = '\0';
+
+    while (cursor + 5 <= lineEnd) {
+        if (!inString && cursor[0] == '/' && cursor + 1 < lineEnd && cursor[1] == '/') {
+            break;
+        }
+        if (inString) {
+            if (*cursor == '\\' && cursor + 1 < lineEnd) {
+                cursor += 2;
+                continue;
+            }
+            if (*cursor == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            inString = 1;
+            quote = *cursor;
+            cursor++;
+            continue;
+        }
+        if (strncmp(cursor, "toon:", 5) == 0 &&
+            (cursor == lineStart || !isIdentifierChar((unsigned char)cursor[-1])) &&
+            (cursor + 5 == lineEnd || isspace((unsigned char)cursor[5]) ||
+             cursor[5] == '/' || cursor[5] == ';')) {
+            return cursor;
+        }
+        cursor++;
+    }
+    return NULL;
+}
+
+static size_t leadingIndentWidth(const char *lineStart, const char *lineEnd) {
+    const char *cursor = lineStart;
+
+    while (cursor < lineEnd && (*cursor == ' ' || *cursor == '\t')) {
+        cursor++;
+    }
+    return (size_t)(cursor - lineStart);
+}
+
+static char *preprocessToonBlocks(const char *source, const char *path) {
+    const char *cursor = source;
+    Buffer out = {0};
+
+    if (!source) {
+        return NULL;
+    }
+
+    while (*cursor) {
+        const char *lineStart = cursor;
+        const char *lineEnd = cursor;
+        const char *toonMarker;
+
+        while (*lineEnd && *lineEnd != '\n') {
+            lineEnd++;
+        }
+
+        toonMarker = findToonMarker(lineStart, lineEnd);
+        if (!toonMarker) {
+            if (!bufferAppendN(&out, lineStart, (size_t)(lineEnd - lineStart))) {
+                free(out.data);
+                return NULL;
+            }
+            if (*lineEnd == '\n' && !bufferAppendN(&out, "\n", 1)) {
+                free(out.data);
+                return NULL;
+            }
+            cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+            continue;
+        }
+
+        {
+            const char *afterMarker = toonMarker + 5;
+            const char *scan = afterMarker;
+            const char *blockStart;
+            const char *blockCursor;
+            const char *blockEnd;
+            const char *lastContentEnd = NULL;
+            size_t markerIndent = leadingIndentWidth(lineStart, lineEnd);
+            size_t baseIndent = 0;
+            int sawContent = 0;
+            Buffer toonText = {0};
+
+            while (scan < lineEnd) {
+                if (*scan == '/' && scan + 1 < lineEnd && scan[1] == '/') {
+                    break;
+                }
+                if (!isspace((unsigned char)*scan)) {
+                    fprintf(stderr,
+                            "%s: Aether TOON rewrite error: only whitespace or comments may follow 'toon:'.\n",
+                            path ? path : "<aether>");
+                    free(out.data);
+                    return NULL;
+                }
+                scan++;
+            }
+
+            blockStart = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+            blockCursor = blockStart;
+
+            while (*blockCursor) {
+                const char *blockLineStart = blockCursor;
+                const char *blockLineEnd = blockCursor;
+                size_t blockIndent;
+                const char *trimmed;
+
+                while (*blockLineEnd && *blockLineEnd != '\n') {
+                    blockLineEnd++;
+                }
+                blockIndent = leadingIndentWidth(blockLineStart, blockLineEnd);
+                trimmed = blockLineStart + blockIndent;
+
+                if (trimmed >= blockLineEnd) {
+                    blockCursor = *blockLineEnd == '\n' ? blockLineEnd + 1 : blockLineEnd;
+                    continue;
+                }
+                if (blockIndent <= markerIndent) {
+                    break;
+                }
+                if (!sawContent || blockIndent < baseIndent) {
+                    baseIndent = blockIndent;
+                }
+                sawContent = 1;
+                lastContentEnd = *blockLineEnd == '\n' ? blockLineEnd + 1 : blockLineEnd;
+                blockCursor = *blockLineEnd == '\n' ? blockLineEnd + 1 : blockLineEnd;
+            }
+
+            if (!sawContent) {
+                fprintf(stderr,
+                        "%s: Aether TOON rewrite error: 'toon:' must be followed by an indented TOON block.\n",
+                        path ? path : "<aether>");
+                free(out.data);
+                return NULL;
+            }
+
+            blockEnd = lastContentEnd ? lastContentEnd : blockCursor;
+            blockCursor = blockStart;
+            while (blockCursor < blockEnd) {
+                const char *blockLineStart = blockCursor;
+                const char *blockLineEnd = blockCursor;
+                const char *nextBlockCursor;
+                size_t blockIndent;
+                const char *contentStart;
+
+                while (*blockLineEnd && *blockLineEnd != '\n') {
+                    blockLineEnd++;
+                }
+                nextBlockCursor = *blockLineEnd == '\n' ? blockLineEnd + 1 : blockLineEnd;
+                blockIndent = leadingIndentWidth(blockLineStart, blockLineEnd);
+                contentStart = blockLineStart;
+                if (blockIndent >= baseIndent) {
+                    contentStart = blockLineStart + baseIndent;
+                }
+                if (!bufferAppendN(&toonText, contentStart, (size_t)(blockLineEnd - contentStart))) {
+                    free(toonText.data);
+                    free(out.data);
+                    return NULL;
+                }
+                if (nextBlockCursor < blockEnd && *blockLineEnd == '\n' &&
+                    !bufferAppendN(&toonText, "\n", 1)) {
+                    free(toonText.data);
+                    free(out.data);
+                    return NULL;
+                }
+                blockCursor = nextBlockCursor;
+            }
+
+            if (!bufferAppendN(&out, lineStart, (size_t)(toonMarker - lineStart)) ||
+                !bufferAppendEscapedStringLiteral(&out, toonText.data, toonText.len) ||
+                !bufferAppend(&out, ";")) {
+                free(toonText.data);
+                free(out.data);
+                return NULL;
+            }
+            free(toonText.data);
+
+            if (*lineEnd == '\n' && !bufferAppendN(&out, "\n", 1)) {
+                free(out.data);
+                return NULL;
+            }
+
+            blockCursor = blockStart;
+            while (blockCursor < blockEnd) {
+                const char *blockLineEnd = blockCursor;
+
+                while (*blockLineEnd && *blockLineEnd != '\n') {
+                    blockLineEnd++;
+                }
+                if (*blockLineEnd == '\n' && !bufferAppendN(&out, "\n", 1)) {
+                    free(out.data);
+                    return NULL;
+                }
+                blockCursor = *blockLineEnd == '\n' ? blockLineEnd + 1 : blockLineEnd;
+            }
+
+            cursor = blockEnd;
+        }
+    }
+
+    return out.data;
+}
+
 typedef struct PendingContracts {
     char *preExpr;
     char *postExpr;
@@ -183,6 +462,27 @@ typedef struct ParBlockState {
     char *indent;
     Buffer joinLines;
 } ParBlockState;
+
+typedef struct TypeBlockState {
+    int active;
+    int bodyDepth;
+} TypeBlockState;
+
+typedef struct JsonAliasState {
+    int needed;
+    int alreadyImported;
+} JsonAliasState;
+
+typedef struct ToonLiteralBinding {
+    char *name;
+    char *literal;
+} ToonLiteralBinding;
+
+typedef struct ToonLiteralTable {
+    ToonLiteralBinding *items;
+    size_t count;
+    size_t cap;
+} ToonLiteralTable;
 
 static void freePendingContracts(PendingContracts *pending) {
     if (!pending) {
@@ -220,6 +520,552 @@ static void clearParBlockState(ParBlockState *state) {
     state->joinLines.data = NULL;
     state->joinLines.len = 0;
     state->joinLines.cap = 0;
+}
+
+static void clearTypeBlockState(TypeBlockState *state) {
+    if (!state) {
+        return;
+    }
+    state->active = 0;
+    state->bodyDepth = 0;
+}
+
+static void freeToonLiteralTable(ToonLiteralTable *table) {
+    size_t i;
+
+    if (!table) {
+        return;
+    }
+    for (i = 0; i < table->count; i++) {
+        free(table->items[i].name);
+        free(table->items[i].literal);
+    }
+    free(table->items);
+    table->items = NULL;
+    table->count = 0;
+    table->cap = 0;
+}
+
+static int ensureToonLiteralTable(ToonLiteralTable *table, size_t extra) {
+    ToonLiteralBinding *resized;
+    size_t need;
+    size_t newCap;
+
+    if (!table) {
+        return 0;
+    }
+    need = table->count + extra;
+    if (need <= table->cap) {
+        return 1;
+    }
+    newCap = table->cap ? table->cap * 2 : 8;
+    while (newCap < need) {
+        newCap *= 2;
+    }
+    resized = (ToonLiteralBinding *)realloc(table->items, newCap * sizeof(ToonLiteralBinding));
+    if (!resized) {
+        return 0;
+    }
+    table->items = resized;
+    table->cap = newCap;
+    return 1;
+}
+
+static int setToonLiteralBinding(ToonLiteralTable *table, const char *name, const char *literal) {
+    size_t i;
+    char *nameCopy;
+    char *literalCopy;
+
+    if (!table || !name || !literal) {
+        return 0;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].name, name) == 0) {
+            literalCopy = dupRange(literal, literal + strlen(literal));
+            if (!literalCopy) {
+                return 0;
+            }
+            free(table->items[i].literal);
+            table->items[i].literal = literalCopy;
+            return 1;
+        }
+    }
+    if (!ensureToonLiteralTable(table, 1)) {
+        return 0;
+    }
+    nameCopy = dupRange(name, name + strlen(name));
+    literalCopy = dupRange(literal, literal + strlen(literal));
+    if (!nameCopy || !literalCopy) {
+        free(nameCopy);
+        free(literalCopy);
+        return 0;
+    }
+    table->items[table->count].name = nameCopy;
+    table->items[table->count].literal = literalCopy;
+    table->count++;
+    return 1;
+}
+
+static const char *findToonLiteralBinding(const ToonLiteralTable *table, const char *name, size_t len) {
+    size_t i;
+
+    if (!table || !name) {
+        return NULL;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strlen(table->items[i].name) == len &&
+            strncmp(table->items[i].name, name, len) == 0) {
+            return table->items[i].literal;
+        }
+    }
+    return NULL;
+}
+
+static void clearToonLiteralBinding(ToonLiteralTable *table, const char *name, size_t len) {
+    size_t i;
+
+    if (!table || !name) {
+        return;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strlen(table->items[i].name) == len &&
+            strncmp(table->items[i].name, name, len) == 0) {
+            free(table->items[i].name);
+            free(table->items[i].literal);
+            if (i + 1 < table->count) {
+                memmove(&table->items[i],
+                        &table->items[i + 1],
+                        (table->count - i - 1) * sizeof(ToonLiteralBinding));
+            }
+            table->count--;
+            return;
+        }
+    }
+}
+
+static int isSupportedToonBindingType(const char *typeStart, const char *typeEnd) {
+    size_t len;
+
+    if (!typeStart || !typeEnd || typeEnd < typeStart) {
+        return 0;
+    }
+    while (typeStart < typeEnd && isspace((unsigned char)*typeStart)) {
+        typeStart++;
+    }
+    while (typeEnd > typeStart && isspace((unsigned char)typeEnd[-1])) {
+        typeEnd--;
+    }
+    len = (size_t)(typeEnd - typeStart);
+    return (len == 4 && strncmp(typeStart, "TOON", len) == 0) ||
+           (len == 4 && strncmp(typeStart, "Text", len) == 0);
+}
+
+static void maybeRecordToonLiteralBinding(ToonLiteralTable *table, const char *body, const char *lineEnd) {
+    const char *cursor;
+    const char *nameStart;
+    const char *nameEnd;
+    const char *equals;
+    const char *valueStart;
+    const char *valueEnd;
+    const char *aliasLiteral = NULL;
+    char *name = NULL;
+    char *literal = NULL;
+
+    if (!table || !body || !lineEnd) {
+        return;
+    }
+    if (!(startsWithWord(body, lineEnd, "let") || startsWithWord(body, lineEnd, "const"))) {
+        return;
+    }
+    cursor = body + (startsWithWord(body, lineEnd, "const") ? 5 : 3);
+    cursor = skipSpacesInRange(cursor, lineEnd);
+    nameStart = cursor;
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    cursor = skipSpacesInRange(cursor, lineEnd);
+    if (cursor >= lineEnd || *cursor != ':') {
+        return;
+    }
+    equals = cursor + 1;
+    while (equals < lineEnd && *equals != '=') {
+        equals++;
+    }
+    if (equals >= lineEnd || *equals != '=') {
+        return;
+    }
+    if (!isSupportedToonBindingType(cursor + 1, equals)) {
+        return;
+    }
+    valueStart = skipSpacesInRange(equals + 1, lineEnd);
+    valueEnd = lineEnd;
+    while (valueEnd > valueStart && isspace((unsigned char)valueEnd[-1])) {
+        valueEnd--;
+    }
+    if (valueEnd > valueStart && valueEnd[-1] == ';') {
+        valueEnd--;
+    }
+    while (valueEnd > valueStart && isspace((unsigned char)valueEnd[-1])) {
+        valueEnd--;
+    }
+    name = trimmedCopy(nameStart, nameEnd);
+    if (!name) {
+        return;
+    }
+    if (valueEnd > valueStart && *valueStart == '"' && valueEnd[-1] == '"') {
+        literal = dupRange(valueStart, valueEnd);
+        if (!literal || !setToonLiteralBinding(table, name, literal)) {
+            free(name);
+            free(literal);
+            return;
+        }
+        free(name);
+        free(literal);
+        return;
+    }
+    if (valueEnd > valueStart &&
+        (isalpha((unsigned char)*valueStart) || *valueStart == '_')) {
+        const char *aliasEnd = valueStart;
+
+        while (aliasEnd < valueEnd && (isalnum((unsigned char)*aliasEnd) || *aliasEnd == '_')) {
+            aliasEnd++;
+        }
+        if (aliasEnd == valueEnd) {
+            aliasLiteral = findToonLiteralBinding(table,
+                                                 valueStart,
+                                                 (size_t)(valueEnd - valueStart));
+        }
+    }
+    if (aliasLiteral && setToonLiteralBinding(table, name, aliasLiteral)) {
+        free(name);
+        return;
+    }
+    clearToonLiteralBinding(table, name, strlen(name));
+    free(name);
+}
+
+static int appendJsonAliasReplacement(Buffer *out,
+                                      const char *nameStart,
+                                      size_t nameLen,
+                                      JsonAliasState *jsonState) {
+    if (!out || !nameStart || nameLen == 0) {
+        return 0;
+    }
+
+    if (nameLen == 15 && strncmp(nameStart, "toon_parse_file", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonReadFile");
+    }
+    if (nameLen == 10 && strncmp(nameStart, "toon_parse", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonRead");
+    }
+    if (nameLen == 9 && strncmp(nameStart, "toon_root", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetRoot");
+    }
+    if (nameLen == 10 && strncmp(nameStart, "toon_close", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonDocFree");
+    }
+    if (nameLen == 8 && strncmp(nameStart, "toon_key", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetKey");
+    }
+    if (nameLen == 7 && strncmp(nameStart, "toon_at", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetIndex");
+    }
+    if (nameLen == 8 && strncmp(nameStart, "toon_len", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetLength");
+    }
+    if (nameLen == 9 && strncmp(nameStart, "toon_free", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonFreeValue");
+    }
+    if (nameLen == 15 && strncmp(nameStart, "toon_text_value", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetString");
+    }
+    if (nameLen == 14 && strncmp(nameStart, "toon_int_value", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetInt");
+    }
+    if (nameLen == 15 && strncmp(nameStart, "toon_real_value", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetNumber");
+    }
+    if (nameLen == 15 && strncmp(nameStart, "toon_bool_value", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonGetBool");
+    }
+    if (nameLen == 15 && strncmp(nameStart, "toon_null_value", nameLen) == 0) {
+        jsonState->needed = 1;
+        return bufferAppend(out, "YyjsonIsNull");
+    }
+    return 0;
+}
+
+static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t nameLen) {
+    if (!out || !nameStart || nameLen == 0) {
+        return 0;
+    }
+    if (nameLen == 7 && strncmp(nameStart, "println", nameLen) == 0) {
+        return bufferAppend(out, "writeln");
+    }
+    if (nameLen == 5 && strncmp(nameStart, "print", nameLen) == 0) {
+        return bufferAppend(out, "write");
+    }
+    return 0;
+}
+
+static int appendAetherCapabilityAlias(Buffer *out,
+                                       const char *nameStart,
+                                       size_t nameLen,
+                                       const char *openParen,
+                                       const char **outCursor) {
+    const char *closeParen;
+
+    if (!out || !nameStart || !openParen || *openParen != '(' || !outCursor) {
+        return 0;
+    }
+    closeParen = skipSpaces(openParen + 1);
+    if (nameLen == 8 && strncmp(nameStart, "has_toon", nameLen) == 0) {
+        if (*closeParen != ')') {
+            return 0;
+        }
+        if (!bufferAppend(out, "hasextbuiltin(\"yyjson\", \"YyjsonRead\")")) {
+            return 0;
+        }
+        *outCursor = closeParen + 1;
+        return 1;
+    }
+    if (nameLen == 11 && strncmp(nameStart, "has_builtin", nameLen) == 0) {
+        return 0;
+    }
+    return 0;
+}
+
+static const char *toonScalarGetterForName(const char *nameStart, size_t nameLen) {
+    if (nameLen == 13 && strncmp(nameStart, "toon_get_text", nameLen) == 0) {
+        return "YyjsonGetString";
+    }
+    if (nameLen == 12 && strncmp(nameStart, "toon_get_int", nameLen) == 0) {
+        return "YyjsonGetInt";
+    }
+    if (nameLen == 13 && strncmp(nameStart, "toon_get_real", nameLen) == 0) {
+        return "YyjsonGetNumber";
+    }
+    if (nameLen == 13 && strncmp(nameStart, "toon_get_bool", nameLen) == 0) {
+        return "YyjsonGetBool";
+    }
+    return NULL;
+}
+
+static int appendTrimmedRange(Buffer *out, const char *start, const char *end) {
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    return bufferAppendN(out, start, (size_t)(end - start));
+}
+
+static int appendToonScalarAlias(Buffer *out,
+                                 const char *nameStart,
+                                 size_t nameLen,
+                                 const char *openParen,
+                                 const char **outCursor,
+                                 JsonAliasState *jsonState) {
+    const char *getter = toonScalarGetterForName(nameStart, nameLen);
+    const char *cursor;
+    const char *arg1Start;
+    const char *arg1End = NULL;
+    const char *arg2Start = NULL;
+    const char *arg2End = NULL;
+    int depth = 0;
+    int inString = 0;
+    char quote = '\0';
+
+    if (!getter || !openParen || *openParen != '(' || !outCursor) {
+        return 0;
+    }
+    cursor = openParen + 1;
+    arg1Start = cursor;
+    while (*cursor) {
+        if (inString) {
+            if (*cursor == '\\' && cursor[1] != '\0') {
+                cursor += 2;
+                continue;
+            }
+            if (*cursor == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            inString = 1;
+            quote = *cursor;
+            cursor++;
+            continue;
+        }
+        if (*cursor == '(' || *cursor == '[' || *cursor == '{') {
+            depth++;
+        } else if (*cursor == ')' || *cursor == ']' || *cursor == '}') {
+            if (depth == 0) {
+                if (!arg1End || !arg2Start) {
+                    return 0;
+                }
+                arg2End = cursor;
+                break;
+            }
+            depth--;
+        } else if (*cursor == ',' && depth == 0 && !arg1End) {
+            arg1End = cursor;
+            arg2Start = cursor + 1;
+        }
+        cursor++;
+    }
+    if (!arg1End || !arg2Start || !arg2End) {
+        return 0;
+    }
+    jsonState->needed = 1;
+    if (!bufferAppend(out, getter) ||
+        !bufferAppend(out, "(YyjsonGetKey(") ||
+        !appendTrimmedRange(out, arg1Start, arg1End) ||
+        !bufferAppend(out, ", ") ||
+        !appendTrimmedRange(out, arg2Start, arg2End) ||
+        !bufferAppend(out, "))")) {
+        return 0;
+    }
+    *outCursor = cursor + 1;
+    return 1;
+}
+
+static char *applyJsonAliasesToLine(const char *line,
+                                    JsonAliasState *jsonState,
+                                    const ToonLiteralTable *toonTable) {
+    const char *cursor = line;
+    Buffer out = {0};
+
+    if (!line || !jsonState) {
+        return line ? dupRange(line, line + strlen(line)) : NULL;
+    }
+    if (*line == '\0') {
+        return dupRange(line, line);
+    }
+
+    while (*cursor) {
+        if ((cursor == line || !(isalnum((unsigned char)cursor[-1]) || cursor[-1] == '_')) &&
+            ((strncmp(cursor, "toon_parse", 10) == 0 &&
+              !(isalnum((unsigned char)cursor[10]) || cursor[10] == '_')) ||
+             (strncmp(cursor, "YyjsonRead", 10) == 0 &&
+              !(isalnum((unsigned char)cursor[10]) || cursor[10] == '_')))) {
+            const char *nameEnd = cursor + 10;
+            const char *openParen = skipSpaces(nameEnd);
+
+            if (*openParen == '(') {
+                const char *argStart = skipSpaces(openParen + 1);
+                const char *argEnd = argStart;
+                const char *literal = NULL;
+                const char *closeParen;
+
+                while (*argEnd && (isalnum((unsigned char)*argEnd) || *argEnd == '_')) {
+                    argEnd++;
+                }
+                literal = findToonLiteralBinding(toonTable, argStart, (size_t)(argEnd - argStart));
+                closeParen = skipSpaces(argEnd);
+                if (literal && *closeParen == ')') {
+                    jsonState->needed = 1;
+                    if (!bufferAppend(&out, "YyjsonRead(") ||
+                        !bufferAppend(&out, literal) ||
+                        !bufferAppend(&out, ")")) {
+                        free(out.data);
+                        return NULL;
+                    }
+                    cursor = closeParen + 1;
+                    continue;
+                }
+            }
+        }
+        if ((cursor == line || !(isalnum((unsigned char)cursor[-1]) || cursor[-1] == '_')) &&
+            isalpha((unsigned char)*cursor)) {
+            const char *nameStart = cursor;
+            const char *nameEnd = cursor + 1;
+            const char *afterName;
+            const char *advancedCursor = NULL;
+
+            while (*nameEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+                nameEnd++;
+            }
+            afterName = skipSpaces(nameEnd);
+            if (*afterName == '(' &&
+                appendAetherCapabilityAlias(&out,
+                                            nameStart,
+                                            (size_t)(nameEnd - nameStart),
+                                            afterName,
+                                            &advancedCursor)) {
+                cursor = advancedCursor;
+                continue;
+            }
+            if (*afterName == '(' &&
+                appendToonScalarAlias(&out,
+                                      nameStart,
+                                      (size_t)(nameEnd - nameStart),
+                                      afterName,
+                                      &advancedCursor,
+                                      jsonState)) {
+                cursor = advancedCursor;
+                continue;
+            }
+            if (*afterName == '(' &&
+                appendAetherBuiltinAlias(&out, nameStart, (size_t)(nameEnd - nameStart))) {
+                cursor = nameEnd;
+                continue;
+            }
+            if (*afterName == '(' &&
+                appendJsonAliasReplacement(&out, nameStart, (size_t)(nameEnd - nameStart), jsonState)) {
+                cursor = nameEnd;
+                continue;
+            }
+        }
+        if ((cursor == line || !(isalnum((unsigned char)cursor[-1]) || cursor[-1] == '_')) &&
+            strncmp(cursor, "YyjsonRead(", 11) == 0) {
+            const char *argStart = skipSpaces(cursor + 11);
+            const char *argEnd = argStart;
+            const char *literal = NULL;
+
+            while (*argEnd && (isalnum((unsigned char)*argEnd) || *argEnd == '_')) {
+                argEnd++;
+            }
+            literal = findToonLiteralBinding(toonTable, argStart, (size_t)(argEnd - argStart));
+            if (literal) {
+                const char *afterArg = skipSpaces(argEnd);
+                if (*afterArg == ')') {
+                    if (!bufferAppend(&out, "YyjsonRead(") ||
+                        !bufferAppend(&out, literal) ||
+                        !bufferAppend(&out, ")")) {
+                        free(out.data);
+                        return NULL;
+                    }
+                    cursor = afterArg + 1;
+                    continue;
+                }
+            }
+        }
+        if (!bufferAppendN(&out, cursor, 1)) {
+            free(out.data);
+            return NULL;
+        }
+        cursor++;
+    }
+
+    return out.data;
 }
 
 static int isLineComment(const char *body, const char *lineEnd) {
@@ -653,6 +1499,7 @@ static char *translateTypedDeclLine(const char *lineStart, const char *body, con
     const char *colon;
     const char *afterColon;
     const char *typeEnd;
+    const char *equals = NULL;
     Buffer out = {0};
 
     cursor = skipSpaces(cursor);
@@ -674,10 +1521,135 @@ static char *translateTypedDeclLine(const char *lineStart, const char *body, con
     while (typeEnd > afterColon && isspace((unsigned char)typeEnd[-1])) {
         typeEnd--;
     }
+    equals = skipSpaces(typeEnd);
 
     if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart))) {
         free(out.data);
         return NULL;
+    }
+    if (!isConst && equals < lineEnd && *equals == '=') {
+        const char *exprStart = skipSpaces(equals + 1);
+        const char *typeNameStart = afterColon;
+        const char *typeNameEnd = typeEnd;
+        const char *initNameEnd = exprStart;
+        const char *openBrace;
+        const char *closeBrace;
+        const char *indentEnd = body;
+        Buffer initOut = {0};
+        int typeMatches = 0;
+
+        while (typeNameStart < typeNameEnd && isspace((unsigned char)*typeNameStart)) {
+            typeNameStart++;
+        }
+        while (typeNameEnd > typeNameStart && isspace((unsigned char)typeNameEnd[-1])) {
+            typeNameEnd--;
+        }
+        while (initNameEnd < lineEnd && (isalnum((unsigned char)*initNameEnd) || *initNameEnd == '_')) {
+            initNameEnd++;
+        }
+        openBrace = skipSpaces(initNameEnd);
+        closeBrace = lineEnd;
+        while (closeBrace > exprStart && isspace((unsigned char)closeBrace[-1])) {
+            closeBrace--;
+        }
+        if (closeBrace > exprStart && closeBrace[-1] == ';') {
+            closeBrace--;
+        }
+        while (closeBrace > exprStart && isspace((unsigned char)closeBrace[-1])) {
+            closeBrace--;
+        }
+        if (openBrace < lineEnd && *openBrace == '{' &&
+            closeBrace > openBrace && closeBrace[-1] == '}') {
+            typeMatches = ((size_t)(typeNameEnd - typeNameStart) == (size_t)(initNameEnd - exprStart) &&
+                           strncmp(typeNameStart, exprStart, (size_t)(typeNameEnd - typeNameStart)) == 0);
+        }
+        if (typeMatches) {
+            const char *entryCursor = openBrace + 1;
+
+            if (!appendMappedType(&initOut, afterColon, typeEnd) ||
+                !bufferAppend(&initOut, " ") ||
+                !bufferAppendN(&initOut, nameStart, (size_t)(nameEnd - nameStart)) ||
+                !bufferAppend(&initOut, " = new ") ||
+                !bufferAppendN(&initOut, exprStart, (size_t)(initNameEnd - exprStart)) ||
+                !bufferAppend(&initOut, "();")) {
+                free(initOut.data);
+                free(out.data);
+                return NULL;
+            }
+            while (entryCursor < closeBrace - 1) {
+                const char *segmentStart;
+                const char *segmentEnd;
+                const char *fieldEnd;
+                const char *fieldNameEnd;
+                const char *valueStart;
+                const char *valueEnd;
+                int depth = 0;
+
+                while (entryCursor < closeBrace - 1 &&
+                       (isspace((unsigned char)*entryCursor) || *entryCursor == ',')) {
+                    entryCursor++;
+                }
+                if (entryCursor >= closeBrace - 1) {
+                    break;
+                }
+                segmentStart = entryCursor;
+                segmentEnd = segmentStart;
+                fieldEnd = NULL;
+                while (segmentEnd < closeBrace - 1) {
+                    char ch = *segmentEnd;
+
+                    if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+                        depth++;
+                    } else if (ch == ')' || ch == ']' || ch == '}' || ch == '>') {
+                        if (depth > 0) {
+                            depth--;
+                        }
+                    } else if (ch == ':' && depth == 0 && !fieldEnd) {
+                        fieldEnd = segmentEnd;
+                    } else if (ch == ',' && depth == 0) {
+                        break;
+                    }
+                    segmentEnd++;
+                }
+                if (!fieldEnd) {
+                    free(initOut.data);
+                    free(out.data);
+                    return dupRange(lineStart, lineEnd);
+                }
+                fieldNameEnd = fieldEnd;
+                while (fieldNameEnd > segmentStart && isspace((unsigned char)fieldNameEnd[-1])) {
+                    fieldNameEnd--;
+                }
+                valueStart = skipSpaces(fieldEnd + 1);
+                valueEnd = segmentEnd;
+                while (valueEnd > valueStart && isspace((unsigned char)valueEnd[-1])) {
+                    valueEnd--;
+                }
+                if (fieldNameEnd == segmentStart || valueEnd == valueStart) {
+                    free(initOut.data);
+                    free(out.data);
+                    return dupRange(lineStart, lineEnd);
+                }
+                if (!bufferAppend(&initOut, "\n") ||
+                    !bufferAppendN(&initOut, lineStart, (size_t)(indentEnd - lineStart)) ||
+                    !bufferAppendN(&initOut, nameStart, (size_t)(nameEnd - nameStart)) ||
+                    !bufferAppend(&initOut, ".") ||
+                    !bufferAppendN(&initOut, segmentStart, (size_t)(fieldNameEnd - segmentStart)) ||
+                    !bufferAppend(&initOut, " = ") ||
+                    !bufferAppendN(&initOut, valueStart, (size_t)(valueEnd - valueStart)) ||
+                    !bufferAppend(&initOut, ";")) {
+                    free(initOut.data);
+                    free(out.data);
+                    return NULL;
+                }
+                entryCursor = segmentEnd;
+                if (entryCursor < closeBrace - 1 && *entryCursor == ',') {
+                    entryCursor++;
+                }
+            }
+            free(out.data);
+            return initOut.data;
+        }
     }
     if (isConst && !bufferAppend(&out, "const ")) {
         free(out.data);
@@ -735,7 +1707,185 @@ static char *translateConditionLine(const char *lineStart,
     return out.data;
 }
 
-static char *translateLine(const char *lineStart, const char *lineEnd) {
+static char *translateForRangeLine(const char *lineStart, const char *body, const char *lineEnd) {
+    const char *nameStart = body + 3;
+    const char *nameEnd;
+    const char *inKw;
+    const char *exprStart;
+    const char *rangeOp = NULL;
+    const char *exprEnd;
+    const char *brace;
+    const char *endExprStart;
+    const char *endExprEnd;
+    const char *scan;
+    int depth = 0;
+    Buffer out = {0};
+
+    nameStart = skipSpaces(nameStart);
+    nameEnd = nameStart;
+    while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    inKw = skipSpaces(nameEnd);
+    if (!startsWithWord(inKw, lineEnd, "in")) {
+        return dupRange(lineStart, lineEnd);
+    }
+    exprStart = skipSpaces(inKw + 2);
+    brace = findLastCharInRange(exprStart, lineEnd, '{');
+    if (!brace) {
+        return dupRange(lineStart, lineEnd);
+    }
+
+    scan = exprStart;
+    while (scan < brace) {
+        if (*scan == '"' || *scan == '\'') {
+            char quote = *scan++;
+            while (scan < brace) {
+                if (*scan == '\\' && scan + 1 < brace) {
+                    scan += 2;
+                    continue;
+                }
+                if (*scan == quote) {
+                    scan++;
+                    break;
+                }
+                scan++;
+            }
+            continue;
+        }
+        if (*scan == '(' || *scan == '[' || *scan == '{') {
+            depth++;
+        } else if ((*scan == ')' || *scan == ']' || *scan == '}') && depth > 0) {
+            depth--;
+        } else if (*scan == '.' && scan + 1 < brace && scan[1] == '.' && depth == 0) {
+            rangeOp = scan;
+            break;
+        }
+        scan++;
+    }
+    if (!rangeOp) {
+        return dupRange(lineStart, lineEnd);
+    }
+    exprEnd = rangeOp;
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    endExprStart = rangeOp + 2;
+    while (endExprStart < brace && isspace((unsigned char)*endExprStart)) {
+        endExprStart++;
+    }
+    endExprEnd = brace;
+    while (endExprEnd > endExprStart && isspace((unsigned char)endExprEnd[-1])) {
+        endExprEnd--;
+    }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "for (int ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " = ") ||
+        !bufferAppendN(&out, exprStart, (size_t)(exprEnd - exprStart)) ||
+        !bufferAppend(&out, "; ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " < ") ||
+        !bufferAppendN(&out, endExprStart, (size_t)(endExprEnd - endExprStart)) ||
+        !bufferAppend(&out, "; ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " = ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " + 1)") ||
+        !bufferAppendN(&out, brace, (size_t)(lineEnd - brace))) {
+        free(out.data);
+        return NULL;
+    }
+
+    return out.data;
+}
+
+static char *translateExportLine(const char *lineStart, const char *body, const char *lineEnd) {
+    const char *rest = skipSpaces(body + 6);
+    char *translatedRest = NULL;
+    Buffer out = {0};
+
+    if (rest >= lineEnd) {
+        return dupRange(lineStart, lineEnd);
+    }
+    if (strncmp(rest, "fn ", 3) == 0) {
+        translatedRest = translateFnLine(rest, rest, lineEnd);
+    } else if (strncmp(rest, "let ", 4) == 0 && memchr(rest, ':', (size_t)(lineEnd - rest))) {
+        translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 0);
+    } else if (strncmp(rest, "const ", 6) == 0 && memchr(rest, ':', (size_t)(lineEnd - rest))) {
+        translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 1);
+    } else {
+        return dupRange(lineStart, lineEnd);
+    }
+    if (!translatedRest) {
+        return NULL;
+    }
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "export ") ||
+        !bufferAppend(&out, translatedRest)) {
+        free(translatedRest);
+        free(out.data);
+        return NULL;
+    }
+    free(translatedRest);
+    return out.data;
+}
+
+static char *translateTypeLine(const char *lineStart, const char *body, const char *lineEnd) {
+    Buffer out = {0};
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "class ") ||
+        !bufferAppendN(&out, body + 5, (size_t)(lineEnd - (body + 5)))) {
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
+}
+
+static char *translateTypeFieldLine(const char *lineStart, const char *body, const char *lineEnd) {
+    const char *nameStart = body;
+    const char *nameEnd = body;
+    const char *colon;
+    const char *typeStart;
+    const char *typeEnd;
+    Buffer out = {0};
+
+    while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    if (nameEnd == nameStart) {
+        return dupRange(lineStart, lineEnd);
+    }
+    colon = skipSpaces(nameEnd);
+    if (colon >= lineEnd || *colon != ':') {
+        return dupRange(lineStart, lineEnd);
+    }
+    typeStart = skipSpaces(colon + 1);
+    typeEnd = typeStart;
+    while (typeEnd < lineEnd && *typeEnd != ';') {
+        typeEnd++;
+    }
+    while (typeEnd > typeStart && isspace((unsigned char)typeEnd[-1])) {
+        typeEnd--;
+    }
+    if (typeEnd == typeStart || (typeEnd < lineEnd && *typeEnd != ';' && lineEnd[-1] != ';')) {
+        return dupRange(lineStart, lineEnd);
+    }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !appendMappedType(&out, typeStart, typeEnd) ||
+        !bufferAppend(&out, " ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, ";")) {
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
+}
+
+static char *translateLine(const char *lineStart, const char *lineEnd, JsonAliasState *jsonState) {
     const char *body = lineStart;
     Buffer out = {0};
 
@@ -757,6 +1907,9 @@ static char *translateLine(const char *lineStart, const char *lineEnd) {
             return NULL;
         }
         return out.data;
+    }
+    if (strncmp(body, "export ", 7) == 0) {
+        return translateExportLine(lineStart, body, lineEnd);
     }
     if (strncmp(body, "fn ", 3) == 0) {
         return translateFnLine(lineStart, body, lineEnd);
@@ -785,8 +1938,14 @@ static char *translateLine(const char *lineStart, const char *lineEnd) {
         }
         return out.data;
     }
+    if (strncmp(body, "type ", 5) == 0) {
+        return translateTypeLine(lineStart, body, lineEnd);
+    }
     if (strncmp(body, "if ", 3) == 0) {
         return translateConditionLine(lineStart, body, lineEnd, "if");
+    }
+    if (strncmp(body, "for ", 4) == 0) {
+        return translateForRangeLine(lineStart, body, lineEnd);
     }
     if (strncmp(body, "while ", 6) == 0) {
         return translateConditionLine(lineStart, body, lineEnd, "while");
@@ -818,6 +1977,50 @@ static char *translateLine(const char *lineStart, const char *lineEnd) {
             body += 3;
             continue;
         }
+        if ((body == lineStart || !(isalnum((unsigned char)body[-1]) || body[-1] == '_')) &&
+            (size_t)(lineEnd - body) >= 4 &&
+            strncmp(body, "self", 4) == 0 &&
+            (body + 4 == lineEnd || !(isalnum((unsigned char)body[4]) || body[4] == '_'))) {
+            if (!bufferAppend(&out, "myself")) {
+                free(out.data);
+                return NULL;
+            }
+            body += 4;
+            continue;
+        }
+        if ((body == lineStart || !(isalnum((unsigned char)body[-1]) || body[-1] == '_')) &&
+            isalpha((unsigned char)*body)) {
+            const char *nameStart = body;
+            const char *nameEnd = body + 1;
+            const char *advancedCursor = NULL;
+
+            while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+                nameEnd++;
+            }
+            if (nameEnd < lineEnd &&
+                *skipSpacesInRange(nameEnd, lineEnd) == '(' &&
+                appendAetherCapabilityAlias(&out,
+                                            nameStart,
+                                            (size_t)(nameEnd - nameStart),
+                                            skipSpacesInRange(nameEnd, lineEnd),
+                                            &advancedCursor)) {
+                body = advancedCursor;
+                continue;
+            }
+            if (nameEnd < lineEnd &&
+                *skipSpacesInRange(nameEnd, lineEnd) == '(' &&
+                appendAetherBuiltinAlias(&out, nameStart, (size_t)(nameEnd - nameStart))) {
+                body = nameEnd;
+                continue;
+            }
+            if (jsonState &&
+                nameEnd < lineEnd &&
+                *skipSpacesInRange(nameEnd, lineEnd) == '(' &&
+                appendJsonAliasReplacement(&out, nameStart, (size_t)(nameEnd - nameStart), jsonState)) {
+                body = nameEnd;
+                continue;
+            }
+        }
         if (!bufferAppendN(&out, body, 1)) {
             free(out.data);
             return NULL;
@@ -829,17 +2032,26 @@ static char *translateLine(const char *lineStart, const char *lineEnd) {
 }
 
 char *aetherRewriteSource(const char *source, const char *path) {
-    const char *cursor = source;
+    char *preprocessed = NULL;
+    const char *cursor;
     Buffer out = {0};
     PendingContracts pending = {0};
     FunctionContracts fnState = {0};
     ParBlockState parState = {0};
+    TypeBlockState typeState = {0};
+    JsonAliasState jsonState = {0};
+    ToonLiteralTable toonTable = {0};
     int braceDepth = 0;
     (void)path;
 
     if (!source) {
         return NULL;
     }
+    preprocessed = preprocessToonBlocks(source, path);
+    if (!preprocessed) {
+        return NULL;
+    }
+    cursor = preprocessed;
 
     while (*cursor) {
         const char *lineStart = cursor;
@@ -857,6 +2069,8 @@ char *aetherRewriteSource(const char *source, const char *path) {
             body++;
         }
 
+        maybeRecordToonLiteralBinding(&toonTable, body, lineEnd);
+
         if (fnState.active && fnState.postExpr && braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
                 char *indent = dupRange(lineStart, body);
@@ -864,6 +2078,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
@@ -872,6 +2089,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
@@ -895,6 +2115,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
@@ -903,6 +2126,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
@@ -937,28 +2163,74 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
                 translated = parOpen.data;
             } else if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
                 translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState);
+            } else if (typeState.active &&
+                       !startsWithWord(body, lineEnd, "fn") &&
+                       !startsWithWord(body, lineEnd, "@pre") &&
+                       !startsWithWord(body, lineEnd, "@post") &&
+                       !startsWithWord(body, lineEnd, "@pure") &&
+                       !startsWithWord(body, lineEnd, "@cost") &&
+                       !startsWithWord(body, lineEnd, "if") &&
+                       !startsWithWord(body, lineEnd, "while") &&
+                       !startsWithWord(body, lineEnd, "for") &&
+                       !startsWithWord(body, lineEnd, "let") &&
+                       !startsWithWord(body, lineEnd, "const") &&
+                       !startsWithWord(body, lineEnd, "ret") &&
+                       !startsWithWord(body, lineEnd, "fx") &&
+                       !startsWithWord(body, lineEnd, "par") &&
+                       !startsWithWord(body, lineEnd, "type") &&
+                       !startsWithWord(body, lineEnd, "mod") &&
+                       !startsWithWord(body, lineEnd, "use") &&
+                       !startsWithWord(body, lineEnd, "export") &&
+                       !isStandaloneCloseBrace(body, lineEnd) &&
+                       !isLineComment(body, lineEnd)) {
+                translated = translateTypeFieldLine(lineStart, body, lineEnd);
             } else {
-                translated = translateLine(lineStart, lineEnd);
+                translated = translateLine(lineStart, lineEnd, &jsonState);
             }
         }
         if (!translated) {
             freePendingContracts(&pending);
             clearFunctionContracts(&fnState);
             clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeToonLiteralTable(&toonTable);
+            free(preprocessed);
             free(out.data);
             return NULL;
+        }
+        {
+            char *aliased = applyJsonAliasesToLine(translated, &jsonState, &toonTable);
+            if (!aliased) {
+                free(translated);
+                freePendingContracts(&pending);
+                clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeToonLiteralTable(&toonTable);
+                free(preprocessed);
+                free(out.data);
+                return NULL;
+            }
+            free(translated);
+            translated = aliased;
         }
         if (!bufferAppend(&out, translated)) {
             free(translated);
             freePendingContracts(&pending);
             clearFunctionContracts(&fnState);
             clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeToonLiteralTable(&toonTable);
+            free(preprocessed);
             free(out.data);
             return NULL;
         }
@@ -975,6 +2247,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 freePendingContracts(&pending);
                 clearFunctionContracts(&fnState);
                 clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeToonLiteralTable(&toonTable);
+                free(preprocessed);
                 free(out.data);
                 return NULL;
             }
@@ -1002,6 +2277,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
@@ -1014,6 +2292,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
                     clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeToonLiteralTable(&toonTable);
+                    free(preprocessed);
                     free(out.data);
                     return NULL;
                 }
@@ -1040,10 +2321,19 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 freePendingContracts(&pending);
                 clearFunctionContracts(&fnState);
                 clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeToonLiteralTable(&toonTable);
+                free(preprocessed);
                 free(out.data);
                 return NULL;
             }
             lineEnd++;
+        }
+
+        if (startsWithWord(body, lineEnd, "type") && lineDelta > 0) {
+            clearTypeBlockState(&typeState);
+            typeState.active = 1;
+            typeState.bodyDepth = braceDepth + lineDelta;
         }
         braceDepth += lineDelta;
         if (fnState.active && braceDepth < fnState.bodyDepth) {
@@ -1052,11 +2342,17 @@ char *aetherRewriteSource(const char *source, const char *path) {
         if (parState.active && braceDepth < parState.bodyDepth) {
             clearParBlockState(&parState);
         }
+        if (typeState.active && braceDepth < typeState.bodyDepth) {
+            clearTypeBlockState(&typeState);
+        }
         cursor = lineEnd;
     }
 
     freePendingContracts(&pending);
     clearFunctionContracts(&fnState);
     clearParBlockState(&parState);
+    clearTypeBlockState(&typeState);
+    freeToonLiteralTable(&toonTable);
+    free(preprocessed);
     return out.data;
 }

@@ -1,0 +1,25 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"users\":[{\"name\":\"Ada\"},{\"name\":\"Bob\"}],\"count\":2}");
+    let root: ToonNode = toon_root(doc);
+    let users: ToonNode = toon_key(root, "users");
+    let first: ToonNode = toon_at(users, 0);
+    let name: ToonNode = toon_key(first, "name");
+
+    fx {
+        println("first = ", toon_text_value(name));
+        println("count = ", toon_get_int(root, "count"));
+    }
+
+    toon_free(name);
+    toon_free(first);
+    toon_free(users);
+    toon_close(doc);
+    ret;
+}

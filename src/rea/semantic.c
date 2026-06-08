@@ -4,6 +4,7 @@
 #include "core/types.h"
 #include "core/utils.h"
 #include "rea/parser.h"
+#include "aether/parser.h"
 #include "ast/ast.h"
 #include "ast/closure_registry.h"
 #include "compiler/compiler.h"
@@ -18,6 +19,10 @@
 #include <direct.h>
 #else
 #include <unistd.h>
+#endif
+
+#ifndef PSCAL_FRONTEND_PARSE_MODULE_SOURCE
+#define PSCAL_FRONTEND_PARSE_MODULE_SOURCE(source) parseRea(source)
 #endif
 
 // Forward declaration from core/utils.c
@@ -1108,7 +1113,7 @@ static ReaModuleInfo *loadModuleRecursive(const char *path) {
         return NULL;
     }
 
-    AST *ast = parseRea(source);
+    AST *ast = PSCAL_FRONTEND_PARSE_MODULE_SOURCE(source);
     if (!ast) {
         free(source);
         free(resolved);

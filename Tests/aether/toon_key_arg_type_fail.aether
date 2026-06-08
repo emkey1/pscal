@@ -1,0 +1,20 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"name\":\"Ada\"}");
+    let root: ToonNode = toon_root(doc);
+    let badKey: Int = 1;
+    let name: Text = toon_get_text(root, badKey);
+
+    fx {
+        println(name);
+    }
+
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,22 @@
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            writeln("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let payload: Text = "{\"title\":\"Aether\",\"enabled\":true,\"users\":2}";
+    let docSource: TOON = payload;
+    let doc: ToonDoc = toon_parse(docSource);
+    let root: ToonNode = toon_root(doc);
+
+    fx {
+        writeln("title = ", toon_text_value(toon_key(root, "title")));
+        writeln("enabled = ", toon_bool_value(toon_key(root, "enabled")));
+        writeln("users = ", toon_int_value(toon_key(root, "users")));
+    }
+
+    toon_close(doc);
+    ret;
+}

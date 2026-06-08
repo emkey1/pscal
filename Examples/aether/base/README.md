@@ -10,6 +10,25 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/contracts
 ./build/bin/aether Examples/aether/base/pure_functions
 ./build/bin/aether Examples/aether/base/parallel_calls
+./build/bin/aether Examples/aether/base/for_range
+./build/bin/aether Examples/aether/base/module_demo
+./build/bin/aether Examples/aether/base/toon_blocks
+./build/bin/aether Examples/aether/base/toon_access
+./build/bin/aether Examples/aether/base/toon_handles
+./build/bin/aether Examples/aether/base/toon_typed_handles
+./build/bin/aether Examples/aether/base/toon_rebind
+./build/bin/aether Examples/aether/base/toon_scalar_bindings
+./build/bin/aether Examples/aether/base/toon_scalar_rebind
+./build/bin/aether Examples/aether/base/toon_scalar_alias
+./build/bin/aether Examples/aether/base/toon_key_vars
+./build/bin/aether Examples/aether/base/toon_parse_payloads
+./build/bin/aether Examples/aether/base/toon_parse_file
+./build/bin/aether Examples/aether/base/toon_shape_scalars
+./build/bin/aether Examples/aether/base/toon_real_scalars
+./build/bin/aether Examples/aether/base/toon_variable_parse
+./build/bin/aether Examples/aether/base/type_blocks
+./build/bin/aether Examples/aether/base/type_init
+./build/bin/aether Examples/aether/base/self_alias
 ```
 
 These examples stay within the currently supported Aether Core subset:
@@ -21,10 +40,59 @@ These examples stay within the currently supported Aether Core subset:
 - `fx { ... }`
 - known effectful builtins such as `write`, `writeln`, `printf`, `readln`,
   `halt`, and thread-launch helpers require `fx`
+- Aether-native `print(...)` and `println(...)` spellings lowered onto the
+  shared `write` and `writeln` builtins
 - `@pure` now rejects direct effectful builtin calls and direct calls into
   non-pure Aether functions
 - restricted `par { ... }` lowering for direct call statements, mapped onto
   shared spawn/join behavior
+- half-open `for name in start..end { ... }` range loops lowered onto shared
+  `for (...)` semantics
+- `mod`, `use`, and `export fn` lowered onto the shared module/import system
+- embedded `toon:` blocks that carry upstream TOON syntax and currently lower
+  to `TOON`/`Text` string payloads
+- compact `toon_*` helper calls lowered onto the shared `Json` library for
+  parse/root/key/array access when yyjson support is available; this helper
+  path currently covers parse/root/close cleanly for direct literal payloads
+  and expects JSON-compatible `TOON` text
+- keyed scalar helpers such as `toon_get_text(root, "name")` and
+  `toon_get_int(root, "count")` lowered onto yyjson key lookup plus scalar
+  extraction
+- `has_toon()` as the compact Aether capability probe for TOON/yyjson support
+- `ToonDoc` and `ToonNode` as source-level opaque handle types for parsed TOON
+  documents and nodes, lowered onto the shared runtime representation
+- `toon_typed_handles`: combines `has_toon()`, `ToonDoc`, `ToonNode`,
+  handle navigation, keyed scalar reads, and explicit cleanup in one example
+- `toon_rebind`: shows a `ToonNode` binding being reassigned from another
+  node-producing helper while preserving the source-level handle kind rules
+- `toon_scalar_bindings`: binds `toon_get_text` / `toon_get_int` /
+  `toon_get_bool` results into matching `Text` / `Int` / `Bool` variables
+- `toon_scalar_rebind`: reassigns a `Bool` binding from `toon_get_bool(...)`
+  while preserving the declared scalar type
+- `toon_scalar_alias`: reuses `Text` and `Int` scalar bindings through direct
+  assignment while preserving Aether's source-level scalar types
+- `toon_key_vars`: uses typed `Text` key bindings and an `Int` index binding
+  with `toon_key(...)`, `toon_at(...)`, and `toon_get_text(...)`
+- `toon_parse_payloads`: parses TOON from named `Text` / `TOON` payload
+  bindings and then reads typed values from the parsed document
+- `toon_parse_file`: parses TOON/JSON from a named `Text` file path binding
+  and then reads typed values from the parsed document
+- `toon_shape_scalars`: binds `toon_len(...)` and `toon_null_value(...)` into
+  matching `Int` and `Bool` variables
+- `toon_real_scalars`: binds `toon_get_real(...)` and `toon_real_value(...)`
+  into `Real` variables
+- direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
+  `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
+  yyjson builtins
+- simple variable-based `toon_parse(...)` flows when a local `Text` or `TOON`
+  binding can still be resolved to a literal payload by the frontend rewrite
+  layer
+- `type Name { ... }` blocks with `field: Type;` members lowered onto the
+  shared Rea class/object model
+- compact object initialization with `let value: Type = Type { field: expr, ... };`
+  lowered onto `new Type()` plus field assignments
+- `self` as the Aether source spelling for the current object inside `type`
+  methods, lowered onto the shared backend's `myself`
 - `@pre` and `@post` lowered into runtime guards
 - annotation forms such as `@pure` and `@cost` preserved as metadata comments
 

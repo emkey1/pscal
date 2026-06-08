@@ -9,11 +9,41 @@ CONTRACT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contracts_pass.aether"
 CONTRACT_FAIL_PRE_FIXTURE="$ROOT_DIR/Tests/aether/contracts_fail_pre.aether"
 CONTRACT_FAIL_POST_FIXTURE="$ROOT_DIR/Tests/aether/contracts_fail_post.aether"
 EFFECTS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/effects_fail_outside_fx.aether"
+PRINT_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/print_alias_pass.aether"
+PRINT_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/print_alias_fail_outside_fx.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
 PAR_PASS_FIXTURE="$ROOT_DIR/Tests/aether/par_pass.aether"
 PAR_FAIL_NON_CALL_FIXTURE="$ROOT_DIR/Tests/aether/par_fail_non_call.aether"
+FOR_RANGE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/for_range_pass.aether"
+MODULE_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_import_pass.aether"
+MODULE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_math"
+TOON_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_block_pass.aether"
+TYPE_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_block_pass.aether"
+TYPE_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_pass.aether"
+SELF_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_alias_pass.aether"
+TOON_JSON_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_json_helpers_pass.aether"
+TOON_HANDLE_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_helpers_pass.aether"
+TOON_VARIABLE_PARSE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_variable_parse_pass.aether"
+HAS_TOON_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_toon_alias_pass.aether"
+TOON_HANDLE_ARITH_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_arithmetic_fail.aether"
+TOON_HANDLE_CROSS_ASSIGN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_cross_assign_fail.aether"
+TOON_HANDLE_KIND_DOC_AS_NODE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_kind_fail_doc_as_node.aether"
+TOON_HANDLE_KIND_NODE_AS_DOC_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_kind_fail_node_as_doc.aether"
+TOON_HANDLE_DECL_FAIL_DOC_TYPE_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_decl_fail_doc_type.aether"
+TOON_HANDLE_DECL_FAIL_NODE_TYPE_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_decl_fail_node_type.aether"
+TOON_HANDLE_REASSIGN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_reassign_fail.aether"
+TOON_SCALAR_DECL_FAIL_TEXT_TYPE_FIXTURE="$ROOT_DIR/Tests/aether/toon_scalar_decl_fail_text_type.aether"
+TOON_SCALAR_REASSIGN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_scalar_reassign_fail.aether"
+TOON_SCALAR_CROSS_ASSIGN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_scalar_cross_assign_fail.aether"
+TOON_KEY_ARG_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_key_arg_type_fail.aether"
+TOON_OBJECT_KEY_ARG_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_object_key_arg_type_fail.aether"
+TOON_INDEX_ARG_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_index_arg_type_fail.aether"
+TOON_PARSE_ARG_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_parse_arg_type_fail.aether"
+TOON_PARSE_FILE_ARG_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_parse_file_arg_type_fail.aether"
+TOON_SHAPE_SCALAR_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_shape_scalar_decl_fail.aether"
+TOON_REAL_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_real_decl_fail.aether"
 
 if [ ! -x "$AETHER_BIN" ]; then
     echo "missing aether binary: $AETHER_BIN" >&2
@@ -26,11 +56,41 @@ for fixture in \
     "$CONTRACT_FAIL_PRE_FIXTURE" \
     "$CONTRACT_FAIL_POST_FIXTURE" \
     "$EFFECTS_FAIL_FIXTURE" \
+    "$PRINT_ALIAS_PASS_FIXTURE" \
+    "$PRINT_ALIAS_FAIL_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
     "$PAR_PASS_FIXTURE" \
-    "$PAR_FAIL_NON_CALL_FIXTURE"
+    "$PAR_FAIL_NON_CALL_FIXTURE" \
+    "$FOR_RANGE_PASS_FIXTURE" \
+    "$MODULE_IMPORT_PASS_FIXTURE" \
+    "$MODULE_SUPPORT_FIXTURE" \
+    "$TOON_BLOCK_PASS_FIXTURE" \
+    "$TYPE_BLOCK_PASS_FIXTURE" \
+    "$TYPE_INIT_PASS_FIXTURE" \
+    "$SELF_ALIAS_PASS_FIXTURE" \
+    "$TOON_JSON_HELPERS_PASS_FIXTURE" \
+    "$TOON_HANDLE_HELPERS_PASS_FIXTURE" \
+    "$TOON_VARIABLE_PARSE_PASS_FIXTURE" \
+    "$HAS_TOON_ALIAS_PASS_FIXTURE" \
+    "$TOON_HANDLE_ARITH_FAIL_FIXTURE" \
+    "$TOON_HANDLE_CROSS_ASSIGN_FAIL_FIXTURE" \
+    "$TOON_HANDLE_KIND_DOC_AS_NODE_FAIL_FIXTURE" \
+    "$TOON_HANDLE_KIND_NODE_AS_DOC_FAIL_FIXTURE" \
+    "$TOON_HANDLE_DECL_FAIL_DOC_TYPE_FIXTURE" \
+    "$TOON_HANDLE_DECL_FAIL_NODE_TYPE_FIXTURE" \
+    "$TOON_HANDLE_REASSIGN_FAIL_FIXTURE" \
+    "$TOON_SCALAR_DECL_FAIL_TEXT_TYPE_FIXTURE" \
+    "$TOON_SCALAR_REASSIGN_FAIL_FIXTURE" \
+    "$TOON_SCALAR_CROSS_ASSIGN_FAIL_FIXTURE" \
+    "$TOON_KEY_ARG_TYPE_FAIL_FIXTURE" \
+    "$TOON_OBJECT_KEY_ARG_TYPE_FAIL_FIXTURE" \
+    "$TOON_INDEX_ARG_TYPE_FAIL_FIXTURE" \
+    "$TOON_PARSE_ARG_TYPE_FAIL_FIXTURE" \
+    "$TOON_PARSE_FILE_ARG_TYPE_FAIL_FIXTURE" \
+    "$TOON_SHAPE_SCALAR_DECL_FAIL_FIXTURE" \
+    "$TOON_REAL_DECL_FAIL_FIXTURE"
 do
     if [ ! -f "$fixture" ]; then
         echo "missing fixture: $fixture" >&2
@@ -41,8 +101,262 @@ done
 "$AETHER_BIN" --no-cache --no-run "$SMOKE_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache --dump-ast-json "$SMOKE_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache "$CONTRACT_PASS_FIXTURE" >/dev/null
+"$AETHER_BIN" --no-cache "$PRINT_ALIAS_PASS_FIXTURE" >/tmp/aether_print_alias_pass.out
+printf 'Aether print aliases\n' >/tmp/aether_print_alias_expected.out
+if ! cmp -s /tmp/aether_print_alias_expected.out /tmp/aether_print_alias_pass.out; then
+    echo "unexpected print alias output" >&2
+    cat /tmp/aether_print_alias_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null
 "$AETHER_BIN" --no-cache --no-run "$PAR_PASS_FIXTURE" >/dev/null
+"$AETHER_BIN" --no-cache "$FOR_RANGE_PASS_FIXTURE" >/tmp/aether_for_range_pass.out
+if ! grep -qx "10" /tmp/aether_for_range_pass.out; then
+    echo "unexpected for-range output" >&2
+    cat /tmp/aether_for_range_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$MODULE_IMPORT_PASS_FIXTURE" >/tmp/aether_module_import_pass.out
+if ! grep -qx "42" /tmp/aether_module_import_pass.out; then
+    echo "unexpected module import output" >&2
+    cat /tmp/aether_module_import_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TOON_BLOCK_PASS_FIXTURE" >/tmp/aether_toon_block_pass.out
+printf 'users[2]{id,name,role}:\n  1,Ada,admin\n  2,Bob,user\n' >/tmp/aether_toon_block_expected.out
+if ! cmp -s /tmp/aether_toon_block_expected.out /tmp/aether_toon_block_pass.out; then
+    echo "unexpected TOON block output" >&2
+    cat /tmp/aether_toon_block_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TYPE_BLOCK_PASS_FIXTURE" >/tmp/aether_type_block_pass.out
+if ! grep -qx "42" /tmp/aether_type_block_pass.out; then
+    echo "unexpected type block output" >&2
+    cat /tmp/aether_type_block_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TYPE_INIT_PASS_FIXTURE" >/tmp/aether_type_init_pass.out
+if ! grep -qx "42" /tmp/aether_type_init_pass.out; then
+    echo "unexpected type init output" >&2
+    cat /tmp/aether_type_init_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$SELF_ALIAS_PASS_FIXTURE" >/tmp/aether_self_alias_pass.out
+printf '41\n42\n' >/tmp/aether_self_alias_expected.out
+if ! cmp -s /tmp/aether_self_alias_expected.out /tmp/aether_self_alias_pass.out; then
+    echo "unexpected self alias output" >&2
+    cat /tmp/aether_self_alias_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TOON_JSON_HELPERS_PASS_FIXTURE" >/tmp/aether_toon_json_helpers_pass.out
+if grep -qx "yyjson unavailable" /tmp/aether_toon_json_helpers_pass.out; then
+    :
+else
+    printf 'Rea\n3\n1\n' >/tmp/aether_toon_json_helpers_expected.out
+    if ! cmp -s /tmp/aether_toon_json_helpers_expected.out /tmp/aether_toon_json_helpers_pass.out; then
+        echo "unexpected TOON helper output" >&2
+        cat /tmp/aether_toon_json_helpers_pass.out >&2
+        exit 1
+    fi
+fi
+"$AETHER_BIN" --no-cache "$TOON_HANDLE_HELPERS_PASS_FIXTURE" >/tmp/aether_toon_handle_helpers_pass.out
+if grep -qx "yyjson unavailable" /tmp/aether_toon_handle_helpers_pass.out; then
+    :
+else
+    printf '2\nBob\n2\n' >/tmp/aether_toon_handle_helpers_expected.out
+    if ! cmp -s /tmp/aether_toon_handle_helpers_expected.out /tmp/aether_toon_handle_helpers_pass.out; then
+        echo "unexpected TOON handle helper output" >&2
+        cat /tmp/aether_toon_handle_helpers_pass.out >&2
+        exit 1
+    fi
+fi
+"$AETHER_BIN" --no-cache "$TOON_VARIABLE_PARSE_PASS_FIXTURE" >/tmp/aether_toon_variable_parse_pass.out
+if grep -qx "yyjson unavailable" /tmp/aether_toon_variable_parse_pass.out; then
+    :
+else
+    printf 'Aether\n42\n' >/tmp/aether_toon_variable_parse_expected.out
+    if ! cmp -s /tmp/aether_toon_variable_parse_expected.out /tmp/aether_toon_variable_parse_pass.out; then
+        echo "unexpected TOON variable parse output" >&2
+        cat /tmp/aether_toon_variable_parse_pass.out >&2
+        exit 1
+    fi
+fi
+"$AETHER_BIN" --no-cache "$HAS_TOON_ALIAS_PASS_FIXTURE" >/tmp/aether_has_toon_alias_pass.out
+if ! grep -Eq '^(toon-ready|toon-missing)$' /tmp/aether_has_toon_alias_pass.out; then
+    echo "unexpected has_toon alias output" >&2
+    cat /tmp/aether_has_toon_alias_pass.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_HANDLE_ARITH_FAIL_FIXTURE" >/tmp/aether_toon_handle_arith_fail.out 2>&1; then
+    echo "expected TOON handle arithmetic failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "opaque TOON handle 'doc' cannot be used in arithmetic expressions" /tmp/aether_toon_handle_arith_fail.out; then
+    echo "missing TOON handle arithmetic failure message" >&2
+    cat /tmp/aether_toon_handle_arith_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_HANDLE_CROSS_ASSIGN_FAIL_FIXTURE" >/tmp/aether_toon_handle_cross_assign_fail.out 2>&1; then
+    echo "expected TOON handle cross-assignment failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "cannot assign ToonDoc handle 'doc' to ToonNode binding" /tmp/aether_toon_handle_cross_assign_fail.out; then
+    echo "missing TOON handle cross-assignment failure message" >&2
+    cat /tmp/aether_toon_handle_cross_assign_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_HANDLE_KIND_DOC_AS_NODE_FAIL_FIXTURE" >/tmp/aether_toon_handle_kind_doc_as_node_fail.out 2>&1; then
+    echo "expected TOON doc-as-node failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_text_value' expects a ToonNode handle, but 'doc' is ToonDoc" /tmp/aether_toon_handle_kind_doc_as_node_fail.out; then
+    echo "missing TOON doc-as-node failure message" >&2
+    cat /tmp/aether_toon_handle_kind_doc_as_node_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_HANDLE_KIND_NODE_AS_DOC_FAIL_FIXTURE" >/tmp/aether_toon_handle_kind_node_as_doc_fail.out 2>&1; then
+    echo "expected TOON node-as-doc failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_close' expects a ToonDoc handle, but 'root' is ToonNode" /tmp/aether_toon_handle_kind_node_as_doc_fail.out; then
+    echo "missing TOON node-as-doc failure message" >&2
+    cat /tmp/aether_toon_handle_kind_node_as_doc_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_HANDLE_DECL_FAIL_DOC_TYPE_FIXTURE" >/tmp/aether_toon_handle_decl_fail_doc_type.out 2>&1; then
+    echo "expected TOON doc declaration type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'doc' must use ToonDoc when initialized from 'toon_parse'" /tmp/aether_toon_handle_decl_fail_doc_type.out; then
+    echo "missing TOON doc declaration type failure message" >&2
+    cat /tmp/aether_toon_handle_decl_fail_doc_type.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_HANDLE_DECL_FAIL_NODE_TYPE_FIXTURE" >/tmp/aether_toon_handle_decl_fail_node_type.out 2>&1; then
+    echo "expected TOON node declaration type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'root' must use ToonNode when initialized from 'toon_root'" /tmp/aether_toon_handle_decl_fail_node_type.out; then
+    echo "missing TOON node declaration type failure message" >&2
+    cat /tmp/aether_toon_handle_decl_fail_node_type.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_HANDLE_REASSIGN_FAIL_FIXTURE" >/tmp/aether_toon_handle_reassign_fail.out 2>&1; then
+    echo "expected TOON handle reassignment failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'current' must use ToonDoc when initialized from 'toon_parse'" /tmp/aether_toon_handle_reassign_fail.out; then
+    echo "missing TOON handle reassignment failure message" >&2
+    cat /tmp/aether_toon_handle_reassign_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_SCALAR_DECL_FAIL_TEXT_TYPE_FIXTURE" >/tmp/aether_toon_scalar_decl_fail_text_type.out 2>&1; then
+    echo "expected TOON scalar declaration type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrong' must use Text when initialized from 'toon_get_text'" /tmp/aether_toon_scalar_decl_fail_text_type.out; then
+    echo "missing TOON scalar declaration type failure message" >&2
+    cat /tmp/aether_toon_scalar_decl_fail_text_type.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_SCALAR_REASSIGN_FAIL_FIXTURE" >/tmp/aether_toon_scalar_reassign_fail.out 2>&1; then
+    echo "expected TOON scalar reassignment type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'enabled' must use Text when initialized from 'toon_get_text'" /tmp/aether_toon_scalar_reassign_fail.out; then
+    echo "missing TOON scalar reassignment type failure message" >&2
+    cat /tmp/aether_toon_scalar_reassign_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_SCALAR_CROSS_ASSIGN_FAIL_FIXTURE" >/tmp/aether_toon_scalar_cross_assign_fail.out 2>&1; then
+    echo "expected TOON scalar cross-assignment failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "cannot assign Text binding 'name' to Bool binding 'enabled'" /tmp/aether_toon_scalar_cross_assign_fail.out; then
+    echo "missing TOON scalar cross-assignment failure message" >&2
+    cat /tmp/aether_toon_scalar_cross_assign_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_KEY_ARG_TYPE_FAIL_FIXTURE" >/tmp/aether_toon_key_arg_type_fail.out 2>&1; then
+    echo "expected TOON key argument type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_get_text' expects a Text second argument, but 'badKey' is Int" /tmp/aether_toon_key_arg_type_fail.out; then
+    echo "missing TOON key argument type failure message" >&2
+    cat /tmp/aether_toon_key_arg_type_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_OBJECT_KEY_ARG_TYPE_FAIL_FIXTURE" >/tmp/aether_toon_object_key_arg_type_fail.out 2>&1; then
+    echo "expected TOON object-key argument type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_key' expects a Text second argument, but 'badKey' is Bool" /tmp/aether_toon_object_key_arg_type_fail.out; then
+    echo "missing TOON object-key argument type failure message" >&2
+    cat /tmp/aether_toon_object_key_arg_type_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_INDEX_ARG_TYPE_FAIL_FIXTURE" >/tmp/aether_toon_index_arg_type_fail.out 2>&1; then
+    echo "expected TOON index argument type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_at' expects a Int second argument, but 'badIndex' is Text" /tmp/aether_toon_index_arg_type_fail.out; then
+    echo "missing TOON index argument type failure message" >&2
+    cat /tmp/aether_toon_index_arg_type_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_PARSE_ARG_TYPE_FAIL_FIXTURE" >/tmp/aether_toon_parse_arg_type_fail.out 2>&1; then
+    echo "expected TOON parse argument type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_parse' expects a Text or TOON first argument, but 'badPayload' is Int" /tmp/aether_toon_parse_arg_type_fail.out; then
+    echo "missing TOON parse argument type failure message" >&2
+    cat /tmp/aether_toon_parse_arg_type_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_PARSE_FILE_ARG_TYPE_FAIL_FIXTURE" >/tmp/aether_toon_parse_file_arg_type_fail.out 2>&1; then
+    echo "expected TOON parse_file argument type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "call to 'toon_parse_file' expects a Text first argument, but 'badPath' is Bool" /tmp/aether_toon_parse_file_arg_type_fail.out; then
+    echo "missing TOON parse_file argument type failure message" >&2
+    cat /tmp/aether_toon_parse_file_arg_type_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_SHAPE_SCALAR_DECL_FAIL_FIXTURE" >/tmp/aether_toon_shape_scalar_decl_fail.out 2>&1; then
+    echo "expected TOON shape scalar declaration type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrongLen' must use Int when initialized from 'toon_len'" /tmp/aether_toon_shape_scalar_decl_fail.out; then
+    echo "missing TOON length declaration type failure message" >&2
+    cat /tmp/aether_toon_shape_scalar_decl_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_REAL_DECL_FAIL_FIXTURE" >/tmp/aether_toon_real_decl_fail.out 2>&1; then
+    echo "expected TOON real declaration type failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "binding for 'wrong' must use Real when initialized from 'toon_get_real'" /tmp/aether_toon_real_decl_fail.out; then
+    echo "missing TOON real declaration type failure message" >&2
+    cat /tmp/aether_toon_real_decl_fail.out >&2
+    exit 1
+fi
 
 if "$AETHER_BIN" --no-cache "$CONTRACT_FAIL_PRE_FIXTURE" >/tmp/aether_contract_fail_pre.out 2>&1; then
     echo "expected precondition failure but program succeeded" >&2
@@ -71,6 +385,16 @@ fi
 if ! grep -q "Aether effect error: call to 'writeln' requires an fx block" /tmp/aether_effects_fail.out; then
     echo "missing effect-boundary failure message" >&2
     cat /tmp/aether_effects_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$PRINT_ALIAS_FAIL_FIXTURE" >/tmp/aether_print_alias_fail.out 2>&1; then
+    echo "expected print alias effect-boundary failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether effect error: call to 'println' requires an fx block" /tmp/aether_print_alias_fail.out; then
+    echo "missing print alias effect-boundary failure message" >&2
+    cat /tmp/aether_print_alias_fail.out >&2
     exit 1
 fi
 
