@@ -72,6 +72,7 @@ TOON_REAL_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_real_decl_fail.aether"
 TOON_TYPE_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_type_decl_fail.aether"
 TOON_PRESENCE_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_presence_decl_fail.aether"
 TOON_DEFAULTS_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_defaults_decl_fail.aether"
+TOON_COMMENT_ARITH_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_comment_arithmetic_pass.aether"
 SHOWCASE_EXAMPLE="$ROOT_DIR/Examples/aether/showcase/agent_report"
 
 if [ ! -x "$AETHER_BIN" ]; then
@@ -148,6 +149,7 @@ for fixture in \
     "$TOON_TYPE_DECL_FAIL_FIXTURE" \
     "$TOON_PRESENCE_DECL_FAIL_FIXTURE" \
     "$TOON_DEFAULTS_DECL_FAIL_FIXTURE" \
+    "$TOON_COMMENT_ARITH_PASS_FIXTURE" \
     "$SHOWCASE_EXAMPLE"
 do
     if [ ! -f "$fixture" ]; then
@@ -812,6 +814,13 @@ fi
 if ! grep -q "Aether par rewrite error: only direct call statements are allowed inside par blocks" /tmp/aether_par_fail_non_call.out; then
     echo "missing par rewrite failure message" >&2
     cat /tmp/aether_par_fail_non_call.out >&2
+    exit 1
+fi
+
+"$AETHER_BIN" --no-cache "$TOON_COMMENT_ARITH_PASS_FIXTURE" >/tmp/aether_toon_comment_arith_pass.out
+if ! grep -q '^Ada$' /tmp/aether_toon_comment_arith_pass.out; then
+    echo "missing TOON comment arithmetic pass output" >&2
+    cat /tmp/aether_toon_comment_arith_pass.out >&2
     exit 1
 fi
 

@@ -53,6 +53,7 @@ static const char *g_aether_source_path = NULL;
 static void reportAetherError(const char *kind, int line, const char *detail);
 static int expectedOpaqueReturnKind(const char *name, size_t len, int *returnsDoc);
 static const char *expectedScalarReturnTypeName(const char *name, size_t len);
+static const char *skipQuotedString(const char *cursor, int *line);
 
 static void freeOpaqueBindingTable(AetherOpaqueBindingTable *table) {
     size_t i;
@@ -196,6 +197,72 @@ static const char *skipInlineSpaces(const char *cursor, const char *lineEnd) {
         cursor++;
     }
     return cursor;
+}
+
+static char *sanitizeAetherSourceForSemanticScan(const char *source) {
+    size_t len;
+    char *copy;
+    size_t i = 0;
+    int inLineComment = 0;
+    int inBlockComment = 0;
+
+    if (!source) {
+        return NULL;
+    }
+    len = strlen(source);
+    copy = (char *)malloc(len + 1);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, source, len + 1);
+
+    while (i < len) {
+        if (inLineComment) {
+            if (copy[i] == '\n') {
+                inLineComment = 0;
+            } else {
+                copy[i] = ' ';
+            }
+            i++;
+            continue;
+        }
+        if (inBlockComment) {
+            if (copy[i] == '*' && i + 1 < len && copy[i + 1] == '/') {
+                copy[i] = ' ';
+                copy[i + 1] = ' ';
+                inBlockComment = 0;
+                i += 2;
+                continue;
+            }
+            if (copy[i] != '\n') {
+                copy[i] = ' ';
+            }
+            i++;
+            continue;
+        }
+        if (copy[i] == '"' || copy[i] == '\'') {
+            const char *after = skipQuotedString(copy + i, NULL);
+            i += (size_t)(after - (copy + i));
+            continue;
+        }
+        if (copy[i] == '/' && i + 1 < len && copy[i + 1] == '/') {
+            copy[i] = ' ';
+            copy[i + 1] = ' ';
+            inLineComment = 1;
+            i += 2;
+            continue;
+        }
+        if (copy[i] == '/' && i + 1 < len && copy[i + 1] == '*') {
+            copy[i] = ' ';
+            copy[i + 1] = ' ';
+            inBlockComment = 1;
+            i += 2;
+            continue;
+        }
+        i++;
+    }
+
+    return copy;
 }
 
 static const char *skipQuotedString(const char *cursor, int *line) {
@@ -2098,17 +2165,20 @@ void aetherPerformSemanticAnalysis(AST *root) {
     const char *source = aetherGetLastSource();
 
     if (source) {
+        char *sanitized = sanitizeAetherSourceForSemanticScan(source);
+        const char *scanSource = sanitized ? sanitized : source;
         AetherFunctionTable table = {0};
         AetherOpaqueBindingTable opaqueBindings = {0};
         AetherScalarBindingTable scalarBindings = {0};
-        validateContractAnnotations(source);
-        collectFunctionPurity(source, &table);
-        collectOpaqueBindings(source, &opaqueBindings);
-        collectScalarBindings(source, &scalarBindings);
-        validateAetherSource(source, &table, &opaqueBindings, &scalarBindings);
+        validateContractAnnotations(scanSource);
+        collectFunctionPurity(scanSource, &table);
+        collectOpaqueBindings(scanSource, &opaqueBindings);
+        collectScalarBindings(scanSource, &scalarBindings);
+        validateAetherSource(scanSource, &table, &opaqueBindings, &scalarBindings);
         freeScalarBindingTable(&scalarBindings);
         freeOpaqueBindingTable(&opaqueBindings);
         freeFunctionTable(&table);
+        free(sanitized);
     }
     reaPerformSemanticAnalysis(root);
 }
