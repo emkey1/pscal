@@ -1,9 +1,11 @@
 #include "aether/translate.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef struct Buffer {
     char *data;
@@ -67,6 +69,46 @@ static char *dupRange(const char *start, const char *end) {
 
 static char *dupCString(const char *text) {
     return text ? dupRange(text, text + strlen(text)) : NULL;
+}
+
+static char *readTextFile(const char *path) {
+    FILE *fp;
+    long size;
+    char *buffer;
+
+    if (!path) {
+        return NULL;
+    }
+    fp = fopen(path, "rb");
+    if (!fp) {
+        return NULL;
+    }
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return NULL;
+    }
+    size = ftell(fp);
+    if (size < 0) {
+        fclose(fp);
+        return NULL;
+    }
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return NULL;
+    }
+    buffer = (char *)malloc((size_t)size + 1);
+    if (!buffer) {
+        fclose(fp);
+        return NULL;
+    }
+    if (size > 0 && fread(buffer, 1, (size_t)size, fp) != (size_t)size) {
+        free(buffer);
+        fclose(fp);
+        return NULL;
+    }
+    buffer[size] = '\0';
+    fclose(fp);
+    return buffer;
 }
 
 static char *trimmedCopy(const char *start, const char *end) {
@@ -133,6 +175,41 @@ static const char *skipSpacesInRange(const char *p, const char *end) {
         p++;
     }
     return p;
+}
+
+static char *resolveRelativePath(const char *sourcePath, const char *importPath) {
+    char combined[PATH_MAX];
+    char resolved[PATH_MAX];
+    const char *slash;
+    size_t dirLen;
+
+    if (!importPath || !*importPath) {
+        return NULL;
+    }
+    if (importPath[0] == '/') {
+        if (realpath(importPath, resolved)) {
+            return dupCString(resolved);
+        }
+        return dupCString(importPath);
+    }
+    if (!sourcePath || !*sourcePath) {
+        return dupCString(importPath);
+    }
+    slash = strrchr(sourcePath, '/');
+    if (!slash) {
+        return dupCString(importPath);
+    }
+    dirLen = (size_t)(slash - sourcePath);
+    if (dirLen + 1 + strlen(importPath) + 1 > sizeof(combined)) {
+        return NULL;
+    }
+    memcpy(combined, sourcePath, dirLen);
+    combined[dirLen] = '/';
+    strcpy(combined + dirLen + 1, importPath);
+    if (realpath(combined, resolved)) {
+        return dupCString(resolved);
+    }
+    return dupCString(combined);
 }
 
 static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
@@ -1060,6 +1137,153 @@ static void maybeRecordAetherBindingType(AetherBindingTable *table,
     }
     free(name);
     free(typeName);
+}
+
+static char *extractBindingName(const char *body, const char *lineEnd) {
+    const char *cursor;
+    const char *nameStart;
+    const char *nameEnd;
+
+    if (!body || !lineEnd) {
+        return NULL;
+    }
+    if (!(startsWithWord(body, lineEnd, "let") || startsWithWord(body, lineEnd, "const"))) {
+        return NULL;
+    }
+    cursor = body + (startsWithWord(body, lineEnd, "const") ? 5 : 3);
+    cursor = skipSpacesInRange(cursor, lineEnd);
+    nameStart = cursor;
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    if (nameEnd == nameStart) {
+        return NULL;
+    }
+    return trimmedCopy(nameStart, nameEnd);
+}
+
+static char *extractUsePathLiteral(const char *body, const char *lineEnd) {
+    const char *cursor;
+    const char *pathStart;
+    const char *pathEnd;
+
+    if (!body || !lineEnd || !startsWithWord(body, lineEnd, "use")) {
+        return NULL;
+    }
+    cursor = skipSpacesInRange(body + 3, lineEnd);
+    if (cursor >= lineEnd || *cursor != '"') {
+        return NULL;
+    }
+    pathStart = cursor + 1;
+    pathEnd = pathStart;
+    while (pathEnd < lineEnd) {
+        if (*pathEnd == '\\' && pathEnd + 1 < lineEnd) {
+            pathEnd += 2;
+            continue;
+        }
+        if (*pathEnd == '"') {
+            break;
+        }
+        pathEnd++;
+    }
+    if (pathEnd >= lineEnd || *pathEnd != '"') {
+        return NULL;
+    }
+    return dupRange(pathStart, pathEnd);
+}
+
+static int copyNamedBindingType(AetherBindingTable *dst,
+                                const AetherBindingTable *src,
+                                const char *name) {
+    const char *typeName;
+
+    if (!dst || !src || !name) {
+        return 0;
+    }
+    typeName = findAetherBindingType(src, name, strlen(name));
+    if (!typeName) {
+        return 1;
+    }
+    return setAetherBindingType(dst, name, typeName);
+}
+
+static int collectImportedAetherBindings(AetherBindingTable *out,
+                                         const char *source,
+                                         const char *modulePath) {
+    AetherBindingTable local = {0};
+    const char *cursor = source;
+
+    (void)modulePath;
+    if (!out || !source) {
+        return 0;
+    }
+
+    while (*cursor) {
+        const char *lineStart = cursor;
+        const char *lineEnd = cursor;
+        const char *body;
+
+        while (*lineEnd && *lineEnd != '\n') {
+            lineEnd++;
+        }
+        body = skipSpacesInRange(lineStart, lineEnd);
+
+        if (startsWithWord(body, lineEnd, "export")) {
+            const char *rest = skipSpacesInRange(body + 6, lineEnd);
+
+            maybeRecordAetherBindingType(&local, rest, lineEnd);
+            if (startsWithWord(rest, lineEnd, "let") || startsWithWord(rest, lineEnd, "const")) {
+                char *name = extractBindingName(rest, lineEnd);
+                if (name) {
+                    if (!copyNamedBindingType(out, &local, name)) {
+                        free(name);
+                        freeAetherBindingTable(&local);
+                        return 0;
+                    }
+                    free(name);
+                }
+            }
+        } else {
+            maybeRecordAetherBindingType(&local, body, lineEnd);
+        }
+
+        cursor = *lineEnd == '\n' ? lineEnd + 1 : lineEnd;
+    }
+
+    freeAetherBindingTable(&local);
+    return 1;
+}
+
+static int maybeLoadImportedBindings(AetherBindingTable *table,
+                                     const char *body,
+                                     const char *lineEnd,
+                                     const char *sourcePath) {
+    char *importPath = NULL;
+    char *resolvedPath = NULL;
+    char *moduleSource = NULL;
+    int ok = 1;
+
+    if (!table || !body || !lineEnd || !startsWithWord(body, lineEnd, "use")) {
+        return 1;
+    }
+    importPath = extractUsePathLiteral(body, lineEnd);
+    if (!importPath) {
+        return 1;
+    }
+    resolvedPath = resolveRelativePath(sourcePath, importPath);
+    if (!resolvedPath) {
+        free(importPath);
+        return 1;
+    }
+    moduleSource = readTextFile(resolvedPath);
+    if (moduleSource) {
+        ok = collectImportedAetherBindings(table, moduleSource, resolvedPath);
+    }
+    free(moduleSource);
+    free(resolvedPath);
+    free(importPath);
+    return ok;
 }
 
 static void maybeRecordToonLiteralBinding(ToonLiteralTable *table, const char *body, const char *lineEnd) {
@@ -2948,6 +3172,17 @@ char *aetherRewriteSource(const char *source, const char *path) {
             body++;
         }
 
+        if (!maybeLoadImportedBindings(&bindingTable, body, lineEnd, path)) {
+            freePendingContracts(&pending);
+            clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
+            freeToonLiteralTable(&toonTable);
+            free(preprocessed);
+            free(out.data);
+            return NULL;
+        }
         maybeRecordToonLiteralBinding(&toonTable, body, lineEnd);
         maybeRecordAetherBindingType(&bindingTable, body, lineEnd);
 

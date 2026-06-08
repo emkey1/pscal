@@ -1,0 +1,13 @@
+use "module_consts";
+
+fn main() -> Void {
+    let greetingText = Greeting;
+    let meaning = Answer;
+
+    fx {
+        println(greetingText);
+        println(meaning);
+    }
+
+    ret;
+}

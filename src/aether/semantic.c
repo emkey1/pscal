@@ -2118,6 +2118,10 @@ void aetherSemanticSetSourcePath(const char *path) {
     reaSemanticSetSourcePath(path);
 }
 
+const char *aetherSemanticGetSourcePath(void) {
+    return g_aether_source_path;
+}
+
 int aetherGetLoadedModuleCount(void) {
     return reaGetLoadedModuleCount();
 }

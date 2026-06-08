@@ -17,6 +17,7 @@ bootstrap frontend:
 ./build/bin/aether Examples/aether/base/for_range
 ./build/bin/aether Examples/aether/base/loop_forms
 ./build/bin/aether Examples/aether/base/module_demo
+./build/bin/aether Examples/aether/base/module_consts_demo
 ./build/bin/aether Examples/aether/base/toon_blocks
 ./build/bin/aether Examples/aether/base/toon_access
 ./build/bin/aether Examples/aether/base/toon_handles
@@ -69,6 +70,8 @@ These examples stay within the currently supported Aether Core subset:
 - compact `loop` forms now supported for condition loops, half-open range
   loops, and infinite loops lowered onto shared `while` / `for` constructs
 - `mod`, `use`, and `export fn` lowered onto the shared module/import system
+- inferred imported bindings from exported Aether `const` / `let` declarations
+  in quoted `use` targets when their types are obvious to the frontend
 - embedded `toon:` blocks that carry upstream TOON syntax and currently lower
   to `TOON`/`Text` string payloads
 - compact `toon_*` helper calls lowered onto the shared `Json` library for
@@ -120,6 +123,8 @@ These examples stay within the currently supported Aether Core subset:
   without explicit types, including helper-return and binding-alias inference
 - `loop_forms`: shows `loop cond { ... }`, `loop name in start..end { ... }`,
   and bare `loop { ... }` forms with `break`
+- `module_consts_demo`: shows inferred `let` bindings sourced from exported
+  constants in another Aether module
 - direct handle helpers such as `toon_key`, `toon_at`, `toon_len`,
   `toon_text_value`, `toon_int_value`, and `toon_free` lowered straight onto
   yyjson builtins

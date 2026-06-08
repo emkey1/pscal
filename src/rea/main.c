@@ -526,13 +526,13 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     registerBuiltinFunction("tobyte", AST_FUNCTION_DECL, NULL);
 
     if (strict_mode) PSCAL_FRONTEND_SET_STRICT_MODE(1);
+    PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH(path);
     AST *program = PSCAL_FRONTEND_PARSE_SOURCE(effective_src);
     if (!program) {
         if (preprocessed_source) free(preprocessed_source);
         free(src);
         REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
     }
-    PSCAL_FRONTEND_SEMANTIC_SET_SOURCE_PATH(path);
     PSCAL_FRONTEND_PERFORM_SEMANTIC_ANALYSIS(program);
     if (pascal_semantic_error_count > 0 && !dump_ast_json) {
         freeAST(program);

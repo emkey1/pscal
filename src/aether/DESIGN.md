@@ -406,6 +406,8 @@ Aether distinguishes:
 - immutable bindings via `const`,
 - compact initialized declarations without explicit types when inference is
   narrow, predictable, and source-local.
+- imported exported bindings may participate in that inference when the
+  frontend can resolve them from a quoted `use` target without ambiguity.
 
 These should lower directly onto shared declaration and constant-handling
 machinery.

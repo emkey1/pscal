@@ -5,6 +5,7 @@
 
 void aetherPerformSemanticAnalysis(AST *root);
 void aetherSemanticSetSourcePath(const char *path);
+const char *aetherSemanticGetSourcePath(void);
 int aetherGetLoadedModuleCount(void);
 AST *aetherGetModuleAST(int index);
 const char *aetherGetModulePath(int index);

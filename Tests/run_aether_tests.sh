@@ -37,6 +37,8 @@ FOR_RANGE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/for_range_pass.aether"
 LOOP_FORMS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/loop_forms_pass.aether"
 MODULE_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_import_pass.aether"
 MODULE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_math"
+MODULE_CONST_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_consts"
+MODULE_CONST_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_const_import_pass.aether"
 TOON_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_block_pass.aether"
 TYPE_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_block_pass.aether"
 TYPE_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_pass.aether"
@@ -105,6 +107,8 @@ for fixture in \
     "$LOOP_FORMS_PASS_FIXTURE" \
     "$MODULE_IMPORT_PASS_FIXTURE" \
     "$MODULE_SUPPORT_FIXTURE" \
+    "$MODULE_CONST_SUPPORT_FIXTURE" \
+    "$MODULE_CONST_IMPORT_PASS_FIXTURE" \
     "$TOON_BLOCK_PASS_FIXTURE" \
     "$TYPE_BLOCK_PASS_FIXTURE" \
     "$TYPE_INIT_PASS_FIXTURE" \
@@ -241,6 +245,13 @@ fi
 if ! grep -qx "42" /tmp/aether_module_import_pass.out; then
     echo "unexpected module import output" >&2
     cat /tmp/aether_module_import_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$MODULE_CONST_IMPORT_PASS_FIXTURE" >/tmp/aether_module_const_import_pass.out
+printf 'Aether\n42\n' >/tmp/aether_module_const_import_expected.out
+if ! cmp -s /tmp/aether_module_const_import_expected.out /tmp/aether_module_const_import_pass.out; then
+    echo "unexpected module const import output" >&2
+    cat /tmp/aether_module_const_import_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$TOON_BLOCK_PASS_FIXTURE" >/tmp/aether_toon_block_pass.out

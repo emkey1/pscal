@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 
+#include "aether/semantic.h"
 #include "aether/translate.h"
 #include "rea/parser.h"
 
@@ -28,13 +29,15 @@ static void aetherRememberSource(const char *source) {
 AST *parseAether(const char *source) {
     char *rewritten;
     AST *ast;
+    const char *sourcePath;
 
     if (!source) {
         return NULL;
     }
 
     aetherRememberSource(source);
-    rewritten = aetherRewriteSource(source, NULL);
+    sourcePath = aetherSemanticGetSourcePath();
+    rewritten = aetherRewriteSource(source, sourcePath);
     if (!rewritten) {
         return NULL;
     }

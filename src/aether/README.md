@@ -51,6 +51,9 @@ Bootstrap status:
 - Imported modules now parse through the active frontend parser as well, so
   Aether module files can use `mod`, `use`, and `export fn` syntax instead of
   needing raw Rea syntax in imported sources.
+- The rewrite layer now also harvests exported `const` / `let` binding types
+  from quoted `use` targets, so obvious imported values can participate in
+  later inferred Aether declarations too.
 - Embedded `toon:` blocks now preserve real TOON syntax based on the upstream
   TOON specification and currently lower to escaped `str` constants for `TOON`
   values, keeping the backend unchanged while the frontend syntax settles.

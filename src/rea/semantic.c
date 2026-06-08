@@ -2050,6 +2050,31 @@ static AST *findDeclInCompound(AST *node, const char *ident, int referenceLine) 
     return NULL;
 }
 
+static bool reaNodeIsDescendant(AST *ancestor, AST *node) {
+    AST *cursor = node;
+
+    while (cursor) {
+        if (cursor == ancestor) {
+            return true;
+        }
+        cursor = cursor->parent;
+    }
+    return false;
+}
+
+static bool isSelfInitializingDeclarationUse(AST *decl, AST *useNode) {
+    if (!decl || !useNode) {
+        return false;
+    }
+    if (decl->type == AST_VAR_DECL) {
+        return decl->left && reaNodeIsDescendant(decl->left, useNode);
+    }
+    if (decl->type == AST_CONST_DECL) {
+        return decl->left && reaNodeIsDescendant(decl->left, useNode);
+    }
+    return false;
+}
+
 static void ensureExceptionGlobals(AST *root) {
     if (!root || !astContainsExceptions(root)) {
         return;
@@ -3041,6 +3066,9 @@ static const char *resolveExprClass(AST *expr, ClassInfo *currentClass) {
             return currentClass->name;
         }
         AST *decl = findStaticDeclarationInAST(expr->token->value, expr, gProgramRoot);
+        if (decl && isSelfInitializingDeclarationUse(decl, expr)) {
+            decl = NULL;
+        }
         if (!decl && currentClass) {
             Symbol *fs = lookupField(currentClass, expr->token->value);
             if (fs && fs->type_def) decl = fs->type_def;
@@ -3205,11 +3233,20 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
          */
         const char *ident = node->token->value;
         AST *decl = findStaticDeclarationInAST(ident, node, gProgramRoot);
+        if (decl && isSelfInitializingDeclarationUse(decl, node)) {
+            decl = NULL;
+        }
         if (!decl && node->parent) {
             decl = findStaticDeclarationInAST(ident, node->parent, gProgramRoot);
+            if (decl && isSelfInitializingDeclarationUse(decl, node)) {
+                decl = NULL;
+            }
         }
         if (!decl && node->parent && node->parent->parent) {
             decl = findStaticDeclarationInAST(ident, node->parent->parent, gProgramRoot);
+            if (decl && isSelfInitializingDeclarationUse(decl, node)) {
+                decl = NULL;
+            }
         }
         if (!decl) {
             if (clsContext) {
@@ -3230,6 +3267,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             AST *ancestor = node->parent;
             while (!decl && ancestor) {
                 decl = findStaticDeclarationInAST(ident, ancestor, gProgramRoot);
+                if (decl && isSelfInitializingDeclarationUse(decl, node)) {
+                    decl = NULL;
+                }
                 ancestor = ancestor->parent;
             }
         }
@@ -3259,6 +3299,9 @@ static void validateNodeInternal(AST *node, ClassInfo *currentClass) {
             }
             if (!decl) {
                 decl = findVarDeclAnywhere(gProgramRoot, ident, referenceLine);
+                if (decl && isSelfInitializingDeclarationUse(decl, node)) {
+                    decl = NULL;
+                }
                 if (decl) {
                     int declLine = declarationLine(decl);
                     if (declLine > 0 && referenceLine > 0 && declLine != referenceLine) {
