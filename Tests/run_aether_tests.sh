@@ -39,6 +39,7 @@ NUMERIC_EXPR_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/numeric_expr_inferen
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
 TUPLE_DESTRUCTURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_pass.aether"
+ARRAY_APPEND_PASS_FIXTURE="$ROOT_DIR/Tests/aether/dynamic_array_append_pass.aether"
 TUPLE_DIRECT_BIND_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_return_unsupported_fail.aether"
 TUPLE_BAD_DESTRUCTURE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_let_destructure_unsupported_fail.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
@@ -130,6 +131,7 @@ for fixture in \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
     "$TUPLE_DESTRUCTURE_PASS_FIXTURE" \
+    "$ARRAY_APPEND_PASS_FIXTURE" \
     "$TUPLE_DIRECT_BIND_FAIL_FIXTURE" \
     "$TUPLE_BAD_DESTRUCTURE_FAIL_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
@@ -320,6 +322,13 @@ printf '1\n2\n' >/tmp/aether_tuple_destructure_expected.out
 if ! cmp -s /tmp/aether_tuple_destructure_expected.out /tmp/aether_tuple_destructure_pass.out; then
     echo "unexpected tuple destructure output" >&2
     cat /tmp/aether_tuple_destructure_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$ARRAY_APPEND_PASS_FIXTURE" >/tmp/aether_array_append_pass.out
+printf '2\n7\n9\n' >/tmp/aether_array_append_expected.out
+if ! cmp -s /tmp/aether_array_append_expected.out /tmp/aether_array_append_pass.out; then
+    echo "unexpected dynamic array append output" >&2
+    cat /tmp/aether_array_append_pass.out >&2
     exit 1
 fi
 if "$AETHER_BIN" --no-cache "$TUPLE_DIRECT_BIND_FAIL_FIXTURE" >/tmp/aether_tuple_direct_bind_fail.out 2>&1; then

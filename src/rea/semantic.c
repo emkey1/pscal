@@ -2615,19 +2615,38 @@ static void ensureConstructorAliasForClass(const char *cls, Symbol *target) {
     hashTableInsert(procedure_table, alias);
 }
 
+static bool isSelfLikeName(const char *name) {
+    if (!name) return false;
+    return strcasecmp(name, "self") == 0 ||
+           strcasecmp(name, "myself") == 0 ||
+           strcasecmp(name, "my") == 0;
+}
+
 static void ensureSelfParam(AST *node, const char *cls) {
     if (!node || !cls) return;
     bool hasSelf = false;
     if (node->child_count > 0) {
         AST *param = node->children[0];
         if (param && param->type == AST_VAR_DECL) {
+            AST *declVar = (param->child_count > 0) ? param->children[0] : NULL;
+            const char *declName = (declVar && declVar->token) ? declVar->token->value : NULL;
             AST *ptype = param->right;
             while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
                 ptype = ptype->right;
             }
             if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value &&
-                strcasecmp(ptype->token->value, cls) == 0) {
+                strcasecmp(ptype->token->value, cls) == 0 &&
+                isSelfLikeName(declName)) {
                 hasSelf = true;
+                if (declVar && declVar->token &&
+                    declVar->token->value &&
+                    strcasecmp(declVar->token->value, "myself") != 0) {
+                    free(declVar->token->value);
+                    declVar->token->value = strdup("myself");
+                    if (declVar->token->value) {
+                        declVar->token->length = strlen(declVar->token->value);
+                    }
+                }
             }
         }
     }
@@ -2767,11 +2786,14 @@ static void collectMethods(AST *node) {
                 }
             }
             if (param && param->type == AST_VAR_DECL) {
+                AST *declVar = (param->child_count > 0) ? param->children[0] : NULL;
+                const char *declName = (declVar && declVar->token) ? declVar->token->value : NULL;
                 AST *ptype = param->right;
                 while (ptype && (ptype->type == AST_POINTER_TYPE || ptype->type == AST_ARRAY_TYPE)) {
                     ptype = ptype->right;
                 }
-                if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value) {
+                if (ptype && ptype->type == AST_TYPE_REFERENCE && ptype->token && ptype->token->value &&
+                    isSelfLikeName(declName)) {
                     const char *cls = ptype->token->value;
                     ClassInfo *ci = lookupClass(cls);
                     if (ci) {

@@ -19,6 +19,7 @@ Write Aether like this:
 - use `@pure` for pure helpers
 - use `@pre` and `@post` for runtime-checked contracts
 - prefer explicit types when inference is not obviously safe
+- use `length(arrayValue)` for dynamic array length, not `len(...)`
 - use `ToonDoc` and `ToonNode` for structured TOON/JSON-style data
 - use the examples under `Examples/aether/` as the ground truth for style
 
@@ -485,6 +486,30 @@ Important details:
 - fields use `name: Type;`
 - inside methods, use `self`
 - `self` lowers onto the shared backend receiver model
+- top-level helpers that start with `self: Type` are treated as extension-style
+  methods and should be called with method syntax
+
+Example:
+
+```aether
+fn bump(self: Counter) -> Int {
+    self.value = self.value + 1;
+    ret self.value;
+}
+
+fn main() -> Void {
+    let counter = new Counter();
+    let next: Int = counter.bump();
+    ret;
+}
+```
+
+Do not call extension-style helpers like plain free functions:
+
+```aether
+counter.bump();     // good
+bump(counter);      // wrong in Aether today
+```
 
 ### Object creation
 
@@ -508,6 +533,27 @@ Method-call inference now works in common cases:
 ```aether
 let ready = summary.isReady();
 ```
+
+### Dynamic arrays
+
+Use `Type[]` for dynamic arrays:
+
+```aether
+let xs: Int[] = [];
+xs = xs + [7];
+xs = xs + [9];
+
+fx {
+    println(length(xs));
+}
+```
+
+Important details:
+
+- `length(xs)` is the compact array-length helper
+- `len(xs)` is not an Aether helper
+- `xs = xs + [value]` is the supported compact append pattern
+- `let xs: Int[] = [];` is supported
 
 ## Structured data: TOON
 

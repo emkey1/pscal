@@ -1,0 +1,14 @@
+fn main() -> Void {
+    let xs: Int[] = [];
+    let first: Int = 7;
+
+    xs = xs + [first];
+    xs = xs + [9];
+
+    fx {
+        println(length(xs));
+        println(xs[0]);
+        println(xs[1]);
+    }
+    ret;
+}

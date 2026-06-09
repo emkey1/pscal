@@ -2533,7 +2533,7 @@ static AST *parseVarDecl(ReaParser *p) {
         VarType vtype_local = vtype;
         AST *varType = first ? typeNode : copyAST(baseType);
         if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
-            varType = parseArrayType(p, varType, &vtype_local, false);
+            varType = parseArrayType(p, varType, &vtype_local, true);
         }
 
         if (first && (p->current.type == REA_TOKEN_LEFT_PAREN || p->current.type == REA_TOKEN_LESS)) {

@@ -408,6 +408,69 @@ static int appendIdentifier(Buffer *buf, const char *start, const char *end) {
     return ok;
 }
 
+static int appendMappedParamTypeAndName(Buffer *out,
+                                        const char *typeStart,
+                                        const char *typeEnd,
+                                        const char *nameStart,
+                                        const char *nameEnd) {
+    const char *suffixStart = typeEnd;
+    const char *baseEnd = typeEnd;
+    const char *scan;
+
+    while (baseEnd > typeStart && isspace((unsigned char)baseEnd[-1])) {
+        baseEnd--;
+    }
+    scan = baseEnd;
+    while (scan > typeStart) {
+        const char *cursor = scan;
+        while (cursor > typeStart && isspace((unsigned char)cursor[-1])) {
+            cursor--;
+        }
+        if (cursor - typeStart >= 2 && cursor[-2] == '[' && cursor[-1] == ']') {
+            scan = cursor - 2;
+            suffixStart = scan;
+            continue;
+        }
+        break;
+    }
+    baseEnd = suffixStart;
+    while (baseEnd > typeStart && isspace((unsigned char)baseEnd[-1])) {
+        baseEnd--;
+    }
+
+    if (!appendMappedType(out, typeStart, baseEnd) ||
+        !bufferAppend(out, " ") ||
+        !appendIdentifier(out, nameStart, nameEnd)) {
+        return 0;
+    }
+
+    if (suffixStart < typeEnd) {
+        const char *suffix = suffixStart;
+        while (suffix < typeEnd) {
+            if (!isspace((unsigned char)*suffix) &&
+                !bufferAppendN(out, suffix, 1)) {
+                return 0;
+            }
+            suffix++;
+        }
+    }
+
+    return 1;
+}
+
+static int appendMappedTypeAndCStringName(Buffer *out,
+                                          const char *typeText,
+                                          const char *nameText) {
+    if (!typeText || !nameText) {
+        return 0;
+    }
+    return appendMappedParamTypeAndName(out,
+                                        typeText,
+                                        typeText + strlen(typeText),
+                                        nameText,
+                                        nameText + strlen(nameText));
+}
+
 static const char *findCharInRange(const char *start, const char *end, char target) {
     const char *cursor = start;
     while (cursor < end) {
@@ -3451,7 +3514,7 @@ static char *rewriteMethodScopedExpr(const char *start,
     if (!start || !end || end < start) {
         return NULL;
     }
-    if (!isMethod || !typeState) {
+    if (!isMethod) {
         return dupRange(start, end);
     }
 
@@ -3501,7 +3564,8 @@ static char *rewriteMethodScopedExpr(const char *start,
                 cursor = nameEnd;
                 continue;
             }
-            if ((cursor == start || cursor[-1] != '.') &&
+            if (typeState &&
+                (cursor == start || cursor[-1] != '.') &&
                 !(afterName < end && *afterName == '(') &&
                 typeBlockHasField(typeState, nameStart, (size_t)(nameEnd - nameStart))) {
                 if (!bufferAppend(&out, "myself.") ||
@@ -3741,9 +3805,11 @@ static char *translateMultiLineTypedObjectInitOpenLine(const char *lineStart,
     if (!state->targetName) {
         return NULL;
     }
-    if (!appendMappedType(&out, afterColon, typeEnd) ||
-        !bufferAppend(&out, " ") ||
-        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+    if (!appendMappedParamTypeAndName(&out,
+                                      afterColon,
+                                      typeEnd,
+                                      nameStart,
+                                      nameEnd) ||
         !bufferAppend(&out, " = new ") ||
         !bufferAppendN(&out, exprStart, (size_t)(initNameEnd - exprStart)) ||
         !bufferAppend(&out, "();")) {
@@ -3928,9 +3994,11 @@ static int translateParamList(Buffer *out, const char *start, const char *end) {
                 return 0;
             }
             if (colon) {
-                if (!appendMappedType(out, colon + 1, segmentEnd) ||
-                    !bufferAppend(out, " ") ||
-                    !appendIdentifier(out, segmentStart, colon)) {
+                if (!appendMappedParamTypeAndName(out,
+                                                  colon + 1,
+                                                  segmentEnd,
+                                                  segmentStart,
+                                                  colon)) {
                     return 0;
                 }
             } else {
@@ -3948,6 +4016,49 @@ static int translateParamList(Buffer *out, const char *start, const char *end) {
         cursor = skipSpaces(cursor);
     }
     return 1;
+}
+
+static int functionHasSelfLikeReceiverParam(const char *body, const char *lineEnd) {
+    const char *nameStart = body + 2;
+    const char *nameEnd;
+    const char *paramsOpen;
+    const char *paramsClose;
+    const char *cursor;
+    const char *colon;
+
+    while (nameStart < lineEnd && isspace((unsigned char)*nameStart)) {
+        nameStart++;
+    }
+    nameEnd = nameStart;
+    while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    paramsOpen = findCharInRange(nameEnd, lineEnd, '(');
+    paramsClose = paramsOpen ? findMatchingCloseParen(paramsOpen, lineEnd) : NULL;
+    if (!paramsOpen || !paramsClose) {
+        return 0;
+    }
+    cursor = skipSpacesInRange(paramsOpen + 1, paramsClose);
+    if (cursor >= paramsClose) {
+        return 0;
+    }
+    colon = findCharInRange(cursor, paramsClose, ':');
+    if (!colon) {
+        return 0;
+    }
+    while (colon > cursor && isspace((unsigned char)colon[-1])) {
+        colon--;
+    }
+    if ((size_t)(colon - cursor) == 4 && strncmp(cursor, "self", 4) == 0) {
+        return 1;
+    }
+    if ((size_t)(colon - cursor) == 2 && strncmp(cursor, "my", 2) == 0) {
+        return 1;
+    }
+    if ((size_t)(colon - cursor) == 6 && strncmp(cursor, "myself", 6) == 0) {
+        return 1;
+    }
+    return 0;
 }
 
 static char *translateFnLine(const char *lineStart, const char *body, const char *lineEnd) {
@@ -4045,9 +4156,7 @@ static char *translateTupleFnLine(const char *lineStart,
 
         snprintf(fieldName, sizeof(fieldName), "%s_item%zu", tupleTypeName, i);
         if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
-            !appendMappedType(&out, itemTypes[i], itemTypes[i] + strlen(itemTypes[i])) ||
-            !bufferAppend(&out, " ") ||
-            !bufferAppend(&out, fieldName) ||
+            !appendMappedTypeAndCStringName(&out, itemTypes[i], fieldName) ||
             !bufferAppend(&out, ";\n")) {
             free(out.data);
             return NULL;
@@ -4250,11 +4359,7 @@ static char *translateTupleDestructureLetLine(const char *lineStart,
 
         snprintf(fieldName, sizeof(fieldName), "%s_item%zu", tupleSig->tupleTypeName, i);
         if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
-            !appendMappedType(&out,
-                              tupleSig->itemTypes[i],
-                              tupleSig->itemTypes[i] + strlen(tupleSig->itemTypes[i])) ||
-            !bufferAppend(&out, " ") ||
-            !bufferAppend(&out, names[i]) ||
+            !appendMappedTypeAndCStringName(&out, tupleSig->itemTypes[i], names[i]) ||
             !bufferAppend(&out, " = ") ||
             !bufferAppend(&out, fieldName) ||
             !bufferAppend(&out, ";\n")) {
@@ -4640,6 +4745,46 @@ static char *translateTypedDeclLine(const char *lineStart,
     }
     equals = skipSpaces(typeEnd);
 
+    if (!isConst && equals < lineEnd && *equals == '=') {
+        const char *exprStart = skipSpaces(equals + 1);
+        const char *exprEnd = lineEnd;
+        const char *scan = typeEnd;
+        int hasOpenArraySuffix = 0;
+
+        while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+            exprEnd--;
+        }
+        if (exprEnd > exprStart && exprEnd[-1] == ';') {
+            exprEnd--;
+        }
+        while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+            exprEnd--;
+        }
+
+        while (scan > afterColon && isspace((unsigned char)scan[-1])) {
+            scan--;
+        }
+        if (scan - afterColon >= 2 && scan[-2] == '[' && scan[-1] == ']') {
+            hasOpenArraySuffix = 1;
+        }
+        if (hasOpenArraySuffix &&
+            exprEnd - exprStart == 2 &&
+            exprStart[0] == '[' &&
+            exprStart[1] == ']') {
+            if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+                !appendMappedParamTypeAndName(&out,
+                                              afterColon,
+                                              typeEnd,
+                                              nameStart,
+                                              nameEnd) ||
+                !bufferAppend(&out, ";")) {
+                free(out.data);
+                return NULL;
+            }
+            return out.data;
+        }
+    }
+
     if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart))) {
         free(out.data);
         return NULL;
@@ -4683,9 +4828,11 @@ static char *translateTypedDeclLine(const char *lineStart,
         if (typeMatches) {
             const char *entryCursor = openBrace + 1;
 
-            if (!appendMappedType(&initOut, afterColon, typeEnd) ||
-                !bufferAppend(&initOut, " ") ||
-                !bufferAppendN(&initOut, nameStart, (size_t)(nameEnd - nameStart)) ||
+            if (!appendMappedParamTypeAndName(&initOut,
+                                              afterColon,
+                                              typeEnd,
+                                              nameStart,
+                                              nameEnd) ||
                 !bufferAppend(&initOut, " = new ") ||
                 !bufferAppendN(&initOut, exprStart, (size_t)(initNameEnd - exprStart)) ||
                 !bufferAppend(&initOut, "();")) {
@@ -4788,10 +4935,101 @@ static char *translateTypedDeclLine(const char *lineStart,
         free(out.data);
         return NULL;
     }
-    if (!appendMappedType(&out, afterColon, typeEnd) ||
-        !bufferAppend(&out, " ") ||
-        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+    if (!appendMappedParamTypeAndName(&out,
+                                      afterColon,
+                                      typeEnd,
+                                      nameStart,
+                                      nameEnd) ||
         (typeEnd < lineEnd && !bufferAppendN(&out, typeEnd, (size_t)(lineEnd - typeEnd)))) {
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
+}
+
+static char *translateArrayAppendLine(const char *lineStart,
+                                      const char *body,
+                                      const char *lineEnd) {
+    const char *equals;
+    const char *lhsStart;
+    const char *lhsEnd;
+    const char *rhsStart;
+    const char *plus;
+    const char *itemOpen;
+    const char *itemClose;
+    const char *itemStart;
+    const char *itemEnd;
+    Buffer out = {0};
+
+    if (!body || !lineEnd ||
+        startsWithWord(body, lineEnd, "let") ||
+        startsWithWord(body, lineEnd, "const") ||
+        startsWithWord(body, lineEnd, "if") ||
+        startsWithWord(body, lineEnd, "while") ||
+        startsWithWord(body, lineEnd, "for") ||
+        startsWithWord(body, lineEnd, "loop") ||
+        startsWithWord(body, lineEnd, "ret") ||
+        startsWithWord(body, lineEnd, "fx") ||
+        startsWithWord(body, lineEnd, "par")) {
+        return NULL;
+    }
+
+    equals = findCharInRange(body, lineEnd, '=');
+    if (!equals || (equals + 1 < lineEnd && equals[1] == '=')) {
+        return NULL;
+    }
+    lhsStart = skipSpacesInRange(body, equals);
+    lhsEnd = equals;
+    while (lhsEnd > lhsStart && isspace((unsigned char)lhsEnd[-1])) {
+        lhsEnd--;
+    }
+    if (lhsEnd == lhsStart) {
+        return NULL;
+    }
+    rhsStart = skipSpacesInRange(equals + 1, lineEnd);
+    plus = findCharInRange(rhsStart, lineEnd, '+');
+    if (!plus) {
+        return NULL;
+    }
+    itemOpen = findCharInRange(plus + 1, lineEnd, '[');
+    itemClose = itemOpen ? findLastCharInRange(itemOpen + 1, lineEnd, ']') : NULL;
+    if (!itemOpen || !itemClose || itemClose <= itemOpen) {
+        return NULL;
+    }
+
+    {
+        const char *rhsNameEnd = plus;
+        while (rhsNameEnd > rhsStart && isspace((unsigned char)rhsNameEnd[-1])) {
+            rhsNameEnd--;
+        }
+        if ((size_t)(rhsNameEnd - rhsStart) != (size_t)(lhsEnd - lhsStart) ||
+            strncmp(lhsStart, rhsStart, (size_t)(lhsEnd - lhsStart)) != 0) {
+            return NULL;
+        }
+    }
+
+    itemStart = skipSpacesInRange(itemOpen + 1, itemClose);
+    itemEnd = itemClose;
+    while (itemEnd > itemStart && isspace((unsigned char)itemEnd[-1])) {
+        itemEnd--;
+    }
+    if (itemEnd == itemStart) {
+        return NULL;
+    }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "setlength(") ||
+        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
+        !bufferAppend(&out, ", length(") ||
+        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
+        !bufferAppend(&out, ") + 1);\n") ||
+        !bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
+        !bufferAppend(&out, "[length(") ||
+        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
+        !bufferAppend(&out, ") - 1] = ") ||
+        !bufferAppendN(&out, itemStart, (size_t)(itemEnd - itemStart)) ||
+        !bufferAppend(&out, ";")) {
         free(out.data);
         return NULL;
     }
@@ -5820,15 +6058,18 @@ char *aetherRewriteSource(const char *source, const char *path) {
                        !isLineComment(body, lineEnd)) {
                 translated = translateTypeFieldLine(lineStart, body, lineEnd);
             } else {
-                translated = translateLineInMethod(lineStart,
-                                                   lineEnd,
-                                                   &jsonState,
-                                                   &bindingTable,
-                                                   &functionTable,
-                                                   &typeState,
-                                                   fnState.active && fnState.isMethod,
-                                                   path,
-                                                   lineNumber);
+                translated = translateArrayAppendLine(lineStart, body, lineEnd);
+                if (!translated) {
+                    translated = translateLineInMethod(lineStart,
+                                                       lineEnd,
+                                                       &jsonState,
+                                                       &bindingTable,
+                                                       &functionTable,
+                                                       &typeState,
+                                                       fnState.active && fnState.isMethod,
+                                                       path,
+                                                       lineNumber);
+                }
             }
         }
         if (!translated) {
@@ -6193,7 +6434,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             fnState.active = lineDelta > 0;
             fnState.bodyDepth = braceDepth + lineDelta;
             fnState.isVoid = hasTupleReturn || (returnType && strcmp(returnType, "Void") == 0);
-            fnState.isMethod = typeState.active;
+            fnState.isMethod = typeState.active || functionHasSelfLikeReceiverParam(body, lineEnd);
             fnState.bindingCountBefore = bindingTable.count;
             fnState.name = fnName;
             fnState.postExpr = pending.postExpr
