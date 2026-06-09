@@ -1,0 +1,28 @@
+{
+  "tasks": [
+    {
+      "id": "hello_fx",
+      "title": "Minimal fx hello world",
+      "prompt": "Write the smallest valid Aether program that prints exactly `hello from benchmark` followed by a newline.",
+      "expected_stdout": "hello from benchmark\n"
+    },
+    {
+      "id": "classify_scores",
+      "title": "Pure helper plus effectful output",
+      "prompt": "Write an Aether program with a pure helper `classify(score: Int) -> Text` that returns `ready` for scores >= 90, `review` for scores >= 70, and `blocked` otherwise. In `main`, print three lines for scores 95, 72, and 10 in the format `95 => ready`.",
+      "expected_stdout": "95 => ready\n72 => review\n10 => blocked\n"
+    },
+    {
+      "id": "type_and_method",
+      "title": "Type block with self mutation",
+      "prompt": "Write an Aether program that defines a `Counter` type with an `value: Int` field and a `bump() -> Int` method that increments `self.value` and returns it. In `main`, create a counter, call `bump()` twice, and print each returned value on its own line.",
+      "expected_stdout": "1\n2\n"
+    },
+    {
+      "id": "toon_inline_extract",
+      "title": "TOON parsing with inline node lookup",
+      "prompt": "Write an Aether program that checks `has_toon()`. If TOON support is missing, print `toon unavailable` and exit. Otherwise parse the JSON text `{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}`, extract the `name` and `score`, print them as `Aether 42`, close the document, and return.",
+      "expected_stdout": "Aether 42\n"
+    }
+  ]
+}
