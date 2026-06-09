@@ -1,0 +1,9 @@
+{
+  "destinations": [
+    {
+      "id": "command-repair-template",
+      "type": "command",
+      "command_template": "python3 Tests/aether_doc_bench/mock_repair_model.py {prompt_file}"
+    }
+  ]
+}

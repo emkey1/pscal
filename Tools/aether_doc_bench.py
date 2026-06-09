@@ -179,6 +179,65 @@ def build_prompt(doc_name: str, doc_text: str, task: Task) -> str:
     )
 
 
+def build_repair_prompt(
+    doc_name: str,
+    doc_text: str,
+    task: Task,
+    previous_source: str,
+    attempt_number: int,
+    failure_summary: str,
+    observed_stdout: str,
+    observed_stderr: str,
+) -> str:
+    return textwrap.dedent(
+        f"""\
+        You are repairing a failed Aether program.
+
+        Use the following Aether guide as the ground truth for syntax, supported
+        features, and style.
+
+        Guide variant: {doc_name}
+        --- BEGIN AETHER GUIDE ---
+        {doc_text}
+        --- END AETHER GUIDE ---
+
+        Your previous attempt did not satisfy the benchmark task.
+        Return one full corrected Aether program.
+
+        Requirements:
+        - Return only raw Aether source code.
+        - Do not wrap the answer in Markdown fences.
+        - Do not explain the code.
+        - Keep the program self-contained unless the task explicitly provides files.
+        - The program must compile and run with the local `aether` compiler.
+        - The program must print exactly the expected output.
+
+        Task ID: {task.task_id}
+        Task Title: {task.title}
+        Task:
+        {task.prompt}
+
+        Expected stdout:
+        {task.expected_stdout}
+
+        Repair attempt number:
+        {attempt_number}
+
+        Failure summary:
+        {failure_summary}
+
+        Observed stdout:
+        {observed_stdout}
+
+        Observed stderr:
+        {observed_stderr}
+
+        Previous source:
+        {previous_source}
+        """
+    )
+
+
 def resolve_api_key(destination: Destination) -> str | None:
     if destination.api_key is not None:
         return destination.api_key
@@ -394,20 +453,108 @@ def compile_and_run(task: Task, source_code: str, args: argparse.Namespace) -> d
         }
 
 
+def truncate_for_prompt(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...[truncated]..."
+
+
+def derive_failure_summary(generated_ok: bool, run: dict[str, Any], generation_error: str | None = None) -> str:
+    if not generated_ok:
+        if generation_error:
+            first_line = generation_error.strip().splitlines()[0]
+            return f"generation_error: {first_line}"
+        return "generation_error: empty model output"
+    if run["returncode"] != 0:
+        stderr = (run.get("stderr") or "").strip()
+        if stderr:
+            return stderr.splitlines()[0]
+        return f"nonzero_exit:{run['returncode']}"
+    return "stdout_mismatch"
+
+
+def derive_failure_fingerprint(result: dict[str, Any]) -> str:
+    if not result.get("generated_ok", False):
+        err = result.get("generation_error", "empty model output")
+        return "generation:" + err.strip().splitlines()[0][:160]
+    run = result["run"]
+    if run["returncode"] != 0:
+        stderr = (run.get("stderr") or "").strip()
+        if stderr:
+            line = stderr.splitlines()[0]
+            if ": " in line:
+                line = line.split(": ", 1)[1]
+            return "run_error:" + line[:160]
+        return f"run_error:returncode={run['returncode']}"
+    return "stdout_mismatch"
+
+
+def evaluate_attempt(
+    prompt: str,
+    prompt_kind: str,
+    destination: Destination,
+    task: Task,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    attempt: dict[str, Any] = {
+        "prompt_kind": prompt_kind,
+        "prompt_approx_tokens": approx_tokens(prompt),
+    }
+    generation = run_model(prompt, destination)
+    source_code = sanitize_code(generation["raw_text"])
+    attempt["generation"] = generation
+    attempt["generated_ok"] = bool(source_code.strip())
+    attempt["source_code"] = source_code
+    if attempt["generated_ok"]:
+        attempt["run"] = compile_and_run(task, source_code, args)
+    else:
+        attempt["run"] = {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": "empty model output",
+            "elapsed_seconds": 0.0,
+            "exact_stdout_match": False,
+        }
+    return attempt
+
+
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(results)
     generated = sum(1 for item in results if item["generated_ok"])
     compiled_and_ran = sum(1 for item in results if item["run"]["returncode"] == 0)
     exact = sum(1 for item in results if item["run"]["exact_stdout_match"])
+    repaired = sum(1 for item in results if item.get("resolved_after_repair", False))
     return {
         "total_cases": total,
         "generated_ok": generated,
         "run_ok": compiled_and_ran,
         "exact_stdout_match": exact,
+        "resolved_after_repair": repaired,
         "generated_rate": round(generated / total, 4) if total else 0.0,
         "run_rate": round(compiled_and_ran / total, 4) if total else 0.0,
         "exact_match_rate": round(exact / total, 4) if total else 0.0,
+        "repair_recovery_rate": round(repaired / total, 4) if total else 0.0,
     }
+
+
+def summarize_failure_patterns(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: dict[str, dict[str, Any]] = {}
+    for result in results:
+        if result["run"]["exact_stdout_match"]:
+            continue
+        fingerprint = result.get("failure_fingerprint") or derive_failure_fingerprint(result)
+        entry = counts.setdefault(
+            fingerprint,
+            {
+                "fingerprint": fingerprint,
+                "count": 0,
+                "task_ids": [],
+            },
+        )
+        entry["count"] += 1
+        if result["task_id"] not in entry["task_ids"]:
+            entry["task_ids"].append(result["task_id"])
+    return sorted(counts.values(), key=lambda item: (-item["count"], item["fingerprint"]))
 
 
 def print_text_summary(report: dict[str, Any]) -> None:
@@ -425,8 +572,14 @@ def print_text_summary(report: dict[str, Any]) -> None:
                 f"approx_tokens={variant['doc_approx_tokens']:<6}  "
                 f"generated={variant['summary']['generated_ok']}/{variant['summary']['total_cases']}  "
                 f"run={variant['summary']['run_ok']}/{variant['summary']['total_cases']}  "
-                f"exact={variant['summary']['exact_stdout_match']}/{variant['summary']['total_cases']}"
+                f"exact={variant['summary']['exact_stdout_match']}/{variant['summary']['total_cases']}  "
+                f"repaired={variant['summary']['resolved_after_repair']}/{variant['summary']['total_cases']}"
             )
+            for failure in variant.get("failure_patterns", [])[:3]:
+                print(
+                    f"       fail x{failure['count']}: {failure['fingerprint']} "
+                    f"[tasks: {', '.join(failure['task_ids'])}]"
+                )
         print("")
 
 
@@ -473,6 +626,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", default="", help="legacy fallback only; use destination configs instead")
     parser.add_argument("--model", default="", help="legacy fallback only; use destination configs instead")
     parser.add_argument("--repeats", type=int, default=1, help="repeat each task N times per doc variant")
+    parser.add_argument(
+        "--repair-attempts",
+        type=int,
+        default=0,
+        help="when > 0, retry failed cases by feeding diagnostics back to the model",
+    )
+    parser.add_argument(
+        "--repair-feedback-limit",
+        type=int,
+        default=1200,
+        help="max characters of stdout/stderr/source included in a repair prompt section",
+    )
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN, help="path to local aether binary")
     parser.add_argument("--output-json", type=pathlib.Path, default=None, help="write full JSON report to this path")
     parser.add_argument("--text-summary", action="store_true", help="print compact text summary")
@@ -562,24 +727,54 @@ def main() -> int:
                         "task_id": task.task_id,
                         "task_title": task.title,
                         "repeat_index": repeat_index,
-                        "prompt_approx_tokens": approx_tokens(prompt),
+                        "attempts": [],
                     }
                     try:
-                        generation = run_model(prompt, destination)
-                        source_code = sanitize_code(generation["raw_text"])
-                        case_record["generation"] = generation
-                        case_record["generated_ok"] = bool(source_code.strip())
-                        case_record["source_code"] = source_code
-                        if case_record["generated_ok"]:
-                            case_record["run"] = compile_and_run(task, source_code, args)
-                        else:
-                            case_record["run"] = {
-                                "returncode": -1,
-                                "stdout": "",
-                                "stderr": "empty model output",
-                                "elapsed_seconds": 0.0,
-                                "exact_stdout_match": False,
-                            }
+                        attempt = evaluate_attempt(
+                            prompt=prompt,
+                            prompt_kind="initial",
+                            destination=destination,
+                            task=task,
+                            args=args,
+                        )
+                        case_record["attempts"].append(attempt)
+
+                        for repair_index in range(args.repair_attempts):
+                            if attempt["run"]["exact_stdout_match"]:
+                                break
+                            failure_summary = derive_failure_summary(
+                                attempt["generated_ok"],
+                                attempt["run"],
+                                attempt.get("generation_error"),
+                            )
+                            repair_prompt = build_repair_prompt(
+                                doc_name=doc_name,
+                                doc_text=doc_text,
+                                task=task,
+                                previous_source=truncate_for_prompt(attempt.get("source_code", ""), args.repair_feedback_limit),
+                                attempt_number=repair_index + 1,
+                                failure_summary=failure_summary,
+                                observed_stdout=truncate_for_prompt(attempt["run"].get("stdout", ""), args.repair_feedback_limit),
+                                observed_stderr=truncate_for_prompt(attempt["run"].get("stderr", ""), args.repair_feedback_limit),
+                            )
+                            attempt = evaluate_attempt(
+                                prompt=repair_prompt,
+                                prompt_kind="repair",
+                                destination=destination,
+                                task=task,
+                                args=args,
+                            )
+                            case_record["attempts"].append(attempt)
+
+                        final_attempt = case_record["attempts"][-1]
+                        case_record.update(final_attempt)
+                        case_record["attempt_count"] = len(case_record["attempts"])
+                        case_record["resolved_after_repair"] = (
+                            case_record["run"]["exact_stdout_match"] and len(case_record["attempts"]) > 1
+                        )
+                        case_record["failure_fingerprint"] = (
+                            "" if case_record["run"]["exact_stdout_match"] else derive_failure_fingerprint(case_record)
+                        )
                     except Exception as exc:  # pragma: no cover - surfaced in JSON report
                         case_record["generated_ok"] = False
                         case_record["generation_error"] = str(exc)
@@ -590,6 +785,9 @@ def main() -> int:
                             "elapsed_seconds": 0.0,
                             "exact_stdout_match": False,
                         }
+                        case_record["attempt_count"] = len(case_record["attempts"])
+                        case_record["resolved_after_repair"] = False
+                        case_record["failure_fingerprint"] = derive_failure_fingerprint(case_record)
                     finally:
                         try:
                             run_destination_cleanup(destination, task, doc_name, repeat_index)
@@ -604,6 +802,7 @@ def main() -> int:
                 "doc_approx_tokens": approx_tokens(doc_text),
                 "results": results,
                 "summary": summarize(results),
+                "failure_patterns": summarize_failure_patterns(results),
             }
             destination_report["variants"].append(variant_report)
         report["destinations"].append(destination_report)

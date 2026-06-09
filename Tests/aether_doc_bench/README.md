@@ -19,6 +19,18 @@ Success is measured pragmatically:
 3. did the program run successfully?
 4. did stdout match the expected output exactly?
 
+Optionally, the harness can also do repair iterations:
+
+5. when a case fails, feed the failure back to the model
+6. measure whether the model can recover on a later attempt
+
+That makes the tool useful in two different ways:
+
+- documentation refinement: repeated repair-needed patterns usually point to
+  unclear or incomplete guidance
+- Aether debugging: repeated failures on otherwise reasonable repaired code may
+  indicate a compiler/runtime defect
+
 ## Runner
 
 Use:
@@ -39,6 +51,15 @@ Run one task only:
 
 ```bash
 python3 Tools/aether_doc_bench.py --task hello_fx --text-summary
+```
+
+Enable one repair attempt after an initial failure:
+
+```bash
+python3 Tools/aether_doc_bench.py \
+  --task hello_fx \
+  --repair-attempts 1 \
+  --text-summary
 ```
 
 List configured destinations:
@@ -137,6 +158,17 @@ python3 Tools/aether_doc_bench.py \
   --text-summary
 ```
 
+There is also a repair-path self-test:
+
+```bash
+python3 Tools/aether_doc_bench.py \
+  --destinations-config Tests/aether_doc_bench/repair_test_destinations.json \
+  --destination command-repair-template \
+  --task hello_fx \
+  --repair-attempts 1 \
+  --text-summary
+```
+
 ## Local config
 
 Keep machine-specific or private model settings in:
@@ -188,3 +220,20 @@ Keep tasks small, deterministic, and exact-output based.
 
 The goal is not to test every language feature here. The goal is to measure
 how reliably a model can turn the guide into working Aether.
+
+## Interpreting repeated failures
+
+If one task fails far more often than the others:
+
+- it may indicate a documentation gap for that language surface
+- it may indicate an Aether frontend/backend defect
+
+The JSON report now records:
+
+- every attempt per case
+- whether the case was resolved after repair
+- a compact failure fingerprint
+- aggregate failure-pattern counts per document variant
+
+That makes it easier to see whether the same effect-boundary, inference,
+TOON-shape, or runtime issue keeps surfacing across multiple models.
