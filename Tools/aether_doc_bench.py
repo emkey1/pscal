@@ -25,7 +25,6 @@ import argparse
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,6 +39,7 @@ from typing import Any
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
 DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
+DEFAULT_DESTINATIONS_CONFIG = REPO_ROOT / "Tests" / "aether_doc_bench" / "destinations.template.json"
 DOC_VARIANTS = {
     "full": REPO_ROOT / "Docs" / "aether_for_llms_and_others.md",
     "small": REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
@@ -55,6 +55,19 @@ class Task:
     timeout_seconds: int = 20
     cwd: str | None = None
     files: dict[str, str] | None = None
+
+
+@dataclass
+class Destination:
+    destination_id: str
+    kind: str
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    api_key_env: str | None = None
+    temperature: float = 0.2
+    max_output_tokens: int = 3000
+    command_template: str | None = None
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -82,6 +95,27 @@ def load_tasks(path: pathlib.Path) -> list[Task]:
             )
         )
     return tasks
+
+
+def load_destinations(path: pathlib.Path) -> list[Destination]:
+    raw = json.loads(read_text(path))
+    items = raw.get("destinations", [])
+    destinations: list[Destination] = []
+    for item in items:
+        destinations.append(
+            Destination(
+                destination_id=item["id"],
+                kind=item["type"],
+                model=item.get("model"),
+                base_url=item.get("base_url"),
+                api_key=item.get("api_key"),
+                api_key_env=item.get("api_key_env"),
+                temperature=float(item.get("temperature", 0.2)),
+                max_output_tokens=int(item.get("max_output_tokens", 3000)),
+                command_template=item.get("command_template"),
+            )
+        )
+    return destinations
 
 
 def resolve_docs(names: list[str]) -> list[tuple[str, pathlib.Path]]:
@@ -139,41 +173,102 @@ def build_prompt(doc_name: str, doc_text: str, task: Task) -> str:
     )
 
 
-def invoke_openai(prompt: str, model: str, temperature: float, max_output_tokens: int) -> dict[str, Any]:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for provider=openai")
+def resolve_api_key(destination: Destination) -> str | None:
+    if destination.api_key is not None:
+        return destination.api_key
+    if destination.api_key_env:
+        return os.environ.get(destination.api_key_env)
+    return os.environ.get("OPENAI_API_KEY")
 
-    body = {
-        "model": model,
-        "input": prompt,
-        "reasoning": {"effort": "medium"},
-        "text": {"verbosity": "low"},
-        "max_output_tokens": max_output_tokens,
+
+def http_json_request(url: str, body: dict[str, Any], api_key: str | None) -> dict[str, Any]:
+    headers = {
+        "Content-Type": "application/json",
     }
-    if temperature >= 0:
-        body["temperature"] = temperature
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     req = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
+        url,
         method="POST",
         data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
     )
 
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI API error {exc.code}: {detail}") from exc
+        raise RuntimeError(f"HTTP API error {exc.code}: {detail}") from exc
 
+
+def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, Any]:
+    if not destination.model:
+        raise RuntimeError("destination model is required for openai_responses")
+    base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
+    api_key = resolve_api_key(destination)
+    if not api_key:
+        raise RuntimeError("an API key is required for openai_responses")
+
+    body = {
+        "model": destination.model,
+        "input": prompt,
+        "reasoning": {"effort": "medium"},
+        "text": {"verbosity": "low"},
+        "max_output_tokens": destination.max_output_tokens,
+    }
+    if destination.temperature >= 0:
+        body["temperature"] = destination.temperature
+
+    payload = http_json_request(f"{base_url}/responses", body, api_key)
     output_text = payload.get("output_text", "")
     if not output_text:
-        raise RuntimeError("OpenAI response did not contain output_text")
+        raise RuntimeError("Responses API reply did not contain output_text")
+
+    return {
+        "raw_text": output_text,
+        "response_id": payload.get("id"),
+        "usage": payload.get("usage"),
+    }
+
+
+def flatten_chat_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") in ("text", "output_text"):
+                parts.append(str(item.get("text", "")))
+        return "".join(parts)
+    return ""
+
+
+def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dict[str, Any]:
+    if not destination.model:
+        raise RuntimeError("destination model is required for openai_chat_completions")
+    base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
+    api_key = resolve_api_key(destination)
+
+    body = {
+        "model": destination.model,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": destination.max_output_tokens,
+    }
+    if destination.temperature >= 0:
+        body["temperature"] = destination.temperature
+
+    payload = http_json_request(f"{base_url}/chat/completions", body, api_key)
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError("chat completions reply did not contain choices")
+    message = choices[0].get("message") or {}
+    output_text = flatten_chat_content(message.get("content"))
+    if not output_text:
+        raise RuntimeError("chat completions reply did not contain message content")
 
     return {
         "raw_text": output_text,
@@ -212,19 +307,16 @@ def invoke_command(prompt: str, command_template: str, cwd: pathlib.Path) -> dic
     }
 
 
-def run_model(prompt: str, args: argparse.Namespace) -> dict[str, Any]:
-    if args.provider == "openai":
-        return invoke_openai(
-            prompt=prompt,
-            model=args.model,
-            temperature=args.temperature,
-            max_output_tokens=args.max_output_tokens,
-        )
-    if args.provider == "command":
-        if not args.command_template:
-            raise RuntimeError("--command-template is required for provider=command")
-        return invoke_command(prompt=prompt, command_template=args.command_template, cwd=REPO_ROOT)
-    raise RuntimeError(f"unsupported provider {args.provider}")
+def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
+    if destination.kind == "openai_responses":
+        return invoke_openai_responses(prompt=prompt, destination=destination)
+    if destination.kind == "openai_chat_completions":
+        return invoke_openai_chat_completions(prompt=prompt, destination=destination)
+    if destination.kind == "command":
+        if not destination.command_template:
+            raise RuntimeError("command_template is required for command destinations")
+        return invoke_command(prompt=prompt, command_template=destination.command_template, cwd=REPO_ROOT)
+    raise RuntimeError(f"unsupported destination type {destination.kind}")
 
 
 def materialize_task_files(task: Task, work_dir: pathlib.Path) -> None:
@@ -287,19 +379,23 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def print_text_summary(report: dict[str, Any]) -> None:
-    print(f"provider      : {report['provider']}")
-    print(f"model         : {report.get('model') or '(external command)'}")
     print(f"tasks file    : {report['tasks_file']}")
-    print(f"cases         : {report['summary']['total_cases']}")
+    print(f"cases/dest    : {report['summary']['total_cases_per_destination']}")
+    print(f"destinations  : {report['summary']['destination_count']}")
     print("")
-    for variant in report["variants"]:
-        print(
-            f"{variant['doc_name']:>5}  "
-            f"approx_tokens={variant['doc_approx_tokens']:<6}  "
-            f"generated={variant['summary']['generated_ok']}/{variant['summary']['total_cases']}  "
-            f"run={variant['summary']['run_ok']}/{variant['summary']['total_cases']}  "
-            f"exact={variant['summary']['exact_stdout_match']}/{variant['summary']['total_cases']}"
-        )
+    for destination in report["destinations"]:
+        print(f"destination   : {destination['destination_id']}")
+        print(f"type          : {destination['type']}")
+        print(f"model         : {destination.get('model') or '(external command)'}")
+        for variant in destination["variants"]:
+            print(
+                f"{variant['doc_name']:>5}  "
+                f"approx_tokens={variant['doc_approx_tokens']:<6}  "
+                f"generated={variant['summary']['generated_ok']}/{variant['summary']['total_cases']}  "
+                f"run={variant['summary']['run_ok']}/{variant['summary']['total_cases']}  "
+                f"exact={variant['summary']['exact_stdout_match']}/{variant['summary']['total_cases']}"
+            )
+        print("")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -313,29 +409,37 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", action="append", default=[], help="restrict to one or more task ids")
     parser.add_argument("--list-tasks", action="store_true", help="list manifest task ids and exit")
     parser.add_argument(
-        "--provider",
-        choices=("openai", "command"),
-        default="openai",
-        help="LLM invocation backend",
+        "--destinations-config",
+        type=pathlib.Path,
+        default=DEFAULT_DESTINATIONS_CONFIG,
+        help="destination profile JSON",
     )
-    parser.add_argument("--model", default="gpt-5-mini", help="model name for provider=openai")
+    parser.add_argument(
+        "--destination",
+        action="append",
+        default=[],
+        help="restrict to one or more destination ids from the config",
+    )
+    parser.add_argument("--list-destinations", action="store_true", help="list configured destinations and exit")
     parser.add_argument(
         "--temperature",
         type=float,
         default=0.2,
-        help="generation temperature for provider=openai; set negative to omit",
+        help="legacy fallback only; use destination configs instead",
     )
     parser.add_argument(
         "--max-output-tokens",
         type=int,
         default=3000,
-        help="OpenAI max output tokens",
+        help="legacy fallback only; use destination configs instead",
     )
     parser.add_argument(
         "--command-template",
         default="",
-        help="shell command for provider=command; use {prompt_file} placeholder",
+        help="legacy fallback only; use destination configs instead",
     )
+    parser.add_argument("--provider", default="", help="legacy fallback only; use destination configs instead")
+    parser.add_argument("--model", default="", help="legacy fallback only; use destination configs instead")
     parser.add_argument("--repeats", type=int, default=1, help="repeat each task N times per doc variant")
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN, help="path to local aether binary")
     parser.add_argument("--output-json", type=pathlib.Path, default=None, help="write full JSON report to this path")
@@ -363,70 +467,109 @@ def main() -> int:
     if not tasks:
         raise SystemExit("no tasks selected")
 
+    if args.destinations_config.exists():
+        destinations = load_destinations(args.destinations_config)
+    else:
+        destinations = []
+
+    if not destinations and args.provider:
+        destinations = [
+            Destination(
+                destination_id="legacy-cli",
+                kind="openai_responses" if args.provider == "openai" else args.provider,
+                model=args.model or None,
+                temperature=args.temperature,
+                max_output_tokens=args.max_output_tokens,
+                command_template=args.command_template or None,
+            )
+        ]
+
+    if args.destination:
+        wanted_destinations = set(args.destination)
+        destinations = [item for item in destinations if item.destination_id in wanted_destinations]
+
+    if args.list_destinations:
+        for item in destinations:
+            model = item.model or "-"
+            print(f"{item.destination_id}\t{item.kind}\t{model}")
+        return 0
+
+    if not destinations:
+        raise SystemExit("no destinations selected")
+
     doc_variants = resolve_docs([part.strip() for part in args.docs.split(",") if part.strip()])
 
     report: dict[str, Any] = {
-        "provider": args.provider,
-        "model": args.model if args.provider == "openai" else None,
         "tasks_file": str(args.tasks),
+        "destinations_config": str(args.destinations_config),
         "created_at_unix": int(time.time()),
         "summary": {
-            "total_cases": len(tasks) * args.repeats,
+            "total_cases_per_destination": len(tasks) * args.repeats,
             "doc_variants": len(doc_variants),
+            "destination_count": len(destinations),
         },
-        "variants": [],
+        "destinations": [],
     }
 
-    for doc_name, doc_path in doc_variants:
-        doc_text = read_text(doc_path)
-        results: list[dict[str, Any]] = []
+    for destination in destinations:
+        destination_report = {
+            "destination_id": destination.destination_id,
+            "type": destination.kind,
+            "model": destination.model,
+            "base_url": destination.base_url,
+            "variants": [],
+        }
+        for doc_name, doc_path in doc_variants:
+            doc_text = read_text(doc_path)
+            results: list[dict[str, Any]] = []
 
-        for task in tasks:
-            for repeat_index in range(args.repeats):
-                prompt = build_prompt(doc_name=doc_name, doc_text=doc_text, task=task)
-                case_record: dict[str, Any] = {
-                    "task_id": task.task_id,
-                    "task_title": task.title,
-                    "repeat_index": repeat_index,
-                    "prompt_approx_tokens": approx_tokens(prompt),
-                }
-                try:
-                    generation = run_model(prompt, args)
-                    source_code = sanitize_code(generation["raw_text"])
-                    case_record["generation"] = generation
-                    case_record["generated_ok"] = bool(source_code.strip())
-                    case_record["source_code"] = source_code
-                    if case_record["generated_ok"]:
-                        case_record["run"] = compile_and_run(task, source_code, args)
-                    else:
+            for task in tasks:
+                for repeat_index in range(args.repeats):
+                    prompt = build_prompt(doc_name=doc_name, doc_text=doc_text, task=task)
+                    case_record: dict[str, Any] = {
+                        "task_id": task.task_id,
+                        "task_title": task.title,
+                        "repeat_index": repeat_index,
+                        "prompt_approx_tokens": approx_tokens(prompt),
+                    }
+                    try:
+                        generation = run_model(prompt, destination)
+                        source_code = sanitize_code(generation["raw_text"])
+                        case_record["generation"] = generation
+                        case_record["generated_ok"] = bool(source_code.strip())
+                        case_record["source_code"] = source_code
+                        if case_record["generated_ok"]:
+                            case_record["run"] = compile_and_run(task, source_code, args)
+                        else:
+                            case_record["run"] = {
+                                "returncode": -1,
+                                "stdout": "",
+                                "stderr": "empty model output",
+                                "elapsed_seconds": 0.0,
+                                "exact_stdout_match": False,
+                            }
+                    except Exception as exc:  # pragma: no cover - surfaced in JSON report
+                        case_record["generated_ok"] = False
+                        case_record["generation_error"] = str(exc)
                         case_record["run"] = {
                             "returncode": -1,
                             "stdout": "",
-                            "stderr": "empty model output",
+                            "stderr": str(exc),
                             "elapsed_seconds": 0.0,
                             "exact_stdout_match": False,
                         }
-                except Exception as exc:  # pragma: no cover - surfaced in JSON report
-                    case_record["generated_ok"] = False
-                    case_record["generation_error"] = str(exc)
-                    case_record["run"] = {
-                        "returncode": -1,
-                        "stdout": "",
-                        "stderr": str(exc),
-                        "elapsed_seconds": 0.0,
-                        "exact_stdout_match": False,
-                    }
-                results.append(case_record)
+                    results.append(case_record)
 
-        variant_report = {
-            "doc_name": doc_name,
-            "doc_path": str(doc_path),
-            "doc_bytes": len(doc_text.encode("utf-8")),
-            "doc_approx_tokens": approx_tokens(doc_text),
-            "results": results,
-            "summary": summarize(results),
-        }
-        report["variants"].append(variant_report)
+            variant_report = {
+                "doc_name": doc_name,
+                "doc_path": str(doc_path),
+                "doc_bytes": len(doc_text.encode("utf-8")),
+                "doc_approx_tokens": approx_tokens(doc_text),
+                "results": results,
+                "summary": summarize(results),
+            }
+            destination_report["variants"].append(variant_report)
+        report["destinations"].append(destination_report)
 
     if args.output_json:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)

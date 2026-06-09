@@ -41,33 +41,77 @@ Run one task only:
 python3 Tools/aether_doc_bench.py --task hello_fx --text-summary
 ```
 
+List configured destinations:
+
+```bash
+python3 Tools/aether_doc_bench.py --list-destinations
+```
+
 ## Providers
 
-### OpenAI
+The harness now prefers named destination profiles from:
+
+- `Tests/aether_doc_bench/destinations.template.json`
+- optional local overrides such as `Tests/aether_doc_bench/destinations.local.json`
+
+Each destination has an `id` and a `type`.
+
+Current destination types:
+
+- `openai_responses`
+- `openai_chat_completions`
+- `command`
+
+### OpenAI Responses
 
 Set `OPENAI_API_KEY`, then run:
 
 ```bash
 python3 Tools/aether_doc_bench.py \
-  --provider openai \
-  --model gpt-5-mini \
+  --destination openai-gpt-5-mini \
+  --text-summary
+```
+
+### OpenAI-compatible `/chat/completions`
+
+Add a destination like this:
+
+```json
+{
+  "id": "my-local-model",
+  "type": "openai_chat_completions",
+  "base_url": "http://host:port/v1",
+  "api_key": "",
+  "model": "provider/model-name",
+  "temperature": 0.2,
+  "max_output_tokens": 3000
+}
+```
+
+Then run:
+
+```bash
+python3 Tools/aether_doc_bench.py \
+  --destinations-config Tests/aether_doc_bench/destinations.local.json \
+  --destination my-local-model \
   --text-summary
 ```
 
 ### External command
 
 For other LLM workflows, point the harness at a command that consumes a prompt
-file and prints raw Aether source to stdout.
+file and prints raw Aether source to stdout via a `command` destination.
 
 The command receives a `{prompt_file}` placeholder.
 
 Example shape:
 
-```bash
-python3 Tools/aether_doc_bench.py \
-  --provider command \
-  --command-template 'my-llm-runner --prompt-file {prompt_file}' \
-  --text-summary
+```json
+{
+  "id": "my-command-runner",
+  "type": "command",
+  "command_template": "my-llm-runner --prompt-file {prompt_file}"
+}
 ```
 
 ### Deterministic self-test
@@ -77,9 +121,34 @@ without any network calls:
 
 ```bash
 python3 Tools/aether_doc_bench.py \
-  --provider command \
-  --command-template 'python3 Tests/aether_doc_bench/mock_model.py {prompt_file}' \
+  --destination command-template \
   --text-summary
+```
+
+## Local config
+
+Keep machine-specific or private model settings in:
+
+- `Tests/aether_doc_bench/destinations.local.json`
+
+That local file should not be committed.
+
+For example, a local OpenAI-compatible endpoint with no API key:
+
+```json
+{
+  "destinations": [
+    {
+      "id": "c1t-gpt-oss-120b",
+      "type": "openai_chat_completions",
+      "base_url": "http://c1t:8001/v1",
+      "api_key": "",
+      "model": "openai/gpt-oss-120b",
+      "temperature": 0.2,
+      "max_output_tokens": 3000
+    }
+  ]
+}
 ```
 
 ## Task manifest

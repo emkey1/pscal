@@ -25,6 +25,8 @@ tmp/
 ios/PSCAL.xcodeproj/xcshareddata/xcdebugger/*
 foo.pbc
 Tests/examples/__pycache__/
+Tests/aether_doc_bench/destinations.local.json
+Tests/aether_doc_bench/out/
 output/
 .tmp-mkdir-repro-check/
 .tmp-mkdir-repro-final/

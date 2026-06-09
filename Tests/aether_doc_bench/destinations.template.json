@@ -1,0 +1,27 @@
+{
+  "destinations": [
+    {
+      "id": "openai-gpt-5-mini",
+      "type": "openai_responses",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-5-mini",
+      "temperature": 0.2,
+      "max_output_tokens": 3000
+    },
+    {
+      "id": "openai-compatible-template",
+      "type": "openai_chat_completions",
+      "base_url": "http://localhost:8000/v1",
+      "api_key": "",
+      "model": "replace/me",
+      "temperature": 0.2,
+      "max_output_tokens": 3000
+    },
+    {
+      "id": "command-template",
+      "type": "command",
+      "command_template": "python3 Tests/aether_doc_bench/mock_model.py {prompt_file}"
+    }
+  ]
+}
