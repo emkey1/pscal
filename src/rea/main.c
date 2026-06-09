@@ -193,6 +193,11 @@ typedef struct ParsedDiagnostic {
     char *raw;
 } ParsedDiagnostic;
 
+typedef struct RuntimeLocationInfo {
+    size_t offset;
+    int line;
+} RuntimeLocationInfo;
+
 static void freeParsedDiagnostics(ParsedDiagnostic *items, int count) {
     if (!items) return;
     for (int i = 0; i < count; i++) {
@@ -412,6 +417,24 @@ static ParsedDiagnostic parseDiagnosticLine(const char *line) {
     return diag;
 }
 
+static int parseRuntimeLocationLine(const char *line, RuntimeLocationInfo *info) {
+    unsigned long long parsedOffset = 0;
+    int parsedLine = 0;
+
+    if (!line || !info) return 0;
+    if (sscanf(line, "[Error Location] Offset: %llu, Line: %d", &parsedOffset, &parsedLine) == 2) {
+        info->offset = (size_t)parsedOffset;
+        info->line = parsedLine;
+        return 1;
+    }
+    if (sscanf(line, "[Warning Location] Offset: %llu, Line: %d", &parsedOffset, &parsedLine) == 2) {
+        info->offset = (size_t)parsedOffset;
+        info->line = parsedLine;
+        return 1;
+    }
+    return 0;
+}
+
 static ParsedDiagnostic *collectDiagnosticsFromText(const char *text, int *outCount) {
     ParsedDiagnostic *items = NULL;
     int count = 0;
@@ -447,6 +470,67 @@ static ParsedDiagnostic *collectDiagnosticsFromText(const char *text, int *outCo
                     capacity = newCap;
                 }
                 diag = parseDiagnosticLine(line);
+                items[count++] = diag;
+                free(line);
+            }
+        }
+        cursor = *rawLineEnd == '\0' ? rawLineEnd : rawLineEnd + 1;
+    }
+
+    if (outCount) *outCount = count;
+    return items;
+}
+
+static ParsedDiagnostic *collectRuntimeDiagnosticsFromText(const char *text,
+                                                          const char *defaultFile,
+                                                          int *outCount) {
+    static const char kRuntimeText[] = "runtime";
+    ParsedDiagnostic *items = NULL;
+    int count = 0;
+    int capacity = 0;
+    const char *cursor = text ? text : "";
+
+    while (*cursor) {
+        const char *lineStart = cursor;
+        const char *lineEnd = cursor;
+        const char *rawLineEnd;
+        RuntimeLocationInfo location = {0};
+
+        while (*lineEnd && *lineEnd != '\n') lineEnd++;
+        rawLineEnd = lineEnd;
+        lineEnd = trimEnd(lineStart, lineEnd);
+        if (lineEnd > lineStart) {
+            char *line = diagDupRange(lineStart, lineEnd);
+            if (!line) {
+                freeParsedDiagnostics(items, count);
+                return NULL;
+            }
+            if (parseRuntimeLocationLine(line, &location)) {
+                if (count > 0) {
+                    items[count - 1].line = location.line;
+                }
+                free(line);
+            } else {
+                ParsedDiagnostic diag;
+                if (count == capacity) {
+                    int newCap = capacity ? capacity * 2 : 4;
+                    ParsedDiagnostic *resized =
+                        (ParsedDiagnostic *)realloc(items, (size_t)newCap * sizeof(ParsedDiagnostic));
+                    if (!resized) {
+                        free(line);
+                        freeParsedDiagnostics(items, count);
+                        return NULL;
+                    }
+                    items = resized;
+                    capacity = newCap;
+                }
+                diag = parseDiagnosticLine(line);
+                free(diag.file);
+                diag.file = defaultFile ? diagDupRange(defaultFile, defaultFile + strlen(defaultFile)) : NULL;
+                free(diag.phase);
+                diag.phase = diagDupRange(kRuntimeText, kRuntimeText + 7);
+                free(diag.kind);
+                diag.kind = diagDupRange(kRuntimeText, kRuntimeText + 7);
                 items[count++] = diag;
                 free(line);
             }
@@ -517,6 +601,31 @@ static void emitDiagnosticsToon(FILE *out, ParsedDiagnostic *items, int count) {
 static void emitDiagnosticsFromText(FILE *out, const char *text, int asToon) {
     int count = 0;
     ParsedDiagnostic *items = collectDiagnosticsFromText(text, &count);
+
+    if (!items && count == 0) {
+        if (asToon) {
+            fputs("diagnostics[0]{severity,phase,kind,file,line,column,message,hint,raw}:\n", out);
+        } else {
+            fputs("[]\n", out);
+        }
+        return;
+    }
+
+    if (asToon) {
+        emitDiagnosticsToon(out, items, count);
+    } else {
+        emitDiagnosticsJson(out, items, count);
+    }
+
+    freeParsedDiagnostics(items, count);
+}
+
+static void emitRuntimeDiagnosticsFromText(FILE *out,
+                                           const char *text,
+                                           const char *defaultFile,
+                                           int asToon) {
+    int count = 0;
+    ParsedDiagnostic *items = collectRuntimeDiagnosticsFromText(text, defaultFile, &count);
 
     if (!items && count == 0) {
         if (asToon) {
@@ -1064,6 +1173,20 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
         if (dump_bytecode_only_flag || no_run_flag) {
             result = INTERPRET_OK;
         } else {
+            DiagnosticCapture runtimeDiagCapture = {
+                .enabled = diagnostics_json || diagnostics_toon,
+                .saved_stderr_fd = -1,
+                .tmp = NULL
+            };
+            if (runtimeDiagCapture.enabled && !diagnosticCaptureBegin(&runtimeDiagCapture)) {
+                fprintf(stderr, "Failed to initialize runtime diagnostics capture: %s\n", strerror(errno));
+                freeBytecodeChunk(&chunk);
+                freeAST(program);
+                freeProcedureTable();
+                if (preprocessed_source) free(preprocessed_source);
+                free(src);
+                REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
+            }
             reaInstallSigint();
             VM vm;
             initVM(&vm);
@@ -1077,6 +1200,15 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
             result = interpretBytecode(&vm, &chunk, globalSymbols, constGlobalSymbols, procedure_table, 0);
             g_sigint_vm = NULL;
             freeVM(&vm);
+            if (runtimeDiagCapture.enabled) {
+                diagnosticCaptureEnd(&runtimeDiagCapture);
+                if (result != INTERPRET_OK) {
+                    char *diagText = diagnosticCaptureRead(&runtimeDiagCapture);
+                    emitRuntimeDiagnosticsFromText(stderr, diagText, path, diagnostics_toon);
+                    free(diagText);
+                }
+                diagnosticCaptureDispose(&runtimeDiagCapture);
+            }
         }
     }
 

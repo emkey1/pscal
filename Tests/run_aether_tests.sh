@@ -723,6 +723,49 @@ if ! grep -q "Line: 4" /tmp/aether_runtime_line_mapping_fail.out; then
     cat /tmp/aether_runtime_line_mapping_fail.out >&2
     exit 1
 fi
+if env -u OPENAI_API_KEY "$AETHER_BIN" --diagnostics-json --no-cache "$RUNTIME_LINE_MAPPING_FAIL_FIXTURE" >/tmp/aether_runtime_line_mapping_json.out 2>&1; then
+    echo "expected runtime diagnostics-json failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '"phase":"runtime"' /tmp/aether_runtime_line_mapping_json.out; then
+    echo "missing runtime diagnostics-json phase" >&2
+    cat /tmp/aether_runtime_line_mapping_json.out >&2
+    exit 1
+fi
+if ! grep -q '"kind":"runtime"' /tmp/aether_runtime_line_mapping_json.out; then
+    echo "missing runtime diagnostics-json kind" >&2
+    cat /tmp/aether_runtime_line_mapping_json.out >&2
+    exit 1
+fi
+if ! grep -q '"file":"'"$RUNTIME_LINE_MAPPING_FAIL_FIXTURE"'"' /tmp/aether_runtime_line_mapping_json.out; then
+    echo "missing runtime diagnostics-json file path" >&2
+    cat /tmp/aether_runtime_line_mapping_json.out >&2
+    exit 1
+fi
+if ! grep -q '"line":4' /tmp/aether_runtime_line_mapping_json.out; then
+    echo "missing runtime diagnostics-json line number" >&2
+    cat /tmp/aether_runtime_line_mapping_json.out >&2
+    exit 1
+fi
+if ! grep -q 'OpenAIChatCompletions requires an API key' /tmp/aether_runtime_line_mapping_json.out; then
+    echo "missing runtime diagnostics-json message" >&2
+    cat /tmp/aether_runtime_line_mapping_json.out >&2
+    exit 1
+fi
+if env -u OPENAI_API_KEY "$AETHER_BIN" --diagnostics-toon --no-cache "$RUNTIME_LINE_MAPPING_FAIL_FIXTURE" >/tmp/aether_runtime_line_mapping_toon.out 2>&1; then
+    echo "expected runtime diagnostics-toon failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '^diagnostics\[1\]{severity,phase,kind,file,line,column,message,hint,raw}:$' /tmp/aether_runtime_line_mapping_toon.out; then
+    echo "missing runtime diagnostics-toon header" >&2
+    cat /tmp/aether_runtime_line_mapping_toon.out >&2
+    exit 1
+fi
+if ! grep -q '"error","runtime","runtime","'"$RUNTIME_LINE_MAPPING_FAIL_FIXTURE"'",4,null,"OpenAIChatCompletions requires an API key via argument or OPENAI_API_KEY\."' /tmp/aether_runtime_line_mapping_toon.out; then
+    echo "missing runtime diagnostics-toon row" >&2
+    cat /tmp/aether_runtime_line_mapping_toon.out >&2
+    exit 1
+fi
 
 if "$AETHER_BIN" --no-cache "$PRINT_ALIAS_FAIL_FIXTURE" >/tmp/aether_print_alias_fail.out 2>&1; then
     echo "expected print alias effect-boundary failure but program succeeded" >&2

@@ -232,6 +232,10 @@ A good default rule for LLMs:
 Runtime and compile-time failures should report original Aether source lines,
 not lowered Rea lines. When debugging, trust the reported Aether line first.
 
+If you invoke the compiler with `--diagnostics-json` or `--diagnostics-toon`,
+runtime failures are also emitted in structured form with the original Aether
+file and line when available.
+
 ## Purity and contracts
 
 ### `@pure`
