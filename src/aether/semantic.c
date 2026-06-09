@@ -2163,6 +2163,7 @@ static void validateAetherSource(const char *source,
 
 void aetherPerformSemanticAnalysis(AST *root) {
     const char *source = aetherGetLastSource();
+    int errorCountBefore = pascal_semantic_error_count;
 
     if (source) {
         char *sanitized = sanitizeAetherSourceForSemanticScan(source);
@@ -2179,6 +2180,9 @@ void aetherPerformSemanticAnalysis(AST *root) {
         freeOpaqueBindingTable(&opaqueBindings);
         freeFunctionTable(&table);
         free(sanitized);
+    }
+    if (pascal_semantic_error_count > errorCountBefore) {
+        return;
     }
     reaPerformSemanticAnalysis(root);
 }

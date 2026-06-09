@@ -238,6 +238,10 @@ If you invoke the compiler with `--diagnostics-json` or `--diagnostics-toon`,
 runtime failures are also emitted in structured form with the original Aether
 file and line when available.
 
+Frontend failures now follow the same pattern for important Aether-owned cases
+too. In particular, unresolved `use "..."` imports should report as Aether
+import errors with the original source file and line.
+
 In ordinary CLI mode, runtime failures should also include a plain-text
 `file:line:` prefix before the message when the source label is available.
 
@@ -421,6 +425,8 @@ examples:
 
 - prefer no `use` imports unless the module is part of the supplied context
 - inline small constants and helpers instead of assuming support files exist
+- if a `use` target does not exist, the compiler should fail with an Aether
+  import error on the original source line
 
 ## Types and methods
 

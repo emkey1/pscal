@@ -944,6 +944,20 @@ if ! grep -q '"line":1' /tmp/aether_import_missing_json.out; then
     cat /tmp/aether_import_missing_json.out >&2
     exit 1
 fi
+if "$AETHER_BIN" --no-cache --diagnostics-toon "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_toon.out 2>&1; then
+    echo "expected missing import diagnostics-toon failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '^diagnostics\[1\]{severity,phase,kind,file,line,column,message,hint,raw}:$' /tmp/aether_import_missing_toon.out; then
+    echo "missing import diagnostics-toon header" >&2
+    cat /tmp/aether_import_missing_toon.out >&2
+    exit 1
+fi
+if ! grep -q '"error","semantic","import","'"$IMPORT_MISSING_FAIL_FIXTURE"'",1,null,"Aether import error: unable to resolve import '\''definitely_missing_aether_module'\''; add the module file or remove the use line\."' /tmp/aether_import_missing_toon.out; then
+    echo "missing import diagnostics-toon row" >&2
+    cat /tmp/aether_import_missing_toon.out >&2
+    exit 1
+fi
 
 if "$AETHER_BIN" --no-cache "$PAR_FAIL_NON_CALL_FIXTURE" >/tmp/aether_par_fail_non_call.out 2>&1; then
     echo "expected par rewrite failure for non-call statement but program succeeded" >&2
