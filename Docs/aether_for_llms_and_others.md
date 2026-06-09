@@ -289,13 +289,42 @@ In ordinary CLI mode, runtime failures should also include a plain-text
 `print(...)` and `println(...)` are Aether spellings for the shared
 `write(...)` and `writeln(...)` builtins.
 
-When either side of `+` is textual (`Text`, string, or char), Aether
-concatenates and stringifies the other side as needed. This is valid:
+For mixed-type output, prefer variadic `print(...)` / `println(...)` arguments
+instead of building one large string with `+`.
+
+Use this pattern:
 
 ```aether
-let line: Text = "score=" + 42;
-let label: Text = "pi≈" + 3.14;
+fx {
+    println("score = ", 42);
+    println("pi ~= ", 3.14:0:2);
+}
 ```
+
+Do not assume `Text + Int` or `Text + Real` is a universally safe pattern.
+Some concatenation cases may appear to work in narrow contexts, but for humans
+and especially for LLMs, the reliable rule is:
+
+- if values are mixed types, prefer `println(a, b, c)` or `print(a, b, c)`
+- use `+` for text-building only when the operands are already clearly
+  text-compatible or explicitly converted
+
+Bad:
+
+```aether
+println("Drop " + j + " -> ID: " + tx.id + " | Amt: " + tx.amount);
+```
+
+Good:
+
+```aether
+println("Drop ", j, " -> ID: ", tx.id, " | Amt: ", tx.amount);
+```
+
+If you want a rule that works well for LLM-generated code, use this one:
+
+- for visible output, default to comma-separated `println(...)` arguments
+- do not guess that `+` will stringify numbers for you
 
 Plain `println(realValue)` currently uses the backend default real formatting,
 which is 6 digits after the decimal point.

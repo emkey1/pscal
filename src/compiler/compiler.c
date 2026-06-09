@@ -6687,6 +6687,16 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                         continue;
                     }
 
+                    /*
+                     * Local slots are recycled across nested scopes. Clear the
+                     * runtime slot before reinitializing it so a new local can
+                     * safely change type when it reuses a slot that previously
+                     * held a different scoped variable.
+                     */
+                    noteLocalSlotUse(current_function_compiler, slot);
+                    writeBytecodeChunk(chunk, RESET_LOCAL, getLine(varNameNode));
+                    writeBytecodeChunk(chunk, (uint8_t)slot, getLine(varNameNode));
+
                     AST* resolved_local_type = resolveTypeAlias(actual_type_def_node);
                     if (resolved_local_type && resolved_local_type->type == AST_TYPE_DECL && resolved_local_type->left) {
                         resolved_local_type = resolveTypeAlias(resolved_local_type->left);
