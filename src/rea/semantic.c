@@ -872,6 +872,9 @@ static char *readFileContents(const char *path, size_t *outLen) {
     if (outLen) *outLen = 0;
     FILE *fp = fopen(path, "rb");
     if (!fp) {
+        if (frontendIsAether()) {
+            return NULL;
+        }
         if (noteFailedModulePathOnce(path)) {
             fprintf(stderr, "Error: unable to open module '%s'.\n", path);
             pascal_semantic_error_count++;
@@ -1127,13 +1130,21 @@ static void collectImportBindings(AST *decls, ReaModuleBindingList *bindings) {
             if (!importNode || importNode->type != AST_IMPORT || !importNode->token || !importNode->token->value) continue;
             sawExplicitImports = true;
             const char *path = importNode->token->value;
+            int line = importNode->token ? importNode->token->line : 0;
             ReaModuleInfo *mod = loadModuleRecursive(path);
-            if (!mod) continue;
+            if (!mod) {
+                if (frontendIsAether()) {
+                    reportReaLineError(line,
+                                       "Aether import error: unable to resolve import '%s'; add the module file or remove the use line.",
+                                       path);
+                    pascal_semantic_error_count++;
+                }
+                continue;
+            }
             const char *alias = NULL;
             if (importNode->left && importNode->left->token && importNode->left->token->value) {
                 alias = importNode->left->token->value;
             }
-            int line = importNode->token ? importNode->token->line : 0;
             if (alias && *alias) {
                 addBinding(bindings, alias, mod, line, false);
                 if (mod->name) {

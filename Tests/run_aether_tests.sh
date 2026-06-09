@@ -39,6 +39,7 @@ INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inli
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
+IMPORT_MISSING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/import_missing_fail.aether"
 PAR_PASS_FIXTURE="$ROOT_DIR/Tests/aether/par_pass.aether"
 PAR_FAIL_NON_CALL_FIXTURE="$ROOT_DIR/Tests/aether/par_fail_non_call.aether"
 FOR_RANGE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/for_range_pass.aether"
@@ -122,6 +123,7 @@ for fixture in \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
+    "$IMPORT_MISSING_FAIL_FIXTURE" \
     "$PAR_PASS_FIXTURE" \
     "$PAR_FAIL_NON_CALL_FIXTURE" \
     "$FOR_RANGE_PASS_FIXTURE" \
@@ -911,6 +913,35 @@ fi
 if ! grep -q "Aether purity error: pure function 'wrapper' cannot call non-pure function 'noisy'" /tmp/aether_pure_fail_non_pure_call.out; then
     echo "missing purity failure for non-pure call" >&2
     cat /tmp/aether_pure_fail_non_pure_call.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_fail.out 2>&1; then
+    echo "expected missing import failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "^$IMPORT_MISSING_FAIL_FIXTURE:1: Aether import error: unable to resolve import 'definitely_missing_aether_module'; add the module file or remove the use line\.$" /tmp/aether_import_missing_fail.out; then
+    echo "missing Aether import failure message" >&2
+    cat /tmp/aether_import_missing_fail.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --no-cache --diagnostics-json "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_json.out 2>&1; then
+    echo "expected missing import diagnostics-json failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '"phase":"semantic"' /tmp/aether_import_missing_json.out; then
+    echo "missing import diagnostics-json semantic phase" >&2
+    cat /tmp/aether_import_missing_json.out >&2
+    exit 1
+fi
+if ! grep -q '"kind":"import"' /tmp/aether_import_missing_json.out; then
+    echo "missing import diagnostics-json kind" >&2
+    cat /tmp/aether_import_missing_json.out >&2
+    exit 1
+fi
+if ! grep -q '"line":1' /tmp/aether_import_missing_json.out; then
+    echo "missing import diagnostics-json line" >&2
+    cat /tmp/aether_import_missing_json.out >&2
     exit 1
 fi
 

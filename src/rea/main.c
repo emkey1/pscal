@@ -351,6 +351,9 @@ static void inferDiagnosticPhaseKind(const char *message, char **outPhase, char 
         } else if (strstr(message, "Aether purity error")) {
             phase = "semantic";
             kind = "purity";
+        } else if (strstr(message, "Aether import error")) {
+            phase = "semantic";
+            kind = "import";
         } else if (strstr(message, "Aether type error")) {
             phase = "semantic";
             kind = "type";

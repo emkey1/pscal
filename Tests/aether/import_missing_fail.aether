@@ -1,0 +1,5 @@
+use "definitely_missing_aether_module";
+
+fn main() -> Void {
+    ret;
+}
