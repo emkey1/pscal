@@ -177,7 +177,7 @@
       "prompt": "A module file named `bench_support` and a data file named `support_jobs.json` are provided in the working directory. Write a structured Aether program that imports the module, uses its exported default score and pure helpers, parses the job file, prints one line per job in the form `job 0 -> Alpha / ready / 95`, and then prints final totals for `ready`, `review`, and `blocked`. Keep the program cleanly separated into helpers, and prefer a readable multi-function solution over a compact one-liner.",
       "expected_stdout": "job 0 -> Alpha / ready / 95\njob 1 -> Beta / blocked / 50\njob 2 -> Gamma / blocked / 12\nready = 1\nreview = 0\nblocked = 2\n",
       "files": {
-        "bench_support": "const DefaultScore: Int = 50;\n\n@pure\nfn classifySupport(score: Int) -> Text {\n    if score >= 90 {\n        ret \"ready\";\n    }\n    if score >= 70 {\n        ret \"review\";\n    }\n    ret \"blocked\";\n}\n\n@pure\nfn clampSupport(score: Int) -> Int {\n    if score > 100 {\n        ret 100;\n    }\n    if score < 0 {\n        ret 0;\n    }\n    ret score;\n}\n",
+        "bench_support": "mod BenchSupport {\n    export const DefaultScore: Int = 50;\n\n    @pure\n    export fn classifySupport(score: Int) -> Text {\n        if score >= 90 {\n            ret \"ready\";\n        }\n        if score >= 70 {\n            ret \"review\";\n        }\n        ret \"blocked\";\n    }\n\n    @pure\n    export fn clampSupport(score: Int) -> Int {\n        if score > 100 {\n            ret 100;\n        }\n        if score < 0 {\n            ret 0;\n        }\n        ret score;\n    }\n}\n",
         "support_jobs.json": "{\"jobs\":[{\"name\":\"Alpha\",\"score\":95},{\"name\":\"Beta\"},{\"name\":\"Gamma\",\"score\":12}]}\n"
       }
     }

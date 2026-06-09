@@ -6291,6 +6291,14 @@ static char *translateLine(const char *lineStart,
     if (strncmp(body, "fn ", 3) == 0) {
         return translateFnLine(lineStart, body, lineEnd, NULL);
     }
+    if (strncmp(body, "let mut ", 8) == 0) {
+        reportAetherRewriteError(path,
+                                 lineNumber,
+                                 "binding",
+                                 "`let mut` is not valid Aether syntax.",
+                                 "bindings declared with `let` are already mutable; write `let name: Type = ...;` or `let name = ...;`.");
+        return NULL;
+    }
     if (strncmp(body, "let ", 4) == 0 && hasTypedDeclSeparator(body, lineEnd, 0)) {
         return translateTypedDeclLine(lineStart, body, lineEnd, 0, functions, lineNumber);
     }

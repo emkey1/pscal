@@ -23,6 +23,7 @@ Aether is a compact front end for PSCAL.
 3. Treat `ToonDoc` and `ToonNode` as opaque handles.
 4. If inference is not obviously safe, add the type explicitly.
 5. Put `@pre`, `@post`, `@pure`, and `@cost` above the function, never inside it.
+6. Imported names must match the exported symbol names exactly.
 
 ## Core syntax
 
@@ -81,6 +82,8 @@ Safe patterns:
 - `let x = new Type();`
 - `let x = knownFunction(...);`
 - `let x = knownTypedValue.method(...);`
+
+`let` bindings are already mutable. Never write `let mut`.
 
 Prefer explicit types for:
 
@@ -219,11 +222,55 @@ if toon_has_key(row, "meta") {
 }
 ```
 
+If the payload root is an object like `{"jobs":[...]}` or `{"releases":[...]}`
+then extract the array field first:
+
+```aether
+let root: ToonNode = toon_root(doc);
+let jobs: ToonNode = toon_key(root, "jobs");
+
+loop i in 0..toon_len(jobs) {
+    let job: ToonNode = toon_at(jobs, i);
+}
+```
+
 ## Imports
 
 - only use `use "..."` for real, verified modules
 - never invent `use "helpers";` or similar support modules
 - if no module is provided, keep the example self-contained
+- imported symbols are not renamed automatically
+
+## Contracts
+
+Good:
+
+```aether
+@pre score >= 0
+@post result >= 0
+fn normalize(score: Int) -> Int {
+    ret score;
+}
+```
+
+Bad:
+
+```aether
+@pre
+@post
+fn normalize(score: Int) -> Int {
+    ret score;
+}
+```
+
+Also bad:
+
+```aether
+fn normalize(score: Int) -> Int {
+    @pre score >= 0
+    ret score;
+}
+```
 
 ## Tuples
 

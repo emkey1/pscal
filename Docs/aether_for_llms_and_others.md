@@ -150,6 +150,21 @@ let count: Int = 0;
 let label: Text = "Aether";
 ```
 
+Bindings declared with `let` are already mutable. Do not write `let mut`.
+
+Good:
+
+```aether
+let ready: Int = 0;
+ready = ready + 1;
+```
+
+Bad:
+
+```aether
+let mut ready: Int = 0;
+```
+
 Obvious inference:
 
 ```aether
@@ -485,12 +500,35 @@ fn normalize(score: Int) -> Int {
 }
 ```
 
+Also correct:
+
+```aether
+@pre score >= 0
+@post result <= 100
+fn clamp(score: Int) -> Int {
+    if score > 100 {
+        ret 100;
+    }
+    ret score;
+}
+```
+
 Wrong:
 
 ```aether
 fn normalize(score: Int) -> Int {
     @pre score >= 0
     @post result >= 0
+    ret score;
+}
+```
+
+Also wrong:
+
+```aether
+@pre
+@post
+fn normalize(score: Int) -> Int {
     ret score;
 }
 ```
@@ -532,6 +570,8 @@ For LLMs, this is a hard rule:
 
 - never invent a `use` target from pattern matching alone
 - if you cannot verify the module, do not import it
+- imported symbol names must match the exported names exactly
+- `use "module_name";` does not rename exported symbols for you
 
 Imported module:
 
@@ -860,6 +900,18 @@ let root: ToonNode = toon_root(doc);
 
 loop i in 0..toon_len(root) {
     let user: ToonNode = toon_at(root, i);
+}
+```
+
+When the parsed JSON root is an object containing an array field, first extract
+that array node, then iterate it:
+
+```aether
+let root: ToonNode = toon_root(doc);
+let jobs: ToonNode = toon_key(root, "jobs");
+
+loop i in 0..toon_len(jobs) {
+    let job: ToonNode = toon_at(jobs, i);
 }
 ```
 
@@ -1203,6 +1255,32 @@ This is the key distinction:
 - if the first element is an object, calling `toon_len(toon_at(root, 0))`
   does not mean "array length"; it asks for the size/shape of that first
   element instead
+
+### Mistake: treating an object root like the array itself
+
+Bad:
+
+```aether
+let root: ToonNode = toon_root(doc);
+
+loop i in 0..toon_len(root) {
+    let release: ToonNode = toon_at(root, i);
+}
+```
+
+Good:
+
+```aether
+let root: ToonNode = toon_root(doc);
+let releases: ToonNode = toon_key(root, "releases");
+
+loop i in 0..toon_len(releases) {
+    let release: ToonNode = toon_at(releases, i);
+}
+```
+
+If the payload looks like `{"jobs":[...]}` or `{"releases":[...]}`, the root is
+an object. Extract the array field with `toon_key(...)` before iterating.
 
 ### Mistake: using the wrong receiver spelling
 

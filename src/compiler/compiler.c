@@ -1290,6 +1290,77 @@ oom_cleanup:
     free(tables);
 }
 
+static void syncVirtualMethodSymbolToGlobalTable(Symbol* source) {
+    if (!source || !source->name || !procedure_table) {
+        return;
+    }
+
+    Symbol* resolved = resolveSymbolAlias(source);
+    if (!resolved || !resolved->name || !resolved->type_def) {
+        return;
+    }
+
+    if (!resolved->type_def->is_virtual || strchr(resolved->name, '.') == NULL) {
+        return;
+    }
+
+    Symbol* target = hashTableLookup(procedure_table, resolved->name);
+    if (target && target->is_alias && target->real_symbol) {
+        target = target->real_symbol;
+    }
+
+    if (target == resolved) {
+        return;
+    }
+
+    if (!target) {
+        target = (Symbol*)calloc(1, sizeof(Symbol));
+        if (!target) {
+            fprintf(stderr, "Compiler error: Out of memory mirroring virtual method '%s'.\n",
+                    resolved->name);
+            compiler_had_error = true;
+            return;
+        }
+        target->name = strdup(resolved->name);
+        if (!target->name) {
+            fprintf(stderr, "Compiler error: Out of memory storing virtual method name '%s'.\n",
+                    resolved->name);
+            free(target);
+            compiler_had_error = true;
+            return;
+        }
+        hashTableInsert(procedure_table, target);
+    }
+
+    target->type = resolved->type;
+    target->is_defined = resolved->is_defined;
+    target->bytecode_address = resolved->bytecode_address;
+    target->arity = resolved->arity;
+    target->locals_count = resolved->locals_count;
+    target->slot_index = resolved->slot_index;
+    target->enclosing = resolved->enclosing;
+    target->upvalue_count = resolved->upvalue_count;
+    target->is_const = resolved->is_const;
+    target->is_inline = resolved->is_inline;
+    target->closure_captures = resolved->closure_captures;
+    target->closure_escapes = resolved->closure_escapes;
+    target->is_local_var = false;
+    target->is_alias = false;
+    target->real_symbol = NULL;
+    memcpy(target->upvalues, resolved->upvalues, sizeof(resolved->upvalues));
+
+    if (target->type_def) {
+        freeAST(target->type_def);
+        target->type_def = NULL;
+    }
+    target->type_def = copyAST(resolved->type_def);
+    if (resolved->type_def && !target->type_def) {
+        fprintf(stderr, "Compiler error: Out of memory copying virtual method AST for '%s'.\n",
+                resolved->name);
+        compiler_had_error = true;
+    }
+}
+
 static int getLine(AST* node);
 static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
 static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_approx);
@@ -3070,6 +3141,38 @@ static void emitEmptyArrayLiteralForType(AST* targetType, BytecodeChunk* chunk, 
     constIdx = addConstantToChunk(chunk, &emptyArray);
     freeValue(&emptyArray);
     emitConstant(chunk, constIdx, line);
+}
+
+static bool emitArrayLiteralConstant(AST* arrayLiteral, BytecodeChunk* chunk, int line) {
+    if (!arrayLiteral || arrayLiteral->type != AST_ARRAY_LITERAL) {
+        return false;
+    }
+
+    if (arrayLiteral->child_count == 0) {
+        Value emptyArray = makeEmptyArray(TYPE_UNKNOWN, NULL);
+        int constIdx = addConstantToChunk(chunk, &emptyArray);
+        freeValue(&emptyArray);
+        emitConstant(chunk, constIdx, line);
+        return true;
+    }
+
+    int lower = 0;
+    int upper = arrayLiteral->child_count - 1;
+    Value first = evaluateCompileTimeValue(arrayLiteral->children[0]);
+    VarType elementType = first.type;
+    Value arrVal = makeArrayND(1, &lower, &upper, elementType, NULL);
+
+    if (!populateCompileTimeArrayLiteral(&arrVal, arrayLiteral, line)) {
+        freeValue(&first);
+        freeValue(&arrVal);
+        return false;
+    }
+
+    freeValue(&first);
+    int constIdx = addConstantToChunk(chunk, &arrVal);
+    freeValue(&arrVal);
+    emitConstant(chunk, constIdx, line);
+    return true;
 }
 
 static int getLocalRecordFieldCount(AST* recordType) {
@@ -7054,6 +7157,18 @@ static void compileNode(AST* node, BytecodeChunk* chunk, int current_line_approx
                     }
                 }
                 current_class_const_table = saved_table;
+
+                if (current_function_compiler != NULL) {
+                    for (int i = 0; i < node->left->child_count; i++) {
+                        AST* member = node->left->children[i];
+                        if (member &&
+                            (member->type == AST_FUNCTION_DECL ||
+                             member->type == AST_PROCEDURE_DECL)) {
+                            compileDefinedFunction(member, chunk, getLine(member));
+                        }
+                    }
+                    emitVTables(chunk);
+                }
             }
             break;
         }
@@ -7454,6 +7569,7 @@ static void compileDefinedFunction(AST* func_decl_node, BytecodeChunk* chunk, in
             proc_symbol->upvalues[i].is_ref = fc.upvalues[i].is_ref;
             proc_symbol->upvalues[i].source_is_ref = fc.upvalues[i].source_is_ref;
         }
+        syncVirtualMethodSymbolToGlobalTable(proc_symbol);
     }
 
     if (jump_over_body_operand_offset >= 0) {
@@ -7888,6 +8004,25 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
                 freeValue(&const_val);
             }
+            break;
+        }
+        case AST_TYPE_DECL: {
+            /*
+             * Type declarations are compile-time declarations. They should not
+             * fall through to the generic statement warning path when they
+             * appear inside Aether-generated compound blocks.
+             */
+            compileNode(node, chunk, line);
+            break;
+        }
+        case AST_FUNCTION_DECL:
+        case AST_PROCEDURE_DECL: {
+            /*
+             * Aether-generated code can place helper declarations inside a
+             * compound scope. Reuse the normal declaration compiler path
+             * instead of warning on them as unknown statements.
+             */
+            compileNode(node, chunk, line);
             break;
         }
         case AST_WRITELN: {
@@ -9620,6 +9755,14 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 emitGlobalNameIdx(chunk, GET_FIELD_ADDRESS_KEEP, GET_FIELD_ADDRESS_KEEP16, nameIndex, line);
                 compileRValue(fieldAssign->right, chunk, getLine(fieldAssign->right));
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
+            }
+            break;
+        }
+        case AST_ARRAY_LITERAL: {
+            if (!emitArrayLiteralConstant(node, chunk, line)) {
+                fprintf(stderr, "L%d: Compiler error: array literal must be compile-time evaluable.\n", line);
+                compiler_had_error = true;
+                emitConstant(chunk, addNilConstant(chunk), line);
             }
             break;
         }

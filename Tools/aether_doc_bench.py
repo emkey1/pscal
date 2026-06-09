@@ -44,6 +44,7 @@ DOC_VARIANTS = {
     "full": REPO_ROOT / "Docs" / "aether_for_llms_and_others.md",
     "small": REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
 }
+_DESTINATION_CONTEXT_CACHE: dict[tuple[str, str, str], int | None] = {}
 
 
 @dataclass
@@ -71,6 +72,7 @@ class Destination:
     after_each_command: str | None = None
     after_each_timeout_seconds: int = 60
     cooldown_seconds: float = 0.0
+    prompt_context_limit: int | None = None
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -119,6 +121,9 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 after_each_command=item.get("after_each_command"),
                 after_each_timeout_seconds=int(item.get("after_each_timeout_seconds", 60)),
                 cooldown_seconds=float(item.get("cooldown_seconds", 0.0)),
+                prompt_context_limit=(
+                    int(item["prompt_context_limit"]) if item.get("prompt_context_limit") is not None else None
+                ),
             )
         )
     return destinations
@@ -266,6 +271,50 @@ def http_json_request(url: str, body: dict[str, Any], api_key: str | None) -> di
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP API error {exc.code}: {detail}") from exc
+
+
+def http_json_get(url: str, api_key: str | None) -> dict[str, Any]:
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib.request.Request(url, method="GET", headers=headers)
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP API error {exc.code}: {detail}") from exc
+
+
+def get_destination_context_limit(destination: Destination) -> int | None:
+    if destination.prompt_context_limit is not None:
+        return destination.prompt_context_limit
+
+    if not destination.model or not destination.base_url:
+        return None
+
+    normalized_base_url = destination.base_url.rstrip("/")
+    if normalized_base_url not in ("http://127.0.0.1:1215/v1", "http://localhost:1215/v1"):
+        return None
+
+    cache_key = (destination.destination_id, destination.model, normalized_base_url)
+    if cache_key in _DESTINATION_CONTEXT_CACHE:
+        return _DESTINATION_CONTEXT_CACHE[cache_key]
+
+    api_key = resolve_api_key(destination)
+    payload = http_json_get(normalized_base_url[:-3] + "/api/v0/models", api_key)
+    for item in payload.get("data", []):
+        if item.get("id") != destination.model:
+            continue
+        limit = item.get("loaded_context_length") or item.get("max_context_length")
+        value = int(limit) if limit else None
+        _DESTINATION_CONTEXT_CACHE[cache_key] = value
+        return value
+
+    _DESTINATION_CONTEXT_CACHE[cache_key] = None
+    return None
 
 
 def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, Any]:
@@ -496,10 +545,17 @@ def evaluate_attempt(
     task: Task,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
+    prompt_tokens = approx_tokens(prompt)
     attempt: dict[str, Any] = {
         "prompt_kind": prompt_kind,
-        "prompt_approx_tokens": approx_tokens(prompt),
+        "prompt_approx_tokens": prompt_tokens,
     }
+    context_limit = get_destination_context_limit(destination)
+    if context_limit is not None and prompt_tokens >= context_limit:
+        raise RuntimeError(
+            "prompt_too_large: approx prompt tokens "
+            f"{prompt_tokens} exceed loaded context {context_limit} for model {destination.model}"
+        )
     generation = run_model(prompt, destination)
     source_code = sanitize_code(generation["raw_text"])
     attempt["generation"] = generation
@@ -516,6 +572,33 @@ def evaluate_attempt(
             "exact_stdout_match": False,
         }
     return attempt
+
+
+def make_prompt_too_large_record(
+    prompt: str,
+    context_limit: int,
+    destination: Destination,
+) -> dict[str, Any]:
+    message = (
+        "prompt_too_large: approx prompt tokens "
+        f"{approx_tokens(prompt)} exceed loaded context {context_limit} for model {destination.model}"
+    )
+    return {
+        "prompt_kind": "initial",
+        "prompt_approx_tokens": approx_tokens(prompt),
+        "generated_ok": False,
+        "generation_error": message,
+        "run": {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": message,
+            "elapsed_seconds": 0.0,
+            "exact_stdout_match": False,
+        },
+        "attempt_count": 0,
+        "resolved_after_repair": False,
+        "failure_fingerprint": "generation:" + message,
+    }
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -729,6 +812,21 @@ def main() -> int:
                         "repeat_index": repeat_index,
                         "attempts": [],
                     }
+                    context_limit = get_destination_context_limit(destination)
+                    if context_limit is not None and approx_tokens(prompt) >= context_limit:
+                        case_record.update(
+                            make_prompt_too_large_record(
+                                prompt=prompt,
+                                context_limit=context_limit,
+                                destination=destination,
+                            )
+                        )
+                        results.append(case_record)
+                        try:
+                            run_destination_cleanup(destination, task, doc_name, repeat_index)
+                        except Exception as cleanup_exc:  # pragma: no cover - surfaced in JSON report
+                            case_record["cleanup_error"] = str(cleanup_exc)
+                        continue
                     try:
                         attempt = evaluate_attempt(
                             prompt=prompt,
