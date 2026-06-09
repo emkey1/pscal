@@ -3572,6 +3572,53 @@ static char *extractAnnotationExpr(const char *body, const char *lineEnd, const 
     return trimmedCopy(exprStart, lineEnd);
 }
 
+static void reportMisplacedContractBlock(const char *path,
+                                         const char *cursor,
+                                         int lineNumber) {
+    const char *scan = cursor;
+    int scanLine = lineNumber;
+
+    while (scan && *scan) {
+        const char *lineStart = scan;
+        const char *lineEnd = scan;
+        const char *body;
+
+        while (*lineEnd && *lineEnd != '\n') {
+            lineEnd++;
+        }
+
+        body = lineStart;
+        while (body < lineEnd && (*body == ' ' || *body == '\t')) {
+            body++;
+        }
+
+        if (startsWithWord(body, lineEnd, "@pre")) {
+            reportAetherRewriteError(path,
+                                     scanLine,
+                                     "contract",
+                                     "@pre must annotate the next function declaration.",
+                                     "move @pre above the `fn ...` line instead of placing it inside the function body.");
+        } else if (startsWithWord(body, lineEnd, "@post")) {
+            reportAetherRewriteError(path,
+                                     scanLine,
+                                     "contract",
+                                     "@post must annotate the next function declaration.",
+                                     "move @post above the `fn ...` line instead of placing it inside the function body.");
+        } else if (body == lineEnd || isLineComment(body, lineEnd)) {
+            /* Keep scanning through blank/comment lines so adjacent misplaced
+             * contracts are all reported together. */
+        } else {
+            break;
+        }
+
+        if (!*lineEnd) {
+            break;
+        }
+        scan = lineEnd + 1;
+        scanLine++;
+    }
+}
+
 static int extractFunctionSignature(const char *body,
                                     const char *lineEnd,
                                     char **outName,
@@ -6142,29 +6189,10 @@ char *aetherRewriteSource(const char *source, const char *path) {
             }
         }
 
-        if (fnState.active && startsWithWord(body, lineEnd, "@pre")) {
-            reportAetherRewriteError(path,
-                                     lineNumber,
-                                     "contract",
-                                     "@pre must annotate the next function declaration.",
-                                     "move @pre above the `fn ...` line instead of placing it inside the function body.");
-            freePendingContracts(&pending);
-            clearFunctionContracts(&fnState);
-            clearParBlockState(&parState);
-            clearTypeBlockState(&typeState);
-            freeAetherBindingTable(&bindingTable);
-            freeAetherFunctionTable(&functionTable);
-            freeToonLiteralTable(&toonTable);
-            freeAetherTupleTable(&tupleTable);
-            free(preprocessed);
-            free(out.data);
-            return NULL;
-        } else if (fnState.active && startsWithWord(body, lineEnd, "@post")) {
-            reportAetherRewriteError(path,
-                                     lineNumber,
-                                     "contract",
-                                     "@post must annotate the next function declaration.",
-                                     "move @post above the `fn ...` line instead of placing it inside the function body.");
+        if (fnState.active &&
+            (startsWithWord(body, lineEnd, "@pre") ||
+             startsWithWord(body, lineEnd, "@post"))) {
+            reportMisplacedContractBlock(path, lineStart, lineNumber);
             freePendingContracts(&pending);
             clearFunctionContracts(&fnState);
             clearParBlockState(&parState);
