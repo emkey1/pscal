@@ -62,6 +62,15 @@ Current destination types:
 - `openai_chat_completions`
 - `command`
 
+Optional pacing / cleanup fields:
+
+- `after_each_command`: shell command run after every benchmark case
+- `after_each_timeout_seconds`: timeout for that cleanup command
+- `cooldown_seconds`: sleep after each benchmark case
+
+Those fields are useful for local-model workflows where you want to unload a
+model or let memory settle between runs.
+
 ### OpenAI Responses
 
 Set `OPENAI_API_KEY`, then run:
@@ -84,7 +93,10 @@ Add a destination like this:
   "api_key": "",
   "model": "provider/model-name",
   "temperature": 0.2,
-  "max_output_tokens": 3000
+  "max_output_tokens": 3000,
+  "after_each_command": "",
+  "after_each_timeout_seconds": 60,
+  "cooldown_seconds": 2
 }
 ```
 
@@ -149,6 +161,13 @@ For example, a local OpenAI-compatible endpoint with no API key:
     }
   ]
 }
+```
+
+If your local runtime needs help managing memory, add:
+
+```json
+"after_each_command": "your-unload-command-here",
+"cooldown_seconds": 2
 ```
 
 ## Task manifest

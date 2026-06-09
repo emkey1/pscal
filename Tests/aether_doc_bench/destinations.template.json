@@ -7,7 +7,8 @@
       "api_key_env": "OPENAI_API_KEY",
       "model": "gpt-5-mini",
       "temperature": 0.2,
-      "max_output_tokens": 3000
+      "max_output_tokens": 3000,
+      "cooldown_seconds": 0
     },
     {
       "id": "openai-compatible-template",
@@ -16,12 +17,16 @@
       "api_key": "",
       "model": "replace/me",
       "temperature": 0.2,
-      "max_output_tokens": 3000
+      "max_output_tokens": 3000,
+      "after_each_command": "",
+      "after_each_timeout_seconds": 60,
+      "cooldown_seconds": 0
     },
     {
       "id": "command-template",
       "type": "command",
-      "command_template": "python3 Tests/aether_doc_bench/mock_model.py {prompt_file}"
+      "command_template": "python3 Tests/aether_doc_bench/mock_model.py {prompt_file}",
+      "cooldown_seconds": 0
     }
   ]
 }

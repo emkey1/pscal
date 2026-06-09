@@ -68,6 +68,9 @@ class Destination:
     temperature: float = 0.2
     max_output_tokens: int = 3000
     command_template: str | None = None
+    after_each_command: str | None = None
+    after_each_timeout_seconds: int = 60
+    cooldown_seconds: float = 0.0
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -113,6 +116,9 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 temperature=float(item.get("temperature", 0.2)),
                 max_output_tokens=int(item.get("max_output_tokens", 3000)),
                 command_template=item.get("command_template"),
+                after_each_command=item.get("after_each_command"),
+                after_each_timeout_seconds=int(item.get("after_each_timeout_seconds", 60)),
+                cooldown_seconds=float(item.get("cooldown_seconds", 0.0)),
             )
         )
     return destinations
@@ -305,6 +311,32 @@ def invoke_command(prompt: str, command_template: str, cwd: pathlib.Path) -> dic
         "raw_text": proc.stdout,
         "stderr": proc.stderr,
     }
+
+
+def run_destination_cleanup(destination: Destination, task: Task, doc_name: str, repeat_index: int) -> None:
+    if destination.after_each_command:
+        command = destination.after_each_command.format(
+            destination_id=destination.destination_id,
+            model=destination.model or "",
+            task_id=task.task_id,
+            doc_name=doc_name,
+            repeat_index=repeat_index,
+        )
+        proc = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+            timeout=destination.after_each_timeout_seconds,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "after_each_command failed with exit code "
+                f"{proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+    if destination.cooldown_seconds > 0:
+        time.sleep(destination.cooldown_seconds)
 
 
 def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
@@ -558,6 +590,11 @@ def main() -> int:
                             "elapsed_seconds": 0.0,
                             "exact_stdout_match": False,
                         }
+                    finally:
+                        try:
+                            run_destination_cleanup(destination, task, doc_name, repeat_index)
+                        except Exception as cleanup_exc:  # pragma: no cover - surfaced in JSON report
+                            case_record["cleanup_error"] = str(cleanup_exc)
                     results.append(case_record)
 
             variant_report = {
