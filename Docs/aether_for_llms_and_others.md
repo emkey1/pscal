@@ -25,6 +25,7 @@ Write Aether like this:
 Do not write Aether like this:
 
 - do not invent new keywords
+- do not invent module imports
 - do not assume Python syntax, JavaScript syntax, or Rust syntax will work
 - do not call effectful builtins outside `fx`
 - do not treat `ToonDoc` and `ToonNode` as plain integers
@@ -365,6 +366,20 @@ Supported units include:
 
 Use quoted `use` imports and compact `mod`/`export` syntax.
 
+Important import rule:
+
+- only write `use "..."` when the module is explicitly provided in the prompt,
+  shown in the repository, or otherwise verified to exist
+- if no real module is available, keep the program self-contained instead of
+  inventing a helper module
+- generic names like `helpers` are especially risky unless the file is known to
+  exist
+
+For LLMs, this is a hard rule:
+
+- never invent a `use` target from pattern matching alone
+- if you cannot verify the module, do not import it
+
 Imported module:
 
 ```aether
@@ -384,7 +399,7 @@ mod Helpers {
 Consumer:
 
 ```aether
-use "helpers";
+use "module_consts";
 
 fn main() -> Void {
     let score = DefaultScore;
@@ -400,6 +415,12 @@ See:
 - `Examples/aether/base/module_demo`
 - `Examples/aether/base/module_consts_demo`
 - `Examples/aether/showcase/agent_report`
+
+When writing standalone snippets for docs, tests, chats, or LLM-generated
+examples:
+
+- prefer no `use` imports unless the module is part of the supplied context
+- inline small constants and helpers instead of assuming support files exist
 
 ## Types and methods
 
@@ -765,7 +786,9 @@ If you are generating Aether, follow these rules in order:
 7. Close TOON documents after use.
 8. Prefer small helper functions over one giant `main`.
 9. Use `type` plus methods for simple stateful objects.
-10. When in doubt, copy the shape from `Examples/aether/base` or the showcase.
+10. Never write `use "..."` unless that module is provided or verified.
+11. Generic imports like `use "helpers";` are invalid unless the actual module exists.
+12. When in doubt, copy the shape from `Examples/aether/base` or the showcase.
 
 ## Common mistakes
 
