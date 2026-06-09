@@ -125,6 +125,12 @@ Bootstrap status:
 - `--diagnostics-toon` now emits the same structured diagnostics in a compact
   TOON table form, and both renderers preserve original `.aether` source line
   numbers even when the rewrite layer inserts extra generated lines.
+- `--dump-rewrite` now dumps the lowered Rea source that Aether generated and
+  exits before parsing. This is primarily a debugging tool for frontend
+  rewrite bugs and LLM-facing diagnostics work.
+- Array-returning functions now lower and parse cleanly through the shared
+  backend path, so compact signatures like `fn sort(xs: Int[]) -> Int[]`
+  work without introducing a separate VM or bytecode compiler.
 - The next phase is to replace the shared Rea grammar incrementally with
   Aether-specific lexer, parser, and semantic logic.
 

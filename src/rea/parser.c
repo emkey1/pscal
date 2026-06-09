@@ -2757,6 +2757,15 @@ static AST *parseFunctionDecl(ReaParser *p, Token *nameTok, AST *typeNode, VarTy
         vtype = TYPE_POINTER;
     }
 
+    if (p->current.type == REA_TOKEN_LEFT_BRACKET) {
+        typeNode = parseArrayType(p, typeNode, &vtype, true);
+        if (!typeNode) {
+            p->hadError = true;
+            freeAST(params);
+            return NULL;
+        }
+    }
+
     // Parse function body. Previously the parser split variable declarations
     // from executable statements and wrapped them into an `AST_BLOCK` with two
     // children (declarations and statements).  This caused any variable

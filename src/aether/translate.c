@@ -240,6 +240,10 @@ static int startsWithWord(const char *body, const char *lineEnd, const char *wor
 static int braceDeltaForLine(const char *line);
 static void freeTupleItemTypes(char **items, size_t count);
 static char *extractSelfReceiverTypeName(const char *paramsStart, const char *paramsEnd);
+static void splitTypeSuffix(const char *typeStart,
+                            const char *typeEnd,
+                            const char **outBaseEnd,
+                            const char **outSuffixStart);
 
 static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
     const char *cursor;
@@ -416,7 +420,40 @@ static int appendMappedParamTypeAndName(Buffer *out,
                                         const char *nameEnd) {
     const char *suffixStart = typeEnd;
     const char *baseEnd = typeEnd;
+
+    splitTypeSuffix(typeStart, typeEnd, &baseEnd, &suffixStart);
+
+    if (!appendMappedType(out, typeStart, baseEnd) ||
+        !bufferAppend(out, " ") ||
+        !appendIdentifier(out, nameStart, nameEnd)) {
+        return 0;
+    }
+
+    if (suffixStart < typeEnd) {
+        const char *suffix = suffixStart;
+        while (suffix < typeEnd) {
+            if (!isspace((unsigned char)*suffix) &&
+                !bufferAppendN(out, suffix, 1)) {
+                return 0;
+            }
+            suffix++;
+        }
+    }
+
+    return 1;
+}
+
+static void splitTypeSuffix(const char *typeStart,
+                            const char *typeEnd,
+                            const char **outBaseEnd,
+                            const char **outSuffixStart) {
+    const char *suffixStart = typeEnd;
+    const char *baseEnd = typeEnd;
     const char *scan;
+
+    if (!outBaseEnd || !outSuffixStart) {
+        return;
+    }
 
     while (baseEnd > typeStart && isspace((unsigned char)baseEnd[-1])) {
         baseEnd--;
@@ -439,24 +476,8 @@ static int appendMappedParamTypeAndName(Buffer *out,
         baseEnd--;
     }
 
-    if (!appendMappedType(out, typeStart, baseEnd) ||
-        !bufferAppend(out, " ") ||
-        !appendIdentifier(out, nameStart, nameEnd)) {
-        return 0;
-    }
-
-    if (suffixStart < typeEnd) {
-        const char *suffix = suffixStart;
-        while (suffix < typeEnd) {
-            if (!isspace((unsigned char)*suffix) &&
-                !bufferAppendN(out, suffix, 1)) {
-                return 0;
-            }
-            suffix++;
-        }
-    }
-
-    return 1;
+    *outBaseEnd = baseEnd;
+    *outSuffixStart = suffixStart;
 }
 
 static int appendMappedTypeAndCStringName(Buffer *out,
@@ -4317,6 +4338,8 @@ static char *translateFnLine(const char *lineStart,
     const char *arrow;
     const char *typeStart;
     const char *typeEnd;
+    const char *baseTypeEnd;
+    const char *typeSuffixStart;
     Buffer out = {0};
 
     while (*nameStart && isspace((unsigned char)*nameStart)) {
@@ -4343,9 +4366,10 @@ static char *translateFnLine(const char *lineStart,
     while (typeEnd > typeStart && isspace((unsigned char)typeEnd[-1])) {
         typeEnd--;
     }
+    splitTypeSuffix(typeStart, typeEnd, &baseTypeEnd, &typeSuffixStart);
 
     if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
-        !appendMappedType(&out, typeStart, typeEnd) ||
+        !appendMappedType(&out, typeStart, baseTypeEnd) ||
         !bufferAppend(&out, " ") ||
         !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
         !bufferAppend(&out, "(") ||
@@ -4356,6 +4380,18 @@ static char *translateFnLine(const char *lineStart,
         !bufferAppend(&out, ")")) {
         free(out.data);
         return NULL;
+    }
+
+    if (typeSuffixStart < typeEnd) {
+        const char *suffix = typeSuffixStart;
+        while (suffix < typeEnd) {
+            if (!isspace((unsigned char)*suffix) &&
+                !bufferAppendN(&out, suffix, 1)) {
+                free(out.data);
+                return NULL;
+            }
+            suffix++;
+        }
     }
 
     if (*typeEnd) {

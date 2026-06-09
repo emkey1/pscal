@@ -51,6 +51,7 @@
 #include "rea/state.h"
 #include "rea/semantic.h"
 #include "aether/parser.h"
+#include "aether/translate.h"
 #include "aether/state.h"
 #include "aether/semantic.h"
 #include "Pascal/lexer.h"
@@ -157,6 +158,7 @@ static const char *REA_USAGE =
     "   Options:\n"
     "     -v                     Display version.\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
+    "     --dump-rewrite         Dump frontend-rewritten source and exit.\n"
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
     "     --no-run               Compile but skip VM execution.\n"
@@ -873,6 +875,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     }
 
     int dump_ast_json = 0;
+    int dump_rewrite = 0;
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
     int no_run_flag = 0;
@@ -910,6 +913,8 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[argi], "--dump-ast-json") == 0) {
             dump_ast_json = 1;
+        } else if (strcmp(argv[argi], "--dump-rewrite") == 0) {
+            dump_rewrite = 1;
         } else if (strcmp(argv[argi], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
@@ -979,6 +984,25 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
 #endif
     char *preprocessed_source = preprocessConditionals(src, defines, define_count);
     const char *effective_src = preprocessed_source ? preprocessed_source : src;
+
+#if PSCAL_FRONTEND_KIND == FRONTEND_KIND_AETHER
+    if (dump_rewrite) {
+        char *rewritten = aetherRewriteSource(effective_src, path);
+        if (!rewritten) {
+            if (preprocessed_source) free(preprocessed_source);
+            free(src);
+            REA_RETURN(vmExitWithCleanup(EXIT_FAILURE));
+        }
+        fputs(rewritten, stdout);
+        if (rewritten[0] != '\0' && rewritten[strlen(rewritten) - 1] != '\n') {
+            fputc('\n', stdout);
+        }
+        free(rewritten);
+        if (preprocessed_source) free(preprocessed_source);
+        free(src);
+        REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
+    }
+#endif
     // Note: Bootstrap of entrypoint is disabled; rely on source top-level or
     // future bytecode-level CALL injection.
 
