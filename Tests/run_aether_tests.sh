@@ -34,6 +34,7 @@ DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/diagnostic_line_map
 FUNCTION_INFERENCE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/function_inference_support"
 FUNCTION_RETURN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_return_inference_pass.aether"
 OBJECT_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_inference_pass.aether"
+OBJECT_DEFAULT_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_default_init_pass.aether"
 STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_pass.aether"
 NUMERIC_EXPR_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/numeric_expr_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
@@ -131,6 +132,7 @@ for fixture in \
     "$FUNCTION_INFERENCE_SUPPORT_FIXTURE" \
     "$FUNCTION_RETURN_INFERENCE_PASS_FIXTURE" \
     "$OBJECT_INFERENCE_PASS_FIXTURE" \
+    "$OBJECT_DEFAULT_INIT_PASS_FIXTURE" \
     "$STRING_LEN_INFERENCE_PASS_FIXTURE" \
     "$NUMERIC_EXPR_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
@@ -311,6 +313,13 @@ printf '42\ntrue\n' >/tmp/aether_object_inference_expected.out
 if ! cmp -s /tmp/aether_object_inference_expected.out /tmp/aether_object_inference_pass.out; then
     echo "unexpected object inference output" >&2
     cat /tmp/aether_object_inference_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$OBJECT_DEFAULT_INIT_PASS_FIXTURE" >/tmp/aether_object_default_init_pass.out
+printf '1\n2\n' >/tmp/aether_object_default_init_expected.out
+if ! cmp -s /tmp/aether_object_default_init_expected.out /tmp/aether_object_default_init_pass.out; then
+    echo "unexpected object default init output" >&2
+    cat /tmp/aether_object_default_init_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$STRING_LEN_INFERENCE_PASS_FIXTURE" >/tmp/aether_string_len_inference_pass.out

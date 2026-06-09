@@ -3231,6 +3231,58 @@ static void emitArrayFieldInitializers(AST* recordType, BytecodeChunk* chunk, in
     }
 }
 
+// Emit default initialization code for non-array fields within a record/class.
+// Assumes the object instance is on top of the VM stack.
+static void emitDefaultFieldInitializers(AST* recordType, BytecodeChunk* chunk, int line, bool hasVTable) {
+    recordType = resolveTypeAlias(recordType);
+    if (!recordType || recordType->type != AST_RECORD_TYPE) return;
+
+    if (recordType->extra && recordType->extra->token && recordType->extra->token->value) {
+        AST* parent = lookupType(recordType->extra->token->value);
+        emitDefaultFieldInitializers(parent, chunk, line, recordTypeHasVTable(parent));
+    }
+
+    for (int i = 0; i < recordType->child_count; i++) {
+        AST* decl = recordType->children[i];
+        if (!decl || decl->type != AST_VAR_DECL) continue;
+        if (decl->var_type == TYPE_ARRAY) continue;
+
+        AST* type_node = decl->right;
+        AST* actual_type = type_node ? resolveTypeAlias(type_node) : NULL;
+        if (!actual_type) {
+            actual_type = type_node;
+        }
+
+        for (int j = 0; j < decl->child_count; j++) {
+            AST* varNode = decl->children[j];
+            Value defaultValue;
+            int constIdx;
+            int offset;
+
+            if (!varNode || !varNode->token || !varNode->token->value) continue;
+
+            offset = getRecordFieldOffset(recordType, varNode->token->value);
+            if (hasVTable) offset++;
+            if (offset < 0) continue;
+
+            defaultValue = makeValueForType(decl->var_type, actual_type ? actual_type : type_node, NULL);
+            constIdx = addConstantToChunk(chunk, &defaultValue);
+            freeValue(&defaultValue);
+
+            writeBytecodeChunk(chunk, DUP, line);
+            if (offset <= UINT8_MAX) {
+                writeBytecodeChunk(chunk, GET_FIELD_OFFSET, line);
+                writeBytecodeChunk(chunk, (uint8_t)offset, line);
+            } else {
+                writeBytecodeChunk(chunk, GET_FIELD_OFFSET16, line);
+                emitShort(chunk, (uint16_t)offset, line);
+            }
+            emitConstant(chunk, constIdx, line);
+            writeBytecodeChunk(chunk, SET_INDIRECT, line);
+        }
+    }
+}
+
 // Determine the record type for an expression used as an object base.
 static AST* getRecordTypeFromExpr(AST* expr) {
     if (!expr) return NULL;
@@ -5747,6 +5799,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
 
+            emitDefaultFieldInitializers(classType, chunk, line, hasVTable);
             emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             Symbol* ctorSymbol = lookupProcedure(lowerClassName);
@@ -9443,6 +9496,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             }
 
+            emitDefaultFieldInitializers(classType, chunk, line, hasVTable);
             emitArrayFieldInitializers(classType, chunk, line, hasVTable);
 
             Symbol* ctorSymbol = lookupProcedure(lowerClassName);

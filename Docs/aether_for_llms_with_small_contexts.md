@@ -62,6 +62,14 @@ type Counter {
 }
 ```
 
+`new Type()` gives fields type-appropriate defaults in Aether:
+
+- integers start at `0`
+- reals start at `0.0`
+- booleans start at `false`
+- strings start empty
+- pointers start at `nil`
+
 ## Safe inference
 
 Safe patterns:

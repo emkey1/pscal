@@ -555,9 +555,11 @@ Consumer:
 use "module_consts";
 
 fn main() -> Void {
-    let score = DefaultScore;
+    let greeting = Greeting;
+    let answer = Answer;
     fx {
-        println(classify(score));
+        println(greeting);
+        println(answer);
     }
     ret;
 }
@@ -634,6 +636,25 @@ Plain construction:
 ```aether
 let counter = new Counter();
 ```
+
+For Aether code, `new Type()` applies type-appropriate default field
+initialization automatically:
+
+- integer-like fields start at `0`
+- real fields start at `0.0`
+- booleans start at `false`
+- strings/text start empty
+- pointers start as `nil`
+- arrays use their normal array-field initialization path
+
+So this is valid and predictable:
+
+```aether
+let counter = new Counter();
+let next: Int = counter.bump();
+```
+
+You can still assign fields explicitly when that makes the example clearer.
 
 Compact field initialization:
 
