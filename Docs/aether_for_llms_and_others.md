@@ -611,10 +611,40 @@ toon_close(doc);
 
 Important:
 
+- `toon_root(doc)` returns the top-level parsed value
+- if the input JSON starts with `[` and is therefore a top-level array,
+  `toon_root(doc)` is the array to iterate
+- if the input JSON starts with `{` and is therefore a top-level object,
+  `toon_root(doc)` is the object to query by key
 - if the parsed JSON text is an array, `toon_root(doc)` is already the array
 - do not write `let user_array = toon_at(root, 0)` unless you specifically want the first element
+- `toon_at(root, 0)` means "give me the first element stored inside `root`"
+- it does not mean "treat `root` as an array variable"
 - `println(...)` still requires `fx`, even for banner lines or one-off status output
 - compute pure values outside `fx` when practical, then print inside `fx`
+
+Two very common top-level shapes:
+
+```aether
+/* top-level array */
+let doc: ToonDoc = toon_parse("[{\"name\":\"Alice\"},{\"name\":\"Bob\"}]");
+let root: ToonNode = toon_root(doc);
+
+loop i in 0..toon_len(root) {
+    let user: ToonNode = toon_at(root, i);
+}
+```
+
+```aether
+/* top-level object */
+let doc: ToonDoc = toon_parse("{\"users\":[{\"name\":\"Alice\"},{\"name\":\"Bob\"}]}");
+let root: ToonNode = toon_root(doc);
+let users: ToonNode = toon_key(root, "users");
+
+loop i in 0..toon_len(users) {
+    let user: ToonNode = toon_at(users, i);
+}
+```
 
 ## Tasks and AI helpers
 
@@ -903,6 +933,14 @@ loop i in 0..toon_len(root) {
 ```
 
 If `root` came from parsing a JSON array, `root` is the collection to iterate.
+
+This is the key distinction:
+
+- `root` is the array
+- `toon_at(root, 0)` is the first element inside that array
+- if the first element is an object, calling `toon_len(toon_at(root, 0))`
+  does not mean "array length"; it asks for the size/shape of that first
+  element instead
 
 ### Mistake: using the wrong receiver spelling
 
