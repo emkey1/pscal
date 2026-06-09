@@ -587,6 +587,35 @@ Follow these rules exactly:
 - close parsed documents with `toon_close(doc)`
 - prefer explicit types around TOON code when the shape is not obvious
 
+Common TOON iteration pattern:
+
+```aether
+let doc: ToonDoc = toon_parse(users_json);
+let root: ToonNode = toon_root(doc);
+
+fx {
+    println("--- Users ---");
+}
+
+loop i in 0..toon_len(root) {
+    let user: ToonNode = toon_at(root, i);
+    let name: Text = toon_get_text(user, "name");
+
+    fx {
+        println("user ", i, ": ", name);
+    }
+}
+
+toon_close(doc);
+```
+
+Important:
+
+- if the parsed JSON text is an array, `toon_root(doc)` is already the array
+- do not write `let user_array = toon_at(root, 0)` unless you specifically want the first element
+- `println(...)` still requires `fx`, even for banner lines or one-off status output
+- compute pure values outside `fx` when practical, then print inside `fx`
+
 ## Tasks and AI helpers
 
 Aether has compact aliases over shared runtime/task helpers.
@@ -850,6 +879,31 @@ Good:
 let root: ToonNode = toon_root(doc);
 ```
 
+### Mistake: confusing a TOON array with its first element
+
+Bad:
+
+```aether
+let root: ToonNode = toon_root(doc);
+let user_array: ToonNode = toon_at(root, 0);
+
+loop i in 0..toon_len(user_array) {
+    let user: ToonNode = toon_at(user_array, i);
+}
+```
+
+Good:
+
+```aether
+let root: ToonNode = toon_root(doc);
+
+loop i in 0..toon_len(root) {
+    let user: ToonNode = toon_at(root, i);
+}
+```
+
+If `root` came from parsing a JSON array, `root` is the collection to iterate.
+
 ### Mistake: using the wrong receiver spelling
 
 Bad:
@@ -862,6 +916,22 @@ Good:
 
 ```aether
 self.value = 1;
+```
+
+### Mistake: printing outside `fx`
+
+Bad:
+
+```aether
+println("--- Processing User List ---");
+```
+
+Good:
+
+```aether
+fx {
+    println("--- Processing User List ---");
+}
 ```
 
 ## Where to look next
