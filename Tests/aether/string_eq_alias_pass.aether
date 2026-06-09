@@ -1,0 +1,14 @@
+@pure
+fn classify(name: Text) -> Text {
+    if string_eq(name, "Aether") {
+        ret "ok";
+    }
+    ret "no";
+}
+
+fn main() -> Void {
+    fx {
+        println(classify("Aether"));
+    }
+    ret;
+}

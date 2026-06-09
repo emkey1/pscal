@@ -52,6 +52,8 @@ PAR_FAIL_NON_CALL_FIXTURE="$ROOT_DIR/Tests/aether/par_fail_non_call.aether"
 FOR_RANGE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/for_range_pass.aether"
 LOOP_FORMS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/loop_forms_pass.aether"
 ARRAY_RETURN_PASS_FIXTURE="$ROOT_DIR/Tests/aether/array_return_pass.aether"
+INLINE_IF_EXPR_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_if_expr_pass.aether"
+STRING_EQ_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_eq_alias_pass.aether"
 MODULE_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_import_pass.aether"
 MODULE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_math"
 MODULE_CONST_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_consts"
@@ -147,6 +149,8 @@ for fixture in \
     "$FOR_RANGE_PASS_FIXTURE" \
     "$LOOP_FORMS_PASS_FIXTURE" \
     "$ARRAY_RETURN_PASS_FIXTURE" \
+    "$INLINE_IF_EXPR_PASS_FIXTURE" \
+    "$STRING_EQ_ALIAS_PASS_FIXTURE" \
     "$MODULE_IMPORT_PASS_FIXTURE" \
     "$MODULE_SUPPORT_FIXTURE" \
     "$MODULE_CONST_SUPPORT_FIXTURE" \
@@ -223,6 +227,18 @@ if ! cmp -s /tmp/aether_print_alias_expected.out /tmp/aether_print_alias_pass.ou
     exit 1
 fi
 "$AETHER_BIN" --no-cache --no-run "$ARRAY_RETURN_PASS_FIXTURE" >/dev/null
+"$AETHER_BIN" --no-cache "$INLINE_IF_EXPR_PASS_FIXTURE" >/tmp/aether_inline_if_expr_pass.out
+if ! grep -qx "42" /tmp/aether_inline_if_expr_pass.out; then
+    echo "unexpected inline if expression output" >&2
+    cat /tmp/aether_inline_if_expr_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$STRING_EQ_ALIAS_PASS_FIXTURE" >/tmp/aether_string_eq_alias_pass.out
+if ! grep -qx "ok" /tmp/aether_string_eq_alias_pass.out; then
+    echo "unexpected string_eq alias output" >&2
+    cat /tmp/aether_string_eq_alias_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$TASK_HELPERS_PASS_FIXTURE" >/tmp/aether_task_helpers_pass.out
 if ! grep -q '^named_ok = true$' /tmp/aether_task_helpers_pass.out; then
     echo "unexpected task helper named output" >&2

@@ -13,6 +13,8 @@ typedef struct Buffer {
     size_t cap;
 } Buffer;
 
+typedef struct TypeBlockState TypeBlockState;
+
 static int trackRewriteOutputLines(const char *text, int *currentOutputLine, int sourceLine) {
     const char *cursor = text;
 
@@ -244,6 +246,10 @@ static void splitTypeSuffix(const char *typeStart,
                             const char *typeEnd,
                             const char **outBaseEnd,
                             const char **outSuffixStart);
+static char *rewriteMethodScopedExpr(const char *start,
+                                     const char *end,
+                                     const TypeBlockState *typeState,
+                                     int isMethod);
 
 static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
     const char *cursor;
@@ -549,6 +555,43 @@ static const char *findMatchingCloseParen(const char *open, const char *end) {
         if (ch == '(') {
             depth++;
         } else if (ch == ')') {
+            depth--;
+            if (depth == 0) {
+                return cursor;
+            }
+        }
+        cursor++;
+    }
+    return NULL;
+}
+
+static const char *findMatchingCloseBrace(const char *open, const char *end) {
+    const char *cursor;
+    int depth = 0;
+
+    if (!open || !end || open >= end || *open != '{') {
+        return NULL;
+    }
+    cursor = open;
+    while (cursor < end) {
+        if (*cursor == '"' || *cursor == '\'') {
+            char quote = *cursor++;
+            while (cursor < end) {
+                if (*cursor == '\\' && cursor + 1 < end) {
+                    cursor += 2;
+                    continue;
+                }
+                if (*cursor == quote) {
+                    cursor++;
+                    break;
+                }
+                cursor++;
+            }
+            continue;
+        }
+        if (*cursor == '{') {
+            depth++;
+        } else if (*cursor == '}') {
             depth--;
             if (depth == 0) {
                 return cursor;
@@ -924,14 +967,14 @@ typedef struct ParBlockState {
     Buffer joinLines;
 } ParBlockState;
 
-typedef struct TypeBlockState {
+struct TypeBlockState {
     int active;
     int bodyDepth;
     char *name;
     char **fieldNames;
     size_t fieldCount;
     size_t fieldCap;
-} TypeBlockState;
+};
 
 typedef struct ObjectInitState {
     int active;
@@ -2841,6 +2884,91 @@ static int appendAetherCapabilityAlias(Buffer *out,
     return 0;
 }
 
+static int appendAetherInlineCallAlias(Buffer *out,
+                                       const char *nameStart,
+                                       size_t nameLen,
+                                       const char *openParen,
+                                       const char *lineEnd,
+                                       const char **outCursor) {
+    const char *closeParen;
+    const char *arg1Start;
+    const char *arg1End;
+    const char *arg2Start;
+    const char *arg2End;
+    const char *comma = NULL;
+    const char *scan;
+    int depth = 0;
+
+    if (!out || !nameStart || !openParen || *openParen != '(' || !lineEnd || !outCursor) {
+        return 0;
+    }
+    if (!(nameLen == 9 && strncmp(nameStart, "string_eq", nameLen) == 0)) {
+        return 0;
+    }
+    closeParen = findMatchingCloseParen(openParen, lineEnd);
+    if (!closeParen) {
+        return 0;
+    }
+    arg1Start = skipSpacesInRange(openParen + 1, closeParen);
+    if (arg1Start >= closeParen) {
+        return 0;
+    }
+    scan = arg1Start;
+    while (scan < closeParen) {
+        char ch = *scan;
+
+        if (ch == '"' || ch == '\'') {
+            char quote = ch;
+            scan++;
+            while (scan < closeParen) {
+                if (*scan == '\\' && scan + 1 < closeParen) {
+                    scan += 2;
+                    continue;
+                }
+                if (*scan == quote) {
+                    scan++;
+                    break;
+                }
+                scan++;
+            }
+            continue;
+        }
+        if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+            depth++;
+        } else if ((ch == ')' || ch == ']' || ch == '}' || ch == '>') && depth > 0) {
+            depth--;
+        } else if (ch == ',' && depth == 0) {
+            comma = scan;
+            break;
+        }
+        scan++;
+    }
+    if (!comma) {
+        return 0;
+    }
+    arg1End = comma;
+    while (arg1End > arg1Start && isspace((unsigned char)arg1End[-1])) {
+        arg1End--;
+    }
+    arg2Start = skipSpacesInRange(comma + 1, closeParen);
+    arg2End = closeParen;
+    while (arg2End > arg2Start && isspace((unsigned char)arg2End[-1])) {
+        arg2End--;
+    }
+    if (arg1End <= arg1Start || arg2End <= arg2Start) {
+        return 0;
+    }
+    if (!bufferAppend(out, "(") ||
+        !bufferAppendN(out, arg1Start, (size_t)(arg1End - arg1Start)) ||
+        !bufferAppend(out, " == ") ||
+        !bufferAppendN(out, arg2Start, (size_t)(arg2End - arg2Start)) ||
+        !bufferAppend(out, ")")) {
+        return 0;
+    }
+    *outCursor = closeParen + 1;
+    return 1;
+}
+
 static int appendAetherExtensionCallRewrite(Buffer *out,
                                             const char *nameStart,
                                             size_t nameLen,
@@ -3593,6 +3721,119 @@ static char *extractAnnotationExpr(const char *body, const char *lineEnd, const 
     return trimmedCopy(exprStart, lineEnd);
 }
 
+static char *rewriteInlineIfExpression(const char *exprStart,
+                                       const char *exprEnd,
+                                       const TypeBlockState *typeState,
+                                       int isMethod) {
+    const char *cursor;
+    const char *condStart;
+    const char *condEnd;
+    const char *thenOpen;
+    const char *thenClose;
+    const char *elseKw;
+    const char *elseOpen;
+    const char *elseClose;
+    const char *rest;
+    const char *scan;
+    int depth = 0;
+    char *rewrittenCond = NULL;
+    char *rewrittenThen = NULL;
+    char *rewrittenElse = NULL;
+    Buffer out = {0};
+
+    if (!exprStart || !exprEnd || exprEnd <= exprStart) {
+        return NULL;
+    }
+    cursor = skipSpacesInRange(exprStart, exprEnd);
+    if (!startsWithWord(cursor, exprEnd, "if")) {
+        return NULL;
+    }
+    condStart = skipSpacesInRange(cursor + 2, exprEnd);
+    scan = condStart;
+    thenOpen = NULL;
+    while (scan < exprEnd) {
+        if (*scan == '"' || *scan == '\'') {
+            char quote = *scan++;
+            while (scan < exprEnd) {
+                if (*scan == '\\' && scan + 1 < exprEnd) {
+                    scan += 2;
+                    continue;
+                }
+                if (*scan == quote) {
+                    scan++;
+                    break;
+                }
+                scan++;
+            }
+            continue;
+        }
+        if (*scan == '(' || *scan == '[') {
+            depth++;
+        } else if ((*scan == ')' || *scan == ']') && depth > 0) {
+            depth--;
+        } else if (*scan == '{' && depth == 0) {
+            thenOpen = scan;
+            break;
+        }
+        scan++;
+    }
+    if (!thenOpen) {
+        return NULL;
+    }
+    condEnd = thenOpen;
+    while (condEnd > condStart && isspace((unsigned char)condEnd[-1])) {
+        condEnd--;
+    }
+    thenClose = findMatchingCloseBrace(thenOpen, exprEnd);
+    if (!thenClose) {
+        return NULL;
+    }
+    elseKw = skipSpacesInRange(thenClose + 1, exprEnd);
+    if (!startsWithWord(elseKw, exprEnd, "else")) {
+        return NULL;
+    }
+    elseOpen = skipSpacesInRange(elseKw + 4, exprEnd);
+    if (elseOpen >= exprEnd || *elseOpen != '{') {
+        return NULL;
+    }
+    elseClose = findMatchingCloseBrace(elseOpen, exprEnd);
+    if (!elseClose) {
+        return NULL;
+    }
+    rest = skipSpacesInRange(elseClose + 1, exprEnd);
+    if (rest != exprEnd) {
+        return NULL;
+    }
+
+    rewrittenCond = rewriteMethodScopedExpr(condStart, condEnd, typeState, isMethod);
+    rewrittenThen = rewriteMethodScopedExpr(thenOpen + 1, thenClose, typeState, isMethod);
+    rewrittenElse = rewriteMethodScopedExpr(elseOpen + 1, elseClose, typeState, isMethod);
+    if (!rewrittenCond || !rewrittenThen || !rewrittenElse) {
+        free(rewrittenCond);
+        free(rewrittenThen);
+        free(rewrittenElse);
+        free(out.data);
+        return NULL;
+    }
+    if (!bufferAppend(&out, "((") ||
+        !bufferAppend(&out, rewrittenCond) ||
+        !bufferAppend(&out, ") ? (") ||
+        !bufferAppend(&out, rewrittenThen) ||
+        !bufferAppend(&out, ") : (") ||
+        !bufferAppend(&out, rewrittenElse) ||
+        !bufferAppend(&out, "))")) {
+        free(rewrittenCond);
+        free(rewrittenThen);
+        free(rewrittenElse);
+        free(out.data);
+        return NULL;
+    }
+    free(rewrittenCond);
+    free(rewrittenThen);
+    free(rewrittenElse);
+    return out.data;
+}
+
 static void reportMisplacedContractBlock(const char *path,
                                          const char *cursor,
                                          int lineNumber) {
@@ -3746,9 +3987,6 @@ static char *rewriteMethodScopedExpr(const char *start,
     if (!start || !end || end < start) {
         return NULL;
     }
-    if (!isMethod) {
-        return dupRange(start, end);
-    }
 
     while (cursor < end) {
         if (*cursor == '"' || *cursor == '\'') {
@@ -3782,12 +4020,24 @@ static char *rewriteMethodScopedExpr(const char *start,
             const char *nameStart = cursor;
             const char *nameEnd = cursor + 1;
             const char *afterName;
+            const char *advancedCursor = NULL;
 
             while (nameEnd < end && isIdentifierChar((unsigned char)*nameEnd)) {
                 nameEnd++;
             }
             afterName = skipSpacesInRange(nameEnd, end);
-            if ((size_t)(nameEnd - nameStart) == 4 &&
+            if (afterName < end && *afterName == '(' &&
+                appendAetherInlineCallAlias(&out,
+                                            nameStart,
+                                            (size_t)(nameEnd - nameStart),
+                                            afterName,
+                                            end,
+                                            &advancedCursor)) {
+                cursor = advancedCursor;
+                continue;
+            }
+            if (isMethod &&
+                (size_t)(nameEnd - nameStart) == 4 &&
                 strncmp(nameStart, "self", 4) == 0) {
                 if (!bufferAppend(&out, "myself")) {
                     free(out.data);
@@ -5009,6 +5259,7 @@ static char *translateTypedDeclLine(const char *lineStart,
     const char *afterColon;
     const char *typeEnd;
     const char *equals = NULL;
+    char *inlineIfExpr = NULL;
     Buffer out = {0};
 
     cursor = skipSpaces(cursor);
@@ -5222,12 +5473,41 @@ static char *translateTypedDeclLine(const char *lineStart,
         free(out.data);
         return NULL;
     }
+    if (equals < lineEnd && *equals == '=') {
+        const char *exprStart = skipSpaces(equals + 1);
+        const char *exprEnd = lineEnd;
+        while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+            exprEnd--;
+        }
+        if (exprEnd > exprStart && exprEnd[-1] == ';') {
+            exprEnd--;
+        }
+        while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+            exprEnd--;
+        }
+        inlineIfExpr = rewriteInlineIfExpression(exprStart, exprEnd, NULL, 0);
+    }
     if (!appendMappedParamTypeAndName(&out,
                                       afterColon,
                                       typeEnd,
                                       nameStart,
-                                      nameEnd) ||
-        (typeEnd < lineEnd && !bufferAppendN(&out, typeEnd, (size_t)(lineEnd - typeEnd)))) {
+                                      nameEnd)) {
+        free(out.data);
+        free(inlineIfExpr);
+        return NULL;
+    }
+    if (inlineIfExpr) {
+        if (!bufferAppend(&out, " = ") ||
+            !bufferAppend(&out, inlineIfExpr) ||
+            !bufferAppend(&out, ";")) {
+            free(out.data);
+            free(inlineIfExpr);
+            return NULL;
+        }
+        free(inlineIfExpr);
+        return out.data;
+    }
+    if (typeEnd < lineEnd && !bufferAppendN(&out, typeEnd, (size_t)(lineEnd - typeEnd))) {
         free(out.data);
         return NULL;
     }
@@ -5354,6 +5634,7 @@ static char *translateInferredDeclLine(const char *lineStart,
     const char *equals;
     const char *exprStart;
     char *typeName = NULL;
+    char *inlineIfExpr = NULL;
     Buffer out = {0};
 
     cursor = skipSpaces(cursor);
@@ -5367,15 +5648,34 @@ static char *translateInferredDeclLine(const char *lineStart,
         return dupRange(lineStart, lineEnd);
     }
     exprStart = skipSpaces(equals + 1);
+    {
+        const char *exprEnd = lineEnd;
+        while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+            exprEnd--;
+        }
+        if (exprEnd > exprStart && exprEnd[-1] == ';') {
+            exprEnd--;
+        }
+        while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+            exprEnd--;
+        }
+        inlineIfExpr = rewriteInlineIfExpression(exprStart, exprEnd, NULL, 0);
+    }
 
     if (isConst) {
         if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
             !bufferAppend(&out, "const ") ||
             !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
-            !bufferAppendN(&out, equals, (size_t)(lineEnd - equals))) {
+            !(inlineIfExpr
+                  ? (bufferAppend(&out, " = ") &&
+                     bufferAppend(&out, inlineIfExpr) &&
+                     bufferAppend(&out, ";"))
+                  : bufferAppendN(&out, equals, (size_t)(lineEnd - equals)))) {
+            free(inlineIfExpr);
             free(out.data);
             return NULL;
         }
+        free(inlineIfExpr);
         return out.data;
     }
 
@@ -5423,6 +5723,7 @@ static char *translateInferredDeclLine(const char *lineStart,
                      nameStart);
         }
         reportAetherRewriteError(path, lineNumber, "declaration", detail, hint);
+        free(inlineIfExpr);
         return NULL;
     }
 
@@ -5430,12 +5731,18 @@ static char *translateInferredDeclLine(const char *lineStart,
         !bufferAppend(&out, mapTypeName(typeName)) ||
         !bufferAppend(&out, " ") ||
         !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
-        !bufferAppendN(&out, equals, (size_t)(lineEnd - equals))) {
+        !(inlineIfExpr
+              ? (bufferAppend(&out, " = ") &&
+                 bufferAppend(&out, inlineIfExpr) &&
+                 bufferAppend(&out, ";"))
+              : bufferAppendN(&out, equals, (size_t)(lineEnd - equals)))) {
         free(typeName);
+        free(inlineIfExpr);
         free(out.data);
         return NULL;
     }
     free(typeName);
+    free(inlineIfExpr);
     return out.data;
 }
 
@@ -5445,6 +5752,7 @@ static char *translateConditionLine(const char *lineStart,
                                     const char *keyword) {
     const char *exprStart;
     const char *brace;
+    char *rewrittenExpr = NULL;
     Buffer out = {0};
     size_t keywordLen = keyword ? strlen(keyword) : 0;
 
@@ -5467,17 +5775,140 @@ static char *translateConditionLine(const char *lineStart,
     while (brace > exprStart && isspace((unsigned char)brace[-1])) {
         brace--;
     }
+    rewrittenExpr = rewriteMethodScopedExpr(exprStart, brace, NULL, 0);
+    if (!rewrittenExpr) {
+        return NULL;
+    }
 
     if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
         !bufferAppend(&out, keyword) ||
         !bufferAppend(&out, " (") ||
-        !bufferAppendN(&out, exprStart, (size_t)(brace - exprStart)) ||
+        !bufferAppend(&out, rewrittenExpr) ||
         !bufferAppend(&out, ")") ||
         !bufferAppendN(&out, brace, (size_t)(lineEnd - brace))) {
+        free(rewrittenExpr);
         free(out.data);
         return NULL;
     }
+    free(rewrittenExpr);
 
+    return out.data;
+}
+
+static char *translateReturnInlineIfLine(const char *lineStart,
+                                         const char *body,
+                                         const char *lineEnd,
+                                         const TypeBlockState *typeState,
+                                         int isMethod) {
+    const char *exprStart;
+    const char *exprEnd;
+    char *rewrittenExpr;
+    Buffer out = {0};
+
+    if (!startsWithWord(body, lineEnd, "ret")) {
+        return NULL;
+    }
+    exprStart = skipSpacesInRange(body + 3, lineEnd);
+    if (exprStart >= lineEnd) {
+        return NULL;
+    }
+    exprEnd = lineEnd;
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (exprEnd > exprStart && exprEnd[-1] == ';') {
+        exprEnd--;
+    }
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    rewrittenExpr = rewriteInlineIfExpression(exprStart, exprEnd, typeState, isMethod);
+    if (!rewrittenExpr) {
+        return NULL;
+    }
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "return ") ||
+        !bufferAppend(&out, rewrittenExpr) ||
+        !bufferAppend(&out, ";")) {
+        free(rewrittenExpr);
+        free(out.data);
+        return NULL;
+    }
+    free(rewrittenExpr);
+    return out.data;
+}
+
+static char *translateAssignInlineIfLine(const char *lineStart,
+                                         const char *body,
+                                         const char *lineEnd,
+                                         const TypeBlockState *typeState,
+                                         int isMethod) {
+    const char *equals;
+    const char *lhsStart;
+    const char *lhsEnd;
+    const char *rhsStart;
+    const char *rhsEnd;
+    char *rewrittenLhs = NULL;
+    char *rewrittenRhs = NULL;
+    Buffer out = {0};
+
+    if (!body || !lineEnd ||
+        startsWithWord(body, lineEnd, "let") ||
+        startsWithWord(body, lineEnd, "const") ||
+        startsWithWord(body, lineEnd, "if") ||
+        startsWithWord(body, lineEnd, "while") ||
+        startsWithWord(body, lineEnd, "for") ||
+        startsWithWord(body, lineEnd, "loop") ||
+        startsWithWord(body, lineEnd, "ret") ||
+        startsWithWord(body, lineEnd, "fx") ||
+        startsWithWord(body, lineEnd, "par")) {
+        return NULL;
+    }
+
+    equals = findCharInRange(body, lineEnd, '=');
+    if (!equals ||
+        (equals + 1 < lineEnd && equals[1] == '=') ||
+        (equals > body && equals[-1] == '=') ||
+        (equals + 1 < lineEnd && equals[1] == '>')) {
+        return NULL;
+    }
+    lhsStart = skipSpacesInRange(body, equals);
+    lhsEnd = equals;
+    while (lhsEnd > lhsStart && isspace((unsigned char)lhsEnd[-1])) {
+        lhsEnd--;
+    }
+    rhsStart = skipSpacesInRange(equals + 1, lineEnd);
+    rhsEnd = lineEnd;
+    while (rhsEnd > rhsStart && isspace((unsigned char)rhsEnd[-1])) {
+        rhsEnd--;
+    }
+    if (rhsEnd > rhsStart && rhsEnd[-1] == ';') {
+        rhsEnd--;
+    }
+    while (rhsEnd > rhsStart && isspace((unsigned char)rhsEnd[-1])) {
+        rhsEnd--;
+    }
+    rewrittenRhs = rewriteInlineIfExpression(rhsStart, rhsEnd, typeState, isMethod);
+    if (!rewrittenRhs) {
+        return NULL;
+    }
+    rewrittenLhs = rewriteMethodScopedExpr(lhsStart, lhsEnd, typeState, isMethod);
+    if (!rewrittenLhs) {
+        free(rewrittenRhs);
+        return NULL;
+    }
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, rewrittenLhs) ||
+        !bufferAppend(&out, " = ") ||
+        !bufferAppend(&out, rewrittenRhs) ||
+        !bufferAppend(&out, ";")) {
+        free(rewrittenLhs);
+        free(rewrittenRhs);
+        free(out.data);
+        return NULL;
+    }
+    free(rewrittenLhs);
+    free(rewrittenRhs);
     return out.data;
 }
 
@@ -5893,6 +6324,15 @@ static char *translateLine(const char *lineStart,
     if (strncmp(body, "type ", 5) == 0) {
         return translateTypeLine(lineStart, body, lineEnd);
     }
+    {
+        char *translated = translateReturnInlineIfLine(lineStart, body, lineEnd, NULL, 0);
+        if (!translated) {
+            translated = translateAssignInlineIfLine(lineStart, body, lineEnd, NULL, 0);
+        }
+        if (translated) {
+            return translated;
+        }
+    }
     if (strncmp(body, "if ", 3) == 0) {
         return translateConditionLine(lineStart, body, lineEnd, "if");
     }
@@ -5952,6 +6392,17 @@ static char *translateLine(const char *lineStart,
 
             while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
                 nameEnd++;
+            }
+            if (nameEnd < lineEnd &&
+                *skipSpacesInRange(nameEnd, lineEnd) == '(' &&
+                appendAetherInlineCallAlias(&out,
+                                            nameStart,
+                                            (size_t)(nameEnd - nameStart),
+                                            skipSpacesInRange(nameEnd, lineEnd),
+                                            lineEnd,
+                                            &advancedCursor)) {
+                body = advancedCursor;
+                continue;
             }
             if (nameEnd < lineEnd &&
                 *skipSpacesInRange(nameEnd, lineEnd) == '(' &&

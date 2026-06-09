@@ -175,6 +175,16 @@ ret "blocked";
 
 Parentheses are not required.
 
+A compact inline conditional expression is also supported on the right-hand
+side of declarations, assignments, and returns:
+
+```aether
+let score: Int = if count > 0 { total / count } else { 0 };
+```
+
+For text equality, prefer plain `==`, but `string_eq(a, b)` is also accepted
+as a compact alias and lowers to the same comparison.
+
 ### Loops
 
 Condition loop:
