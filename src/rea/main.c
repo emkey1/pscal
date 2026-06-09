@@ -51,7 +51,9 @@
 #include "rea/state.h"
 #include "rea/semantic.h"
 #include "aether/parser.h"
+#ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
 #include "aether/translate.h"
+#endif
 #include "aether/state.h"
 #include "aether/semantic.h"
 #include "Pascal/lexer.h"
@@ -158,7 +160,9 @@ static const char *REA_USAGE =
     "   Options:\n"
     "     -v                     Display version.\n"
     "     --dump-ast-json        Dump AST to JSON and exit.\n"
+#ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
     "     --dump-rewrite         Dump frontend-rewritten source and exit.\n"
+#endif
     "     --dump-bytecode        Dump compiled bytecode before execution.\n"
     "     --dump-bytecode-only   Dump compiled bytecode and exit (no execution).\n"
     "     --no-run               Compile but skip VM execution.\n"
@@ -875,7 +879,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     }
 
     int dump_ast_json = 0;
+#ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
     int dump_rewrite = 0;
+#endif
     int dump_bytecode_flag = 0;
     int dump_bytecode_only_flag = 0;
     int no_run_flag = 0;
@@ -913,8 +919,10 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
             REA_RETURN(vmExitWithCleanup(EXIT_SUCCESS));
         } else if (strcmp(argv[argi], "--dump-ast-json") == 0) {
             dump_ast_json = 1;
+#ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
         } else if (strcmp(argv[argi], "--dump-rewrite") == 0) {
             dump_rewrite = 1;
+#endif
         } else if (strcmp(argv[argi], "--dump-bytecode") == 0) {
             dump_bytecode_flag = 1;
         } else if (strcmp(argv[argi], "--dump-bytecode-only") == 0) {
@@ -985,7 +993,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
     char *preprocessed_source = preprocessConditionals(src, defines, define_count);
     const char *effective_src = preprocessed_source ? preprocessed_source : src;
 
-#if PSCAL_FRONTEND_KIND == FRONTEND_KIND_AETHER
+#ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
     if (dump_rewrite) {
         char *rewritten = aetherRewriteSource(effective_src, path);
         if (!rewritten) {
