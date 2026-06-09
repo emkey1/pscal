@@ -6142,7 +6142,41 @@ char *aetherRewriteSource(const char *source, const char *path) {
             }
         }
 
-        if (startsWithWord(body, lineEnd, "@pre")) {
+        if (fnState.active && startsWithWord(body, lineEnd, "@pre")) {
+            reportAetherRewriteError(path,
+                                     lineNumber,
+                                     "contract",
+                                     "@pre must annotate the next function declaration.",
+                                     "move @pre above the `fn ...` line instead of placing it inside the function body.");
+            freePendingContracts(&pending);
+            clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
+            freeAetherFunctionTable(&functionTable);
+            freeToonLiteralTable(&toonTable);
+            freeAetherTupleTable(&tupleTable);
+            free(preprocessed);
+            free(out.data);
+            return NULL;
+        } else if (fnState.active && startsWithWord(body, lineEnd, "@post")) {
+            reportAetherRewriteError(path,
+                                     lineNumber,
+                                     "contract",
+                                     "@post must annotate the next function declaration.",
+                                     "move @post above the `fn ...` line instead of placing it inside the function body.");
+            freePendingContracts(&pending);
+            clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
+            freeAetherFunctionTable(&functionTable);
+            freeToonLiteralTable(&toonTable);
+            freeAetherTupleTable(&tupleTable);
+            free(preprocessed);
+            free(out.data);
+            return NULL;
+        } else if (startsWithWord(body, lineEnd, "@pre")) {
             char *expr = extractAnnotationExpr(body, lineEnd, "@pre");
             pending.preExpr = appendContractExpr(pending.preExpr, expr);
             free(expr);
