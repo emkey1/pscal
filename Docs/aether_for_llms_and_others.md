@@ -142,6 +142,8 @@ Inference also works in some common Aether-specific cases:
 - method calls on known typed bindings
 - `string_len(textValue)`
 - known TOON helper return values
+- simple numeric expressions over known `Int` / `Real` values, such as
+  `count + 1` or `base_amount * multiplier`
 
 If inference is not obviously safe, add the type explicitly.
 

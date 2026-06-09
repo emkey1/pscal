@@ -639,6 +639,7 @@ typedef struct FunctionContracts {
     int bodyDepth;
     int isVoid;
     int isMethod;
+    size_t bindingCountBefore;
     char *name;
     char *postExpr;
 } FunctionContracts;
@@ -724,6 +725,7 @@ static void clearFunctionContracts(FunctionContracts *state) {
     state->bodyDepth = 0;
     state->isVoid = 0;
     state->isMethod = 0;
+    state->bindingCountBefore = 0;
     state->name = NULL;
     state->postExpr = NULL;
 }
@@ -786,6 +788,20 @@ static void freeAetherBindingTable(AetherBindingTable *table) {
     table->items = NULL;
     table->count = 0;
     table->cap = 0;
+}
+
+static void restoreAetherBindingTableCount(AetherBindingTable *table, size_t keepCount) {
+    if (!table) {
+        return;
+    }
+    while (table->count > keepCount) {
+        size_t idx = table->count - 1;
+        free(table->items[idx].name);
+        free(table->items[idx].typeName);
+        table->items[idx].name = NULL;
+        table->items[idx].typeName = NULL;
+        table->count--;
+    }
 }
 
 static void freeAetherFunctionTable(AetherFunctionTable *table) {
@@ -1355,6 +1371,154 @@ static char *composeQualifiedLookup(const char *left,
     return qualified;
 }
 
+static int isAetherNumericTypeName(const char *typeName) {
+    if (!typeName) {
+        return 0;
+    }
+    return strcmp(typeName, "Int") == 0 || strcmp(typeName, "Real") == 0;
+}
+
+static int isLikelyUnaryOperatorSite(const char *start, const char *op) {
+    const char *cursor;
+
+    if (!start || !op || op <= start) {
+        return 1;
+    }
+    cursor = op;
+    while (cursor > start) {
+        cursor--;
+        if (isspace((unsigned char)*cursor)) {
+            continue;
+        }
+        return *cursor == '(' || *cursor == '[' || *cursor == '{' ||
+               *cursor == ',' || *cursor == ':' || *cursor == '=' ||
+               *cursor == '+' || *cursor == '-' || *cursor == '*' ||
+               *cursor == '/' || *cursor == '%' || *cursor == '!' ||
+               *cursor == '<' || *cursor == '>' || *cursor == '&' ||
+               *cursor == '|';
+    }
+    return 1;
+}
+
+static int isWrappedInOuterParens(const char *start, const char *end) {
+    const char *cursor;
+    int depth = 0;
+    int inString = 0;
+    char quote = '\0';
+
+    if (!start || !end || end - start < 2 || *start != '(' || end[-1] != ')') {
+        return 0;
+    }
+    cursor = start;
+    while (cursor < end) {
+        char ch = *cursor;
+
+        if (inString) {
+            if (ch == '\\' && cursor + 1 < end) {
+                cursor += 2;
+                continue;
+            }
+            if (ch == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (ch == '"' || ch == '\'') {
+            inString = 1;
+            quote = ch;
+            cursor++;
+            continue;
+        }
+        if (ch == '(') {
+            depth++;
+        } else if (ch == ')') {
+            depth--;
+            if (depth == 0 && cursor + 1 < end) {
+                return 0;
+            }
+        }
+        cursor++;
+    }
+    return depth == 0;
+}
+
+static const char *findTopLevelArithmeticOp(const char *start,
+                                            const char *end,
+                                            const char *ops) {
+    const char *cursor = start;
+    const char *found = NULL;
+    int parenDepth = 0;
+    int braceDepth = 0;
+    int bracketDepth = 0;
+    int inString = 0;
+    char quote = '\0';
+
+    if (!start || !end || !ops) {
+        return NULL;
+    }
+    while (cursor < end) {
+        char ch = *cursor;
+
+        if (inString) {
+            if (ch == '\\' && cursor + 1 < end) {
+                cursor += 2;
+                continue;
+            }
+            if (ch == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (ch == '"' || ch == '\'') {
+            inString = 1;
+            quote = ch;
+            cursor++;
+            continue;
+        }
+        if (ch == '(') {
+            parenDepth++;
+            cursor++;
+            continue;
+        }
+        if (ch == ')') {
+            parenDepth--;
+            cursor++;
+            continue;
+        }
+        if (ch == '{') {
+            braceDepth++;
+            cursor++;
+            continue;
+        }
+        if (ch == '}') {
+            braceDepth--;
+            cursor++;
+            continue;
+        }
+        if (ch == '[') {
+            bracketDepth++;
+            cursor++;
+            continue;
+        }
+        if (ch == ']') {
+            bracketDepth--;
+            cursor++;
+            continue;
+        }
+        if (parenDepth == 0 && braceDepth == 0 && bracketDepth == 0 &&
+            strchr(ops, ch) != NULL &&
+            !isLikelyUnaryOperatorSite(start, cursor)) {
+            found = cursor;
+        }
+        cursor++;
+    }
+    return found;
+}
+
 static char *inferAetherBindingTypeName(const char *exprStart,
                                         const char *exprEnd,
                                         const AetherBindingTable *bindings,
@@ -1390,6 +1554,16 @@ static char *inferAetherBindingTypeName(const char *exprStart,
     if (trimmedStart >= trimmedEnd) {
         return NULL;
     }
+    while (isWrappedInOuterParens(trimmedStart, trimmedEnd)) {
+        trimmedStart++;
+        trimmedEnd--;
+        while (trimmedStart < trimmedEnd && isspace((unsigned char)*trimmedStart)) {
+            trimmedStart++;
+        }
+        while (trimmedEnd > trimmedStart && isspace((unsigned char)trimmedEnd[-1])) {
+            trimmedEnd--;
+        }
+    }
     if (*trimmedStart == '"' && trimmedEnd[-1] == '"') {
         return dupCString("Text");
     }
@@ -1402,6 +1576,33 @@ static char *inferAetherBindingTypeName(const char *exprStart,
     newObjectType = inferNewObjectTypeName(trimmedStart, trimmedEnd);
     if (newObjectType) {
         return newObjectType;
+    }
+    {
+        const char *op = findTopLevelArithmeticOp(trimmedStart, trimmedEnd, "+-");
+        if (!op) {
+            op = findTopLevelArithmeticOp(trimmedStart, trimmedEnd, "*");
+        }
+        if (op) {
+            char *leftType = inferAetherBindingTypeName(trimmedStart, op, bindings, functions);
+            char *rightType = inferAetherBindingTypeName(op + 1, trimmedEnd, bindings, functions);
+            char *resultType = NULL;
+
+            if (leftType && rightType &&
+                isAetherNumericTypeName(leftType) &&
+                isAetherNumericTypeName(rightType)) {
+                if (*op == '+' || *op == '-' || *op == '*') {
+                    resultType = dupCString((strcmp(leftType, "Real") == 0 ||
+                                             strcmp(rightType, "Real") == 0)
+                                                ? "Real"
+                                                : "Int");
+                }
+            }
+            free(leftType);
+            free(rightType);
+            if (resultType) {
+                return resultType;
+            }
+        }
     }
     nameEnd = trimmedStart;
     if (isalpha((unsigned char)*nameEnd) || *nameEnd == '_') {
@@ -1545,6 +1746,64 @@ static void maybeRecordAetherBindingType(AetherBindingTable *table,
     }
     free(name);
     free(typeName);
+}
+
+static int recordAetherFunctionParamBindings(AetherBindingTable *table,
+                                             const char *body,
+                                             const char *lineEnd) {
+    const char *paramsOpen;
+    const char *paramsClose;
+    const char *cursor;
+
+    if (!table || !body || !lineEnd || !startsWithWord(body, lineEnd, "fn")) {
+        return 1;
+    }
+    paramsOpen = findCharInRange(body, lineEnd, '(');
+    paramsClose = paramsOpen ? findLastCharInRange(paramsOpen, lineEnd, ')') : NULL;
+    if (!paramsOpen || !paramsClose || paramsClose <= paramsOpen + 1) {
+        return 1;
+    }
+    cursor = paramsOpen + 1;
+    while (cursor < paramsClose) {
+        const char *segmentStart = skipSpacesInRange(cursor, paramsClose);
+        const char *segmentEnd = segmentStart;
+        const char *colon;
+        const char *nameEnd;
+        const char *typeStart;
+        const char *typeEnd;
+        char *paramName = NULL;
+        char *paramType = NULL;
+
+        while (segmentEnd < paramsClose && *segmentEnd != ',') {
+            segmentEnd++;
+        }
+        while (segmentEnd > segmentStart && isspace((unsigned char)segmentEnd[-1])) {
+            segmentEnd--;
+        }
+        colon = findCharInRange(segmentStart, segmentEnd, ':');
+        if (colon) {
+            nameEnd = colon;
+            while (nameEnd > segmentStart && isspace((unsigned char)nameEnd[-1])) {
+                nameEnd--;
+            }
+            typeStart = skipSpacesInRange(colon + 1, segmentEnd);
+            typeEnd = segmentEnd;
+            if (nameEnd > segmentStart && typeEnd > typeStart) {
+                paramName = trimmedCopy(segmentStart, nameEnd);
+                paramType = trimmedCopy(typeStart, typeEnd);
+                if ((!paramName || !paramType) ||
+                    !setAetherBindingType(table, paramName, paramType)) {
+                    free(paramName);
+                    free(paramType);
+                    return 0;
+                }
+            }
+        }
+        free(paramName);
+        free(paramType);
+        cursor = segmentEnd < paramsClose ? segmentEnd + 1 : segmentEnd;
+    }
+    return 1;
 }
 
 static char *extractBindingName(const char *body, const char *lineEnd) {
@@ -4875,11 +5134,26 @@ char *aetherRewriteSource(const char *source, const char *path) {
             fnState.bodyDepth = braceDepth + lineDelta;
             fnState.isVoid = returnType && strcmp(returnType, "Void") == 0;
             fnState.isMethod = typeState.active;
+            fnState.bindingCountBefore = bindingTable.count;
             fnState.name = fnName;
             fnState.postExpr = pending.postExpr
                                    ? dupRange(pending.postExpr,
                                               pending.postExpr + strlen(pending.postExpr))
                                    : NULL;
+            if (fnState.active &&
+                !recordAetherFunctionParamBindings(&bindingTable, body, lineEnd)) {
+                free(returnType);
+                freePendingContracts(&pending);
+                clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
+                freeAetherFunctionTable(&functionTable);
+                freeToonLiteralTable(&toonTable);
+                free(preprocessed);
+                free(out.data);
+                return NULL;
+            }
 
             free(returnType);
             freePendingContracts(&pending);
@@ -4932,6 +5206,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
         }
         braceDepth += lineDelta;
         if (fnState.active && braceDepth < fnState.bodyDepth) {
+            restoreAetherBindingTableCount(&bindingTable, fnState.bindingCountBefore);
             clearFunctionContracts(&fnState);
         }
         if (parState.active && braceDepth < parState.bodyDepth) {

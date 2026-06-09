@@ -1,6 +1,6 @@
 fn main() -> Void {
-    let base: Int = 41;
-    let answer = base + 1;
+    let tag: Text = "Aether";
+    let answer = tag + 1;
     fx {
         println(answer);
     }

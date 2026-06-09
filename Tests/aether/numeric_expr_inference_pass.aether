@@ -1,0 +1,13 @@
+@pure
+fn calculate_final_value(base_amount: Int, multiplier: Real) -> Real {
+    let result = base_amount * multiplier;
+    ret result;
+}
+
+fn main() -> Void {
+    let total = calculate_final_value(100, 0.08);
+    fx {
+        println(total);
+    }
+    ret;
+}
