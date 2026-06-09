@@ -229,6 +229,9 @@ A good default rule for LLMs:
 - if the code prints, launches tasks, or does other visible runtime work,
   put that part inside `fx`
 
+Runtime and compile-time failures should report original Aether source lines,
+not lowered Rea lines. When debugging, trust the reported Aether line first.
+
 ## Purity and contracts
 
 ### `@pure`

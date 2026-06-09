@@ -1164,6 +1164,7 @@ set(PSCAL_CORE_SOURCES
     src/common/frontend_kind.c
     src/common/runtime_paths.c
     src/common/pascal_state.c
+    src/aether/diagmap.c
     src/vm/vm.c
     lib/noise/noise.c
     src/runtime/terrain/terrain_generator.c
@@ -2323,7 +2324,6 @@ set(REA_SOURCES
     src/rea/state.c
     src/rea/builtins/thread.c
     src/rea/type_stubs.c
-    src/aether/diagmap.c
 )
 
 if(NOT PSCAL_PLATFORM_IOS)

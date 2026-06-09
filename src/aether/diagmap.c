@@ -63,3 +63,7 @@ int aetherMapRewrittenLineToSource(int rewrittenLine) {
     }
     return rewrittenLine;
 }
+
+int aetherHasRewriteLineMap(void) {
+    return g_aether_rewrite_line_count > 0;
+}

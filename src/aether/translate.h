@@ -3,6 +3,7 @@
 
 char *aetherRewriteSource(const char *source, const char *path);
 int aetherMapRewrittenLineToSource(int rewrittenLine);
+int aetherHasRewriteLineMap(void);
 int aetherNoteRewriteLineMapping(int rewrittenLine, int sourceLine);
 void aetherClearRewriteLineMap(void);
 

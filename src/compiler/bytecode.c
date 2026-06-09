@@ -12,6 +12,7 @@
 #include "Pascal/globals.h"
 #include "backend_ast/builtin.h"
 #include "core/version.h"
+#include "aether/translate.h"
 
 // initBytecodeChunk, freeBytecodeChunk, reallocate, writeBytecodeChunk,
 // addConstantToChunk, emitShort, patchShort from your provided file.
@@ -104,6 +105,9 @@ static const char* formatInlineCachePointer(uintptr_t cached, char* buffer, size
 }
 
 void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line) { // From all.txt
+    if (aetherHasRewriteLineMap()) {
+        line = aetherMapRewrittenLineToSource(line);
+    }
     if (chunk->capacity < chunk->count + 1) {
         int oldCapacity = chunk->capacity;
         chunk->capacity = oldCapacity < 8 ? 8 : oldCapacity * 2;

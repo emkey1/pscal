@@ -4,6 +4,7 @@
 #include "ast/ast.h"
 #include "compiler/compiler.h"
 #include "core/utils.h"
+#include "aether/translate.h"
 #include "rea/parser.h"
 #include "rea/semantic.h"
 #include "symbol/symbol.h"
@@ -38,6 +39,7 @@ void reaResetSymbolState(void) {
 void reaInvalidateGlobalState(void) {
     reaResetParserState();
     reaSemanticResetState();
+    aetherClearRewriteLineMap();
     reaResetSymbolState();
     compilerResetState();
 }

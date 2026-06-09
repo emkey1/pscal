@@ -25,6 +25,7 @@ TASK_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/task_alias_fail_outside_fx.aethe
 HAS_BUILTIN_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_builtin_alias_pass.aether"
 AI_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/ai_helpers_pass.aether"
 AI_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/ai_alias_fail_outside_fx.aether"
+RUNTIME_LINE_MAPPING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/runtime_line_mapping_fail.aether"
 INFERRED_BINDINGS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_bindings_pass.aether"
 INFERRED_CONST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inferred_const_pass.aether"
 INFERRED_LET_UNKNOWN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/inferred_let_unknown_fail.aether"
@@ -103,6 +104,7 @@ for fixture in \
     "$HAS_BUILTIN_ALIAS_PASS_FIXTURE" \
     "$AI_HELPERS_PASS_FIXTURE" \
     "$AI_ALIAS_FAIL_FIXTURE" \
+    "$RUNTIME_LINE_MAPPING_FAIL_FIXTURE" \
     "$INFERRED_BINDINGS_PASS_FIXTURE" \
     "$INFERRED_CONST_PASS_FIXTURE" \
     "$INFERRED_LET_UNKNOWN_FAIL_FIXTURE" \
@@ -699,6 +701,26 @@ fi
 if ! grep -q "Aether effect error: call to 'ai_chat' requires an fx block" /tmp/aether_ai_alias_fail.out; then
     echo "missing ai alias effect-boundary failure message" >&2
     cat /tmp/aether_ai_alias_fail.out >&2
+    exit 1
+fi
+
+if env -u OPENAI_API_KEY "$AETHER_BIN" --no-cache "$RUNTIME_LINE_MAPPING_FAIL_FIXTURE" >/tmp/aether_runtime_line_mapping_fail.out 2>&1; then
+    echo "expected runtime line-mapping failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "OpenAIChatCompletions requires an API key" /tmp/aether_runtime_line_mapping_fail.out; then
+    echo "missing runtime openai failure message" >&2
+    cat /tmp/aether_runtime_line_mapping_fail.out >&2
+    exit 1
+fi
+if ! grep -q "\\[Error Location\\] Offset: " /tmp/aether_runtime_line_mapping_fail.out; then
+    echo "missing runtime error location" >&2
+    cat /tmp/aether_runtime_line_mapping_fail.out >&2
+    exit 1
+fi
+if ! grep -q "Line: 4" /tmp/aether_runtime_line_mapping_fail.out; then
+    echo "missing mapped runtime line number" >&2
+    cat /tmp/aether_runtime_line_mapping_fail.out >&2
     exit 1
 fi
 
