@@ -3208,10 +3208,301 @@ static char *translateFnLine(const char *lineStart, const char *body, const char
     return out.data;
 }
 
+static char *translateInlineObjectInitMethodDeclLine(const char *lineStart,
+                                                     const char *indentStart,
+                                                     const char *nameStart,
+                                                     const char *nameEnd,
+                                                     const char *exprStart,
+                                                     const char *exprEnd,
+                                                     const char *declTypeNameStart,
+                                                     const char *declTypeNameEnd,
+                                                     const AetherFunctionTable *functions,
+                                                     int lineNumber) {
+    const char *typeNameStart = exprStart;
+    const char *typeNameEnd = exprStart;
+    const char *openBrace;
+    const char *closeBrace = NULL;
+    const char *methodDot;
+    const char *methodNameStart;
+    const char *methodNameEnd;
+    const char *methodArgsStart;
+    const char *methodArgsEnd = NULL;
+    const char *cursor;
+    const char *returnTypeName = NULL;
+    char *qualifiedMethodName = NULL;
+    char *inferredReturnType = NULL;
+    char *declTypeName = NULL;
+    char tempName[64];
+    Buffer out = {0};
+    int depth = 0;
+    int inString = 0;
+    char quote = '\0';
+
+    if (!lineStart || !indentStart || !nameStart || !nameEnd || !exprStart || !exprEnd) {
+        return NULL;
+    }
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (exprEnd > exprStart && exprEnd[-1] == ';') {
+        exprEnd--;
+    }
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (declTypeNameStart && declTypeNameEnd && declTypeNameEnd > declTypeNameStart) {
+        declTypeName = trimmedCopy(declTypeNameStart, declTypeNameEnd);
+        if (!declTypeName) {
+            return NULL;
+        }
+        returnTypeName = declTypeName;
+    }
+    while (typeNameEnd < exprEnd && (isalnum((unsigned char)*typeNameEnd) || *typeNameEnd == '_')) {
+        typeNameEnd++;
+    }
+    if (typeNameEnd == typeNameStart) {
+        return NULL;
+    }
+    openBrace = skipSpacesInRange(typeNameEnd, exprEnd);
+    if (openBrace >= exprEnd || *openBrace != '{') {
+        return NULL;
+    }
+    cursor = openBrace;
+    while (cursor < exprEnd) {
+        char ch = *cursor;
+
+        if (inString) {
+            if (ch == '\\' && cursor + 1 < exprEnd) {
+                cursor += 2;
+                continue;
+            }
+            if (ch == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (ch == '"' || ch == '\'') {
+            inString = 1;
+            quote = ch;
+            cursor++;
+            continue;
+        }
+        if (ch == '{') {
+            depth++;
+        } else if (ch == '}') {
+            depth--;
+            if (depth == 0) {
+                closeBrace = cursor;
+                break;
+            }
+        }
+        cursor++;
+    }
+    if (!closeBrace) {
+        return NULL;
+    }
+    methodDot = skipSpacesInRange(closeBrace + 1, exprEnd);
+    if (methodDot >= exprEnd || *methodDot != '.') {
+        return NULL;
+    }
+    methodNameStart = skipSpacesInRange(methodDot + 1, exprEnd);
+    methodNameEnd = methodNameStart;
+    while (methodNameEnd < exprEnd && (isalnum((unsigned char)*methodNameEnd) || *methodNameEnd == '_')) {
+        methodNameEnd++;
+    }
+    if (methodNameEnd == methodNameStart) {
+        return NULL;
+    }
+    methodArgsStart = skipSpacesInRange(methodNameEnd, exprEnd);
+    if (methodArgsStart >= exprEnd || *methodArgsStart != '(') {
+        return NULL;
+    }
+    cursor = methodArgsStart;
+    depth = 0;
+    inString = 0;
+    quote = '\0';
+    while (cursor < exprEnd) {
+        char ch = *cursor;
+
+        if (inString) {
+            if (ch == '\\' && cursor + 1 < exprEnd) {
+                cursor += 2;
+                continue;
+            }
+            if (ch == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (ch == '"' || ch == '\'') {
+            inString = 1;
+            quote = ch;
+            cursor++;
+            continue;
+        }
+        if (ch == '(') {
+            depth++;
+        } else if (ch == ')') {
+            depth--;
+            if (depth == 0) {
+                methodArgsEnd = cursor;
+                break;
+            }
+        }
+        cursor++;
+    }
+    if (!methodArgsEnd) {
+        return NULL;
+    }
+    cursor = skipSpacesInRange(methodArgsEnd + 1, exprEnd);
+    if (cursor != exprEnd) {
+        return NULL;
+    }
+
+    if (!returnTypeName) {
+        if (!functions) {
+            return NULL;
+        }
+        qualifiedMethodName = composeQualifiedLookup(typeNameStart,
+                                                     (size_t)(typeNameEnd - typeNameStart),
+                                                     methodNameStart,
+                                                     (size_t)(methodNameEnd - methodNameStart));
+        if (!qualifiedMethodName) {
+            free(declTypeName);
+            return NULL;
+        }
+        returnTypeName = findAetherFunctionReturnType(functions,
+                                                      qualifiedMethodName,
+                                                      strlen(qualifiedMethodName));
+        if (!returnTypeName) {
+            free(qualifiedMethodName);
+            free(declTypeName);
+            return NULL;
+        }
+        inferredReturnType = dupCString(returnTypeName);
+        free(qualifiedMethodName);
+        if (!inferredReturnType) {
+            free(declTypeName);
+            return NULL;
+        }
+        returnTypeName = inferredReturnType;
+    }
+
+    snprintf(tempName, sizeof(tempName), "__aether_obj_%d", lineNumber > 0 ? lineNumber : 0);
+    if (!appendMappedType(&out, typeNameStart, typeNameEnd) ||
+        !bufferAppend(&out, " ") ||
+        !bufferAppend(&out, tempName) ||
+        !bufferAppend(&out, " = new ") ||
+        !bufferAppendN(&out, typeNameStart, (size_t)(typeNameEnd - typeNameStart)) ||
+        !bufferAppend(&out, "();")) {
+        free(declTypeName);
+        free(inferredReturnType);
+        free(out.data);
+        return NULL;
+    }
+
+    cursor = openBrace + 1;
+    while (cursor < closeBrace) {
+        const char *segmentStart;
+        const char *segmentEnd;
+        const char *fieldEnd = NULL;
+        const char *fieldNameEnd;
+        const char *valueStart;
+        const char *valueEnd;
+        int fieldDepth = 0;
+
+        while (cursor < closeBrace &&
+               (isspace((unsigned char)*cursor) || *cursor == ',')) {
+            cursor++;
+        }
+        if (cursor >= closeBrace) {
+            break;
+        }
+        segmentStart = cursor;
+        segmentEnd = segmentStart;
+        while (segmentEnd < closeBrace) {
+            char ch = *segmentEnd;
+
+            if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+                fieldDepth++;
+            } else if (ch == ')' || ch == ']' || ch == '}' || ch == '>') {
+                if (fieldDepth > 0) {
+                    fieldDepth--;
+                }
+            } else if (ch == ':' && fieldDepth == 0 && !fieldEnd) {
+                fieldEnd = segmentEnd;
+            } else if (ch == ',' && fieldDepth == 0) {
+                break;
+            }
+            segmentEnd++;
+        }
+        if (!fieldEnd) {
+            free(declTypeName);
+            free(inferredReturnType);
+            free(out.data);
+            return NULL;
+        }
+        fieldNameEnd = fieldEnd;
+        while (fieldNameEnd > segmentStart && isspace((unsigned char)fieldNameEnd[-1])) {
+            fieldNameEnd--;
+        }
+        valueStart = skipSpaces(fieldEnd + 1);
+        valueEnd = segmentEnd;
+        while (valueEnd > valueStart && isspace((unsigned char)valueEnd[-1])) {
+            valueEnd--;
+        }
+        if (!bufferAppend(&out, "\n") ||
+            !bufferAppendN(&out, lineStart, (size_t)(indentStart - lineStart)) ||
+            !bufferAppend(&out, tempName) ||
+            !bufferAppend(&out, ".") ||
+            !bufferAppendN(&out, segmentStart, (size_t)(fieldNameEnd - segmentStart)) ||
+            !bufferAppend(&out, " = ") ||
+            !bufferAppendN(&out, valueStart, (size_t)(valueEnd - valueStart)) ||
+            !bufferAppend(&out, ";")) {
+            free(declTypeName);
+            free(inferredReturnType);
+            free(out.data);
+            return NULL;
+        }
+        cursor = segmentEnd;
+        if (cursor < closeBrace && *cursor == ',') {
+            cursor++;
+        }
+    }
+
+    if (!bufferAppend(&out, "\n") ||
+        !appendMappedType(&out,
+                          returnTypeName,
+                          returnTypeName + strlen(returnTypeName)) ||
+        !bufferAppend(&out, " ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " = ") ||
+        !bufferAppend(&out, tempName) ||
+        !bufferAppend(&out, ".") ||
+        !bufferAppendN(&out, methodNameStart, (size_t)(methodNameEnd - methodNameStart)) ||
+        !bufferAppendN(&out, methodArgsStart, (size_t)(methodArgsEnd - methodArgsStart + 1)) ||
+        !bufferAppend(&out, ";")) {
+        free(declTypeName);
+        free(inferredReturnType);
+        free(out.data);
+        return NULL;
+    }
+
+    free(declTypeName);
+    free(inferredReturnType);
+    return out.data;
+}
+
 static char *translateTypedDeclLine(const char *lineStart,
                                     const char *body,
                                     const char *lineEnd,
-                                    int isConst) {
+                                    int isConst,
+                                    const AetherFunctionTable *functions,
+                                    int lineNumber) {
     const char *cursor = body + (isConst ? 5 : 3);
     const char *nameStart;
     const char *nameEnd;
@@ -3369,6 +3660,22 @@ static char *translateTypedDeclLine(const char *lineStart,
             free(out.data);
             return initOut.data;
         }
+        if (!isConst) {
+            char *inlineMethodDecl = translateInlineObjectInitMethodDeclLine(lineStart,
+                                                                             body,
+                                                                             nameStart,
+                                                                             nameEnd,
+                                                                             exprStart,
+                                                                             lineEnd,
+                                                                             typeNameStart,
+                                                                             typeNameEnd,
+                                                                             functions,
+                                                                             lineNumber);
+            if (inlineMethodDecl) {
+                free(out.data);
+                return inlineMethodDecl;
+            }
+        }
     }
     if (isConst && !bufferAppend(&out, "const ")) {
         free(out.data);
@@ -3421,6 +3728,22 @@ static char *translateInferredDeclLine(const char *lineStart,
             return NULL;
         }
         return out.data;
+    }
+
+    {
+        char *inlineMethodDecl = translateInlineObjectInitMethodDeclLine(lineStart,
+                                                                         body,
+                                                                         nameStart,
+                                                                         nameEnd,
+                                                                         exprStart,
+                                                                         lineEnd,
+                                                                         NULL,
+                                                                         NULL,
+                                                                         functions,
+                                                                         lineNumber);
+        if (inlineMethodDecl) {
+            return inlineMethodDecl;
+        }
     }
 
     typeName = inferAetherBindingTypeName(exprStart, lineEnd, bindings, functions);
@@ -3757,9 +4080,9 @@ static char *translateExportLine(const char *lineStart,
     if (strncmp(rest, "fn ", 3) == 0) {
         translatedRest = translateFnLine(rest, rest, lineEnd);
     } else if (strncmp(rest, "let ", 4) == 0 && hasTypedDeclSeparator(rest, lineEnd, 0)) {
-        translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 0);
+        translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 0, functions, lineNumber);
     } else if (strncmp(rest, "const ", 6) == 0 && hasTypedDeclSeparator(rest, lineEnd, 1)) {
-        translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 1);
+        translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 1, functions, lineNumber);
     } else if (strncmp(rest, "let ", 4) == 0) {
         translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 0, bindings, functions, path, lineNumber);
     } else if (strncmp(rest, "const ", 6) == 0) {
@@ -3887,10 +4210,10 @@ static char *translateLine(const char *lineStart,
         return translateFnLine(lineStart, body, lineEnd);
     }
     if (strncmp(body, "let ", 4) == 0 && hasTypedDeclSeparator(body, lineEnd, 0)) {
-        return translateTypedDeclLine(lineStart, body, lineEnd, 0);
+        return translateTypedDeclLine(lineStart, body, lineEnd, 0, functions, lineNumber);
     }
     if (strncmp(body, "const ", 6) == 0 && hasTypedDeclSeparator(body, lineEnd, 1)) {
-        return translateTypedDeclLine(lineStart, body, lineEnd, 1);
+        return translateTypedDeclLine(lineStart, body, lineEnd, 1, functions, lineNumber);
     }
     if (strncmp(body, "let ", 4) == 0) {
         return translateInferredDeclLine(lineStart, body, lineEnd, 0, bindings, functions, path, lineNumber);
