@@ -7,6 +7,7 @@ AETHER_BIN="$ROOT_DIR/build/bin/aether"
 SMOKE_FIXTURE="$ROOT_DIR/Tests/aether/smoke.aether"
 CONTRACT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contracts_pass.aether"
 CONTRACT_LAYOUT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contract_layout_pass.aether"
+CONTRACT_STRING_LEN_PASS_FIXTURE="$ROOT_DIR/Tests/aether/contract_string_len_pass.aether"
 COST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_pass.aether"
 COST_ZERO_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_zero_fail.aether"
 COST_UNIT_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/cost_annotation_unit_fail.aether"
@@ -37,6 +38,8 @@ STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_p
 NUMERIC_EXPR_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/numeric_expr_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
+TUPLE_RETURN_UNSUPPORTED_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_return_unsupported_fail.aether"
+TUPLE_LET_DESTRUCTURE_UNSUPPORTED_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_let_destructure_unsupported_fail.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -94,6 +97,7 @@ for fixture in \
     "$SMOKE_FIXTURE" \
     "$CONTRACT_PASS_FIXTURE" \
     "$CONTRACT_LAYOUT_PASS_FIXTURE" \
+    "$CONTRACT_STRING_LEN_PASS_FIXTURE" \
     "$COST_PASS_FIXTURE" \
     "$COST_ZERO_FAIL_FIXTURE" \
     "$COST_UNIT_FAIL_FIXTURE" \
@@ -124,6 +128,8 @@ for fixture in \
     "$NUMERIC_EXPR_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
+    "$TUPLE_RETURN_UNSUPPORTED_FAIL_FIXTURE" \
+    "$TUPLE_LET_DESTRUCTURE_UNSUPPORTED_FAIL_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -185,6 +191,12 @@ done
 if ! grep -qx "42" /tmp/aether_contract_layout_pass.out; then
     echo "unexpected contract layout output" >&2
     cat /tmp/aether_contract_layout_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$CONTRACT_STRING_LEN_PASS_FIXTURE" >/tmp/aether_contract_string_len_pass.out
+if ! grep -qx "10" /tmp/aether_contract_string_len_pass.out; then
+    echo "unexpected contract string_len output" >&2
+    cat /tmp/aether_contract_string_len_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$COST_PASS_FIXTURE" >/tmp/aether_cost_pass.out
@@ -299,6 +311,24 @@ fi
 if ! cmp -s /tmp/aether_inline_object_method_inference_expected.out /tmp/aether_inline_object_method_inference_comment_pass.out; then
     echo "unexpected inline object method inference with comment output" >&2
     cat /tmp/aether_inline_object_method_inference_comment_pass.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --no-cache "$TUPLE_RETURN_UNSUPPORTED_FAIL_FIXTURE" >/tmp/aether_tuple_return_unsupported.out 2>&1; then
+    echo "expected tuple return unsupported failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "tuple return types are not supported yet" /tmp/aether_tuple_return_unsupported.out; then
+    echo "missing tuple return unsupported failure message" >&2
+    cat /tmp/aether_tuple_return_unsupported.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --no-cache "$TUPLE_LET_DESTRUCTURE_UNSUPPORTED_FAIL_FIXTURE" >/tmp/aether_tuple_let_destructure_unsupported.out 2>&1; then
+    echo "expected tuple let destructure unsupported failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q 'tuple destructuring in `let (...) = ...` is not supported yet' /tmp/aether_tuple_let_destructure_unsupported.out; then
+    echo "missing tuple let destructure unsupported failure message" >&2
+    cat /tmp/aether_tuple_let_destructure_unsupported.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null

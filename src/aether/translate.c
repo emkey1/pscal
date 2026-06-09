@@ -236,6 +236,9 @@ static char *resolveRelativePath(const char *sourcePath, const char *importPath)
     return dupCString(combined);
 }
 
+static int startsWithWord(const char *body, const char *lineEnd, const char *word);
+static int braceDeltaForLine(const char *line);
+
 static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
     const char *cursor;
     const char *nameEnd;
@@ -252,6 +255,75 @@ static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isCo
     nameEnd = cursor;
     marker = skipSpacesInRange(nameEnd, lineEnd);
     return marker < lineEnd && *marker == ':';
+}
+
+static int isUnsupportedTupleReturnSignature(const char *body, const char *lineEnd) {
+    const char *fnKw;
+    const char *openParen;
+    const char *cursor;
+    int depth = 0;
+
+    if (!body || !lineEnd || !startsWithWord(body, lineEnd, "fn")) {
+        return 0;
+    }
+    fnKw = body + 2;
+    while (fnKw < lineEnd && isspace((unsigned char)*fnKw)) {
+        fnKw++;
+    }
+    while (fnKw < lineEnd && (isalnum((unsigned char)*fnKw) || *fnKw == '_')) {
+        fnKw++;
+    }
+    openParen = skipSpacesInRange(fnKw, lineEnd);
+    if (openParen >= lineEnd || *openParen != '(') {
+        return 0;
+    }
+    cursor = openParen;
+    while (cursor < lineEnd) {
+        if (*cursor == '"' || *cursor == '\'') {
+            char quote = *cursor++;
+            while (cursor < lineEnd) {
+                if (*cursor == '\\' && cursor + 1 < lineEnd) {
+                    cursor += 2;
+                    continue;
+                }
+                if (*cursor == quote) {
+                    cursor++;
+                    break;
+                }
+                cursor++;
+            }
+            continue;
+        }
+        if (*cursor == '(') {
+            depth++;
+        } else if (*cursor == ')') {
+            depth--;
+            if (depth == 0) {
+                cursor++;
+                break;
+            }
+        }
+        cursor++;
+    }
+    if (cursor >= lineEnd) {
+        return 0;
+    }
+    cursor = skipSpacesInRange(cursor, lineEnd);
+    if ((size_t)(lineEnd - cursor) < 2 || cursor[0] != '-' || cursor[1] != '>') {
+        return 0;
+    }
+    cursor = skipSpacesInRange(cursor + 2, lineEnd);
+    return cursor < lineEnd && *cursor == '(';
+}
+
+static int isUnsupportedTupleLetPattern(const char *body, const char *lineEnd) {
+    const char *cursor;
+
+    if (!body || !lineEnd || !startsWithWord(body, lineEnd, "let")) {
+        return 0;
+    }
+    cursor = skipSpacesInRange(body + 3, lineEnd);
+    return cursor < lineEnd && *cursor == '(';
 }
 
 static int appendIdentifier(Buffer *buf, const char *start, const char *end) {
@@ -301,9 +373,6 @@ static const char *findSubstringInRange(const char *start, const char *end, cons
     }
     return NULL;
 }
-
-static int startsWithWord(const char *body, const char *lineEnd, const char *word);
-static int braceDeltaForLine(const char *line);
 
 static void reportAetherRewriteError(const char *path,
                                      int line,
@@ -3187,13 +3256,21 @@ static int appendContractGuard(Buffer *out,
                                const char *indent,
                                const char *fnName,
                                const char *kind,
-                               const char *expr) {
+                               const char *expr,
+                               JsonAliasState *jsonState,
+                               const ToonLiteralTable *toonTable) {
+    char *aliasedExpr = NULL;
+
     if (!out || !indent || !fnName || !kind || !expr) {
+        return 0;
+    }
+    aliasedExpr = applyJsonAliasesToLine(expr, jsonState, toonTable);
+    if (!aliasedExpr) {
         return 0;
     }
     if (!bufferAppend(out, indent) ||
         !bufferAppend(out, "if (!(") ||
-        !bufferAppend(out, expr) ||
+        !bufferAppend(out, aliasedExpr) ||
         !bufferAppend(out, ")) {\n") ||
         !bufferAppend(out, indent) ||
         !bufferAppend(out, "    writeln(\"Aether @") ||
@@ -3205,8 +3282,10 @@ static int appendContractGuard(Buffer *out,
         !bufferAppend(out, "    halt(1);\n") ||
         !bufferAppend(out, indent) ||
         !bufferAppend(out, "}\n")) {
+        free(aliasedExpr);
         return 0;
     }
+    free(aliasedExpr);
     return 1;
 }
 
@@ -3469,7 +3548,9 @@ static char *translateReturnWithPost(const char *lineStart,
                                      const char *body,
                                      const char *lineEnd,
                                      const FunctionContracts *fnState,
-                                     const TypeBlockState *typeState) {
+                                     const TypeBlockState *typeState,
+                                     JsonAliasState *jsonState,
+                                     const ToonLiteralTable *toonTable) {
     const char *cursor = body + 3;
     const char *exprStart;
     const char *exprEnd;
@@ -3518,7 +3599,13 @@ static char *translateReturnWithPost(const char *lineStart,
             return NULL;
         }
     }
-    if (!appendContractGuard(&out, indent, fnState->name, "post", fnState->postExpr)) {
+    if (!appendContractGuard(&out,
+                             indent,
+                             fnState->name,
+                             "post",
+                             fnState->postExpr,
+                             jsonState,
+                             toonTable)) {
         free(indent);
         free(out.data);
         return NULL;
@@ -4878,6 +4965,41 @@ char *aetherRewriteSource(const char *source, const char *path) {
         maybeRecordAetherFunctionReturnType(&functionTable, body, lineEnd, NULL, typeState.name);
         maybeRecordAetherBindingType(&bindingTable, body, lineEnd, &functionTable);
 
+        if (isUnsupportedTupleReturnSignature(body, lineEnd)) {
+            reportAetherRewriteError(path,
+                                     lineNumber,
+                                     "feature",
+                                     "tuple return types are not supported yet.",
+                                     "return a single record/object type for now, or split the work into separate functions.");
+            freePendingContracts(&pending);
+            clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
+            freeAetherFunctionTable(&functionTable);
+            freeToonLiteralTable(&toonTable);
+            free(preprocessed);
+            free(out.data);
+            return NULL;
+        }
+        if (isUnsupportedTupleLetPattern(body, lineEnd)) {
+            reportAetherRewriteError(path,
+                                     lineNumber,
+                                     "feature",
+                                     "tuple destructuring in `let (...) = ...` is not supported yet.",
+                                     "bind the returned value to one name, or return a record/object type instead.");
+            freePendingContracts(&pending);
+            clearFunctionContracts(&fnState);
+            clearParBlockState(&parState);
+            clearTypeBlockState(&typeState);
+            freeAetherBindingTable(&bindingTable);
+            freeAetherFunctionTable(&functionTable);
+            freeToonLiteralTable(&toonTable);
+            free(preprocessed);
+            free(out.data);
+            return NULL;
+        }
+
         if (fnState.active && fnState.postExpr && fnState.isVoid && braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
                 char *indent = dupRange(lineStart, body);
@@ -4894,7 +5016,13 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(out.data);
                     return NULL;
                 }
-                if (!appendContractGuard(&out, indent, fnState.name, "post", fnState.postExpr)) {
+                if (!appendContractGuard(&out,
+                                         indent,
+                                         fnState.name,
+                                         "post",
+                                         fnState.postExpr,
+                                         &jsonState,
+                                         &toonTable)) {
                     free(indent);
                     freePendingContracts(&pending);
                     clearFunctionContracts(&fnState);
@@ -5055,7 +5183,13 @@ char *aetherRewriteSource(const char *source, const char *path) {
                                                        lineNumber);
                 }
             } else if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
-                translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState, &typeState);
+                translated = translateReturnWithPost(lineStart,
+                                                    body,
+                                                    lineEnd,
+                                                    &fnState,
+                                                    &typeState,
+                                                    &jsonState,
+                                                    &toonTable);
             } else if (typeState.active &&
                        isTypeFieldDeclarationLine(body, lineEnd) &&
                        !startsWithWord(body, lineEnd, "fn") &&
@@ -5264,7 +5398,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
                                          indent,
                                          fnName,
                                          "pre",
-                                         methodPreExpr ? methodPreExpr : pending.preExpr)) {
+                                         methodPreExpr ? methodPreExpr : pending.preExpr,
+                                         &jsonState,
+                                         &toonTable)) {
                     free(methodPreExpr);
                     free(methodPostExpr);
                     free(indent);

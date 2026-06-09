@@ -1,0 +1,16 @@
+@pure
+@pre string_len(code) > 0
+@post result >= string_len(code)
+fn evaluateCode(code: Text) -> Int {
+    let len: Int = string_len(code);
+    let multiplier = 5;
+    ret len * multiplier;
+}
+
+fn main() -> Void {
+    let score: Int = evaluateCode("A1");
+    fx {
+        println(score);
+    }
+    ret;
+}

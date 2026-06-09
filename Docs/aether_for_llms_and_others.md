@@ -29,6 +29,7 @@ Do not write Aether like this:
 - do not assume Python syntax, JavaScript syntax, or Rust syntax will work
 - do not call effectful builtins outside `fx`
 - do not treat `ToonDoc` and `ToonNode` as plain integers
+- do not assume tuple return types or `let (a, b) = ...` destructuring exist yet
 - do not rely on broad magical inference; Aether inference is intentionally
   narrow
 
