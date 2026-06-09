@@ -38,8 +38,9 @@ STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_p
 NUMERIC_EXPR_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/numeric_expr_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
-TUPLE_RETURN_UNSUPPORTED_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_return_unsupported_fail.aether"
-TUPLE_LET_DESTRUCTURE_UNSUPPORTED_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_let_destructure_unsupported_fail.aether"
+TUPLE_DESTRUCTURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_pass.aether"
+TUPLE_DIRECT_BIND_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_return_unsupported_fail.aether"
+TUPLE_BAD_DESTRUCTURE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_let_destructure_unsupported_fail.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -128,8 +129,9 @@ for fixture in \
     "$NUMERIC_EXPR_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
-    "$TUPLE_RETURN_UNSUPPORTED_FAIL_FIXTURE" \
-    "$TUPLE_LET_DESTRUCTURE_UNSUPPORTED_FAIL_FIXTURE" \
+    "$TUPLE_DESTRUCTURE_PASS_FIXTURE" \
+    "$TUPLE_DIRECT_BIND_FAIL_FIXTURE" \
+    "$TUPLE_BAD_DESTRUCTURE_FAIL_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -313,22 +315,29 @@ if ! cmp -s /tmp/aether_inline_object_method_inference_expected.out /tmp/aether_
     cat /tmp/aether_inline_object_method_inference_comment_pass.out >&2
     exit 1
 fi
-if "$AETHER_BIN" --no-cache "$TUPLE_RETURN_UNSUPPORTED_FAIL_FIXTURE" >/tmp/aether_tuple_return_unsupported.out 2>&1; then
-    echo "expected tuple return unsupported failure but program succeeded" >&2
+"$AETHER_BIN" --no-cache "$TUPLE_DESTRUCTURE_PASS_FIXTURE" >/tmp/aether_tuple_destructure_pass.out
+printf '1\n2\n' >/tmp/aether_tuple_destructure_expected.out
+if ! cmp -s /tmp/aether_tuple_destructure_expected.out /tmp/aether_tuple_destructure_pass.out; then
+    echo "unexpected tuple destructure output" >&2
+    cat /tmp/aether_tuple_destructure_pass.out >&2
     exit 1
 fi
-if ! grep -q "tuple return types are not supported yet" /tmp/aether_tuple_return_unsupported.out; then
-    echo "missing tuple return unsupported failure message" >&2
-    cat /tmp/aether_tuple_return_unsupported.out >&2
+if "$AETHER_BIN" --no-cache "$TUPLE_DIRECT_BIND_FAIL_FIXTURE" >/tmp/aether_tuple_direct_bind_fail.out 2>&1; then
+    echo "expected tuple direct bind failure but program succeeded" >&2
     exit 1
 fi
-if "$AETHER_BIN" --no-cache "$TUPLE_LET_DESTRUCTURE_UNSUPPORTED_FAIL_FIXTURE" >/tmp/aether_tuple_let_destructure_unsupported.out 2>&1; then
-    echo "expected tuple let destructure unsupported failure but program succeeded" >&2
+if ! grep -q "tuple-return calls must be destructured directly" /tmp/aether_tuple_direct_bind_fail.out; then
+    echo "missing tuple direct bind failure message" >&2
+    cat /tmp/aether_tuple_direct_bind_fail.out >&2
     exit 1
 fi
-if ! grep -q 'tuple destructuring in `let (...) = ...` is not supported yet' /tmp/aether_tuple_let_destructure_unsupported.out; then
-    echo "missing tuple let destructure unsupported failure message" >&2
-    cat /tmp/aether_tuple_let_destructure_unsupported.out >&2
+if "$AETHER_BIN" --no-cache "$TUPLE_BAD_DESTRUCTURE_FAIL_FIXTURE" >/tmp/aether_tuple_bad_destructure_fail.out 2>&1; then
+    echo "expected tuple bad destructure failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "tuple destructuring target is not a known tuple-return function" /tmp/aether_tuple_bad_destructure_fail.out; then
+    echo "missing tuple bad destructure failure message" >&2
+    cat /tmp/aether_tuple_bad_destructure_fail.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null

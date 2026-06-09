@@ -238,6 +238,7 @@ static char *resolveRelativePath(const char *sourcePath, const char *importPath)
 
 static int startsWithWord(const char *body, const char *lineEnd, const char *word);
 static int braceDeltaForLine(const char *line);
+static void freeTupleItemTypes(char **items, size_t count);
 
 static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
     const char *cursor;
@@ -257,65 +258,6 @@ static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isCo
     return marker < lineEnd && *marker == ':';
 }
 
-static int isUnsupportedTupleReturnSignature(const char *body, const char *lineEnd) {
-    const char *fnKw;
-    const char *openParen;
-    const char *cursor;
-    int depth = 0;
-
-    if (!body || !lineEnd || !startsWithWord(body, lineEnd, "fn")) {
-        return 0;
-    }
-    fnKw = body + 2;
-    while (fnKw < lineEnd && isspace((unsigned char)*fnKw)) {
-        fnKw++;
-    }
-    while (fnKw < lineEnd && (isalnum((unsigned char)*fnKw) || *fnKw == '_')) {
-        fnKw++;
-    }
-    openParen = skipSpacesInRange(fnKw, lineEnd);
-    if (openParen >= lineEnd || *openParen != '(') {
-        return 0;
-    }
-    cursor = openParen;
-    while (cursor < lineEnd) {
-        if (*cursor == '"' || *cursor == '\'') {
-            char quote = *cursor++;
-            while (cursor < lineEnd) {
-                if (*cursor == '\\' && cursor + 1 < lineEnd) {
-                    cursor += 2;
-                    continue;
-                }
-                if (*cursor == quote) {
-                    cursor++;
-                    break;
-                }
-                cursor++;
-            }
-            continue;
-        }
-        if (*cursor == '(') {
-            depth++;
-        } else if (*cursor == ')') {
-            depth--;
-            if (depth == 0) {
-                cursor++;
-                break;
-            }
-        }
-        cursor++;
-    }
-    if (cursor >= lineEnd) {
-        return 0;
-    }
-    cursor = skipSpacesInRange(cursor, lineEnd);
-    if ((size_t)(lineEnd - cursor) < 2 || cursor[0] != '-' || cursor[1] != '>') {
-        return 0;
-    }
-    cursor = skipSpacesInRange(cursor + 2, lineEnd);
-    return cursor < lineEnd && *cursor == '(';
-}
-
 static int isUnsupportedTupleLetPattern(const char *body, const char *lineEnd) {
     const char *cursor;
 
@@ -324,6 +266,135 @@ static int isUnsupportedTupleLetPattern(const char *body, const char *lineEnd) {
     }
     cursor = skipSpacesInRange(body + 3, lineEnd);
     return cursor < lineEnd && *cursor == '(';
+}
+
+static int splitTopLevelCommaList(const char *start,
+                                  const char *end,
+                                  char ***outItems,
+                                  size_t *outCount) {
+    const char *cursor = start;
+    const char *segmentStart = start;
+    char **items = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    int depthParen = 0;
+    int depthBracket = 0;
+    int depthBrace = 0;
+    int depthAngle = 0;
+    int inString = 0;
+    char quote = '\0';
+
+    if (!outItems || !outCount || !start || !end || end < start) {
+        return 0;
+    }
+    *outItems = NULL;
+    *outCount = 0;
+
+    while (cursor <= end) {
+        int atEnd = (cursor == end);
+        char ch = atEnd ? '\0' : *cursor;
+
+        if (!atEnd && inString) {
+            if (ch == '\\' && cursor + 1 < end) {
+                cursor += 2;
+                continue;
+            }
+            if (ch == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (!atEnd && (ch == '"' || ch == '\'')) {
+            inString = 1;
+            quote = ch;
+            cursor++;
+            continue;
+        }
+        if (!atEnd) {
+            if (ch == '(') {
+                depthParen++;
+            } else if (ch == ')') {
+                if (depthParen > 0) {
+                    depthParen--;
+                }
+            } else if (ch == '[') {
+                depthBracket++;
+            } else if (ch == ']') {
+                if (depthBracket > 0) {
+                    depthBracket--;
+                }
+            } else if (ch == '{') {
+                depthBrace++;
+            } else if (ch == '}') {
+                if (depthBrace > 0) {
+                    depthBrace--;
+                }
+            } else if (ch == '<') {
+                depthAngle++;
+            } else if (ch == '>') {
+                if (depthAngle > 0) {
+                    depthAngle--;
+                }
+            }
+        }
+        if (atEnd || (ch == ',' && depthParen == 0 && depthBracket == 0 &&
+                      depthBrace == 0 && depthAngle == 0)) {
+            char *item;
+            const char *segmentEnd = cursor;
+
+            while (segmentStart < segmentEnd && isspace((unsigned char)*segmentStart)) {
+                segmentStart++;
+            }
+            while (segmentEnd > segmentStart && isspace((unsigned char)segmentEnd[-1])) {
+                segmentEnd--;
+            }
+            if (segmentEnd <= segmentStart) {
+                freeTupleItemTypes(items, count);
+                return 0;
+            }
+            item = dupRange(segmentStart, segmentEnd);
+            if (!item) {
+                freeTupleItemTypes(items, count);
+                return 0;
+            }
+            if (count == cap) {
+                size_t newCap = cap ? cap * 2 : 4;
+                char **resized = (char **)realloc(items, newCap * sizeof(char *));
+                if (!resized) {
+                    free(item);
+                    freeTupleItemTypes(items, count);
+                    return 0;
+                }
+                items = resized;
+                cap = newCap;
+            }
+            items[count++] = item;
+            segmentStart = cursor + 1;
+        }
+        cursor++;
+    }
+
+    *outItems = items;
+    *outCount = count;
+    return count > 0;
+}
+
+static int parseTupleTypeList(const char *start,
+                              const char *end,
+                              char ***outTypes,
+                              size_t *outCount) {
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if (end - start < 2 || *start != '(' || end[-1] != ')') {
+        return 0;
+    }
+    return splitTopLevelCommaList(start + 1, end - 1, outTypes, outCount);
 }
 
 static int appendIdentifier(Buffer *buf, const char *start, const char *end) {
@@ -355,6 +426,50 @@ static const char *findLastCharInRange(const char *start, const char *end, char 
         if (*cursor == target) {
             return cursor;
         }
+    }
+    return NULL;
+}
+
+static const char *findMatchingCloseParen(const char *open, const char *end) {
+    const char *cursor;
+    int depth = 0;
+    int inString = 0;
+    char quote = '\0';
+
+    if (!open || !end || open >= end || *open != '(') {
+        return NULL;
+    }
+    cursor = open;
+    while (cursor < end) {
+        char ch = *cursor;
+
+        if (inString) {
+            if (ch == '\\' && cursor + 1 < end) {
+                cursor += 2;
+                continue;
+            }
+            if (ch == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (ch == '"' || ch == '\'') {
+            inString = 1;
+            quote = ch;
+            cursor++;
+            continue;
+        }
+        if (ch == '(') {
+            depth++;
+        } else if (ch == ')') {
+            depth--;
+            if (depth == 0) {
+                return cursor;
+            }
+        }
+        cursor++;
     }
     return NULL;
 }
@@ -711,6 +826,9 @@ typedef struct FunctionContracts {
     size_t bindingCountBefore;
     char *name;
     char *postExpr;
+    char *tupleTypeName;
+    char **tupleItemTypes;
+    size_t tupleItemCount;
 } FunctionContracts;
 
 typedef struct ParBlockState {
@@ -774,6 +892,19 @@ typedef struct ToonLiteralTable {
     size_t cap;
 } ToonLiteralTable;
 
+typedef struct AetherTupleSig {
+    char *functionName;
+    char *tupleTypeName;
+    char **itemTypes;
+    size_t itemCount;
+} AetherTupleSig;
+
+typedef struct AetherTupleTable {
+    AetherTupleSig *items;
+    size_t count;
+    size_t cap;
+} AetherTupleTable;
+
 static void freePendingContracts(PendingContracts *pending) {
     if (!pending) {
         return;
@@ -785,11 +916,18 @@ static void freePendingContracts(PendingContracts *pending) {
 }
 
 static void clearFunctionContracts(FunctionContracts *state) {
+    size_t i;
+
     if (!state) {
         return;
     }
     free(state->name);
     free(state->postExpr);
+    free(state->tupleTypeName);
+    for (i = 0; i < state->tupleItemCount; i++) {
+        free(state->tupleItemTypes[i]);
+    }
+    free(state->tupleItemTypes);
     state->active = 0;
     state->bodyDepth = 0;
     state->isVoid = 0;
@@ -797,6 +935,9 @@ static void clearFunctionContracts(FunctionContracts *state) {
     state->bindingCountBefore = 0;
     state->name = NULL;
     state->postExpr = NULL;
+    state->tupleTypeName = NULL;
+    state->tupleItemTypes = NULL;
+    state->tupleItemCount = 0;
 }
 
 static void clearParBlockState(ParBlockState *state) {
@@ -939,6 +1080,31 @@ static int ensureAetherFunctionTable(AetherFunctionTable *table, size_t extra) {
     return 1;
 }
 
+static int ensureAetherTupleTable(AetherTupleTable *table, size_t extra) {
+    AetherTupleSig *resized;
+    size_t need;
+    size_t newCap;
+
+    if (!table) {
+        return 0;
+    }
+    need = table->count + extra;
+    if (need <= table->cap) {
+        return 1;
+    }
+    newCap = table->cap ? table->cap * 2 : 8;
+    while (newCap < need) {
+        newCap *= 2;
+    }
+    resized = (AetherTupleSig *)realloc(table->items, newCap * sizeof(AetherTupleSig));
+    if (!resized) {
+        return 0;
+    }
+    table->items = resized;
+    table->cap = newCap;
+    return 1;
+}
+
 static int setAetherBindingType(AetherBindingTable *table, const char *name, const char *typeName) {
     size_t i;
     char *nameCopy;
@@ -1038,6 +1204,92 @@ static const char *findAetherFunctionReturnType(const AetherFunctionTable *table
         if (strlen(table->items[i].name) == len &&
             strncmp(table->items[i].name, name, len) == 0) {
             return table->items[i].returnType;
+        }
+    }
+    return NULL;
+}
+
+static int setAetherTupleSig(AetherTupleTable *table,
+                             const char *functionName,
+                             const char *tupleTypeName,
+                             char **itemTypes,
+                             size_t itemCount) {
+    size_t i;
+    char *fnCopy = NULL;
+    char *typeCopy = NULL;
+    char **itemCopies = NULL;
+
+    if (!table || !functionName || !tupleTypeName || !itemTypes || itemCount == 0) {
+        return 0;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].functionName, functionName) == 0) {
+            typeCopy = dupCString(tupleTypeName);
+            if (!typeCopy) {
+                return 0;
+            }
+            itemCopies = (char **)calloc(itemCount, sizeof(char *));
+            if (!itemCopies) {
+                free(typeCopy);
+                return 0;
+            }
+            for (size_t j = 0; j < itemCount; j++) {
+                itemCopies[j] = dupCString(itemTypes[j]);
+                if (!itemCopies[j]) {
+                    free(typeCopy);
+                    freeTupleItemTypes(itemCopies, itemCount);
+                    return 0;
+                }
+            }
+            free(table->items[i].tupleTypeName);
+            freeTupleItemTypes(table->items[i].itemTypes, table->items[i].itemCount);
+            table->items[i].tupleTypeName = typeCopy;
+            table->items[i].itemTypes = itemCopies;
+            table->items[i].itemCount = itemCount;
+            return 1;
+        }
+    }
+    if (!ensureAetherTupleTable(table, 1)) {
+        return 0;
+    }
+    fnCopy = dupCString(functionName);
+    typeCopy = dupCString(tupleTypeName);
+    itemCopies = (char **)calloc(itemCount, sizeof(char *));
+    if (!fnCopy || !typeCopy || !itemCopies) {
+        free(fnCopy);
+        free(typeCopy);
+        free(itemCopies);
+        return 0;
+    }
+    for (i = 0; i < itemCount; i++) {
+        itemCopies[i] = dupCString(itemTypes[i]);
+        if (!itemCopies[i]) {
+            free(fnCopy);
+            free(typeCopy);
+            freeTupleItemTypes(itemCopies, itemCount);
+            return 0;
+        }
+    }
+    table->items[table->count].functionName = fnCopy;
+    table->items[table->count].tupleTypeName = typeCopy;
+    table->items[table->count].itemTypes = itemCopies;
+    table->items[table->count].itemCount = itemCount;
+    table->count++;
+    return 1;
+}
+
+static const AetherTupleSig *findAetherTupleSig(const AetherTupleTable *table,
+                                                const char *name,
+                                                size_t len) {
+    size_t i;
+
+    if (!table || !name) {
+        return NULL;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strlen(table->items[i].functionName) == len &&
+            strncmp(table->items[i].functionName, name, len) == 0) {
+            return &table->items[i];
         }
     }
     return NULL;
@@ -1214,6 +1466,35 @@ static void clearToonLiteralBinding(ToonLiteralTable *table, const char *name, s
             return;
         }
     }
+}
+
+static void freeTupleItemTypes(char **items, size_t count) {
+    size_t i;
+
+    if (!items) {
+        return;
+    }
+    for (i = 0; i < count; i++) {
+        free(items[i]);
+    }
+    free(items);
+}
+
+static void freeAetherTupleTable(AetherTupleTable *table) {
+    size_t i;
+
+    if (!table) {
+        return;
+    }
+    for (i = 0; i < table->count; i++) {
+        free(table->items[i].functionName);
+        free(table->items[i].tupleTypeName);
+        freeTupleItemTypes(table->items[i].itemTypes, table->items[i].itemCount);
+    }
+    free(table->items);
+    table->items = NULL;
+    table->count = 0;
+    table->cap = 0;
 }
 
 static int isSupportedToonBindingType(const char *typeStart, const char *typeEnd) {
@@ -1828,7 +2109,7 @@ static int recordAetherFunctionParamBindings(AetherBindingTable *table,
         return 1;
     }
     paramsOpen = findCharInRange(body, lineEnd, '(');
-    paramsClose = paramsOpen ? findLastCharInRange(paramsOpen, lineEnd, ')') : NULL;
+    paramsClose = paramsOpen ? findMatchingCloseParen(paramsOpen, lineEnd) : NULL;
     if (!paramsOpen || !paramsClose || paramsClose <= paramsOpen + 1) {
         return 1;
     }
@@ -1983,7 +2264,7 @@ static void maybeRecordAetherFunctionReturnType(AetherFunctionTable *table,
     }
     nameEnd = cursor;
     paramsOpen = findCharInRange(nameEnd, lineEnd, '(');
-    paramsClose = paramsOpen ? findLastCharInRange(paramsOpen, lineEnd, ')') : NULL;
+    paramsClose = paramsOpen ? findMatchingCloseParen(paramsOpen, lineEnd) : NULL;
     arrow = paramsClose ? findSubstringInRange(paramsClose, lineEnd, "->") : NULL;
     if (!paramsOpen || !paramsClose || !arrow || nameEnd == nameStart) {
         return;
@@ -2481,16 +2762,6 @@ static const char *toonTypePredicateExpected(const char *nameStart, size_t nameL
 static char *applyJsonAliasesToLine(const char *line,
                                     JsonAliasState *jsonState,
                                     const ToonLiteralTable *toonTable);
-
-static int appendTrimmedRange(Buffer *out, const char *start, const char *end) {
-    while (start < end && isspace((unsigned char)*start)) {
-        start++;
-    }
-    while (end > start && isspace((unsigned char)end[-1])) {
-        end--;
-    }
-    return bufferAppendN(out, start, (size_t)(end - start));
-}
 
 static int appendAliasedTrimmedRange(Buffer *out,
                                      const char *start,
@@ -3099,7 +3370,7 @@ static int extractFunctionSignature(const char *body,
         nameEnd++;
     }
     paramsOpen = findCharInRange(nameEnd, lineEnd, '(');
-    paramsClose = paramsOpen ? findLastCharInRange(paramsOpen, lineEnd, ')') : NULL;
+    paramsClose = paramsOpen ? findMatchingCloseParen(paramsOpen, lineEnd) : NULL;
     arrow = paramsClose ? findSubstringInRange(paramsClose, lineEnd, "->") : NULL;
     if (!paramsOpen || !paramsClose || !arrow) {
         return 0;
@@ -3697,7 +3968,7 @@ static char *translateFnLine(const char *lineStart, const char *body, const char
         nameEnd++;
     }
     paramsOpen = findCharInRange(nameEnd, lineEnd, '(');
-    paramsClose = paramsOpen ? findLastCharInRange(paramsOpen, lineEnd, ')') : NULL;
+    paramsClose = paramsOpen ? findMatchingCloseParen(paramsOpen, lineEnd) : NULL;
     arrow = paramsClose ? findSubstringInRange(paramsClose, lineEnd, "->") : NULL;
     if (!paramsOpen || !paramsClose || !arrow) {
         return dupRange(lineStart, lineEnd);
@@ -3736,6 +4007,306 @@ static char *translateFnLine(const char *lineStart, const char *body, const char
         }
     }
     return out.data;
+}
+
+static char *translateTupleFnLine(const char *lineStart,
+                                  const char *body,
+                                  const char *lineEnd,
+                                  const char *tupleTypeName,
+                                  char **itemTypes,
+                                  size_t itemCount) {
+    const char *nameStart = body + 2;
+    const char *nameEnd;
+    const char *paramsOpen;
+    const char *paramsClose;
+    const char *brace;
+    Buffer out = {0};
+    size_t i;
+
+    if (!tupleTypeName || !itemTypes || itemCount == 0) {
+        return NULL;
+    }
+    while (nameStart < lineEnd && isspace((unsigned char)*nameStart)) {
+        nameStart++;
+    }
+    nameEnd = nameStart;
+    while (nameEnd < lineEnd && (isalnum((unsigned char)*nameEnd) || *nameEnd == '_')) {
+        nameEnd++;
+    }
+    paramsOpen = findCharInRange(nameEnd, lineEnd, '(');
+    paramsClose = paramsOpen ? findMatchingCloseParen(paramsOpen, lineEnd) : NULL;
+    brace = findLastCharInRange(paramsClose ? paramsClose : body, lineEnd, '{');
+    if (!paramsOpen || !paramsClose || !brace) {
+        return dupRange(lineStart, lineEnd);
+    }
+
+    for (i = 0; i < itemCount; i++) {
+        char fieldName[64];
+
+        snprintf(fieldName, sizeof(fieldName), "%s_item%zu", tupleTypeName, i);
+        if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+            !appendMappedType(&out, itemTypes[i], itemTypes[i] + strlen(itemTypes[i])) ||
+            !bufferAppend(&out, " ") ||
+            !bufferAppend(&out, fieldName) ||
+            !bufferAppend(&out, ";\n")) {
+            free(out.data);
+            return NULL;
+        }
+    }
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "void ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, "(") ||
+        !translateParamList(&out, paramsOpen + 1, paramsClose) ||
+        !bufferAppend(&out, ")") ||
+        !bufferAppendN(&out, brace, (size_t)(lineEnd - brace))) {
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
+}
+
+static char *translateTupleReturnLine(const char *lineStart,
+                                      const char *body,
+                                      const char *lineEnd,
+                                      const FunctionContracts *fnState,
+                                      JsonAliasState *jsonState,
+                                      const ToonLiteralTable *toonTable) {
+    const char *cursor = skipSpaces(body + 3);
+    const char *exprEnd = lineEnd;
+    char **items = NULL;
+    size_t itemCount = 0;
+    Buffer out = {0};
+    char *indent = NULL;
+    (void)jsonState;
+    (void)toonTable;
+
+    if (!fnState || !fnState->tupleTypeName) {
+        return dupRange(lineStart, lineEnd);
+    }
+    while (exprEnd > cursor && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (exprEnd > cursor && exprEnd[-1] == ';') {
+        exprEnd--;
+    }
+    while (exprEnd > cursor && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (!parseTupleTypeList(cursor, exprEnd, &items, &itemCount) ||
+        itemCount != fnState->tupleItemCount) {
+        freeTupleItemTypes(items, itemCount);
+        return dupRange(lineStart, lineEnd);
+    }
+
+    indent = dupRange(lineStart, body);
+    if (!indent) {
+        freeTupleItemTypes(items, itemCount);
+        return NULL;
+    }
+    for (size_t i = 0; i < itemCount; i++) {
+        char fieldName[64];
+
+        snprintf(fieldName, sizeof(fieldName), "%s_item%zu", fnState->tupleTypeName, i);
+        if (!bufferAppend(&out, indent) ||
+            !bufferAppend(&out, fieldName) ||
+            !bufferAppend(&out, " = ")) {
+            free(indent);
+            freeTupleItemTypes(items, itemCount);
+            free(out.data);
+            return NULL;
+        }
+        if (!bufferAppend(&out, items[i]) ||
+            !bufferAppend(&out, ";\n")) {
+            free(indent);
+            freeTupleItemTypes(items, itemCount);
+            free(out.data);
+            return NULL;
+        }
+    }
+    if (!bufferAppend(&out, indent) ||
+        !bufferAppend(&out, "return;")) {
+        free(indent);
+        freeTupleItemTypes(items, itemCount);
+        free(out.data);
+        return NULL;
+    }
+    free(indent);
+    freeTupleItemTypes(items, itemCount);
+    return out.data;
+}
+
+static int extractDirectTupleCallName(const char *exprStart,
+                                      const char *exprEnd,
+                                      const char **outNameStart,
+                                      size_t *outNameLen) {
+    const char *cursor = exprStart;
+    const char *nameStart;
+    const char *nameEnd;
+    const char *afterName;
+
+    if (!exprStart || !exprEnd || !outNameStart || !outNameLen) {
+        return 0;
+    }
+    while (cursor < exprEnd && isspace((unsigned char)*cursor)) {
+        cursor++;
+    }
+    if (cursor >= exprEnd || !(isalpha((unsigned char)*cursor) || *cursor == '_')) {
+        return 0;
+    }
+    nameStart = cursor;
+    while (cursor < exprEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    afterName = skipSpacesInRange(nameEnd, exprEnd);
+    if (afterName >= exprEnd || *afterName != '(') {
+        return 0;
+    }
+    *outNameStart = nameStart;
+    *outNameLen = (size_t)(nameEnd - nameStart);
+    return 1;
+}
+
+static char *translateTupleDestructureLetLine(const char *lineStart,
+                                              const char *body,
+                                              const char *lineEnd,
+                                              const AetherTupleTable *tupleTable,
+                                              const char *path,
+                                              int lineNumber) {
+    const char *cursor = skipSpaces(body + 3);
+    const char *patternEnd;
+    const char *equals;
+    const char *equalsToken;
+    const char *exprStart;
+    const char *exprEnd = lineEnd;
+    const char *callNameStart = NULL;
+    size_t callNameLen = 0;
+    char **names = NULL;
+    size_t nameCount = 0;
+    const AetherTupleSig *tupleSig = NULL;
+    Buffer out = {0};
+
+    if (!tupleTable || cursor >= lineEnd || *cursor != '(') {
+        return NULL;
+    }
+    equalsToken = findCharInRange(cursor, lineEnd, '=');
+    patternEnd = equalsToken ? findMatchingCloseParen(cursor, equalsToken) : NULL;
+    equals = equalsToken ? equalsToken : NULL;
+    if (!patternEnd || !equals || equals >= lineEnd || *equals != '=') {
+        return NULL;
+    }
+    exprStart = skipSpacesInRange(equals + 1, lineEnd);
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (exprEnd > exprStart && exprEnd[-1] == ';') {
+        exprEnd--;
+    }
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (!splitTopLevelCommaList(cursor + 1, patternEnd, &names, &nameCount)) {
+        return NULL;
+    }
+    if (!extractDirectTupleCallName(exprStart, exprEnd, &callNameStart, &callNameLen)) {
+        reportAetherRewriteError(path,
+                                 lineNumber,
+                                 "feature",
+                                 "tuple destructuring currently requires a direct call to a known tuple-return function.",
+                                 "use `let tmp = fnCall();` and then read fields, or destructure a direct tuple-return call.");
+        freeTupleItemTypes(names, nameCount);
+        return NULL;
+    }
+    tupleSig = findAetherTupleSig(tupleTable, callNameStart, callNameLen);
+    if (!tupleSig) {
+        reportAetherRewriteError(path,
+                                 lineNumber,
+                                 "feature",
+                                 "tuple destructuring target is not a known tuple-return function.",
+                                 "destructure only direct calls to tuple-return Aether functions in the current module.");
+        freeTupleItemTypes(names, nameCount);
+        return NULL;
+    }
+    if (tupleSig->itemCount != nameCount) {
+        reportAetherRewriteError(path,
+                                 lineNumber,
+                                 "feature",
+                                 "tuple destructuring arity does not match the function return tuple.",
+                                 "make the number of bindings match the number of returned tuple elements.");
+        freeTupleItemTypes(names, nameCount);
+        return NULL;
+    }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppendN(&out, exprStart, (size_t)(exprEnd - exprStart)) ||
+        !bufferAppend(&out, ";\n")) {
+        freeTupleItemTypes(names, nameCount);
+        free(out.data);
+        return NULL;
+    }
+    for (size_t i = 0; i < nameCount; i++) {
+        char fieldName[64];
+
+        snprintf(fieldName, sizeof(fieldName), "%s_item%zu", tupleSig->tupleTypeName, i);
+        if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+            !appendMappedType(&out,
+                              tupleSig->itemTypes[i],
+                              tupleSig->itemTypes[i] + strlen(tupleSig->itemTypes[i])) ||
+            !bufferAppend(&out, " ") ||
+            !bufferAppend(&out, names[i]) ||
+            !bufferAppend(&out, " = ") ||
+            !bufferAppend(&out, fieldName) ||
+            !bufferAppend(&out, ";\n")) {
+            freeTupleItemTypes(names, nameCount);
+            free(out.data);
+            return NULL;
+        }
+    }
+    if (out.len > 0 && out.data[out.len - 1] == '\n') {
+        out.data[out.len - 1] = '\0';
+        out.len--;
+    }
+    freeTupleItemTypes(names, nameCount);
+    return out.data;
+}
+
+static int findTupleInitializerCallee(const char *body,
+                                      const char *lineEnd,
+                                      const AetherTupleTable *tupleTable) {
+    const char *cursor;
+    const char *equals;
+    const char *exprStart;
+    const char *exprEnd;
+    const char *callNameStart = NULL;
+    size_t callNameLen = 0;
+
+    if (!body || !lineEnd || !tupleTable || !startsWithWord(body, lineEnd, "let")) {
+        return 0;
+    }
+    cursor = skipSpacesInRange(body + 3, lineEnd);
+    while (cursor < lineEnd && *cursor != '=') {
+        cursor++;
+    }
+    if (cursor >= lineEnd || *cursor != '=') {
+        return 0;
+    }
+    equals = cursor;
+    exprStart = skipSpacesInRange(equals + 1, lineEnd);
+    exprEnd = lineEnd;
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (exprEnd > exprStart && exprEnd[-1] == ';') {
+        exprEnd--;
+    }
+    while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
+        exprEnd--;
+    }
+    if (!extractDirectTupleCallName(exprStart, exprEnd, &callNameStart, &callNameLen)) {
+        return 0;
+    }
+    return findAetherTupleSig(tupleTable, callNameStart, callNameLen) != NULL;
 }
 
 static char *translateInlineObjectInitMethodDeclLine(const char *lineStart,
@@ -4917,9 +5488,11 @@ char *aetherRewriteSource(const char *source, const char *path) {
     AetherBindingTable bindingTable = {0};
     AetherFunctionTable functionTable = {0};
     ToonLiteralTable toonTable = {0};
+    AetherTupleTable tupleTable = {0};
     int braceDepth = 0;
     int lineNumber = 1;
     int outputLineNumber = 1;
+    int nextTupleTypeId = 0;
 
     if (!source) {
         return NULL;
@@ -4949,6 +5522,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
             body++;
         }
 
+        size_t lineOutputStart = out.len;
+        int outputLineBeforeLine = outputLineNumber;
+
         if (!maybeLoadImportedBindings(&bindingTable, &functionTable, body, lineEnd, path)) {
             freePendingContracts(&pending);
             clearFunctionContracts(&fnState);
@@ -4957,6 +5533,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             freeAetherBindingTable(&bindingTable);
             freeAetherFunctionTable(&functionTable);
             freeToonLiteralTable(&toonTable);
+            freeAetherTupleTable(&tupleTable);
             free(preprocessed);
             free(out.data);
             return NULL;
@@ -4964,41 +5541,6 @@ char *aetherRewriteSource(const char *source, const char *path) {
         maybeRecordToonLiteralBinding(&toonTable, body, lineEnd);
         maybeRecordAetherFunctionReturnType(&functionTable, body, lineEnd, NULL, typeState.name);
         maybeRecordAetherBindingType(&bindingTable, body, lineEnd, &functionTable);
-
-        if (isUnsupportedTupleReturnSignature(body, lineEnd)) {
-            reportAetherRewriteError(path,
-                                     lineNumber,
-                                     "feature",
-                                     "tuple return types are not supported yet.",
-                                     "return a single record/object type for now, or split the work into separate functions.");
-            freePendingContracts(&pending);
-            clearFunctionContracts(&fnState);
-            clearParBlockState(&parState);
-            clearTypeBlockState(&typeState);
-            freeAetherBindingTable(&bindingTable);
-            freeAetherFunctionTable(&functionTable);
-            freeToonLiteralTable(&toonTable);
-            free(preprocessed);
-            free(out.data);
-            return NULL;
-        }
-        if (isUnsupportedTupleLetPattern(body, lineEnd)) {
-            reportAetherRewriteError(path,
-                                     lineNumber,
-                                     "feature",
-                                     "tuple destructuring in `let (...) = ...` is not supported yet.",
-                                     "bind the returned value to one name, or return a record/object type instead.");
-            freePendingContracts(&pending);
-            clearFunctionContracts(&fnState);
-            clearParBlockState(&parState);
-            clearTypeBlockState(&typeState);
-            freeAetherBindingTable(&bindingTable);
-            freeAetherFunctionTable(&functionTable);
-            freeToonLiteralTable(&toonTable);
-            free(preprocessed);
-            free(out.data);
-            return NULL;
-        }
 
         if (fnState.active && fnState.postExpr && fnState.isVoid && braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
@@ -5163,7 +5705,47 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     return NULL;
                 }
                 translated = parOpen.data;
+            } else if (startsWithWord(body, lineEnd, "fn")) {
+                translated = dupRange(lineStart, lineEnd);
+            } else if (isUnsupportedTupleLetPattern(body, lineEnd)) {
+                translated = translateTupleDestructureLetLine(lineStart,
+                                                              body,
+                                                              lineEnd,
+                                                              &tupleTable,
+                                                              path,
+                                                              lineNumber);
+                if (!translated) {
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
             } else if (startsWithWord(body, lineEnd, "let")) {
+                if (findTupleInitializerCallee(body, lineEnd, &tupleTable)) {
+                    reportAetherRewriteError(path,
+                                             lineNumber,
+                                             "feature",
+                                             "tuple-return calls must be destructured directly.",
+                                             "use `let (a, b) = pair();` rather than binding the tuple call to one name.");
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
                 translated = translateMultiLineTypedObjectInitOpenLine(lineStart,
                                                                        body,
                                                                        lineEnd,
@@ -5182,14 +5764,39 @@ char *aetherRewriteSource(const char *source, const char *path) {
                                                        path,
                                                        lineNumber);
                 }
+            } else if (fnState.active && fnState.tupleTypeName && startsWithWord(body, lineEnd, "ret")) {
+                translated = translateTupleReturnLine(lineStart,
+                                                      body,
+                                                      lineEnd,
+                                                      &fnState,
+                                                      &jsonState,
+                                                      &toonTable);
+                if (!translated) {
+                    reportAetherRewriteError(path,
+                                             lineNumber,
+                                             "internal",
+                                             "tuple return rewrite failed.",
+                                             "this is a compiler defect; simplify the tuple return or report the issue.");
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
             } else if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
                 translated = translateReturnWithPost(lineStart,
-                                                    body,
-                                                    lineEnd,
-                                                    &fnState,
-                                                    &typeState,
-                                                    &jsonState,
-                                                    &toonTable);
+                                                     body,
+                                                     lineEnd,
+                                                     &fnState,
+                                                     &typeState,
+                                                     &jsonState,
+                                                     &toonTable);
             } else if (typeState.active &&
                        isTypeFieldDeclarationLine(body, lineEnd) &&
                        !startsWithWord(body, lineEnd, "fn") &&
@@ -5247,6 +5854,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 freeAetherBindingTable(&bindingTable);
                 freeAetherFunctionTable(&functionTable);
                 freeToonLiteralTable(&toonTable);
+                freeAetherTupleTable(&tupleTable);
                 free(preprocessed);
                 free(out.data);
                 return NULL;
@@ -5297,6 +5905,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 freeAetherBindingTable(&bindingTable);
                 freeAetherFunctionTable(&functionTable);
                 freeToonLiteralTable(&toonTable);
+                freeAetherTupleTable(&tupleTable);
                 free(preprocessed);
                 free(out.data);
                 return NULL;
@@ -5311,6 +5920,10 @@ char *aetherRewriteSource(const char *source, const char *path) {
         if (startsWithWord(body, lineEnd, "fn")) {
             char *fnName = NULL;
             char *returnType = NULL;
+            char **tupleItemTypes = NULL;
+            size_t tupleItemCount = 0;
+            char tupleTypeName[64];
+            int hasTupleReturn = 0;
 
             if (!extractFunctionSignature(body, lineEnd, &fnName, &returnType)) {
                 free(translated);
@@ -5324,6 +5937,135 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 free(preprocessed);
                 free(out.data);
                 return NULL;
+            }
+
+            hasTupleReturn = parseTupleTypeList(returnType,
+                                               returnType + strlen(returnType),
+                                               &tupleItemTypes,
+                                               &tupleItemCount);
+            free(translated);
+            translated = NULL;
+            if (hasTupleReturn) {
+                if (typeState.active) {
+                    reportAetherRewriteError(path,
+                                             lineNumber,
+                                             "feature",
+                                             "tuple return types are currently only supported on top-level functions.",
+                                             "return a record/object from methods, or move tuple-return logic to a top-level helper function.");
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(fnName);
+                    free(returnType);
+                    free(translated);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+                if (pending.postExpr) {
+                    reportAetherRewriteError(path,
+                                             lineNumber,
+                                             "feature",
+                                             "tuple-return functions do not support @post yet.",
+                                             "use @pre only for now, or return a named object type if you need postconditions.");
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(fnName);
+                    free(returnType);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+                nextTupleTypeId++;
+                snprintf(tupleTypeName, sizeof(tupleTypeName), "__aether_tuple_%d", nextTupleTypeId);
+                translated = translateTupleFnLine(lineStart,
+                                                  body,
+                                                  lineEnd,
+                                                  tupleTypeName,
+                                                  tupleItemTypes,
+                                                  tupleItemCount);
+                if (!translated) {
+                    reportAetherRewriteError(path,
+                                             lineNumber,
+                                             "internal",
+                                             "tuple function signature rewrite failed.",
+                                             "this is a compiler defect; simplify the tuple-return signature or report the issue.");
+                }
+                if (!translated ||
+                    !setAetherTupleSig(&tupleTable, fnName, tupleTypeName, tupleItemTypes, tupleItemCount) ||
+                    !setAetherFunctionReturnType(&functionTable, fnName, "Void")) {
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(fnName);
+                    free(returnType);
+                    free(translated);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                        free(out.data);
+                        return NULL;
+                    }
+            } else {
+                translated = translateFnLine(lineStart, body, lineEnd);
+                if (!translated) {
+                    free(fnName);
+                    free(returnType);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+            }
+
+            if (out.len >= lineOutputStart) {
+                out.len = lineOutputStart;
+                if (out.data) {
+                    out.data[out.len] = '\0';
+                }
+                outputLineNumber = outputLineBeforeLine;
+                if (!bufferAppend(&out, translated) ||
+                    !trackRewriteOutputLines(translated, &outputLineNumber, lineNumber)) {
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(returnType);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    free(translated);
+                    return NULL;
+                }
+                lineDelta = braceDeltaOverrideSet ? braceDeltaOverride : braceDeltaForLine(translated);
             }
 
             if ((pending.preExpr || pending.postExpr) && lineDelta > 0) {
@@ -5450,7 +6192,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             clearFunctionContracts(&fnState);
             fnState.active = lineDelta > 0;
             fnState.bodyDepth = braceDepth + lineDelta;
-            fnState.isVoid = returnType && strcmp(returnType, "Void") == 0;
+            fnState.isVoid = hasTupleReturn || (returnType && strcmp(returnType, "Void") == 0);
             fnState.isMethod = typeState.active;
             fnState.bindingCountBefore = bindingTable.count;
             fnState.name = fnName;
@@ -5458,8 +6200,62 @@ char *aetherRewriteSource(const char *source, const char *path) {
                                    ? dupRange(pending.postExpr,
                                               pending.postExpr + strlen(pending.postExpr))
                                    : NULL;
+            if (hasTupleReturn) {
+                fnState.tupleTypeName = dupCString(tupleTypeName);
+                if (!fnState.tupleTypeName) {
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(returnType);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+                fnState.tupleItemTypes = (char **)calloc(tupleItemCount, sizeof(char *));
+                if (!fnState.tupleItemTypes) {
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(returnType);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+                fnState.tupleItemCount = tupleItemCount;
+                for (size_t tupleIndex = 0; tupleIndex < tupleItemCount; tupleIndex++) {
+                    fnState.tupleItemTypes[tupleIndex] = dupCString(tupleItemTypes[tupleIndex]);
+                    if (!fnState.tupleItemTypes[tupleIndex]) {
+                        freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                        free(returnType);
+                        freePendingContracts(&pending);
+                        clearFunctionContracts(&fnState);
+                        clearParBlockState(&parState);
+                        clearTypeBlockState(&typeState);
+                        freeAetherBindingTable(&bindingTable);
+                        freeAetherFunctionTable(&functionTable);
+                        freeToonLiteralTable(&toonTable);
+                        freeAetherTupleTable(&tupleTable);
+                        free(preprocessed);
+                        free(out.data);
+                        return NULL;
+                    }
+                }
+            }
             if (fnState.active &&
                 !recordAetherFunctionParamBindings(&bindingTable, body, lineEnd)) {
+                freeTupleItemTypes(tupleItemTypes, tupleItemCount);
                 free(returnType);
                 freePendingContracts(&pending);
                 clearFunctionContracts(&fnState);
@@ -5468,11 +6264,13 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 freeAetherBindingTable(&bindingTable);
                 freeAetherFunctionTable(&functionTable);
                 freeToonLiteralTable(&toonTable);
+                freeAetherTupleTable(&tupleTable);
                 free(preprocessed);
                 free(out.data);
                 return NULL;
             }
 
+            freeTupleItemTypes(tupleItemTypes, tupleItemCount);
             free(returnType);
             freePendingContracts(&pending);
         }
@@ -5547,6 +6345,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     freeAetherBindingTable(&bindingTable);
     freeAetherFunctionTable(&functionTable);
     freeToonLiteralTable(&toonTable);
+    freeAetherTupleTable(&tupleTable);
     free(preprocessed);
     return out.data;
 }

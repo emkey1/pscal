@@ -29,7 +29,7 @@ Do not write Aether like this:
 - do not assume Python syntax, JavaScript syntax, or Rust syntax will work
 - do not call effectful builtins outside `fx`
 - do not treat `ToonDoc` and `ToonNode` as plain integers
-- do not assume tuple return types or `let (a, b) = ...` destructuring exist yet
+- do not assume general tuple support exists beyond direct tuple-return helpers
 - do not rely on broad magical inference; Aether inference is intentionally
   narrow
 
@@ -66,6 +66,16 @@ and LLMs to read and debug:
 let job: ToonNode = toon_at(jobs, i);
 let name: Text = toon_get_text(job, "name");
 ```
+
+Narrow tuple support now exists, but it is intentionally small:
+
+- tuple returns are for top-level helper functions only
+- destructuring must be a direct call, for example `let (a, b) = pair();`
+- binding a tuple-return call to one name is not supported
+- tuple-return methods are not supported
+- `@post` on tuple-return functions is not supported yet
+- this tuple surface is intentionally narrow and should not be expanded without
+  a strong justification that preserves Aether's compactness and clarity
 
 ## The mental model
 
@@ -202,6 +212,29 @@ For `Void` functions, this is also fine:
 
 ```aether
 ret;
+```
+
+Tuple-return helpers are also supported in a narrow form:
+
+```aether
+fn pair() -> (Int, Int) {
+    ret (1, 2);
+}
+
+fn main() -> Void {
+    let (a, b) = pair();
+    fx {
+        println(a);
+        println(b);
+    }
+    ret;
+}
+```
+
+Use that exact pattern. Do not do this:
+
+```aether
+let value = pair();
 ```
 
 ## Effects: `fx`
