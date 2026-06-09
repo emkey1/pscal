@@ -4639,6 +4639,38 @@ static char *translateLine(const char *lineStart,
     return out.data;
 }
 
+static char *translateLineInMethod(const char *lineStart,
+                                   const char *lineEnd,
+                                   JsonAliasState *jsonState,
+                                   const AetherBindingTable *bindings,
+                                   const AetherFunctionTable *functions,
+                                   const TypeBlockState *typeState,
+                                   int isMethod,
+                                   const char *path,
+                                   int lineNumber) {
+    char *translated = translateLine(lineStart,
+                                     lineEnd,
+                                     jsonState,
+                                     bindings,
+                                     functions,
+                                     path,
+                                     lineNumber);
+    char *rewritten;
+
+    if (!translated) {
+        return NULL;
+    }
+    if (!isMethod || !typeState) {
+        return translated;
+    }
+    rewritten = rewriteMethodScopedExpr(translated,
+                                        translated + strlen(translated),
+                                        typeState,
+                                        isMethod);
+    free(translated);
+    return rewritten;
+}
+
 char *aetherRewriteSource(const char *source, const char *path) {
     char *preprocessed = NULL;
     const char *cursor;
@@ -4866,13 +4898,15 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     braceDeltaOverrideSet = 1;
                     braceDeltaOverride = 1;
                 } else {
-                    translated = translateLine(lineStart,
-                                               lineEnd,
-                                               &jsonState,
-                                               &bindingTable,
-                                               &functionTable,
-                                               path,
-                                               lineNumber);
+                    translated = translateLineInMethod(lineStart,
+                                                       lineEnd,
+                                                       &jsonState,
+                                                       &bindingTable,
+                                                       &functionTable,
+                                                       &typeState,
+                                                       fnState.active && fnState.isMethod,
+                                                       path,
+                                                       lineNumber);
                 }
             } else if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
                 translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState, &typeState);
@@ -4899,13 +4933,15 @@ char *aetherRewriteSource(const char *source, const char *path) {
                        !isLineComment(body, lineEnd)) {
                 translated = translateTypeFieldLine(lineStart, body, lineEnd);
             } else {
-                translated = translateLine(lineStart,
-                                           lineEnd,
-                                           &jsonState,
-                                           &bindingTable,
-                                           &functionTable,
-                                           path,
-                                           lineNumber);
+                translated = translateLineInMethod(lineStart,
+                                                   lineEnd,
+                                                   &jsonState,
+                                                   &bindingTable,
+                                                   &functionTable,
+                                                   &typeState,
+                                                   fnState.active && fnState.isMethod,
+                                                   path,
+                                                   lineNumber);
             }
         }
         if (!translated) {
