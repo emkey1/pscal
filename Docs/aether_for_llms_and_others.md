@@ -620,6 +620,8 @@ Important:
 - do not write `let user_array = toon_at(root, 0)` unless you specifically want the first element
 - `toon_at(root, 0)` means "give me the first element stored inside `root`"
 - it does not mean "treat `root` as an array variable"
+- one-character JSON keys such as `"v"` are valid TOON keys in Aether;
+  `toon_has_key(node, "v")` and `toon_get_real_or(node, "v", 0.0)` should work
 - `println(...)` still requires `fx`, even for banner lines or one-off status output
 - compute pure values outside `fx` when practical, then print inside `fx`
 

@@ -2452,6 +2452,44 @@ static int appendAliasedTrimmedRange(Buffer *out,
     return ok;
 }
 
+static int isSingleCharDoubleQuotedLiteral(const char *start, const char *end) {
+    size_t innerLen;
+
+    if (!start || !end) {
+        return 0;
+    }
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    if ((size_t)(end - start) < 3 || *start != '"' || end[-1] != '"') {
+        return 0;
+    }
+    innerLen = (size_t)(end - start - 2);
+    if (innerLen == 1) {
+        return 1;
+    }
+    if (innerLen == 2 && start[1] == '\\') {
+        return 1;
+    }
+    return 0;
+}
+
+static int appendToonTextKeyArg(Buffer *out,
+                                const char *start,
+                                const char *end,
+                                JsonAliasState *jsonState,
+                                const ToonLiteralTable *toonTable) {
+    if (isSingleCharDoubleQuotedLiteral(start, end)) {
+        return bufferAppend(out, "(\"\" + ") &&
+               appendAliasedTrimmedRange(out, start, end, jsonState, toonTable) &&
+               bufferAppend(out, ")");
+    }
+    return appendAliasedTrimmedRange(out, start, end, jsonState, toonTable);
+}
+
 static int appendToonScalarAlias(Buffer *out,
                                  const char *nameStart,
                                  size_t nameLen,
@@ -2534,13 +2572,13 @@ static int appendToonScalarAlias(Buffer *out,
         if (!bufferAppend(out, "(YyjsonHasKey(") ||
             !appendAliasedTrimmedRange(out, arg1Start, arg1End, jsonState, toonTable) ||
             !bufferAppend(out, ", ") ||
-            !appendAliasedTrimmedRange(out, arg2Start, arg2End, jsonState, toonTable) ||
+            !appendToonTextKeyArg(out, arg2Start, arg2End, jsonState, toonTable) ||
             !bufferAppend(out, ") ? ") ||
             !bufferAppend(out, getter) ||
             !bufferAppend(out, "(YyjsonGetKey(") ||
             !appendAliasedTrimmedRange(out, arg1Start, arg1End, jsonState, toonTable) ||
             !bufferAppend(out, ", ") ||
-            !appendAliasedTrimmedRange(out, arg2Start, arg2End, jsonState, toonTable) ||
+            !appendToonTextKeyArg(out, arg2Start, arg2End, jsonState, toonTable) ||
             !bufferAppend(out, ")) : ") ||
             !appendAliasedTrimmedRange(out, arg3Start, arg3End, jsonState, toonTable) ||
             !bufferAppend(out, ")")) {
@@ -2551,10 +2589,107 @@ static int appendToonScalarAlias(Buffer *out,
             !bufferAppend(out, "(YyjsonGetKey(") ||
             !appendAliasedTrimmedRange(out, arg1Start, arg1End, jsonState, toonTable) ||
             !bufferAppend(out, ", ") ||
-            !appendAliasedTrimmedRange(out, arg2Start, arg2End, jsonState, toonTable) ||
+            !appendToonTextKeyArg(out, arg2Start, arg2End, jsonState, toonTable) ||
             !bufferAppend(out, "))")) {
             return 0;
         }
+    }
+    *outCursor = cursor + 1;
+    return 1;
+}
+
+static int appendToonQueryAlias(Buffer *out,
+                                const char *nameStart,
+                                size_t nameLen,
+                                const char *openParen,
+                                const char **outCursor,
+                                JsonAliasState *jsonState,
+                                const ToonLiteralTable *toonTable) {
+    const char *replacement = NULL;
+    const char *cursor;
+    const char *arg1Start;
+    const char *arg1End = NULL;
+    const char *arg2Start = NULL;
+    const char *arg2End = NULL;
+    int depth = 0;
+    int inString = 0;
+    char quote = '\0';
+    int keyHelper = 0;
+
+    if (!out || !nameStart || !openParen || *openParen != '(' || !outCursor) {
+        return 0;
+    }
+    if (nameLen == 8 && strncmp(nameStart, "toon_key", nameLen) == 0) {
+        replacement = "YyjsonGetKey";
+        keyHelper = 1;
+    } else if (nameLen == 12 && strncmp(nameStart, "toon_has_key", nameLen) == 0) {
+        replacement = "YyjsonHasKey";
+        keyHelper = 1;
+    } else if (nameLen == 7 && strncmp(nameStart, "toon_at", nameLen) == 0) {
+        replacement = "YyjsonGetIndex";
+    } else if (nameLen == 11 && strncmp(nameStart, "toon_has_at", nameLen) == 0) {
+        replacement = "YyjsonHasIndex";
+    } else {
+        return 0;
+    }
+
+    cursor = openParen + 1;
+    arg1Start = cursor;
+    while (*cursor) {
+        if (inString) {
+            if (*cursor == '\\' && cursor[1] != '\0') {
+                cursor += 2;
+                continue;
+            }
+            if (*cursor == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            inString = 1;
+            quote = *cursor;
+            cursor++;
+            continue;
+        }
+        if (*cursor == '(' || *cursor == '[' || *cursor == '{') {
+            depth++;
+        } else if (*cursor == ')' || *cursor == ']' || *cursor == '}') {
+            if (depth == 0) {
+                arg2End = cursor;
+                break;
+            }
+            depth--;
+        } else if (*cursor == ',' && depth == 0 && !arg1End) {
+            arg1End = cursor;
+            arg2Start = cursor + 1;
+        }
+        cursor++;
+    }
+    if (!arg1End || !arg2Start || !arg2End) {
+        return 0;
+    }
+
+    jsonState->needed = 1;
+    if (!bufferAppend(out, replacement) ||
+        !bufferAppend(out, "(") ||
+        !appendAliasedTrimmedRange(out, arg1Start, arg1End, jsonState, toonTable) ||
+        !bufferAppend(out, ", ")) {
+        return 0;
+    }
+    if (keyHelper) {
+        if (!appendToonTextKeyArg(out, arg2Start, arg2End, jsonState, toonTable)) {
+            return 0;
+        }
+    } else {
+        if (!appendAliasedTrimmedRange(out, arg2Start, arg2End, jsonState, toonTable)) {
+            return 0;
+        }
+    }
+    if (!bufferAppend(out, ")")) {
+        return 0;
     }
     *outCursor = cursor + 1;
     return 1;
@@ -2744,6 +2879,17 @@ static char *applyJsonAliasesToLine(const char *line,
                                       &advancedCursor,
                                       jsonState,
                                       toonTable)) {
+                cursor = advancedCursor;
+                continue;
+            }
+            if (*afterName == '(' &&
+                appendToonQueryAlias(&out,
+                                     nameStart,
+                                     (size_t)(nameEnd - nameStart),
+                                     afterName,
+                                     &advancedCursor,
+                                     jsonState,
+                                     toonTable)) {
                 cursor = advancedCursor;
                 continue;
             }

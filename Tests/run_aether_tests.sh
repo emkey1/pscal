@@ -82,6 +82,7 @@ TOON_PRESENCE_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_presence_decl_fail.
 TOON_DEFAULTS_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_defaults_decl_fail.aether"
 TOON_COMMENT_ARITH_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_comment_arithmetic_pass.aether"
 TOON_NESTED_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_nested_helpers_pass.aether"
+TOON_SINGLE_CHAR_KEY_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_single_char_key_pass.aether"
 SHOWCASE_EXAMPLE="$ROOT_DIR/Examples/aether/showcase/agent_report"
 
 if [ ! -x "$AETHER_BIN" ]; then
@@ -168,6 +169,7 @@ for fixture in \
     "$TOON_DEFAULTS_DECL_FAIL_FIXTURE" \
     "$TOON_COMMENT_ARITH_PASS_FIXTURE" \
     "$TOON_NESTED_HELPERS_PASS_FIXTURE" \
+    "$TOON_SINGLE_CHAR_KEY_PASS_FIXTURE" \
     "$SHOWCASE_EXAMPLE"
 do
     if [ ! -f "$fixture" ]; then
@@ -999,6 +1001,18 @@ if ! grep -q '^Ada 91$' /tmp/aether_toon_nested_helpers_pass.out; then
     echo "missing TOON nested helper pass output" >&2
     cat /tmp/aether_toon_nested_helpers_pass.out >&2
     exit 1
+fi
+
+"$AETHER_BIN" --no-cache "$TOON_SINGLE_CHAR_KEY_PASS_FIXTURE" >/tmp/aether_toon_single_char_key_pass.out
+if grep -qx "yyjson unavailable" /tmp/aether_toon_single_char_key_pass.out; then
+    :
+else
+    printf 'true\nfalse\n3.5\n0.0\n' >/tmp/aether_toon_single_char_key_expected.out
+    if ! cmp -s /tmp/aether_toon_single_char_key_expected.out /tmp/aether_toon_single_char_key_pass.out; then
+        echo "unexpected TOON single-char key output" >&2
+        cat /tmp/aether_toon_single_char_key_pass.out >&2
+        exit 1
+    fi
 fi
 
 echo "aether smoke tests passed"
