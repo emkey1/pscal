@@ -49,6 +49,34 @@ static bool vmHandleGlobalInterrupt(VM* vm);
 static bool vmConsumeSuspendRequest(VM* vm);
 static bool vmIsRootExecutor(const VM* vm);
 
+static char* vmStringifyValueForConcat(const Value* value) {
+    if (!value) {
+        return strdup("");
+    }
+
+    FILE* stream = NULL;
+    char* buffer = NULL;
+    size_t size = 0;
+
+#if defined(__APPLE__) || defined(_GNU_SOURCE) || defined(__linux__)
+    stream = open_memstream(&buffer, &size);
+#endif
+    if (!stream) {
+        return NULL;
+    }
+
+    printValueToStream(*value, stream);
+    if (fclose(stream) != 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    if (!buffer) {
+        return strdup("");
+    }
+    return buffer;
+}
+
 #define VM_PROC_REGISTRY_CAPACITY 1024
 
 static pthread_mutex_t gVmProcRegistryLock = PTHREAD_MUTEX_INITIALIZER;
@@ -5867,9 +5895,10 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     final_b = (Value*)final_b->ptr_val; \
                 } \
                 if ((IS_STRING(*final_a) || IS_CHAR(*final_a)) && \
-                    (IS_STRING(*final_b) || IS_CHAR(*final_b))) { \
+                    (IS_STRING(*final_b) || IS_CHAR(*final_b) || current_instruction_code == ADD)) { \
                     char a_buffer[5] = {0}; \
                     char b_buffer[5] = {0}; \
+                    char* coerced_b = NULL; \
                     const char* s_a = NULL; \
                     const char* s_b = NULL; \
                     VarType result_type = \
@@ -5889,6 +5918,77 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     } \
                     if (IS_STRING(*final_b)) { \
                         s_b = AS_STRING(*final_b) ? AS_STRING(*final_b) : ""; \
+                    } else if (IS_CHAR(*final_b)) { \
+                        if (final_b->type == TYPE_WIDECHAR) { \
+                            encodeUtf8Codepoint((uint32_t)AS_CHAR(*final_b), b_buffer); \
+                        } else { \
+                            b_buffer[0] = (char)AS_CHAR(*final_b); \
+                        } \
+                        s_b = b_buffer; \
+                    } else { \
+                        coerced_b = vmStringifyValueForConcat(final_b); \
+                        if (!coerced_b) { \
+                            runtimeError(vm, "Runtime Error: Failed to stringify right operand for concatenation."); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                        } \
+                        s_b = coerced_b; \
+                    } \
+                    size_t len_a = strlen(s_a); \
+                    size_t len_b = strlen(s_b); \
+                    if (len_b > SIZE_MAX - len_a - 1) { \
+                        free(coerced_b); \
+                        runtimeError(vm, "Runtime Error: String concatenation overflow."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    size_t total_len = len_a + len_b; \
+                    char* temp_concat_buffer = NULL; \
+                    if (final_a == &a_val_popped && a_val_popped.type == TYPE_STRING && a_val_popped.s_val) { \
+                        temp_concat_buffer = (char*)realloc(a_val_popped.s_val, total_len + 1); \
+                        if (!temp_concat_buffer) { \
+                            free(coerced_b); \
+                            runtimeError(vm, "Runtime Error: Realloc failed for string concatenation buffer."); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                        } \
+                        memcpy(temp_concat_buffer + len_a, s_b, len_b); \
+                        temp_concat_buffer[total_len] = '\0'; \
+                        a_val_popped.s_val = NULL; \
+                    } else { \
+                        temp_concat_buffer = (char*)malloc(total_len + 1); \
+                        if (!temp_concat_buffer) { \
+                            free(coerced_b); \
+                            runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
+                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                            return INTERPRET_RUNTIME_ERROR; \
+                        } \
+                        memcpy(temp_concat_buffer, s_a, len_a); \
+                        memcpy(temp_concat_buffer + len_a, s_b, len_b); \
+                        temp_concat_buffer[total_len] = '\0'; \
+                    } \
+                    result_val = makeOwnedString(temp_concat_buffer, total_len); \
+                    result_val.type = result_type; \
+                    free(coerced_b); \
+                    freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                    op_is_handled = true; \
+                } else if ((IS_STRING(*final_b) || IS_CHAR(*final_b)) && current_instruction_code == ADD) { \
+                    char* coerced_a = vmStringifyValueForConcat(final_a); \
+                    char b_buffer[5] = {0}; \
+                    const char* s_a = NULL; \
+                    const char* s_b = NULL; \
+                    VarType result_type = \
+                        (final_b->type == TYPE_UNICODE_STRING || final_b->type == TYPE_WIDECHAR) \
+                        ? TYPE_UNICODE_STRING \
+                        : TYPE_STRING; \
+                    if (!coerced_a) { \
+                        runtimeError(vm, "Runtime Error: Failed to stringify left operand for concatenation."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
+                    } \
+                    s_a = coerced_a; \
+                    if (IS_STRING(*final_b)) { \
+                        s_b = AS_STRING(*final_b) ? AS_STRING(*final_b) : ""; \
                     } else { \
                         if (final_b->type == TYPE_WIDECHAR) { \
                             encodeUtf8Codepoint((uint32_t)AS_CHAR(*final_b), b_buffer); \
@@ -5900,35 +6000,25 @@ InterpretResult interpretBytecode(VM* vm, BytecodeChunk* chunk, HashTable* globa
                     size_t len_a = strlen(s_a); \
                     size_t len_b = strlen(s_b); \
                     if (len_b > SIZE_MAX - len_a - 1) { \
+                        free(coerced_a); \
                         runtimeError(vm, "Runtime Error: String concatenation overflow."); \
                         freeValue(&a_val_popped); freeValue(&b_val_popped); \
                         return INTERPRET_RUNTIME_ERROR; \
                     } \
                     size_t total_len = len_a + len_b; \
-                    char* temp_concat_buffer = NULL; \
-                    if (final_a == &a_val_popped && a_val_popped.type == TYPE_STRING && a_val_popped.s_val) { \
-                        temp_concat_buffer = (char*)realloc(a_val_popped.s_val, total_len + 1); \
-                        if (!temp_concat_buffer) { \
-                            runtimeError(vm, "Runtime Error: Realloc failed for string concatenation buffer."); \
-                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                            return INTERPRET_RUNTIME_ERROR; \
-                        } \
-                        memcpy(temp_concat_buffer + len_a, s_b, len_b); \
-                        temp_concat_buffer[total_len] = '\0'; \
-                        a_val_popped.s_val = NULL; \
-                    } else { \
-                        temp_concat_buffer = (char*)malloc(total_len + 1); \
-                        if (!temp_concat_buffer) { \
-                            runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
-                            freeValue(&a_val_popped); freeValue(&b_val_popped); \
-                            return INTERPRET_RUNTIME_ERROR; \
-                        } \
-                        memcpy(temp_concat_buffer, s_a, len_a); \
-                        memcpy(temp_concat_buffer + len_a, s_b, len_b); \
-                        temp_concat_buffer[total_len] = '\0'; \
+                    char* temp_concat_buffer = (char*)malloc(total_len + 1); \
+                    if (!temp_concat_buffer) { \
+                        free(coerced_a); \
+                        runtimeError(vm, "Runtime Error: Malloc failed for string concatenation buffer."); \
+                        freeValue(&a_val_popped); freeValue(&b_val_popped); \
+                        return INTERPRET_RUNTIME_ERROR; \
                     } \
+                    memcpy(temp_concat_buffer, s_a, len_a); \
+                    memcpy(temp_concat_buffer + len_a, s_b, len_b); \
+                    temp_concat_buffer[total_len] = '\0'; \
                     result_val = makeOwnedString(temp_concat_buffer, total_len); \
                     result_val.type = result_type; \
+                    free(coerced_a); \
                     freeValue(&a_val_popped); freeValue(&b_val_popped); \
                     op_is_handled = true; \
                 } else { \

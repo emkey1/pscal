@@ -3309,8 +3309,16 @@ static const char* getTypeNameFromAST(AST* typeAst) {
 
 static bool buildReceiverMethodName(AST* receiverExpr, const char* memberName,
                                     char* outName, size_t outSize) {
+    const char* effectiveMemberName = memberName;
+    const char* dot;
+
     if (!receiverExpr || !memberName || !outName || outSize == 0) {
         return false;
+    }
+
+    dot = strrchr(memberName, '.');
+    if (dot && dot[1] != '\0') {
+        effectiveMemberName = dot + 1;
     }
 
     AST* recordType = getRecordTypeFromExpr(receiverExpr);
@@ -3319,7 +3327,7 @@ static bool buildReceiverMethodName(AST* receiverExpr, const char* memberName,
         return false;
     }
 
-    AST* definingRecord = findRecordTypeDefiningMethod(recordType, memberName);
+    AST* definingRecord = findRecordTypeDefiningMethod(recordType, effectiveMemberName);
     if (definingRecord && definingRecord->type == AST_RECORD_TYPE) {
         recordType = definingRecord;
     }
@@ -3329,7 +3337,7 @@ static bool buildReceiverMethodName(AST* receiverExpr, const char* memberName,
         return false;
     }
 
-    int written = snprintf(outName, outSize, "%s.%s", typeName, memberName);
+    int written = snprintf(outName, outSize, "%s.%s", typeName, effectiveMemberName);
     if (written < 0 || written >= (int)outSize) {
         return false;
     }
@@ -8334,9 +8342,7 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
         case AST_PROCEDURE_CALL: {
             bool treat_as_literal = false;
             if (node->child_count == 0 && node->token && node->token->value) {
-                if (node->var_type == TYPE_POINTER) {
-                    treat_as_literal = true;
-                } else if (node->type_def &&
+                if (node->type_def &&
                            (node->type_def->type == AST_PROC_PTR_TYPE ||
                             (node->type_def->type == AST_TYPE_REFERENCE && node->type_def->right &&
                              node->type_def->right->type == AST_PROC_PTR_TYPE))) {
@@ -8506,7 +8512,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                                     interfaceReceiver == NULL);
             bool isInterfaceDispatch = (isCallQualified && interfaceReceiver != NULL);
             if (isReceiverStyleMethod && !isVirtualMethod && !isInterfaceDispatch) {
-                usesReceiverGlobal = true;
+                /*
+                 * Receiver-style helpers collected from top-level declarations
+                 * still have an explicit first parameter, so the receiver must
+                 * flow through the normal argument list instead of the hidden
+                 * `myself` global path used by true class methods.
+                 */
+                usesReceiverGlobal = false;
             }
 
             bool receiverInFirstChild = (callReceiver && node->child_count > 0 &&
@@ -10171,9 +10183,7 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
 
             bool treat_as_literal = false;
             if (node->child_count == 0 && node->token && node->token->value) {
-                if (node->var_type == TYPE_POINTER) {
-                    treat_as_literal = true;
-                } else if (node->type_def &&
+                if (node->type_def &&
                            (node->type_def->type == AST_PROC_PTR_TYPE ||
                             (node->type_def->type == AST_TYPE_REFERENCE && node->type_def->right &&
                              node->type_def->right->type == AST_PROC_PTR_TYPE))) {
@@ -10370,7 +10380,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                                    func_symbol->type_def->is_virtual;
             bool isInterfaceDispatch = isCallQualified && interfaceReceiver != NULL;
             if (isReceiverStyleMethod && !isVirtualMethod && !isInterfaceDispatch) {
-                usesReceiverGlobal = true;
+                /*
+                 * Receiver-style helpers collected from top-level declarations
+                 * still have an explicit first parameter, so the receiver must
+                 * flow through the normal argument list instead of the hidden
+                 * `myself` global path used by true class methods.
+                 */
+                usesReceiverGlobal = false;
             }
 
             bool receiverInFirstChild = (callReceiver && node->child_count > 0 &&

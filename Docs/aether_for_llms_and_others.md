@@ -156,6 +156,8 @@ Inference also works in some common Aether-specific cases:
 - known TOON helper return values
 - simple numeric expressions over known `Int` / `Real` values, such as
   `count + 1` or `base_amount * multiplier`
+- simple method / function results with non-ambiguous declared return types,
+  including pointer-backed record values returned from helpers
 
 If inference is not obviously safe, add the type explicitly.
 
@@ -286,6 +288,14 @@ In ordinary CLI mode, runtime failures should also include a plain-text
 
 `print(...)` and `println(...)` are Aether spellings for the shared
 `write(...)` and `writeln(...)` builtins.
+
+When either side of `+` is textual (`Text`, string, or char), Aether
+concatenates and stringifies the other side as needed. This is valid:
+
+```aether
+let line: Text = "score=" + 42;
+let label: Text = "pi≈" + 3.14;
+```
 
 Plain `println(realValue)` currently uses the backend default real formatting,
 which is 6 digits after the decimal point.

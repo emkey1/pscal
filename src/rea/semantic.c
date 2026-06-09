@@ -2811,15 +2811,6 @@ static void collectMethods(AST *node) {
                             fullname = node->token->value;
                         }
                         ensureSelfParam(node, cls);
-                        // Assign method index for implicitly declared methods
-                        int method_index = 0;
-                        for (int mb = 0; mb < HASHTABLE_SIZE; mb++) {
-                            for (Symbol *ms = methods->buckets[mb]; ms; ms = ms->next) {
-                                method_index++;
-                            }
-                        }
-                        node->is_virtual = true;
-                        node->i_val = method_index;
                         char *lname = lowerDup(fullname + strlen(cls) + 1);
                         if (lname) {
                             if (hashTableLookup(methods, lname)) {
