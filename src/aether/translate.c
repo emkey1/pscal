@@ -4123,9 +4123,25 @@ static char *translateReturnWithPost(const char *lineStart,
     return out.data;
 }
 
-static int translateParamList(Buffer *out, const char *start, const char *end) {
+static int isSelfLikeParamNameRange(const char *start, const char *end) {
+    size_t len;
+
+    if (!start || !end || end <= start) {
+        return 0;
+    }
+    len = (size_t)(end - start);
+    return (len == 4 && strncmp(start, "self", 4) == 0) ||
+           (len == 2 && strncmp(start, "my", 2) == 0) ||
+           (len == 6 && strncmp(start, "myself", 6) == 0);
+}
+
+static int translateParamListEx(Buffer *out,
+                                const char *start,
+                                const char *end,
+                                int skipSelfLikeFirstParam) {
     const char *cursor = start;
     int first = 1;
+    int paramIndex = 0;
 
     while (cursor < end) {
         const char *segmentStart = cursor;
@@ -4154,23 +4170,37 @@ static int translateParamList(Buffer *out, const char *start, const char *end) {
             segmentEnd--;
         }
         if (segmentStart < segmentEnd) {
-            if (!first && !bufferAppend(out, ", ")) {
-                return 0;
+            int shouldSkip = 0;
+
+            if (skipSelfLikeFirstParam && paramIndex == 0 && colon) {
+                const char *nameEnd = colon;
+
+                while (nameEnd > segmentStart && isspace((unsigned char)nameEnd[-1])) {
+                    nameEnd--;
+                }
+                shouldSkip = isSelfLikeParamNameRange(segmentStart, nameEnd);
             }
-            if (colon) {
-                if (!appendMappedParamTypeAndName(out,
-                                                  colon + 1,
-                                                  segmentEnd,
-                                                  segmentStart,
-                                                  colon)) {
+
+            if (!shouldSkip) {
+                if (!first && !bufferAppend(out, ", ")) {
                     return 0;
                 }
-            } else {
-                if (!bufferAppendN(out, segmentStart, (size_t)(segmentEnd - segmentStart))) {
-                    return 0;
+                if (colon) {
+                    if (!appendMappedParamTypeAndName(out,
+                                                      colon + 1,
+                                                      segmentEnd,
+                                                      segmentStart,
+                                                      colon)) {
+                        return 0;
+                    }
+                } else {
+                    if (!bufferAppendN(out, segmentStart, (size_t)(segmentEnd - segmentStart))) {
+                        return 0;
+                    }
                 }
+                first = 0;
             }
-            first = 0;
+            paramIndex++;
         }
 
         cursor = segmentEnd;
@@ -4180,6 +4210,10 @@ static int translateParamList(Buffer *out, const char *start, const char *end) {
         cursor = skipSpaces(cursor);
     }
     return 1;
+}
+
+static int translateParamList(Buffer *out, const char *start, const char *end) {
+    return translateParamListEx(out, start, end, 0);
 }
 
 static int functionHasSelfLikeReceiverParam(const char *body, const char *lineEnd) {
@@ -4225,7 +4259,10 @@ static int functionHasSelfLikeReceiverParam(const char *body, const char *lineEn
     return 0;
 }
 
-static char *translateFnLine(const char *lineStart, const char *body, const char *lineEnd) {
+static char *translateFnLine(const char *lineStart,
+                             const char *body,
+                             const char *lineEnd,
+                             const TypeBlockState *typeState) {
     const char *nameStart = body + 2;
     const char *nameEnd;
     const char *paramsOpen;
@@ -4265,7 +4302,10 @@ static char *translateFnLine(const char *lineStart, const char *body, const char
         !bufferAppend(&out, " ") ||
         !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
         !bufferAppend(&out, "(") ||
-        !translateParamList(&out, paramsOpen + 1, paramsClose) ||
+        !translateParamListEx(&out,
+                              paramsOpen + 1,
+                              paramsClose,
+                              typeState && typeState->active) ||
         !bufferAppend(&out, ")")) {
         free(out.data);
         return NULL;
@@ -5604,7 +5644,7 @@ static char *translateExportLine(const char *lineStart,
         return dupRange(lineStart, lineEnd);
     }
     if (strncmp(rest, "fn ", 3) == 0) {
-        translatedRest = translateFnLine(rest, rest, lineEnd);
+        translatedRest = translateFnLine(rest, rest, lineEnd, NULL);
     } else if (strncmp(rest, "let ", 4) == 0 && hasTypedDeclSeparator(rest, lineEnd, 0)) {
         translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 0, functions, lineNumber);
     } else if (strncmp(rest, "const ", 6) == 0 && hasTypedDeclSeparator(rest, lineEnd, 1)) {
@@ -5735,7 +5775,7 @@ static char *translateLine(const char *lineStart,
         return translateExportLine(lineStart, body, lineEnd, bindings, functions, path, lineNumber);
     }
     if (strncmp(body, "fn ", 3) == 0) {
-        return translateFnLine(lineStart, body, lineEnd);
+        return translateFnLine(lineStart, body, lineEnd, NULL);
     }
     if (strncmp(body, "let ", 4) == 0 && hasTypedDeclSeparator(body, lineEnd, 0)) {
         return translateTypedDeclLine(lineStart, body, lineEnd, 0, functions, lineNumber);
@@ -6465,7 +6505,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                         return NULL;
                     }
             } else {
-                translated = translateFnLine(lineStart, body, lineEnd);
+                translated = translateFnLine(lineStart, body, lineEnd, &typeState);
                 if (!translated) {
                     free(fnName);
                     free(returnType);
