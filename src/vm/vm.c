@@ -762,6 +762,71 @@ static FieldValue* findRecordFieldBySlot(Value* record_struct_ptr, uint16_t fiel
     return NULL;
 }
 
+static AST* resolveRecordTypeFromBaseValue(Value* base_val_ptr) {
+    AST* type_node;
+
+    if (!base_val_ptr) {
+        return NULL;
+    }
+
+    type_node = base_val_ptr->base_type_node;
+    type_node = vmResolveTypeAlias(type_node);
+    if (type_node && type_node->type == AST_POINTER_TYPE && type_node->right) {
+        type_node = vmResolveTypeAlias(type_node->right);
+    }
+    if (type_node && type_node->type == AST_TYPE_DECL && type_node->left) {
+        type_node = vmResolveTypeAlias(type_node->left);
+    }
+    if (type_node && type_node->type == AST_RECORD_TYPE) {
+        return type_node;
+    }
+    return NULL;
+}
+
+static void hydrateFieldMetadataFromBaseValue(Value* base_val_ptr,
+                                              FieldValue* field,
+                                              uint16_t field_index) {
+    AST* record_type;
+    FieldValue* prototype_fields;
+    FieldValue* prototype_field;
+
+    if (!field) {
+        return;
+    }
+    if (field->type_def &&
+        field->declared_type != TYPE_UNKNOWN &&
+        field->declared_type != TYPE_VOID &&
+        field->name) {
+        return;
+    }
+
+    record_type = resolveRecordTypeFromBaseValue(base_val_ptr);
+    if (!record_type) {
+        return;
+    }
+
+    prototype_fields = createEmptyRecord(record_type);
+    if (!prototype_fields) {
+        return;
+    }
+
+    prototype_field = findRecordFieldBySlot(&(Value){ .type = TYPE_RECORD, .record_val = prototype_fields },
+                                            field_index);
+    if (prototype_field) {
+        if (!field->name && prototype_field->name) {
+            field->name = strdup(prototype_field->name);
+        }
+        if (!field->type_def && prototype_field->type_def) {
+            field->type_def = prototype_field->type_def;
+        }
+        if (field->declared_type == TYPE_UNKNOWN || field->declared_type == TYPE_VOID) {
+            field->declared_type = prototype_field->declared_type;
+        }
+    }
+
+    freeFieldValue(prototype_fields);
+}
+
 static bool pushFieldValueByOffset(VM* vm, Value* base_val_ptr, uint16_t field_index) {
     Value* record_struct_ptr = resolveRecordForField(vm, base_val_ptr);
     if (!record_struct_ptr) {
@@ -773,6 +838,7 @@ static bool pushFieldValueByOffset(VM* vm, Value* base_val_ptr, uint16_t field_i
         runtimeError(vm, "VM Error: Field index out of range.");
         return false;
     }
+    hydrateFieldMetadataFromBaseValue(base_val_ptr, current, field_index);
 
     push(vm, copyValueForStack(fieldValueStorage(current)));
     return true;
@@ -7005,7 +7071,7 @@ comparison_error_label:
                 FieldValue* fields_head = NULL;
                 FieldValue** next_ptr = &fields_head;
                 for (uint16_t i = 0; i < field_count; i++) {
-                    FieldValue* field = malloc(sizeof(FieldValue));
+                    FieldValue* field = calloc(1, sizeof(FieldValue));
                     if (!field) {
                         freeFieldValue(fields_head);
                         runtimeError(vm, "VM Error: Out of memory allocating object field.");
@@ -7016,6 +7082,8 @@ comparison_error_label:
                     field->storage = &field->value;
                     field->slot_index = (int)i;
                     field->owns_storage = true;
+                    field->declared_type = TYPE_VOID;
+                    field->type_def = NULL;
                     field->next = NULL;
                     *next_ptr = field;
                     next_ptr = &field->next;
@@ -7035,7 +7103,7 @@ comparison_error_label:
                 FieldValue* fields_head = NULL;
                 FieldValue** next_ptr = &fields_head;
                 for (uint16_t i = 0; i < field_count; i++) {
-                    FieldValue* field = malloc(sizeof(FieldValue));
+                    FieldValue* field = calloc(1, sizeof(FieldValue));
                     if (!field) {
                         freeFieldValue(fields_head);
                         runtimeError(vm, "VM Error: Out of memory allocating object field.");
@@ -7046,6 +7114,8 @@ comparison_error_label:
                     field->storage = &field->value;
                     field->slot_index = (int)i;
                     field->owns_storage = true;
+                    field->declared_type = TYPE_VOID;
+                    field->type_def = NULL;
                     field->next = NULL;
                     *next_ptr = field;
                     next_ptr = &field->next;
@@ -7084,6 +7154,7 @@ comparison_error_label:
                     runtimeError(vm, "VM Error: Field index out of range.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                hydrateFieldMetadataFromBaseValue(base_val_ptr, current, field_index);
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
                 push(vm, makePointer(fieldValueStorage(current), current->type_def));
@@ -7113,6 +7184,7 @@ comparison_error_label:
 
                     return INTERPRET_RUNTIME_ERROR;
                 }
+                hydrateFieldMetadataFromBaseValue(base_val_ptr, current, field_index);
                 Value popped_base_val = pop(vm);
                 freeValue(&popped_base_val);
                 push(vm, makePointer(fieldValueStorage(current), current->type_def));

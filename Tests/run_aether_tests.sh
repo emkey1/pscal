@@ -62,6 +62,7 @@ TYPE_METHOD_CONTRACTS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_method_contracts
 SELF_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_alias_pass.aether"
 SELF_MUTATION_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_mutation_pass.aether"
 SELF_CONDITION_METHOD_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_condition_method_pass.aether"
+TEXT_FIELD_METHOD_PARAM_PASS_FIXTURE="$ROOT_DIR/Tests/aether/text_field_method_param_pass.aether"
 TOON_JSON_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_json_helpers_pass.aether"
 TOON_HANDLE_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_helpers_pass.aether"
 TOON_VARIABLE_PARSE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_variable_parse_pass.aether"
@@ -155,6 +156,7 @@ for fixture in \
     "$SELF_ALIAS_PASS_FIXTURE" \
     "$SELF_MUTATION_PASS_FIXTURE" \
     "$SELF_CONDITION_METHOD_PASS_FIXTURE" \
+    "$TEXT_FIELD_METHOD_PARAM_PASS_FIXTURE" \
     "$TOON_JSON_HELPERS_PASS_FIXTURE" \
     "$TOON_HANDLE_HELPERS_PASS_FIXTURE" \
     "$TOON_VARIABLE_PARSE_PASS_FIXTURE" \
@@ -441,6 +443,13 @@ printf '35\nIN_STOCK\n' >/tmp/aether_self_condition_method_expected.out
 if ! cmp -s /tmp/aether_self_condition_method_expected.out /tmp/aether_self_condition_method_pass.out; then
     echo "unexpected self condition method output" >&2
     cat /tmp/aether_self_condition_method_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TEXT_FIELD_METHOD_PARAM_PASS_FIXTURE" >/tmp/aether_text_field_method_param_pass.out
+printf 'true\nAlice\n150\n' >/tmp/aether_text_field_method_param_expected.out
+if ! cmp -s /tmp/aether_text_field_method_param_expected.out /tmp/aether_text_field_method_param_pass.out; then
+    echo "unexpected text field method parameter output" >&2
+    cat /tmp/aether_text_field_method_param_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$TOON_JSON_HELPERS_PASS_FIXTURE" >/tmp/aether_toon_json_helpers_pass.out
