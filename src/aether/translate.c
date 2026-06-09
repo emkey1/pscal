@@ -5113,7 +5113,9 @@ static char *translateTypedDeclLine(const char *lineStart,
 
 static char *translateArrayAppendLine(const char *lineStart,
                                       const char *body,
-                                      const char *lineEnd) {
+                                      const char *lineEnd,
+                                      const TypeBlockState *typeState,
+                                      int isMethod) {
     const char *equals;
     const char *lhsStart;
     const char *lhsEnd;
@@ -5123,6 +5125,8 @@ static char *translateArrayAppendLine(const char *lineStart,
     const char *itemClose;
     const char *itemStart;
     const char *itemEnd;
+    char *rewrittenLhs = NULL;
+    char *rewrittenItem = NULL;
     Buffer out = {0};
 
     if (!body || !lineEnd ||
@@ -5181,22 +5185,35 @@ static char *translateArrayAppendLine(const char *lineStart,
         return NULL;
     }
 
-    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
-        !bufferAppend(&out, "setlength(") ||
-        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
-        !bufferAppend(&out, ", length(") ||
-        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
-        !bufferAppend(&out, ") + 1);\n") ||
-        !bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
-        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
-        !bufferAppend(&out, "[length(") ||
-        !bufferAppendN(&out, lhsStart, (size_t)(lhsEnd - lhsStart)) ||
-        !bufferAppend(&out, ") - 1] = ") ||
-        !bufferAppendN(&out, itemStart, (size_t)(itemEnd - itemStart)) ||
-        !bufferAppend(&out, ";")) {
+    rewrittenLhs = rewriteMethodScopedExpr(lhsStart, lhsEnd, typeState, isMethod);
+    rewrittenItem = rewriteMethodScopedExpr(itemStart, itemEnd, typeState, isMethod);
+    if (!rewrittenLhs || !rewrittenItem) {
+        free(rewrittenLhs);
+        free(rewrittenItem);
         free(out.data);
         return NULL;
     }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, "setlength(") ||
+        !bufferAppend(&out, rewrittenLhs) ||
+        !bufferAppend(&out, ", length(") ||
+        !bufferAppend(&out, rewrittenLhs) ||
+        !bufferAppend(&out, ") + 1);\n") ||
+        !bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, rewrittenLhs) ||
+        !bufferAppend(&out, "[length(") ||
+        !bufferAppend(&out, rewrittenLhs) ||
+        !bufferAppend(&out, ") - 1] = ") ||
+        !bufferAppend(&out, rewrittenItem) ||
+        !bufferAppend(&out, ";")) {
+        free(rewrittenLhs);
+        free(rewrittenItem);
+        free(out.data);
+        return NULL;
+    }
+    free(rewrittenLhs);
+    free(rewrittenItem);
     return out.data;
 }
 
@@ -5656,9 +5673,11 @@ static char *translateTypeFieldLine(const char *lineStart, const char *body, con
     }
 
     if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
-        !appendMappedType(&out, typeStart, typeEnd) ||
-        !bufferAppend(&out, " ") ||
-        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !appendMappedParamTypeAndName(&out,
+                                      typeStart,
+                                      typeEnd,
+                                      nameStart,
+                                      nameEnd) ||
         !bufferAppend(&out, ";")) {
         free(out.data);
         return NULL;
@@ -6235,7 +6254,11 @@ char *aetherRewriteSource(const char *source, const char *path) {
                        !isLineComment(body, lineEnd)) {
                 translated = translateTypeFieldLine(lineStart, body, lineEnd);
             } else {
-                translated = translateArrayAppendLine(lineStart, body, lineEnd);
+                translated = translateArrayAppendLine(lineStart,
+                                                     body,
+                                                     lineEnd,
+                                                     &typeState,
+                                                     fnState.active && fnState.isMethod);
                 if (!translated) {
                     translated = translateLineInMethod(lineStart,
                                                        lineEnd,

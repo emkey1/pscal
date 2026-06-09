@@ -3043,6 +3043,35 @@ static bool recordUsesExplicitFieldSlots(AST* recordType) {
     return recordType && recordType->type == AST_RECORD_TYPE && recordType->i_val > 0;
 }
 
+static void emitEmptyArrayLiteralForType(AST* targetType, BytecodeChunk* chunk, int line) {
+    AST* resolvedType = resolveTypeAlias(targetType);
+    AST* elementTypeNode = NULL;
+    VarType elementType = TYPE_UNKNOWN;
+    Value emptyArray;
+    int constIdx;
+
+    if (resolvedType && resolvedType->type == AST_TYPE_DECL && resolvedType->left) {
+        resolvedType = resolveTypeAlias(resolvedType->left);
+    }
+    if (resolvedType && resolvedType->type == AST_VAR_DECL && resolvedType->right) {
+        resolvedType = resolveTypeAlias(resolvedType->right);
+    }
+    if (resolvedType && resolvedType->type == AST_ARRAY_TYPE) {
+        elementTypeNode = resolveTypeAlias(resolvedType->right);
+        if (!elementTypeNode) {
+            elementTypeNode = resolvedType->right;
+        }
+        if (elementTypeNode) {
+            elementType = elementTypeNode->var_type;
+        }
+    }
+
+    emptyArray = makeEmptyArray(elementType, elementTypeNode);
+    constIdx = addConstantToChunk(chunk, &emptyArray);
+    freeValue(&emptyArray);
+    emitConstant(chunk, constIdx, line);
+}
+
 static int getLocalRecordFieldCount(AST* recordType) {
     recordType = resolveTypeAlias(recordType);
     if (!recordType || recordType->type != AST_RECORD_TYPE) return 0;
@@ -8173,7 +8202,13 @@ static void compileStatement(AST* node, BytecodeChunk* chunk, int current_line_a
                 }
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);
             } else {
-                compileRValue(rvalue, chunk, getLine(rvalue));
+                if (lvalue->var_type == TYPE_ARRAY &&
+                    rvalue && rvalue->type == AST_ARRAY_LITERAL &&
+                    rvalue->child_count == 0) {
+                    emitEmptyArrayLiteralForType(lvalue->type_def, chunk, getLine(rvalue));
+                } else {
+                    compileRValue(rvalue, chunk, getLine(rvalue));
+                }
                 maybeAutoBoxInterfaceForExpression(lvalue, rvalue, chunk, line, false);
 
                 if (current_function_compiler && current_function_compiler->returns_value &&
@@ -9963,7 +9998,13 @@ static void compileRValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 writeBytecodeChunk(chunk, SET_INDIRECT, line);            // [addr]
                 writeBytecodeChunk(chunk, GET_INDIRECT, line);            // [result]
             } else {
-                compileRValue(rvalue, chunk, getLine(rvalue));
+                if (lvalue->var_type == TYPE_ARRAY &&
+                    rvalue && rvalue->type == AST_ARRAY_LITERAL &&
+                    rvalue->child_count == 0) {
+                    emitEmptyArrayLiteralForType(lvalue->type_def, chunk, getLine(rvalue));
+                } else {
+                    compileRValue(rvalue, chunk, getLine(rvalue));
+                }
                 maybeAutoBoxInterfaceForExpression(lvalue, rvalue, chunk, line, true);
                 writeBytecodeChunk(chunk, DUP, line); // Preserve assigned value as the expression result
 
