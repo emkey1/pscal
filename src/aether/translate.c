@@ -411,6 +411,38 @@ static const char *findToonMarker(const char *lineStart, const char *lineEnd) {
     return NULL;
 }
 
+static const char *findLineCommentStartInRange(const char *start, const char *end) {
+    const char *cursor = start;
+    int inString = 0;
+    char quote = '\0';
+
+    while (cursor + 1 < end) {
+        if (inString) {
+            if (*cursor == '\\' && cursor + 1 < end) {
+                cursor += 2;
+                continue;
+            }
+            if (*cursor == quote) {
+                inString = 0;
+                quote = '\0';
+            }
+            cursor++;
+            continue;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            inString = 1;
+            quote = *cursor;
+            cursor++;
+            continue;
+        }
+        if (cursor[0] == '/' && cursor[1] == '/') {
+            return cursor;
+        }
+        cursor++;
+    }
+    return NULL;
+}
+
 static size_t leadingIndentWidth(const char *lineStart, const char *lineEnd) {
     const char *cursor = lineStart;
 
@@ -1336,6 +1368,12 @@ static char *inferAetherBindingTypeName(const char *exprStart,
 
     if (!exprStart || !exprEnd || exprEnd < exprStart) {
         return NULL;
+    }
+    {
+        const char *commentStart = findLineCommentStartInRange(trimmedStart, trimmedEnd);
+        if (commentStart) {
+            trimmedEnd = commentStart;
+        }
     }
     while (trimmedStart < trimmedEnd && isspace((unsigned char)*trimmedStart)) {
         trimmedStart++;
@@ -3240,6 +3278,12 @@ static char *translateInlineObjectInitMethodDeclLine(const char *lineStart,
 
     if (!lineStart || !indentStart || !nameStart || !nameEnd || !exprStart || !exprEnd) {
         return NULL;
+    }
+    {
+        const char *commentStart = findLineCommentStartInRange(exprStart, exprEnd);
+        if (commentStart) {
+            exprEnd = commentStart;
+        }
     }
     while (exprEnd > exprStart && isspace((unsigned char)exprEnd[-1])) {
         exprEnd--;

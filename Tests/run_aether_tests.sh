@@ -35,6 +35,7 @@ FUNCTION_RETURN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_return_i
 OBJECT_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_inference_pass.aether"
 STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
+INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -117,6 +118,7 @@ for fixture in \
     "$OBJECT_INFERENCE_PASS_FIXTURE" \
     "$STRING_LEN_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
+    "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -276,6 +278,12 @@ printf 'true\n' >/tmp/aether_inline_object_method_inference_expected.out
 if ! cmp -s /tmp/aether_inline_object_method_inference_expected.out /tmp/aether_inline_object_method_inference_pass.out; then
     echo "unexpected inline object method inference output" >&2
     cat /tmp/aether_inline_object_method_inference_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" >/tmp/aether_inline_object_method_inference_comment_pass.out
+if ! cmp -s /tmp/aether_inline_object_method_inference_expected.out /tmp/aether_inline_object_method_inference_comment_pass.out; then
+    echo "unexpected inline object method inference with comment output" >&2
+    cat /tmp/aether_inline_object_method_inference_comment_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null
