@@ -606,6 +606,7 @@ typedef struct FunctionContracts {
     int active;
     int bodyDepth;
     int isVoid;
+    int isMethod;
     char *name;
     char *postExpr;
 } FunctionContracts;
@@ -622,7 +623,16 @@ typedef struct TypeBlockState {
     int active;
     int bodyDepth;
     char *name;
+    char **fieldNames;
+    size_t fieldCount;
+    size_t fieldCap;
 } TypeBlockState;
+
+typedef struct ObjectInitState {
+    int active;
+    int bodyDepth;
+    char *targetName;
+} ObjectInitState;
 
 typedef struct JsonAliasState {
     int needed;
@@ -681,6 +691,7 @@ static void clearFunctionContracts(FunctionContracts *state) {
     state->active = 0;
     state->bodyDepth = 0;
     state->isVoid = 0;
+    state->isMethod = 0;
     state->name = NULL;
     state->postExpr = NULL;
 }
@@ -701,13 +712,32 @@ static void clearParBlockState(ParBlockState *state) {
 }
 
 static void clearTypeBlockState(TypeBlockState *state) {
+    size_t i;
+
     if (!state) {
         return;
     }
     free(state->name);
+    for (i = 0; i < state->fieldCount; i++) {
+        free(state->fieldNames[i]);
+    }
+    free(state->fieldNames);
     state->active = 0;
     state->bodyDepth = 0;
     state->name = NULL;
+    state->fieldNames = NULL;
+    state->fieldCount = 0;
+    state->fieldCap = 0;
+}
+
+static void clearObjectInitState(ObjectInitState *state) {
+    if (!state) {
+        return;
+    }
+    free(state->targetName);
+    state->active = 0;
+    state->bodyDepth = 0;
+    state->targetName = NULL;
 }
 
 static void freeAetherBindingTable(AetherBindingTable *table) {
@@ -894,6 +924,66 @@ static const char *findAetherFunctionReturnType(const AetherFunctionTable *table
         }
     }
     return NULL;
+}
+
+static int ensureTypeFieldCapacity(TypeBlockState *state, size_t extra) {
+    char **resized;
+    size_t need;
+    size_t newCap;
+
+    if (!state) {
+        return 0;
+    }
+    need = state->fieldCount + extra;
+    if (need <= state->fieldCap) {
+        return 1;
+    }
+    newCap = state->fieldCap ? state->fieldCap * 2 : 8;
+    while (newCap < need) {
+        newCap *= 2;
+    }
+    resized = (char **)realloc(state->fieldNames, newCap * sizeof(char *));
+    if (!resized) {
+        return 0;
+    }
+    state->fieldNames = resized;
+    state->fieldCap = newCap;
+    return 1;
+}
+
+static int typeBlockHasField(const TypeBlockState *state, const char *name, size_t len) {
+    size_t i;
+
+    if (!state || !name) {
+        return 0;
+    }
+    for (i = 0; i < state->fieldCount; i++) {
+        if (strlen(state->fieldNames[i]) == len &&
+            strncmp(state->fieldNames[i], name, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int recordTypeFieldName(TypeBlockState *state, const char *name, size_t len) {
+    char *copy;
+
+    if (!state || !name || len == 0) {
+        return 0;
+    }
+    if (typeBlockHasField(state, name, len)) {
+        return 1;
+    }
+    if (!ensureTypeFieldCapacity(state, 1)) {
+        return 0;
+    }
+    copy = dupRange(name, name + len);
+    if (!copy) {
+        return 0;
+    }
+    state->fieldNames[state->fieldCount++] = copy;
+    return 1;
 }
 
 static void freeToonLiteralTable(ToonLiteralTable *table) {
@@ -2564,6 +2654,88 @@ static char *buildContractIndent(const char *lineStart, const char *body) {
     return out.data;
 }
 
+static char *rewriteMethodScopedExpr(const char *start,
+                                     const char *end,
+                                     const TypeBlockState *typeState,
+                                     int isMethod) {
+    const char *cursor = start;
+    Buffer out = {0};
+
+    if (!start || !end || end < start) {
+        return NULL;
+    }
+    if (!isMethod || !typeState) {
+        return dupRange(start, end);
+    }
+
+    while (cursor < end) {
+        if (*cursor == '"' || *cursor == '\'') {
+            char quote = *cursor++;
+
+            if (!bufferAppendN(&out, cursor - 1, 1)) {
+                free(out.data);
+                return NULL;
+            }
+            while (cursor < end) {
+                if (!bufferAppendN(&out, cursor, 1)) {
+                    free(out.data);
+                    return NULL;
+                }
+                if (*cursor == '\\' && cursor + 1 < end) {
+                    cursor++;
+                    if (!bufferAppendN(&out, cursor, 1)) {
+                        free(out.data);
+                        return NULL;
+                    }
+                } else if (*cursor == quote) {
+                    cursor++;
+                    break;
+                }
+                cursor++;
+            }
+            continue;
+        }
+        if ((cursor == start || !isIdentifierChar((unsigned char)cursor[-1])) &&
+            (isalpha((unsigned char)*cursor) || *cursor == '_')) {
+            const char *nameStart = cursor;
+            const char *nameEnd = cursor + 1;
+            const char *afterName;
+
+            while (nameEnd < end && isIdentifierChar((unsigned char)*nameEnd)) {
+                nameEnd++;
+            }
+            afterName = skipSpacesInRange(nameEnd, end);
+            if ((size_t)(nameEnd - nameStart) == 4 &&
+                strncmp(nameStart, "self", 4) == 0) {
+                if (!bufferAppend(&out, "myself")) {
+                    free(out.data);
+                    return NULL;
+                }
+                cursor = nameEnd;
+                continue;
+            }
+            if ((cursor == start || cursor[-1] != '.') &&
+                !(afterName < end && *afterName == '(') &&
+                typeBlockHasField(typeState, nameStart, (size_t)(nameEnd - nameStart))) {
+                if (!bufferAppend(&out, "myself.") ||
+                    !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart))) {
+                    free(out.data);
+                    return NULL;
+                }
+                cursor = nameEnd;
+                continue;
+            }
+        }
+        if (!bufferAppendN(&out, cursor, 1)) {
+            free(out.data);
+            return NULL;
+        }
+        cursor++;
+    }
+
+    return out.data;
+}
+
 static int appendContractGuard(Buffer *out,
                                const char *indent,
                                const char *fnName,
@@ -2598,6 +2770,191 @@ static int isStandaloneCloseBrace(const char *body, const char *lineEnd) {
         tail--;
     }
     return tail == body + 1 && body < tail && *body == '}';
+}
+
+static int isStandaloneCloseBraceWithOptionalSemicolon(const char *body, const char *lineEnd) {
+    const char *tail = lineEnd;
+
+    while (tail > body && isspace((unsigned char)tail[-1])) {
+        tail--;
+    }
+    if (tail > body && tail[-1] == ';') {
+        tail--;
+    }
+    while (tail > body && isspace((unsigned char)tail[-1])) {
+        tail--;
+    }
+    return tail == body + 1 && body < tail && *body == '}';
+}
+
+static char *translateObjectInitFieldLine(const char *lineStart,
+                                          const char *body,
+                                          const char *lineEnd,
+                                          const char *targetName) {
+    const char *segmentEnd = lineEnd;
+    const char *fieldEnd = NULL;
+    const char *fieldNameEnd;
+    const char *valueStart;
+    const char *valueEnd;
+    const char *cursor = body;
+    int depth = 0;
+    Buffer out = {0};
+
+    if (!targetName || !*targetName) {
+        return dupRange(lineStart, lineEnd);
+    }
+    while (cursor < lineEnd) {
+        char ch = *cursor;
+        if (ch == '"' || ch == '\'') {
+            char quote = ch;
+            cursor++;
+            while (cursor < lineEnd) {
+                if (*cursor == '\\' && cursor + 1 < lineEnd) {
+                    cursor += 2;
+                    continue;
+                }
+                if (*cursor == quote) {
+                    cursor++;
+                    break;
+                }
+                cursor++;
+            }
+            continue;
+        }
+        if (ch == '(' || ch == '[' || ch == '{') {
+            depth++;
+        } else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) {
+            depth--;
+        } else if (ch == ':' && depth == 0) {
+            fieldEnd = cursor;
+            break;
+        }
+        cursor++;
+    }
+    if (!fieldEnd) {
+        return dupRange(lineStart, lineEnd);
+    }
+    fieldNameEnd = fieldEnd;
+    while (fieldNameEnd > body && isspace((unsigned char)fieldNameEnd[-1])) {
+        fieldNameEnd--;
+    }
+    valueStart = skipSpaces(fieldEnd + 1);
+    while (segmentEnd > valueStart && isspace((unsigned char)segmentEnd[-1])) {
+        segmentEnd--;
+    }
+    if (segmentEnd > valueStart && segmentEnd[-1] == ',') {
+        segmentEnd--;
+    }
+    valueEnd = segmentEnd;
+    while (valueEnd > valueStart && isspace((unsigned char)valueEnd[-1])) {
+        valueEnd--;
+    }
+    if (fieldNameEnd == body || valueEnd == valueStart) {
+        return dupRange(lineStart, lineEnd);
+    }
+
+    if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+        !bufferAppend(&out, targetName) ||
+        !bufferAppend(&out, ".") ||
+        !bufferAppendN(&out, body, (size_t)(fieldNameEnd - body)) ||
+        !bufferAppend(&out, " = ") ||
+        !bufferAppendN(&out, valueStart, (size_t)(valueEnd - valueStart)) ||
+        !bufferAppend(&out, ";")) {
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
+}
+
+static char *translateMultiLineTypedObjectInitOpenLine(const char *lineStart,
+                                                       const char *body,
+                                                       const char *lineEnd,
+                                                       ObjectInitState *state) {
+    const char *cursor = body + 3;
+    const char *nameStart;
+    const char *nameEnd;
+    const char *colon;
+    const char *afterColon;
+    const char *typeEnd;
+    const char *equals;
+    const char *exprStart;
+    const char *initNameEnd;
+    const char *openBrace;
+    const char *closeBrace;
+    const char *typeNameStart;
+    const char *typeNameEnd;
+    Buffer out = {0};
+
+    if (!startsWithWord(body, lineEnd, "let")) {
+        return NULL;
+    }
+    cursor = skipSpaces(cursor);
+    nameStart = cursor;
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    cursor = skipSpaces(cursor);
+    if (cursor >= lineEnd || *cursor != ':') {
+        return NULL;
+    }
+    colon = cursor;
+    afterColon = skipSpaces(colon + 1);
+    typeEnd = afterColon;
+    while (typeEnd < lineEnd && *typeEnd != '=' && *typeEnd != ';') {
+        typeEnd++;
+    }
+    while (typeEnd > afterColon && isspace((unsigned char)typeEnd[-1])) {
+        typeEnd--;
+    }
+    equals = skipSpaces(typeEnd);
+    if (equals >= lineEnd || *equals != '=') {
+        return NULL;
+    }
+    exprStart = skipSpaces(equals + 1);
+    initNameEnd = exprStart;
+    while (initNameEnd < lineEnd && (isalnum((unsigned char)*initNameEnd) || *initNameEnd == '_')) {
+        initNameEnd++;
+    }
+    openBrace = skipSpaces(initNameEnd);
+    if (!(openBrace < lineEnd && *openBrace == '{')) {
+        return NULL;
+    }
+    closeBrace = findLastCharInRange(openBrace + 1, lineEnd, '}');
+    if (closeBrace) {
+        return NULL;
+    }
+    typeNameStart = afterColon;
+    typeNameEnd = typeEnd;
+    while (typeNameStart < typeNameEnd && isspace((unsigned char)*typeNameStart)) {
+        typeNameStart++;
+    }
+    while (typeNameEnd > typeNameStart && isspace((unsigned char)typeNameEnd[-1])) {
+        typeNameEnd--;
+    }
+    if ((size_t)(typeNameEnd - typeNameStart) != (size_t)(initNameEnd - exprStart) ||
+        strncmp(typeNameStart, exprStart, (size_t)(typeNameEnd - typeNameStart)) != 0) {
+        return NULL;
+    }
+    if (!state) {
+        return NULL;
+    }
+    clearObjectInitState(state);
+    state->targetName = dupRange(nameStart, nameEnd);
+    if (!state->targetName) {
+        return NULL;
+    }
+    if (!appendMappedType(&out, afterColon, typeEnd) ||
+        !bufferAppend(&out, " ") ||
+        !bufferAppendN(&out, nameStart, (size_t)(nameEnd - nameStart)) ||
+        !bufferAppend(&out, " = new ") ||
+        !bufferAppendN(&out, exprStart, (size_t)(initNameEnd - exprStart)) ||
+        !bufferAppend(&out, "();")) {
+        clearObjectInitState(state);
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
 }
 
 static int isParallelCallStatement(const char *body, const char *lineEnd) {
@@ -2664,12 +3021,14 @@ static char *translateParallelCallLine(const char *lineStart,
 static char *translateReturnWithPost(const char *lineStart,
                                      const char *body,
                                      const char *lineEnd,
-                                     const FunctionContracts *fnState) {
+                                     const FunctionContracts *fnState,
+                                     const TypeBlockState *typeState) {
     const char *cursor = body + 3;
     const char *exprStart;
     const char *exprEnd;
     Buffer out = {0};
     char *indent = NULL;
+    char *rewrittenExpr = NULL;
 
     if (!fnState || !fnState->postExpr) {
         return dupRange(lineStart, lineEnd);
@@ -2696,10 +3055,17 @@ static char *translateReturnWithPost(const char *lineStart,
     }
 
     if (exprStart < exprEnd) {
+        rewrittenExpr = rewriteMethodScopedExpr(exprStart, exprEnd, typeState, fnState->isMethod);
+        if (!rewrittenExpr) {
+            free(indent);
+            free(out.data);
+            return NULL;
+        }
         if (!bufferAppend(&out, indent) ||
             !bufferAppend(&out, "result = ") ||
-            !bufferAppendN(&out, exprStart, (size_t)(exprEnd - exprStart)) ||
+            !bufferAppend(&out, rewrittenExpr) ||
             !bufferAppend(&out, ";\n")) {
+            free(rewrittenExpr);
             free(indent);
             free(out.data);
             return NULL;
@@ -2712,10 +3078,12 @@ static char *translateReturnWithPost(const char *lineStart,
     }
     if (!bufferAppend(&out, indent) ||
         !bufferAppend(&out, exprStart < exprEnd ? "return result;" : "return;")) {
+        free(rewrittenExpr);
         free(indent);
         free(out.data);
         return NULL;
     }
+    free(rewrittenExpr);
     free(indent);
     return out.data;
 }
@@ -3649,6 +4017,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     FunctionContracts fnState = {0};
     ParBlockState parState = {0};
     TypeBlockState typeState = {0};
+    ObjectInitState objectInitState = {0};
     JsonAliasState jsonState = {0};
     AetherBindingTable bindingTable = {0};
     AetherFunctionTable functionTable = {0};
@@ -3673,6 +4042,8 @@ char *aetherRewriteSource(const char *source, const char *path) {
         const char *body;
         char *translated = NULL;
         int lineDelta = 0;
+        int braceDeltaOverrideSet = 0;
+        int braceDeltaOverride = 0;
 
         while (*lineEnd && *lineEnd != '\n') {
             lineEnd++;
@@ -3699,7 +4070,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
         maybeRecordAetherFunctionReturnType(&functionTable, body, lineEnd, NULL, typeState.name);
         maybeRecordAetherBindingType(&bindingTable, body, lineEnd, &functionTable);
 
-        if (fnState.active && fnState.postExpr && braceDepth == fnState.bodyDepth) {
+        if (fnState.active && fnState.postExpr && fnState.isVoid && braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
                 char *indent = dupRange(lineStart, body);
                 size_t outLenBefore = out.len;
@@ -3807,6 +4178,18 @@ char *aetherRewriteSource(const char *source, const char *path) {
             }
         }
 
+        if (!translated &&
+            objectInitState.active &&
+            braceDepth == objectInitState.bodyDepth) {
+            if (isStandaloneCloseBraceWithOptionalSemicolon(body, lineEnd)) {
+                translated = dupCString("");
+                braceDeltaOverrideSet = 1;
+                braceDeltaOverride = -1;
+            } else if (body < lineEnd && !isLineComment(body, lineEnd)) {
+                translated = translateObjectInitFieldLine(lineStart, body, lineEnd, objectInitState.targetName);
+            }
+        }
+
         if (startsWithWord(body, lineEnd, "@pre")) {
             char *expr = extractAnnotationExpr(body, lineEnd, "@pre");
             pending.preExpr = appendContractExpr(pending.preExpr, expr);
@@ -3844,8 +4227,25 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     return NULL;
                 }
                 translated = parOpen.data;
+            } else if (startsWithWord(body, lineEnd, "let")) {
+                translated = translateMultiLineTypedObjectInitOpenLine(lineStart,
+                                                                       body,
+                                                                       lineEnd,
+                                                                       &objectInitState);
+                if (translated) {
+                    braceDeltaOverrideSet = 1;
+                    braceDeltaOverride = 1;
+                } else {
+                    translated = translateLine(lineStart,
+                                               lineEnd,
+                                               &jsonState,
+                                               &bindingTable,
+                                               &functionTable,
+                                               path,
+                                               lineNumber);
+                }
             } else if (fnState.active && fnState.postExpr && startsWithWord(body, lineEnd, "ret")) {
-                translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState);
+                translated = translateReturnWithPost(lineStart, body, lineEnd, &fnState, &typeState);
             } else if (typeState.active &&
                        isTypeFieldDeclarationLine(body, lineEnd) &&
                        !startsWithWord(body, lineEnd, "fn") &&
@@ -3934,7 +4334,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             free(out.data);
             return NULL;
         }
-        lineDelta = braceDeltaForLine(translated);
+        lineDelta = braceDeltaOverrideSet ? braceDeltaOverride : braceDeltaForLine(translated);
 
         if (startsWithWord(body, lineEnd, "par") && findCharInRange(body, lineEnd, '{') != NULL) {
             clearParBlockState(&parState);
@@ -3957,6 +4357,11 @@ char *aetherRewriteSource(const char *source, const char *path) {
             }
         }
 
+        if (braceDeltaOverrideSet && braceDeltaOverride > 0 && objectInitState.targetName) {
+            objectInitState.active = 1;
+            objectInitState.bodyDepth = braceDepth + braceDeltaOverride;
+        }
+
         if (startsWithWord(body, lineEnd, "fn")) {
             char *fnName = NULL;
             char *returnType = NULL;
@@ -3976,6 +4381,8 @@ char *aetherRewriteSource(const char *source, const char *path) {
             }
 
             if ((pending.preExpr || pending.postExpr) && lineDelta > 0) {
+                char *methodPreExpr = NULL;
+                char *methodPostExpr = NULL;
                 char *indent = buildContractIndent(lineStart, body);
                 size_t outLenBefore = out.len;
                 if (!indent) {
@@ -3993,8 +4400,61 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(out.data);
                     return NULL;
                 }
+                if (typeState.active) {
+                    if (pending.preExpr) {
+                        methodPreExpr = rewriteMethodScopedExpr(pending.preExpr,
+                                                                pending.preExpr + strlen(pending.preExpr),
+                                                                &typeState,
+                                                                1);
+                        if (!methodPreExpr) {
+                            free(indent);
+                            free(fnName);
+                            free(returnType);
+                            free(translated);
+                            freePendingContracts(&pending);
+                            clearFunctionContracts(&fnState);
+                            clearParBlockState(&parState);
+                            clearTypeBlockState(&typeState);
+                            freeAetherBindingTable(&bindingTable);
+                            freeAetherFunctionTable(&functionTable);
+                            freeToonLiteralTable(&toonTable);
+                            free(preprocessed);
+                            free(out.data);
+                            return NULL;
+                        }
+                    }
+                    if (pending.postExpr) {
+                        methodPostExpr = rewriteMethodScopedExpr(pending.postExpr,
+                                                                 pending.postExpr + strlen(pending.postExpr),
+                                                                 &typeState,
+                                                                 1);
+                        if (!methodPostExpr) {
+                            free(methodPreExpr);
+                            free(indent);
+                            free(fnName);
+                            free(returnType);
+                            free(translated);
+                            freePendingContracts(&pending);
+                            clearFunctionContracts(&fnState);
+                            clearParBlockState(&parState);
+                            clearTypeBlockState(&typeState);
+                            freeAetherBindingTable(&bindingTable);
+                            freeAetherFunctionTable(&functionTable);
+                            freeToonLiteralTable(&toonTable);
+                            free(preprocessed);
+                            free(out.data);
+                            return NULL;
+                        }
+                    }
+                }
                 if (pending.preExpr &&
-                    !appendContractGuard(&out, indent, fnName, "pre", pending.preExpr)) {
+                    !appendContractGuard(&out,
+                                         indent,
+                                         fnName,
+                                         "pre",
+                                         methodPreExpr ? methodPreExpr : pending.preExpr)) {
+                    free(methodPreExpr);
+                    free(methodPostExpr);
                     free(indent);
                     free(fnName);
                     free(returnType);
@@ -4012,6 +4472,8 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 }
                 if (pending.preExpr &&
                     !trackRewriteOutputLines(out.data + outLenBefore, &outputLineNumber, lineNumber)) {
+                    free(methodPreExpr);
+                    free(methodPostExpr);
                     free(indent);
                     free(fnName);
                     free(returnType);
@@ -4028,12 +4490,20 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     return NULL;
                 }
                 free(indent);
+                if (methodPostExpr) {
+                    free(pending.postExpr);
+                    pending.postExpr = methodPostExpr;
+                    methodPostExpr = NULL;
+                }
+                free(methodPreExpr);
+                free(methodPostExpr);
             }
 
             clearFunctionContracts(&fnState);
             fnState.active = lineDelta > 0;
             fnState.bodyDepth = braceDepth + lineDelta;
             fnState.isVoid = returnType && strcmp(returnType, "Void") == 0;
+            fnState.isMethod = typeState.active;
             fnState.name = fnName;
             fnState.postExpr = pending.postExpr
                                    ? dupRange(pending.postExpr,
@@ -4068,6 +4538,26 @@ char *aetherRewriteSource(const char *source, const char *path) {
             typeState.active = 1;
             typeState.bodyDepth = braceDepth + lineDelta;
             typeState.name = extractTypeNameFromLine(body, lineEnd);
+        } else if (typeState.active && isTypeFieldDeclarationLine(body, lineEnd)) {
+            const char *fieldEnd = body;
+
+            while (fieldEnd < lineEnd &&
+                   (isalnum((unsigned char)*fieldEnd) || *fieldEnd == '_')) {
+                fieldEnd++;
+            }
+            if (fieldEnd > body &&
+                !recordTypeFieldName(&typeState, body, (size_t)(fieldEnd - body))) {
+                freePendingContracts(&pending);
+                clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
+                freeAetherFunctionTable(&functionTable);
+                freeToonLiteralTable(&toonTable);
+                free(preprocessed);
+                free(out.data);
+                return NULL;
+            }
         }
         braceDepth += lineDelta;
         if (fnState.active && braceDepth < fnState.bodyDepth) {
@@ -4075,6 +4565,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
         }
         if (parState.active && braceDepth < parState.bodyDepth) {
             clearParBlockState(&parState);
+        }
+        if (objectInitState.active && braceDepth < objectInitState.bodyDepth) {
+            clearObjectInitState(&objectInitState);
         }
         if (typeState.active && braceDepth < typeState.bodyDepth) {
             clearTypeBlockState(&typeState);
@@ -4085,6 +4578,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     freePendingContracts(&pending);
     clearFunctionContracts(&fnState);
     clearParBlockState(&parState);
+    clearObjectInitState(&objectInitState);
     clearTypeBlockState(&typeState);
     freeAetherBindingTable(&bindingTable);
     freeAetherFunctionTable(&functionTable);

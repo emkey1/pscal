@@ -47,6 +47,7 @@ MODULE_CONST_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_const_import_pas
 TOON_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_block_pass.aether"
 TYPE_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_block_pass.aether"
 TYPE_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_pass.aether"
+TYPE_METHOD_CONTRACTS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_method_contracts_pass.aether"
 SELF_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_alias_pass.aether"
 SELF_MUTATION_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_mutation_pass.aether"
 TOON_JSON_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_json_helpers_pass.aether"
@@ -126,6 +127,7 @@ for fixture in \
     "$TOON_BLOCK_PASS_FIXTURE" \
     "$TYPE_BLOCK_PASS_FIXTURE" \
     "$TYPE_INIT_PASS_FIXTURE" \
+    "$TYPE_METHOD_CONTRACTS_PASS_FIXTURE" \
     "$SELF_ALIAS_PASS_FIXTURE" \
     "$SELF_MUTATION_PASS_FIXTURE" \
     "$TOON_JSON_HELPERS_PASS_FIXTURE" \
@@ -314,6 +316,13 @@ fi
 if ! grep -qx "42" /tmp/aether_type_init_pass.out; then
     echo "unexpected type init output" >&2
     cat /tmp/aether_type_init_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TYPE_METHOD_CONTRACTS_PASS_FIXTURE" >/tmp/aether_type_method_contracts_pass.out
+printf 'circle=78.539816\nrect=24.000000\n' >/tmp/aether_type_method_contracts_expected.out
+if ! cmp -s /tmp/aether_type_method_contracts_expected.out /tmp/aether_type_method_contracts_pass.out; then
+    echo "unexpected type method contract output" >&2
+    cat /tmp/aether_type_method_contracts_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$SELF_ALIAS_PASS_FIXTURE" >/tmp/aether_self_alias_pass.out

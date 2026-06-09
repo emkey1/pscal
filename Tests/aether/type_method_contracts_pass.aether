@@ -1,0 +1,42 @@
+const PI: Real = 3.14159265;
+
+type Circle {
+    radius: Real;
+
+    @pre radius > 0.0
+    @post result > 0.0
+    fn area() -> Real {
+        ret PI * self.radius * self.radius;
+    }
+}
+
+type Rectangle {
+    width: Real;
+    height: Real;
+
+    @pre width > 0.0
+    @pre height > 0.0
+    @post result > 0.0
+    fn area() -> Real {
+        ret self.width * self.height;
+    }
+}
+
+fn main() -> Void {
+    let circle = new Circle();
+    circle.radius = 5.0;
+
+    let rect: Rectangle = Rectangle {
+        width: 4.0,
+        height: 6.0
+    };
+
+    let circleArea: Real = circle.area();
+    let rectArea: Real = rect.area();
+
+    fx {
+        println("circle=", circleArea);
+        println("rect=", rectArea);
+    }
+    ret;
+}
