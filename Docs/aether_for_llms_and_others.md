@@ -508,8 +508,12 @@ Do not call extension-style helpers like plain free functions:
 
 ```aether
 counter.bump();     // good
-bump(counter);      // wrong in Aether today
+bump(counter);      // also accepted when the receiver type is obvious
 ```
+
+If Aether can prove the first argument is the receiver, it rewrites the free
+call to method form. When in doubt, method form is still the clearest source
+style for both humans and LLMs.
 
 ### Object creation
 
@@ -551,7 +555,7 @@ fx {
 Important details:
 
 - `length(xs)` is the compact array-length helper
-- `len(xs)` is not an Aether helper
+- `len(xs)` is accepted as a compact alias for `length(xs)`
 - `xs = xs + [value]` is the supported compact append pattern
 - `let xs: Int[] = [];` is supported
 

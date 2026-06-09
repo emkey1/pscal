@@ -239,6 +239,7 @@ static char *resolveRelativePath(const char *sourcePath, const char *importPath)
 static int startsWithWord(const char *body, const char *lineEnd, const char *word);
 static int braceDeltaForLine(const char *line);
 static void freeTupleItemTypes(char **items, size_t count);
+static char *extractSelfReceiverTypeName(const char *paramsStart, const char *paramsEnd);
 
 static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
     const char *cursor;
@@ -2310,6 +2311,7 @@ static void maybeRecordAetherFunctionReturnType(AetherFunctionTable *table,
     char qualifiedName[512];
     char *fnName = NULL;
     char *returnType = NULL;
+    char *receiverType = NULL;
 
     if (!table || !body || !lineEnd) {
         return;
@@ -2356,8 +2358,61 @@ static void maybeRecordAetherFunctionReturnType(AetherFunctionTable *table,
         snprintf(qualifiedName, sizeof(qualifiedName), "%s.%s", typeName, fnName) < (int)sizeof(qualifiedName)) {
         setAetherFunctionReturnType(table, qualifiedName, returnType);
     }
+    receiverType = extractSelfReceiverTypeName(paramsOpen + 1, paramsClose);
+    if (receiverType &&
+        snprintf(qualifiedName, sizeof(qualifiedName), "%s.%s", receiverType, fnName) < (int)sizeof(qualifiedName)) {
+        setAetherFunctionReturnType(table, qualifiedName, returnType);
+    }
+    free(receiverType);
     free(fnName);
     free(returnType);
+}
+
+static char *extractSelfReceiverTypeName(const char *paramsStart, const char *paramsEnd) {
+    const char *cursor;
+    const char *nameStart;
+    const char *nameEnd;
+    const char *colon;
+    const char *typeStart;
+    const char *typeEnd;
+    int depth = 0;
+
+    if (!paramsStart || !paramsEnd || paramsEnd <= paramsStart) {
+        return NULL;
+    }
+    cursor = skipSpacesInRange(paramsStart, paramsEnd);
+    nameStart = cursor;
+    while (cursor < paramsEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    nameEnd = cursor;
+    cursor = skipSpacesInRange(cursor, paramsEnd);
+    if (nameEnd == nameStart || cursor >= paramsEnd || *cursor != ':') {
+        return NULL;
+    }
+    if (!(((size_t)(nameEnd - nameStart) == 4 && strncmp(nameStart, "self", 4) == 0) ||
+          ((size_t)(nameEnd - nameStart) == 6 && strncmp(nameStart, "myself", 6) == 0) ||
+          ((size_t)(nameEnd - nameStart) == 2 && strncmp(nameStart, "my", 2) == 0))) {
+        return NULL;
+    }
+    colon = cursor;
+    typeStart = skipSpacesInRange(colon + 1, paramsEnd);
+    typeEnd = typeStart;
+    while (typeEnd < paramsEnd) {
+        char ch = *typeEnd;
+        if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+            depth++;
+        } else if ((ch == ')' || ch == ']' || ch == '}' || ch == '>') && depth > 0) {
+            depth--;
+        } else if (ch == ',' && depth == 0) {
+            break;
+        }
+        typeEnd++;
+    }
+    while (typeEnd > typeStart && isspace((unsigned char)typeEnd[-1])) {
+        typeEnd--;
+    }
+    return trimmedCopy(typeStart, typeEnd);
 }
 
 static char *extractUsePathLiteral(const char *body, const char *lineEnd) {
@@ -2718,6 +2773,9 @@ static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t n
     if (nameLen == 10 && strncmp(nameStart, "string_len", nameLen) == 0) {
         return bufferAppend(out, "length");
     }
+    if (nameLen == 3 && strncmp(nameStart, "len", nameLen) == 0) {
+        return bufferAppend(out, "length");
+    }
     return 0;
 }
 
@@ -2760,6 +2818,112 @@ static int appendAetherCapabilityAlias(Buffer *out,
         return 1;
     }
     return 0;
+}
+
+static int appendAetherExtensionCallRewrite(Buffer *out,
+                                            const char *nameStart,
+                                            size_t nameLen,
+                                            const char *openParen,
+                                            const char *lineEnd,
+                                            const AetherBindingTable *bindings,
+                                            const AetherFunctionTable *functions,
+                                            const char **outCursor) {
+    const char *closeParen;
+    const char *argStart;
+    const char *argEnd;
+    const char *comma = NULL;
+    const char *scan;
+    int depth = 0;
+    char *receiverType = NULL;
+    char qualifiedName[512];
+    const char *resolvedReturnType;
+
+    if (!out || !nameStart || !openParen || *openParen != '(' || !lineEnd ||
+        !bindings || !functions || !outCursor) {
+        return 0;
+    }
+    closeParen = findMatchingCloseParen(openParen, lineEnd);
+    if (!closeParen) {
+        return 0;
+    }
+    argStart = skipSpacesInRange(openParen + 1, closeParen);
+    if (argStart >= closeParen) {
+        return 0;
+    }
+
+    scan = argStart;
+    while (scan < closeParen) {
+        char ch = *scan;
+
+        if (ch == '"' || ch == '\'') {
+            char quote = ch;
+            scan++;
+            while (scan < closeParen) {
+                if (*scan == '\\' && scan + 1 < closeParen) {
+                    scan += 2;
+                    continue;
+                }
+                if (*scan == quote) {
+                    scan++;
+                    break;
+                }
+                scan++;
+            }
+            continue;
+        }
+        if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
+            depth++;
+        } else if ((ch == ')' || ch == ']' || ch == '}' || ch == '>') && depth > 0) {
+            depth--;
+        } else if (ch == ',' && depth == 0) {
+            comma = scan;
+            break;
+        }
+        scan++;
+    }
+    argEnd = comma ? comma : closeParen;
+    while (argEnd > argStart && isspace((unsigned char)argEnd[-1])) {
+        argEnd--;
+    }
+    receiverType = inferAetherBindingTypeName(argStart, argEnd, bindings, functions);
+    if (!receiverType) {
+        return 0;
+    }
+    if (snprintf(qualifiedName, sizeof(qualifiedName), "%s.%.*s",
+                 receiverType, (int)nameLen, nameStart) >= (int)sizeof(qualifiedName)) {
+        free(receiverType);
+        return 0;
+    }
+    resolvedReturnType = findAetherFunctionReturnType(functions,
+                                                      qualifiedName,
+                                                      strlen(qualifiedName));
+    free(receiverType);
+    if (!resolvedReturnType) {
+        return 0;
+    }
+
+    if (!bufferAppendN(out, argStart, (size_t)(argEnd - argStart)) ||
+        !bufferAppend(out, ".") ||
+        !bufferAppendN(out, nameStart, nameLen) ||
+        !bufferAppend(out, "(")) {
+        return 0;
+    }
+    if (comma) {
+        const char *restStart = skipSpacesInRange(comma + 1, closeParen);
+        const char *restEnd = closeParen;
+
+        while (restEnd > restStart && isspace((unsigned char)restEnd[-1])) {
+            restEnd--;
+        }
+        if (restEnd > restStart && !bufferAppendN(out, restStart, (size_t)(restEnd - restStart))) {
+            return 0;
+        }
+    }
+    if (!bufferAppend(out, ")")) {
+        return 0;
+    }
+    *outCursor = closeParen + 1;
+    return 1;
 }
 
 static const char *toonScalarGetterForName(const char *nameStart, size_t nameLen) {
@@ -5654,6 +5818,19 @@ static char *translateLine(const char *lineStart,
                                             (size_t)(nameEnd - nameStart),
                                             skipSpacesInRange(nameEnd, lineEnd),
                                             &advancedCursor)) {
+                body = advancedCursor;
+                continue;
+            }
+            if (nameEnd < lineEnd &&
+                *skipSpacesInRange(nameEnd, lineEnd) == '(' &&
+                appendAetherExtensionCallRewrite(&out,
+                                                 nameStart,
+                                                 (size_t)(nameEnd - nameStart),
+                                                 skipSpacesInRange(nameEnd, lineEnd),
+                                                 lineEnd,
+                                                 bindings,
+                                                 functions,
+                                                 &advancedCursor)) {
                 body = advancedCursor;
                 continue;
             }

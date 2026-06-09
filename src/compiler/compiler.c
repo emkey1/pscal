@@ -5597,7 +5597,7 @@ static void compileLValue(AST* node, BytecodeChunk* chunk, int current_line_appr
                 break;
             }
 
-            if (node->token && node->token->value) {
+            if (!node->left && node->token && node->token->value) {
                 Value* const_ptr = findCompilerConstant(node->token->value);
                 if (const_ptr) {
                     fprintf(stderr,
