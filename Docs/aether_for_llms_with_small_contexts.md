@@ -1,0 +1,293 @@
+# Aether for LLMs with Small Contexts
+
+Maintenance note:
+
+- this is the compact companion to
+  `Docs/aether_for_llms_and_others.md`
+- keep this file short and rule-focused
+- refresh it whenever the full document changes
+
+## Purpose
+
+Aether is a compact front end for PSCAL.
+
+- it uses the existing PSCAL backend, bytecode compiler, and VM
+- it is not a separate runtime
+- prefer valid, explicit, compact code over clever code
+
+## Golden rules
+
+1. Every `print(...)`, `println(...)`, task helper call, and `ai_chat(...)`
+   call must be inside `fx { ... }`.
+2. Never invent `use "..."` imports. Only import verified modules.
+3. Treat `ToonDoc` and `ToonNode` as opaque handles.
+4. If inference is not obviously safe, add the type explicitly.
+5. Put `@pre`, `@post`, `@pure`, and `@cost` above the function, never inside it.
+
+## Core syntax
+
+```aether
+fn add(a: Int, b: Int) -> Int {
+    ret a + b;
+}
+```
+
+```aether
+let count: Int = 0;
+const Name: Text = "Aether";
+```
+
+```aether
+if score >= 90 {
+    ret "ready";
+}
+```
+
+```aether
+loop i in 0..count {
+    fx {
+        println(i);
+    }
+}
+```
+
+```aether
+type Counter {
+    value: Int;
+
+    fn bump() -> Int {
+        self.value = self.value + 1;
+        ret self.value;
+    }
+}
+```
+
+## Safe inference
+
+Safe patterns:
+
+- `let x = 42;`
+- `let x = 3.5;`
+- `let x = "text";`
+- `let x = true;`
+- `let x = new Type();`
+- `let x = knownFunction(...);`
+- `let x = knownTypedValue.method(...);`
+
+Prefer explicit types for:
+
+- TOON handles and extracted TOON values
+- branchy results when the final type is not visually obvious
+- public examples where clarity matters
+
+## Effects
+
+Good:
+
+```aether
+fn main() -> Void {
+    fx {
+        println("hello");
+    }
+    ret;
+}
+```
+
+Bad:
+
+```aether
+fn main() -> Void {
+    println("hello");
+    ret;
+}
+```
+
+## Printing and real formatting
+
+- `print(...)` and `println(...)` are preferred for mixed-type output
+- prefer `println(a, b, c)` over string-building with `+`
+
+Real formatting:
+
+```aether
+println(value);      // default backend format, usually 6 decimals
+println(value:0:2);  // 2 decimals
+println(value:8:3);  // width 8, precision 3
+```
+
+Division rule:
+
+- `a / b` with `Int` operands behaves like integer-style arithmetic
+- for real-valued results, force a `Real` operand:
+
+```aether
+let pct: Real = ok * 100.0 / total;
+```
+
+## Inline conditional expressions
+
+Supported on the right-hand side of declarations, assignments, and returns:
+
+```aether
+let score: Int = if count > 0 { total / count } else { 0 };
+```
+
+## Text equality
+
+Preferred:
+
+```aether
+if name == "Aether" {
+    ret true;
+}
+```
+
+Also accepted:
+
+```aether
+if string_eq(name, "Aether") {
+    ret true;
+}
+```
+
+## TOON rules
+
+Use:
+
+- `ToonDoc` for parsed documents
+- `ToonNode` for nodes
+
+Common helpers:
+
+- `has_toon()`
+- `toon_parse(text)`
+- `toon_parse_file(path)`
+- `toon_root(doc)`
+- `toon_close(doc)`
+- `toon_key(node, key)`
+- `toon_at(node, index)`
+- `toon_len(node)`
+- `toon_get_text(...)`
+- `toon_get_int(...)`
+- `toon_get_real(...)`
+- `toon_get_bool(...)`
+- `_or` fallback variants
+
+Never:
+
+- do arithmetic on `ToonDoc` or `ToonNode`
+- assign `ToonDoc` where `ToonNode` is expected
+- assign `ToonNode` where `ToonDoc` is expected
+
+Safe pattern:
+
+```aether
+let doc: ToonDoc = toon_parse(payload);
+let root: ToonNode = toon_root(doc);
+let name: Text = toon_get_text(root, "name");
+toon_close(doc);
+```
+
+Important nested-lookup rule:
+
+- `_or` helpers only protect the final lookup
+- they do not make the entire chain safe
+
+Unsafe:
+
+```aether
+let code: Text = toon_get_text_or(toon_key(toon_at(root, i), "meta"), "code", "EMPTY");
+```
+
+Safer:
+
+```aether
+let row: ToonNode = toon_at(root, i);
+let code: Text = "EMPTY";
+
+if toon_has_key(row, "meta") {
+    let meta: ToonNode = toon_key(row, "meta");
+    code = toon_get_text_or(meta, "code", "EMPTY");
+}
+```
+
+## Imports
+
+- only use `use "..."` for real, verified modules
+- never invent `use "helpers";` or similar support modules
+- if no module is provided, keep the example self-contained
+
+## Tuples
+
+Supported narrowly:
+
+```aether
+fn pair() -> (Int, Int) {
+    ret (1, 2);
+}
+
+let (a, b) = pair();
+```
+
+Do not do this:
+
+```aether
+let value = pair();
+```
+
+## Copyable templates
+
+Pure helper plus effectful main:
+
+```aether
+@pure
+fn transform(value: Int) -> Int {
+    ret value + 1;
+}
+
+fn main() -> Void {
+    let answer: Int = transform(41);
+    fx {
+        println("answer = ", answer);
+    }
+    ret;
+}
+```
+
+TOON-driven program:
+
+```aether
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"name\":\"Aether\"}");
+    let root: ToonNode = toon_root(doc);
+    let name: Text = toon_get_text(root, "name");
+
+    fx {
+        println("name = ", name);
+    }
+
+    toon_close(doc);
+    ret;
+}
+```
+
+## Validation checklist
+
+- all `print(...)` and `println(...)` calls are inside `fx { ... }`
+- all task helper calls and `ai_chat(...)` calls are inside `fx { ... }`
+- all imports reference verified modules
+- all function parameters have explicit types
+- no arithmetic is performed on `ToonDoc` or `ToonNode`
+- `ToonDoc` values are closed with `toon_close(doc)`
+- TOON keys are `Text` and indexes are `Int`
+- decimal arithmetic uses a `Real` operand when needed
+- decimal output uses `value:width:precision` when formatting matters
+- tuple-return calls are destructured directly
+- annotations are above the function, not inside it

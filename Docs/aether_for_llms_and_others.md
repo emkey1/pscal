@@ -1,5 +1,12 @@
 # Aether for Humans and LLMs
 
+Maintenance note:
+
+- this is the full reference version
+- keep it human-usable
+- when this file changes, also refresh
+  `Docs/aether_for_llms_with_small_contexts.md` in the same commit
+
 This is the practical guide to reading and writing Aether code as it exists
 today in this repository.
 
@@ -22,6 +29,12 @@ Write Aether like this:
 - use `length(arrayValue)` for dynamic array length, not `len(...)`
 - use `ToonDoc` and `ToonNode` for structured TOON/JSON-style data
 - use the examples under `Examples/aether/` as the ground truth for style
+
+Golden rule:
+
+- every `print(...)`, `println(...)`, task helper call, and AI helper call
+  must be inside `fx { ... }`
+- this is a compile-time rule, not just a style preference
 
 Do not write Aether like this:
 
@@ -160,6 +173,22 @@ Inference also works in some common Aether-specific cases:
   including pointer-backed record values returned from helpers
 
 If inference is not obviously safe, add the type explicitly.
+
+For LLMs, these are the safe inference patterns to rely on:
+
+- `let x = 42;`
+- `let x = 3.5;`
+- `let x = "text";`
+- `let x = true;`
+- `let x = new Type();`
+- `let x = knownFunction(...);`
+- `let x = knownTypedValue.method(...);`
+
+Always add an explicit type for:
+
+- TOON handles and extracted TOON values when the shape is not trivial
+- branchy results when the final type is not obvious at a glance
+- public examples where clarity matters more than shaving a few tokens
 
 ### Conditionals
 
@@ -311,6 +340,61 @@ fx {
 }
 ```
 
+### Real formatting in `println()`
+
+Plain `println(realValue)` currently uses the backend default real formatting,
+which is 6 digits after the decimal point.
+
+When you need stable decimal output, use the Pascal-style formatting form:
+
+```aether
+println(realValue:width:precision);
+```
+
+Where:
+
+- `width` is the minimum field width
+- `precision` is the number of digits after the decimal point
+- use width `0` when you only care about decimal precision
+
+Example:
+
+```aether
+fn main() -> Void {
+    let pi: Real = 3.14159265;
+    fx {
+        println(pi);      // Default format: 3.141593
+        println(pi:0:2);  // Width 0, 2 decimals: 3.14
+        println(pi:8:3);  // Width 8, 3 decimals:    3.142
+    }
+    ret;
+}
+```
+
+Common cases:
+
+| Use case | Syntax | Output |
+|---|---|---|
+| Simple percentage | `value:0:2` | `95.50` |
+| Right-aligned amount | `value:10:2` | `     95.50` |
+| Wider scientific-style display | `value:12:4` | `      3.1416` |
+| Default backend format | `value` | `3.141593` |
+
+For percentages, force real arithmetic before formatting:
+
+```aether
+let successRate: Real = successful * 100.0 / total;
+fx {
+    println("success = ", successRate:0:2, "%");
+}
+```
+
+Division rule:
+
+- `a / b` with `Int` operands follows integer-style arithmetic
+- to force a real-valued result, introduce a `Real` operand, for example
+  `successful * 100.0 / total`
+
 Do not assume `Text + Int` or `Text + Real` is a universally safe pattern.
 Some concatenation cases may appear to work in narrow contexts, but for humans
 and especially for LLMs, the reliable rule is:
@@ -335,28 +419,7 @@ If you want a rule that works well for LLM-generated code, use this one:
 
 - for visible output, default to comma-separated `println(...)` arguments
 - do not guess that `+` will stringify numbers for you
-
-Plain `println(realValue)` currently uses the backend default real formatting,
-which is 6 digits after the decimal point.
-
-Example:
-
-```aether
-fn main() -> Void {
-    let value: Real = 3.14159265;
-    fx {
-        println(value);      // 3.141593
-        println(value:0:2);  // 3.14
-        println(value:8:3);  //    3.142
-    }
-    ret;
-}
-```
-
-Use the Pascal-style `value:width:precision` form when you need stable,
-compact, or human-friendly real-number output.
-
-If you only care about decimal precision, use width `0`.
+- for controlled decimal output, use `value:width:precision`
 
 ## Purity and contracts
 
@@ -722,6 +785,9 @@ Follow these rules exactly:
 - treat `ToonDoc` and `ToonNode` as opaque handle types
 - do not do arithmetic on them
 - do not assign a `ToonDoc` where a `ToonNode` is expected
+- do not assign a `ToonNode` where a `ToonDoc` is expected
+- do not treat them as plain scalar values or pattern-match them as if they
+  were ordinary records
 - use `Text` keys and `Int` indexes
 - close parsed documents with `toon_close(doc)`
 - prefer explicit types around TOON code when the shape is not obvious
@@ -809,6 +875,13 @@ Reason:
 
 - the fallback only applies to the final `"code"` lookup
 - it does not recover from a missing or invalid intermediate `"meta"` node
+
+General nested-lookup rule:
+
+- nested TOON calls are allowed
+- but `_or` helpers only protect the final lookup
+- if an intermediate node may be missing or may not have the right shape,
+  bind and validate that step first
 
 ## Tasks and AI helpers
 
@@ -1019,7 +1092,11 @@ If you are generating Aether, follow these rules in order:
 9. Use `type` plus methods for simple stateful objects.
 10. Never write `use "..."` unless that module is provided or verified.
 11. Generic imports like `use "helpers";` are invalid unless the actual module exists.
-12. When in doubt, copy the shape from `Examples/aether/base` or the showcase.
+12. Treat `ToonDoc` and `ToonNode` as opaque handles, not numbers.
+13. If decimal arithmetic matters, force a `Real` into the expression, for
+    example `100.0`.
+14. If decimal output matters, use `value:width:precision`.
+15. When in doubt, copy the shape from `Examples/aether/base` or the showcase.
 
 ## Common mistakes
 
@@ -1135,6 +1212,22 @@ fx {
     println("--- Processing User List ---");
 }
 ```
+
+## Validation checklist
+
+Before submitting Aether code, verify:
+
+- all `print(...)` and `println(...)` calls are inside `fx { ... }`
+- all task helper calls and `ai_chat(...)` calls are inside `fx { ... }`
+- all `use "..."` imports reference real, verified modules
+- all function parameters have explicit types
+- no arithmetic is performed on `ToonDoc` or `ToonNode`
+- `ToonDoc` values are closed with `toon_close(doc)`
+- TOON keys are `Text` and TOON indexes are `Int`
+- decimal arithmetic uses a `Real` operand when needed, for example `100.0`
+- decimal output uses `value:width:precision` when stable formatting matters
+- tuple-return calls are destructured directly, not bound to a single name
+- `@pre`, `@post`, `@pure`, and `@cost` are above the function, not inside it
 
 ## Where to look next
 
