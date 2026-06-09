@@ -1068,6 +1068,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
 
     BytecodeChunk chunk;
     initBytecodeChunk(&chunk);
+    setBytecodeChunkSourcePath(&chunk, path);
     bool used_cache = 0;
     if (!no_cache) used_cache = loadBytecodeFromCache(path, kReaCompilerId, argv[0], dep_array, dep_count, &chunk);
     if (dep_array) free(dep_array);

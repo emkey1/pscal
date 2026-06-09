@@ -713,6 +713,11 @@ if ! grep -q "OpenAIChatCompletions requires an API key" /tmp/aether_runtime_lin
     cat /tmp/aether_runtime_line_mapping_fail.out >&2
     exit 1
 fi
+if ! grep -q '^aether/runtime_line_mapping_fail\.aether:4: OpenAIChatCompletions requires an API key via argument or OPENAI_API_KEY\.$' /tmp/aether_runtime_line_mapping_fail.out; then
+    echo "missing plain-text runtime file/line prefix" >&2
+    cat /tmp/aether_runtime_line_mapping_fail.out >&2
+    exit 1
+fi
 if ! grep -q "\\[Error Location\\] Offset: " /tmp/aether_runtime_line_mapping_fail.out; then
     echo "missing runtime error location" >&2
     cat /tmp/aether_runtime_line_mapping_fail.out >&2

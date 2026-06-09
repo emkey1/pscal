@@ -172,6 +172,7 @@ typedef struct {
     struct Symbol_s** global_symbol_cache;
 
     // Optional: For debugging runtime errors
+    char* source_path;     // Owning source path label for human-facing diagnostics
     int* lines;         // Array storing the source line number for each byte of code
 } BytecodeChunk;
 
@@ -190,5 +191,6 @@ int getInstructionLength(BytecodeChunk* chunk, int offset);
 void setBuiltinLowercaseIndex(BytecodeChunk* chunk, int original_idx, int lowercase_idx);
 int getBuiltinLowercaseIndex(const BytecodeChunk* chunk, int original_idx);
 void writeInlineCacheSlot(BytecodeChunk* chunk, int line);
+void setBytecodeChunkSourcePath(BytecodeChunk* chunk, const char* path);
 
 #endif // PSCAL_BYTECODE_H

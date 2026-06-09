@@ -29,12 +29,14 @@ void initBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     chunk->builtin_lowercase_indices = NULL;
     chunk->builtin_resolved_ids = NULL;
     chunk->global_symbol_cache = NULL;
+    chunk->source_path = NULL;
   //  chunk->lines = 0;
 }
 
 void freeBytecodeChunk(BytecodeChunk* chunk) { // From all.txt
     free(chunk->code);
     free(chunk->lines);
+    free(chunk->source_path);
     for (int i = 0; i < chunk->constants_count; i++) {
         freeValue(&chunk->constants[i]);
     }
@@ -102,6 +104,29 @@ static const char* formatInlineCachePointer(uintptr_t cached, char* buffer, size
     snprintf(buffer, bufferSize, "%p", (void*)cached);
     buffer[bufferSize - 1] = '\0';
     return buffer;
+}
+
+void setBytecodeChunkSourcePath(BytecodeChunk* chunk, const char* path) {
+    char* copy = NULL;
+    size_t len;
+
+    if (!chunk) {
+        return;
+    }
+    free(chunk->source_path);
+    chunk->source_path = NULL;
+    if (!path) {
+        return;
+    }
+    len = strlen(path);
+    copy = (char*)malloc(len + 1);
+    if (!copy) {
+        fprintf(stderr, "Memory allocation error (source path copy failed)\n");
+        EXIT_FAILURE_HANDLER();
+        return;
+    }
+    memcpy(copy, path, len + 1);
+    chunk->source_path = copy;
 }
 
 void writeBytecodeChunk(BytecodeChunk* chunk, uint8_t byte, int line) { // From all.txt

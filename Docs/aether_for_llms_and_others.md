@@ -236,6 +236,9 @@ If you invoke the compiler with `--diagnostics-json` or `--diagnostics-toon`,
 runtime failures are also emitted in structured form with the original Aether
 file and line when available.
 
+In ordinary CLI mode, runtime failures should also include a plain-text
+`file:line:` prefix before the message when the source label is available.
+
 ## Purity and contracts
 
 ### `@pure`

@@ -3372,18 +3372,28 @@ void runtimeError(VM* vm, const char* format, ...) {
     va_start(args, format);
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
-    write(STDERR_FILENO, message, strlen(message));
-    write(STDERR_FILENO, "\n", 1);
 
     size_t instruction_offset = 0;
     int error_line = 0;
     bool have_runtime_location = false;
     if (vm) {
         computeRuntimeLocation(vm, &instruction_offset, &error_line);
+        if (vm->chunk && vm->chunk->source_path && error_line > 0) {
+            fprintf(stderr, "%s:%d: %s\n",
+                    bytecodeDisplayNameForPath(vm->chunk->source_path),
+                    error_line,
+                    message);
+        } else {
+            write(STDERR_FILENO, message, strlen(message));
+            write(STDERR_FILENO, "\n", 1);
+        }
 #if !defined(PSCAL_TARGET_IOS)
         fprintf(stderr, "[Error Location] Offset: %zu, Line: %d\n", instruction_offset, error_line);
 #endif
         have_runtime_location = true;
+    } else {
+        write(STDERR_FILENO, message, strlen(message));
+        write(STDERR_FILENO, "\n", 1);
     }
 
     if (s_vmVerboseErrors && vm) {
