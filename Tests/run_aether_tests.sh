@@ -33,6 +33,7 @@ DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/diagnostic_line_map
 FUNCTION_INFERENCE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/function_inference_support"
 FUNCTION_RETURN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_return_inference_pass.aether"
 OBJECT_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_inference_pass.aether"
+STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_pass.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -113,6 +114,7 @@ for fixture in \
     "$FUNCTION_INFERENCE_SUPPORT_FIXTURE" \
     "$FUNCTION_RETURN_INFERENCE_PASS_FIXTURE" \
     "$OBJECT_INFERENCE_PASS_FIXTURE" \
+    "$STRING_LEN_INFERENCE_PASS_FIXTURE" \
     "$PURE_PASS_FIXTURE" \
     "$PURE_FAIL_EFFECTFUL_FIXTURE" \
     "$PURE_FAIL_NON_PURE_CALL_FIXTURE" \
@@ -258,6 +260,13 @@ printf '42\ntrue\n' >/tmp/aether_object_inference_expected.out
 if ! cmp -s /tmp/aether_object_inference_expected.out /tmp/aether_object_inference_pass.out; then
     echo "unexpected object inference output" >&2
     cat /tmp/aether_object_inference_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$STRING_LEN_INFERENCE_PASS_FIXTURE" >/tmp/aether_string_len_inference_pass.out
+printf 'true\nfalse\n' >/tmp/aether_string_len_inference_expected.out
+if ! cmp -s /tmp/aether_string_len_inference_expected.out /tmp/aether_string_len_inference_pass.out; then
+    echo "unexpected string_len inference output" >&2
+    cat /tmp/aether_string_len_inference_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null

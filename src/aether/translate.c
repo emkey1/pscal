@@ -1205,6 +1205,7 @@ static const char *inferHelperReturnTypeName(const char *nameStart, size_t nameL
         return "Text";
     }
     if ((nameLen == 8 && strncmp(nameStart, "toon_len", 8) == 0) ||
+        (nameLen == 10 && strncmp(nameStart, "string_len", 10) == 0) ||
         (nameLen == 12 && strncmp(nameStart, "toon_get_int", 12) == 0) ||
         (nameLen == 15 && strncmp(nameStart, "toon_get_int_or", 15) == 0) ||
         (nameLen == 14 && strncmp(nameStart, "toon_int_value", 14) == 0)) {
@@ -2003,6 +2004,9 @@ static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t n
     }
     if (nameLen == 5 && strncmp(nameStart, "print", nameLen) == 0) {
         return bufferAppend(out, "write");
+    }
+    if (nameLen == 10 && strncmp(nameStart, "string_len", nameLen) == 0) {
+        return bufferAppend(out, "length");
     }
     return 0;
 }

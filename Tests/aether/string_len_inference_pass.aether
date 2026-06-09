@@ -1,0 +1,13 @@
+@pure
+fn validateName(name: Text) -> Bool {
+    let len = string_len(name);
+    ret len > 0 && len <= 64;
+}
+
+fn main() -> Void {
+    fx {
+        println(validateName("abc"));
+        println(validateName(""));
+    }
+    ret;
+}

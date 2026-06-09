@@ -139,6 +139,7 @@ Inference also works in some common Aether-specific cases:
 - imported constants with obvious exported types
 - `new Type()`
 - method calls on known typed bindings
+- `string_len(textValue)`
 - known TOON helper return values
 
 If inference is not obviously safe, add the type explicitly.
@@ -239,6 +240,33 @@ file and line when available.
 In ordinary CLI mode, runtime failures should also include a plain-text
 `file:line:` prefix before the message when the source label is available.
 
+## Printing and numeric formatting
+
+`print(...)` and `println(...)` are Aether spellings for the shared
+`write(...)` and `writeln(...)` builtins.
+
+Plain `println(realValue)` currently uses the backend default real formatting,
+which is 6 digits after the decimal point.
+
+Example:
+
+```aether
+fn main() -> Void {
+    let value: Real = 3.14159265;
+    fx {
+        println(value);      // 3.141593
+        println(value:0:2);  // 3.14
+        println(value:8:3);  //    3.142
+    }
+    ret;
+}
+```
+
+Use the Pascal-style `value:width:precision` form when you need stable,
+compact, or human-friendly real-number output.
+
+If you only care about decimal precision, use width `0`.
+
 ## Purity and contracts
 
 ### `@pure`
@@ -258,6 +286,19 @@ fn classify(score: Int) -> Text {
 Current Aether rules reject direct effectful builtins inside pure functions and
 also reject direct calls into known non-pure Aether functions.
 
+## Strings
+
+Use `Text` for string values.
+
+The compact length helper is:
+
+```aether
+let len = string_len(name);
+```
+
+`string_len(...)` lowers to the shared backend string-length builtin and
+returns `Int`, so the inferred form above is valid.
+
 ### `@pre` and `@post`
 
 Use contracts when you want runtime-checked function assumptions.
@@ -276,6 +317,7 @@ fn normalize(score: Int) -> Int {
 Rules:
 
 - annotations attach to the next function
+- do not place `@pre` or `@post` inside the function body
 - `@pre` and `@post` must contain expressions
 - `@post` may refer to `result`
 
