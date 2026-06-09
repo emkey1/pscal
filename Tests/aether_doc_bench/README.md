@@ -3,6 +3,10 @@
 This directory defines a small benchmark corpus for measuring how well an LLM
 can learn Aether from the current guide documents.
 
+The main corpus now contains a couple dozen tasks ranging from tiny `hello
+world` programs to larger agent-style TOON/reporting prompts that should push
+models toward much longer answers.
+
 ## Purpose
 
 The benchmark compares document variants such as:
@@ -154,6 +158,7 @@ without any network calls:
 
 ```bash
 python3 Tools/aether_doc_bench.py \
+  --tasks Tests/aether_doc_bench/smoke_tasks.json \
   --destination command-template \
   --text-summary
 ```
@@ -162,6 +167,7 @@ There is also a repair-path self-test:
 
 ```bash
 python3 Tools/aether_doc_bench.py \
+  --tasks Tests/aether_doc_bench/smoke_tasks.json \
   --destinations-config Tests/aether_doc_bench/repair_test_destinations.json \
   --destination command-repair-template \
   --task hello_fx \
