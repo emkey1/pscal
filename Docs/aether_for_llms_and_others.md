@@ -534,6 +534,12 @@ Fallback extraction:
 - `toon_get_real_or(node, key, fallback)`
 - `toon_get_bool_or(node, key, fallback)`
 
+Important fallback rule:
+
+- `_or` helpers only protect the final keyed lookup on a valid object node
+- they do not make an entire nested traversal path safe
+- if an intermediate object might be missing, guard that intermediate step first
+
 Shape and type checks:
 
 - `toon_type(node)`
@@ -647,6 +653,29 @@ loop i in 0..toon_len(users) {
     let user: ToonNode = toon_at(users, i);
 }
 ```
+
+Safe nested lookup pattern:
+
+```aether
+let row: ToonNode = toon_at(root, i);
+let code: Text = "EMPTY";
+
+if toon_has_key(row, "meta") {
+    let meta: ToonNode = toon_key(row, "meta");
+    code = toon_get_text_or(meta, "code", "EMPTY");
+}
+```
+
+Do not assume this is safe:
+
+```aether
+let code: Text = toon_get_text_or(toon_key(toon_at(root, i), "meta"), "code", "EMPTY");
+```
+
+Reason:
+
+- the fallback only applies to the final `"code"` lookup
+- it does not recover from a missing or invalid intermediate `"meta"` node
 
 ## Tasks and AI helpers
 

@@ -115,6 +115,8 @@ These examples stay within the currently supported Aether Core subset:
   compact existence checks on objects and arrays
 - `toon_defaults`: uses `toon_get_*_or(...)` helpers to read scalar values with
   typed fallback defaults
+- `toon_safe_nested`: shows the safe guard pattern for nested object traversal
+  where `_or` protects only the final keyed lookup, not the whole path
 - `cost_annotations`: shows validated `@cost` budgets in both `ops` and `ms`
   forms without changing the shared backend
 - `contract_layouts`: shows `@pre`, `@post`, and `@cost` surviving realistic
