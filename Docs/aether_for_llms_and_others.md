@@ -321,6 +321,26 @@ Rules:
 - `@pre` and `@post` must contain expressions
 - `@post` may refer to `result`
 
+Correct:
+
+```aether
+@pre score >= 0
+@post result >= 0
+fn normalize(score: Int) -> Int {
+    ret score;
+}
+```
+
+Wrong:
+
+```aether
+fn normalize(score: Int) -> Int {
+    @pre score >= 0
+    @post result >= 0
+    ret score;
+}
+```
+
 ### `@cost`
 
 Use `@cost` when you want a validated budget annotation.
