@@ -90,6 +90,52 @@ typedef struct ReaModuleBindingList {
 static ReaModuleInfo **gLoadedModules = NULL;
 static int gLoadedModuleCount = 0;
 static int gLoadedModuleCapacity = 0;
+static char **gFailedModulePaths = NULL;
+static int gFailedModulePathCount = 0;
+static int gFailedModulePathCapacity = 0;
+
+static void clearFailedModulePaths(void) {
+    if (gFailedModulePaths) {
+        for (int i = 0; i < gFailedModulePathCount; i++) {
+            free(gFailedModulePaths[i]);
+        }
+        free(gFailedModulePaths);
+    }
+    gFailedModulePaths = NULL;
+    gFailedModulePathCount = 0;
+    gFailedModulePathCapacity = 0;
+}
+
+static bool noteFailedModulePathOnce(const char *path) {
+    char **resized;
+    int newCap;
+
+    if (!path || !*path) {
+        return true;
+    }
+    for (int i = 0; i < gFailedModulePathCount; i++) {
+        if (gFailedModulePaths[i] && strcasecmp(gFailedModulePaths[i], path) == 0) {
+            return false;
+        }
+    }
+    if (gFailedModulePathCount >= gFailedModulePathCapacity) {
+        newCap = gFailedModulePathCapacity ? gFailedModulePathCapacity * 2 : 8;
+        resized = (char **)realloc(gFailedModulePaths, (size_t)newCap * sizeof(char *));
+        if (!resized) {
+            fprintf(stderr, "Memory allocation failure expanding failed-module registry.\n");
+            EXIT_FAILURE_HANDLER();
+        }
+        gFailedModulePaths = resized;
+        gFailedModulePathCapacity = newCap;
+    }
+    gFailedModulePaths[gFailedModulePathCount] = strdup(path);
+    if (!gFailedModulePaths[gFailedModulePathCount]) {
+        fprintf(stderr, "Memory allocation failure recording failed module path.\n");
+        EXIT_FAILURE_HANDLER();
+    }
+    gFailedModulePathCount++;
+    return true;
+}
 
 static void freeModuleInfo(ReaModuleInfo *info) {
     if (!info) return;
@@ -118,6 +164,7 @@ static void clearModuleCache(void) {
     gLoadedModules = NULL;
     gLoadedModuleCount = 0;
     gLoadedModuleCapacity = 0;
+    clearFailedModulePaths();
 }
 
 static ReaModuleBindingList *gActiveBindings = NULL;
@@ -825,8 +872,10 @@ static char *readFileContents(const char *path, size_t *outLen) {
     if (outLen) *outLen = 0;
     FILE *fp = fopen(path, "rb");
     if (!fp) {
-        fprintf(stderr, "Error: unable to open module '%s'.\n", path);
-        pascal_semantic_error_count++;
+        if (noteFailedModulePathOnce(path)) {
+            fprintf(stderr, "Error: unable to open module '%s'.\n", path);
+            pascal_semantic_error_count++;
+        }
         return NULL;
     }
     if (fseek(fp, 0, SEEK_END) != 0) {
@@ -1132,8 +1181,6 @@ static ReaModuleInfo *loadModuleRecursive(const char *path) {
     size_t sourceLen = 0;
     char *source = readFileContents(resolved, &sourceLen);
     if (!source) {
-        fprintf(stderr, "Error: unable to open module '%s'.\n", resolved);
-        pascal_semantic_error_count++;
         free(resolved);
         return NULL;
     }
