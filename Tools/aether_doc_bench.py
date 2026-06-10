@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
 import os
 import pathlib
 import subprocess
@@ -45,6 +46,10 @@ DOC_VARIANTS = {
     "small": REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
 }
 _DESTINATION_CONTEXT_CACHE: dict[tuple[str, str, str], int | None] = {}
+
+
+class ProviderTimeoutError(RuntimeError):
+    pass
 
 
 @dataclass
@@ -73,6 +78,7 @@ class Destination:
     after_each_timeout_seconds: int = 60
     cooldown_seconds: float = 0.0
     prompt_context_limit: int | None = None
+    request_timeout_seconds: int = 120
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -124,6 +130,7 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
                 prompt_context_limit=(
                     int(item["prompt_context_limit"]) if item.get("prompt_context_limit") is not None else None
                 ),
+                request_timeout_seconds=int(item.get("request_timeout_seconds", 120)),
             )
         )
     return destinations
@@ -251,7 +258,12 @@ def resolve_api_key(destination: Destination) -> str | None:
     return os.environ.get("OPENAI_API_KEY")
 
 
-def http_json_request(url: str, body: dict[str, Any], api_key: str | None) -> dict[str, Any]:
+def http_json_request(
+    url: str,
+    body: dict[str, Any],
+    api_key: str | None,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
     headers = {
         "Content-Type": "application/json",
     }
@@ -266,11 +278,16 @@ def http_json_request(url: str, body: dict[str, Any], api_key: str | None) -> di
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP API error {exc.code}: {detail}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError(f"HTTP API request timed out after {timeout_seconds} seconds") from exc
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        raise RuntimeError(f"HTTP API request failed: {reason}") from exc
 
 
 def http_json_get(url: str, api_key: str | None) -> dict[str, Any]:
@@ -335,7 +352,12 @@ def invoke_openai_responses(prompt: str, destination: Destination) -> dict[str, 
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
 
-    payload = http_json_request(f"{base_url}/responses", body, api_key)
+    payload = http_json_request(
+        f"{base_url}/responses",
+        body,
+        api_key,
+        timeout_seconds=destination.request_timeout_seconds,
+    )
     output_text = payload.get("output_text", "")
     if not output_text:
         raise RuntimeError("Responses API reply did not contain output_text")
@@ -375,7 +397,12 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
 
-    payload = http_json_request(f"{base_url}/chat/completions", body, api_key)
+    payload = http_json_request(
+        f"{base_url}/chat/completions",
+        body,
+        api_key,
+        timeout_seconds=destination.request_timeout_seconds,
+    )
     choices = payload.get("choices") or []
     if not choices:
         raise RuntimeError("chat completions reply did not contain choices")
@@ -457,6 +484,34 @@ def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
             raise RuntimeError("command_template is required for command destinations")
         return invoke_command(prompt=prompt, command_template=destination.command_template, cwd=REPO_ROOT)
     raise RuntimeError(f"unsupported destination type {destination.kind}")
+
+
+def _run_model_worker(prompt: str, destination: Destination, queue: Any) -> None:
+    try:
+        queue.put(("ok", run_model(prompt, destination)))
+    except Exception as exc:
+        queue.put(("err", str(exc)))
+
+
+def run_model_with_deadline(prompt: str, destination: Destination) -> dict[str, Any]:
+    deadline = max(1, int(destination.request_timeout_seconds))
+    ctx = multiprocessing.get_context("spawn")
+    queue: Any = ctx.Queue()
+    proc = ctx.Process(target=_run_model_worker, args=(prompt, destination, queue))
+    proc.start()
+    proc.join(deadline)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(5)
+        raise ProviderTimeoutError(f"provider request exceeded {deadline} seconds")
+    if proc.exitcode not in (0, None) and queue.empty():
+        raise RuntimeError(f"provider worker exited unexpectedly with code {proc.exitcode}")
+    if queue.empty():
+        raise RuntimeError("provider worker returned no result")
+    status, payload = queue.get()
+    if status == "ok":
+        return payload
+    raise RuntimeError(payload)
 
 
 def materialize_task_files(task: Task, work_dir: pathlib.Path) -> None:
@@ -556,7 +611,7 @@ def evaluate_attempt(
             "prompt_too_large: approx prompt tokens "
             f"{prompt_tokens} exceed loaded context {context_limit} for model {destination.model}"
         )
-    generation = run_model(prompt, destination)
+    generation = run_model_with_deadline(prompt, destination)
     source_code = sanitize_code(generation["raw_text"])
     attempt["generation"] = generation
     attempt["generated_ok"] = bool(source_code.strip())
@@ -666,6 +721,32 @@ def print_text_summary(report: dict[str, Any]) -> None:
         print("")
 
 
+def print_progress_start(destination: Destination, doc_name: str, task: Task, repeat_index: int) -> None:
+    print(
+        f"[progress] {destination.destination_id} {doc_name} {task.task_id} repeat={repeat_index} start",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def print_progress_done(
+    destination: Destination,
+    doc_name: str,
+    task: Task,
+    repeat_index: int,
+    result: dict[str, Any],
+) -> None:
+    run = result.get("run", {})
+    print(
+        f"[progress] {destination.destination_id} {doc_name} {task.task_id} repeat={repeat_index} "
+        f"generated={int(bool(result.get('generated_ok', False)))} "
+        f"returncode={run.get('returncode', -1)} "
+        f"exact={int(bool(run.get('exact_stdout_match', False)))}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tasks", type=pathlib.Path, default=DEFAULT_TASKS, help="task manifest JSON")
@@ -724,6 +805,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN, help="path to local aether binary")
     parser.add_argument("--output-json", type=pathlib.Path, default=None, help="write full JSON report to this path")
     parser.add_argument("--text-summary", action="store_true", help="print compact text summary")
+    parser.add_argument("--progress", action="store_true", help="print per-task progress to stderr")
     return parser
 
 
@@ -805,6 +887,8 @@ def main() -> int:
 
             for task in tasks:
                 for repeat_index in range(args.repeats):
+                    if args.progress:
+                        print_progress_start(destination, doc_name, task, repeat_index)
                     prompt = build_prompt(doc_name=doc_name, doc_text=doc_text, task=task)
                     case_record: dict[str, Any] = {
                         "task_id": task.task_id,
@@ -821,6 +905,8 @@ def main() -> int:
                                 destination=destination,
                             )
                         )
+                        if args.progress:
+                            print_progress_done(destination, doc_name, task, repeat_index, case_record)
                         results.append(case_record)
                         try:
                             run_destination_cleanup(destination, task, doc_name, repeat_index)
@@ -891,6 +977,8 @@ def main() -> int:
                             run_destination_cleanup(destination, task, doc_name, repeat_index)
                         except Exception as cleanup_exc:  # pragma: no cover - surfaced in JSON report
                             case_record["cleanup_error"] = str(cleanup_exc)
+                    if args.progress:
+                        print_progress_done(destination, doc_name, task, repeat_index, case_record)
                     results.append(case_record)
 
             variant_report = {

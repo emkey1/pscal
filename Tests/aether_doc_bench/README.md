@@ -92,6 +92,7 @@ Optional pacing / cleanup fields:
 - `after_each_command`: shell command run after every benchmark case
 - `after_each_timeout_seconds`: timeout for that cleanup command
 - `cooldown_seconds`: sleep after each benchmark case
+- `request_timeout_seconds`: timeout for a single provider API request
 
 Those fields are useful for local-model workflows where you want to unload a
 model or let memory settle between runs.
@@ -119,6 +120,7 @@ Add a destination like this:
   "model": "provider/model-name",
   "temperature": 0.2,
   "max_output_tokens": 3000,
+  "request_timeout_seconds": 120,
   "after_each_command": "",
   "after_each_timeout_seconds": 60,
   "cooldown_seconds": 2
@@ -204,9 +206,19 @@ For example, a local OpenAI-compatible endpoint with no API key:
 If your local runtime needs help managing memory, add:
 
 ```json
+"request_timeout_seconds": 180,
 "after_each_command": "your-unload-command-here",
 "cooldown_seconds": 2
 ```
+
+For smaller local models, it is often better to treat them as a
+small-context core lane rather than forcing them through the larger guide.
+In practice that means:
+
+- run them against `Docs/aether_for_llms_with_small_contexts.md`
+- keep only one local model loaded at a time
+- unload a model before loading the next one
+- count stability as part of the result, not just final exact-match rate
 
 ## Task manifest
 

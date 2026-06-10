@@ -18,6 +18,7 @@
       "model": "replace/me",
       "temperature": 0.2,
       "max_output_tokens": 3000,
+      "request_timeout_seconds": 120,
       "after_each_command": "",
       "after_each_timeout_seconds": 60,
       "cooldown_seconds": 0
