@@ -235,13 +235,12 @@ def resolve_docs(names: list[str]) -> list[tuple[str, pathlib.Path]]:
 
 def sanitize_code(raw: str) -> str:
     text = raw.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        while lines and lines[-1].strip() == "```":
-            lines.pop()
-        text = "\n".join(lines).strip()
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    while lines and lines[-1].strip() == "```":
+        lines.pop()
+    text = "\n".join(lines).strip()
     return text
 
 

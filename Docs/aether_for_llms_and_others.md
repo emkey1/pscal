@@ -55,6 +55,8 @@ generated Aether works on the first try.
 10. **TUP-001.** Tuple support is intentionally narrow: destructure direct
     top-level helper returns such as `let (a, b) = pair();` and do not assume
     general tuple features.
+11. **OUT-001.** Return raw Aether source only when asked to generate code. Do
+    not wrap the answer in Markdown fences.
 
 Highest-value failure checks:
 
@@ -83,6 +85,7 @@ Never generate Aether code with:
 - `@pre`, `@post`, `@pure`, or `@cost` inside a function body
 - tuple-return calls bound to one variable, such as `let value = pair();`
 - mixed-type output built by guessing that `+` will stringify numbers
+- Markdown fences around the program, such as ```aether ... ```
 
 ## Canonical vs accepted forms
 
@@ -224,6 +227,23 @@ let mut ready: Int = 0;
 `let mut` is accepted for compatibility, but it is redundant and ignored.
 Generate plain `let` in new Aether.
 
+### Current record-style initialization syntax
+
+Canonical:
+
+```aether
+let point: Point = Point {
+    x: 3,
+    y: 4
+};
+```
+
+Do not generate constructor-call style field initialization:
+
+```aether
+let point: Point = Point(x: 3, y: 4);
+```
+
 ### Safe inference policy
 
 Inference works in several common cases, but LLM-generated code should be
@@ -287,6 +307,16 @@ declarations, assignments, and returns:
 let score: Int = if count > 0 { total / count } else { 0 };
 ```
 
+Do not place inline conditional expressions directly inside `println(...)`
+argument lists. Bind them first:
+
+```aether
+let label: Text = if ready { "ready" } else { "blocked" };
+fx {
+    println(label);
+}
+```
+
 For text equality, canonical style is plain `==`:
 
 ```aether
@@ -297,6 +327,9 @@ if status == "ready" {
 
 `string_eq(a, b)` is accepted as a compact alias and lowers to the same
 comparison, but `==` is the preferred generated form.
+
+For string length, use `string_len(name)`. Do not generate property-style
+forms such as `name.len`.
 
 ### Loops
 
@@ -1072,6 +1105,7 @@ LLM rules:
 - if you cannot verify the module, do not import it
 - imported symbol names must match exported names exactly
 - `use "module_name";` does not rename exported symbols for you
+- imported exported names are used directly after import
 
 When writing standalone snippets for docs, tests, chats, or generated examples:
 
@@ -1100,6 +1134,19 @@ fn main() -> Void {
     fx {
         println(greeting);
         println(answer);
+    }
+    ret;
+}
+```
+
+Another direct-import example:
+
+```aether
+use "bench_math";
+
+fn main() -> Void {
+    fx {
+        println(answer());
     }
     ret;
 }
