@@ -26,7 +26,7 @@ Write Aether like this:
 - use `@pure` for pure helpers
 - use `@pre` and `@post` for runtime-checked contracts
 - prefer explicit types when inference is not obviously safe
-- never write `let mut`; plain `let` is already mutable
+- prefer plain `let`; `let mut` is accepted but redundant and ignored
 - define types and helper functions before `main` uses them
 - use `length(arrayValue)` for dynamic array length, not `len(...)`
 - use `ToonDoc` and `ToonNode` for structured TOON/JSON-style data
@@ -152,7 +152,9 @@ let count: Int = 0;
 let label: Text = "Aether";
 ```
 
-Bindings declared with `let` are already mutable. Do not write `let mut`.
+Bindings declared with `let` are already mutable. `let mut` is accepted for
+compatibility with LLM output, but it is redundant and ignored. Prefer plain
+`let`.
 
 Good:
 
@@ -161,7 +163,7 @@ let ready: Int = 0;
 ready = ready + 1;
 ```
 
-Bad:
+Accepted but redundant:
 
 ```aether
 let mut ready: Int = 0;

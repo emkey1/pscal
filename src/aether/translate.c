@@ -6292,12 +6292,37 @@ static char *translateLine(const char *lineStart,
         return translateFnLine(lineStart, body, lineEnd, NULL);
     }
     if (strncmp(body, "let mut ", 8) == 0) {
-        reportAetherRewriteError(path,
-                                 lineNumber,
-                                 "binding",
-                                 "`let mut` is not valid Aether syntax.",
-                                 "bindings declared with `let` are already mutable; write `let name: Type = ...;` or `let name = ...;`.");
-        return NULL;
+        char *normalized = NULL;
+        const char *normalizedBody;
+        const char *normalizedEnd;
+
+        if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
+            !bufferAppend(&out, "let ") ||
+            !bufferAppendN(&out, body + 8, (size_t)(lineEnd - (body + 8)))) {
+            free(out.data);
+            return NULL;
+        }
+
+        normalized = out.data;
+        normalizedBody = normalized + (body - lineStart);
+        normalizedEnd = normalized + strlen(normalized);
+
+        if (hasTypedDeclSeparator(normalizedBody, normalizedEnd, 0)) {
+            return translateTypedDeclLine(normalized,
+                                          normalizedBody,
+                                          normalizedEnd,
+                                          0,
+                                          functions,
+                                          lineNumber);
+        }
+        return translateInferredDeclLine(normalized,
+                                         normalizedBody,
+                                         normalizedEnd,
+                                         0,
+                                         bindings,
+                                         functions,
+                                         path,
+                                         lineNumber);
     }
     if (strncmp(body, "let ", 4) == 0 && hasTypedDeclSeparator(body, lineEnd, 0)) {
         return translateTypedDeclLine(lineStart, body, lineEnd, 0, functions, lineNumber);

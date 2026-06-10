@@ -24,7 +24,7 @@ Aether is a compact front end for PSCAL.
 4. If inference is not obviously safe, add the type explicitly.
 5. Put `@pre`, `@post`, `@pure`, and `@cost` above the function, never inside it.
 6. Imported names must match the exported symbol names exactly.
-7. Never write `let mut`. Aether `let` bindings are already mutable.
+7. Prefer plain `let`. `let mut` is accepted, but redundant and ignored.
 8. Define types, helper functions, and modules before `main` uses them.
 
 ## Core syntax
@@ -85,7 +85,8 @@ Safe patterns:
 - `let x = knownFunction(...);`
 - `let x = knownTypedValue.method(...);`
 
-`let` bindings are already mutable. Never write `let mut`.
+`let` bindings are already mutable. `let mut` is accepted, but redundant and
+ignored.
 
 Preferred declaration order:
 
