@@ -26,6 +26,8 @@ Write Aether like this:
 - use `@pure` for pure helpers
 - use `@pre` and `@post` for runtime-checked contracts
 - prefer explicit types when inference is not obviously safe
+- never write `let mut`; plain `let` is already mutable
+- define types and helper functions before `main` uses them
 - use `length(arrayValue)` for dynamic array length, not `len(...)`
 - use `ToonDoc` and `ToonNode` for structured TOON/JSON-style data
 - use the examples under `Examples/aether/` as the ground truth for style
@@ -188,6 +190,12 @@ Inference also works in some common Aether-specific cases:
   including pointer-backed record values returned from helpers
 
 If inference is not obviously safe, add the type explicitly.
+
+Preferred declaration order:
+
+- define helper functions before their callers
+- define `type` blocks before you instantiate them or call their methods
+- define module exports before writing the code that imports and uses them
 
 For LLMs, these are the safe inference patterns to rely on:
 
