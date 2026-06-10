@@ -238,11 +238,14 @@ let point: Point = Point {
 };
 ```
 
-Do not generate constructor-call style field initialization:
+Accepted but non-canonical:
 
 ```aether
 let point: Point = Point(x: 3, y: 4);
 ```
+
+Both forms compile. Generate the brace form by default because it is easier to
+scan and less likely to be confused with an ordinary constructor call.
 
 ### Safe inference policy
 
@@ -268,6 +271,7 @@ Inference also works in some Aether-specific cases:
 - `new Type()`
 - method calls on known typed bindings
 - `string_len(textValue)`
+- `textValue.len` and `arrayValue.len`
 - known TOON helper return values
 - simple numeric expressions over known `Int` / `Real` values, such as
   `count + 1` or `base_amount * multiplier`
@@ -328,8 +332,17 @@ if status == "ready" {
 `string_eq(a, b)` is accepted as a compact alias and lowers to the same
 comparison, but `==` is the preferred generated form.
 
-For string length, use `string_len(name)`. Do not generate property-style
-forms such as `name.len`.
+For string length, canonical style is `string_len(name)`. Property-style
+length is now accepted for `Text` and dynamic arrays:
+
+```aether
+let a: Int = string_len(name);  // canonical
+let b: Int = name.len;          // accepted
+let c: Int = values.len;        // accepted for dynamic arrays
+```
+
+Generate `string_len(text)` and `length(array)` by default in new examples, but
+accept `.len` as a valid shorthand when reading or repairing Aether.
 
 ### Loops
 

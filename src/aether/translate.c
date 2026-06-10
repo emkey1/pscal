@@ -243,6 +243,9 @@ static int startsWithWord(const char *body, const char *lineEnd, const char *wor
 static int braceDeltaForLine(const char *line);
 static void freeTupleItemTypes(char **items, size_t count);
 static char *extractSelfReceiverTypeName(const char *paramsStart, const char *paramsEnd);
+typedef struct AetherBindingTable AetherBindingTable;
+typedef struct AetherFunctionTable AetherFunctionTable;
+typedef struct AetherFieldTable AetherFieldTable;
 static void splitTypeSuffix(const char *typeStart,
                             const char *typeEnd,
                             const char **outBaseEnd,
@@ -251,6 +254,11 @@ static char *rewriteMethodScopedExpr(const char *start,
                                      const char *end,
                                      const TypeBlockState *typeState,
                                      int isMethod);
+static char *rewriteAetherLenPropertyExpr(const char *start,
+                                          const char *end,
+                                          const AetherBindingTable *bindings,
+                                          const AetherFunctionTable *functions,
+                                          const AetherFieldTable *fields);
 
 static int hasTypedDeclSeparator(const char *body, const char *lineEnd, int isConst) {
     const char *cursor;
@@ -1023,6 +1031,18 @@ typedef struct AetherFunctionTable {
     size_t cap;
 } AetherFunctionTable;
 
+typedef struct AetherFieldSig {
+    char *typeName;
+    char *fieldName;
+    char *fieldType;
+} AetherFieldSig;
+
+typedef struct AetherFieldTable {
+    AetherFieldSig *items;
+    size_t count;
+    size_t cap;
+} AetherFieldTable;
+
 typedef struct ToonLiteralBinding {
     char *name;
     char *literal;
@@ -1172,6 +1192,23 @@ static void freeAetherFunctionTable(AetherFunctionTable *table) {
     table->cap = 0;
 }
 
+static void freeAetherFieldTable(AetherFieldTable *table) {
+    size_t i;
+
+    if (!table) {
+        return;
+    }
+    for (i = 0; i < table->count; i++) {
+        free(table->items[i].typeName);
+        free(table->items[i].fieldName);
+        free(table->items[i].fieldType);
+    }
+    free(table->items);
+    table->items = NULL;
+    table->count = 0;
+    table->cap = 0;
+}
+
 static int ensureAetherBindingTable(AetherBindingTable *table, size_t extra) {
     AetherBinding *resized;
     size_t need;
@@ -1214,6 +1251,31 @@ static int ensureAetherFunctionTable(AetherFunctionTable *table, size_t extra) {
         newCap *= 2;
     }
     resized = (AetherFunctionSig *)realloc(table->items, newCap * sizeof(AetherFunctionSig));
+    if (!resized) {
+        return 0;
+    }
+    table->items = resized;
+    table->cap = newCap;
+    return 1;
+}
+
+static int ensureAetherFieldTable(AetherFieldTable *table, size_t extra) {
+    AetherFieldSig *resized;
+    size_t need;
+    size_t newCap;
+
+    if (!table) {
+        return 0;
+    }
+    need = table->count + extra;
+    if (need <= table->cap) {
+        return 1;
+    }
+    newCap = table->cap ? table->cap * 2 : 16;
+    while (newCap < need) {
+        newCap *= 2;
+    }
+    resized = (AetherFieldSig *)realloc(table->items, newCap * sizeof(AetherFieldSig));
     if (!resized) {
         return 0;
     }
@@ -1319,6 +1381,49 @@ static int setAetherFunctionReturnType(AetherFunctionTable *table,
     return 1;
 }
 
+static int setAetherFieldType(AetherFieldTable *table,
+                              const char *typeName,
+                              const char *fieldName,
+                              const char *fieldType) {
+    size_t i;
+    char *typeCopy;
+    char *nameCopy;
+    char *fieldTypeCopy;
+
+    if (!table || !typeName || !fieldName || !fieldType) {
+        return 0;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].typeName, typeName) == 0 &&
+            strcmp(table->items[i].fieldName, fieldName) == 0) {
+            fieldTypeCopy = dupCString(fieldType);
+            if (!fieldTypeCopy) {
+                return 0;
+            }
+            free(table->items[i].fieldType);
+            table->items[i].fieldType = fieldTypeCopy;
+            return 1;
+        }
+    }
+    if (!ensureAetherFieldTable(table, 1)) {
+        return 0;
+    }
+    typeCopy = dupCString(typeName);
+    nameCopy = dupCString(fieldName);
+    fieldTypeCopy = dupCString(fieldType);
+    if (!typeCopy || !nameCopy || !fieldTypeCopy) {
+        free(typeCopy);
+        free(nameCopy);
+        free(fieldTypeCopy);
+        return 0;
+    }
+    table->items[table->count].typeName = typeCopy;
+    table->items[table->count].fieldName = nameCopy;
+    table->items[table->count].fieldType = fieldTypeCopy;
+    table->count++;
+    return 1;
+}
+
 static const char *findAetherBindingType(const AetherBindingTable *table, const char *name, size_t len) {
     size_t i;
 
@@ -1346,6 +1451,25 @@ static const char *findAetherFunctionReturnType(const AetherFunctionTable *table
         if (strlen(table->items[i].name) == len &&
             strncmp(table->items[i].name, name, len) == 0) {
             return table->items[i].returnType;
+        }
+    }
+    return NULL;
+}
+
+static const char *findAetherFieldType(const AetherFieldTable *table,
+                                       const char *typeName,
+                                       const char *fieldName,
+                                       size_t fieldLen) {
+    size_t i;
+
+    if (!table || !typeName || !fieldName) {
+        return NULL;
+    }
+    for (i = 0; i < table->count; i++) {
+        if (strcmp(table->items[i].typeName, typeName) == 0 &&
+            strlen(table->items[i].fieldName) == fieldLen &&
+            strncmp(table->items[i].fieldName, fieldName, fieldLen) == 0) {
+            return table->items[i].fieldType;
         }
     }
     return NULL;
@@ -2014,7 +2138,8 @@ static const char *findTopLevelArithmeticOp(const char *start,
 static char *inferAetherBindingTypeName(const char *exprStart,
                                         const char *exprEnd,
                                         const AetherBindingTable *bindings,
-                                        const AetherFunctionTable *functions) {
+                                        const AetherFunctionTable *functions,
+                                        const AetherFieldTable *fields) {
     const char *trimmedStart = exprStart;
     const char *trimmedEnd = exprEnd;
     const char *nameEnd;
@@ -2075,8 +2200,8 @@ static char *inferAetherBindingTypeName(const char *exprStart,
             op = findTopLevelArithmeticOp(trimmedStart, trimmedEnd, "*");
         }
         if (op) {
-            char *leftType = inferAetherBindingTypeName(trimmedStart, op, bindings, functions);
-            char *rightType = inferAetherBindingTypeName(op + 1, trimmedEnd, bindings, functions);
+            char *leftType = inferAetherBindingTypeName(trimmedStart, op, bindings, functions, fields);
+            char *rightType = inferAetherBindingTypeName(op + 1, trimmedEnd, bindings, functions, fields);
             char *resultType = NULL;
 
             if (leftType && rightType &&
@@ -2160,6 +2285,41 @@ static char *inferAetherBindingTypeName(const char *exprStart,
                     }
                 }
             }
+            if (functions && bindings && fields) {
+                const char *dot = skipSpacesInRange(nameEnd, trimmedEnd);
+                if (dot < trimmedEnd && *dot == '.') {
+                    const char *fieldStart = skipSpacesInRange(dot + 1, trimmedEnd);
+                    const char *fieldEnd = fieldStart;
+                    const char *fieldTail;
+
+                    while (fieldEnd < trimmedEnd &&
+                           (isalnum((unsigned char)*fieldEnd) || *fieldEnd == '_')) {
+                        fieldEnd++;
+                    }
+                    fieldTail = skipSpacesInRange(fieldEnd, trimmedEnd);
+                    if (fieldEnd > fieldStart && fieldTail == trimmedEnd) {
+                        const char *receiverType = findAetherBindingType(bindings,
+                                                                         trimmedStart,
+                                                                         (size_t)(nameEnd - trimmedStart));
+                        if (receiverType) {
+                            if ((size_t)(fieldEnd - fieldStart) == 3 &&
+                                strncmp(fieldStart, "len", 3) == 0) {
+                                if (strcmp(receiverType, "Text") == 0 ||
+                                    strstr(receiverType, "[]") != NULL) {
+                                    return dupCString("Int");
+                                }
+                            }
+                            helperType = findAetherFieldType(fields,
+                                                             receiverType,
+                                                             fieldStart,
+                                                             (size_t)(fieldEnd - fieldStart));
+                            if (helperType) {
+                                return dupCString(helperType);
+                            }
+                        }
+                    }
+                }
+            }
         }
         if (nameEnd < trimmedEnd && *skipSpacesInRange(nameEnd, trimmedEnd) == '(') {
             helperType = inferHelperReturnTypeName(trimmedStart, (size_t)(nameEnd - trimmedStart));
@@ -2178,7 +2338,8 @@ static char *inferAetherBindingTypeName(const char *exprStart,
 static void maybeRecordAetherBindingType(AetherBindingTable *table,
                                          const char *body,
                                          const char *lineEnd,
-                                         const AetherFunctionTable *functions) {
+                                         const AetherFunctionTable *functions,
+                                         const AetherFieldTable *fields) {
     const char *cursor;
     const char *nameStart;
     const char *nameEnd;
@@ -2229,7 +2390,8 @@ static void maybeRecordAetherBindingType(AetherBindingTable *table,
             typeName = inferAetherBindingTypeName(skipSpacesInRange(equals + 1, lineEnd),
                                                   lineEnd,
                                                   table,
-                                                  functions);
+                                                  functions,
+                                                  fields);
         }
     }
 
@@ -2543,6 +2705,7 @@ static int collectImportedAetherBindings(AetherBindingTable *out,
                                          const char *source,
                                          const char *modulePath) {
     AetherBindingTable local = {0};
+    AetherFieldTable localFields = {0};
     char *moduleName = NULL;
     char *currentTypeName = NULL;
     const char *cursor = source;
@@ -2578,7 +2741,7 @@ static int collectImportedAetherBindings(AetherBindingTable *out,
             const char *rest = skipSpacesInRange(body + 6, lineEnd);
 
             maybeRecordAetherFunctionReturnType(functions, rest, lineEnd, moduleName, currentTypeName);
-            maybeRecordAetherBindingType(&local, rest, lineEnd, functions);
+            maybeRecordAetherBindingType(&local, rest, lineEnd, functions, &localFields);
             if (startsWithWord(rest, lineEnd, "let") || startsWithWord(rest, lineEnd, "const")) {
                 char *name = extractBindingName(rest, lineEnd);
                 if (name) {
@@ -2593,7 +2756,7 @@ static int collectImportedAetherBindings(AetherBindingTable *out,
             }
         } else {
             maybeRecordAetherFunctionReturnType(functions, body, lineEnd, moduleName, currentTypeName);
-            maybeRecordAetherBindingType(&local, body, lineEnd, functions);
+            maybeRecordAetherBindingType(&local, body, lineEnd, functions, &localFields);
         }
 
         braceDepth += braceDeltaForLine(body);
@@ -2608,6 +2771,7 @@ static int collectImportedAetherBindings(AetherBindingTable *out,
     free(currentTypeName);
     free(moduleName);
     freeAetherBindingTable(&local);
+    freeAetherFieldTable(&localFields);
     return 1;
 }
 
@@ -2990,6 +3154,7 @@ static int appendAetherExtensionCallRewrite(Buffer *out,
                                             const char *lineEnd,
                                             const AetherBindingTable *bindings,
                                             const AetherFunctionTable *functions,
+                                            const AetherFieldTable *fields,
                                             const char **outCursor) {
     const char *closeParen;
     const char *argStart;
@@ -3048,7 +3213,7 @@ static int appendAetherExtensionCallRewrite(Buffer *out,
     while (argEnd > argStart && isspace((unsigned char)argEnd[-1])) {
         argEnd--;
     }
-    receiverType = inferAetherBindingTypeName(argStart, argEnd, bindings, functions);
+    receiverType = inferAetherBindingTypeName(argStart, argEnd, bindings, functions, fields);
     if (!receiverType) {
         return 0;
     }
@@ -4071,6 +4236,137 @@ static char *rewriteMethodScopedExpr(const char *start,
                 }
                 cursor = nameEnd;
                 continue;
+            }
+        }
+        if (!bufferAppendN(&out, cursor, 1)) {
+            free(out.data);
+            return NULL;
+        }
+        cursor++;
+    }
+
+    return out.data;
+}
+
+static char *rewriteAetherLenPropertyExpr(const char *start,
+                                          const char *end,
+                                          const AetherBindingTable *bindings,
+                                          const AetherFunctionTable *functions,
+                                          const AetherFieldTable *fields) {
+    const char *cursor = start;
+    Buffer out = {0};
+
+    if (!start || !end || end < start) {
+        return NULL;
+    }
+    if (start == end) {
+        return dupCString("");
+    }
+
+    while (cursor < end) {
+        if (cursor + 1 < end && cursor[0] == '/' && cursor[1] == '/') {
+            if (!bufferAppendN(&out, cursor, (size_t)(end - cursor))) {
+                free(out.data);
+                return NULL;
+            }
+            return out.data;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            char quote = *cursor++;
+
+            if (!bufferAppendN(&out, cursor - 1, 1)) {
+                free(out.data);
+                return NULL;
+            }
+            while (cursor < end) {
+                if (!bufferAppendN(&out, cursor, 1)) {
+                    free(out.data);
+                    return NULL;
+                }
+                if (*cursor == '\\' && cursor + 1 < end) {
+                    cursor++;
+                    if (!bufferAppendN(&out, cursor, 1)) {
+                        free(out.data);
+                        return NULL;
+                    }
+                } else if (*cursor == quote) {
+                    cursor++;
+                    break;
+                }
+                cursor++;
+            }
+            continue;
+        }
+        if ((cursor == start || !isIdentifierChar((unsigned char)cursor[-1])) &&
+            (isalpha((unsigned char)*cursor) || *cursor == '_')) {
+            const char *chainEnd = cursor + 1;
+            const char *lastDot = NULL;
+            const char *lastSegmentStart = cursor;
+            const char *lastSegmentEnd = chainEnd;
+            const char *tail;
+            char *receiverType = NULL;
+            const char *helperName = NULL;
+
+            while (chainEnd < end && isIdentifierChar((unsigned char)*chainEnd)) {
+                chainEnd++;
+            }
+            lastSegmentEnd = chainEnd;
+
+            while (1) {
+                const char *dot = skipSpacesInRange(chainEnd, end);
+                const char *segmentStart;
+                const char *segmentEnd;
+
+                if (dot >= end || *dot != '.') {
+                    break;
+                }
+                segmentStart = skipSpacesInRange(dot + 1, end);
+                if (segmentStart >= end ||
+                    !(isalpha((unsigned char)*segmentStart) || *segmentStart == '_')) {
+                    break;
+                }
+                segmentEnd = segmentStart + 1;
+                while (segmentEnd < end && isIdentifierChar((unsigned char)*segmentEnd)) {
+                    segmentEnd++;
+                }
+                lastDot = dot;
+                lastSegmentStart = segmentStart;
+                lastSegmentEnd = segmentEnd;
+                chainEnd = segmentEnd;
+            }
+
+            tail = skipSpacesInRange(chainEnd, end);
+            if (lastDot &&
+                lastSegmentEnd > lastSegmentStart &&
+                (size_t)(lastSegmentEnd - lastSegmentStart) == 3 &&
+                strncmp(lastSegmentStart, "len", 3) == 0 &&
+                (tail >= end || *tail != '(')) {
+                receiverType = inferAetherBindingTypeName(cursor,
+                                                          lastDot,
+                                                          bindings,
+                                                          functions,
+                                                          fields);
+                if (receiverType) {
+                    if (strcmp(receiverType, "Text") == 0) {
+                        helperName = "string_len";
+                    } else if (strstr(receiverType, "[]") != NULL) {
+                        helperName = "length";
+                    }
+                }
+                if (helperName) {
+                    if (!bufferAppend(&out, helperName) ||
+                        !bufferAppend(&out, "(") ||
+                        !bufferAppendN(&out, cursor, (size_t)(lastDot - cursor)) ||
+                        !bufferAppend(&out, ")")) {
+                        free(receiverType);
+                        free(out.data);
+                        return NULL;
+                    }
+                    free(receiverType);
+                    cursor = chainEnd;
+                    continue;
+                }
+                free(receiverType);
             }
         }
         if (!bufferAppendN(&out, cursor, 1)) {
@@ -5346,8 +5642,8 @@ static char *translateTypedDeclLine(const char *lineStart,
         const char *typeNameStart = afterColon;
         const char *typeNameEnd = typeEnd;
         const char *initNameEnd = exprStart;
-        const char *openBrace;
-        const char *closeBrace;
+        const char *openDelim;
+        const char *closeDelim;
         const char *indentEnd = body;
         Buffer initOut = {0};
         int typeMatches = 0;
@@ -5361,24 +5657,28 @@ static char *translateTypedDeclLine(const char *lineStart,
         while (initNameEnd < lineEnd && (isalnum((unsigned char)*initNameEnd) || *initNameEnd == '_')) {
             initNameEnd++;
         }
-        openBrace = skipSpaces(initNameEnd);
-        closeBrace = lineEnd;
-        while (closeBrace > exprStart && isspace((unsigned char)closeBrace[-1])) {
-            closeBrace--;
+        openDelim = skipSpaces(initNameEnd);
+        closeDelim = lineEnd;
+        while (closeDelim > exprStart && isspace((unsigned char)closeDelim[-1])) {
+            closeDelim--;
         }
-        if (closeBrace > exprStart && closeBrace[-1] == ';') {
-            closeBrace--;
+        if (closeDelim > exprStart && closeDelim[-1] == ';') {
+            closeDelim--;
         }
-        while (closeBrace > exprStart && isspace((unsigned char)closeBrace[-1])) {
-            closeBrace--;
+        while (closeDelim > exprStart && isspace((unsigned char)closeDelim[-1])) {
+            closeDelim--;
         }
-        if (openBrace < lineEnd && *openBrace == '{' &&
-            closeBrace > openBrace && closeBrace[-1] == '}') {
+        if (openDelim < lineEnd &&
+            (*openDelim == '{' || *openDelim == '(') &&
+            closeDelim > openDelim &&
+            ((*openDelim == '{' && closeDelim[-1] == '}') ||
+             (*openDelim == '(' && closeDelim[-1] == ')'))) {
             typeMatches = ((size_t)(typeNameEnd - typeNameStart) == (size_t)(initNameEnd - exprStart) &&
                            strncmp(typeNameStart, exprStart, (size_t)(typeNameEnd - typeNameStart)) == 0);
         }
         if (typeMatches) {
-            const char *entryCursor = openBrace + 1;
+            const char *entryCursor = openDelim + 1;
+            const char *entryLimit = closeDelim - 1;
 
             if (!appendMappedParamTypeAndName(&initOut,
                                               afterColon,
@@ -5392,7 +5692,7 @@ static char *translateTypedDeclLine(const char *lineStart,
                 free(out.data);
                 return NULL;
             }
-            while (entryCursor < closeBrace - 1) {
+            while (entryCursor < entryLimit) {
                 const char *segmentStart;
                 const char *segmentEnd;
                 const char *fieldEnd;
@@ -5401,17 +5701,17 @@ static char *translateTypedDeclLine(const char *lineStart,
                 const char *valueEnd;
                 int depth = 0;
 
-                while (entryCursor < closeBrace - 1 &&
+                while (entryCursor < entryLimit &&
                        (isspace((unsigned char)*entryCursor) || *entryCursor == ',')) {
                     entryCursor++;
                 }
-                if (entryCursor >= closeBrace - 1) {
+                if (entryCursor >= entryLimit) {
                     break;
                 }
                 segmentStart = entryCursor;
                 segmentEnd = segmentStart;
                 fieldEnd = NULL;
-                while (segmentEnd < closeBrace - 1) {
+                while (segmentEnd < entryLimit) {
                     char ch = *segmentEnd;
 
                     if (ch == '(' || ch == '[' || ch == '{' || ch == '<') {
@@ -5459,7 +5759,7 @@ static char *translateTypedDeclLine(const char *lineStart,
                     return NULL;
                 }
                 entryCursor = segmentEnd;
-                if (entryCursor < closeBrace - 1 && *entryCursor == ',') {
+                if (entryCursor < entryLimit && *entryCursor == ',') {
                     entryCursor++;
                 }
             }
@@ -5640,6 +5940,7 @@ static char *translateInferredDeclLine(const char *lineStart,
                                        int isConst,
                                        const AetherBindingTable *bindings,
                                        const AetherFunctionTable *functions,
+                                       const AetherFieldTable *fields,
                                        const char *path,
                                        int lineNumber) {
     const char *cursor = body + (isConst ? 5 : 3);
@@ -5709,7 +6010,7 @@ static char *translateInferredDeclLine(const char *lineStart,
         }
     }
 
-    typeName = inferAetherBindingTypeName(exprStart, lineEnd, bindings, functions);
+    typeName = inferAetherBindingTypeName(exprStart, lineEnd, bindings, functions, fields);
     if (!typeName) {
         char detail[512];
         char hint[512];
@@ -6162,6 +6463,7 @@ static char *translateExportLine(const char *lineStart,
                                  const char *lineEnd,
                                  const AetherBindingTable *bindings,
                                  const AetherFunctionTable *functions,
+                                 const AetherFieldTable *fields,
                                  const char *path,
                                  int lineNumber) {
     const char *rest = skipSpaces(body + 6);
@@ -6178,9 +6480,9 @@ static char *translateExportLine(const char *lineStart,
     } else if (strncmp(rest, "const ", 6) == 0 && hasTypedDeclSeparator(rest, lineEnd, 1)) {
         translatedRest = translateTypedDeclLine(rest, rest, lineEnd, 1, functions, lineNumber);
     } else if (strncmp(rest, "let ", 4) == 0) {
-        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 0, bindings, functions, path, lineNumber);
+        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 0, bindings, functions, fields, path, lineNumber);
     } else if (strncmp(rest, "const ", 6) == 0) {
-        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 1, bindings, functions, path, lineNumber);
+        translatedRest = translateInferredDeclLine(rest, rest, lineEnd, 1, bindings, functions, fields, path, lineNumber);
     } else {
         return dupRange(lineStart, lineEnd);
     }
@@ -6270,11 +6572,42 @@ static int isTypeFieldDeclarationLine(const char *body, const char *lineEnd) {
     return cursor < lineEnd && *cursor == ':';
 }
 
+static char *extractTypeFieldTypeName(const char *body, const char *lineEnd) {
+    const char *cursor;
+    const char *typeStart;
+    const char *typeEnd;
+
+    if (!isTypeFieldDeclarationLine(body, lineEnd)) {
+        return NULL;
+    }
+    cursor = body;
+    while (cursor < lineEnd && (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+        cursor++;
+    }
+    cursor = skipSpaces(cursor);
+    if (cursor >= lineEnd || *cursor != ':') {
+        return NULL;
+    }
+    typeStart = skipSpacesInRange(cursor + 1, lineEnd);
+    typeEnd = typeStart;
+    while (typeEnd < lineEnd && *typeEnd != ';' && *typeEnd != '=') {
+        typeEnd++;
+    }
+    while (typeEnd > typeStart && isspace((unsigned char)typeEnd[-1])) {
+        typeEnd--;
+    }
+    if (typeEnd <= typeStart) {
+        return NULL;
+    }
+    return trimmedCopy(typeStart, typeEnd);
+}
+
 static char *translateLine(const char *lineStart,
                            const char *lineEnd,
                            JsonAliasState *jsonState,
                            const AetherBindingTable *bindings,
                            const AetherFunctionTable *functions,
+                           const AetherFieldTable *fields,
                            const char *path,
                            int lineNumber) {
     const char *body = lineStart;
@@ -6300,7 +6633,7 @@ static char *translateLine(const char *lineStart,
         return out.data;
     }
     if (strncmp(body, "export ", 7) == 0) {
-        return translateExportLine(lineStart, body, lineEnd, bindings, functions, path, lineNumber);
+        return translateExportLine(lineStart, body, lineEnd, bindings, functions, fields, path, lineNumber);
     }
     if (strncmp(body, "fn ", 3) == 0) {
         return translateFnLine(lineStart, body, lineEnd, NULL);
@@ -6339,6 +6672,7 @@ static char *translateLine(const char *lineStart,
                                          0,
                                          bindings,
                                          functions,
+                                         fields,
                                          path,
                                          lineNumber);
     }
@@ -6349,10 +6683,10 @@ static char *translateLine(const char *lineStart,
         return translateTypedDeclLine(lineStart, body, lineEnd, 1, functions, lineNumber);
     }
     if (strncmp(body, "let ", 4) == 0) {
-        return translateInferredDeclLine(lineStart, body, lineEnd, 0, bindings, functions, path, lineNumber);
+        return translateInferredDeclLine(lineStart, body, lineEnd, 0, bindings, functions, fields, path, lineNumber);
     }
     if (strncmp(body, "const ", 6) == 0) {
-        return translateInferredDeclLine(lineStart, body, lineEnd, 1, bindings, functions, path, lineNumber);
+        return translateInferredDeclLine(lineStart, body, lineEnd, 1, bindings, functions, fields, path, lineNumber);
     }
     if (strncmp(body, "use ", 4) == 0) {
         if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
@@ -6474,6 +6808,7 @@ static char *translateLine(const char *lineStart,
                                                  lineEnd,
                                                  bindings,
                                                  functions,
+                                                 fields,
                                                  &advancedCursor)) {
                 body = advancedCursor;
                 continue;
@@ -6507,6 +6842,7 @@ static char *translateLineInMethod(const char *lineStart,
                                    JsonAliasState *jsonState,
                                    const AetherBindingTable *bindings,
                                    const AetherFunctionTable *functions,
+                                   const AetherFieldTable *fields,
                                    const TypeBlockState *typeState,
                                    int isMethod,
                                    const char *path,
@@ -6516,22 +6852,34 @@ static char *translateLineInMethod(const char *lineStart,
                                      jsonState,
                                      bindings,
                                      functions,
+                                     fields,
                                      path,
                                      lineNumber);
     char *rewritten;
+    char *lenRewritten;
 
     if (!translated) {
         return NULL;
     }
-    if (!isMethod || !typeState) {
-        return translated;
+    if (isMethod && typeState) {
+        rewritten = rewriteMethodScopedExpr(translated,
+                                            translated + strlen(translated),
+                                            typeState,
+                                            isMethod);
+        free(translated);
+        if (!rewritten) {
+            return NULL;
+        }
+    } else {
+        rewritten = translated;
     }
-    rewritten = rewriteMethodScopedExpr(translated,
-                                        translated + strlen(translated),
-                                        typeState,
-                                        isMethod);
-    free(translated);
-    return rewritten;
+    lenRewritten = rewriteAetherLenPropertyExpr(rewritten,
+                                                rewritten + strlen(rewritten),
+                                                bindings,
+                                                functions,
+                                                fields);
+    free(rewritten);
+    return lenRewritten;
 }
 
 char *aetherRewriteSource(const char *source, const char *path) {
@@ -6546,6 +6894,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     JsonAliasState jsonState = {0};
     AetherBindingTable bindingTable = {0};
     AetherFunctionTable functionTable = {0};
+    AetherFieldTable fieldTable = {0};
     ToonLiteralTable toonTable = {0};
     AetherTupleTable tupleTable = {0};
     int braceDepth = 0;
@@ -6599,7 +6948,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
         }
         maybeRecordToonLiteralBinding(&toonTable, body, lineEnd);
         maybeRecordAetherFunctionReturnType(&functionTable, body, lineEnd, NULL, typeState.name);
-        maybeRecordAetherBindingType(&bindingTable, body, lineEnd, &functionTable);
+        maybeRecordAetherBindingType(&bindingTable, body, lineEnd, &functionTable, &fieldTable);
 
         if (fnState.active && fnState.postExpr && fnState.isVoid && braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
@@ -6833,6 +7182,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                                                        &jsonState,
                                                        &bindingTable,
                                                        &functionTable,
+                                                       &fieldTable,
                                                        &typeState,
                                                        fnState.active && fnState.isMethod,
                                                        path,
@@ -6905,6 +7255,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
                                                        &jsonState,
                                                        &bindingTable,
                                                        &functionTable,
+                                                       &fieldTable,
                                                        &typeState,
                                                        fnState.active && fnState.isMethod,
                                                        path,
@@ -7216,6 +7567,66 @@ char *aetherRewriteSource(const char *source, const char *path) {
                         }
                     }
                 }
+                if (pending.preExpr) {
+                    char *preWithLen = rewriteAetherLenPropertyExpr(methodPreExpr ? methodPreExpr : pending.preExpr,
+                                                                    (methodPreExpr ? methodPreExpr : pending.preExpr) +
+                                                                        strlen(methodPreExpr ? methodPreExpr : pending.preExpr),
+                                                                    &bindingTable,
+                                                                    &functionTable,
+                                                                    &fieldTable);
+                    if (!preWithLen) {
+                        free(methodPreExpr);
+                        free(methodPostExpr);
+                        free(indent);
+                        free(fnName);
+                        free(returnType);
+                        free(translated);
+                        freePendingContracts(&pending);
+                        clearFunctionContracts(&fnState);
+                        clearParBlockState(&parState);
+                        clearTypeBlockState(&typeState);
+                        freeAetherBindingTable(&bindingTable);
+                        freeAetherFunctionTable(&functionTable);
+                        freeToonLiteralTable(&toonTable);
+                        free(preprocessed);
+                        free(out.data);
+                        return NULL;
+                    }
+                    if (methodPreExpr) {
+                        free(methodPreExpr);
+                    }
+                    methodPreExpr = preWithLen;
+                }
+                if (pending.postExpr) {
+                    char *postWithLen = rewriteAetherLenPropertyExpr(methodPostExpr ? methodPostExpr : pending.postExpr,
+                                                                     (methodPostExpr ? methodPostExpr : pending.postExpr) +
+                                                                         strlen(methodPostExpr ? methodPostExpr : pending.postExpr),
+                                                                     &bindingTable,
+                                                                     &functionTable,
+                                                                     &fieldTable);
+                    if (!postWithLen) {
+                        free(methodPreExpr);
+                        free(methodPostExpr);
+                        free(indent);
+                        free(fnName);
+                        free(returnType);
+                        free(translated);
+                        freePendingContracts(&pending);
+                        clearFunctionContracts(&fnState);
+                        clearParBlockState(&parState);
+                        clearTypeBlockState(&typeState);
+                        freeAetherBindingTable(&bindingTable);
+                        freeAetherFunctionTable(&functionTable);
+                        freeToonLiteralTable(&toonTable);
+                        free(preprocessed);
+                        free(out.data);
+                        return NULL;
+                    }
+                    if (methodPostExpr) {
+                        free(methodPostExpr);
+                    }
+                    methodPostExpr = postWithLen;
+                }
                 if (pending.preExpr &&
                     !appendContractGuard(&out,
                                          indent,
@@ -7350,6 +7761,25 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 free(out.data);
                 return NULL;
             }
+            if (fnState.active && fnState.isMethod && typeState.name) {
+                if (!setAetherBindingType(&bindingTable, "self", typeState.name) ||
+                    !setAetherBindingType(&bindingTable, "myself", typeState.name)) {
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(returnType);
+                    freePendingContracts(&pending);
+                    clearFunctionContracts(&fnState);
+                    clearParBlockState(&parState);
+                    clearTypeBlockState(&typeState);
+                    freeAetherBindingTable(&bindingTable);
+                    freeAetherFunctionTable(&functionTable);
+                    freeAetherFieldTable(&fieldTable);
+                    freeToonLiteralTable(&toonTable);
+                    freeAetherTupleTable(&tupleTable);
+                    free(preprocessed);
+                    free(out.data);
+                    return NULL;
+                }
+            }
 
             freeTupleItemTypes(tupleItemTypes, tupleItemCount);
             free(returnType);
@@ -7382,6 +7812,8 @@ char *aetherRewriteSource(const char *source, const char *path) {
             typeState.name = extractTypeNameFromLine(body, lineEnd);
         } else if (typeState.active && isTypeFieldDeclarationLine(body, lineEnd)) {
             const char *fieldEnd = body;
+            char *fieldName = NULL;
+            char *fieldTypeName = NULL;
 
             while (fieldEnd < lineEnd &&
                    (isalnum((unsigned char)*fieldEnd) || *fieldEnd == '_')) {
@@ -7395,11 +7827,37 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 clearTypeBlockState(&typeState);
                 freeAetherBindingTable(&bindingTable);
                 freeAetherFunctionTable(&functionTable);
+                freeAetherFieldTable(&fieldTable);
                 freeToonLiteralTable(&toonTable);
                 free(preprocessed);
                 free(out.data);
                 return NULL;
             }
+            if (fieldEnd > body) {
+                fieldName = trimmedCopy(body, fieldEnd);
+            }
+            fieldTypeName = extractTypeFieldTypeName(body, lineEnd);
+            if (fieldName && fieldTypeName && typeState.name &&
+                !setAetherFieldType(&fieldTable,
+                                    typeState.name,
+                                    fieldName,
+                                    fieldTypeName)) {
+                free(fieldName);
+                free(fieldTypeName);
+                freePendingContracts(&pending);
+                clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
+                freeAetherFunctionTable(&functionTable);
+                freeAetherFieldTable(&fieldTable);
+                freeToonLiteralTable(&toonTable);
+                free(preprocessed);
+                free(out.data);
+                return NULL;
+            }
+            free(fieldName);
+            free(fieldTypeName);
         }
         braceDepth += lineDelta;
         if (fnState.active && braceDepth < fnState.bodyDepth) {
@@ -7425,6 +7883,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
     clearTypeBlockState(&typeState);
     freeAetherBindingTable(&bindingTable);
     freeAetherFunctionTable(&functionTable);
+    freeAetherFieldTable(&fieldTable);
     freeToonLiteralTable(&toonTable);
     freeAetherTupleTable(&tupleTable);
     free(preprocessed);

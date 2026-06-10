@@ -1,0 +1,32 @@
+type Counter {
+    label: Text;
+    values: Int[];
+
+    fn labelSize() -> Int {
+        ret self.label.len;
+    }
+
+    fn valueCount() -> Int {
+        ret self.values.len;
+    }
+}
+
+fn main() -> Void {
+    let name: Text = "Aether";
+    let counter = new Counter();
+    counter.label = "tooling";
+    counter.values = [];
+    counter.values = counter.values + [1];
+    counter.values = counter.values + [2];
+
+    let a = name.len;
+    let b = counter.labelSize();
+    let c = counter.valueCount();
+
+    fx {
+        writeln(a);
+        writeln(b);
+        writeln(c);
+    }
+    ret;
+}

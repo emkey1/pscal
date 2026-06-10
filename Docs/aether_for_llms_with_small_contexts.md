@@ -81,11 +81,13 @@ let p: Point = Point {
 };
 ```
 
-Do not generate:
+Also accepted:
 
 ```aether
 let p: Point = Point(x: 3, y: 4);
 ```
+
+Generate the brace form by default.
 
 `new Type()` gives fields type-appropriate defaults in Aether:
 
@@ -186,9 +188,12 @@ String length:
 
 ```aether
 let len: Int = string_len(name);
+let len2: Int = name.len;   // accepted
+let len3: Int = values.len; // accepted for dynamic arrays
 ```
 
-Do not generate `name.len`.
+Generate `string_len(name)` or `length(values)` by default. Accept `.len` when
+reading or repairing code.
 
 Also accepted:
 

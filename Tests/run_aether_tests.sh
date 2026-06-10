@@ -36,6 +36,7 @@ FUNCTION_RETURN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_return_i
 OBJECT_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_inference_pass.aether"
 OBJECT_DEFAULT_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_default_init_pass.aether"
 STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_pass.aether"
+LEN_PROPERTY_PASS_FIXTURE="$ROOT_DIR/Tests/aether/len_property_pass.aether"
 NUMERIC_EXPR_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/numeric_expr_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
@@ -62,9 +63,11 @@ MODULE_CONST_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_const_import_pas
 TOON_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_block_pass.aether"
 TYPE_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_block_pass.aether"
 TYPE_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_pass.aether"
+TYPE_INIT_PAREN_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_paren_pass.aether"
 TYPE_METHOD_CONTRACTS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_method_contracts_pass.aether"
 SELF_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_alias_pass.aether"
 SELF_MUTATION_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_mutation_pass.aether"
+METHOD_FIELD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/method_field_inference_pass.aether"
 SELF_CONDITION_METHOD_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_condition_method_pass.aether"
 TEXT_FIELD_METHOD_PARAM_PASS_FIXTURE="$ROOT_DIR/Tests/aether/text_field_method_param_pass.aether"
 TOON_JSON_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_json_helpers_pass.aether"
@@ -134,6 +137,7 @@ for fixture in \
     "$OBJECT_INFERENCE_PASS_FIXTURE" \
     "$OBJECT_DEFAULT_INIT_PASS_FIXTURE" \
     "$STRING_LEN_INFERENCE_PASS_FIXTURE" \
+    "$LEN_PROPERTY_PASS_FIXTURE" \
     "$NUMERIC_EXPR_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
@@ -160,9 +164,11 @@ for fixture in \
     "$TOON_BLOCK_PASS_FIXTURE" \
     "$TYPE_BLOCK_PASS_FIXTURE" \
     "$TYPE_INIT_PASS_FIXTURE" \
+    "$TYPE_INIT_PAREN_PASS_FIXTURE" \
     "$TYPE_METHOD_CONTRACTS_PASS_FIXTURE" \
     "$SELF_ALIAS_PASS_FIXTURE" \
     "$SELF_MUTATION_PASS_FIXTURE" \
+    "$METHOD_FIELD_INFERENCE_PASS_FIXTURE" \
     "$SELF_CONDITION_METHOD_PASS_FIXTURE" \
     "$TEXT_FIELD_METHOD_PARAM_PASS_FIXTURE" \
     "$TOON_JSON_HELPERS_PASS_FIXTURE" \
@@ -329,6 +335,13 @@ if ! cmp -s /tmp/aether_string_len_inference_expected.out /tmp/aether_string_len
     cat /tmp/aether_string_len_inference_pass.out >&2
     exit 1
 fi
+"$AETHER_BIN" --no-cache "$LEN_PROPERTY_PASS_FIXTURE" >/tmp/aether_len_property_pass.out
+printf '6\n7\n2\n' >/tmp/aether_len_property_expected.out
+if ! cmp -s /tmp/aether_len_property_expected.out /tmp/aether_len_property_pass.out; then
+    echo "unexpected len property output" >&2
+    cat /tmp/aether_len_property_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$NUMERIC_EXPR_INFERENCE_PASS_FIXTURE" >/tmp/aether_numeric_expr_inference_pass.out
 printf '8.000000\n' >/tmp/aether_numeric_expr_inference_expected.out
 if ! cmp -s /tmp/aether_numeric_expr_inference_expected.out /tmp/aether_numeric_expr_inference_pass.out; then
@@ -446,6 +459,12 @@ if ! grep -qx "42" /tmp/aether_type_init_pass.out; then
     cat /tmp/aether_type_init_pass.out >&2
     exit 1
 fi
+"$AETHER_BIN" --no-cache "$TYPE_INIT_PAREN_PASS_FIXTURE" >/tmp/aether_type_init_paren_pass.out
+if ! grep -qx "7" /tmp/aether_type_init_paren_pass.out; then
+    echo "unexpected paren type init output" >&2
+    cat /tmp/aether_type_init_paren_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$TYPE_METHOD_CONTRACTS_PASS_FIXTURE" >/tmp/aether_type_method_contracts_pass.out
 printf 'circle=78.539816\nrect=24.000000\n' >/tmp/aether_type_method_contracts_expected.out
 if ! cmp -s /tmp/aether_type_method_contracts_expected.out /tmp/aether_type_method_contracts_pass.out; then
@@ -464,6 +483,12 @@ fi
 if ! grep -qx "42" /tmp/aether_self_mutation_pass.out; then
     echo "unexpected self mutation output" >&2
     cat /tmp/aether_self_mutation_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$METHOD_FIELD_INFERENCE_PASS_FIXTURE" >/tmp/aether_method_field_inference_pass.out
+if ! grep -qx "3" /tmp/aether_method_field_inference_pass.out; then
+    echo "unexpected method field inference output" >&2
+    cat /tmp/aether_method_field_inference_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$SELF_CONDITION_METHOD_PASS_FIXTURE" >/tmp/aether_self_condition_method_pass.out
@@ -1030,45 +1055,43 @@ if ! grep -q "Aether purity error: pure function 'wrapper' cannot call non-pure 
     exit 1
 fi
 
-if "$AETHER_BIN" --no-cache "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_fail.out 2>&1; then
-    echo "expected missing import failure but program succeeded" >&2
-    exit 1
-fi
-if ! grep -q "^$IMPORT_MISSING_FAIL_FIXTURE:1: Aether import error: unable to resolve import 'definitely_missing_aether_module'; add the module file or remove the use line\.$" /tmp/aether_import_missing_fail.out; then
-    echo "missing Aether import failure message" >&2
+if ! "$AETHER_BIN" --no-cache "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_fail.out 2>&1; then
+    echo "missing import fixture should succeed by default" >&2
     cat /tmp/aether_import_missing_fail.out >&2
     exit 1
 fi
-if "$AETHER_BIN" --no-cache --diagnostics-json "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_json.out 2>&1; then
-    echo "expected missing import diagnostics-json failure but program succeeded" >&2
+if [ -s /tmp/aether_import_missing_fail.out ]; then
+    echo "default missing import run should be silent" >&2
+    cat /tmp/aether_import_missing_fail.out >&2
     exit 1
 fi
-if ! grep -q '"phase":"semantic"' /tmp/aether_import_missing_json.out; then
-    echo "missing import diagnostics-json semantic phase" >&2
+if ! "$AETHER_BIN" --no-cache --verbose-compat "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_verbose.out 2>&1; then
+    echo "missing import verbose-compat run should still succeed" >&2
+    cat /tmp/aether_import_missing_verbose.out >&2
+    exit 1
+fi
+if ! grep -q "^$IMPORT_MISSING_FAIL_FIXTURE:1: warning: Aether ignored missing import 'definitely_missing_aether_module'\.$" /tmp/aether_import_missing_verbose.out; then
+    echo "missing verbose-compat warning for ignored import" >&2
+    cat /tmp/aether_import_missing_verbose.out >&2
+    exit 1
+fi
+if ! "$AETHER_BIN" --no-cache --diagnostics-json "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_json.out 2>&1; then
+    echo "missing import diagnostics-json run should succeed" >&2
     cat /tmp/aether_import_missing_json.out >&2
     exit 1
 fi
-if ! grep -q '"kind":"import"' /tmp/aether_import_missing_json.out; then
-    echo "missing import diagnostics-json kind" >&2
+if [ -s /tmp/aether_import_missing_json.out ]; then
+    echo "missing import diagnostics-json output should stay empty" >&2
     cat /tmp/aether_import_missing_json.out >&2
     exit 1
 fi
-if ! grep -q '"line":1' /tmp/aether_import_missing_json.out; then
-    echo "missing import diagnostics-json line" >&2
-    cat /tmp/aether_import_missing_json.out >&2
-    exit 1
-fi
-if "$AETHER_BIN" --no-cache --diagnostics-toon "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_toon.out 2>&1; then
-    echo "expected missing import diagnostics-toon failure but program succeeded" >&2
-    exit 1
-fi
-if ! grep -q '^diagnostics\[1\]{severity,phase,kind,file,line,column,message,hint,raw}:$' /tmp/aether_import_missing_toon.out; then
-    echo "missing import diagnostics-toon header" >&2
+if ! "$AETHER_BIN" --no-cache --diagnostics-toon "$IMPORT_MISSING_FAIL_FIXTURE" >/tmp/aether_import_missing_toon.out 2>&1; then
+    echo "missing import diagnostics-toon run should succeed" >&2
     cat /tmp/aether_import_missing_toon.out >&2
     exit 1
 fi
-if ! grep -q '"error","semantic","import","'"$IMPORT_MISSING_FAIL_FIXTURE"'",1,null,"Aether import error: unable to resolve import '\''definitely_missing_aether_module'\''; add the module file or remove the use line\."' /tmp/aether_import_missing_toon.out; then
-    echo "missing import diagnostics-toon row" >&2
+if [ -s /tmp/aether_import_missing_toon.out ]; then
+    echo "missing import diagnostics-toon output should stay empty" >&2
     cat /tmp/aether_import_missing_toon.out >&2
     exit 1
 fi
