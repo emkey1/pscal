@@ -1,4 +1,5 @@
 #include "aether/translate.h"
+#include "aether/state.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -631,6 +632,19 @@ static void reportAetherRewriteError(const char *path,
     if (hint && *hint) {
         fprintf(stderr, "hint: %s\n", hint);
     }
+}
+
+static void reportAetherCompatibilityWarning(const char *path,
+                                             int line,
+                                             const char *detail) {
+    if (!aetherGetVerboseCompatibilityDiagnostics()) {
+        return;
+    }
+    fprintf(stderr,
+            "%s:%d: Aether compatibility warning: %s\n",
+            path ? path : "<aether>",
+            line > 0 ? line : 1,
+            detail ? detail : "compatibility fallback applied.");
 }
 
 static int isIdentifierChar(unsigned char ch) {
@@ -6295,6 +6309,10 @@ static char *translateLine(const char *lineStart,
         char *normalized = NULL;
         const char *normalizedBody;
         const char *normalizedEnd;
+
+        reportAetherCompatibilityWarning(path,
+                                         lineNumber,
+                                         "`let mut` is accepted as `let`; `mut` is ignored.");
 
         if (!bufferAppendN(&out, lineStart, (size_t)(body - lineStart)) ||
             !bufferAppend(&out, "let ") ||

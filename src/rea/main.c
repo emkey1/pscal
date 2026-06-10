@@ -169,6 +169,9 @@ static const char *REA_USAGE =
     "     --dump-ext-builtins    List extended builtin inventory and exit.\n"
     "     --no-cache             Compile fresh (ignore cached bytecode).\n"
     "     --verbose              Print compilation/cache status messages.\n"
+#if PSCAL_FRONTEND_KIND == FRONTEND_KIND_AETHER
+    "     --verbose-compat       Print Aether compatibility warnings such as ignored missing imports.\n"
+#endif
     "     --strict               Enable strict parser checks for top-level structure.\n"
     "     --diagnostics-json     Emit compiler diagnostics as JSON on failure.\n"
     "     --diagnostics-toon     Emit compiler diagnostics as TOON on failure.\n"
@@ -899,6 +902,7 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
 #endif
     int verbose_flag = 0;
     int strict_mode = 0;
+    int verbose_compat = 0;
     int diagnostics_json = 0;
     int diagnostics_toon = 0;
     int argi = 1;
@@ -936,6 +940,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
             no_cache = 1;
         } else if (strcmp(argv[argi], "--verbose") == 0) {
             verbose_flag = 1;
+        } else if (strcmp(argv[argi], "--verbose-compat") == 0 ||
+                   strcmp(argv[argi], "--verbose-errors") == 0) {
+            verbose_compat = 1;
         } else if (strcmp(argv[argi], "--strict") == 0) {
             strict_mode = 1;
         } else if (strcmp(argv[argi], "--diagnostics-json") == 0) {
@@ -992,6 +999,9 @@ int PSCAL_FRONTEND_MAIN_NAME(int argc, char **argv) {
 #endif
     char *preprocessed_source = preprocessConditionals(src, defines, define_count);
     const char *effective_src = preprocessed_source ? preprocessed_source : src;
+
+    aetherSetVerboseCompatibilityDiagnostics(
+        frontendGetKind() == FRONTEND_KIND_AETHER ? verbose_compat : 0);
 
 #ifdef PSCAL_FRONTEND_HAS_REWRITE_DUMP
     if (dump_rewrite) {

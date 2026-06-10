@@ -5,6 +5,7 @@
 #include "core/utils.h"
 #include "rea/parser.h"
 #include "aether/parser.h"
+#include "aether/state.h"
 #include "aether/translate.h"
 #include "common/frontend_kind.h"
 #include "ast/ast.h"
@@ -191,6 +192,25 @@ static void reportReaLineError(int line, const char *fmt, ...) {
         fprintf(stderr, "%s:%d: ", gReaSourcePath, displayLine);
     } else {
         fprintf(stderr, "L%d: ", displayLine);
+    }
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n");
+    va_end(args);
+}
+
+static void reportReaLineWarning(int line, const char *fmt, ...) {
+    va_list args;
+    int displayLine = line;
+
+    if (frontendIsAether()) {
+        displayLine = aetherMapRewrittenLineToSource(line);
+    }
+
+    va_start(args, fmt);
+    if (gReaSourcePath && *gReaSourcePath) {
+        fprintf(stderr, "%s:%d: warning: ", gReaSourcePath, displayLine);
+    } else {
+        fprintf(stderr, "L%d: warning: ", displayLine);
     }
     vfprintf(stderr, fmt, args);
     fprintf(stderr, "\n");
@@ -1134,10 +1154,11 @@ static void collectImportBindings(AST *decls, ReaModuleBindingList *bindings) {
             ReaModuleInfo *mod = loadModuleRecursive(path);
             if (!mod) {
                 if (frontendIsAether()) {
-                    reportReaLineError(line,
-                                       "Aether import error: unable to resolve import '%s'; add the module file or remove the use line.",
-                                       path);
-                    pascal_semantic_error_count++;
+                    if (aetherGetVerboseCompatibilityDiagnostics()) {
+                        reportReaLineWarning(line,
+                                             "Aether ignored missing import '%s'.",
+                                             path);
+                    }
                 }
                 continue;
             }

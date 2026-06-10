@@ -136,6 +136,94 @@ def load_destinations(path: pathlib.Path) -> list[Destination]:
     return destinations
 
 
+def load_report_json(path: pathlib.Path) -> dict[str, Any]:
+    return json.loads(read_text(path))
+
+
+def iter_report_results(
+    report: dict[str, Any],
+    destination_filter: set[str] | None = None,
+    doc_filter: set[str] | None = None,
+):
+    for destination in report.get("destinations", []):
+        destination_id = destination.get("destination_id", "")
+        if destination_filter and destination_id not in destination_filter:
+            continue
+        for variant in destination.get("variants", []):
+            doc_name = variant.get("doc_name", "")
+            if doc_filter and doc_name not in doc_filter:
+                continue
+            for result in variant.get("results", []):
+                yield destination_id, doc_name, result
+
+
+def result_metric_ok(result: dict[str, Any], metric: str) -> bool:
+    if metric == "generated":
+        return bool(result.get("generated_ok", False))
+    run = result.get("run", {})
+    if metric == "run":
+        return run.get("returncode", -1) == 0
+    if metric == "exact":
+        return bool(run.get("exact_stdout_match", False))
+    raise ValueError(f"unknown metric: {metric}")
+
+
+def compute_task_bucket_stats(
+    report_paths: list[pathlib.Path],
+    metric: str,
+    destination_filter: set[str] | None = None,
+    doc_filter: set[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    stats: dict[str, dict[str, Any]] = {}
+    for path in report_paths:
+        report = load_report_json(path)
+        for destination_id, doc_name, result in iter_report_results(report, destination_filter, doc_filter):
+            task_id = result.get("task_id", "")
+            if not task_id:
+                continue
+            entry = stats.setdefault(
+                task_id,
+                {
+                    "task_id": task_id,
+                    "samples": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "report_paths": [],
+                    "destinations": [],
+                    "docs": [],
+                },
+            )
+            entry["samples"] += 1
+            ok = result_metric_ok(result, metric)
+            if ok:
+                entry["successes"] += 1
+            else:
+                entry["failures"] += 1
+            if str(path) not in entry["report_paths"]:
+                entry["report_paths"].append(str(path))
+            if destination_id and destination_id not in entry["destinations"]:
+                entry["destinations"].append(destination_id)
+            if doc_name and doc_name not in entry["docs"]:
+                entry["docs"].append(doc_name)
+
+    for entry in stats.values():
+        samples = entry["samples"]
+        entry["success_rate"] = round(entry["successes"] / samples, 4) if samples else 0.0
+        entry["failure_rate"] = round(entry["failures"] / samples, 4) if samples else 0.0
+    return stats
+
+
+def classify_task_bucket(
+    entry: dict[str, Any],
+    failure_threshold: float,
+) -> str:
+    if entry.get("samples", 0) == 0:
+        return "no_data"
+    if entry["failure_rate"] >= failure_threshold:
+        return "unstable"
+    return "stable"
+
+
 def resolve_docs(names: list[str]) -> list[tuple[str, pathlib.Path]]:
     resolved: list[tuple[str, pathlib.Path]] = []
     for name in names:
@@ -758,6 +846,48 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", action="append", default=[], help="restrict to one or more task ids")
     parser.add_argument("--list-tasks", action="store_true", help="list manifest task ids and exit")
     parser.add_argument(
+        "--bucket-report",
+        action="append",
+        default=[],
+        type=pathlib.Path,
+        help="benchmark report JSON used to classify tasks by failure rate; may be repeated",
+    )
+    parser.add_argument(
+        "--bucket-destination",
+        action="append",
+        default=[],
+        help="restrict task-bucket classification to one or more destination ids in the report(s)",
+    )
+    parser.add_argument(
+        "--bucket-doc",
+        action="append",
+        default=[],
+        help="restrict task-bucket classification to one or more doc variants in the report(s)",
+    )
+    parser.add_argument(
+        "--bucket-metric",
+        choices=("generated", "run", "exact"),
+        default="exact",
+        help="metric used when classifying tasks from prior report(s) (default: exact)",
+    )
+    parser.add_argument(
+        "--bucket-failure-threshold",
+        type=float,
+        default=0.2,
+        help="tasks at or above this failure rate are classified as unstable (default: 0.2)",
+    )
+    parser.add_argument(
+        "--task-bucket",
+        choices=("stable", "unstable"),
+        default="",
+        help="optionally run only tasks classified into this bucket from prior report(s)",
+    )
+    parser.add_argument(
+        "--list-task-buckets",
+        action="store_true",
+        help="print stable/unstable task classification from prior report(s) and exit",
+    )
+    parser.add_argument(
         "--destinations-config",
         type=pathlib.Path,
         default=DEFAULT_DESTINATIONS_CONFIG,
@@ -817,6 +947,57 @@ def main() -> int:
         raise SystemExit(f"missing aether binary: {args.aether_bin}")
 
     tasks = load_tasks(args.tasks)
+    task_bucket_stats: dict[str, dict[str, Any]] = {}
+    if args.bucket_report:
+        destination_filter = set(args.bucket_destination) if args.bucket_destination else None
+        doc_filter = set(args.bucket_doc) if args.bucket_doc else None
+        task_bucket_stats = compute_task_bucket_stats(
+            report_paths=args.bucket_report,
+            metric=args.bucket_metric,
+            destination_filter=destination_filter,
+            doc_filter=doc_filter,
+        )
+    elif args.task_bucket or args.list_task_buckets:
+        raise SystemExit("--task-bucket and --list-task-buckets require at least one --bucket-report")
+
+    if args.list_task_buckets:
+        stable_ids: list[str] = []
+        unstable_ids: list[str] = []
+        no_data_ids: list[str] = []
+        for task in tasks:
+            entry = task_bucket_stats.get(task.task_id)
+            bucket = classify_task_bucket(entry, args.bucket_failure_threshold) if entry else "no_data"
+            line = task.task_id
+            if entry:
+                line += (
+                    f"\tbucket={bucket}\tsamples={entry['samples']}"
+                    f"\tsuccess_rate={entry['success_rate']:.2f}\tfailure_rate={entry['failure_rate']:.2f}"
+                )
+            else:
+                line += "\tbucket=no_data\tsamples=0\tsuccess_rate=0.00\tfailure_rate=0.00"
+            print(line)
+            if bucket == "stable":
+                stable_ids.append(task.task_id)
+            elif bucket == "unstable":
+                unstable_ids.append(task.task_id)
+            else:
+                no_data_ids.append(task.task_id)
+        print("")
+        print(f"stable    ({len(stable_ids)}): {', '.join(stable_ids)}")
+        print(f"unstable  ({len(unstable_ids)}): {', '.join(unstable_ids)}")
+        if no_data_ids:
+            print(f"no_data   ({len(no_data_ids)}): {', '.join(no_data_ids)}")
+        return 0
+
+    if args.task_bucket:
+        wanted_bucket = args.task_bucket
+        selected_ids = {
+            task.task_id
+            for task in tasks
+            if task.task_id in task_bucket_stats
+            and classify_task_bucket(task_bucket_stats[task.task_id], args.bucket_failure_threshold) == wanted_bucket
+        }
+        tasks = [task for task in tasks if task.task_id in selected_ids]
     if args.task:
         wanted = set(args.task)
         tasks = [task for task in tasks if task.task_id in wanted]
