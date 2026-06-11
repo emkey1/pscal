@@ -47,6 +47,7 @@ DOC_VARIANTS = {
     "small": REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
 }
 _DESTINATION_CONTEXT_CACHE: dict[tuple[str, str, str], int | None] = {}
+OUTPUT_END_MARKER = "__AETHER_BENCH_END__"
 
 
 class ProviderTimeoutError(RuntimeError):
@@ -481,7 +482,11 @@ def resolve_docs(names: list[str]) -> list[tuple[str, pathlib.Path]]:
 
 
 def sanitize_code(raw: str) -> str:
-    text = raw.strip()
+    text = raw
+    marker_idx = text.find(OUTPUT_END_MARKER)
+    if marker_idx != -1:
+        text = text[:marker_idx]
+    text = text.strip()
     lines = text.splitlines()
     if lines and lines[0].startswith("```"):
         lines = lines[1:]
@@ -510,6 +515,7 @@ def build_prompt(doc_name: str, doc_text: str, task: Task) -> str:
         - Return only raw Aether source code.
         - Do not wrap the answer in Markdown fences.
         - Do not explain the code.
+        - After the full program, output a final line containing exactly `{OUTPUT_END_MARKER}`.
         - Keep the program self-contained unless the task explicitly provides files.
         - The program must compile and run with the local `aether` compiler.
         - The program must print exactly the expected output.
@@ -536,6 +542,7 @@ def build_python_prompt(task: Task) -> str:
         - Return only raw Python source code.
         - Do not wrap the answer in Markdown fences.
         - Do not explain the code.
+        - After the full program, output a final line containing exactly `{OUTPUT_END_MARKER}`.
         - Keep the program self-contained unless the task explicitly provides files.
         - The program must run with the local `python3`.
         - The program must print exactly the expected output.
@@ -594,6 +601,7 @@ def build_batch_prompt(doc_name: str, doc_text: str, tasks: list[Task]) -> str:
         Requirements:
         - Return only raw JSON.
         - Do not wrap the answer in Markdown fences.
+        - After the final `}}` of the JSON object, output a final line containing exactly `{OUTPUT_END_MARKER}`.
         - Include exactly one result for every task below.
         - Each `source_code` value must be one complete Aether program.
         - Do not explain the code.
@@ -635,6 +643,7 @@ def build_repair_prompt(
         - Return only raw Aether source code.
         - Do not wrap the answer in Markdown fences.
         - Do not explain the code.
+        - After the full program, output a final line containing exactly `{OUTPUT_END_MARKER}`.
         - Keep the program self-contained unless the task explicitly provides files.
         - The program must compile and run with the local `aether` compiler.
         - The program must print exactly the expected output.
@@ -683,6 +692,7 @@ def build_python_repair_prompt(
         - Return only raw Python source code.
         - Do not wrap the answer in Markdown fences.
         - Do not explain the code.
+        - After the full program, output a final line containing exactly `{OUTPUT_END_MARKER}`.
         - Keep the program self-contained unless the task explicitly provides files.
         - The program must run with the local `python3`.
         - The program must print exactly the expected output.
@@ -722,6 +732,9 @@ def resolve_api_key(destination: Destination) -> str | None:
 
 
 def strip_markdown_fences(text: str) -> str:
+    marker_idx = text.find(OUTPUT_END_MARKER)
+    if marker_idx != -1:
+        text = text[:marker_idx]
     stripped = text.strip()
     lines = stripped.splitlines()
     if lines and lines[0].startswith("```"):

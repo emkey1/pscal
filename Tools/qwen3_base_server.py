@@ -10,16 +10,34 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.generation.stopping_criteria import StoppingCriteria, StoppingCriteriaList
+
+
+OUTPUT_END_MARKER = "__AETHER_BENCH_END__"
+
+
+class TokenSequenceStopper(StoppingCriteria):
+    def __init__(self, stop_ids: list[int]) -> None:
+        super().__init__()
+        self.stop_ids = stop_ids
+        self.stop_len = len(stop_ids)
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs: object) -> bool:
+        if self.stop_len == 0 or input_ids.shape[1] < self.stop_len:
+            return False
+        tail = input_ids[0, -self.stop_len :].tolist()
+        return tail == self.stop_ids
 
 
 class ModelRunner:
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.stop_ids = self.tokenizer.encode(OUTPUT_END_MARKER, add_special_tokens=False)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            torch_dtype="auto",
-            device_map="auto",
+            dtype=torch.bfloat16,
+            device_map={"": 0},
         )
         self.lock = threading.Lock()
 
@@ -35,6 +53,7 @@ class ModelRunner:
                 temperature=temperature if do_sample else None,
                 do_sample=do_sample,
                 pad_token_id=self.tokenizer.eos_token_id,
+                stopping_criteria=StoppingCriteriaList([TokenSequenceStopper(self.stop_ids)]),
             )
             generated_ids = outputs[0][prompt_tokens:]
             text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
