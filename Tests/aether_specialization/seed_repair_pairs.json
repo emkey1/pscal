@@ -1,0 +1,32 @@
+{
+  "pairs": [
+    {
+      "id": "repair_fx_required",
+      "diagnostic": "Aether effect error: call to 'println' requires an fx block.",
+      "broken_source": "fn main() -> Void {\n    println(\"hello\");\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    fx {\n        println(\"hello\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "hello\n"
+    },
+    {
+      "id": "repair_return_to_ret",
+      "diagnostic": "identifier or keyword mismatch: use 'ret' instead of 'return'.",
+      "broken_source": "fn answer() -> Int {\n    return 42;\n}\n\nfn main() -> Void {\n    fx {\n        println(answer());\n    }\n    ret;\n}\n",
+      "fixed_source": "fn answer() -> Int {\n    ret 42;\n}\n\nfn main() -> Void {\n    fx {\n        println(answer());\n    }\n    ret;\n}\n",
+      "expected_stdout": "42\n"
+    },
+    {
+      "id": "repair_contract_placement",
+      "diagnostic": "Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "broken_source": "fn clamp(score: Int) -> Int {\n    @pre score >= 0\n    if score > 100 {\n        ret 100;\n    }\n    ret score;\n}\n\nfn main() -> Void {\n    fx {\n        println(clamp(150));\n    }\n    ret;\n}\n",
+      "fixed_source": "@pre score >= 0\nfn clamp(score: Int) -> Int {\n    if score > 100 {\n        ret 100;\n    }\n    ret score;\n}\n\nfn main() -> Void {\n    fx {\n        println(clamp(150));\n    }\n    ret;\n}\n",
+      "expected_stdout": "100\n"
+    },
+    {
+      "id": "repair_invented_import",
+      "diagnostic": "Error: unable to open module 'helpers'.",
+      "broken_source": "use \"helpers\";\n\nfn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
+      "expected_stdout": "42\n"
+    }
+  ]
+}

@@ -120,11 +120,13 @@ Bootstrap status:
   rewrite path instead of being misclassified as a type-field declaration.
 - `--diagnostics-json` now emits machine-readable compiler diagnostics for
   Aether failures by capturing the frontend's text diagnostics and re-emitting
-  them as structured JSON with file, line, phase, kind, message, and hint
-  fields where available.
+  them as structured JSON with file, line, phase, kind, code, message, and
+  hint fields where available. Stable `code` values are intended for editor
+  integrations, benchmark harnesses, and LLM repair loops.
 - `--diagnostics-toon` now emits the same structured diagnostics in a compact
-  TOON table form, and both renderers preserve original `.aether` source line
-  numbers even when the rewrite layer inserts extra generated lines.
+  TOON table form, including the same `code` column, and both renderers
+  preserve original `.aether` source line numbers even when the rewrite layer
+  inserts extra generated lines.
 - `--dump-rewrite` now dumps the lowered Rea source that Aether generated and
   exits before parsing. This is primarily a debugging tool for frontend
   rewrite bugs and LLM-facing diagnostics work.

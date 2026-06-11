@@ -1,0 +1,12 @@
+fn main() -> Void {
+    let ready: Bool = true;
+    let label: Text = if ready {
+        "ready";
+    } else {
+        "blocked";
+    };
+    fx {
+        println(label);
+    }
+    ret;
+}

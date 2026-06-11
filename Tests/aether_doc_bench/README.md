@@ -66,6 +66,15 @@ python3 Tools/aether_doc_bench.py \
   --text-summary
 ```
 
+Batch several Aether tasks behind one shared-guide prompt:
+
+```bash
+python3 Tools/aether_doc_bench.py \
+  --destination command-template \
+  --shared-guide-batch-size 4 \
+  --text-summary
+```
+
 List configured destinations:
 
 ```bash
@@ -87,15 +96,25 @@ Current destination types:
 - `openai_chat_completions`
 - `command`
 
+`--shared-guide-batch-size` affects only the Aether initial-generation lane.
+When set above `1`, the harness sends one prompt containing the selected guide
+plus multiple tasks, expects one JSON reply with one program per task, then
+splits prompt/usage accounting back across those cases. Repairs still run
+per failed case. The Python baseline remains per-case because it has no guide
+overhead to amortize.
+
 Optional pacing / cleanup fields:
 
 - `after_each_command`: shell command run after every benchmark case
 - `after_each_timeout_seconds`: timeout for that cleanup command
 - `cooldown_seconds`: sleep after each benchmark case
 - `request_timeout_seconds`: timeout for a single provider API request
+- `request_max_retries`: retry transient HTTP/API failures this many times
+- `retry_backoff_seconds`: base delay for exponential backoff between retries
 
 Those fields are useful for local-model workflows where you want to unload a
 model or let memory settle between runs.
+They are also useful for hosted APIs that enforce rate limits, such as Gemini.
 
 ### OpenAI Responses
 
@@ -121,6 +140,8 @@ Add a destination like this:
   "temperature": 0.2,
   "max_output_tokens": 3000,
   "request_timeout_seconds": 120,
+  "request_max_retries": 4,
+  "retry_backoff_seconds": 5,
   "after_each_command": "",
   "after_each_timeout_seconds": 60,
   "cooldown_seconds": 2
@@ -162,6 +183,16 @@ without any network calls:
 python3 Tools/aether_doc_bench.py \
   --tasks Tests/aether_doc_bench/smoke_tasks.json \
   --destination command-template \
+  --text-summary
+```
+
+Batch-mode self-test:
+
+```bash
+python3 Tools/aether_doc_bench.py \
+  --tasks Tests/aether_doc_bench/smoke_tasks.json \
+  --destination command-template \
+  --shared-guide-batch-size 2 \
   --text-summary
 ```
 
@@ -211,6 +242,15 @@ If your local runtime needs help managing memory, add:
 "cooldown_seconds": 2
 ```
 
+If your hosted provider rate-limits aggressively, add retry/backoff as well:
+
+```json
+"request_timeout_seconds": 180,
+"request_max_retries": 4,
+"retry_backoff_seconds": 5,
+"cooldown_seconds": 3
+```
+
 For smaller local models, it is often better to treat them as a
 small-context core lane rather than forcing them through the larger guide.
 In practice that means:
@@ -239,6 +279,18 @@ Keep tasks small, deterministic, and exact-output based.
 The goal is not to test every language feature here. The goal is to measure
 how reliably a model can turn the guide into working Aether.
 
+## Report fields
+
+Every variant report includes the original per-case results plus aggregate
+rollups. When batch mode is enabled it also includes:
+
+- `shared_guide_batch_size`
+- `batch_mode_enabled`
+- `batch_runs`
+
+Each `batch_runs` entry records the grouped task ids, shared prompt token
+estimate, and shared provider-usage block for that batch request.
+
 ## Interpreting repeated failures
 
 If one task fails far more often than the others:
@@ -252,6 +304,56 @@ The JSON report now records:
 - whether the case was resolved after repair
 - a compact failure fingerprint
 - aggregate failure-pattern counts per document variant
+- normalized provider token usage per attempt when the endpoint returns it
+- aggregate token-usage totals per document variant
+- a `doc_token_reference` block with both long and short guide sizes for each run
+
+When Aether exposes a structured diagnostic `code`, the benchmark prefers that
+stable identifier over raw stderr text. This means recurring failures collapse
+into buckets like `run_error_code:AETH-EFFECT-FX-REQUIRED` instead of being
+split apart by line numbers or wording drift.
 
 That makes it easier to see whether the same effect-boundary, inference,
 TOON-shape, or runtime issue keeps surfacing across multiple models.
+
+For OpenAI-compatible providers that return a `usage` object, each attempt now
+includes a normalized `usage` block with:
+
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `cached_tokens` when available
+- `reasoning_tokens` when available
+- `provider_raw` for the original provider payload
+
+Each doc variant also includes a `usage_summary` rollup so you can compare the
+token cost of the long and short guides in addition to correctness.
+
+To separate language compactness from retry overhead, the report now includes
+three different token views:
+
+- `usage_summary`: total workflow tokens across all attempts
+- `final_source_token_summary`: final answer size only, one program per case
+- `exact_final_source_token_summary`: final answer size only for exact-match cases
+
+Matching usage rollups also exist for final attempts:
+
+- `final_usage_summary`
+- `run_ok_final_usage_summary`
+- `exact_final_usage_summary`
+
+There is also an optional Python comparison lane:
+
+```bash
+python3 Tools/aether_doc_bench.py --python-baseline --text-summary
+```
+
+When enabled, each case also asks the same model for a Python 3 solution,
+executes it locally with `python3`, and records:
+
+- per-attempt normalized usage
+- per-attempt approximate answer tokens
+- exact-output success/failure
+- per-variant Python usage and answer-token rollups
+
+This is intended to make Aether-vs-Python token comparisons straightforward.

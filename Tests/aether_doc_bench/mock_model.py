@@ -4,15 +4,16 @@
 from __future__ import annotations
 
 import pathlib
+import json
 import re
 import sys
 
 
-def extract_task_id(prompt: str) -> str:
-    match = re.search(r"^\s*Task ID:\s*(\S+)\s*$", prompt, re.MULTILINE)
-    if not match:
+def extract_task_ids(prompt: str) -> list[str]:
+    matches = re.findall(r"^\s*Task ID:\s*(\S+)\s*$", prompt, re.MULTILINE)
+    if not matches:
         raise SystemExit("unable to locate Task ID in prompt")
-    return match.group(1)
+    return matches
 
 
 PROGRAMS = {
@@ -93,8 +94,17 @@ def main() -> int:
         raise SystemExit("usage: mock_model.py PROMPT_FILE")
     prompt_path = pathlib.Path(sys.argv[1])
     prompt = prompt_path.read_text(encoding="utf-8")
-    task_id = extract_task_id(prompt)
-    sys.stdout.write(PROGRAMS[task_id])
+    task_ids = extract_task_ids(prompt)
+    if "\"results\"" in prompt or "Return exactly one JSON object" in prompt:
+        payload = {
+            "results": [
+                {"task_id": task_id, "source_code": PROGRAMS[task_id]}
+                for task_id in task_ids
+            ]
+        }
+        sys.stdout.write(json.dumps(payload))
+        return 0
+    sys.stdout.write(PROGRAMS[task_ids[0]])
     return 0
 
 

@@ -1,0 +1,7 @@
+fn main() -> Void {
+    let ready: Bool = true;
+    fx {
+        println("status:", if ready { "ready" } else { "blocked" });
+    }
+    ret;
+}

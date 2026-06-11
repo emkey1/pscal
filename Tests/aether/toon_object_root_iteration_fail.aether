@@ -1,0 +1,18 @@
+fn main() -> Void {
+    if !has_toon() {
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"jobs\":[{\"name\":\"Alpha\"}]}");
+    let root: ToonNode = toon_root(doc);
+
+    loop i in 0..toon_len(root) {
+        let job: ToonNode = toon_at(root, i);
+        fx {
+            println(toon_get_text(job, "name"));
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

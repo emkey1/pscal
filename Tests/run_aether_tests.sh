@@ -33,6 +33,9 @@ INFERRED_LET_UNKNOWN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/inferred_let_unknown_f
 DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/diagnostic_line_mapping_fail.aether"
 FUNCTION_INFERENCE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/function_inference_support"
 FUNCTION_RETURN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_return_inference_pass.aether"
+FUNCTION_MISSING_RETURN_TYPE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/function_missing_return_type_fail.aether"
+FUNCTION_FORWARD_DECL_PASS_FIXTURE="$ROOT_DIR/Tests/aether/function_forward_decl_pass.aether"
+FUNCTION_MISSING_VALUE_RETURN_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/function_missing_value_return_fail.aether"
 OBJECT_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_inference_pass.aether"
 OBJECT_DEFAULT_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_default_init_pass.aether"
 STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_pass.aether"
@@ -55,6 +58,9 @@ FOR_RANGE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/for_range_pass.aether"
 LOOP_FORMS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/loop_forms_pass.aether"
 ARRAY_RETURN_PASS_FIXTURE="$ROOT_DIR/Tests/aether/array_return_pass.aether"
 INLINE_IF_EXPR_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_if_expr_pass.aether"
+INLINE_IF_CALL_ARGS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_if_call_args_pass.aether"
+MULTILINE_INLINE_IF_DECL_PASS_FIXTURE="$ROOT_DIR/Tests/aether/multiline_inline_if_decl_pass.aether"
+RETURN_OBJECT_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/return_object_init_pass.aether"
 STRING_EQ_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_eq_alias_pass.aether"
 MODULE_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_import_pass.aether"
 MODULE_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_math"
@@ -62,6 +68,7 @@ MODULE_CONST_SUPPORT_FIXTURE="$ROOT_DIR/Tests/aether/module_consts"
 MODULE_CONST_IMPORT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/module_const_import_pass.aether"
 TOON_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_block_pass.aether"
 TYPE_BLOCK_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_block_pass.aether"
+TYPE_FIELD_COMMA_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/type_field_comma_fail.aether"
 TYPE_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_pass.aether"
 TYPE_INIT_PAREN_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_init_paren_pass.aether"
 TYPE_METHOD_CONTRACTS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/type_method_contracts_pass.aether"
@@ -97,6 +104,7 @@ TOON_DEFAULTS_DECL_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_defaults_decl_fail.
 TOON_COMMENT_ARITH_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_comment_arithmetic_pass.aether"
 TOON_NESTED_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_nested_helpers_pass.aether"
 TOON_SINGLE_CHAR_KEY_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_single_char_key_pass.aether"
+TOON_OBJECT_ROOT_ITER_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_object_root_iteration_fail.aether"
 SHOWCASE_EXAMPLE="$ROOT_DIR/Examples/aether/showcase/agent_report"
 
 if [ ! -x "$AETHER_BIN" ]; then
@@ -134,6 +142,9 @@ for fixture in \
     "$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE" \
     "$FUNCTION_INFERENCE_SUPPORT_FIXTURE" \
     "$FUNCTION_RETURN_INFERENCE_PASS_FIXTURE" \
+    "$FUNCTION_MISSING_RETURN_TYPE_FAIL_FIXTURE" \
+    "$FUNCTION_FORWARD_DECL_PASS_FIXTURE" \
+    "$FUNCTION_MISSING_VALUE_RETURN_FAIL_FIXTURE" \
     "$OBJECT_INFERENCE_PASS_FIXTURE" \
     "$OBJECT_DEFAULT_INIT_PASS_FIXTURE" \
     "$STRING_LEN_INFERENCE_PASS_FIXTURE" \
@@ -156,6 +167,9 @@ for fixture in \
     "$LOOP_FORMS_PASS_FIXTURE" \
     "$ARRAY_RETURN_PASS_FIXTURE" \
     "$INLINE_IF_EXPR_PASS_FIXTURE" \
+    "$INLINE_IF_CALL_ARGS_PASS_FIXTURE" \
+    "$MULTILINE_INLINE_IF_DECL_PASS_FIXTURE" \
+    "$RETURN_OBJECT_INIT_PASS_FIXTURE" \
     "$STRING_EQ_ALIAS_PASS_FIXTURE" \
     "$MODULE_IMPORT_PASS_FIXTURE" \
     "$MODULE_SUPPORT_FIXTURE" \
@@ -163,6 +177,7 @@ for fixture in \
     "$MODULE_CONST_IMPORT_PASS_FIXTURE" \
     "$TOON_BLOCK_PASS_FIXTURE" \
     "$TYPE_BLOCK_PASS_FIXTURE" \
+    "$TYPE_FIELD_COMMA_FAIL_FIXTURE" \
     "$TYPE_INIT_PASS_FIXTURE" \
     "$TYPE_INIT_PAREN_PASS_FIXTURE" \
     "$TYPE_METHOD_CONTRACTS_PASS_FIXTURE" \
@@ -198,6 +213,7 @@ for fixture in \
     "$TOON_COMMENT_ARITH_PASS_FIXTURE" \
     "$TOON_NESTED_HELPERS_PASS_FIXTURE" \
     "$TOON_SINGLE_CHAR_KEY_PASS_FIXTURE" \
+    "$TOON_OBJECT_ROOT_ITER_FAIL_FIXTURE" \
     "$SHOWCASE_EXAMPLE"
 do
     if [ ! -f "$fixture" ]; then
@@ -239,6 +255,26 @@ fi
 if ! grep -qx "42" /tmp/aether_inline_if_expr_pass.out; then
     echo "unexpected inline if expression output" >&2
     cat /tmp/aether_inline_if_expr_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$INLINE_IF_CALL_ARGS_PASS_FIXTURE" >/tmp/aether_inline_if_call_args_pass.out
+printf 'status:ready\n' >/tmp/aether_inline_if_call_args_expected.out
+if ! cmp -s /tmp/aether_inline_if_call_args_expected.out /tmp/aether_inline_if_call_args_pass.out; then
+    echo "unexpected inline if call-arg output" >&2
+    cat /tmp/aether_inline_if_call_args_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$MULTILINE_INLINE_IF_DECL_PASS_FIXTURE" >/tmp/aether_multiline_inline_if_decl_pass.out
+if ! grep -qx "ready" /tmp/aether_multiline_inline_if_decl_pass.out; then
+    echo "unexpected multiline inline if decl output" >&2
+    cat /tmp/aether_multiline_inline_if_decl_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$RETURN_OBJECT_INIT_PASS_FIXTURE" >/tmp/aether_return_object_init_pass.out
+printf '7\nready\n' >/tmp/aether_return_object_init_expected.out
+if ! cmp -s /tmp/aether_return_object_init_expected.out /tmp/aether_return_object_init_pass.out; then
+    echo "unexpected return object init output" >&2
+    cat /tmp/aether_return_object_init_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$STRING_EQ_ALIAS_PASS_FIXTURE" >/tmp/aether_string_eq_alias_pass.out
@@ -312,6 +348,12 @@ printf 'Aether\n42\n' >/tmp/aether_function_return_inference_expected.out
 if ! cmp -s /tmp/aether_function_return_inference_expected.out /tmp/aether_function_return_inference_pass.out; then
     echo "unexpected function return inference output" >&2
     cat /tmp/aether_function_return_inference_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$FUNCTION_FORWARD_DECL_PASS_FIXTURE" >/tmp/aether_function_forward_decl_pass.out
+if ! grep -qx "42" /tmp/aether_function_forward_decl_pass.out; then
+    echo "unexpected function forward declaration output" >&2
+    cat /tmp/aether_function_forward_decl_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$OBJECT_INFERENCE_PASS_FIXTURE" >/tmp/aether_object_inference_pass.out
@@ -937,12 +979,12 @@ if env -u OPENAI_API_KEY "$AETHER_BIN" --diagnostics-toon --no-cache "$RUNTIME_L
     echo "expected runtime diagnostics-toon failure but program succeeded" >&2
     exit 1
 fi
-if ! grep -q '^diagnostics\[1\]{severity,phase,kind,file,line,column,message,hint,raw}:$' /tmp/aether_runtime_line_mapping_toon.out; then
+if ! grep -q '^diagnostics\[1\]{severity,phase,kind,code,file,line,column,message,hint,raw}:$' /tmp/aether_runtime_line_mapping_toon.out; then
     echo "missing runtime diagnostics-toon header" >&2
     cat /tmp/aether_runtime_line_mapping_toon.out >&2
     exit 1
 fi
-if ! grep -q '"error","runtime","runtime","'"$RUNTIME_LINE_MAPPING_FAIL_FIXTURE"'",4,null,"OpenAIChatCompletions requires an API key via argument or OPENAI_API_KEY\."' /tmp/aether_runtime_line_mapping_toon.out; then
+if ! grep -q '"error","runtime","runtime","","'"$RUNTIME_LINE_MAPPING_FAIL_FIXTURE"'",4,null,"OpenAIChatCompletions requires an API key via argument or OPENAI_API_KEY\."' /tmp/aether_runtime_line_mapping_toon.out; then
     echo "missing runtime diagnostics-toon row" >&2
     cat /tmp/aether_runtime_line_mapping_toon.out >&2
     exit 1
@@ -996,6 +1038,91 @@ if ! grep -q '"hint":"add an explicit type, for example `let answer: Int = ...;`
     cat /tmp/aether_inferred_let_unknown_json.out >&2
     exit 1
 fi
+if "$AETHER_BIN" --no-cache "$FUNCTION_MISSING_RETURN_TYPE_FAIL_FIXTURE" >/tmp/aether_function_missing_return_type_fail.out 2>&1; then
+    echo "expected missing return type rewrite failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether function rewrite error: functions must declare an explicit return type" /tmp/aether_function_missing_return_type_fail.out; then
+    echo "missing function return type rewrite failure message" >&2
+    cat /tmp/aether_function_missing_return_type_fail.out >&2
+    exit 1
+fi
+if ! grep -q "hint: write \`fn name(args) -> Void { ... }\` or replace \`Void\` with the actual return type." /tmp/aether_function_missing_return_type_fail.out; then
+    echo "missing function return type rewrite failure hint" >&2
+    cat /tmp/aether_function_missing_return_type_fail.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --diagnostics-json --no-cache "$FUNCTION_MISSING_RETURN_TYPE_FAIL_FIXTURE" >/tmp/aether_function_missing_return_type_json.out 2>&1; then
+    echo "expected missing return type diagnostics-json failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '"phase":"rewrite"' /tmp/aether_function_missing_return_type_json.out; then
+    echo "missing function diagnostics-json phase" >&2
+    cat /tmp/aether_function_missing_return_type_json.out >&2
+    exit 1
+fi
+if ! grep -q '"line":1' /tmp/aether_function_missing_return_type_json.out; then
+    echo "missing function diagnostics-json line mapping" >&2
+    cat /tmp/aether_function_missing_return_type_json.out >&2
+    exit 1
+fi
+if ! grep -q '"code":"AETH-REWRITE-FUNCTION-RETURN-TYPE"' /tmp/aether_function_missing_return_type_json.out; then
+    echo "missing function diagnostics-json code" >&2
+    cat /tmp/aether_function_missing_return_type_json.out >&2
+    exit 1
+fi
+if ! grep -q '"message":"Aether function rewrite error: functions must declare an explicit return type\."' /tmp/aether_function_missing_return_type_json.out; then
+    echo "missing function diagnostics-json message" >&2
+    cat /tmp/aether_function_missing_return_type_json.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --no-cache "$FUNCTION_MISSING_VALUE_RETURN_FAIL_FIXTURE" >/tmp/aether_function_missing_value_return_fail.out 2>&1; then
+    echo "expected missing value return rewrite failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether function rewrite error: non-Void functions have a fallthrough path with no return value" /tmp/aether_function_missing_value_return_fail.out; then
+    echo "missing value return rewrite failure message" >&2
+    cat /tmp/aether_function_missing_value_return_fail.out >&2
+    exit 1
+fi
+if ! grep -q 'hint: add `ret value;` on the top-level path that can reach the closing `}`, or declare the function `-> Void` if it only performs side effects\.' /tmp/aether_function_missing_value_return_fail.out; then
+    echo "missing value return rewrite failure hint" >&2
+    cat /tmp/aether_function_missing_value_return_fail.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --no-cache "$TYPE_FIELD_COMMA_FAIL_FIXTURE" >/tmp/aether_type_field_comma_fail.out 2>&1; then
+    echo "expected type field comma rewrite failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether type rewrite error: type fields must end with ';', not ','." /tmp/aether_type_field_comma_fail.out; then
+    echo "missing type field comma rewrite failure message" >&2
+    cat /tmp/aether_type_field_comma_fail.out >&2
+    exit 1
+fi
+if ! grep -q "hint: write \`fieldName: Type;\` for each field inside a \`type\` block." /tmp/aether_type_field_comma_fail.out; then
+    echo "missing type field comma rewrite failure hint" >&2
+    cat /tmp/aether_type_field_comma_fail.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --diagnostics-json --no-cache "$TYPE_FIELD_COMMA_FAIL_FIXTURE" >/tmp/aether_type_field_comma_json.out 2>&1; then
+    echo "expected type field comma diagnostics-json failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '"line":2' /tmp/aether_type_field_comma_json.out; then
+    echo "missing type field comma diagnostics-json line mapping" >&2
+    cat /tmp/aether_type_field_comma_json.out >&2
+    exit 1
+fi
+if ! grep -q '"code":"AETH-REWRITE-TYPE-FIELD-SEMICOLON"' /tmp/aether_type_field_comma_json.out; then
+    echo "missing type field comma diagnostics-json code" >&2
+    cat /tmp/aether_type_field_comma_json.out >&2
+    exit 1
+fi
+if ! grep -q '"message":"Aether type rewrite error: type fields must end with ' /tmp/aether_type_field_comma_json.out; then
+    echo "missing type field comma diagnostics-json message" >&2
+    cat /tmp/aether_type_field_comma_json.out >&2
+    exit 1
+fi
 if "$AETHER_BIN" --diagnostics-json --no-cache "$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE" >/tmp/aether_diagnostic_line_mapping_json.out 2>&1; then
     echo "expected diagnostic line-mapping failure with diagnostics-json but program succeeded" >&2
     exit 1
@@ -1019,17 +1146,17 @@ if "$AETHER_BIN" --diagnostics-toon --no-cache "$DIAGNOSTIC_LINE_MAPPING_FAIL_FI
     echo "expected diagnostic line-mapping failure with diagnostics-toon but program succeeded" >&2
     exit 1
 fi
-if ! grep -q '^diagnostics\[3\]{severity,phase,kind,file,line,column,message,hint,raw}:$' /tmp/aether_diagnostic_line_mapping_toon.out; then
+if ! grep -q '^diagnostics\[3\]{severity,phase,kind,code,file,line,column,message,hint,raw}:$' /tmp/aether_diagnostic_line_mapping_toon.out; then
     echo "missing diagnostics-toon header" >&2
     cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
     exit 1
 fi
-if ! grep -q '"scope","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,8,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
+if ! grep -q '"scope","","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,8,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
     echo "missing diagnostics-toon mapped loop line" >&2
     cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
     exit 1
 fi
-if ! grep -q '"scope","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,9,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
+if ! grep -q '"scope","","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,9,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
     echo "missing diagnostics-toon mapped body line" >&2
     cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
     exit 1
@@ -1110,6 +1237,26 @@ fi
 if ! grep -q '^Ada$' /tmp/aether_toon_comment_arith_pass.out; then
     echo "missing TOON comment arithmetic pass output" >&2
     cat /tmp/aether_toon_comment_arith_pass.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$TOON_OBJECT_ROOT_ITER_FAIL_FIXTURE" >/tmp/aether_toon_object_root_iter_fail.out 2>&1; then
+    echo "expected object-root iteration failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q '\[AETH-RUNTIME-TOON-GET-INDEX-ARRAY\]' /tmp/aether_toon_object_root_iter_fail.out; then
+    echo "missing object-root iteration runtime code" >&2
+    cat /tmp/aether_toon_object_root_iter_fail.out >&2
+    exit 1
+fi
+if ! grep -q 'YyjsonGetIndex requires an array value handle, got object\.' /tmp/aether_toon_object_root_iter_fail.out; then
+    echo "missing object-root iteration type-aware runtime error" >&2
+    cat /tmp/aether_toon_object_root_iter_fail.out >&2
+    exit 1
+fi
+if ! grep -q 'extract its array field first, for example toon_key(root, "jobs")' /tmp/aether_toon_object_root_iter_fail.out; then
+    echo "missing object-root iteration hint" >&2
+    cat /tmp/aether_toon_object_root_iter_fail.out >&2
     exit 1
 fi
 

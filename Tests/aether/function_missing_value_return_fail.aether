@@ -1,0 +1,11 @@
+fn broken(flag: Bool) -> Int {
+    flag == true;
+}
+
+fn main() -> Void {
+    let value: Int = broken(false);
+    fx {
+        println(value);
+    }
+    ret;
+}

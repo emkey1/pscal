@@ -1,0 +1,28 @@
+{
+  "pairs": [
+    {
+      "id": "hello_fx",
+      "prompt": "Write the smallest valid Aether program that prints exactly `hello from benchmark` followed by a newline.",
+      "solution": "fn main() -> Void {\n    fx {\n        println(\"hello from benchmark\");\n    }\n    ret;\n}\n",
+      "expected_stdout": "hello from benchmark\n"
+    },
+    {
+      "id": "classify_scores",
+      "prompt": "Write an Aether program with a pure helper `classify(score: Int) -> Text` that returns `ready` for scores >= 90, `review` for scores >= 70, and `blocked` otherwise. In `main`, print three lines for scores 95, 72, and 10 in the format `95 => ready`.",
+      "solution": "@pure\nfn classify(score: Int) -> Text {\n    if score >= 90 {\n        ret \"ready\";\n    }\n    if score >= 70 {\n        ret \"review\";\n    }\n    ret \"blocked\";\n}\n\nfn main() -> Void {\n    fx {\n        println(\"95 => \", classify(95));\n        println(\"72 => \", classify(72));\n        println(\"10 => \", classify(10));\n    }\n    ret;\n}\n",
+      "expected_stdout": "95 => ready\n72 => review\n10 => blocked\n"
+    },
+    {
+      "id": "type_and_method",
+      "prompt": "Write an Aether program that defines a `Counter` type with a `value: Int` field and a `bump() -> Int` method that increments the field and returns it. In `main`, create a counter, initialize it correctly, call `bump()` twice, and print each returned value on its own line.",
+      "solution": "type Counter {\n    value: Int;\n\n    fn bump() -> Int {\n        self.value = self.value + 1;\n        ret self.value;\n    }\n}\n\nfn main() -> Void {\n    let counter = new Counter();\n    counter.value = 0;\n    fx {\n        println(counter.bump());\n        println(counter.bump());\n    }\n    ret;\n}\n",
+      "expected_stdout": "1\n2\n"
+    },
+    {
+      "id": "toon_inline_extract",
+      "prompt": "Write an Aether program that checks `has_toon()`. If TOON support is missing, print `toon unavailable` and exit. Otherwise parse the JSON text `{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}`, extract the `name` and `score`, print them as `Aether 42`, close the document, and return.",
+      "solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Aether 42\n"
+    }
+  ]
+}

@@ -1261,12 +1261,58 @@ static const char *expectedTertiaryArgTypeName(const char *name, size_t len) {
 }
 
 static void reportAetherError(const char *kind, int line, const char *detail) {
-    fprintf(stderr,
-            "%s:%d: Aether %s error: %s\n",
-            g_aether_source_path ? g_aether_source_path : "<aether>",
-            line,
-            kind,
-            detail ? detail : "unknown error");
+    const char *code = NULL;
+
+    if (kind && detail) {
+        if (strcmp(kind, "type") == 0 &&
+            strstr(detail, "opaque TOON handle") &&
+            strstr(detail, "arithmetic expressions")) {
+            code = "AETH-TYPE-TOON-OPAQUE-ARITH";
+        } else if (strcmp(kind, "type") == 0 &&
+                   strstr(detail, "expects a ToonDoc handle")) {
+            code = "AETH-TYPE-TOON-DOC-NODE-MISMATCH";
+        } else if (strcmp(kind, "type") == 0 &&
+                   strstr(detail, "expects a ToonNode handle")) {
+            code = "AETH-TYPE-TOON-DOC-NODE-MISMATCH";
+        } else if (strcmp(kind, "type") == 0 &&
+                   strstr(detail, " first argument")) {
+            code = "AETH-TYPE-HELPER-FIRST-ARG";
+        } else if (strcmp(kind, "type") == 0 &&
+                   strstr(detail, " second argument")) {
+            code = "AETH-TYPE-HELPER-SECOND-ARG";
+        } else if (strcmp(kind, "type") == 0 &&
+                   strstr(detail, " third argument")) {
+            code = "AETH-TYPE-HELPER-THIRD-ARG";
+        } else if (strcmp(kind, "effect") == 0 &&
+                   strstr(detail, "requires an fx block")) {
+            code = "AETH-EFFECT-FX-REQUIRED";
+        } else if (strcmp(kind, "purity") == 0 &&
+                   strstr(detail, "cannot call effectful builtin")) {
+            code = "AETH-PURITY-EFFECTFUL-BUILTIN";
+        } else if (strcmp(kind, "purity") == 0 &&
+                   strstr(detail, "cannot call non-pure function")) {
+            code = "AETH-PURITY-NONPURE-CALL";
+        } else if (strstr(detail, "not in scope")) {
+            code = "AETH-SCOPE-NOT-IN-SCOPE";
+        }
+    }
+
+    if (code) {
+        fprintf(stderr,
+                "%s:%d: [%s] Aether %s error: %s\n",
+                g_aether_source_path ? g_aether_source_path : "<aether>",
+                line,
+                code,
+                kind,
+                detail ? detail : "unknown error");
+    } else {
+        fprintf(stderr,
+                "%s:%d: Aether %s error: %s\n",
+                g_aether_source_path ? g_aether_source_path : "<aether>",
+                line,
+                kind,
+                detail ? detail : "unknown error");
+    }
     pascal_semantic_error_count++;
 }
 

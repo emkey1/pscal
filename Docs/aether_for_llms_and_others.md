@@ -189,6 +189,9 @@ Canonical function form:
 fn name(arg: Type, ...) -> ReturnType { ... }
 ```
 
+Every function must declare an explicit return type. There is no omitted-return
+shorthand. Even procedures must be written as `-> Void`.
+
 Example:
 
 ```aether
@@ -246,6 +249,15 @@ let point: Point = Point(x: 3, y: 4);
 
 Both forms compile. Generate the brace form by default because it is easier to
 scan and less likely to be confused with an ordinary constructor call.
+
+Inside a `type` block, fields end with semicolons, not commas:
+
+```aether
+type JobSummary {
+    name: Text;
+    score: Int;
+}
+```
 
 ### Safe inference policy
 
@@ -914,6 +926,15 @@ Shape and type checks:
 
 `toon_root(doc)` returns the parsed top-level value.
 
+**High-priority rule for LLMs:** do not assume `root` is the iterable array.
+First decide whether the top-level JSON is:
+
+- an array: iterate `root`
+- an object containing an array field: extract that field, then iterate it
+
+If the prompt names a collection such as `jobs`, `transactions`, `releases`,
+or `users`, and the payload is object-shaped, bind that named array first.
+
 If the input JSON starts with `[`, the root is already the array to iterate:
 
 ```aether
@@ -944,6 +965,25 @@ toon_close(doc);
 
 Never use `toon_at(root, 0)` to mean "get the array" unless `root` is an array
 and you intentionally want its first element.
+
+Do not write this unless the JSON truly starts with `[`:
+
+```aether
+loop i in 0..toon_len(root) {
+    let row: ToonNode = toon_at(root, i);
+}
+```
+
+For object-shaped payloads, write this instead:
+
+```aether
+let root: ToonNode = toon_root(doc);
+let rows: ToonNode = toon_key(root, "jobs"); // or "transactions", "releases", etc.
+
+loop i in 0..toon_len(rows) {
+    let row: ToonNode = toon_at(rows, i);
+}
+```
 
 This is the key distinction:
 
@@ -1071,6 +1111,48 @@ let name: Text = toon_get_text(job, "name");
 One-character JSON keys such as `"v"` are valid TOON keys in Aether.
 `toon_has_key(node, "v")` and `toon_get_real_or(node, "v", 0.0)` should work.
 
+### JSON key fidelity rule
+
+Copy JSON keys exactly as provided. Do not normalize names in your head.
+
+If the input shape is:
+
+```json
+{"server":{"port":0},"app":{"name":""},"log":{"level":"warning"}}
+```
+
+then the Aether reads should use that exact structure:
+
+```aether
+let server: ToonNode = toon_key(root, "server");
+let app: ToonNode = toon_key(root, "app");
+let log: ToonNode = toon_key(root, "log");
+
+let port: Int = toon_get_int_or(server, "port", 0);
+let name: Text = toon_get_text_or(app, "name", "");
+let level: Text = toon_get_text_or(log, "level", "info");
+```
+
+Do not guess replacements like:
+
+- `toon_get_int_or(root, "port", 0)`
+- `toon_get_text_or(root, "appName", "")`
+- `toon_get_text_or(root, "logLevel", "info")`
+
+Benchmark-shaped config pattern:
+
+```aether
+let doc: ToonDoc = toon_parse_file("config.json");
+let root: ToonNode = toon_root(doc);
+let server: ToonNode = toon_key(root, "server");
+let app: ToonNode = toon_key(root, "app");
+let log: ToonNode = toon_key(root, "log");
+
+let port: Int = toon_get_int_or(server, "port", 0);
+let appName: Text = toon_get_text_or(app, "name", "");
+let logLevel: Text = toon_get_text_or(log, "level", "info");
+```
+
 ## Tasks and AI helpers
 
 Aether has compact aliases over shared runtime/task helpers.
@@ -1119,6 +1201,14 @@ LLM rules:
 - imported symbol names must match exported names exactly
 - `use "module_name";` does not rename exported symbols for you
 - imported exported names are used directly after import
+- do not silently rename provided exports to shorter guessed helper names
+
+Copy export names exactly:
+
+- if a module exports `classifySupport`, call `classifySupport(...)`
+- if a module exports `clampSupport`, call `clampSupport(...)`
+- do not rename them to guessed locals such as `classify(...)` or
+  `normalizeScore(...)` unless you define those wrappers yourself
 
 When writing standalone snippets for docs, tests, chats, or generated examples:
 
@@ -1164,6 +1254,37 @@ fn main() -> Void {
     ret;
 }
 ```
+
+Benchmark-shaped provided-module pattern:
+
+If the prompt provides a module with:
+
+```aether
+mod BenchSupport {
+    export const DefaultScore: Int = 50;
+    export fn classifySupport(score: Int) -> Text { ... }
+    export fn clampSupport(score: Int) -> Int { ... }
+}
+```
+
+then consume those exact names:
+
+```aether
+use "bench_support";
+
+fn summarize(job: ToonNode) -> Int {
+    let raw: Int = toon_get_int_or(job, "score", DefaultScore);
+    let score: Int = clampSupport(raw);
+    let status: Text = classifySupport(score);
+    fx {
+        println(status);
+    }
+    ret score;
+}
+```
+
+Do not rename `classifySupport` to `classify` or `clampSupport` to
+`normalizeScore` unless you define wrappers yourself.
 
 Real module examples:
 
@@ -1584,6 +1705,8 @@ Before submitting Aether code, verify:
 - all `print(...)` and `println(...)` calls are inside `fx { ... }`
 - all task helper calls and `ai_chat(...)` calls are inside `fx { ... }`
 - all `use "..."` imports reference real, verified modules
+- imported constants are used directly and not redefined locally unless the task
+  explicitly asks for a local override
 - all function parameters have explicit types
 - `ret` is used instead of `return`
 - `type` is used instead of `class`
@@ -1599,60 +1722,3 @@ Before submitting Aether code, verify:
 - `@pre`, `@post`, `@pure`, and `@cost` are above the function, not inside it
 - generated code follows canonical forms unless there is a reason to preserve
   accepted-but-non-canonical source
-
-## Small-context LLM doc extraction checklist
-
-When updating `Docs/aether_for_llms_with_small_contexts.md`, preserve these
-items from this full reference:
-
-- Highest-Value Rules
-- Never Generate These
-- Canonical vs accepted forms for high-risk syntax
-- smallest useful program
-- safe generation algorithm
-- `fx` rules
-- print/formatting rules
-- conservative inference policy
-- import rules
-- TOON handle rules
-- TOON root-shape rule
-- TOON `_or` fallback warning
-- tuple limitations
-- repair rules
-- validation checklist
-
-Do not let the small-context document become a general overview. Its job is to
-make generated Aether valid.
-
-## Where to look next
-
-Practical examples:
-
-- `Examples/aether/base/README.md`
-- `Examples/aether/showcase/README.md`
-
-Implementation notes:
-
-- `src/aether/README.md`
-- `src/aether/DESIGN.md`
-
-Best example files to copy from:
-
-- `Examples/aether/base/hello`
-- `Examples/aether/base/contracts`
-- `Examples/aether/base/contract_layouts`
-- `Examples/aether/base/inferred_decls`
-- `Examples/aether/base/function_inference`
-- `Examples/aether/base/object_inference`
-- `Examples/aether/base/self_mutation`
-- `Examples/aether/base/toon_access`
-- `Examples/aether/base/toon_defaults`
-- `Examples/aether/showcase/agent_report`
-
-## Bottom Line
-
-If you want valid Aether today, keep generated code compact, explicit about
-effects, modest about inference, typed around TOON handles and extracted values,
-careful about imports, conservative with tuples, and close to the existing
-examples. That is still the fastest path for both humans and LLMs to produce
-working Aether code.

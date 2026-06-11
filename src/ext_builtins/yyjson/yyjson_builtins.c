@@ -295,6 +295,23 @@ static const char *jsonTypeToString(yyjson_val *val) {
     }
 }
 
+static const char *jsonFindSuggestedArrayField(yyjson_val *val) {
+    yyjson_obj_iter iter;
+    yyjson_val *key = NULL;
+
+    if (!val || !yyjson_is_obj(val)) {
+        return NULL;
+    }
+    iter = yyjson_obj_iter_with(val);
+    while ((key = yyjson_obj_iter_next(&iter))) {
+        yyjson_val *child = yyjson_obj_iter_get_val(key);
+        if (child && yyjson_is_arr(child)) {
+            return yyjson_get_str(key);
+        }
+    }
+    return NULL;
+}
+
 static Value vmBuiltinYyjsonRead(struct VM_s *vm, int arg_count, Value *args) {
     if (arg_count != 1 || !isPascalStringType(args[0].type)) {
         runtimeError(vm, "YyjsonRead expects a single string argument.");
@@ -437,7 +454,7 @@ cleanup:
 
 static Value vmBuiltinYyjsonGetIndex(struct VM_s *vm, int arg_count, Value *args) {
     if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
-        runtimeError(vm, "YyjsonGetIndex expects (value_handle:int, index:int).");
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-INDEX-ARITY] YyjsonGetIndex expects (value_handle:int, index:int).");
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
     int handle = (int)AS_INTEGER(args[0]);
@@ -448,13 +465,26 @@ static Value vmBuiltinYyjsonGetIndex(struct VM_s *vm, int arg_count, Value *args
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetIndex received an invalid value handle (%d).", handle);
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-INDEX-HANDLE] YyjsonGetIndex received an invalid value handle (%d).", handle);
         return makeInt(YYJSON_UNUSED_HANDLE);
     }
 
     Value result = makeInt(YYJSON_UNUSED_HANDLE);
     if (!yyjson_is_arr(val)) {
-        runtimeError(vm, "YyjsonGetIndex requires an array value handle.");
+        const char *actualType = jsonTypeToString(val);
+        const char *suggestedField = jsonFindSuggestedArrayField(val);
+        if (suggestedField && *suggestedField) {
+            runtimeError(vm,
+                         "[AETH-RUNTIME-TOON-GET-INDEX-ARRAY] YyjsonGetIndex requires an array value handle, got %s. "
+                         "If this is an object root, extract its array field first, for example "
+                         "toon_key(root, \"%s\").",
+                         actualType,
+                         suggestedField);
+        } else {
+            runtimeError(vm,
+                         "[AETH-RUNTIME-TOON-GET-INDEX-ARRAY] YyjsonGetIndex requires an array value handle, got %s.",
+                         actualType);
+        }
         goto cleanup;
     }
 
@@ -465,7 +495,7 @@ static Value vmBuiltinYyjsonGetIndex(struct VM_s *vm, int arg_count, Value *args
 
     int child_handle = jsonAllocValueHandle(doc, child);
     if (child_handle == YYJSON_UNUSED_HANDLE) {
-        runtimeError(vm, "YyjsonGetIndex: unable to allocate value handle.");
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-INDEX-ALLOC] YyjsonGetIndex: unable to allocate value handle.");
         goto cleanup;
     }
 
@@ -507,7 +537,7 @@ cleanup:
 
 static Value vmBuiltinYyjsonHasIndex(struct VM_s *vm, int arg_count, Value *args) {
     if (arg_count != 2 || !IS_INTLIKE(args[0]) || !IS_INTLIKE(args[1])) {
-        runtimeError(vm, "YyjsonHasIndex expects (value_handle:int, index:int).");
+        runtimeError(vm, "[AETH-RUNTIME-TOON-HAS-INDEX-ARITY] YyjsonHasIndex expects (value_handle:int, index:int).");
         return makeInt(0);
     }
     int handle = (int)AS_INTEGER(args[0]);
@@ -518,13 +548,26 @@ static Value vmBuiltinYyjsonHasIndex(struct VM_s *vm, int arg_count, Value *args
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonHasIndex received an invalid value handle (%d).", handle);
+        runtimeError(vm, "[AETH-RUNTIME-TOON-HAS-INDEX-HANDLE] YyjsonHasIndex received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
 
     Value result = makeInt(0);
     if (!yyjson_is_arr(val)) {
-        runtimeError(vm, "YyjsonHasIndex requires an array value handle.");
+        const char *actualType = jsonTypeToString(val);
+        const char *suggestedField = jsonFindSuggestedArrayField(val);
+        if (suggestedField && *suggestedField) {
+            runtimeError(vm,
+                         "[AETH-RUNTIME-TOON-HAS-INDEX-ARRAY] YyjsonHasIndex requires an array value handle, got %s. "
+                         "If this is an object root, extract its array field first, for example "
+                         "toon_key(root, \"%s\").",
+                         actualType,
+                         suggestedField);
+        } else {
+            runtimeError(vm,
+                         "[AETH-RUNTIME-TOON-HAS-INDEX-ARRAY] YyjsonHasIndex requires an array value handle, got %s.",
+                         actualType);
+        }
         goto cleanup;
     }
 
@@ -585,20 +628,22 @@ static Value vmBuiltinYyjsonGetType(struct VM_s *vm, int arg_count, Value *args)
 
 static Value vmBuiltinYyjsonGetString(struct VM_s *vm, int arg_count, Value *args) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) {
-        runtimeError(vm, "YyjsonGetString expects a single value handle.");
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-STRING-ARITY] YyjsonGetString expects a single value handle.");
         return makeString("");
     }
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetString received an invalid value handle (%d).", handle);
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-STRING-HANDLE] YyjsonGetString received an invalid value handle (%d).", handle);
         return makeString("");
     }
 
     Value result = makeString("");
     if (!yyjson_is_str(val)) {
-        runtimeError(vm, "YyjsonGetString requires a string value handle.");
+        runtimeError(vm,
+                     "[AETH-RUNTIME-TOON-GET-STRING-TYPE] YyjsonGetString requires a string value handle, got %s.",
+                     jsonTypeToString(val));
         goto cleanup;
     }
 
@@ -612,14 +657,14 @@ cleanup:
 
 static Value vmBuiltinYyjsonGetNumber(struct VM_s *vm, int arg_count, Value *args) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) {
-        runtimeError(vm, "YyjsonGetNumber expects a single value handle.");
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-NUMBER-ARITY] YyjsonGetNumber expects a single value handle.");
         return makeDouble(0.0);
     }
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetNumber received an invalid value handle (%d).", handle);
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-NUMBER-HANDLE] YyjsonGetNumber received an invalid value handle (%d).", handle);
         return makeDouble(0.0);
     }
 
@@ -633,7 +678,9 @@ static Value vmBuiltinYyjsonGetNumber(struct VM_s *vm, int arg_count, Value *arg
         goto cleanup;
     }
 
-    runtimeError(vm, "YyjsonGetNumber requires a numeric value handle.");
+    runtimeError(vm,
+                 "[AETH-RUNTIME-TOON-GET-NUMBER-TYPE] YyjsonGetNumber requires a numeric value handle, got %s.",
+                 jsonTypeToString(val));
 
 cleanup:
     jsonReleaseValue(handle);
@@ -642,20 +689,22 @@ cleanup:
 
 static Value vmBuiltinYyjsonGetInt(struct VM_s *vm, int arg_count, Value *args) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) {
-        runtimeError(vm, "YyjsonGetInt expects a single value handle.");
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-INT-ARITY] YyjsonGetInt expects a single value handle.");
         return makeInt64(0);
     }
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetInt received an invalid value handle (%d).", handle);
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-INT-HANDLE] YyjsonGetInt received an invalid value handle (%d).", handle);
         return makeInt64(0);
     }
 
     Value result = makeInt64(0);
     if (!yyjson_is_int(val)) {
-        runtimeError(vm, "YyjsonGetInt requires an integer value handle.");
+        runtimeError(vm,
+                     "[AETH-RUNTIME-TOON-GET-INT-TYPE] YyjsonGetInt requires an integer value handle, got %s.",
+                     jsonTypeToString(val));
         goto cleanup;
     }
 
@@ -668,20 +717,22 @@ cleanup:
 
 static Value vmBuiltinYyjsonGetBool(struct VM_s *vm, int arg_count, Value *args) {
     if (arg_count != 1 || !IS_INTLIKE(args[0])) {
-        runtimeError(vm, "YyjsonGetBool expects a single value handle.");
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-BOOL-ARITY] YyjsonGetBool expects a single value handle.");
         return makeInt(0);
     }
     int handle = (int)AS_INTEGER(args[0]);
     yyjson_doc *doc = NULL;
     yyjson_val *val = NULL;
     if (!jsonAcquireValue(handle, &doc, &val, NULL)) {
-        runtimeError(vm, "YyjsonGetBool received an invalid value handle (%d).", handle);
+        runtimeError(vm, "[AETH-RUNTIME-TOON-GET-BOOL-HANDLE] YyjsonGetBool received an invalid value handle (%d).", handle);
         return makeInt(0);
     }
 
     Value result = makeInt(0);
     if (!yyjson_is_bool(val)) {
-        runtimeError(vm, "YyjsonGetBool requires a boolean value handle.");
+        runtimeError(vm,
+                     "[AETH-RUNTIME-TOON-GET-BOOL-TYPE] YyjsonGetBool requires a boolean value handle, got %s.",
+                     jsonTypeToString(val));
         goto cleanup;
     }
 

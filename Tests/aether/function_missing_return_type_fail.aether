@@ -1,0 +1,8 @@
+fn helper(value: Int) {
+    ret;
+}
+
+fn main() -> Void {
+    helper(1);
+    ret;
+}

@@ -197,6 +197,7 @@ typedef struct ParsedDiagnostic {
     int line;
     char *phase;
     char *kind;
+    char *code;
     char *message;
     char *hint;
     char *raw;
@@ -213,6 +214,7 @@ static void freeParsedDiagnostics(ParsedDiagnostic *items, int count) {
         free(items[i].file);
         free(items[i].phase);
         free(items[i].kind);
+        free(items[i].code);
         free(items[i].message);
         free(items[i].hint);
         free(items[i].raw);
@@ -386,6 +388,44 @@ static void inferDiagnosticPhaseKind(const char *message, char **outPhase, char 
     *outKind = diagDupRange(kind, kind + strlen(kind));
 }
 
+static void extractDiagnosticCode(ParsedDiagnostic *diag) {
+    const char *message;
+    const char *close;
+    const char *after;
+    char *strippedMessage;
+
+    if (!diag || !diag->message || diag->message[0] != '[') {
+        return;
+    }
+
+    message = diag->message;
+    close = strchr(message, ']');
+    if (!close || close == message + 1) {
+        return;
+    }
+
+    after = close + 1;
+    if (*after == ' ') {
+        after++;
+    }
+
+    diag->code = diagDupRange(message + 1, close);
+    if (!diag->code) {
+        free(diag->code);
+        diag->code = NULL;
+        return;
+    }
+
+    strippedMessage = diagDupRange(after, after + strlen(after));
+    if (!strippedMessage) {
+        free(diag->code);
+        diag->code = NULL;
+        return;
+    }
+    free(diag->message);
+    diag->message = strippedMessage;
+}
+
 static ParsedDiagnostic parseDiagnosticLine(const char *line) {
     ParsedDiagnostic diag = {0};
     const char *firstColon;
@@ -407,6 +447,7 @@ static ParsedDiagnostic parseDiagnosticLine(const char *line) {
                 diag.file = diagDupRange(line, firstColon);
                 diag.line = (int)parsedLine;
                 diag.message = diagDupRange(message, message + strlen(message));
+                extractDiagnosticCode(&diag);
                 inferDiagnosticPhaseKind(diag.message, &diag.phase, &diag.kind);
                 return diag;
             }
@@ -419,12 +460,14 @@ static ParsedDiagnostic parseDiagnosticLine(const char *line) {
             const char *message = endptr + 2;
             diag.line = (int)parsedLine;
             diag.message = diagDupRange(message, message + strlen(message));
+            extractDiagnosticCode(&diag);
             inferDiagnosticPhaseKind(diag.message, &diag.phase, &diag.kind);
             return diag;
         }
     }
 
     diag.message = diagDupRange(line, line + strlen(line));
+    extractDiagnosticCode(&diag);
     inferDiagnosticPhaseKind(diag.message, &diag.phase, &diag.kind);
     return diag;
 }
@@ -563,6 +606,12 @@ static void emitDiagnosticsJson(FILE *out, ParsedDiagnostic *items, int count) {
         jsonWriteEscaped(out, diag->phase ? diag->phase : "compile");
         fputs(",\"kind\":", out);
         jsonWriteEscaped(out, diag->kind ? diag->kind : "generic");
+        fputs(",\"code\":", out);
+        if (diag->code) {
+            jsonWriteEscaped(out, diag->code);
+        } else {
+            fputs("null", out);
+        }
         fputs(",\"file\":", out);
         if (diag->file) {
             jsonWriteEscaped(out, diag->file);
@@ -589,7 +638,7 @@ static void emitDiagnosticsJson(FILE *out, ParsedDiagnostic *items, int count) {
 }
 
 static void emitDiagnosticsToon(FILE *out, ParsedDiagnostic *items, int count) {
-    fprintf(out, "diagnostics[%d]{severity,phase,kind,file,line,column,message,hint,raw}:\n", count);
+    fprintf(out, "diagnostics[%d]{severity,phase,kind,code,file,line,column,message,hint,raw}:\n", count);
     for (int i = 0; i < count; i++) {
         ParsedDiagnostic *diag = &items[i];
         fputs("  \"", out);
@@ -598,6 +647,8 @@ static void emitDiagnosticsToon(FILE *out, ParsedDiagnostic *items, int count) {
         toonWriteEscaped(out, diag->phase ? diag->phase : "compile");
         fputs("\",\"", out);
         toonWriteEscaped(out, diag->kind ? diag->kind : "generic");
+        fputs("\",\"", out);
+        toonWriteEscaped(out, diag->code ? diag->code : "");
         fputs("\",\"", out);
         toonWriteEscaped(out, diag->file ? diag->file : "");
         fprintf(out, "\",%d,null,\"", diag->line);
@@ -616,7 +667,7 @@ static void emitDiagnosticsFromText(FILE *out, const char *text, int asToon) {
 
     if (!items && count == 0) {
         if (asToon) {
-            fputs("diagnostics[0]{severity,phase,kind,file,line,column,message,hint,raw}:\n", out);
+            fputs("diagnostics[0]{severity,phase,kind,code,file,line,column,message,hint,raw}:\n", out);
         } else {
             fputs("[]\n", out);
         }
@@ -641,7 +692,7 @@ static void emitRuntimeDiagnosticsFromText(FILE *out,
 
     if (!items && count == 0) {
         if (asToon) {
-            fputs("diagnostics[0]{severity,phase,kind,file,line,column,message,hint,raw}:\n", out);
+            fputs("diagnostics[0]{severity,phase,kind,code,file,line,column,message,hint,raw}:\n", out);
         } else {
             fputs("[]\n", out);
         }
