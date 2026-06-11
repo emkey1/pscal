@@ -138,8 +138,11 @@ def main() -> int:
         return 0
 
     if args.command == "start-server":
-        start_server(args.host, args.workspace, args.port, args.model_id)
-        health = poll_health(base_url, args.wait_seconds)
+        try:
+            health = http_get_json(base_url + "/health", timeout=5)
+        except Exception:
+            start_server(args.host, args.workspace, args.port, args.model_id)
+            health = poll_health(base_url, args.wait_seconds)
         print(json.dumps(health, ensure_ascii=True))
         return 0
 
