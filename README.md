@@ -1,38 +1,123 @@
-# Pscal
+# PSCAL
 
-Pscal started out as a Pascal interpreter, written for the most part with the help of various AI's.  Most notably Google's Gemini 2.5 Pro and more recently OpenAI's GPT5 in conjunction with their codex.  It has quickly evolved into a VM with multiple front ends, documented below.
+**Practical Scripting Computation And Logic engine** — a bytecode VM with a
+shared backend and multiple language front ends, written in C.
 
-There are currently four front end languages:
+PSCAL is built around one idea: invest in a single stack-based virtual
+machine, bytecode compiler, and builtin library, then keep language front ends
+thin. Every front end gets the full backend for free — HTTP with serious TLS
+controls, SQLite, yyjson, threads, optional SDL2/SDL3 graphics and audio, and
+an extensible builtin mechanism. The AST-JSON → bytecode tool
+(`pscaljson2bc`) makes the VM a public compilation target, so new front ends
+can be prototyped in any language.
 
-- Pascal: Implements a significant subset of classic Pascal.
-- CLike:  Implements a C like language that has native support for strings and some other enhancements.
-- exsh:   Compiles shell scripts that orchestrate processes and PSCAL builtins.
-- Rea:    Implements an Object Oriented Programming Language (OOP)
+## Front ends
 
-The code base is written in C and consists of a hand‑written lexer and parser, a bytecode compiler and a stack‑based virtual machine.  
+- **Aether** *(new, experimental)*: a compact language designed from the start
+  to be written correctly by LLMs as well as humans. Explicit effect
+  boundaries, lightweight contracts, a deliberately closed builtin surface,
+  and first-class structured-data (TOON/JSON) helpers. See below.
+- **Rea**: an object-oriented language.
+- **Pascal**: a significant subset of classic Pascal.
+- **CLike**: a C-like language with native strings and other enhancements.
+- **exsh**: a shell front end that compiles orchestration scripts to PSCAL
+  bytecode, with threads and access to the full builtin catalog.
+- **tiny**: a minimal educational front end written in Python
+  (`tools/tiny`), demonstrating how to target the VM externally.
 
-Optional SDL2/SDL3 support adds graphics and audio capabilities, and there is built‑in support for CURL, yyjson and SQLite with others easily added.
+PSCAL started as a Pascal interpreter and was written for the most part with
+the help of various AIs — most notably Google's Gemini 2.5 Pro and, more
+recently, OpenAI's GPT-5 with Codex. It has since evolved into the
+multi-front-end VM described here.
 
-PSCAL also now ships with an iOS/iPadOS host app built in SwiftUI. The mobile app embeds the PSCAL toolchain, stages examples and runtime assets into the app sandbox, and is available for external testing through TestFlight.
+## Aether: an LLM-first front end
 
-The PSCAL suite is extensible through extended builtins.  Check the Docs directory for additional details on this.
+Aether is the newest front end (it is less than a week old — expect rough
+edges and rapid change). Its design goal is unusual: most languages optimize
+for human ergonomics and treat machine generation as a side effect. Aether
+inverts that. The language is specified so that a model given only its
+reference document produces correct programs on the first try:
+
+- **Visible effects**: all output, task launches, and AI calls live inside
+  explicit `fx { ... }` blocks; pure logic stays outside.
+- **Lightweight contracts**: `@pure`, `@pre`, `@post`, and `@cost`
+  annotations with runtime checking.
+- **Closed builtin surface**: the documented helpers are the complete
+  callable surface, which removes the most common LLM failure mode —
+  invented functions.
+- **Structured data first**: TOON helpers (backed by yyjson) for parsing and
+  traversing JSON-shaped payloads with opaque, type-safe handles.
+- **Canonical forms**: one preferred spelling for each construct, with
+  accepted compatibility forms documented separately, plus repair rules that
+  map diagnostics back to fixes.
+
+Aether lowers onto the shared backend through the existing toolchain;
+diagnostics map back to original Aether source lines, with structured output
+available via `--diagnostics-json` / `--diagnostics-toon` and compatibility
+warnings via `--verbose-compat`.
+
+A quick taste:
+
+```aether
+@pure
+fn classify(score: Int) -> Text {
+    if score >= 90 {
+        ret "ready";
+    }
+    ret "review";
+}
+
+fn main() -> Void {
+    let status: Text = classify(95);
+    fx {
+        println("status = ", status);
+    }
+    ret;
+}
+```
+
+Documentation and examples:
+
+- Full reference: `Docs/` [VERIFY: exact filename — the two Aether docs
+  cross-reference each other as `aether_for_humans_and_llms.md` and
+  `aether_for_llms_and_others.md`; settle on one name and link it here]
+- Small-context LLM guide: `Docs/aether_for_llms_with_small_contexts.md`
+- Examples: `Examples/aether/base/`, `Examples/aether/showcase/`
+  (`agent_report`, `release_board`)
+
+Example usage:
+
+```
+[VERIFY: invocation — dedicated binary (e.g. build/bin/aether
+Examples/aether/showcase/agent_report) or via another front end's binary?
+Show the exact command a new user should run first.]
+```
+
+Early internal testing suggests LLMs given only the Aether reference produce
+correct programs at a higher rate than they produce correct Python for the
+same tasks. [VERIFY: link the eval harness / benchmark scripts when
+published; until then consider softening or omitting this claim in the
+public README]
 
 ## Community
 
-- Discord server: [https://discord.gg/jZV6UHUyBS](https://discord.gg/jZV6UHUyBS)
-- iOS/iPadOS TestFlight info: [https://discord.com/channels/1412663740419280928/1412664012193271940/1449783416076632218](https://discord.com/channels/1412663740419280928/1412664012193271940/1449783416076632218)
+- Discord server: <https://discord.gg/jZV6UHUyBS>
+- iOS/iPadOS TestFlight info: see the Discord `#testflight` channel
+  [VERIFY: keep or restore the original deep link]
 
 ## Requirements
 
 - C compiler with C11 support
 - [CMake](https://cmake.org/) 3.18 or newer
 - [Git](https://git-scm.com/) (required for submodules)
-- [libcurl](https://curl.se/libcurl/) when building with `-DPSCAL_USE_BUNDLED_CURL=OFF`
-- **Optional**: SDL2 or SDL3 plus the matching `SDL*_image`, `SDL*_mixer` and `SDL*_ttf` libraries when building with `-DSDL=ON`
+- [libcurl](https://curl.se/libcurl/) when building with
+  `-DPSCAL_USE_BUNDLED_CURL=OFF`
+- **Optional**: SDL2 or SDL3 plus the matching `SDL*_image`, `SDL*_mixer`
+  and `SDL*_ttf` libraries when building with `-DSDL=ON`
 
-On Debian/Ubuntu the required packages can be installed with:
+On Debian/Ubuntu:
 
-```sh
+```
 sudo apt-get update
 sudo apt-get install build-essential cmake git libcurl4-openssl-dev \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
@@ -40,29 +125,27 @@ sudo apt-get install build-essential cmake git libcurl4-openssl-dev \
 
 ## Clone (with submodules)
 
-Use a recursive clone so all required subprojects are present:
-
-```sh
+```
 git clone --recurse-submodules https://github.com/emkey1/pscal.git
 cd pscal
 ```
 
 If you already cloned without submodules:
 
-```sh
+```
 git submodule update --init --recursive
 ```
 
-After each pull, refresh submodules:
+After each pull:
 
-```sh
+```
 git pull --recurse-submodules
 git submodule update --init --recursive
 ```
 
 ## Building
 
-```sh
+```
 cmake -S . -B build
 cmake --build build -j
 ```
@@ -70,402 +153,268 @@ cmake --build build -j
 Common configure options:
 
 - `-DSDL=ON`: enable SDL-dependent graphics/audio builtins and examples.
-- `-DPSCAL_USE_SDL3=ON`: prefer SDL3 where supported by the build.
-- `-DRELEASE_BUILD=ON`: append `_REL` to version naming while keeping optional extended builtins enabled.
-- `-DBUILD_DASCAL=ON`: build the debug-oriented `dascal` binary.
-
-If you use submodules, run this before pushing to make sure pinned commits are
-fetchable by others:
-
-```sh
-Tools/check_submodule_refs.sh
-```
-
-To verify both protected branches in one pass:
-
-```sh
-Tools/check_submodule_refs.sh --protected-refs
-```
+- `-DPSCAL_USE_SDL3=ON`: prefer SDL3 where supported.
+- `-DRELEASE_BUILD=ON`: append `_REL` to version naming while keeping
+  optional extended builtins enabled.
+- `-DBUILD_DASCAL=ON`: build the debug-oriented `dascal` binary (very
+  verbose debugging; not built by default).
 
 Binaries are written to `build/bin` (e.g. `pascal`).
-To also build the debugging-oriented `dascal` binary, configure CMake with `-DBUILD_DASCAL=ON`.
 
-The `dascal` binary has very verbose debugging enabled and is not built by default.
+If you use submodules, verify pinned commits are fetchable before pushing:
+
+```
+Tools/check_submodule_refs.sh
+Tools/check_submodule_refs.sh --protected-refs   # both protected branches
+```
 
 To build without SDL explicitly:
 
-```sh
+```
 cmake -S . -B build -DSDL=OFF
 cmake --build build -j
 ```
 
-For iOS/iPadOS static-library presets:
+### iOS/iPadOS
 
-```sh
-cmake --preset ios-simulator-debug
-cmake --build --preset ios-simulator-debug
+PSCAL ships with an iOS/iPadOS host app built in SwiftUI
+(`ios/PSCAL.xcodeproj`). The app embeds the toolchain, stages examples and
+runtime assets into the app sandbox, and is available for external testing
+through TestFlight. Static-library presets:
 
-cmake --preset ios-device-debug
-cmake --build --preset ios-device-debug
-
-cmake --preset ios-simulator-release
-cmake --build --preset ios-simulator-release
-
-cmake --preset ios-device-release
-cmake --build --preset ios-device-release
+```
+cmake --preset ios-simulator-debug   && cmake --build --preset ios-simulator-debug
+cmake --preset ios-device-debug      && cmake --build --preset ios-device-debug
+cmake --preset ios-simulator-release && cmake --build --preset ios-simulator-release
+cmake --preset ios-device-release    && cmake --build --preset ios-device-release
 ```
 
-The iOS/iPadOS host app lives in `ios/PSCAL.xcodeproj`. For a full walkthrough,
-see `ios/README.md` and `Docs/ios_build.md`.
+See `ios/README.md` and `Docs/ios_build.md` for a full walkthrough.
 
 ## Repository layout (git)
 
 PSCAL uses a mix of submodules and vendored source trees:
 
-- Submodules (tracked/pinned in `.gitmodules`): `src/smallclue`, `third-party/SDL`, `third-party/micro`, `third-party/dvtm`, `third-party/libgit2`, `third-party/openrsync`.
-- Vendored in-tree sources (tracked directly by PSCAL): notably `third-party/nextvi` and `third-party/openssh-10.2p1`.
+- Submodules (pinned in `.gitmodules`): `src/smallclue`, `third-party/SDL`,
+  `third-party/micro`, `third-party/dvtm`, `third-party/libgit2`,
+  `third-party/openrsync`.
+- Vendored in-tree sources: notably `third-party/nextvi` and
+  `third-party/openssh-10.2p1`.
 
-SmallCLUE note:
-- `src/smallclue/third-party` is bootstrap-generated and intentionally not tracked as git submodules.
-- It is populated by SmallCLUE setup scripts (`src/smallclue/setup_posix_env.sh`, `src/smallclue/setup_ish_env.sh`) via `src/smallclue/fetch_dependencies.sh`.
-
-For SmallCLUE applet coverage (`git`, `ssh/scp/sftp`, `rsync`, etc.), see [src/smallclue/README.md](src/smallclue/README.md).
+SmallCLUE note: `src/smallclue/third-party` is bootstrap-generated and
+intentionally not tracked as submodules; it is populated by the SmallCLUE
+setup scripts via `src/smallclue/fetch_dependencies.sh`. For applet coverage
+(`git`, `ssh/scp/sftp`, `rsync`, etc.) see `src/smallclue/README.md`.
 
 ## Tests
 
-After building, run the regression suite:
+After building:
 
-```sh
+```
 ./Tests/run_all_tests
 ```
 
 The harness auto-selects a writable `TMPDIR` so it can be launched from any
-working directory. Export `RUN_NET_TESTS=1` or `RUN_SDL=1` when you want to
-exercise network or graphics fixtures.
+working directory.
 
-- Headless defaults: when SDL is enabled at build time, the test runners default to dummy SDL drivers in headless/CI environments to avoid GUI requirements and noise. SDL-dependent tests are skipped in this mode.
-- Force SDL tests: to exercise windowed graphics and input, run with a real video/audio driver and set `RUN_SDL=1`:
+- **Headless defaults**: with SDL enabled at build time, test runners default
+  to dummy SDL drivers in headless/CI environments; SDL-dependent tests are
+  skipped.
+- **Force SDL tests** with a real driver:
 
-  - macOS example (Terminal app in a logged-in GUI session):
-    ```sh
-    RUN_SDL=1 SDL_VIDEODRIVER=cocoa SDL_AUDIODRIVER=coreaudio ./run_all_tests
-    ```
-  - Linux example (X11):
-    ```sh
-    RUN_SDL=1 SDL_VIDEODRIVER=x11 ./run_all_tests
-    ```
+  ```
+  # macOS (logged-in GUI session)
+  RUN_SDL=1 SDL_VIDEODRIVER=cocoa SDL_AUDIODRIVER=coreaudio ./run_all_tests
+  # Linux (X11)
+  RUN_SDL=1 SDL_VIDEODRIVER=x11 ./run_all_tests
+  ```
 
-  If `RUN_SDL=1` is not set, the scripts may export `SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy` and skip SDL-specific tests to remain deterministic in CI.
+- **Network tests** are guarded for CI determinism; set `RUN_NET_TESTS=1` to
+  enable them (e.g. `Examples/pascal/base/HttpHeadersNetDemo`; the CLike
+  runner skips tests with a `.net` sentinel file unless it is set).
 
-- Network tests: to keep CI deterministic, tests that require outbound network are guarded.
-  - Pascal examples include a demo (`Examples/pascal/base/HttpHeadersNetDemo`) that only runs when `RUN_NET_TESTS=1` is set.
-  - The CLike test runner will skip any test with a `.net` sentinel file unless `RUN_NET_TESTS=1` is set.
+Note: on macOS you may see benign LaunchServices/XPC warnings on stderr when
+running SDL tests in some environments.
 
-Note: On macOS, you may see benign LaunchServices/XPC warnings on stderr when running SDL tests in some environments.
+## Front end details
 
-## Running the new example (threads + procedure pointers)
+### Rea
 
-Two convenient ways to run the demo that exercises procedure/function pointers (including indirect calls) and the new `CreateThread(@Proc, arg)`/`WaitForThread(t)` APIs:
+Rea is PSCAL's object-oriented front end. The install step publishes the Rea
+import library to `${CMAKE_INSTALL_PREFIX}/lib/rea`.
+[VERIFY: the original README never gave Rea its own usage section — worth a
+short one here with a binary invocation and an Examples path, since Aether
+lowers through it]
 
-1) CMake custom target:
+### CLike
 
-```sh
-cmake --build build --target run_threads_procptr_demo
+`build/bin/clike` implements a compact C-like bytecode compiler. The grammar
+covers variable and function declarations, conditionals, loops and
+expressions. VM builtins can be invoked simply by calling a function name that
+lacks a user definition.
+
 ```
-
-2) Makefile in `Examples/`:
-
-```sh
-make -C Examples threads-procptr-demo
-```
-
-The example source lives at `Examples/pascal/base/ThreadsProcPtrDemo`.
-
-The exsh front end now includes `Examples/exsh/threading_demo`, which shows how
-to launch allow-listed VM builtins on worker threads with
-`ThreadSpawnBuiltin`/`WaitForThread`/`ThreadGetResult`. The script resolves
-`localhost` on a background worker, joins both the DNS lookup and a timer, and
-prints the stored result via the new helpers. For a fuller tour, run
-`Examples/exsh/parallel-check github.com example.com` to queue DNS lookups in
-parallel, tag workers with `ThreadSetName`, and clear cached statuses via
-`ThreadGetResult(..., true)` before reporting the pass/fail summary.
-
-## Tiny language front end (Written in Python)
-
-A minimal compiler for a small educational language, often called *tiny*, is
-provided in `tools/tiny`.  It is written in Python and provides an example of 
-how to add a custom stand alone front end that can generate bytecode that the
-pscal VM/back end can execute.  It compiles source code that follows the grammar
-described in the project documentation and emits bytecode that can be executed
-by the virtual machine.
-
-Example usage:
-
-```sh
-python tools/tiny program.tiny out.pbc
-./build/bin/pscalvm out.pbc
-./build/bin/pscald out.pbc
-```
-
-Only integer variables and arithmetic are supported, but this is sufficient for
-basic experiments or teaching purposes. Example programs demonstrating the
-language can be found in `Examples/tiny`.
-
-## CLike front end
-
-`build/bin/clike` implements a compact C-like bytecode compiler that integrates
-with the pscal vm.  The grammar covers variable and function declarations,
-conditionals, loops and expressions. VM builtins can be invoked simply by
-calling a function name that lacks a user definition.
-
-Example usage:
-
-```sh
 build/bin/clike program.cl
-
 ```
 
-Sample programs demonstrating the C like front end are available in
-`Examples/clike/base`. For a step-by-step guide see
-[Docs/clike_tutorial.md](Docs/clike_tutorial.md).
-
-### Simple Web Server (CLike)
-
-A minimal HTTP server written in CLike is available at
-`Examples/clike/base/simple_web_server`. It serves files from a specified directory,
-with `index.html` auto-detected for `/`, and includes a small worker pool and
-metrics.
-
-- Quick start (default port 5555, ephemeral root):
-  ```sh
-  build/bin/clike Examples/clike/base/simple_web_server
-  ```
-- Serve an existing directory on port 8080:
-  ```sh
-  build/bin/clike Examples/clike/base/simple_web_server 8080 /path/to/htdocs
-  # or
-  build/bin/clike Examples/clike/base/simple_web_server /path/to/htdocs 8080
-  ```
-- Optional tuning (threads, queue cap):
-  ```sh
-  build/bin/clike Examples/clike/base/simple_web_server /path 8080 16 128
-  ```
-
-Documentation: see [Docs/simple_web_server.md](Docs/simple_web_server.md).
-
-Tip: a basic `htdocs` directory for this server lives in the PSCAL clone under
-`lib/misc/simple_web_server/htdocs`.
+Sample programs live in `Examples/clike/base`; see `Docs/clike_tutorial.md`
+for a step-by-step guide. An interactive session is available via
+`build/bin/clike-repl` (wraps a line in `int main() { ... }` and executes it;
+see `Docs/clike_repl_tutorial.md`).
 
 Options and semantics:
 
-- Command-line options:
-  - `--dump-bytecode`: compile and disassemble bytecode (then execute).
-  - `--dump-bytecode-only`: compile and disassemble bytecode, then exit (no execution).
-- Standalone tools:
-  - `pscald <bytecode_file>`: disassemble a compiled bytecode file. Output matches `--dump-bytecode-only`.
-- Operator semantics:
-  - Logical `&&` and `||` use short-circuit evaluation.
-  - Shift operators `<<` and `>>` are supported with standard precedence (lower than `+`/`-`, left-associative).
-  - `~x` on integer types behaves like bitwise NOT; on non-integers it falls back to logical NOT.
-- SDL feature detection:
-  - When built with `-DSDL=ON`, the CLike preprocessor defines `SDL_ENABLED` so you can guard code with `#ifdef SDL_ENABLED`.
+- `--dump-bytecode`: compile and disassemble bytecode, then execute.
+- `--dump-bytecode-only`: disassemble, then exit.
+- `pscald <bytecode_file>`: standalone disassembler (output matches
+  `--dump-bytecode-only`).
+- Logical `&&` / `||` short-circuit; `<<` / `>>` supported with standard
+  precedence; `~x` is bitwise NOT on integers, logical NOT otherwise.
+- With `-DSDL=ON` the preprocessor defines `SDL_ENABLED` for `#ifdef` guards.
 
 Environment variables:
 
 - `CLIKE_LIB_DIR`: search directory for CLike `import "..."` modules.
-- `PASCAL_LIB_DIR`: root directory for Pascal units (`.pl` files). The test runner stages a copy under this path.
-- `SDL_VIDEODRIVER`, `SDL_AUDIODRIVER`: set to `dummy` by default in headless runs; set `RUN_SDL=1` to execute SDL examples/tests.
-- `RUN_NET_TESTS`: when set to `1`, enables network-dependent tests and demos.
+- `PASCAL_LIB_DIR`: root directory for Pascal units (`.pl` files).
+- `SDL_VIDEODRIVER` / `SDL_AUDIODRIVER`: `dummy` by default in headless runs.
+- `RUN_NET_TESTS=1`: enables network-dependent tests and demos.
 
-### HTTP networking (sync)
+A minimal HTTP server written in CLike lives at
+`Examples/clike/base/simple_web_server` (worker pool, metrics, `index.html`
+auto-detection; docs in `Docs/simple_web_server.md`; a basic `htdocs` lives
+under `lib/misc/simple_web_server/htdocs`):
 
-Built-in HTTP helpers are available to all front ends (Pascal and CLike). Highlights:
+```
+build/bin/clike Examples/clike/base/simple_web_server [port] [/path/to/htdocs] [threads] [queue]
+```
 
-- Sessions: `HttpSession/httpsession`, `HttpClose/httpclose`.
-- Headers: `HttpSetHeader/httpsetheader`, `HttpClearHeaders/httpclearheaders`, `HttpGetLastHeaders/httpgetlastheaders`, `HttpGetHeader/httpgetheader`.
-- Options via `HttpSetOption/httpsetoption` (key → value):
-  - `timeout_ms`, `follow_redirects`, `user_agent`
-  - Compression: `accept_encoding` (e.g., `gzip` or empty string for all supported encodings)
-  - TLS: `ca_path`, `client_cert`, `client_key`, hostname checks via `verify_peer`, `verify_host`
-  - Proxy: `proxy`
-  - HTTP/2: `http2`
-  - Auth: `basic_auth` (`user:pass`)
-  - Output: `out_file` (tee response to file in `HttpRequest`)
-- Requests:
-  - Memory: `HttpRequest/httprequest(s, method, url, bodyStr|mstream|nil, outMStream)` → status code
-  - File: `HttpRequestToFile/httprequesttofile(s, method, url, body, outPath)` → status code
-- Errors: `HttpErrorCode/httperrorcode` (0 none; 1 generic; 2 I/O; 3 timeout; 4 SSL; 5 resolve; 6 connect), `HttpLastError/httplasterror` message.
+### Pascal
 
-Notes:
-- `file://` URLs are handled directly by the runtime with synthesized `Content-Length` and `Content-Type` headers; this enables hermetic tests without relying on libcurl’s file scheme.
+Implements a significant subset of classic Pascal. A demo exercising
+procedure/function pointers and the `CreateThread(@Proc, arg)` /
+`WaitForThread(t)` APIs lives at `Examples/pascal/base/ThreadsProcPtrDemo`:
 
-See also: Docs/http_security.md for details on pinning, TLS knobs, proxies, and DNS overrides with step‑by‑step commands.
+```
+cmake --build build --target run_threads_procptr_demo
+# or
+make -C Examples threads-procptr-demo
+```
 
-#### TLS, Security, and Proxies
+### exsh
 
-Configure per-session knobs via `HttpSetOption/httpsetoption`:
+`build/bin/exsh` compiles shell-style orchestration scripts to PSCAL
+bytecode. Pipelines, background jobs, and conditionals map to dedicated VM
+builtins (`backend_ast/shell.c`), and the full PSCAL builtin catalog is
+available via the `builtin` command. Prefix arguments with `int:`,
+`float:`/`double:`/`real:`, `bool:`, `str:` or `nil` to coerce shell tokens.
 
-- TLS constraints:
-  - `tls_min` / `tls_max`: integers 10/11/12/13 map to TLSv1.0/1.1/1.2/1.3 (min and max cap when supported).
-  - `alpn`: 0/1 to disable/enable ALPN (when libcurl supports it).
-  - `ciphers`: OpenSSL-style cipher list string for `CURLOPT_SSL_CIPHER_LIST`.
-  - `pin_sha256`: pinned public key (string). Use `sha256//BASE64` or a file path per libcurl `CURLOPT_PINNEDPUBLICKEY` format.
-
-- Proxies:
-  - `proxy`: proxy URL (e.g., `http://host:8080`).
-  - `proxy_userpwd`: `user:pass` credentials.
-  - `proxy_type`: `http`, `https` (if supported by your libcurl), `socks5`, or `socks4`.
-
-- DNS overrides:
-  - `resolve_add`: add an entry `host:port:address` (e.g., `example.com:443:93.184.216.34`).
-  - `resolve_clear`: clear all resolve overrides.
-
-## exsh front end
-
-`build/bin/exsh` compiles shell-style orchestration scripts to PSCAL bytecode.
-Pipelines, background jobs, and conditionals map to dedicated VM
-builtins implemented in `backend_ast/shell.c`, while the full PSCAL builtin
-catalog (HTTP, sockets, extended math/string helpers, optional SDL/SQLite
-bindings) is available via the `builtin` command. Prefix arguments with
-`int:`, `float:`/`double:`/`real:`, `bool:`, `str:` or `nil` to coerce shell
-tokens to the appropriate VM types before dispatch.
-
-Example usage:
-
-```sh
+```
 build/bin/exsh Examples/exsh/pipeline
 build/bin/exsh --dump-bytecode Examples/exsh/functions
 build/bin/exsh Examples/exsh/builtins
 ```
 
-Bytecode for each script is cached in `~/.pscal/bc_cache` under a
-`<identifier>-<hash>.bc` name derived from exsh's compiler identifier; pass `--no-cache` to force recompilation. The runtime
-exports `EXSH_LAST_STATUS` after every builtin invocation so scripts can
-inspect the most recent exit code without parsing stderr. Builtins such as
-`export` and `unset` mutate the process environment for subsequent commands, and
-standard utilities (`printenv`, `env`) reflect those changes immediately.
-Direct parameter interpolation (`$NAME`, `${NAME}`) is parsed but not yet
-expanded; rely on the environment tooling above when you need to inspect
-variables from a script.
+Bytecode is cached in `~/.pscal/bc_cache` (`--no-cache` to force
+recompilation). The runtime exports `EXSH_LAST_STATUS` after every builtin
+invocation. `export`/`unset` mutate the process environment for subsequent
+commands. Direct parameter interpolation (`$NAME`, `${NAME}`) is parsed but
+not yet expanded. **Known limitation**: control-flow helpers (`if`, loop
+syntax) are currently placeholders that execute both branches — gate behavior
+with `EXSH_LAST_STATUS` until the VM gains jump support for exsh.
 
-Control-flow helpers (`if`, loop syntax) are currently placeholders that execute
-both branches. Gate behaviour using the exported status variable until the VM
-gains proper jump support for the exsh front end.
+Threading demos: `Examples/exsh/threading_demo` and
+`Examples/exsh/parallel-check` show `ThreadSpawnBuiltin` / `WaitForThread` /
+`ThreadGetResult` / `ThreadSetName`.
 
-### iOS/vproc parity testing on macOS
+For iOS/vproc parity testing on macOS and the release sanity sweep, see
+`Tests/run_exsh_ios_host_tests.sh`, `Tests/run_ios_release_sanity.sh`, and
+`Docs/exsh_overview.md`.
 
-To exercise the iOS-style virtual-process path on macOS (without a simulator/device), build a host binary that defines `PSCAL_TARGET_IOS` and runs the vproc code:
+### tiny
 
-```sh
-Tests/run_exsh_ios_host_tests.sh          # configures build/ios-host, builds exsh, runs jobspec sanity
-# or manually:
-cmake -S . -B build/ios-host -DPSCAL_FORCE_IOS=ON -DVPROC_ENABLE_STUBS_FOR_TESTS=ON -DENABLE_EXT_BUILTIN_3D=ON -DPSCAL_BUILD_STATIC_LIBS=ON -DSDL=OFF -DPSCAL_USE_BUNDLED_CURL=OFF
-cmake --build build/ios-host --target exsh
-python Tests/exsh/exsh_test_harness.py --executable build/ios-host/bin/exsh --only jobspec
+A minimal compiler for a small educational language, written in Python
+(`tools/tiny`). Integer variables and arithmetic only — an example of adding
+a standalone front end that emits VM bytecode:
+
+```
+python tools/tiny program.tiny out.pbc
+./build/bin/pscalvm out.pbc
+./build/bin/pscald out.pbc
 ```
 
-The exsh harness accepts `--executable` to point at any built exsh, so you can run the full manifest against the iOS-flavored binary when debugging vproc/job-control behavior.
-Use `-DPSCAL_FORCE_IOS=ON` to enable iOS mode on macOS; this defines `PSCAL_TARGET_IOS` and injects the vproc shim include so behavior matches the iOS/iPadOS app build.
-
-For a one-command release sanity sweep across the iOS-targeted host regressions:
-
-```sh
-Tests/run_ios_release_sanity.sh
-# optional deeper checks:
-#   RUN_INTERACTIVE_SIGNAL_TESTS=1 Tests/run_ios_release_sanity.sh
-#   RUN_IOS_PRESET_BUILDS=1 Tests/run_ios_release_sanity.sh
-#   RUN_IOS_XCODEBUILD=1 Tests/run_ios_release_sanity.sh
-```
-
-`RUN_IOS_PRESET_BUILDS=1` adds `ios-simulator` and `ios-device` preset builds.
-`RUN_IOS_XCODEBUILD=1` adds a generic iOS `xcodebuild` pass with signing disabled.
-
-More details and operational tips live in
-[Docs/exsh_overview.md](Docs/exsh_overview.md).
+Example programs live in `Examples/tiny`.
 
 ## AST JSON → Bytecode (pscaljson2bc)
 
-`pscaljson2bc` compiles an AST JSON stream (as produced by any front end's `--dump-ast-json`) into VM bytecode.
+`pscaljson2bc` compiles an AST JSON stream (as produced by any front end's
+`--dump-ast-json`) into VM bytecode — this is the supported path for building
+external front ends.
 
-- Input: a file path or `-`/stdin.
-- Output: raw bytecode to stdout or `-o <file>`.
-- Options:
-  - `--dump-bytecode` disassembles the generated bytecode to stderr before writing the raw bytes.
-  - `--dump-bytecode-only` disassembles to stderr and exits without writing raw bytecode.
+- Input: a file path or `-`/stdin. Output: raw bytecode to stdout or
+  `-o <file>`.
+- `--dump-bytecode` disassembles to stderr before writing;
+  `--dump-bytecode-only` disassembles and exits.
 
-Examples:
-
-```sh
-# Compile Pascal source via JSON pipeline to bytecode file
+```
 build/bin/pascal --dump-ast-json Tests/Pascal/BoolTest | build/bin/pscaljson2bc -o out.bc
-
-# Or read from a JSON file captured earlier
-build/bin/pscaljson2bc --dump-bytecode-only /path/to/ast.json
-
-# Execute generated bytecode
 build/bin/pscalvm out.bc
-# Disassemble bytecode
 build/bin/pscald out.bc
 ```
 
-Install: `pscaljson2bc` is installed alongside `pascal` and `pscalvm` by `cmake --install <build-dir>`.
+Installed alongside `pascal` and `pscalvm` by `cmake --install`. Shell
+completions live in `tools/completions` (bash and zsh; CMake can install them
+via `PSCAL_INSTALL_COMPLETIONS`). Full guide: `Docs/pscaljson2bc.md`.
 
-More: see the full guide at `Docs/pscaljson2bc.md`.
+## HTTP networking
 
-Shell completions:
-- Bash: source `tools/completions/pscaljson2bc.bash` to enable option completion:
-  ```sh
-  source tools/completions/pscaljson2bc.bash
-  ```
-- Zsh: add `tools/completions` to your `fpath` or copy `_pscaljson2bc` into a directory in `fpath`, then `autoload -Uz compinit && compinit`.
-  ```zsh
-  fpath=("$PWD/tools/completions" $fpath)
-  autoload -Uz compinit && compinit
-  ```
-Completions can also be installed automatically by CMake (see the `PSCAL_INSTALL_COMPLETIONS` option).
+Built-in HTTP helpers are available to all front ends. Highlights:
 
-All of the above apply to both sync and async requests. Async jobs snapshot session options at submission.
+- Sessions: `HttpSession`, `HttpClose`. Headers: `HttpSetHeader`,
+  `HttpClearHeaders`, `HttpGetLastHeaders`, `HttpGetHeader`.
+- Requests: `HttpRequest(s, method, url, body, outMStream)` → status code;
+  `HttpRequestToFile(...)` for file output. Async jobs snapshot session
+  options at submission.
+- Options via `HttpSetOption`: `timeout_ms`, `follow_redirects`,
+  `user_agent`, `accept_encoding`, `out_file`, `http2`, `basic_auth`.
+- TLS: `ca_path`, `client_cert`/`client_key`, `verify_peer`/`verify_host`,
+  `tls_min`/`tls_max` (10/11/12/13), `alpn`, `ciphers`, and SPKI pinning via
+  `pin_sha256` (`sha256//BASE64` or a file path).
+- Proxies: `proxy`, `proxy_userpwd`, `proxy_type` (`http`, `https`,
+  `socks5`, `socks4`).
+- DNS overrides: `resolve_add` (`host:port:address`), `resolve_clear`.
+- Errors: `HttpErrorCode` (0 none; 1 generic; 2 I/O; 3 timeout; 4 SSL;
+  5 resolve; 6 connect) and `HttpLastError`.
+- `file://` URLs are handled directly by the runtime with synthesized
+  headers, enabling hermetic tests.
 
-An interactive session is also available via `build/bin/clike-repl`, which
-reads a single line of C-like code, wraps it in `int main() { ... }`, and
-executes it immediately. For details see
-[Docs/clike_repl_tutorial.md](Docs/clike_repl_tutorial.md).
+See `Docs/http_security.md` for pinning, TLS knobs, proxies, and DNS
+overrides with step-by-step commands. `tools/pin-from-host.sh` computes a
+libcurl-compatible SPKI pin from a live host or PEM file.
 
 ## Runtime library
 
 The front ends ship with fonts, configuration templates, documentation, and
-standard libraries. Install everything with CMake once the build completes:
+standard libraries:
 
-```sh
+```
 cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/opt/pscal
 cmake --build build
 sudo cmake --install build
 ```
 
-`cmake --install` places executables in `${CMAKE_INSTALL_PREFIX}/bin` and copies
-runtime assets to `${PSCAL_INSTALL_ROOT}` (which defaults to
-`${CMAKE_INSTALL_PREFIX}/pscal`). Override the runtime location with
-`-DPSCAL_INSTALL_ROOT=/path/to/runtime` when configuring if you want the assets
-outside the prefix. The install step also publishes the Rea import library to
-`${CMAKE_INSTALL_PREFIX}/lib/rea` for compatibility with existing scripts. When
-`exsh` is active as a login shell, the installer backs up the running binary to
-`exsh.previous` before writing the new executable so upgrades succeed without
-dropping sessions.
+Executables install to `${CMAKE_INSTALL_PREFIX}/bin`; runtime assets to
+`${PSCAL_INSTALL_ROOT}` (default `${CMAKE_INSTALL_PREFIX}/pscal`, overridable
+with `-DPSCAL_INSTALL_ROOT=...`). When `exsh` is the active login shell, the
+installer backs up the running binary to `exsh.previous` before upgrading.
 
 ## Extending built-ins
 
-Additional VM builtin functions can be linked in by dropping C source files into
-`src/ext_builtins`.  Each file should implement a `registerExtendedBuiltins`
-function that registers its routines.  See
-[Docs/extended_builtins.md](Docs/extended_builtins.md) for details and an
-example that exposes the host process ID in `src/ext_builtins/getpid.c`.
-
-## Tools
-
-- `tools/pin-from-host.sh`: computes a libcurl-compatible SPKI pin (`sha256//BASE64`) from a live host or PEM file. Useful with `HttpSetOption(s, 'pin_sha256', ...)`. See `Docs/http_security.md` for usage.
+Drop C source files into `src/ext_builtins`; each implements a
+`registerExtendedBuiltins` function. See `Docs/extended_builtins.md` and the
+example exposing the host PID in `src/ext_builtins/getpid.c`.
 
 ## License
 
-As the Pscal code base was primarily generated by AI, it is distributed under the
-[MIT License](LICENSE). PSCAL releases prior to 2.22 were distributed under the
+As the PSCAL code base was primarily generated by AI, it is distributed under
+the [MIT License](LICENSE). Releases prior to 2.22 were distributed under the
 Unlicense.

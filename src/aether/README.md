@@ -107,6 +107,9 @@ Bootstrap status:
 - Direct handle-oriented TOON helpers now also lower cleanly onto existing
   yyjson builtins: key lookup, array indexing/length, scalar extraction, and
   handle cleanup.
+- `toon_free(...)` is the Aether spelling for releasing an individual
+  `ToonNode` handle early, while `toon_close(doc)` releases the document and
+  any remaining child handles derived from it.
 - Simple variable-based `toon_parse(...)` flows now work too when the payload
   can be traced to a local `Text` or `TOON` literal binding by the rewrite
   layer.

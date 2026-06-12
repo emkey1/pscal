@@ -1382,33 +1382,33 @@ static void reportAetherError(const char *kind, int line, const char *detail) {
         if (strcmp(kind, "type") == 0 &&
             strstr(detail, "opaque TOON handle") &&
             strstr(detail, "arithmetic expressions")) {
-            code = "AETH-TYPE-TOON-OPAQUE-ARITH";
+            code = "TOON-001";
         } else if (strcmp(kind, "type") == 0 &&
                    strstr(detail, "expects a ToonDoc handle")) {
-            code = "AETH-TYPE-TOON-DOC-NODE-MISMATCH";
+            code = "TOON-001";
         } else if (strcmp(kind, "type") == 0 &&
                    strstr(detail, "expects a ToonNode handle")) {
-            code = "AETH-TYPE-TOON-DOC-NODE-MISMATCH";
+            code = "TOON-001";
         } else if (strcmp(kind, "type") == 0 &&
                    strstr(detail, " first argument")) {
-            code = "AETH-TYPE-HELPER-FIRST-ARG";
+            code = "TOON-001";
         } else if (strcmp(kind, "type") == 0 &&
                    strstr(detail, " second argument")) {
-            code = "AETH-TYPE-HELPER-SECOND-ARG";
+            code = "TOON-001";
         } else if (strcmp(kind, "type") == 0 &&
                    strstr(detail, " third argument")) {
-            code = "AETH-TYPE-HELPER-THIRD-ARG";
+            code = "TOON-001";
         } else if (strcmp(kind, "effect") == 0 &&
                    strstr(detail, "requires an fx block")) {
-            code = "AETH-EFFECT-FX-REQUIRED";
+            code = "FX-001";
         } else if (strcmp(kind, "purity") == 0 &&
                    strstr(detail, "cannot call effectful builtin")) {
-            code = "AETH-PURITY-EFFECTFUL-BUILTIN";
+            code = "ANN-001";
         } else if (strcmp(kind, "purity") == 0 &&
                    strstr(detail, "cannot call non-pure function")) {
-            code = "AETH-PURITY-NONPURE-CALL";
+            code = "ANN-001";
         } else if (strstr(detail, "not in scope")) {
-            code = "AETH-SCOPE-NOT-IN-SCOPE";
+            code = "SCOPE-001";
         }
     }
 

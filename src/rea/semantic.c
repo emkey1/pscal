@@ -182,20 +182,33 @@ static char *joinPaths(const char *base, const char *relative);
 static void reportReaLineError(int line, const char *fmt, ...) {
     va_list args;
     int displayLine = line;
+    char message[1024];
+    const char *code = NULL;
 
     if (frontendIsAether()) {
         displayLine = aetherMapRewrittenLineToSource(line);
     }
 
     va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    if (frontendIsAether()) {
+        if (strstr(message, "not in scope.")) {
+            code = "SCOPE-001";
+        }
+    }
+
     if (gReaSourcePath && *gReaSourcePath) {
         fprintf(stderr, "%s:%d: ", gReaSourcePath, displayLine);
     } else {
         fprintf(stderr, "L%d: ", displayLine);
     }
-    vfprintf(stderr, fmt, args);
+    if (code) {
+        fprintf(stderr, "[%s] ", code);
+    }
+    fputs(message, stderr);
     fprintf(stderr, "\n");
-    va_end(args);
 }
 
 static void reportReaLineWarning(int line, const char *fmt, ...) {
