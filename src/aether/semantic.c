@@ -54,6 +54,7 @@ static void reportAetherError(const char *kind, int line, const char *detail);
 static int expectedOpaqueReturnKind(const char *name, size_t len, int *returnsDoc);
 static const char *expectedScalarReturnTypeName(const char *name, size_t len);
 static const char *skipQuotedString(const char *cursor, int *line);
+static int isArithmeticChar(char ch);
 
 static void freeOpaqueBindingTable(AetherOpaqueBindingTable *table) {
     size_t i;
@@ -662,6 +663,120 @@ static const char *inferNumericTypeName(const char *start, const char *end) {
         return NULL;
     }
     return sawDot ? "Real" : "Int";
+}
+
+static const char *mergeNumericOperandTypes(const char *currentType, const char *operandType) {
+    if (!operandType) {
+        return NULL;
+    }
+    if (strcmp(operandType, "Int") != 0 && strcmp(operandType, "Real") != 0) {
+        return NULL;
+    }
+    if (!currentType) {
+        return operandType;
+    }
+    if (strcmp(currentType, "Real") == 0 || strcmp(operandType, "Real") == 0) {
+        return "Real";
+    }
+    return "Int";
+}
+
+static const char *inferScalarExpressionTypeName(const char *start,
+                                                 const char *end,
+                                                 const AetherScalarBindingTable *scalarBindings) {
+    const char *trimmedStart = start;
+    const char *trimmedEnd = end;
+    const char *cursor;
+    const char *mergedType = NULL;
+    int sawArithmetic = 0;
+
+    if (!start || !end || end <= start) {
+        return NULL;
+    }
+    while (trimmedStart < trimmedEnd && isspace((unsigned char)*trimmedStart)) {
+        trimmedStart++;
+    }
+    while (trimmedEnd > trimmedStart && isspace((unsigned char)trimmedEnd[-1])) {
+        trimmedEnd--;
+    }
+    if (trimmedEnd > trimmedStart && trimmedEnd[-1] == ';') {
+        trimmedEnd--;
+    }
+    while (trimmedEnd > trimmedStart && isspace((unsigned char)trimmedEnd[-1])) {
+        trimmedEnd--;
+    }
+    if (trimmedStart >= trimmedEnd) {
+        return NULL;
+    }
+
+    cursor = trimmedStart;
+    while (cursor < trimmedEnd) {
+        const char *tokenStart;
+        const char *tokenEnd;
+        const char *operandType;
+
+        while (cursor < trimmedEnd && isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
+        if (cursor >= trimmedEnd) {
+            break;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            return NULL;
+        }
+        if (isArithmeticChar(*cursor)) {
+            sawArithmetic = 1;
+            cursor++;
+            continue;
+        }
+        if (*cursor == '(' || *cursor == ')' || *cursor == ',') {
+            cursor++;
+            continue;
+        }
+
+        tokenStart = cursor;
+        if (isdigit((unsigned char)*cursor) ||
+            ((*cursor == '+' || *cursor == '-') &&
+             cursor + 1 < trimmedEnd &&
+             isdigit((unsigned char)cursor[1]))) {
+            cursor++;
+            while (cursor < trimmedEnd &&
+                   (isdigit((unsigned char)*cursor) || *cursor == '.' ||
+                    *cursor == 'e' || *cursor == 'E' ||
+                    *cursor == '+' || *cursor == '-')) {
+                cursor++;
+            }
+            tokenEnd = cursor;
+            operandType = inferNumericTypeName(tokenStart, tokenEnd);
+        } else if (isalpha((unsigned char)*cursor) || *cursor == '_') {
+            while (cursor < trimmedEnd &&
+                   (isalnum((unsigned char)*cursor) || *cursor == '_')) {
+                cursor++;
+            }
+            tokenEnd = cursor;
+            cursor = skipInlineSpaces(cursor, trimmedEnd);
+            if (cursor < trimmedEnd && *cursor == '(') {
+                operandType = expectedScalarReturnTypeName(tokenStart,
+                                                           (size_t)(tokenEnd - tokenStart));
+            } else {
+                const AetherScalarBinding *binding;
+
+                binding = findScalarBinding(scalarBindings,
+                                            tokenStart,
+                                            (size_t)(tokenEnd - tokenStart));
+                operandType = binding ? binding->typeName : NULL;
+            }
+        } else {
+            return NULL;
+        }
+
+        mergedType = mergeNumericOperandTypes(mergedType, operandType);
+        if (!mergedType) {
+            return NULL;
+        }
+    }
+
+    return sawArithmetic ? mergedType : NULL;
 }
 
 static const char *inferInitializerTypeName(const char *start,
@@ -1635,8 +1750,10 @@ static void validateScalarAssignmentLine(const char *body,
     const char *equals;
     const char *rhsStart;
     const char *rhsEnd;
+    const char *rhsTail;
     const AetherScalarBinding *lhsBinding;
     const AetherScalarBinding *rhsBinding;
+    const char *rhsExprType;
     char detail[256];
 
     if (!body || !lineEnd || !scalarBindings) {
@@ -1671,8 +1788,45 @@ static void validateScalarAssignmentLine(const char *body,
         return;
     }
 
+    rhsTail = skipInlineSpaces(rhsEnd, lineEnd);
+    if (rhsTail < lineEnd && *rhsTail != ';') {
+        rhsExprType = inferScalarExpressionTypeName(rhsStart, lineEnd, scalarBindings);
+        if (!rhsExprType) {
+            return;
+        }
+        if (strcmp(lhsBinding->typeName, rhsExprType) == 0) {
+            return;
+        }
+
+        snprintf(detail,
+                 sizeof(detail),
+                 "cannot assign %s expression to %s binding '%.*s'.",
+                 rhsExprType,
+                 lhsBinding->typeName,
+                 (int)(lhsEnd - lhsStart),
+                 lhsStart);
+        reportAetherError("type", line, detail);
+        return;
+    }
+
     rhsBinding = findScalarBinding(scalarBindings, rhsStart, (size_t)(rhsEnd - rhsStart));
     if (!rhsBinding) {
+        rhsExprType = inferScalarExpressionTypeName(rhsStart, lineEnd, scalarBindings);
+        if (!rhsExprType) {
+            return;
+        }
+        if (strcmp(lhsBinding->typeName, rhsExprType) == 0) {
+            return;
+        }
+
+        snprintf(detail,
+                 sizeof(detail),
+                 "cannot assign %s expression to %s binding '%.*s'.",
+                 rhsExprType,
+                 lhsBinding->typeName,
+                 (int)(lhsEnd - lhsStart),
+                 lhsStart);
+        reportAetherError("type", line, detail);
         return;
     }
     if (strcmp(lhsBinding->typeName, rhsBinding->typeName) == 0) {

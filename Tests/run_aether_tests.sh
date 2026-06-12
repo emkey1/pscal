@@ -41,6 +41,7 @@ OBJECT_DEFAULT_INIT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/object_default_init_pas
 STRING_LEN_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/string_len_inference_pass.aether"
 LEN_PROPERTY_PASS_FIXTURE="$ROOT_DIR/Tests/aether/len_property_pass.aether"
 NUMERIC_EXPR_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/numeric_expr_inference_pass.aether"
+REAL_ASSIGNMENT_FROM_MIXED_NUMERIC_EXPR_PASS_FIXTURE="$ROOT_DIR/Tests/aether/real_assignment_from_mixed_numeric_expr_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
 TUPLE_DESTRUCTURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_pass.aether"
@@ -79,6 +80,7 @@ SELF_CONDITION_METHOD_PASS_FIXTURE="$ROOT_DIR/Tests/aether/self_condition_method
 TEXT_FIELD_METHOD_PARAM_PASS_FIXTURE="$ROOT_DIR/Tests/aether/text_field_method_param_pass.aether"
 TOON_JSON_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_json_helpers_pass.aether"
 TOON_HANDLE_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_helpers_pass.aether"
+TOON_HANDLE_NIL_COMPARE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_nil_compare_pass.aether"
 TOON_VARIABLE_PARSE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/toon_variable_parse_pass.aether"
 HAS_TOON_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_toon_alias_pass.aether"
 TOON_HANDLE_ARITH_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/toon_handle_arithmetic_fail.aether"
@@ -150,6 +152,7 @@ for fixture in \
     "$STRING_LEN_INFERENCE_PASS_FIXTURE" \
     "$LEN_PROPERTY_PASS_FIXTURE" \
     "$NUMERIC_EXPR_INFERENCE_PASS_FIXTURE" \
+    "$REAL_ASSIGNMENT_FROM_MIXED_NUMERIC_EXPR_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
     "$TUPLE_DESTRUCTURE_PASS_FIXTURE" \
@@ -188,6 +191,7 @@ for fixture in \
     "$TEXT_FIELD_METHOD_PARAM_PASS_FIXTURE" \
     "$TOON_JSON_HELPERS_PASS_FIXTURE" \
     "$TOON_HANDLE_HELPERS_PASS_FIXTURE" \
+    "$TOON_HANDLE_NIL_COMPARE_PASS_FIXTURE" \
     "$TOON_VARIABLE_PARSE_PASS_FIXTURE" \
     "$HAS_TOON_ALIAS_PASS_FIXTURE" \
     "$TOON_HANDLE_ARITH_FAIL_FIXTURE" \

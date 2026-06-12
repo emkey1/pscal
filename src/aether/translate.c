@@ -254,6 +254,11 @@ static char *rewriteMethodScopedExpr(const char *start,
                                      const char *end,
                                      const TypeBlockState *typeState,
                                      int isMethod);
+static char *rewriteAetherOpaqueNilComparisons(const char *start,
+                                               const char *end,
+                                               const AetherBindingTable *bindings,
+                                               const AetherFunctionTable *functions,
+                                               const AetherFieldTable *fields);
 static char *rewriteAetherLenPropertyExpr(const char *start,
                                           const char *end,
                                           const AetherBindingTable *bindings,
@@ -4556,6 +4561,257 @@ static char *rewriteMethodScopedExpr(const char *start,
     return out.data;
 }
 
+static int isAetherOpaqueHandleTypeName(const char *typeName) {
+    return typeName &&
+           (strcmp(typeName, "ToonDoc") == 0 || strcmp(typeName, "ToonNode") == 0);
+}
+
+static const char *trimRangeStart(const char *start, const char *end) {
+    while (start < end && isspace((unsigned char)*start)) {
+        start++;
+    }
+    return start;
+}
+
+static const char *trimRangeEnd(const char *start, const char *end) {
+    while (end > start && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    return end;
+}
+
+static int rangeEqualsWord(const char *start, const char *end, const char *word) {
+    size_t len;
+
+    if (!start || !end || !word) {
+        return 0;
+    }
+    start = trimRangeStart(start, end);
+    end = trimRangeEnd(start, end);
+    len = strlen(word);
+    return (size_t)(end - start) == len && strncmp(start, word, len) == 0;
+}
+
+static const char *findOpaqueNilOperandStart(const char *lineStart, const char *cursor) {
+    const char *scan = cursor;
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    int braceDepth = 0;
+
+    while (scan > lineStart) {
+        char ch = scan[-1];
+
+        if (ch == ')') {
+            parenDepth++;
+            scan--;
+            continue;
+        }
+        if (ch == ']') {
+            bracketDepth++;
+            scan--;
+            continue;
+        }
+        if (ch == '}') {
+            braceDepth++;
+            scan--;
+            continue;
+        }
+        if (ch == '(') {
+            if (parenDepth == 0) {
+                break;
+            }
+            parenDepth--;
+            scan--;
+            continue;
+        }
+        if (ch == '[') {
+            if (bracketDepth == 0) {
+                break;
+            }
+            bracketDepth--;
+            scan--;
+            continue;
+        }
+        if (ch == '{') {
+            if (braceDepth == 0) {
+                break;
+            }
+            braceDepth--;
+            scan--;
+            continue;
+        }
+        if (parenDepth == 0 && bracketDepth == 0 && braceDepth == 0) {
+            if (ch == ';' || ch == ',' || ch == '{' || ch == '}' || ch == ':') {
+                break;
+            }
+            if ((ch == '|' || ch == '&') && scan - 2 >= lineStart && scan[-2] == ch) {
+                break;
+            }
+            if ((ch == '=' || ch == '!') && scan - 2 >= lineStart && scan[-2] == '=') {
+                break;
+            }
+        }
+        scan--;
+    }
+    return scan;
+}
+
+static const char *findOpaqueNilOperandEnd(const char *cursor, const char *lineEnd) {
+    const char *scan = cursor;
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    int braceDepth = 0;
+
+    while (scan < lineEnd) {
+        char ch = *scan;
+
+        if (ch == '(') {
+            parenDepth++;
+            scan++;
+            continue;
+        }
+        if (ch == '[') {
+            bracketDepth++;
+            scan++;
+            continue;
+        }
+        if (ch == '{') {
+            braceDepth++;
+            scan++;
+            continue;
+        }
+        if (ch == ')') {
+            if (parenDepth == 0) {
+                break;
+            }
+            parenDepth--;
+            scan++;
+            continue;
+        }
+        if (ch == ']') {
+            if (bracketDepth == 0) {
+                break;
+            }
+            bracketDepth--;
+            scan++;
+            continue;
+        }
+        if (ch == '}') {
+            if (braceDepth == 0) {
+                break;
+            }
+            braceDepth--;
+            scan++;
+            continue;
+        }
+        if (parenDepth == 0 && bracketDepth == 0 && braceDepth == 0) {
+            if (ch == ';' || ch == ',' || ch == '{' || ch == '}' || ch == ':') {
+                break;
+            }
+            if ((ch == '|' || ch == '&') && scan + 1 < lineEnd && scan[1] == ch) {
+                break;
+            }
+            if ((ch == '=' || ch == '!') && scan + 1 < lineEnd && scan[1] == '=') {
+                break;
+            }
+        }
+        scan++;
+    }
+    return scan;
+}
+
+static char *rewriteAetherOpaqueNilComparisons(const char *start,
+                                               const char *end,
+                                               const AetherBindingTable *bindings,
+                                               const AetherFunctionTable *functions,
+                                               const AetherFieldTable *fields) {
+    const char *cursor = start;
+    const char *lastCopied = start;
+    Buffer out = {0};
+    int changed = 0;
+
+    if (!start || !end || end < start) {
+        return NULL;
+    }
+    while (cursor < end) {
+        if (cursor + 1 < end && cursor[0] == '/' && cursor[1] == '/') {
+            break;
+        }
+        if (*cursor == '"' || *cursor == '\'') {
+            char quote = *cursor++;
+            while (cursor < end) {
+                if (*cursor == '\\' && cursor + 1 < end) {
+                    cursor += 2;
+                    continue;
+                }
+                if (*cursor == quote) {
+                    cursor++;
+                    break;
+                }
+                cursor++;
+            }
+            continue;
+        }
+        if (cursor + 1 < end &&
+            ((cursor[0] == '=' && cursor[1] == '=') ||
+             (cursor[0] == '!' && cursor[1] == '='))) {
+            const char *lhsStart = findOpaqueNilOperandStart(start, cursor);
+            const char *lhsEnd = cursor;
+            const char *rhsStart = cursor + 2;
+            const char *rhsEnd = findOpaqueNilOperandEnd(rhsStart, end);
+            const char *trimmedLhsStart = trimRangeStart(lhsStart, lhsEnd);
+            const char *trimmedLhsEnd = trimRangeEnd(trimmedLhsStart, lhsEnd);
+            const char *trimmedRhsStart = trimRangeStart(rhsStart, rhsEnd);
+            const char *trimmedRhsEnd = trimRangeEnd(trimmedRhsStart, rhsEnd);
+            int lhsIsNil = rangeEqualsWord(trimmedLhsStart, trimmedLhsEnd, "nil");
+            int rhsIsNil = rangeEqualsWord(trimmedRhsStart, trimmedRhsEnd, "nil");
+            char *opaqueType = NULL;
+            const char *replaceStart = NULL;
+            const char *replaceEnd = NULL;
+
+            if (lhsIsNil ^ rhsIsNil) {
+                const char *opaqueStart = lhsIsNil ? trimmedRhsStart : trimmedLhsStart;
+                const char *opaqueEnd = lhsIsNil ? trimmedRhsEnd : trimmedLhsEnd;
+
+                opaqueType = inferAetherBindingTypeName(opaqueStart,
+                                                        opaqueEnd,
+                                                        bindings,
+                                                        functions,
+                                                        fields);
+                if (isAetherOpaqueHandleTypeName(opaqueType)) {
+                    replaceStart = lhsIsNil ? trimmedLhsStart : trimmedRhsStart;
+                    replaceEnd = lhsIsNil ? trimmedLhsEnd : trimmedRhsEnd;
+                }
+            }
+
+            if (replaceStart && replaceEnd) {
+                if (!bufferAppendN(&out, lastCopied, (size_t)(replaceStart - lastCopied)) ||
+                    !bufferAppend(&out, "-1")) {
+                    free(opaqueType);
+                    free(out.data);
+                    return NULL;
+                }
+                changed = 1;
+                lastCopied = replaceEnd;
+            }
+            free(opaqueType);
+            cursor += 2;
+            continue;
+        }
+        cursor++;
+    }
+
+    if (!changed) {
+        free(out.data);
+        return dupRange(start, end);
+    }
+    if (!bufferAppendN(&out, lastCopied, (size_t)(end - lastCopied))) {
+        free(out.data);
+        return NULL;
+    }
+    return out.data;
+}
+
 static char *rewriteAetherLenPropertyExpr(const char *start,
                                           const char *end,
                                           const AetherBindingTable *bindings,
@@ -7534,6 +7790,7 @@ static char *translateLineInMethod(const char *lineStart,
                                      path,
                                      lineNumber);
     char *rewritten;
+    char *opaqueNilRewritten;
     char *lenRewritten;
 
     if (!translated) {
@@ -7551,12 +7808,21 @@ static char *translateLineInMethod(const char *lineStart,
     } else {
         rewritten = translated;
     }
-    lenRewritten = rewriteAetherLenPropertyExpr(rewritten,
-                                                rewritten + strlen(rewritten),
+    opaqueNilRewritten = rewriteAetherOpaqueNilComparisons(rewritten,
+                                                           rewritten + strlen(rewritten),
+                                                           bindings,
+                                                           functions,
+                                                           fields);
+    free(rewritten);
+    if (!opaqueNilRewritten) {
+        return NULL;
+    }
+    lenRewritten = rewriteAetherLenPropertyExpr(opaqueNilRewritten,
+                                                opaqueNilRewritten + strlen(opaqueNilRewritten),
                                                 bindings,
                                                 functions,
                                                 fields);
-    free(rewritten);
+    free(opaqueNilRewritten);
     return lenRewritten;
 }
 

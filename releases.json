@@ -1,0 +1,26 @@
+[
+    {
+        "name": "R1",
+        "version": "1.0.0",
+        "score": 92,
+        "blockers": 0
+    },
+    {
+        "name": "R2",
+        "version": "1.1.0",
+        "raw_score": 67,
+        "blockers": 1
+    },
+    {
+        "name": "R3",
+        "version": "2.0.0",
+        "score": 38,
+        "blockers": 2
+    },
+    {
+        "name": "R4",
+        "version": "2.1.0",
+        "raw_score": 105,
+        "blockers": 0
+    }
+]
