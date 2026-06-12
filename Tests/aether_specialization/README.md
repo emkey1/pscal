@@ -73,9 +73,10 @@ Validate corpus structure explicitly:
 python3 Tools/aether_specialization_validate_corpus.py --strict
 ```
 
-Imported external candidates are quarantined by default and do not enter the
-training export unless promoted with `--include-in-training` or by directly
-editing manifest metadata.
+`corpus_candidates/` contains only corpus entries — every file is listed in
+the manifest with `canonical: true` and has a meaningful descriptive name.
+Exploratory probes, scratch outputs, and duplicate drafts live in `scratch/`
+and are not referenced by the manifest or the training export pipeline.
 
 The separate reference corpus currently pulls from:
 
