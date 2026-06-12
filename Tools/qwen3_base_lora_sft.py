@@ -148,7 +148,6 @@ def main() -> int:
 
     training_args = TrainingArguments(
         output_dir=str(args.output_dir),
-        overwrite_output_dir=True,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=1,
@@ -162,7 +161,7 @@ def main() -> int:
         eval_strategy="steps",
         eval_steps=args.save_steps,
         save_strategy="steps",
-        report_to=[],
+        report_to="none",
         seed=args.seed,
     )
 
