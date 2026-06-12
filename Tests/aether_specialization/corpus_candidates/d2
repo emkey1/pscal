@@ -1,0 +1,89 @@
+type Accumulator {
+    cycles: Int;
+    sum: Real;
+
+    fn digest(val: Real) -> Real {
+        // Test 1: Self-mutation and method return inference
+        self.cycles = self.cycles + 1;
+        self.sum = self.sum + val;
+        ret self.sum;
+    }
+}
+
+// Test 2: Annotation Stacking
+// The compiler must weave budget checks, purity enforcement, and 
+// runtime pre/post contracts into a single function block.
+@cost 500us
+@pre input >= 0.0
+@post result >= input
+@pure
+fn inflate(input: Real) -> Real {
+    ret input + 1.5;
+}
+
+fn main() -> Void {
+    if !has_toon() { 
+        ret; 
+    }
+
+    let state: Accumulator = Accumulator {
+        cycles: 0,
+        sum: 0.0
+    };
+
+    // Test 3: Heterogeneous TOON payload with missing/bad data
+    let payload: Text = "[{\"v\": 3.14159}, {\"v\": -10.0}, {\"broken\": true}]";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+
+    fx {
+        println("--- Commencing Stress Test ---");
+    }
+
+    let count: Int = toon_len(root);
+
+    // Test 4: Nested loops of different types
+    loop i in 0..count {
+        let node: ToonNode = toon_at(root, i);
+
+        // Test 5: Dynamic TOON shape checking mixed with fallbacks
+        if toon_has_key(node, "v") {
+            let rawVal: Real = toon_get_real_or(node, "v", 0.0);
+
+            // Coerce data to satisfy our strict @pre contract
+            let safeVal: Real = rawVal;
+            if rawVal < 0.0 {
+                safeVal = 0.0;
+            }
+            
+            // Test 6: Safe inference from a known @pure function
+            let inflated = inflate(safeVal);
+
+            // Test 7: Safe inference from a known method return
+            let currentSum = state.digest(inflated);
+
+            // Test 8: Pascal-style formatting width/precision bounds inside fx
+            fx {
+                println("Node ", i, " | Raw: ", rawVal:0:2, " | Sum: ", currentSum:8:3);
+            }
+        }
+
+        // Test 9: Inner infinite loop with a break to test scope/jump handling
+        let trap = 0;
+        loop {
+            trap = trap + 1;
+            if trap >= 2 {
+                break;
+            }
+        }
+    }
+
+    fx {
+        println("------------------------------");
+        println("Cycles Completed : ", state.cycles);
+        println("Final Sum        : ", state.sum:0:4);
+    }
+
+    toon_close(doc);
+    ret;
+}

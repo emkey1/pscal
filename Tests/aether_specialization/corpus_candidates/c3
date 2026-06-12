@@ -1,0 +1,28 @@
+// --- Core Logic Functions ---
+
+// @pure: This function performs a pure calculation/transformation.
+@pure
+fn calculate_final_value(base_amount: Int, multiplier: Real) -> Real {
+    let result = base_amount * multiplier;
+    ret result;
+}
+
+// --- Main Program ---
+fn main() -> Void {
+    let config_json = "{\"item_id\":\"A42\",\"base_price\":100,\"tax_rate\":0.08}";
+    let doc: ToonDoc = toon_parse(config_json);
+    let root: ToonNode = toon_root(doc);
+    let item_id: Text = toon_get_text(root, "item_id");
+    let base_price: Int = toon_get_int(root, "base_price");
+    let tax_rate: Real = toon_get_real(root, "tax_rate");
+    let final_price = calculate_final_value(base_price, tax_rate);
+    fx {
+        println("--- Configuration Processing ---");
+        println("Item ID: ", item_id);
+        println("Base Price: ", base_price);
+        println("Tax Rate: ", tax_rate);
+        println("Final Calculated Price: ", final_price:0:2);
+    }
+    toon_close(doc);
+    ret;
+}

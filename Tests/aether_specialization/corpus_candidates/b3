@@ -1,0 +1,20 @@
+type Counter {
+    value: Int;
+
+    fn bump() -> Int {
+        self.value = self.value + 1;
+        ret self.value;
+    }
+}
+
+fn main() -> Void {
+    let counter = new Counter();
+    counter.value = 0;
+
+    loop i in 0..5 {
+        let newVal: Int = counter.bump();
+        fx { println("iteration ", i, ": counter = ", newVal); }
+    }
+
+    ret;
+}

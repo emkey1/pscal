@@ -1,0 +1,52 @@
+@pure
+fn normalizePort(port: Int) -> Int {
+    if port < 1 {
+        ret 8080;
+    }
+    if port > 65535 {
+        ret 65535;
+    }
+    ret port;
+}
+
+@pure
+fn classifyLogLevel(level: Text) -> Text {
+    if level == "debug" {
+        ret "DEBUG";
+    }
+    if level == "info" {
+        ret "INFO";
+    }
+    ret "WARN";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("TOUN/JSON backend unavailable");
+        }
+        ret;
+    }
+
+    let configStr: Text = "{\"port\": 99999, \"level\": \"info\", \"debug_mode\": true}";
+    let doc: ToonDoc = toon_parse(configStr);
+    let root: ToonNode = toon_root(doc);
+
+    let rawPort: Int = toon_get_int_or(root, "port", 8080);
+    let port: Int = normalizePort(rawPort);
+
+    let rawLevel: Text = toon_get_text_or(root, "level", "warn");
+    let level: Text = classifyLogLevel(rawLevel);
+
+    let debugMode: Bool = toon_get_bool_or(root, "debug_mode", false);
+
+    fx {
+        println("Configuration Loaded:");
+        println("  Normalized Port: ", port);
+        println("  Log Level: ", level);
+        println("  Debug Mode: ", debugMode);
+    }
+
+    toon_close(doc);
+    ret;
+}

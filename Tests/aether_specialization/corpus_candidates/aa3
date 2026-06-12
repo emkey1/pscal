@@ -1,0 +1,60 @@
+// Inventory Management System
+// Demonstrates custom types, methods, and logic control.
+
+// Define the Inventory type with fields and methods
+type Inventory {
+    currentStock: Int;
+    maxCapacity: Int;
+
+    // Method to add items without exceeding capacity
+    // Returns the new stock level
+    fn addItem(amount: Int) -> Int {
+        if amount <= 0 {
+            ret self.currentStock;
+        }
+
+        let potential: Int = self.currentStock + amount;
+        
+        if potential > self.maxCapacity {
+            self.currentStock = self.maxCapacity;
+        } else {
+            self.currentStock = potential;
+        }
+        
+        ret self.currentStock;
+    }
+
+    // Method to determine the status of the inventory
+    fn getStatus() -> Text {
+        if self.currentStock == self.maxCapacity {
+            ret "FULL";
+        }
+        if self.currentStock == 0 {
+            ret "EMPTY";
+        }
+        ret "IN_STOCK";
+    }
+}
+
+fn main() -> Void {
+    // Initialize inventory: 10 of 50
+    let store: Inventory = new Inventory();
+    store.currentStock = 10;
+    store.maxCapacity = 50;
+
+    // Add 25 items
+    // Logic: 10 + 25 = 35. 35 <= 50, so stock becomes 35.
+    let finalStock: Int = store.addItem(25);
+
+    // Get the status
+    // Logic: 35 is not 50 (FULL) and not 0 (EMPTY), so status is IN_STOCK.
+    let statusText: Text = store.getStatus();
+
+    // Print the required output lines
+    fx {
+        println("Final Stock: ", finalStock);
+        println("Current Status: ", statusText);
+    }
+
+    ret;
+}

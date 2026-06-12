@@ -1,0 +1,280 @@
+{
+  "items": [
+    {
+      "source_path": "/tmp/a1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/a1",
+      "sha256": "821a0f7f05b09e6c71866d2751b7532eb19f87ac400ed6af5fa76abfa4ff1a9a",
+      "stdout": "answer = 42\n"
+    },
+    {
+      "source_path": "/tmp/aa01",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa01",
+      "sha256": "309e2f4d9c3969bcc70f7db2e9474e81d4bc7a4e234daa0dc5de0d940e89ecd2",
+      "stdout": "--- Log Analysis Report ---\nTotal Entries: 3\nTS: 2023-10-01T10:00:00Z | SVC: auth | CODE: 503 | SEV: CRITICAL | RISK: 50300.00\nTS: 2023-10-01T10:05:00Z | SVC: db | CODE: 404 | SEV: ERROR | RISK: 40400.00\nTS: 2023-10-01T10:06:00Z | SVC: api | CODE: 200 | SEV: INFO | RISK: 20000.00\n--------------------------------\nCritical Events: 1\nAverage Risk Score: 36900.00\n"
+    },
+    {
+      "source_path": "/tmp/aa3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3",
+      "sha256": "0c21850d96e00d934bcd127c40071acb67246dc9b95cb7ddea2a48a287cec87b",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/aa3_case1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case1",
+      "sha256": "d2868b41e4c0f03d176e522b1d49ea9e6ea066aa9363381776748275e67961fb",
+      "stdout": "1\n"
+    },
+    {
+      "source_path": "/tmp/aa3_case2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case2",
+      "sha256": "4d7d39d0dd05263353360b99a978e119ea9a8d05ab7d899598fd5d8f1a7f5b49",
+      "stdout": "10\n"
+    },
+    {
+      "source_path": "/tmp/aa3_case3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case3",
+      "sha256": "5fc6fe9ec519cd2f3f901cb0da3381ff5789a61e03c20229050fad49991d2d1f",
+      "stdout": "0\n"
+    },
+    {
+      "source_path": "/tmp/aa3_case4",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case4",
+      "sha256": "697c6b99f491e84b3abae060a7582fd3acc9fa013dba58ce620df514056e7695",
+      "stdout": "FULL\n"
+    },
+    {
+      "source_path": "/tmp/aa3_case5",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case5",
+      "sha256": "3e70bd528860364d4f32489804d5490ff5b94e0f4dc83f8fe2a322f2a3073b7d",
+      "stdout": "0\n"
+    },
+    {
+      "source_path": "/tmp/aa3_case6",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case6",
+      "sha256": "f08e01c3266eba716ffbcd78f19a6160fa4566ef15c44bf197053528f936ff29",
+      "stdout": "FULL\n"
+    },
+    {
+      "source_path": "/tmp/aa3_case7",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case7",
+      "sha256": "4e3b42b69a0224a7860d3f2d4d2ea9992347930a0823b805009d91c28eee82e2",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/aether_fileexists_lit2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_fileexists_lit2",
+      "sha256": "27fa1481532bbc3391b95d95ba260f4c9b3bb00b80fa33c6b58d3642626319a3",
+      "stdout": "false\n"
+    },
+    {
+      "source_path": "/tmp/aether_new_probe2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_new_probe2",
+      "sha256": "5fbcda4959abb7147e33713f1f32d3a652e4bf426ed1f60de293988e5d2ba585",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_probe1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_probe1",
+      "sha256": "617ddaf0739c978e599b702e74e4419255ac7ad4b541b7e1ad041b49ca11ed46",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_probe2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_probe2",
+      "sha256": "9eca2e8ff0c35195a800cb58c5b1b25525aacfd91d2d9d327fe43156bc885e09",
+      "stdout": "Aether\n"
+    },
+    {
+      "source_path": "/tmp/aether_probe3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_probe3",
+      "sha256": "cdb8d8aade1444815270e0e959dfc559f2a43096adae51a57a9575d26c715391",
+      "stdout": "Aether\n"
+    },
+    {
+      "source_path": "/tmp/aether_self_mut_probe2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_self_mut_probe2",
+      "sha256": "39327acfb288bd18c4d71ced915730e1ecdbf12842e1daf9642a882cf8ffce70",
+      "stdout": "42\n"
+    },
+    {
+      "source_path": "/tmp/aether_tmp1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp1",
+      "sha256": "8d201e9e4c148b319b6edf9c347f7f8ac38a6d576085bedfa298103f11ca416e",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp10",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp10",
+      "sha256": "1e2f0f11d403f669929db5987a53f64470e2b6da822b0a5ad52b432148196738",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp11",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp11",
+      "sha256": "cb84e415a22453fb9386a2a649a8e93e7f13770d61240343a7bf3683f5f455bb",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp12",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp12",
+      "sha256": "29f72f91001ff44be8feaf6252ec525714ee113f8d808df1924749fea2b927eb",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp13",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp13",
+      "sha256": "297aa610a80032d9abcdf54599914bd394d7173a82babe3a21ebb220733d399b",
+      "stdout": "Aether\n"
+    },
+    {
+      "source_path": "/tmp/aether_tmp2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp2",
+      "sha256": "bdce57612a0a8e227e9973db7e38c1de03651c34c4c18372feab35cea3367830",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp3",
+      "sha256": "933f19d40d45395dcc0c06bd0ee047a7467198f6b4c164f34fcf49653609f012",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp4",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp4",
+      "sha256": "549be9cbf8f30dcf78520eb01d9269d6465bed59fef6601da7aa7c78b0f2fc63",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp5",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp5",
+      "sha256": "84ec80dd6993e8d9e5a5a5821d0551f3009868230e61fb292e3220f641d44acc",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp6",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp6",
+      "sha256": "065de465fa304a4acf65e16868eed71b19e75da08c904d199a1c41a5a1519b5e",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/aether_tmp7",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp7",
+      "sha256": "99b61e9488ded11cc6ad9be25a22153d92e24f8bc64dfd3b31d4013aa6d2d79f",
+      "stdout": ""
+    },
+    {
+      "source_path": "/tmp/b3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/b3",
+      "sha256": "d569e15adb3c9f49508ad5b62aea16a62fcc2b0e55bfb20b1d68da66eb858321",
+      "stdout": "iteration 0: counter = 1\niteration 1: counter = 2\niteration 2: counter = 3\niteration 3: counter = 4\niteration 4: counter = 5\n"
+    },
+    {
+      "source_path": "/tmp/b5",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/b5",
+      "sha256": "f59d9385913f970f8c1ea7ca389ff59d17ec7995b99f2a6b978c2e2a8a55d7c0",
+      "stdout": "--- Geometry Report ---\nCircle (r=5.0) Area: 78.539816\nRectangle (4x6) Area: 24.000000\n"
+    },
+    {
+      "source_path": "/tmp/b6",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/b6",
+      "sha256": "dafbe12843b8dfac0937e6b57137c6a50d67c75fb612805e425c69ad45dcd5c3",
+      "stdout": "Configuration Loaded:\n  Normalized Port: 65535\n  Log Level: INFO\n  Debug Mode: true\n"
+    },
+    {
+      "source_path": "/tmp/b7",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/b7",
+      "sha256": "79ba7dd708ba96edd549f7799c669e1a3172369d1fd92812a70f4695f2ed6bff",
+      "stdout": "=== Annual Review Report ===\nEmployee: Alice\n  Score: 95\n  Status: Exceeds Expectations\n  Bonus: $ 5000.000000\nEmployee: Bob\n  Score: 80\n  Status: Meets Expectations\n  Bonus: $ 2500.000000\nEmployee: Charlie\n  Score: 65\n  Status: Needs Improvement\n  Bonus: $ 0.000000\n"
+    },
+    {
+      "source_path": "/tmp/c1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/c1",
+      "sha256": "dd8e348d78420ce959a4609fb104162a192533920c79c1277e5650b96ce885ef",
+      "stdout": "--- Job Analysis Report ---\nJob Name: Data Extraction Task\nRaw Score: 95\nNormalized Score: 95\nStatus: ready\nIs Ready: true\n"
+    },
+    {
+      "source_path": "/tmp/c2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/c2",
+      "sha256": "cc1fb43031507d394204060351ba92e3cd4be3531fa80b03a814558c3bb2ec15",
+      "stdout": "--- Job Analysis Report ---\nJob Name: Data Extraction Task\nRaw Score: 95\nNormalized Score: 95\nStatus: ready\nIs Ready: true\n"
+    },
+    {
+      "source_path": "/tmp/c3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/c3",
+      "sha256": "c076816b23f4d3ce544c0aa59d482b40ec4af939a8af23e89aab12432e0f547c",
+      "stdout": "--- Configuration Processing ---\nItem ID: A42\nBase Price: 100\nTax Rate: 0.080000\nFinal Calculated Price: 8.00\n"
+    },
+    {
+      "source_path": "/tmp/c4",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/c4",
+      "sha256": "0340b395ea4e2b4dd5088896705114f19e59246959a5db3fa5a214def8ef63c8",
+      "stdout": "--- Inventory Operation ---\nInitial Stock: 10\nItems Added: 25\nFinal Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/c6",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/c6",
+      "sha256": "bb23d3cd47a1c01443ba46bd649e3c489ba7ef4270b5f5dc9e096c3a83cc305c",
+      "stdout": "--- Commencing Stress Test ---\nNode 0 | Raw: 3.14 | Sum:    4.642\nNode 1 | Raw: -10.00 | Sum:    6.142\n------------------------------\nCycles Completed : 2\nFinal Sum        : 6.1416\n"
+    },
+    {
+      "source_path": "/tmp/cum_1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/cum_1",
+      "sha256": "a8ce4e59c33d2593493e21fe4ac5486c1d12c4dd75fea378f2437f8cc529f94c",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/cum_2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/cum_2",
+      "sha256": "770c08d3203b5780d2a882062d28e2595ad20c6f01e21d0fb3149648112d095c",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/cum_3",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/cum_3",
+      "sha256": "659fb00cde60d832a02c71d1fd6cd7ccefb6b737a47971ec033ad0501b1de4de",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/cum_4",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/cum_4",
+      "sha256": "03bf694ad9e14673762ffce8fbab68e2fe5fef0313244023073a64d50427ba23",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/cum_5",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/cum_5",
+      "sha256": "fb424d8cab456f479595747be24b59d14d819bb1baf4554b36c5b98c48df3f96",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/cum_6",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/cum_6",
+      "sha256": "5b6b2944298115875549b89b1ddb7df90c216bdfb71554ad91c8eedda9196fde",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/cum_7",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/cum_7",
+      "sha256": "072368c74527d8ba54abf3c60aab6b09bde839c914989942c382a5d7a2eb31fb",
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+    },
+    {
+      "source_path": "/tmp/d1",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/d1",
+      "sha256": "b98af18c05f0c08f2a2542f99bcedab743233f4157a3e8ebb626717752f4bdeb",
+      "stdout": "--- Starting Log Analysis ---\nService: auth | Code: 401 | Severity: warning\nService: db | Code: 503 | Severity: critical\nService: web | Code: 200 | Severity: info\n-----------------------------\nTotal Logs Processed : 3\nCritical Alerts      : 1\n"
+    },
+    {
+      "source_path": "/tmp/d2",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/d2",
+      "sha256": "18715c34eefd733e0126bc8f4028589e68af3c12359e544e9433973d3019c869",
+      "stdout": "--- Commencing Stress Test ---\nNode 0 | Raw: 3.14 | Sum:    4.642\nNode 1 | Raw: -10.00 | Sum:    6.142\n------------------------------\nCycles Completed : 2\nFinal Sum        : 6.1416\n"
+    },
+    {
+      "source_path": "/tmp/d4",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/d4",
+      "sha256": "5435ac647a7e246a1a786b071054bc1642565612ade34e94a0c30bd0bbd2ff3d",
+      "stdout": "=== Job Processing Report ===\nTotal jobs   : 6\nAverage score: 62.666667\nMin score    : 0\nMax score    : 100\n------------------------------\nAlpha => Excellent (95)\nBeta => Good (78)\nGamma => Average (62)\nDelta => Poor (41)\nEpsilon => Excellent (100)\nZeta => Poor (0)\n------------------------------\n"
+    }
+  ]
+}

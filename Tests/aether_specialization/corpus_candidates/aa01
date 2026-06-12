@@ -1,0 +1,114 @@
+// Aether Log Analyzer
+// Parses a JSON log stream, classifies severity, and outputs a summary.
+
+const DefaultSeverity: Int = 1;
+
+// Pure helper to classify severity based on an error code.
+// No effects here.
+@pure
+fn classify_severity(code: Int) -> Text {
+    if code >= 500 {
+        ret "CRITICAL";
+    }
+    if code >= 400 {
+        ret "ERROR";
+    }
+    if code >= 300 {
+        ret "WARNING";
+    }
+    ret "INFO";
+}
+
+// Pure helper to calculate a weighted risk score.
+@pure
+fn calc_risk(code: Int, count: Int) -> Real {
+    // Force real arithmetic by using 100.0
+    let base: Real = code * 100.0;
+    ret base / count;
+}
+
+// Define the structure for our processed log entry
+type LogEntry {
+    timestamp: Text;
+    service: Text;
+    code: Int;
+    severity: Text;
+    risk: Real;
+}
+
+fn main() -> Void {
+    // Check if TOON support is available
+    if !has_toon() {
+        fx {
+            println("Error: yyjson library not available.");
+        }
+        ret;
+    }
+
+    // Simulated JSON input: A list of log entries
+    // In a real scenario, this might come from toon_parse_file("logs.json")
+    let json_payload: Text = 
+        "[{\"ts\":\"2023-10-01T10:00:00Z\",\"svc\":\"auth\",\"code\":503},{\"ts\":\"2023-10-01T10:05:00Z\",\"svc\":\"db\",\"code\":404},{\"ts\":\"2023-10-01T10:06:00Z\",\"svc\":\"api\",\"code\":200}]";
+    
+    let doc: ToonDoc = toon_parse(json_payload);
+    let root: ToonNode = toon_root(doc);
+
+    // Validate root is an array before iterating
+    if !toon_is_arr(root) {
+        fx {
+            println("Error: Expected JSON array at root.");
+        }
+        toon_close(doc);
+        ret;
+    }
+
+    let count: Int = toon_len(root);
+    let total_risk: Real = 0.0;
+    let critical_count: Int = 0;
+
+    fx {
+        println("--- Log Analysis Report ---");
+        println("Total Entries: ", count);
+    }
+
+    // Iterate over the TOON array
+    loop i in 0..count {
+        let entry_node: ToonNode = toon_at(root, i);
+        
+        // Extract fields with fallbacks
+        let ts: Text = toon_get_text_or(entry_node, "ts", "unknown");
+        let svc: Text = toon_get_text_or(entry_node, "svc", "unknown");
+        let code: Int = toon_get_int_or(entry_node, "code", 0);
+
+        // Process data
+        let severity: Text = classify_severity(code);
+        let risk: Real = calc_risk(code, 1); // Simplified risk calc for demo
+
+        // Accumulate stats
+        total_risk = total_risk + risk;
+        if severity == "CRITICAL" {
+            critical_count = critical_count + 1;
+        }
+
+        // Output individual entry inside fx
+        fx {
+            println("TS: ", ts, " | SVC: ", svc, " | CODE: ", code, " | SEV: ", severity, " | RISK: ", risk:0:2);
+        }
+    }
+
+    // Final Summary
+    let avg_risk: Real = 0.0;
+    if count > 0 {
+        avg_risk = total_risk / count;
+    }
+
+    fx {
+        println("--------------------------------");
+        println("Critical Events: ", critical_count);
+        println("Average Risk Score: ", avg_risk:0:2);
+    }
+
+    // Always close the document
+    toon_close(doc);
+    ret;
+}

@@ -1,0 +1,4 @@
+fn main() -> Void {
+    fx { println(fileexists("agent_payload.json")); }
+    ret;
+}

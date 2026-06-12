@@ -1,0 +1,6 @@
+const Label = "Aether";
+fn main() -> Void {
+    let labelCopy = Label;
+    fx { println(labelCopy); }
+    ret;
+}

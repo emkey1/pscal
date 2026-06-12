@@ -1,0 +1,60 @@
+@pure
+fn calculateBonus(score: Int) -> Real {
+    if score >= 90 {
+        ret 5000.0;
+    }
+    if score >= 75 {
+        ret 2500.0;
+    }
+    ret 0.0;
+}
+
+@pure
+fn getStatus(score: Int) -> Text {
+    if score >= 90 {
+        ret "Exceeds Expectations";
+    }
+    if score >= 75 {
+        ret "Meets Expectations";
+    }
+    ret "Needs Improvement";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("TOON backend unavailable");
+        }
+        ret;
+    }
+
+    let data: Text = "{\"employees\": [{\"name\": \"Alice\", \"score\": 95}, {\"name\": \"Bob\", \"score\": 80}, {\"name\": \"Charlie\", \"score\": 65}]}";
+    let doc: ToonDoc = toon_parse(data);
+    let root: ToonNode = toon_root(doc);
+
+    let empNode: ToonNode = toon_key(root, "employees");
+    let count: Int = toon_len(empNode);
+
+    fx {
+        println("=== Annual Review Report ===");
+    }
+
+    loop i in 0..count {
+        let empItem: ToonNode = toon_at(empNode, i);
+        let name: Text = toon_get_text(empItem, "name");
+        let score: Int = toon_get_int(empItem, "score");
+
+        let bonus: Real = calculateBonus(score);
+        let status: Text = getStatus(score);
+
+        fx {
+            println("Employee: ", name);
+            println("  Score: ", score);
+            println("  Status: ", status);
+            println("  Bonus: $", bonus);
+        }
+    }
+
+    toon_close(doc);
+    ret;
+}

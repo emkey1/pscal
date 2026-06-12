@@ -1,0 +1,73 @@
+type Accumulator {
+    cycles: Int;
+    sum: Real;
+
+    fn digest(val: Real) -> Real {
+        self.cycles = self.cycles + 1;
+        self.sum = self.sum + val;
+        ret self.sum;
+    }
+}
+
+@cost 500us
+@pre input >= 0.0
+@post result >= input
+@pure
+fn inflate(input: Real) -> Real {
+    ret input + 1.5;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        ret;
+    }
+
+    let state: Accumulator = Accumulator {
+        cycles: 0,
+        sum: 0.0
+    };
+
+    let payload: Text = "[{\"v\": 3.14159}, {\"v\": -10.0}, {\"broken\": true}]";
+    let doc: ToonDoc = toon_parse(payload);
+    let root: ToonNode = toon_root(doc);
+
+    fx {
+        println("--- Commencing Stress Test ---");
+    }
+
+    let count: Int = toon_len(root);
+
+    loop i in 0..count {
+        let node: ToonNode = toon_at(root, i);
+
+        if toon_has_key(node, "v") {
+            let rawVal: Real = toon_get_real_or(node, "v", 0.0);
+            let safeVal: Real = rawVal;
+            if rawVal < 0.0 {
+                safeVal = 0.0;
+            }
+            let inflated = inflate(safeVal);
+            let currentSum = state.digest(inflated);
+            fx {
+                println("Node ", i, " | Raw: ", rawVal:0:2, " | Sum: ", currentSum:8:3);
+            }
+        }
+
+        let trap = 0;
+        loop {
+            trap = trap + 1;
+            if trap >= 2 {
+                break;
+            }
+        }
+    }
+
+    fx {
+        println("------------------------------");
+        println("Cycles Completed : ", state.cycles);
+        println("Final Sum        : ", state.sum:0:4);
+    }
+
+    toon_close(doc);
+    ret;
+}

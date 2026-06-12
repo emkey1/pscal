@@ -35,6 +35,12 @@ That command exports:
 - verified instruction JSONL
 - verified repair JSONL
 
+The raw corpus currently pulls from:
+
+- `Examples/aether/base/*`
+- `Examples/aether/showcase/*`
+- `Tests/aether_specialization/corpus_candidates/*`
+
 The output is intended to become the first input to a `Qwen/Qwen3-4B-Base`
 specialization run.
 

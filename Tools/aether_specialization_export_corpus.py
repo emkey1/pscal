@@ -12,6 +12,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_ROOTS = [
     REPO_ROOT / "Examples" / "aether" / "base",
     REPO_ROOT / "Examples" / "aether" / "showcase",
+    REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates",
 ]
 
 
