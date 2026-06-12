@@ -93,6 +93,7 @@ nohup "$workspace/.venv/bin/python" "$workspace/scripts/qwen3_base_lora_sft.py" 
   --model-id '{args.model_id}' \
   --instruction-jsonl "$workspace/data/aether_instruction_sft.jsonl" \
   --repair-jsonl "$workspace/data/aether_repair_sft.jsonl" \
+  --corpus-json "$workspace/data/aether_raw_corpus.json" \
   --reference-json "$workspace/data/aether_reference_corpus.json" \
   --output-dir "$outdir" \
   --epochs {args.epochs} \

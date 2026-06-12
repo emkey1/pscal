@@ -117,6 +117,26 @@ def load_reference_records(reference_json: Path | None) -> list[dict]:
     return records
 
 
+def load_raw_corpus_records(corpus_json: Path | None) -> list[dict]:
+    if corpus_json is None or not corpus_json.exists():
+        return []
+    payload = read_json(corpus_json)
+    records: list[dict] = []
+    for item in payload.get("items", []):
+        path = str(item.get("path", "corpus"))
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        records.append(
+            {
+                "id": f"raw_{slugify(path)}",
+                "kind": "raw_aether_corpus",
+                "text": content + "\n",
+            }
+        )
+    return records
+
+
 class SaveMetadataCallback(TrainerCallback):
     def __init__(self, path: Path, metadata: dict) -> None:
         self.path = path
@@ -132,6 +152,7 @@ def main() -> int:
     parser.add_argument("--model-id", default="Qwen/Qwen3-4B-Base")
     parser.add_argument("--instruction-jsonl", type=Path, required=True)
     parser.add_argument("--repair-jsonl", type=Path, required=True)
+    parser.add_argument("--corpus-json", type=Path)
     parser.add_argument("--reference-json", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=1337)
@@ -154,6 +175,7 @@ def main() -> int:
     torch.manual_seed(args.seed)
 
     records = load_records(args.instruction_jsonl, args.repair_jsonl)
+    raw_corpus_records = load_raw_corpus_records(args.corpus_json)
     reference_records = load_reference_records(args.reference_json)
     if len(records) < 2:
         raise SystemExit("need at least two verified records for train/eval split")
@@ -163,7 +185,8 @@ def main() -> int:
     train_records = records[:split_index]
     eval_records = records[split_index:]
     random.shuffle(reference_records)
-    train_records = train_records + reference_records
+    random.shuffle(raw_corpus_records)
+    train_records = train_records + raw_corpus_records + reference_records
 
     train_dataset = Dataset.from_list(train_records)
     eval_dataset = Dataset.from_list(eval_records)
@@ -223,9 +246,11 @@ def main() -> int:
         "instruction_jsonl": str(args.instruction_jsonl),
         "repair_jsonl": str(args.repair_jsonl),
         "reference_json": str(args.reference_json) if args.reference_json else None,
+        "corpus_json": str(args.corpus_json) if args.corpus_json else None,
         "train_records": len(train_records),
         "eval_records": len(eval_records),
         "supervised_train_records": len(records[:split_index]),
+        "raw_corpus_train_records": len(raw_corpus_records),
         "reference_train_records": len(reference_records),
         "max_seq_len": args.max_seq_len,
         "epochs": args.epochs,
