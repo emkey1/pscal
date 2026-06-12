@@ -1,0 +1,48 @@
+// 41_contract_quote
+// Concepts: stacked contracts, @cost on a helper, Int-to-Real arithmetic,
+// explicit typed intermediates
+// expect: normalized units = 100
+// expect: hours = 1.50
+// expect: quote = 180.00
+
+@pure
+@pre units >= 0
+@post result >= 0 && result <= 100
+fn normalizeUnits(units: Int) -> Int {
+    if units > 100 {
+        ret 100;
+    }
+    ret units;
+}
+
+@pure
+@pre minutes >= 0
+@post result >= 0.0
+fn billHours(minutes: Int) -> Real {
+    ret minutes / 60.0;
+}
+
+@cost 3steps
+@pre units >= 0
+@pre minutes >= 0
+@post result >= 0.0
+fn quoteWork(units: Int, minutes: Int) -> Real {
+    let safeUnits: Int = normalizeUnits(units);
+    let hours: Real = billHours(minutes);
+    ret safeUnits * 1.5 + hours * 20.0;
+}
+
+fn main() -> Void {
+    let units: Int = 140;
+    let minutes: Int = 90;
+    let safeUnits: Int = normalizeUnits(units);
+    let hours: Real = billHours(minutes);
+    let total: Real = quoteWork(units, minutes);
+
+    fx {
+        println("normalized units = ", safeUnits);
+        println("hours = ", hours:0:2);
+        println("quote = ", total:0:2);
+    }
+    ret;
+}

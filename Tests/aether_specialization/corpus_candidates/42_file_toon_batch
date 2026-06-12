@@ -1,0 +1,65 @@
+// 42_file_toon_batch
+// Concepts: fileexists guard, toon_parse_file, object-root extraction,
+// defaulted lookups on the final node, deterministic file-backed reporting
+// expect: batch = daily-7
+// expect: alpha -> ready
+// expect: beta -> review
+// expect: gamma -> blocked
+// expect: missing scores = 1
+
+@pure
+fn classifyBatchScore(score: Int) -> Text {
+    if score >= 90 {
+        ret "ready";
+    }
+    if score >= 70 {
+        ret "review";
+    }
+    ret "blocked";
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    if !fileexists("jobs42.json") {
+        fx {
+            println("missing jobs42.json");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("jobs42.json");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+    let batchName: Text = toon_get_text(root, "batch");
+    let missingScores: Int = 0;
+
+    fx {
+        println("batch = ", batchName);
+    }
+
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let name: Text = toon_get_text(job, "name");
+        if !toon_has_key(job, "score") {
+            missingScores = missingScores + 1;
+        }
+        let score: Int = toon_get_int_or(job, "score", 0);
+        let label: Text = classifyBatchScore(score);
+        fx {
+            println(name, " -> ", label);
+        }
+    }
+
+    fx {
+        println("missing scores = ", missingScores);
+    }
+
+    toon_close(doc);
+    ret;
+}
