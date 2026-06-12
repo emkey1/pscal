@@ -578,6 +578,15 @@ spelling for the shared PSCAL `delay(ms)` builtin and is effectful, so it must
 stay inside `fx`. `task_wait(handle)` waits for a task handle; it is not a
 timer and should not be used like `task_wait(100)`.
 
+Structured discovery also exists for sophisticated agents:
+- `builtins_json()` returns a compact JSON list of Aether-visible builtin names
+- `builtins_json(true)` returns richer JSON metadata, including aliases and
+  usage hints when available
+- `builtin_info(name)` returns JSON metadata for one builtin name
+
+Use discovery when the prompt depends on optional runtime capabilities. Do not
+replace the documented core subset with ad hoc discovery in ordinary examples.
+
 [VERIFY: give one-line signatures (args, return types) for `ai_chat` and the
 task helpers an LLM should generate, plus the valid `has_builtin` categories —
 or state explicitly that LLMs should not generate these calls unless the

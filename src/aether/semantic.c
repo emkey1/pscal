@@ -860,6 +860,12 @@ static const char *inferInitializerTypeName(const char *start,
     if ((size_t)(nameEnd - trimmedStart) == 7 && strncmp(trimmedStart, "ai_chat", 7) == 0) {
         return "Text";
     }
+    if ((size_t)(nameEnd - trimmedStart) == 13 && strncmp(trimmedStart, "builtins_json", 13) == 0) {
+        return "Text";
+    }
+    if ((size_t)(nameEnd - trimmedStart) == 12 && strncmp(trimmedStart, "builtin_info", 12) == 0) {
+        return "Text";
+    }
     if ((size_t)(nameEnd - trimmedStart) == 8 && strncmp(trimmedStart, "has_toon", 8) == 0) {
         return "Bool";
     }

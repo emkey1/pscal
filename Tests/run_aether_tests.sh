@@ -26,6 +26,7 @@ TASK_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/task_alias_fail_outside_fx.aethe
 SLEEP_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/sleep_alias_pass.aether"
 SLEEP_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/sleep_alias_fail_outside_fx.aether"
 HAS_BUILTIN_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_builtin_alias_pass.aether"
+BUILTIN_QUERY_PASS_FIXTURE="$ROOT_DIR/Tests/aether/builtin_query_pass.aether"
 AI_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/ai_helpers_pass.aether"
 AI_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/ai_alias_fail_outside_fx.aether"
 RUNTIME_LINE_MAPPING_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/runtime_line_mapping_fail.aether"
@@ -329,6 +330,13 @@ fi
 if ! grep -Eq '^(true|false)$' /tmp/aether_has_builtin_alias_pass.out; then
     echo "unexpected has_builtin alias output" >&2
     cat /tmp/aether_has_builtin_alias_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$BUILTIN_QUERY_PASS_FIXTURE" >/tmp/aether_builtin_query_pass.out
+printf 'true\ntrue\ntrue\ntrue\n' >/tmp/aether_builtin_query_expected.out
+if ! cmp -s /tmp/aether_builtin_query_expected.out /tmp/aether_builtin_query_pass.out; then
+    echo "unexpected builtin query output" >&2
+    cat /tmp/aether_builtin_query_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$AI_HELPERS_PASS_FIXTURE" >/tmp/aether_ai_helpers_pass.out

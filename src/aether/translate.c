@@ -2119,7 +2119,9 @@ static const char *inferHelperReturnTypeName(const char *nameStart, size_t nameL
         (nameLen == 13 && strncmp(nameStart, "toon_get_text", 13) == 0) ||
         (nameLen == 16 && strncmp(nameStart, "toon_get_text_or", 16) == 0) ||
         (nameLen == 15 && strncmp(nameStart, "toon_text_value", 15) == 0) ||
-        (nameLen == 7 && strncmp(nameStart, "ai_chat", 7) == 0)) {
+        (nameLen == 7 && strncmp(nameStart, "ai_chat", 7) == 0) ||
+        (nameLen == 13 && strncmp(nameStart, "builtins_json", 13) == 0) ||
+        (nameLen == 12 && strncmp(nameStart, "builtin_info", 12) == 0)) {
         return "Text";
     }
     if ((nameLen == 8 && strncmp(nameStart, "toon_len", 8) == 0) ||
@@ -3259,6 +3261,12 @@ static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t n
     }
     if (nameLen == 7 && strncmp(nameStart, "ai_chat", nameLen) == 0) {
         return bufferAppend(out, "openaichatcompletions");
+    }
+    if (nameLen == 13 && strncmp(nameStart, "builtins_json", nameLen) == 0) {
+        return bufferAppend(out, "aetherbuiltinsjson");
+    }
+    if (nameLen == 12 && strncmp(nameStart, "builtin_info", nameLen) == 0) {
+        return bufferAppend(out, "aetherbuiltininfo");
     }
     if (nameLen == 7 && strncmp(nameStart, "println", nameLen) == 0) {
         return bufferAppend(out, "writeln");

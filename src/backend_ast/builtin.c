@@ -2188,6 +2188,25 @@ const char* getVmBuiltinNameById(int id) {
     return name;
 }
 
+size_t getVmBuiltinCount(void) {
+    pthread_once(&builtin_registry_once, initBuiltinRegistryMutex);
+    pthread_mutex_lock(&builtin_registry_mutex);
+    size_t count = num_vm_builtins + num_extra_vm_builtins;
+    pthread_mutex_unlock(&builtin_registry_mutex);
+    return count;
+}
+
+BuiltinRoutineType getVmBuiltinTypeById(int id) {
+    if (id < 0) {
+        return BUILTIN_TYPE_NONE;
+    }
+    const char *name = getVmBuiltinNameById(id);
+    if (!name) {
+        return BUILTIN_TYPE_NONE;
+    }
+    return getBuiltinType(name);
+}
+
 bool getVmBuiltinMapping(const char *name, VmBuiltinMapping *out_mapping, int *out_id) {
     if (out_id) {
         *out_id = -1;

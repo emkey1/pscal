@@ -284,6 +284,11 @@ Never: `toon_get_text_or(toon_key(toon_at(root, i), "meta"), "code", "EMPTY");`
 waits on a task handle, not a duration. [VERIFY: copy resolved signatures from full doc, or state that
 these are not generated without prompt-supplied signatures]
 
+Discovery exists:
+- `builtins_json()` -> JSON list of available Aether-visible builtins
+- `builtins_json(true)` -> richer JSON metadata
+- `builtin_info(name)` -> JSON metadata for one builtin
+
 ## Imports (IMP-001, MOD-001)
 
 Imports are advanced; most generated Aether should be single-file.

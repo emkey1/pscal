@@ -126,6 +126,8 @@ These examples stay within the currently supported Aether Core subset:
   worker launches
 - `sleep_alias`: shows the compact `sleep(ms)` alias over the shared PSCAL
   `delay(ms)` builtin; it is effectful and therefore still belongs inside `fx`
+- `builtin_queries`: shows `builtins_json(...)` and `builtin_info(...)` for
+  structured capability discovery without inflating the language guide
 - `ai_helpers`: shows the compact `ai_chat(...)` alias and the Aether AI
   capability probes without requiring a live call during the example run
 - `inferred_decls`: shows compact initialized `const` / `let` declarations

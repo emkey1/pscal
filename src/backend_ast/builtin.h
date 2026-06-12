@@ -35,6 +35,8 @@ typedef struct {
 VmBuiltinFn getVmBuiltinHandler(const char* name);
 VmBuiltinFn getVmBuiltinHandlerById(int id);
 const char* getVmBuiltinNameById(int id);
+size_t getVmBuiltinCount(void);
+BuiltinRoutineType getVmBuiltinTypeById(int id);
 bool getVmBuiltinMapping(const char* name, VmBuiltinMapping* out_mapping, int* out_id);
 bool getVmBuiltinMappingCanonical(const char* canonical_name, VmBuiltinMapping* out_mapping, int* out_id);
 int getVmBuiltinID(const char* name);
