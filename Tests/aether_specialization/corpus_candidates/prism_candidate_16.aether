@@ -1,0 +1,17 @@
+@pure
+fn factorial(n: Int) -> Int {
+    if n == 0 {
+        ret 1;
+    }
+    ret n * factorial(n - 1);
+}
+
+fn main() -> Void {
+    let num: Int = 5;
+    let result: Int = factorial(num);
+
+    fx {
+        println("Factorial of ", num, " is ", result);
+    }
+    ret;
+}

@@ -485,6 +485,24 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/36_pipeline_capstone",
       "sha256": "62a4ded2b15b53b377c3262e325aa4c3bd803ba9adae77249919157b80e776e8",
       "stdout": "alpha [ 95] -> ready\nbeta [ 72] -> review\ngamma [ 100] -> ready\nready jobs = 2\n"
+    },
+    {
+      "source_path": "/tmp/prism_candidate_16.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/prism_candidate_16.aether",
+      "sha256": "ab0db608412fb7d27e64a24b4e75f341a7b129d7c3919252bae797ea6140b787",
+      "stdout": "Factorial of 5 is 120\n"
+    },
+    {
+      "source_path": "/tmp/prism_candidate_17.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/prism_candidate_17.aether",
+      "sha256": "7cb78f676a6cb3e77a18f657617aa19455349caf37fb2398ea8dfa1384dbfd21",
+      "stdout": "First element: 1\n"
+    },
+    {
+      "source_path": "/tmp/prism_candidate_20_fixed_probe.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/prism_candidate_20_fixed_probe.aether",
+      "sha256": "994182d9a69e7c0278614d1c77a0a674c62c69322ddaf44ff6b12fdbaf7c35e0",
+      "stdout": "User score: 85 -> Grade: B\n"
     }
   ]
 }
