@@ -1,0 +1,95 @@
+// 66_agent_report_file
+// Concepts: object-root TOON file parsing, custom mutable type, pure helpers,
+// score normalization, classification, per-job output, final totals
+// expect: job 0: Alpha / ready / 95
+// expect: job 1: Beta / review / 78
+// expect: job 2: Gamma / blocked / 62
+// expect: job 3: Delta / blocked / 41
+// expect: job 4: Epsilon / ready / 100
+// expect: total = 5
+// expect: ready = 2
+// expect: review = 1
+// expect: blocked = 2
+
+const DefaultScore: Int = 0;
+
+@pure
+fn normalizeScore(score: Int) -> Int {
+    if score < 0 {
+        ret 0;
+    }
+    if score > 100 {
+        ret 100;
+    }
+    ret score;
+}
+
+@pure
+fn classifyScore(score: Int) -> Text {
+    if score >= 90 {
+        ret "ready";
+    }
+    if score >= 70 {
+        ret "review";
+    }
+    ret "blocked";
+}
+
+type Totals {
+    total: Int;
+    ready: Int;
+    review: Int;
+    blocked: Int;
+
+    fn record(status: Text) -> Void {
+        self.total = self.total + 1;
+        if status == "ready" {
+            self.ready = self.ready + 1;
+            ret;
+        }
+        if status == "review" {
+            self.review = self.review + 1;
+            ret;
+        }
+        self.blocked = self.blocked + 1;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("agent_payload66.json");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+    let totals: Totals = new Totals();
+
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let name: Text = toon_get_text(job, "name");
+        let rawScore: Int = toon_get_int_or(job, "score", DefaultScore);
+        let score: Int = normalizeScore(rawScore);
+        let status: Text = classifyScore(score);
+
+        totals.record(status);
+
+        fx {
+            println("job ", i, ": ", name, " / ", status, " / ", score);
+        }
+    }
+
+    fx {
+        println("total = ", totals.total);
+        println("ready = ", totals.ready);
+        println("review = ", totals.review);
+        println("blocked = ", totals.blocked);
+    }
+
+    toon_close(doc);
+    ret;
+}

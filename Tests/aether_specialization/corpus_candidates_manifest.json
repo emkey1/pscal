@@ -611,6 +611,36 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/65_nested_pure_helpers",
       "sha256": "cfed9f81f4d340fbc616cd673b2682dad561cfbc866c57acaeffcd1c5ffde031",
       "stdout": "total = 14\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/66_agent_report_file",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/66_agent_report_file",
+      "sha256": "ff7508758287509d6f818272e5e606e868d167f8845a0e197f6e0bea13ac12c9",
+      "stdout": "job 0: Alpha / ready / 95\njob 1: Beta / review / 78\njob 2: Gamma / blocked / 62\njob 3: Delta / blocked / 41\njob 4: Epsilon / ready / 100\ntotal = 5\nready = 2\nreview = 1\nblocked = 2\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/67_config_validator_nested",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/67_config_validator_nested",
+      "sha256": "19dbfccf8cb8569883138e7cd09f6dd4c33935c7dad97c6b8fbb552a95b7ecf8",
+      "stdout": "ISSUE: port is invalid (0)\nISSUE: app name is empty or too long\nlog severity level: 2\nVALIDATION FAILED: 2 issue(s) found\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/68_ledger_audit_file",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/68_ledger_audit_file",
+      "sha256": "3afb1d948a2eb2784f647dbf84b7819eb28023718f0d022f53bdf28da69222c3",
+      "stdout": "row 0: T1 / valid / 500\nrow 1: T2 / invalid / 99999\nrow 2: T3 / invalid / -100\nrow 3: UNKNOWN / invalid / -1\nbatch = batch_99\nbalance = 500\nvalid = 1\ninvalid = 3\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/69_release_board_file",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/69_release_board_file",
+      "sha256": "c9f185652255cc209d7d282c9fba4fe29b21331dc1a0008d3eeaef5657010a78",
+      "stdout": "release 0: R1 / green / false / 92\nrelease 1: R2 / yellow / true / 76\nrelease 2: R3 / red / false / 61\nrelease 3: R4 / green / true / 100\ngreen = 2\nyellow = 1\nred = 1\nblocked = 2\naverage = 82.25\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/70_tuple_post_ordered_pair",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/70_tuple_post_ordered_pair",
+      "sha256": "f195e7c85d32e38db23630bc5e8ae2a381229f1111c603de2482ce32dc6b2982",
+      "stdout": "lo = 4\nhi = 9\n"
     }
   ]
 }

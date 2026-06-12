@@ -1,0 +1,22 @@
+// 70_tuple_post_ordered_pair
+// Concepts: tuple-return helper, direct destructuring, tuple @post slots
+// expect: lo = 4
+// expect: hi = 9
+
+@pure
+@post result.0 <= result.1
+fn orderedPair(a: Int, b: Int) -> (Int, Int) {
+    if a <= b {
+        ret (a, b);
+    }
+    ret (b, a);
+}
+
+fn main() -> Void {
+    let (lo, hi) = orderedPair(9, 4);
+    fx {
+        println("lo = ", lo);
+        println("hi = ", hi);
+    }
+    ret;
+}
