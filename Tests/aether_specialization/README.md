@@ -42,6 +42,20 @@ The raw corpus currently pulls from:
 - `Examples/aether/showcase/*`
 - `Tests/aether_specialization/corpus_candidates/*`
 
+Raw corpus export can also carry lightweight per-example metadata from
+`Tests/aether_specialization/corpus_candidates_manifest.json`. Intended keys:
+
+- `canonical`: `true` when the sample is preferred new-style Aether
+- `fixture_required`: `true` when the example depends on extra files
+- `assumption_bearing`: `true` when expected output depends on a stated
+  assumption rather than a fully-specified prompt
+- `tags`: short labels such as `module`, `toon`, `report`, `tuple`, `formatting`
+- `notes`: one-line rationale or caveat
+
+These fields are advisory training metadata. They do not replace compiler
+verification, but they help keep canonical examples distinct from compatibility
+or assumption-heavy ones.
+
 The separate reference corpus currently pulls from:
 
 - `Docs/aether_for_llms_and_others.md`

@@ -15,6 +15,9 @@ DEFAULT_ROOTS = [
     REPO_ROOT / "Examples" / "aether" / "showcase",
     REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates",
 ]
+DEFAULT_MANIFEST = (
+    REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates_manifest.json"
+)
 
 
 def looks_like_source(path: pathlib.Path) -> bool:
@@ -47,11 +50,28 @@ def looks_canonical_for_training(text: str) -> bool:
     return True
 
 
+def load_manifest_metadata(path: pathlib.Path) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, dict] = {}
+    for item in payload.get("items", []):
+        repo_path = item.get("repo_path")
+        if not isinstance(repo_path, str):
+            continue
+        metadata = item.get("metadata")
+        if isinstance(metadata, dict):
+            out[repo_path] = metadata
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-json", type=pathlib.Path, required=True)
+    parser.add_argument("--manifest", type=pathlib.Path, default=DEFAULT_MANIFEST)
     args = parser.parse_args()
 
+    manifest_metadata = load_manifest_metadata(args.manifest)
     items: list[dict[str, str]] = []
     for root in DEFAULT_ROOTS:
         for path in sorted(root.rglob("*")):
@@ -60,12 +80,17 @@ def main() -> int:
             text = path.read_text(encoding="utf-8")
             if not looks_canonical_for_training(text):
                 continue
+            repo_path = str(path.relative_to(REPO_ROOT))
+            record = {
+                "path": repo_path,
+                "kind": "raw_aether_corpus",
+                "content": text,
+            }
+            metadata = manifest_metadata.get(repo_path)
+            if metadata:
+                record["metadata"] = metadata
             items.append(
-                {
-                    "path": str(path.relative_to(REPO_ROOT)),
-                    "kind": "raw_aether_corpus",
-                    "content": text,
-                }
+                record
             )
 
     args.output_json.parent.mkdir(parents=True, exist_ok=True)

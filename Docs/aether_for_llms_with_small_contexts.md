@@ -61,9 +61,7 @@ exactly.
 - Types: `Int`, `Real`, `Text`, `Bool` (`true`/`false`), `Void`, plus opaque
   `ToonDoc`/`ToonNode`. `println(boolValue)` prints `true` or `false`. No
   conversion helpers exist; use variadic `println`.
-- Operators: `+ - * /`, `== != < <= > >=`, `!` negation.
-  [VERIFY: modulo spelling; logical and/or spelling, one compound example —
-  copy resolved answers from full doc]
+- Operators: `+ - * / %`, `== != < <= > >=`, `!`, `&&`, `||`.
 
 ```aether
 fn add(a: Int, b: Int) -> Int {
@@ -90,8 +88,7 @@ if score >= 90 {
 ret "blocked";
 ```
 
-[VERIFY: statement-level `else` — copy the resolved rule from the full doc:
-either one supported example, or add `else` to the never-generate list]
+Statement-level `else` is supported.
 
 Inline `if ... else ...` expressions are allowed only on the right-hand side
 of declarations, assignments, and `ret` — never inside `println(...)` args:
@@ -108,7 +105,7 @@ loop i in 0..count { fx { println(i); } }
 loop { break; }
 ```
 
-[VERIFY: `continue` supported or never-generate — copy from full doc]
+`continue` is supported.
 
 ## Records: `type`
 

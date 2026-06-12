@@ -172,9 +172,9 @@ the builtin tables instead of this sentence]
 | Category | Operators |
 |---|---|
 | Arithmetic | `+ - * /` on `Int`/`Real`; `Int / Int` is integer-style division |
-| Modulo | [VERIFY: `%` or a `mod` keyword? give one example] |
+| Modulo | `%` (example: `7 % 3` = `1`) |
 | Comparison | `== != < <= > >=` |
-| Logical | `!` for negation; [VERIFY: `&&` / `||`? `and` / `or`? Pick one, show one compound-condition example, and add the rejected spellings to Never Generate] |
+| Logical | `!` for negation; `&&` and `||` for conjunction/disjunction |
 | Text | `+` concatenation (text-compatible operands only); `==` equality |
 | Array | `xs + [v]` append; [VERIFY: does `xs + ys` concatenate two arrays?] |
 
@@ -192,8 +192,8 @@ Hard rules:
 - every function declares an explicit return type; procedures use `-> Void`
 - every parameter has an explicit type
 - use `ret value;`, or bare `ret;` in `Void` functions; never `return`
-- `ret` is legal inside an `fx` block [VERIFY: confirm; if not, state that
-  `ret` must appear outside `fx` and adjust templates]
+- `ret` is not legal inside an `fx` block; return from the surrounding
+  function outside the effect block
 
 ```aether
 fn add(a: Int, b: Int) -> Int {
@@ -315,10 +315,15 @@ if score >= 70 {
 ret "blocked";
 ```
 
-[VERIFY: statement-level `else` / `else if`. LLMs will emit `} else {`
-instinctively. Either (a) document it as supported with one example here, or
-(b) add `else` blocks to Never Generate with sequential `if` + `ret` as the
-repair. Do not leave this unstated.]
+Statement-level `else` is supported:
+
+```aether
+if score >= 90 {
+    ret "ready";
+} else {
+    ret "blocked";
+}
+```
 
 Inline conditional expressions are allowed on the right-hand side of
 declarations, assignments, and returns — but never directly inside
@@ -345,8 +350,7 @@ loop {                      // infinite
 }
 ```
 
-`break` exits the nearest loop. [VERIFY: is `continue` supported? One line
-either way; if unsupported, add it to Never Generate.]
+`break` exits the nearest loop. `continue` is supported.
 
 ## Effects: `fx` (FX-001)
 

@@ -574,73 +574,211 @@
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/59_range_loop_squares_typed",
       "repo_path": "Tests/aether_specialization/corpus_candidates/59_range_loop_squares_typed",
       "sha256": "0ae2c408e5d14e4e548d258966c30dbb7d8056690b3272a290447fe4061b041e",
-      "stdout": "0 => 0\n1 => 1\n2 => 4\n3 => 9\n4 => 16\n"
+      "stdout": "0 => 0\n1 => 1\n2 => 4\n3 => 9\n4 => 16\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "loop",
+          "typing",
+          "arithmetic"
+        ],
+        "notes": "Canonical typed loop-local arithmetic example."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/60_module_function_import_quoted",
       "repo_path": "Tests/aether_specialization/corpus_candidates/60_module_function_import_quoted",
       "sha256": "8c0dbdf81136bd7c05e4213328188b0cdfb4e0e6d7373c50662db06952e63364",
-      "stdout": "42\n"
+      "stdout": "42\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "module",
+          "import",
+          "function"
+        ],
+        "notes": "Canonical quoted module import with direct exported fn call."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/61_module_const_import_quoted",
       "repo_path": "Tests/aether_specialization/corpus_candidates/61_module_const_import_quoted",
       "sha256": "4b3d67b8a7889dd33dc61b4af3291a9315e238ab60188ebb37abad14a991eb89",
-      "stdout": "Aether\n42\n"
+      "stdout": "Aether\n42\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "module",
+          "import",
+          "const"
+        ],
+        "notes": "Canonical quoted module import with direct exported const access."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
       "repo_path": "Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
       "sha256": "5bc4fee88a8f77965b3fda335383bbe22fa1c6cad4634f0c93c04a278f92a602",
-      "stdout": "Aether\ntrue\n2\n"
+      "stdout": "Aether\ntrue\n2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "file",
+          "object-root",
+          "scalars"
+        ],
+        "notes": "Minimal object-root toon_parse_file scalar extraction."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
       "sha256": "47d2ab19eb4732d7bf38b00cd8afc5b7b1c4650d99502bdef238b21ea71564ad",
-      "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n"
+      "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "file",
+          "nested",
+          "guards"
+        ],
+        "notes": "Staged nested TOON lookup with guarded fallback."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/64_negative_real_formatting",
       "repo_path": "Tests/aether_specialization/corpus_candidates/64_negative_real_formatting",
       "sha256": "f3b5ea07d7341ec0fffb1f7abbeb67b9d1e44a645bdda07d90e97c1846a8a78c",
-      "stdout": "Default: -0.500000\nPrec=3: -0.500\nRight-align:      -0.50\nDefault: -2.345600\nPrec=3: -2.346\nRight-align:      -2.35\nDefault: 10.123450\nPrec=3: 10.123\nRight-align:      10.12\n"
+      "stdout": "Default: -0.500000\nPrec=3: -0.500\nRight-align:      -0.50\nDefault: -2.345600\nPrec=3: -2.346\nRight-align:      -2.35\nDefault: 10.123450\nPrec=3: 10.123\nRight-align:      10.12\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "real",
+          "formatting",
+          "output"
+        ],
+        "notes": "Negative real formatting and width/precision examples."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/65_nested_pure_helpers",
       "repo_path": "Tests/aether_specialization/corpus_candidates/65_nested_pure_helpers",
       "sha256": "cfed9f81f4d340fbc616cd673b2682dad561cfbc866c57acaeffcd1c5ffde031",
-      "stdout": "total = 14\n"
+      "stdout": "total = 14\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "pure",
+          "helpers",
+          "loop"
+        ],
+        "notes": "One pure helper calling another with typed loop locals."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/66_agent_report_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/66_agent_report_file",
       "sha256": "ff7508758287509d6f818272e5e606e868d167f8845a0e197f6e0bea13ac12c9",
-      "stdout": "job 0: Alpha / ready / 95\njob 1: Beta / review / 78\njob 2: Gamma / blocked / 62\njob 3: Delta / blocked / 41\njob 4: Epsilon / ready / 100\ntotal = 5\nready = 2\nreview = 1\nblocked = 2\n"
+      "stdout": "job 0: Alpha / ready / 95\njob 1: Beta / review / 78\njob 2: Gamma / blocked / 62\njob 3: Delta / blocked / 41\njob 4: Epsilon / ready / 100\ntotal = 5\nready = 2\nreview = 1\nblocked = 2\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "report",
+          "type",
+          "classification"
+        ],
+        "notes": "Structured object-root job report with totals."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/67_config_validator_nested",
       "repo_path": "Tests/aether_specialization/corpus_candidates/67_config_validator_nested",
       "sha256": "19dbfccf8cb8569883138e7cd09f6dd4c33935c7dad97c6b8fbb552a95b7ecf8",
-      "stdout": "ISSUE: port is invalid (0)\nISSUE: app name is empty or too long\nlog severity level: 2\nVALIDATION FAILED: 2 issue(s) found\n"
+      "stdout": "ISSUE: port is invalid (0)\nISSUE: app name is empty or too long\nlog severity level: 2\nVALIDATION FAILED: 2 issue(s) found\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "config",
+          "validation",
+          "nested"
+        ],
+        "notes": "Nested object extraction with pure validators and issue counting."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/68_ledger_audit_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/68_ledger_audit_file",
       "sha256": "3afb1d948a2eb2784f647dbf84b7819eb28023718f0d022f53bdf28da69222c3",
-      "stdout": "row 0: T1 / valid / 500\nrow 1: T2 / invalid / 99999\nrow 2: T3 / invalid / -100\nrow 3: UNKNOWN / invalid / -1\nbatch = batch_99\nbalance = 500\nvalid = 1\ninvalid = 3\n"
+      "stdout": "row 0: T1 / valid / 500\nrow 1: T2 / invalid / 99999\nrow 2: T3 / invalid / -100\nrow 3: UNKNOWN / invalid / -1\nbatch = batch_99\nbalance = 500\nvalid = 1\ninvalid = 3\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "ledger",
+          "audit",
+          "type"
+        ],
+        "notes": "Transaction audit with fallback extraction and summary counters."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/69_release_board_file",
       "repo_path": "Tests/aether_specialization/corpus_candidates/69_release_board_file",
       "sha256": "c9f185652255cc209d7d282c9fba4fe29b21331dc1a0008d3eeaef5657010a78",
-      "stdout": "release 0: R1 / green / false / 92\nrelease 1: R2 / yellow / true / 76\nrelease 2: R3 / red / false / 61\nrelease 3: R4 / green / true / 100\ngreen = 2\nyellow = 1\nred = 1\nblocked = 2\naverage = 82.25\n"
+      "stdout": "release 0: R1 / green / false / 92\nrelease 1: R2 / yellow / true / 76\nrelease 2: R3 / red / false / 61\nrelease 3: R4 / green / true / 100\ngreen = 2\nyellow = 1\nred = 1\nblocked = 2\naverage = 82.25\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon",
+          "release",
+          "formatting",
+          "classification"
+        ],
+        "notes": "Release-board summary with normalized averages and blocked counts."
+      }
     },
     {
       "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/70_tuple_post_ordered_pair",
       "repo_path": "Tests/aether_specialization/corpus_candidates/70_tuple_post_ordered_pair",
       "sha256": "f195e7c85d32e38db23630bc5e8ae2a381229f1111c603de2482ce32dc6b2982",
-      "stdout": "lo = 4\nhi = 9\n"
+      "stdout": "lo = 4\nhi = 9\n",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "tuple",
+          "postcondition",
+          "destructure"
+        ],
+        "notes": "Direct tuple destructuring with tuple @post slot syntax."
+      }
     }
   ]
 }
