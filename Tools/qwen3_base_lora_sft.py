@@ -120,6 +120,7 @@ def main() -> int:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
+    tokenizer.model_max_length = args.max_seq_len
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
@@ -188,7 +189,6 @@ def main() -> int:
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         formatting_func=lambda record: record["text"],
-        max_length=args.max_seq_len,
     )
     trainer.add_callback(SaveMetadataCallback(args.output_dir / "run_metadata.json", metadata))
     trainer.train()
