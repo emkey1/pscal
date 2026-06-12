@@ -1,0 +1,44 @@
+// 46_bank_account_methods
+// Concepts: mutable record state, methods using self, Bool return from a method
+// expect: Withdrawal successful. New balance: 800
+// expect: Final balance: 1300
+
+type BankAccount {
+    owner: Text;
+    balance: Int;
+
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+        ret;
+    }
+
+    fn withdraw(amount: Int) -> Bool {
+        if self.balance >= amount {
+            self.balance = self.balance - amount;
+            ret true;
+        }
+        ret false;
+    }
+}
+
+fn main() -> Void {
+    let account: BankAccount = new BankAccount();
+    account.owner = "Alice";
+    account.balance = 1000;
+
+    let success: Bool = account.withdraw(200);
+
+    fx {
+        if success {
+            println("Withdrawal successful. New balance: ", account.balance);
+        } else {
+            println("Insufficient funds.");
+        }
+    }
+
+    account.deposit(500);
+    fx {
+        println("Final balance: ", account.balance);
+    }
+    ret;
+}
