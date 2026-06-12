@@ -1,0 +1,35 @@
+type JobState {
+    id: Text;
+    status: Text;
+
+    fn update_status(new_status: Text) -> Void {
+        self.status = new_status;
+        ret;
+    }
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("TOON unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"id\": \"j-123\", \"status\": \"pending\"}");
+    let root: ToonNode = toon_root(doc);
+
+    let raw_id: Text = toon_get_text(root, "id");
+    let raw_status: Text = toon_get_text(root, "status");
+
+    let job: JobState = new JobState();
+    job.id = raw_id;
+    job.status = raw_status;
+
+    job.update_status("running");
+
+    fx {
+        println("Job ", job.id, " now: ", job.status);
+    }
+
+    toon_close(doc);
+    ret;
+}

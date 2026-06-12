@@ -539,6 +539,24 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example5.aether",
       "sha256": "9a6863754dc721c1d8c87468bba2eac7e11d9a7cebe7fb8be0b915dce722a025",
       "stdout": "Captured 68 on Thermal_04\nCaptured 71 on Thermal_04\nSensor Thermal_04 is offline; skipping.\nTotal stored samples: 2\n"
+    },
+    {
+      "source_path": "/tmp/qnext26.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/qnext26.aether",
+      "sha256": "bb4ad522cbc5da321ab2b52afb7c653e284882a144a034eb865f0e5e3eb50418",
+      "stdout": "Scores after update:\n  [ 0]: 10\n  [ 1]: 99\n  [ 2]: 30\n  [ 3]: 40\n"
+    },
+    {
+      "source_path": "/tmp/qnext28_fixed.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/qnext28_fixed.aether",
+      "sha256": "09e320d9d9e03d1609c8bb26d2a4a82092255fd4b3fafa6c3454cc0fda40f75b",
+      "stdout": "Job j-123 now: running\n"
+    },
+    {
+      "source_path": "/tmp/qnext29.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/qnext29.aether",
+      "sha256": "37d10fe53e9ce12c0de252b57bd4ec436355e6a518bd9616293b995f8070b031",
+      "stdout": "Ratio (default): 2.333333\nRatio (prec=2): 2.33\nRatio (padded):     2.3333\n"
     }
   ]
 }
