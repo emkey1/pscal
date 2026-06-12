@@ -1119,7 +1119,12 @@ def invoke_openai_completions(prompt: str, destination: Destination) -> dict[str
     }
 
 
-def invoke_command(prompt: str, command_template: str, cwd: pathlib.Path) -> dict[str, Any]:
+def invoke_command(
+    prompt: str,
+    command_template: str,
+    cwd: pathlib.Path,
+    timeout_seconds: int,
+) -> dict[str, Any]:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".prompt", delete=False) as handle:
         handle.write(prompt)
         prompt_file = pathlib.Path(handle.name)
@@ -1132,7 +1137,7 @@ def invoke_command(prompt: str, command_template: str, cwd: pathlib.Path) -> dic
             cwd=str(cwd),
             text=True,
             capture_output=True,
-            timeout=180,
+            timeout=timeout_seconds,
         )
     finally:
         prompt_file.unlink(missing_ok=True)
@@ -1205,7 +1210,12 @@ def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
     if destination.kind == "command":
         if not destination.command_template:
             raise RuntimeError("command_template is required for command destinations")
-        return invoke_command(prompt=prompt, command_template=destination.command_template, cwd=REPO_ROOT)
+        return invoke_command(
+            prompt=prompt,
+            command_template=destination.command_template,
+            cwd=REPO_ROOT,
+            timeout_seconds=max(30, int(destination.request_timeout_seconds)),
+        )
     raise RuntimeError(f"unsupported destination type {destination.kind}")
 
 
@@ -2036,6 +2046,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--provider", default="", help="legacy fallback only; use destination configs instead")
     parser.add_argument("--model", default="", help="legacy fallback only; use destination configs instead")
+    parser.add_argument(
+        "--request-timeout-seconds",
+        type=int,
+        default=120,
+        help="legacy fallback only; overall model request timeout in seconds",
+    )
     parser.add_argument("--repeats", type=int, default=1, help="repeat each task N times per doc variant")
     parser.add_argument(
         "--repair-attempts",
@@ -2152,6 +2168,7 @@ def main() -> int:
                 temperature=args.temperature,
                 max_output_tokens=args.max_output_tokens,
                 command_template=args.command_template or None,
+                request_timeout_seconds=args.request_timeout_seconds,
             )
         ]
 

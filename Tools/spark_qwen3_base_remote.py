@@ -54,8 +54,60 @@ def http_post_json(url: str, payload: dict[str, object], timeout: int) -> dict[s
         return json.loads(response.read().decode("utf-8"))
 
 
+def remote_generate(
+    *,
+    host: str,
+    port: int,
+    prompt: str,
+    max_new_tokens: int,
+    temperature: float,
+    timeout_seconds: int,
+) -> dict[str, object]:
+    payload = json.dumps(
+        {
+            "prompt": prompt,
+            "max_new_tokens": max_new_tokens,
+            "temperature": temperature,
+        },
+        ensure_ascii=True,
+    )
+    remote_script = f"""
+set -euo pipefail
+tmp="$(mktemp)"
+cat > "$tmp"
+"$HOME/training/aether-qwen3-base/.venv/bin/python" - <<'PY' "$tmp" {port} {timeout_seconds}
+import json
+import pathlib
+import sys
+import urllib.request
+
+payload_path = pathlib.Path(sys.argv[1])
+port = int(sys.argv[2])
+timeout_seconds = int(sys.argv[3])
+payload = payload_path.read_bytes()
+request = urllib.request.Request(
+    f"http://127.0.0.1:{{port}}/generate",
+    data=payload,
+    headers={{"Content-Type": "application/json"}},
+)
+with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+    sys.stdout.write(response.read().decode("utf-8"))
+PY
+rm -f "$tmp"
+"""
+    proc = run_ssh(host, remote_script, input_text=payload)
+    return json.loads(proc.stdout)
+
+
 def start_server(host: str, workspace: str, port: int, model_id: str) -> None:
+    start_server_with_adapter(host, workspace, port, model_id, "")
+
+
+def start_server_with_adapter(host: str, workspace: str, port: int, model_id: str, adapter_path: str) -> None:
     sync_server(host, workspace)
+    adapter_arg = ""
+    if adapter_path:
+        adapter_arg = f'  --adapter-path "{adapter_path}" \\\n'
     remote_script = f"""
 set -euo pipefail
 workspace="{workspace}"
@@ -68,6 +120,7 @@ if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
 fi
 nohup "$workspace/.venv/bin/python" "$workspace/scripts/qwen3_base_server.py" \
   --model-id '{model_id}' \
+{adapter_arg}\
   --host 0.0.0.0 \
   --port {port} \
   >"$logfile" 2>&1 < /dev/null &
@@ -106,12 +159,24 @@ def poll_health(base_url: str, timeout_seconds: int) -> dict[str, object]:
     raise RuntimeError(last_error)
 
 
+def health_matches_requested(
+    health: dict[str, object],
+    *,
+    model_id: str,
+    adapter_path: str,
+) -> bool:
+    running_model = str(health.get("model") or "")
+    running_adapter = str(health.get("adapter_path") or "")
+    return running_model == model_id and running_adapter == adapter_path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--workspace", default=DEFAULT_WORKSPACE)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--model-id", default=DEFAULT_MODEL_ID)
+    parser.add_argument("--adapter-path", default="")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("sync-server")
@@ -141,8 +206,30 @@ def main() -> int:
         try:
             health = http_get_json(base_url + "/health", timeout=5)
         except Exception:
-            start_server(args.host, args.workspace, args.port, args.model_id)
+            start_server_with_adapter(
+                args.host,
+                args.workspace,
+                args.port,
+                args.model_id,
+                args.adapter_path.strip(),
+            )
             health = poll_health(base_url, args.wait_seconds)
+        else:
+            requested_adapter = args.adapter_path.strip()
+            if not health_matches_requested(
+                health,
+                model_id=args.model_id,
+                adapter_path=requested_adapter,
+            ):
+                stop_server(args.host, args.workspace)
+                start_server_with_adapter(
+                    args.host,
+                    args.workspace,
+                    args.port,
+                    args.model_id,
+                    requested_adapter,
+                )
+                health = poll_health(base_url, args.wait_seconds)
         print(json.dumps(health, ensure_ascii=True))
         return 0
 
@@ -156,12 +243,14 @@ def main() -> int:
 
     if args.command == "generate":
         prompt = args.prompt_file.read_text(encoding="utf-8")
-        payload = {
-            "prompt": prompt,
-            "max_new_tokens": args.max_new_tokens,
-            "temperature": args.temperature,
-        }
-        result = http_post_json(base_url + "/generate", payload, timeout=args.timeout_seconds)
+        result = remote_generate(
+            host=args.host,
+            port=args.port,
+            prompt=prompt,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            timeout_seconds=args.timeout_seconds,
+        )
         if args.raw:
             print(result["raw_text"], end="")
         else:

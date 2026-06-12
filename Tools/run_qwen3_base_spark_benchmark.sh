@@ -3,10 +3,15 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 output_json="${1:-$repo_root/Tests/aether_doc_bench/out/qwen3_4b_base_baseline.json}"
+adapter_path="${2:-}"
 
 mkdir -p "$(dirname "$output_json")"
 
-python3 "$repo_root/tools/spark_qwen3_base_remote.py" start-server --wait-seconds 1800
+start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" start-server --wait-seconds 1800)
+if [ -n "$adapter_path" ]; then
+  start_args+=(--adapter-path "$adapter_path")
+fi
+"${start_args[@]}"
 
 python3 "$repo_root/Tools/aether_doc_bench.py" \
   --destinations-config "$repo_root/Tests/aether_doc_bench/does_not_exist.local.json" \
