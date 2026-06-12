@@ -243,6 +243,11 @@ static int startsWithWord(const char *body, const char *lineEnd, const char *wor
 static int braceDeltaForLine(const char *line);
 static void freeTupleItemTypes(char **items, size_t count);
 static char *extractSelfReceiverTypeName(const char *paramsStart, const char *paramsEnd);
+static int extractFunctionSignature(const char *body,
+                                    const char *lineEnd,
+                                    char **outName,
+                                    char **outReturnType);
+static int hasExplicitFunctionReturnType(const char *body, const char *lineEnd);
 typedef struct AetherBindingTable AetherBindingTable;
 typedef struct AetherFunctionTable AetherFunctionTable;
 typedef struct AetherFieldTable AetherFieldTable;
@@ -5563,12 +5568,14 @@ static char *translateFnForwardDeclLine(const char *lineStart,
 
 static int appendTopLevelForwardDeclarations(Buffer *out,
                                              const char *source,
-                                             int *outputLineNumber) {
+                                             int *outputLineNumber,
+                                             AetherTupleTable *tupleTable,
+                                             int *nextTupleTypeId) {
     const char *cursor = source;
     int lineNumber = 1;
     int emittedAny = 0;
 
-    if (!out || !source || !outputLineNumber) {
+    if (!out || !source || !outputLineNumber || !tupleTable || !nextTupleTypeId) {
         return 0;
     }
 
@@ -5602,6 +5609,24 @@ static int appendTopLevelForwardDeclarations(Buffer *out,
                                                    returnType + strlen(returnType),
                                                    &tupleItemTypes,
                                                    &tupleItemCount);
+            }
+
+            if (hasTupleReturn && fnName) {
+                char tupleTypeName[64];
+
+                (*nextTupleTypeId)++;
+                snprintf(tupleTypeName, sizeof(tupleTypeName), "__aether_tuple_%d", *nextTupleTypeId);
+                if (!setAetherTupleSig(tupleTable,
+                                       fnName,
+                                       tupleTypeName,
+                                       tupleItemTypes,
+                                       tupleItemCount)) {
+                    free(fnName);
+                    free(returnType);
+                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                    free(forwardDecl);
+                    return 0;
+                }
             }
 
             if (!hasTupleReturn && forwardDecl) {
@@ -7866,8 +7891,13 @@ char *aetherRewriteSource(const char *source, const char *path) {
         free(preprocessed);
         preprocessed = inlineIfPreprocessed;
     }
-    if (!appendTopLevelForwardDeclarations(&out, preprocessed, &outputLineNumber)) {
+    if (!appendTopLevelForwardDeclarations(&out,
+                                           preprocessed,
+                                           &outputLineNumber,
+                                           &tupleTable,
+                                           &nextTupleTypeId)) {
         free(preprocessed);
+        freeAetherTupleTable(&tupleTable);
         free(out.data);
         return NULL;
     }
@@ -8410,6 +8440,7 @@ char *aetherRewriteSource(const char *source, const char *path) {
             char **tupleItemTypes = NULL;
             size_t tupleItemCount = 0;
             char tupleTypeName[64];
+            const AetherTupleSig *existingTupleSig = NULL;
             int hasTupleReturn = 0;
 
             if (!hasExplicitFunctionReturnType(body, lineEnd)) {
@@ -8500,8 +8531,16 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(out.data);
                     return NULL;
                 }
-                nextTupleTypeId++;
-                snprintf(tupleTypeName, sizeof(tupleTypeName), "__aether_tuple_%d", nextTupleTypeId);
+                existingTupleSig = findAetherTupleSig(&tupleTable, fnName, strlen(fnName));
+                if (existingTupleSig && existingTupleSig->tupleTypeName) {
+                    snprintf(tupleTypeName,
+                             sizeof(tupleTypeName),
+                             "%s",
+                             existingTupleSig->tupleTypeName);
+                } else {
+                    nextTupleTypeId++;
+                    snprintf(tupleTypeName, sizeof(tupleTypeName), "__aether_tuple_%d", nextTupleTypeId);
+                }
                 translated = translateTupleFnLine(lineStart,
                                                   body,
                                                   lineEnd,

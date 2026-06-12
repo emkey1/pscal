@@ -62,6 +62,40 @@
       "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
       "expected_stdout": "Aether 42\n"
+    },
+    {
+      "id": "repair_global_const_scope",
+      "diagnostic": "Runtime Error: Undefined global variable 'PI'.",
+      "broken_source": "fn main() -> Void {\n    const PI: Real = 3.14159265;\n    fn area(radius: Real) -> Real {\n        ret PI * radius * radius;\n    }\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
+      "fixed_source": "const PI: Real = 3.14159265;\n\n@pure\nfn area(radius: Real) -> Real {\n    ret PI * radius * radius;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
+      "expected_stdout": "area=19.63\n"
+    },
+    {
+      "id": "repair_benchmark_marker_leak",
+      "diagnostic": "[SCOPE-001] identifier '__AETHER_BENCH_START__' not in scope.",
+      "broken_source": "__AETHER_BENCH_START__\nuse \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Aether\n42\n",
+      "files": {
+        "bench_consts": "mod BenchConsts {\n    export const Greeting = \"Aether\";\n    export const Answer = 42;\n}\n"
+      }
+    },
+    {
+      "id": "repair_contract_nested_in_main",
+      "diagnostic": "[ANN-001] Aether contract rewrite error: @pre must annotate the next function declaration.",
+      "broken_source": "fn main() -> Void {\n    @pre score >= 0\n    @post result >= 0\n    fn normalize(score: Int) -> Int {\n        ret score;\n    }\n\n    let answer1: Int = normalize(150);\n    let answer2: Int = normalize(42);\n\n    fx {\n        println(\"150 => \", answer1);\n        println(\"42 => \", answer2);\n    }\n\n    ret;\n}\n",
+      "fixed_source": "@pre score >= 0\n@post result >= 0\nfn normalize(score: Int) -> Int {\n    ret score;\n}\n\nfn main() -> Void {\n    let answer1: Int = normalize(150);\n    let answer2: Int = normalize(42);\n\n    fx {\n        println(\"150 => \", answer1);\n        println(\"42 => \", answer2);\n    }\n\n    ret;\n}\n",
+      "expected_stdout": "150 => 150\n42 => 42\n"
+    },
+    {
+      "id": "repair_module_const_export_name",
+      "diagnostic": "[SCOPE-001] identifier 'FOURTY_TWO' not in scope.",
+      "broken_source": "use \"bench_consts\";\nfn main() -> Void {\n    fx {\n        println(\"Aether\");\n        println(FOURTY_TWO);\n    }\n    ret;\n}\n",
+      "fixed_source": "use \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Aether\n42\n",
+      "files": {
+        "bench_consts": "mod BenchConsts {\n    export const Greeting = \"Aether\";\n    export const Answer = 42;\n}\n"
+      }
     }
   ]
 }

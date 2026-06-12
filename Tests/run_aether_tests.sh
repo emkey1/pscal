@@ -45,6 +45,7 @@ REAL_ASSIGNMENT_FROM_MIXED_NUMERIC_EXPR_PASS_FIXTURE="$ROOT_DIR/Tests/aether/rea
 INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_pass.aether"
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
 TUPLE_DESTRUCTURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_pass.aether"
+TUPLE_DESTRUCTURE_FORWARD_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_forward_pass.aether"
 ARRAY_APPEND_PASS_FIXTURE="$ROOT_DIR/Tests/aether/dynamic_array_append_pass.aether"
 ARRAY_FIELD_INDEX_PASS_FIXTURE="$ROOT_DIR/Tests/aether/array_field_index_pass.aether"
 EXTENSION_CALL_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/extension_call_alias_pass.aether"
@@ -157,6 +158,7 @@ for fixture in \
     "$INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE" \
     "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
     "$TUPLE_DESTRUCTURE_PASS_FIXTURE" \
+    "$TUPLE_DESTRUCTURE_FORWARD_PASS_FIXTURE" \
     "$ARRAY_APPEND_PASS_FIXTURE" \
     "$EXTENSION_CALL_ALIAS_PASS_FIXTURE" \
     "$TUPLE_DIRECT_BIND_FAIL_FIXTURE" \
@@ -414,6 +416,13 @@ printf '1\n2\n' >/tmp/aether_tuple_destructure_expected.out
 if ! cmp -s /tmp/aether_tuple_destructure_expected.out /tmp/aether_tuple_destructure_pass.out; then
     echo "unexpected tuple destructure output" >&2
     cat /tmp/aether_tuple_destructure_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$TUPLE_DESTRUCTURE_FORWARD_PASS_FIXTURE" >/tmp/aether_tuple_destructure_forward_pass.out
+printf 'answer 42\n' >/tmp/aether_tuple_destructure_forward_expected.out
+if ! cmp -s /tmp/aether_tuple_destructure_forward_expected.out /tmp/aether_tuple_destructure_forward_pass.out; then
+    echo "unexpected forward tuple destructure output" >&2
+    cat /tmp/aether_tuple_destructure_forward_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$ARRAY_APPEND_PASS_FIXTURE" >/tmp/aether_array_append_pass.out

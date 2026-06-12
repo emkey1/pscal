@@ -76,6 +76,55 @@
       "files": {
         "jobs42.json": "{\"batch\":\"daily-7\",\"jobs\":[{\"name\":\"alpha\",\"score\":93},{\"name\":\"beta\",\"score\":71},{\"name\":\"gamma\"}]}\n"
       }
+    },
+    {
+      "id": "real_format_circle",
+      "prompt": "Write an Aether program with `const PI: Real = 3.14159265;` and a pure helper `area(radius: Real) -> Real`. Use radius `2.5` and print exactly `area=19.63` followed by a newline. Use Aether's real formatting syntax instead of string post-processing.",
+      "solution": "const PI: Real = 3.14159265;\n\n@pure\nfn area(radius: Real) -> Real {\n    ret PI * radius * radius;\n}\n\nfn main() -> Void {\n    fx {\n        println(\"area=\", area(2.5):0:2);\n    }\n    ret;\n}\n",
+      "expected_stdout": "area=19.63\n"
+    },
+    {
+      "id": "tuple_destructure_forward",
+      "prompt": "Write an Aether program with a helper `pair() -> (Text, Int)` that returns `(\"answer\", 42)`. Destructure the direct call with `let (label, value) = pair();` and print `answer 42` followed by a newline.",
+      "solution": "fn main() -> Void {\n    let (label, value) = pair();\n    fx {\n        println(label, \" \", value);\n    }\n    ret;\n}\n\nfn pair() -> (Text, Int) {\n    ret (\"answer\", 42);\n}\n",
+      "expected_stdout": "answer 42\n"
+    },
+    {
+      "id": "module_function_import_bench",
+      "prompt": "A module file named `bench_math` is provided in the working directory. Write an Aether program that imports it using current Aether import syntax, calls the exported helper that returns 42, and prints exactly `42` followed by a newline.",
+      "solution": "use \"bench_math\";\n\nfn main() -> Void {\n    fx {\n        println(answer());\n    }\n    ret;\n}\n",
+      "expected_stdout": "42\n",
+      "files": {
+        "bench_math": "mod BenchMath {\n    export fn answer() -> Int {\n        ret 42;\n    }\n}\n"
+      }
+    },
+    {
+      "id": "module_const_import_bench",
+      "prompt": "A module file named `bench_consts` is provided in the working directory. Write an Aether program that imports it using current Aether import syntax, reads the exported constants, and prints `Aether` on the first line and `42` on the second line.",
+      "solution": "use \"bench_consts\";\n\nfn main() -> Void {\n    fx {\n        println(Greeting);\n        println(Answer);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Aether\n42\n",
+      "files": {
+        "bench_consts": "mod BenchConsts {\n    export const Greeting = \"Aether\";\n    export const Answer = 42;\n}\n"
+      }
+    },
+    {
+      "id": "toon_safe_nested_codes",
+      "prompt": "A file named `rows.json` is provided in the working directory. Write an Aether program that checks `has_toon()`, parses the file, iterates through the `rows` array, safely reads `meta.code` when present, falls back to `EMPTY` when it is absent, prints `row 0 = A1` style lines, counts how many rows resolved to `EMPTY`, and prints `missing = N` at the end. Use the safer staged TOON access pattern rather than assuming nested fallbacks protect the whole chain.",
+      "solution": "fn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse_file(\"rows.json\");\n    let root: ToonNode = toon_root(doc);\n    let rows: ToonNode = toon_key(root, \"rows\");\n    let missing: Int = 0;\n\n    loop i in 0..toon_len(rows) {\n        let row: ToonNode = toon_at(rows, i);\n        let code: Text = \"EMPTY\";\n        if toon_has_key(row, \"meta\") {\n            let meta: ToonNode = toon_key(row, \"meta\");\n            if toon_has_key(meta, \"code\") {\n                code = toon_get_text_or(meta, \"code\", \"EMPTY\");\n            }\n        }\n        fx {\n            println(\"row \", i, \" = \", code);\n        }\n        if code == \"EMPTY\" {\n            missing = missing + 1;\n        }\n    }\n\n    fx {\n        println(\"missing = \", missing);\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n",
+      "files": {
+        "rows.json": "{\"rows\":[{\"meta\":{\"code\":\"A1\"}},{\"meta\":{}},{\"broken\":true}]}\n"
+      }
+    },
+    {
+      "id": "large_support_module_report_bench",
+      "prompt": "A module file named `bench_support` and a data file named `support_jobs.json` are provided in the working directory. Write a structured Aether program that imports the module, uses its exported default score and pure helpers, parses the job file, prints one line per job in the form `job 0 -> Alpha / ready / 95`, and then prints final totals for `ready`, `review`, and `blocked`. Keep the program cleanly separated into helpers, and prefer a readable multi-function solution over a compact one-liner.",
+      "solution": "use \"bench_support\";\n\nfn main() -> Void {\n    if !has_toon() {\n        fx { println(\"yyjson unavailable\"); }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse_file(\"support_jobs.json\");\n    let root: ToonNode = toon_root(doc);\n    let jobs: ToonNode = toon_key(root, \"jobs\");\n    let ready: Int = 0;\n    let review: Int = 0;\n    let blocked: Int = 0;\n\n    loop i in 0..toon_len(jobs) {\n        let job: ToonNode = toon_at(jobs, i);\n        let name: Text = toon_get_text(job, \"name\");\n        let rawScore: Int = toon_get_int_or(job, \"score\", DefaultScore);\n        let score: Int = clampSupport(rawScore);\n        let status: Text = classifySupport(score);\n\n        fx {\n            println(\"job \", i, \" -> \", name, \" / \", status, \" / \", score);\n        }\n\n        if status == \"ready\" {\n            ready = ready + 1;\n        }\n        if status == \"review\" {\n            review = review + 1;\n        }\n        if status == \"blocked\" {\n            blocked = blocked + 1;\n        }\n    }\n\n    fx {\n        println(\"ready = \", ready);\n        println(\"review = \", review);\n        println(\"blocked = \", blocked);\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "job 0 -> Alpha / ready / 95\njob 1 -> Beta / blocked / 50\njob 2 -> Gamma / blocked / 12\nready = 1\nreview = 0\nblocked = 2\n",
+      "files": {
+        "bench_support": "mod BenchSupport {\n    export const DefaultScore: Int = 50;\n\n    @pure\n    export fn classifySupport(score: Int) -> Text {\n        if score >= 90 {\n            ret \"ready\";\n        }\n        if score >= 70 {\n            ret \"review\";\n        }\n        ret \"blocked\";\n    }\n\n    @pure\n    export fn clampSupport(score: Int) -> Int {\n        if score > 100 {\n            ret 100;\n        }\n        if score < 0 {\n            ret 0;\n        }\n        ret score;\n    }\n}\n",
+        "support_jobs.json": "{\"jobs\":[{\"name\":\"Alpha\",\"score\":95},{\"name\":\"Beta\"},{\"name\":\"Gamma\",\"score\":12}]}\n"
+      }
     }
   ]
 }
