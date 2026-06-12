@@ -1,0 +1,47 @@
+// 63_toon_safe_nested_codes_file
+// Concepts: object-root array extraction, staged nested TOON lookup, explicit fallback
+// expect: row 0 = A1
+// expect: row 1 = EMPTY
+// expect: row 2 = EMPTY
+// expect: missing = 2
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("rows.json");
+    let root: ToonNode = toon_root(doc);
+    let rows: ToonNode = toon_key(root, "rows");
+    let missing: Int = 0;
+
+    loop i in 0..toon_len(rows) {
+        let row: ToonNode = toon_at(rows, i);
+        let code: Text = "EMPTY";
+
+        if toon_has_key(row, "meta") {
+            let meta: ToonNode = toon_key(row, "meta");
+            if toon_has_key(meta, "code") {
+                code = toon_get_text_or(meta, "code", "EMPTY");
+            }
+        }
+
+        if code == "EMPTY" {
+            missing = missing + 1;
+        }
+
+        fx {
+            println("row ", i, " = ", code);
+        }
+    }
+
+    fx {
+        println("missing = ", missing);
+    }
+
+    toon_close(doc);
+    ret;
+}

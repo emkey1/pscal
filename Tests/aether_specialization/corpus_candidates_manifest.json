@@ -569,6 +569,48 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/tuple_post_clamp_flag.aether",
       "sha256": "0e1660417668f2f29592df973904bfa91fcc63e787838f080472ee66b53d9c77",
       "stdout": "150 => 100 / true\n42 => 42 / false\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/59_range_loop_squares_typed",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/59_range_loop_squares_typed",
+      "sha256": "0ae2c408e5d14e4e548d258966c30dbb7d8056690b3272a290447fe4061b041e",
+      "stdout": "0 => 0\n1 => 1\n2 => 4\n3 => 9\n4 => 16\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/60_module_function_import_quoted",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/60_module_function_import_quoted",
+      "sha256": "8c0dbdf81136bd7c05e4213328188b0cdfb4e0e6d7373c50662db06952e63364",
+      "stdout": "42\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/61_module_const_import_quoted",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/61_module_const_import_quoted",
+      "sha256": "4b3d67b8a7889dd33dc61b4af3291a9315e238ab60188ebb37abad14a991eb89",
+      "stdout": "Aether\n42\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/62_toon_parse_file_simple",
+      "sha256": "5bc4fee88a8f77965b3fda335383bbe22fa1c6cad4634f0c93c04a278f92a602",
+      "stdout": "Aether\ntrue\n2\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/63_toon_safe_nested_codes_file",
+      "sha256": "47d2ab19eb4732d7bf38b00cd8afc5b7b1c4650d99502bdef238b21ea71564ad",
+      "stdout": "row 0 = A1\nrow 1 = EMPTY\nrow 2 = EMPTY\nmissing = 2\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/64_negative_real_formatting",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/64_negative_real_formatting",
+      "sha256": "f3b5ea07d7341ec0fffb1f7abbeb67b9d1e44a645bdda07d90e97c1846a8a78c",
+      "stdout": "Default: -0.500000\nPrec=3: -0.500\nRight-align:      -0.50\nDefault: -2.345600\nPrec=3: -2.346\nRight-align:      -2.35\nDefault: 10.123450\nPrec=3: 10.123\nRight-align:      10.12\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/65_nested_pure_helpers",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/65_nested_pure_helpers",
+      "sha256": "cfed9f81f4d340fbc616cd673b2682dad561cfbc866c57acaeffcd1c5ffde031",
+      "stdout": "total = 14\n"
     }
   ]
 }

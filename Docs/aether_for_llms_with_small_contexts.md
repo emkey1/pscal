@@ -45,6 +45,9 @@ compiler, and VM. It is not a separate runtime.
     spacing, casing, line order, and decimal precision.
 17. **NAME-001.** Do not redeclare a local name in the same scope. Pick fresh
     names such as `values`, `count`, `sum`, `maxValue`.
+18. **MOD-002.** Canonical import form is `use "module_name";`. After import,
+    call exported names directly. Never guess `export { ... }`, `JsonDoc`,
+    `json.parseFile(...)`, `Int.MIN`, or `value.toString()`.
 
 Default stance: single-file programs; variadic `println("label = ", v)` over
 mixed-type `+`; explicit types for TOON values and non-trivial helper results;
@@ -134,6 +137,13 @@ Omit the type only for: literals (`42`, `3.5`, `"text"`, `true`),
 `new Type()`, and calls to functions/methods with known declared return types.
 Annotate everything else — especially TOON extractions, branchy results, and
 arithmetic where operand types aren't visible at a glance.
+
+```aether
+loop i in 0..5 {
+    let square: Int = i * i;
+    fx { println(i, " => ", square); }
+}
+```
 
 ## Effects (FX-001)
 
@@ -270,12 +280,15 @@ Guard intermediates:
 ```aether
 let code: Text = "EMPTY";
 if toon_has_key(row, "meta") {
-    let meta: ToonNode = toon_key(row, "meta");
+let meta: ToonNode = toon_key(row, "meta");
     code = toon_get_text_or(meta, "code", "EMPTY");
 }
 ```
 
 Never: `toon_get_text_or(toon_key(toon_at(root, i), "meta"), "code", "EMPTY");`
+
+Never generate foreign JSON/object APIs such as `JsonDoc`, `JsonNode`,
+`json.parseFile(...)`, `root.get(...)`, `Int.MIN`, or `value.toString()`.
 
 ## Tasks and AI
 

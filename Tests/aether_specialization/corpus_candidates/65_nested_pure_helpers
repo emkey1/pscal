@@ -1,0 +1,28 @@
+// 65_nested_pure_helpers
+// Concepts: one pure helper calling another, explicit local typing in a loop
+// expect: total = 14
+
+@pure
+fn square(x: Int) -> Int {
+    ret x * x;
+}
+
+@pure
+fn sumSquares(limit: Int) -> Int {
+    let total: Int = 0;
+
+    loop i in 0..limit {
+        let value: Int = square(i);
+        total = total + value;
+    }
+
+    ret total;
+}
+
+fn main() -> Void {
+    let total: Int = sumSquares(4);
+    fx {
+        println("total = ", total);
+    }
+    ret;
+}

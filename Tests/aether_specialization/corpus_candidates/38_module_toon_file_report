@@ -6,7 +6,7 @@
 // expect: gamma -> blocked
 // expect: default = 50
 
-use support_rules;
+use "support_rules";
 
 fn main() -> Void {
     if !has_toon() {

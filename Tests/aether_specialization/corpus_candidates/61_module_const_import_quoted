@@ -1,0 +1,16 @@
+// 61_module_const_import_quoted
+// Concepts: canonical quoted module import, direct exported constant access
+// expect: Aether
+// expect: 42
+
+use "bench_consts";
+
+fn main() -> Void {
+    let greeting: Text = Greeting;
+    let answer: Int = Answer;
+    fx {
+        println(greeting);
+        println(answer);
+    }
+    ret;
+}

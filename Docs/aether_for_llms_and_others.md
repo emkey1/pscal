@@ -73,6 +73,8 @@ when unsure about a type, add it explicitly.
 - `for`, `while`, `var`, `func`, `def`, `=>`, Python-style colons (SYN-001)
 - `print` / `println` / task helpers / `ai_chat` outside `fx { ... }` (FX-001)
 - invented imports such as `use "helpers";` (IMP-001)
+- `use module_name;` or `export { ... }` in new code; use canonical
+  `use "module_name";` and `mod Name { export ... }`
 - invented helper functions not listed in this document (BUILT-001)
 - names that were never declared, or locals reused outside their scope
   (SCOPE-001)
@@ -81,6 +83,8 @@ when unsure about a type, add it explicitly.
 - annotations inside a function body (ANN-001)
 - a tuple-return call bound to one variable: `let value = pair();` (TUP-001)
 - mixed-type output that guesses `+` will stringify numbers
+- foreign object/JSON APIs such as `JsonDoc`, `JsonNode`, `json.parseFile(...)`,
+  `root.get(...)`, `Int.MIN`, and `value.toString()`
 - `write(...)` / `writeln(...)` spellings in Aether source
   [VERIFY: print/println lower to write/writeln; confirm the Pascal spellings
   are rejected (keep this bullet) or accepted (move to Accepted forms)]
@@ -248,6 +252,17 @@ Omit the type only for these initializers:
 Everything else gets an explicit type — especially TOON extractions with
 non-trivial shape, branchy results, and arithmetic such as `base + 1` where
 the operand types are not visible at a glance. When in doubt, annotate.
+
+Canonical loop-local example:
+
+```aether
+loop i in 0..5 {
+    let square: Int = i * i;
+    fx {
+        println(i, " => ", square);
+    }
+}
+```
 
 ## Records: `type`
 
@@ -612,10 +627,13 @@ Hard rules:
   the repository, or otherwise verified; otherwise stay self-contained
 - a missing `use` target may be silently ignored in compatibility mode, but
   its names still do not exist
+- canonical import form is `use "module_name";` in new code
 - **MOD-001**: imported names must match exported names exactly; `use` does
   not rename. If a module exports `classifySupport`, call
   `classifySupport(...)` — never a guessed local like `classify(...)` unless
   you define the wrapper yourself
+- after import, exported constants and helpers may be called directly; prefer
+  direct calls like `answer()` and `Greeting` over guessed foreign object APIs
 - file naming: `mod PascalCaseName` lives in a snake_case file consumed as
   `use "pascal_case_name";` (e.g. `mod ModuleConsts` → `use "module_consts";`)
   [VERIFY: confirm this mapping is exactly mod-name → snake_case file name,
