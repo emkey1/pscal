@@ -10,157 +10,287 @@
       "source_path": "/tmp/aa01",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa01",
       "sha256": "309e2f4d9c3969bcc70f7db2e9474e81d4bc7a4e234daa0dc5de0d940e89ecd2",
-      "stdout": "--- Log Analysis Report ---\nTotal Entries: 3\nTS: 2023-10-01T10:00:00Z | SVC: auth | CODE: 503 | SEV: CRITICAL | RISK: 50300.00\nTS: 2023-10-01T10:05:00Z | SVC: db | CODE: 404 | SEV: ERROR | RISK: 40400.00\nTS: 2023-10-01T10:06:00Z | SVC: api | CODE: 200 | SEV: INFO | RISK: 20000.00\n--------------------------------\nCritical Events: 1\nAverage Risk Score: 36900.00\n"
+      "stdout": "--- Log Analysis Report ---\nTotal Entries: 3\nTS: 2023-10-01T10:00:00Z | SVC: auth | CODE: 503 | SEV: CRITICAL | RISK: 50300.00\nTS: 2023-10-01T10:05:00Z | SVC: db | CODE: 404 | SEV: ERROR | RISK: 40400.00\nTS: 2023-10-01T10:06:00Z | SVC: api | CODE: 200 | SEV: INFO | RISK: 20000.00\n--------------------------------\nCritical Events: 1\nAverage Risk Score: 36900.00\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3",
       "sha256": "0c21850d96e00d934bcd127c40071acb67246dc9b95cb7ddea2a48a287cec87b",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3_case1",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case1",
       "sha256": "d2868b41e4c0f03d176e522b1d49ea9e6ea066aa9363381776748275e67961fb",
-      "stdout": "1\n"
+      "stdout": "1\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3_case2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case2",
       "sha256": "4d7d39d0dd05263353360b99a978e119ea9a8d05ab7d899598fd5d8f1a7f5b49",
-      "stdout": "10\n"
+      "stdout": "10\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3_case3",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case3",
       "sha256": "5fc6fe9ec519cd2f3f901cb0da3381ff5789a61e03c20229050fad49991d2d1f",
-      "stdout": "0\n"
+      "stdout": "0\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3_case4",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case4",
       "sha256": "697c6b99f491e84b3abae060a7582fd3acc9fa013dba58ce620df514056e7695",
-      "stdout": "FULL\n"
+      "stdout": "FULL\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3_case5",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case5",
       "sha256": "3e70bd528860364d4f32489804d5490ff5b94e0f4dc83f8fe2a322f2a3073b7d",
-      "stdout": "0\n"
+      "stdout": "0\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3_case6",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case6",
       "sha256": "f08e01c3266eba716ffbcd78f19a6160fa4566ef15c44bf197053528f936ff29",
-      "stdout": "FULL\n"
+      "stdout": "FULL\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aa3_case7",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aa3_case7",
       "sha256": "4e3b42b69a0224a7860d3f2d4d2ea9992347930a0823b805009d91c28eee82e2",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_fileexists_lit2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_fileexists_lit2",
       "sha256": "27fa1481532bbc3391b95d95ba260f4c9b3bb00b80fa33c6b58d3642626319a3",
-      "stdout": "false\n"
+      "stdout": "false\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_new_probe2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_new_probe2",
       "sha256": "5fbcda4959abb7147e33713f1f32d3a652e4bf426ed1f60de293988e5d2ba585",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_probe1",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_probe1",
       "sha256": "617ddaf0739c978e599b702e74e4419255ac7ad4b541b7e1ad041b49ca11ed46",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_probe2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_probe2",
       "sha256": "9eca2e8ff0c35195a800cb58c5b1b25525aacfd91d2d9d327fe43156bc885e09",
-      "stdout": "Aether\n"
+      "stdout": "Aether\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_probe3",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_probe3",
       "sha256": "cdb8d8aade1444815270e0e959dfc559f2a43096adae51a57a9575d26c715391",
-      "stdout": "Aether\n"
+      "stdout": "Aether\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_self_mut_probe2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_self_mut_probe2",
       "sha256": "39327acfb288bd18c4d71ced915730e1ecdbf12842e1daf9642a882cf8ffce70",
-      "stdout": "42\n"
+      "stdout": "42\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp1",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp1",
       "sha256": "8d201e9e4c148b319b6edf9c347f7f8ac38a6d576085bedfa298103f11ca416e",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp10",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp10",
       "sha256": "1e2f0f11d403f669929db5987a53f64470e2b6da822b0a5ad52b432148196738",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp11",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp11",
       "sha256": "cb84e415a22453fb9386a2a649a8e93e7f13770d61240343a7bf3683f5f455bb",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp12",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp12",
       "sha256": "29f72f91001ff44be8feaf6252ec525714ee113f8d808df1924749fea2b927eb",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp13",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp13",
       "sha256": "297aa610a80032d9abcdf54599914bd394d7173a82babe3a21ebb220733d399b",
-      "stdout": "Aether\n"
+      "stdout": "Aether\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp2",
       "sha256": "bdce57612a0a8e227e9973db7e38c1de03651c34c4c18372feab35cea3367830",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp3",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp3",
       "sha256": "933f19d40d45395dcc0c06bd0ee047a7467198f6b4c164f34fcf49653609f012",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp4",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp4",
       "sha256": "549be9cbf8f30dcf78520eb01d9269d6465bed59fef6601da7aa7c78b0f2fc63",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp5",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp5",
       "sha256": "84ec80dd6993e8d9e5a5a5821d0551f3009868230e61fb292e3220f641d44acc",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp6",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp6",
       "sha256": "065de465fa304a4acf65e16868eed71b19e75da08c904d199a1c41a5a1519b5e",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_tmp7",
       "repo_path": "Tests/aether_specialization/corpus_candidates/aether_tmp7",
       "sha256": "99b61e9488ded11cc6ad9be25a22153d92e24f8bc64dfd3b31d4013aa6d2d79f",
-      "stdout": ""
+      "stdout": "",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/b3",
@@ -172,109 +302,199 @@
       "source_path": "/tmp/b5",
       "repo_path": "Tests/aether_specialization/corpus_candidates/b5",
       "sha256": "f59d9385913f970f8c1ea7ca389ff59d17ec7995b99f2a6b978c2e2a8a55d7c0",
-      "stdout": "--- Geometry Report ---\nCircle (r=5.0) Area: 78.539816\nRectangle (4x6) Area: 24.000000\n"
+      "stdout": "--- Geometry Report ---\nCircle (r=5.0) Area: 78.539816\nRectangle (4x6) Area: 24.000000\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/b6",
       "repo_path": "Tests/aether_specialization/corpus_candidates/b6",
       "sha256": "dafbe12843b8dfac0937e6b57137c6a50d67c75fb612805e425c69ad45dcd5c3",
-      "stdout": "Configuration Loaded:\n  Normalized Port: 65535\n  Log Level: INFO\n  Debug Mode: true\n"
+      "stdout": "Configuration Loaded:\n  Normalized Port: 65535\n  Log Level: INFO\n  Debug Mode: true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/b7",
       "repo_path": "Tests/aether_specialization/corpus_candidates/b7",
       "sha256": "79ba7dd708ba96edd549f7799c669e1a3172369d1fd92812a70f4695f2ed6bff",
-      "stdout": "=== Annual Review Report ===\nEmployee: Alice\n  Score: 95\n  Status: Exceeds Expectations\n  Bonus: $ 5000.000000\nEmployee: Bob\n  Score: 80\n  Status: Meets Expectations\n  Bonus: $ 2500.000000\nEmployee: Charlie\n  Score: 65\n  Status: Needs Improvement\n  Bonus: $ 0.000000\n"
+      "stdout": "=== Annual Review Report ===\nEmployee: Alice\n  Score: 95\n  Status: Exceeds Expectations\n  Bonus: $ 5000.000000\nEmployee: Bob\n  Score: 80\n  Status: Meets Expectations\n  Bonus: $ 2500.000000\nEmployee: Charlie\n  Score: 65\n  Status: Needs Improvement\n  Bonus: $ 0.000000\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/c1",
       "repo_path": "Tests/aether_specialization/corpus_candidates/c1",
       "sha256": "dd8e348d78420ce959a4609fb104162a192533920c79c1277e5650b96ce885ef",
-      "stdout": "--- Job Analysis Report ---\nJob Name: Data Extraction Task\nRaw Score: 95\nNormalized Score: 95\nStatus: ready\nIs Ready: true\n"
+      "stdout": "--- Job Analysis Report ---\nJob Name: Data Extraction Task\nRaw Score: 95\nNormalized Score: 95\nStatus: ready\nIs Ready: true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/c2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/c2",
       "sha256": "cc1fb43031507d394204060351ba92e3cd4be3531fa80b03a814558c3bb2ec15",
-      "stdout": "--- Job Analysis Report ---\nJob Name: Data Extraction Task\nRaw Score: 95\nNormalized Score: 95\nStatus: ready\nIs Ready: true\n"
+      "stdout": "--- Job Analysis Report ---\nJob Name: Data Extraction Task\nRaw Score: 95\nNormalized Score: 95\nStatus: ready\nIs Ready: true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/c3",
       "repo_path": "Tests/aether_specialization/corpus_candidates/c3",
       "sha256": "c076816b23f4d3ce544c0aa59d482b40ec4af939a8af23e89aab12432e0f547c",
-      "stdout": "--- Configuration Processing ---\nItem ID: A42\nBase Price: 100\nTax Rate: 0.080000\nFinal Calculated Price: 8.00\n"
+      "stdout": "--- Configuration Processing ---\nItem ID: A42\nBase Price: 100\nTax Rate: 0.080000\nFinal Calculated Price: 8.00\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/c4",
       "repo_path": "Tests/aether_specialization/corpus_candidates/c4",
       "sha256": "0340b395ea4e2b4dd5088896705114f19e59246959a5db3fa5a214def8ef63c8",
-      "stdout": "--- Inventory Operation ---\nInitial Stock: 10\nItems Added: 25\nFinal Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "--- Inventory Operation ---\nInitial Stock: 10\nItems Added: 25\nFinal Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/c6",
       "repo_path": "Tests/aether_specialization/corpus_candidates/c6",
       "sha256": "bb23d3cd47a1c01443ba46bd649e3c489ba7ef4270b5f5dc9e096c3a83cc305c",
-      "stdout": "--- Commencing Stress Test ---\nNode 0 | Raw: 3.14 | Sum:    4.642\nNode 1 | Raw: -10.00 | Sum:    6.142\n------------------------------\nCycles Completed : 2\nFinal Sum        : 6.1416\n"
+      "stdout": "--- Commencing Stress Test ---\nNode 0 | Raw: 3.14 | Sum:    4.642\nNode 1 | Raw: -10.00 | Sum:    6.142\n------------------------------\nCycles Completed : 2\nFinal Sum        : 6.1416\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/cum_1",
       "repo_path": "Tests/aether_specialization/corpus_candidates/cum_1",
       "sha256": "a8ce4e59c33d2593493e21fe4ac5486c1d12c4dd75fea378f2437f8cc529f94c",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/cum_2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/cum_2",
       "sha256": "770c08d3203b5780d2a882062d28e2595ad20c6f01e21d0fb3149648112d095c",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/cum_3",
       "repo_path": "Tests/aether_specialization/corpus_candidates/cum_3",
       "sha256": "659fb00cde60d832a02c71d1fd6cd7ccefb6b737a47971ec033ad0501b1de4de",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/cum_4",
       "repo_path": "Tests/aether_specialization/corpus_candidates/cum_4",
       "sha256": "03bf694ad9e14673762ffce8fbab68e2fe5fef0313244023073a64d50427ba23",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/cum_5",
       "repo_path": "Tests/aether_specialization/corpus_candidates/cum_5",
       "sha256": "fb424d8cab456f479595747be24b59d14d819bb1baf4554b36c5b98c48df3f96",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/cum_6",
       "repo_path": "Tests/aether_specialization/corpus_candidates/cum_6",
       "sha256": "5b6b2944298115875549b89b1ddb7df90c216bdfb71554ad91c8eedda9196fde",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/cum_7",
       "repo_path": "Tests/aether_specialization/corpus_candidates/cum_7",
       "sha256": "072368c74527d8ba54abf3c60aab6b09bde839c914989942c382a5d7a2eb31fb",
-      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n"
+      "stdout": "Final Stock: 35\nCurrent Status: IN_STOCK\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/d1",
       "repo_path": "Tests/aether_specialization/corpus_candidates/d1",
       "sha256": "b98af18c05f0c08f2a2542f99bcedab743233f4157a3e8ebb626717752f4bdeb",
-      "stdout": "--- Starting Log Analysis ---\nService: auth | Code: 401 | Severity: warning\nService: db | Code: 503 | Severity: critical\nService: web | Code: 200 | Severity: info\n-----------------------------\nTotal Logs Processed : 3\nCritical Alerts      : 1\n"
+      "stdout": "--- Starting Log Analysis ---\nService: auth | Code: 401 | Severity: warning\nService: db | Code: 503 | Severity: critical\nService: web | Code: 200 | Severity: info\n-----------------------------\nTotal Logs Processed : 3\nCritical Alerts      : 1\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/d2",
       "repo_path": "Tests/aether_specialization/corpus_candidates/d2",
       "sha256": "18715c34eefd733e0126bc8f4028589e68af3c12359e544e9433973d3019c869",
-      "stdout": "--- Commencing Stress Test ---\nNode 0 | Raw: 3.14 | Sum:    4.642\nNode 1 | Raw: -10.00 | Sum:    6.142\n------------------------------\nCycles Completed : 2\nFinal Sum        : 6.1416\n"
+      "stdout": "--- Commencing Stress Test ---\nNode 0 | Raw: 3.14 | Sum:    4.642\nNode 1 | Raw: -10.00 | Sum:    6.142\n------------------------------\nCycles Completed : 2\nFinal Sum        : 6.1416\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/d4",
       "repo_path": "Tests/aether_specialization/corpus_candidates/d4",
       "sha256": "5435ac647a7e246a1a786b071054bc1642565612ade34e94a0c30bd0bbd2ff3d",
-      "stdout": "=== Job Processing Report ===\nTotal jobs   : 6\nAverage score: 62.666667\nMin score    : 0\nMax score    : 100\n------------------------------\nAlpha => Excellent (95)\nBeta => Good (78)\nGamma => Average (62)\nDelta => Poor (41)\nEpsilon => Excellent (100)\nZeta => Poor (0)\n------------------------------\n"
+      "stdout": "=== Job Processing Report ===\nTotal jobs   : 6\nAverage score: 62.666667\nMin score    : 0\nMax score    : 100\n------------------------------\nAlpha => Excellent (95)\nBeta => Good (78)\nGamma => Average (62)\nDelta => Poor (41)\nEpsilon => Excellent (100)\nZeta => Poor (0)\n------------------------------\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/aether_training_examples_extract/01_hello",
@@ -490,73 +710,133 @@
       "source_path": "/tmp/prism_candidate_16.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/prism_candidate_16.aether",
       "sha256": "ab0db608412fb7d27e64a24b4e75f341a7b129d7c3919252bae797ea6140b787",
-      "stdout": "Factorial of 5 is 120\n"
+      "stdout": "Factorial of 5 is 120\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/prism_candidate_17.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/prism_candidate_17.aether",
       "sha256": "7cb78f676a6cb3e77a18f657617aa19455349caf37fb2398ea8dfa1384dbfd21",
-      "stdout": "First element: 1\n"
+      "stdout": "First element: 1\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/prism_candidate_20_fixed_probe.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/prism_candidate_20_fixed_probe.aether",
       "sha256": "994182d9a69e7c0278614d1c77a0a674c62c69322ddaf44ff6b12fdbaf7c35e0",
-      "stdout": "User score: 85 -> Grade: B\n"
+      "stdout": "User score: 85 -> Grade: B\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/nemo22.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/nemo22.aether",
       "sha256": "40a6bc80582432c7bda6e9f0e50e0e00395befeb355fc44ad6658f58da9593c3",
-      "stdout": "Incremented: 42  \u2192  43\n"
+      "stdout": "Incremented: 42  \u2192  43\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/nemo25_fixed_probe.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/nemo25_fixed_probe.aether",
       "sha256": "37d7e563568092168e589092718f184a3758a12fd3a53301a18460f06d4162ed",
-      "stdout": "Value 5 -> Label: positive | Special?: false\nValue 0 -> Label: neutral | Special?: true\nValue 12 -> Label: positive | Special?: false\n"
+      "stdout": "Value 5 -> Label: positive | Special?: false\nValue 0 -> Label: neutral | Special?: true\nValue 12 -> Label: positive | Special?: false\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/qwen27_example2_fixed.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example2_fixed.aether",
       "sha256": "d25eb96a07b0f6795b371867bbc17752c873b784776f6c23568a9c552052a441",
-      "stdout": "builtin = sleep\nkind = procedure\nbackend = delay\nreturn = Void\neffectful = true\n"
+      "stdout": "builtin = sleep\nkind = procedure\nbackend = delay\nreturn = Void\neffectful = true\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/qwen27_example3.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example3.aether",
       "sha256": "301fdca80ed41eeb3b71aa9af1411e045075d1b9e541deccf5f1dae81151d838",
-      "stdout": "Executing budgeted transformation...\nResult: 645 (completed within ops budget)\n"
+      "stdout": "Executing budgeted transformation...\nResult: 645 (completed within ops budget)\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/qwen27_example4_fixed.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example4_fixed.aether",
       "sha256": "bcb0cf2a5e84e474a81130210251ad93de8119f847cb06c0d495209daaab526e",
-      "stdout": "Root shape detection: object\nObject root detected. Extracting records key.\n  Row 0: X1\n  Row 1: X2\n"
+      "stdout": "Root shape detection: object\nObject root detected. Extracting records key.\n  Row 0: X1\n  Row 1: X2\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/qwen27_example5.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example5.aether",
       "sha256": "9a6863754dc721c1d8c87468bba2eac7e11d9a7cebe7fb8be0b915dce722a025",
-      "stdout": "Captured 68 on Thermal_04\nCaptured 71 on Thermal_04\nSensor Thermal_04 is offline; skipping.\nTotal stored samples: 2\n"
+      "stdout": "Captured 68 on Thermal_04\nCaptured 71 on Thermal_04\nSensor Thermal_04 is offline; skipping.\nTotal stored samples: 2\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/qnext26.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/qnext26.aether",
       "sha256": "bb4ad522cbc5da321ab2b52afb7c653e284882a144a034eb865f0e5e3eb50418",
-      "stdout": "Scores after update:\n  [ 0]: 10\n  [ 1]: 99\n  [ 2]: 30\n  [ 3]: 40\n"
+      "stdout": "Scores after update:\n  [ 0]: 10\n  [ 1]: 99\n  [ 2]: 30\n  [ 3]: 40\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/qnext28_fixed.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/qnext28_fixed.aether",
       "sha256": "09e320d9d9e03d1609c8bb26d2a4a82092255fd4b3fafa6c3454cc0fda40f75b",
-      "stdout": "Job j-123 now: running\n"
+      "stdout": "Job j-123 now: running\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/qnext29.aether",
       "repo_path": "Tests/aether_specialization/corpus_candidates/qnext29.aether",
       "sha256": "37d10fe53e9ce12c0de252b57bd4ec436355e6a518bd9616293b995f8070b031",
-      "stdout": "Ratio (default): 2.333333\nRatio (prec=2): 2.33\nRatio (padded):     2.3333\n"
+      "stdout": "Ratio (default): 2.333333\nRatio (prec=2): 2.33\nRatio (padded):     2.3333\n",
+      "metadata": {
+        "include_in_training": false,
+        "lifecycle": "quarantine",
+        "notes": "Exploratory probe or externally generated scratch case retained for reference but excluded from training export."
+      }
     },
     {
       "source_path": "/tmp/tuple_post_bounds.aether",
@@ -1217,6 +1497,378 @@
           "export"
         ],
         "notes": "Module file exporting const plus pure helpers; use @pure above export fn."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/37_module_dual_helpers",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/37_module_dual_helpers",
+      "sha256": "6fc72360aaad2cdec67dd6a038c29769859dd0c11010453d8bcaa01e5e5898df",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ]
+      },
+      "stdout": "Result: 15\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/38_module_toon_file_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/38_module_toon_file_report",
+      "sha256": "51defe2a0e69e2703c2edc9e633272873b20fae96d5b8da89237b441a359380f",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon"
+        ]
+      },
+      "stdout": "alpha -> ready\nbeta -> review\ngamma -> blocked\ndefault = 50\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/39_array_records_rollup",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/39_array_records_rollup",
+      "sha256": "2667e97d2f7cad32f4093591cdc7d39b2bb6cdfa11252fbece9db57c4e65559c",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "array"
+        ]
+      },
+      "stdout": "alpha: ready\nbeta: review\ngamma: blocked\nready = 1\nreview = 1\nblocked = 1\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/40_window_methods",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/40_window_methods",
+      "sha256": "384a765b7d0c35d07a7dcf6a822948c9fed55acf4d14d4dd9561e155f5a482e9",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "count = 3\nsum = 27\naverage = 9.00\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/41_contract_quote",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/41_contract_quote",
+      "sha256": "16944cfad7da5a172d2e0b8960e0bd29efd88e0bc520573a1c95c995c3b6336d",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "normalized units = 100\nhours = 1.50\nquote = 180.00\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/42_file_toon_batch",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/42_file_toon_batch",
+      "sha256": "1765d2c67ef7eb3110aa1040c8b8bbb077265504b9f040ad0e842812e8b57569",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "toon"
+        ]
+      },
+      "stdout": "batch = daily-7\nalpha -> ready\nbeta -> review\ngamma -> blocked\nmissing scores = 1\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/43_module_threshold_report",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/43_module_threshold_report",
+      "sha256": "264a3251288486a155794b15fa6cb1e9bb5a88ca0463a6aa0741c4f2ded35bc0",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ]
+      },
+      "stdout": "[hot] alpha\n[warm] beta\n[cold] gamma\nthreshold = 80\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/44_tuple_bounds_contracts",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/44_tuple_bounds_contracts",
+      "sha256": "58c1e586cda201e7d9a5f00c002ef56c99f01dda608d7ff5e6349145ea9c2d41",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "tuple"
+        ]
+      },
+      "stdout": "Clamped range: 50 to 100\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/45_toon_users_object_root",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/45_toon_users_object_root",
+      "sha256": "4ce2bc1925e00bb2de354f07f89feeb26fff955bab7785d6ffbdb495c6614d86",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon"
+        ]
+      },
+      "stdout": "Processing 2 users\nUser # 1 is Alice\nUser # 2 is Bob\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/46_bank_account_methods",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/46_bank_account_methods",
+      "sha256": "d4affd4ffc62b94020b9e66a9158d0662b85613ae70709a7f2ed52e8d1f8fb0e",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "Withdrawal successful. New balance: 800\nFinal balance: 1300\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/47_array_average_real",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/47_array_average_real",
+      "sha256": "4cce16336b6984e990cf92658afa728962c22016f105b56c2f6c608ebe502ea2",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "array"
+        ]
+      },
+      "stdout": "Average score: 85.00\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/48_module_config_health",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/48_module_config_health",
+      "sha256": "953ba7f946cf41e839953a590373cea7aa152c18d5633e5f4d18b22e1dc57422",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": true,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ]
+      },
+      "stdout": "Service https://api.example.com is healthy.\nMax retries allowed: 3\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/49_toon_nested_meta_guard",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/49_toon_nested_meta_guard",
+      "sha256": "fba4613202ae81a49e19b5fa28f79e4bad179ad6e051eeb292e7e00403b6e4f9",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon"
+        ]
+      },
+      "stdout": "Item 1 has code: A\nItem 2 has code: UNKNOWN\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/50_status_sequential_if",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/50_status_sequential_if",
+      "sha256": "409fa0cf263c4da37e270373ba479f32b09ff40ed077472dedee11480fca6354",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "User level 75 is classified as: Advanced\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/51_string_label_length",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/51_string_label_length",
+      "sha256": "d4dea30d5c7517e3353470a2b55d89455533c0e51af6763f99eca2a4182f1792",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "Generated ID: ID-12345-V2\nLength: 11 -> Status: Long ID\nLength is an Int: 11\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/52_loop_break_control",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/52_loop_break_control",
+      "sha256": "68821f8015eed9d0c1c6382ffb153f526f8dcffba7d7683f19b3a8496141a0e4",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "Starting process...\nAttempt # 1\nAttempt # 2\nAttempt # 3\nCritical check passed. Stopping early.\nProcess finished after 3 iterations.\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/53_real_receipt_formatting",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/53_real_receipt_formatting",
+      "sha256": "c35fa23a228ebb238b51fde13d93892b583001208b65c8b4198a1a08aed395e4",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "Item: Widget | Qty: 12\nUnit Price:      19.99\nSubtotal:     239.88\nTax (8%):      19.19\nGrand Total:     259.07\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/54_array_index_mutation",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/54_array_index_mutation",
+      "sha256": "9ba88fed367cbdfd7a961e8dcc33d28637c78b82be50885241503f4c014d141d",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "array"
+        ]
+      },
+      "stdout": "Modified buffer:\n  [ 0]: 20\n  [ 1]: 40\n  [ 2]: 99\n  [ 3]: 80\n  [ 4]: 100\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/55_bool_validation_flow",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/55_bool_validation_flow",
+      "sha256": "a54cd9e83adfe2a8a22f403d59a5f3025fccaaa2a8f39bdb930ef505c399d0a0",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "Access granted.\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/56_builtin_capability_probe",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/56_builtin_capability_probe",
+      "sha256": "059c4fc002672e6c82b5d1a8f0046c643fcaef42280953236308c8751ce0909c",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "AI capabilities not available in this runtime.\nTask spawning is disabled.\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/57_range_loop_progress",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/57_range_loop_progress",
+      "sha256": "2f5ab7ea9347a62da08d160d1d247f06dd79d145e3fea3a891905b844cbc9947",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": []
+      },
+      "stdout": "Calculating sum from 0 to 9\nStep 0: Current total = 0\nStep 3: Current total = 6\nStep 6: Current total = 21\nStep 9: Current total = 45\nFinal Sum: 45\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/58_toon_null_defaults",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/58_toon_null_defaults",
+      "sha256": "7af51939104d95140fa6b17bacefa935068868cc556555ea25a05e243d011bec",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "toon"
+        ]
+      },
+      "stdout": "Original Price: 100\nDiscount Applied: 0\nFinal Price: 100\nNotes: No notes provided\n"
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/math_utils",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/math_utils",
+      "sha256": "4d14c7268473bfc1f751aaac67a9b400a9e14b02e58061d102b07c13b8697fb3",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module used by curated multi-file corpus cases."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/text_utils",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/text_utils",
+      "sha256": "4561fc761b7a305dd35d6312d620577b0fe7cce9b1646aa045149357374a04bf",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module used by curated multi-file corpus cases."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/service_config",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/service_config",
+      "sha256": "1c58a5a4b465ed2838b52146e4cf25ac5534e4d2af317e7d66d75d0966c825da",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module used by curated multi-file corpus cases."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/severity_labels",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/severity_labels",
+      "sha256": "0004203ea1060cdc432490e36b772712409a70d5f1f67297315cf036059f0b59",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module used by curated multi-file corpus cases."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/severity_rules",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/severity_rules",
+      "sha256": "bde4b3ea9aa4de84794ac2fd8c74b08015e0352b5a72160dae176c5442042247",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module used by curated multi-file corpus cases."
+      }
+    },
+    {
+      "source_path": "/Users/mke/PBuild/Tests/aether_specialization/corpus_candidates/support_rules",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/support_rules",
+      "sha256": "cc5360773a56df40a54b4794d5eeccc8d09784595ce1b8da39d589fd4aba7ed2",
+      "metadata": {
+        "canonical": true,
+        "fixture_required": false,
+        "assumption_bearing": false,
+        "tags": [
+          "module"
+        ],
+        "notes": "Support module used by curated multi-file corpus cases."
       }
     }
   ]

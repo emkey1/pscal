@@ -66,6 +66,11 @@ def main() -> int:
     parser.add_argument("--aether-bin", type=pathlib.Path, default=DEFAULT_AETHER_BIN)
     parser.add_argument("--dest-dir", type=pathlib.Path, default=DEFAULT_DEST_DIR)
     parser.add_argument("--manifest", type=pathlib.Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--include-in-training",
+        action="store_true",
+        help="promote imported candidates directly into the raw training corpus",
+    )
     args = parser.parse_args()
 
     if not args.aether_bin.exists():
@@ -109,6 +114,10 @@ def main() -> int:
             "repo_path": str(target.relative_to(REPO_ROOT)),
             "sha256": sha256,
             "stdout": stdout,
+            "metadata": {
+                "include_in_training": args.include_in_training,
+                "lifecycle": "imported_candidate" if args.include_in_training else "quarantine",
+            },
         }
         manifest.setdefault("items", []).append(record)
         known_hashes.add(sha256)

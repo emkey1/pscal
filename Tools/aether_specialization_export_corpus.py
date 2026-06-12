@@ -13,8 +13,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_ROOTS = [
     REPO_ROOT / "Examples" / "aether" / "base",
     REPO_ROOT / "Examples" / "aether" / "showcase",
-    REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates",
 ]
+DEFAULT_CORPUS_DIR = REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates"
 DEFAULT_MANIFEST = (
     REPO_ROOT / "Tests" / "aether_specialization" / "corpus_candidates_manifest.json"
 )
@@ -65,6 +65,13 @@ def load_manifest_metadata(path: pathlib.Path) -> dict[str, dict]:
     return out
 
 
+def load_manifest_items(path: pathlib.Path) -> list[dict]:
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload.get("items", [])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-json", type=pathlib.Path, required=True)
@@ -72,7 +79,9 @@ def main() -> int:
     args = parser.parse_args()
 
     manifest_metadata = load_manifest_metadata(args.manifest)
+    manifest_items = load_manifest_items(args.manifest)
     items: list[dict[str, str]] = []
+    seen_repo_paths: set[str] = set()
     for root in DEFAULT_ROOTS:
         for path in sorted(root.rglob("*")):
             if not looks_like_source(path):
@@ -89,9 +98,44 @@ def main() -> int:
             metadata = manifest_metadata.get(repo_path)
             if metadata:
                 record["metadata"] = metadata
-            items.append(
-                record
-            )
+            items.append(record)
+            seen_repo_paths.add(repo_path)
+
+    missing_manifest_paths: list[str] = []
+    for item in manifest_items:
+        repo_path = item.get("repo_path")
+        if not isinstance(repo_path, str) or not repo_path:
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        if metadata.get("include_in_training") is False:
+            continue
+        path = REPO_ROOT / repo_path
+        if not path.exists():
+            missing_manifest_paths.append(repo_path)
+            continue
+        if path.suffix == ".json":
+            continue
+        if str(DEFAULT_CORPUS_DIR) not in str(path.parent):
+            continue
+        text = path.read_text(encoding="utf-8")
+        if not looks_canonical_for_training(text):
+            continue
+        if repo_path in seen_repo_paths:
+            continue
+        record = {
+            "path": repo_path,
+            "kind": "raw_aether_corpus",
+            "content": text,
+        }
+        if metadata:
+            record["metadata"] = metadata
+        items.append(record)
+        seen_repo_paths.add(repo_path)
+
+    if missing_manifest_paths:
+        raise SystemExit(
+            "missing manifest corpus files:\n" + "\n".join(sorted(missing_manifest_paths))
+        )
 
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps({"items": items}, indent=2), encoding="utf-8")

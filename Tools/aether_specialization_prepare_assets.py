@@ -37,6 +37,13 @@ def main() -> int:
     run(
         [
             "python3",
+            str(REPO_ROOT / "tools" / "aether_specialization_validate_corpus.py"),
+            "--strict",
+        ]
+    )
+    run(
+        [
+            "python3",
             str(REPO_ROOT / "tools" / "aether_specialization_export_corpus.py"),
             "--output-json",
             str(corpus_json),

@@ -40,7 +40,8 @@ The raw corpus currently pulls from:
 
 - `Examples/aether/base/*`
 - `Examples/aether/showcase/*`
-- `Tests/aether_specialization/corpus_candidates/*`
+- manifest-approved entries from
+  `Tests/aether_specialization/corpus_candidates_manifest.json`
 
 Raw corpus export can also carry lightweight per-example metadata from
 `Tests/aether_specialization/corpus_candidates_manifest.json`. Intended keys:
@@ -55,6 +56,26 @@ Raw corpus export can also carry lightweight per-example metadata from
 These fields are advisory training metadata. They do not replace compiler
 verification, but they help keep canonical examples distinct from compatibility
 or assumption-heavy ones.
+
+Additional source-of-truth rules:
+
+- `Tests/aether_specialization/corpus_candidates_manifest.json` is the source
+  of truth for repo corpus candidates used in training export
+- a file under `corpus_candidates/` that is not listed in the manifest is a
+  validation failure
+- a manifest entry whose file is missing is a validation failure
+- JSON fixtures belong under `Tests/aether_specialization/fixtures/`, not under
+  `corpus_candidates/`
+
+Validate corpus structure explicitly:
+
+```bash
+python3 Tools/aether_specialization_validate_corpus.py --strict
+```
+
+Imported external candidates are quarantined by default and do not enter the
+training export unless promoted with `--include-in-training` or by directly
+editing manifest metadata.
 
 The separate reference corpus currently pulls from:
 
