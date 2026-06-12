@@ -1,0 +1,82 @@
+// L4_ticket_triage  (wishlist 9 + 11)
+// tickets.json = {"tickets":[
+//   {"id":"TK1","priority":"high","age":2},{"id":"TK2","priority":"low","age":9},
+//   {"id":"TK3","priority":"medium"},{"id":"TK4","priority":"high","age":1}]}
+// ASSUMPTIONS:
+//   - weights: high=3, medium=2, low=1, else 0
+//   - missing age falls back to 0
+//   - escalate when priority is "high" OR age > 7
+// expect: ticket 0: TK1 / high / 3 / escalate=true
+// expect: ticket 1: TK2 / low / 1 / escalate=true
+// expect: ticket 2: TK3 / medium / 2 / escalate=false
+// expect: ticket 3: TK4 / high / 3 / escalate=true
+// expect: escalated = 3
+
+@pure
+fn weightOf(priority: Text) -> Int {
+    if priority == "high" {
+        ret 3;
+    }
+    if priority == "medium" {
+        ret 2;
+    }
+    if priority == "low" {
+        ret 1;
+    }
+    ret 0;
+}
+
+@pure
+fn escalate(priority: Text, age: Int) -> Bool {
+    ret priority == "high" || age > 7;
+}
+
+type Ticket {
+    id: Text;
+    priority: Text;
+    weight: Int;
+    escalate: Bool;
+}
+
+fn makeTicket(node: ToonNode) -> Ticket {
+    let id: Text = toon_get_text(node, "id");
+    let priority: Text = toon_get_text_or(node, "priority", "none");
+    let age: Int = toon_get_int_or(node, "age", 0);
+    let ticket: Ticket = new Ticket();
+    ticket.id = id;
+    ticket.priority = priority;
+    ticket.weight = weightOf(priority);
+    ticket.escalate = escalate(priority, age);
+    ret ticket;
+}
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("tickets.json");
+    let root: ToonNode = toon_root(doc);
+    let tickets: ToonNode = toon_key(root, "tickets");
+
+    let escalated: Int = 0;
+
+    loop i in 0..toon_len(tickets) {
+        let node: ToonNode = toon_at(tickets, i);
+        let ticket: Ticket = makeTicket(node);
+        if ticket.escalate {
+            escalated = escalated + 1;
+        }
+        fx {
+            println("ticket ", i, ": ", ticket.id, " / ", ticket.priority, " / ", ticket.weight, " / escalate=", ticket.escalate);
+        }
+    }
+
+    fx {
+        println("escalated = ", escalated);
+    }
+
+    toon_close(doc);
+    ret;
+}

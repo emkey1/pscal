@@ -1,0 +1,20 @@
+// t2_order_tuple  (wishlist 2)
+// expect: lo = 4
+// expect: hi = 9
+
+@post result.0 <= result.1
+fn ordered(a: Int, b: Int) -> (Int, Int) {
+    if a <= b {
+        ret (a, b);
+    }
+    ret (b, a);
+}
+
+fn main() -> Void {
+    let (lo, hi) = ordered(9, 4);
+    fx {
+        println("lo = ", lo);
+        println("hi = ", hi);
+    }
+    ret;
+}

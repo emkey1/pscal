@@ -1,0 +1,38 @@
+// h1_toon_to_array  (wishlist 5)
+// scores.json = {"scores":[40, 75, 92, 88, 61]}
+// Copies TOON ints into a native Int[], closes the doc, then runs a second
+// pass over the native array.
+// expect: count = 5
+// expect: passing = 3
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("scores.json");
+    let root: ToonNode = toon_root(doc);
+    let arr: ToonNode = toon_key(root, "scores");
+
+    let scores: Int[] = [];
+    loop i in 0..toon_len(arr) {
+        let node: ToonNode = toon_at(arr, i);
+        let v: Int = toon_int_value(node);
+        scores = scores + [v];
+    }
+    toon_close(doc);
+
+    let n: Int = length(scores);
+    let passing: Int = 0;
+    loop i in 0..n {
+        if scores[i] >= 70 {
+            passing = passing + 1;
+        }
+    }
+    fx {
+        println("count = ", n);
+        println("passing = ", passing);
+    }
+    ret;
+}

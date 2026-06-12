@@ -1,0 +1,18 @@
+// r1_format_grid  (wishlist 7)
+// FLAG: exact space padding for :width:precision is backend printf behavior;
+// verify the padded columns against the real compiler.
+// expect: pos default=3.141590 p2=3.14 w10=      3.14
+// expect: neg default=-2.500000 p2=-2.50 w10=     -2.50
+
+fn show(label: Text, value: Real) -> Void {
+    fx {
+        println(label, " default=", value, " p2=", value:0:2, " w10=", value:10:2);
+    }
+    ret;
+}
+
+fn main() -> Void {
+    show("pos", 3.14159);
+    show("neg", -2.5);
+    ret;
+}

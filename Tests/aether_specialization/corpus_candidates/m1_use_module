@@ -1,0 +1,23 @@
+// m1_use_module  (wishlist 6)
+// Uses bench_metrics (PassMark, isPass, band). Requires bench_metrics in the
+// working directory.
+// expect: 95 pass=true band=high
+// expect: 68 pass=false band=low
+// expect: 72 pass=true band=mid
+// expect: pass mark = 70
+
+use "bench_metrics";
+
+fn main() -> Void {
+    let scores: Int[] = [95, 68, 72];
+    loop i in 0..length(scores) {
+        let s: Int = scores[i];
+        fx {
+            println(s, " pass=", isPass(s), " band=", band(s));
+        }
+    }
+    fx {
+        println("pass mark = ", PassMark);
+    }
+    ret;
+}

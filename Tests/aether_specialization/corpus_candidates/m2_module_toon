@@ -1,0 +1,28 @@
+// m2_module_toon  (wishlist 6)
+// users.json = {"users":[{"name":"Ada","score":91},{"name":"Bob","score":55}]}
+// expect: Ada / high / pass=true
+// expect: Bob / low / pass=false
+
+use "bench_metrics";
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("users.json");
+    let root: ToonNode = toon_root(doc);
+    let users: ToonNode = toon_key(root, "users");
+
+    loop i in 0..toon_len(users) {
+        let u: ToonNode = toon_at(users, i);
+        let name: Text = toon_get_text(u, "name");
+        let score: Int = toon_get_int_or(u, "score", 0);
+        fx {
+            println(name, " / ", band(score), " / pass=", isPass(score));
+        }
+    }
+    toon_close(doc);
+    ret;
+}

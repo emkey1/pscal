@@ -1,0 +1,28 @@
+// n2_array_root_nested  (wishlist 8)
+// expect: id 1 tag=x
+// expect: id 2 tag=none
+
+fn main() -> Void {
+    if !has_toon() {
+        fx { println("yyjson unavailable"); }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("[{\"id\":1,\"meta\":{\"tag\":\"x\"}},{\"id\":2}]");
+    let root: ToonNode = toon_root(doc);
+
+    loop i in 0..toon_len(root) {
+        let row: ToonNode = toon_at(root, i);
+        let id: Int = toon_get_int(row, "id");
+        let tag: Text = "none";
+        if toon_has_key(row, "meta") {
+            let meta: ToonNode = toon_key(row, "meta");
+            tag = toon_get_text_or(meta, "tag", "none");
+        }
+        fx {
+            println("id ", id, " tag=", tag);
+        }
+    }
+    toon_close(doc);
+    ret;
+}
