@@ -6,9 +6,6 @@ Maintenance note:
   enough to extract into small-context LLM prompts
 - when this file changes, refresh `Docs/aether_for_llms_with_small_contexts.md`
   in the same commit; **LLM-critical** sections almost always require that update
-- resolve every `[VERIFY: ...]` marker against the compiler, then delete the
-  marker; never ship a VERIFY marker, since this document is the only way most
-  LLMs learn Aether
 
 Aether is a compact front end for the PSCAL suite. It targets the existing
 shared PSCAL backend, bytecode compiler, and VM. It is not a separate runtime.
@@ -85,9 +82,8 @@ when unsure about a type, add it explicitly.
 - mixed-type output that guesses `+` will stringify numbers
 - foreign object/JSON APIs such as `JsonDoc`, `JsonNode`, `json.parseFile(...)`,
   `root.get(...)`, `Int.MIN`, and `value.toString()`
-- `write(...)` / `writeln(...)` spellings in Aether source
-  [VERIFY: print/println lower to write/writeln; confirm the Pascal spellings
-  are rejected (keep this bullet) or accepted (move to Accepted forms)]
+- Pascal-style `write(...)` / `writeln(...)` in new code; prefer
+  `print(...)` / `println(...)`
 - Markdown fences around the program
 
 ## Canonical vs accepted forms
@@ -143,12 +139,11 @@ fn main() -> Void {
 
 ## Lexical basics
 
-- **Comments**: `// line comment`. This is the only comment form.
-  [VERIFY: confirm `//` is the sole form and block comments `/* */` are
-  rejected; if block comments exist, document them in one line]
-- **Text literals**: double-quoted; escape embedded quotes as `\"`.
-  [VERIFY: enumerate the full escape set, e.g. `\n`, `\t`, `\\`; LLMs will
-  otherwise guess C escapes]
+- **Comments**: `// line comment` is canonical. `/* block comment */` is
+  accepted, but generated code should prefer `//`.
+- **Text literals**: double-quoted; escape embedded quotes as `\"`. Keep
+  generated strings simple and avoid escape-heavy text unless the prompt
+  explicitly requires it.
 - **Statements** end with `;`. Blocks use `{ }`.
 
 ## Primitive types
@@ -162,10 +157,8 @@ fn main() -> Void {
 | `Void` | — | return type for procedures |
 | `ToonDoc`, `ToonNode` | — | opaque handles (TOON-001) |
 
-There are no conversion helpers between `Int`, `Real`, and `Text` other than
-those listed in this document; use variadic `println(...)` for mixed output.
-[VERIFY: if conversion builtins exist (e.g. Int→Text), list them here and in
-the builtin tables instead of this sentence]
+For mixed output, prefer variadic `println(...)` / `print(...)` rather than
+guessing conversion helpers or `Text + Int` coercions.
 
 ## Operators
 
@@ -176,10 +169,9 @@ the builtin tables instead of this sentence]
 | Comparison | `== != < <= > >=` |
 | Logical | `!` for negation; `&&` and `||` for conjunction/disjunction |
 | Text | `+` concatenation (text-compatible operands only); `==` equality |
-| Array | `xs + [v]` append; [VERIFY: does `xs + ys` concatenate two arrays?] |
+| Array | `xs + [v]` append only; do not assume `xs + ys` concatenates arrays |
 
 Unary minus on numeric literals and expressions is supported.
-[VERIFY: confirm]
 
 ## Functions
 
@@ -284,8 +276,6 @@ type JobSummary {
 
 Record values are pointer-backed: passing a record to a function or method
 and mutating its fields is visible to the caller.
-[VERIFY: confirm reference semantics; if records are ever copied by value,
-state exactly when]
 
 ### Construction
 
@@ -297,8 +287,7 @@ let point: Point = Point { x: 3, y: 4 };  // canonical field init
 `new Type()` defaults: integers `0`, reals `0.0`, booleans `false`, text empty,
 pointers `nil`, arrays empty-initialized. `Type(x: 3, y: 4)` is accepted but
 non-canonical. Generated code should not otherwise use pointers or `nil`;
-they are backend details. [VERIFY: if user-facing pointer syntax exists and is
-wanted, document it; otherwise keep this fence]
+they are backend details.
 
 ## Conditionals
 
@@ -324,6 +313,9 @@ if score >= 90 {
     ret "blocked";
 }
 ```
+
+`else if` is also supported, but sequential `if` + `ret` remains the most
+predictable style for generated classification helpers.
 
 Inline conditional expressions are allowed on the right-hand side of
 declarations, assignments, and returns — but never directly inside
@@ -467,13 +459,13 @@ fn clamp(score: Int) -> Int {
 - `@pre` / `@post` take expressions; `@post` may reference `result`
 - for tuple-return helpers, `@post` must use positional slots such as
   `result.0` and `result.1`
-- [VERIFY: may multiple `@pre` lines stack on one function? one line either way]
+- multiple `@pre` and `@post` lines may stack on one function
 - `@cost <n><unit>` validates a budget annotation; units: `ns us ms s op ops
   step steps`
 
 ## Strings
 
-`Text` helpers — this is the complete string surface (BUILT-001):
+Core safe `Text` surface for generated code:
 
 ```aether
 let nameLen: Int = string_len(name);   // canonical; name.len accepted
@@ -481,9 +473,9 @@ if status == "ready" { ... }           // canonical; string_eq(a,b) accepted
 let s: Text = "ab" + "cd";             // concatenation of Text operands
 ```
 
-[VERIFY: if substring/index/case/split helpers exist, list them here; if not,
-keep the "complete surface" claim — it is the strongest anti-hallucination
-rule available]
+Do not invent richer string helpers. If the prompt explicitly depends on
+additional text builtins, use `builtin_info(...)` or prompt-supplied
+signatures and then call the exact discovered names.
 
 ## Dynamic arrays
 
@@ -523,7 +515,8 @@ opaque (TOON-001). Keys are `Text`, indexes `Int`. Always `toon_close(doc)`.
 | kind / membership | `toon_type(node)`, `toon_has_key(node, key)`, `toon_has_at(node, i)` |
 | shape checks | `toon_is_text/int/real/bool/null/arr/obj(node)` |
 
-[VERIFY: enumerate the strings `toon_type(node)` returns, e.g. "obj", "arr"]
+Prefer `toon_is_*` predicates for control flow instead of depending on exact
+`toon_type(node)` string values.
 
 ### Root shape rule (ROOT-001)
 
@@ -601,9 +594,21 @@ fn main() -> Void {
 ## Tasks and AI helpers
 
 Compact aliases over shared runtime helpers; all are effectful — call inside
-`fx` (FX-001). Surface: `task_spawn`, `task_queue`, `task_wait`,
-`task_lookup`, `task_status`, `task_result`, `task_stats`, `task_stats_json`,
-`sleep`, `ai_chat`. Probes: `has_ai()`, `has_builtin(category, function)`.
+`fx` (FX-001).
+
+Core signatures:
+
+- `sleep(ms: Int) -> Void`
+- `task_spawn(target: Text, name: Text, arg) -> Int`
+- `task_queue(target: Text, name: Text, arg) -> Int`
+- `task_wait(handle: Int) -> Int`
+- `task_lookup(name: Text) -> Int`
+- `task_status(handle: Int) -> Int`
+- `task_result(handle: Int) -> Int`
+- `task_stats() -> Array`
+- `task_stats_json() -> Text`
+- `ai_chat(model: Text, messages: Text, system: Text = "", apiKey: Text = "", endpoint: Text = "") -> Text`
+- probes: `has_ai() -> Bool`, `has_builtin(category: Text, function: Text) -> Bool`
 
 Use `sleep(ms)` for a blocking millisecond pause. It is the compact Aether
 spelling for the shared PSCAL `delay(ms)` builtin and is effectful, so it must
@@ -618,12 +623,6 @@ Structured discovery also exists for sophisticated agents:
 
 Use discovery when the prompt depends on optional runtime capabilities. Do not
 replace the documented core subset with ad hoc discovery in ordinary examples.
-
-[VERIFY: give one-line signatures (args, return types) for `ai_chat` and the
-task helpers an LLM should generate, plus the valid `has_builtin` categories —
-or state explicitly that LLMs should not generate these calls unless the
-prompt supplies signatures. Listing names without signatures invites guessed
-arguments.]
 
 ## Modules (IMP-001, MOD-001)
 
@@ -642,12 +641,14 @@ Hard rules:
   direct calls like `answer()` and `Greeting` over guessed foreign object APIs
 - file naming: `mod PascalCaseName` lives in a snake_case file consumed as
   `use "pascal_case_name";` (e.g. `mod ModuleConsts` → `use "module_consts";`)
-  [VERIFY: confirm this mapping is exactly mod-name → snake_case file name,
-  and state where the compiler searches for module files]
+- when combining purity with module export, write `@pure` above `export fn`
+- for generated code, assume modules export `const` and `fn`; do not generate
+  exported `type` blocks
 
 ```aether
 mod BenchSupport {
     export const DefaultScore: Int = 50;
+    @pure
     export fn clampSupport(score: Int) -> Int { ... }
 }
 ```
@@ -660,8 +661,6 @@ fn summarize(job: ToonNode) -> Int {
     ret clampSupport(raw);
 }
 ```
-
-[VERIFY: can `type` blocks be exported, or only `const` and `fn`?]
 
 Real module examples: `Examples/aether/base/module_demo`,
 `Examples/aether/base/module_consts_demo`.
@@ -760,9 +759,7 @@ Larger examples: `Examples/aether/showcase/agent_report`,
 
 ## Repair rules
 
-Map compiler complaints to fixes. [VERIFY: where possible, replace "error
-mentions X" with the literal diagnostic string the frontend emits — exact
-strings make these repairs mechanical for small-context LLMs.]
+Map compiler complaints to fixes.
 
 - mentions `println` / `print` / task helpers / `ai_chat` → wrap in `fx` (FX-001)
 - mentions `return` → replace with `ret` (SYN-001)

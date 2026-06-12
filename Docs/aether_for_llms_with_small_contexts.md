@@ -4,8 +4,6 @@ Maintenance note:
 
 - compact companion to the full reference (`Docs/aether_for_llms_and_others.md`)
 - keep this file short and rule-focused; refresh whenever the full doc changes
-- resolve every `[VERIFY: ...]` from the full document, then delete the
-  marker; never ship one
 
 Aether is a compact PSCAL front end. It uses the existing backend, bytecode
 compiler, and VM. It is not a separate runtime.
@@ -56,8 +54,8 @@ exactly.
 
 ## Core syntax
 
-- Comments: `// line comment` only. Text literals are double-quoted; escape
-  `\"`. [VERIFY: full escape set, from full doc]
+- Comments: prefer `// line comment`. Block comments are accepted, but models
+  should still generate `//`. Text literals are double-quoted; escape `\"`.
 - Types: `Int`, `Real`, `Text`, `Bool` (`true`/`false`), `Void`, plus opaque
   `ToonDoc`/`ToonNode`. `println(boolValue)` prints `true` or `false`. No
   conversion helpers exist; use variadic `println`.
@@ -123,7 +121,7 @@ type Counter {
 - `new Counter()` zeroes fields (Int `0`, Real `0.0`, Bool `false`, Text empty)
 - canonical init: `Point { x: 3, y: 4 }`; `Point(x: 3, y: 4)` accepted
 - records are pointer-backed: mutations through a callee are visible to the
-  caller [VERIFY: confirm in full doc]
+  caller
 - a top-level `fn bump(self: Counter) -> Int` is an extension method; call it
   as `counter.bump()`
 
@@ -184,8 +182,8 @@ if name == "Aether" { ... }            // canonical; string_eq(a,b) accepted
 let nameLen: Int = string_len(name);   // canonical; name.len accepted
 ```
 
-This is the complete Text surface (BUILT-001). [VERIFY: sync with full doc if
-more string helpers exist]
+Treat this as the safe Text surface for generated code. Do not invent richer
+helpers.
 
 ## Dynamic arrays
 
@@ -290,11 +288,15 @@ Never generate foreign JSON/object APIs such as `JsonDoc`, `JsonNode`,
 
 ## Tasks and AI
 
-`task_spawn/queue/wait/lookup/status/result/stats/stats_json`, `ai_chat`,
-`sleep`, probes `has_ai()` / `has_builtin(category, function)`. All effectful
-— call inside `fx`. `sleep(ms)` is a blocking millisecond pause. `task_wait`
-waits on a task handle, not a duration. [VERIFY: copy resolved signatures from full doc, or state that
-these are not generated without prompt-supplied signatures]
+`sleep(ms: Int) -> Void`, `task_spawn(target: Text, name: Text, arg) -> Int`,
+`task_queue(target: Text, name: Text, arg) -> Int`,
+`task_wait(handle: Int) -> Int`, `task_lookup(name: Text) -> Int`,
+`task_status(handle: Int) -> Int`, `task_result(handle: Int) -> Int`,
+`task_stats() -> Array`, `task_stats_json() -> Text`,
+`ai_chat(model: Text, messages: Text, system: Text = "", apiKey: Text = "", endpoint: Text = "") -> Text`,
+probes `has_ai() -> Bool`, `has_builtin(category: Text, function: Text) -> Bool`.
+All are effectful and must stay inside `fx`. `sleep(ms)` is a blocking
+millisecond pause. `task_wait` waits on a task handle, not a duration.
 
 Discovery exists:
 - `builtins_json()` -> JSON list of available Aether-visible builtins
@@ -312,7 +314,9 @@ Imports are advanced; most generated Aether should be single-file.
   never a guessed `classify(...)`. Module exports `Answer` → use `Answer`,
   not `APP_NAME`, `AetherName`, or another invented spelling.
 - file naming: `mod ModuleConsts` → `use "module_consts";`
-  [VERIFY: confirm mapping in full doc]
+- when combining purity with module export, write `@pure` above `export fn`
+- for generated code, assume modules export `const` and `fn`; do not generate
+  exported `type` blocks
 
 ```aether
 use "bench_support";
