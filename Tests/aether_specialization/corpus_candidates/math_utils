@@ -1,0 +1,6 @@
+mod MathUtils {
+    @pure
+    export fn add(left: Int, right: Int) -> Int {
+        ret left + right;
+    }
+}

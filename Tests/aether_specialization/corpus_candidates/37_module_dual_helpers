@@ -1,0 +1,16 @@
+// 37_module_dual_helpers
+// Concepts: one main file plus two support modules; exported pure helpers;
+// variadic println with imported label helper
+// expect: Result: 15
+
+use math_utils;
+use text_utils;
+
+fn main() -> Void {
+    let total: Int = MathUtils.add(5, 10);
+    let label: Text = TextUtils.resultLabel();
+    fx {
+        println(label, total);
+    }
+    ret;
+}

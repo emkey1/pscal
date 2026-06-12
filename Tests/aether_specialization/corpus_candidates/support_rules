@@ -1,0 +1,14 @@
+mod SupportRules {
+    export const DefaultScore: Int = 50;
+
+    @pure
+    export fn classifySupport(score: Int) -> Text {
+        if score >= 90 {
+            ret "ready";
+        }
+        if score >= 70 {
+            ret "review";
+        }
+        ret "blocked";
+    }
+}

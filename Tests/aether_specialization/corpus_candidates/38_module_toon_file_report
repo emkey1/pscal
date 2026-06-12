@@ -1,0 +1,39 @@
+// 38_module_toon_file_report
+// Concepts: support module plus toon_parse_file; staged TOON access;
+// imported pure helper and exported default constant
+// expect: alpha -> ready
+// expect: beta -> review
+// expect: gamma -> blocked
+// expect: default = 50
+
+use support_rules;
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse_file("jobs38.json");
+    let root: ToonNode = toon_root(doc);
+    let jobs: ToonNode = toon_key(root, "jobs");
+
+    loop i in 0..toon_len(jobs) {
+        let job: ToonNode = toon_at(jobs, i);
+        let name: Text = toon_get_text(job, "name");
+        let score: Int = toon_get_int_or(job, "score", DefaultScore);
+        let label: Text = classifySupport(score);
+        fx {
+            println(name, " -> ", label);
+        }
+    }
+
+    fx {
+        println("default = ", DefaultScore);
+    }
+
+    toon_close(doc);
+    ret;
+}
