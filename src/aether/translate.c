@@ -641,22 +641,22 @@ static void reportAetherRewriteError(const char *path,
     if (kind && detail) {
         if (strcmp(kind, "function") == 0 &&
             strstr(detail, "explicit return type")) {
-            code = "AETH-REWRITE-FUNCTION-RETURN-TYPE";
+            code = "SYN-001";
         } else if (strcmp(kind, "type") == 0 &&
                    strstr(detail, "type fields must end with ';', not ','")) {
-            code = "AETH-REWRITE-TYPE-FIELD-SEMICOLON";
+            code = "SYN-001";
         } else if (strcmp(kind, "declaration") == 0 &&
                    strstr(detail, "cannot infer the type of")) {
-            code = "AETH-REWRITE-LET-INFER";
+            code = "TYPE-001";
         } else if (strcmp(kind, "contract") == 0 &&
                    strstr(detail, "@pre must annotate the next function declaration")) {
-            code = "AETH-REWRITE-CONTRACT-PRE-DETACHED";
+            code = "ANN-001";
         } else if (strcmp(kind, "contract") == 0 &&
                    strstr(detail, "@post must annotate the next function declaration")) {
-            code = "AETH-REWRITE-CONTRACT-POST-DETACHED";
+            code = "ANN-001";
         } else if (strcmp(kind, "feature") == 0 &&
                    strstr(detail, "tuple return types are not supported yet")) {
-            code = "AETH-REWRITE-TUPLE-RETURNS-UNSUPPORTED";
+            code = "TUP-001";
         }
     }
 
@@ -6553,7 +6553,10 @@ static char *translateArrayAppendLine(const char *lineStart,
     if (!plus) {
         return NULL;
     }
-    itemOpen = findCharInRange(plus + 1, lineEnd, '[');
+    itemOpen = skipSpacesInRange(plus + 1, lineEnd);
+    if (itemOpen >= lineEnd || *itemOpen != '[') {
+        return NULL;
+    }
     itemClose = itemOpen ? findLastCharInRange(itemOpen + 1, lineEnd, ']') : NULL;
     if (!itemOpen || !itemClose || itemClose <= itemOpen) {
         return NULL;

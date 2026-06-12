@@ -46,6 +46,7 @@ INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_objec
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
 TUPLE_DESTRUCTURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_pass.aether"
 ARRAY_APPEND_PASS_FIXTURE="$ROOT_DIR/Tests/aether/dynamic_array_append_pass.aether"
+ARRAY_FIELD_INDEX_PASS_FIXTURE="$ROOT_DIR/Tests/aether/array_field_index_pass.aether"
 EXTENSION_CALL_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/extension_call_alias_pass.aether"
 TUPLE_DIRECT_BIND_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_return_unsupported_fail.aether"
 TUPLE_BAD_DESTRUCTURE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_let_destructure_unsupported_fail.aether"
@@ -420,6 +421,13 @@ printf '2\n7\n9\n' >/tmp/aether_array_append_expected.out
 if ! cmp -s /tmp/aether_array_append_expected.out /tmp/aether_array_append_pass.out; then
     echo "unexpected dynamic array append output" >&2
     cat /tmp/aether_array_append_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$ARRAY_FIELD_INDEX_PASS_FIXTURE" >/tmp/aether_array_field_index_pass.out
+printf '14\n' >/tmp/aether_array_field_index_expected.out
+if ! cmp -s /tmp/aether_array_field_index_expected.out /tmp/aether_array_field_index_pass.out; then
+    echo "unexpected array field index output" >&2
+    cat /tmp/aether_array_field_index_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$EXTENSION_CALL_ALIAS_PASS_FIXTURE" >/tmp/aether_extension_call_alias_pass.out
@@ -1070,7 +1078,7 @@ if ! grep -q '"line":1' /tmp/aether_function_missing_return_type_json.out; then
     cat /tmp/aether_function_missing_return_type_json.out >&2
     exit 1
 fi
-if ! grep -q '"code":"AETH-REWRITE-FUNCTION-RETURN-TYPE"' /tmp/aether_function_missing_return_type_json.out; then
+if ! grep -q '"code":"SYN-001"' /tmp/aether_function_missing_return_type_json.out; then
     echo "missing function diagnostics-json code" >&2
     cat /tmp/aether_function_missing_return_type_json.out >&2
     exit 1
@@ -1117,7 +1125,7 @@ if ! grep -q '"line":2' /tmp/aether_type_field_comma_json.out; then
     cat /tmp/aether_type_field_comma_json.out >&2
     exit 1
 fi
-if ! grep -q '"code":"AETH-REWRITE-TYPE-FIELD-SEMICOLON"' /tmp/aether_type_field_comma_json.out; then
+if ! grep -q '"code":"SYN-001"' /tmp/aether_type_field_comma_json.out; then
     echo "missing type field comma diagnostics-json code" >&2
     cat /tmp/aether_type_field_comma_json.out >&2
     exit 1
