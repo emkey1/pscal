@@ -23,6 +23,59 @@
       "prompt": "Write an Aether program that checks `has_toon()`. If TOON support is missing, print `toon unavailable` and exit. Otherwise parse the JSON text `{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}`, extract the `name` and `score`, print them as `Aether 42`, close the document, and return.",
       "solution": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
       "expected_stdout": "Aether 42\n"
+    },
+    {
+      "id": "array_average_real",
+      "prompt": "Write an Aether program that builds an `Int[]` dynamically by appending the values 85, 92, and 78, computes their average as a `Real`, and prints exactly `Average score: 85.00` on one line using width/precision formatting.",
+      "solution": "fn main() -> Void {\n    let scores: Int[] = [];\n    scores = scores + [85];\n    scores = scores + [92];\n    scores = scores + [78];\n\n    let n: Int = length(scores);\n    let sum: Int = 0;\n    loop i in 0..n {\n        sum = sum + scores[i];\n    }\n\n    let average: Real = sum * 1.0 / n;\n\n    fx {\n        println(\"Average score: \", average:0:2);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Average score: 85.00\n"
+    },
+    {
+      "id": "bank_account_methods",
+      "prompt": "Write an Aether program that defines a `BankAccount` type with `owner: Text` and `balance: Int`, plus `deposit(amount: Int) -> Void` and `withdraw(amount: Int) -> Bool` methods that mutate `self`. In `main`, create an account for Alice with balance 1000, withdraw 200, print whether the withdrawal succeeded and the new balance, then deposit 500 and print the final balance.",
+      "solution": "type BankAccount {\n    owner: Text;\n    balance: Int;\n\n    fn deposit(amount: Int) -> Void {\n        self.balance = self.balance + amount;\n        ret;\n    }\n\n    fn withdraw(amount: Int) -> Bool {\n        if self.balance >= amount {\n            self.balance = self.balance - amount;\n            ret true;\n        }\n        ret false;\n    }\n}\n\nfn main() -> Void {\n    let account: BankAccount = new BankAccount();\n    account.owner = \"Alice\";\n    account.balance = 1000;\n\n    let success: Bool = account.withdraw(200);\n\n    fx {\n        if success {\n            println(\"Withdrawal successful. New balance: \", account.balance);\n        } else {\n            println(\"Insufficient funds.\");\n        }\n    }\n\n    account.deposit(500);\n    fx {\n        println(\"Final balance: \", account.balance);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Withdrawal successful. New balance: 800\nFinal balance: 1300\n"
+    },
+    {
+      "id": "array_index_mutation",
+      "prompt": "Write an Aether program that starts with `let buffer: Int[] = [10, 20, 30, 40, 50];`, overwrites index 2 with 99, then doubles every even entry in a loop, and finally prints the modified buffer one entry per line under a `Modified buffer:` header.",
+      "solution": "fn main() -> Void {\n    let buffer: Int[] = [10, 20, 30, 40, 50];\n    let size: Int = length(buffer);\n    let first: Int = buffer[0];\n    buffer[2] = 99;\n\n    if first < 0 {\n        fx {\n            println(\"unreachable\");\n        }\n    }\n\n    loop i in 0..size {\n        let current: Int = buffer[i];\n        if current % 2 == 0 {\n            buffer[i] = current * 2;\n        }\n    }\n\n    fx {\n        println(\"Modified buffer:\");\n        loop i in 0..length(buffer) {\n            println(\"  [\", i, \"]: \", buffer[i]);\n        }\n    }\n    ret;\n}\n",
+      "expected_stdout": "Modified buffer:\n  [0]: 20\n  [1]: 40\n  [2]: 99\n  [3]: 80\n  [4]: 100\n"
+    },
+    {
+      "id": "bool_validation_flow",
+      "prompt": "Write an Aether program with a pure helper `validateUser(isActive: Bool, age: Int, role: Text) -> Bool` that returns true only for active adult admins. In `main`, call it with `true, 25, \\\"admin\\\"` and print either `Access granted.` or `Access denied.`.",
+      "solution": "@pure\nfn validateUser(isActive: Bool, age: Int, role: Text) -> Bool {\n    if !isActive {\n        ret false;\n    }\n    if age < 18 {\n        ret false;\n    }\n    if role != \"admin\" {\n        ret false;\n    }\n    ret true;\n}\n\nfn main() -> Void {\n    let active: Bool = true;\n    let age: Int = 25;\n    let role: Text = \"admin\";\n    let isValid: Bool = validateUser(active, age, role);\n\n    fx {\n        if isValid {\n            println(\"Access granted.\");\n        } else {\n            println(\"Access denied.\");\n        }\n    }\n    ret;\n}\n",
+      "expected_stdout": "Access granted.\n"
+    },
+    {
+      "id": "module_dual_helpers",
+      "prompt": "Write an Aether program that imports two helper modules, uses one exported function to add 5 and 10, uses the other exported function to get a label, and prints exactly `Result: 15`.",
+      "solution": "use math_utils;\nuse text_utils;\n\nfn main() -> Void {\n    let total: Int = MathUtils.add(5, 10);\n    let label: Text = TextUtils.resultLabel();\n    fx {\n        println(label, total);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Result: 15\n",
+      "files": {
+        "math_utils": "mod MathUtils {\n    @pure\n    export fn add(left: Int, right: Int) -> Int {\n        ret left + right;\n    }\n}\n",
+        "text_utils": "mod TextUtils {\n    @pure\n    export fn resultLabel() -> Text {\n        ret \"Result:\";\n    }\n}\n"
+      }
+    },
+    {
+      "id": "module_threshold_report",
+      "prompt": "Write an Aether program that imports `severity_rules` and `severity_labels`, defines a small `Finding` type, classifies three findings named alpha, beta, and gamma with scores 95, 80, and 40, and prints each prefixed severity line followed by the imported warm threshold.",
+      "solution": "use \"severity_rules\";\nuse \"severity_labels\";\n\ntype Finding {\n    name: Text;\n    score: Int;\n}\n\nfn main() -> Void {\n    let alpha: Finding = Finding { name: \"alpha\", score: 95 };\n    let beta: Finding = Finding { name: \"beta\", score: 80 };\n    let gamma: Finding = Finding { name: \"gamma\", score: 40 };\n    let items: Finding[] = [];\n    items = items + [alpha];\n    items = items + [beta];\n    items = items + [gamma];\n\n    let count: Int = length(items);\n    loop i in 0..count {\n        let item: Finding = items[i];\n        let level: Text = classifySeverity(item.score);\n        let prefix: Text = severityPrefix(level);\n        fx {\n            println(prefix, \" \", item.name);\n        }\n    }\n\n    fx {\n        println(\"threshold = \", WarmThreshold);\n    }\n    ret;\n}\n",
+      "expected_stdout": "[hot] alpha\n[warm] beta\n[cold] gamma\nthreshold = 80\n",
+      "files": {
+        "severity_rules": "mod SeverityRules {\n    export const WarmThreshold = 80;\n\n    @pure\n    export fn classifySeverity(score: Int) -> Text {\n        if score >= 90 {\n            ret \"hot\";\n        }\n        if score >= WarmThreshold {\n            ret \"warm\";\n        }\n        ret \"cold\";\n    }\n}\n",
+        "severity_labels": "mod SeverityLabels {\n    @pure\n    export fn severityPrefix(level: Text) -> Text {\n        if level == \"hot\" {\n            ret \"[hot]\";\n        }\n        if level == \"warm\" {\n            ret \"[warm]\";\n        }\n        ret \"[cold]\";\n    }\n}\n"
+      }
+    },
+    {
+      "id": "file_toon_batch",
+      "prompt": "Write an Aether program that checks `has_toon()`, checks that `jobs42.json` exists, parses it with `toon_parse_file`, reads the root object fields `batch` and `jobs`, classifies each job score with a pure helper, counts how many jobs are missing `score`, and prints the batch name, one `name -> label` line per job, and the missing-score count.",
+      "solution": "@pure\nfn classifyBatchScore(score: Int) -> Text {\n    if score >= 90 {\n        ret \"ready\";\n    }\n    if score >= 70 {\n        ret \"review\";\n    }\n    ret \"blocked\";\n}\n\nfn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"yyjson unavailable\");\n        }\n        ret;\n    }\n\n    if !fileexists(\"jobs42.json\") {\n        fx {\n            println(\"missing jobs42.json\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse_file(\"jobs42.json\");\n    let root: ToonNode = toon_root(doc);\n    let jobs: ToonNode = toon_key(root, \"jobs\");\n    let batchName: Text = toon_get_text(root, \"batch\");\n    let missingScores: Int = 0;\n\n    fx {\n        println(\"batch = \", batchName);\n    }\n\n    loop i in 0..toon_len(jobs) {\n        let job: ToonNode = toon_at(jobs, i);\n        let name: Text = toon_get_text(job, \"name\");\n        if !toon_has_key(job, \"score\") {\n            missingScores = missingScores + 1;\n        }\n        let score: Int = toon_get_int_or(job, \"score\", 0);\n        let label: Text = classifyBatchScore(score);\n        fx {\n            println(name, \" -> \", label);\n        }\n    }\n\n    fx {\n        println(\"missing scores = \", missingScores);\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "batch = daily-7\nalpha -> ready\nbeta -> review\ngamma -> blocked\nmissing scores = 1\n",
+      "files": {
+        "jobs42.json": "{\"batch\":\"daily-7\",\"jobs\":[{\"name\":\"alpha\",\"score\":93},{\"name\":\"beta\",\"score\":71},{\"name\":\"gamma\"}]}\n"
+      }
     }
   ]
 }

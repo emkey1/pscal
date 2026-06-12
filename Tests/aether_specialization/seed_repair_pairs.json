@@ -27,6 +27,41 @@
       "broken_source": "use \"helpers\";\n\nfn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
       "fixed_source": "fn main() -> Void {\n    fx {\n        println(42);\n    }\n    ret;\n}\n",
       "expected_stdout": "42\n"
+    },
+    {
+      "id": "repair_method_self_parameter",
+      "diagnostic": "Aether method error: do not declare an explicit self parameter inside a type method; methods receive `self` implicitly.",
+      "broken_source": "type Counter {\n    value: Int;\n\n    fn bump(self: Counter) -> Int {\n        self.value = self.value + 1;\n        ret self.value;\n    }\n}\n\nfn main() -> Void {\n    let counter: Counter = new Counter();\n    counter.value = 0;\n    fx {\n        println(counter.bump());\n    }\n    ret;\n}\n",
+      "fixed_source": "type Counter {\n    value: Int;\n\n    fn bump() -> Int {\n        self.value = self.value + 1;\n        ret self.value;\n    }\n}\n\nfn main() -> Void {\n    let counter: Counter = new Counter();\n    counter.value = 0;\n    fx {\n        println(counter.bump());\n    }\n    ret;\n}\n",
+      "expected_stdout": "1\n"
+    },
+    {
+      "id": "repair_println_string_concat",
+      "diagnostic": "Type mismatch: do not build print text with `Text + Int`; pass mixed values directly to `println`.",
+      "broken_source": "fn main() -> Void {\n    let score: Int = 42;\n    fx {\n        println(\"score = \" + score);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let score: Int = 42;\n    fx {\n        println(\"score = \", score);\n    }\n    ret;\n}\n",
+      "expected_stdout": "score = 42\n"
+    },
+    {
+      "id": "repair_toon_guarded_intermediate",
+      "diagnostic": "TOON access error: `_or` helpers only protect the final lookup; guard intermediate object lookups before descending.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"TOON unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"items\\\":[{\\\"id\\\":1,\\\"meta\\\":{\\\"code\\\":\\\"A\\\"}},{\\\"id\\\":2}]}\");\n    let root: ToonNode = toon_root(doc);\n    let items: ToonNode = toon_key(root, \"items\");\n\n    loop i in 0..toon_len(items) {\n        let item: ToonNode = toon_at(items, i);\n        let id: Int = toon_get_int(item, \"id\");\n        let code: Text = toon_get_text_or(toon_key(item, \"meta\"), \"code\", \"UNKNOWN\");\n        fx {\n            println(\"Item \", id, \" has code: \", code);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"TOON unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"items\\\":[{\\\"id\\\":1,\\\"meta\\\":{\\\"code\\\":\\\"A\\\"}},{\\\"id\\\":2}]}\");\n    let root: ToonNode = toon_root(doc);\n    let items: ToonNode = toon_key(root, \"items\");\n\n    loop i in 0..toon_len(items) {\n        let item: ToonNode = toon_at(items, i);\n        let id: Int = toon_get_int(item, \"id\");\n        let code: Text = \"UNKNOWN\";\n\n        if toon_has_key(item, \"meta\") {\n            let meta: ToonNode = toon_key(item, \"meta\");\n            code = toon_get_text_or(meta, \"code\", \"MISSING\");\n        }\n\n        fx {\n            println(\"Item \", id, \" has code: \", code);\n        }\n    }\n\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Item 1 has code: A\nItem 2 has code: UNKNOWN\n"
+    },
+    {
+      "id": "repair_float_formatting",
+      "diagnostic": "Formatting issue: default Real printing is verbose; use `value:width:precision` inside `println` when exact decimals matter.",
+      "broken_source": "fn main() -> Void {\n    let amount: Real = 19.99;\n    fx {\n        println(\"Amount: \", amount);\n    }\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    let amount: Real = 19.99;\n    fx {\n        println(\"Amount: \", amount:0:2);\n    }\n    ret;\n}\n",
+      "expected_stdout": "Amount: 19.99\n"
+    },
+    {
+      "id": "repair_type_for_toon_handle",
+      "diagnostic": "Aether declaration rewrite error: TOON handles should be bound with explicit `ToonDoc` or `ToonNode` types.",
+      "broken_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "fixed_source": "fn main() -> Void {\n    if !has_toon() {\n        fx {\n            println(\"toon unavailable\");\n        }\n        ret;\n    }\n\n    let doc: ToonDoc = toon_parse(\"{\\\"name\\\":\\\"Aether\\\",\\\"score\\\":42}\");\n    let root: ToonNode = toon_root(doc);\n    let name: Text = toon_get_text(root, \"name\");\n    let score: Int = toon_get_int(root, \"score\");\n    fx {\n        println(name, \" \", score);\n    }\n    toon_close(doc);\n    ret;\n}\n",
+      "expected_stdout": "Aether 42\n"
     }
   ]
 }

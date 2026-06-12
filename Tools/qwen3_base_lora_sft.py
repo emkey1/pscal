@@ -7,6 +7,7 @@ import argparse
 import importlib.util
 import json
 import random
+import re
 from pathlib import Path
 
 # The Spark training venv currently has an optional `kernels` package installed
@@ -40,6 +41,10 @@ def read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+def read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def format_messages(record: dict) -> str:
     parts: list[str] = []
     for message in record.get("messages", []):
@@ -49,6 +54,28 @@ def format_messages(record: dict) -> str:
             continue
         parts.append(f"### {role}\n{content}")
     return "\n\n".join(parts).strip() + "\n"
+
+
+def chunk_reference_text(text: str, *, max_chars: int = 6000) -> list[str]:
+    sections: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in text.splitlines():
+        is_heading = line.startswith("#")
+        line_len = len(line) + 1
+        if current and ((is_heading and current_len >= max_chars // 2) or current_len + line_len > max_chars):
+            sections.append("\n".join(current).strip() + "\n")
+            current = []
+            current_len = 0
+        current.append(line)
+        current_len += line_len
+    if current:
+        sections.append("\n".join(current).strip() + "\n")
+    return [section for section in sections if section.strip()]
+
+
+def slugify(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-") or "reference"
 
 
 def load_records(instruction_jsonl: Path, repair_jsonl: Path) -> list[dict]:
@@ -69,6 +96,27 @@ def load_records(instruction_jsonl: Path, repair_jsonl: Path) -> list[dict]:
     return filtered
 
 
+def load_reference_records(reference_json: Path | None) -> list[dict]:
+    if reference_json is None or not reference_json.exists():
+        return []
+    payload = read_json(reference_json)
+    records: list[dict] = []
+    for item in payload.get("items", []):
+        path = str(item.get("path", "reference"))
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        for idx, chunk in enumerate(chunk_reference_text(content), start=1):
+            records.append(
+                {
+                    "id": f"{slugify(path)}_chunk_{idx}",
+                    "kind": "reference_corpus",
+                    "text": f"### REFERENCE\n{path}\n\n{chunk}".strip() + "\n",
+                }
+            )
+    return records
+
+
 class SaveMetadataCallback(TrainerCallback):
     def __init__(self, path: Path, metadata: dict) -> None:
         self.path = path
@@ -84,6 +132,7 @@ def main() -> int:
     parser.add_argument("--model-id", default="Qwen/Qwen3-4B-Base")
     parser.add_argument("--instruction-jsonl", type=Path, required=True)
     parser.add_argument("--repair-jsonl", type=Path, required=True)
+    parser.add_argument("--reference-json", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
@@ -105,6 +154,7 @@ def main() -> int:
     torch.manual_seed(args.seed)
 
     records = load_records(args.instruction_jsonl, args.repair_jsonl)
+    reference_records = load_reference_records(args.reference_json)
     if len(records) < 2:
         raise SystemExit("need at least two verified records for train/eval split")
 
@@ -112,6 +162,8 @@ def main() -> int:
     split_index = max(1, min(len(records) - 1, int(len(records) * args.train_split)))
     train_records = records[:split_index]
     eval_records = records[split_index:]
+    random.shuffle(reference_records)
+    train_records = train_records + reference_records
 
     train_dataset = Dataset.from_list(train_records)
     eval_dataset = Dataset.from_list(eval_records)
@@ -170,8 +222,11 @@ def main() -> int:
         "model_id": args.model_id,
         "instruction_jsonl": str(args.instruction_jsonl),
         "repair_jsonl": str(args.repair_jsonl),
+        "reference_json": str(args.reference_json) if args.reference_json else None,
         "train_records": len(train_records),
         "eval_records": len(eval_records),
+        "supervised_train_records": len(records[:split_index]),
+        "reference_train_records": len(reference_records),
         "max_seq_len": args.max_seq_len,
         "epochs": args.epochs,
         "batch_size": args.batch_size,
