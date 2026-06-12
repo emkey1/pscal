@@ -30,6 +30,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     corpus_json = output_dir / "aether_raw_corpus.json"
+    reference_json = output_dir / "aether_reference_corpus.json"
     instruction_jsonl = output_dir / "aether_instruction_sft.jsonl"
     repair_jsonl = output_dir / "aether_repair_sft.jsonl"
 
@@ -37,8 +38,16 @@ def main() -> int:
         [
             "python3",
             str(REPO_ROOT / "tools" / "aether_specialization_export_corpus.py"),
-            "--output",
+            "--output-json",
             str(corpus_json),
+        ]
+    )
+    run(
+        [
+            "python3",
+            str(REPO_ROOT / "tools" / "aether_specialization_export_reference_corpus.py"),
+            "--output-json",
+            str(reference_json),
         ]
     )
     run(
@@ -59,6 +68,7 @@ def main() -> int:
     )
 
     print(f"corpus_json={corpus_json}")
+    print(f"reference_json={reference_json}")
     print(f"instruction_jsonl={instruction_jsonl}")
     print(f"repair_jsonl={repair_jsonl}")
     return 0

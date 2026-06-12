@@ -32,6 +32,7 @@ python3 tools/aether_specialization_prepare_assets.py \
 That command exports:
 
 - a raw-code corpus manifest
+- a reference/instruction corpus manifest
 - verified instruction JSONL
 - verified repair JSONL
 
@@ -40,6 +41,15 @@ The raw corpus currently pulls from:
 - `Examples/aether/base/*`
 - `Examples/aether/showcase/*`
 - `Tests/aether_specialization/corpus_candidates/*`
+
+The separate reference corpus currently pulls from:
+
+- `Docs/aether_for_llms_and_others.md`
+- `Docs/aether_for_llms_with_small_contexts.md`
+
+Keep that reference corpus separate from raw executable Aether source. It is
+meant for instruction-style conditioning, synthetic-pair generation, or
+retrieval-time context, not for blind mixing into the verified source corpus.
 
 The output is intended to become the first input to a `Qwen/Qwen3-4B-Base`
 specialization run.
