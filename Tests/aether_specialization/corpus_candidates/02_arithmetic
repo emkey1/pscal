@@ -3,7 +3,8 @@
 // expect: sum = 10
 // expect: difference = 4
 // expect: product = 21
-// expect: quotient = 2   (Int / Int is integer-style)
+// note: Int / Int is integer-style here
+// expect: quotient = 2
 
 fn main() -> Void {
     let a: Int = 7;

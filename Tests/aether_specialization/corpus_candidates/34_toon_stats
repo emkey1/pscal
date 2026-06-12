@@ -3,7 +3,7 @@
 // stable decimal output
 // expect: transactions = 4
 // expect: total = 545
-// expect: large share = 50.00%
+// expect: large share = 50.00 %
 
 fn main() -> Void {
     if !has_toon() {

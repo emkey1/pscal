@@ -2,7 +2,7 @@
 // Concepts: default Real format (6 decimals) vs value:width:precision
 // expect: 2.718280
 // expect: 2.72
-// expect:    2.718   (width 8, precision 3)
+// expect:    2.718
 
 fn main() -> Void {
     let e: Real = 2.71828;

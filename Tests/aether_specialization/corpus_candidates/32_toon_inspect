@@ -6,7 +6,7 @@
 // expect: color 1 = green
 // expect: color 2 = blue
 // expect: index 5 present: no
-// expect: kind = <backend-defined kind name for arrays>
+// expect: kind = array
 
 fn main() -> Void {
     if !has_toon() {

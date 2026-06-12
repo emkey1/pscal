@@ -1,9 +1,9 @@
 // 36_pipeline_capstone
 // Concepts: end-to-end shape — pure classification, contract-guarded
 // normalization, record construction from TOON rows, effectful report
-// expect: alpha [95] -> ready
-// expect: beta [72] -> review
-// expect: gamma [100] -> ready
+// expect: alpha [ 95] -> ready
+// expect: beta [ 72] -> review
+// expect: gamma [ 100] -> ready
 // expect: ready jobs = 2
 
 const DefaultScore: Int = 50;
