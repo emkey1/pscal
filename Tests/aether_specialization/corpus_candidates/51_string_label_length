@@ -1,0 +1,20 @@
+// 51_string_label_length
+// Concepts: string concatenation, string_len, inline conditional expression
+// expect: Generated ID: ID-12345-V2
+// expect: Length: 11 -> Status: Long ID
+// expect: Length is an Int: 11
+
+fn main() -> Void {
+    let prefix: Text = "ID-";
+    let suffix: Text = "-V2";
+    let fullId: Text = prefix + "12345" + suffix;
+    let len: Int = string_len(fullId);
+    let label: Text = if len > 10 { "Long ID" } else { "Short ID" };
+
+    fx {
+        println("Generated ID: ", fullId);
+        println("Length: ", len, " -> Status: ", label);
+        println("Length is an Int: ", len);
+    }
+    ret;
+}
