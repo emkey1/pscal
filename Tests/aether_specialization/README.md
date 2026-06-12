@@ -37,3 +37,53 @@ That command exports:
 
 The output is intended to become the first input to a `Qwen/Qwen3-4B-Base`
 specialization run.
+
+## Spark workflow
+
+Prepare and sync verified assets to the Spark workspace:
+
+```bash
+python3 tools/aether_specialization_sync_to_spark.py
+```
+
+Sync the trainer script only:
+
+```bash
+python3 tools/spark_qwen3_base_train_remote.py sync-script
+```
+
+Start a short smoke run:
+
+```bash
+python3 tools/spark_qwen3_base_train_remote.py \
+  --run-name sft-seed-smoke-v1 \
+  --epochs 1 \
+  --max-seq-len 4096 \
+  --save-steps 5 \
+  start
+```
+
+Check status and tail the remote log:
+
+```bash
+python3 tools/spark_qwen3_base_train_remote.py --run-name sft-seed-smoke-v1 status
+```
+
+Start the convenience wrapper:
+
+```bash
+bash Tools/run_qwen3_base_spark_training.sh sft-seed-v1
+```
+
+Current first-pass trainer:
+
+- `tools/qwen3_base_lora_sft.py`
+
+Current remote helpers:
+
+- `tools/aether_specialization_sync_to_spark.py`
+- `tools/spark_qwen3_base_train_remote.py`
+
+Current default remote workspace:
+
+- `~/training/aether-qwen3-base`
