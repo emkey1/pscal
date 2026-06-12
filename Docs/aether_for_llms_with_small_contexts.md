@@ -35,6 +35,7 @@ Default generation stance:
 - prefer a single-file program unless a real module is explicitly provided
 - prefer `println("label = ", value)` over mixed-type string concatenation
 - prefer explicit types whenever a value came from TOON or a non-trivial helper
+- do not hard-code the expected output text in place of real logic
 
 ## Core syntax
 
@@ -166,6 +167,8 @@ println(value:0:2);  // 2 decimals
 println(value:8:3);  // width 8, precision 3
 ```
 
+If exact output matters, prefer `value:0:2` style formatting over the default.
+
 Division rule:
 
 - `a / b` with `Int` operands behaves like integer-style arithmetic
@@ -294,6 +297,7 @@ Golden TOON rule:
 - if JSON starts with `[` then iterate `root`
 - if JSON starts with `{` then usually extract a named array field first
 - never assume `root` itself is the row array in object-shaped payloads
+- never invent dotted keys like `"server.port"` for nested objects
 
 Bad:
 

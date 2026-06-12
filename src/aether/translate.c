@@ -7888,6 +7888,30 @@ char *aetherRewriteSource(const char *source, const char *path) {
             body++;
         }
 
+        if (body == lineEnd) {
+            if (!bufferAppend(&out, "\n") ||
+                !trackRewriteOutputLines("\n", &outputLineNumber, lineNumber)) {
+                freePendingContracts(&pending);
+                clearFunctionContracts(&fnState);
+                clearParBlockState(&parState);
+                clearTypeBlockState(&typeState);
+                freeAetherBindingTable(&bindingTable);
+                freeAetherFunctionTable(&functionTable);
+                freeToonLiteralTable(&toonTable);
+                freeAetherTupleTable(&tupleTable);
+                free(preprocessed);
+                free(out.data);
+                return NULL;
+            }
+            if (*lineEnd == '\n') {
+                cursor = lineEnd + 1;
+                lineNumber++;
+            } else {
+                cursor = lineEnd;
+            }
+            continue;
+        }
+
         size_t lineOutputStart = out.len;
         int outputLineBeforeLine = outputLineNumber;
 

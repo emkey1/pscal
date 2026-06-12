@@ -8,6 +8,8 @@ the generated source with the local `aether` binary.
 Two model adapters are supported:
 
 1. `openai`: calls the Responses API with a configured model.
+2. `openai_chat_completions`: calls an OpenAI-compatible chat completions API.
+3. `openai_completions`: calls an OpenAI-compatible raw completions API.
 2. `command`: runs an external command that reads the prompt from a file.
 
 The benchmark focuses on practical success:
@@ -527,6 +529,8 @@ def build_prompt(doc_name: str, doc_text: str, task: Task) -> str:
 
         Expected stdout:
         {task.expected_stdout}
+
+        Aether source:
         """
     )
 
@@ -554,6 +558,8 @@ def build_python_prompt(task: Task) -> str:
 
         Expected stdout:
         {task.expected_stdout}
+
+        Python source:
         """
     )
 
@@ -670,6 +676,8 @@ def build_repair_prompt(
 
         Previous source:
         {previous_source}
+
+        Corrected Aether source:
         """
     )
 
@@ -719,6 +727,8 @@ def build_python_repair_prompt(
 
         Previous source:
         {previous_source}
+
+        Corrected Python source:
         """
     )
 
@@ -1009,6 +1019,7 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
             {"role": "user", "content": prompt},
         ],
         "max_tokens": destination.max_output_tokens,
+        "stop": [OUTPUT_END_MARKER],
     }
     if destination.temperature >= 0:
         body["temperature"] = destination.temperature
@@ -1028,6 +1039,43 @@ def invoke_openai_chat_completions(prompt: str, destination: Destination) -> dic
     output_text = flatten_chat_content(message.get("content"))
     if not output_text:
         raise RuntimeError("chat completions reply did not contain message content")
+
+    return {
+        "raw_text": output_text,
+        "response_id": payload.get("id"),
+        "usage": payload.get("usage"),
+    }
+
+
+def invoke_openai_completions(prompt: str, destination: Destination) -> dict[str, Any]:
+    if not destination.model:
+        raise RuntimeError("destination model is required for openai_completions")
+    base_url = (destination.base_url or "https://api.openai.com/v1").rstrip("/")
+    api_key = resolve_api_key(destination)
+
+    body = {
+        "model": destination.model,
+        "prompt": prompt,
+        "max_tokens": destination.max_output_tokens,
+        "stop": [OUTPUT_END_MARKER],
+    }
+    if destination.temperature >= 0:
+        body["temperature"] = destination.temperature
+
+    payload = http_json_request(
+        f"{base_url}/completions",
+        body,
+        api_key,
+        timeout_seconds=destination.request_timeout_seconds,
+        max_retries=destination.request_max_retries,
+        retry_backoff_seconds=destination.retry_backoff_seconds,
+    )
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError("completions reply did not contain choices")
+    output_text = str(choices[0].get("text", ""))
+    if not output_text:
+        raise RuntimeError("completions reply did not contain text")
 
     return {
         "raw_text": output_text,
@@ -1117,6 +1165,8 @@ def run_model(prompt: str, destination: Destination) -> dict[str, Any]:
         return invoke_openai_responses(prompt=prompt, destination=destination)
     if destination.kind == "openai_chat_completions":
         return invoke_openai_chat_completions(prompt=prompt, destination=destination)
+    if destination.kind == "openai_completions":
+        return invoke_openai_completions(prompt=prompt, destination=destination)
     if destination.kind == "command":
         if not destination.command_template:
             raise RuntimeError("command_template is required for command destinations")

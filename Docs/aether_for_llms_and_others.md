@@ -85,6 +85,9 @@ Never generate Aether code with:
 - `@pre`, `@post`, `@pure`, or `@cost` inside a function body
 - tuple-return calls bound to one variable, such as `let value = pair();`
 - mixed-type output built by guessing that `+` will stringify numbers
+- guessed dotted TOON keys such as `"server.port"` or `"app.name"`
+- fake logic that only prints the expected answer text without actually
+  computing it from the input
 - Markdown fences around the program, such as ```aether ... ```
 
 ## Canonical vs accepted forms
@@ -583,6 +586,9 @@ fn main() -> Void {
     ret;
 }
 ```
+
+When a test expects exact output, prefer explicit formatting. `println(x:0:2)`
+is safer than plain `println(x)` when the exact number of decimals matters.
 
 Common cases:
 
@@ -1138,6 +1144,11 @@ Do not guess replacements like:
 - `toon_get_int_or(root, "port", 0)`
 - `toon_get_text_or(root, "appName", "")`
 - `toon_get_text_or(root, "logLevel", "info")`
+- `toon_get_int_or(root, "server.port", 0)`
+- `toon_get_text_or(root, "app.name", "")`
+
+For nested objects, stage the lookup one object at a time. Do not invent
+dotted-key access unless the payload literally uses dotted keys as flat strings.
 
 Benchmark-shaped config pattern:
 
