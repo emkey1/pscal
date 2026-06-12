@@ -212,9 +212,18 @@ fn main() -> Void {
 ```
 
 Limits: top-level helper functions only; destructuring must be a direct call;
-no binding to a single name; no tuple-return methods; no `@post` on
-tuple-return functions. [VERIFY: arity — pairs only, or `(a, b, c)` and mixed
-element types too? State the exact limit.]
+no binding to a single name; no tuple-return methods. `@post` is allowed on
+tuple-return helpers, but only with positional result slots:
+
+```aether
+@post result.0 <= result.1
+fn ordered(a: Int, b: Int) -> (Int, Int) {
+    ret (a, b);
+}
+```
+
+Use `result.0`, `result.1`, and so on inside tuple `@post` expressions. Do not
+write bare `result` there.
 
 ## Variables and constants
 
@@ -437,6 +446,8 @@ fn clamp(score: Int) -> Int {
 - `@pure` functions reject effectful builtins and calls into known non-pure
   Aether functions
 - `@pre` / `@post` take expressions; `@post` may reference `result`
+- for tuple-return helpers, `@post` must use positional slots such as
+  `result.0` and `result.1`
 - [VERIFY: may multiple `@pre` lines stack on one function? one line either way]
 - `@cost <n><unit>` validates a budget annotation; units: `ns us ms s op ops
   step steps`

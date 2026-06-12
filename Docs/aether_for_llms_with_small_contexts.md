@@ -33,7 +33,8 @@ compiler, and VM. It is not a separate runtime.
 11. **LEN-001.** `toon_len(node)` for TOON arrays; `length(xs)` for dynamic
     arrays.
 12. **TUP-001.** Tuples are narrow: `let (a, b) = pair();` on a direct
-    top-level helper call only. Never `let value = pair();`.
+    top-level helper call only. Never `let value = pair();`. Tuple `@post`
+    checks must use positional slots like `result.0`, `result.1`.
 13. **OUT-001.** Return raw Aether source only. No Markdown fences.
 14. **ROOT-001.** If the JSON starts with `{`, extract the named array with
     `toon_key(root, "...")` before iterating. Only iterate `root` directly

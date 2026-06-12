@@ -7,9 +7,9 @@ adapter_path="${2:-}"
 
 mkdir -p "$(dirname "$output_json")"
 
-start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" start-server --wait-seconds 1800)
+start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" --host "claw@100.124.15.16" start-server --wait-seconds 1800)
 if [ -n "$adapter_path" ]; then
-  start_args+=(--adapter-path "$adapter_path")
+  start_args=(python3 "$repo_root/tools/spark_qwen3_base_remote.py" --host "claw@100.124.15.16" --adapter-path "$adapter_path" start-server --wait-seconds 1800)
 fi
 "${start_args[@]}"
 

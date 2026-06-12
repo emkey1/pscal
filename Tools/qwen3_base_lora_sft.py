@@ -177,7 +177,7 @@ def main() -> int:
     model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
         torch_dtype=torch.bfloat16,
-        device_map="auto",
+        low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
 

@@ -557,6 +557,18 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/qnext29.aether",
       "sha256": "37d10fe53e9ce12c0de252b57bd4ec436355e6a518bd9616293b995f8070b031",
       "stdout": "Ratio (default): 2.333333\nRatio (prec=2): 2.33\nRatio (padded):     2.3333\n"
+    },
+    {
+      "source_path": "/tmp/tuple_post_bounds.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/tuple_post_bounds.aether",
+      "sha256": "bacc27b13c2f59c50734ff9c5cf5afe365e17418fde188da517f67446541da99",
+      "stdout": "lo = 4\nhi = 9\n"
+    },
+    {
+      "source_path": "/tmp/tuple_post_clamp_flag.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/tuple_post_clamp_flag.aether",
+      "sha256": "0e1660417668f2f29592df973904bfa91fcc63e787838f080472ee66b53d9c77",
+      "stdout": "150 => 100 / true\n42 => 42 / false\n"
     }
   ]
 }

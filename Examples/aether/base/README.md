@@ -121,6 +121,8 @@ These examples stay within the currently supported Aether Core subset:
   forms without changing the shared backend
 - `contract_layouts`: shows `@pre`, `@post`, and `@cost` surviving realistic
   blank-line and comment-separated layouts before a function declaration
+- `tuple_post_contracts`: shows the narrow supported tuple-contract form where
+  `@post` uses positional slots such as `result.0` and `result.1`
 - `task_helpers`: shows the compact Aether task/thread alias surface along with
   the `has_ai()` capability probe, while still respecting `fx` around effectful
   worker launches

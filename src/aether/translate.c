@@ -4577,6 +4577,131 @@ static char *rewriteMethodScopedExpr(const char *start,
     return out.data;
 }
 
+static char *rewriteTuplePostExpr(const char *start,
+                                  const char *end,
+                                  const FunctionContracts *fnState,
+                                  char *detail,
+                                  size_t detailSize) {
+    const char *cursor = start;
+    Buffer out = {0};
+
+    if (detail && detailSize > 0) {
+        detail[0] = '\0';
+    }
+    if (!start || !end || end < start || !fnState || !fnState->tupleTypeName) {
+        return NULL;
+    }
+
+    while (cursor < end) {
+        if (*cursor == '"' || *cursor == '\'') {
+            char quote = *cursor++;
+
+            if (!bufferAppendN(&out, cursor - 1, 1)) {
+                free(out.data);
+                return NULL;
+            }
+            while (cursor < end) {
+                if (!bufferAppendN(&out, cursor, 1)) {
+                    free(out.data);
+                    return NULL;
+                }
+                if (*cursor == '\\' && cursor + 1 < end) {
+                    cursor++;
+                    if (!bufferAppendN(&out, cursor, 1)) {
+                        free(out.data);
+                        return NULL;
+                    }
+                } else if (*cursor == quote) {
+                    cursor++;
+                    break;
+                }
+                cursor++;
+            }
+            continue;
+        }
+        if ((cursor == start || !isIdentifierChar((unsigned char)cursor[-1])) &&
+            (isalpha((unsigned char)*cursor) || *cursor == '_')) {
+            const char *nameStart = cursor;
+            const char *nameEnd = cursor + 1;
+
+            while (nameEnd < end && isIdentifierChar((unsigned char)*nameEnd)) {
+                nameEnd++;
+            }
+            if ((size_t)(nameEnd - nameStart) == 6 &&
+                strncmp(nameStart, "result", 6) == 0) {
+                const char *dot = skipSpacesInRange(nameEnd, end);
+
+                if (dot < end && *dot == '.') {
+                    const char *indexStart = skipSpacesInRange(dot + 1, end);
+                    const char *indexEnd = indexStart;
+                    unsigned long tupleIndex = 0;
+                    char fieldName[64];
+
+                    while (indexEnd < end && isdigit((unsigned char)*indexEnd)) {
+                        indexEnd++;
+                    }
+                    if (indexEnd == indexStart) {
+                        if (detail && detailSize > 0) {
+                            snprintf(detail,
+                                     detailSize,
+                                     "tuple @post access must use `result.0`, `result.1`, and so on.");
+                        }
+                        free(out.data);
+                        return NULL;
+                    }
+                    tupleIndex = strtoul(indexStart, NULL, 10);
+                    if (tupleIndex >= fnState->tupleItemCount) {
+                        if (detail && detailSize > 0) {
+                            snprintf(detail,
+                                     detailSize,
+                                     "tuple @post index %lu is out of range; this function returns %zu values.",
+                                     tupleIndex,
+                                     fnState->tupleItemCount);
+                        }
+                        free(out.data);
+                        return NULL;
+                    }
+                    if (indexEnd < end && isIdentifierChar((unsigned char)*indexEnd)) {
+                        if (detail && detailSize > 0) {
+                            snprintf(detail,
+                                     detailSize,
+                                     "tuple @post access must use a numeric slot like `result.0`.");
+                        }
+                        free(out.data);
+                        return NULL;
+                    }
+                    snprintf(fieldName,
+                             sizeof(fieldName),
+                             "%s_item%lu",
+                             fnState->tupleTypeName,
+                             tupleIndex);
+                    if (!bufferAppend(&out, fieldName)) {
+                        free(out.data);
+                        return NULL;
+                    }
+                    cursor = indexEnd;
+                    continue;
+                }
+
+                if (detail && detailSize > 0) {
+                    snprintf(detail,
+                             detailSize,
+                             "tuple-return @post checks must reference slots explicitly, for example `result.0` or `result.1`.");
+                }
+                free(out.data);
+                return NULL;
+            }
+        }
+        if (!bufferAppendN(&out, cursor, 1)) {
+            free(out.data);
+            return NULL;
+        }
+        cursor++;
+    }
+
+    return out.data;
+}
+
 static int isAetherOpaqueHandleTypeName(const char *typeName) {
     return typeName &&
            (strcmp(typeName, "ToonDoc") == 0 || strcmp(typeName, "ToonNode") == 0);
@@ -5792,6 +5917,19 @@ static char *translateTupleReturnLine(const char *lineStart,
             free(out.data);
             return NULL;
         }
+    }
+    if (fnState->postExpr &&
+        !appendContractGuard(&out,
+                             indent,
+                             fnState->name,
+                             "post",
+                             fnState->postExpr,
+                             jsonState,
+                             toonTable)) {
+        free(indent);
+        freeTupleItemTypes(items, itemCount);
+        free(out.data);
+        return NULL;
     }
     if (!bufferAppend(&out, indent) ||
         !bufferAppend(&out, "return;")) {
@@ -8008,7 +8146,11 @@ char *aetherRewriteSource(const char *source, const char *path) {
             fnState.sawFallthroughTopLevelStmt = 1;
         }
 
-        if (fnState.active && fnState.postExpr && fnState.isVoid && braceDepth == fnState.bodyDepth) {
+        if (fnState.active &&
+            fnState.postExpr &&
+            fnState.isVoid &&
+            !fnState.tupleTypeName &&
+            braceDepth == fnState.bodyDepth) {
             if (isStandaloneCloseBrace(body, lineEnd)) {
                 char *indent = dupRange(lineStart, body);
                 size_t outLenBefore = out.len;
@@ -8499,6 +8641,9 @@ char *aetherRewriteSource(const char *source, const char *path) {
             free(translated);
             translated = NULL;
             if (hasTupleReturn) {
+                char *tuplePostExpr = NULL;
+                char tuplePostDetail[256] = {0};
+
                 if (typeState.active) {
                     reportAetherRewriteError(path,
                                              lineNumber,
@@ -8521,27 +8666,6 @@ char *aetherRewriteSource(const char *source, const char *path) {
                     free(out.data);
                     return NULL;
                 }
-                if (pending.postExpr) {
-                    reportAetherRewriteError(path,
-                                             lineNumber,
-                                             "feature",
-                                             "tuple-return functions do not support @post yet.",
-                                             "use @pre only for now, or return a named object type if you need postconditions.");
-                    freeTupleItemTypes(tupleItemTypes, tupleItemCount);
-                    free(fnName);
-                    free(returnType);
-                    freePendingContracts(&pending);
-                    clearFunctionContracts(&fnState);
-                    clearParBlockState(&parState);
-                    clearTypeBlockState(&typeState);
-                    freeAetherBindingTable(&bindingTable);
-                    freeAetherFunctionTable(&functionTable);
-                    freeToonLiteralTable(&toonTable);
-                    freeAetherTupleTable(&tupleTable);
-                    free(preprocessed);
-                    free(out.data);
-                    return NULL;
-                }
                 existingTupleSig = findAetherTupleSig(&tupleTable, fnName, strlen(fnName));
                 if (existingTupleSig && existingTupleSig->tupleTypeName) {
                     snprintf(tupleTypeName,
@@ -8551,6 +8675,42 @@ char *aetherRewriteSource(const char *source, const char *path) {
                 } else {
                     nextTupleTypeId++;
                     snprintf(tupleTypeName, sizeof(tupleTypeName), "__aether_tuple_%d", nextTupleTypeId);
+                }
+                if (pending.postExpr) {
+                    FunctionContracts tuplePostState = {0};
+
+                    tuplePostState.tupleTypeName = tupleTypeName;
+                    tuplePostState.tupleItemCount = tupleItemCount;
+                    tuplePostExpr = rewriteTuplePostExpr(pending.postExpr,
+                                                         pending.postExpr + strlen(pending.postExpr),
+                                                         &tuplePostState,
+                                                         tuplePostDetail,
+                                                         sizeof(tuplePostDetail));
+                    if (!tuplePostExpr) {
+                        reportAetherRewriteError(path,
+                                                 lineNumber,
+                                                 "contract",
+                                                 tuplePostDetail[0]
+                                                     ? tuplePostDetail
+                                                     : "tuple-return @post rewrite failed.",
+                                                 "use positional tuple slots in @post, for example `result.0` and `result.1`.");
+                        freeTupleItemTypes(tupleItemTypes, tupleItemCount);
+                        free(fnName);
+                        free(returnType);
+                        freePendingContracts(&pending);
+                        clearFunctionContracts(&fnState);
+                        clearParBlockState(&parState);
+                        clearTypeBlockState(&typeState);
+                        freeAetherBindingTable(&bindingTable);
+                        freeAetherFunctionTable(&functionTable);
+                        freeToonLiteralTable(&toonTable);
+                        freeAetherTupleTable(&tupleTable);
+                        free(preprocessed);
+                        free(out.data);
+                        return NULL;
+                    }
+                    free(pending.postExpr);
+                    pending.postExpr = tuplePostExpr;
                 }
                 translated = translateTupleFnLine(lineStart,
                                                   body,

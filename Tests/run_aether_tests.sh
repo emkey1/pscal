@@ -49,11 +49,13 @@ INLINE_OBJECT_METHOD_INFERENCE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_objec
 INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE="$ROOT_DIR/Tests/aether/inline_object_method_inference_comment_pass.aether"
 TUPLE_DESTRUCTURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_pass.aether"
 TUPLE_DESTRUCTURE_FORWARD_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_destructure_forward_pass.aether"
+TUPLE_POST_PASS_FIXTURE="$ROOT_DIR/Tests/aether/tuple_post_pass.aether"
 ARRAY_APPEND_PASS_FIXTURE="$ROOT_DIR/Tests/aether/dynamic_array_append_pass.aether"
 ARRAY_FIELD_INDEX_PASS_FIXTURE="$ROOT_DIR/Tests/aether/array_field_index_pass.aether"
 EXTENSION_CALL_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/extension_call_alias_pass.aether"
 TUPLE_DIRECT_BIND_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_return_unsupported_fail.aether"
 TUPLE_BAD_DESTRUCTURE_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_let_destructure_unsupported_fail.aether"
+TUPLE_POST_INVALID_RESULT_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/tuple_post_invalid_result_fail.aether"
 PURE_PASS_FIXTURE="$ROOT_DIR/Tests/aether/pure_pass.aether"
 PURE_FAIL_EFFECTFUL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_effectful.aether"
 PURE_FAIL_NON_PURE_CALL_FIXTURE="$ROOT_DIR/Tests/aether/pure_fail_non_pure_call.aether"
@@ -162,6 +164,7 @@ for fixture in \
     "$INLINE_OBJECT_METHOD_INFERENCE_COMMENT_PASS_FIXTURE" \
     "$TUPLE_DESTRUCTURE_PASS_FIXTURE" \
     "$TUPLE_DESTRUCTURE_FORWARD_PASS_FIXTURE" \
+    "$TUPLE_POST_PASS_FIXTURE" \
     "$ARRAY_APPEND_PASS_FIXTURE" \
     "$EXTENSION_CALL_ALIAS_PASS_FIXTURE" \
     "$TUPLE_DIRECT_BIND_FAIL_FIXTURE" \
@@ -442,6 +445,13 @@ if ! cmp -s /tmp/aether_tuple_destructure_forward_expected.out /tmp/aether_tuple
     cat /tmp/aether_tuple_destructure_forward_pass.out >&2
     exit 1
 fi
+"$AETHER_BIN" --no-cache "$TUPLE_POST_PASS_FIXTURE" >/tmp/aether_tuple_post_pass.out
+printf 'lo = 3\nhi = 8\n' >/tmp/aether_tuple_post_expected.out
+if ! cmp -s /tmp/aether_tuple_post_expected.out /tmp/aether_tuple_post_pass.out; then
+    echo "unexpected tuple post output" >&2
+    cat /tmp/aether_tuple_post_pass.out >&2
+    exit 1
+fi
 "$AETHER_BIN" --no-cache "$ARRAY_APPEND_PASS_FIXTURE" >/tmp/aether_array_append_pass.out
 printf '2\n7\n9\n' >/tmp/aether_array_append_expected.out
 if ! cmp -s /tmp/aether_array_append_expected.out /tmp/aether_array_append_pass.out; then
@@ -479,6 +489,15 @@ fi
 if ! grep -q "tuple destructuring target is not a known tuple-return function" /tmp/aether_tuple_bad_destructure_fail.out; then
     echo "missing tuple bad destructure failure message" >&2
     cat /tmp/aether_tuple_bad_destructure_fail.out >&2
+    exit 1
+fi
+if "$AETHER_BIN" --no-cache "$TUPLE_POST_INVALID_RESULT_FAIL_FIXTURE" >/tmp/aether_tuple_post_invalid_result_fail.out 2>&1; then
+    echo "expected tuple @post positional failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "tuple-return @post checks must reference slots explicitly" /tmp/aether_tuple_post_invalid_result_fail.out; then
+    echo "missing tuple @post positional failure message" >&2
+    cat /tmp/aether_tuple_post_invalid_result_fail.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$PURE_PASS_FIXTURE" >/dev/null

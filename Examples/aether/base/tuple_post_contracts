@@ -1,0 +1,16 @@
+@pre low <= high
+@post result.0 <= result.1
+@post result.0 >= low
+@post result.1 <= high
+fn normalizeBounds(low: Int, high: Int) -> (Int, Int) {
+    ret (low, high);
+}
+
+fn main() -> Void {
+    let (lo, hi) = normalizeBounds(4, 9);
+    fx {
+        println("lo = ", lo);
+        println("hi = ", hi);
+    }
+    ret;
+}
