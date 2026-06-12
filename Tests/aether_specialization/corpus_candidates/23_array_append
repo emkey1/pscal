@@ -1,0 +1,19 @@
+// 23_array_append
+// Concepts: dynamic array declaration, xs = xs + [v] append, length(xs)
+// expect: count = 4
+// expect: sum of squares = 14
+
+fn main() -> Void {
+    let squares: Int[] = [];
+    let sum: Int = 0;
+    loop i in 0..4 {
+        squares = squares + [i * i];
+        sum = sum + i * i;
+    }
+    let count: Int = length(squares);
+    fx {
+        println("count = ", count);
+        println("sum of squares = ", sum);
+    }
+    ret;
+}

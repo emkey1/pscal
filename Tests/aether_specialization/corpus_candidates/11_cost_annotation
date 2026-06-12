@@ -1,0 +1,16 @@
+// 11_cost_annotation
+// Concepts: @cost with a time unit, placed directly above the function
+// expect: answer = 42
+
+@cost 5ms
+fn fastPath() -> Int {
+    ret 42;
+}
+
+fn main() -> Void {
+    let answer: Int = fastPath();
+    fx {
+        println("answer = ", answer);
+    }
+    ret;
+}

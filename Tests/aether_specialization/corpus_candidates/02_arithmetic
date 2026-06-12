@@ -1,0 +1,22 @@
+// 02_arithmetic
+// Concepts: Int arithmetic, variadic println (never '+' for mixed types)
+// expect: sum = 10
+// expect: difference = 4
+// expect: product = 21
+// expect: quotient = 2   (Int / Int is integer-style)
+
+fn main() -> Void {
+    let a: Int = 7;
+    let b: Int = 3;
+    let sum: Int = a + b;
+    let difference: Int = a - b;
+    let product: Int = a * b;
+    let quotient: Int = a / b;
+    fx {
+        println("sum = ", sum);
+        println("difference = ", difference);
+        println("product = ", product);
+        println("quotient = ", quotient);
+    }
+    ret;
+}

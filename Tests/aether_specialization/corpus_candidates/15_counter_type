@@ -1,0 +1,22 @@
+// 15_counter_type
+// Concepts: type block, semicolon fields, lowercase self, method call
+// expect: 42
+
+type Counter {
+    value: Int;
+
+    fn bump() -> Int {
+        self.value = self.value + 1;
+        ret self.value;
+    }
+}
+
+fn main() -> Void {
+    let counter: Counter = new Counter();
+    counter.value = 41;
+    let answer: Int = counter.bump();
+    fx {
+        println(answer);
+    }
+    ret;
+}

@@ -1,0 +1,17 @@
+// 08_break
+// Concepts: loop { } with break, guard via plain if (no else needed)
+// expect: smallest n with n*n > 200 is 15
+
+fn main() -> Void {
+    let n: Int = 1;
+    loop {
+        if n * n > 200 {
+            break;
+        }
+        n = n + 1;
+    }
+    fx {
+        println("smallest n with n*n > 200 is ", n);
+    }
+    ret;
+}

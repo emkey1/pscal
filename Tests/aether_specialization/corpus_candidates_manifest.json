@@ -275,6 +275,216 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/d4",
       "sha256": "5435ac647a7e246a1a786b071054bc1642565612ade34e94a0c30bd0bbd2ff3d",
       "stdout": "=== Job Processing Report ===\nTotal jobs   : 6\nAverage score: 62.666667\nMin score    : 0\nMax score    : 100\n------------------------------\nAlpha => Excellent (95)\nBeta => Good (78)\nGamma => Average (62)\nDelta => Poor (41)\nEpsilon => Excellent (100)\nZeta => Poor (0)\n------------------------------\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/01_hello",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/01_hello",
+      "sha256": "3c3a215baff7665310303cfe5a33a6f8961e2ff2a351119f11091d52531c2317",
+      "stdout": "Hello from Aether\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/02_arithmetic",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/02_arithmetic",
+      "sha256": "49e977fbe97362cb0d6a4496d13f4190910856e457cbacdcb7fb74477a734ceb",
+      "stdout": "sum = 10\ndifference = 4\nproduct = 21\nquotient = 2\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/03_const_let",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/03_const_let",
+      "sha256": "d48c54ded2ca2155f6613e31e0c3e69e3c3544ddaeacf8d83fda32562c90cc53",
+      "stdout": "count = 3 of 3\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/04_classify",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/04_classify",
+      "sha256": "81dbec641f99c001aa02e9670c2b949f9d3ccc3441d9c006bdb010fb161b6c31",
+      "stdout": "95 -> ready\n72 -> review\n40 -> blocked\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/05_inline_conditional",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/05_inline_conditional",
+      "sha256": "928fcab003b495a827d5b0e247da73b01ba101d016635523887dcf2742dcfa54",
+      "stdout": "score is high\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/06_countdown",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/06_countdown",
+      "sha256": "2b3ed450d1066b60e8b4e988a6ee31c857cae1f315e53d2d2845af36cb23f56b",
+      "stdout": "3\n2\n1\nliftoff\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/07_range_sum",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/07_range_sum",
+      "sha256": "089a0a5e0a4987c2da44b27c3db15b2f9d7e3ea1e9038ec223162cdd2318314b",
+      "stdout": "sum of 0..5 = 10\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/08_break",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/08_break",
+      "sha256": "5da8b69b7efc9fa47db95ad6446a80a09a6de2b3a5d45f066751fcea618d7af2",
+      "stdout": "smallest n with n*n > 200 is 15\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/09_clamp_contract",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/09_clamp_contract",
+      "sha256": "eef2e8fdc86a23811f6f97521fbd4588b343587cf52b4801891755881e0f3f8d",
+      "stdout": "clamp(150) = 100\nclamp(42) = 42\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/10_pure_vs_fx",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/10_pure_vs_fx",
+      "sha256": "66072dd4ccc4a7bed6c436635ee31bacff60c0fd440033872cbfb41400d48fb9",
+      "stdout": "31C -> hot\n20C -> mild\n5C -> cold\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/11_cost_annotation",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/11_cost_annotation",
+      "sha256": "16ea33cd19ea019505e9a0bfc8ba7fd6608ef0c63c77a7dd54e682488f65eb61",
+      "stdout": "answer = 42\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/12_tuple_pair",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/12_tuple_pair",
+      "sha256": "efe7f8ac552820c709fd712cba55b1314ee9a769a03552c4b4202ed23be164dd",
+      "stdout": "lo = 3\nhi = 8\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/13_extension_method",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/13_extension_method",
+      "sha256": "de7f1bca44858d7ab9ea1fd9c3b8966e3836faaba451420afdcf5b9296061070",
+      "stdout": "first = 1\nsecond = 2\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/14_factorial_loop",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/14_factorial_loop",
+      "sha256": "6f92b260a31735c10287620212619c27c42036cadc293aeea2d2d21f6b226891",
+      "stdout": "5! = 120\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/15_counter_type",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/15_counter_type",
+      "sha256": "46f29466921721b460cad6657be3068b1446064b3de661333f03b7c27c7c2d74",
+      "stdout": "42\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/16_point_braces",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/16_point_braces",
+      "sha256": "47bc5f1ef00c4a0abfe3e0d3609196aab35e55737f8c7e3fb6a39d9e7ea97cf8",
+      "stdout": "sum after doubling = 14\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/17_job_summary",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/17_job_summary",
+      "sha256": "dcb3595e1e0c55479a76cabd5d0c691b8837e9802e51f00640122bd3e815a5e4",
+      "stdout": "job alpha: ready\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/18_guarded_withdraw",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/18_guarded_withdraw",
+      "sha256": "74f8cc581041fbeba7943bdd7eb99d8d275494b1bd1ebe02b18e8c4fd30db0ea",
+      "stdout": "after withdraw 30: 70\nafter withdraw 200: 70\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/19_new_defaults",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/19_new_defaults",
+      "sha256": "f735bd705dbccae842585f04205a5299779dbc18ffb36efda692bde8cccad5d5",
+      "stdout": "value = 0\nlabel length = 0\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/20_string_len",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/20_string_len",
+      "sha256": "4ad75dacecabe71ba4d50d328727cac5931e54d4c0799cfa6fa0ec57a0eef4cc",
+      "stdout": "Hello, Aether!\nname length = 6\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/22_report_line",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/22_report_line",
+      "sha256": "8e2ef9d4d4f4c45392af863944a0dbad4787d2e6fd5b930b36480920a9e2bdc9",
+      "stdout": "[report] items = 3\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/23_array_append",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/23_array_append",
+      "sha256": "6979f7b3052ea51f8f5581dbcb39a0dee07c75e6dc6b0a56f0450ede067f8a18",
+      "stdout": "count = 4\nsum of squares = 14\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/24_array_filter",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/24_array_filter",
+      "sha256": "034e0d19ae2449b796db10a91e3cbcbb493aa8814cf05b1bafebf05754eb5c24",
+      "stdout": "evens found = 5\neven sum = 20\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/25_percentage",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/25_percentage",
+      "sha256": "9f8233506618d980bef86239c6805bc866f2a12d2effa5ca4b013f151aa5e470",
+      "stdout": "success = 84.00 %\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/26_average_guard",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/26_average_guard",
+      "sha256": "1c88f14874ecb1e183f9e13727b1c72c2b2397bdb173bd0d745dbc08f13d8665",
+      "stdout": "average = 7.50\nempty average = 0.00\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/27_real_formatting",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/27_real_formatting",
+      "sha256": "d576963eed19500f3d88203978a5f196a3cc7b0e43287f2695d118ed751e21a5",
+      "stdout": "2.718280\n2.72\n   2.718\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/28_toon_object",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/28_toon_object",
+      "sha256": "9229b1f162a5a266d42346461586b254317116d434f30d6a02edd7e072cc9601",
+      "stdout": "name = Vega\ncount = 3\nenabled: yes\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/29_toon_array_root",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/29_toon_array_root",
+      "sha256": "faa81676f60b3c5cd3f0480f3b1e6800d030802c5dfaae29c91acbe73272e977",
+      "stdout": "A: ready\nB: review\nC: blocked\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/30_toon_object_with_array",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/30_toon_object_with_array",
+      "sha256": "0a5aeee66abf4e53226b51e937db6258a0b01983758609a6b3b2700a11e20e35",
+      "stdout": "job ingest priority 3\njob retry priority 1\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/31_toon_guarded_nested",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/31_toon_guarded_nested",
+      "sha256": "733ba40bd6135d32bfe624ede9676b8144ad1dd83f652f2d327f6d5d095b342b",
+      "stdout": "row 1: OK\nrow 2: EMPTY\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/32_toon_inspect",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/32_toon_inspect",
+      "sha256": "40895afd1abb5684e3e4153079f9d6b9c062cc2681951b0a80d2115529f88286",
+      "stdout": "root is object\ncolor 0 = red\ncolor 1 = green\ncolor 2 = blue\nindex 5 present: no\nkind = array\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/33_toon_config",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/33_toon_config",
+      "sha256": "ef168085a0723ff014623086536f6056450719a04715a32098cad0b0e9eed4b4",
+      "stdout": "port = 8080\napp = demo\nlevel = info\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/34_toon_stats",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/34_toon_stats",
+      "sha256": "9e791c01f1828c9031f625d9b683f9ae5711f7c834511723cda73524db6b8eb0",
+      "stdout": "transactions = 4\ntotal = 545\nlarge share = 50.00 %\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/35_capability_probes",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/35_capability_probes",
+      "sha256": "92e7adfb56052d39ca0cf3978d2af7ac87706302ef292a7b109a4cd89ad47f9f",
+      "stdout": "toon: available\nai: available\n"
+    },
+    {
+      "source_path": "/tmp/aether_training_examples_extract/36_pipeline_capstone",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/36_pipeline_capstone",
+      "sha256": "62a4ded2b15b53b377c3262e325aa4c3bd803ba9adae77249919157b80e776e8",
+      "stdout": "alpha [ 95] -> ready\nbeta [ 72] -> review\ngamma [ 100] -> ready\nready jobs = 2\n"
     }
   ]
 }

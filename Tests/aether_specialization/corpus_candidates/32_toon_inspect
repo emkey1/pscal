@@ -1,0 +1,46 @@
+// 32_toon_inspect
+// Concepts: toon_is_obj/toon_is_arr, element value extraction with
+// toon_text_value, bounds probing with toon_has_at, toon_type
+// expect: root is object
+// expect: color 0 = red
+// expect: color 1 = green
+// expect: color 2 = blue
+// expect: index 5 present: no
+// expect: kind = <backend-defined kind name for arrays>
+
+fn main() -> Void {
+    if !has_toon() {
+        fx {
+            println("yyjson unavailable");
+        }
+        ret;
+    }
+
+    let doc: ToonDoc = toon_parse("{\"colors\":[\"red\",\"green\",\"blue\"]}");
+    let root: ToonNode = toon_root(doc);
+
+    let rootIsObj: Bool = toon_is_obj(root);
+    let rootLabel: Text = if rootIsObj { "object" } else { "other" };
+    fx {
+        println("root is ", rootLabel);
+    }
+
+    let colors: ToonNode = toon_key(root, "colors");
+    loop i in 0..toon_len(colors) {
+        let entry: ToonNode = toon_at(colors, i);
+        let value: Text = toon_text_value(entry);
+        fx {
+            println("color ", i, " = ", value);
+        }
+    }
+
+    let hasFifth: Bool = toon_has_at(colors, 5);
+    let fifthLabel: Text = if hasFifth { "yes" } else { "no" };
+    fx {
+        println("index 5 present: ", fifthLabel);
+        println("kind = ", toon_type(colors));
+    }
+
+    toon_close(doc);
+    ret;
+}

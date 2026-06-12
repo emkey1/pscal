@@ -1,0 +1,23 @@
+// 24_array_filter
+// Concepts: filtered append, Bool state flipped with an inline conditional
+// expect: evens found = 5
+// expect: even sum = 20
+
+fn main() -> Void {
+    let evens: Int[] = [];
+    let evenSum: Int = 0;
+    let isEven: Bool = true;
+    loop i in 0..10 {
+        if isEven {
+            evens = evens + [i];
+            evenSum = evenSum + i;
+        }
+        isEven = if isEven { false } else { true };
+    }
+    let found: Int = length(evens);
+    fx {
+        println("evens found = ", found);
+        println("even sum = ", evenSum);
+    }
+    ret;
+}

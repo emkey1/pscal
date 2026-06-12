@@ -1,0 +1,15 @@
+// 35_capability_probes
+// Concepts: capability probing; report availability without invoking
+// the underlying helpers
+// expect: toon: <available|missing depending on build>
+// expect: ai: <available|missing depending on build>
+
+fn main() -> Void {
+    let toonLabel: Text = if has_toon() { "available" } else { "missing" };
+    let aiLabel: Text = if has_ai() { "available" } else { "missing" };
+    fx {
+        println("toon: ", toonLabel);
+        println("ai: ", aiLabel);
+    }
+    ret;
+}
