@@ -158,7 +158,7 @@ fn main() -> Void {
 | `Int` | `42`, `-1` | integer arithmetic |
 | `Real` | `3.5` | use a `Real` operand to force real division |
 | `Text` | `"hi"` | string type |
-| `Bool` | `true`, `false` | `println(flag)` prints [VERIFY: `true`/`false` or Pascal-style `TRUE`/`FALSE`? state the exact output] |
+| `Bool` | `true`, `false` | `println(flag)` prints `true` or `false` |
 | `Void` | — | return type for procedures |
 | `ToonDoc`, `ToonNode` | — | opaque handles (TOON-001) |
 
@@ -487,12 +487,14 @@ rule available]
 let xs: Int[] = [];
 xs = xs + [7];          // append pattern
 let n: Int = length(xs);
+let first: Int = xs[0]; // indexed read
+xs[0] = 9;              // indexed write
+let ys: Int[] = [1, 2, 3];
 ```
 
 - `Type[]` declares; `[]` is the empty literal
-- [VERIFY: element access — `xs[0]` read and `xs[0] = v;` write? Show one
-  read and one write example; LLMs cannot do useful array work without this]
-- [VERIFY: multi-element literals `[1, 2, 3]`? arrays of Text / records?]
+- indexed reads/writes such as `xs[0]` and `xs[0] = v;` are supported
+- multi-element literals such as `[1, 2, 3]` are supported
 - `length(xs)` canonical; `len(xs)` and `xs.len` accepted
 - never `toon_len(xs)` on a dynamic array (LEN-001)
 

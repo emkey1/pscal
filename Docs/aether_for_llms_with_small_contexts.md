@@ -59,9 +59,8 @@ exactly.
 - Comments: `// line comment` only. Text literals are double-quoted; escape
   `\"`. [VERIFY: full escape set, from full doc]
 - Types: `Int`, `Real`, `Text`, `Bool` (`true`/`false`), `Void`, plus opaque
-  `ToonDoc`/`ToonNode`. No conversion helpers exist; use variadic `println`.
-  [VERIFY: sync with full doc if conversions exist; also state what
-  `println(boolValue)` prints]
+  `ToonDoc`/`ToonNode`. `println(boolValue)` prints `true` or `false`. No
+  conversion helpers exist; use variadic `println`.
 - Operators: `+ - * /`, `== != < <= > >=`, `!` negation.
   [VERIFY: modulo spelling; logical and/or spelling, one compound example —
   copy resolved answers from full doc]
@@ -197,11 +196,13 @@ more string helpers exist]
 let xs: Int[] = [];
 xs = xs + [7];              // append
 let n: Int = length(xs);    // len(xs) and xs.len accepted
+let first: Int = xs[0];     // indexed read
+xs[0] = 9;                  // indexed write
+let ys: Int[] = [1, 2, 3];  // multi-element literal
 ```
 
-Never `toon_len(xs)` on a dynamic array. [VERIFY: element access `xs[0]`
-read/write and multi-element literals `[1, 2, 3]` — copy resolved examples
-from full doc; LLMs need indexing to do useful array work]
+Never `toon_len(xs)` on a dynamic array. Indexed reads/writes and
+multi-element literals are supported.
 
 Use distinct local names inside one scope. Do not redeclare `xs`, `count`, or
 other loop variables later in the same function.
