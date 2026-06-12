@@ -1163,12 +1163,12 @@ if ! grep -q '^diagnostics\[3\]{severity,phase,kind,code,file,line,column,messag
     cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
     exit 1
 fi
-if ! grep -q '"scope","","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,8,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
+if ! grep -q '"scope","SCOPE-001","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,8,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
     echo "missing diagnostics-toon mapped loop line" >&2
     cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
     exit 1
 fi
-if ! grep -q '"scope","","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,9,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
+if ! grep -q '"scope","SCOPE-001","'"$DIAGNOSTIC_LINE_MAPPING_FAIL_FIXTURE"'".*,9,null,"identifier '\''i'\'' not in scope\."' /tmp/aether_diagnostic_line_mapping_toon.out; then
     echo "missing diagnostics-toon mapped body line" >&2
     cat /tmp/aether_diagnostic_line_mapping_toon.out >&2
     exit 1
