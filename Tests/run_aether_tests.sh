@@ -23,6 +23,8 @@ PRINT_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/print_alias_pass.aether"
 PRINT_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/print_alias_fail_outside_fx.aether"
 TASK_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/task_helpers_pass.aether"
 TASK_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/task_alias_fail_outside_fx.aether"
+SLEEP_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/sleep_alias_pass.aether"
+SLEEP_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/sleep_alias_fail_outside_fx.aether"
 HAS_BUILTIN_ALIAS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/has_builtin_alias_pass.aether"
 AI_HELPERS_PASS_FIXTURE="$ROOT_DIR/Tests/aether/ai_helpers_pass.aether"
 AI_ALIAS_FAIL_FIXTURE="$ROOT_DIR/Tests/aether/ai_alias_fail_outside_fx.aether"
@@ -314,6 +316,13 @@ fi
 if ! grep -Eq '^has_ai = (true|false)$' /tmp/aether_task_helpers_pass.out; then
     echo "unexpected task helper has_ai output" >&2
     cat /tmp/aether_task_helpers_pass.out >&2
+    exit 1
+fi
+"$AETHER_BIN" --no-cache "$SLEEP_ALIAS_PASS_FIXTURE" >/tmp/aether_sleep_alias_pass.out
+printf 'before\nafter\n' >/tmp/aether_sleep_alias_expected.out
+if ! cmp -s /tmp/aether_sleep_alias_expected.out /tmp/aether_sleep_alias_pass.out; then
+    echo "unexpected sleep alias output" >&2
+    cat /tmp/aether_sleep_alias_pass.out >&2
     exit 1
 fi
 "$AETHER_BIN" --no-cache "$HAS_BUILTIN_ALIAS_PASS_FIXTURE" >/tmp/aether_has_builtin_alias_pass.out
@@ -930,6 +939,16 @@ fi
 if ! grep -q "Aether effect error: call to 'task_spawn' requires an fx block" /tmp/aether_task_alias_fail.out; then
     echo "missing task alias effect-boundary failure message" >&2
     cat /tmp/aether_task_alias_fail.out >&2
+    exit 1
+fi
+
+if "$AETHER_BIN" --no-cache "$SLEEP_ALIAS_FAIL_FIXTURE" >/tmp/aether_sleep_alias_fail.out 2>&1; then
+    echo "expected sleep alias effect-boundary failure but program succeeded" >&2
+    exit 1
+fi
+if ! grep -q "Aether effect error: call to 'sleep' requires an fx block" /tmp/aether_sleep_alias_fail.out; then
+    echo "missing sleep alias effect-boundary failure message" >&2
+    cat /tmp/aether_sleep_alias_fail.out >&2
     exit 1
 fi
 

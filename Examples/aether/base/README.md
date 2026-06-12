@@ -124,6 +124,8 @@ These examples stay within the currently supported Aether Core subset:
 - `task_helpers`: shows the compact Aether task/thread alias surface along with
   the `has_ai()` capability probe, while still respecting `fx` around effectful
   worker launches
+- `sleep_alias`: shows the compact `sleep(ms)` alias over the shared PSCAL
+  `delay(ms)` builtin; it is effectful and therefore still belongs inside `fx`
 - `ai_helpers`: shows the compact `ai_chat(...)` alias and the Aether AI
   capability probes without requiring a live call during the example run
 - `inferred_decls`: shows compact initialized `const` / `let` declarations

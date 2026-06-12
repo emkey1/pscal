@@ -1,0 +1,16 @@
+@pre value > 0
+@post result >= value
+@cost 50us
+fn increment(value: Int) -> Int {
+    ret value + 1;
+}
+
+fn main() -> Void {
+    let start: Int = 42;
+    let end: Int = increment(start);
+
+    fx {
+        println("Incremented: ", start, " → ", end);
+    }
+    ret;
+}

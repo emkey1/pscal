@@ -1206,6 +1206,7 @@ static int aetherIsEffectfulBuiltin(const char *name, size_t len) {
         "println",
         "read",
         "readln",
+        "sleep",
         "store",
         "swap",
         "task_cancel",

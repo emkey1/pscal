@@ -503,6 +503,18 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/prism_candidate_20_fixed_probe.aether",
       "sha256": "994182d9a69e7c0278614d1c77a0a674c62c69322ddaf44ff6b12fdbaf7c35e0",
       "stdout": "User score: 85 -> Grade: B\n"
+    },
+    {
+      "source_path": "/tmp/nemo22.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/nemo22.aether",
+      "sha256": "40a6bc80582432c7bda6e9f0e50e0e00395befeb355fc44ad6658f58da9593c3",
+      "stdout": "Incremented: 42  \u2192  43\n"
+    },
+    {
+      "source_path": "/tmp/nemo25_fixed_probe.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/nemo25_fixed_probe.aether",
+      "sha256": "37d7e563568092168e589092718f184a3758a12fd3a53301a18460f06d4162ed",
+      "stdout": "Value 5 -> Label: positive | Special?: false\nValue 0 -> Label: neutral | Special?: true\nValue 12 -> Label: positive | Special?: false\n"
     }
   ]
 }

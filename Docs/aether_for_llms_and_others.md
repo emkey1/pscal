@@ -571,7 +571,12 @@ fn main() -> Void {
 Compact aliases over shared runtime helpers; all are effectful — call inside
 `fx` (FX-001). Surface: `task_spawn`, `task_queue`, `task_wait`,
 `task_lookup`, `task_status`, `task_result`, `task_stats`, `task_stats_json`,
-`ai_chat`. Probes: `has_ai()`, `has_builtin(category, function)`.
+`sleep`, `ai_chat`. Probes: `has_ai()`, `has_builtin(category, function)`.
+
+Use `sleep(ms)` for a blocking millisecond pause. It is the compact Aether
+spelling for the shared PSCAL `delay(ms)` builtin and is effectful, so it must
+stay inside `fx`. `task_wait(handle)` waits for a task handle; it is not a
+timer and should not be used like `task_wait(100)`.
 
 [VERIFY: give one-line signatures (args, return types) for `ai_chat` and the
 task helpers an LLM should generate, plus the valid `has_builtin` categories —

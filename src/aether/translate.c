@@ -3263,6 +3263,9 @@ static int appendAetherBuiltinAlias(Buffer *out, const char *nameStart, size_t n
     if (nameLen == 7 && strncmp(nameStart, "println", nameLen) == 0) {
         return bufferAppend(out, "writeln");
     }
+    if (nameLen == 5 && strncmp(nameStart, "sleep", nameLen) == 0) {
+        return bufferAppend(out, "delay");
+    }
     if (nameLen == 5 && strncmp(nameStart, "print", nameLen) == 0) {
         return bufferAppend(out, "write");
     }

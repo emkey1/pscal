@@ -1,0 +1,25 @@
+@pure
+@pre input >= 0
+@cost 10op
+fn classify_and_label(input: Int) -> (Text, Bool) {
+    if input == 0 {
+        ret ("neutral", true);
+    }
+    if input > 0 {
+        ret ("positive", false);
+    }
+    ret ("negative", true);
+}
+
+fn main() -> Void {
+    let values: Int[] = [5, 0, 12];
+
+    loop i in 0..length(values) {
+        let (label, isSpecial) = classify_and_label(values[i]);
+
+        fx {
+            println("Value ", values[i], " -> Label: ", label, " | Special?: ", isSpecial);
+        }
+    }
+    ret;
+}

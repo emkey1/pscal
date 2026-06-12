@@ -1,0 +1,8 @@
+fn main() -> Void {
+    fx {
+        println("before");
+        sleep(1);
+        println("after");
+    }
+    ret;
+}

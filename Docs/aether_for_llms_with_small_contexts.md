@@ -279,8 +279,9 @@ Never: `toon_get_text_or(toon_key(toon_at(root, i), "meta"), "code", "EMPTY");`
 ## Tasks and AI
 
 `task_spawn/queue/wait/lookup/status/result/stats/stats_json`, `ai_chat`,
-probes `has_ai()` / `has_builtin(category, function)`. All effectful — call
-inside `fx`. [VERIFY: copy resolved signatures from full doc, or state that
+`sleep`, probes `has_ai()` / `has_builtin(category, function)`. All effectful
+— call inside `fx`. `sleep(ms)` is a blocking millisecond pause. `task_wait`
+waits on a task handle, not a duration. [VERIFY: copy resolved signatures from full doc, or state that
 these are not generated without prompt-supplied signatures]
 
 ## Imports (IMP-001, MOD-001)
