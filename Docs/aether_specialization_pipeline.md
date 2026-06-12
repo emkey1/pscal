@@ -167,6 +167,7 @@ Do not assume the same serving stack is ideal for both.
 Recommended baseline policy:
 
 - benchmark the base model separately from instruct/thinking variants
+- benchmark each candidate with the full guide, the small guide, and no guide
 - keep a strict output contract
 - record token usage, but do not let reasoning-heavy variants dominate your
   conclusions about the family

@@ -13,6 +13,7 @@ The benchmark compares document variants such as:
 
 - `Docs/aether_for_llms_and_others.md`
 - `Docs/aether_for_llms_with_small_contexts.md`
+- no guide at all (`--docs none`)
 
 against the same set of programming tasks.
 
@@ -75,6 +76,14 @@ python3 Tools/aether_doc_bench.py \
   --text-summary
 ```
 
+Run the no-guide baseline:
+
+```bash
+python3 Tools/aether_doc_bench.py \
+  --docs none \
+  --text-summary
+```
+
 List configured destinations:
 
 ```bash
@@ -102,6 +111,10 @@ plus multiple tasks, expects one JSON reply with one program per task, then
 splits prompt/usage accounting back across those cases. Repairs still run
 per failed case. The Python baseline remains per-case because it has no guide
 overhead to amortize.
+
+Small models are forced back to per-task mode even when a larger batch size is
+requested. Today the harness treats models at `8B` and below as small for this
+purpose, because multi-program JSON batching is a poor fit for weak code models.
 
 Optional pacing / cleanup fields:
 
@@ -307,6 +320,7 @@ The JSON report now records:
 - normalized provider token usage per attempt when the endpoint returns it
 - aggregate token-usage totals per document variant
 - a `doc_token_reference` block with both long and short guide sizes for each run
+- a `doc_token_reference` entry for the no-guide baseline (`none`), which is size `0`
 
 When Aether exposes a structured diagnostic `code`, the benchmark prefers that
 stable identifier over raw stderr text. This means recurring failures collapse

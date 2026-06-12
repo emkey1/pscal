@@ -28,6 +28,7 @@ import json
 import multiprocessing
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -44,9 +45,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_TASKS = REPO_ROOT / "Tests" / "aether_doc_bench" / "tasks.json"
 DEFAULT_AETHER_BIN = REPO_ROOT / "build" / "bin" / "aether"
 DEFAULT_DESTINATIONS_CONFIG = REPO_ROOT / "Tests" / "aether_doc_bench" / "destinations.template.json"
-DOC_VARIANTS = {
+DOC_VARIANTS: dict[str, pathlib.Path | None] = {
     "full": REPO_ROOT / "Docs" / "aether_for_llms_and_others.md",
     "small": REPO_ROOT / "Docs" / "aether_for_llms_with_small_contexts.md",
+    "none": None,
 }
 _DESTINATION_CONTEXT_CACHE: dict[tuple[str, str, str], int | None] = {}
 OUTPUT_END_MARKER = "__AETHER_BENCH_END__"
@@ -91,9 +93,39 @@ def read_text(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def write_json_atomic(path: pathlib.Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
+
+
 def approx_tokens(text: str) -> int:
     # Coarse but stable enough for comparing prompt-footprint impact.
     return max(1, (len(text) + 3) // 4)
+
+
+def infer_model_size_billions(model_name: str | None) -> float | None:
+    if not model_name:
+        return None
+    text = model_name.lower()
+    match = re.search(r"(\d+(?:\.\d+)?)\s*b\b", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def effective_shared_guide_batch_size(args: argparse.Namespace, destination: Destination) -> int:
+    requested = max(1, int(getattr(args, "shared_guide_batch_size", 1)))
+    if requested <= 1:
+        return 1
+    model_size_b = infer_model_size_billions(destination.model)
+    if model_size_b is not None and model_size_b <= 8.0:
+        return 1
+    return requested
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -474,13 +506,34 @@ def classify_task_bucket(
     return "stable"
 
 
-def resolve_docs(names: list[str]) -> list[tuple[str, pathlib.Path]]:
-    resolved: list[tuple[str, pathlib.Path]] = []
+def resolve_docs(names: list[str]) -> list[tuple[str, pathlib.Path | None]]:
+    resolved: list[tuple[str, pathlib.Path | None]] = []
     for name in names:
         if name not in DOC_VARIANTS:
             raise SystemExit(f"unknown doc variant '{name}', expected one of: {', '.join(DOC_VARIANTS)}")
         resolved.append((name, DOC_VARIANTS[name]))
     return resolved
+
+
+def build_guide_block(doc_name: str, doc_text: str) -> str:
+    if doc_name == "none":
+        return textwrap.dedent(
+            """\
+            Do not assume you have an Aether reference guide for this task.
+            Use only what you already know about the language and infer cautiously.
+            """
+        ).strip()
+    return textwrap.dedent(
+        f"""\
+        Use the following Aether guide as the ground truth for syntax, supported
+        features, and style.
+
+        Guide variant: {doc_name}
+        --- BEGIN AETHER GUIDE ---
+        {doc_text}
+        --- END AETHER GUIDE ---
+        """
+    ).strip()
 
 
 def sanitize_code(raw: str) -> str:
@@ -503,13 +556,7 @@ def build_prompt(doc_name: str, doc_text: str, task: Task) -> str:
         f"""\
         You are writing Aether code.
 
-        Use the following Aether guide as the ground truth for syntax, supported
-        features, and style.
-
-        Guide variant: {doc_name}
-        --- BEGIN AETHER GUIDE ---
-        {doc_text}
-        --- END AETHER GUIDE ---
+        {build_guide_block(doc_name, doc_text)}
 
         Write exactly one complete Aether program that solves the task below.
 
@@ -586,13 +633,7 @@ def build_batch_prompt(doc_name: str, doc_text: str, tasks: list[Task]) -> str:
         f"""\
         You are writing Aether code.
 
-        Use the following Aether guide as the ground truth for syntax, supported
-        features, and style.
-
-        Guide variant: {doc_name}
-        --- BEGIN AETHER GUIDE ---
-        {doc_text}
-        --- END AETHER GUIDE ---
+        {build_guide_block(doc_name, doc_text)}
 
         Solve every task below.
 
@@ -634,13 +675,7 @@ def build_repair_prompt(
         f"""\
         You are repairing a failed Aether program.
 
-        Use the following Aether guide as the ground truth for syntax, supported
-        features, and style.
-
-        Guide variant: {doc_name}
-        --- BEGIN AETHER GUIDE ---
-        {doc_text}
-        --- END AETHER GUIDE ---
+        {build_guide_block(doc_name, doc_text)}
 
         Your previous attempt did not satisfy the benchmark task.
         Return one full corrected Aether program.
@@ -1716,10 +1751,11 @@ def run_aether_cases_for_repeat(
     repeat_index: int,
     args: argparse.Namespace,
     doc_token_reference: dict[str, Any],
+    on_case_complete: Any | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     results: list[dict[str, Any]] = []
     batch_runs: list[dict[str, Any]] = []
-    batch_size = max(1, int(getattr(args, "shared_guide_batch_size", 1)))
+    batch_size = effective_shared_guide_batch_size(args, destination)
 
     def run_single_task(task: Task) -> dict[str, Any]:
         if args.progress:
@@ -1783,7 +1819,10 @@ def run_aether_cases_for_repeat(
 
     if batch_size <= 1:
         for task in tasks:
-            results.append(run_single_task(task))
+            case_record = run_single_task(task)
+            results.append(case_record)
+            if on_case_complete:
+                on_case_complete(case_record)
         return results, batch_runs
 
     for task_group in chunk_list(tasks, batch_size):
@@ -1796,10 +1835,15 @@ def run_aether_cases_for_repeat(
         if context_limit is not None and approx_tokens(batch_prompt) >= context_limit:
             if len(task_group) > 1:
                 for task in task_group:
-                    results.append(run_single_task(task))
+                    case_record = run_single_task(task)
+                    results.append(case_record)
+                    if on_case_complete:
+                        on_case_complete(case_record)
                 continue
             case_record = run_single_task(task_group[0])
             results.append(case_record)
+            if on_case_complete:
+                on_case_complete(case_record)
             continue
 
         batch_prompt_tokens = approx_tokens(batch_prompt)
@@ -1891,12 +1935,16 @@ def run_aether_cases_for_repeat(
                 if args.progress:
                     print_progress_done(destination, doc_name, task, repeat_index, case_record)
                 results.append(case_record)
+                if on_case_complete:
+                    on_case_complete(case_record)
         except Exception as exc:  # pragma: no cover - surfaced in JSON report
             batch_meta["error"] = str(exc)
             for task in task_group:
                 case_record = run_single_task(task)
                 case_record["batch_fallback_reason"] = str(exc)
                 results.append(case_record)
+                if on_case_complete:
+                    on_case_complete(case_record)
 
         batch_runs.append(batch_meta)
 
@@ -1910,7 +1958,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--docs",
         default="full,small",
-        help="comma-separated doc variants to benchmark (default: full,small)",
+        help="comma-separated doc variants to benchmark (default: full,small; also supports none)",
     )
     parser.add_argument("--task", action="append", default=[], help="restrict to one or more task ids")
     parser.add_argument("--list-tasks", action="store_true", help="list manifest task ids and exit")
@@ -2133,14 +2181,51 @@ def main() -> int:
         },
         "doc_token_reference": {
             name: {
-                "path": str(path),
-                "approx_tokens": approx_tokens(read_text(path)),
-                "bytes": len(read_text(path).encode("utf-8")),
+                "path": str(path) if path else None,
+                "approx_tokens": approx_tokens(read_text(path)) if path else 0,
+                "bytes": len(read_text(path).encode("utf-8")) if path else 0,
             }
             for name, path in DOC_VARIANTS.items()
         },
         "destinations": [],
     }
+
+    def persist_report_checkpoint() -> None:
+        if not args.output_json:
+            return
+        report["updated_at_unix"] = int(time.time())
+        write_json_atomic(args.output_json, report)
+
+    def refresh_variant_report(variant_report: dict[str, Any]) -> None:
+        results = variant_report["results"]
+        variant_report["summary"] = summarize(results)
+        variant_report["usage_summary"] = summarize_usage(results)
+        variant_report["source_token_summary"] = summarize_source_tokens(results)
+        variant_report["final_usage_summary"] = summarize_final_usage(results, "all")
+        variant_report["run_ok_final_usage_summary"] = summarize_final_usage(results, "run_ok")
+        variant_report["exact_final_usage_summary"] = summarize_final_usage(results, "exact")
+        variant_report["final_source_token_summary"] = summarize_final_source_tokens(results, "all")
+        variant_report["run_ok_final_source_token_summary"] = summarize_final_source_tokens(results, "run_ok")
+        variant_report["exact_final_source_token_summary"] = summarize_final_source_tokens(results, "exact")
+        variant_report["failure_patterns"] = summarize_failure_patterns(results)
+
+        if "python_baseline_results" in variant_report:
+            python_results = variant_report["python_baseline_results"]
+            variant_report["python_baseline_summary"] = summarize(python_results)
+            variant_report["python_baseline_usage_summary"] = summarize_usage(python_results)
+            variant_report["python_baseline_source_token_summary"] = summarize_source_tokens(python_results)
+            variant_report["python_baseline_final_usage_summary"] = summarize_final_usage(python_results, "all")
+            variant_report["python_baseline_run_ok_final_usage_summary"] = summarize_final_usage(python_results, "run_ok")
+            variant_report["python_baseline_exact_final_usage_summary"] = summarize_final_usage(python_results, "exact")
+            variant_report["python_baseline_final_source_token_summary"] = summarize_final_source_tokens(python_results, "all")
+            variant_report["python_baseline_run_ok_final_source_token_summary"] = summarize_final_source_tokens(python_results, "run_ok")
+            variant_report["python_baseline_exact_final_source_token_summary"] = summarize_final_source_tokens(python_results, "exact")
+            variant_report["python_failure_patterns"] = summarize_failure_patterns(python_results)
+
+    def append_case_and_checkpoint(variant_report: dict[str, Any], case_record: dict[str, Any]) -> None:
+        variant_report["results"].append(case_record)
+        refresh_variant_report(variant_report)
+        persist_report_checkpoint()
 
     for destination in destinations:
         destination_report = {
@@ -2150,11 +2235,34 @@ def main() -> int:
             "base_url": destination.base_url,
             "variants": [],
         }
+        report["destinations"].append(destination_report)
         for doc_name, doc_path in doc_variants:
-            doc_text = read_text(doc_path)
-            results: list[dict[str, Any]] = []
-            python_results: list[dict[str, Any]] = []
-            batch_runs: list[dict[str, Any]] = []
+            doc_text = read_text(doc_path) if doc_path else ""
+            variant_report = {
+                "doc_name": doc_name,
+                "doc_path": str(doc_path) if doc_path else None,
+                "doc_bytes": len(doc_text.encode("utf-8")),
+                "doc_approx_tokens": approx_tokens(doc_text) if doc_text else 0,
+                "shared_guide_batch_size_requested": max(1, int(args.shared_guide_batch_size)),
+                "shared_guide_batch_size": effective_shared_guide_batch_size(args, destination),
+                "batch_mode_enabled": bool(effective_shared_guide_batch_size(args, destination) > 1),
+                "batch_runs": [],
+                "results": [],
+                "summary": summarize([]),
+                "usage_summary": summarize_usage([]),
+                "source_token_summary": summarize_source_tokens([]),
+                "final_usage_summary": summarize_final_usage([], "all"),
+                "run_ok_final_usage_summary": summarize_final_usage([], "run_ok"),
+                "exact_final_usage_summary": summarize_final_usage([], "exact"),
+                "final_source_token_summary": summarize_final_source_tokens([], "all"),
+                "run_ok_final_source_token_summary": summarize_final_source_tokens([], "run_ok"),
+                "exact_final_source_token_summary": summarize_final_source_tokens([], "exact"),
+                "failure_patterns": summarize_failure_patterns([]),
+            }
+            if args.python_baseline:
+                variant_report["python_baseline_results"] = []
+            destination_report["variants"].append(variant_report)
+            persist_report_checkpoint()
 
             for repeat_index in range(args.repeats):
                 repeat_results, repeat_batch_runs = run_aether_cases_for_repeat(
@@ -2165,9 +2273,14 @@ def main() -> int:
                     repeat_index=repeat_index,
                     args=args,
                     doc_token_reference=report["doc_token_reference"],
+                    on_case_complete=lambda case_record, variant_report=variant_report: append_case_and_checkpoint(
+                        variant_report,
+                        case_record,
+                    ),
                 )
-                results.extend(repeat_results)
-                batch_runs.extend(repeat_batch_runs)
+                variant_report["batch_runs"].extend(repeat_batch_runs)
+                refresh_variant_report(variant_report)
+                persist_report_checkpoint()
 
                 if args.python_baseline:
                     for task in tasks:
@@ -2183,46 +2296,12 @@ def main() -> int:
                         python_case["task_title"] = task.title
                         python_case["repeat_index"] = repeat_index
                         python_case["doc_token_reference"] = report["doc_token_reference"]
-                        python_results.append(python_case)
-
-            variant_report = {
-                "doc_name": doc_name,
-                "doc_path": str(doc_path),
-                "doc_bytes": len(doc_text.encode("utf-8")),
-                "doc_approx_tokens": approx_tokens(doc_text),
-                "shared_guide_batch_size": max(1, int(args.shared_guide_batch_size)),
-                "batch_mode_enabled": bool(int(args.shared_guide_batch_size) > 1),
-                "batch_runs": batch_runs,
-                "results": results,
-                "summary": summarize(results),
-                "usage_summary": summarize_usage(results),
-                "source_token_summary": summarize_source_tokens(results),
-                "final_usage_summary": summarize_final_usage(results, "all"),
-                "run_ok_final_usage_summary": summarize_final_usage(results, "run_ok"),
-                "exact_final_usage_summary": summarize_final_usage(results, "exact"),
-                "final_source_token_summary": summarize_final_source_tokens(results, "all"),
-                "run_ok_final_source_token_summary": summarize_final_source_tokens(results, "run_ok"),
-                "exact_final_source_token_summary": summarize_final_source_tokens(results, "exact"),
-                "failure_patterns": summarize_failure_patterns(results),
-            }
-            if args.python_baseline:
-                variant_report["python_baseline_results"] = python_results
-                variant_report["python_baseline_summary"] = summarize(python_results)
-                variant_report["python_baseline_usage_summary"] = summarize_usage(python_results)
-                variant_report["python_baseline_source_token_summary"] = summarize_source_tokens(python_results)
-                variant_report["python_baseline_final_usage_summary"] = summarize_final_usage(python_results, "all")
-                variant_report["python_baseline_run_ok_final_usage_summary"] = summarize_final_usage(python_results, "run_ok")
-                variant_report["python_baseline_exact_final_usage_summary"] = summarize_final_usage(python_results, "exact")
-                variant_report["python_baseline_final_source_token_summary"] = summarize_final_source_tokens(python_results, "all")
-                variant_report["python_baseline_run_ok_final_source_token_summary"] = summarize_final_source_tokens(python_results, "run_ok")
-                variant_report["python_baseline_exact_final_source_token_summary"] = summarize_final_source_tokens(python_results, "exact")
-                variant_report["python_failure_patterns"] = summarize_failure_patterns(python_results)
-            destination_report["variants"].append(variant_report)
-        report["destinations"].append(destination_report)
+                        variant_report["python_baseline_results"].append(python_case)
+                        refresh_variant_report(variant_report)
+                        persist_report_checkpoint()
 
     if args.output_json:
-        args.output_json.parent.mkdir(parents=True, exist_ok=True)
-        args.output_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        persist_report_checkpoint()
 
     if args.text_summary or not args.output_json:
         print_text_summary(report)

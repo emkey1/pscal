@@ -11,7 +11,7 @@ import sys
 def main() -> int:
     if len(sys.argv) < 3:
         raise SystemExit(
-            "usage: run_aether_doc_bench_with_doc.py <variant: full|small> /path/to/guide.md [bench args...]"
+            "usage: run_aether_doc_bench_with_doc.py <variant: full|small|none> /path/to/guide.md [bench args...]"
         )
 
     variant = sys.argv[1]
