@@ -515,6 +515,30 @@
       "repo_path": "Tests/aether_specialization/corpus_candidates/nemo25_fixed_probe.aether",
       "sha256": "37d7e563568092168e589092718f184a3758a12fd3a53301a18460f06d4162ed",
       "stdout": "Value 5 -> Label: positive | Special?: false\nValue 0 -> Label: neutral | Special?: true\nValue 12 -> Label: positive | Special?: false\n"
+    },
+    {
+      "source_path": "/tmp/qwen27_example2_fixed.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example2_fixed.aether",
+      "sha256": "d25eb96a07b0f6795b371867bbc17752c873b784776f6c23568a9c552052a441",
+      "stdout": "builtin = sleep\nkind = procedure\nbackend = delay\nreturn = Void\neffectful = true\n"
+    },
+    {
+      "source_path": "/tmp/qwen27_example3.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example3.aether",
+      "sha256": "301fdca80ed41eeb3b71aa9af1411e045075d1b9e541deccf5f1dae81151d838",
+      "stdout": "Executing budgeted transformation...\nResult: 645 (completed within ops budget)\n"
+    },
+    {
+      "source_path": "/tmp/qwen27_example4_fixed.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example4_fixed.aether",
+      "sha256": "bcb0cf2a5e84e474a81130210251ad93de8119f847cb06c0d495209daaab526e",
+      "stdout": "Root shape detection: object\nObject root detected. Extracting records key.\n  Row 0: X1\n  Row 1: X2\n"
+    },
+    {
+      "source_path": "/tmp/qwen27_example5.aether",
+      "repo_path": "Tests/aether_specialization/corpus_candidates/qwen27_example5.aether",
+      "sha256": "9a6863754dc721c1d8c87468bba2eac7e11d9a7cebe7fb8be0b915dce722a025",
+      "stdout": "Captured 68 on Thermal_04\nCaptured 71 on Thermal_04\nSensor Thermal_04 is offline; skipping.\nTotal stored samples: 2\n"
     }
   ]
 }
